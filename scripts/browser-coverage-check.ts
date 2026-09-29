@@ -5,9 +5,17 @@
  * Discovers high-risk interactive `.tsrx` (Checkbox / RadioGroup / form.Subscribe)
  * and requires a manifest entry with browser, stack-browser, or skip evidence.
  * Browser evidence must prove mount + interaction + overlay/DOM-race asserts.
+ *
+ * Change-aware mode (UI_COVERAGE_BASE or UI_COVERAGE_TOUCHED): newly added or
+ * modified high-risk surfaces cannot be skip-only — they need browser or
+ * stack-browser proof. Inventory-only mode still allows bootstrap skips.
  */
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
+import {
+  formatTouchedList,
+  resolveUiCoverageDiff,
+} from "./ui-coverage-diff.ts";
 
 type Evidence =
   | { kind: "browser"; test: string; subject: string }
@@ -44,6 +52,7 @@ function walkTsrx(dir: string, out: string[] = []): string[] {
 const root = resolve(import.meta.dir, "..");
 const srcDir = join(root, "apps/web/src");
 const manifestPath = join(root, "apps/web/src/test/browser-coverage.manifest.ts");
+const uiDiff = resolveUiCoverageDiff(root);
 
 if (!existsSync(manifestPath)) {
   console.error(`browser-coverage-check: FAIL: missing manifest: ${manifestPath}`);
@@ -98,9 +107,12 @@ if (dupes.length) {
 const missingFromManifest: string[] = [];
 const uncovered: string[] = [];
 const badEvidence: string[] = [];
+const touchedSkipOnly: string[] = [];
 let withBrowser = 0;
 let withStack = 0;
 let withSkipOnly = 0;
+const touchedSet = new Set(uiDiff?.touched ?? []);
+const addedSet = new Set(uiDiff?.added ?? []);
 
 function proveBrowserTest(testRel: string, subject: string, surface: string): void {
   const testPath = resolve(root, testRel);
@@ -215,6 +227,9 @@ for (const surface of discovered) {
     if (okStack) withStack += 1;
   } else {
     withSkipOnly += 1;
+    if (touchedSet.has(surface)) {
+      touchedSkipOnly.push(surface);
+    }
   }
 }
 
@@ -226,7 +241,7 @@ if (orphans.length) {
 }
 if (missingFromManifest.length) {
   errors.push(
-    `high-risk surfaces missing from manifest (add *.browser.test.tsx or skip):\n  - ${missingFromManifest.join("\n  - ")}`,
+    `high-risk surfaces missing from manifest (add *.browser.test.tsx — skip not enough for new UI):\n  - ${missingFromManifest.join("\n  - ")}`,
   );
 }
 if (uncovered.length) {
@@ -235,9 +250,46 @@ if (uncovered.length) {
 if (badEvidence.length) {
   errors.push(`invalid evidence:\n  - ${badEvidence.join("\n  - ")}`);
 }
+if (uiDiff && touchedSkipOnly.length) {
+  const addedTouched = touchedSkipOnly.filter((s) => addedSet.has(s));
+  const modifiedTouched = touchedSkipOnly.filter((s) => !addedSet.has(s));
+  const parts: string[] = [];
+  if (addedTouched.length) {
+    parts.push(
+      `newly added high-risk UI must have browser or stack-browser proof (skip not allowed):\n${formatTouchedList(addedTouched)}`,
+    );
+  }
+  if (modifiedTouched.length) {
+    parts.push(
+      `changed high-risk UI is still skip-only — add *.browser.test.tsx or stack-browser evidence before merging:\n${formatTouchedList(modifiedTouched)}`,
+    );
+  }
+  errors.push(parts.join("\n"));
+}
 
+// New product .tsrx under components/ that is already high-risk but missing from
+// manifest is covered above. Also fail when a newly added high-risk path was
+// listed in the diff but somehow not discovered (shouldn't happen).
+if (uiDiff) {
+  const highRiskAddedMissing = uiDiff.added.filter(
+    (rel) =>
+      !EXCLUDE_RE.test(rel) &&
+      existsSync(join(srcDir, rel)) &&
+      HIGH_RISK_RE.test(readFileSync(join(srcDir, rel), "utf8")) &&
+      !bySurface.has(rel),
+  );
+  if (highRiskAddedMissing.length) {
+    errors.push(
+      `newly added high-risk .tsrx missing from browserCoverageManifest:\n${formatTouchedList(highRiskAddedMissing)}`,
+    );
+  }
+}
+
+const mode = uiDiff
+  ? `change-aware base=${uiDiff.base} touched=${uiDiff.touched.length}`
+  : "inventory-only";
 console.log(
-  `browser-coverage-check: discovered=${discovered.length} browser=${withBrowser} stack-browser=${withStack} skip-only=${withSkipOnly}`,
+  `browser-coverage-check: mode=${mode} discovered=${discovered.length} browser=${withBrowser} stack-browser=${withStack} skip-only=${withSkipOnly}`,
 );
 
 if (errors.length) {

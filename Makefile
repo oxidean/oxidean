@@ -13,7 +13,7 @@
 .PHONY: up-dev-auth down-dev-auth up-with-dev-auth down-with-dev-auth test-e2e-stack seed-actions-demo test-e2e-actions
 .PHONY: db-migrate db-switch-dialect db-matrix
 .PHONY: coverage-web coverage-rust coverage-weighted coverage-contract
-.PHONY: route-coverage-check browser-coverage-check
+.PHONY: route-coverage-check browser-coverage-check ui-coverage-change-contract
 .PHONY: web-lint web-format-check test-web-browser
 
 COMPOSE ?= docker compose
@@ -293,6 +293,9 @@ route-coverage-check:
 
 browser-coverage-check:
 	@./scripts/browser-coverage-check.sh
+
+ui-coverage-change-contract:
+	@./scripts/ui-coverage-change.contract.sh
 
 web-lint:
 	bun run --filter @oxidean/web lint

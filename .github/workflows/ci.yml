@@ -98,31 +98,50 @@ jobs:
 
   # G-11.1-15 — every user-facing apps/web route page must declare happy-dom,
   # stack-browser, or documented skip evidence in the route coverage manifest.
+  # Change-aware: newly added / modified routes cannot stay skip-only.
   route-coverage:
     name: route-coverage
     needs: [makefile-lint]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.4.0"
-      - name: route coverage gate
-        run: make route-coverage-check
+      - name: route coverage gate (inventory + change-aware)
+        env:
+          UI_COVERAGE_BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || 'HEAD~1' }}
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch --no-tags origin "${{ github.base_ref }}"
+          fi
+          make route-coverage-check
 
   # High-risk interactive UI (Checkbox / RadioGroup / form.Subscribe) must prove
   # Chromium coverage via *.browser.test.tsx, stack-browser, or documented skip.
+  # Change-aware: newly added / modified high-risk surfaces cannot stay skip-only.
   browser-coverage:
     name: browser-coverage
     needs: [makefile-lint]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.4.0"
-      - name: browser coverage gate
-        run: make browser-coverage-check
+      - name: browser coverage gate (inventory + change-aware)
+        env:
+          UI_COVERAGE_BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || 'HEAD~1' }}
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch --no-tags origin "${{ github.base_ref }}"
+          fi
+          make browser-coverage-check
+          ./scripts/ui-coverage-change.contract.sh
 
   # D-QH-02 weighted coverage gate (unit 25% / integration 40% / e2e checklist 35%).
   # Rust cargo-llvm-cov is Make-ready but skipped here (runtime/disk residual);

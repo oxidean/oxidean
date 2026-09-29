@@ -8,11 +8,12 @@
  * Paths are repo-relative from the Oxidean root. Surface paths are relative to
  * `apps/web/src/`.
  *
- * Adding new high-risk UI:
+ * Adding or changing high-risk UI:
  * 1. Author the `.tsrx`.
  * 2. Add `*.browser.test.tsx` that mounts + interacts + asserts no overlay/DOM race
  *    (or attribute an existing stack-browser suite that exercises the control).
  * 3. Append a row here; run `make browser-coverage-check`.
+ * 4. Do not leave new/changed surfaces as skip-only — CI change-aware mode rejects that.
  */
 
 export type BrowserCoverageKind = "browser" | "stack-browser" | "skip";

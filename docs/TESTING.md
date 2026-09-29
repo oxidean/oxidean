@@ -175,7 +175,15 @@ login / verify / profile also have happy-dom `*.integration.test.ts` export/rend
 2. Prefer a colocated `*.browser.test.tsx` that mounts, toggles the control, and asserts no overlay / DOM race. Attribute an existing stack-browser click-through only when that suite already exercises the control.
 3. Append a row to `browserCoverageManifest` (`subject` must appear in the test source).
 4. Run `make browser-coverage-check` and `make test-web-browser` before pushing.
-5. Temporary `{ kind: "skip", rationale: "…" }` is allowed with a non-empty rationale; prefer real Chromium proof on the next touch.
+5. Temporary `{ kind: "skip", rationale: "…" }` is allowed **only for untouched bootstrap gaps**. CI runs change-aware mode (`UI_COVERAGE_BASE=origin/<base>`) and **fails** if a newly added or modified high-risk surface is still skip-only — add real browser/stack-browser proof in that PR.
+
+**Change-aware UI coverage (CI)** — both `route-coverage` and `browser-coverage` jobs set `UI_COVERAGE_BASE` to the PR base (or `HEAD~1` on push). Touched skip-only routes or high-risk components block the merge. Local probe:
+
+```bash
+UI_COVERAGE_BASE=origin/main make browser-coverage-check
+UI_COVERAGE_BASE=origin/main make route-coverage-check
+make ui-coverage-change-contract   # self-test: skip-only touch fails, covered touch passes
+```
 
 ### API client
 
@@ -242,9 +250,9 @@ Workflow: [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) (`name: CI`)
 |-----|----------------|
 | `api-rust` | Install nextest → `cargo nextest run --workspace --profile ci` |
 | `web-octane` | `bun install --frozen-lockfile` → `bun run test` (api-client + web unit/integration) → Turbo build `@oxidean/web` |
-| `route-coverage` | `make route-coverage-check` — every user-facing `.tsrx` page has happy-dom, stack-browser, or documented skip (G-11.1-15) |
+| `route-coverage` | `make route-coverage-check` — every user-facing `.tsrx` page has happy-dom, stack-browser, or documented skip (G-11.1-15); change-aware: touched routes cannot stay skip-only |
 | `web-browser` | `make test-web-browser` — Vitest Chromium component DOM-race suite (`*.browser.test.tsx`) |
-| `browser-coverage` | `make browser-coverage-check` — every high-risk interactive `.tsrx` (Checkbox / RadioGroup / `form.Subscribe`) has Chromium browser, stack-browser, or documented skip proof |
+| `browser-coverage` | `make browser-coverage-check` + change contract — high-risk interactive `.tsrx` Chromium proof; touched/new surfaces cannot stay skip-only |
 | `coverage-weighted` | Bun install → `make coverage-contract` → `make coverage-web` → e2e checklist → `scripts/coverage-weighted.sh` (bootstrap floor `0.65`, ratchet target `0.70`); uploads `var/coverage/` + `apps/web/coverage/` on failure |
 | `e2e-stack` | Rust + Bun + Playwright → `make test-e2e-stack`; on failure uploads `var/e2e/` as `e2e-stack-logs` |
 | `rpc-sync` | `make rpc-sync-check` |
