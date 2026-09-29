@@ -112,16 +112,17 @@ jobs:
           bun-version: "1.4.0"
       - name: route coverage gate (inventory + change-aware)
         env:
-          UI_COVERAGE_BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || 'HEAD~1' }}
+          UI_COVERAGE_BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || (github.event.before != '0000000000000000000000000000000000000000' && github.event.before || 'HEAD~1') }}
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             git fetch --no-tags origin "${{ github.base_ref }}"
           fi
           make route-coverage-check
 
-  # High-risk interactive UI (Checkbox / RadioGroup / form.Subscribe) must prove
-  # Chromium coverage via *.browser.test.tsx, stack-browser, or documented skip.
-  # Change-aware: newly added / modified high-risk surfaces cannot stay skip-only.
+  # High-risk interactive UI (Checkbox / Radio / Select / Switch / portals /
+  # form.Subscribe) must prove Chromium coverage via *.browser.test.tsx,
+  # stack-browser, or documented skip. Change-aware: newly added / modified
+  # high-risk surfaces cannot stay skip-only.
   browser-coverage:
     name: browser-coverage
     needs: [makefile-lint]
@@ -135,7 +136,7 @@ jobs:
           bun-version: "1.4.0"
       - name: browser coverage gate (inventory + change-aware)
         env:
-          UI_COVERAGE_BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || 'HEAD~1' }}
+          UI_COVERAGE_BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || (github.event.before != '0000000000000000000000000000000000000000' && github.event.before || 'HEAD~1') }}
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             git fetch --no-tags origin "${{ github.base_ref }}"

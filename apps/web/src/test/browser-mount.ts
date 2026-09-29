@@ -92,6 +92,57 @@ export async function clickAriaLabel(label: string): Promise<void> {
   });
 }
 
+async function waitForTestIdAttached(testId: string, ms = 2_000): Promise<Element | null> {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    const el = document.querySelector(`[data-testid="${testId}"]`);
+    if (el) return el;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  return document.querySelector(`[data-testid="${testId}"]`);
+}
+
+/**
+ * Open a Base UI Select and commit an option.
+ *
+ * Base UI ignores mouse `click` on Select.Item unless `pointerdown` first set
+ * `allowMouseSelectionRef` (see admin/auth.integration.test.ts).
+ */
+export async function pickSelectOptionByTestId(
+  triggerTestId: string,
+  optionTestId: string,
+): Promise<void> {
+  const trigger = document.querySelector(`[data-testid="${triggerTestId}"]`);
+  if (!trigger) {
+    throw new Error(`pickSelectOption: no trigger [data-testid="${triggerTestId}"]`);
+  }
+
+  await act(async () => {
+    (trigger as HTMLElement).click();
+  });
+
+  let option = await waitForTestIdAttached(optionTestId, 2_000);
+  if (!option) {
+    // Retry open once — portal open can miss the first click under Chromium.
+    await act(async () => {
+      (trigger as HTMLElement).click();
+    });
+    option = await waitForTestIdAttached(optionTestId, 2_000);
+  }
+  if (!option) {
+    throw new Error(
+      `pickSelectOption: option [data-testid="${optionTestId}"] never attached. ${debugBody()}`,
+    );
+  }
+
+  await act(async () => {
+    option.dispatchEvent(
+      new PointerEvent("pointerdown", { bubbles: true, cancelable: true, pointerType: "mouse" }),
+    );
+    (option as HTMLElement).click();
+  });
+}
+
 export function expectNoOctaneOverlayInDocument(): void {
   const html = document.body.innerHTML;
   if (

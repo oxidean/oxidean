@@ -2,8 +2,9 @@
  * Browser (Chromium component) coverage manifest — follow-up to #41–#43 / PR #54.
  *
  * Every high-risk interactive `.tsrx` under `apps/web/src` (Checkbox, RadioGroup,
- * or `form.Subscribe`) must appear here with proof that a real-DOM render test
- * (or stack-browser click-through) covers it. Happy-dom alone does not count.
+ * form.Subscribe, Select*, Switch, Dialog/AlertDialog/DropdownMenu portals) must
+ * appear here with proof that a real-DOM render test (or stack-browser
+ * click-through) covers it. Happy-dom alone does not count.
  *
  * Paths are repo-relative from the Oxidean root. Surface paths are relative to
  * `apps/web/src/`.
@@ -12,7 +13,7 @@
  * 1. Author the `.tsrx`.
  * 2. Add `*.browser.test.tsx` that mounts + interacts + asserts no overlay/DOM race
  *    (or attribute an existing stack-browser suite that exercises the control).
- * 3. Append a row here; run `make browser-coverage-check`.
+ * 3. Append a row here; run `make browser-coverage-check` / `make browser-coverage-check-pr`.
  * 4. Do not leave new/changed surfaces as skip-only — CI change-aware mode rejects that.
  */
 
@@ -32,8 +33,8 @@ export type BrowserCoverageEvidence =
   | {
       kind: "stack-browser";
       test: string;
-      /** Optional marker that must appear in the stack-browser suite source. */
-      subject?: string;
+      /** Marker that must appear in the stack-browser suite source. */
+      subject: string;
     }
   | { kind: "skip"; rationale: string };
 
@@ -54,10 +55,13 @@ const FORGE_SSH = "apps/web/e2e/stack-browser/forge-packages-ssh-orgs.stack.brow
 const FORGE_MIRROR = "apps/web/e2e/stack-browser/forge-mirror.stack.browser.test.tsx";
 const NEW_REPO = "apps/web/e2e/stack-browser/new-repo-template.stack.browser.test.tsx";
 const FORGE_ISSUES = "apps/web/e2e/stack-browser/forge-issues-releases.stack.browser.test.tsx";
+const FORGE_BRANCHES = "apps/web/e2e/stack-browser/forge-branches.stack.browser.test.tsx";
+const CHROME_MENUS = "apps/web/e2e/stack-browser/chrome-menus.stack.browser.test.tsx";
 const PAT_STACK = "apps/web/e2e/stack-browser/pat-mint.stack.browser.test.tsx";
+const SETTINGS_AVATAR = "apps/web/e2e/stack-browser/settings-profile-avatar.stack.browser.test.tsx";
 
 export const browserCoverageManifest: BrowserCoverageEntry[] = [
-  // --- primitives (keepMounted Indicators) ---
+  // --- primitives ---
   {
     surface: "components/ui/checkbox.tsrx",
     coverage: [{ kind: "browser", test: UI_BROWSER, subject: "ui-controls.browser-harness" }],
@@ -66,8 +70,28 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
     surface: "components/ui/radio-group.tsrx",
     coverage: [{ kind: "browser", test: UI_BROWSER, subject: "ui-controls.browser-harness" }],
   },
+  {
+    surface: "components/ui/select.tsrx",
+    coverage: [{ kind: "browser", test: UI_BROWSER, subject: "ui-harness-select" }],
+  },
+  {
+    surface: "components/ui/switch.tsrx",
+    coverage: [{ kind: "browser", test: UI_BROWSER, subject: "ui-harness-switch" }],
+  },
+  {
+    surface: "components/ui/dialog.tsrx",
+    coverage: [{ kind: "stack-browser", test: FORGE_BRANCHES, subject: "branch" }],
+  },
+  {
+    surface: "components/ui/alert-dialog.tsrx",
+    coverage: [{ kind: "stack-browser", test: FORGE_BRANCHES, subject: "delete" }],
+  },
+  {
+    surface: "components/ui/dropdown-menu.tsrx",
+    coverage: [{ kind: "stack-browser", test: CHROME_MENUS, subject: "menu" }],
+  },
 
-  // --- PAT mint (motivating crash class) ---
+  // --- PAT mint ---
   {
     surface: "components/settings/pat-classic-form.tsrx",
     coverage: [
@@ -86,6 +110,13 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
     surface: "components/settings/pat-fg-repo-picker.tsrx",
     coverage: [{ kind: "browser", test: PAT_BROWSER, subject: "fg-repo-item" }],
   },
+  {
+    surface: "components/settings/pat-expiry-field.tsrx",
+    coverage: [
+      { kind: "browser", test: PAT_BROWSER, subject: "pat-expiry-option" },
+      { kind: "stack-browser", test: PAT_STACK, subject: "expectPatMintClickThroughFlow" },
+    ],
+  },
 
   // --- settings forms ---
   {
@@ -101,12 +132,12 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
       {
         kind: "skip",
         rationale:
-          "Subscribe wraps submit only (no Checkbox/Radio); stack-browser SSH/settings chrome covers adjacent settings. Promote to *.browser.test.tsx if GPG gains toggles.",
+          "Subscribe wraps submit only; stack-browser SSH/settings chrome covers adjacent settings. Promote to *.browser.test.tsx if GPG gains toggles.",
       },
     ],
   },
 
-  // --- repo settings ---
+  // --- repo / chrome ---
   {
     surface: "components/repo/mirror-settings-panel.tsrx",
     coverage: [
@@ -120,12 +151,94 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
       {
         kind: "skip",
         rationale:
-          "Checkbox/events live behind repo settings webhooks panel; no dedicated Chromium mount yet. Add *.browser.test.tsx when webhook UI is next touched.",
+          "Webhook events Checkbox live behind repo settings webhooks panel; no dedicated Chromium mount yet. Add *.browser.test.tsx when webhook UI is next touched.",
       },
     ],
   },
+  {
+    surface: "components/repo/webhooks-panel.tsrx",
+    coverage: [
+      {
+        kind: "skip",
+        rationale:
+          "Panel hosts webhook-form; no stack-browser click-through for webhooks yet. Promote with webhook-form browser mount.",
+      },
+    ],
+  },
+  {
+    surface: "components/repo/collaborators-panel.tsrx",
+    coverage: [
+      {
+        kind: "skip",
+        rationale:
+          "Role Select in repo settings; not yet exercised in stack-browser. Add browser mount when collaborators UI is next touched.",
+      },
+    ],
+  },
+  {
+    surface: "components/repo/ref-select.tsrx",
+    coverage: [
+      {
+        kind: "skip",
+        rationale:
+          "Branch/tag Select used across forge chrome; covered indirectly by forge-repo/branches flows. Dedicated browser Select pick when next edited.",
+      },
+    ],
+  },
+  {
+    surface: "components/repo/lfs-settings-panel.tsrx",
+    coverage: [
+      {
+        kind: "skip",
+        rationale:
+          "Switch/settings panel; promote to *.browser.test.tsx on next LFS settings edit.",
+      },
+    ],
+  },
+  {
+    surface: "components/repo/actions-settings-panel.tsrx",
+    coverage: [
+      {
+        kind: "skip",
+        rationale: "Actions enable Switch; promote on next actions-settings edit.",
+      },
+    ],
+  },
+  {
+    surface: "components/repo/template-repo-settings-panel.tsrx",
+    coverage: [
+      {
+        kind: "skip",
+        rationale: "Template Switch panel; promote on next template-settings edit.",
+      },
+    ],
+  },
+  {
+    surface: "components/repo/clone-box.tsrx",
+    coverage: [
+      {
+        kind: "skip",
+        rationale:
+          "Clone URL Select; forge-repo stack-browser covers repo home chrome. Dedicated Select pick when clone-box is next touched.",
+      },
+    ],
+  },
+  {
+    surface: "components/admin/byte-quota-field.tsrx",
+    coverage: [
+      {
+        kind: "skip",
+        rationale:
+          "Admin quota Select; forge-admin opens /admin/packages chrome. Add browser Select pick when quota field is next edited.",
+      },
+    ],
+  },
+  {
+    surface: "components/chrome.tsrx",
+    coverage: [{ kind: "stack-browser", test: CHROME_MENUS, subject: "chrome" }],
+  },
 
-  // --- routes with Checkbox / Radio / Subscribe ---
+  // --- routes ---
   {
     surface: "routes/login.tsrx",
     coverage: [{ kind: "stack-browser", test: AUTH_UI, subject: "login" }],
@@ -140,7 +253,7 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
       {
         kind: "skip",
         rationale:
-          "Checkbox is secondary; happy-dom mount + auth stack covers verify. Promote to browser mount if verify gains Base UI Indicator toggles beside panels.",
+          "Checkbox is secondary; happy-dom mount + auth stack covers verify. Promote to browser mount if verify gains Indicator toggles beside panels.",
       },
     ],
   },
@@ -150,7 +263,7 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
       {
         kind: "skip",
         rationale:
-          "Setup wizard Radio/Checkbox covered by happy-dom setup.integration; full Chromium click-through not yet required. Add *.browser.test.tsx when setup UI is next changed.",
+          "Setup wizard Radio/Checkbox covered by happy-dom setup.integration; add *.browser.test.tsx when setup UI is next changed.",
       },
     ],
   },
@@ -160,7 +273,7 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
       {
         kind: "skip",
         rationale:
-          "Credentials step Subscribe/checkbox covered by happy-dom setup.credentials.integration; promote on next edit.",
+          "Credentials step covered by happy-dom setup.credentials.integration; promote on next edit.",
       },
     ],
   },
@@ -173,17 +286,35 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
     coverage: [{ kind: "stack-browser", test: FORGE_ADMIN, subject: "admin/auth" }],
   },
   {
+    surface: "routes/admin/templates.tsrx",
+    coverage: [
+      {
+        kind: "skip",
+        rationale:
+          "Admin templates Switch/Select; forge-admin does not open /admin/templates yet. Add browser or stack-browser on next templates edit.",
+      },
+    ],
+  },
+  {
     surface: "routes/$owner.settings.index.tsrx",
     coverage: [
       {
         kind: "skip",
         rationale:
-          "Org general settings Select/visibility; stack-browser org settings covers chrome. Add browser mount when org visibility radios are next touched.",
+          "Org general settings Select; stack-browser org settings covers chrome. Add browser mount when org visibility radios are next touched.",
       },
     ],
   },
   {
+    surface: "routes/$owner.settings.members.tsrx",
+    coverage: [{ kind: "stack-browser", test: FORGE_SSH, subject: "members" }],
+  },
+  {
     surface: "routes/$owner.$repo.releases.new.tsrx",
     coverage: [{ kind: "stack-browser", test: FORGE_ISSUES, subject: "release" }],
+  },
+  {
+    surface: "routes/settings/tokens.index.tsrx",
+    coverage: [{ kind: "stack-browser", test: SETTINGS_AVATAR, subject: "tokens" }],
   },
 ];

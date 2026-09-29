@@ -76,6 +76,8 @@ type PlaywrightPage = {
     fill: (v: string) => Promise<unknown>;
     click: (opts?: object) => Promise<unknown>;
     press: (key: string) => Promise<unknown>;
+    focus?: () => Promise<unknown>;
+    dispatchEvent?: (type: string, eventInit?: object) => Promise<unknown>;
     innerText?: () => Promise<string>;
     isVisible?: () => Promise<boolean>;
     getAttribute?: (name: string) => Promise<string | null>;
@@ -99,6 +101,9 @@ type PlaywrightPage = {
             buffer: Buffer;
           }>,
     ) => Promise<unknown>;
+  };
+  keyboard?: {
+    press: (key: string) => Promise<unknown>;
   };
   waitForURL: (url: string | RegExp | ((url: URL) => boolean), opts?: object) => Promise<unknown>;
   content: () => Promise<string>;
@@ -1404,13 +1409,55 @@ export const expectSettingsProfileAvatarFlow: BrowserCommand<[]> = async (ctx) =
 };
 
 /**
+ * Open a Base UI Select and commit an option (stack-browser).
+ *
+ * Prefer keyboard commit (avoids allowMouseSelectionRef mouse guard). Fall back
+ * to pointerdown+click on the attached option if keyboard does not stick.
+ */
+async function pickSelectOptionByTestId(
+  page: PlaywrightPage,
+  triggerTestId: string,
+  optionTestId: string,
+): Promise<void> {
+  const trigger = page.locator(`[data-testid="${triggerTestId}"]`);
+  const option = page.locator(`[data-testid="${optionTestId}"]`);
+
+  await trigger.click();
+  try {
+    await option.waitFor({ state: "attached", timeout: 3_000 });
+  } catch {
+    await trigger.click();
+    await option.waitFor({ state: "attached", timeout: 5_000 });
+  }
+
+  // Primary: focus option + Enter (Base UI commits keyboard activation).
+  if (option.focus) {
+    await option.focus();
+  } else {
+    await option.click({ force: true });
+  }
+  if (page.keyboard?.press) {
+    await page.keyboard.press("Enter");
+  } else {
+    await option.press("Enter");
+  }
+
+  // Fallback: pointerdown then click — same sequence as happy-dom / browser-mount.
+  const stillOpen = await option.isVisible?.().catch(() => false);
+  if (stillOpen) {
+    if (option.dispatchEvent) {
+      await option.dispatchEvent("pointerdown", { pointerType: "mouse" });
+    }
+    await option.click({ force: true });
+  }
+}
+
+/**
  * Click through classic + fine-grained PAT mint controls without Octane
  * insertBefore / error overlay (issues #41–#43).
  *
- * Base UI Select option picks are flaky in stack-browser Chromium (portal
- * visibility / pointer selection). Open/close triggers only here; option
- * selection + custom/none expiry are covered by unit helpers and the Vitest
- * browser suite.
+ * Select option picks use keyboard-first `pickSelectOptionByTestId` (portal
+ * visibility + Base UI allowMouseSelectionRef).
  */
 export const expectPatMintClickThroughFlow: BrowserCommand<[]> = async (ctx) => {
   const { context } = asPlaywright(ctx);
@@ -1436,12 +1483,15 @@ export const expectPatMintClickThroughFlow: BrowserCommand<[]> = async (ctx) => 
     pageGuard.assertNoPageErrors("pat classic after scope toggles");
     assertNoOctaneOverlay(await page.content(), "pat classic after scope toggles");
 
-    // Expiry Select is present; opening it must not overlay. Option picks are
-    // covered by unit helpers — Base UI Select portals are already race-annotated.
-    await page.locator('[data-testid="pat-expiry-preset"]').click();
-    await page.locator('[data-testid="pat-expiry-preset"]').click();
-    pageGuard.assertNoPageErrors("pat classic after expiry trigger");
-    assertNoOctaneOverlay(await page.content(), "pat classic after expiry trigger");
+    await pickSelectOptionByTestId(page, "pat-expiry-preset", "pat-expiry-option-custom");
+    await page.getByTestId("pat-expiry-custom").waitFor({ state: "attached", timeout: 10_000 });
+    pageGuard.assertNoPageErrors("pat classic after expiry custom");
+    assertNoOctaneOverlay(await page.content(), "pat classic after expiry custom");
+
+    await pickSelectOptionByTestId(page, "pat-expiry-preset", "pat-expiry-option-none");
+    await page.getByTestId("pat-expiry-none-warn").waitFor({ state: "attached", timeout: 10_000 });
+    pageGuard.assertNoPageErrors("pat classic after no expiration");
+    assertNoOctaneOverlay(await page.content(), "pat classic after no expiration");
 
     await page.goto(`${webOrigin()}/settings/tokens/new/fine-grained`, {
       waitUntil: "domcontentloaded",
@@ -1470,17 +1520,14 @@ export const expectPatMintClickThroughFlow: BrowserCommand<[]> = async (ctx) => 
       assertNoOctaneOverlay(await page.content(), "pat fg after repo checkbox");
     }
 
-    await page.locator('[data-testid="fg-contents-perm"]').click();
-    await page.locator('[data-testid="fg-contents-perm"]').click();
-    await page.locator('[data-testid="fg-packages-perm-select"]').click();
-    await page.locator('[data-testid="fg-packages-perm-select"]').click();
-    pageGuard.assertNoPageErrors("pat fg after permission triggers");
-    assertNoOctaneOverlay(await page.content(), "pat fg after permission triggers");
+    await pickSelectOptionByTestId(page, "fg-contents-perm", "fg-contents-option-write");
+    await pickSelectOptionByTestId(page, "fg-packages-perm-select", "fg-packages-option-read");
+    pageGuard.assertNoPageErrors("pat fg after permission selects");
+    assertNoOctaneOverlay(await page.content(), "pat fg after permission selects");
 
-    await page.locator('[data-testid="pat-expiry-preset"]').click();
-    await page.locator('[data-testid="pat-expiry-preset"]').click();
-    pageGuard.assertNoPageErrors("pat fg after expiry trigger");
-    assertNoOctaneOverlay(await page.content(), "pat fg after expiry trigger");
+    await pickSelectOptionByTestId(page, "pat-expiry-preset", "pat-expiry-option-7");
+    pageGuard.assertNoPageErrors("pat fg after expiry preset");
+    assertNoOctaneOverlay(await page.content(), "pat fg after expiry preset");
 
     return true;
   } finally {

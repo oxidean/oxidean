@@ -3,7 +3,7 @@
  * Used by browser-coverage-check and route-coverage-check.
  */
 import { existsSync } from "node:fs";
-import { join, relative, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 
 const HARNESS_RE = /\.(?:browser-)?harness\.tsrx$|\.test\./;
@@ -110,5 +110,3 @@ export function resolveUiCoverageDiff(root: string): UiCoverageDiff | null {
 export function formatTouchedList(paths: string[]): string {
   return paths.map((p) => `  - ${p}`).join("\n");
 }
-
-export { relative, resolve, join };

@@ -14,6 +14,7 @@
 .PHONY: db-migrate db-switch-dialect db-matrix
 .PHONY: coverage-web coverage-rust coverage-weighted coverage-contract
 .PHONY: route-coverage-check browser-coverage-check ui-coverage-change-contract
+.PHONY: route-coverage-check-pr browser-coverage-check-pr
 .PHONY: web-lint web-format-check test-web-browser
 
 COMPOSE ?= docker compose
@@ -291,8 +292,16 @@ coverage-contract:
 route-coverage-check:
 	@./scripts/route-coverage-check.sh
 
+# Change-aware (PR-equivalent): fail skip-only for routes touched vs origin/main.
+route-coverage-check-pr:
+	@UI_COVERAGE_BASE=$${UI_COVERAGE_BASE:-origin/main} ./scripts/route-coverage-check.sh
+
 browser-coverage-check:
 	@./scripts/browser-coverage-check.sh
+
+# Change-aware (PR-equivalent): fail skip-only for high-risk UI touched vs origin/main.
+browser-coverage-check-pr:
+	@UI_COVERAGE_BASE=$${UI_COVERAGE_BASE:-origin/main} ./scripts/browser-coverage-check.sh
 
 ui-coverage-change-contract:
 	@./scripts/ui-coverage-change.contract.sh

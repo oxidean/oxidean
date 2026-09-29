@@ -154,35 +154,38 @@ login / verify / profile also have happy-dom `*.integration.test.ts` export/rend
    - `{ kind: "skip", rationale: "…" }` (temporary; prefer real coverage)
 3. Run `make route-coverage-check` before pushing.
 
-**Browser (Chromium component) coverage gate** — complementary to route-coverage. Discovers every `apps/web/src/**/*.tsrx` that uses `Checkbox`, `RadioGroup` / `RadioGroupItem`, or `form.Subscribe` (excluding `*.harness.tsrx` / `*.browser-harness.tsrx`). Each surface must prove real-DOM coverage; happy-dom alone does **not** count for this gate.
+**Browser (Chromium component) coverage gate** — complementary to route-coverage. Discovers every `apps/web/src/**/*.tsrx` that uses `Checkbox`, `RadioGroup` / `RadioGroupItem`, `form.Subscribe`, `SelectRoot` / `SelectPortal` / `SelectTrigger`, `Switch`, or `DialogPortal` / `AlertDialogPortal` / `DropdownMenu` (excluding `*.harness.tsrx` / `*.browser-harness.tsrx`). Each surface must prove real-DOM coverage; happy-dom alone does **not** count for this gate.
 
 | Artifact | Role |
 |----------|------|
 | `apps/web/src/test/browser-coverage.manifest.ts` | Declares each high-risk surface + `browser` / `stack-browser` / `skip` evidence |
 | `scripts/browser-coverage-check.ts` | Discovers high-risk `.tsrx`, validates evidence, proves browser tests mount + click + assert |
-| `make browser-coverage-check` | Local + CI entrypoint (`browser-coverage` job) |
+| `make browser-coverage-check` | Inventory entrypoint |
+| `make browser-coverage-check-pr` | Change-aware vs `origin/main` (PR-equivalent; run before push) |
 
 **Browser evidence must prove coverage** — for `kind: "browser"`, the `*.browser.test.tsx` file must:
 
 1. Call `mountComponent` or `mountWithQueryClient` (`apps/web/src/test/browser-mount.ts`)
-2. Contain the `subject` marker (import path fragment or export name for that surface)
-3. Interact via `clickTestId` / `clickAriaLabel` / `.click(`
+2. Contain the `subject` marker and reference the surface module basename (e.g. `pat-expiry-field`)
+3. Interact via `clickTestId` / `clickAriaLabel` / `pickSelectOptionByTestId` / `.click(`
 4. Assert with `expectNoOctaneOverlayInDocument`, `expectNoDomRaces`, or `trackDomErrors`
+
+**Base UI Select** — do not use bare option `.click()`. Use `pickSelectOptionByTestId` (browser-mount: `pointerdown` then click; stack-browser: keyboard-first Enter with pointerdown fallback). See `ui-controls.browser.test.tsx` and `expectPatMintClickThroughFlow`.
 
 **Adding or changing high-risk interactive UI**
 
-1. Author the `.tsrx` (Checkbox / Radio / `form.Subscribe` surfaces).
-2. Prefer a colocated `*.browser.test.tsx` that mounts, toggles the control, and asserts no overlay / DOM race. Attribute an existing stack-browser click-through only when that suite already exercises the control.
-3. Append a row to `browserCoverageManifest` (`subject` must appear in the test source).
-4. Run `make browser-coverage-check` and `make test-web-browser` before pushing.
-5. Temporary `{ kind: "skip", rationale: "…" }` is allowed **only for untouched bootstrap gaps**. CI runs change-aware mode (`UI_COVERAGE_BASE=origin/<base>`) and **fails** if a newly added or modified high-risk surface is still skip-only — add real browser/stack-browser proof in that PR.
+1. Author the `.tsrx` (Checkbox / Radio / Select / Switch / portals / `form.Subscribe`).
+2. Prefer a colocated `*.browser.test.tsx` that mounts, toggles the control, and asserts no overlay / DOM race. Attribute an existing stack-browser click-through only when that suite already exercises the control (`subject` required).
+3. Append a row to `browserCoverageManifest`.
+4. Run `make browser-coverage-check-pr` and `make test-web-browser` before pushing.
+5. Temporary `{ kind: "skip", rationale: "…" }` is allowed **only for untouched bootstrap gaps**. CI change-aware mode **fails** if a newly added or modified high-risk surface is still skip-only.
 
-**Change-aware UI coverage (CI)** — both `route-coverage` and `browser-coverage` jobs set `UI_COVERAGE_BASE` to the PR base (or `HEAD~1` on push). Touched skip-only routes or high-risk components block the merge. Local probe:
+**Change-aware UI coverage (CI)** — `route-coverage` and `browser-coverage` set `UI_COVERAGE_BASE` to the PR base, or on push to `github.event.before` (full push range). Local:
 
 ```bash
-UI_COVERAGE_BASE=origin/main make browser-coverage-check
-UI_COVERAGE_BASE=origin/main make route-coverage-check
-make ui-coverage-change-contract   # self-test: skip-only touch fails, covered touch passes
+make browser-coverage-check-pr
+make route-coverage-check-pr
+make ui-coverage-change-contract
 ```
 
 ### API client
@@ -252,7 +255,7 @@ Workflow: [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) (`name: CI`)
 | `web-octane` | `bun install --frozen-lockfile` → `bun run test` (api-client + web unit/integration) → Turbo build `@oxidean/web` |
 | `route-coverage` | `make route-coverage-check` — every user-facing `.tsrx` page has happy-dom, stack-browser, or documented skip (G-11.1-15); change-aware: touched routes cannot stay skip-only |
 | `web-browser` | `make test-web-browser` — Vitest Chromium component DOM-race suite (`*.browser.test.tsx`) |
-| `browser-coverage` | `make browser-coverage-check` + change contract — high-risk interactive `.tsrx` Chromium proof; touched/new surfaces cannot stay skip-only |
+| `browser-coverage` | `make browser-coverage-check` + change contract — high-risk UI (Checkbox/Radio/Select/Switch/portals/Subscribe) Chromium proof; touched/new surfaces cannot stay skip-only |
 | `coverage-weighted` | Bun install → `make coverage-contract` → `make coverage-web` → e2e checklist → `scripts/coverage-weighted.sh` (bootstrap floor `0.65`, ratchet target `0.70`); uploads `var/coverage/` + `apps/web/coverage/` on failure |
 | `e2e-stack` | Rust + Bun + Playwright → `make test-e2e-stack`; on failure uploads `var/e2e/` as `e2e-stack-logs` |
 | `rpc-sync` | `make rpc-sync-check` |
