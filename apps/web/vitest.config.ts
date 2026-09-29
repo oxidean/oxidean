@@ -74,6 +74,11 @@ export default defineConfig({
       "@": path.resolve(rootDir, "./src"),
     },
   },
+  // Pre-bundle deps Vite discovers mid-suite via `cn` so Chromium iframes are
+  // not aborted by an optimizeDeps reload (CI flake for the browser project).
+  optimizeDeps: {
+    include: ["class-variance-authority", "clsx", "tailwind-merge"],
+  },
   test: {
     globals: false,
     coverage: {
