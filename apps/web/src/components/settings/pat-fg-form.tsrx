@@ -104,12 +104,12 @@ export function PatFgForm({ onCreated }: PatFgFormProps) @{
           } else {
             setFormError(res.error.message || NETWORK_ERROR);
           }
-          setPending(false);
           return;
         }
         onCreated(res.data.token);
       } catch {
         setFormError(NETWORK_ERROR);
+      } finally {
         setPending(false);
       }
     },
@@ -137,19 +137,6 @@ export function PatFgForm({ onCreated }: PatFgFormProps) @{
       cancelled = true;
     };
   }, []);
-
-  function toggleRepo(id: string, checked: boolean) {
-    const current = form.getFieldValue("selectedIds");
-    if (checked) {
-      if (current.includes(id)) return;
-      form.setFieldValue("selectedIds", [...current, id]);
-    } else {
-      form.setFieldValue(
-        "selectedIds",
-        current.filter((x) => x !== id),
-      );
-    }
-  }
 
   const reposLoading = repos === null;
   const ownedRepos = repos ?? [];
@@ -229,25 +216,34 @@ export function PatFgForm({ onCreated }: PatFgFormProps) @{
         )}
       </form.Field>
 
-      <form.Subscribe
-        selector={(s) => ({
-          repoAccess: s.values.repoAccess,
-          selectedIds: s.values.selectedIds,
-        })}
-      >
-        {(v) => (
-          <PatFgRepoPicker
-            visible={v.repoAccess === "selected"}
-            pending={pending}
-            reposLoading={reposLoading}
-            reposError={reposError}
-            ownedRepos={ownedRepos}
-            filteredRepos={filteredRepos}
-            selectedIds={v.selectedIds}
-            repoFilter={repoFilter}
-            onRepoFilterChange={setRepoFilter}
-            onToggleRepo={toggleRepo}
-          />
+      {/* Visibility only here — selectedIds go through form.Field so repo
+          checkbox toggles do not re-enter this Subscribe. */}
+      <form.Subscribe selector={(s) => s.values.repoAccess}>
+        {(repoAccess) => (
+          <form.Field name="selectedIds">
+            {(field) => (
+              <PatFgRepoPicker
+                visible={repoAccess === "selected"}
+                pending={pending}
+                reposLoading={reposLoading}
+                reposError={reposError}
+                ownedRepos={ownedRepos}
+                filteredRepos={filteredRepos}
+                selectedIds={field.state.value}
+                repoFilter={repoFilter}
+                onRepoFilterChange={setRepoFilter}
+                onToggleRepo={(id, checked) => {
+                  const current = field.state.value;
+                  if (checked) {
+                    if (current.includes(id)) return;
+                    field.handleChange([...current, id]);
+                  } else {
+                    field.handleChange(current.filter((x) => x !== id));
+                  }
+                }}
+              />
+            )}
+          </form.Field>
         )}
       </form.Subscribe>
 
@@ -294,13 +290,13 @@ export function PatFgForm({ onCreated }: PatFgFormProps) @{
                 <SelectPositioner sideOffset={4}>
                   <SelectPopup>
                     <SelectList>
-                      <SelectItem value="read">
+                      <SelectItem value="read" data-testid="fg-contents-option-read">
                         <SelectItemIndicator>
                           <Check aria-hidden size={16} className="text-primary" />
                         </SelectItemIndicator>
                         <SelectItemText>Read-only</SelectItemText>
                       </SelectItem>
-                      <SelectItem value="write">
+                      <SelectItem value="write" data-testid="fg-contents-option-write">
                         <SelectItemIndicator>
                           <Check aria-hidden size={16} className="text-primary" />
                         </SelectItemIndicator>
@@ -352,19 +348,19 @@ export function PatFgForm({ onCreated }: PatFgFormProps) @{
                 <SelectPositioner sideOffset={4}>
                   <SelectPopup>
                     <SelectList>
-                      <SelectItem value="none">
+                      <SelectItem value="none" data-testid="fg-packages-option-none">
                         <SelectItemIndicator>
                           <Check aria-hidden size={16} className="text-primary" />
                         </SelectItemIndicator>
                         <SelectItemText>No access</SelectItemText>
                       </SelectItem>
-                      <SelectItem value="read">
+                      <SelectItem value="read" data-testid="fg-packages-option-read">
                         <SelectItemIndicator>
                           <Check aria-hidden size={16} className="text-primary" />
                         </SelectItemIndicator>
                         <SelectItemText>Read-only</SelectItemText>
                       </SelectItem>
-                      <SelectItem value="write">
+                      <SelectItem value="write" data-testid="fg-packages-option-write">
                         <SelectItemIndicator>
                           <Check aria-hidden size={16} className="text-primary" />
                         </SelectItemIndicator>

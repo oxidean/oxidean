@@ -72,7 +72,7 @@ export function PatExpiryField({
           <SelectPopup>
             <SelectList>
               @for (const opt of PAT_EXPIRY_PRESETS; key opt.value) {
-                <SelectItem value={opt.value}>
+                <SelectItem value={opt.value} data-testid={`pat-expiry-option-${opt.value}`}>
                   <SelectItemIndicator>
                     <Check aria-hidden size={16} className="text-primary" />
                   </SelectItemIndicator>

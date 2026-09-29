@@ -102,17 +102,17 @@ describe("PAT mint browser DOM races", () => {
       }
 
       const deadline = Date.now() + 10_000;
-      while (!document.querySelector('[data-testid="fg-repo-r1"]') && Date.now() < deadline) {
+      while (!document.querySelector('[data-testid="fg-repo-item-r1"]') && Date.now() < deadline) {
         await new Promise((r) => setTimeout(r, 50));
       }
-      if (!document.querySelector('[data-testid="fg-repo-r1"]')) {
-        throw new Error(`fg-repo-r1 never appeared. ${debugBody()}`);
+      if (!document.querySelector('[data-testid="fg-repo-item-r1"]')) {
+        throw new Error(`fg-repo-item-r1 never appeared. ${debugBody()}`);
       }
 
       await clickTestId("fg-repo-access-all");
       await clickTestId("fg-repo-access-selected");
-      await clickTestId("fg-repo-r1");
-      await clickTestId("fg-repo-r2");
+      await clickTestId("fg-repo-item-r1");
+      await clickTestId("fg-repo-item-r2");
 
       expect(document.querySelector('[data-testid="pat-fg-summary"]')).toBeTruthy();
       tracker.expectNoDomRaces();

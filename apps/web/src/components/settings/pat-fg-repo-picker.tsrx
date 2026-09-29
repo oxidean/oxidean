@@ -95,7 +95,7 @@ export function PatFgRepoPicker({
                   checked={selectedIds.includes(repo.id)}
                   disabled={pending || !visible}
                   aria-label={repoFullName(repo)}
-                  data-testid={`fg-repo-${repo.id}`}
+                  data-testid={`fg-repo-item-${repo.id}`}
                   onCheckedChange={(checked) => onToggleRepo(repo.id, checked === true)}
                 />
                 <span

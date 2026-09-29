@@ -28,5 +28,6 @@ describe("pat-expiry helpers", () => {
   it("expiryPresetLabel covers catalog", () => {
     expect(expiryPresetLabel("30")).toBe("30 days");
     expect(expiryPresetLabel("none")).toBe("No expiration");
+    expect(expiryPresetLabel("custom")).toBe("Custom date");
   });
 });

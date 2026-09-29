@@ -68,12 +68,12 @@ export function PatClassicForm({ onCreated }: PatClassicFormProps) @{
           } else {
             setFormError(res.error.message || NETWORK_ERROR);
           }
-          setPending(false);
           return;
         }
         onCreated(res.data.token);
       } catch {
         setFormError(NETWORK_ERROR);
+      } finally {
         setPending(false);
       }
     },

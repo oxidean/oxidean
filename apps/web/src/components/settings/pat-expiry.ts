@@ -7,7 +7,7 @@ export const PAT_EXPIRY_PRESETS: { value: PatExpiryPreset; label: string }[] = [
   { value: "30", label: "30 days" },
   { value: "60", label: "60 days" },
   { value: "90", label: "90 days" },
-  { value: "custom", label: "Custom…" },
+  { value: "custom", label: "Custom date" },
   { value: "none", label: "No expiration" },
 ];
 
