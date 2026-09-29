@@ -170,7 +170,7 @@ login / verify / profile also have happy-dom `*.integration.test.ts` export/rend
 3. Interact via `clickTestId` / `clickAriaLabel` / `pickSelectOptionByTestId` / `.click(`
 4. Assert with `expectNoOctaneOverlayInDocument`, `expectNoDomRaces`, or `trackDomErrors`
 
-**Base UI Select** — do not use bare option `.click()`. Use `pickSelectOptionByTestId` (browser-mount: `pointerdown` then click; stack-browser: keyboard-first Enter with pointerdown fallback). See `ui-controls.browser.test.tsx` and `expectPatMintClickThroughFlow`.
+**Base UI Select** — do not use bare option `.click()` or trigger `.click()` in stack-browser. Use `pickSelectOptionByTestId` (browser-mount: `pointerdown` then click; stack-browser: real mouse press via `hover` + `mouse.down/up` to open, then in-page `pointerdown`+click to commit — Playwright `locator.click()` leaves `aria-expanded=false` on the SSR page). See `ui-controls.browser.test.tsx` and `expectPatMintClickThroughFlow`.
 
 **Adding or changing high-risk interactive UI**
 

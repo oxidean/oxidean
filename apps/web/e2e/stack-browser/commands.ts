@@ -54,6 +54,12 @@ type PlaywrightPage = {
   };
   getByTestId: (id: string) => {
     waitFor: (opts?: object) => Promise<unknown>;
+    click?: (opts?: object) => Promise<unknown>;
+    hover?: (opts?: object) => Promise<unknown>;
+    focus?: () => Promise<unknown>;
+    press?: (key: string) => Promise<unknown>;
+    scrollIntoViewIfNeeded?: () => Promise<unknown>;
+    getAttribute?: (name: string) => Promise<string | null>;
     locator: (sel: string) => {
       waitFor: (opts?: object) => Promise<unknown>;
       click: (opts?: object) => Promise<unknown>;
@@ -77,6 +83,9 @@ type PlaywrightPage = {
     click: (opts?: object) => Promise<unknown>;
     press: (key: string) => Promise<unknown>;
     focus?: () => Promise<unknown>;
+    hover?: (opts?: object) => Promise<unknown>;
+    scrollIntoViewIfNeeded?: () => Promise<unknown>;
+    boundingBox?: () => Promise<{ x: number; y: number; width: number; height: number } | null>;
     dispatchEvent?: (type: string, eventInit?: object) => Promise<unknown>;
     innerText?: () => Promise<string>;
     isVisible?: () => Promise<boolean>;
@@ -105,6 +114,12 @@ type PlaywrightPage = {
   keyboard?: {
     press: (key: string) => Promise<unknown>;
   };
+  mouse?: {
+    move?: (x: number, y: number, opts?: object) => Promise<unknown>;
+    down: (opts?: object) => Promise<unknown>;
+    up: (opts?: object) => Promise<unknown>;
+  };
+  evaluate?: <R, A = unknown>(fn: (arg: A) => R | Promise<R>, arg?: A) => Promise<R>;
   waitForURL: (url: string | RegExp | ((url: URL) => boolean), opts?: object) => Promise<unknown>;
   content: () => Promise<string>;
   url: () => string;
@@ -1411,45 +1426,95 @@ export const expectSettingsProfileAvatarFlow: BrowserCommand<[]> = async (ctx) =
 /**
  * Open a Base UI Select and commit an option (stack-browser).
  *
- * Prefer keyboard commit (avoids allowMouseSelectionRef mouse guard). Fall back
- * to pointerdown+click on the attached option if keyboard does not stick.
+ * Base UI Select's pressable trigger does not stay open under Playwright's
+ * synthetic `locator.click()` / `HTMLElement.click()` against the SSR page —
+ * `aria-expanded` stays false and the portal never mounts. Real pointer
+ * press (hover + mouse.down/up) opens it; options then attach in the DOM.
+ *
+ * Commit via in-page pointerdown+click (allowMouseSelectionRef), not Playwright
+ * option locators (visibility/inert backdrop flakiness). Never re-click the
+ * trigger to "retry" — that toggles the popup closed.
  */
 async function pickSelectOptionByTestId(
   page: PlaywrightPage,
   triggerTestId: string,
   optionTestId: string,
 ): Promise<void> {
-  const trigger = page.locator(`[data-testid="${triggerTestId}"]`);
+  if (!page.mouse?.down || !page.mouse?.up) {
+    throw new Error("pickSelectOptionByTestId requires page.mouse down/up");
+  }
+  if (!page.evaluate) {
+    throw new Error("pickSelectOptionByTestId requires page.evaluate");
+  }
+
+  // Prefer getByTestId (same path as the working standalone probe).
+  const trigger = page.getByTestId(triggerTestId);
   const option = page.locator(`[data-testid="${optionTestId}"]`);
 
-  await trigger.click();
-  try {
-    await option.waitFor({ state: "attached", timeout: 3_000 });
-  } catch {
-    await trigger.click();
-    await option.waitFor({ state: "attached", timeout: 5_000 });
-  }
-
-  // Primary: focus option + Enter (Base UI commits keyboard activation).
-  if (option.focus) {
-    await option.focus();
-  } else {
-    await option.click({ force: true });
-  }
-  if (page.keyboard?.press) {
-    await page.keyboard.press("Enter");
-  } else {
-    await option.press("Enter");
-  }
-
-  // Fallback: pointerdown then click — same sequence as happy-dom / browser-mount.
-  const stillOpen = await option.isVisible?.().catch(() => false);
-  if (stillOpen) {
-    if (option.dispatchEvent) {
-      await option.dispatchEvent("pointerdown", { pointerType: "mouse" });
+  const closeIfOpen = async () => {
+    if ((await trigger.getAttribute?.("aria-expanded")) === "true") {
+      if (page.keyboard?.press) {
+        await page.keyboard.press("Escape");
+      } else if (trigger.press) {
+        await trigger.press("Escape");
+      }
+      await new Promise((r) => setTimeout(r, 50));
     }
-    await option.click({ force: true });
+  };
+
+  const pressOpen = async () => {
+    if (trigger.scrollIntoViewIfNeeded) {
+      await trigger.scrollIntoViewIfNeeded();
+    }
+    // Real pointer press — locator.click() / element.click() leave
+    // aria-expanded=false on the SSR page for Base UI Select.
+    if (typeof trigger.hover === "function") {
+      await trigger.hover();
+    } else if (trigger.focus) {
+      await trigger.focus();
+    }
+    await page.mouse.down();
+    await page.mouse.up();
+  };
+
+  // Retry: pressable Select handlers may not be ready immediately after SSR paint
+  // (same settle+retry pattern as branch dialog / mirror radios).
+  let opened = false;
+  for (let attempt = 0; attempt < 8; attempt++) {
+    await closeIfOpen();
+    if (attempt === 0) {
+      await new Promise((r) => setTimeout(r, 400));
+    }
+    await pressOpen();
+    try {
+      await option.waitFor({ state: "attached", timeout: 800 });
+      opened = true;
+      break;
+    } catch {
+      // try again
+    }
   }
+  if (!opened) {
+    const expanded = await trigger.getAttribute?.("aria-expanded");
+    throw new Error(
+      `pickSelectOptionByTestId: option [data-testid="${optionTestId}"] never attached after mouse press on ${triggerTestId} (aria-expanded=${expanded})`,
+    );
+  }
+
+  await page.evaluate((id) => {
+    const el = document.querySelector(`[data-testid="${id}"]`);
+    if (!el) {
+      throw new Error(`option [data-testid="${id}"] missing at commit`);
+    }
+    el.dispatchEvent(
+      new PointerEvent("pointerdown", {
+        bubbles: true,
+        cancelable: true,
+        pointerType: "mouse",
+      }),
+    );
+    (el as HTMLElement).click();
+  }, optionTestId);
 }
 
 /**
@@ -1482,6 +1547,11 @@ export const expectPatMintClickThroughFlow: BrowserCommand<[]> = async (ctx) => 
     await page.locator('[data-testid="scope-repo"]').click();
     pageGuard.assertNoPageErrors("pat classic after scope toggles");
     assertNoOctaneOverlay(await page.content(), "pat classic after scope toggles");
+
+    // Ensure no leftover popup/inert from prior clicks before Select press.
+    if (page.keyboard?.press) {
+      await page.keyboard.press("Escape");
+    }
 
     await pickSelectOptionByTestId(page, "pat-expiry-preset", "pat-expiry-option-custom");
     await page.getByTestId("pat-expiry-custom").waitFor({ state: "attached", timeout: 10_000 });
