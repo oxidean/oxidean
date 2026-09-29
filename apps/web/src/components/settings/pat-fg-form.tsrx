@@ -1,13 +1,31 @@
 import { useEffect, useState } from "octane";
 import { useForm } from "@octanejs/tanstack-form";
+import { Check, ChevronDown } from "@octanejs/lucide";
 import type { RepoPublic } from "@oxidean/api-client";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Skeleton } from "@/components/ui/skeleton";
+import {
+  SelectIcon,
+  SelectItem,
+  SelectItemIndicator,
+  SelectItemText,
+  SelectList,
+  SelectPopup,
+  SelectPortal,
+  SelectPositioner,
+  SelectRoot,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { PatExpiryField } from "@/components/settings/pat-expiry-field";
+import {
+  resolveExpiresAt,
+  tomorrowDateValue,
+  type PatExpiryPreset,
+} from "@/components/settings/pat-expiry";
+import { PatFgRepoPicker } from "@/components/settings/pat-fg-repo-picker";
 import { apiClient } from "@/lib/api-client";
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
@@ -16,21 +34,24 @@ type PatFgFormProps = {
   onCreated: (token: string) => void;
 };
 
-function tomorrowDateValue(): string {
-  const d = new Date();
-  d.setUTCDate(d.getUTCDate() + 1);
-  return d.toISOString().slice(0, 10);
-}
-
-function expiryToIso(dateValue: string): string {
-  return `${dateValue}T23:59:59Z`;
-}
+type ContentsChoice = "read" | "write";
+type PackagesChoice = "none" | "read" | "write";
 
 function repoFullName(repo: RepoPublic): string {
   return `${repo.owner_username}/${repo.name}`;
 }
 
-/** Fine-grained PAT create form (D-05 / D-06 / D-07 / D-16 / T-08-06). */
+function contentsLabel(v: ContentsChoice): string {
+  return v === "write" ? "Read and write" : "Read-only";
+}
+
+function packagesLabel(v: PackagesChoice): string {
+  if (v === "write") return "Read and write";
+  if (v === "read") return "Read-only";
+  return "No access";
+}
+
+/** Fine-grained PAT create form — keep panels mounted; narrow Field/Subscribe. */
 export function PatFgForm({ onCreated }: PatFgFormProps) @{
   const [noteError, setNoteError] = useState("");
   const [repoError, setRepoError] = useState("");
@@ -38,15 +59,16 @@ export function PatFgForm({ onCreated }: PatFgFormProps) @{
   const [pending, setPending] = useState(false);
   const [repos, setRepos] = useState<RepoPublic[] | null>(null);
   const [reposError, setReposError] = useState("");
+  const [repoFilter, setRepoFilter] = useState("");
 
   const form = useForm({
     defaultValues: {
       note: "",
       repoAccess: "selected" as "all" | "selected",
       selectedIds: [] as string[],
-      contents: "read" as "read" | "write",
-      packagesPerm: "none" as "none" | "read" | "write",
-      expiryMode: "none" as "none" | "date",
+      contents: "read" as ContentsChoice,
+      packagesPerm: "none" as PackagesChoice,
+      expiryPreset: "30" as PatExpiryPreset,
       expiryDate: tomorrowDateValue(),
     },
     onSubmit: async ({ value }) => {
@@ -70,8 +92,7 @@ export function PatFgForm({ onCreated }: PatFgFormProps) @{
           repository_ids: value.repoAccess === "selected" ? value.selectedIds : undefined,
           contents: value.contents,
           packages: value.packagesPerm === "none" ? null : value.packagesPerm,
-          expires_at:
-            value.expiryMode === "date" && value.expiryDate ? expiryToIso(value.expiryDate) : null,
+          expires_at: resolveExpiresAt(value.expiryPreset, value.expiryDate),
         });
         if (!res.ok) {
           if (res.error.code === "auth.email_unverified") {
@@ -83,12 +104,12 @@ export function PatFgForm({ onCreated }: PatFgFormProps) @{
           } else {
             setFormError(res.error.message || NETWORK_ERROR);
           }
-          setPending(false);
           return;
         }
         onCreated(res.data.token);
       } catch {
         setFormError(NETWORK_ERROR);
+      } finally {
         setPending(false);
       }
     },
@@ -117,26 +138,19 @@ export function PatFgForm({ onCreated }: PatFgFormProps) @{
     };
   }, []);
 
-  function toggleRepo(id: string, checked: boolean) {
-    const current = form.getFieldValue("selectedIds");
-    if (checked) {
-      if (current.includes(id)) return;
-      form.setFieldValue("selectedIds", [...current, id]);
-    } else {
-      form.setFieldValue(
-        "selectedIds",
-        current.filter((x) => x !== id),
-      );
-    }
-  }
-
   const reposLoading = repos === null;
   const ownedRepos = repos ?? [];
+  const filterNeedle = repoFilter.trim().toLowerCase();
+  const filteredRepos =
+    filterNeedle.length === 0
+      ? ownedRepos
+      : ownedRepos.filter((r) => repoFullName(r).toLowerCase().includes(filterNeedle));
 
   <form
     method="post"
     action="#"
     className="mt-8 flex flex-col gap-6"
+    data-testid="pat-fg-form"
     onSubmit={(e) => {
       e.preventDefault();
       void form.handleSubmit();
@@ -158,203 +172,268 @@ export function PatFgForm({ onCreated }: PatFgFormProps) @{
           <p className="text-[14px] text-muted-foreground">
             What’s this token for? For example, laptop or CI.
           </p>
-          @if (noteError) {
-            <p role="alert" className="text-[14px] text-destructive">
-              {noteError as string}
-            </p>;
-          }
+          <p
+            role="alert"
+            className={noteError ? "text-[14px] text-destructive" : "hidden"}
+            data-testid="pat-fg-note-error"
+          >
+            {(noteError || "") as string}
+          </p>
         </div>
       )}
     </form.Field>
 
     <div className="flex flex-col gap-3">
       <p className="text-[14px] font-medium text-foreground">Repository access</p>
-      <RadioGroup
-        value={form.state.values.repoAccess}
-        disabled={pending}
-        onValueChange={(v) => {
-          if (v === "all" || v === "selected") form.setFieldValue("repoAccess", v);
-        }}
-        className="gap-3"
+      <form.Field name="repoAccess">
+        {(field) => (
+          <RadioGroup
+            value={field.state.value}
+            disabled={pending}
+            onValueChange={(v) => {
+              if (v === "all" || v === "selected") field.handleChange(v);
+            }}
+            className="gap-3"
+          >
+            <label className="flex cursor-pointer items-start gap-3">
+              <RadioGroupItem value="all" className="mt-0.5" data-testid="fg-repo-access-all" />
+              <span className="flex flex-col gap-1">
+                <span className="text-[14px] text-foreground">All repositories</span>
+                <span className="text-[14px] text-muted-foreground">
+                  Includes all current and future repositories you own.
+                </span>
+              </span>
+            </label>
+            <label className="flex cursor-pointer items-start gap-3">
+              <RadioGroupItem
+                value="selected"
+                className="mt-0.5"
+                data-testid="fg-repo-access-selected"
+              />
+              <span className="text-[14px] text-foreground">Only select repositories</span>
+            </label>
+          </RadioGroup>
+        )}
+      </form.Field>
+
+      {/* Visibility only here — selectedIds go through form.Field so repo
+          checkbox toggles do not re-enter this Subscribe. */}
+      <form.Subscribe selector={(s) => s.values.repoAccess}>
+        {(repoAccess) => (
+          <form.Field name="selectedIds">
+            {(field) => (
+              <PatFgRepoPicker
+                visible={repoAccess === "selected"}
+                pending={pending}
+                reposLoading={reposLoading}
+                reposError={reposError}
+                ownedRepos={ownedRepos}
+                filteredRepos={filteredRepos}
+                selectedIds={field.state.value}
+                repoFilter={repoFilter}
+                onRepoFilterChange={setRepoFilter}
+                onToggleRepo={(id, checked) => {
+                  const current = field.state.value;
+                  if (checked) {
+                    if (current.includes(id)) return;
+                    field.handleChange([...current, id]);
+                  } else {
+                    field.handleChange(current.filter((x) => x !== id));
+                  }
+                }}
+              />
+            )}
+          </form.Field>
+        )}
+      </form.Subscribe>
+
+      <p
+        role="alert"
+        className={repoError ? "text-[14px] text-destructive" : "hidden"}
+        data-testid="pat-fg-repo-error"
       >
-        <label className="flex cursor-pointer items-start gap-3">
-          <RadioGroupItem value="all" className="mt-0.5" />
-          <span className="flex flex-col gap-1">
-            <span className="text-[14px] text-foreground">All repositories</span>
-            <span className="text-[14px] text-muted-foreground">
-              Includes all current and future repositories you own.
-            </span>
-          </span>
-        </label>
-        <label className="flex cursor-pointer items-start gap-3">
-          <RadioGroupItem value="selected" className="mt-0.5" />
-          <span className="text-[14px] text-foreground">Only select repositories</span>
-        </label>
-      </RadioGroup>
-
-      @if (form.state.values.repoAccess === "selected") {
-        <div className="mt-1 flex max-h-64 flex-col gap-2 overflow-y-auto rounded-md border border-border bg-card p-3">
-          @if (reposLoading) {
-            <>
-              <Skeleton className="h-8 w-full" />
-              <Skeleton className="h-8 w-full" />
-              <Skeleton className="h-8 w-3/4" />
-            </>;
-          } @else {
-            @if (reposError) {
-              <p role="alert" className="text-[14px] text-destructive">
-                {reposError as string}
-              </p>;
-            } @else {
-              @if (ownedRepos.length === 0) {
-                <>
-                  <p className="text-[16px] text-muted-foreground">
-                    You don’t have any repositories yet.
-                  </p>
-                  <a
-                    href="/new"
-                    className="text-[14px] font-semibold text-primary no-underline hover:underline"
-                  >
-                    New repository
-                  </a>
-                </>;
-              } @else {
-                @for (const repo of ownedRepos; key repo.id) {
-                  <label className="flex min-w-0 cursor-pointer items-center gap-3">
-                    <Checkbox
-                      checked={form.state.values.selectedIds.includes(repo.id)}
-                      disabled={pending}
-                      aria-label={repoFullName(repo)}
-                      onCheckedChange={(checked) =>
-                        toggleRepo(repo.id, checked === true)
-                      }
-                    />
-                    <span
-                      className="min-w-0 flex-1 truncate text-[14px] text-foreground"
-                      title={repoFullName(repo) as string}
-                    >
-                      {repoFullName(repo) as string}
-                    </span>
-                    <Badge variant="outline">
-                      @if (
-                        repo.visibility === "private"
-                      ) {
-                        <>Private</>;
-                      } @else {
-                        <>Public</>;
-                      }
-                    </Badge>
-                  </label>;
-                }
-              }
-            }
-          }
-        </div>;
-      }
-
-      @if (repoError) {
-        <p role="alert" className="text-[14px] text-destructive">
-          {repoError as string}
-        </p>;
-      }
-    </div>
-
-    <div className="flex flex-col gap-3">
-      <p className="text-[14px] font-medium text-foreground">Contents permission</p>
-      <RadioGroup
-        value={form.state.values.contents}
-        disabled={pending}
-        onValueChange={(v) => {
-          if (v === "read" || v === "write") form.setFieldValue("contents", v);
-        }}
-        className="gap-3"
-      >
-        <label className="flex cursor-pointer items-center gap-3">
-          <RadioGroupItem value="read" />
-          <span className="text-[14px] text-foreground">Read-only</span>
-        </label>
-        <label className="flex cursor-pointer items-center gap-3">
-          <RadioGroupItem value="write" />
-          <span className="text-[14px] text-foreground">Read and write</span>
-        </label>
-      </RadioGroup>
-      <p className="text-[14px] text-muted-foreground">
-        Read-only allows clone and fetch. Read and write also allows push.
-      </p>
-    </div>
-
-    <div className="flex flex-col gap-3" data-testid="fg-packages-perm">
-      <p className="text-[14px] font-medium text-foreground">Packages permission</p>
-      <RadioGroup
-        value={form.state.values.packagesPerm}
-        disabled={pending}
-        onValueChange={(v) => {
-          if (v === "none" || v === "read" || v === "write") {
-            form.setFieldValue("packagesPerm", v);
-          }
-        }}
-        className="gap-3"
-      >
-        <label className="flex cursor-pointer items-center gap-3">
-          <RadioGroupItem value="none" />
-          <span className="text-[14px] text-foreground">No package access</span>
-        </label>
-        <label className="flex cursor-pointer items-center gap-3">
-          <RadioGroupItem value="read" />
-          <span className="text-[14px] text-foreground">Packages read</span>
-        </label>
-        <label className="flex cursor-pointer items-center gap-3">
-          <RadioGroupItem value="write" />
-          <span className="text-[14px] text-foreground">Packages write</span>
-        </label>
-      </RadioGroup>
-      <p className="text-[14px] text-muted-foreground">
-        Repo scope alone does not grant package registry access.
+        {(repoError || "") as string}
       </p>
     </div>
 
     <div className="flex flex-col gap-3">
-      <p className="text-[14px] font-medium text-foreground">Expiration</p>
-      <RadioGroup
-        value={form.state.values.expiryMode}
-        disabled={pending}
-        onValueChange={(v) => {
-          if (v === "none" || v === "date") form.setFieldValue("expiryMode", v);
-        }}
-        className="gap-3"
-      >
-        <label className="flex cursor-pointer items-center gap-3">
-          <RadioGroupItem value="none" />
-          <span className="text-[14px] text-foreground">No expiration</span>
-        </label>
-        <label className="flex cursor-pointer items-center gap-3">
-          <RadioGroupItem value="date" />
-          <span className="text-[14px] text-foreground">Expires on</span>
-        </label>
-      </RadioGroup>
-      @if (form.state.values.expiryMode === "date") {
-        <form.Field name="expiryDate">
-          {(field) => (
-            <Input
-              type="date"
+      <p className="text-[14px] font-medium text-foreground">Repository permissions</p>
+      <form.Field name="contents">
+        {(field) => (
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-col gap-0.5">
+              <span className="text-[14px] text-foreground">Contents</span>
+              <span className="text-[13px] text-muted-foreground">
+                Repository code via git. Read-only allows clone and fetch; write also allows push.
+              </span>
+            </div>
+            <SelectRoot
               value={field.state.value}
-              min={tomorrowDateValue() as string}
-              aria-label="Expiration date"
+              onValueChange={(next) => {
+                if (next === "read" || next === "write") field.handleChange(next);
+              }}
+            >
+              <SelectTrigger
+                className="w-full max-w-[12rem]"
+                aria-label="Contents permission"
+                disabled={pending}
+                data-testid="fg-contents-perm"
+              >
+                <SelectValue>{contentsLabel(field.state.value) as string}</SelectValue>
+                <SelectIcon>
+                  <ChevronDown aria-hidden size={16} />
+                </SelectIcon>
+              </SelectTrigger>
+              {/* octane-dom-race-ok: Base UI SelectPortal has no keepMounted escape
+                  hatch; popup is anchor-scoped under the Select root. */}
+              <SelectPortal>
+                <SelectPositioner sideOffset={4}>
+                  <SelectPopup>
+                    <SelectList>
+                      <SelectItem value="read" data-testid="fg-contents-option-read">
+                        <SelectItemIndicator>
+                          <Check aria-hidden size={16} className="text-primary" />
+                        </SelectItemIndicator>
+                        <SelectItemText>Read-only</SelectItemText>
+                      </SelectItem>
+                      <SelectItem value="write" data-testid="fg-contents-option-write">
+                        <SelectItemIndicator>
+                          <Check aria-hidden size={16} className="text-primary" />
+                        </SelectItemIndicator>
+                        <SelectItemText>Read and write</SelectItemText>
+                      </SelectItem>
+                    </SelectList>
+                  </SelectPopup>
+                </SelectPositioner>
+              </SelectPortal>
+            </SelectRoot>
+          </div>
+        )}
+      </form.Field>
+
+      <form.Field name="packagesPerm">
+        {(field) => (
+          <div
+            className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"
+            data-testid="fg-packages-perm"
+          >
+            <div className="flex flex-col gap-0.5">
+              <span className="text-[14px] text-foreground">Packages</span>
+              <span className="text-[13px] text-muted-foreground">
+                Package registry access. Contents alone does not grant package access.
+              </span>
+            </div>
+            <SelectRoot
+              value={field.state.value}
+              onValueChange={(next) => {
+                if (next === "none" || next === "read" || next === "write") {
+                  field.handleChange(next);
+                }
+              }}
+            >
+              <SelectTrigger
+                className="w-full max-w-[12rem]"
+                aria-label="Packages permission"
+                disabled={pending}
+                data-testid="fg-packages-perm-select"
+              >
+                <SelectValue>{packagesLabel(field.state.value) as string}</SelectValue>
+                <SelectIcon>
+                  <ChevronDown aria-hidden size={16} />
+                </SelectIcon>
+              </SelectTrigger>
+              {/* octane-dom-race-ok: Base UI SelectPortal has no keepMounted escape
+                  hatch; popup is anchor-scoped under the Select root. */}
+              <SelectPortal>
+                <SelectPositioner sideOffset={4}>
+                  <SelectPopup>
+                    <SelectList>
+                      <SelectItem value="none" data-testid="fg-packages-option-none">
+                        <SelectItemIndicator>
+                          <Check aria-hidden size={16} className="text-primary" />
+                        </SelectItemIndicator>
+                        <SelectItemText>No access</SelectItemText>
+                      </SelectItem>
+                      <SelectItem value="read" data-testid="fg-packages-option-read">
+                        <SelectItemIndicator>
+                          <Check aria-hidden size={16} className="text-primary" />
+                        </SelectItemIndicator>
+                        <SelectItemText>Read-only</SelectItemText>
+                      </SelectItem>
+                      <SelectItem value="write" data-testid="fg-packages-option-write">
+                        <SelectItemIndicator>
+                          <Check aria-hidden size={16} className="text-primary" />
+                        </SelectItemIndicator>
+                        <SelectItemText>Read and write</SelectItemText>
+                      </SelectItem>
+                    </SelectList>
+                  </SelectPopup>
+                </SelectPositioner>
+              </SelectPortal>
+            </SelectRoot>
+          </div>
+        )}
+      </form.Field>
+    </div>
+
+    <form.Field name="expiryPreset">
+      {(presetField) => (
+        <form.Field name="expiryDate">
+          {(dateField) => (
+            <PatExpiryField
+              preset={presetField.state.value}
+              customDate={dateField.state.value}
               disabled={pending}
-              className="max-w-xs"
-              onBlur={field.handleBlur}
-              onInput={(e) => field.handleChange((e.currentTarget as HTMLInputElement).value)}
+              onPresetChange={(p) => presetField.handleChange(p)}
+              onCustomDateChange={(d) => dateField.handleChange(d)}
+              noneHint="This token will never expire. GitHub fine-grained tokens require an expiration; Oxidean still allows none for self-host flexibility."
             />
           )}
-        </form.Field>;
-      }
-    </div>
+        </form.Field>
+      )}
+    </form.Field>
 
-    @if (formError) {
-      <p role="alert" className="text-[16px] text-destructive">
-        {formError as string}
-      </p>;
-    }
+    <form.Subscribe
+      selector={(s) => ({
+        repoAccess: s.values.repoAccess,
+        selectedCount: s.values.selectedIds.length,
+        contents: s.values.contents,
+        packagesPerm: s.values.packagesPerm,
+        expiryPreset: s.values.expiryPreset,
+      })}
+    >
+      {(v) => {
+        const repoText =
+          v.repoAccess === "all"
+            ? "all repositories"
+            : `${v.selectedCount} selected ${v.selectedCount === 1 ? "repository" : "repositories"}`;
+        const pkgText =
+          v.packagesPerm === "none"
+            ? "no package access"
+            : `packages ${packagesLabel(v.packagesPerm).toLowerCase()}`;
+        const expText =
+          v.expiryPreset === "none"
+            ? "no expiration"
+            : v.expiryPreset === "custom"
+              ? "a custom expiration date"
+              : `expiration in ${v.expiryPreset} days`;
+        return (
+          <p className="text-[14px] text-muted-foreground" data-testid="pat-fg-summary">
+            {
+              `This token will access ${repoText}, with contents ${contentsLabel(v.contents).toLowerCase()}, ${pkgText}, and ${expText}.` as string
+            }
+          </p>
+        );
+      }}
+    </form.Subscribe>
+
+    <p
+      role="alert"
+      className={formError ? "text-[16px] text-destructive" : "hidden"}
+      data-testid="pat-fg-form-error"
+    >
+      {(formError || "") as string}
+    </p>
 
     <Button type="submit" className="h-11 w-fit" disabled={pending}>
       {(pending ? "Generating…" : "Generate token") as string}

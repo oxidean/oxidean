@@ -30,14 +30,15 @@ Integration-style Rust tests live under `crates/oxidean-api/tests/` and `crates/
 
 ### Vitest projects (`apps/web`)
 
-`apps/web/vitest.config.ts` defines projects. Default `bun run test` / `vitest run` always includes **unit** and **integration**. Projects **e2e-stack** and **e2e-stack-browser** are included only when `E2E_STACK=1` (used by `make test-e2e-stack`).
+`apps/web/vitest.config.ts` defines projects. Default `bun run test` runs **unit** and **integration** only (`--project` flags). **browser** is a separate Chromium component tier (`bun run test:browser` / `make test-web-browser`). Projects **e2e-stack** and **e2e-stack-browser** are included only when `E2E_STACK=1` (used by `make test-e2e-stack`).
 
 | Project | Environment | Include pattern | Notes |
 |---------|-------------|-----------------|-------|
 | `unit` | `node` | `src/**/*.unit.test.ts` | Fast pure logic |
-| `integration` | `happy-dom` | `src/**/*.integration.test.{ts,tsx}` | Setup: `src/test/setup-integration.ts` (global `trackDomErrors` — every test fails on Octane `insertBefore` / hierarchy races **when happy-dom surfaces them**). **Not sufficient** for Base UI Indicator mount + Octane Chromium races; those need stack-browser `pageerror`. For high-risk clicks you may still wrap with a local tracker for a clearer label. |
+| `integration` | `happy-dom` | `src/**/*.integration.test.{ts,tsx}` | Setup: `src/test/setup-integration.ts` (global `trackDomErrors` — every test fails on Octane `insertBefore` / hierarchy races **when happy-dom surfaces them**). **Not sufficient** for Base UI Indicator mount + Octane Chromium races. |
+| `browser` | Playwright Chromium | `src/**/*.browser.test.{ts,tsx}` | Real DOM component tests (mocked RPC). Setup: `src/test/setup-browser.ts`. Run via `make test-web-browser` / CI `web-browser` job. Prefer this for PAT mint / checkbox / radio Subscribe races. |
 | `e2e-stack` | `node` | `e2e/stack/**/*.stack.test.ts` | Only if `E2E_STACK=1`; 60s timeout; no file parallelism |
-| `e2e-stack-browser` | Playwright Chromium | `e2e/stack-browser/**/*.stack.browser.test.{ts,tsx}` | Only if `E2E_STACK=1`; commands open pages via `newGuardedPage` (fails on `pageerror` / DOM races). **Gate** for Base UI + Octane hierarchy races that happy-dom misses (e.g. mirror auth SSH click). |
+| `e2e-stack-browser` | Playwright Chromium | `e2e/stack-browser/**/*.stack.browser.test.{ts,tsx}` | Only if `E2E_STACK=1`; commands open pages via `newGuardedPage` + `assertNoOctaneOverlay` (fails on `pageerror` / DOM races / Octane overlay). Includes `expectPatMintClickThroughFlow`. |
 
 ### `@oxidean/api-client`
 
@@ -63,7 +64,9 @@ bun run test                                    # turbo: all packages with a tes
 bun run --filter @oxidean/web test             # web: unit + integration
 bun run --filter @oxidean/web test:unit
 bun run --filter @oxidean/web test:integration
+bun run --filter @oxidean/web test:browser     # Chromium component DOM-race tier
 bun run --filter @oxidean/api-client test
+make test-web-browser                          # same as test:browser
 ```
 
 From `apps/web`:
@@ -72,6 +75,7 @@ From `apps/web`:
 bun run test
 bun run test:unit
 bun run test:integration
+bun run test:browser
 ```
 
 ### Full stack e2e (`make test-e2e-stack`)

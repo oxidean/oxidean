@@ -43,7 +43,7 @@ Full skill: [`.agents/skills/octane/SKILL.md`](../.agents/skills/octane/SKILL.md
 - Server/session data: TanStack Query (`apps/web/src/lib/session-queries.ts`). Forms: `@octanejs/tanstack-form`. File uploads: `@octanejs/dropzone` / `FileDropzone`.
 - Text fields: native `onInput` (or `field.handleChange`). Anonymous auth pages: SSR loaders, no decorative form skeletons.
 - Preserve chrome / brand patterns; do not introduce a second design system.
-- **DOM races:** do not `@if`/`@else`-swap large sibling trees next to Base UI `RadioGroup` / Select (causes `insertBefore` / “Something went wrong!”). Keep both panels mounted and toggle with `hidden`, or isolate the swap in a child component. Wrap multi-root `@if` bodies in `<>…</>`. Happy-dom integration and stack-browser e2e fail automatically on these races (`setup-integration.ts`, `newGuardedPage`).
+- **DOM races:** do not `@if`/`@else`-swap large sibling trees next to Base UI `RadioGroup` / Select, and do not nest `@if`/`@for` inside `form.Subscribe` bodies that re-render on checkbox/radio clicks (causes `insertBefore` / “Something went wrong!”). Keep both panels mounted and toggle with `hidden`, use per-field `form.Field`, or isolate the swap in a child component. Wrap multi-root `@if` bodies in `<>…</>`. Prefer `keepMounted` on Checkbox/Radio Indicators (shipped in `components/ui`). Happy-dom integration, Vitest browser (`*.browser.test.tsx`), and stack-browser e2e fail automatically on these races (`setup-integration.ts`, `setup-browser.ts`, `newGuardedPage` / `assertNoOctaneOverlay`).
 
 ## RPC & API
 

@@ -79,6 +79,23 @@ jobs:
       - name: web build
         run: bunx turbo run build --filter=@oxidean/web
 
+  # Chromium component tests for Octane insertBefore races (happy-dom cannot catch).
+  web-browser:
+    name: web-browser
+    needs: [makefile-lint]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.0"
+      - name: bun install
+        run: bun install --frozen-lockfile
+      - name: Playwright Chromium
+        run: bunx playwright install --with-deps chromium
+      - name: vitest browser (PAT mint DOM races)
+        run: make test-web-browser
+
   # G-11.1-15 — every user-facing apps/web route page must declare happy-dom,
   # stack-browser, or documented skip evidence in the route coverage manifest.
   route-coverage:

@@ -14,7 +14,7 @@
 .PHONY: db-migrate db-switch-dialect db-matrix
 .PHONY: coverage-web coverage-rust coverage-weighted coverage-contract
 .PHONY: route-coverage-check
-.PHONY: web-lint web-format-check
+.PHONY: web-lint web-format-check test-web-browser
 
 COMPOSE ?= docker compose
 COMPOSE_FILE ?= docker-compose.yml
@@ -46,6 +46,7 @@ help:
 	@echo "  make coverage-contract - aggregator contract self-test"
 	@echo "  make route-coverage-check - G-11.1-15 every .tsrx page has happy-dom/browser/skip"
 	@echo "  make web-lint       - oxlint type-aware + octane DOM-race heuristic + deny-warnings"
+	@echo "  make test-web-browser - Vitest browser (Chromium) component DOM-race tests"
 	@echo "  make web-format-check - oxfmt --check (@tsrx/oxc)"
 	@echo "  make smoke-actions  - Actions/runner Compose smoke (ACT-04/05; skip-ok without Docker)"
 	@echo "  make smoke          - compose bring-up smoke (PLAT-01)"
@@ -298,6 +299,9 @@ web-lint:
 
 web-format-check:
 	bun run --filter @oxidean/web format:check
+
+test-web-browser:
+	bun run --filter @oxidean/web test:browser
 
 coverage-weighted: coverage-web
 	@mkdir -p var/coverage

@@ -20,8 +20,9 @@ export function Checkbox({
     {...props}
   >
     <CheckboxPrimitive.Indicator
+      keepMounted
       data-slot="checkbox-indicator"
-      className="grid place-content-center text-current"
+      className="grid place-content-center text-current data-[unchecked]:hidden"
     >
       <Check aria-hidden size={14} />
     </CheckboxPrimitive.Indicator>

@@ -336,7 +336,7 @@ function tokensNewPage(mod: Record<string, unknown>): unknown {
 }
 
 describe("/settings/tokens/new (GIT-11 / D-05 classic create)", () => {
-  it("title New classic token + Note + Full control checkbox + No expiration + Generate token", async () => {
+  it("title New classic token + Note + Full control checkbox + Expiration preset + Generate token", async () => {
     const mod = await loadTokensNewModule();
     const { container } = renderWithQueryClient(tokensNewPage(mod));
 
@@ -344,8 +344,12 @@ describe("/settings/tokens/new (GIT-11 / D-05 classic create)", () => {
       expect(container.querySelector("h1")?.textContent).toBe("New classic token");
     });
     expect(screen.getByLabelText(/^Note$/i)).toBeInTheDocument();
-    expect(screen.getByText("Full control of private repositories")).toBeInTheDocument();
-    expect(screen.getByText("No expiration")).toBeInTheDocument();
+    expect(screen.getByTestId("scope-repo")).toBeInTheDocument();
+    expect(
+      screen.getByRole("checkbox", { name: /Full control of private repositories/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("pat-expiry-preset")).toBeInTheDocument();
+    expect(screen.getByText("Expiration")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Generate token" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Personal access tokens/i })).toHaveAttribute(
       "href",
@@ -474,7 +478,7 @@ function tokensNewFgPage(mod: Record<string, unknown>): unknown {
 }
 
 describe("/settings/tokens/new/fine-grained (GIT-11 / D-05 / D-06 FG create)", () => {
-  it("title New fine-grained token + All repositories / Only select repositories + Contents Read-only / Read and write", async () => {
+  it("title New fine-grained token + All repositories / Only select repositories + Contents/Packages selects", async () => {
     const mod = await loadTokensNewFgModule();
     const { container } = renderWithQueryClient(tokensNewFgPage(mod));
 
@@ -484,10 +488,11 @@ describe("/settings/tokens/new/fine-grained (GIT-11 / D-05 / D-06 FG create)", (
     expect(screen.getByLabelText(/^Note$/i)).toBeInTheDocument();
     expect(screen.getByText("All repositories")).toBeInTheDocument();
     expect(screen.getByText("Only select repositories")).toBeInTheDocument();
-    expect(screen.getByText("Contents permission")).toBeInTheDocument();
-    expect(screen.getByText("Read-only")).toBeInTheDocument();
-    expect(screen.getByText("Read and write")).toBeInTheDocument();
-    expect(screen.getByText("No expiration")).toBeInTheDocument();
+    expect(screen.getByText("Repository permissions")).toBeInTheDocument();
+    expect(screen.getByTestId("fg-contents-perm")).toBeInTheDocument();
+    expect(screen.getByTestId("fg-packages-perm-select")).toBeInTheDocument();
+    expect(screen.getByLabelText("Contents permission")).toHaveTextContent("Read-only");
+    expect(screen.getByTestId("pat-expiry-preset")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Generate token" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Personal access tokens/i })).toHaveAttribute(
       "href",
@@ -583,8 +588,7 @@ describe("/settings/tokens/new/fine-grained (GIT-11 / D-15 FG reveal)", () => {
     fireEvent.input(screen.getByLabelText(/^Note$/i), {
       target: { value: "ci" },
     });
-    fireEvent.click(screen.getByText("All repositories"));
-    fireEvent.click(screen.getByText("Read and write"));
+    fireEvent.click(screen.getByTestId("fg-repo-access-all"));
     fireEvent.click(screen.getByRole("button", { name: "Generate token" }));
 
     await waitFor(() => {
@@ -594,7 +598,7 @@ describe("/settings/tokens/new/fine-grained (GIT-11 / D-15 FG reveal)", () => {
       expect.objectContaining({
         name: "ci",
         repo_access: "all",
-        contents: "write",
+        contents: "read",
       }),
     );
 

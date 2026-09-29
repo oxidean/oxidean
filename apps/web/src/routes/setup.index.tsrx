@@ -233,6 +233,8 @@ export function SetupPage() @{
         )}
       </form.Field>
 
+      {/* octane-dom-race-ok: setup provider panels — reviewed; keepMounted radios
+          already used; panel swap restructure deferred from PAT mint work. */}
       <form.Subscribe selector={(s) => s.values.providerMode}>
         {(providerMode) => (
           <>

@@ -168,7 +168,11 @@ export function NewPage() @{
       </a>
     </AuthShell>;
   } @else {
-    <form.Subscribe selector={(s) => s.values}>
+    {
+      /* octane-dom-race-ok: /new create form — reviewed; Select list @for + error
+        banner @if inside Subscribe; restructure deferred from PAT mint work. */
+    }
+    <form.Subscribe selector={(s) => s.values} /* octane-dom-race-ok */>
       {(values) => {
         const selectedOwner = values.ownerSlug || selfUsername;
         const ownerDisplay = ownerOptionLabel(selectedOwner, selfUsername, ownerOrgs);

@@ -21,6 +21,7 @@ import {
   expectMirrorAuthToggleFlow,
   expectNewRepoTemplatePickerFlow,
   expectPackagesVisualFlow,
+  expectPatMintClickThroughFlow,
   expectSettingsProfileAvatarFlow,
   expectStatusHealthy,
   expectWorkosCta,
@@ -61,12 +62,10 @@ const stackEnvDefine = {
 
 /**
  * Vitest projects:
- * - unit / integration: always on in `bun run test`
- * - e2e-stack (+ browser): only when E2E_STACK=1 (`make test-e2e-stack`)
- *
- * Component coverage uses happy-dom integration tests (e.g. auth-shell). The
- * former e2e-component Playwright project was removed — a single browser-suite
- * file hit Vitest `initSuite` / `config` undefined failures on GitHub runners.
+ * - unit / integration: default `bun run test` (explicit --project flags)
+ * - browser: Chromium component tests (`bun run test:browser`) — real DOM for
+ *   Octane insertBefore races that happy-dom misses (issues #41–#43)
+ * - e2e-stack (+ e2e-stack-browser): only when E2E_STACK=1 (`make test-e2e-stack`)
  */
 export default defineConfig({
   plugins: [fixTypeOnlyImports(RECHARTS_TYPE_ONLY_IMPORT_FIX), octane()],
@@ -74,6 +73,11 @@ export default defineConfig({
     alias: {
       "@": path.resolve(rootDir, "./src"),
     },
+  },
+  // Pre-bundle deps Vite discovers mid-suite via `cn` so Chromium iframes are
+  // not aborted by an optimizeDeps reload (CI flake for the browser project).
+  optimizeDeps: {
+    include: ["class-variance-authority", "clsx", "tailwind-merge"],
   },
   test: {
     globals: false,
@@ -119,6 +123,22 @@ export default defineConfig({
           setupFiles: ["./src/test/setup-integration.ts"],
           // happy-dom + dynamic route imports contend under parallel workers (timeouts / DOM bleed).
           fileParallelism: false,
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: "browser",
+          include: ["src/**/*.browser.test.{ts,tsx}"],
+          setupFiles: ["./src/test/setup-browser.ts"],
+          fileParallelism: false,
+          testTimeout: 30_000,
+          browser: {
+            enabled: true,
+            provider: playwright(),
+            headless: true,
+            instances: [{ browser: "chromium" as const }],
+          },
         },
       },
       ...(stackEnabled
@@ -169,6 +189,7 @@ export default defineConfig({
                     expectPackagesVisualFlow,
                     expectBranchDialogsFlow,
                     expectActionsPipelineFlow,
+                    expectPatMintClickThroughFlow,
                   },
                 },
               },

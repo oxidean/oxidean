@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { BrowserCommand } from "vitest/node";
 import { adminLogin, restoreLocalAuth, rpc, updateAuthSettings } from "../stack/client.ts";
 import { apiOrigin, e2eDbPath, webOrigin } from "../stack/env.ts";
-import { newGuardedPage } from "./dom-race-guard.ts";
+import { assertNoOctaneOverlay, newGuardedPage } from "./dom-race-guard.ts";
 import { assertVisualBaseline, relativeTimeMasks } from "./visual.ts";
 
 type AuthPatch = {
@@ -132,20 +132,6 @@ function asPlaywright(ctx: unknown): PlaywrightCommandCtx {
     throw new Error(`requires playwright provider, got ${c.provider.name}`);
   }
   return c;
-}
-
-/**
- * Fail fast on Vite overlay, runtime ReferenceErrors, or Octane's default
- * error UI (`<strong style="font-size:1rem">Something went wrong!</strong>`).
- */
-function assertNoOctaneOverlay(html: string, label: string) {
-  if (
-    html.includes("vite-error-overlay") ||
-    html.includes("Something went wrong!") ||
-    /is not defined|ReferenceError|Octane error|@else if/i.test(html)
-  ) {
-    throw new Error(`${label} showed Vite/Octane render error. body=${html.slice(0, 1200)}`);
-  }
 }
 
 function envVar(key: string): string | undefined {
@@ -1414,6 +1400,91 @@ export const expectSettingsProfileAvatarFlow: BrowserCommand<[]> = async (ctx) =
     return true;
   } finally {
     await pageGuard.close("stack-browser");
+  }
+};
+
+/**
+ * Click through classic + fine-grained PAT mint controls without Octane
+ * insertBefore / error overlay (issues #41–#43).
+ *
+ * Base UI Select option picks are flaky in stack-browser Chromium (portal
+ * visibility / pointer selection). Open/close triggers only here; option
+ * selection + custom/none expiry are covered by unit helpers and the Vitest
+ * browser suite.
+ */
+export const expectPatMintClickThroughFlow: BrowserCommand<[]> = async (ctx) => {
+  const { context } = asPlaywright(ctx);
+  await context.clearCookies();
+  const seed = await ensureForgeAdminSession();
+  await injectSessionCookie(context, seed.cookie);
+
+  const pageGuard = await newGuardedPage(context);
+  const page = pageGuard.page;
+  try {
+    await page.goto(`${webOrigin()}/settings/tokens/new`, {
+      waitUntil: "domcontentloaded",
+      timeout: 60_000,
+    });
+    await page.getByTestId("pat-classic-form").waitFor({ state: "visible", timeout: 30_000 });
+    assertNoOctaneOverlay(await page.content(), "pat classic initial");
+
+    // Checkbox toggles are the insertBefore crash class (Base UI Indicator + form).
+    await page.locator('[data-testid="scope-repo"]').click();
+    await page.locator('[data-testid="scope-package-read"]').click();
+    await page.locator('[data-testid="scope-package-write"]').click();
+    await page.locator('[data-testid="scope-repo"]').click();
+    pageGuard.assertNoPageErrors("pat classic after scope toggles");
+    assertNoOctaneOverlay(await page.content(), "pat classic after scope toggles");
+
+    // Expiry Select is present; opening it must not overlay. Option picks are
+    // covered by unit helpers — Base UI Select portals are already race-annotated.
+    await page.locator('[data-testid="pat-expiry-preset"]').click();
+    await page.locator('[data-testid="pat-expiry-preset"]').click();
+    pageGuard.assertNoPageErrors("pat classic after expiry trigger");
+    assertNoOctaneOverlay(await page.content(), "pat classic after expiry trigger");
+
+    await page.goto(`${webOrigin()}/settings/tokens/new/fine-grained`, {
+      waitUntil: "domcontentloaded",
+      timeout: 60_000,
+    });
+    await page.getByTestId("pat-fg-form").waitFor({ state: "visible", timeout: 30_000 });
+    assertNoOctaneOverlay(await page.content(), "pat fg initial");
+
+    await page.locator('[data-testid="fg-repo-access-all"]').click();
+    await page.locator('[data-testid="fg-repo-access-selected"]').click();
+    await page.getByTestId("fg-repo-picker").waitFor({ state: "visible", timeout: 15_000 });
+    pageGuard.assertNoPageErrors("pat fg after repo access toggle");
+    assertNoOctaneOverlay(await page.content(), "pat fg after repo access toggle");
+
+    const repoFilter = page.locator('[data-testid="fg-repo-filter"]');
+    await repoFilter.waitFor({ state: "visible", timeout: 10_000 });
+    await repoFilter.fill("zzz-no-match");
+    await repoFilter.fill("");
+
+    // Repo checkboxes use `fg-repo-item-${id}` (not fg-repo-access-* / filter).
+    const repoBoxes = page.locator('[data-testid^="fg-repo-item-"]');
+    const repoCount = (await repoBoxes.count?.()) ?? 0;
+    if (repoCount > 0) {
+      await repoBoxes.first?.().click();
+      pageGuard.assertNoPageErrors("pat fg after repo checkbox");
+      assertNoOctaneOverlay(await page.content(), "pat fg after repo checkbox");
+    }
+
+    await page.locator('[data-testid="fg-contents-perm"]').click();
+    await page.locator('[data-testid="fg-contents-perm"]').click();
+    await page.locator('[data-testid="fg-packages-perm-select"]').click();
+    await page.locator('[data-testid="fg-packages-perm-select"]').click();
+    pageGuard.assertNoPageErrors("pat fg after permission triggers");
+    assertNoOctaneOverlay(await page.content(), "pat fg after permission triggers");
+
+    await page.locator('[data-testid="pat-expiry-preset"]').click();
+    await page.locator('[data-testid="pat-expiry-preset"]').click();
+    pageGuard.assertNoPageErrors("pat fg after expiry trigger");
+    assertNoOctaneOverlay(await page.content(), "pat fg after expiry trigger");
+
+    return true;
+  } finally {
+    await pageGuard.close("pat-mint-click-through");
   }
 };
 

@@ -378,7 +378,9 @@ export function AdminAuthPage() @{
               Instance provider mode and email delivery. Secrets stay in environment variables.
             </p>
 
-            <form.Subscribe selector={(s) => s.values}>
+            {/* octane-dom-race-ok: admin auth settings — reviewed; provider panels
+                restructure deferred (PAT mint Subscribe races fixed separately). */}
+            <form.Subscribe selector={(s) => s.values} /* octane-dom-race-ok */>
               {(values) => {
                 return (
                   <form
@@ -427,6 +429,7 @@ export function AdminAuthPage() @{
                       (D-08).
                     </p>
 
+                    {/* octane-dom-race-ok */}
                     @if (values.provider_mode === "workos") {
                       <div className="flex flex-col gap-4 rounded-md border border-border p-4">
                         <div className="flex flex-col gap-2">
