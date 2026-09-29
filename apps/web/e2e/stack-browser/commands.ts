@@ -54,6 +54,12 @@ type PlaywrightPage = {
   };
   getByTestId: (id: string) => {
     waitFor: (opts?: object) => Promise<unknown>;
+    click?: (opts?: object) => Promise<unknown>;
+    hover?: (opts?: object) => Promise<unknown>;
+    focus?: () => Promise<unknown>;
+    press?: (key: string) => Promise<unknown>;
+    scrollIntoViewIfNeeded?: () => Promise<unknown>;
+    getAttribute?: (name: string) => Promise<string | null>;
     locator: (sel: string) => {
       waitFor: (opts?: object) => Promise<unknown>;
       click: (opts?: object) => Promise<unknown>;
@@ -76,6 +82,11 @@ type PlaywrightPage = {
     fill: (v: string) => Promise<unknown>;
     click: (opts?: object) => Promise<unknown>;
     press: (key: string) => Promise<unknown>;
+    focus?: () => Promise<unknown>;
+    hover?: (opts?: object) => Promise<unknown>;
+    scrollIntoViewIfNeeded?: () => Promise<unknown>;
+    boundingBox?: () => Promise<{ x: number; y: number; width: number; height: number } | null>;
+    dispatchEvent?: (type: string, eventInit?: object) => Promise<unknown>;
     innerText?: () => Promise<string>;
     isVisible?: () => Promise<boolean>;
     getAttribute?: (name: string) => Promise<string | null>;
@@ -100,6 +111,15 @@ type PlaywrightPage = {
           }>,
     ) => Promise<unknown>;
   };
+  keyboard?: {
+    press: (key: string) => Promise<unknown>;
+  };
+  mouse?: {
+    move?: (x: number, y: number, opts?: object) => Promise<unknown>;
+    down: (opts?: object) => Promise<unknown>;
+    up: (opts?: object) => Promise<unknown>;
+  };
+  evaluate?: <R, A = unknown>(fn: (arg: A) => R | Promise<R>, arg?: A) => Promise<R>;
   waitForURL: (url: string | RegExp | ((url: URL) => boolean), opts?: object) => Promise<unknown>;
   content: () => Promise<string>;
   url: () => string;
@@ -1404,13 +1424,105 @@ export const expectSettingsProfileAvatarFlow: BrowserCommand<[]> = async (ctx) =
 };
 
 /**
+ * Open a Base UI Select and commit an option (stack-browser).
+ *
+ * Base UI Select's pressable trigger does not stay open under Playwright's
+ * synthetic `locator.click()` / `HTMLElement.click()` against the SSR page —
+ * `aria-expanded` stays false and the portal never mounts. Real pointer
+ * press (hover + mouse.down/up) opens it; options then attach in the DOM.
+ *
+ * Commit via in-page pointerdown+click (allowMouseSelectionRef), not Playwright
+ * option locators (visibility/inert backdrop flakiness). Never re-click the
+ * trigger to "retry" — that toggles the popup closed.
+ */
+async function pickSelectOptionByTestId(
+  page: PlaywrightPage,
+  triggerTestId: string,
+  optionTestId: string,
+): Promise<void> {
+  if (!page.mouse?.down || !page.mouse?.up) {
+    throw new Error("pickSelectOptionByTestId requires page.mouse down/up");
+  }
+  if (!page.evaluate) {
+    throw new Error("pickSelectOptionByTestId requires page.evaluate");
+  }
+
+  // Prefer getByTestId (same path as the working standalone probe).
+  const trigger = page.getByTestId(triggerTestId);
+  const option = page.locator(`[data-testid="${optionTestId}"]`);
+
+  const closeIfOpen = async () => {
+    if ((await trigger.getAttribute?.("aria-expanded")) === "true") {
+      if (page.keyboard?.press) {
+        await page.keyboard.press("Escape");
+      } else if (trigger.press) {
+        await trigger.press("Escape");
+      }
+      await new Promise((r) => setTimeout(r, 50));
+    }
+  };
+
+  const pressOpen = async () => {
+    if (trigger.scrollIntoViewIfNeeded) {
+      await trigger.scrollIntoViewIfNeeded();
+    }
+    // Real pointer press — locator.click() / element.click() leave
+    // aria-expanded=false on the SSR page for Base UI Select.
+    if (typeof trigger.hover === "function") {
+      await trigger.hover();
+    } else if (trigger.focus) {
+      await trigger.focus();
+    }
+    await page.mouse.down();
+    await page.mouse.up();
+  };
+
+  // Retry: pressable Select handlers may not be ready immediately after SSR paint
+  // (same settle+retry pattern as branch dialog / mirror radios).
+  let opened = false;
+  for (let attempt = 0; attempt < 8; attempt++) {
+    await closeIfOpen();
+    if (attempt === 0) {
+      await new Promise((r) => setTimeout(r, 400));
+    }
+    await pressOpen();
+    try {
+      await option.waitFor({ state: "attached", timeout: 800 });
+      opened = true;
+      break;
+    } catch {
+      // try again
+    }
+  }
+  if (!opened) {
+    const expanded = await trigger.getAttribute?.("aria-expanded");
+    throw new Error(
+      `pickSelectOptionByTestId: option [data-testid="${optionTestId}"] never attached after mouse press on ${triggerTestId} (aria-expanded=${expanded})`,
+    );
+  }
+
+  await page.evaluate((id) => {
+    const el = document.querySelector(`[data-testid="${id}"]`);
+    if (!el) {
+      throw new Error(`option [data-testid="${id}"] missing at commit`);
+    }
+    el.dispatchEvent(
+      new PointerEvent("pointerdown", {
+        bubbles: true,
+        cancelable: true,
+        pointerType: "mouse",
+      }),
+    );
+    (el as HTMLElement).click();
+  }, optionTestId);
+}
+
+/**
  * Click through classic + fine-grained PAT mint controls without Octane
  * insertBefore / error overlay (issues #41–#43).
  *
- * Base UI Select option picks are flaky in stack-browser Chromium (portal
- * visibility / pointer selection). Open/close triggers only here; option
- * selection + custom/none expiry are covered by unit helpers and the Vitest
- * browser suite.
+ * Select option picks use keyboard-first `pickSelectOptionByTestId` (portal
+ * visibility + Base UI allowMouseSelectionRef).
  */
 export const expectPatMintClickThroughFlow: BrowserCommand<[]> = async (ctx) => {
   const { context } = asPlaywright(ctx);
@@ -1436,12 +1548,20 @@ export const expectPatMintClickThroughFlow: BrowserCommand<[]> = async (ctx) => 
     pageGuard.assertNoPageErrors("pat classic after scope toggles");
     assertNoOctaneOverlay(await page.content(), "pat classic after scope toggles");
 
-    // Expiry Select is present; opening it must not overlay. Option picks are
-    // covered by unit helpers — Base UI Select portals are already race-annotated.
-    await page.locator('[data-testid="pat-expiry-preset"]').click();
-    await page.locator('[data-testid="pat-expiry-preset"]').click();
-    pageGuard.assertNoPageErrors("pat classic after expiry trigger");
-    assertNoOctaneOverlay(await page.content(), "pat classic after expiry trigger");
+    // Ensure no leftover popup/inert from prior clicks before Select press.
+    if (page.keyboard?.press) {
+      await page.keyboard.press("Escape");
+    }
+
+    await pickSelectOptionByTestId(page, "pat-expiry-preset", "pat-expiry-option-custom");
+    await page.getByTestId("pat-expiry-custom").waitFor({ state: "attached", timeout: 10_000 });
+    pageGuard.assertNoPageErrors("pat classic after expiry custom");
+    assertNoOctaneOverlay(await page.content(), "pat classic after expiry custom");
+
+    await pickSelectOptionByTestId(page, "pat-expiry-preset", "pat-expiry-option-none");
+    await page.getByTestId("pat-expiry-none-warn").waitFor({ state: "attached", timeout: 10_000 });
+    pageGuard.assertNoPageErrors("pat classic after no expiration");
+    assertNoOctaneOverlay(await page.content(), "pat classic after no expiration");
 
     await page.goto(`${webOrigin()}/settings/tokens/new/fine-grained`, {
       waitUntil: "domcontentloaded",
@@ -1470,17 +1590,14 @@ export const expectPatMintClickThroughFlow: BrowserCommand<[]> = async (ctx) => 
       assertNoOctaneOverlay(await page.content(), "pat fg after repo checkbox");
     }
 
-    await page.locator('[data-testid="fg-contents-perm"]').click();
-    await page.locator('[data-testid="fg-contents-perm"]').click();
-    await page.locator('[data-testid="fg-packages-perm-select"]').click();
-    await page.locator('[data-testid="fg-packages-perm-select"]').click();
-    pageGuard.assertNoPageErrors("pat fg after permission triggers");
-    assertNoOctaneOverlay(await page.content(), "pat fg after permission triggers");
+    await pickSelectOptionByTestId(page, "fg-contents-perm", "fg-contents-option-write");
+    await pickSelectOptionByTestId(page, "fg-packages-perm-select", "fg-packages-option-read");
+    pageGuard.assertNoPageErrors("pat fg after permission selects");
+    assertNoOctaneOverlay(await page.content(), "pat fg after permission selects");
 
-    await page.locator('[data-testid="pat-expiry-preset"]').click();
-    await page.locator('[data-testid="pat-expiry-preset"]').click();
-    pageGuard.assertNoPageErrors("pat fg after expiry trigger");
-    assertNoOctaneOverlay(await page.content(), "pat fg after expiry trigger");
+    await pickSelectOptionByTestId(page, "pat-expiry-preset", "pat-expiry-option-7");
+    pageGuard.assertNoPageErrors("pat fg after expiry preset");
+    assertNoOctaneOverlay(await page.content(), "pat fg after expiry preset");
 
     return true;
   } finally {

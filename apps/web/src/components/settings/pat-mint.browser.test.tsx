@@ -1,6 +1,9 @@
 /**
  * Real-Chromium gate for PAT mint DOM races (#42 / #43).
  * Single file so Vite optimizeDeps reload cannot abort a second suite iframe.
+ *
+ * Also proves pat-expiry-field Select picks and pat-fg-repo-picker checkbox
+ * toggles via the classic/FG form mounts (browser-coverage subjects).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PatClassicForm } from "@/components/settings/pat-classic-form";
@@ -11,6 +14,7 @@ import {
   debugBody,
   expectNoOctaneOverlayInDocument,
   mountComponent,
+  pickSelectOptionByTestId,
 } from "@/test/browser-mount";
 import { trackDomErrors } from "@/test/dom-errors";
 
@@ -82,6 +86,31 @@ describe("PAT mint browser DOM races", () => {
       await clickTestId("scope-package-read");
       await clickTestId("scope-package-write");
       await clickTestId("scope-repo");
+
+      expect(document.querySelector('[data-testid="pat-classic-summary"]')).toBeTruthy();
+      tracker.expectNoDomRaces();
+      expectNoOctaneOverlayInDocument();
+    } finally {
+      tracker.dispose();
+    }
+  }, 30_000);
+
+  it("classic: expiry Select custom/none commits without insertBefore / overlay", async () => {
+    const tracker = trackDomErrors();
+    try {
+      await mountComponent(PatClassicForm, { onCreated: () => {} });
+
+      await pickSelectOptionByTestId("pat-expiry-preset", "pat-expiry-option-custom");
+      const custom = document.querySelector('[data-testid="pat-expiry-custom"]');
+      if (!custom || custom.classList.contains("hidden")) {
+        throw new Error(`pat-expiry-custom not shown after Select. ${debugBody()}`);
+      }
+
+      await pickSelectOptionByTestId("pat-expiry-preset", "pat-expiry-option-none");
+      const warn = document.querySelector('[data-testid="pat-expiry-none-warn"]');
+      if (!warn || warn.classList.contains("hidden")) {
+        throw new Error(`pat-expiry-none-warn not shown after Select. ${debugBody()}`);
+      }
 
       expect(document.querySelector('[data-testid="pat-classic-summary"]')).toBeTruthy();
       tracker.expectNoDomRaces();

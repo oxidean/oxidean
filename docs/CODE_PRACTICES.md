@@ -44,6 +44,7 @@ Full skill: [`.agents/skills/octane/SKILL.md`](../.agents/skills/octane/SKILL.md
 - Text fields: native `onInput` (or `field.handleChange`). Anonymous auth pages: SSR loaders, no decorative form skeletons.
 - Preserve chrome / brand patterns; do not introduce a second design system.
 - **DOM races:** do not `@if`/`@else`-swap large sibling trees next to Base UI `RadioGroup` / Select, and do not nest `@if`/`@for` inside `form.Subscribe` bodies that re-render on checkbox/radio clicks (causes `insertBefore` / “Something went wrong!”). Keep both panels mounted and toggle with `hidden`, use per-field `form.Field`, or isolate the swap in a child component. Wrap multi-root `@if` bodies in `<>…</>`. Prefer `keepMounted` on Checkbox/Radio Indicators (shipped in `components/ui`). Happy-dom integration, Vitest browser (`*.browser.test.tsx`), and stack-browser e2e fail automatically on these races (`setup-integration.ts`, `setup-browser.ts`, `newGuardedPage` / `assertNoOctaneOverlay`).
+- **Browser coverage required for high-risk UI:** any new or changed `.tsrx` that uses `Checkbox`, `RadioGroup` / `RadioGroupItem`, `form.Subscribe`, Select, Switch, or Dialog/Menu portals must register Chromium proof in `apps/web/src/test/browser-coverage.manifest.ts`. Prefer a colocated `*.browser.test.tsx` (use `pickSelectOptionByTestId` for Base UI Select). Run `make browser-coverage-check-pr` before push. Bootstrap `skip` is inventory-only — **CI fails if you add or edit a skip-only surface without real evidence**. See [TESTING.md](TESTING.md).
 
 ## RPC & API
 
@@ -58,6 +59,7 @@ Full skill: [`.agents/skills/octane/SKILL.md`](../.agents/skills/octane/SKILL.md
 |-------------|---------|
 | Pure helper | Unit test |
 | UI + Query / session | Integration test (`renderWithQueryClient` where applicable) |
+| High-risk interactive UI (Checkbox / Radio / Select / Switch / portals / `form.Subscribe`) | Vitest browser (`*.browser.test.tsx`) + `browser-coverage` manifest row (`make browser-coverage-check-pr`) |
 | Auth / RPC contract | Rust integration test and/or stack e2e |
 | RPC schema | `make rpc-sync-check` clean |
 

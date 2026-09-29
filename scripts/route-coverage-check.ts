@@ -1,8 +1,16 @@
 /**
  * Route coverage gate implementation (invoked by scripts/route-coverage-check.sh).
+ *
+ * Change-aware mode (UI_COVERAGE_BASE or UI_COVERAGE_TOUCHED): newly added or
+ * modified user-facing routes cannot be skip-only — they need happy-dom mount
+ * or stack-browser evidence. layoutOnly shells are exempt.
  */
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
+import {
+  formatTouchedList,
+  resolveUiCoverageDiff,
+} from "./ui-coverage-diff.ts";
 
 type Evidence =
   | { kind: "happy-dom"; test: string }
@@ -28,6 +36,17 @@ function walkTsrx(dir: string, out: string[] = []): string[] {
 const root = resolve(import.meta.dir, "..");
 const routesDir = join(root, "apps/web/src/routes");
 const manifestPath = join(root, "apps/web/src/test/route-coverage.manifest.ts");
+const uiDiff = resolveUiCoverageDiff(root);
+const touchedRoutes = new Set(
+  (uiDiff?.touched ?? [])
+    .filter((p) => p.startsWith("routes/"))
+    .map((p) => p.slice("routes/".length)),
+);
+const addedRoutes = new Set(
+  (uiDiff?.added ?? [])
+    .filter((p) => p.startsWith("routes/"))
+    .map((p) => p.slice("routes/".length)),
+);
 
 if (!existsSync(manifestPath)) {
   console.error(`route-coverage-check: FAIL: missing manifest: ${manifestPath}`);
@@ -76,6 +95,7 @@ if (dupes.length) {
 const missingFromManifest: string[] = [];
 const uncovered: string[] = [];
 const badEvidence: string[] = [];
+const touchedSkipOnly: string[] = [];
 let required = 0;
 let layoutOnly = 0;
 let withHappy = 0;
@@ -143,6 +163,9 @@ for (const route of discovered) {
     if (okBrowser) withBrowser += 1;
   } else {
     withSkipOnly += 1;
+    if (touchedRoutes.has(route)) {
+      touchedSkipOnly.push(route);
+    }
   }
 }
 
@@ -163,9 +186,28 @@ if (uncovered.length) {
 if (badEvidence.length) {
   errors.push(`invalid evidence:\n  - ${badEvidence.join("\n  - ")}`);
 }
+if (uiDiff && touchedSkipOnly.length) {
+  const addedTouched = touchedSkipOnly.filter((r) => addedRoutes.has(r));
+  const modifiedTouched = touchedSkipOnly.filter((r) => !addedRoutes.has(r));
+  const parts: string[] = [];
+  if (addedTouched.length) {
+    parts.push(
+      `newly added routes must have happy-dom or stack-browser proof (skip not allowed):\n${formatTouchedList(addedTouched)}`,
+    );
+  }
+  if (modifiedTouched.length) {
+    parts.push(
+      `changed routes are still skip-only — add a happy-dom mount or stack-browser suite before merging:\n${formatTouchedList(modifiedTouched)}`,
+    );
+  }
+  errors.push(parts.join("\n"));
+}
 
+const mode = uiDiff
+  ? `change-aware base=${uiDiff.base} touched-routes=${touchedRoutes.size}`
+  : "inventory-only";
 console.log(
-  `route-coverage-check: discovered=${discovered.length} layoutOnly=${layoutOnly} required=${required} happy-dom=${withHappy} stack-browser=${withBrowser} skip-only=${withSkipOnly}`,
+  `route-coverage-check: mode=${mode} discovered=${discovered.length} layoutOnly=${layoutOnly} required=${required} happy-dom=${withHappy} stack-browser=${withBrowser} skip-only=${withSkipOnly}`,
 );
 
 if (errors.length) {

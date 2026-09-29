@@ -13,7 +13,8 @@
 .PHONY: up-dev-auth down-dev-auth up-with-dev-auth down-with-dev-auth test-e2e-stack seed-actions-demo test-e2e-actions
 .PHONY: db-migrate db-switch-dialect db-matrix
 .PHONY: coverage-web coverage-rust coverage-weighted coverage-contract
-.PHONY: route-coverage-check
+.PHONY: route-coverage-check browser-coverage-check ui-coverage-change-contract
+.PHONY: route-coverage-check-pr browser-coverage-check-pr
 .PHONY: web-lint web-format-check test-web-browser
 
 COMPOSE ?= docker compose
@@ -44,10 +45,8 @@ help:
 	@echo "  make coverage-rust  - Rust lib/test coverage via cargo-llvm-cov (optional)"
 	@echo "  make coverage-weighted - D-QH-02 weighted gate (25/40/35, floor 0.65→0.70)"
 	@echo "  make coverage-contract - aggregator contract self-test"
-	@echo "  make route-coverage-check - G-11.1-15 every .tsrx page has happy-dom/browser/skip"
-	@echo "  make web-lint       - oxlint type-aware + octane DOM-race heuristic + deny-warnings"
-	@echo "  make test-web-browser - Vitest browser (Chromium) component DOM-race tests"
-	@echo "  make web-format-check - oxfmt --check (@tsrx/oxc)"
+	@echo "  make route-coverage-check / browser-coverage-check - page + high-risk UI coverage gates"
+	@echo "  make web-lint / web-format-check / test-web-browser - oxlint, oxfmt, Chromium DOM races"
 	@echo "  make smoke-actions  - Actions/runner Compose smoke (ACT-04/05; skip-ok without Docker)"
 	@echo "  make smoke          - compose bring-up smoke (PLAT-01)"
 	@echo "  make smoke-protection - ORG-06 helper + HTTPS/SSH protected-push denial (D-PKG-03)"
@@ -292,6 +291,20 @@ coverage-contract:
 
 route-coverage-check:
 	@./scripts/route-coverage-check.sh
+
+# Change-aware (PR-equivalent): fail skip-only for routes touched vs origin/main.
+route-coverage-check-pr:
+	@UI_COVERAGE_BASE=$${UI_COVERAGE_BASE:-origin/main} ./scripts/route-coverage-check.sh
+
+browser-coverage-check:
+	@./scripts/browser-coverage-check.sh
+
+# Change-aware (PR-equivalent): fail skip-only for high-risk UI touched vs origin/main.
+browser-coverage-check-pr:
+	@UI_COVERAGE_BASE=$${UI_COVERAGE_BASE:-origin/main} ./scripts/browser-coverage-check.sh
+
+ui-coverage-change-contract:
+	@./scripts/ui-coverage-change.contract.sh
 
 web-lint:
 	bun run --filter @oxidean/web lint
