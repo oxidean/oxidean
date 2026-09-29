@@ -4,7 +4,12 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { PatExpiryField } from "@/components/settings/pat-expiry-field";
+import {
+  resolveExpiresAt,
+  tomorrowDateValue,
+  type PatExpiryPreset,
+} from "@/components/settings/pat-expiry";
 import { apiClient } from "@/lib/api-client";
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
@@ -13,17 +18,7 @@ type PatClassicFormProps = {
   onCreated: (token: string) => void;
 };
 
-function tomorrowDateValue(): string {
-  const d = new Date();
-  d.setUTCDate(d.getUTCDate() + 1);
-  return d.toISOString().slice(0, 10);
-}
-
-function expiryToIso(dateValue: string): string {
-  return `${dateValue}T23:59:59Z`;
-}
-
-/** Classic PAT create form (D-05 / D-07 / D-16). */
+/** Classic PAT create form — per-field Fields; no `@if` inside Subscribe trees. */
 export function PatClassicForm({ onCreated }: PatClassicFormProps) @{
   const [noteError, setNoteError] = useState("");
   const [scopeError, setScopeError] = useState("");
@@ -36,7 +31,7 @@ export function PatClassicForm({ onCreated }: PatClassicFormProps) @{
       repoChecked: true,
       packageRead: false,
       packageWrite: false,
-      expiryMode: "none" as "none" | "date",
+      expiryPreset: "30" as PatExpiryPreset,
       expiryDate: tomorrowDateValue(),
     },
     onSubmit: async ({ value }) => {
@@ -63,8 +58,7 @@ export function PatClassicForm({ onCreated }: PatClassicFormProps) @{
         const res = await apiClient.pat.createClassic({
           name: trimmed,
           scopes: scopes as ("repo" | "package:read" | "package:write")[],
-          expires_at:
-            value.expiryMode === "date" && value.expiryDate ? expiryToIso(value.expiryDate) : null,
+          expires_at: resolveExpiresAt(value.expiryPreset, value.expiryDate),
         });
         if (!res.ok) {
           if (res.error.code === "auth.email_unverified") {
@@ -89,6 +83,7 @@ export function PatClassicForm({ onCreated }: PatClassicFormProps) @{
     method="post"
     action="#"
     className="mt-8 flex flex-col gap-6"
+    data-testid="pat-classic-form"
     onSubmit={(e) => {
       e.preventDefault();
       void form.handleSubmit();
@@ -110,115 +105,163 @@ export function PatClassicForm({ onCreated }: PatClassicFormProps) @{
           <p className="text-[14px] text-muted-foreground">
             What's this token for? e.g. laptop, CI
           </p>
-          @if (noteError) {
-            <p role="alert" className="text-[14px] text-destructive">
-              {noteError as string}
-            </p>;
-          }
+          <p
+            role="alert"
+            className={noteError ? "text-[14px] text-destructive" : "hidden"}
+            data-testid="pat-classic-note-error"
+          >
+            {(noteError || "") as string}
+          </p>
         </div>
       )}
     </form.Field>
 
-    <form.Subscribe selector={(s) => s.values}>
-      {(values) => (
-        <div className="flex flex-col gap-2">
-          <p className="text-[14px] font-medium text-foreground">Scopes</p>
-          <label className="flex cursor-pointer items-start gap-3">
-            <Checkbox
-              checked={values.repoChecked}
-              disabled={pending}
-              aria-label="Full control of private repositories"
-              onCheckedChange={(checked) => form.setFieldValue("repoChecked", checked === true)}
-            />
-            <span className="text-[14px] text-foreground">
-              Full control of private repositories
-            </span>
-          </label>
-          <label className="flex cursor-pointer items-start gap-3">
-            <Checkbox
-              checked={values.packageRead || values.packageWrite}
-              disabled={pending || values.packageWrite}
-              aria-label="package:read"
-              data-testid="scope-package-read"
-              onCheckedChange={(checked) => form.setFieldValue("packageRead", checked === true)}
-            />
-            <span className="text-[14px] text-foreground">
-              package:read — download packages (does not include repo alone)
-            </span>
-          </label>
-          <label className="flex cursor-pointer items-start gap-3">
-            <Checkbox
-              checked={values.packageWrite}
-              disabled={pending}
-              aria-label="package:write"
-              data-testid="scope-package-write"
-              onCheckedChange={(checked) => {
-                const on = checked === true;
-                form.setFieldValue("packageWrite", on);
-                if (on) form.setFieldValue("packageRead", true);
-              }}
-            />
-            <span className="text-[14px] text-foreground">
-              package:write — publish and manage packages
-            </span>
-          </label>
-          @if (scopeError) {
-            <p role="alert" className="text-[14px] text-destructive">
-              {scopeError as string}
-            </p>;
-          }
-        </div>
-      )}
-    </form.Subscribe>
+    <div className="flex flex-col gap-3" data-testid="pat-classic-scopes">
+      <p className="text-[14px] font-medium text-foreground">Scopes</p>
 
-    <form.Subscribe selector={(s) => s.values}>
-      {(values) => (
-        <div className="flex flex-col gap-3">
-          <p className="text-[14px] font-medium text-foreground">Expiration</p>
-          <RadioGroup
-            value={values.expiryMode}
-            disabled={pending}
-            onValueChange={(v) => {
-              if (v === "none" || v === "date") form.setFieldValue("expiryMode", v);
-            }}
-            className="gap-3"
-          >
-            <label className="flex cursor-pointer items-center gap-3">
-              <RadioGroupItem value="none" />
-              <span className="text-[14px] text-foreground">No expiration</span>
+      <div className="flex flex-col gap-2">
+        <p className="text-[13px] font-medium uppercase tracking-wide text-muted-foreground">
+          Repository
+        </p>
+        <form.Field name="repoChecked">
+          {(field) => (
+            <label className="flex cursor-pointer items-start gap-3">
+              <Checkbox
+                checked={field.state.value}
+                disabled={pending}
+                aria-label="Full control of private repositories"
+                data-testid="scope-repo"
+                onCheckedChange={(checked) => field.handleChange(checked === true)}
+              />
+              <span className="flex flex-col gap-0.5">
+                <span className="text-[14px] text-foreground">
+                  repo — Full control of private repositories
+                </span>
+                <span className="text-[13px] text-muted-foreground">
+                  Required for git clone, fetch, and push over HTTPS.
+                </span>
+              </span>
             </label>
-            <label className="flex cursor-pointer items-center gap-3">
-              <RadioGroupItem value="date" />
-              <span className="text-[14px] text-foreground">Expires on</span>
-            </label>
-          </RadioGroup>
-          @if (values.expiryMode === "date") {
-            <form.Field name="expiryDate">
-              {(field) => (
-                <Input
-                  type="date"
-                  value={field.state.value}
-                  min={tomorrowDateValue() as string}
-                  aria-label="Expiration date"
-                  disabled={pending}
-                  className="max-w-xs"
-                  onBlur={field.handleBlur}
-                  onInput={(e) =>
-                    field.handleChange((e.currentTarget as HTMLInputElement).value)
-                  }
-                />
+          )}
+        </form.Field>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <p className="text-[13px] font-medium uppercase tracking-wide text-muted-foreground">
+          Packages
+        </p>
+        <form.Field name="packageRead">
+          {(field) => (
+            <form.Subscribe selector={(s) => s.values.packageWrite}>
+              {(packageWrite) => (
+                <label className="flex cursor-pointer items-start gap-3">
+                  <Checkbox
+                    checked={field.state.value || packageWrite}
+                    disabled={pending || packageWrite}
+                    aria-label="package:read"
+                    data-testid="scope-package-read"
+                    onCheckedChange={(checked) => field.handleChange(checked === true)}
+                  />
+                  <span className="flex flex-col gap-0.5">
+                    <span className="text-[14px] text-foreground">
+                      package:read — Download packages
+                    </span>
+                    <span className="text-[13px] text-muted-foreground">
+                      Registry download only; does not include repository access by itself.
+                    </span>
+                  </span>
+                </label>
               )}
-            </form.Field>;
-          }
-        </div>
+            </form.Subscribe>
+          )}
+        </form.Field>
+        <form.Field name="packageWrite">
+          {(field) => (
+            <label className="flex cursor-pointer items-start gap-3">
+              <Checkbox
+                checked={field.state.value}
+                disabled={pending}
+                aria-label="package:write"
+                data-testid="scope-package-write"
+                onCheckedChange={(checked) => {
+                  const on = checked === true;
+                  field.handleChange(on);
+                  if (on) form.setFieldValue("packageRead", true);
+                }}
+              />
+              <span className="flex flex-col gap-0.5">
+                <span className="text-[14px] text-foreground">
+                  package:write — Publish and manage packages
+                </span>
+                <span className="text-[13px] text-muted-foreground">
+                  Implies package:read. Publish, overwrite, and delete package versions.
+                </span>
+              </span>
+            </label>
+          )}
+        </form.Field>
+      </div>
+
+      <p
+        role="alert"
+        className={scopeError ? "text-[14px] text-destructive" : "hidden"}
+        data-testid="pat-classic-scope-error"
+      >
+        {(scopeError || "") as string}
+      </p>
+    </div>
+
+    <form.Field name="expiryPreset">
+      {(presetField) => (
+        <form.Field name="expiryDate">
+          {(dateField) => (
+            <PatExpiryField
+              preset={presetField.state.value}
+              customDate={dateField.state.value}
+              disabled={pending}
+              onPresetChange={(p) => presetField.handleChange(p)}
+              onCustomDateChange={(d) => dateField.handleChange(d)}
+            />
+          )}
+        </form.Field>
       )}
+    </form.Field>
+
+    <form.Subscribe
+      selector={(s) => ({
+        repo: s.values.repoChecked,
+        packageRead: s.values.packageRead,
+        packageWrite: s.values.packageWrite,
+        expiryPreset: s.values.expiryPreset,
+      })}
+    >
+      {(v) => {
+        const parts: string[] = [];
+        if (v.repo) parts.push("repo");
+        if (v.packageWrite) parts.push("package:write");
+        else if (v.packageRead) parts.push("package:read");
+        const scopeText = parts.length > 0 ? parts.join(", ") : "no scopes";
+        const expText =
+          v.expiryPreset === "none"
+            ? "no expiration"
+            : v.expiryPreset === "custom"
+              ? "a custom expiration date"
+              : `expiration in ${v.expiryPreset} days`;
+        return (
+          <p className="text-[14px] text-muted-foreground" data-testid="pat-classic-summary">
+            {`This token will have ${scopeText}, with ${expText}.` as string}
+          </p>
+        );
+      }}
     </form.Subscribe>
 
-    @if (formError) {
-      <p role="alert" className="text-[16px] text-destructive">
-        {formError as string}
-      </p>;
-    }
+    <p
+      role="alert"
+      className={formError ? "text-[16px] text-destructive" : "hidden"}
+      data-testid="pat-classic-form-error"
+    >
+      {(formError || "") as string}
+    </p>
 
     <form.Subscribe selector={(s) => s.values.repoChecked}>
       {(repoChecked) => (

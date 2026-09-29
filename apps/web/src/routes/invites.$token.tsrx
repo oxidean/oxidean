@@ -169,6 +169,7 @@ export function InviteAcceptPage() @{
             <acceptForm.Subscribe selector={(s) => s.isSubmitting}>
               {(isSubmitting) => (
                 <Button type="submit" disabled={isSubmitting}>
+                  {/* octane-dom-race-ok: button label text only */}
                   @if (isSubmitting) {
                     <>Accepting…</>;
                   } @else {
@@ -260,6 +261,7 @@ export function InviteAcceptPage() @{
             <anonForm.Subscribe selector={(s) => s.isSubmitting}>
               {(isSubmitting) => (
                 <Button type="submit" disabled={isSubmitting}>
+                  {/* octane-dom-race-ok: button label text only */}
                   @if (isSubmitting) {
                     <>Creating account…</>;
                   } @else {

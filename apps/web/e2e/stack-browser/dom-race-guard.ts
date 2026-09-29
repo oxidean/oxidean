@@ -4,6 +4,20 @@
  */
 import { DOM_RACE_RE } from "../../src/test/dom-errors.ts";
 
+/**
+ * Fail fast on Vite overlay, runtime ReferenceErrors, or Octane's default
+ * error UI (`<strong style="font-size:1rem">Something went wrong!</strong>`).
+ */
+export function assertNoOctaneOverlay(html: string, label: string): void {
+  if (
+    html.includes("vite-error-overlay") ||
+    html.includes("Something went wrong!") ||
+    /is not defined|ReferenceError|Octane error|@else if/i.test(html)
+  ) {
+    throw new Error(`${label} showed Vite/Octane render error. body=${html.slice(0, 1200)}`);
+  }
+}
+
 /** Minimal page surface shared with commands.ts. */
 export type GuardablePage = {
   on: (event: string, handler: (...args: never[]) => void) => void;

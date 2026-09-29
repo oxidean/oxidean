@@ -157,6 +157,7 @@ export function OrgSettingsPage() @{
                     <SelectPositioner sideOffset={4}>
                       <SelectPopup>
                         <SelectList>
+                          {/* octane-dom-race-ok: static Select options list */}
                           @for (const opt of MEMBER_BASE_OPTIONS; key opt.value) {
                             <SelectItem value={opt.value}>
                               <SelectItemIndicator>
