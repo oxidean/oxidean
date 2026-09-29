@@ -64,6 +64,8 @@ make up / make smoke         # Compose + health
 make rpc-sync-check          # CI gate for client drift
 make web-lint                # oxlint type-aware (apps/web; @tsrx/oxc) + octane DOM-race heuristic
 make web-format-check        # oxfmt --check (apps/web)
+make test-web-browser        # Vitest Chromium component DOM-race tests
+make browser-coverage-check  # high-risk UI Chromium coverage gate
 ```
 
 ### Before committing web changes
