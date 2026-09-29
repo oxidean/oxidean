@@ -93,7 +93,7 @@ jobs:
         run: bun install --frozen-lockfile
       - name: Playwright Chromium
         run: bunx playwright install --with-deps chromium
-      - name: vitest browser (PAT mint DOM races)
+      - name: vitest browser (Chromium component DOM races)
         run: make test-web-browser
 
   # G-11.1-15 — every user-facing apps/web route page must declare happy-dom,
@@ -109,6 +109,20 @@ jobs:
           bun-version: "1.4.0"
       - name: route coverage gate
         run: make route-coverage-check
+
+  # High-risk interactive UI (Checkbox / RadioGroup / form.Subscribe) must prove
+  # Chromium coverage via *.browser.test.tsx, stack-browser, or documented skip.
+  browser-coverage:
+    name: browser-coverage
+    needs: [makefile-lint]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.0"
+      - name: browser coverage gate
+        run: make browser-coverage-check
 
   # D-QH-02 weighted coverage gate (unit 25% / integration 40% / e2e checklist 35%).
   # Rust cargo-llvm-cov is Make-ready but skipped here (runtime/disk residual);

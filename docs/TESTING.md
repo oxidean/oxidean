@@ -154,6 +154,29 @@ login / verify / profile also have happy-dom `*.integration.test.ts` export/rend
    - `{ kind: "skip", rationale: "…" }` (temporary; prefer real coverage)
 3. Run `make route-coverage-check` before pushing.
 
+**Browser (Chromium component) coverage gate** — complementary to route-coverage. Discovers every `apps/web/src/**/*.tsrx` that uses `Checkbox`, `RadioGroup` / `RadioGroupItem`, or `form.Subscribe` (excluding `*.harness.tsrx` / `*.browser-harness.tsrx`). Each surface must prove real-DOM coverage; happy-dom alone does **not** count for this gate.
+
+| Artifact | Role |
+|----------|------|
+| `apps/web/src/test/browser-coverage.manifest.ts` | Declares each high-risk surface + `browser` / `stack-browser` / `skip` evidence |
+| `scripts/browser-coverage-check.ts` | Discovers high-risk `.tsrx`, validates evidence, proves browser tests mount + click + assert |
+| `make browser-coverage-check` | Local + CI entrypoint (`browser-coverage` job) |
+
+**Browser evidence must prove coverage** — for `kind: "browser"`, the `*.browser.test.tsx` file must:
+
+1. Call `mountComponent` or `mountWithQueryClient` (`apps/web/src/test/browser-mount.ts`)
+2. Contain the `subject` marker (import path fragment or export name for that surface)
+3. Interact via `clickTestId` / `clickAriaLabel` / `.click(`
+4. Assert with `expectNoOctaneOverlayInDocument`, `expectNoDomRaces`, or `trackDomErrors`
+
+**Adding or changing high-risk interactive UI**
+
+1. Author the `.tsrx` (Checkbox / Radio / `form.Subscribe` surfaces).
+2. Prefer a colocated `*.browser.test.tsx` that mounts, toggles the control, and asserts no overlay / DOM race. Attribute an existing stack-browser click-through only when that suite already exercises the control.
+3. Append a row to `browserCoverageManifest` (`subject` must appear in the test source).
+4. Run `make browser-coverage-check` and `make test-web-browser` before pushing.
+5. Temporary `{ kind: "skip", rationale: "…" }` is allowed with a non-empty rationale; prefer real Chromium proof on the next touch.
+
 ### API client
 
 Add `*.test.ts` beside the module under `packages/api-client/src/` (Vitest picks them up with the package default config).
@@ -220,6 +243,8 @@ Workflow: [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) (`name: CI`)
 | `api-rust` | Install nextest → `cargo nextest run --workspace --profile ci` |
 | `web-octane` | `bun install --frozen-lockfile` → `bun run test` (api-client + web unit/integration) → Turbo build `@oxidean/web` |
 | `route-coverage` | `make route-coverage-check` — every user-facing `.tsrx` page has happy-dom, stack-browser, or documented skip (G-11.1-15) |
+| `web-browser` | `make test-web-browser` — Vitest Chromium component DOM-race suite (`*.browser.test.tsx`) |
+| `browser-coverage` | `make browser-coverage-check` — every high-risk interactive `.tsrx` (Checkbox / RadioGroup / `form.Subscribe`) has Chromium browser, stack-browser, or documented skip proof |
 | `coverage-weighted` | Bun install → `make coverage-contract` → `make coverage-web` → e2e checklist → `scripts/coverage-weighted.sh` (bootstrap floor `0.65`, ratchet target `0.70`); uploads `var/coverage/` + `apps/web/coverage/` on failure |
 | `e2e-stack` | Rust + Bun + Playwright → `make test-e2e-stack`; on failure uploads `var/e2e/` as `e2e-stack-logs` |
 | `rpc-sync` | `make rpc-sync-check` |
