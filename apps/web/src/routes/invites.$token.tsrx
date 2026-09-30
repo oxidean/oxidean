@@ -1,6 +1,6 @@
 import { createFileRoute, useParams } from "@octanejs/tanstack-router";
 import { useForm } from "@octanejs/tanstack-form";
-import type { UserPublic } from "@oxidean/api-client";
+import type { InvitesAcceptResponse, UserPublic } from "@oxidean/api-client";
 import { useEffect, useState } from "octane";
 import { AuthErrorBanner, AuthShell } from "@/components/auth-shell";
 import { AuthFormSkeleton } from "@/components/page-skeletons";
@@ -18,14 +18,15 @@ export const Route = createFileRoute("/invites/$token")({
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
 const INVALID_INVITE =
-  "This invitation is invalid or has expired. Ask an organization admin to send a new invite.";
+  "This invitation is invalid or has expired. Ask an administrator to send a new invite.";
 const EMAIL_MISMATCH =
   "You're signed in with a different email than this invitation. Sign out, then open the link again or create an account for the invited email.";
 const LOGIN_REQUIRED =
   "An account with this email already exists. Sign in, then open the invitation link again.";
 const CLOSED_SIGNUP_SUPPORT =
   "This invite lets you join even when public sign-up is closed. You'll create an account for the invited email only.";
-const LOGGED_IN_SUPPORT = "Accept to join the organization with the role you were invited for.";
+const LOGGED_IN_SUPPORT =
+  "Accept to use this invitation with the role or access you were invited for.";
 const TAKEN_ERROR = "That username is already taken. Try another username.";
 const RESERVED_ERROR = "That username is reserved. Choose a different username.";
 
@@ -33,7 +34,7 @@ type Phase =
   | { kind: "loading" }
   | { kind: "logged-in"; user: UserPublic }
   | { kind: "anon" }
-  | { kind: "done"; orgSlug: string };
+  | { kind: "done"; accept: InvitesAcceptResponse };
 
 export function InviteAcceptPage() @{
   const params = useParams({ from: "/invites/$token" }) as { token?: string };
@@ -101,17 +102,24 @@ export function InviteAcceptPage() @{
       return;
     }
     try {
-      const res = await apiClient.org.invites.accept({
+      const res = await apiClient.invites.accept({
         token,
         username: fields?.username ?? null,
         password: fields?.password ?? null,
       });
       if (!res.ok) {
         const code = res.error.code;
-        if (code === "org.invalid_invite") setError(INVALID_INVITE);
-        else if (code === "org.invite_email_mismatch") setError(EMAIL_MISMATCH);
-        else if (code === "org.invite_login_required") setError(LOGIN_REQUIRED);
-        else if (code === "auth.taken") setError(TAKEN_ERROR);
+        if (
+          code === "org.invalid_invite" ||
+          code === "invite.invalid" ||
+          code === "admin.invalid_invite"
+        ) {
+          setError(INVALID_INVITE);
+        } else if (code === "org.invite_email_mismatch" || code === "invite.email_mismatch") {
+          setError(EMAIL_MISMATCH);
+        } else if (code === "org.invite_login_required" || code === "invite.login_required") {
+          setError(LOGIN_REQUIRED);
+        } else if (code === "auth.taken") setError(TAKEN_ERROR);
         else if (code === "auth.reserved_username") setError(RESERVED_ERROR);
         else if (
           code === "auth.weak_password" ||
@@ -124,8 +132,12 @@ export function InviteAcceptPage() @{
         }
         return;
       }
-      setPhase({ kind: "done", orgSlug: res.data.org.slug });
-      window.location.assign(`/${res.data.org.slug}`);
+      setPhase({ kind: "done", accept: res.data });
+      if (res.data.kind === "org") {
+        window.location.assign(`/${res.data.org.slug}`);
+      } else {
+        window.location.assign("/");
+      }
     } catch {
       setError(NETWORK_ERROR);
     }
@@ -139,12 +151,18 @@ export function InviteAcceptPage() @{
     </AuthShell>;
   } @else {
     @if (phase.kind === "done") {
-      <AuthShell
-        title="Invitation accepted"
-        support={`Redirecting to /${phase.orgSlug as string}…`}
-      >
-        <p className="text-sm text-muted-foreground">You're in. Opening the organization…</p>
-      </AuthShell>;
+      @if (phase.accept.kind === "org") {
+        <AuthShell
+          title="Invitation accepted"
+          support={`Redirecting to /${phase.accept.org.slug as string}…`}
+        >
+          <p className="text-sm text-muted-foreground">You're in. Opening the organization…</p>
+        </AuthShell>;
+      } @else {
+        <AuthShell title="Invitation accepted" support="Redirecting to your home…">
+          <p className="text-sm text-muted-foreground">Your account is ready. Opening Oxidean…</p>
+        </AuthShell>;
+      }
     } @else {
       @if (phase.kind === "logged-in") {
         <AuthShell title="Accept invitation" support={LOGGED_IN_SUPPORT}>
@@ -154,7 +172,7 @@ export function InviteAcceptPage() @{
           <p className="text-sm text-muted-foreground">
             Signed in as{" "}
             <span className="font-medium text-foreground">{phase.user.username as string}</span>.
-            Join with this account if it matches the invited email.
+            Continue with this account if it matches the invited email.
           </p>
           <p className="text-sm text-muted-foreground">{CLOSED_SIGNUP_SUPPORT}</p>
           <form

@@ -224,6 +224,15 @@ export const routeCoverageManifest: RouteCoverageEntry[] = [
     ],
   },
   {
+    route: "admin/users.tsrx",
+    coverage: [
+      {
+        kind: "happy-dom",
+        test: "apps/web/src/routes/admin/users.integration.test.ts",
+      },
+    ],
+  },
+  {
     route: "admin/packages.tsrx",
     coverage: [
       {
