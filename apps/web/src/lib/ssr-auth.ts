@@ -116,6 +116,30 @@ export const fetchAdminLfsUsage = createServerFn({ method: "GET" }).handler(asyn
   return client.admin.lfs.getUsage();
 });
 
+/** SSR: admin.users.list with Cookie forward. */
+export const fetchAdminUsersList = createServerFn({ method: "GET" })
+  .validator(
+    (data: { query?: string | null; limit?: number | null; offset?: number | null } = {}) => ({
+      query: data?.query ?? null,
+      limit: typeof data?.limit === "number" ? data.limit : 50,
+      offset: typeof data?.offset === "number" ? data.offset : 0,
+    }),
+  )
+  .handler(async ({ data }) => {
+    const client = createSsrClient(incomingCookie());
+    return client.admin.users.list({
+      query: data.query,
+      limit: data.limit,
+      offset: data.offset,
+    });
+  });
+
+/** SSR: admin.invites.list with Cookie forward. */
+export const fetchAdminInvitesList = createServerFn({ method: "GET" }).handler(async () => {
+  const client = createSsrClient(incomingCookie());
+  return client.admin.invites.list();
+});
+
 /** SSR: system.health (status page). */
 export const fetchSystemHealth = createServerFn({ method: "GET" }).handler(async () => {
   const client = createSsrClient(incomingCookie());

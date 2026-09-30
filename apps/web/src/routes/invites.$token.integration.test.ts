@@ -10,10 +10,8 @@ vi.mock("@/lib/api-client", () => ({
     auth: {
       me: (...args: unknown[]) => meMock(...args),
     },
-    org: {
-      invites: {
-        accept: (...args: unknown[]) => acceptMock(...args),
-      },
+    invites: {
+      accept: (...args: unknown[]) => acceptMock(...args),
     },
   },
 }));
