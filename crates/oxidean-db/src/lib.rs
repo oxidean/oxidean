@@ -12,6 +12,7 @@ pub mod lfs;
 pub mod migrate;
 pub mod mirrors;
 pub mod notifications;
+pub mod instance_invites;
 pub mod org_invites;
 pub mod org_members;
 pub mod organizations;
@@ -50,6 +51,7 @@ pub use mirrors::{RepositoryMirrorRefResultRow, RepositoryMirrorRow};
 pub use notifications::NotificationRow;
 pub use oxidean_core::DbProbeResponse;
 pub use pool::DbPool;
+pub use instance_invites::InstanceInviteRow;
 pub use org_invites::OrgInviteRow;
 pub use org_members::{OrgMemberListRow, OrgMemberRow, OrgMineRow};
 pub use organizations::OrganizationRow;
@@ -271,6 +273,76 @@ impl Database {
 
     pub async fn list_orgs_for_user(&self, user_id: &str) -> Result<Vec<OrgMineRow>, String> {
         org_members::list_orgs_for_user(self.require_pool()?, user_id).await
+    }
+
+    // --- instance invites ---
+
+    pub async fn insert_instance_invite(
+        &self,
+        id: &str,
+        email: &str,
+        token_hash: &str,
+        expires_at: &str,
+        invited_by: &str,
+    ) -> Result<InstanceInviteRow, String> {
+        instance_invites::insert_invite(
+            self.require_pool()?,
+            id,
+            email,
+            token_hash,
+            expires_at,
+            invited_by,
+        )
+        .await
+    }
+
+    pub async fn find_instance_invite_by_id(
+        &self,
+        id: &str,
+    ) -> Result<Option<InstanceInviteRow>, String> {
+        instance_invites::find_by_id(self.require_pool()?, id).await
+    }
+
+    pub async fn find_instance_invite_by_token_hash(
+        &self,
+        token_hash: &str,
+    ) -> Result<Option<InstanceInviteRow>, String> {
+        instance_invites::find_by_token_hash(self.require_pool()?, token_hash).await
+    }
+
+    pub async fn find_pending_instance_invite_by_email(
+        &self,
+        email: &str,
+    ) -> Result<Option<InstanceInviteRow>, String> {
+        instance_invites::find_pending_by_email(self.require_pool()?, email).await
+    }
+
+    pub async fn list_pending_instance_invites(&self) -> Result<Vec<InstanceInviteRow>, String> {
+        instance_invites::list_pending(self.require_pool()?).await
+    }
+
+    pub async fn revoke_instance_invite(&self, id: &str, revoked_at: &str) -> Result<(), String> {
+        instance_invites::revoke(self.require_pool()?, id, revoked_at).await
+    }
+
+    pub async fn accept_instance_invite(&self, id: &str, accepted_at: &str) -> Result<(), String> {
+        instance_invites::mark_accepted(self.require_pool()?, id, accepted_at).await
+    }
+
+    pub async fn count_instance_invites_created_by_since(
+        &self,
+        invited_by: &str,
+        since: &str,
+    ) -> Result<i64, String> {
+        instance_invites::count_created_by_since(self.require_pool()?, invited_by, since).await
+    }
+
+    pub async fn set_instance_invite_expires_at(
+        &self,
+        id: &str,
+        expires_at: &str,
+    ) -> Result<(), String> {
+        instance_invites::set_expires_at(self.require_pool()?, id, expires_at).await
     }
 
     // --- organization invites ---
@@ -1677,6 +1749,31 @@ impl Database {
 
     pub async fn count_sys_admins(&self) -> Result<i64, String> {
         users::count_sys_admins(self.require_pool()?).await
+    }
+
+    pub async fn list_users_page(
+        &self,
+        query: Option<&str>,
+        limit: i64,
+        offset: i64,
+    ) -> Result<(Vec<UserRow>, i64), String> {
+        users::list_page(self.require_pool()?, query, limit, offset).await
+    }
+
+    pub async fn set_user_banned_at(&self, id: &str, at: &str) -> Result<UserRow, String> {
+        users::set_banned_at(self.require_pool()?, id, at).await
+    }
+
+    pub async fn clear_user_banned_at(&self, id: &str) -> Result<UserRow, String> {
+        users::clear_banned_at(self.require_pool()?, id).await
+    }
+
+    pub async fn set_user_role(&self, id: &str, role: &str) -> Result<UserRow, String> {
+        users::set_role(self.require_pool()?, id, role).await
+    }
+
+    pub async fn delete_user(&self, id: &str) -> Result<(), String> {
+        users::delete_user(self.require_pool()?, id).await
     }
 
     pub async fn set_email_verified_at(
