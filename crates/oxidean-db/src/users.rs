@@ -19,6 +19,8 @@ pub struct UserRow {
     /// Account default branch for new repos (D-09); defaults to `main`.
     pub default_branch: String,
     pub email_verified_at: Option<String>,
+    /// Soft-ban timestamp; when set, auth surfaces reject the user.
+    pub banned_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -63,6 +65,9 @@ macro_rules! map_user {
             email_verified_at: row
                 .try_get("email_verified_at")
                 .map_err(|e| format!("user row: {e}"))?,
+            banned_at: row
+                .try_get("banned_at")
+                .map_err(|e| format!("user row: {e}"))?,
             created_at: row
                 .try_get("created_at")
                 .map_err(|e| format!("user row: {e}"))?,
@@ -76,6 +81,8 @@ macro_rules! map_user {
 const USER_SELECT_PG: &str = "SELECT id, email, username, password_hash, display_name, bio, avatar_path, role, must_change_credentials, default_branch,
        CASE WHEN email_verified_at IS NULL THEN NULL
             ELSE to_char(email_verified_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') END AS email_verified_at,
+       CASE WHEN banned_at IS NULL THEN NULL
+            ELSE to_char(banned_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') END AS banned_at,
        to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS created_at,
        to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS updated_at
 FROM users";
@@ -83,6 +90,8 @@ FROM users";
 const USER_SELECT_MYSQL: &str = "SELECT id, email, username, password_hash, display_name, bio, avatar_path, role, must_change_credentials, default_branch,
        CASE WHEN email_verified_at IS NULL THEN NULL
             ELSE DATE_FORMAT(email_verified_at, '%Y-%m-%dT%H:%i:%sZ') END AS email_verified_at,
+       CASE WHEN banned_at IS NULL THEN NULL
+            ELSE DATE_FORMAT(banned_at, '%Y-%m-%dT%H:%i:%sZ') END AS banned_at,
        DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at,
        DATE_FORMAT(updated_at, '%Y-%m-%dT%H:%i:%sZ') AS updated_at
 FROM users";
@@ -90,6 +99,8 @@ FROM users";
 const USER_SELECT_SQLITE: &str = "SELECT id, email, username, password_hash, display_name, bio, avatar_path, role, must_change_credentials, default_branch,
        CASE WHEN email_verified_at IS NULL THEN NULL
             ELSE strftime('%Y-%m-%dT%H:%M:%SZ', email_verified_at) END AS email_verified_at,
+       CASE WHEN banned_at IS NULL THEN NULL
+            ELSE strftime('%Y-%m-%dT%H:%M:%SZ', banned_at) END AS banned_at,
        strftime('%Y-%m-%dT%H:%M:%SZ', created_at) AS created_at,
        strftime('%Y-%m-%dT%H:%M:%SZ', updated_at) AS updated_at
 FROM users";
@@ -719,6 +730,7 @@ pub async fn list_by_username_prefix(
             let rows = sqlx::query(
                 "SELECT username, display_name, avatar_path FROM users
                  WHERE LOWER(username) LIKE LOWER($1) ESCAPE '\\'
+                   AND banned_at IS NULL
                  ORDER BY username ASC
                  LIMIT $2",
             )
@@ -747,6 +759,7 @@ pub async fn list_by_username_prefix(
             let rows = sqlx::query(
                 "SELECT username, display_name, avatar_path FROM users
                  WHERE LOWER(username) LIKE LOWER(?) ESCAPE '\\\\'
+                   AND banned_at IS NULL
                  ORDER BY username ASC
                  LIMIT ?",
             )
@@ -775,6 +788,7 @@ pub async fn list_by_username_prefix(
             let rows = sqlx::query(
                 "SELECT username, display_name, avatar_path FROM users
                  WHERE LOWER(username) LIKE LOWER(?1) ESCAPE '\\'
+                   AND banned_at IS NULL
                  ORDER BY username ASC
                  LIMIT ?2",
             )
@@ -798,6 +812,311 @@ pub async fn list_by_username_prefix(
                     })
                 })
                 .collect()
+        }
+    }
+}
+
+/// Set `banned_at` (soft ban).
+pub async fn set_banned_at(pool: &DbPool, id: &str, at: &str) -> Result<UserRow, String> {
+    match pool {
+        DbPool::Postgres(p) => {
+            sqlx::query(
+                "UPDATE users SET banned_at = $2::timestamptz, updated_at = now() WHERE id = $1",
+            )
+            .bind(id)
+            .bind(at)
+            .execute(p)
+            .await
+            .map_err(|e| format!("set banned_at failed: {e}"))?;
+        }
+        DbPool::MySql(p) => {
+            sqlx::query("UPDATE users SET banned_at = ?, updated_at = NOW() WHERE id = ?")
+                .bind(at)
+                .bind(id)
+                .execute(p)
+                .await
+                .map_err(|e| format!("set banned_at failed: {e}"))?;
+        }
+        DbPool::Sqlite(p) => {
+            sqlx::query(
+                "UPDATE users SET banned_at = ?2,
+    updated_at = strftime('%Y-%m-%d %H:%M:%S','now')
+WHERE id = ?1",
+            )
+            .bind(id)
+            .bind(at)
+            .execute(p)
+            .await
+            .map_err(|e| format!("set banned_at failed: {e}"))?;
+        }
+    }
+    find_by_id(pool, id)
+        .await?
+        .ok_or_else(|| "set banned_at failed: user not found".into())
+}
+
+/// Clear `banned_at` (unban).
+pub async fn clear_banned_at(pool: &DbPool, id: &str) -> Result<UserRow, String> {
+    match pool {
+        DbPool::Postgres(p) => {
+            sqlx::query("UPDATE users SET banned_at = NULL, updated_at = now() WHERE id = $1")
+                .bind(id)
+                .execute(p)
+                .await
+                .map_err(|e| format!("clear banned_at failed: {e}"))?;
+        }
+        DbPool::MySql(p) => {
+            sqlx::query("UPDATE users SET banned_at = NULL, updated_at = NOW() WHERE id = ?")
+                .bind(id)
+                .execute(p)
+                .await
+                .map_err(|e| format!("clear banned_at failed: {e}"))?;
+        }
+        DbPool::Sqlite(p) => {
+            sqlx::query(
+                "UPDATE users SET banned_at = NULL,
+    updated_at = strftime('%Y-%m-%d %H:%M:%S','now')
+WHERE id = ?1",
+            )
+            .bind(id)
+            .execute(p)
+            .await
+            .map_err(|e| format!("clear banned_at failed: {e}"))?;
+        }
+    }
+    find_by_id(pool, id)
+        .await?
+        .ok_or_else(|| "clear banned_at failed: user not found".into())
+}
+
+/// Update instance role (`user` | `admin` | `sys-admin`).
+pub async fn set_role(pool: &DbPool, id: &str, role: &str) -> Result<UserRow, String> {
+    match pool {
+        DbPool::Postgres(p) => {
+            sqlx::query("UPDATE users SET role = $2, updated_at = now() WHERE id = $1")
+                .bind(id)
+                .bind(role)
+                .execute(p)
+                .await
+                .map_err(|e| format!("set role failed: {e}"))?;
+        }
+        DbPool::MySql(p) => {
+            sqlx::query("UPDATE users SET role = ?, updated_at = NOW() WHERE id = ?")
+                .bind(role)
+                .bind(id)
+                .execute(p)
+                .await
+                .map_err(|e| format!("set role failed: {e}"))?;
+        }
+        DbPool::Sqlite(p) => {
+            sqlx::query(
+                "UPDATE users SET role = ?2,
+    updated_at = strftime('%Y-%m-%d %H:%M:%S','now')
+WHERE id = ?1",
+            )
+            .bind(id)
+            .bind(role)
+            .execute(p)
+            .await
+            .map_err(|e| format!("set role failed: {e}"))?;
+        }
+    }
+    find_by_id(pool, id)
+        .await?
+        .ok_or_else(|| "set role failed: user not found".into())
+}
+
+/// Hard-delete a user row (FK cascades remove related rows).
+pub async fn delete_user(pool: &DbPool, id: &str) -> Result<(), String> {
+    let n = match pool {
+        DbPool::Postgres(p) => sqlx::query("DELETE FROM users WHERE id = $1")
+            .bind(id)
+            .execute(p)
+            .await
+            .map_err(|e| format!("delete user failed: {e}"))?
+            .rows_affected(),
+        DbPool::MySql(p) => sqlx::query("DELETE FROM users WHERE id = ?")
+            .bind(id)
+            .execute(p)
+            .await
+            .map_err(|e| format!("delete user failed: {e}"))?
+            .rows_affected(),
+        DbPool::Sqlite(p) => sqlx::query("DELETE FROM users WHERE id = ?1")
+            .bind(id)
+            .execute(p)
+            .await
+            .map_err(|e| format!("delete user failed: {e}"))?
+            .rows_affected(),
+    };
+    if n == 0 {
+        return Err("user not found".into());
+    }
+    Ok(())
+}
+
+/// Paginated admin user listing with optional username/email/display_name search.
+pub async fn list_page(
+    pool: &DbPool,
+    query: Option<&str>,
+    limit: i64,
+    offset: i64,
+) -> Result<(Vec<UserRow>, i64), String> {
+    let q = query.map(str::trim).filter(|s| !s.is_empty());
+    let pattern = q.map(|s| format!("%{}%", escape_like_pattern(s)));
+    match pool {
+        DbPool::Postgres(p) => {
+            let total = if let Some(ref pat) = pattern {
+                sqlx::query_scalar::<_, i64>(
+                    "SELECT COUNT(*)::bigint FROM users
+WHERE LOWER(username) LIKE LOWER($1) ESCAPE '\\'
+   OR LOWER(email) LIKE LOWER($1) ESCAPE '\\'
+   OR LOWER(display_name) LIKE LOWER($1) ESCAPE '\\'",
+                )
+                .bind(pat)
+                .fetch_one(p)
+                .await
+                .map_err(|e| format!("count users page failed: {e}"))?
+            } else {
+                sqlx::query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM users")
+                    .fetch_one(p)
+                    .await
+                    .map_err(|e| format!("count users page failed: {e}"))?
+            };
+            let select = USER_SELECT_PG;
+            let rows = if let Some(ref pat) = pattern {
+                let sql = format!(
+                    "{select}
+WHERE LOWER(username) LIKE LOWER($1) ESCAPE '\\'
+   OR LOWER(email) LIKE LOWER($1) ESCAPE '\\'
+   OR LOWER(display_name) LIKE LOWER($1) ESCAPE '\\'
+ORDER BY created_at DESC
+LIMIT $2 OFFSET $3"
+                );
+                sqlx::query(&sql)
+                    .bind(pat)
+                    .bind(limit)
+                    .bind(offset)
+                    .fetch_all(p)
+                    .await
+                    .map_err(|e| format!("list users page failed: {e}"))?
+            } else {
+                let sql = format!("{select} ORDER BY created_at DESC LIMIT $1 OFFSET $2");
+                sqlx::query(&sql)
+                    .bind(limit)
+                    .bind(offset)
+                    .fetch_all(p)
+                    .await
+                    .map_err(|e| format!("list users page failed: {e}"))?
+            };
+            let users = rows
+                .into_iter()
+                .map(|r| Ok(map_user!(r)))
+                .collect::<Result<Vec<_>, String>>()?;
+            Ok((users, total))
+        }
+        DbPool::MySql(p) => {
+            let total = if let Some(ref pat) = pattern {
+                sqlx::query_scalar::<_, i64>(
+                    "SELECT COUNT(*) FROM users
+WHERE LOWER(username) LIKE LOWER(?) ESCAPE '\\\\'
+   OR LOWER(email) LIKE LOWER(?) ESCAPE '\\\\'
+   OR LOWER(display_name) LIKE LOWER(?) ESCAPE '\\\\'",
+                )
+                .bind(pat)
+                .bind(pat)
+                .bind(pat)
+                .fetch_one(p)
+                .await
+                .map_err(|e| format!("count users page failed: {e}"))?
+            } else {
+                sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM users")
+                    .fetch_one(p)
+                    .await
+                    .map_err(|e| format!("count users page failed: {e}"))?
+            };
+            let select = USER_SELECT_MYSQL;
+            let rows = if let Some(ref pat) = pattern {
+                let sql = format!(
+                    "{select}
+WHERE LOWER(username) LIKE LOWER(?) ESCAPE '\\\\'
+   OR LOWER(email) LIKE LOWER(?) ESCAPE '\\\\'
+   OR LOWER(display_name) LIKE LOWER(?) ESCAPE '\\\\'
+ORDER BY created_at DESC
+LIMIT ? OFFSET ?"
+                );
+                sqlx::query(&sql)
+                    .bind(pat)
+                    .bind(pat)
+                    .bind(pat)
+                    .bind(limit)
+                    .bind(offset)
+                    .fetch_all(p)
+                    .await
+                    .map_err(|e| format!("list users page failed: {e}"))?
+            } else {
+                let sql = format!("{select} ORDER BY created_at DESC LIMIT ? OFFSET ?");
+                sqlx::query(&sql)
+                    .bind(limit)
+                    .bind(offset)
+                    .fetch_all(p)
+                    .await
+                    .map_err(|e| format!("list users page failed: {e}"))?
+            };
+            let users = rows
+                .into_iter()
+                .map(|r| Ok(map_user!(r)))
+                .collect::<Result<Vec<_>, String>>()?;
+            Ok((users, total))
+        }
+        DbPool::Sqlite(p) => {
+            let total = if let Some(ref pat) = pattern {
+                sqlx::query_scalar::<_, i64>(
+                    "SELECT COUNT(*) FROM users
+WHERE LOWER(username) LIKE LOWER(?1) ESCAPE '\\'
+   OR LOWER(email) LIKE LOWER(?1) ESCAPE '\\'
+   OR LOWER(display_name) LIKE LOWER(?1) ESCAPE '\\'",
+                )
+                .bind(pat)
+                .fetch_one(p)
+                .await
+                .map_err(|e| format!("count users page failed: {e}"))?
+            } else {
+                sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM users")
+                    .fetch_one(p)
+                    .await
+                    .map_err(|e| format!("count users page failed: {e}"))?
+            };
+            let select = USER_SELECT_SQLITE;
+            let rows = if let Some(ref pat) = pattern {
+                let sql = format!(
+                    "{select}
+WHERE LOWER(username) LIKE LOWER(?1) ESCAPE '\\'
+   OR LOWER(email) LIKE LOWER(?1) ESCAPE '\\'
+   OR LOWER(display_name) LIKE LOWER(?1) ESCAPE '\\'
+ORDER BY created_at DESC
+LIMIT ?2 OFFSET ?3"
+                );
+                sqlx::query(&sql)
+                    .bind(pat)
+                    .bind(limit)
+                    .bind(offset)
+                    .fetch_all(p)
+                    .await
+                    .map_err(|e| format!("list users page failed: {e}"))?
+            } else {
+                let sql = format!("{select} ORDER BY created_at DESC LIMIT ?1 OFFSET ?2");
+                sqlx::query(&sql)
+                    .bind(limit)
+                    .bind(offset)
+                    .fetch_all(p)
+                    .await
+                    .map_err(|e| format!("list users page failed: {e}"))?
+            };
+            let users = rows
+                .into_iter()
+                .map(|r| Ok(map_user!(r)))
+                .collect::<Result<Vec<_>, String>>()?;
+            Ok((users, total))
         }
     }
 }
