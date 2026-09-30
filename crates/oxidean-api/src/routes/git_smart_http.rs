@@ -237,6 +237,10 @@ async fn authenticate_pat(
             return Err(StatusCode::INTERNAL_SERVER_ERROR.into_response());
         }
     };
+    if owner.banned_at.is_some() {
+        record_failed_auth(state, headers, Some(&username)).await;
+        return Err(unauthorized_pat_hint());
+    }
     let user_ok = USERNAME_ALIASES
         .iter()
         .any(|a| username.eq_ignore_ascii_case(a))

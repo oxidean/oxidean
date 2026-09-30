@@ -91,6 +91,20 @@ pub async fn authorize_pack(
     caller_user_id: &str,
     cmd: &PackCommand,
 ) -> AuthzDecision {
+    match db.find_user_by_id(caller_user_id).await {
+        Ok(Some(u)) if u.banned_at.is_some() => {
+            return AuthzDecision::Deny {
+                message: "ERROR: Permission denied to this repository.\n".into(),
+            };
+        }
+        Ok(Some(_)) => {}
+        _ => {
+            return AuthzDecision::Deny {
+                message: "ERROR: Permission denied to this repository.\n".into(),
+            };
+        }
+    }
+
     let (owner, name, action) = match cmd {
         PackCommand::UploadPack { owner, name } => (owner.as_str(), name.as_str(), PackAction::Fetch),
         PackCommand::ReceivePack { owner, name } => (owner.as_str(), name.as_str(), PackAction::Push),
@@ -155,7 +169,7 @@ pub async fn authorize_pack(
                 };
             }
             let caller = match db.find_user_by_id(caller_user_id).await {
-                Ok(Some(u)) => u,
+                Ok(Some(u)) if u.banned_at.is_none() => u,
                 _ => {
                     return AuthzDecision::Deny {
                         message: "ERROR: Permission denied to this repository.\n".into(),

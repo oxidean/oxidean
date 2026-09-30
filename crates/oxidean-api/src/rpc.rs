@@ -9,13 +9,15 @@ use oxidean_core::{
 use oxidean_db::Database;
 use oxidean_git::GitBackend;
 
-use crate::auth::admin;
+use crate::admin;
+use crate::auth::admin as auth_admin;
 use crate::auth::bootstrap;
 use crate::auth::local;
 use crate::auth::profile;
 use crate::auth::session::{ResolvedSession, SessionService};
 use crate::auth::verify_reset;
 use crate::email::EmailSender;
+use crate::invites;
 use crate::issue;
 use crate::label;
 use crate::notification;
@@ -236,23 +238,23 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Ok(list) => RpcResponse::ok(list),
             Err(e) => RpcResponse::err(e),
         },
-        "admin.auth.get_settings" => match admin::get_settings(ctx).await {
+        "admin.auth.get_settings" => match auth_admin::get_settings(ctx).await {
             Ok(settings) => RpcResponse::ok(settings),
             Err(e) => RpcResponse::err(e),
         },
-        "admin.auth.update_settings" => match admin::update_settings(ctx, req.input).await {
+        "admin.auth.update_settings" => match auth_admin::update_settings(ctx, req.input).await {
             Ok(settings) => RpcResponse::ok(settings),
             Err(e) => RpcResponse::err(e),
         },
-        "admin.lfs.getSettings" => match admin::lfs_get_settings(ctx).await {
+        "admin.lfs.getSettings" => match auth_admin::lfs_get_settings(ctx).await {
             Ok(s) => RpcResponse::ok(s),
             Err(e) => RpcResponse::err(e),
         },
-        "admin.lfs.updateSettings" => match admin::lfs_update_settings(ctx, req.input).await {
+        "admin.lfs.updateSettings" => match auth_admin::lfs_update_settings(ctx, req.input).await {
             Ok(s) => RpcResponse::ok(s),
             Err(e) => RpcResponse::err(e),
         },
-        "admin.lfs.getUsage" => match admin::lfs_get_usage(ctx).await {
+        "admin.lfs.getUsage" => match auth_admin::lfs_get_usage(ctx).await {
             Ok(s) => RpcResponse::ok(s),
             Err(e) => RpcResponse::err(e),
         },
@@ -278,11 +280,47 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
                 Err(e) => RpcResponse::err(e),
             }
         }
-        "admin.instance.factory_reset" => match admin::factory_reset(ctx, req.input).await {
+        "admin.instance.factory_reset" => match auth_admin::factory_reset(ctx, req.input).await {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },
-        "admin.repos.gc" => match admin::repo_gc(ctx, req.input).await {
+        "admin.repos.gc" => match auth_admin::repo_gc(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "admin.users.list" => match admin::users_list(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "admin.users.updateRole" => match admin::users_update_role(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "admin.users.revokeSessions" => match admin::users_revoke_sessions(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "admin.users.ban" => match admin::users_ban(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "admin.users.unban" => match admin::users_unban(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "admin.users.delete" => match admin::users_delete(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "admin.invites.create" => match admin::invites_create(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "admin.invites.list" => match admin::invites_list(ctx).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "admin.invites.revoke" => match admin::invites_revoke(ctx, req.input).await {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },
@@ -331,6 +369,10 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Err(e) => RpcResponse::err(e),
         },
         "org.invites.accept" => match org::invites_accept(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "invites.accept" => match invites::accept(ctx, req.input).await {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },

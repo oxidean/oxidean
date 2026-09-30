@@ -180,6 +180,10 @@ impl Database {
         organizations::find_by_id(self.require_pool()?, id).await
     }
 
+    pub async fn delete_organization(&self, id: &str) -> Result<(), String> {
+        organizations::delete_organization(self.require_pool()?, id).await
+    }
+
     /// Batch variant — one `IN (...)` round trip.
     pub async fn find_organizations_by_ids(
         &self,
@@ -772,6 +776,14 @@ impl Database {
 
     pub async fn hard_delete_repository(&self, id: &str) -> Result<(), String> {
         repositories::hard_delete(self.require_pool()?, id).await
+    }
+
+    pub async fn hard_delete_repositories_by_owner(
+        &self,
+        owner_id: &str,
+        owner_type: &str,
+    ) -> Result<u64, String> {
+        repositories::hard_delete_by_owner(self.require_pool()?, owner_id, owner_type).await
     }
 
     // --- pulls ---

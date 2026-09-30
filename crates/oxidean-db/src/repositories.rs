@@ -595,6 +595,44 @@ pub async fn hard_delete(pool: &DbPool, id: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Hard-delete all repositories for an owner (including soft-deleted rows).
+pub async fn hard_delete_by_owner(
+    pool: &DbPool,
+    owner_id: &str,
+    owner_type: &str,
+) -> Result<u64, String> {
+    let n = match pool {
+        DbPool::Postgres(p) => sqlx::query(
+            "DELETE FROM repositories WHERE owner_id = $1 AND owner_type = $2",
+        )
+        .bind(owner_id)
+        .bind(owner_type)
+        .execute(p)
+        .await
+        .map_err(|e| format!("hard-delete repositories by owner failed: {e}"))?
+        .rows_affected(),
+        DbPool::MySql(p) => sqlx::query(
+            "DELETE FROM repositories WHERE owner_id = ? AND owner_type = ?",
+        )
+        .bind(owner_id)
+        .bind(owner_type)
+        .execute(p)
+        .await
+        .map_err(|e| format!("hard-delete repositories by owner failed: {e}"))?
+        .rows_affected(),
+        DbPool::Sqlite(p) => sqlx::query(
+            "DELETE FROM repositories WHERE owner_id = ?1 AND owner_type = ?2",
+        )
+        .bind(owner_id)
+        .bind(owner_type)
+        .execute(p)
+        .await
+        .map_err(|e| format!("hard-delete repositories by owner failed: {e}"))?
+        .rows_affected(),
+    };
+    Ok(n)
+}
+
 pub async fn find_by_id(pool: &DbPool, id: &str) -> Result<Option<RepositoryRow>, String> {
     match pool {
         DbPool::Postgres(p) => {

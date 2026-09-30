@@ -211,6 +211,121 @@ pub struct UserLookupResponse {
     pub users: Vec<UserLookupHit>,
 }
 
+/// Admin user row for `admin.users.list` (includes email + ban state).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminUserPublic {
+    pub id: String,
+    pub email: String,
+    pub username: String,
+    pub display_name: String,
+    pub role: Role,
+    pub email_verified: bool,
+    pub banned_at: Option<String>,
+    pub created_at: String,
+}
+
+/// `admin.users.list` input.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminUsersListRequest {
+    #[serde(default)]
+    pub query: Option<String>,
+    #[serde(default)]
+    pub limit: Option<i64>,
+    #[serde(default)]
+    pub offset: Option<i64>,
+}
+
+/// `admin.users.list` response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminUsersListResponse {
+    pub users: Vec<AdminUserPublic>,
+    pub total: i64,
+}
+
+/// `admin.users.updateRole` — only `user` ↔ `sys-admin`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminUsersUpdateRoleRequest {
+    pub user_id: String,
+    pub role: Role,
+}
+
+/// Shared `{ user_id }` for ban / unban / revokeSessions.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminUsersUserIdRequest {
+    pub user_id: String,
+}
+
+/// `admin.users.delete` — confirmation must equal the target username.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminUsersDeleteRequest {
+    pub user_id: String,
+    pub confirmation: String,
+}
+
+/// `admin.users.delete` summary for the confirmation UI.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminUsersDeleteResponse {
+    pub ok: bool,
+    pub deleted_repos: i64,
+    pub deleted_orgs: i64,
+}
+
+/// Public pending instance invite — never includes token or token_hash.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InstanceInvitePublic {
+    pub id: String,
+    pub email: String,
+    pub expires_at: String,
+    pub invited_by: String,
+    pub created_at: String,
+}
+
+/// `admin.invites.create`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminInvitesCreateRequest {
+    pub email: String,
+}
+
+/// `admin.invites.create` — invite metadata + one-time copyable URL.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminInvitesCreateResponse {
+    pub invite: InstanceInvitePublic,
+    pub invite_url: String,
+}
+
+/// `admin.invites.list` response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminInvitesListResponse {
+    pub invites: Vec<InstanceInvitePublic>,
+}
+
+/// `admin.invites.revoke`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminInvitesRevokeRequest {
+    pub invite_id: String,
+}
+
+/// Unified `invites.accept` / `org.invites.accept` input.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InvitesAcceptRequest {
+    pub token: String,
+    #[serde(default)]
+    pub username: Option<String>,
+    #[serde(default)]
+    pub password: Option<String>,
+}
+
+/// Unified `invites.accept` response — instance signup or org membership.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum InvitesAcceptResponse {
+    Instance,
+    Org {
+        org: crate::OrgPublic,
+        member: crate::OrgMemberPublic,
+    },
+}
+
 /// Instance auth settings for admin UI — secrets never returned; ENV badges only (D-09, T-04-22).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthSettingsPublic {

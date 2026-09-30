@@ -150,6 +150,14 @@ impl SessionService {
             .await
             .map_err(AuthError::from_db)?;
 
+        // Soft-ban: treat session as absent (PATs gated separately at resolve).
+        if let Ok(Some(user)) = db.find_user_by_id(&row.user_id).await {
+            if user.banned_at.is_some() {
+                let _ = db.delete_session(&row.id).await;
+                return Ok(None);
+            }
+        }
+
         Ok(Some(ResolvedSession {
             session_id: row.id,
             user_id: row.user_id,

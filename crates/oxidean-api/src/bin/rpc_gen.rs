@@ -85,6 +85,73 @@ export type FactoryResetResponse = {
   needs_setup: boolean;
 };
 
+export type AdminUserPublic = {
+  id: string;
+  email: string;
+  username: string;
+  display_name: string;
+  role: UserRole;
+  email_verified: boolean;
+  banned_at?: string | null;
+  created_at: string;
+};
+
+export type AdminUsersListRequest = {
+  query?: string | null;
+  limit?: number | null;
+  offset?: number | null;
+};
+
+export type AdminUsersListResponse = {
+  users: AdminUserPublic[];
+  total: number;
+};
+
+export type AdminUsersUpdateRoleRequest = {
+  user_id: string;
+  role: UserRole;
+};
+
+export type AdminUsersUserIdRequest = {
+  user_id: string;
+};
+
+export type AdminUsersDeleteRequest = {
+  user_id: string;
+  confirmation: string;
+};
+
+export type AdminUsersDeleteResponse = {
+  ok: boolean;
+  deleted_repos: number;
+  deleted_orgs: number;
+};
+
+export type InstanceInvitePublic = {
+  id: string;
+  email: string;
+  expires_at: string;
+  invited_by: string;
+  created_at: string;
+};
+
+export type AdminInvitesCreateRequest = {
+  email: string;
+};
+
+export type AdminInvitesCreateResponse = {
+  invite: InstanceInvitePublic;
+  invite_url: string;
+};
+
+export type AdminInvitesListResponse = {
+  invites: InstanceInvitePublic[];
+};
+
+export type AdminInvitesRevokeRequest = {
+  invite_id: string;
+};
+
 export type RepoGcRequest = {
   owner?: string | null;
   name?: string | null;
@@ -1374,6 +1441,13 @@ export type OrgInvitesAcceptResponse = {
   member: OrgMemberPublic;
 };
 
+/** Unified invite accept (instance or org). Same input shape as OrgInvitesAcceptRequest. */
+export type InvitesAcceptRequest = OrgInvitesAcceptRequest;
+
+export type InvitesAcceptResponse =
+  | { kind: "instance" }
+  | { kind: "org"; org: OrgPublic; member: OrgMemberPublic };
+
 /** Classic PAT string prefix (oxidean_pat_). */
 export const CLASSIC_PAT_PREFIX = "oxidean_pat_" as const;
 /** Fine-grained PAT string prefix (oxidean_fg_). */
@@ -2549,6 +2623,10 @@ export function createClient(opts: CreateClientOptions) {
           rpcCall<OrgInvitesAcceptResponse>(opts, "org.invites.accept", input),
       },
     },
+    invites: {
+      accept: (input: InvitesAcceptRequest) =>
+        rpcCall<InvitesAcceptResponse>(opts, "invites.accept", input),
+    },
     issue: {
       create: (input: CreateIssueRequest) =>
         rpcCall<IssuePublic>(opts, "issue.create", input),
@@ -2817,6 +2895,31 @@ export function createClient(opts: CreateClientOptions) {
           ),
         listRunners: () =>
           rpcCall<ActionListRunnersResponse>(opts, "admin.actions.listRunners", {}),
+      },
+      users: {
+        list: (input: AdminUsersListRequest = {}) =>
+          rpcCall<AdminUsersListResponse>(opts, "admin.users.list", input),
+        updateRole: (input: AdminUsersUpdateRoleRequest) =>
+          rpcCall<AdminUserPublic>(opts, "admin.users.updateRole", input),
+        revokeSessions: (input: AdminUsersUserIdRequest) =>
+          rpcCall<{ ok: boolean; revoked: number }>(
+            opts,
+            "admin.users.revokeSessions",
+            input,
+          ),
+        ban: (input: AdminUsersUserIdRequest) =>
+          rpcCall<AdminUserPublic>(opts, "admin.users.ban", input),
+        unban: (input: AdminUsersUserIdRequest) =>
+          rpcCall<AdminUserPublic>(opts, "admin.users.unban", input),
+        delete: (input: AdminUsersDeleteRequest) =>
+          rpcCall<AdminUsersDeleteResponse>(opts, "admin.users.delete", input),
+      },
+      invites: {
+        create: (input: AdminInvitesCreateRequest) =>
+          rpcCall<AdminInvitesCreateResponse>(opts, "admin.invites.create", input),
+        list: () => rpcCall<AdminInvitesListResponse>(opts, "admin.invites.list", {}),
+        revoke: (input: AdminInvitesRevokeRequest) =>
+          rpcCall<{ ok: boolean }>(opts, "admin.invites.revoke", input),
       },
     },
   };

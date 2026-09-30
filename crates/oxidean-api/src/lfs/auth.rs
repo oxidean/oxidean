@@ -177,6 +177,9 @@ pub async fn authenticate_pat(
             return Err(StatusCode::INTERNAL_SERVER_ERROR.into_response());
         }
     };
+    if owner.banned_at.is_some() {
+        return Err(unauthorized_lfs());
+    }
     let user_ok = USERNAME_ALIASES
         .iter()
         .any(|a| username.eq_ignore_ascii_case(a))
