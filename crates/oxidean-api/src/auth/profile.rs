@@ -44,6 +44,12 @@ pub async fn get_profile(ctx: &RpcCtx) -> Result<UserPublic, AppError> {
         .await
         .map_err(db_err)?
         .ok_or_else(|| AppError::new("auth.unauthenticated", "not authenticated"))?;
+    if user.banned_at.is_some() {
+        return Err(AppError::new(
+            "auth.banned",
+            "This account has been suspended.",
+        ));
+    }
     Ok(user_to_public(&user))
 }
 
@@ -68,6 +74,9 @@ pub async fn get_public_profile(
         .await
         .map_err(db_err)?
         .ok_or_else(|| AppError::new("user.not_found", "User not found"))?;
+    if user.banned_at.is_some() {
+        return Err(AppError::new("user.not_found", "User not found"));
+    }
     Ok(oxidean_core::PublicUserProfile {
         username: user.username,
         display_name: user.display_name,

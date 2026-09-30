@@ -239,14 +239,8 @@ pub struct OrgInvitesRevokeRequest {
 }
 
 /// `org.invites.accept` — token from email link; username/password when provisioning (A2).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OrgInvitesAcceptRequest {
-    pub token: String,
-    #[serde(default)]
-    pub username: Option<String>,
-    #[serde(default)]
-    pub password: Option<String>,
-}
+/// Same shape as [`crate::InvitesAcceptRequest`] (unified `invites.accept`).
+pub type OrgInvitesAcceptRequest = crate::InvitesAcceptRequest;
 
 /// `org.invites.accept` response.
 #[derive(Debug, Clone, Serialize, Deserialize)]

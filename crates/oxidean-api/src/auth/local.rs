@@ -285,6 +285,14 @@ pub async fn login(ctx: &mut RpcCtx, input: serde_json::Value) -> Result<UserPub
         ));
     }
 
+    if user.banned_at.is_some() {
+        // Same generic message as bad password (no ban-status leak).
+        return Err(AppError::new(
+            "auth.invalid_credentials",
+            "Incorrect email/username or password",
+        ));
+    }
+
     let cookie = issue_session(ctx, &user.id, req.remember_me).await?;
     ctx.set_cookie = Some(CookieChange::Set(cookie));
     Ok(user_to_public(&user))
@@ -338,6 +346,12 @@ pub async fn me(ctx: &RpcCtx) -> Result<UserPublic, AppError> {
         .await
         .map_err(db_err)?
         .ok_or_else(|| AppError::new("auth.unauthenticated", "not authenticated"))?;
+    if user.banned_at.is_some() {
+        return Err(AppError::new(
+            "auth.banned",
+            "This account has been suspended.",
+        ));
+    }
     Ok(user_to_public(&user))
 }
 

@@ -100,6 +100,13 @@ pub async fn authenticate_registry(
         return Ok(None);
     }
 
+    // Soft-ban: keep PAT rows; reject at resolve so unban restores access.
+    match db.find_user_by_id(&pat.user_id).await? {
+        Some(u) if u.banned_at.is_some() => return Ok(None),
+        None => return Ok(None),
+        Some(_) => {}
+    }
+
     let scopes_parsed = match pat.scopes_json.as_deref() {
         Some(raw) => {
             let names: Vec<String> = serde_json::from_str(raw).unwrap_or_default();
