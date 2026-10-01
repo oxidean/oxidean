@@ -169,9 +169,9 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
     surface: "components/repo/collaborators-panel.tsrx",
     coverage: [
       {
-        kind: "skip",
-        rationale:
-          "Role Select in repo settings; not yet exercised in stack-browser. Add browser mount when collaborators UI is next touched.",
+        kind: "browser",
+        test: "apps/web/src/components/repo/collaborators-panel.browser.test.tsx",
+        subject: "collaborators-panel",
       },
     ],
   },

@@ -77,6 +77,7 @@ function PermissionSelect({
   >
     <SelectTrigger
       id={id}
+      data-testid={id}
       className="min-w-[8rem]"
       aria-label={ariaLabel ?? "Permission"}
       disabled={disabled}
@@ -93,7 +94,7 @@ function PermissionSelect({
         <SelectPopup>
           <SelectList>
             @for (const opt of PERM_OPTIONS; key opt.value) {
-              <SelectItem value={opt.value}>
+              <SelectItem value={opt.value} data-testid={`${id}-option-${opt.value}`}>
                 <SelectItemIndicator>
                   <Check aria-hidden size={16} className="text-primary" />
                 </SelectItemIndicator>
@@ -331,7 +332,11 @@ export function CollaboratorsPanel({ owner, name }: CollaboratorsPanelProps) @{
     }
   }
 
-  <section className="mt-12 flex flex-col gap-4" aria-labelledby="collaborators-heading">
+  <section
+    className="mt-12 flex flex-col gap-4"
+    aria-labelledby="collaborators-heading"
+    data-testid="collaborators-panel"
+  >
     <h2
       id="collaborators-heading"
       className="font-[family-name:var(--font-display)] text-[18px] font-semibold text-foreground"
@@ -357,7 +362,12 @@ export function CollaboratorsPanel({ owner, name }: CollaboratorsPanelProps) @{
         <p className="text-[14px] text-muted-foreground">
           No collaborators yet. Add someone by username to share access.
         </p>
-        <Button type="button" className="h-11 w-fit" onClick={() => setShowAdd(true)}>
+        <Button
+          type="button"
+          className="h-11 w-fit"
+          data-testid="collab-add-open"
+          onClick={() => setShowAdd(true)}
+        >
           Add collaborator
         </Button>
       </>;
