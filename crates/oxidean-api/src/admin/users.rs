@@ -1,8 +1,10 @@
 //! `admin.users.*` — list, role, sessions, ban/unban, hard delete.
 
 use oxidean_core::{
-    AdminUserPublic, AdminUsersDeleteRequest, AdminUsersDeleteResponse, AdminUsersListRequest,
-    AdminUsersListResponse, AdminUsersUpdateRoleRequest, AdminUsersUserIdRequest, AppError, Role,
+    AdminUserAccessOrg, AdminUserAccessRepo, AdminUserPublic, AdminUsersDeleteRequest,
+    AdminUsersDeleteResponse, AdminUsersGetAccessResponse, AdminUsersListRequest,
+    AdminUsersListResponse, AdminUsersUpdateRoleRequest, AdminUsersUserIdRequest, AppError,
+    CollaboratorPermission, OrgRole, Role,
 };
 use oxidean_db::UserRow;
 
@@ -333,4 +335,57 @@ pub async fn delete(
         deleted_repos,
         deleted_orgs,
     })
+}
+
+/// `admin.users.getAccess` — read-only org memberships + repo collaborator grants.
+pub async fn get_access(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<AdminUsersGetAccessResponse, AppError> {
+    let _admin = require_admin_user(ctx).await?;
+    let req: AdminUsersUserIdRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid admin.users.getAccess input: {e}"),
+        )
+    })?;
+    let target = load_target(ctx, &req.user_id).await?;
+
+    let org_rows = ctx
+        .db
+        .list_orgs_for_user(&target.id)
+        .await
+        .map_err(db_err)?;
+    let mut orgs = Vec::with_capacity(org_rows.len());
+    for row in org_rows {
+        let role = OrgRole::parse(&row.role).map_err(|e| {
+            tracing::error!(error = %e, "invalid org role in access summary");
+            AppError::new("admin.internal", "admin operation failed")
+        })?;
+        orgs.push(AdminUserAccessOrg {
+            slug: row.slug,
+            display_name: row.display_name,
+            role,
+        });
+    }
+
+    let grant_rows = ctx
+        .db
+        .list_repo_collaborator_grants_for_user(&target.id)
+        .await
+        .map_err(db_err)?;
+    let mut repos = Vec::with_capacity(grant_rows.len());
+    for row in grant_rows {
+        let permission = CollaboratorPermission::parse(&row.permission).map_err(|e| {
+            tracing::error!(error = %e, "invalid collab permission in access summary");
+            AppError::new("admin.internal", "admin operation failed")
+        })?;
+        repos.push(AdminUserAccessRepo {
+            owner: row.owner_slug,
+            name: row.name,
+            permission,
+        });
+    }
+
+    Ok(AdminUsersGetAccessResponse { orgs, repos })
 }

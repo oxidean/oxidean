@@ -117,6 +117,23 @@ export type AdminUsersDeleteResponse = {
   deleted_orgs: number;
 };
 
+export type AdminUserAccessOrg = {
+  slug: string;
+  display_name: string;
+  role: OrgRole;
+};
+
+export type AdminUserAccessRepo = {
+  owner: string;
+  name: string;
+  permission: CollaboratorPermission;
+};
+
+export type AdminUsersGetAccessResponse = {
+  orgs: AdminUserAccessOrg[];
+  repos: AdminUserAccessRepo[];
+};
+
 export type InstanceInvitePublic = {
   id: string;
   email: string;
@@ -203,8 +220,14 @@ export type UpdateProfileRequest = {
   default_branch?: string | null;
 };
 
+export type UserLookupContext =
+  | { kind: "instance" }
+  | { kind: "org"; slug: string }
+  | { kind: "repo"; owner: string; name: string };
+
 export type UserLookupRequest = {
   prefix: string;
+  context?: UserLookupContext | null;
 };
 
 export type UserLookupHit = {
@@ -1080,6 +1103,37 @@ export type RepoCollaboratorsRemoveRequest = {
   user_id: string;
 };
 
+export type RepoInvitePublic = {
+  id: string;
+  email: string;
+  permission: CollaboratorPermission;
+  expires_at: string;
+  invited_by: string;
+  created_at: string;
+};
+
+export type RepoInvitesListResponse = {
+  invites: RepoInvitePublic[];
+};
+
+export type RepoInvitesCreateRequest = {
+  owner: string;
+  name: string;
+  email: string;
+  permission: CollaboratorPermission;
+};
+
+export type RepoInvitesCreateResponse = {
+  invite: RepoInvitePublic;
+  invite_url: string;
+};
+
+export type RepoInvitesRevokeRequest = {
+  owner: string;
+  name: string;
+  invite_id: string;
+};
+
 /** Classic branch protection rule (Phase 13 / ORG-05). */
 export type BranchProtectionRulePublic = {
   id: string;
@@ -1415,6 +1469,11 @@ export type OrgInvitesCreateRequest = {
   role: OrgRole;
 };
 
+export type OrgInvitesCreateResponse = {
+  invite: OrgInvitePublic;
+  invite_url: string;
+};
+
 export type OrgInvitesRevokeRequest = {
   slug: string;
   invite_id: string;
@@ -1431,12 +1490,18 @@ export type OrgInvitesAcceptResponse = {
   member: OrgMemberPublic;
 };
 
-/** Unified invite accept (instance or org). Same input shape as OrgInvitesAcceptRequest. */
+/** Unified invite accept (instance, org, or repo). Same input shape as OrgInvitesAcceptRequest. */
 export type InvitesAcceptRequest = OrgInvitesAcceptRequest;
 
 export type InvitesAcceptResponse =
   | { kind: "instance" }
-  | { kind: "org"; org: OrgPublic; member: OrgMemberPublic };
+  | { kind: "org"; org: OrgPublic; member: OrgMemberPublic }
+  | {
+      kind: "repo";
+      owner: string;
+      name: string;
+      permission: CollaboratorPermission;
+    };
 
 /** Classic PAT string prefix (oxidean_pat_). */
 export const CLASSIC_PAT_PREFIX = "oxidean_pat_" as const;
@@ -2541,6 +2606,14 @@ export function createClient(opts: CreateClientOptions) {
         remove: (input: RepoCollaboratorsRemoveRequest) =>
           rpcCall<{ ok: boolean }>(opts, "repo.collaborators.remove", input),
       },
+      invites: {
+        create: (input: RepoInvitesCreateRequest) =>
+          rpcCall<RepoInvitesCreateResponse>(opts, "repo.invites.create", input),
+        list: (input: RepoGetRequest) =>
+          rpcCall<RepoInvitesListResponse>(opts, "repo.invites.list", input),
+        revoke: (input: RepoInvitesRevokeRequest) =>
+          rpcCall<{ ok: boolean }>(opts, "repo.invites.revoke", input),
+      },
       branchProtection: {
         list: (input: RepoGetRequest) =>
           rpcCall<BranchProtectionListResponse>(opts, "repo.branchProtection.list", input),
@@ -2604,7 +2677,7 @@ export function createClient(opts: CreateClientOptions) {
       },
       invites: {
         create: (input: OrgInvitesCreateRequest) =>
-          rpcCall<OrgInvitePublic>(opts, "org.invites.create", input),
+          rpcCall<OrgInvitesCreateResponse>(opts, "org.invites.create", input),
         list: (input: OrgSlugRequest) =>
           rpcCall<OrgInvitesListResponse>(opts, "org.invites.list", input),
         revoke: (input: OrgInvitesRevokeRequest) =>
@@ -2903,6 +2976,8 @@ export function createClient(opts: CreateClientOptions) {
           rpcCall<AdminUserPublic>(opts, "admin.users.unban", input),
         delete: (input: AdminUsersDeleteRequest) =>
           rpcCall<AdminUsersDeleteResponse>(opts, "admin.users.delete", input),
+        getAccess: (input: AdminUsersUserIdRequest) =>
+          rpcCall<AdminUsersGetAccessResponse>(opts, "admin.users.getAccess", input),
       },
       invites: {
         create: (input: AdminInvitesCreateRequest) =>
@@ -3033,7 +3108,7 @@ export function userLookupQueryOptions(
   input: UserLookupRequest,
 ) {
   return {
-    queryKey: ["user", "lookup", input.prefix] as const,
+    queryKey: ["user", "lookup", input.prefix, input.context ?? null] as const,
     queryFn: async () => {
       const res = await client.user.lookup(input);
       if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);

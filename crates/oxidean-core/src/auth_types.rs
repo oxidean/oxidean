@@ -195,6 +195,18 @@ pub struct UpdateProfileRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserLookupRequest {
     pub prefix: String,
+    /// Optional scope for exclude/rank (PR-B contextual autocomplete).
+    #[serde(default)]
+    pub context: Option<UserLookupContext>,
+}
+
+/// Scope for contextual `user.lookup` ranking / exclusion.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum UserLookupContext {
+    Instance,
+    Org { slug: String },
+    Repo { owner: String, name: String },
 }
 
 /// Public autocomplete hit — never includes email (T-10-03).
@@ -315,7 +327,7 @@ pub struct InvitesAcceptRequest {
     pub password: Option<String>,
 }
 
-/// Unified `invites.accept` response — instance signup or org membership.
+/// Unified `invites.accept` response — instance signup, org membership, or repo collaborator.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum InvitesAcceptResponse {
@@ -324,6 +336,34 @@ pub enum InvitesAcceptResponse {
         org: crate::OrgPublic,
         member: crate::OrgMemberPublic,
     },
+    Repo {
+        owner: String,
+        name: String,
+        permission: crate::CollaboratorPermission,
+    },
+}
+
+/// Org membership summary for `admin.users.getAccess`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminUserAccessOrg {
+    pub slug: String,
+    pub display_name: String,
+    pub role: crate::OrgRole,
+}
+
+/// Repo collaborator grant summary for `admin.users.getAccess`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminUserAccessRepo {
+    pub owner: String,
+    pub name: String,
+    pub permission: crate::CollaboratorPermission,
+}
+
+/// `admin.users.getAccess` response — read-only memberships / grants.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminUsersGetAccessResponse {
+    pub orgs: Vec<AdminUserAccessOrg>,
+    pub repos: Vec<AdminUserAccessRepo>,
 }
 
 /// Instance auth settings for admin UI — secrets never returned; ENV badges only (D-09, T-04-22).

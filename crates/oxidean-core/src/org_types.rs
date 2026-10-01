@@ -231,6 +231,13 @@ pub struct OrgInvitesCreateRequest {
     pub role: OrgRole,
 }
 
+/// `org.invites.create` — invite metadata + one-time copyable URL.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrgInvitesCreateResponse {
+    pub invite: OrgInvitePublic,
+    pub invite_url: String,
+}
+
 /// `org.invites.revoke`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OrgInvitesRevokeRequest {

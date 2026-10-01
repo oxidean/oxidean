@@ -1190,6 +1190,47 @@ pub struct RepoCollaboratorsRemoveRequest {
     pub user_id: String,
 }
 
+/// Public pending repo invite — never includes token or token_hash.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoInvitePublic {
+    pub id: String,
+    pub email: String,
+    pub permission: CollaboratorPermission,
+    pub expires_at: String,
+    pub invited_by: String,
+    pub created_at: String,
+}
+
+/// `repo.invites.list` response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoInvitesListResponse {
+    pub invites: Vec<RepoInvitePublic>,
+}
+
+/// `repo.invites.create`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoInvitesCreateRequest {
+    pub owner: String,
+    pub name: String,
+    pub email: String,
+    pub permission: CollaboratorPermission,
+}
+
+/// `repo.invites.create` — invite metadata + one-time copyable URL.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoInvitesCreateResponse {
+    pub invite: RepoInvitePublic,
+    pub invite_url: String,
+}
+
+/// `repo.invites.revoke`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoInvitesRevokeRequest {
+    pub owner: String,
+    pub name: String,
+    pub invite_id: String,
+}
+
 /// Org profile meta-repos (Oxidean-first; `.github` kept for compatibility). Leading `.` is otherwise rejected.
 const ALLOWED_DOT_REPO_NAMES: &[&str] = &[".oxidean", ".github"];
 

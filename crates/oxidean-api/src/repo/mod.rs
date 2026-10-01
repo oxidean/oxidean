@@ -7,6 +7,7 @@ mod branch_protection;
 mod commit_status;
 mod collaborators;
 mod fork_network;
+mod invites;
 mod language_stats;
 mod rename_transfer;
 mod search;
@@ -29,6 +30,9 @@ pub use commit_status::{create as commit_status_create, list as commit_status_li
 pub use collaborators::{
     add as collaborators_add, list as collaborators_list, remove as collaborators_remove,
     resolve_repo_for_admin, update as collaborators_update,
+};
+pub use invites::{
+    create as invites_create, list as invites_list, revoke as invites_revoke,
 };
 pub use fork_network::head_valid_for_base;
 pub use rename_transfer::{
