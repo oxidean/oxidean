@@ -183,7 +183,7 @@ async fn bootstrap_sysadmin(db: &Database) -> (String, String) {
 }
 
 async fn login_as(
-    app: &axum::Router,
+    _app: &axum::Router,
     db: &Database,
     user_id: &str,
 ) -> String {
