@@ -197,6 +197,8 @@ export function OrgMembersPage() @{
   const [inviteError, setInviteError] = useState("");
   const [inviteSuccess, setInviteSuccess] = useState("");
   const [invitePending, setInvitePending] = useState(false);
+  const [createdInviteUrl, setCreatedInviteUrl] = useState("");
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "error">("idle");
 
   const addForm = useForm({
     defaultValues: {
@@ -246,6 +248,8 @@ export function OrgMembersPage() @{
     onSubmit: async ({ value }) => {
       setInviteError("");
       setInviteSuccess("");
+      setCreatedInviteUrl("");
+      setCopyState("idle");
       const email = value.email.trim();
       if (!email) {
         setInviteError("Email is required.");
@@ -269,6 +273,7 @@ export function OrgMembersPage() @{
         }
         inviteForm.reset();
         setInviteSuccess("Invitation sent.");
+        setCreatedInviteUrl(res.data.invite_url);
         setInvitePending(false);
         await refreshInvites();
       } catch {
@@ -289,6 +294,20 @@ export function OrgMembersPage() @{
 
   async function refreshInvites() {
     await queryClient.invalidateQueries({ queryKey: invitesQueryKey(slug) });
+  }
+
+  async function copyInviteUrl() {
+    if (!createdInviteUrl) return;
+    try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error("clipboard unavailable");
+      }
+      await navigator.clipboard.writeText(createdInviteUrl);
+      setCopyState("copied");
+      window.setTimeout(() => setCopyState("idle"), 2000);
+    } catch {
+      setCopyState("error");
+    }
   }
 
   async function updateRole(member: OrgMemberPublic, role: OrgRole) {
@@ -449,6 +468,7 @@ export function OrgMembersPage() @{
                   <MemberLookup
                     value={field.state.value}
                     onValueChange={field.handleChange}
+                    context={{ kind: "org", slug }}
                   />
                 )}
               </addForm.Field>
@@ -498,6 +518,32 @@ export function OrgMembersPage() @{
                 <p role="status" className="text-[14px] text-foreground">
                   {inviteSuccess as string}
                 </p>;
+              }
+              @if (createdInviteUrl) {
+                <div className="flex flex-col gap-2 rounded-md border border-border p-3">
+                  <Label htmlFor="org-invite-url">Invite link</Label>
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <Input
+                      id="org-invite-url"
+                      readOnly
+                      value={createdInviteUrl as string}
+                      className="font-mono text-[13px]"
+                    />
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="h-11 shrink-0"
+                      onClick={() => void copyInviteUrl()}
+                    >
+                      {(copyState === "copied" ? "Copied" : "Copy link") as string}
+                    </Button>
+                  </div>
+                  @if (copyState === "error") {
+                    <p role="alert" className="text-[13px] text-destructive">
+                      Could not copy. Select the link and copy it manually.
+                    </p>;
+                  }
+                </div>;
               }
               <inviteForm.Field name="email">
                 {(field) => (

@@ -54,6 +54,19 @@ describe("repo settings Collaborators (ORG-03 / D-ORG-02c / D-ORG-04)", () => {
       String((m as { default: string }).default),
     );
     expect(src).toMatch(/MemberLookup/);
+    expect(src).toMatch(/kind:\s*"repo"/);
     expect(src).not.toMatch(/hit\.email/);
+  }, 30_000);
+
+  it("email invite panel: create list revoke + copy link", async () => {
+    const src = await import("../components/repo/collaborators-panel.tsrx?raw").then((m) =>
+      String((m as { default: string }).default),
+    );
+    expect(src).toMatch(/Email invitations/);
+    expect(src).toMatch(/invites\.create/);
+    expect(src).toMatch(/invites\.list/);
+    expect(src).toMatch(/invites\.revoke/);
+    expect(src).toMatch(/invite_url/);
+    expect(src).toMatch(/Copy link/);
   }, 30_000);
 });

@@ -1,7 +1,10 @@
 import { createFileRoute, useLoaderData } from "@octanejs/tanstack-router";
 import { useQuery, useQueryClient } from "@octanejs/tanstack-query";
 import type {
+  AdminUserAccessOrg,
+  AdminUserAccessRepo,
   AdminUserPublic,
+  AdminUsersGetAccessResponse,
   AdminUsersListResponse,
   InstanceInvitePublic,
   UserPublic,
@@ -70,6 +73,75 @@ function roleLabel(role: UserRole): string {
 
 function isBanned(user: AdminUserPublic): boolean {
   return user.banned_at != null && user.banned_at !== "";
+}
+
+type AccessSummaryView = {
+  orgs: AdminUserAccessOrg[];
+  repos: AdminUserAccessRepo[];
+  error?: string;
+  loading: boolean;
+};
+
+function AdminUserAccessPanel({
+  userId,
+  summary,
+}: {
+  userId: string;
+  summary: AccessSummaryView;
+}) @{
+  <div
+    className="mt-3 max-w-xl rounded-md border border-border bg-muted/30 p-3 text-[13px]"
+    data-testid={`admin-user-access-${userId}`}
+  >
+    @if (summary.loading) {
+      <p className="text-muted-foreground">Loading access…</p>;
+    } @else {
+      @if (summary.error) {
+        <p role="alert" className="text-destructive">
+          {summary.error as string}
+        </p>;
+      } @else {
+        <>
+          <p className="font-medium text-foreground">Organizations</p>
+          @if (summary.orgs.length === 0) {
+            <p className="mt-1 text-muted-foreground">None</p>;
+          } @else {
+            <ul className="mt-1 list-inside list-disc text-muted-foreground">
+              @for (const org of summary.orgs; key org.slug) {
+                <li>
+                  <a
+                    href={`/${org.slug}`}
+                    className="text-primary underline-offset-2 hover:underline"
+                  >
+                    {org.slug as string}
+                  </a>
+                  {` · ${org.role} · ${org.display_name}` as string}
+                </li>;
+              }
+            </ul>;
+          }
+          <p className="mt-3 font-medium text-foreground">Repository grants</p>
+          @if (summary.repos.length === 0) {
+            <p className="mt-1 text-muted-foreground">None</p>;
+          } @else {
+            <ul className="mt-1 list-inside list-disc text-muted-foreground">
+              @for (const repo of summary.repos; key `${repo.owner}/${repo.name}`) {
+                <li>
+                  <a
+                    href={`/${repo.owner}/${repo.name}`}
+                    className="text-primary underline-offset-2 hover:underline"
+                  >
+                    {`${repo.owner}/${repo.name}` as string}
+                  </a>
+                  {` · ${repo.permission}` as string}
+                </li>;
+              }
+            </ul>;
+          }
+        </>;
+      }
+    }
+  </div>;
 }
 
 function formatShortDate(iso: string): string {
@@ -157,6 +229,12 @@ export function AdminUsersPage() @{
   const [inviteError, setInviteError] = useState("");
   const [createdInviteUrl, setCreatedInviteUrl] = useState("");
   const [copyState, setCopyState] = useState<"idle" | "copied" | "error">("idle");
+
+  const [accessUserId, setAccessUserId] = useState<string | null>(null);
+  const [accessCache, setAccessCache] = useState<
+    Record<string, AdminUsersGetAccessResponse | { error: string }>
+  >({});
+  const [accessLoadingId, setAccessLoadingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (loaderData?.kind === "unauthenticated") {
@@ -367,6 +445,47 @@ export function AdminUsersPage() @{
     } catch {
       setCopyState("error");
     }
+  }
+
+  async function toggleAccess(user: AdminUserPublic) {
+    if (accessUserId === user.id) {
+      setAccessUserId(null);
+      return;
+    }
+    setAccessUserId(user.id);
+    if (accessCache[user.id]) return;
+    setAccessLoadingId(user.id);
+    try {
+      const res = await apiClient.admin.users.getAccess({ user_id: user.id });
+      if (!res.ok) {
+        setAccessCache((prev) => ({
+          ...prev,
+          [user.id]: { error: res.error.message || NETWORK_ERROR },
+        }));
+      } else {
+        setAccessCache((prev) => ({ ...prev, [user.id]: res.data }));
+      }
+    } catch {
+      setAccessCache((prev) => ({
+        ...prev,
+        [user.id]: { error: NETWORK_ERROR },
+      }));
+    } finally {
+      setAccessLoadingId(null);
+    }
+  }
+
+  function accessSummary(userId: string): {
+    orgs: AdminUserAccessOrg[];
+    repos: AdminUserAccessRepo[];
+    error?: string;
+    loading: boolean;
+  } {
+    const cached = accessCache[userId];
+    const loading = accessLoadingId === userId;
+    if (!cached) return { orgs: [], repos: [], loading };
+    if ("error" in cached) return { orgs: [], repos: [], error: cached.error, loading };
+    return { orgs: cached.orgs, repos: cached.repos, loading };
   }
 
   const readyFromLoader = loaderData?.kind === "ready";
@@ -635,6 +754,18 @@ export function AdminUsersPage() @{
                               <Button
                                 type="button"
                                 variant="ghost"
+                                className="h-9 px-2"
+                                onClick={() => void toggleAccess(user)}
+                              >
+                                {
+                                  (accessUserId === user.id
+                                    ? "Hide access"
+                                    : "View access") as string
+                                }
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="ghost"
                                 className="h-9 px-2 text-destructive"
                                 disabled={user.id === selfId}
                                 onClick={() => {
@@ -646,6 +777,14 @@ export function AdminUsersPage() @{
                                 Delete
                               </Button>
                             </div>
+                            @if (
+                              accessUserId === user.id
+                            ) {
+                              <AdminUserAccessPanel
+                                userId={user.id}
+                                summary={accessSummary(user.id)}
+                              />;
+                            }
                           </td>
                         </tr>;
                       } @empty {

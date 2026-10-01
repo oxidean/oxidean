@@ -135,6 +135,8 @@ export function InviteAcceptPage() @{
       setPhase({ kind: "done", accept: res.data });
       if (res.data.kind === "org") {
         window.location.assign(`/${res.data.org.slug}`);
+      } else if (res.data.kind === "repo") {
+        window.location.assign(`/${res.data.owner}/${res.data.name}`);
       } else {
         window.location.assign("/");
       }
@@ -159,9 +161,22 @@ export function InviteAcceptPage() @{
           <p className="text-sm text-muted-foreground">You're in. Opening the organization…</p>
         </AuthShell>;
       } @else {
-        <AuthShell title="Invitation accepted" support="Redirecting to your home…">
-          <p className="text-sm text-muted-foreground">Your account is ready. Opening Oxidean…</p>
-        </AuthShell>;
+        @if (phase.accept.kind === "repo") {
+          <AuthShell
+            title="Invitation accepted"
+            support={`Redirecting to /${phase.accept.owner as string}/${phase.accept.name as string}…`}
+          >
+            <p className="text-sm text-muted-foreground">
+              {
+                `You now have ${phase.accept.permission as string} access. Opening the repository…` as string
+              }
+            </p>
+          </AuthShell>;
+        } @else {
+          <AuthShell title="Invitation accepted" support="Redirecting to your home…">
+            <p className="text-sm text-muted-foreground">Your account is ready. Opening Oxidean…</p>
+          </AuthShell>;
+        }
       }
     } @else {
       @if (phase.kind === "logged-in") {

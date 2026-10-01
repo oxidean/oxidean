@@ -1,4 +1,8 @@
-import type { CollaboratorPermission, RepoCollaboratorPublic } from "@oxidean/api-client";
+import type {
+  CollaboratorPermission,
+  RepoCollaboratorPublic,
+  RepoInvitePublic,
+} from "@oxidean/api-client";
 import { Check, ChevronDown } from "@octanejs/lucide";
 import { useQuery, useQueryClient } from "@octanejs/tanstack-query";
 import { useForm } from "@octanejs/tanstack-form";
@@ -15,6 +19,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   SelectIcon,
@@ -45,6 +50,10 @@ function permLabel(p: CollaboratorPermission): string {
 
 function collaboratorsQueryKey(owner: string, name: string) {
   return ["repo", "collaborators", owner, name] as const;
+}
+
+function invitesQueryKey(owner: string, name: string) {
+  return ["repo", "invites", owner, name] as const;
 }
 
 function PermissionSelect({
@@ -120,10 +129,29 @@ export function CollaboratorsPanel({ owner, name }: CollaboratorsPanelProps) @{
     },
   });
 
+  const invitesQ = useQuery({
+    queryKey: invitesQueryKey(owner, name),
+    queryFn: async () => {
+      const res = await apiClient.repo.invites.list({ owner, name });
+      if (!res.ok) {
+        throw new Error(res.error.message || NETWORK_ERROR);
+      }
+      return res.data;
+    },
+  });
+
   const collaborators: RepoCollaboratorPublic[] = listQ.data?.collaborators ?? [];
+  const invites: RepoInvitePublic[] = invitesQ.data?.invites ?? [];
 
   const [addError, setAddError] = useState("");
   const [addPending, setAddPending] = useState(false);
+  const [showAdd, setShowAdd] = useState(false);
+
+  const [inviteError, setInviteError] = useState("");
+  const [inviteSuccess, setInviteSuccess] = useState("");
+  const [invitePending, setInvitePending] = useState(false);
+  const [createdInviteUrl, setCreatedInviteUrl] = useState("");
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "error">("idle");
 
   const addForm = useForm({
     defaultValues: {
@@ -153,23 +181,86 @@ export function CollaboratorsPanel({ owner, name }: CollaboratorsPanelProps) @{
         addForm.reset();
         setShowAdd(false);
         setAddPending(false);
-        await refresh();
+        await refreshCollabs();
       } catch {
         setAddError(NETWORK_ERROR);
         setAddPending(false);
       }
     },
   });
-  const [showAdd, setShowAdd] = useState(false);
+
+  const inviteForm = useForm({
+    defaultValues: {
+      email: "",
+      permission: "write" as CollaboratorPermission,
+    },
+    onSubmit: async ({ value }) => {
+      setInviteError("");
+      setInviteSuccess("");
+      setCreatedInviteUrl("");
+      setCopyState("idle");
+      const email = value.email.trim();
+      if (!email) {
+        setInviteError("Email is required.");
+        return;
+      }
+      setInvitePending(true);
+      try {
+        const res = await apiClient.repo.invites.create({
+          owner,
+          name,
+          email,
+          permission: value.permission,
+        });
+        if (!res.ok) {
+          setInviteError(res.error.message || NETWORK_ERROR);
+          setInvitePending(false);
+          return;
+        }
+        inviteForm.reset();
+        setInviteSuccess("Invitation sent.");
+        setCreatedInviteUrl(res.data.invite_url);
+        setInvitePending(false);
+        await refreshInvites();
+      } catch {
+        setInviteError(NETWORK_ERROR);
+        setInvitePending(false);
+      }
+    },
+  });
+
   const [rowError, setRowError] = useState("");
   const [removeTarget, setRemoveTarget] = useState<RepoCollaboratorPublic | null>(null);
   const [removePending, setRemovePending] = useState(false);
   const [removeError, setRemoveError] = useState("");
+  const [revokeTarget, setRevokeTarget] = useState<RepoInvitePublic | null>(null);
+  const [revokePending, setRevokePending] = useState(false);
+  const [revokeError, setRevokeError] = useState("");
 
-  async function refresh() {
+  async function refreshCollabs() {
     await queryClient.invalidateQueries({
       queryKey: collaboratorsQueryKey(owner, name),
     });
+  }
+
+  async function refreshInvites() {
+    await queryClient.invalidateQueries({
+      queryKey: invitesQueryKey(owner, name),
+    });
+  }
+
+  async function copyInviteUrl() {
+    if (!createdInviteUrl) return;
+    try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error("clipboard unavailable");
+      }
+      await navigator.clipboard.writeText(createdInviteUrl);
+      setCopyState("copied");
+      window.setTimeout(() => setCopyState("idle"), 2000);
+    } catch {
+      setCopyState("error");
+    }
   }
 
   async function updatePermission(row: RepoCollaboratorPublic, permission: CollaboratorPermission) {
@@ -186,7 +277,7 @@ export function CollaboratorsPanel({ owner, name }: CollaboratorsPanelProps) @{
         setRowError(res.error.message || NETWORK_ERROR);
         return;
       }
-      await refresh();
+      await refreshCollabs();
     } catch {
       setRowError(NETWORK_ERROR);
     }
@@ -209,10 +300,34 @@ export function CollaboratorsPanel({ owner, name }: CollaboratorsPanelProps) @{
       }
       setRemovePending(false);
       setRemoveTarget(null);
-      await refresh();
+      await refreshCollabs();
     } catch {
       setRemoveError(NETWORK_ERROR);
       setRemovePending(false);
+    }
+  }
+
+  async function confirmRevoke() {
+    if (!revokeTarget || revokePending) return;
+    setRevokeError("");
+    setRevokePending(true);
+    try {
+      const res = await apiClient.repo.invites.revoke({
+        owner,
+        name,
+        invite_id: revokeTarget.id,
+      });
+      if (!res.ok) {
+        setRevokeError(res.error.message || NETWORK_ERROR);
+        setRevokePending(false);
+        return;
+      }
+      setRevokePending(false);
+      setRevokeTarget(null);
+      await refreshInvites();
+    } catch {
+      setRevokeError(NETWORK_ERROR);
+      setRevokePending(false);
     }
   }
 
@@ -319,6 +434,7 @@ export function CollaboratorsPanel({ owner, name }: CollaboratorsPanelProps) @{
               label="Username"
               value={field.state.value}
               onValueChange={field.handleChange}
+              context={{ kind: "repo", owner, name }}
             />
           )}
         </addForm.Field>
@@ -360,6 +476,141 @@ export function CollaboratorsPanel({ owner, name }: CollaboratorsPanelProps) @{
       </form>;
     }
 
+    <section className="mt-8 flex flex-col gap-4" aria-labelledby="repo-invites-heading">
+      <h3 id="repo-invites-heading" className="text-[16px] font-semibold text-foreground">
+        Email invitations
+      </h3>
+      <p className="text-[14px] text-muted-foreground">
+        Invite someone by email. They can join even when public sign-up is closed.
+      </p>
+
+      <form
+        className="flex flex-col gap-4"
+        method="post"
+        action="#"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void inviteForm.handleSubmit();
+        }}
+      >
+        @if (inviteError) {
+          <AuthErrorBanner message={inviteError} />;
+        }
+        @if (inviteSuccess) {
+          <p role="status" className="text-[14px] text-foreground">
+            {inviteSuccess as string}
+          </p>;
+        }
+        @if (createdInviteUrl) {
+          <div className="flex flex-col gap-2 rounded-md border border-border p-3">
+            <Label htmlFor="repo-invite-url">Invite link</Label>
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Input
+                id="repo-invite-url"
+                readOnly
+                value={createdInviteUrl as string}
+                className="font-mono text-[13px]"
+              />
+              <Button
+                type="button"
+                variant="secondary"
+                className="h-11 shrink-0"
+                onClick={() => void copyInviteUrl()}
+              >
+                {(copyState === "copied" ? "Copied" : "Copy link") as string}
+              </Button>
+            </div>
+            @if (copyState === "error") {
+              <p role="alert" className="text-[13px] text-destructive">
+                Could not copy. Select the link and copy it manually.
+              </p>;
+            }
+          </div>;
+        }
+        <inviteForm.Field name="email">
+          {(field) => (
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="repo-invite-email">Email</Label>
+              <Input
+                id="repo-invite-email"
+                name="email"
+                type="email"
+                autoComplete="email"
+                value={field.state.value}
+                onBlur={field.handleBlur}
+                onInput={(ev) => field.handleChange((ev.currentTarget as HTMLInputElement).value)}
+              />
+            </div>
+          )}
+        </inviteForm.Field>
+        <inviteForm.Subscribe selector={(s) => s.values.permission}>
+          {(invitePerm) => (
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="repo-invite-perm">Permission</Label>
+              <PermissionSelect
+                id="repo-invite-perm"
+                value={invitePerm}
+                onChange={(p) => inviteForm.setFieldValue("permission", p)}
+                ariaLabel="Invite permission"
+              />
+            </div>
+          )}
+        </inviteForm.Subscribe>
+        <Button type="submit" className="h-11 w-fit" disabled={invitePending}>
+          @if (invitePending) {
+            <>Sending…</>;
+          } @else {
+            <>Send invitation</>;
+          }
+        </Button>
+      </form>
+
+      <h4 className="mt-2 text-[15px] font-semibold text-foreground">Pending invitations</h4>
+      @if (invitesQ.isPending) {
+        <p className="text-[14px] text-muted-foreground">Loading…</p>;
+      } @else if (invitesQ.isError) {
+        <p role="alert" className="text-[14px] text-destructive">
+          {
+            (invitesQ.error instanceof Error
+              ? invitesQ.error.message
+              : NETWORK_ERROR) as string
+          }
+        </p>;
+      } @else if (invites.length === 0) {
+        <p className="text-[14px] text-muted-foreground">No pending invitations.</p>;
+      } @else {
+        <ul className="divide-y divide-border border-y border-border">
+          @for (const inv of invites; key inv.id) {
+            <li className="flex flex-wrap items-center justify-between gap-3 py-3">
+              <div>
+                <p className="text-[14px] font-medium text-foreground">
+                  {inv.email as string}
+                </p>
+                <p className="text-[13px] text-muted-foreground">
+                  {
+                    (permLabel(inv.permission) +
+                      " · expires " +
+                      inv.expires_at) as string
+                  }
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-11"
+                onClick={() => {
+                  setRevokeError("");
+                  setRevokeTarget(inv);
+                }}
+              >
+                Revoke
+              </Button>
+            </li>;
+          }
+        </ul>;
+      }
+    </section>
+
     <AlertDialog
       open={!!removeTarget}
       onOpenChange={(open) => {
@@ -395,6 +646,46 @@ export function CollaboratorsPanel({ owner, name }: CollaboratorsPanelProps) @{
             onClick={() => void confirmRemove()}
           >
             {(removePending ? "Removing…" : "Remove collaborator") as string}
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+
+    <AlertDialog
+      open={revokeTarget != null}
+      onOpenChange={(next) => {
+        if (revokePending) return;
+        if (!next) {
+          setRevokeError("");
+          setRevokeTarget(null);
+        }
+      }}
+    >
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Revoke invite?</AlertDialogTitle>
+          <AlertDialogDescription>
+            {
+              (revokeTarget
+                ? `Revokes the invitation for ${revokeTarget.email}. They will no longer be able to join with this link.`
+                : "Revoke this invitation?") as string
+            }
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        @if (revokeError) {
+          <p role="alert" className="text-[14px] text-destructive">
+            {revokeError as string}
+          </p>;
+        }
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={revokePending}>Keep invite</AlertDialogCancel>
+          <Button
+            type="button"
+            variant="destructive"
+            disabled={revokePending}
+            onClick={() => void confirmRevoke()}
+          >
+            {(revokePending ? "Revoking…" : "Revoke invite") as string}
           </Button>
         </AlertDialogFooter>
       </AlertDialogContent>

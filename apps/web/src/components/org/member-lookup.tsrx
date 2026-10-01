@@ -1,4 +1,4 @@
-import type { UserLookupHit } from "@oxidean/api-client";
+import type { UserLookupContext, UserLookupHit } from "@oxidean/api-client";
 import { userLookupQueryOptions } from "@oxidean/api-client";
 import { useQuery } from "@octanejs/tanstack-query";
 import { useEffect, useState } from "octane";
@@ -20,6 +20,8 @@ export type MemberLookupProps = {
   compact?: boolean;
   className?: string;
   inputClassName?: string;
+  /** Contextual exclude/rank for add-member / add-collaborator. */
+  context?: UserLookupContext | null;
 };
 
 /**
@@ -38,6 +40,7 @@ export function MemberLookup({
   compact = false,
   className,
   inputClassName,
+  context = null,
 }: MemberLookupProps) @{
   const [debounced, setDebounced] = useState(value.trim());
   const [open, setOpen] = useState(false);
@@ -54,7 +57,10 @@ export function MemberLookup({
   const enabled = prefix.length >= 2;
 
   const lookup = useQuery({
-    ...userLookupQueryOptions(apiClient, { prefix }),
+    ...userLookupQueryOptions(apiClient, {
+      prefix,
+      context: context ?? undefined,
+    }),
     enabled,
   });
 

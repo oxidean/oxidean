@@ -83,4 +83,14 @@ describe("/invites/$token (G-11.1-15)", () => {
       { timeout: 10_000 },
     );
   });
+
+  it("handles repo invite accept kind in source", async () => {
+    const src = await import("./invites.$token.tsrx?raw").then((m) =>
+      String((m as { default: string }).default),
+    );
+    expect(src).toMatch(/kind === "repo"/);
+    expect(src).toMatch(/res\.data\.owner/);
+    expect(src).toMatch(/res\.data\.name/);
+    expect(src).toMatch(/permission/);
+  });
 });
