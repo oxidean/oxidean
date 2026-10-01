@@ -12,6 +12,7 @@ const banMock = vi.fn();
 const unbanMock = vi.fn();
 const deleteUserMock = vi.fn();
 const revokeInviteMock = vi.fn();
+const getAccessMock = vi.fn();
 
 vi.mock("@/lib/api-client", () => ({
   apiClient: {
@@ -26,6 +27,7 @@ vi.mock("@/lib/api-client", () => ({
         ban: (...args: unknown[]) => banMock(...args),
         unban: (...args: unknown[]) => unbanMock(...args),
         delete: (...args: unknown[]) => deleteUserMock(...args),
+        getAccess: (...args: unknown[]) => getAccessMock(...args),
       },
       invites: {
         create: (...args: unknown[]) => createInviteMock(...args),
@@ -34,6 +36,12 @@ vi.mock("@/lib/api-client", () => ({
       },
     },
   },
+}));
+
+vi.mock("@/lib/toast", () => ({
+  toastSuccess: vi.fn(),
+  toastError: vi.fn(),
+  toastWarning: vi.fn(),
 }));
 
 const sysAdmin = {
@@ -126,6 +134,7 @@ describe("/admin/users", () => {
     unbanMock.mockReset();
     deleteUserMock.mockReset();
     revokeInviteMock.mockReset();
+    getAccessMock.mockReset();
     assignMock.mockReset();
     Object.defineProperty(window, "location", {
       configurable: true,
@@ -140,6 +149,21 @@ describe("/admin/users", () => {
       data: {
         invite: pendingInvite,
         invite_url: "https://oxidean.example/invites/tok-abc",
+      },
+    });
+    banMock.mockResolvedValue({
+      ok: true,
+      data: { ...listedUser, banned_at: "2026-09-30T12:00:00Z" },
+    });
+    deleteUserMock.mockResolvedValue({
+      ok: true,
+      data: { ok: true, deleted_repos: 1, deleted_orgs: 0 },
+    });
+    getAccessMock.mockResolvedValue({
+      ok: true,
+      data: {
+        orgs: [{ slug: "acme", display_name: "Acme", role: "member" }],
+        repos: [{ owner: "acme", name: "app", permission: "write" }],
       },
     });
     loaderData = {
@@ -225,6 +249,133 @@ describe("/admin/users", () => {
       );
       expect(screen.getByTestId("admin-invite-url-copy")).toBeTruthy();
       expect(screen.getByRole("button", { name: /Copy invite URL|Copy link/i })).toBeTruthy();
+    });
+  });
+
+  it("opens ban confirm dialog and calls ban RPC", async () => {
+    renderWithQueryClient(AdminUsersPage);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("admin-user-ban-u2")).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByTestId("admin-user-ban-u2"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("admin-users-confirm-dialog")).toBeTruthy();
+      expect(screen.getByText(/Ban @ada/i)).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /^Ban user$/i }));
+
+    await waitFor(() => {
+      expect(banMock).toHaveBeenCalledWith({ user_id: "u2" });
+    });
+  });
+
+  it("delete dialog requires username confirmation before submit", async () => {
+    renderWithQueryClient(AdminUsersPage);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("admin-user-delete-u2")).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByTestId("admin-user-delete-u2"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("admin-users-delete-dialog")).toBeTruthy();
+      expect(screen.getByTestId("admin-delete-confirm")).toBeTruthy();
+    });
+
+    expect(screen.getByTestId("admin-users-delete-submit")).toBeDisabled();
+
+    fireEvent.input(screen.getByTestId("admin-delete-confirm"), {
+      target: { value: "ada" },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("admin-users-delete-submit")).not.toBeDisabled();
+    });
+
+    fireEvent.click(screen.getByTestId("admin-users-delete-submit"));
+
+    await waitFor(() => {
+      expect(deleteUserMock).toHaveBeenCalledWith({
+        user_id: "u2",
+        confirmation: "ada",
+      });
+    });
+  });
+
+  it("view access loads getAccess and shows org/repo grants", async () => {
+    renderWithQueryClient(AdminUsersPage);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("admin-user-access-toggle-u2")).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByTestId("admin-user-access-toggle-u2"));
+
+    await waitFor(() => {
+      expect(getAccessMock).toHaveBeenCalledWith({ user_id: "u2" });
+      const panel = screen.getByTestId("admin-user-access-u2");
+      expect(panel).toBeTruthy();
+      expect(panel.textContent).toMatch(/Organizations/);
+      expect(panel.textContent).toMatch(/acme/);
+      expect(panel.textContent).toMatch(/acme\/app/);
+      expect(panel.textContent).toMatch(/write/i);
+      expect(panel.querySelector('a[href="/acme"]')).toBeTruthy();
+      expect(panel.querySelector('a[href="/acme/app"]')).toBeTruthy();
+    });
+  });
+
+  it("revoke sessions confirm calls revokeSessions RPC", async () => {
+    revokeSessionsMock.mockResolvedValue({ ok: true, data: { revoked: 3 } });
+    renderWithQueryClient(AdminUsersPage);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("admin-user-revoke-sessions-u2")).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByTestId("admin-user-revoke-sessions-u2"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("admin-users-confirm-dialog")).toBeTruthy();
+      expect(screen.getByText(/Force-logout @ada/i)).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /^Revoke sessions$/i }));
+
+    await waitFor(() => {
+      expect(revokeSessionsMock).toHaveBeenCalledWith({ user_id: "u2" });
+    });
+  });
+
+  it("make sys-admin confirm calls updateRole RPC", async () => {
+    updateRoleMock.mockResolvedValue({
+      ok: true,
+      data: { ...listedUser, role: "sys-admin" },
+    });
+    renderWithQueryClient(AdminUsersPage);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("admin-user-make-sysadmin-u2")).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByTestId("admin-user-make-sysadmin-u2"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("admin-users-confirm-dialog")).toBeTruthy();
+      expect(screen.getByText(/Grant system administrator access to @ada/i)).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /^Grant system admin$/i }));
+
+    await waitFor(() => {
+      expect(updateRoleMock).toHaveBeenCalledWith({
+        user_id: "u2",
+        role: "sys-admin",
+      });
     });
   });
 });

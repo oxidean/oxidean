@@ -286,6 +286,16 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
     coverage: [{ kind: "stack-browser", test: FORGE_ADMIN, subject: "admin/auth" }],
   },
   {
+    surface: "routes/admin/users.tsrx",
+    coverage: [
+      {
+        kind: "browser",
+        test: "apps/web/src/routes/admin/users.browser.test.tsx",
+        subject: "admin-users-page",
+      },
+    ],
+  },
+  {
     surface: "routes/admin/templates.tsrx",
     coverage: [
       {

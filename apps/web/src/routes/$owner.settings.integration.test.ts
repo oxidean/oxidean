@@ -2,13 +2,15 @@
  * Org settings layout + General / Members / Labels render coverage.
  */
 import { createElement } from "octane";
-import { cleanup, screen, waitFor } from "@octanejs/testing-library";
+import { cleanup, fireEvent, screen, waitFor } from "@octanejs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithQueryClient } from "@/test/render-with-query";
 
 const updateSettingsMock = vi.fn();
 const membersListMock = vi.fn();
 const invitesListMock = vi.fn();
+const invitesCreateMock = vi.fn();
+const invitesRevokeMock = vi.fn();
 const labelsListMock = vi.fn();
 
 vi.mock("@/lib/api-client", () => ({
@@ -23,8 +25,8 @@ vi.mock("@/lib/api-client", () => ({
       },
       invites: {
         list: (...args: unknown[]) => invitesListMock(...args),
-        create: vi.fn(),
-        revoke: vi.fn(),
+        create: (...args: unknown[]) => invitesCreateMock(...args),
+        revoke: (...args: unknown[]) => invitesRevokeMock(...args),
       },
     },
     label: {
@@ -103,6 +105,23 @@ beforeEach(() => {
     },
   });
   invitesListMock.mockResolvedValue({ ok: true, data: { invites: [] } });
+  invitesCreateMock.mockReset();
+  invitesRevokeMock.mockReset();
+  invitesCreateMock.mockResolvedValue({
+    ok: true,
+    data: {
+      invite: {
+        id: "oi1",
+        email: "new@example.com",
+        role: "member",
+        expires_at: "2026-10-07T00:00:00Z",
+        invited_by: "u1",
+        created_at: "2026-09-30T00:00:00Z",
+      },
+      invite_url: "https://oxidean.example/invites/org-tok",
+    },
+  });
+  invitesRevokeMock.mockResolvedValue({ ok: true, data: { ok: true } });
   labelsListMock.mockResolvedValue({
     ok: true,
     data: {
@@ -169,6 +188,86 @@ describe("org settings members", () => {
     });
     expect(screen.getByRole("heading", { name: "Members" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Add member" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Email invitations" })).toBeInTheDocument();
+  });
+
+  it("creates org invite and shows copyable invite URL", async () => {
+    invitesListMock.mockResolvedValueOnce({ ok: true, data: { invites: [] } }).mockResolvedValue({
+      ok: true,
+      data: {
+        invites: [
+          {
+            id: "oi1",
+            email: "new@example.com",
+            role: "member",
+            expires_at: "2026-10-07T00:00:00Z",
+            invited_by: "u1",
+            created_at: "2026-09-30T00:00:00Z",
+          },
+        ],
+      },
+    });
+
+    renderWithQueryClient(OrgMembersPage);
+
+    await waitFor(() => {
+      expect(document.getElementById("invite-email")).toBeTruthy();
+    });
+
+    fireEvent.input(document.getElementById("invite-email") as HTMLInputElement, {
+      target: { value: "new@example.com" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^Send invitation$/i }));
+
+    await waitFor(() => {
+      expect(invitesCreateMock).toHaveBeenCalledWith({
+        slug: "acme",
+        email: "new@example.com",
+        role: "member",
+      });
+      expect(screen.getByDisplayValue("https://oxidean.example/invites/org-tok")).toBeTruthy();
+      expect(screen.getByRole("button", { name: /^Copy link$/i })).toBeTruthy();
+      expect(screen.getByText("new@example.com")).toBeTruthy();
+    });
+  });
+
+  it("revokes a pending org invite via confirm dialog", async () => {
+    invitesListMock.mockResolvedValue({
+      ok: true,
+      data: {
+        invites: [
+          {
+            id: "oi1",
+            email: "pending@example.com",
+            role: "member",
+            expires_at: "2026-10-07T00:00:00Z",
+            invited_by: "u1",
+            created_at: "2026-09-30T00:00:00Z",
+          },
+        ],
+      },
+    });
+
+    renderWithQueryClient(OrgMembersPage);
+
+    await waitFor(() => {
+      expect(screen.getByText("pending@example.com")).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /^Revoke$/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Revoke invite\?/i)).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /^Revoke invite$/i }));
+
+    await waitFor(() => {
+      expect(invitesRevokeMock).toHaveBeenCalledWith({
+        slug: "acme",
+        invite_id: "oi1",
+      });
+    });
   });
 
   it("unhappy: shows loading when org missing", () => {

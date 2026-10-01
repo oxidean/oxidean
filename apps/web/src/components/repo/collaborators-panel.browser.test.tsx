@@ -79,6 +79,11 @@ describe("CollaboratorsPanel browser DOM races", () => {
       await pickSelectOptionByTestId("collab-add-perm", "collab-add-perm-option-read");
 
       expect(document.querySelector('[data-testid="collab-add-perm"]')).toBeTruthy();
+
+      await waitForTestId("repo-invite-perm");
+      await pickSelectOptionByTestId("repo-invite-perm", "repo-invite-perm-option-admin");
+      await pickSelectOptionByTestId("repo-invite-perm", "repo-invite-perm-option-write");
+
       tracker.expectNoDomRaces();
       expectNoOctaneOverlayInDocument();
     } finally {
