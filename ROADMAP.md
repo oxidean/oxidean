@@ -35,6 +35,16 @@ The forge is only as useful as what third-party tools can drive. Today the typed
 - [ ] **API-05** Atom/RSS feeds for repo activity, releases, and user activity.
 - [ ] **API-06** GitHub-compatible subset for common tooling (commit statuses API shape, PR refs `refs/pull/N/head`, known webhook payload conventions) so existing CI/deploy bots work unchanged where practical.
 
+## Agents, MCP, and CLI
+
+Machine-facing surfaces beyond raw git/HTTP. These depend on API-02 (token auth) and benefit from API-03 (OAuth apps).
+
+- [ ] **AGT-01** Instance MCP server: a streamable-HTTP MCP endpoint on the instance exposing repos, issues, PRs, action runs, packages, and search as tools and resources — functionality comparable to github-mcp-server and Forgejo's MCP support.
+- [ ] **AGT-02** WebMCP surface in the web app: the app advertises MCP capabilities to browser-side agents (WebMCP, as surfaced by Chrome DevTools) backed by the instance MCP endpoint.
+- [ ] **AGT-03** MCP auth and setup model: local/stdio MCP calls work with minimal configuration; remote third-party tools authenticate via PAT or OAuth with documented scopes, configured from settings.
+- [ ] **CLI-01** Companion CLI (`ox`, gh-class): login, repo/issue/PR/actions/packages operations, scriptable JSON output, works against any instance URL.
+- [ ] **CLI-02** Server-driven compatibility contract: the CLI reads a versioned capability/procedure manifest from the connected instance (new `system.manifest`-style RPC) and feature-gates its commands, so API changes on the server never hard-break installed clients.
+
 ## Git and code surface
 
 - [ ] **GIT-21** Web file editing: create, edit, rename, delete, and upload files with a commit from the browser, signed by the existing web-flow key. Includes new-branch-with-PR flow.
@@ -77,6 +87,8 @@ v1 runs push, pull_request, and manual dispatch on self-hosted runners. Parity n
 - [ ] **CI-07** Workflow status badges endpoint for README embedding.
 - [ ] **CI-08** Re-run failed jobs and step-level debug logging controls.
 - [ ] **CI-09** Job `id-token`/OIDC for keyless cloud auth from workflows.
+- [ ] **CI-10** External/hosted runner providers (Blacksmith-class): publish a stable, versioned spec and reference SDK for `proto/runner.proto`, plus provider-facing docs and `runs-on` label conventions.
+- [ ] **CI-11** Runner protocol compatibility shim: speak an existing runner protocol (act_runner or the GitHub runner protocol) so hosted providers register without writing a custom client.
 
 ## Packages and registries
 
@@ -143,12 +155,12 @@ Carried from [.planning/PROJECT.md](.planning/PROJECT.md) so this roadmap stays 
 ## Suggested order
 
 1. **DEBT-\*** — close v1.0 residue; several items (DEBT-01, DEBT-04, DEBT-05) are prerequisites for later sections.
-2. **API-01..03** — the integration surface is the biggest parity blocker; it also unlocks MIG-01 tooling.
+2. **API-01..03** — the integration surface is the biggest parity blocker; it also unlocks MIG-01 tooling and is a prerequisite for AGT/CLI.
 3. **GIT-21..25** — web editing, archive, protected tags, deploy keys: the most-felt daily gaps for repo admins.
 4. **COL-01..08** — collaboration depth (milestones, templates, attachments, CODEOWNERS, merge queue).
 5. **CI-01..05** — scheduling, job graph, artifacts, cache, environments.
 6. **SEC-01..04** — OAuth login, 2FA, LDAP, session controls.
-7. **SRCH, NOT, PKG, OPS** — breadth tracks, parallelizable once the API surface exists.
+7. **SRCH, NOT, PKG, OPS, AGT, CLI** — breadth tracks, parallelizable once the API surface exists.
 8. **MIG-\*** — importers gain the most from the REST API landing first.
 9. **XPL-\*** — last, on explicit decision.
 
