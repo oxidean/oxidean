@@ -15,6 +15,7 @@ pub mod notifications;
 pub mod instance_invites;
 pub mod org_invites;
 pub mod org_members;
+pub mod repo_invites;
 pub mod organizations;
 pub mod packages;
 pub mod pats;
@@ -53,6 +54,7 @@ pub use oxidean_core::DbProbeResponse;
 pub use pool::DbPool;
 pub use instance_invites::InstanceInviteRow;
 pub use org_invites::OrgInviteRow;
+pub use repo_invites::RepoInviteRow;
 pub use org_members::{OrgMemberListRow, OrgMemberRow, OrgMineRow};
 pub use organizations::OrganizationRow;
 pub use packages::{PackageRow, PackageVersionRow, PackageUsageBreakdownRow};
@@ -61,7 +63,9 @@ pub use pulls::{PullCommentRow, PullReviewRow, PullRow, PullSearchFilters, RepoM
 pub use redirects::RedirectRow;
 pub use releases::{ReleaseAssetRow, ReleaseRow};
 pub use repo_activity::RepoActivityRow;
-pub use repo_collaborators::{RepoCollaboratorListRow, RepoCollaboratorRow};
+pub use repo_collaborators::{
+    RepoCollaboratorGrantRow, RepoCollaboratorListRow, RepoCollaboratorRow,
+};
 pub use stars::{ForkListSort, RepoForkListRow, RepoStargazerListRow};
 pub use watches::RepoWatcherListRow;
 pub use repositories::{RepoDiskRef, RepositoryRow};
@@ -424,6 +428,84 @@ impl Database {
         org_invites::set_expires_at(self.require_pool()?, id, expires_at).await
     }
 
+    // --- repository invites ---
+
+    pub async fn insert_repo_invite(
+        &self,
+        id: &str,
+        repository_id: &str,
+        email: &str,
+        permission: &str,
+        token_hash: &str,
+        expires_at: &str,
+        invited_by: &str,
+    ) -> Result<RepoInviteRow, String> {
+        repo_invites::insert_invite(
+            self.require_pool()?,
+            id,
+            repository_id,
+            email,
+            permission,
+            token_hash,
+            expires_at,
+            invited_by,
+        )
+        .await
+    }
+
+    pub async fn find_repo_invite_by_id(
+        &self,
+        id: &str,
+    ) -> Result<Option<RepoInviteRow>, String> {
+        repo_invites::find_by_id(self.require_pool()?, id).await
+    }
+
+    pub async fn find_repo_invite_by_token_hash(
+        &self,
+        token_hash: &str,
+    ) -> Result<Option<RepoInviteRow>, String> {
+        repo_invites::find_by_token_hash(self.require_pool()?, token_hash).await
+    }
+
+    pub async fn find_pending_repo_invite_by_repo_email(
+        &self,
+        repository_id: &str,
+        email: &str,
+    ) -> Result<Option<RepoInviteRow>, String> {
+        repo_invites::find_pending_by_repo_email(self.require_pool()?, repository_id, email).await
+    }
+
+    pub async fn list_pending_repo_invites(
+        &self,
+        repository_id: &str,
+    ) -> Result<Vec<RepoInviteRow>, String> {
+        repo_invites::list_pending(self.require_pool()?, repository_id).await
+    }
+
+    pub async fn revoke_repo_invite(&self, id: &str, revoked_at: &str) -> Result<(), String> {
+        repo_invites::revoke(self.require_pool()?, id, revoked_at).await
+    }
+
+    pub async fn accept_repo_invite(&self, id: &str, accepted_at: &str) -> Result<(), String> {
+        repo_invites::mark_accepted(self.require_pool()?, id, accepted_at).await
+    }
+
+    pub async fn count_repo_invites_created_by_since(
+        &self,
+        invited_by: &str,
+        since: &str,
+    ) -> Result<i64, String> {
+        repo_invites::count_created_by_since(self.require_pool()?, invited_by, since).await
+    }
+
+    pub async fn set_repo_invite_expires_at(
+        &self,
+        id: &str,
+        expires_at: &str,
+    ) -> Result<(), String> {
+        repo_invites::set_expires_at(self.require_pool()?, id, expires_at).await
+    }
+
     pub async fn find_repo_collaborator(
         &self,
         repo_id: &str,
@@ -437,6 +519,13 @@ impl Database {
         repo_id: &str,
     ) -> Result<Vec<RepoCollaboratorListRow>, String> {
         repo_collaborators::list_collaborators(self.require_pool()?, repo_id).await
+    }
+
+    pub async fn list_repo_collaborator_grants_for_user(
+        &self,
+        user_id: &str,
+    ) -> Result<Vec<RepoCollaboratorGrantRow>, String> {
+        repo_collaborators::list_grants_for_user(self.require_pool()?, user_id).await
     }
 
     pub async fn insert_repo_collaborator(
