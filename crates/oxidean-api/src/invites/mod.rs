@@ -389,12 +389,14 @@ async fn accept_repo(
     {
         let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
         let _ = ctx.db.accept_repo_invite(&row.id, &now).await;
-        // Already has a grant — mark invite used; do not downgrade.
-        let _ = existing;
+        // Already has a grant — mark invite used; do not change the existing permission.
+        let existing_perm = CollaboratorPermission::parse(&existing.permission).map_err(|_| {
+            AppError::new("repo.internal", "repository operation failed")
+        })?;
         return Ok(InvitesAcceptResponse::Repo {
             owner: owner_slug,
             name: repo.name,
-            permission,
+            permission: existing_perm,
         });
     }
 
@@ -405,7 +407,7 @@ async fn accept_repo(
         return Ok(InvitesAcceptResponse::Repo {
             owner: owner_slug,
             name: repo.name,
-            permission,
+            permission: CollaboratorPermission::Admin,
         });
     }
 
