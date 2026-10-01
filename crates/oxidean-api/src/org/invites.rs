@@ -3,8 +3,8 @@
 use chrono::Utc;
 use oxidean_core::{
     AppError, OrgInvitePublic, OrgInvitesAcceptRequest, OrgInvitesAcceptResponse,
-    OrgInvitesCreateRequest, OrgInvitesListResponse, OrgInvitesRevokeRequest, OrgRole,
-    OrgSlugRequest,
+    OrgInvitesCreateRequest, OrgInvitesCreateResponse, OrgInvitesListResponse,
+    OrgInvitesRevokeRequest, OrgRole, OrgSlugRequest,
 };
 use oxidean_db::{OrgInviteRow, OrganizationRow, UserRow};
 use sha2::{Digest, Sha256};
@@ -111,9 +111,13 @@ fn invite_public(row: &OrgInviteRow) -> Result<OrgInvitePublic, AppError> {
     })
 }
 
-fn build_invite_email(to: &str, org_slug: &str, org_name: &str, magic: &str) -> OutboundEmail {
+fn invite_url(magic: &str) -> String {
     let origin = public_origin();
-    let link = format!("{origin}/invites/{magic}");
+    format!("{origin}/invites/{magic}")
+}
+
+fn build_invite_email(to: &str, org_slug: &str, org_name: &str, magic: &str) -> OutboundEmail {
+    let link = invite_url(magic);
     let text = format!(
         "You've been invited to join {org_name} ({org_slug}) on Oxidean.\n\n\
 Accept this invitation:\n{link}\n\n\
@@ -143,8 +147,11 @@ async fn enforce_create_rate_limit(ctx: &RpcCtx, caller_id: &str) -> Result<(), 
     Ok(())
 }
 
-/// `org.invites.create` — Admin+; hash-at-rest; email via EmailSender.
-pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<OrgInvitePublic, AppError> {
+/// `org.invites.create` — Admin+; hash-at-rest; email via EmailSender; returns invite_url.
+pub async fn create(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<OrgInvitesCreateResponse, AppError> {
     let caller = require_verified(ctx).await?;
     let req: OrgInvitesCreateRequest = serde_json::from_value(input).map_err(|e| {
         AppError::new(
@@ -220,7 +227,10 @@ pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<OrgInviteP
         tracing::error!(error = %e, "org invite email send failed");
     }
 
-    invite_public(&row)
+    Ok(OrgInvitesCreateResponse {
+        invite: invite_public(&row)?,
+        invite_url: invite_url(&magic),
+    })
 }
 
 /// `org.invites.list` — Admin+; pending only; no tokens.
@@ -319,6 +329,7 @@ pub async fn accept(
         oxidean_core::InvitesAcceptResponse::Org { org, member } => {
             Ok(OrgInvitesAcceptResponse { org, member })
         }
-        oxidean_core::InvitesAcceptResponse::Instance => Err(invalid_invite()),
+        oxidean_core::InvitesAcceptResponse::Instance
+        | oxidean_core::InvitesAcceptResponse::Repo { .. } => Err(invalid_invite()),
     }
 }

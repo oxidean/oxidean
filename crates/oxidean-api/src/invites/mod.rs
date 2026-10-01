@@ -2,8 +2,8 @@
 
 use chrono::Utc;
 use oxidean_core::{
-    is_reserved_username, validate_username, AppError, InvitesAcceptRequest, InvitesAcceptResponse,
-    OrgMemberPublic, OrgPublic, OrgRole, Role,
+    is_reserved_username, validate_username, AppError, CollaboratorPermission, InvitesAcceptRequest,
+    InvitesAcceptResponse, OrgMemberPublic, OrgPublic, OrgRole, Role,
 };
 use oxidean_db::UserRow;
 use sha2::{Digest, Sha256};
@@ -251,13 +251,16 @@ async fn accept_org(
     token: &str,
     username: Option<&str>,
     password: Option<&str>,
-) -> Result<InvitesAcceptResponse, AppError> {
-    let row = ctx
+) -> Result<Option<InvitesAcceptResponse>, AppError> {
+    let row = match ctx
         .db
         .find_org_invite_by_token_hash(&sha256_hex(token.as_bytes()))
         .await
         .map_err(org_db_err)?
-        .ok_or_else(invalid_invite)?;
+    {
+        Some(r) => r,
+        None => return Ok(None),
+    };
 
     if row.accepted_at.is_some() || row.revoked_at.is_some() {
         return Err(invalid_invite());
@@ -314,7 +317,7 @@ async fn accept_org(
         })?;
 
     let org_public: OrgPublic = to_public(&org)?;
-    Ok(InvitesAcceptResponse::Org {
+    Ok(Some(InvitesAcceptResponse::Org {
         org: org_public,
         member: OrgMemberPublic {
             user_id: member_row.user_id,
@@ -322,10 +325,115 @@ async fn accept_org(
             role: invite_role,
             created_at: member_row.created_at,
         },
+    }))
+}
+
+async fn accept_repo(
+    ctx: &mut RpcCtx,
+    token: &str,
+    username: Option<&str>,
+    password: Option<&str>,
+) -> Result<InvitesAcceptResponse, AppError> {
+    let row = ctx
+        .db
+        .find_repo_invite_by_token_hash(&sha256_hex(token.as_bytes()))
+        .await
+        .map_err(db_err)?
+        .ok_or_else(invalid_invite)?;
+
+    if row.accepted_at.is_some() || row.revoked_at.is_some() {
+        return Err(invalid_invite());
+    }
+    let expires_at = parse_expires(&row.expires_at)?;
+    if expires_at <= Utc::now() {
+        return Err(invalid_invite());
+    }
+
+    let permission = CollaboratorPermission::parse(&row.permission).map_err(|_| {
+        AppError::new("repo.internal", "repository operation failed")
+    })?;
+
+    let repo = ctx
+        .db
+        .find_repository_by_id(&row.repository_id)
+        .await
+        .map_err(db_err)?
+        .ok_or_else(invalid_invite)?;
+    if repo.deleted_at.is_some() {
+        return Err(invalid_invite());
+    }
+
+    let owner_slug = if repo.owner_type.eq_ignore_ascii_case("org") {
+        ctx.db
+            .find_organization_by_id(&repo.owner_id)
+            .await
+            .map_err(db_err)?
+            .map(|o| o.slug)
+            .ok_or_else(invalid_invite)?
+    } else {
+        ctx.db
+            .find_user_by_id(&repo.owner_id)
+            .await
+            .map_err(db_err)?
+            .map(|u| u.username)
+            .ok_or_else(invalid_invite)?
+    };
+
+    let user = resolve_or_provision_invitee(ctx, &row.email, username, password).await?;
+
+    if let Some(existing) = ctx
+        .db
+        .find_repo_collaborator(&repo.id, &user.id)
+        .await
+        .map_err(db_err)?
+    {
+        let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        let _ = ctx.db.accept_repo_invite(&row.id, &now).await;
+        // Already has a grant — mark invite used; do not downgrade.
+        let _ = existing;
+        return Ok(InvitesAcceptResponse::Repo {
+            owner: owner_slug,
+            name: repo.name,
+            permission,
+        });
+    }
+
+    // Personal owner already has full access.
+    if repo.owner_type.eq_ignore_ascii_case("user") && repo.owner_id == user.id {
+        let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        let _ = ctx.db.accept_repo_invite(&row.id, &now).await;
+        return Ok(InvitesAcceptResponse::Repo {
+            owner: owner_slug,
+            name: repo.name,
+            permission,
+        });
+    }
+
+    ctx.db
+        .insert_repo_collaborator(&repo.id, &user.id, permission.as_str())
+        .await
+        .map_err(db_err)?;
+
+    let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    ctx.db
+        .accept_repo_invite(&row.id, &now)
+        .await
+        .map_err(|e| {
+            if e == "repo invite not found" {
+                invalid_invite()
+            } else {
+                db_err(e)
+            }
+        })?;
+
+    Ok(InvitesAcceptResponse::Repo {
+        owner: owner_slug,
+        name: repo.name,
+        permission,
     })
 }
 
-/// `invites.accept` — try instance_invites first, then organization_invites.
+/// `invites.accept` — try instance_invites, then organization_invites, then repository_invites.
 pub async fn accept(
     ctx: &mut RpcCtx,
     input: serde_json::Value,
@@ -347,5 +455,8 @@ pub async fn accept(
     if let Some(resp) = accept_instance(ctx, token, username, password).await? {
         return Ok(resp);
     }
-    accept_org(ctx, token, username, password).await
+    if let Some(resp) = accept_org(ctx, token, username, password).await? {
+        return Ok(resp);
+    }
+    accept_repo(ctx, token, username, password).await
 }
