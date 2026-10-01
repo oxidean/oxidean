@@ -272,6 +272,10 @@ pub struct AdminUsersUserIdRequest {
 pub struct AdminUsersDeleteRequest {
     pub user_id: String,
     pub confirmation: String,
+    /// Opt-in required when a sole-owner org still has other members —
+    /// deleting the account would delete that org and its repositories.
+    #[serde(default)]
+    pub delete_orgs: Option<bool>,
 }
 
 /// `admin.users.delete` summary for the confirmation UI.

@@ -13,6 +13,10 @@ pub struct SessionRow {
     pub remember_me: bool,
     pub created_at: String,
     pub last_seen_at: String,
+    /// `users.id` via LEFT JOIN — `None` when the owning user row is gone.
+    pub joined_user_id: Option<String>,
+    /// `users.banned_at` via LEFT JOIN — `Some` marks a soft-banned owner.
+    pub user_banned_at: Option<String>,
 }
 
 macro_rules! map_session {
@@ -44,27 +48,42 @@ macro_rules! map_session {
             last_seen_at: row
                 .try_get("last_seen_at")
                 .map_err(|e| format!("session row: {e}"))?,
+            joined_user_id: row
+                .try_get("joined_user_id")
+                .map_err(|e| format!("session row: {e}"))?,
+            user_banned_at: row
+                .try_get("user_banned_at")
+                .map_err(|e| format!("session row: {e}"))?,
         }
     }};
 }
 
-const SESSION_SELECT_PG: &str = "SELECT id, user_id, token_hash, remember_me,
-       to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS expires_at,
-       to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS created_at,
-       to_char(last_seen_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS last_seen_at
-FROM sessions";
+const SESSION_SELECT_PG: &str = "SELECT s.id, s.user_id, s.token_hash, s.remember_me,
+       to_char(s.expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS expires_at,
+       to_char(s.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS created_at,
+       to_char(s.last_seen_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS last_seen_at,
+       u.id AS joined_user_id,
+       to_char(u.banned_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS user_banned_at
+FROM sessions s
+LEFT JOIN users u ON u.id = s.user_id";
 
-const SESSION_SELECT_MYSQL: &str = "SELECT id, user_id, token_hash, remember_me,
-       DATE_FORMAT(expires_at, '%Y-%m-%dT%H:%i:%sZ') AS expires_at,
-       DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at,
-       DATE_FORMAT(last_seen_at, '%Y-%m-%dT%H:%i:%sZ') AS last_seen_at
-FROM sessions";
+const SESSION_SELECT_MYSQL: &str = "SELECT s.id, s.user_id, s.token_hash, s.remember_me,
+       DATE_FORMAT(s.expires_at, '%Y-%m-%dT%H:%i:%sZ') AS expires_at,
+       DATE_FORMAT(s.created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at,
+       DATE_FORMAT(s.last_seen_at, '%Y-%m-%dT%H:%i:%sZ') AS last_seen_at,
+       u.id AS joined_user_id,
+       DATE_FORMAT(u.banned_at, '%Y-%m-%dT%H:%i:%sZ') AS user_banned_at
+FROM sessions s
+LEFT JOIN users u ON u.id = s.user_id";
 
-const SESSION_SELECT_SQLITE: &str = "SELECT id, user_id, token_hash, remember_me,
-       strftime('%Y-%m-%dT%H:%M:%SZ', expires_at) AS expires_at,
-       strftime('%Y-%m-%dT%H:%M:%SZ', created_at) AS created_at,
-       strftime('%Y-%m-%dT%H:%M:%SZ', last_seen_at) AS last_seen_at
-FROM sessions";
+const SESSION_SELECT_SQLITE: &str = "SELECT s.id, s.user_id, s.token_hash, s.remember_me,
+       strftime('%Y-%m-%dT%H:%M:%SZ', s.expires_at) AS expires_at,
+       strftime('%Y-%m-%dT%H:%M:%SZ', s.created_at) AS created_at,
+       strftime('%Y-%m-%dT%H:%M:%SZ', s.last_seen_at) AS last_seen_at,
+       u.id AS joined_user_id,
+       strftime('%Y-%m-%dT%H:%M:%SZ', u.banned_at) AS user_banned_at
+FROM sessions s
+LEFT JOIN users u ON u.id = s.user_id";
 
 /// Create a session row. `id` is the session PK; `token_hash` is SHA-256 hex of the cookie value.
 pub async fn create(
@@ -128,7 +147,7 @@ pub async fn find_by_token_hash(
 ) -> Result<Option<SessionRow>, String> {
     match pool {
         DbPool::Postgres(p) => {
-            let row = sqlx::query(&format!("{SESSION_SELECT_PG} WHERE token_hash = $1"))
+            let row = sqlx::query(&format!("{SESSION_SELECT_PG} WHERE s.token_hash = $1"))
                 .bind(token_hash)
                 .fetch_optional(p)
                 .await
@@ -139,7 +158,7 @@ pub async fn find_by_token_hash(
             })
         }
         DbPool::MySql(p) => {
-            let row = sqlx::query(&format!("{SESSION_SELECT_MYSQL} WHERE token_hash = ?"))
+            let row = sqlx::query(&format!("{SESSION_SELECT_MYSQL} WHERE s.token_hash = ?"))
                 .bind(token_hash)
                 .fetch_optional(p)
                 .await
@@ -150,7 +169,7 @@ pub async fn find_by_token_hash(
             })
         }
         DbPool::Sqlite(p) => {
-            let row = sqlx::query(&format!("{SESSION_SELECT_SQLITE} WHERE token_hash = ?1"))
+            let row = sqlx::query(&format!("{SESSION_SELECT_SQLITE} WHERE s.token_hash = ?1"))
                 .bind(token_hash)
                 .fetch_optional(p)
                 .await

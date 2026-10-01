@@ -292,6 +292,7 @@ pub async fn delete(
         .map_err(db_err)?;
     let mut deleted_orgs: i64 = 0;
     let mut sole_owner_orgs: Vec<(String, String)> = Vec::new(); // (id, slug)
+    let mut shared_orgs: Vec<String> = Vec::new(); // slugs with other members
     for org in memberships {
         // OrgMineRow.role is org role (`owner` | `admin` | `member` | `read`).
         if org.role != "owner" {
@@ -308,7 +309,23 @@ pub async fn delete(
             .map_err(db_err)?;
         deleted_repos += org_repos.len() as i64;
         sole_owner_orgs.push((org.id.clone(), org.slug.clone()));
+        let members = ctx.db.list_org_members(&org.id).await.map_err(db_err)?;
+        if members.len() > 1 {
+            shared_orgs.push(org.slug.clone());
+        }
         wipe_slugs.push(org.slug);
+    }
+
+    // Shared orgs would be deleted along with the account — require an
+    // explicit opt-in so other members' data is never removed silently.
+    if !shared_orgs.is_empty() && req.delete_orgs != Some(true) {
+        return Err(AppError::new(
+            "admin.delete_orgs_confirm",
+            format!(
+                "Deleting this account also deletes organization(s) that still have other members: {}. Confirm again with delete_orgs to proceed.",
+                shared_orgs.join(", ")
+            ),
+        ));
     }
 
     let _ = ctx

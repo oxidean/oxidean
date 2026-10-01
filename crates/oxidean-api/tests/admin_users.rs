@@ -1064,3 +1064,112 @@ async fn admin_users_get_access_lists_orgs_and_repos() {
         "expected shared collaborator grant — {access_v}"
     );
 }
+
+/// Deleting a sole owner of an org that still has other members requires the
+/// explicit `delete_orgs` opt-in; without it the call refuses before writes.
+#[tokio::test]
+async fn admin_users_delete_requires_delete_orgs_for_shared_org() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!(
+        "sqlite:{}",
+        dir.path().join("admin_users_delete_orgs.db").display()
+    );
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let (app, _) = test_app_with_recorder(db.clone()).await;
+
+    let (admin_id, _) = bootstrap_sysadmin(&db).await;
+    let admin_cookie = login_as(&app, &db, &admin_id).await;
+
+    let (owner_cookie, owner_v) =
+        signup_and_login(&app, "sharedowner@ex.com", "sharedowner").await;
+    let owner_id = owner_v["data"]["id"].as_str().expect("id").to_string();
+    verify_user(&db, &owner_id).await;
+
+    let (_member_cookie, member_v) =
+        signup_and_login(&app, "orgmember@ex.com", "orgmember1").await;
+    let member_id = member_v["data"]["id"].as_str().expect("id").to_string();
+    verify_user(&db, &member_id).await;
+
+    let (_, create_org) = rpc_json(
+        &app,
+        r#"{"procedure":"org.create","input":{"slug":"shared-org","display_name":"Shared Org"}}"#,
+        Some(&owner_cookie),
+    )
+    .await;
+    assert_eq!(create_org["ok"], true, "{create_org}");
+    let org_id = create_org["data"]["id"].as_str().expect("org id").to_string();
+
+    let (_, add_member) = rpc_json(
+        &app,
+        r#"{"procedure":"org.members.add","input":{"slug":"shared-org","username":"orgmember1","role":"member"}}"#,
+        Some(&owner_cookie),
+    )
+    .await;
+    assert_eq!(add_member["ok"], true, "{add_member}");
+
+    let (_, refused) = rpc_json(
+        &app,
+        &format!(
+            r#"{{"procedure":"admin.users.delete","input":{{"user_id":"{owner_id}","confirmation":"sharedowner"}}}}"#
+        ),
+        Some(&admin_cookie),
+    )
+    .await;
+    assert_eq!(
+        refused["error"]["code"], "admin.delete_orgs_confirm",
+        "{refused}"
+    );
+    assert!(
+        refused["error"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("shared-org"),
+        "error should name the shared orgs — {refused}"
+    );
+    assert!(
+        db.find_user_by_id(&owner_id)
+            .await
+            .expect("find user")
+            .is_some(),
+        "refused delete must leave the user row intact"
+    );
+    assert!(
+        db.find_organization_by_id(&org_id)
+            .await
+            .expect("find org")
+            .is_some(),
+        "refused delete must leave the org intact"
+    );
+
+    let (_, deleted) = rpc_json(
+        &app,
+        &format!(
+            r#"{{"procedure":"admin.users.delete","input":{{"user_id":"{owner_id}","confirmation":"sharedowner","delete_orgs":true}}}}"#
+        ),
+        Some(&admin_cookie),
+    )
+    .await;
+    assert_eq!(deleted["ok"], true, "{deleted}");
+    assert_eq!(deleted["data"]["deleted_orgs"].as_i64().unwrap_or(0), 1);
+    assert!(
+        db.find_user_by_id(&owner_id)
+            .await
+            .expect("find user")
+            .is_none()
+    );
+    assert!(
+        db.find_organization_by_id(&org_id)
+            .await
+            .expect("find org")
+            .is_none()
+    );
+    // The other member's account survives the org deletion.
+    assert!(
+        db.find_user_by_id(&member_id)
+            .await
+            .expect("find member")
+            .is_some()
+    );
+}

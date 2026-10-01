@@ -109,6 +109,7 @@ export type AdminUsersUserIdRequest = {
 export type AdminUsersDeleteRequest = {
   user_id: string;
   confirmation: string;
+  delete_orgs?: boolean | null;
 };
 
 export type AdminUsersDeleteResponse = {

@@ -137,6 +137,18 @@ impl SessionService {
             return Ok(None);
         }
 
+        // Owner gone (user row deleted) — drop the dangling session.
+        if row.joined_user_id.is_none() {
+            let _ = db.delete_session(&row.id).await;
+            return Ok(None);
+        }
+
+        // Soft-ban: treat session as absent (PATs gated separately at resolve).
+        if row.user_banned_at.is_some() {
+            let _ = db.delete_session(&row.id).await;
+            return Ok(None);
+        }
+
         let last_seen = now.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
         let new_expires = if row.remember_me {
             // Absolute expiry from create; only refresh last_seen.
@@ -149,14 +161,6 @@ impl SessionService {
         db.touch_session(&row.id, &new_expires_str, &last_seen)
             .await
             .map_err(AuthError::from_db)?;
-
-        // Soft-ban: treat session as absent (PATs gated separately at resolve).
-        if let Ok(Some(user)) = db.find_user_by_id(&row.user_id).await {
-            if user.banned_at.is_some() {
-                let _ = db.delete_session(&row.id).await;
-                return Ok(None);
-            }
-        }
 
         Ok(Some(ResolvedSession {
             session_id: row.id,
