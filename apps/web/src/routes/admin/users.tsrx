@@ -10,7 +10,20 @@ import type {
   UserPublic,
   UserRole,
 } from "@oxidean/api-client";
+import {
+  Ban,
+  EllipsisVertical,
+  Eye,
+  LogOut,
+  RotateCcw,
+  Search,
+  ShieldMinus,
+  ShieldPlus,
+  Trash2,
+  UserPlus,
+} from "@octanejs/lucide";
 import { useEffect, useState } from "octane";
+import { AvatarPreview } from "@/components/avatar-preview";
 import { AdminSettingsLayout, SettingsShell } from "@/components/settings/settings-shell";
 import {
   AlertDialog,
@@ -22,7 +35,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -31,13 +45,24 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { List, ListHeader, ListRow } from "@/components/ui/list";
+import { PageHeader } from "@/components/ui/page-header";
 import { apiClient } from "@/lib/api-client";
 import { formatRelative } from "@/lib/relative-time";
 import { authSessionQueryOptions, setAuthMeCache } from "@/lib/session-queries";
 import { fetchAdminInvitesList, fetchAdminUsersList, fetchSessionMe } from "@/lib/ssr-auth";
 import { toastSuccess } from "@/lib/toast";
+import { cn } from "@/lib/utils";
 
 export type AdminUsersLoaderData =
   | { kind: "unauthenticated" }
@@ -65,12 +90,6 @@ type ConfirmKind =
   | { kind: "unban"; user: AdminUserPublic }
   | { kind: "revoke-invite"; invite: InstanceInvitePublic };
 
-function roleLabel(role: UserRole): string {
-  if (role === "sys-admin") return "System admin";
-  if (role === "admin") return "Admin";
-  return "User";
-}
-
 function isBanned(user: AdminUserPublic): boolean {
   return user.banned_at != null && user.banned_at !== "";
 }
@@ -90,7 +109,7 @@ function AdminUserAccessPanel({
   summary: AccessSummaryView;
 }) @{
   <div
-    className="mt-3 max-w-xl rounded-md border border-border bg-muted/30 p-3 text-[13px]"
+    className="border-t border-border/60 bg-muted/20 px-4 py-3 text-[13px] sm:pl-[4.25rem]"
     data-testid={`admin-user-access-${userId}`}
   >
     @if (summary.loading) {
@@ -221,9 +240,12 @@ export function AdminUsersPage() @{
 
   const [deleteTarget, setDeleteTarget] = useState<AdminUserPublic | null>(null);
   const [deletePhrase, setDeletePhrase] = useState("");
+  const [deleteOrgs, setDeleteOrgs] = useState(false);
+  const [deleteOrgsRequired, setDeleteOrgsRequired] = useState(false);
   const [deletePending, setDeletePending] = useState(false);
   const [deleteError, setDeleteError] = useState("");
 
+  const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
   const [invitePending, setInvitePending] = useState(false);
   const [inviteError, setInviteError] = useState("");
@@ -386,8 +408,12 @@ export function AdminUsersPage() @{
       const res = await apiClient.admin.users.delete({
         user_id: deleteTarget.id,
         confirmation: deletePhrase.trim(),
+        delete_orgs: deleteOrgs,
       });
       if (!res.ok) {
+        if (res.error.code === "admin.delete_orgs_confirm") {
+          setDeleteOrgsRequired(true);
+        }
         setDeleteError(res.error.message || NETWORK_ERROR);
         setDeletePending(false);
         return;
@@ -398,6 +424,8 @@ export function AdminUsersPage() @{
       setDeletePending(false);
       setDeleteTarget(null);
       setDeletePhrase("");
+      setDeleteOrgs(false);
+      setDeleteOrgsRequired(false);
       await refreshUsers();
     } catch {
       setDeleteError(NETWORK_ERROR);
@@ -445,6 +473,14 @@ export function AdminUsersPage() @{
     } catch {
       setCopyState("error");
     }
+  }
+
+  function closeInviteDialog() {
+    setInviteOpen(false);
+    setInviteEmail("");
+    setInviteError("");
+    setCreatedInviteUrl("");
+    setCopyState("idle");
   }
 
   async function toggleAccess(user: AdminUserPublic) {
@@ -587,46 +623,33 @@ export function AdminUsersPage() @{
           </SettingsShell>;
         } @else {
           <AdminSettingsLayout active="users" data-testid="admin-users-page">
-            <h1 className="font-[family-name:var(--font-display)] text-[24px] font-semibold leading-[1.2] text-foreground">
-              Users
-            </h1>
-            <p className="mt-2 text-[16px] text-muted-foreground">
-              Search accounts, change roles, revoke sessions, ban or delete users, and invite people
-              when public sign-up is closed.
-            </p>
+            <PageHeader
+              title="Users"
+              description="Search accounts, change roles, revoke sessions, ban or delete users, and invite people when public sign-up is closed."
+              actions={
+                <Button
+                  type="button"
+                  data-testid="admin-invite-open"
+                  onClick={() => {
+                    setInviteError("");
+                    setCreatedInviteUrl("");
+                    setCopyState("idle");
+                    setInviteOpen(true);
+                  }}
+                >
+                  <UserPlus aria-hidden size={16} />
+                  Invite people
+                </Button>
+              }
+            />
 
-            <section className="mt-8" aria-labelledby="admin-users-table-heading">
+            <section className="mt-6" aria-labelledby="admin-users-table-heading">
               <h2
                 id="admin-users-table-heading"
                 className="font-[family-name:var(--font-display)] text-[18px] font-semibold"
               >
                 Accounts
               </h2>
-              <form
-                method="post"
-                action="#"
-                className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-end"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  setOffset(0);
-                  setQuery(searchDraft.trim());
-                }}
-              >
-                <div className="flex min-w-0 flex-1 flex-col gap-2">
-                  <Label htmlFor="admin-users-search">Search</Label>
-                  <Input
-                    id="admin-users-search"
-                    data-testid="admin-users-search"
-                    value={searchDraft as string}
-                    onInput={(e) => setSearchDraft((e.currentTarget as HTMLInputElement).value)}
-                    placeholder="Username, display name, or email"
-                    autoComplete="off"
-                  />
-                </div>
-                <Button type="submit" className="h-11 shrink-0">
-                  Search
-                </Button>
-              </form>
 
               @if (usersQ.isError && !usersPage) {
                 <p role="alert" className="mt-4 text-[14px] text-destructive">
@@ -637,56 +660,134 @@ export function AdminUsersPage() @{
                   }
                 </p>;
               } @else {
-                <div className="mt-4 overflow-x-auto">
-                  <table className="w-full min-w-[48rem] border-collapse text-left text-[14px]">
-                    <thead>
-                      <tr className="border-b border-border text-muted-foreground">
-                        <th className="py-2 pr-3 font-medium">Username</th>
-                        <th className="py-2 pr-3 font-medium">Display name</th>
-                        <th className="py-2 pr-3 font-medium">Email</th>
-                        <th className="py-2 pr-3 font-medium">Role</th>
-                        <th className="py-2 pr-3 font-medium">Verified</th>
-                        <th className="py-2 pr-3 font-medium">Created</th>
-                        <th className="py-2 font-medium">
-                          <span className="sr-only">Actions</span>
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      @for (const user of users; key user.id) {
-                        <tr className="border-b border-border align-top">
-                          <td className="py-3 pr-3 font-medium text-foreground">
-                            <span className="inline-flex flex-wrap items-center gap-2">
-                              {("@" + user.username) as string}
-                              @if (isBanned(user)) {
-                                <Badge variant="destructive">Banned</Badge>;
+                <>
+                  <List className="mt-4">
+                    <ListHeader>
+                      <span>
+                        {
+                          (total === 0
+                            ? "0 accounts"
+                            : `${total} ${total === 1 ? "account" : "accounts"}`) as string
+                        }
+                      </span>
+                      <form
+                        method="post"
+                        action="#"
+                        className="ml-auto flex min-w-0 flex-1 items-center justify-end gap-2 font-normal sm:flex-none"
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          setOffset(0);
+                          setQuery(searchDraft.trim());
+                        }}
+                      >
+                        <Label htmlFor="admin-users-search" className="sr-only">
+                          Search
+                        </Label>
+                        <Input
+                          id="admin-users-search"
+                          data-testid="admin-users-search"
+                          value={searchDraft as string}
+                          onInput={(e) =>
+                            setSearchDraft((e.currentTarget as HTMLInputElement).value)
+                          }
+                          placeholder="Username, display name, or email"
+                          autoComplete="off"
+                          className="h-9 w-full min-w-0 sm:w-64"
+                        />
+                        <Button type="submit" variant="outline" className="h-9 shrink-0 px-3">
+                          Search
+                        </Button>
+                      </form>
+                    </ListHeader>
+
+                    @for (const user of users; key user.id) {
+                      <div
+                        className="border-t border-border first:border-t-0"
+                        data-testid={`admin-user-row-${user.id}`}
+                      >
+                        <div className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/40">
+                          <AvatarPreview
+                            user={{
+                              avatar_url: null,
+                              display_name: user.display_name,
+                              username: user.username,
+                            }}
+                            size={36}
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                              <span className="font-medium text-foreground">
+                                {("@" + user.username) as string}
+                              </span>
+                              @if (
+                                user.display_name &&
+                                user.display_name !== user.username
+                              ) {
+                                <span className="truncate text-[13px] text-muted-foreground">
+                                  {user.display_name as string}
+                                </span>;
                               }
-                            </span>
-                          </td>
-                          <td className="py-3 pr-3 text-foreground">
-                            {(user.display_name || "—") as string}
-                          </td>
-                          <td className="py-3 pr-3 text-muted-foreground">
-                            {user.email as string}
-                          </td>
-                          <td className="py-3 pr-3">
-                            {roleLabel(user.role) as string}
-                          </td>
-                          <td className="py-3 pr-3">
-                            {(user.email_verified ? "Yes" : "No") as string}
-                          </td>
-                          <td className="py-3 pr-3 text-muted-foreground">
-                            {formatRelative(user.created_at) as string}
-                          </td>
-                          <td className="py-3">
-                            <div className="flex flex-wrap gap-1">
                               @if (
                                 user.role === "sys-admin"
                               ) {
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  className="h-9 px-2"
+                                <Badge variant="primary">System admin</Badge>;
+                              } @else {
+                                @if (user.role === "admin") {
+                                  <Badge variant="secondary">Admin</Badge>;
+                                }
+                              }
+                              @if (isBanned(user)) {
+                                <Badge variant="destructive">Banned</Badge>;
+                              }
+                              @if (
+                                !user.email_verified
+                              ) {
+                                <Badge variant="outline">Unverified</Badge>;
+                              }
+                              @if (user.id === selfId) {
+                                <Badge variant="outline">You</Badge>;
+                              }
+                            </div>
+                            <p className="mt-0.5 truncate text-[13px] text-muted-foreground">
+                              {
+                                `${user.email} · Joined ${formatRelative(user.created_at)}` as string
+                              }
+                            </p>
+                          </div>
+                          {/* MenuPrimitive.Portal keepMounted is inside DropdownMenuContent. */}
+                          <DropdownMenu>
+                            <DropdownMenuTrigger
+                              type="button"
+                              aria-label={`Actions for @${user.username}`}
+                              data-testid={`admin-user-menu-${user.id}`}
+                              className={cn(
+                                buttonVariants({ variant: "ghost", size: "icon-sm" }),
+                                "shrink-0",
+                              )}
+                            >
+                              <EllipsisVertical aria-hidden size={16} />
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="min-w-48">
+                              <DropdownMenuItem
+                                data-testid={`admin-user-access-toggle-${user.id}`}
+                                onClick={() => void toggleAccess(user)}
+                              >
+                                <Eye
+                                  aria-hidden
+                                  size={15}
+                                  className="text-muted-foreground"
+                                />
+                                {
+                                  (accessUserId === user.id
+                                    ? "Hide access"
+                                    : "View access") as string
+                                }
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              @if (
+                                user.role === "sys-admin"
+                              ) {
+                                <DropdownMenuItem
                                   disabled={user.id === selfId}
                                   onClick={() =>
                                     openConfirm({
@@ -696,13 +797,15 @@ export function AdminUsersPage() @{
                                     })
                                   }
                                 >
-                                  Make user
-                                </Button>;
+                                  <ShieldMinus
+                                    aria-hidden
+                                    size={15}
+                                    className="text-muted-foreground"
+                                  />
+                                  Demote to user
+                                </DropdownMenuItem>;
                               } @else {
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  className="h-9 px-2"
+                                <DropdownMenuItem
                                   data-testid={`admin-user-make-sysadmin-${user.id}`}
                                   onClick={() =>
                                     openConfirm({
@@ -712,36 +815,42 @@ export function AdminUsersPage() @{
                                     })
                                   }
                                 >
+                                  <ShieldPlus
+                                    aria-hidden
+                                    size={15}
+                                    className="text-muted-foreground"
+                                  />
                                   Make sys-admin
-                                </Button>;
+                                </DropdownMenuItem>;
                               }
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                className="h-9 px-2"
+                              <DropdownMenuItem
                                 data-testid={`admin-user-revoke-sessions-${user.id}`}
                                 onClick={() =>
                                   openConfirm({ kind: "revoke-sessions", user })
                                 }
                               >
+                                <LogOut
+                                  aria-hidden
+                                  size={15}
+                                  className="text-muted-foreground"
+                                />
                                 Revoke sessions
-                              </Button>
+                              </DropdownMenuItem>
                               @if (isBanned(user)) {
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  className="h-9 px-2"
+                                <DropdownMenuItem
                                   onClick={() =>
                                     openConfirm({ kind: "unban", user })
                                   }
                                 >
+                                  <RotateCcw
+                                    aria-hidden
+                                    size={15}
+                                    className="text-muted-foreground"
+                                  />
                                   Unban
-                                </Button>;
+                                </DropdownMenuItem>;
                               } @else {
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  className="h-9 px-2"
+                                <DropdownMenuItem
                                   data-testid={`admin-user-ban-${user.id}`}
                                   disabled={
                                     user.id === selfId ||
@@ -751,184 +860,120 @@ export function AdminUsersPage() @{
                                     openConfirm({ kind: "ban", user })
                                   }
                                 >
+                                  <Ban
+                                    aria-hidden
+                                    size={15}
+                                    className="text-muted-foreground"
+                                  />
                                   Ban
-                                </Button>;
+                                </DropdownMenuItem>;
                               }
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                className="h-9 px-2"
-                                data-testid={`admin-user-access-toggle-${user.id}`}
-                                onClick={() => void toggleAccess(user)}
-                              >
-                                {
-                                  (accessUserId === user.id
-                                    ? "Hide access"
-                                    : "View access") as string
-                                }
-                              </Button>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                className="h-9 px-2 text-destructive"
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                className="text-destructive data-[highlighted]:bg-destructive/10 data-[highlighted]:text-destructive"
                                 data-testid={`admin-user-delete-${user.id}`}
                                 disabled={user.id === selfId}
                                 onClick={() => {
                                   setDeleteError("");
                                   setDeletePhrase("");
+                                  setDeleteOrgs(false);
+                                  setDeleteOrgsRequired(false);
                                   setDeleteTarget(user);
                                 }}
                               >
+                                <Trash2 aria-hidden size={15} />
                                 Delete
-                              </Button>
-                            </div>
-                            @if (
-                              accessUserId === user.id
-                            ) {
-                              <AdminUserAccessPanel
-                                userId={user.id}
-                                summary={accessSummary(user.id)}
-                              />;
-                            }
-                          </td>
-                        </tr>;
-                      } @empty {
-                        <tr>
-                          <td
-                            colSpan={7}
-                            className="py-6 text-center text-muted-foreground"
-                          >
-                            No users match this search.
-                          </td>
-                        </tr>;
-                      }
-                    </tbody>
-                  </table>
-                </div>;
-                <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-                  <p className="text-[13px] text-muted-foreground">
-                    {
-                      (total === 0
-                        ? "0 users"
-                        : `Showing ${offset + 1}–${Math.min(offset + PAGE_SIZE, total)} of ${total}`) as string
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+                        @if (accessUserId === user.id) {
+                          <AdminUserAccessPanel
+                            userId={user.id}
+                            summary={accessSummary(user.id)}
+                          />;
+                        }
+                      </div>;
+                    } @empty {
+                      <EmptyState
+                        compact
+                        className="rounded-none border-0 border-t bg-transparent"
+                        icon={<Search aria-hidden size={20} />}
+                        title={
+                          (query
+                            ? "No users match this search"
+                            : "No accounts yet") as string
+                        }
+                        description={
+                          (query
+                            ? `Nothing found for “${query}”. Check the spelling or clear the search.`
+                            : "Invite people to create the first account.") as string
+                        }
+                        action={
+                          query ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                setSearchDraft("");
+                                setOffset(0);
+                                setQuery("");
+                              }}
+                            >
+                              Clear search
+                            </Button>
+                          ) : undefined
+                        }
+                      />;
                     }
-                  </p>
-                  <div className="flex gap-2">
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      disabled={!canPrev}
-                      onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
-                    >
-                      Previous
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      disabled={!canNext}
-                      onClick={() => setOffset(offset + PAGE_SIZE)}
-                    >
-                      Next
-                    </Button>
+                  </List>
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                    <p className="text-[13px] text-muted-foreground">
+                      {
+                        (total === 0
+                          ? "0 users"
+                          : `Showing ${offset + 1}–${Math.min(offset + PAGE_SIZE, total)} of ${total}`) as string
+                      }
+                    </p>
+                    <div className="flex gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={!canPrev}
+                        onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
+                      >
+                        Previous
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={!canNext}
+                        onClick={() => setOffset(offset + PAGE_SIZE)}
+                      >
+                        Next
+                      </Button>
+                    </div>
                   </div>
-                </div>;
+                </>;
               }
             </section>
 
-            <section className="mt-12" aria-labelledby="admin-invites-heading">
+            <section className="mt-10" aria-labelledby="admin-invites-heading">
               <h2
                 id="admin-invites-heading"
                 className="font-[family-name:var(--font-display)] text-[18px] font-semibold"
               >
-                Invite people
+                Pending invitations
               </h2>
               <p className="mt-1 text-[14px] text-muted-foreground">
-                Send an instance invite by email. Works even when public sign-up is closed. Copy the
-                link if email delivery is the log sink.
+                Invite links work even when public sign-up is closed. Create one with “Invite
+                people”.
               </p>
-
-              <form
-                method="post"
-                action="#"
-                className="mt-4 flex flex-col gap-4"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  void createInvite();
-                }}
-              >
-                @if (inviteError) {
-                  <p role="alert" className="text-[14px] text-destructive">
-                    {inviteError as string}
-                  </p>;
-                }
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-                  <div className="flex min-w-0 flex-1 flex-col gap-2">
-                    <Label htmlFor="admin-invite-email">Email</Label>
-                    <Input
-                      id="admin-invite-email"
-                      data-testid="admin-invite-email"
-                      type="email"
-                      autoComplete="email"
-                      value={inviteEmail as string}
-                      onInput={(e) => setInviteEmail((e.currentTarget as HTMLInputElement).value)}
-                      disabled={invitePending}
-                    />
-                  </div>
-                  <Button
-                    type="submit"
-                    className="h-11 shrink-0"
-                    disabled={invitePending}
-                    data-testid="admin-invite-create"
-                  >
-                    {(invitePending ? "Creating…" : "Create invite") as string}
-                  </Button>
-                </div>
-              </form>
-
-              @if (createdInviteUrl) {
-                <div
-                  className="mt-4 rounded-md border border-border p-4"
-                  data-testid="admin-invite-url-panel"
-                >
-                  <p className="text-[14px] font-medium text-foreground">
-                    Invite link (copy now)
-                  </p>
-                  <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-stretch">
-                    <Input
-                      readOnly
-                      value={createdInviteUrl as string}
-                      aria-label="Invite URL"
-                      data-testid="admin-invite-url"
-                      className="min-w-0 flex-1 font-mono text-[13px]"
-                      onFocus={(e) => {
-                        const el = e.currentTarget as HTMLInputElement;
-                        el.select();
-                      }}
-                    />
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="h-11 shrink-0"
-                      data-testid="admin-invite-url-copy"
-                      aria-label="Copy invite URL"
-                      onClick={() => void copyInviteUrl()}
-                    >
-                      {(copyState === "copied" ? "Copied" : "Copy link") as string}
-                    </Button>
-                  </div>
-                  @if (copyState === "error") {
-                    <p role="alert" className="mt-2 text-[14px] text-destructive">
-                      Couldn’t copy. Select the link and copy manually.
-                    </p>;
-                  }
-                </div>;
-              }
-
-              <h3 className="mt-8 text-[16px] font-semibold text-foreground">
-                Pending invitations
-              </h3>
               @if (invitesQ.isError) {
-                <p role="alert" className="mt-2 text-[14px] text-destructive">
+                <p role="alert" className="mt-3 text-[14px] text-destructive">
                   {
                     (invitesQ.error instanceof Error
                       ? invitesQ.error.message
@@ -937,34 +982,34 @@ export function AdminUsersPage() @{
                 </p>;
               } @else {
                 @if (invites.length === 0) {
-                  <p className="mt-2 text-[14px] text-muted-foreground">
+                  <p className="mt-3 text-[14px] text-muted-foreground">
                     No pending invitations.
                   </p>;
                 } @else {
-                  <ul className="mt-3 divide-y divide-border border-y border-border">
+                  <List className="mt-3">
                     @for (const inv of invites; key inv.id) {
-                      <li className="flex flex-wrap items-center justify-between gap-3 py-3">
-                        <div>
-                          <p className="text-[14px] font-medium text-foreground">
+                      <ListRow>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-[14px] font-medium text-foreground">
                             {inv.email as string}
                           </p>
                           <p className="text-[13px] text-muted-foreground">
-                            {("expires " + formatShortDate(inv.expires_at)) as string}
+                            {("Expires " + formatShortDate(inv.expires_at)) as string}
                           </p>
                         </div>
                         <Button
                           type="button"
                           variant="outline"
-                          className="h-11"
+                          size="sm"
                           onClick={() =>
                             openConfirm({ kind: "revoke-invite", invite: inv })
                           }
                         >
                           Revoke
                         </Button>
-                      </li>;
+                      </ListRow>;
                     }
-                  </ul>;
+                  </List>;
                 }
               }
             </section>
@@ -1016,6 +1061,8 @@ export function AdminUsersPage() @{
                 if (!next) {
                   setDeleteTarget(null);
                   setDeletePhrase("");
+                  setDeleteOrgs(false);
+                  setDeleteOrgsRequired(false);
                   setDeleteError("");
                 }
               }}
@@ -1051,6 +1098,20 @@ export function AdminUsersPage() @{
                     {deleteError as string}
                   </p>;
                 }
+                @if (deleteOrgsRequired) {
+                  <div className="flex min-h-11 items-center gap-3">
+                    <Checkbox
+                      id="admin-delete-orgs"
+                      data-testid="admin-delete-orgs"
+                      checked={deleteOrgs}
+                      disabled={deletePending}
+                      onCheckedChange={(checked) => setDeleteOrgs(checked === true)}
+                    />
+                    <Label htmlFor="admin-delete-orgs">
+                      Also delete the listed organizations and their repositories
+                    </Label>
+                  </div>;
+                }
                 <DialogFooter>
                   <Button
                     type="button"
@@ -1059,6 +1120,8 @@ export function AdminUsersPage() @{
                     onClick={() => {
                       setDeleteTarget(null);
                       setDeletePhrase("");
+                      setDeleteOrgs(false);
+                      setDeleteOrgsRequired(false);
                       setDeleteError("");
                     }}
                   >
@@ -1071,13 +1134,125 @@ export function AdminUsersPage() @{
                     disabled={
                       deletePending ||
                       !deleteTarget ||
-                      deletePhrase.trim() !== deleteTarget.username
+                      deletePhrase.trim() !== deleteTarget.username ||
+                      (deleteOrgsRequired && !deleteOrgs)
                     }
                     onClick={() => void runDelete()}
                   >
                     {(deletePending ? "Deleting…" : "Delete user") as string}
                   </Button>
                 </DialogFooter>
+              </DialogContent>
+            </Dialog>
+
+            {/* DialogPortal keepMounted is inside DialogContent (browser-coverage). */}
+            <Dialog
+              open={inviteOpen}
+              onOpenChange={(next) => {
+                if (invitePending) return;
+                if (next) {
+                  setInviteOpen(true);
+                } else {
+                  closeInviteDialog();
+                }
+              }}
+            >
+              <DialogContent data-testid="admin-invite-dialog">
+                <DialogHeader>
+                  <DialogTitle>Invite people</DialogTitle>
+                  <DialogDescription>
+                    Send an instance invite by email. It works even when public sign-up is closed.
+                    Copy the link if email delivery is the log sink.
+                  </DialogDescription>
+                </DialogHeader>
+                @if (createdInviteUrl) {
+                  <div>
+                    <div
+                      className="rounded-md border border-border p-4"
+                      data-testid="admin-invite-url-panel"
+                    >
+                      <p className="text-[14px] font-medium text-foreground">
+                        Invite link (copy now)
+                      </p>
+                      <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-stretch">
+                        <Input
+                          readOnly
+                          value={createdInviteUrl as string}
+                          aria-label="Invite URL"
+                          data-testid="admin-invite-url"
+                          className="min-w-0 flex-1 font-mono text-[13px]"
+                          onFocus={(e) => {
+                            const el = e.currentTarget as HTMLInputElement;
+                            el.select();
+                          }}
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="shrink-0"
+                          data-testid="admin-invite-url-copy"
+                          aria-label="Copy invite URL"
+                          onClick={() => void copyInviteUrl()}
+                        >
+                          {(copyState === "copied" ? "Copied" : "Copy link") as string}
+                        </Button>
+                      </div>
+                      @if (copyState === "error") {
+                        <p role="alert" className="mt-2 text-[14px] text-destructive">
+                          Couldn’t copy. Select the link and copy manually.
+                        </p>;
+                      }
+                    </div>
+                    <DialogFooter>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => closeInviteDialog()}
+                      >
+                        Done
+                      </Button>
+                    </DialogFooter>
+                  </div>;
+                } @else {
+                  <form
+                    method="post"
+                    action="#"
+                    className="flex flex-col gap-4"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      void createInvite();
+                    }}
+                  >
+                    @if (inviteError) {
+                      <p role="alert" className="text-[14px] text-destructive">
+                        {inviteError as string}
+                      </p>;
+                    }
+                    <div className="flex flex-col gap-2">
+                      <Label htmlFor="admin-invite-email">Email</Label>
+                      <Input
+                        id="admin-invite-email"
+                        data-testid="admin-invite-email"
+                        type="email"
+                        autoComplete="email"
+                        value={inviteEmail as string}
+                        onInput={(e) =>
+                          setInviteEmail((e.currentTarget as HTMLInputElement).value)
+                        }
+                        disabled={invitePending}
+                      />
+                    </div>
+                    <DialogFooter>
+                      <Button
+                        type="submit"
+                        disabled={invitePending}
+                        data-testid="admin-invite-create"
+                      >
+                        {(invitePending ? "Creating…" : "Create invite") as string}
+                      </Button>
+                    </DialogFooter>
+                  </form>;
+                }
               </DialogContent>
             </Dialog>
           </AdminSettingsLayout>;

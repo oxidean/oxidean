@@ -193,6 +193,24 @@ async function typeIntoTestId(testId: string, value: string): Promise<void> {
   });
 }
 
+// Row actions live behind the row overflow menu. Open it (Base UI toggles the
+// menu on click when no pointerdown precedes it) and wait for data-popup-open,
+// retrying once — portal open can miss the first click under Chromium.
+async function openUserMenu(userId: string): Promise<void> {
+  const trigger = await waitForTestId(`admin-user-menu-${userId}`);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await act(async () => {
+      (trigger as HTMLElement).click();
+    });
+    const deadline = Date.now() + 2_000;
+    while (Date.now() < deadline) {
+      if (trigger.hasAttribute("data-popup-open")) return;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+  }
+  throw new Error(`admin-user-menu-${userId} did not open. ${debugBody()}`);
+}
+
 describe("AdminUsersPage browser DOM races", () => {
   it("ban AlertDialog and delete Dialog portals do not throw insertBefore", async () => {
     const tracker = trackDomErrors();
@@ -200,8 +218,9 @@ describe("AdminUsersPage browser DOM races", () => {
       await mountWithQueryClient(AdminUsersPage, {});
 
       await waitForTestId("admin-users-page");
-      await waitForTestId("admin-user-ban-u2");
+      await waitForTestId("admin-user-menu-u2");
 
+      await openUserMenu("u2");
       await clickTestId("admin-user-ban-u2");
       await waitForTestId("admin-users-confirm-dialog");
       expect(document.body.textContent).toMatch(/Ban user/i);
@@ -216,6 +235,23 @@ describe("AdminUsersPage browser DOM races", () => {
       await new Promise((r) => setTimeout(r, 100));
       expect(banMock).toHaveBeenCalled();
 
+      // First delete is refused for shared orgs; the opt-in Checkbox must
+      // mount inside the dialog without an insertBefore race.
+      deleteUserMock
+        .mockResolvedValueOnce({
+          ok: false,
+          error: {
+            code: "admin.delete_orgs_confirm",
+            message:
+              "Deleting this account also deletes organization(s) that still have other members: shared-org. Confirm again with delete_orgs to proceed.",
+          },
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          data: { ok: true, deleted_repos: 0, deleted_orgs: 1 },
+        });
+
+      await openUserMenu("u2");
       await clickTestId("admin-user-delete-u2");
       await waitForTestId("admin-users-delete-dialog");
       await waitForTestId("admin-delete-confirm");
@@ -234,7 +270,32 @@ describe("AdminUsersPage browser DOM races", () => {
 
       await clickTestId("admin-users-delete-submit");
       await new Promise((r) => setTimeout(r, 100));
-      expect(deleteUserMock).toHaveBeenCalled();
+      expect(deleteUserMock).toHaveBeenCalledWith({
+        user_id: "u2",
+        confirmation: "ada",
+        delete_orgs: false,
+      });
+
+      await waitForTestId("admin-delete-orgs");
+      expect(
+        (document.querySelector('[data-testid="admin-users-delete-submit"]') as HTMLButtonElement)
+          .disabled,
+      ).toBe(true);
+
+      await clickTestId("admin-delete-orgs");
+      await new Promise((r) => setTimeout(r, 100));
+      expect(
+        (document.querySelector('[data-testid="admin-users-delete-submit"]') as HTMLButtonElement)
+          .disabled,
+      ).toBe(false);
+
+      await clickTestId("admin-users-delete-submit");
+      await new Promise((r) => setTimeout(r, 100));
+      expect(deleteUserMock).toHaveBeenCalledWith({
+        user_id: "u2",
+        confirmation: "ada",
+        delete_orgs: true,
+      });
 
       tracker.expectNoDomRaces();
       expectNoOctaneOverlayInDocument();

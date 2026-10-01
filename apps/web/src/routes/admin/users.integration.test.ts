@@ -174,6 +174,19 @@ describe("/admin/users", () => {
     };
   });
 
+  // Row actions live behind the row overflow menu — drive the real flow:
+  // open the menu (Base UI toggles on click when no pointerdown precedes it),
+  // then click the menu item.
+  async function openUserMenu(userId: string) {
+    await waitFor(() => {
+      expect(screen.getByTestId(`admin-user-menu-${userId}`)).toBeTruthy();
+    });
+    fireEvent.click(screen.getByTestId(`admin-user-menu-${userId}`));
+    await waitFor(() => {
+      expect(screen.getByTestId(`admin-user-menu-${userId}`)).toHaveAttribute("data-popup-open");
+    });
+  }
+
   it("redirects signed-out sessions toward login", async () => {
     loaderData = { kind: "unauthenticated" };
     meMock.mockResolvedValue({
@@ -209,7 +222,7 @@ describe("/admin/users", () => {
     expect(screen.queryByTestId("admin-users-page")).toBeNull();
   });
 
-  it("renders users table and invite panel for sys-admin", async () => {
+  it("renders users list and invite action for sys-admin", async () => {
     renderWithQueryClient(AdminUsersPage);
 
     await waitFor(
@@ -218,8 +231,8 @@ describe("/admin/users", () => {
         expect(screen.getByRole("heading", { name: "Users" })).toBeTruthy();
         expect(screen.getByText("@ada")).toBeTruthy();
         expect(screen.getByText("Ada Lovelace")).toBeTruthy();
-        expect(screen.getByText("ada@example.com")).toBeTruthy();
-        expect(screen.getByTestId("admin-invite-email")).toBeTruthy();
+        expect(screen.getByText(/ada@example\.com/)).toBeTruthy();
+        expect(screen.getByTestId("admin-invite-open")).toBeTruthy();
         expect(screen.getByText("new@example.com")).toBeTruthy();
       },
       { timeout: 10_000 },
@@ -227,13 +240,26 @@ describe("/admin/users", () => {
 
     const nav = screen.getByRole("navigation", { name: "Admin settings" });
     expect(nav.querySelector('a[href="/admin/users"]')).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId("admin-invite-open"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("admin-invite-dialog")).toHaveAttribute("data-open");
+      expect(screen.getByTestId("admin-invite-email")).toBeTruthy();
+    });
   }, 15_000);
 
   it("creates an invite and shows a copyable invite URL control", async () => {
     renderWithQueryClient(AdminUsersPage);
 
     await waitFor(() => {
-      expect(screen.getByTestId("admin-invite-email")).toBeTruthy();
+      expect(screen.getByTestId("admin-invite-open")).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByTestId("admin-invite-open"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("admin-invite-dialog")).toHaveAttribute("data-open");
     });
 
     fireEvent.input(screen.getByTestId("admin-invite-email"), {
@@ -255,10 +281,7 @@ describe("/admin/users", () => {
   it("opens ban confirm dialog and calls ban RPC", async () => {
     renderWithQueryClient(AdminUsersPage);
 
-    await waitFor(() => {
-      expect(screen.getByTestId("admin-user-ban-u2")).toBeTruthy();
-    });
-
+    await openUserMenu("u2");
     fireEvent.click(screen.getByTestId("admin-user-ban-u2"));
 
     await waitFor(() => {
@@ -276,10 +299,7 @@ describe("/admin/users", () => {
   it("delete dialog requires username confirmation before submit", async () => {
     renderWithQueryClient(AdminUsersPage);
 
-    await waitFor(() => {
-      expect(screen.getByTestId("admin-user-delete-u2")).toBeTruthy();
-    });
-
+    await openUserMenu("u2");
     fireEvent.click(screen.getByTestId("admin-user-delete-u2"));
 
     await waitFor(() => {
@@ -303,6 +323,60 @@ describe("/admin/users", () => {
       expect(deleteUserMock).toHaveBeenCalledWith({
         user_id: "u2",
         confirmation: "ada",
+        delete_orgs: false,
+      });
+    });
+  });
+
+  it("delete dialog requires org-deletion opt-in when server refuses shared orgs", async () => {
+    deleteUserMock
+      .mockResolvedValueOnce({
+        ok: false,
+        error: {
+          code: "admin.delete_orgs_confirm",
+          message:
+            "Deleting this account also deletes organization(s) that still have other members: shared-org. Confirm again with delete_orgs to proceed.",
+        },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        data: { ok: true, deleted_repos: 2, deleted_orgs: 1 },
+      });
+
+    renderWithQueryClient(AdminUsersPage);
+
+    await openUserMenu("u2");
+    fireEvent.click(screen.getByTestId("admin-user-delete-u2"));
+    fireEvent.input(screen.getByTestId("admin-delete-confirm"), {
+      target: { value: "ada" },
+    });
+    fireEvent.click(screen.getByTestId("admin-users-delete-submit"));
+
+    await waitFor(() => {
+      expect(deleteUserMock).toHaveBeenCalledWith({
+        user_id: "u2",
+        confirmation: "ada",
+        delete_orgs: false,
+      });
+      expect(screen.getByTestId("admin-delete-orgs")).toBeTruthy();
+    });
+
+    // Submit stays disabled until the shared-org opt-in is checked.
+    expect(screen.getByTestId("admin-users-delete-submit")).toBeDisabled();
+
+    fireEvent.click(screen.getByTestId("admin-delete-orgs"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("admin-users-delete-submit")).not.toBeDisabled();
+    });
+
+    fireEvent.click(screen.getByTestId("admin-users-delete-submit"));
+
+    await waitFor(() => {
+      expect(deleteUserMock).toHaveBeenCalledWith({
+        user_id: "u2",
+        confirmation: "ada",
+        delete_orgs: true,
       });
     });
   });
@@ -310,10 +384,7 @@ describe("/admin/users", () => {
   it("view access loads getAccess and shows org/repo grants", async () => {
     renderWithQueryClient(AdminUsersPage);
 
-    await waitFor(() => {
-      expect(screen.getByTestId("admin-user-access-toggle-u2")).toBeTruthy();
-    });
-
+    await openUserMenu("u2");
     fireEvent.click(screen.getByTestId("admin-user-access-toggle-u2"));
 
     await waitFor(() => {
@@ -333,10 +404,7 @@ describe("/admin/users", () => {
     revokeSessionsMock.mockResolvedValue({ ok: true, data: { revoked: 3 } });
     renderWithQueryClient(AdminUsersPage);
 
-    await waitFor(() => {
-      expect(screen.getByTestId("admin-user-revoke-sessions-u2")).toBeTruthy();
-    });
-
+    await openUserMenu("u2");
     fireEvent.click(screen.getByTestId("admin-user-revoke-sessions-u2"));
 
     await waitFor(() => {
@@ -358,10 +426,7 @@ describe("/admin/users", () => {
     });
     renderWithQueryClient(AdminUsersPage);
 
-    await waitFor(() => {
-      expect(screen.getByTestId("admin-user-make-sysadmin-u2")).toBeTruthy();
-    });
-
+    await openUserMenu("u2");
     fireEvent.click(screen.getByTestId("admin-user-make-sysadmin-u2"));
 
     await waitFor(() => {
