@@ -703,6 +703,7 @@ export function AdminUsersPage() @{
                                   type="button"
                                   variant="ghost"
                                   className="h-9 px-2"
+                                  data-testid={`admin-user-make-sysadmin-${user.id}`}
                                   onClick={() =>
                                     openConfirm({
                                       kind: "role",
@@ -718,6 +719,7 @@ export function AdminUsersPage() @{
                                 type="button"
                                 variant="ghost"
                                 className="h-9 px-2"
+                                data-testid={`admin-user-revoke-sessions-${user.id}`}
                                 onClick={() =>
                                   openConfirm({ kind: "revoke-sessions", user })
                                 }
@@ -740,6 +742,7 @@ export function AdminUsersPage() @{
                                   type="button"
                                   variant="ghost"
                                   className="h-9 px-2"
+                                  data-testid={`admin-user-ban-${user.id}`}
                                   disabled={
                                     user.id === selfId ||
                                     user.role === "sys-admin"
@@ -755,6 +758,7 @@ export function AdminUsersPage() @{
                                 type="button"
                                 variant="ghost"
                                 className="h-9 px-2"
+                                data-testid={`admin-user-access-toggle-${user.id}`}
                                 onClick={() => void toggleAccess(user)}
                               >
                                 {
@@ -767,6 +771,7 @@ export function AdminUsersPage() @{
                                 type="button"
                                 variant="ghost"
                                 className="h-9 px-2 text-destructive"
+                                data-testid={`admin-user-delete-${user.id}`}
                                 disabled={user.id === selfId}
                                 onClick={() => {
                                   setDeleteError("");
@@ -964,6 +969,7 @@ export function AdminUsersPage() @{
               }
             </section>
 
+            {/* AlertDialogPortal keepMounted is inside AlertDialogContent (browser-coverage). */}
             <AlertDialog
               open={confirm != null}
               onOpenChange={(next) => {
@@ -974,7 +980,7 @@ export function AdminUsersPage() @{
                 }
               }}
             >
-              <AlertDialogContent>
+              <AlertDialogContent data-testid="admin-users-confirm-dialog">
                 <AlertDialogHeader>
                   <AlertDialogTitle>{confirmTitle as string}</AlertDialogTitle>
                   <AlertDialogDescription>{confirmDescription as string}</AlertDialogDescription>
@@ -1002,6 +1008,7 @@ export function AdminUsersPage() @{
               </AlertDialogContent>
             </AlertDialog>
 
+            {/* DialogPortal keepMounted is inside DialogContent (browser-coverage). */}
             <Dialog
               open={deleteTarget != null}
               onOpenChange={(next) => {
@@ -1013,7 +1020,10 @@ export function AdminUsersPage() @{
                 }
               }}
             >
-              <DialogContent showCloseButton={!deletePending}>
+              <DialogContent
+                showCloseButton={!deletePending}
+                data-testid="admin-users-delete-dialog"
+              >
                 <DialogHeader>
                   <DialogTitle>Delete user?</DialogTitle>
                   <DialogDescription>
@@ -1057,6 +1067,7 @@ export function AdminUsersPage() @{
                   <Button
                     type="button"
                     variant="destructive"
+                    data-testid="admin-users-delete-submit"
                     disabled={
                       deletePending ||
                       !deleteTarget ||
