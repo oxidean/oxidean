@@ -65,6 +65,8 @@ Shipped on the current mainline:
 - **Admin console**: auth providers, LFS, packages, runners, and repo templates, with a first-run setup wizard and factory reset
 - **Multi-database** support: Postgres, MySQL, SQLite
 
+What still separates Oxidean from established forges is tracked in [ROADMAP.md](ROADMAP.md).
+
 ## Docs
 
 Canonical docs live under [`docs/`](docs/).
@@ -78,6 +80,7 @@ Canonical docs live under [`docs/`](docs/).
 
 **Product & API**
 
+- [`ROADMAP.md`](ROADMAP.md) — remaining work toward functional forge parity
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — system overview (git, SSH, LFS, orgs, packages)
 - [`docs/API.md`](docs/API.md) — RPC + Smart HTTP / LFS / SSH / registry surfaces
 - [`docs/guides/stack-presets.md`](docs/guides/stack-presets.md) — in-repo `/new` stack presets
