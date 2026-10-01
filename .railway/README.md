@@ -36,6 +36,8 @@ Ephemeral PR environments clone `preview` (services, networking, variables) when
 
 **Collaborators:** invite people to the Railway **project** (Viewer is enough) and have them link their GitHub account. Repo collaborator status alone does not grant PR Environments.
 
+**Repo transfer or rename:** if the GitHub repo moves orgs or is renamed, the GitHub App installation changes and Railway's stored service connections go stale — `config apply` rewrites `source.repo` but does not rebind the connection, and all `deploymentTriggers` are lost. Symptoms: pushes and PRs produce no deploys and no PR environments, and `githubRepoUpdate` returns "Invalid source". Fix per service: `serviceConnect` (or Settings → Source → reconnect) with the new `owner/repo`, which rebinds to the live installation and re-creates `main` triggers on every environment — then delete the triggers on `preview` and `production` and keep `staging` on `main` + Wait for CI. If repo listing returns "Not Authorized", re-link GitHub in Railway account settings.
+
 **Focused PR Environments (recommended):** enable in Project Settings → Environments, then set watch paths on services, for example:
 
 | Service | Watch paths |
