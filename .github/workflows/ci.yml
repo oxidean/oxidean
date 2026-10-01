@@ -112,10 +112,13 @@ jobs:
           bun-version: "1.4.0"
       - name: route coverage gate (inventory + change-aware)
         env:
-          UI_COVERAGE_BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || (github.event.before != '0000000000000000000000000000000000000000' && github.event.before || 'HEAD~1') }}
+          # PR: compare to PR base. Push: origin/main (github.event.before breaks after force-push rewrites).
+          UI_COVERAGE_BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || 'origin/main' }}
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             git fetch --no-tags origin "${{ github.base_ref }}"
+          else
+            git fetch --no-tags origin main
           fi
           make route-coverage-check
 
@@ -136,10 +139,13 @@ jobs:
           bun-version: "1.4.0"
       - name: browser coverage gate (inventory + change-aware)
         env:
-          UI_COVERAGE_BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || (github.event.before != '0000000000000000000000000000000000000000' && github.event.before || 'HEAD~1') }}
+          # PR: compare to PR base. Push: origin/main (github.event.before breaks after force-push rewrites).
+          UI_COVERAGE_BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || 'origin/main' }}
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             git fetch --no-tags origin "${{ github.base_ref }}"
+          else
+            git fetch --no-tags origin main
           fi
           make browser-coverage-check
           ./scripts/ui-coverage-change.contract.sh
