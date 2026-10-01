@@ -273,27 +273,25 @@ pub async fn delete(
         }
     }
 
-    // Personal repos: wipe disk then delete rows (incl. soft-deleted).
+    // Collect wipe targets while rows still exist, then delete DB first.
+    // Disk wipe is best-effort after success so a failed wipe cannot leave
+    // ghost repos in the UI (orphan owner dirs are recoverable).
     let personal_repos = ctx
         .db
         .list_repositories_by_owner(&target.id)
         .await
         .map_err(db_err)?;
     let mut deleted_repos = personal_repos.len() as i64;
-    wipe_owner_dir(&ctx.repos_dir, &target.username).await?;
-    let _ = ctx
-        .db
-        .hard_delete_repositories_by_owner(&target.id, "user")
-        .await
-        .map_err(db_err)?;
+    let mut wipe_slugs: Vec<String> = Vec::new();
+    wipe_slugs.push(target.username.clone());
 
-    // Sole-owner orgs: delete org repos + disk + org row.
     let memberships = ctx
         .db
         .list_orgs_for_user(&target.id)
         .await
         .map_err(db_err)?;
     let mut deleted_orgs: i64 = 0;
+    let mut sole_owner_orgs: Vec<(String, String)> = Vec::new(); // (id, slug)
     for org in memberships {
         // OrgMineRow.role is org role (`owner` | `admin` | `member` | `read`).
         if org.role != "owner" {
@@ -309,16 +307,23 @@ pub async fn delete(
             .await
             .map_err(db_err)?;
         deleted_repos += org_repos.len() as i64;
-        wipe_owner_dir(&ctx.repos_dir, &org.slug).await?;
+        sole_owner_orgs.push((org.id.clone(), org.slug.clone()));
+        wipe_slugs.push(org.slug);
+    }
+
+    let _ = ctx
+        .db
+        .hard_delete_repositories_by_owner(&target.id, "user")
+        .await
+        .map_err(db_err)?;
+
+    for (org_id, _) in &sole_owner_orgs {
         let _ = ctx
             .db
-            .hard_delete_repositories_by_owner(&org.id, "org")
+            .hard_delete_repositories_by_owner(org_id, "org")
             .await
             .map_err(db_err)?;
-        ctx.db
-            .delete_organization(&org.id)
-            .await
-            .map_err(db_err)?;
+        ctx.db.delete_organization(org_id).await.map_err(db_err)?;
         deleted_orgs += 1;
     }
 
@@ -329,6 +334,16 @@ pub async fn delete(
         .await
         .map_err(session_err)?;
     ctx.db.delete_user(&target.id).await.map_err(db_err)?;
+
+    for slug in wipe_slugs {
+        if let Err(e) = wipe_owner_dir(&ctx.repos_dir, &slug).await {
+            tracing::error!(
+                error = %e.message,
+                owner = %slug,
+                "post-delete wipe failed; orphan repo dir may remain"
+            );
+        }
+    }
 
     Ok(AdminUsersDeleteResponse {
         ok: true,
