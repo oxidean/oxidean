@@ -203,11 +203,14 @@ async fn org_invites_create() {
     .await;
     assert_eq!(status, StatusCode::OK, "invites.create — {v}");
     assert_eq!(v["ok"], true, "{v}");
-    assert_eq!(v["data"]["email"], "newbie@ex.com");
-    assert_eq!(v["data"]["role"], "member");
-    assert!(v["data"]["id"].as_str().is_some());
+    assert_eq!(v["data"]["invite"]["email"], "newbie@ex.com");
+    assert_eq!(v["data"]["invite"]["role"], "member");
+    assert!(v["data"]["invite"]["id"].as_str().is_some());
+    let invite_url = v["data"]["invite_url"].as_str().expect("invite_url");
+    assert!(invite_url.contains("/invites/"), "{v}");
     assert!(
-        v["data"].get("token").is_none() && v["data"].get("token_hash").is_none(),
+        v["data"]["invite"].get("token").is_none()
+            && v["data"]["invite"].get("token_hash").is_none(),
         "create must not return plaintext token or hash: {v}"
     );
 
@@ -281,7 +284,7 @@ async fn org_invites_revoke() {
     )
     .await;
     assert_eq!(create_v["ok"], true, "{create_v}");
-    let invite_id = create_v["data"]["id"].as_str().expect("invite id");
+    let invite_id = create_v["data"]["invite"]["id"].as_str().expect("invite id");
 
     let (status, v) = rpc_json(
         &app,
@@ -409,7 +412,10 @@ async fn org_invites_token_hash_at_rest() {
     .await;
     assert_eq!(create_v["ok"], true, "{create_v}");
     assert!(
-        create_v["data"].get("token").is_none() && create_v["data"].get("token_hash").is_none(),
+        create_v["data"]["invite"].get("token").is_none()
+            && create_v["data"]["invite"].get("token_hash").is_none()
+            && create_v["data"].get("token").is_none()
+            && create_v["data"].get("token_hash").is_none(),
         "RPC must not expose token or hash: {create_v}"
     );
 
@@ -420,7 +426,7 @@ async fn org_invites_token_hash_at_rest() {
     assert_eq!(token.len(), 64);
     let expected_hash = sha256_hex(token.as_bytes());
     let row = db
-        .find_org_invite_by_id(create_v["data"]["id"].as_str().expect("id"))
+        .find_org_invite_by_id(create_v["data"]["invite"]["id"].as_str().expect("id"))
         .await
         .expect("find invite")
         .expect("invite row");
@@ -450,7 +456,7 @@ async fn org_invites_accept_expired_token_fails() {
     )
     .await;
     assert_eq!(create_v["ok"], true, "{create_v}");
-    let invite_id = create_v["data"]["id"].as_str().expect("id");
+    let invite_id = create_v["data"]["invite"]["id"].as_str().expect("id");
 
     let token = {
         let sent = recorder.sent.lock().expect("lock");
