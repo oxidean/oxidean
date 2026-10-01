@@ -894,6 +894,79 @@ async fn admin_users_delete_removes_personal_repos_and_sole_owner_org() {
     );
 }
 
+/// DB delete must succeed even when post-delete disk wipe fails (orphan dirs ok).
+#[tokio::test]
+async fn admin_users_delete_succeeds_when_disk_wipe_fails() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let url = format!(
+        "sqlite:{}",
+        dir.path().join("admin_users_delete_wipe_fail.db").display()
+    );
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let (app, _) = test_app_with_recorder_repos(db.clone(), Some(repos.clone())).await;
+
+    let (admin_id, _) = bootstrap_sysadmin(&db).await;
+    let admin_cookie = login_as(&app, &db, &admin_id).await;
+
+    let (user_cookie, login_v) = signup_and_login(&app, "wipefail@ex.com", "wipefail1").await;
+    let user_id = login_v["data"]["id"].as_str().expect("id").to_string();
+    verify_user(&db, &user_id).await;
+
+    let (_, personal) = rpc_json(
+        &app,
+        r#"{"procedure":"repo.create","input":{"name":"stuck-app","visibility":"public","description":""}}"#,
+        Some(&user_cookie),
+    )
+    .await;
+    assert_eq!(personal["ok"], true, "{personal}");
+    let personal_repo_id = personal["data"]["id"].as_str().expect("repo id").to_string();
+    assert!(repos.join("wipefail1").join("stuck-app.git").exists());
+
+    // Make a nested dir non-writable so remove_dir_all fails during wipe.
+    let locked = repos.join("wipefail1").join("locked");
+    std::fs::create_dir_all(&locked).expect("locked dir");
+    std::fs::write(locked.join("pin"), b"x").expect("pin");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o555))
+            .expect("chmod locked");
+    }
+
+    let (_, delete_v) = rpc_json(
+        &app,
+        &format!(
+            r#"{{"procedure":"admin.users.delete","input":{{"user_id":"{user_id}","confirmation":"wipefail1"}}}}"#
+        ),
+        Some(&admin_cookie),
+    )
+    .await;
+    assert_eq!(delete_v["ok"], true, "{delete_v}");
+    assert_eq!(delete_v["data"]["ok"], true);
+
+    assert!(
+        db.find_user_by_id(&user_id).await.expect("find user").is_none(),
+        "user row must be deleted even if wipe fails"
+    );
+    assert!(
+        db.find_repository_by_id(&personal_repo_id)
+            .await
+            .expect("find repo")
+            .is_none(),
+        "repo row must be deleted even if wipe fails"
+    );
+
+    // Restore perms so tempfile cleanup can remove the tree.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755));
+    }
+}
+
 #[tokio::test]
 async fn admin_users_get_access_lists_orgs_and_repos() {
     let dir = tempfile::tempdir().expect("tempdir");
