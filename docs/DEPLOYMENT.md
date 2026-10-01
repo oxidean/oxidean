@@ -187,10 +187,10 @@ Production-like Compose should copy [`.env.example`](../.env.example) to `.env` 
 | `OXIDEAN_ENV` | Not `development`/`dev` (Compose default is `compose`) |
 | `OXIDEAN_CORS_ORIGINS` | Comma-separated public browser origins (**required** when env is not `development`/`dev`) |
 | `OXIDEAN_AUTO_MIGRATE` | Cloud: `true` (schema on API boot / promote). Self-host prod-like Compose may still use `false` + `make db-migrate` |
-| `OXIDEAN_PUBLIC_ORIGIN` | Browser-facing origin for SSO callbacks behind Traefik |
+| `OXIDEAN_PUBLIC_ORIGIN` | Browser-facing origin for SSO callbacks, magic links, and invite URLs |
 | Auth / email secrets | `WORKOS_*`, `OXIDEAN_OIDC_*`, `OXIDEAN_RESEND_API_KEY` / `OXIDEAN_SMTP_URL` as needed |
 
-Full variable table and defaults: [CONFIGURATION.md](CONFIGURATION.md). Cloud secrets live in the Railway dashboard / `preserve()` — see Oxidean Cloud section above.
+Full variable table and defaults: [CONFIGURATION.md](CONFIGURATION.md). Cloud secrets live in the Railway dashboard / `preserve()` — see Oxidean Cloud section above. Day-one operator tasks (user administration, invites, session/audit inspection): [guides/administration.md](guides/administration.md).
 
 ## Smoke targets
 

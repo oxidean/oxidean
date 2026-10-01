@@ -69,6 +69,7 @@ By contributing, you agree that your contributions are licensed under the [MIT L
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design |
 | [docs/API.md](docs/API.md) | RPC + git / LFS / SSH / packages surfaces |
 | [docs/guides/stack-presets.md](docs/guides/stack-presets.md) | In-repo `/new` stack presets |
+| [docs/guides/administration.md](docs/guides/administration.md) | Sys-admins / scoped admins — users, sessions, activity, invites |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Contributors — local API + Vite, monorepo layout |
 | [docs/TESTING.md](docs/TESTING.md) | Test layers |
 | [docs/dev-auth.md](docs/dev-auth.md) | Local auth/email stubs |

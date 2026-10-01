@@ -604,6 +604,8 @@ Smart HTTP failed-authentication attempts are rate-limited in-process: **20 fail
 
 `user.lookup` is rate-limited per session (**60** requests / **60s**). Other RPC routes do not apply in-process limiters; rely on reverse-proxy / edge controls for deployment-wide limits.
 
+Invite issuance is rate-limited per scope (instance / org / repo): **20** invites issued per hour, enforced cumulatively — a bulk `create` batch stops issuing once the remaining hourly budget is exhausted, and remaining recipients get per-recipient `hourly invite limit reached` results. Requests are also capped at **50** recipient emails each, and re-issuing an invite to the same email within **60s** is rejected (re-issue after that revokes the previous pending invite — its link dies). `createLink` counts as one issued invite against the same hourly budget.
+
 ## Actions (Phase 19)
 
 Oxidean Actions is a **control plane**: workflows are discovered under `.github/workflows/*.yml`, runs/jobs are queued, and **registered runners** execute them. There is **no managed CI minutes** product and no in-process job executor (ACT-07 / D-ACT-10).
