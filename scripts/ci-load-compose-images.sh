@@ -13,6 +13,14 @@ if [[ ! -f "$TGZ" ]]; then
   exit 1
 fi
 
+# Fail fast on truncated/corrupt artifact downloads — a partial tarball
+# otherwise dies cryptically inside docker load ("unexpected EOF").
+if ! gzip -t "$TGZ"; then
+  echo "FAIL: image tarball is truncated or corrupt: $TGZ" >&2
+  echo "     re-run the job — this is an artifact-download flake." >&2
+  exit 1
+fi
+
 echo "==> docker load from $TGZ"
 gzip -dc "$TGZ" | docker load
 echo "==> verifying expected tags"

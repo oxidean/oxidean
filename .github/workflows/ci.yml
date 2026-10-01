@@ -318,7 +318,7 @@ jobs:
             /usr/local/share/boost /usr/share/swift || true
           df -h /
       - name: download compose images
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: oxidean-ci-images
           path: /tmp/oxidean-ci-images
@@ -354,7 +354,7 @@ jobs:
             /usr/local/share/boost /usr/share/swift || true
           df -h /
       - name: download compose images
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: oxidean-ci-images
           path: /tmp/oxidean-ci-images
