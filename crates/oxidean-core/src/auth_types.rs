@@ -195,6 +195,18 @@ pub struct UpdateProfileRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserLookupRequest {
     pub prefix: String,
+    /// Optional scope for exclude/rank (PR-B contextual autocomplete).
+    #[serde(default)]
+    pub context: Option<UserLookupContext>,
+}
+
+/// Scope for contextual `user.lookup` ranking / exclusion.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum UserLookupContext {
+    Instance,
+    Org { slug: String },
+    Repo { owner: String, name: String },
 }
 
 /// Public autocomplete hit — never includes email (T-10-03).
@@ -209,6 +221,304 @@ pub struct UserLookupHit {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserLookupResponse {
     pub users: Vec<UserLookupHit>,
+}
+
+/// Admin user row for `admin.users.list` (includes email + ban state).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminUserPublic {
+    pub id: String,
+    pub email: String,
+    pub username: String,
+    pub display_name: String,
+    pub role: Role,
+    pub email_verified: bool,
+    pub banned_at: Option<String>,
+    pub created_at: String,
+}
+
+/// `admin.users.list` input.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminUsersListRequest {
+    #[serde(default)]
+    pub query: Option<String>,
+    #[serde(default)]
+    pub limit: Option<i64>,
+    #[serde(default)]
+    pub offset: Option<i64>,
+}
+
+/// `admin.users.list` response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminUsersListResponse {
+    pub users: Vec<AdminUserPublic>,
+    pub total: i64,
+}
+
+/// `admin.users.updateRole` — only `user` ↔ `sys-admin`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminUsersUpdateRoleRequest {
+    pub user_id: String,
+    pub role: Role,
+}
+
+/// Shared `{ user_id }` for ban / unban / revokeSessions.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminUsersUserIdRequest {
+    pub user_id: String,
+}
+
+/// `admin.users.delete` — confirmation must equal the target username.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminUsersDeleteRequest {
+    pub user_id: String,
+    pub confirmation: String,
+    /// Opt-in required when a sole-owner org still has other members —
+    /// deleting the account would delete that org and its repositories.
+    #[serde(default)]
+    pub delete_orgs: Option<bool>,
+}
+
+/// `admin.users.delete` summary for the confirmation UI.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminUsersDeleteResponse {
+    pub ok: bool,
+    pub deleted_repos: i64,
+    pub deleted_orgs: i64,
+}
+
+/// Public pending instance invite — never includes token or token_hash.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InstanceInvitePublic {
+    pub id: String,
+    /// `None` = shareable link (not bound to a recipient email).
+    pub email: Option<String>,
+    /// `None` = never expires.
+    pub expires_at: Option<String>,
+    pub invited_by: String,
+    pub created_at: String,
+    /// `None` = unlimited seats.
+    pub max_uses: Option<i64>,
+    pub use_count: i64,
+}
+
+/// `admin.invites.create` — bulk: one email-bound invite per address.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminInvitesCreateRequest {
+    pub emails: Vec<String>,
+}
+
+/// Per-recipient outcome of a bulk invite create.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminInvitesCreateItemResult {
+    pub email: String,
+    pub ok: bool,
+    #[serde(default)]
+    pub error: Option<String>,
+    #[serde(default)]
+    pub invite: Option<InstanceInvitePublic>,
+    /// One-time copyable URL (present only when `ok`).
+    #[serde(default)]
+    pub invite_url: Option<String>,
+}
+
+/// `admin.invites.create` response — one entry per submitted email.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminInvitesCreateResponse {
+    pub results: Vec<AdminInvitesCreateItemResult>,
+}
+
+/// `admin.invites.createLink` — shareable link, no bound email.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminInvitesCreateLinkRequest {
+    /// ISO-8601 UTC; `None`/absent = never expires.
+    #[serde(default)]
+    pub expires_at: Option<String>,
+    /// `None`/absent = unlimited seats.
+    #[serde(default)]
+    pub max_uses: Option<i64>,
+}
+
+/// `admin.invites.createLink` — invite metadata + one-time copyable URL.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminInvitesCreateLinkResponse {
+    pub invite: InstanceInvitePublic,
+    pub invite_url: String,
+}
+
+/// `admin.invites.list` response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminInvitesListResponse {
+    pub invites: Vec<InstanceInvitePublic>,
+}
+
+/// `admin.invites.revoke`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminInvitesRevokeRequest {
+    pub invite_id: String,
+}
+
+/// `invites.get` — anonymous-safe invite preview (accept page).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InvitesGetRequest {
+    pub token: String,
+}
+
+/// Invite preview — scope + constraints; never token internals.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InvitesGetResponse {
+    /// `"instance" | "org" | "repo"`.
+    pub kind: String,
+    /// `Some` when the invite is bound to a recipient email (enforced on accept).
+    pub email: Option<String>,
+    /// `None` = never expires.
+    pub expires_at: Option<String>,
+    /// Seats remaining; `None` = unlimited.
+    pub seats_remaining: Option<i64>,
+    /// Org invite target (kind == "org").
+    #[serde(default)]
+    pub org_slug: Option<String>,
+    #[serde(default)]
+    pub org_display_name: Option<String>,
+    /// Repo invite target (kind == "repo").
+    #[serde(default)]
+    pub repo_owner: Option<String>,
+    #[serde(default)]
+    pub repo_name: Option<String>,
+    /// Role/permission granted on accept (org/repo invites).
+    #[serde(default)]
+    pub grant: Option<String>,
+    /// `false` when expired, revoked, or out of seats.
+    pub acceptable: bool,
+    /// `"expired" | "revoked" | "exhausted"` — set when `acceptable` is false.
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
+/// Unified `invites.accept` / `org.invites.accept` input.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InvitesAcceptRequest {
+    pub token: String,
+    /// Account email — required for anonymous accept of unbound link invites.
+    #[serde(default)]
+    pub email: Option<String>,
+    #[serde(default)]
+    pub username: Option<String>,
+    #[serde(default)]
+    pub password: Option<String>,
+}
+
+/// Unified `invites.accept` response — instance signup, org membership, or repo collaborator.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum InvitesAcceptResponse {
+    Instance,
+    Org {
+        org: crate::OrgPublic,
+        member: crate::OrgMemberPublic,
+    },
+    Repo {
+        owner: String,
+        name: String,
+        permission: crate::CollaboratorPermission,
+    },
+}
+
+/// Org membership summary for `admin.users.getAccess`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminUserAccessOrg {
+    pub slug: String,
+    pub display_name: String,
+    pub role: crate::OrgRole,
+}
+
+/// Repo collaborator grant summary for `admin.users.getAccess`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminUserAccessRepo {
+    pub owner: String,
+    pub name: String,
+    pub permission: crate::CollaboratorPermission,
+}
+
+/// `admin.users.getAccess` response — read-only memberships / grants.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminUsersGetAccessResponse {
+    pub orgs: Vec<AdminUserAccessOrg>,
+    pub repos: Vec<AdminUserAccessRepo>,
+}
+
+/// Session row for the admin user view — never includes token or token_hash.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminSessionPublic {
+    pub id: String,
+    pub created_at: String,
+    pub last_seen_at: String,
+    pub expires_at: String,
+    pub remember_me: bool,
+    pub ip_address: Option<String>,
+    pub user_agent: Option<String>,
+}
+
+/// `admin.users.listSessions` response (input is the shared `{ user_id }` shape).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminUsersListSessionsResponse {
+    pub sessions: Vec<AdminSessionPublic>,
+}
+
+/// `admin.users.getActivity` input.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminUsersGetActivityRequest {
+    pub user_id: String,
+    /// Source filter: `"audit"`, `"repository"`, or absent for both.
+    #[serde(default)]
+    pub source: Option<String>,
+    /// Exact event-type filter (audit `event_type` / repo `push_type`).
+    #[serde(default)]
+    pub event_type: Option<String>,
+    #[serde(default)]
+    pub limit: Option<i64>,
+}
+
+/// One row in the merged user activity feed (audit events + repo activity).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminUserActivityItem {
+    pub id: String,
+    /// `"audit"` or `"repository"`.
+    pub source: String,
+    /// Audit `event_type` or repo `push_type`.
+    pub event_type: String,
+    pub created_at: String,
+    // Audit fields.
+    #[serde(default)]
+    pub target_type: Option<String>,
+    #[serde(default)]
+    pub target_id: Option<String>,
+    #[serde(default)]
+    pub detail: Option<String>,
+    #[serde(default)]
+    pub ip_address: Option<String>,
+    #[serde(default)]
+    pub user_agent: Option<String>,
+    // Repository-activity fields.
+    #[serde(default)]
+    pub repo_owner: Option<String>,
+    #[serde(default)]
+    pub repo_name: Option<String>,
+    #[serde(default)]
+    pub ref_name: Option<String>,
+    #[serde(default)]
+    pub commits_count: Option<i64>,
+    #[serde(default)]
+    pub commit_message: Option<String>,
+    #[serde(default)]
+    pub pr_number: Option<i64>,
+}
+
+/// `admin.users.getActivity` response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminUsersGetActivityResponse {
+    pub items: Vec<AdminUserActivityItem>,
+    /// Distinct event types seen for this user (filter UI).
+    pub event_types: Vec<String>,
 }
 
 /// Instance auth settings for admin UI — secrets never returned; ENV badges only (D-09, T-04-22).

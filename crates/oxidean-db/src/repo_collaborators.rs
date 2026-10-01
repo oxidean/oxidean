@@ -372,3 +372,130 @@ ORDER BY c.created_at ASC, c.user_id ASC",
         }
     }
 }
+
+/// Collaborator grant with resolved owner slug + repo name (admin access summary).
+#[derive(Debug, Clone)]
+pub struct RepoCollaboratorGrantRow {
+    pub repo_id: String,
+    pub owner_slug: String,
+    pub name: String,
+    pub permission: String,
+    pub created_at: String,
+}
+
+/// List direct collaborator grants for a user across non-deleted repos.
+pub async fn list_grants_for_user(
+    pool: &DbPool,
+    user_id: &str,
+) -> Result<Vec<RepoCollaboratorGrantRow>, String> {
+    match pool {
+        DbPool::Postgres(p) => {
+            let rows = sqlx::query(
+                "SELECT c.repo_id, r.name, c.permission,
+       COALESCE(u.username, o.slug) AS owner_slug,
+       to_char(c.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS created_at
+FROM repository_collaborators c
+JOIN repositories r ON r.id = c.repo_id AND r.deleted_at IS NULL
+LEFT JOIN users u ON r.owner_type = 'user' AND u.id = r.owner_id
+LEFT JOIN organizations o ON r.owner_type = 'org' AND o.id = r.owner_id
+WHERE c.user_id = $1
+ORDER BY owner_slug ASC, r.name ASC",
+            )
+            .bind(user_id)
+            .fetch_all(p)
+            .await
+            .map_err(|e| format!("list repo collab grants for user failed: {e}"))?;
+            rows.into_iter()
+                .map(|row| {
+                    Ok(RepoCollaboratorGrantRow {
+                        repo_id: row
+                            .try_get("repo_id")
+                            .map_err(|e| format!("collab grant: {e}"))?,
+                        owner_slug: row
+                            .try_get("owner_slug")
+                            .map_err(|e| format!("collab grant: {e}"))?,
+                        name: row.try_get("name").map_err(|e| format!("collab grant: {e}"))?,
+                        permission: row
+                            .try_get("permission")
+                            .map_err(|e| format!("collab grant: {e}"))?,
+                        created_at: row
+                            .try_get("created_at")
+                            .map_err(|e| format!("collab grant: {e}"))?,
+                    })
+                })
+                .collect()
+        }
+        DbPool::MySql(p) => {
+            let rows = sqlx::query(
+                "SELECT c.repo_id, r.name, c.permission,
+       COALESCE(u.username, o.slug) AS owner_slug,
+       DATE_FORMAT(c.created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at
+FROM repository_collaborators c
+JOIN repositories r ON r.id = c.repo_id AND r.deleted_at IS NULL
+LEFT JOIN users u ON r.owner_type = 'user' AND u.id = r.owner_id
+LEFT JOIN organizations o ON r.owner_type = 'org' AND o.id = r.owner_id
+WHERE c.user_id = ?
+ORDER BY owner_slug ASC, r.name ASC",
+            )
+            .bind(user_id)
+            .fetch_all(p)
+            .await
+            .map_err(|e| format!("list repo collab grants for user failed: {e}"))?;
+            rows.into_iter()
+                .map(|row| {
+                    Ok(RepoCollaboratorGrantRow {
+                        repo_id: row
+                            .try_get("repo_id")
+                            .map_err(|e| format!("collab grant: {e}"))?,
+                        owner_slug: row
+                            .try_get("owner_slug")
+                            .map_err(|e| format!("collab grant: {e}"))?,
+                        name: row.try_get("name").map_err(|e| format!("collab grant: {e}"))?,
+                        permission: row
+                            .try_get("permission")
+                            .map_err(|e| format!("collab grant: {e}"))?,
+                        created_at: row
+                            .try_get("created_at")
+                            .map_err(|e| format!("collab grant: {e}"))?,
+                    })
+                })
+                .collect()
+        }
+        DbPool::Sqlite(p) => {
+            let rows = sqlx::query(
+                "SELECT c.repo_id, r.name, c.permission,
+       COALESCE(u.username, o.slug) AS owner_slug,
+       strftime('%Y-%m-%dT%H:%M:%SZ', c.created_at) AS created_at
+FROM repository_collaborators c
+JOIN repositories r ON r.id = c.repo_id AND r.deleted_at IS NULL
+LEFT JOIN users u ON r.owner_type = 'user' AND u.id = r.owner_id
+LEFT JOIN organizations o ON r.owner_type = 'org' AND o.id = r.owner_id
+WHERE c.user_id = ?1
+ORDER BY owner_slug ASC, r.name ASC",
+            )
+            .bind(user_id)
+            .fetch_all(p)
+            .await
+            .map_err(|e| format!("list repo collab grants for user failed: {e}"))?;
+            rows.into_iter()
+                .map(|row| {
+                    Ok(RepoCollaboratorGrantRow {
+                        repo_id: row
+                            .try_get("repo_id")
+                            .map_err(|e| format!("collab grant: {e}"))?,
+                        owner_slug: row
+                            .try_get("owner_slug")
+                            .map_err(|e| format!("collab grant: {e}"))?,
+                        name: row.try_get("name").map_err(|e| format!("collab grant: {e}"))?,
+                        permission: row
+                            .try_get("permission")
+                            .map_err(|e| format!("collab grant: {e}"))?,
+                        created_at: row
+                            .try_get("created_at")
+                            .map_err(|e| format!("collab grant: {e}"))?,
+                    })
+                })
+                .collect()
+        }
+    }
+}

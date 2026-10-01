@@ -85,6 +85,165 @@ export type FactoryResetResponse = {
   needs_setup: boolean;
 };
 
+export type AdminUserPublic = {
+  id: string;
+  email: string;
+  username: string;
+  display_name: string;
+  role: UserRole;
+  email_verified: boolean;
+  banned_at?: string | null;
+  created_at: string;
+};
+
+export type AdminUsersListRequest = {
+  query?: string | null;
+  limit?: number | null;
+  offset?: number | null;
+};
+
+export type AdminUsersListResponse = {
+  users: AdminUserPublic[];
+  total: number;
+};
+
+export type AdminUsersUpdateRoleRequest = {
+  user_id: string;
+  role: UserRole;
+};
+
+export type AdminUsersUserIdRequest = {
+  user_id: string;
+};
+
+export type AdminUsersDeleteRequest = {
+  user_id: string;
+  confirmation: string;
+  delete_orgs?: boolean | null;
+};
+
+export type AdminUsersDeleteResponse = {
+  ok: boolean;
+  deleted_repos: number;
+  deleted_orgs: number;
+};
+
+export type AdminUserAccessOrg = {
+  slug: string;
+  display_name: string;
+  role: OrgRole;
+};
+
+export type AdminUserAccessRepo = {
+  owner: string;
+  name: string;
+  permission: CollaboratorPermission;
+};
+
+export type AdminUsersGetAccessResponse = {
+  orgs: AdminUserAccessOrg[];
+  repos: AdminUserAccessRepo[];
+};
+
+export type InstanceInvitePublic = {
+  id: string;
+  /** null = shareable link (not bound to a recipient email). */
+  email?: string | null;
+  /** null = never expires. */
+  expires_at?: string | null;
+  invited_by: string;
+  created_at: string;
+  /** null = unlimited seats. */
+  max_uses?: number | null;
+  use_count: number;
+};
+
+export type AdminInvitesCreateRequest = {
+  /** Bulk: one email-bound invite per address (max 50). */
+  emails: string[];
+};
+
+export type AdminInvitesCreateItemResult = {
+  email: string;
+  ok: boolean;
+  error?: string | null;
+  invite?: InstanceInvitePublic | null;
+  /** One-time copyable URL (present only when ok). */
+  invite_url?: string | null;
+};
+
+export type AdminInvitesCreateResponse = {
+  results: AdminInvitesCreateItemResult[];
+};
+
+export type AdminInvitesCreateLinkRequest = {
+  /** ISO-8601 UTC; absent = never expires. */
+  expires_at?: string | null;
+  /** Absent = unlimited seats. */
+  max_uses?: number | null;
+};
+
+export type AdminInvitesCreateLinkResponse = {
+  invite: InstanceInvitePublic;
+  invite_url: string;
+};
+
+export type AdminInvitesListResponse = {
+  invites: InstanceInvitePublic[];
+};
+
+export type AdminInvitesRevokeRequest = {
+  invite_id: string;
+};
+
+export type AdminSessionPublic = {
+  id: string;
+  created_at: string;
+  last_seen_at: string;
+  expires_at: string;
+  remember_me: boolean;
+  ip_address?: string | null;
+  user_agent?: string | null;
+};
+
+export type AdminUsersListSessionsResponse = {
+  sessions: AdminSessionPublic[];
+};
+
+export type AdminUsersGetActivityRequest = {
+  user_id: string;
+  /** "audit" | "repository"; absent = both. */
+  source?: string | null;
+  /** Exact event-type filter (audit event_type / repo push_type). */
+  event_type?: string | null;
+  limit?: number | null;
+};
+
+export type AdminUserActivityItem = {
+  id: string;
+  /** "audit" | "repository". */
+  source: string;
+  /** Audit event_type or repo push_type. */
+  event_type: string;
+  created_at: string;
+  target_type?: string | null;
+  target_id?: string | null;
+  detail?: string | null;
+  ip_address?: string | null;
+  user_agent?: string | null;
+  repo_owner?: string | null;
+  repo_name?: string | null;
+  ref_name?: string | null;
+  commits_count?: number | null;
+  commit_message?: string | null;
+  pr_number?: number | null;
+};
+
+export type AdminUsersGetActivityResponse = {
+  items: AdminUserActivityItem[];
+  event_types: string[];
+};
+
 export type RepoGcRequest = {
   owner?: string | null;
   name?: string | null;
@@ -146,8 +305,14 @@ export type UpdateProfileRequest = {
   default_branch?: string | null;
 };
 
+export type UserLookupContext =
+  | { kind: "instance" }
+  | { kind: "org"; slug: string }
+  | { kind: "repo"; owner: string; name: string };
+
 export type UserLookupRequest = {
   prefix: string;
+  context?: UserLookupContext | null;
 };
 
 export type UserLookupHit = {
@@ -1023,6 +1188,66 @@ export type RepoCollaboratorsRemoveRequest = {
   user_id: string;
 };
 
+export type RepoInvitePublic = {
+  id: string;
+  /** null = shareable link (not bound to a recipient email). */
+  email?: string | null;
+  permission: CollaboratorPermission;
+  /** null = never expires. */
+  expires_at?: string | null;
+  invited_by: string;
+  created_at: string;
+  /** null = unlimited seats. */
+  max_uses?: number | null;
+  use_count: number;
+};
+
+export type RepoInvitesListResponse = {
+  invites: RepoInvitePublic[];
+};
+
+export type RepoInvitesCreateRequest = {
+  owner: string;
+  name: string;
+  /** Bulk: one email-bound invite per address (max 50). */
+  emails: string[];
+  permission: CollaboratorPermission;
+};
+
+export type RepoInvitesCreateItemResult = {
+  email: string;
+  ok: boolean;
+  error?: string | null;
+  invite?: RepoInvitePublic | null;
+  /** One-time copyable URL (present only when ok). */
+  invite_url?: string | null;
+};
+
+export type RepoInvitesCreateResponse = {
+  results: RepoInvitesCreateItemResult[];
+};
+
+export type RepoInvitesCreateLinkRequest = {
+  owner: string;
+  name: string;
+  permission: CollaboratorPermission;
+  /** ISO-8601 UTC; absent = never expires. */
+  expires_at?: string | null;
+  /** Absent = unlimited seats. */
+  max_uses?: number | null;
+};
+
+export type RepoInvitesCreateLinkResponse = {
+  invite: RepoInvitePublic;
+  invite_url: string;
+};
+
+export type RepoInvitesRevokeRequest = {
+  owner: string;
+  name: string;
+  invite_id: string;
+};
+
 /** Classic branch protection rule (Phase 13 / ORG-05). */
 export type BranchProtectionRulePublic = {
   id: string;
@@ -1341,11 +1566,16 @@ export type OrgMembersRemoveRequest = {
 
 export type OrgInvitePublic = {
   id: string;
-  email: string;
+  /** null = shareable link (not bound to a recipient email). */
+  email?: string | null;
   role: OrgRole;
-  expires_at: string;
+  /** null = never expires. */
+  expires_at?: string | null;
   invited_by: string;
   created_at: string;
+  /** null = unlimited seats. */
+  max_uses?: number | null;
+  use_count: number;
 };
 
 export type OrgInvitesListResponse = {
@@ -1354,8 +1584,36 @@ export type OrgInvitesListResponse = {
 
 export type OrgInvitesCreateRequest = {
   slug: string;
-  email: string;
+  /** Bulk: one email-bound invite per address (max 50). */
+  emails: string[];
   role: OrgRole;
+};
+
+export type OrgInvitesCreateItemResult = {
+  email: string;
+  ok: boolean;
+  error?: string | null;
+  invite?: OrgInvitePublic | null;
+  /** One-time copyable URL (present only when ok). */
+  invite_url?: string | null;
+};
+
+export type OrgInvitesCreateResponse = {
+  results: OrgInvitesCreateItemResult[];
+};
+
+export type OrgInvitesCreateLinkRequest = {
+  slug: string;
+  role: OrgRole;
+  /** ISO-8601 UTC; absent = never expires. */
+  expires_at?: string | null;
+  /** Absent = unlimited seats. */
+  max_uses?: number | null;
+};
+
+export type OrgInvitesCreateLinkResponse = {
+  invite: OrgInvitePublic;
+  invite_url: string;
 };
 
 export type OrgInvitesRevokeRequest = {
@@ -1365,6 +1623,8 @@ export type OrgInvitesRevokeRequest = {
 
 export type OrgInvitesAcceptRequest = {
   token: string;
+  /** Account email — required for anonymous accept of unbound link invites. */
+  email?: string | null;
   username?: string | null;
   password?: string | null;
 };
@@ -1373,6 +1633,44 @@ export type OrgInvitesAcceptResponse = {
   org: OrgPublic;
   member: OrgMemberPublic;
 };
+
+export type InvitesGetRequest = {
+  token: string;
+};
+
+/** Anonymous-safe invite preview — scope + constraints; never token internals. */
+export type InvitesGetResponse = {
+  kind: "instance" | "org" | "repo" | string;
+  /** Present when bound to a recipient email (enforced on accept). */
+  email?: string | null;
+  /** null = never expires. */
+  expires_at?: string | null;
+  /** Seats remaining; null = unlimited. */
+  seats_remaining?: number | null;
+  org_slug?: string | null;
+  org_display_name?: string | null;
+  repo_owner?: string | null;
+  repo_name?: string | null;
+  /** Role/permission granted on accept (org/repo invites). */
+  grant?: string | null;
+  /** false when expired, revoked, or out of seats. */
+  acceptable: boolean;
+  /** "expired" | "revoked" | "exhausted" — set when acceptable is false. */
+  reason?: string | null;
+};
+
+/** Unified invite accept (instance, org, or repo). Same input shape as OrgInvitesAcceptRequest. */
+export type InvitesAcceptRequest = OrgInvitesAcceptRequest;
+
+export type InvitesAcceptResponse =
+  | { kind: "instance" }
+  | { kind: "org"; org: OrgPublic; member: OrgMemberPublic }
+  | {
+      kind: "repo";
+      owner: string;
+      name: string;
+      permission: CollaboratorPermission;
+    };
 
 /** Classic PAT string prefix (oxidean_pat_). */
 export const CLASSIC_PAT_PREFIX = "oxidean_pat_" as const;
@@ -2477,6 +2775,16 @@ export function createClient(opts: CreateClientOptions) {
         remove: (input: RepoCollaboratorsRemoveRequest) =>
           rpcCall<{ ok: boolean }>(opts, "repo.collaborators.remove", input),
       },
+      invites: {
+        create: (input: RepoInvitesCreateRequest) =>
+          rpcCall<RepoInvitesCreateResponse>(opts, "repo.invites.create", input),
+        createLink: (input: RepoInvitesCreateLinkRequest) =>
+          rpcCall<RepoInvitesCreateLinkResponse>(opts, "repo.invites.createLink", input),
+        list: (input: RepoGetRequest) =>
+          rpcCall<RepoInvitesListResponse>(opts, "repo.invites.list", input),
+        revoke: (input: RepoInvitesRevokeRequest) =>
+          rpcCall<{ ok: boolean }>(opts, "repo.invites.revoke", input),
+      },
       branchProtection: {
         list: (input: RepoGetRequest) =>
           rpcCall<BranchProtectionListResponse>(opts, "repo.branchProtection.list", input),
@@ -2540,7 +2848,9 @@ export function createClient(opts: CreateClientOptions) {
       },
       invites: {
         create: (input: OrgInvitesCreateRequest) =>
-          rpcCall<OrgInvitePublic>(opts, "org.invites.create", input),
+          rpcCall<OrgInvitesCreateResponse>(opts, "org.invites.create", input),
+        createLink: (input: OrgInvitesCreateLinkRequest) =>
+          rpcCall<OrgInvitesCreateLinkResponse>(opts, "org.invites.createLink", input),
         list: (input: OrgSlugRequest) =>
           rpcCall<OrgInvitesListResponse>(opts, "org.invites.list", input),
         revoke: (input: OrgInvitesRevokeRequest) =>
@@ -2548,6 +2858,12 @@ export function createClient(opts: CreateClientOptions) {
         accept: (input: OrgInvitesAcceptRequest) =>
           rpcCall<OrgInvitesAcceptResponse>(opts, "org.invites.accept", input),
       },
+    },
+    invites: {
+      get: (input: InvitesGetRequest) =>
+        rpcCall<InvitesGetResponse>(opts, "invites.get", input),
+      accept: (input: InvitesAcceptRequest) =>
+        rpcCall<InvitesAcceptResponse>(opts, "invites.accept", input),
     },
     issue: {
       create: (input: CreateIssueRequest) =>
@@ -2818,6 +3134,51 @@ export function createClient(opts: CreateClientOptions) {
         listRunners: () =>
           rpcCall<ActionListRunnersResponse>(opts, "admin.actions.listRunners", {}),
       },
+      users: {
+        list: (input: AdminUsersListRequest = {}) =>
+          rpcCall<AdminUsersListResponse>(opts, "admin.users.list", input),
+        updateRole: (input: AdminUsersUpdateRoleRequest) =>
+          rpcCall<AdminUserPublic>(opts, "admin.users.updateRole", input),
+        revokeSessions: (input: AdminUsersUserIdRequest) =>
+          rpcCall<{ ok: boolean; revoked: number }>(
+            opts,
+            "admin.users.revokeSessions",
+            input,
+          ),
+        ban: (input: AdminUsersUserIdRequest) =>
+          rpcCall<AdminUserPublic>(opts, "admin.users.ban", input),
+        unban: (input: AdminUsersUserIdRequest) =>
+          rpcCall<AdminUserPublic>(opts, "admin.users.unban", input),
+        delete: (input: AdminUsersDeleteRequest) =>
+          rpcCall<AdminUsersDeleteResponse>(opts, "admin.users.delete", input),
+        getAccess: (input: AdminUsersUserIdRequest) =>
+          rpcCall<AdminUsersGetAccessResponse>(opts, "admin.users.getAccess", input),
+        listSessions: (input: AdminUsersUserIdRequest) =>
+          rpcCall<AdminUsersListSessionsResponse>(
+            opts,
+            "admin.users.listSessions",
+            input,
+          ),
+        getActivity: (input: AdminUsersGetActivityRequest) =>
+          rpcCall<AdminUsersGetActivityResponse>(
+            opts,
+            "admin.users.getActivity",
+            input,
+          ),
+      },
+      invites: {
+        create: (input: AdminInvitesCreateRequest) =>
+          rpcCall<AdminInvitesCreateResponse>(opts, "admin.invites.create", input),
+        createLink: (input: AdminInvitesCreateLinkRequest) =>
+          rpcCall<AdminInvitesCreateLinkResponse>(
+            opts,
+            "admin.invites.createLink",
+            input,
+          ),
+        list: () => rpcCall<AdminInvitesListResponse>(opts, "admin.invites.list", {}),
+        revoke: (input: AdminInvitesRevokeRequest) =>
+          rpcCall<{ ok: boolean }>(opts, "admin.invites.revoke", input),
+      },
     },
   };
 }
@@ -2940,7 +3301,7 @@ export function userLookupQueryOptions(
   input: UserLookupRequest,
 ) {
   return {
-    queryKey: ["user", "lookup", input.prefix] as const,
+    queryKey: ["user", "lookup", input.prefix, input.context ?? null] as const,
     queryFn: async () => {
       const res = await client.user.lookup(input);
       if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);

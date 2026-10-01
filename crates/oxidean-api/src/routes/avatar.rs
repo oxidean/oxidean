@@ -55,7 +55,17 @@ async fn require_session(
             "not authenticated",
         ));
     };
-    match state.sessions.resolve(&state.db, &token).await {
+    let client = crate::rpc::ClientMeta::from_headers(headers);
+    match state
+        .sessions
+        .resolve(
+            &state.db,
+            &token,
+            client.ip_address.as_deref(),
+            client.user_agent.as_deref(),
+        )
+        .await
+    {
         Ok(Some(s)) => Ok(s),
         Ok(None) => Err(err_response(
             StatusCode::UNAUTHORIZED,

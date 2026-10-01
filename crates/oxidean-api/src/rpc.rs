@@ -9,13 +9,15 @@ use oxidean_core::{
 use oxidean_db::Database;
 use oxidean_git::GitBackend;
 
-use crate::auth::admin;
+use crate::admin;
+use crate::auth::admin as auth_admin;
 use crate::auth::bootstrap;
 use crate::auth::local;
 use crate::auth::profile;
 use crate::auth::session::{ResolvedSession, SessionService};
 use crate::auth::verify_reset;
 use crate::email::EmailSender;
+use crate::invites;
 use crate::issue;
 use crate::label;
 use crate::notification;
@@ -40,6 +42,33 @@ pub enum CookieChange {
     Clear,
 }
 
+/// Client request metadata captured from the HTTP edge (session details, audit).
+#[derive(Debug, Clone, Default)]
+pub struct ClientMeta {
+    /// Rightmost `X-Forwarded-For` hop (trusted-proxy convention — see
+    /// `routes::git_smart_http::client_ip`).
+    pub ip_address: Option<String>,
+    pub user_agent: Option<String>,
+}
+
+impl ClientMeta {
+    pub fn from_headers(headers: &axum::http::HeaderMap) -> Self {
+        let ip_address = headers
+            .get("x-forwarded-for")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.split(',').map(str::trim).filter(|p| !p.is_empty()).next_back())
+            .map(|s| s.to_string());
+        let user_agent = headers
+            .get(axum::http::header::USER_AGENT)
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.chars().take(512).collect());
+        Self {
+            ip_address,
+            user_agent,
+        }
+    }
+}
+
 /// Session-aware RPC context (RESEARCH Pattern 1).
 pub struct RpcCtx {
     pub db: Database,
@@ -56,6 +85,8 @@ pub struct RpcCtx {
     pub git: Arc<dyn GitBackend>,
     pub env_name: String,
     pub session: Option<ResolvedSession>,
+    /// Request client metadata (IP / user-agent) — sessions + audit events.
+    pub client: ClientMeta,
     pub set_cookie: Option<CookieChange>,
     /// Per-session `user.lookup` rate limiter (T-10-03).
     pub lookup_limiter: Arc<Mutex<LookupLimiter>>,
@@ -236,23 +267,23 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Ok(list) => RpcResponse::ok(list),
             Err(e) => RpcResponse::err(e),
         },
-        "admin.auth.get_settings" => match admin::get_settings(ctx).await {
+        "admin.auth.get_settings" => match auth_admin::get_settings(ctx).await {
             Ok(settings) => RpcResponse::ok(settings),
             Err(e) => RpcResponse::err(e),
         },
-        "admin.auth.update_settings" => match admin::update_settings(ctx, req.input).await {
+        "admin.auth.update_settings" => match auth_admin::update_settings(ctx, req.input).await {
             Ok(settings) => RpcResponse::ok(settings),
             Err(e) => RpcResponse::err(e),
         },
-        "admin.lfs.getSettings" => match admin::lfs_get_settings(ctx).await {
+        "admin.lfs.getSettings" => match auth_admin::lfs_get_settings(ctx).await {
             Ok(s) => RpcResponse::ok(s),
             Err(e) => RpcResponse::err(e),
         },
-        "admin.lfs.updateSettings" => match admin::lfs_update_settings(ctx, req.input).await {
+        "admin.lfs.updateSettings" => match auth_admin::lfs_update_settings(ctx, req.input).await {
             Ok(s) => RpcResponse::ok(s),
             Err(e) => RpcResponse::err(e),
         },
-        "admin.lfs.getUsage" => match admin::lfs_get_usage(ctx).await {
+        "admin.lfs.getUsage" => match auth_admin::lfs_get_usage(ctx).await {
             Ok(s) => RpcResponse::ok(s),
             Err(e) => RpcResponse::err(e),
         },
@@ -278,11 +309,63 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
                 Err(e) => RpcResponse::err(e),
             }
         }
-        "admin.instance.factory_reset" => match admin::factory_reset(ctx, req.input).await {
+        "admin.instance.factory_reset" => match auth_admin::factory_reset(ctx, req.input).await {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },
-        "admin.repos.gc" => match admin::repo_gc(ctx, req.input).await {
+        "admin.repos.gc" => match auth_admin::repo_gc(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "admin.users.list" => match admin::users_list(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "admin.users.updateRole" => match admin::users_update_role(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "admin.users.revokeSessions" => match admin::users_revoke_sessions(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "admin.users.ban" => match admin::users_ban(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "admin.users.unban" => match admin::users_unban(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "admin.users.delete" => match admin::users_delete(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "admin.users.getAccess" => match admin::users_get_access(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "admin.users.listSessions" => match admin::users_list_sessions(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "admin.users.getActivity" => match admin::users_get_activity(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "admin.invites.create" => match admin::invites_create(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "admin.invites.createLink" => match admin::invites_create_link(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "admin.invites.list" => match admin::invites_list(ctx).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "admin.invites.revoke" => match admin::invites_revoke(ctx, req.input).await {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },
@@ -331,6 +414,18 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Err(e) => RpcResponse::err(e),
         },
         "org.invites.accept" => match org::invites_accept(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "org.invites.createLink" => match org::invites_create_link(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "invites.accept" => match invites::accept(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "invites.get" => match invites::get(ctx, req.input).await {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },
@@ -559,6 +654,22 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Err(e) => RpcResponse::err(e),
         },
         "repo.collaborators.remove" => match repo::collaborators_remove(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "repo.invites.create" => match repo::invites_create(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "repo.invites.createLink" => match repo::invites_create_link(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "repo.invites.list" => match repo::invites_list(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "repo.invites.revoke" => match repo::invites_revoke(ctx, req.input).await {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },

@@ -1,6 +1,7 @@
 //! Uniform database adapter boundary — the only place dialect branching is allowed (D-08).
 
 pub mod actions;
+pub mod audit_events;
 pub mod auth_identities;
 pub mod auth_settings;
 pub mod branch_protection;
@@ -12,8 +13,10 @@ pub mod lfs;
 pub mod migrate;
 pub mod mirrors;
 pub mod notifications;
+pub mod instance_invites;
 pub mod org_invites;
 pub mod org_members;
+pub mod repo_invites;
 pub mod organizations;
 pub mod packages;
 pub mod pats;
@@ -39,6 +42,7 @@ pub mod watches;
 pub use actions::{
     ActionJobRow, ActionRunRow, ActionRunnerRow, ActionSecretCipherRow, ActionSecretMetaRow,
 };
+pub use audit_events::AuditEventRow;
 pub use branch_protection::{BranchProtectionRuleRow, CommitStatusRow};
 pub use dialect::{redact_url, resolve_dialect, resolve_dialect_from_env, Dialect};
 pub use issue_labels::{IssueAssigneeRow, LabelRow};
@@ -50,7 +54,9 @@ pub use mirrors::{RepositoryMirrorRefResultRow, RepositoryMirrorRow};
 pub use notifications::NotificationRow;
 pub use oxidean_core::DbProbeResponse;
 pub use pool::DbPool;
+pub use instance_invites::InstanceInviteRow;
 pub use org_invites::OrgInviteRow;
+pub use repo_invites::RepoInviteRow;
 pub use org_members::{OrgMemberListRow, OrgMemberRow, OrgMineRow};
 pub use organizations::OrganizationRow;
 pub use packages::{PackageRow, PackageVersionRow, PackageUsageBreakdownRow};
@@ -59,7 +65,9 @@ pub use pulls::{PullCommentRow, PullReviewRow, PullRow, PullSearchFilters, RepoM
 pub use redirects::RedirectRow;
 pub use releases::{ReleaseAssetRow, ReleaseRow};
 pub use repo_activity::RepoActivityRow;
-pub use repo_collaborators::{RepoCollaboratorListRow, RepoCollaboratorRow};
+pub use repo_collaborators::{
+    RepoCollaboratorGrantRow, RepoCollaboratorListRow, RepoCollaboratorRow,
+};
 pub use stars::{ForkListSort, RepoForkListRow, RepoStargazerListRow};
 pub use watches::RepoWatcherListRow;
 pub use repositories::{RepoDiskRef, RepositoryRow};
@@ -178,6 +186,10 @@ impl Database {
         organizations::find_by_id(self.require_pool()?, id).await
     }
 
+    pub async fn delete_organization(&self, id: &str) -> Result<(), String> {
+        organizations::delete_organization(self.require_pool()?, id).await
+    }
+
     /// Batch variant — one `IN (...)` round trip.
     pub async fn find_organizations_by_ids(
         &self,
@@ -273,17 +285,91 @@ impl Database {
         org_members::list_orgs_for_user(self.require_pool()?, user_id).await
     }
 
+    // --- instance invites ---
+
+    pub async fn insert_instance_invite(
+        &self,
+        id: &str,
+        email: Option<&str>,
+        token_hash: &str,
+        expires_at: Option<&str>,
+        invited_by: &str,
+        max_uses: Option<i64>,
+    ) -> Result<InstanceInviteRow, String> {
+        instance_invites::insert_invite(
+            self.require_pool()?,
+            id,
+            email,
+            token_hash,
+            expires_at,
+            invited_by,
+            max_uses,
+        )
+        .await
+    }
+
+    pub async fn find_instance_invite_by_id(
+        &self,
+        id: &str,
+    ) -> Result<Option<InstanceInviteRow>, String> {
+        instance_invites::find_by_id(self.require_pool()?, id).await
+    }
+
+    pub async fn find_instance_invite_by_token_hash(
+        &self,
+        token_hash: &str,
+    ) -> Result<Option<InstanceInviteRow>, String> {
+        instance_invites::find_by_token_hash(self.require_pool()?, token_hash).await
+    }
+
+    pub async fn find_pending_instance_invite_by_email(
+        &self,
+        email: &str,
+    ) -> Result<Option<InstanceInviteRow>, String> {
+        instance_invites::find_pending_by_email(self.require_pool()?, email).await
+    }
+
+    pub async fn list_pending_instance_invites(&self) -> Result<Vec<InstanceInviteRow>, String> {
+        instance_invites::list_pending(self.require_pool()?).await
+    }
+
+    pub async fn revoke_instance_invite(&self, id: &str, revoked_at: &str) -> Result<(), String> {
+        instance_invites::revoke(self.require_pool()?, id, revoked_at).await
+    }
+
+    /// Atomic seat consumption — errors when the invite is revoked or out of seats.
+    pub async fn consume_instance_invite(&self, id: &str, accepted_at: &str) -> Result<(), String> {
+        instance_invites::consume(self.require_pool()?, id, accepted_at).await
+    }
+
+    pub async fn count_instance_invites_created_by_since(
+        &self,
+        invited_by: &str,
+        since: &str,
+    ) -> Result<i64, String> {
+        instance_invites::count_created_by_since(self.require_pool()?, invited_by, since).await
+    }
+
+    pub async fn set_instance_invite_expires_at(
+        &self,
+        id: &str,
+        expires_at: &str,
+    ) -> Result<(), String> {
+        instance_invites::set_expires_at(self.require_pool()?, id, expires_at).await
+    }
+
     // --- organization invites ---
 
     pub async fn insert_org_invite(
         &self,
         id: &str,
         org_id: &str,
-        email: &str,
+        email: Option<&str>,
         role: &str,
         token_hash: &str,
-        expires_at: &str,
+        expires_at: Option<&str>,
         invited_by: &str,
+        max_uses: Option<i64>,
     ) -> Result<OrgInviteRow, String> {
         org_invites::insert_invite(
             self.require_pool()?,
@@ -294,6 +380,7 @@ impl Database {
             token_hash,
             expires_at,
             invited_by,
+            max_uses,
         )
         .await
     }
@@ -328,8 +415,9 @@ impl Database {
         org_invites::revoke(self.require_pool()?, id, revoked_at).await
     }
 
-    pub async fn accept_org_invite(&self, id: &str, accepted_at: &str) -> Result<(), String> {
-        org_invites::mark_accepted(self.require_pool()?, id, accepted_at).await
+    /// Atomic seat consumption — errors when the invite is revoked or out of seats.
+    pub async fn consume_org_invite(&self, id: &str, accepted_at: &str) -> Result<(), String> {
+        org_invites::consume(self.require_pool()?, id, accepted_at).await
     }
 
     pub async fn count_org_invites_created_by_since(
@@ -348,6 +436,87 @@ impl Database {
         org_invites::set_expires_at(self.require_pool()?, id, expires_at).await
     }
 
+    // --- repository invites ---
+
+    pub async fn insert_repo_invite(
+        &self,
+        id: &str,
+        repository_id: &str,
+        email: Option<&str>,
+        permission: &str,
+        token_hash: &str,
+        expires_at: Option<&str>,
+        invited_by: &str,
+        max_uses: Option<i64>,
+    ) -> Result<RepoInviteRow, String> {
+        repo_invites::insert_invite(
+            self.require_pool()?,
+            id,
+            repository_id,
+            email,
+            permission,
+            token_hash,
+            expires_at,
+            invited_by,
+            max_uses,
+        )
+        .await
+    }
+
+    pub async fn find_repo_invite_by_id(
+        &self,
+        id: &str,
+    ) -> Result<Option<RepoInviteRow>, String> {
+        repo_invites::find_by_id(self.require_pool()?, id).await
+    }
+
+    pub async fn find_repo_invite_by_token_hash(
+        &self,
+        token_hash: &str,
+    ) -> Result<Option<RepoInviteRow>, String> {
+        repo_invites::find_by_token_hash(self.require_pool()?, token_hash).await
+    }
+
+    pub async fn find_pending_repo_invite_by_repo_email(
+        &self,
+        repository_id: &str,
+        email: &str,
+    ) -> Result<Option<RepoInviteRow>, String> {
+        repo_invites::find_pending_by_repo_email(self.require_pool()?, repository_id, email).await
+    }
+
+    pub async fn list_pending_repo_invites(
+        &self,
+        repository_id: &str,
+    ) -> Result<Vec<RepoInviteRow>, String> {
+        repo_invites::list_pending(self.require_pool()?, repository_id).await
+    }
+
+    pub async fn revoke_repo_invite(&self, id: &str, revoked_at: &str) -> Result<(), String> {
+        repo_invites::revoke(self.require_pool()?, id, revoked_at).await
+    }
+
+    /// Atomic seat consumption — errors when the invite is revoked or out of seats.
+    pub async fn consume_repo_invite(&self, id: &str, accepted_at: &str) -> Result<(), String> {
+        repo_invites::consume(self.require_pool()?, id, accepted_at).await
+    }
+
+    pub async fn count_repo_invites_created_by_since(
+        &self,
+        invited_by: &str,
+        since: &str,
+    ) -> Result<i64, String> {
+        repo_invites::count_created_by_since(self.require_pool()?, invited_by, since).await
+    }
+
+    pub async fn set_repo_invite_expires_at(
+        &self,
+        id: &str,
+        expires_at: &str,
+    ) -> Result<(), String> {
+        repo_invites::set_expires_at(self.require_pool()?, id, expires_at).await
+    }
+
     pub async fn find_repo_collaborator(
         &self,
         repo_id: &str,
@@ -361,6 +530,13 @@ impl Database {
         repo_id: &str,
     ) -> Result<Vec<RepoCollaboratorListRow>, String> {
         repo_collaborators::list_collaborators(self.require_pool()?, repo_id).await
+    }
+
+    pub async fn list_repo_collaborator_grants_for_user(
+        &self,
+        user_id: &str,
+    ) -> Result<Vec<RepoCollaboratorGrantRow>, String> {
+        repo_collaborators::list_grants_for_user(self.require_pool()?, user_id).await
     }
 
     pub async fn insert_repo_collaborator(
@@ -700,6 +876,14 @@ impl Database {
 
     pub async fn hard_delete_repository(&self, id: &str) -> Result<(), String> {
         repositories::hard_delete(self.require_pool()?, id).await
+    }
+
+    pub async fn hard_delete_repositories_by_owner(
+        &self,
+        owner_id: &str,
+        owner_type: &str,
+    ) -> Result<u64, String> {
+        repositories::hard_delete_by_owner(self.require_pool()?, owner_id, owner_type).await
     }
 
     // --- pulls ---
@@ -1679,6 +1863,31 @@ impl Database {
         users::count_sys_admins(self.require_pool()?).await
     }
 
+    pub async fn list_users_page(
+        &self,
+        query: Option<&str>,
+        limit: i64,
+        offset: i64,
+    ) -> Result<(Vec<UserRow>, i64), String> {
+        users::list_page(self.require_pool()?, query, limit, offset).await
+    }
+
+    pub async fn set_user_banned_at(&self, id: &str, at: &str) -> Result<UserRow, String> {
+        users::set_banned_at(self.require_pool()?, id, at).await
+    }
+
+    pub async fn clear_user_banned_at(&self, id: &str) -> Result<UserRow, String> {
+        users::clear_banned_at(self.require_pool()?, id).await
+    }
+
+    pub async fn set_user_role(&self, id: &str, role: &str) -> Result<UserRow, String> {
+        users::set_role(self.require_pool()?, id, role).await
+    }
+
+    pub async fn delete_user(&self, id: &str) -> Result<(), String> {
+        users::delete_user(self.require_pool()?, id).await
+    }
+
     pub async fn set_email_verified_at(
         &self,
         id: &str,
@@ -1928,6 +2137,8 @@ impl Database {
         token_hash: &str,
         expires_at: &str,
         remember_me: bool,
+        ip_address: Option<&str>,
+        user_agent: Option<&str>,
     ) -> Result<(), String> {
         sessions::create(
             self.require_pool()?,
@@ -1936,6 +2147,8 @@ impl Database {
             token_hash,
             expires_at,
             remember_me,
+            ip_address,
+            user_agent,
         )
         .await
     }
@@ -1952,8 +2165,26 @@ impl Database {
         id: &str,
         expires_at: &str,
         last_seen_at: &str,
+        ip_address: Option<&str>,
+        user_agent: Option<&str>,
     ) -> Result<(), String> {
-        sessions::touch(self.require_pool()?, id, expires_at, last_seen_at).await
+        sessions::touch(
+            self.require_pool()?,
+            id,
+            expires_at,
+            last_seen_at,
+            ip_address,
+            user_agent,
+        )
+        .await
+    }
+
+    /// All sessions for a user (admin view — `token_hash` must never be exposed).
+    pub async fn list_sessions_for_user(
+        &self,
+        user_id: &str,
+    ) -> Result<Vec<sessions::SessionRow>, String> {
+        sessions::list_for_user(self.require_pool()?, user_id).await
     }
 
     pub async fn delete_session(&self, id: &str) -> Result<(), String> {
@@ -2785,6 +3016,12 @@ impl Database {
                     .execute(p)
                     .await
                     .map_err(|e| e.to_string())?;
+                // audit_events survive user deletion via SET NULL — a factory
+                // reset must wipe them explicitly.
+                sqlx::query("DELETE FROM audit_events")
+                    .execute(p)
+                    .await
+                    .map_err(|e| e.to_string())?;
                 sqlx::query("DELETE FROM auth_email_tokens")
                     .execute(p)
                     .await
@@ -2823,6 +3060,10 @@ impl Database {
                     .await
                     .map_err(|e| e.to_string())?;
                 sqlx::query("DELETE FROM organizations")
+                    .execute(p)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                sqlx::query("DELETE FROM audit_events")
                     .execute(p)
                     .await
                     .map_err(|e| e.to_string())?;
@@ -2869,6 +3110,10 @@ impl Database {
                     .await
                     .map_err(|e| e.to_string())?;
                 sqlx::query("DELETE FROM organizations")
+                    .execute(p)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                sqlx::query("DELETE FROM audit_events")
                     .execute(p)
                     .await
                     .map_err(|e| e.to_string())?;
@@ -3142,6 +3387,62 @@ impl Database {
             limit,
         )
         .await
+    }
+
+    /// Repo activity authored by a user, newest first (admin user-activity view).
+    pub async fn list_repo_activity_by_actor(
+        &self,
+        actor_id: &str,
+        limit: i64,
+    ) -> Result<Vec<RepoActivityRow>, String> {
+        repo_activity::list_by_actor(self.require_pool()?, actor_id, limit).await
+    }
+
+    // --- audit events ---
+
+    pub async fn insert_audit_event(
+        &self,
+        id: &str,
+        actor_id: Option<&str>,
+        actor_username: &str,
+        event_type: &str,
+        target_type: Option<&str>,
+        target_id: Option<&str>,
+        detail: Option<&str>,
+        ip_address: Option<&str>,
+        user_agent: Option<&str>,
+    ) -> Result<(), String> {
+        audit_events::insert(
+            self.require_pool()?,
+            audit_events::InsertAuditEvent {
+                id,
+                actor_id,
+                actor_username,
+                event_type,
+                target_type,
+                target_id,
+                detail,
+                ip_address,
+                user_agent,
+            },
+        )
+        .await
+    }
+
+    pub async fn list_audit_events_for_actor(
+        &self,
+        actor_id: &str,
+        event_type: Option<&str>,
+        limit: i64,
+    ) -> Result<Vec<AuditEventRow>, String> {
+        audit_events::list_for_actor(self.require_pool()?, actor_id, event_type, limit).await
+    }
+
+    pub async fn list_audit_event_types_for_actor(
+        &self,
+        actor_id: &str,
+    ) -> Result<Vec<String>, String> {
+        audit_events::list_event_types_for_actor(self.require_pool()?, actor_id).await
     }
 
     pub async fn insert_webhook_delivery(

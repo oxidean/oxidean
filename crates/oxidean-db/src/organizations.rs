@@ -256,6 +256,34 @@ pub async fn find_many_by_id(
     }
 }
 
+/// Hard-delete an organization row (member/invite FKs cascade).
+pub async fn delete_organization(pool: &DbPool, id: &str) -> Result<(), String> {
+    let n = match pool {
+        DbPool::Postgres(p) => sqlx::query("DELETE FROM organizations WHERE id = $1")
+            .bind(id)
+            .execute(p)
+            .await
+            .map_err(|e| format!("delete organization failed: {e}"))?
+            .rows_affected(),
+        DbPool::MySql(p) => sqlx::query("DELETE FROM organizations WHERE id = ?")
+            .bind(id)
+            .execute(p)
+            .await
+            .map_err(|e| format!("delete organization failed: {e}"))?
+            .rows_affected(),
+        DbPool::Sqlite(p) => sqlx::query("DELETE FROM organizations WHERE id = ?1")
+            .bind(id)
+            .execute(p)
+            .await
+            .map_err(|e| format!("delete organization failed: {e}"))?
+            .rows_affected(),
+    };
+    if n == 0 {
+        return Err("organization not found".into());
+    }
+    Ok(())
+}
+
 /// Case-insensitive slug lookup (D-ORG-01 shared namespace).
 pub async fn find_by_slug(pool: &DbPool, slug: &str) -> Result<Option<OrganizationRow>, String> {
     match pool {

@@ -210,11 +210,16 @@ pub struct OrgMembersRemoveRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OrgInvitePublic {
     pub id: String,
-    pub email: String,
+    /// `None` = shareable link (not bound to a recipient email).
+    pub email: Option<String>,
     pub role: OrgRole,
-    pub expires_at: String,
+    /// `None` = never expires.
+    pub expires_at: Option<String>,
     pub invited_by: String,
     pub created_at: String,
+    /// `None` = unlimited seats.
+    pub max_uses: Option<i64>,
+    pub use_count: i64,
 }
 
 /// `org.invites.list` response.
@@ -223,12 +228,52 @@ pub struct OrgInvitesListResponse {
     pub invites: Vec<OrgInvitePublic>,
 }
 
-/// `org.invites.create`.
+/// `org.invites.create` — bulk: one email-bound invite per address.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OrgInvitesCreateRequest {
     pub slug: String,
-    pub email: String,
+    pub emails: Vec<String>,
     pub role: OrgRole,
+}
+
+/// Per-recipient outcome of a bulk `org.invites.create`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrgInvitesCreateItemResult {
+    pub email: String,
+    pub ok: bool,
+    #[serde(default)]
+    pub error: Option<String>,
+    #[serde(default)]
+    pub invite: Option<OrgInvitePublic>,
+    /// One-time copyable URL (present only when `ok`).
+    #[serde(default)]
+    pub invite_url: Option<String>,
+}
+
+/// `org.invites.create` response — one entry per submitted email.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrgInvitesCreateResponse {
+    pub results: Vec<OrgInvitesCreateItemResult>,
+}
+
+/// `org.invites.createLink` — shareable link, no bound email.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrgInvitesCreateLinkRequest {
+    pub slug: String,
+    pub role: OrgRole,
+    /// ISO-8601 UTC; `None`/absent = never expires.
+    #[serde(default)]
+    pub expires_at: Option<String>,
+    /// `None`/absent = unlimited seats.
+    #[serde(default)]
+    pub max_uses: Option<i64>,
+}
+
+/// `org.invites.createLink` — invite metadata + one-time copyable URL.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrgInvitesCreateLinkResponse {
+    pub invite: OrgInvitePublic,
+    pub invite_url: String,
 }
 
 /// `org.invites.revoke`.
@@ -239,14 +284,8 @@ pub struct OrgInvitesRevokeRequest {
 }
 
 /// `org.invites.accept` — token from email link; username/password when provisioning (A2).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OrgInvitesAcceptRequest {
-    pub token: String,
-    #[serde(default)]
-    pub username: Option<String>,
-    #[serde(default)]
-    pub password: Option<String>,
-}
+/// Same shape as [`crate::InvitesAcceptRequest`] (unified `invites.accept`).
+pub type OrgInvitesAcceptRequest = crate::InvitesAcceptRequest;
 
 /// `org.invites.accept` response.
 #[derive(Debug, Clone, Serialize, Deserialize)]

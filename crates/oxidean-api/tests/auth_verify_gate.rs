@@ -190,7 +190,7 @@ async fn idp_trust_verified_sso_user_privileged_ping_ok() {
 
     let sessions = SessionService::new("development");
     let (_token, cookie) = sessions
-        .create(&db, &user.id, false)
+        .create(&db, &user.id, false, None, None)
         .await
         .expect("session");
     let cookie_header = cookie.to_string();

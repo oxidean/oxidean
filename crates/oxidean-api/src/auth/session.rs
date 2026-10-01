@@ -75,11 +75,14 @@ impl SessionService {
 
     /// Mint a new session: CSPRNG token → cookie; SHA-256 hex → DB.
     /// Always creates a fresh session id (session fixation mitigation T-04-08).
+    /// `ip_address`/`user_agent` are stored as the session's client details.
     pub async fn create(
         &self,
         db: &Database,
         user_id: &str,
         remember_me: bool,
+        ip_address: Option<&str>,
+        user_agent: Option<&str>,
     ) -> Result<(String, Cookie<'static>), AuthError> {
         let ttl = if remember_me {
             SESSION_REMEMBER
@@ -102,6 +105,8 @@ impl SessionService {
             &token_hash,
             &expires_at_str,
             remember_me,
+            ip_address,
+            user_agent,
         )
         .await
         .map_err(AuthError::from_db)?;
@@ -111,10 +116,14 @@ impl SessionService {
     }
 
     /// Resolve cookie token → session. Expired rows are deleted. Idle sessions slide expiry.
+    /// When `ip_address`/`user_agent` are provided they refresh the session's
+    /// last-known client details alongside `last_seen`.
     pub async fn resolve(
         &self,
         db: &Database,
         raw_token: &str,
+        ip_address: Option<&str>,
+        user_agent: Option<&str>,
     ) -> Result<Option<ResolvedSession>, AuthError> {
         if raw_token.is_empty() {
             return Ok(None);
@@ -137,6 +146,18 @@ impl SessionService {
             return Ok(None);
         }
 
+        // Owner gone (user row deleted) — drop the dangling session.
+        if row.joined_user_id.is_none() {
+            let _ = db.delete_session(&row.id).await;
+            return Ok(None);
+        }
+
+        // Soft-ban: treat session as absent (PATs gated separately at resolve).
+        if row.user_banned_at.is_some() {
+            let _ = db.delete_session(&row.id).await;
+            return Ok(None);
+        }
+
         let last_seen = now.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
         let new_expires = if row.remember_me {
             // Absolute expiry from create; only refresh last_seen.
@@ -146,7 +167,7 @@ impl SessionService {
                 .map_err(|e| AuthError::Store(e.to_string()))?
         };
         let new_expires_str = new_expires.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-        db.touch_session(&row.id, &new_expires_str, &last_seen)
+        db.touch_session(&row.id, &new_expires_str, &last_seen, ip_address, user_agent)
             .await
             .map_err(AuthError::from_db)?;
 
@@ -286,7 +307,10 @@ mod tests {
         let user_id = seed_user(&db).await;
         let svc = SessionService::new("development");
 
-        let (token, cookie) = svc.create(&db, &user_id, false).await.expect("create");
+        let (token, cookie) = svc
+            .create(&db, &user_id, false, Some("203.0.113.7"), Some("test-ua"))
+            .await
+            .expect("create");
         assert_eq!(cookie.name(), SESSION_COOKIE_NAME);
         assert!(cookie.http_only().unwrap_or(false));
         assert_eq!(cookie.path(), Some("/"));
@@ -296,7 +320,10 @@ mod tests {
             cookie.max_age().unwrap() >= CookieDuration::seconds(SESSION_IDLE.as_secs() as i64 - 1)
         );
 
-        let resolved = svc.resolve(&db, &token).await.expect("resolve");
+        let resolved = svc
+            .resolve(&db, &token, None, None)
+            .await
+            .expect("resolve");
         let session = resolved.expect("some");
         assert_eq!(session.user_id, user_id);
         assert!(!session.remember_me);
@@ -308,14 +335,20 @@ mod tests {
         let user_id = seed_user(&db).await;
         let svc = SessionService::new("development");
 
-        let (token, _) = svc.create(&db, &user_id, false).await.expect("create");
+        let (token, _) = svc
+            .create(&db, &user_id, false, None, None)
+            .await
+            .expect("create");
         let session = svc
-            .resolve(&db, &token)
+            .resolve(&db, &token, None, None)
             .await
             .expect("resolve")
             .expect("present");
         svc.revoke(&db, &session.session_id).await.expect("revoke");
-        let gone = svc.resolve(&db, &token).await.expect("resolve after revoke");
+        let gone = svc
+            .resolve(&db, &token, None, None)
+            .await
+            .expect("resolve after revoke");
         assert!(gone.is_none());
     }
 
@@ -325,7 +358,10 @@ mod tests {
         let user_id = seed_user(&db).await;
         let svc = SessionService::new("production");
 
-        let (_token, cookie) = svc.create(&db, &user_id, true).await.expect("create");
+        let (_token, cookie) = svc
+            .create(&db, &user_id, true, None, None)
+            .await
+            .expect("create");
         let min = CookieDuration::seconds(SESSION_REMEMBER.as_secs() as i64);
         assert!(
             cookie.max_age().unwrap() >= min,

@@ -52,7 +52,7 @@ OAuth/OIDC browser flows leave the SPA for `/api/auth/workos/start|callback` and
 | Abstraction | Role | Location |
 | --- | --- | --- |
 | `AppState` | Shared Axum state: DB, swappable email sender, sessions, pending auth, uploads dir, `GitBackend`, repos dir | `crates/oxidean-api/src/app.rs` |
-| `RpcCtx` / `dispatch` | Session-aware RPC context and procedure router (`system.*`, `auth.*`, `user.*`, `org.*`, `repo.*`, `pat.*`, `admin.*`) | `crates/oxidean-api/src/rpc.rs` |
+| `RpcCtx` / `dispatch` | Session-aware RPC context and procedure router (`system.*`, `auth.*`, `user.*`, `org.*`, `repo.*`, `pat.*`, `admin.*`, `invites.*`) | `crates/oxidean-api/src/rpc.rs` |
 | `SessionService` | Opaque HttpOnly cookie; CSPRNG token in cookie, SHA-256 hash in DB; idle 24h / remember-me 30d | `crates/oxidean-api/src/auth/session.rs` |
 | `EmailSender` | Trait + adapters: log sink, SMTP (`OXIDEAN_SMTP_URL`), Resend (`OXIDEAN_RESEND_API_KEY`) | `crates/oxidean-api/src/email/` |
 | `GitBackend` | Trait seam for all forge git ops (init, tree, blob, refs, history, branch, archive, gc) | `crates/oxidean-git/src/backend.rs` |
@@ -85,11 +85,22 @@ Phase 10 ships orgs + ACL (ORG-01…04) on migration `0010_orgs_acl`:
 
 | Concern | Contract |
 | --- | --- |
-| **Tables** | `organizations`, `organization_members` (Owner/Admin/Member), `organization_invites` (token hash at rest), `repository_collaborators`. |
+| **Tables** | `organizations`, `organization_members` (Owner/Admin/Member), `organization_invites` (token hash at rest), `repository_collaborators`. Sibling invite tables `instance_invites` and `repository_invites` share the same shape — see [Administration & audit](#administration--audit). |
 | **Roles** | Org Owner/Admin manage membership (only Owner grants/changes Owner). Members inherit org `member_base_permission` (`none` \| `read` \| `write`) on org-owned private repos. |
-| **Invites** | Email magic links via existing `EmailSender` + `OXIDEAN_PUBLIC_ORIGIN`. Accepting a valid invite can create a verified local user **even when `allow_signup` is closed**. Existing invite-email accounts must sign in (`org.invite_login_required`) — no password steal on accept. |
-| **Lookup** | `user.lookup` username autocomplete (no emails); rate-limited per session. |
-| **Factory reset** | `factory_reset_instance` deletes repositories (cascades collaborators / PAT-repo links / **issue domain**) and organizations (cascades members / invites / org-scoped labels) before wiping auth users. |
+| **Invites** | Email magic links via existing `EmailSender` + `OXIDEAN_PUBLIC_ORIGIN`, or shareable link invites (unbound `email`, optional `expires_at` and `max_uses` seat cap — `NULL` = unlimited). Accepting a valid invite can create a verified local user **even when `allow_signup` is closed**. Existing invite-email accounts must sign in (`org.invite_login_required`) — no password steal on accept. |
+| **Lookup** | `user.lookup` username autocomplete (no emails); rate-limited per session. Optional `context` excludes already-granted users and fails closed (empty result, not an error) for unauthorized callers. |
+| **Factory reset** | `factory_reset_instance` deletes repositories (cascades collaborators / PAT-repo links / **issue domain**) and organizations (cascades members / invites / org-scoped labels) before wiping auth users — and also wipes `audit_events`, which otherwise survives user deletion on purpose. |
+
+### Administration & audit
+
+| Concern | Contract |
+| --- | --- |
+| **Admin surface** | `admin.*` RPCs + `/admin/users` UI (sys-admin only): user list/role/ban/unban/delete/session revocation, access summary (`getAccess`), per-user sessions (`listSessions`) and activity (`getActivity`), instance invites, auth settings, factory reset. Self-demotion, self-ban, self-delete, and last-sysadmin removal are refused. |
+| **Invite tables** | `instance_invites`, `organization_invites`, `repository_invites` — same shape: nullable `email` (NULL = shareable link), `token_hash` (SHA-256; plaintext only in the outbound mail / returned `invite_url`), `expires_at`, `max_uses`/`use_count`, `accepted_at`, `revoked_at`. |
+| **Invite consumption** | Atomic `UPDATE … WHERE use_count < max_uses OR max_uses IS NULL` — no over-grant under concurrent accepts. Email-bound invites are `max_uses = 1`; `accepted_at` stamps when the final seat is taken. `invites.get` is the anonymous-safe preview; `invites.accept` is the unified redeem across all three kinds. |
+| **Sessions metadata** | `sessions` carries `ip_address` / `user_agent` (last-known, `COALESCE`-preserve on touch) recorded from the rightmost `X-Forwarded-For` hop — same trusted-proxy convention as the auth rate limiter. `admin.users.listSessions` never returns `token_hash`. |
+| **Audit events** | `audit_events` records auth, admin, and invite operations (`actor_id`, `actor_username` snapshot, `event_type`, target, detail, ip/ua). `ON DELETE SET NULL` keeps history when a user is deleted; factory reset truncates it. Recording is fire-and-forget (`crate::audit::record`) — audit failure never breaks the operation it describes. |
+| **Rate limits** | Invite issuance: 20/hour per scope, 50 recipients per bulk request, 60s reissue interval per email. See [API.md](API.md#rate-limits). |
 
 ### Issues & labels
 

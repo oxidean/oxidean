@@ -52,11 +52,12 @@ async fn factory_reset_wipes_orgs_members_invites_collaborators_and_repos() {
     db.insert_org_invite(
         "inv-1",
         &org.id,
-        "new@example.com",
+        Some("new@example.com"),
         "member",
         "tokenhashabc",
-        "2099-01-01 00:00:00",
+        Some("2099-01-01 00:00:00"),
         &owner.id,
+        Some(1),
     )
     .await
     .expect("invite");

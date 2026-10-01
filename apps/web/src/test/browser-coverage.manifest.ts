@@ -169,9 +169,9 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
     surface: "components/repo/collaborators-panel.tsrx",
     coverage: [
       {
-        kind: "skip",
-        rationale:
-          "Role Select in repo settings; not yet exercised in stack-browser. Add browser mount when collaborators UI is next touched.",
+        kind: "browser",
+        test: "apps/web/src/components/repo/collaborators-panel.browser.test.tsx",
+        subject: "collaborators-panel",
       },
     ],
   },
@@ -261,9 +261,9 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
     surface: "routes/setup.index.tsrx",
     coverage: [
       {
-        kind: "skip",
-        rationale:
-          "Setup wizard Radio/Checkbox covered by happy-dom setup.integration; add *.browser.test.tsx when setup UI is next changed.",
+        kind: "browser",
+        test: "apps/web/src/routes/setup.index.browser.test.tsx",
+        subject: "SetupPage",
       },
     ],
   },
@@ -286,6 +286,16 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
     coverage: [{ kind: "stack-browser", test: FORGE_ADMIN, subject: "admin/auth" }],
   },
   {
+    surface: "routes/admin/users.tsrx",
+    coverage: [
+      {
+        kind: "browser",
+        test: "apps/web/src/routes/admin/users.browser.test.tsx",
+        subject: "admin-users-page",
+      },
+    ],
+  },
+  {
     surface: "routes/admin/templates.tsrx",
     coverage: [
       {
@@ -299,9 +309,9 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
     surface: "routes/$owner.settings.index.tsrx",
     coverage: [
       {
-        kind: "skip",
-        rationale:
-          "Org general settings Select; stack-browser org settings covers chrome. Add browser mount when org visibility radios are next touched.",
+        kind: "browser",
+        test: "apps/web/src/routes/$owner.settings.index.browser.test.tsx",
+        subject: "OrgSettingsPage",
       },
     ],
   },

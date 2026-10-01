@@ -1190,6 +1190,86 @@ pub struct RepoCollaboratorsRemoveRequest {
     pub user_id: String,
 }
 
+/// Public pending repo invite — never includes token or token_hash.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoInvitePublic {
+    pub id: String,
+    /// `None` = shareable link (not bound to a recipient email).
+    pub email: Option<String>,
+    pub permission: CollaboratorPermission,
+    /// `None` = never expires.
+    pub expires_at: Option<String>,
+    pub invited_by: String,
+    pub created_at: String,
+    /// `None` = unlimited seats.
+    pub max_uses: Option<i64>,
+    pub use_count: i64,
+}
+
+/// `repo.invites.list` response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoInvitesListResponse {
+    pub invites: Vec<RepoInvitePublic>,
+}
+
+/// `repo.invites.create` — bulk: one email-bound invite per address.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoInvitesCreateRequest {
+    pub owner: String,
+    pub name: String,
+    pub emails: Vec<String>,
+    pub permission: CollaboratorPermission,
+}
+
+/// Per-recipient outcome of a bulk `repo.invites.create`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoInvitesCreateItemResult {
+    pub email: String,
+    pub ok: bool,
+    #[serde(default)]
+    pub error: Option<String>,
+    #[serde(default)]
+    pub invite: Option<RepoInvitePublic>,
+    /// One-time copyable URL (present only when `ok`).
+    #[serde(default)]
+    pub invite_url: Option<String>,
+}
+
+/// `repo.invites.create` response — one entry per submitted email.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoInvitesCreateResponse {
+    pub results: Vec<RepoInvitesCreateItemResult>,
+}
+
+/// `repo.invites.createLink` — shareable link, no bound email.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoInvitesCreateLinkRequest {
+    pub owner: String,
+    pub name: String,
+    pub permission: CollaboratorPermission,
+    /// ISO-8601 UTC; `None`/absent = never expires.
+    #[serde(default)]
+    pub expires_at: Option<String>,
+    /// `None`/absent = unlimited seats.
+    #[serde(default)]
+    pub max_uses: Option<i64>,
+}
+
+/// `repo.invites.createLink` — invite metadata + one-time copyable URL.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoInvitesCreateLinkResponse {
+    pub invite: RepoInvitePublic,
+    pub invite_url: String,
+}
+
+/// `repo.invites.revoke`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoInvitesRevokeRequest {
+    pub owner: String,
+    pub name: String,
+    pub invite_id: String,
+}
+
 /// Org profile meta-repos (Oxidean-first; `.github` kept for compatibility). Leading `.` is otherwise rejected.
 const ALLOWED_DOT_REPO_NAMES: &[&str] = &[".oxidean", ".github"];
 

@@ -36,8 +36,18 @@ fn err_response(status: StatusCode, code: &str, message: &str) -> Response {
 
 async fn build_ctx(state: &AppState, headers: &HeaderMap) -> RpcCtx {
     let raw = session_token_from_headers(headers);
+    let client = crate::rpc::ClientMeta::from_headers(headers);
     let session = match raw.as_deref() {
-        Some(token) => match state.sessions.resolve(&state.db, token).await {
+        Some(token) => match state
+            .sessions
+            .resolve(
+                &state.db,
+                token,
+                client.ip_address.as_deref(),
+                client.user_agent.as_deref(),
+            )
+            .await
+        {
             Ok(s) => s,
             Err(_) => None,
         },
@@ -57,6 +67,7 @@ async fn build_ctx(state: &AppState, headers: &HeaderMap) -> RpcCtx {
         git: state.git.clone(),
         env_name: state.env_name.clone(),
         session,
+        client,
         set_cookie: None,
         lookup_limiter: state.lookup_limiter.clone(),
         search_timeout_ms: state.search_timeout_ms,

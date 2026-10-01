@@ -124,7 +124,13 @@ pub(crate) async fn issue_session(
 ) -> Result<Cookie<'static>, AppError> {
     let (_token, cookie) = ctx
         .sessions
-        .create(&ctx.db, user_id, remember_me)
+        .create(
+            &ctx.db,
+            user_id,
+            remember_me,
+            ctx.client.ip_address.as_deref(),
+            ctx.client.user_agent.as_deref(),
+        )
         .await
         .map_err(session_err)?;
     Ok(cookie)
@@ -217,6 +223,15 @@ pub async fn signup(ctx: &mut RpcCtx, input: serde_json::Value) -> Result<UserPu
     let cookie = issue_session(ctx, &row.id, false).await?;
     ctx.set_cookie = Some(CookieChange::Set(cookie));
 
+    crate::audit::record(
+        ctx,
+        Some((&row.id, &row.username)),
+        "auth.signup",
+        Some(("user", &row.id)),
+        None,
+    )
+    .await;
+
     let welcome = OutboundEmail {
         to: email.clone(),
         subject: "Welcome to Oxidean".into(),
@@ -285,8 +300,24 @@ pub async fn login(ctx: &mut RpcCtx, input: serde_json::Value) -> Result<UserPub
         ));
     }
 
+    if user.banned_at.is_some() {
+        // Same generic message as bad password (no ban-status leak).
+        return Err(AppError::new(
+            "auth.invalid_credentials",
+            "Incorrect email/username or password",
+        ));
+    }
+
     let cookie = issue_session(ctx, &user.id, req.remember_me).await?;
     ctx.set_cookie = Some(CookieChange::Set(cookie));
+    crate::audit::record(
+        ctx,
+        Some((&user.id, &user.username)),
+        "auth.login",
+        Some(("user", &user.id)),
+        None,
+    )
+    .await;
     Ok(user_to_public(&user))
 }
 
@@ -302,8 +333,25 @@ pub async fn logout(ctx: &mut RpcCtx) -> Result<(), AppError> {
         .revoke(&ctx.db, &session.session_id)
         .await
         .map_err(session_err)?;
+    let user_id = session.user_id.clone();
     ctx.set_cookie = Some(CookieChange::Clear);
     ctx.session = None;
+    let username = ctx
+        .db
+        .find_user_by_id(&user_id)
+        .await
+        .ok()
+        .flatten()
+        .map(|u| u.username)
+        .unwrap_or_default();
+    crate::audit::record(
+        ctx,
+        Some((&user_id, &username)),
+        "auth.logout",
+        Some(("user", &user_id)),
+        None,
+    )
+    .await;
     Ok(())
 }
 
@@ -338,6 +386,12 @@ pub async fn me(ctx: &RpcCtx) -> Result<UserPublic, AppError> {
         .await
         .map_err(db_err)?
         .ok_or_else(|| AppError::new("auth.unauthenticated", "not authenticated"))?;
+    if user.banned_at.is_some() {
+        return Err(AppError::new(
+            "auth.banned",
+            "This account has been suspended.",
+        ));
+    }
     Ok(user_to_public(&user))
 }
 

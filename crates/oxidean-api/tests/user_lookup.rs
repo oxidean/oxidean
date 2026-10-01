@@ -262,3 +262,186 @@ async fn user_lookup_prefix_is_case_insensitive() {
     assert_eq!(users[0]["username"], "CamelCase");
     assert!(users[0].get("email").is_none());
 }
+
+/// Org context excludes existing members; unauthorized context returns empty.
+#[tokio::test]
+async fn user_lookup_org_context_excludes_members() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!(
+        "sqlite:{}",
+        dir.path().join("lookup_org_ctx.db").display()
+    );
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), dir.path().join("repos")).await;
+
+    let (owner_cookie, owner_v) = signup_and_login(&app, "octx@ex.com", "octxowner").await;
+    verify_user(&db, owner_v["data"]["id"].as_str().expect("id")).await;
+    let (_, create_org) = rpc_json(
+        &app,
+        r#"{"procedure":"org.create","input":{"slug":"lookup-org","display_name":"Lookup"}}"#,
+        &owner_cookie,
+    )
+    .await;
+    assert_eq!(create_org["ok"], true, "{create_org}");
+
+    let (_, mem_v) = signup_and_login(&app, "mem@ex.com", "octxmember").await;
+    verify_user(&db, mem_v["data"]["id"].as_str().expect("id")).await;
+    let (_, add_v) = rpc_json(
+        &app,
+        r#"{"procedure":"org.members.add","input":{"slug":"lookup-org","username":"octxmember","role":"member"}}"#,
+        &owner_cookie,
+    )
+    .await;
+    assert_eq!(add_v["ok"], true, "{add_v}");
+
+    let (_, cand_v) = signup_and_login(&app, "cand@ex.com", "octxcand").await;
+    verify_user(&db, cand_v["data"]["id"].as_str().expect("id")).await;
+
+    let (status, v) = rpc_json(
+        &app,
+        r#"{"procedure":"user.lookup","input":{"prefix":"octx","context":{"kind":"org","slug":"lookup-org"}}}"#,
+        &owner_cookie,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    let users = v["data"]["users"].as_array().expect("users");
+    let names: Vec<&str> = users
+        .iter()
+        .filter_map(|u| u["username"].as_str())
+        .collect();
+    assert!(names.contains(&"octxcand"), "{v}");
+    assert!(!names.contains(&"octxmember"), "members excluded — {v}");
+    assert!(!names.contains(&"octxowner"), "owner is member — {v}");
+    assert!(users.iter().all(|u| u.get("email").is_none()));
+
+    // Unauthorized (non-admin member) → empty.
+    let login_body =
+        r#"{"procedure":"auth.login","input":{"identifier":"mem@ex.com","password":"password1","remember_me":false}}"#;
+    let login = app
+        .clone()
+        .oneshot(rpc_req(login_body))
+        .await
+        .unwrap();
+    assert_eq!(login.status(), StatusCode::OK);
+    let mem_cookie = session_cookie_from_response(&login);
+    let _ = login.into_body().collect().await;
+
+    let (status, empty_v) = rpc_json(
+        &app,
+        r#"{"procedure":"user.lookup","input":{"prefix":"octx","context":{"kind":"org","slug":"lookup-org"}}}"#,
+        &mem_cookie,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{empty_v}");
+    assert!(
+        empty_v["data"]["users"]
+            .as_array()
+            .expect("users")
+            .is_empty(),
+        "non-admin org context must be empty — {empty_v}"
+    );
+}
+
+/// Repo context excludes collaborators + owner; ranks org members first on org repos.
+#[tokio::test]
+async fn user_lookup_repo_context_excludes_and_ranks() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!(
+        "sqlite:{}",
+        dir.path().join("lookup_repo_ctx.db").display()
+    );
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), dir.path().join("repos")).await;
+
+    let (owner_cookie, owner_v) = signup_and_login(&app, "rctx@ex.com", "rctxowner").await;
+    verify_user(&db, owner_v["data"]["id"].as_str().expect("id")).await;
+    let (_, create_org) = rpc_json(
+        &app,
+        r#"{"procedure":"org.create","input":{"slug":"rctx-org","display_name":"Rctx"}}"#,
+        &owner_cookie,
+    )
+    .await;
+    assert_eq!(create_org["ok"], true, "{create_org}");
+    let (_, create_repo) = rpc_json(
+        &app,
+        r#"{"procedure":"repo.create","input":{"owner":"rctx-org","name":"app","visibility":"private"}}"#,
+        &owner_cookie,
+    )
+    .await;
+    assert_eq!(create_repo["ok"], true, "{create_repo}");
+
+    let (_, mem_v) = signup_and_login(&app, "rmem@ex.com", "rctxmem").await;
+    verify_user(&db, mem_v["data"]["id"].as_str().expect("id")).await;
+    let (_, add_mem) = rpc_json(
+        &app,
+        r#"{"procedure":"org.members.add","input":{"slug":"rctx-org","username":"rctxmem","role":"member"}}"#,
+        &owner_cookie,
+    )
+    .await;
+    assert_eq!(add_mem["ok"], true, "{add_mem}");
+
+    let (_, col_v) = signup_and_login(&app, "rcol@ex.com", "rctxcol").await;
+    verify_user(&db, col_v["data"]["id"].as_str().expect("id")).await;
+    let (_, add_col) = rpc_json(
+        &app,
+        r#"{"procedure":"repo.collaborators.add","input":{"owner":"rctx-org","name":"app","username":"rctxcol","permission":"write"}}"#,
+        &owner_cookie,
+    )
+    .await;
+    assert_eq!(add_col["ok"], true, "{add_col}");
+
+    let (_, out_v) = signup_and_login(&app, "rout@ex.com", "rctxout").await;
+    verify_user(&db, out_v["data"]["id"].as_str().expect("id")).await;
+
+    let (status, v) = rpc_json(
+        &app,
+        r#"{"procedure":"user.lookup","input":{"prefix":"rctx","context":{"kind":"repo","owner":"rctx-org","name":"app"}}}"#,
+        &owner_cookie,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    let users = v["data"]["users"].as_array().expect("users");
+    let names: Vec<&str> = users
+        .iter()
+        .filter_map(|u| u["username"].as_str())
+        .collect();
+    assert!(names.contains(&"rctxmem"), "org member ranked/included — {v}");
+    assert!(names.contains(&"rctxout"), "global fill — {v}");
+    assert!(!names.contains(&"rctxcol"), "collaborator excluded — {v}");
+    // Org member should appear before outsider.
+    let mem_idx = names.iter().position(|n| *n == "rctxmem").unwrap();
+    let out_idx = names.iter().position(|n| *n == "rctxout").unwrap();
+    assert!(mem_idx < out_idx, "org members ranked first — {v}");
+    assert!(users.iter().all(|u| u.get("email").is_none()));
+
+    // Unauthorized outsider → empty.
+    let login_body =
+        r#"{"procedure":"auth.login","input":{"identifier":"rout@ex.com","password":"password1","remember_me":false}}"#;
+    let login = app
+        .clone()
+        .oneshot(rpc_req(login_body))
+        .await
+        .unwrap();
+    assert_eq!(login.status(), StatusCode::OK);
+    let out_cookie = session_cookie_from_response(&login);
+    let _ = login.into_body().collect().await;
+
+    let (status, empty_v) = rpc_json(
+        &app,
+        r#"{"procedure":"user.lookup","input":{"prefix":"rctx","context":{"kind":"repo","owner":"rctx-org","name":"app"}}}"#,
+        &out_cookie,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{empty_v}");
+    assert!(
+        empty_v["data"]["users"]
+            .as_array()
+            .expect("users")
+            .is_empty(),
+        "unauthorized repo context empty — {empty_v}"
+    );
+}

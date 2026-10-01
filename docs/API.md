@@ -100,8 +100,11 @@ SSO start routes redirect to the IdP when configured. If WorkOS/OIDC ENV is miss
 | `org.updateSettings` | Update `display_name` / `member_base_permission` | Org Admin+ |
 | `org.members.list` | Members (`username`, `role`, ids — no emails) | Org member |
 | `org.members.add` / `updateRole` / `remove` | Membership mutations | Org Admin+ (Owner-only for Owner grants) |
-| `org.invites.create` / `list` / `revoke` | Email invites (plaintext token only in outbound mail link) | Org Admin+ |
+| `org.invites.create` / `list` / `revoke` | Bulk email invites — `{ emails }` (max 50) → per-recipient `results[]`; plaintext token only in outbound mail link / returned `invite_url` | Org Admin+ |
+| `org.invites.createLink` | Shareable link invite (unbound `email`); optional `expires_at`, `max_uses` seats | Org Admin+ |
 | `org.invites.accept` | Redeem invite token; may create verified user under closed signup | Token (optional session) |
+| `invites.get` | Anonymous-safe invite preview — `kind`, bound `email`, expiry, seats, `acceptable`/`reason` | Token |
+| `invites.accept` | Unified redeem (instance/org/repo); bound-email enforced, link invites take `email` when anonymous; may create verified user | Token (optional session) |
 | `repo.listMine` / `repo.listByOwner` | Personal / owner-scoped repo lists (ACL-filtered) | Session |
 | `repo.create` / `repo.get` / browse / branch / settings | Forge RPC (Capability ACL) | Session (+ capability) |
 | `repo.star` / `repo.unstar` | Idempotent star membership + `star_count` / `viewer_has_starred` on `RepoPublic` | Session + Read (anonymous rejected; private without Read → `repo.not_found`) |
@@ -113,7 +116,12 @@ SSO start routes redirect to the IdP when configured. If WorkOS/OIDC ENV is miss
 | `repo.transfer` | Transfer ownership (type-confirm `confirmName`); moves bare dir; redirect | Repo Admin |
 | `repo.softDelete` | Soft-delete with type-confirm | Repo Admin |
 | `repo.collaborators.list` / `add` / `update` / `remove` | Per-repo collaborator grants | Repo Admin |
+| `repo.invites.create` / `createLink` / `list` / `revoke` | Bulk collaborator email invites (`{ emails, permission }`) and shareable links (optional `expires_at`, `max_uses`) | Repo Admin |
 | `release.list` / `get` / `create` / `update` / `delete` / `deleteAsset` | Tag-based releases + notes; assets via HTTP | Session (+ capability) |
+| `admin.users.list` / `updateRole` / `ban` / `unban` / `delete` / `revokeSessions` / `getAccess` | User administration (type-confirm delete; `delete_orgs` opt-in for shared orgs) | Sys-admin |
+| `admin.users.listSessions` | Per-user sessions with client metadata (`ip_address`, `user_agent`, `remember_me`, last-seen/expiry) | Sys-admin |
+| `admin.users.getActivity` | Merged per-user activity — audit events + repository activity; `source` (`audit`\|`repository`) and `event_type` filters | Sys-admin |
+| `admin.invites.create` / `createLink` / `list` / `revoke` | Bulk instance email invites + shareable links (optional `expires_at`, `max_uses`) | Sys-admin |
 | `admin.auth.get_settings` | Auth/email settings including `allow_signup` (no secrets) | Admin session |
 | `admin.auth.update_settings` | Update provider/email/`allow_signup`; rebuild email sender | Admin session |
 | `admin.instance.factory_reset` | Wipe users, orgs, repos + issue domain (DB); optional disk wipe via `scope` | Sys-admin |
@@ -577,6 +585,9 @@ Common `error.code` values:
 | `org.forbidden` / `org.not_found` | Org ACL / missing org |
 | `org.invite_login_required` | Invite email already registered — sign in to accept |
 | `org.invite_*` | Invite expired / revoked / invalid |
+| `invite.invalid` | Invite token unknown, expired, revoked, or out of seats |
+| `invite.email_mismatch` | Bound invite accepted under a different email |
+| `invite.login_required` | Link-invite email already registered — sign in to accept |
 | `repo.not_found` | Missing or unauthorized private (web/RPC soft 404) |
 | `repo.create_forbidden` | Org Member cannot create under that org |
 | `issue.not_found` / `issue.comment_not_found` / `issue.link_not_found` | Missing issue/comment/link (private soft-404 where applicable) |
@@ -592,6 +603,8 @@ Avatar and SSO JSON errors use the same `{ ok: false, error: { code, message } }
 Smart HTTP failed-authentication attempts are rate-limited in-process: **20 failures per client IP** and **10 per username** per **15 minutes**, then HTTP `429` with `Retry-After`. Client IP uses the rightmost `X-Forwarded-For` hop from a trusted proxy; do not expose the API without a proxy that sanitizes forwarded headers. Successful PAT auth clears the user bucket. Git-over-SSH failed pubkey auth uses the same windows with the key **fingerprint** as the user bucket. Other RPC routes do not apply this limiter; rely on reverse-proxy / edge controls for deployment-wide limits.
 
 `user.lookup` is rate-limited per session (**60** requests / **60s**). Other RPC routes do not apply in-process limiters; rely on reverse-proxy / edge controls for deployment-wide limits.
+
+Invite issuance is rate-limited per scope (instance / org / repo): **20** invites issued per hour, enforced cumulatively — a bulk `create` batch stops issuing once the remaining hourly budget is exhausted, and remaining recipients get per-recipient `hourly invite limit reached` results. Requests are also capped at **50** recipient emails each, and re-issuing an invite to the same email within **60s** is rejected (re-issue after that revokes the previous pending invite — its link dies). `createLink` counts as one issued invite against the same hourly budget.
 
 ## Actions (Phase 19)
 

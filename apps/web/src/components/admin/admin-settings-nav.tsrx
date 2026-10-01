@@ -1,6 +1,12 @@
 import { cn } from "@/lib/utils";
 
-export type AdminSettingsNavActive = "auth" | "lfs" | "packages" | "runners" | "templates";
+export type AdminSettingsNavActive =
+  | "auth"
+  | "users"
+  | "lfs"
+  | "packages"
+  | "runners"
+  | "templates";
 
 type AdminSettingsNavProps = {
   active: AdminSettingsNavActive;
@@ -12,6 +18,7 @@ const LINKS: {
   label: string;
 }[] = [
   { id: "auth", href: "/admin/auth", label: "Auth" },
+  { id: "users", href: "/admin/users", label: "Users" },
   { id: "lfs", href: "/admin/lfs", label: "LFS quotas" },
   { id: "packages", href: "/admin/packages", label: "Package storage" },
   { id: "templates", href: "/admin/templates", label: "Templates" },

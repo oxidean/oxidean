@@ -251,11 +251,12 @@ async fn factory_reset_wipes_org_acl_and_repository_rows() {
     db.insert_org_invite(
         "inv-wipe",
         &org.id,
-        "invitee@ex.com",
+        Some("invitee@ex.com"),
         "member",
         "wipe-token-hash",
-        "2099-01-01 00:00:00",
+        Some("2099-01-01 00:00:00"),
         &admin_id,
+        Some(1),
     )
     .await
     .expect("invite");

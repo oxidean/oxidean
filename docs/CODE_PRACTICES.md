@@ -76,5 +76,6 @@ Details: [TESTING.md](TESTING.md).
 
 - No secrets in git, CI logs, or README examples.
 - Privileged actions stay behind verification / admin checks already established in auth phases.
+- Security-relevant operations — auth events, admin mutations, invite lifecycle — record an `audit::record` event. It is fire-and-forget: audit failure must never fail the operation it describes.
 - Factory reset and similar destructive RPCs require explicit confirmation strings — never weaken.
 - Uploads and session cookies: follow existing size/type and cookie attribute patterns.

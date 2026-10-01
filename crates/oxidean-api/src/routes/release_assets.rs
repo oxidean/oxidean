@@ -78,7 +78,17 @@ pub async fn remove_asset_file(release_assets_dir: &Path, asset_id: &str) {
 
 async fn resolve_session_user_id(state: &AppState, headers: &HeaderMap) -> Option<String> {
     let token = session_token_from_headers(headers)?;
-    match state.sessions.resolve(&state.db, &token).await {
+    let client = crate::rpc::ClientMeta::from_headers(headers);
+    match state
+        .sessions
+        .resolve(
+            &state.db,
+            &token,
+            client.ip_address.as_deref(),
+            client.user_agent.as_deref(),
+        )
+        .await
+    {
         Ok(Some(s)) => Some(s.user_id),
         _ => None,
     }

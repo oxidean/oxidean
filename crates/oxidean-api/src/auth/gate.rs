@@ -39,5 +39,11 @@ pub async fn require_verified(ctx: &RpcCtx) -> Result<UserRow, AppError> {
             "verify your email to continue",
         ));
     }
+    if user.banned_at.is_some() {
+        return Err(AppError::new(
+            "auth.banned",
+            "This account has been suspended.",
+        ));
+    }
     Ok(user)
 }

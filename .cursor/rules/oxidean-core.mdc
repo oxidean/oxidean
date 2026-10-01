@@ -6,6 +6,7 @@ alwaysApply: true
 # Oxidean — always on
 
 - Read [AGENTS.md](../../AGENTS.md) for stack orientation. Humans: [CONTRIBUTING.md](../../CONTRIBUTING.md), [docs/CODE_PRACTICES.md](../../docs/CODE_PRACTICES.md).
+- **Always use in-repo skills** under [`.agents/skills/`](../../.agents/skills/) when they match the task — see [use-in-repo-skills.mdc](use-in-repo-skills.mdc).
 - One product: cloud + self-host. Bun workspaces + Cargo crates — do not invent a parallel app structure.
 - Web UI is **Octane** (`.tsrx`), not React. Load [`.agents/skills/octane/SKILL.md`](../../.agents/skills/octane/SKILL.md) before UI edits.
 - RPC types: change Rust → `make rpc-gen`. Never treat hand-edited `packages/api-client` as source of truth.

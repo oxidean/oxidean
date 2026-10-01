@@ -52,11 +52,11 @@ export function resolveUiCoverageDiff(root: string): UiCoverageDiff | null {
     return { touched, added, base: "env:UI_COVERAGE_TOUCHED" };
   }
 
-  const base =
+  const requested =
     process.env.UI_COVERAGE_BASE?.trim() ||
     process.env.BROWSER_COVERAGE_BASE?.trim() ||
     "";
-  if (!base) return null;
+  if (!requested) return null;
 
   const git = (args: string[]) =>
     spawnSync("git", ["-C", root, ...args], {
@@ -64,13 +64,31 @@ export function resolveUiCoverageDiff(root: string): UiCoverageDiff | null {
       maxBuffer: 8 * 1024 * 1024,
     });
 
-  // Ensure base is resolvable when CI fetched it as origin/<branch>.
-  const rev = git(["rev-parse", "--verify", base]);
-  if (rev.status !== 0) {
-    console.error(
-      `ui-coverage-diff: FAIL: cannot resolve UI_COVERAGE_BASE=${base}: ${rev.stderr || rev.stdout}`,
+  /** Prefer requested base; fall back when force-pushes orphan github.event.before. */
+  const candidates = [requested, "origin/main", "main"].filter(
+    (v, i, arr) => v && arr.indexOf(v) === i,
+  );
+
+  let base = "";
+  for (const cand of candidates) {
+    const rev = git(["rev-parse", "--verify", cand]);
+    if (rev.status !== 0) continue;
+    const mb = git(["merge-base", cand, "HEAD"]);
+    if (mb.status !== 0) continue;
+    base = cand;
+    if (cand !== requested) {
+      console.warn(
+        `ui-coverage-diff: UI_COVERAGE_BASE=${requested} unusable; falling back to ${cand}`,
+      );
+    }
+    break;
+  }
+
+  if (!base) {
+    console.warn(
+      `ui-coverage-diff: no usable UI_COVERAGE_BASE (tried ${candidates.join(", ")}); inventory-only`,
     );
-    process.exit(1);
+    return null;
   }
 
   const nameOnly = (diffFilter: string) => {

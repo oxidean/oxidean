@@ -2,13 +2,16 @@
  * Org settings layout + General / Members / Labels render coverage.
  */
 import { createElement } from "octane";
-import { cleanup, screen, waitFor } from "@octanejs/testing-library";
+import { cleanup, fireEvent, screen, waitFor } from "@octanejs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithQueryClient } from "@/test/render-with-query";
 
 const updateSettingsMock = vi.fn();
 const membersListMock = vi.fn();
 const invitesListMock = vi.fn();
+const invitesCreateMock = vi.fn();
+const invitesCreateLinkMock = vi.fn();
+const invitesRevokeMock = vi.fn();
 const labelsListMock = vi.fn();
 
 vi.mock("@/lib/api-client", () => ({
@@ -23,8 +26,9 @@ vi.mock("@/lib/api-client", () => ({
       },
       invites: {
         list: (...args: unknown[]) => invitesListMock(...args),
-        create: vi.fn(),
-        revoke: vi.fn(),
+        create: (...args: unknown[]) => invitesCreateMock(...args),
+        createLink: (...args: unknown[]) => invitesCreateLinkMock(...args),
+        revoke: (...args: unknown[]) => invitesRevokeMock(...args),
       },
     },
     label: {
@@ -103,6 +107,48 @@ beforeEach(() => {
     },
   });
   invitesListMock.mockResolvedValue({ ok: true, data: { invites: [] } });
+  invitesCreateMock.mockReset();
+  invitesCreateLinkMock.mockReset();
+  invitesRevokeMock.mockReset();
+  invitesCreateMock.mockResolvedValue({
+    ok: true,
+    data: {
+      results: [
+        {
+          email: "new@example.com",
+          ok: true,
+          invite: {
+            id: "oi1",
+            email: "new@example.com",
+            role: "member",
+            expires_at: "2026-10-07T00:00:00Z",
+            invited_by: "u1",
+            created_at: "2026-09-30T00:00:00Z",
+            max_uses: 1,
+            use_count: 0,
+          },
+          invite_url: "https://oxidean.example/invites/org-tok",
+        },
+      ],
+    },
+  });
+  invitesCreateLinkMock.mockResolvedValue({
+    ok: true,
+    data: {
+      invite: {
+        id: "oi2",
+        email: null,
+        role: "member",
+        expires_at: null,
+        invited_by: "u1",
+        created_at: "2026-09-30T00:00:00Z",
+        max_uses: null,
+        use_count: 0,
+      },
+      invite_url: "https://oxidean.example/invites/org-link-tok",
+    },
+  });
+  invitesRevokeMock.mockResolvedValue({ ok: true, data: { ok: true } });
   labelsListMock.mockResolvedValue({
     ok: true,
     data: {
@@ -169,6 +215,118 @@ describe("org settings members", () => {
     });
     expect(screen.getByRole("heading", { name: "Members" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Add member" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Invitations" })).toBeInTheDocument();
+  });
+
+  it("creates org invites in bulk and shows per-recipient results", async () => {
+    invitesListMock.mockResolvedValueOnce({ ok: true, data: { invites: [] } }).mockResolvedValue({
+      ok: true,
+      data: {
+        invites: [
+          {
+            id: "oi1",
+            email: "new@example.com",
+            role: "member",
+            expires_at: "2026-10-07T00:00:00Z",
+            invited_by: "u1",
+            created_at: "2026-09-30T00:00:00Z",
+            max_uses: 1,
+            use_count: 0,
+          },
+        ],
+      },
+    });
+
+    renderWithQueryClient(OrgMembersPage);
+
+    await waitFor(() => {
+      expect(document.getElementById("invite-emails")).toBeTruthy();
+    });
+
+    fireEvent.input(document.getElementById("invite-emails") as HTMLTextAreaElement, {
+      target: { value: "new@example.com" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^Send invitations$/i }));
+
+    await waitFor(() => {
+      expect(invitesCreateMock).toHaveBeenCalledWith({
+        slug: "acme",
+        emails: ["new@example.com"],
+        role: "member",
+      });
+      expect(screen.getByTestId("org-invite-results")).toBeTruthy();
+      expect(screen.getByTestId("org-invite-result-copy-new@example.com")).toBeTruthy();
+    });
+  });
+
+  it("link mode creates a reusable org invite link", async () => {
+    renderWithQueryClient(OrgMembersPage);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("org-invite-mode-link")).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByTestId("org-invite-mode-link"));
+
+    await waitFor(() => {
+      expect(document.getElementById("invite-link-seats")).toBeTruthy();
+    });
+    fireEvent.input(document.getElementById("invite-link-seats")!, {
+      target: { value: "5" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^Create invite link$/i }));
+
+    await waitFor(() => {
+      expect(invitesCreateLinkMock).toHaveBeenCalledWith({
+        slug: "acme",
+        role: "member",
+        expires_at: null,
+        max_uses: 5,
+      });
+      expect(screen.getByDisplayValue("https://oxidean.example/invites/org-link-tok")).toBeTruthy();
+      expect(screen.getByRole("button", { name: /^Copy link$/i })).toBeTruthy();
+    });
+  });
+
+  it("revokes a pending org invite via confirm dialog", async () => {
+    invitesListMock.mockResolvedValue({
+      ok: true,
+      data: {
+        invites: [
+          {
+            id: "oi1",
+            email: "pending@example.com",
+            role: "member",
+            expires_at: "2026-10-07T00:00:00Z",
+            invited_by: "u1",
+            created_at: "2026-09-30T00:00:00Z",
+            max_uses: 1,
+            use_count: 0,
+          },
+        ],
+      },
+    });
+
+    renderWithQueryClient(OrgMembersPage);
+
+    await waitFor(() => {
+      expect(screen.getByText("pending@example.com")).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /^Revoke$/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Revoke invite\?/i)).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /^Revoke invite$/i }));
+
+    await waitFor(() => {
+      expect(invitesRevokeMock).toHaveBeenCalledWith({
+        slug: "acme",
+        invite_id: "oi1",
+      });
+    });
   });
 
   it("unhappy: shows loading when org missing", () => {

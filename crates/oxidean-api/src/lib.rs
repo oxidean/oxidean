@@ -1,9 +1,12 @@
 pub mod actions;
+pub mod admin;
 pub mod app;
+pub mod audit;
 pub mod auth;
 pub mod cors;
 pub mod email;
 pub mod git;
+pub mod invites;
 pub mod issue;
 pub mod jobs;
 pub mod label;

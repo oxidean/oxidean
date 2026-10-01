@@ -93,6 +93,12 @@ pub(crate) async fn require_admin(ctx: &RpcCtx) -> Result<(), AppError> {
             "You need system admin access to manage auth settings.",
         ));
     }
+    if user.banned_at.is_some() {
+        return Err(AppError::new(
+            "auth.banned",
+            "This account has been suspended.",
+        ));
+    }
     Ok(())
 }
 

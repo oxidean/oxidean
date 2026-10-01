@@ -21,6 +21,10 @@ pub struct RepoActivityRow {
     pub actor_username: String,
     pub actor_display_name: String,
     pub actor_avatar_path: Option<String>,
+    /// Joined from repositories on actor-scoped queries (`list_by_actor`).
+    pub repo_name: Option<String>,
+    /// Owner slug/username for `owner/name` links (`list_by_actor`).
+    pub repo_owner: Option<String>,
 }
 
 macro_rules! map_activity {
@@ -74,6 +78,12 @@ macro_rules! map_activity {
             actor_avatar_path: row
                 .try_get::<Option<String>, _>("actor_avatar_path")
                 .unwrap_or(None),
+            repo_name: row
+                .try_get::<Option<String>, _>("repo_name")
+                .unwrap_or(None),
+            repo_owner: row
+                .try_get::<Option<String>, _>("repo_owner")
+                .unwrap_or(None),
         }
     }};
 }
@@ -101,6 +111,100 @@ const SELECT_SQLITE: &str = "SELECT a.id, a.repository_id, a.actor_id, a.push_ty
        u.avatar_path AS actor_avatar_path
 FROM repository_activity a
 INNER JOIN users u ON u.id = a.actor_id";
+
+/// Actor-scoped select: joins repositories so the admin user-activity view can
+/// show `owner/name` without a second round trip.
+const ACTOR_SELECT_PG: &str = "SELECT a.id, a.repository_id, a.actor_id, a.push_type, a.ref_name,
+       a.before_oid, a.after_oid, a.commits_count, a.commit_message, a.pr_number,
+       to_char(a.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS created_at,
+       u.username AS actor_username, u.display_name AS actor_display_name,
+       u.avatar_path AS actor_avatar_path,
+       r.name AS repo_name,
+       COALESCE(ru.username, ro.slug) AS repo_owner
+FROM repository_activity a
+INNER JOIN users u ON u.id = a.actor_id
+INNER JOIN repositories r ON r.id = a.repository_id
+LEFT JOIN users ru ON r.owner_type = 'user' AND ru.id = r.owner_id
+LEFT JOIN organizations ro ON r.owner_type = 'org' AND ro.id = r.owner_id";
+
+const ACTOR_SELECT_MYSQL: &str = "SELECT a.id, a.repository_id, a.actor_id, a.push_type, a.ref_name,
+       a.before_oid, a.after_oid, a.commits_count, a.commit_message, a.pr_number,
+       DATE_FORMAT(a.created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at,
+       u.username AS actor_username, u.display_name AS actor_display_name,
+       u.avatar_path AS actor_avatar_path,
+       r.name AS repo_name,
+       COALESCE(ru.username, ro.slug) AS repo_owner
+FROM repository_activity a
+INNER JOIN users u ON u.id = a.actor_id
+INNER JOIN repositories r ON r.id = a.repository_id
+LEFT JOIN users ru ON r.owner_type = 'user' AND ru.id = r.owner_id
+LEFT JOIN organizations ro ON r.owner_type = 'org' AND ro.id = r.owner_id";
+
+const ACTOR_SELECT_SQLITE: &str = "SELECT a.id, a.repository_id, a.actor_id, a.push_type, a.ref_name,
+       a.before_oid, a.after_oid, a.commits_count, a.commit_message, a.pr_number,
+       strftime('%Y-%m-%dT%H:%M:%SZ', a.created_at) AS created_at,
+       u.username AS actor_username, u.display_name AS actor_display_name,
+       u.avatar_path AS actor_avatar_path,
+       r.name AS repo_name,
+       COALESCE(ru.username, ro.slug) AS repo_owner
+FROM repository_activity a
+INNER JOIN users u ON u.id = a.actor_id
+INNER JOIN repositories r ON r.id = a.repository_id
+LEFT JOIN users ru ON r.owner_type = 'user' AND ru.id = r.owner_id
+LEFT JOIN organizations ro ON r.owner_type = 'org' AND ro.id = r.owner_id";
+
+/// Repo activity authored by a user, newest first (admin user-activity view).
+pub async fn list_by_actor(
+    pool: &DbPool,
+    actor_id: &str,
+    limit: i64,
+) -> Result<Vec<RepoActivityRow>, String> {
+    let limit = limit.clamp(1, 500);
+    match pool {
+        DbPool::Postgres(p) => {
+            let rows = sqlx::query(&format!(
+                "{ACTOR_SELECT_PG}
+ WHERE a.actor_id = $1
+ ORDER BY a.created_at DESC, a.id DESC
+ LIMIT $2"
+            ))
+            .bind(actor_id)
+            .bind(limit)
+            .fetch_all(p)
+            .await
+            .map_err(|e| format!("list repository_activity by actor failed: {e}"))?;
+            rows.iter().map(|r| Ok(map_activity!(r))).collect()
+        }
+        DbPool::MySql(p) => {
+            let rows = sqlx::query(&format!(
+                "{ACTOR_SELECT_MYSQL}
+ WHERE a.actor_id = ?
+ ORDER BY a.created_at DESC, a.id DESC
+ LIMIT ?"
+            ))
+            .bind(actor_id)
+            .bind(limit)
+            .fetch_all(p)
+            .await
+            .map_err(|e| format!("list repository_activity by actor failed: {e}"))?;
+            rows.iter().map(|r| Ok(map_activity!(r))).collect()
+        }
+        DbPool::Sqlite(p) => {
+            let rows = sqlx::query(&format!(
+                "{ACTOR_SELECT_SQLITE}
+ WHERE a.actor_id = ?1
+ ORDER BY a.created_at DESC, a.id DESC
+ LIMIT ?2"
+            ))
+            .bind(actor_id)
+            .bind(limit)
+            .fetch_all(p)
+            .await
+            .map_err(|e| format!("list repository_activity by actor failed: {e}"))?;
+            rows.iter().map(|r| Ok(map_activity!(r))).collect()
+        }
+    }
+}
 
 pub struct InsertRepoActivity<'a> {
     pub id: &'a str,

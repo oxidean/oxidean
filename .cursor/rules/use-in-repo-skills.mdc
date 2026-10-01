@@ -1,0 +1,36 @@
+---
+description: Always discover and follow Oxidean in-repo agent skills before acting
+alwaysApply: true
+---
+
+# Use in-repo skills
+
+Before implementing, debugging, deploying, or writing substantial prose, **load and follow** the matching skill under [`.agents/skills/`](../../.agents/skills/) (Claude Code: [`.claude/skills/`](../../.claude/skills/) symlinks to the same files). Do not invent a parallel workflow when a project skill already covers the task.
+
+## How to pick a skill
+
+1. Scan skill names/descriptions in `.agents/skills/*/SKILL.md`.
+2. Read the skill file immediately when it matches the task.
+3. Prefer project skills over generic habits or external defaults.
+
+## Common mappings
+
+| Situation | Skill |
+|-----------|--------|
+| `apps/web` UI / `.tsrx` / Octane | [octane](../../.agents/skills/octane/SKILL.md) |
+| New or reshaped visual UI | [frontend-design](../../.agents/skills/frontend-design/SKILL.md), [web-design-guidelines](../../.agents/skills/web-design-guidelines/SKILL.md) when auditing |
+| Rust API / async / idioms | [rust-async-patterns](../../.agents/skills/rust-async-patterns/SKILL.md), [rust-best-practices](../../.agents/skills/rust-best-practices/SKILL.md) |
+| Test-first / red-green | [tdd](../../.agents/skills/tdd/SKILL.md) |
+| Hard bugs / regressions | [diagnosing-bugs](../../.agents/skills/diagnosing-bugs/SKILL.md) |
+| Module design / seams | [codebase-design](../../.agents/skills/codebase-design/SKILL.md), [improve-codebase-architecture](../../.agents/skills/improve-codebase-architecture/SKILL.md) |
+| Railway / cloud deploy / flags | [use-railway](../../.agents/skills/use-railway/SKILL.md) |
+| User-facing prose finalize | [clean-user-facing-text](../../.agents/skills/clean-user-facing-text/SKILL.md) (also [`.cursor/rules/clean-user-facing-text.mdc`](clean-user-facing-text.mdc)) |
+| AI watermark / provenance strip | [remove-ai-marks](../../.agents/skills/remove-ai-marks/SKILL.md) |
+
+GSD / planning skills under [`.cursor/skills/`](../skills/) apply when the user invokes those workflows.
+
+## Do not
+
+- Skip a matching skill because the change “looks small.”
+- Re-derive Octane, Railway, or watermark procedures from memory when the skill exists.
+- Vendor alternate skill copies outside `.agents/skills/` without an explicit ask.
