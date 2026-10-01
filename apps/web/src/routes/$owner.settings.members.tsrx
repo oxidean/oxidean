@@ -6,8 +6,14 @@ import {
   useParams,
 } from "@octanejs/tanstack-router";
 import { useQuery, useQueryClient } from "@octanejs/tanstack-query";
-import type { OrgInvitePublic, OrgMemberPublic, OrgPublic, OrgRole } from "@oxidean/api-client";
-import { Check, ChevronDown } from "@octanejs/lucide";
+import type {
+  OrgInvitePublic,
+  OrgInvitesCreateItemResult,
+  OrgMemberPublic,
+  OrgPublic,
+  OrgRole,
+} from "@oxidean/api-client";
+import { Check, ChevronDown, Link2 } from "@octanejs/lucide";
 import { useForm } from "@octanejs/tanstack-form";
 import { useState } from "octane";
 import { AuthErrorBanner } from "@/components/auth-shell";
@@ -24,6 +30,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   SelectIcon,
   SelectItem,
@@ -58,6 +65,16 @@ const ROLE_OPTIONS: { value: OrgRole; label: string }[] = [
 
 function roleLabel(role: OrgRole): string {
   return ROLE_OPTIONS.find((o) => o.value === role)?.label ?? role;
+}
+
+function inviteExpiryLabel(inv: { expires_at?: string | null }): string {
+  return inv.expires_at ? `expires ${inv.expires_at.slice(0, 10)}` : "never expires";
+}
+
+function inviteSeatsLabel(inv: { max_uses?: number | null; use_count: number }): string {
+  return inv.max_uses == null
+    ? `${inv.use_count} used · unlimited seats`
+    : `${inv.use_count}/${inv.max_uses} seats used`;
 }
 
 function membersQueryKey(slug: string) {
@@ -194,11 +211,17 @@ export function OrgMembersPage() @{
   const [addError, setAddError] = useState("");
   const [addPending, setAddPending] = useState(false);
 
+  const [inviteMode, setInviteMode] = useState<"emails" | "link">("emails");
+  const [inviteEmails, setInviteEmails] = useState("");
+  const [inviteLinkExpiry, setInviteLinkExpiry] = useState("");
+  const [inviteLinkMaxUses, setInviteLinkMaxUses] = useState("");
+  const [inviteResults, setInviteResults] = useState<OrgInvitesCreateItemResult[]>([]);
   const [inviteError, setInviteError] = useState("");
   const [inviteSuccess, setInviteSuccess] = useState("");
   const [invitePending, setInvitePending] = useState(false);
   const [createdInviteUrl, setCreatedInviteUrl] = useState("");
   const [copyState, setCopyState] = useState<"idle" | "copied" | "error">("idle");
+  const [copiedResultUrl, setCopiedResultUrl] = useState("");
 
   const addForm = useForm({
     defaultValues: {
@@ -242,7 +265,6 @@ export function OrgMembersPage() @{
 
   const inviteForm = useForm({
     defaultValues: {
-      email: "",
       role: "member" as OrgRole,
     },
     onSubmit: async ({ value }) => {
@@ -250,16 +272,61 @@ export function OrgMembersPage() @{
       setInviteSuccess("");
       setCreatedInviteUrl("");
       setCopyState("idle");
-      const email = value.email.trim();
-      if (!email) {
-        setInviteError("Email is required.");
+      setCopiedResultUrl("");
+
+      if (inviteMode === "link") {
+        const maxUsesRaw = inviteLinkMaxUses.trim();
+        let maxUses: number | null = null;
+        if (maxUsesRaw) {
+          const parsed = Number(maxUsesRaw);
+          if (!Number.isInteger(parsed) || parsed <= 0) {
+            setInviteError("Max seats must be a positive whole number.");
+            return;
+          }
+          maxUses = parsed;
+        }
+        setInviteResults([]);
+        setInvitePending(true);
+        try {
+          const res = await apiClient.org.invites.createLink({
+            slug,
+            role: value.role,
+            expires_at: inviteLinkExpiry || null,
+            max_uses: maxUses,
+          });
+          if (!res.ok) {
+            setInviteError(
+              res.error.code === "org.forbidden" ? FORBIDDEN : res.error.message || NETWORK_ERROR,
+            );
+            setInvitePending(false);
+            return;
+          }
+          setCreatedInviteUrl(res.data.invite_url);
+          setInviteLinkExpiry("");
+          setInviteLinkMaxUses("");
+          setInvitePending(false);
+          await refreshInvites();
+        } catch {
+          setInviteError(NETWORK_ERROR);
+          setInvitePending(false);
+        }
         return;
       }
+
+      const emails = inviteEmails
+        .split(/[\s,;]+/)
+        .map((e) => e.trim())
+        .filter(Boolean);
+      if (emails.length === 0) {
+        setInviteError("Enter at least one email address.");
+        return;
+      }
+      setInviteResults([]);
       setInvitePending(true);
       try {
         const res = await apiClient.org.invites.create({
           slug,
-          email,
+          emails,
           role: value.role,
         });
         if (!res.ok) {
@@ -271,9 +338,15 @@ export function OrgMembersPage() @{
           setInvitePending(false);
           return;
         }
-        inviteForm.reset();
-        setInviteSuccess("Invitation sent.");
-        setCreatedInviteUrl(res.data.invite_url);
+        setInviteResults(res.data.results);
+        setInviteEmails("");
+        const ok = res.data.results.filter((r) => r.ok).length;
+        const failed = res.data.results.length - ok;
+        setInviteSuccess(
+          failed > 0
+            ? `Created ${ok} invite${ok === 1 ? "" : "s"}; ${failed} recipient${failed === 1 ? "" : "s"} failed.`
+            : `Created ${ok} invite${ok === 1 ? "" : "s"}.`,
+        );
         setInvitePending(false);
         await refreshInvites();
       } catch {
@@ -307,6 +380,19 @@ export function OrgMembersPage() @{
       window.setTimeout(() => setCopyState("idle"), 2000);
     } catch {
       setCopyState("error");
+    }
+  }
+
+  async function copyResultUrl(url: string) {
+    try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error("clipboard unavailable");
+      }
+      await navigator.clipboard.writeText(url);
+      setCopiedResultUrl(url);
+      window.setTimeout(() => setCopiedResultUrl(""), 2000);
+    } catch {
+      setCopiedResultUrl("");
     }
   }
 
@@ -496,10 +582,11 @@ export function OrgMembersPage() @{
 
           <section aria-labelledby="invites-heading">
             <h2 id="invites-heading" className="text-[18px] font-semibold text-foreground">
-              Email invitations
+              Invitations
             </h2>
             <p className="mt-1 text-[14px] text-muted-foreground">
-              Invite someone by email. They can join even when public sign-up is closed.
+              Invite people by email or share a reusable link. They can join even when public
+              sign-up is closed.
             </p>
 
             <form
@@ -511,6 +598,42 @@ export function OrgMembersPage() @{
                 void inviteForm.handleSubmit();
               }}
             >
+              <div className="flex gap-2" role="group" aria-label="Invite mode">
+                <button
+                  type="button"
+                  data-testid="org-invite-mode-emails"
+                  aria-pressed={inviteMode === "emails"}
+                  className={
+                    "rounded-full border px-3 py-1 text-[13px] transition-colors " +
+                    (inviteMode === "emails"
+                      ? "border-primary bg-primary/10 text-foreground"
+                      : "border-border text-muted-foreground hover:text-foreground")
+                  }
+                  onClick={() => {
+                    setInviteMode("emails");
+                    setInviteError("");
+                  }}
+                >
+                  By email
+                </button>
+                <button
+                  type="button"
+                  data-testid="org-invite-mode-link"
+                  aria-pressed={inviteMode === "link"}
+                  className={
+                    "rounded-full border px-3 py-1 text-[13px] transition-colors " +
+                    (inviteMode === "link"
+                      ? "border-primary bg-primary/10 text-foreground"
+                      : "border-border text-muted-foreground hover:text-foreground")
+                  }
+                  onClick={() => {
+                    setInviteMode("link");
+                    setInviteError("");
+                  }}
+                >
+                  Invite link
+                </button>
+              </div>
               @if (inviteError) {
                 <AuthErrorBanner message={inviteError} />;
               }
@@ -545,24 +668,110 @@ export function OrgMembersPage() @{
                   }
                 </div>;
               }
-              <inviteForm.Field name="email">
-                {(field) => (
+              @if (inviteResults.length > 0) {
+                <div
+                  className="max-h-64 overflow-y-auto rounded-md border border-border"
+                  data-testid="org-invite-results"
+                >
+                  <ul className="divide-y divide-border">
+                    @for (const r of inviteResults; key r.email) {
+                      <li className="flex flex-col gap-1 px-4 py-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="truncate text-[14px] font-medium text-foreground">
+                            {r.email as string}
+                          </p>
+                          @if (
+                            r.ok &&
+                            r.invite_url
+                          ) {
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="shrink-0"
+                              data-testid={`org-invite-result-copy-${r.email}`}
+                              onClick={() =>
+                                void copyResultUrl(r.invite_url!)
+                              }
+                            >
+                              {
+                                (copiedResultUrl === r.invite_url
+                                  ? "Copied"
+                                  : "Copy link") as string
+                              }
+                            </Button>;
+                          }
+                        </div>
+                        @if (!r.ok) {
+                          <p
+                            role="alert"
+                            className="text-[13px] text-destructive"
+                          >
+                            {(r.error ?? "Failed") as string}
+                          </p>;
+                        }
+                      </li>;
+                    }
+                  </ul>
+                </div>;
+              }
+              @if (inviteMode === "emails") {
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="invite-emails">Emails</Label>
+                  <Textarea
+                    id="invite-emails"
+                    data-testid="invite-emails"
+                    placeholder={"one@example.com\ntwo@example.com" as string}
+                    value={inviteEmails as string}
+                    onInput={(ev) =>
+                      setInviteEmails((ev.currentTarget as HTMLTextAreaElement).value)
+                    }
+                    disabled={invitePending}
+                  />
+                  <p className="text-[13px] text-muted-foreground">
+                    Separate addresses with commas, spaces, or new lines (max 50).
+                  </p>
+                </div>;
+              } @else {
+                <>
                   <div className="flex flex-col gap-2">
-                    <Label htmlFor="invite-email">Email</Label>
+                    <Label htmlFor="invite-link-expiry">Expires on (optional)</Label>
                     <Input
-                      id="invite-email"
-                      name="email"
-                      type="email"
-                      autoComplete="email"
-                      value={field.state.value}
-                      onBlur={field.handleBlur}
+                      id="invite-link-expiry"
+                      data-testid="invite-link-expiry"
+                      type="date"
+                      value={inviteLinkExpiry as string}
                       onInput={(ev) =>
-                        field.handleChange((ev.currentTarget as HTMLInputElement).value)
+                        setInviteLinkExpiry(
+                          (ev.currentTarget as HTMLInputElement).value,
+                        )
                       }
+                      disabled={invitePending}
+                    />
+                    <p className="text-[13px] text-muted-foreground">
+                      Leave empty for a link that never expires.
+                    </p>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="invite-link-seats">Max seats (optional)</Label>
+                    <Input
+                      id="invite-link-seats"
+                      data-testid="invite-link-seats"
+                      type="number"
+                      min={1}
+                      step={1}
+                      placeholder="Unlimited"
+                      value={inviteLinkMaxUses as string}
+                      onInput={(ev) =>
+                        setInviteLinkMaxUses(
+                          (ev.currentTarget as HTMLInputElement).value,
+                        )
+                      }
+                      disabled={invitePending}
                     />
                   </div>
-                )}
-              </inviteForm.Field>
+                </>;
+              }
               <inviteForm.Subscribe selector={(s) => s.values.role}>
                 {(inviteRole) => (
                   <div className="flex flex-col gap-2">
@@ -579,7 +788,13 @@ export function OrgMembersPage() @{
                 @if (invitePending) {
                   <>Sending…</>;
                 } @else {
-                  <>Send invitation</>;
+                  <>
+                    {
+                      (inviteMode === "link"
+                        ? "Create invite link"
+                        : "Send invitations") as string
+                    }
+                  </>;
                 }
               </Button>
             </form>
@@ -599,14 +814,23 @@ export function OrgMembersPage() @{
                   @for (const inv of invites; key inv.id) {
                     <li className="flex flex-wrap items-center justify-between gap-3 py-3">
                       <div>
-                        <p className="text-[14px] font-medium text-foreground">
-                          {inv.email as string}
+                        <p className="flex items-center gap-1.5 text-[14px] font-medium text-foreground">
+                          @if (inv.email == null) {
+                            <Link2
+                              aria-hidden
+                              size={14}
+                              className="text-muted-foreground"
+                            />;
+                          }
+                          {(inv.email ?? "Invite link") as string}
                         </p>
                         <p className="text-[13px] text-muted-foreground">
                           {
                             (roleLabel(inv.role) +
-                              " · expires " +
-                              inv.expires_at) as string
+                              " · " +
+                              inviteExpiryLabel(inv) +
+                              " · " +
+                              inviteSeatsLabel(inv)) as string
                           }
                         </p>
                       </div>
@@ -646,7 +870,9 @@ export function OrgMembersPage() @{
             <AlertDialogDescription>
               {
                 (revokeTarget
-                  ? `Revokes the invitation for ${revokeTarget.email}. They will no longer be able to join with this link.`
+                  ? revokeTarget.email
+                    ? `Revokes the invitation for ${revokeTarget.email}. They will no longer be able to join with this link.`
+                    : "Revokes this invite link. It will no longer be usable."
                   : "Revoke this invitation?") as string
               }
             </AlertDialogDescription>

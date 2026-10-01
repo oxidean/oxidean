@@ -1,6 +1,7 @@
 //! Uniform database adapter boundary — the only place dialect branching is allowed (D-08).
 
 pub mod actions;
+pub mod audit_events;
 pub mod auth_identities;
 pub mod auth_settings;
 pub mod branch_protection;
@@ -41,6 +42,7 @@ pub mod watches;
 pub use actions::{
     ActionJobRow, ActionRunRow, ActionRunnerRow, ActionSecretCipherRow, ActionSecretMetaRow,
 };
+pub use audit_events::AuditEventRow;
 pub use branch_protection::{BranchProtectionRuleRow, CommitStatusRow};
 pub use dialect::{redact_url, resolve_dialect, resolve_dialect_from_env, Dialect};
 pub use issue_labels::{IssueAssigneeRow, LabelRow};
@@ -288,10 +290,11 @@ impl Database {
     pub async fn insert_instance_invite(
         &self,
         id: &str,
-        email: &str,
+        email: Option<&str>,
         token_hash: &str,
-        expires_at: &str,
+        expires_at: Option<&str>,
         invited_by: &str,
+        max_uses: Option<i64>,
     ) -> Result<InstanceInviteRow, String> {
         instance_invites::insert_invite(
             self.require_pool()?,
@@ -300,6 +303,7 @@ impl Database {
             token_hash,
             expires_at,
             invited_by,
+            max_uses,
         )
         .await
     }
@@ -333,8 +337,9 @@ impl Database {
         instance_invites::revoke(self.require_pool()?, id, revoked_at).await
     }
 
-    pub async fn accept_instance_invite(&self, id: &str, accepted_at: &str) -> Result<(), String> {
-        instance_invites::mark_accepted(self.require_pool()?, id, accepted_at).await
+    /// Atomic seat consumption — errors when the invite is revoked or out of seats.
+    pub async fn consume_instance_invite(&self, id: &str, accepted_at: &str) -> Result<(), String> {
+        instance_invites::consume(self.require_pool()?, id, accepted_at).await
     }
 
     pub async fn count_instance_invites_created_by_since(
@@ -359,11 +364,12 @@ impl Database {
         &self,
         id: &str,
         org_id: &str,
-        email: &str,
+        email: Option<&str>,
         role: &str,
         token_hash: &str,
-        expires_at: &str,
+        expires_at: Option<&str>,
         invited_by: &str,
+        max_uses: Option<i64>,
     ) -> Result<OrgInviteRow, String> {
         org_invites::insert_invite(
             self.require_pool()?,
@@ -374,6 +380,7 @@ impl Database {
             token_hash,
             expires_at,
             invited_by,
+            max_uses,
         )
         .await
     }
@@ -408,8 +415,9 @@ impl Database {
         org_invites::revoke(self.require_pool()?, id, revoked_at).await
     }
 
-    pub async fn accept_org_invite(&self, id: &str, accepted_at: &str) -> Result<(), String> {
-        org_invites::mark_accepted(self.require_pool()?, id, accepted_at).await
+    /// Atomic seat consumption — errors when the invite is revoked or out of seats.
+    pub async fn consume_org_invite(&self, id: &str, accepted_at: &str) -> Result<(), String> {
+        org_invites::consume(self.require_pool()?, id, accepted_at).await
     }
 
     pub async fn count_org_invites_created_by_since(
@@ -434,11 +442,12 @@ impl Database {
         &self,
         id: &str,
         repository_id: &str,
-        email: &str,
+        email: Option<&str>,
         permission: &str,
         token_hash: &str,
-        expires_at: &str,
+        expires_at: Option<&str>,
         invited_by: &str,
+        max_uses: Option<i64>,
     ) -> Result<RepoInviteRow, String> {
         repo_invites::insert_invite(
             self.require_pool()?,
@@ -449,6 +458,7 @@ impl Database {
             token_hash,
             expires_at,
             invited_by,
+            max_uses,
         )
         .await
     }
@@ -486,8 +496,9 @@ impl Database {
         repo_invites::revoke(self.require_pool()?, id, revoked_at).await
     }
 
-    pub async fn accept_repo_invite(&self, id: &str, accepted_at: &str) -> Result<(), String> {
-        repo_invites::mark_accepted(self.require_pool()?, id, accepted_at).await
+    /// Atomic seat consumption — errors when the invite is revoked or out of seats.
+    pub async fn consume_repo_invite(&self, id: &str, accepted_at: &str) -> Result<(), String> {
+        repo_invites::consume(self.require_pool()?, id, accepted_at).await
     }
 
     pub async fn count_repo_invites_created_by_since(
@@ -2126,6 +2137,8 @@ impl Database {
         token_hash: &str,
         expires_at: &str,
         remember_me: bool,
+        ip_address: Option<&str>,
+        user_agent: Option<&str>,
     ) -> Result<(), String> {
         sessions::create(
             self.require_pool()?,
@@ -2134,6 +2147,8 @@ impl Database {
             token_hash,
             expires_at,
             remember_me,
+            ip_address,
+            user_agent,
         )
         .await
     }
@@ -2150,8 +2165,26 @@ impl Database {
         id: &str,
         expires_at: &str,
         last_seen_at: &str,
+        ip_address: Option<&str>,
+        user_agent: Option<&str>,
     ) -> Result<(), String> {
-        sessions::touch(self.require_pool()?, id, expires_at, last_seen_at).await
+        sessions::touch(
+            self.require_pool()?,
+            id,
+            expires_at,
+            last_seen_at,
+            ip_address,
+            user_agent,
+        )
+        .await
+    }
+
+    /// All sessions for a user (admin view — `token_hash` must never be exposed).
+    pub async fn list_sessions_for_user(
+        &self,
+        user_id: &str,
+    ) -> Result<Vec<sessions::SessionRow>, String> {
+        sessions::list_for_user(self.require_pool()?, user_id).await
     }
 
     pub async fn delete_session(&self, id: &str) -> Result<(), String> {
@@ -2983,6 +3016,12 @@ impl Database {
                     .execute(p)
                     .await
                     .map_err(|e| e.to_string())?;
+                // audit_events survive user deletion via SET NULL — a factory
+                // reset must wipe them explicitly.
+                sqlx::query("DELETE FROM audit_events")
+                    .execute(p)
+                    .await
+                    .map_err(|e| e.to_string())?;
                 sqlx::query("DELETE FROM auth_email_tokens")
                     .execute(p)
                     .await
@@ -3021,6 +3060,10 @@ impl Database {
                     .await
                     .map_err(|e| e.to_string())?;
                 sqlx::query("DELETE FROM organizations")
+                    .execute(p)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                sqlx::query("DELETE FROM audit_events")
                     .execute(p)
                     .await
                     .map_err(|e| e.to_string())?;
@@ -3067,6 +3110,10 @@ impl Database {
                     .await
                     .map_err(|e| e.to_string())?;
                 sqlx::query("DELETE FROM organizations")
+                    .execute(p)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                sqlx::query("DELETE FROM audit_events")
                     .execute(p)
                     .await
                     .map_err(|e| e.to_string())?;
@@ -3340,6 +3387,62 @@ impl Database {
             limit,
         )
         .await
+    }
+
+    /// Repo activity authored by a user, newest first (admin user-activity view).
+    pub async fn list_repo_activity_by_actor(
+        &self,
+        actor_id: &str,
+        limit: i64,
+    ) -> Result<Vec<RepoActivityRow>, String> {
+        repo_activity::list_by_actor(self.require_pool()?, actor_id, limit).await
+    }
+
+    // --- audit events ---
+
+    pub async fn insert_audit_event(
+        &self,
+        id: &str,
+        actor_id: Option<&str>,
+        actor_username: &str,
+        event_type: &str,
+        target_type: Option<&str>,
+        target_id: Option<&str>,
+        detail: Option<&str>,
+        ip_address: Option<&str>,
+        user_agent: Option<&str>,
+    ) -> Result<(), String> {
+        audit_events::insert(
+            self.require_pool()?,
+            audit_events::InsertAuditEvent {
+                id,
+                actor_id,
+                actor_username,
+                event_type,
+                target_type,
+                target_id,
+                detail,
+                ip_address,
+                user_agent,
+            },
+        )
+        .await
+    }
+
+    pub async fn list_audit_events_for_actor(
+        &self,
+        actor_id: &str,
+        event_type: Option<&str>,
+        limit: i64,
+    ) -> Result<Vec<AuditEventRow>, String> {
+        audit_events::list_for_actor(self.require_pool()?, actor_id, event_type, limit).await
+    }
+
+    pub async fn list_audit_event_types_for_actor(
+        &self,
+        actor_id: &str,
+    ) -> Result<Vec<String>, String> {
+        audit_events::list_event_types_for_actor(self.require_pool()?, actor_id).await
     }
 
     pub async fn insert_webhook_delivery(

@@ -1,10 +1,10 @@
 import { createFileRoute, useLoaderData } from "@octanejs/tanstack-router";
 import { useQuery, useQueryClient } from "@octanejs/tanstack-query";
 import type {
-  AdminUserAccessOrg,
-  AdminUserAccessRepo,
+  AdminInvitesCreateItemResult,
+  AdminSessionPublic,
+  AdminUserActivityItem,
   AdminUserPublic,
-  AdminUsersGetAccessResponse,
   AdminUsersListResponse,
   InstanceInvitePublic,
   UserPublic,
@@ -14,6 +14,7 @@ import {
   Ban,
   EllipsisVertical,
   Eye,
+  Link2,
   LogOut,
   RotateCcw,
   Search,
@@ -55,13 +56,14 @@ import {
 import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { List, ListHeader, ListRow } from "@/components/ui/list";
 import { PageHeader } from "@/components/ui/page-header";
 import { apiClient } from "@/lib/api-client";
 import { formatRelative } from "@/lib/relative-time";
 import { authSessionQueryOptions, setAuthMeCache } from "@/lib/session-queries";
 import { fetchAdminInvitesList, fetchAdminUsersList, fetchSessionMe } from "@/lib/ssr-auth";
-import { toastSuccess } from "@/lib/toast";
+import { toastSuccess, toastWarning } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 
 export type AdminUsersLoaderData =
@@ -94,39 +96,105 @@ function isBanned(user: AdminUserPublic): boolean {
   return user.banned_at != null && user.banned_at !== "";
 }
 
-type AccessSummaryView = {
-  orgs: AdminUserAccessOrg[];
-  repos: AdminUserAccessRepo[];
-  error?: string;
-  loading: boolean;
-};
+function inviteListLabel(inv: InstanceInvitePublic): string {
+  return inv.email ?? "Invite link";
+}
 
-function AdminUserAccessPanel({
-  userId,
-  summary,
-}: {
-  userId: string;
-  summary: AccessSummaryView;
-}) @{
+function inviteExpiryLabel(inv: { expires_at?: string | null }): string {
+  return inv.expires_at ? `Expires ${formatShortDate(inv.expires_at)}` : "Never expires";
+}
+
+function inviteSeatsLabel(inv: { max_uses?: number | null; use_count: number }): string {
+  return inv.max_uses == null
+    ? `${inv.use_count} used · unlimited seats`
+    : `${inv.use_count}/${inv.max_uses} seats used`;
+}
+
+const ACTIVITY_SOURCES = [
+  { value: "all", label: "All" },
+  { value: "audit", label: "Audit log" },
+  { value: "repository", label: "Repository" },
+] as const;
+
+type ActivitySource = (typeof ACTIVITY_SOURCES)[number]["value"];
+
+function activityItemText(item: AdminUserActivityItem): string {
+  if (item.source === "repository") {
+    const repo =
+      item.repo_owner && item.repo_name ? `${item.repo_owner}/${item.repo_name}` : "repository";
+    const bits = [repo, item.ref_name ?? "", item.commit_message ?? ""].filter(Boolean);
+    return bits.join(" · ");
+  }
+  const bits = [
+    item.target_type && item.target_id ? `${item.target_type} ${item.target_id}` : "",
+    item.detail ?? "",
+  ].filter(Boolean);
+  return bits.join(" · ");
+}
+
+function sessionAgentLabel(ua?: string | null): string {
+  if (!ua) return "Unknown client";
+  return ua.length > 80 ? `${ua.slice(0, 80)}…` : ua;
+}
+
+/** Expanded row detail: access grants + sessions (client metadata) + activity log. */
+function AdminUserDetailPanel({ userId }: { userId: string }) @{
+  const [actSource, setActSource] = useState<ActivitySource>("all");
+  const [actType, setActType] = useState("");
+
+  const accessQ = useQuery({
+    queryKey: ["admin", "users", "access", userId] as const,
+    queryFn: async () => {
+      const res = await apiClient.admin.users.getAccess({ user_id: userId });
+      if (!res.ok) throw new Error(res.error.message || NETWORK_ERROR);
+      return res.data;
+    },
+  });
+  const sessionsQ = useQuery({
+    queryKey: ["admin", "users", "sessions", userId] as const,
+    queryFn: async () => {
+      const res = await apiClient.admin.users.listSessions({ user_id: userId });
+      if (!res.ok) throw new Error(res.error.message || NETWORK_ERROR);
+      return res.data;
+    },
+  });
+  const activityQ = useQuery({
+    queryKey: ["admin", "users", "activity", userId, actSource, actType] as const,
+    queryFn: async () => {
+      const res = await apiClient.admin.users.getActivity({
+        user_id: userId,
+        source: actSource === "all" ? null : actSource,
+        event_type: actType || null,
+        limit: 100,
+      });
+      if (!res.ok) throw new Error(res.error.message || NETWORK_ERROR);
+      return res.data;
+    },
+  });
+
+  const sessions: AdminSessionPublic[] = sessionsQ.data?.sessions ?? [];
+  const activityItems: AdminUserActivityItem[] = activityQ.data?.items ?? [];
+  const eventTypes: string[] = activityQ.data?.event_types ?? [];
+
   <div
     className="border-t border-border/60 bg-muted/20 px-4 py-3 text-[13px] sm:pl-[4.25rem]"
     data-testid={`admin-user-access-${userId}`}
   >
-    @if (summary.loading) {
-      <p className="text-muted-foreground">Loading access…</p>;
+    <p className="font-medium text-foreground">Organizations</p>
+    @if (accessQ.isPending) {
+      <p className="mt-1 text-muted-foreground">Loading access…</p>;
     } @else {
-      @if (summary.error) {
-        <p role="alert" className="text-destructive">
-          {summary.error as string}
+      @if (accessQ.isError) {
+        <p role="alert" className="mt-1 text-destructive">
+          {NETWORK_ERROR as string}
         </p>;
       } @else {
         <>
-          <p className="font-medium text-foreground">Organizations</p>
-          @if (summary.orgs.length === 0) {
+          @if ((accessQ.data?.orgs.length ?? 0) === 0) {
             <p className="mt-1 text-muted-foreground">None</p>;
           } @else {
             <ul className="mt-1 list-inside list-disc text-muted-foreground">
-              @for (const org of summary.orgs; key org.slug) {
+              @for (const org of accessQ.data!.orgs; key org.slug) {
                 <li>
                   <a
                     href={`/${org.slug}`}
@@ -140,11 +208,11 @@ function AdminUserAccessPanel({
             </ul>;
           }
           <p className="mt-3 font-medium text-foreground">Repository grants</p>
-          @if (summary.repos.length === 0) {
+          @if ((accessQ.data?.repos.length ?? 0) === 0) {
             <p className="mt-1 text-muted-foreground">None</p>;
           } @else {
             <ul className="mt-1 list-inside list-disc text-muted-foreground">
-              @for (const repo of summary.repos; key `${repo.owner}/${repo.name}`) {
+              @for (const repo of accessQ.data!.repos; key `${repo.owner}/${repo.name}`) {
                 <li>
                   <a
                     href={`/${repo.owner}/${repo.name}`}
@@ -158,6 +226,158 @@ function AdminUserAccessPanel({
             </ul>;
           }
         </>;
+      }
+    }
+
+    <p className="mt-4 font-medium text-foreground">Sessions</p>
+    @if (sessionsQ.isPending) {
+      <p className="mt-1 text-muted-foreground">Loading sessions…</p>;
+    } @else {
+      @if (sessionsQ.isError) {
+        <p role="alert" className="mt-1 text-destructive">
+          {NETWORK_ERROR as string}
+        </p>;
+      } @else {
+        @if (sessions.length === 0) {
+          <p className="mt-1 text-muted-foreground">No active sessions.</p>;
+        } @else {
+          <ul
+            className="mt-1 space-y-2 text-muted-foreground"
+            data-testid={`admin-user-sessions-${userId}`}
+          >
+            @for (const s of sessions; key s.id) {
+              <li className="rounded-md border border-border/60 bg-background px-3 py-2">
+                <p className="font-mono text-[12px] text-foreground">
+                  {(s.ip_address ?? "unknown IP") as string}
+                  {(s.remember_me ? " · remember me" : "") as string}
+                </p>
+                <p className="mt-0.5 break-all">
+                  {sessionAgentLabel(s.user_agent) as string}
+                </p>
+                <p className="mt-0.5">
+                  {
+                    `Last seen ${formatRelative(s.last_seen_at)} · created ${formatRelative(s.created_at)} · expires ${formatShortDate(s.expires_at)}` as string
+                  }
+                </p>
+              </li>;
+            }
+          </ul>;
+        }
+      }
+    }
+
+    <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1">
+      <p className="font-medium text-foreground">Activity</p>
+      <div className="flex flex-wrap gap-1" role="group" aria-label="Activity source">
+        @for (const src of ACTIVITY_SOURCES; key src.value) {
+          <button
+            type="button"
+            data-testid={`admin-user-activity-src-${src.value}-${userId}`}
+            aria-pressed={actSource === src.value}
+            className={cn(
+              "rounded-full border px-2.5 py-0.5 text-[12px] transition-colors",
+              actSource === src.value
+                ? "border-primary bg-primary/10 text-foreground"
+                : "border-border text-muted-foreground hover:text-foreground",
+            )}
+            onClick={() => {
+              setActSource(src.value);
+              setActType("");
+            }}
+          >
+            {src.label as string}
+          </button>;
+        }
+      </div>
+    </div>
+    @if (eventTypes.length > 0) {
+      <div
+        className="mt-2 flex flex-wrap gap-1"
+        role="group"
+        aria-label="Event type filter"
+        data-testid={`admin-user-activity-types-${userId}`}
+      >
+        <button
+          type="button"
+          aria-pressed={actType === ""}
+          className={cn(
+            "rounded-full border px-2.5 py-0.5 text-[12px] transition-colors",
+            actType === ""
+              ? "border-primary bg-primary/10 text-foreground"
+              : "border-border text-muted-foreground hover:text-foreground",
+          )}
+          onClick={() => setActType("")}
+        >
+          All types
+        </button>
+        @for (const t of eventTypes; key t) {
+          <button
+            type="button"
+            data-testid={`admin-user-activity-type-${t}-${userId}`}
+            aria-pressed={actType === t}
+            className={cn(
+              "rounded-full border px-2.5 py-0.5 font-mono text-[12px] transition-colors",
+              actType === t
+                ? "border-primary bg-primary/10 text-foreground"
+                : "border-border text-muted-foreground hover:text-foreground",
+            )}
+            onClick={() => setActType(t)}
+          >
+            {t as string}
+          </button>;
+        }
+      </div>;
+    }
+    @if (activityQ.isPending) {
+      <p className="mt-1 text-muted-foreground">Loading activity…</p>;
+    } @else {
+      @if (activityQ.isError) {
+        <p role="alert" className="mt-1 text-destructive">
+          {NETWORK_ERROR as string}
+        </p>;
+      } @else {
+        @if (activityItems.length === 0) {
+          <p className="mt-1 text-muted-foreground">No activity recorded.</p>;
+        } @else {
+          <ul
+            className="mt-1 space-y-1.5 text-muted-foreground"
+            data-testid={`admin-user-activity-${userId}`}
+          >
+            @for (const item of activityItems; key `${item.source}-${item.id}`) {
+              <li className="rounded-md border border-border/60 bg-background px-3 py-2">
+                <p className="flex flex-wrap items-center gap-x-2 text-foreground">
+                  <span className="font-mono text-[12px]">
+                    {item.event_type as string}
+                  </span>
+                  <span className="text-[12px] text-muted-foreground">
+                    {formatRelative(item.created_at) as string}
+                  </span>
+                  <Badge variant="outline">{item.source as string}</Badge>
+                </p>
+                @if (activityItemText(item)) {
+                  <p className="mt-0.5 break-all">
+                    {activityItemText(item) as string}
+                  </p>;
+                }
+                @if (
+                  item.ip_address ||
+                  item.user_agent
+                ) {
+                  <p className="mt-0.5 break-all text-[12px]">
+                    {
+                      [
+                        item.ip_address ?? "",
+                        item.user_agent ? sessionAgentLabel(item.user_agent) : "",
+                      ]
+                        .filter(Boolean)
+                        .join(" · ") as string
+                    }
+                  </p>;
+                }
+              </li>;
+            }
+          </ul>;
+        }
       }
     }
   </div>;
@@ -246,17 +466,18 @@ export function AdminUsersPage() @{
   const [deleteError, setDeleteError] = useState("");
 
   const [inviteOpen, setInviteOpen] = useState(false);
-  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteMode, setInviteMode] = useState<"emails" | "link">("emails");
+  const [inviteEmails, setInviteEmails] = useState("");
+  const [inviteLinkExpiry, setInviteLinkExpiry] = useState("");
+  const [inviteLinkMaxUses, setInviteLinkMaxUses] = useState("");
   const [invitePending, setInvitePending] = useState(false);
   const [inviteError, setInviteError] = useState("");
+  const [inviteResults, setInviteResults] = useState<AdminInvitesCreateItemResult[]>([]);
   const [createdInviteUrl, setCreatedInviteUrl] = useState("");
   const [copyState, setCopyState] = useState<"idle" | "copied" | "error">("idle");
+  const [copiedResultUrl, setCopiedResultUrl] = useState("");
 
   const [accessUserId, setAccessUserId] = useState<string | null>(null);
-  const [accessCache, setAccessCache] = useState<
-    Record<string, AdminUsersGetAccessResponse | { error: string }>
-  >({});
-  const [accessLoadingId, setAccessLoadingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (loaderData?.kind === "unauthenticated") {
@@ -386,7 +607,7 @@ export function AdminUsersPage() @{
           setConfirmPending(false);
           return;
         }
-        toastSuccess(`Revoked invite for ${action.invite.email}.`);
+        toastSuccess(`Revoked invite for ${action.invite.email ?? "link"}.`);
         await refreshInvites();
       }
       setConfirmPending(false);
@@ -433,27 +654,82 @@ export function AdminUsersPage() @{
     }
   }
 
-  async function createInvite() {
-    const email = inviteEmail.trim();
-    if (!email) {
-      setInviteError("Email is required.");
+  async function submitInvite() {
+    if (inviteMode === "link") {
+      await createLinkInvite();
+      return;
+    }
+    const emails = inviteEmails
+      .split(/[\s,;]+/)
+      .map((e) => e.trim())
+      .filter(Boolean);
+    if (emails.length === 0) {
+      setInviteError("Enter at least one email address.");
       return;
     }
     setInviteError("");
     setInvitePending(true);
     setCreatedInviteUrl("");
     setCopyState("idle");
+    setCopiedResultUrl("");
     try {
-      const res = await apiClient.admin.invites.create({ email });
+      const res = await apiClient.admin.invites.create({ emails });
+      if (!res.ok) {
+        setInviteError(res.error.message || NETWORK_ERROR);
+        setInvitePending(false);
+        return;
+      }
+      setInviteResults(res.data.results);
+      setInviteEmails("");
+      setInvitePending(false);
+      const ok = res.data.results.filter((r) => r.ok).length;
+      const failed = res.data.results.length - ok;
+      if (failed > 0) {
+        toastWarning(
+          `Created ${ok} invite${ok === 1 ? "" : "s"}; ${failed} recipient${failed === 1 ? "" : "s"} failed.`,
+        );
+      } else {
+        toastSuccess(`Created ${ok} invite${ok === 1 ? "" : "s"}.`);
+      }
+      await refreshInvites();
+    } catch {
+      setInviteError(NETWORK_ERROR);
+      setInvitePending(false);
+    }
+  }
+
+  async function createLinkInvite() {
+    const maxUsesRaw = inviteLinkMaxUses.trim();
+    let maxUses: number | null = null;
+    if (maxUsesRaw) {
+      const parsed = Number(maxUsesRaw);
+      if (!Number.isInteger(parsed) || parsed <= 0) {
+        setInviteError("Max seats must be a positive whole number.");
+        return;
+      }
+      maxUses = parsed;
+    }
+    setInviteError("");
+    setInvitePending(true);
+    setCreatedInviteUrl("");
+    setCopyState("idle");
+    setInviteResults([]);
+    setCopiedResultUrl("");
+    try {
+      const res = await apiClient.admin.invites.createLink({
+        expires_at: inviteLinkExpiry || null,
+        max_uses: maxUses,
+      });
       if (!res.ok) {
         setInviteError(res.error.message || NETWORK_ERROR);
         setInvitePending(false);
         return;
       }
       setCreatedInviteUrl(res.data.invite_url);
-      setInviteEmail("");
+      setInviteLinkExpiry("");
+      setInviteLinkMaxUses("");
       setInvitePending(false);
-      toastSuccess(`Invite created for ${res.data.invite.email}.`);
+      toastSuccess("Invite link created.");
       await refreshInvites();
     } catch {
       setInviteError(NETWORK_ERROR);
@@ -475,12 +751,30 @@ export function AdminUsersPage() @{
     }
   }
 
+  async function copyResultUrl(url: string) {
+    try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error("clipboard unavailable");
+      }
+      await navigator.clipboard.writeText(url);
+      setCopiedResultUrl(url);
+      window.setTimeout(() => setCopiedResultUrl(""), 2000);
+    } catch {
+      setCopiedResultUrl("");
+    }
+  }
+
   function closeInviteDialog() {
     setInviteOpen(false);
-    setInviteEmail("");
+    setInviteMode("emails");
+    setInviteEmails("");
+    setInviteLinkExpiry("");
+    setInviteLinkMaxUses("");
     setInviteError("");
+    setInviteResults([]);
     setCreatedInviteUrl("");
     setCopyState("idle");
+    setCopiedResultUrl("");
   }
 
   async function toggleAccess(user: AdminUserPublic) {
@@ -489,39 +783,6 @@ export function AdminUsersPage() @{
       return;
     }
     setAccessUserId(user.id);
-    if (accessCache[user.id]) return;
-    setAccessLoadingId(user.id);
-    try {
-      const res = await apiClient.admin.users.getAccess({ user_id: user.id });
-      if (!res.ok) {
-        setAccessCache((prev) => ({
-          ...prev,
-          [user.id]: { error: res.error.message || NETWORK_ERROR },
-        }));
-      } else {
-        setAccessCache((prev) => ({ ...prev, [user.id]: res.data }));
-      }
-    } catch {
-      setAccessCache((prev) => ({
-        ...prev,
-        [user.id]: { error: NETWORK_ERROR },
-      }));
-    } finally {
-      setAccessLoadingId(null);
-    }
-  }
-
-  function accessSummary(userId: string): {
-    orgs: AdminUserAccessOrg[];
-    repos: AdminUserAccessRepo[];
-    error?: string;
-    loading: boolean;
-  } {
-    const cached = accessCache[userId];
-    const loading = accessLoadingId === userId;
-    if (!cached) return { orgs: [], repos: [], loading };
-    if ("error" in cached) return { orgs: [], repos: [], error: cached.error, loading };
-    return { orgs: cached.orgs, repos: cached.repos, loading };
   }
 
   const readyFromLoader = loaderData?.kind === "ready";
@@ -572,7 +833,7 @@ export function AdminUsersPage() @{
           : confirm?.kind === "unban"
             ? `Restore access for @${confirm.user.username}.`
             : confirm?.kind === "revoke-invite"
-              ? `Revoke the invitation for ${confirm.invite.email}. They will no longer be able to join with this link.`
+              ? `Revoke ${confirm.invite.email ? `the invitation for ${confirm.invite.email}` : "this invite link"}. It will no longer be usable.`
               : "";
 
   const confirmActionLabel =
@@ -779,8 +1040,8 @@ export function AdminUsersPage() @{
                                 />
                                 {
                                   (accessUserId === user.id
-                                    ? "Hide access"
-                                    : "View access") as string
+                                    ? "Hide details"
+                                    : "View details") as string
                                 }
                               </DropdownMenuItem>
                               <DropdownMenuSeparator />
@@ -888,10 +1149,7 @@ export function AdminUsersPage() @{
                           </DropdownMenu>
                         </div>
                         @if (accessUserId === user.id) {
-                          <AdminUserAccessPanel
-                            userId={user.id}
-                            summary={accessSummary(user.id)}
-                          />;
+                          <AdminUserDetailPanel userId={user.id} />;
                         }
                       </div>;
                     } @empty {
@@ -990,11 +1248,22 @@ export function AdminUsersPage() @{
                     @for (const inv of invites; key inv.id) {
                       <ListRow>
                         <div className="min-w-0 flex-1">
-                          <p className="truncate text-[14px] font-medium text-foreground">
-                            {inv.email as string}
+                          <p className="flex items-center gap-1.5 truncate text-[14px] font-medium text-foreground">
+                            @if (inv.email == null) {
+                              <Link2
+                                aria-hidden
+                                size={14}
+                                className="text-muted-foreground"
+                              />;
+                            }
+                            {inviteListLabel(inv) as string}
                           </p>
                           <p className="text-[13px] text-muted-foreground">
-                            {("Expires " + formatShortDate(inv.expires_at)) as string}
+                            {
+                              (inviteExpiryLabel(inv) +
+                                " · " +
+                                inviteSeatsLabel(inv)) as string
+                            }
                           </p>
                         </div>
                         <Button
@@ -1161,49 +1430,104 @@ export function AdminUsersPage() @{
                 <DialogHeader>
                   <DialogTitle>Invite people</DialogTitle>
                   <DialogDescription>
-                    Send an instance invite by email. It works even when public sign-up is closed.
-                    Copy the link if email delivery is the log sink.
+                    Send instance invites by email, or share a reusable link. Invites work even when
+                    public sign-up is closed.
                   </DialogDescription>
                 </DialogHeader>
-                @if (createdInviteUrl) {
+                @if (createdInviteUrl || inviteResults.length > 0) {
                   <div>
-                    <div
-                      className="rounded-md border border-border p-4"
-                      data-testid="admin-invite-url-panel"
-                    >
-                      <p className="text-[14px] font-medium text-foreground">
-                        Invite link (copy now)
-                      </p>
-                      <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-stretch">
-                        <Input
-                          readOnly
-                          value={createdInviteUrl as string}
-                          aria-label="Invite URL"
-                          data-testid="admin-invite-url"
-                          className="min-w-0 flex-1 font-mono text-[13px]"
-                          onFocus={(e) => {
-                            const el = e.currentTarget as HTMLInputElement;
-                            el.select();
-                          }}
-                        />
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="shrink-0"
-                          data-testid="admin-invite-url-copy"
-                          aria-label="Copy invite URL"
-                          onClick={() => void copyInviteUrl()}
-                        >
-                          {(copyState === "copied" ? "Copied" : "Copy link") as string}
-                        </Button>
-                      </div>
-                      @if (copyState === "error") {
-                        <p role="alert" className="mt-2 text-[14px] text-destructive">
-                          Couldn’t copy. Select the link and copy manually.
-                        </p>;
-                      }
-                    </div>
-                    <DialogFooter>
+                    @if (createdInviteUrl) {
+                      <div
+                        className="rounded-md border border-border p-4"
+                        data-testid="admin-invite-url-panel"
+                      >
+                        <p className="text-[14px] font-medium text-foreground">
+                          Invite link (copy now)
+                        </p>
+                        <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-stretch">
+                          <Input
+                            readOnly
+                            value={createdInviteUrl as string}
+                            aria-label="Invite URL"
+                            data-testid="admin-invite-url"
+                            className="min-w-0 flex-1 font-mono text-[13px]"
+                            onFocus={(e) => {
+                              const el = e.currentTarget as HTMLInputElement;
+                              el.select();
+                            }}
+                          />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="shrink-0"
+                            data-testid="admin-invite-url-copy"
+                            aria-label="Copy invite URL"
+                            onClick={() => void copyInviteUrl()}
+                          >
+                            {
+                              (copyState === "copied"
+                                ? "Copied"
+                                : "Copy link") as string
+                            }
+                          </Button>
+                        </div>
+                        @if (copyState === "error") {
+                          <p
+                            role="alert"
+                            className="mt-2 text-[14px] text-destructive"
+                          >
+                            Couldn’t copy. Select the link and copy manually.
+                          </p>;
+                        }
+                      </div>;
+                    } @else {
+                      <div
+                        className="max-h-64 overflow-y-auto rounded-md border border-border"
+                        data-testid="admin-invite-results"
+                      >
+                        <ul className="divide-y divide-border">
+                          @for (const r of inviteResults; key r.email) {
+                            <li className="flex flex-col gap-1 px-4 py-3">
+                              <div className="flex items-center justify-between gap-2">
+                                <p className="truncate text-[14px] font-medium text-foreground">
+                                  {r.email as string}
+                                </p>
+                                @if (
+                                  r.ok &&
+                                  r.invite_url
+                                ) {
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    className="shrink-0"
+                                    data-testid={`admin-invite-result-copy-${r.email}`}
+                                    onClick={() =>
+                                      void copyResultUrl(r.invite_url!)
+                                    }
+                                  >
+                                    {
+                                      (copiedResultUrl === r.invite_url
+                                        ? "Copied"
+                                        : "Copy link") as string
+                                    }
+                                  </Button>;
+                                }
+                              </div>
+                              @if (!r.ok) {
+                                <p
+                                  role="alert"
+                                  className="text-[13px] text-destructive"
+                                >
+                                  {(r.error ?? "Failed") as string}
+                                </p>;
+                              }
+                            </li>;
+                          }
+                        </ul>
+                      </div>;
+                    }
+                    <DialogFooter className="mt-4">
                       <Button
                         type="button"
                         variant="secondary"
@@ -1220,35 +1544,129 @@ export function AdminUsersPage() @{
                     className="flex flex-col gap-4"
                     onSubmit={(e) => {
                       e.preventDefault();
-                      void createInvite();
+                      void submitInvite();
                     }}
                   >
+                    <div className="flex gap-2" role="group" aria-label="Invite mode">
+                      <button
+                        type="button"
+                        data-testid="admin-invite-mode-emails"
+                        aria-pressed={inviteMode === "emails"}
+                        className={cn(
+                          "rounded-full border px-3 py-1 text-[13px] transition-colors",
+                          inviteMode === "emails"
+                            ? "border-primary bg-primary/10 text-foreground"
+                            : "border-border text-muted-foreground hover:text-foreground",
+                        )}
+                        onClick={() => {
+                          setInviteMode("emails");
+                          setInviteError("");
+                        }}
+                      >
+                        By email
+                      </button>
+                      <button
+                        type="button"
+                        data-testid="admin-invite-mode-link"
+                        aria-pressed={inviteMode === "link"}
+                        className={cn(
+                          "rounded-full border px-3 py-1 text-[13px] transition-colors",
+                          inviteMode === "link"
+                            ? "border-primary bg-primary/10 text-foreground"
+                            : "border-border text-muted-foreground hover:text-foreground",
+                        )}
+                        onClick={() => {
+                          setInviteMode("link");
+                          setInviteError("");
+                        }}
+                      >
+                        Invite link
+                      </button>
+                    </div>
                     @if (inviteError) {
                       <p role="alert" className="text-[14px] text-destructive">
                         {inviteError as string}
                       </p>;
                     }
-                    <div className="flex flex-col gap-2">
-                      <Label htmlFor="admin-invite-email">Email</Label>
-                      <Input
-                        id="admin-invite-email"
-                        data-testid="admin-invite-email"
-                        type="email"
-                        autoComplete="email"
-                        value={inviteEmail as string}
-                        onInput={(e) =>
-                          setInviteEmail((e.currentTarget as HTMLInputElement).value)
-                        }
-                        disabled={invitePending}
-                      />
-                    </div>
+                    @if (inviteMode === "emails") {
+                      <div className="flex flex-col gap-2">
+                        <Label htmlFor="admin-invite-email">Emails</Label>
+                        <Textarea
+                          id="admin-invite-email"
+                          data-testid="admin-invite-email"
+                          placeholder={"one@example.com\ntwo@example.com" as string}
+                          value={inviteEmails as string}
+                          onInput={(e) =>
+                            setInviteEmails(
+                              (e.currentTarget as HTMLTextAreaElement).value,
+                            )
+                          }
+                          disabled={invitePending}
+                        />
+                        <p className="text-[13px] text-muted-foreground">
+                          Separate addresses with commas, spaces, or new lines (max 50).
+                        </p>
+                      </div>;
+                    } @else {
+                      <>
+                        <div className="flex flex-col gap-2">
+                          <Label htmlFor="admin-invite-link-expiry">
+                            Expires on (optional)
+                          </Label>
+                          <Input
+                            id="admin-invite-link-expiry"
+                            data-testid="admin-invite-link-expiry"
+                            type="date"
+                            value={inviteLinkExpiry as string}
+                            onInput={(e) =>
+                              setInviteLinkExpiry(
+                                (e.currentTarget as HTMLInputElement).value,
+                              )
+                            }
+                            disabled={invitePending}
+                          />
+                          <p className="text-[13px] text-muted-foreground">
+                            Leave empty for a link that never expires.
+                          </p>
+                        </div>
+                        <div className="flex flex-col gap-2">
+                          <Label htmlFor="admin-invite-link-seats">
+                            Max seats (optional)
+                          </Label>
+                          <Input
+                            id="admin-invite-link-seats"
+                            data-testid="admin-invite-link-seats"
+                            type="number"
+                            min={1}
+                            step={1}
+                            placeholder="Unlimited"
+                            value={inviteLinkMaxUses as string}
+                            onInput={(e) =>
+                              setInviteLinkMaxUses(
+                                (e.currentTarget as HTMLInputElement).value,
+                              )
+                            }
+                            disabled={invitePending}
+                          />
+                          <p className="text-[13px] text-muted-foreground">
+                            Number of accounts that can join with this link.
+                          </p>
+                        </div>
+                      </>;
+                    }
                     <DialogFooter>
                       <Button
                         type="submit"
                         disabled={invitePending}
                         data-testid="admin-invite-create"
                       >
-                        {(invitePending ? "Creating…" : "Create invite") as string}
+                        {
+                          (invitePending
+                            ? "Creating…"
+                            : inviteMode === "link"
+                              ? "Create link"
+                              : "Create invites") as string
+                        }
                       </Button>
                     </DialogFooter>
                   </form>;

@@ -3,6 +3,7 @@
 use chrono::Utc;
 use oxidean_core::{
     AppError, OrgInvitePublic, OrgInvitesAcceptRequest, OrgInvitesAcceptResponse,
+    OrgInvitesCreateItemResult, OrgInvitesCreateLinkRequest, OrgInvitesCreateLinkResponse,
     OrgInvitesCreateRequest, OrgInvitesCreateResponse, OrgInvitesListResponse,
     OrgInvitesRevokeRequest, OrgRole, OrgSlugRequest,
 };
@@ -18,9 +19,10 @@ use crate::org::{db_err, load_org_by_slug, require_org_role};
 use crate::rpc::RpcCtx;
 
 const TOKEN_BYTES: usize = 32;
-const TTL_SECS: i64 = 7 * 24 * 60 * 60; // 7 days
+const TTL_SECS: i64 = 7 * 24 * 60 * 60; // 7 days (email-bound invites)
 const MIN_ISSUE_INTERVAL_SECS: i64 = 60;
-const MAX_ISSUES_PER_HOUR: i64 = 5;
+const MAX_ISSUES_PER_HOUR: i64 = 20;
+const MAX_BULK: usize = 50;
 const INVITE_SUBJECT: &str = "You've been invited to an organization on Oxidean";
 
 fn is_admin_plus(role: OrgRole) -> bool {
@@ -108,6 +110,8 @@ fn invite_public(row: &OrgInviteRow) -> Result<OrgInvitePublic, AppError> {
         expires_at: row.expires_at.clone(),
         invited_by: row.invited_by.clone(),
         created_at: row.created_at.clone(),
+        max_uses: row.max_uses,
+        use_count: row.use_count,
     })
 }
 
@@ -133,7 +137,9 @@ If you were not expecting this email, you can ignore it.\n"
     }
 }
 
-async fn enforce_create_rate_limit(ctx: &RpcCtx, caller_id: &str) -> Result<(), AppError> {
+/// Rejects when the caller's hourly issue budget is exhausted; otherwise
+/// returns how many invites they may still create this hour.
+async fn enforce_create_rate_limit(ctx: &RpcCtx, caller_id: &str) -> Result<i64, AppError> {
     let since = (Utc::now() - chrono::Duration::hours(1))
         .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
     let count = ctx
@@ -144,10 +150,107 @@ async fn enforce_create_rate_limit(ctx: &RpcCtx, caller_id: &str) -> Result<(), 
     if count >= MAX_ISSUES_PER_HOUR {
         return Err(rate_limited());
     }
-    Ok(())
+    Ok(MAX_ISSUES_PER_HOUR - count)
 }
 
-/// `org.invites.create` — Admin+; hash-at-rest; email via EmailSender; returns invite_url.
+/// One recipient of a bulk `org.invites.create` — never aborts the batch.
+async fn create_one_email_invite(
+    ctx: &RpcCtx,
+    org: &OrganizationRow,
+    caller_id: &str,
+    role: OrgRole,
+    email: &str,
+) -> OrgInvitesCreateItemResult {
+    let fail = |msg: &str| OrgInvitesCreateItemResult {
+        email: email.to_string(),
+        ok: false,
+        error: Some(msg.to_string()),
+        invite: None,
+        invite_url: None,
+    };
+
+    let email = match normalize_email(email) {
+        Ok(e) => e,
+        Err(_) => return fail("invalid email address"),
+    };
+
+    // Soft success when invitee email already belongs to a member (anti-noise for admins).
+    match ctx.db.find_user_by_email(&email).await {
+        Ok(Some(existing)) => {
+            if ctx
+                .db
+                .find_org_member(&org.id, &existing.id)
+                .await
+                .map(|m| m.is_some())
+                .unwrap_or(false)
+            {
+                return fail("user is already a member of this organization");
+            }
+        }
+        Ok(None) => {}
+        Err(e) => {
+            tracing::error!(error = %e, "org invite user lookup failed");
+            return fail("invite creation failed");
+        }
+    }
+
+    if let Ok(Some(pending)) = ctx
+        .db
+        .find_pending_org_invite_by_org_email(&org.id, &email)
+        .await
+    {
+        if let Ok(created) = parse_created_at(&pending.created_at) {
+            if Utc::now().signed_duration_since(created).num_seconds() < MIN_ISSUE_INTERVAL_SECS {
+                return fail("invite was just sent; try again later");
+            }
+        }
+        let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        let _ = ctx.db.revoke_org_invite(&pending.id, &now).await;
+    }
+
+    let magic = generate_magic();
+    let token_hash = sha256_hex(magic.as_bytes());
+    let expires_at = (Utc::now() + chrono::Duration::seconds(TTL_SECS))
+        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let id = Uuid::new_v4().to_string();
+
+    let row = match ctx
+        .db
+        .insert_org_invite(
+            &id,
+            &org.id,
+            Some(&email),
+            role.as_str(),
+            &token_hash,
+            Some(&expires_at),
+            caller_id,
+            Some(1),
+        )
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!(error = %e, "org invite insert failed");
+            return fail("invite creation failed");
+        }
+    };
+
+    let msg = build_invite_email(&email, &org.slug, &org.display_name, &magic);
+    if let Err(e) = ctx.email.send(msg).await {
+        tracing::error!(error = %e, "org invite email send failed");
+    }
+
+    OrgInvitesCreateItemResult {
+        email,
+        ok: true,
+        error: None,
+        invite: invite_public(&row).ok(),
+        invite_url: Some(invite_url(&magic)),
+    }
+}
+
+/// `org.invites.create` — Admin+; bulk email invites with per-recipient results.
+/// Hash-at-rest; each `invite_url` is returned exactly once.
 pub async fn create(
     ctx: &RpcCtx,
     input: serde_json::Value,
@@ -163,71 +266,109 @@ pub async fn create(
     let caller_role = require_admin_plus(ctx, &org, &caller).await?;
     ensure_can_grant_role(caller_role, req.role)?;
 
-    let email = normalize_email(&req.email)?;
+    if req.emails.is_empty() {
+        return Err(AppError::new("rpc.bad_input", "emails must not be empty"));
+    }
+    if req.emails.len() > MAX_BULK {
+        return Err(AppError::new(
+            "rpc.bad_input",
+            format!("at most {MAX_BULK} emails per request"),
+        ));
+    }
+    let remaining = enforce_create_rate_limit(ctx, &caller.id).await?;
+
+    let mut results = Vec::with_capacity(req.emails.len());
+    let mut issued = 0i64;
+    for raw in &req.emails {
+        let email = raw.trim().to_string();
+        if email.is_empty() {
+            continue;
+        }
+        if issued >= remaining {
+            results.push(OrgInvitesCreateItemResult {
+                email,
+                ok: false,
+                error: Some("hourly invite limit reached".into()),
+                invite: None,
+                invite_url: None,
+            });
+            continue;
+        }
+        let item = create_one_email_invite(ctx, &org, &caller.id, req.role, &email).await;
+        if item.ok {
+            issued += 1;
+        }
+        results.push(item);
+    }
+
+    crate::audit::record(
+        ctx,
+        Some((&caller.id, &caller.username)),
+        "org.invites_create",
+        Some(("org", &org.id)),
+        Some(
+            serde_json::json!({
+                "org": org.slug,
+                "role": req.role.as_str(),
+                "requested": req.emails.len(),
+                "created": issued,
+            })
+            .to_string(),
+        ),
+    )
+    .await;
+
+    Ok(OrgInvitesCreateResponse { results })
+}
+
+/// `org.invites.createLink` — Admin+; shareable link (no bound email).
+pub async fn create_link(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<OrgInvitesCreateLinkResponse, AppError> {
+    let caller = require_verified(ctx).await?;
+    let req: OrgInvitesCreateLinkRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid org.invites.createLink input: {e}"),
+        )
+    })?;
+    let org = load_org_by_slug(ctx, &req.slug).await?;
+    let caller_role = require_admin_plus(ctx, &org, &caller).await?;
+    ensure_can_grant_role(caller_role, req.role)?;
+
+    let expires_at = crate::admin::invites::normalize_expiry(req.expires_at.as_deref())?;
+    let max_uses = crate::admin::invites::normalize_max_uses(req.max_uses)?;
     enforce_create_rate_limit(ctx, &caller.id).await?;
-
-    // Soft success when invitee email already belongs to a member (anti-noise for admins).
-    if let Some(existing) = ctx
-        .db
-        .find_user_by_email(&email)
-        .await
-        .map_err(db_err)?
-    {
-        if ctx
-            .db
-            .find_org_member(&org.id, &existing.id)
-            .await
-            .map_err(db_err)?
-            .is_some()
-        {
-            return Err(AppError::new(
-                "org.already_member",
-                "user is already a member of this organization",
-            ));
-        }
-    }
-
-    if let Some(pending) = ctx
-        .db
-        .find_pending_org_invite_by_org_email(&org.id, &email)
-        .await
-        .map_err(db_err)?
-    {
-        let created = parse_created_at(&pending.created_at)?;
-        let age = Utc::now().signed_duration_since(created);
-        if age.num_seconds() < MIN_ISSUE_INTERVAL_SECS {
-            return Err(rate_limited());
-        }
-        let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-        let _ = ctx.db.revoke_org_invite(&pending.id, &now).await;
-    }
 
     let magic = generate_magic();
     let token_hash = sha256_hex(magic.as_bytes());
-    let expires_at = (Utc::now() + chrono::Duration::seconds(TTL_SECS))
-        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
     let id = Uuid::new_v4().to_string();
-
     let row = ctx
         .db
         .insert_org_invite(
             &id,
             &org.id,
-            &email,
+            None,
             req.role.as_str(),
             &token_hash,
-            &expires_at,
+            expires_at.as_deref(),
             &caller.id,
+            max_uses,
         )
         .await
         .map_err(db_err)?;
 
-    let msg = build_invite_email(&email, &org.slug, &org.display_name, &magic);
-    if let Err(e) = ctx.email.send(msg).await {
-        tracing::error!(error = %e, "org invite email send failed");
-    }
+    crate::audit::record(
+        ctx,
+        Some((&caller.id, &caller.username)),
+        "org.invite_link_create",
+        Some(("org", &org.id)),
+        Some(serde_json::json!({ "org": org.slug, "role": req.role.as_str(), "max_uses": max_uses }).to_string()),
+    )
+    .await;
 
-    Ok(OrgInvitesCreateResponse {
+    Ok(OrgInvitesCreateLinkResponse {
         invite: invite_public(&row)?,
         invite_url: invite_url(&magic),
     })
@@ -293,6 +434,14 @@ pub async fn revoke(ctx: &RpcCtx, input: serde_json::Value) -> Result<serde_json
                 db_err(e)
             }
         })?;
+    crate::audit::record(
+        ctx,
+        Some((&caller.id, &caller.username)),
+        "org.invite_revoke",
+        Some(("org", &org.id)),
+        Some(serde_json::json!({ "invite_id": invite.id }).to_string()),
+    )
+    .await;
     Ok(serde_json::json!({ "ok": true }))
 }
 
@@ -316,12 +465,27 @@ pub async fn accept(
     ctx: &mut RpcCtx,
     input: serde_json::Value,
 ) -> Result<OrgInvitesAcceptResponse, AppError> {
-    let _req: OrgInvitesAcceptRequest = serde_json::from_value(input.clone()).map_err(|e| {
+    let req: OrgInvitesAcceptRequest = serde_json::from_value(input.clone()).map_err(|e| {
         AppError::new(
             "rpc.bad_input",
             format!("invalid org.invites.accept input: {e}"),
         )
     })?;
+    // Gate on kind before delegating: the unified accept would otherwise
+    // consume a same-hashed instance/repo invite before this wrapper could
+    // reject it.
+    let token = req.token.trim();
+    let is_org_invite = !token.is_empty()
+        && token.len() == 64
+        && ctx
+            .db
+            .find_org_invite_by_token_hash(&sha256_hex(token.as_bytes()))
+            .await
+            .map_err(db_err)?
+            .is_some();
+    if !is_org_invite {
+        return Err(invalid_invite());
+    }
     match crate::invites::accept(ctx, input)
         .await
         .map_err(map_unified_invite_err)?

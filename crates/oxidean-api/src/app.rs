@@ -351,9 +351,22 @@ fn session_token_from_headers(headers: &HeaderMap) -> Option<String> {
     None
 }
 
-async fn build_rpc_ctx(state: &AppState, raw_token: Option<&str>) -> RpcCtx {
+async fn build_rpc_ctx(
+    state: &AppState,
+    raw_token: Option<&str>,
+    client: rpc::ClientMeta,
+) -> RpcCtx {
     let session = match raw_token {
-        Some(token) => match state.sessions.resolve(&state.db, token).await {
+        Some(token) => match state
+            .sessions
+            .resolve(
+                &state.db,
+                token,
+                client.ip_address.as_deref(),
+                client.user_agent.as_deref(),
+            )
+            .await
+        {
             Ok(s) => s,
             Err(e) => {
                 tracing::warn!(error = %e, "session resolve failed");
@@ -377,6 +390,7 @@ async fn build_rpc_ctx(state: &AppState, raw_token: Option<&str>) -> RpcCtx {
         git: state.git.clone(),
         env_name: state.env_name.clone(),
         session,
+        client,
         set_cookie: None,
         lookup_limiter: state.lookup_limiter.clone(),
         search_timeout_ms: state.search_timeout_ms,
@@ -463,7 +477,7 @@ async fn rpc_http(
     }
 
     let token = session_token_from_headers(&headers);
-    let mut ctx = build_rpc_ctx(&state, token.as_deref()).await;
+    let mut ctx = build_rpc_ctx(&state, token.as_deref(), rpc::ClientMeta::from_headers(&headers)).await;
     let resp = rpc::dispatch(&mut ctx, body).await;
     let status = rpc_status(&resp);
     let set_cookie = ctx.set_cookie.take();
@@ -482,10 +496,16 @@ async fn rpc_ws(
         return (StatusCode::BAD_REQUEST, Json(RpcResponse::err(err))).into_response();
     }
     let token = session_token_from_headers(&headers);
-    ws.on_upgrade(move |socket| handle_socket(socket, state, token))
+    let client = rpc::ClientMeta::from_headers(&headers);
+    ws.on_upgrade(move |socket| handle_socket(socket, state, token, client))
 }
 
-async fn handle_socket(socket: WebSocket, state: AppState, token: Option<String>) {
+async fn handle_socket(
+    socket: WebSocket,
+    state: AppState,
+    token: Option<String>,
+    client: rpc::ClientMeta,
+) {
     let (mut sender, mut receiver) = socket.split();
     while let Some(Ok(msg)) = receiver.next().await {
         let text = match msg {
@@ -495,7 +515,8 @@ async fn handle_socket(socket: WebSocket, state: AppState, token: Option<String>
         };
         let resp = match serde_json::from_str::<RpcRequest>(&text) {
             Ok(req) => {
-                let mut ctx = build_rpc_ctx(&state, token.as_deref()).await;
+                let mut ctx =
+                    build_rpc_ctx(&state, token.as_deref(), client.clone()).await;
                 rpc::dispatch(&mut ctx, req).await
             }
             Err(e) => RpcResponse::err(AppError::new(

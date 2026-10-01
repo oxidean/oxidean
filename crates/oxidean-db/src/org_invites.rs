@@ -8,14 +8,20 @@ use crate::pool::DbPool;
 pub struct OrgInviteRow {
     pub id: String,
     pub org_id: String,
-    pub email: String,
+    /// `None` marks a shareable invite link (no bound email).
+    pub email: Option<String>,
     pub role: String,
     pub token_hash: String,
-    pub expires_at: String,
+    /// `None` = never expires.
+    pub expires_at: Option<String>,
     pub invited_by: String,
     pub created_at: String,
+    /// `accepted_at` doubles as the "fully consumed" marker for seat-limited links.
     pub accepted_at: Option<String>,
     pub revoked_at: Option<String>,
+    /// `None` = unlimited seats (links); email invites are created with `Some(1)`.
+    pub max_uses: Option<i64>,
+    pub use_count: i64,
 }
 
 macro_rules! map_opt_str {
@@ -33,16 +39,12 @@ macro_rules! map_invite {
             org_id: row
                 .try_get("org_id")
                 .map_err(|e| format!("org invite row: {e}"))?,
-            email: row
-                .try_get("email")
-                .map_err(|e| format!("org invite row: {e}"))?,
+            email: map_opt_str!(row, "email"),
             role: row.try_get("role").map_err(|e| format!("org invite row: {e}"))?,
             token_hash: row
                 .try_get("token_hash")
                 .map_err(|e| format!("org invite row: {e}"))?,
-            expires_at: row
-                .try_get("expires_at")
-                .map_err(|e| format!("org invite row: {e}"))?,
+            expires_at: map_opt_str!(row, "expires_at"),
             invited_by: row
                 .try_get("invited_by")
                 .map_err(|e| format!("org invite row: {e}"))?,
@@ -51,12 +53,24 @@ macro_rules! map_invite {
                 .map_err(|e| format!("org invite row: {e}"))?,
             accepted_at: map_opt_str!(row, "accepted_at"),
             revoked_at: map_opt_str!(row, "revoked_at"),
+            max_uses: row
+                .try_get::<Option<i64>, _>("max_uses")
+                .or_else(|_| {
+                    row.try_get::<Option<i32>, _>("max_uses")
+                        .map(|o| o.map(i64::from))
+                })
+                .map_err(|e| format!("org invite row: {e}"))?,
+            use_count: row
+                .try_get::<i64, _>("use_count")
+                .or_else(|_| row.try_get::<i32, _>("use_count").map(i64::from))
+                .map_err(|e| format!("org invite row: {e}"))?,
         }
     }};
 }
 
-const INVITE_SELECT_PG: &str = "SELECT id, org_id, email, role, token_hash, invited_by,
-       to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS expires_at,
+const INVITE_SELECT_PG: &str = "SELECT id, org_id, email, role, token_hash, invited_by, max_uses, use_count,
+       CASE WHEN expires_at IS NULL THEN NULL ELSE
+         to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') END AS expires_at,
        to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS created_at,
        CASE WHEN accepted_at IS NULL THEN NULL ELSE
          to_char(accepted_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') END AS accepted_at,
@@ -64,8 +78,9 @@ const INVITE_SELECT_PG: &str = "SELECT id, org_id, email, role, token_hash, invi
          to_char(revoked_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') END AS revoked_at
 FROM organization_invites";
 
-const INVITE_SELECT_MYSQL: &str = "SELECT id, org_id, email, role, token_hash, invited_by,
-       DATE_FORMAT(expires_at, '%Y-%m-%dT%H:%i:%sZ') AS expires_at,
+const INVITE_SELECT_MYSQL: &str = "SELECT id, org_id, email, role, token_hash, invited_by, max_uses, use_count,
+       CASE WHEN expires_at IS NULL THEN NULL ELSE
+         DATE_FORMAT(expires_at, '%Y-%m-%dT%H:%i:%sZ') END AS expires_at,
        DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at,
        CASE WHEN accepted_at IS NULL THEN NULL ELSE
          DATE_FORMAT(accepted_at, '%Y-%m-%dT%H:%i:%sZ') END AS accepted_at,
@@ -73,8 +88,9 @@ const INVITE_SELECT_MYSQL: &str = "SELECT id, org_id, email, role, token_hash, i
          DATE_FORMAT(revoked_at, '%Y-%m-%dT%H:%i:%sZ') END AS revoked_at
 FROM organization_invites";
 
-const INVITE_SELECT_SQLITE: &str = "SELECT id, org_id, email, role, token_hash, invited_by,
-       strftime('%Y-%m-%dT%H:%M:%SZ', expires_at) AS expires_at,
+const INVITE_SELECT_SQLITE: &str = "SELECT id, org_id, email, role, token_hash, invited_by, max_uses, use_count,
+       CASE WHEN expires_at IS NULL THEN NULL ELSE
+         strftime('%Y-%m-%dT%H:%M:%SZ', expires_at) END AS expires_at,
        strftime('%Y-%m-%dT%H:%M:%SZ', created_at) AS created_at,
        CASE WHEN accepted_at IS NULL THEN NULL ELSE
          strftime('%Y-%m-%dT%H:%M:%SZ', accepted_at) END AS accepted_at,
@@ -83,22 +99,24 @@ const INVITE_SELECT_SQLITE: &str = "SELECT id, org_id, email, role, token_hash, 
 FROM organization_invites";
 
 /// Insert a pending invite (hash-at-rest only).
+/// `email` None = shareable link; `expires_at` None = never; `max_uses` None = unlimited seats.
 pub async fn insert_invite(
     pool: &DbPool,
     id: &str,
     org_id: &str,
-    email: &str,
+    email: Option<&str>,
     role: &str,
     token_hash: &str,
-    expires_at: &str,
+    expires_at: Option<&str>,
     invited_by: &str,
+    max_uses: Option<i64>,
 ) -> Result<OrgInviteRow, String> {
     match pool {
         DbPool::Postgres(p) => {
             sqlx::query(
                 "INSERT INTO organization_invites
-(id, org_id, email, role, token_hash, expires_at, invited_by)
-VALUES ($1, $2, $3, $4, $5, $6::timestamptz, $7)",
+(id, org_id, email, role, token_hash, expires_at, invited_by, max_uses)
+VALUES ($1, $2, $3, $4, $5, $6::timestamptz, $7, $8)",
             )
             .bind(id)
             .bind(org_id)
@@ -107,6 +125,7 @@ VALUES ($1, $2, $3, $4, $5, $6::timestamptz, $7)",
             .bind(token_hash)
             .bind(expires_at)
             .bind(invited_by)
+            .bind(max_uses)
             .execute(p)
             .await
             .map_err(|e| format!("insert org invite failed: {e}"))?;
@@ -114,8 +133,8 @@ VALUES ($1, $2, $3, $4, $5, $6::timestamptz, $7)",
         DbPool::MySql(p) => {
             sqlx::query(
                 "INSERT INTO organization_invites
-(id, org_id, email, role, token_hash, expires_at, invited_by)
-VALUES (?, ?, ?, ?, ?, ?, ?)",
+(id, org_id, email, role, token_hash, expires_at, invited_by, max_uses)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(id)
             .bind(org_id)
@@ -124,6 +143,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?)",
             .bind(token_hash)
             .bind(expires_at)
             .bind(invited_by)
+            .bind(max_uses)
             .execute(p)
             .await
             .map_err(|e| format!("insert org invite failed: {e}"))?;
@@ -131,8 +151,8 @@ VALUES (?, ?, ?, ?, ?, ?, ?)",
         DbPool::Sqlite(p) => {
             sqlx::query(
                 "INSERT INTO organization_invites
-(id, org_id, email, role, token_hash, expires_at, invited_by)
-VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+(id, org_id, email, role, token_hash, expires_at, invited_by, max_uses)
+VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             )
             .bind(id)
             .bind(org_id)
@@ -141,6 +161,7 @@ VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             .bind(token_hash)
             .bind(expires_at)
             .bind(invited_by)
+            .bind(max_uses)
             .execute(p)
             .await
             .map_err(|e| format!("insert org invite failed: {e}"))?;
@@ -385,20 +406,26 @@ WHERE id = ?2 AND accepted_at IS NULL AND revoked_at IS NULL",
     Ok(())
 }
 
-/// Mark invite accepted (single-use).
-pub async fn mark_accepted(pool: &DbPool, id: &str, accepted_at: &str) -> Result<(), String> {
+/// Consume one seat atomically: increments `use_count` and stamps `accepted_at`
+/// when the last seat is taken. Fails ("not found") when the invite is revoked,
+/// fully consumed, or missing — this is the over-grant guard.
+pub async fn consume(pool: &DbPool, id: &str, accepted_at: &str) -> Result<(), String> {
     match pool {
         DbPool::Postgres(p) => {
             let n = sqlx::query(
                 "UPDATE organization_invites
-SET accepted_at = $2::timestamptz
-WHERE id = $1 AND accepted_at IS NULL AND revoked_at IS NULL",
+SET use_count = use_count + 1,
+    accepted_at = CASE
+      WHEN max_uses IS NOT NULL AND use_count + 1 >= max_uses THEN $2::timestamptz
+      ELSE accepted_at END
+WHERE id = $1 AND accepted_at IS NULL AND revoked_at IS NULL
+  AND (max_uses IS NULL OR use_count < max_uses)",
             )
             .bind(id)
             .bind(accepted_at)
             .execute(p)
             .await
-            .map_err(|e| format!("accept org invite failed: {e}"))?
+            .map_err(|e| format!("consume org invite failed: {e}"))?
             .rows_affected();
             if n == 0 {
                 return Err("org invite not found".into());
@@ -407,14 +434,18 @@ WHERE id = $1 AND accepted_at IS NULL AND revoked_at IS NULL",
         DbPool::MySql(p) => {
             let n = sqlx::query(
                 "UPDATE organization_invites
-SET accepted_at = ?
-WHERE id = ? AND accepted_at IS NULL AND revoked_at IS NULL",
+SET use_count = use_count + 1,
+    accepted_at = CASE
+      WHEN max_uses IS NOT NULL AND use_count + 1 >= max_uses THEN ?
+      ELSE accepted_at END
+WHERE id = ? AND accepted_at IS NULL AND revoked_at IS NULL
+  AND (max_uses IS NULL OR use_count < max_uses)",
             )
             .bind(accepted_at)
             .bind(id)
             .execute(p)
             .await
-            .map_err(|e| format!("accept org invite failed: {e}"))?
+            .map_err(|e| format!("consume org invite failed: {e}"))?
             .rows_affected();
             if n == 0 {
                 return Err("org invite not found".into());
@@ -423,14 +454,18 @@ WHERE id = ? AND accepted_at IS NULL AND revoked_at IS NULL",
         DbPool::Sqlite(p) => {
             let n = sqlx::query(
                 "UPDATE organization_invites
-SET accepted_at = ?1
-WHERE id = ?2 AND accepted_at IS NULL AND revoked_at IS NULL",
+SET use_count = use_count + 1,
+    accepted_at = CASE
+      WHEN max_uses IS NOT NULL AND use_count + 1 >= max_uses THEN ?1
+      ELSE accepted_at END
+WHERE id = ?2 AND accepted_at IS NULL AND revoked_at IS NULL
+  AND (max_uses IS NULL OR use_count < max_uses)",
             )
             .bind(accepted_at)
             .bind(id)
             .execute(p)
             .await
-            .map_err(|e| format!("accept org invite failed: {e}"))?
+            .map_err(|e| format!("consume org invite failed: {e}"))?
             .rows_affected();
             if n == 0 {
                 return Err("org invite not found".into());

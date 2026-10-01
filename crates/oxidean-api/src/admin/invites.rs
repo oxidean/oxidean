@@ -1,7 +1,9 @@
-//! `admin.invites.*` — instance email invites (bypass closed signup).
+//! `admin.invites.*` — instance email invites (bypass closed signup) and
+//! shareable invite links (optional expiry, seat cap).
 
 use chrono::Utc;
 use oxidean_core::{
+    AdminInvitesCreateItemResult, AdminInvitesCreateLinkRequest, AdminInvitesCreateLinkResponse,
     AdminInvitesCreateRequest, AdminInvitesCreateResponse, AdminInvitesListResponse,
     AdminInvitesRevokeRequest, AppError, InstanceInvitePublic,
 };
@@ -16,9 +18,10 @@ use crate::email::OutboundEmail;
 use crate::rpc::RpcCtx;
 
 const TOKEN_BYTES: usize = 32;
-const TTL_SECS: i64 = 7 * 24 * 60 * 60; // 7 days
+const TTL_SECS: i64 = 7 * 24 * 60 * 60; // 7 days (email-bound invites)
 const MIN_ISSUE_INTERVAL_SECS: i64 = 60;
-const MAX_ISSUES_PER_HOUR: i64 = 5;
+const MAX_ISSUES_PER_HOUR: i64 = 20;
+const MAX_BULK: usize = 50;
 const INVITE_SUBJECT: &str = "You've been invited to Oxidean";
 
 fn sha256_hex(data: &[u8]) -> String {
@@ -55,10 +58,12 @@ fn invite_public(row: &InstanceInviteRow) -> InstanceInvitePublic {
         expires_at: row.expires_at.clone(),
         invited_by: row.invited_by.clone(),
         created_at: row.created_at.clone(),
+        max_uses: row.max_uses,
+        use_count: row.use_count,
     }
 }
 
-fn invite_url(magic: &str) -> String {
+pub(crate) fn invite_url(magic: &str) -> String {
     let origin = public_origin();
     format!("{origin}/invites/{magic}")
 }
@@ -90,7 +95,52 @@ fn parse_created_at(raw: &str) -> Result<chrono::DateTime<Utc>, AppError> {
         })
 }
 
-async fn enforce_create_rate_limit(ctx: &RpcCtx, caller_id: &str) -> Result<(), AppError> {
+/// Validate + normalize a caller-supplied expiry to UTC RFC-3339 seconds.
+/// `None` → `None` (never expires). Past timestamps are rejected.
+pub(crate) fn normalize_expiry(raw: Option<&str>) -> Result<Option<String>, AppError> {
+    let Some(raw) = raw.map(str::trim).filter(|s| !s.is_empty()) else {
+        return Ok(None);
+    };
+    let dt = chrono::DateTime::parse_from_rfc3339(raw)
+        .map(|d| d.with_timezone(&Utc))
+        .or_else(|_| {
+            // Accept `YYYY-MM-DD` (date-only UI input) as end-of-day UTC.
+            chrono::NaiveDate::parse_from_str(raw, "%Y-%m-%d")
+                .map(|d| {
+                    d.and_hms_opt(23, 59, 59)
+                        .unwrap_or_else(|| d.and_hms_opt(0, 0, 0).unwrap_or_default())
+                        .and_utc()
+                })
+        })
+        .map_err(|_| {
+            AppError::new(
+                "rpc.bad_input",
+                "expires_at must be an ISO-8601 date or timestamp",
+            )
+        })?;
+    if dt <= Utc::now() {
+        return Err(AppError::new(
+            "rpc.bad_input",
+            "expires_at must be in the future",
+        ));
+    }
+    Ok(Some(dt.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)))
+}
+
+/// Validate a seat cap: positive when present.
+pub(crate) fn normalize_max_uses(raw: Option<i64>) -> Result<Option<i64>, AppError> {
+    match raw {
+        Some(n) if n < 1 => Err(AppError::new(
+            "rpc.bad_input",
+            "max_uses must be a positive integer",
+        )),
+        other => Ok(other),
+    }
+}
+
+/// Rejects when the caller's hourly issue budget is exhausted; otherwise
+/// returns how many invites they may still create this hour.
+async fn enforce_create_rate_limit(ctx: &RpcCtx, caller_id: &str) -> Result<i64, AppError> {
     let since = (Utc::now() - chrono::Duration::hours(1))
         .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
     let count = ctx
@@ -101,10 +151,82 @@ async fn enforce_create_rate_limit(ctx: &RpcCtx, caller_id: &str) -> Result<(), 
     if count >= MAX_ISSUES_PER_HOUR {
         return Err(rate_limited());
     }
-    Ok(())
+    Ok(MAX_ISSUES_PER_HOUR - count)
 }
 
-/// `admin.invites.create` — hash-at-rest; returns invite_url once; email via EmailSender.
+/// One recipient of a bulk `admin.invites.create` — never aborts the batch.
+async fn create_one_email_invite(
+    ctx: &RpcCtx,
+    caller_id: &str,
+    email: &str,
+) -> AdminInvitesCreateItemResult {
+    let fail = |msg: &str| AdminInvitesCreateItemResult {
+        email: email.to_string(),
+        ok: false,
+        error: Some(msg.to_string()),
+        invite: None,
+        invite_url: None,
+    };
+
+    let email = match normalize_email(email) {
+        Ok(e) => e,
+        Err(_) => return fail("invalid email address"),
+    };
+    if ctx
+        .db
+        .find_user_by_email(&email)
+        .await
+        .map(|u| u.is_some())
+        .unwrap_or(false)
+    {
+        return fail("an account with this email already exists");
+    }
+
+    if let Ok(Some(pending)) = ctx.db.find_pending_instance_invite_by_email(&email).await {
+        if let Ok(created) = parse_created_at(&pending.created_at) {
+            if Utc::now().signed_duration_since(created).num_seconds() < MIN_ISSUE_INTERVAL_SECS {
+                return fail("invite was just sent; try again later");
+            }
+        }
+        let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        let _ = ctx.db.revoke_instance_invite(&pending.id, &now).await;
+    }
+
+    let magic = generate_magic();
+    let token_hash = sha256_hex(magic.as_bytes());
+    let expires_at = (Utc::now() + chrono::Duration::seconds(TTL_SECS))
+        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let id = Uuid::new_v4().to_string();
+
+    let row = match ctx
+        .db
+        .insert_instance_invite(&id, Some(&email), &token_hash, Some(&expires_at), caller_id, Some(1))
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!(error = %e, "instance invite insert failed");
+            return fail("invite creation failed");
+        }
+    };
+
+    let url = invite_url(&magic);
+    let msg = build_invite_email(&email, &magic);
+    if let Err(e) = ctx.email.send(msg).await {
+        tracing::error!(error = %e, "instance invite email send failed");
+    }
+
+    AdminInvitesCreateItemResult {
+        email,
+        ok: true,
+        error: None,
+        invite: Some(invite_public(&row)),
+        invite_url: Some(url),
+    }
+}
+
+/// `admin.invites.create` — bulk email invites; per-recipient results.
+/// Hash-at-rest; each `invite_url` is returned exactly once.
 pub async fn create(
     ctx: &RpcCtx,
     input: serde_json::Value,
@@ -117,60 +239,100 @@ pub async fn create(
         )
     })?;
 
-    let email = normalize_email(&req.email)?;
-    enforce_create_rate_limit(ctx, &caller.id).await?;
-
-    if let Some(existing) = ctx
-        .db
-        .find_user_by_email(&email)
-        .await
-        .map_err(db_err)?
-    {
+    if req.emails.is_empty() {
+        return Err(AppError::new("rpc.bad_input", "emails must not be empty"));
+    }
+    if req.emails.len() > MAX_BULK {
         return Err(AppError::new(
-            "admin.invite_user_exists",
-            format!(
-                "An account with this email already exists ({})",
-                existing.username
-            ),
+            "rpc.bad_input",
+            format!("at most {MAX_BULK} emails per request"),
         ));
     }
+    let remaining = enforce_create_rate_limit(ctx, &caller.id).await?;
 
-    if let Some(pending) = ctx
-        .db
-        .find_pending_instance_invite_by_email(&email)
-        .await
-        .map_err(db_err)?
-    {
-        let created = parse_created_at(&pending.created_at)?;
-        let age = Utc::now().signed_duration_since(created);
-        if age.num_seconds() < MIN_ISSUE_INTERVAL_SECS {
-            return Err(rate_limited());
+    let mut results = Vec::with_capacity(req.emails.len());
+    let mut issued = 0i64;
+    for raw in &req.emails {
+        let email = raw.trim().to_string();
+        if email.is_empty() {
+            continue;
         }
-        let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-        let _ = ctx.db.revoke_instance_invite(&pending.id, &now).await;
+        if issued >= remaining {
+            results.push(AdminInvitesCreateItemResult {
+                email,
+                ok: false,
+                error: Some("hourly invite limit reached".into()),
+                invite: None,
+                invite_url: None,
+            });
+            continue;
+        }
+        let item = create_one_email_invite(ctx, &caller.id, &email).await;
+        if item.ok {
+            issued += 1;
+        }
+        results.push(item);
     }
+
+    crate::audit::record(
+        ctx,
+        Some((&caller.id, &caller.username)),
+        "admin.invites_create",
+        None,
+        Some(
+            serde_json::json!({ "requested": req.emails.len(), "created": issued }).to_string(),
+        ),
+    )
+    .await;
+
+    Ok(AdminInvitesCreateResponse { results })
+}
+
+/// `admin.invites.createLink` — shareable invite link (no bound email).
+pub async fn create_link(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<AdminInvitesCreateLinkResponse, AppError> {
+    let caller = require_admin_user(ctx).await?;
+    let req: AdminInvitesCreateLinkRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid admin.invites.createLink input: {e}"),
+        )
+    })?;
+
+    let expires_at = normalize_expiry(req.expires_at.as_deref())?;
+    let max_uses = normalize_max_uses(req.max_uses)?;
+    enforce_create_rate_limit(ctx, &caller.id).await?;
 
     let magic = generate_magic();
     let token_hash = sha256_hex(magic.as_bytes());
-    let expires_at = (Utc::now() + chrono::Duration::seconds(TTL_SECS))
-        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
     let id = Uuid::new_v4().to_string();
-
     let row = ctx
         .db
-        .insert_instance_invite(&id, &email, &token_hash, &expires_at, &caller.id)
+        .insert_instance_invite(
+            &id,
+            None,
+            &token_hash,
+            expires_at.as_deref(),
+            &caller.id,
+            max_uses,
+        )
         .await
         .map_err(db_err)?;
 
-    let url = invite_url(&magic);
-    let msg = build_invite_email(&email, &magic);
-    if let Err(e) = ctx.email.send(msg).await {
-        tracing::error!(error = %e, "instance invite email send failed");
-    }
+    crate::audit::record(
+        ctx,
+        Some((&caller.id, &caller.username)),
+        "admin.invite_link_create",
+        Some(("invite", &id)),
+        Some(serde_json::json!({ "max_uses": max_uses }).to_string()),
+    )
+    .await;
 
-    Ok(AdminInvitesCreateResponse {
+    Ok(AdminInvitesCreateLinkResponse {
         invite: invite_public(&row),
-        invite_url: url,
+        invite_url: invite_url(&magic),
     })
 }
 
@@ -189,7 +351,7 @@ pub async fn list(ctx: &RpcCtx) -> Result<AdminInvitesListResponse, AppError> {
 
 /// `admin.invites.revoke`.
 pub async fn revoke(ctx: &RpcCtx, input: serde_json::Value) -> Result<serde_json::Value, AppError> {
-    let _caller = require_admin_user(ctx).await?;
+    let caller = require_admin_user(ctx).await?;
     let req: AdminInvitesRevokeRequest = serde_json::from_value(input).map_err(|e| {
         AppError::new(
             "rpc.bad_input",
@@ -203,7 +365,7 @@ pub async fn revoke(ctx: &RpcCtx, input: serde_json::Value) -> Result<serde_json
         .await
         .map_err(db_err)?
         .ok_or_else(|| AppError::new("admin.invite_not_found", "invite not found"))?;
-    if invite.accepted_at.is_some() || invite.revoked_at.is_some() {
+    if invite.revoked_at.is_some() || invite.accepted_at.is_some() {
         return Err(AppError::new("admin.invite_not_found", "invite not found"));
     }
 
@@ -218,5 +380,15 @@ pub async fn revoke(ctx: &RpcCtx, input: serde_json::Value) -> Result<serde_json
                 db_err(e)
             }
         })?;
+
+    crate::audit::record(
+        ctx,
+        Some((&caller.id, &caller.username)),
+        "admin.invite_revoke",
+        Some(("invite", &invite.id)),
+        None,
+    )
+    .await;
+
     Ok(serde_json::json!({ "ok": true }))
 }

@@ -202,7 +202,7 @@ async fn repo_invites_create_list_revoke_and_accept_closed_signup() {
     verify_user(&db, out_v["data"]["id"].as_str().expect("id")).await;
     let (status, forbidden) = rpc_json(
         &app,
-        r#"{"procedure":"repo.invites.create","input":{"owner":"rown1","name":"shared","email":"x@ex.com","permission":"read"}}"#,
+        r#"{"procedure":"repo.invites.create","input":{"owner":"rown1","name":"shared","emails":["x@ex.com"],"permission":"read"}}"#,
         Some(&outsider),
     )
     .await;
@@ -211,17 +211,19 @@ async fn repo_invites_create_list_revoke_and_accept_closed_signup() {
 
     let (status, create_v) = rpc_json(
         &app,
-        r#"{"procedure":"repo.invites.create","input":{"owner":"rown1","name":"shared","email":"invitee@ex.com","permission":"write"}}"#,
+        r#"{"procedure":"repo.invites.create","input":{"owner":"rown1","name":"shared","emails":["invitee@ex.com"],"permission":"write"}}"#,
         Some(&cookie),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{create_v}");
     assert_eq!(create_v["ok"], true, "{create_v}");
-    assert_eq!(create_v["data"]["invite"]["email"], "invitee@ex.com");
-    assert_eq!(create_v["data"]["invite"]["permission"], "write");
-    let invite_url = create_v["data"]["invite_url"].as_str().expect("invite_url");
+    let first = &create_v["data"]["results"][0];
+    assert_eq!(first["ok"], true, "{create_v}");
+    assert_eq!(first["invite"]["email"], "invitee@ex.com");
+    assert_eq!(first["invite"]["permission"], "write");
+    let invite_url = first["invite_url"].as_str().expect("invite_url");
     assert!(invite_url.contains("/invites/"), "{create_v}");
-    let invite_id = create_v["data"]["invite"]["id"].as_str().expect("id");
+    let invite_id = first["invite"]["id"].as_str().expect("id");
 
     let token = {
         let sent = recorder.sent.lock().expect("lock");
@@ -260,7 +262,7 @@ async fn repo_invites_create_list_revoke_and_accept_closed_signup() {
 
     let (_, create2) = rpc_json(
         &app,
-        r#"{"procedure":"repo.invites.create","input":{"owner":"rown1","name":"shared","email":"invitee2@ex.com","permission":"admin"}}"#,
+        r#"{"procedure":"repo.invites.create","input":{"owner":"rown1","name":"shared","emails":["invitee2@ex.com"],"permission":"admin"}}"#,
         Some(&cookie),
     )
     .await;
@@ -329,7 +331,7 @@ async fn invites_accept_repo_returns_existing_collaborator_permission() {
     // Invite first (create rejects already-collaborators), then raise grant to admin.
     let (_, create_v) = rpc_json(
         &app,
-        r#"{"procedure":"repo.invites.create","input":{"owner":"eown1","name":"shared","email":"already@ex.com","permission":"read"}}"#,
+        r#"{"procedure":"repo.invites.create","input":{"owner":"eown1","name":"shared","emails":["already@ex.com"],"permission":"read"}}"#,
         Some(&owner_cookie),
     )
     .await;
@@ -417,11 +419,12 @@ async fn invites_accept_repo_owner_short_circuit_returns_admin() {
     db.insert_repo_invite(
         "inv-owner-self",
         &repo.id,
-        "oacc@ex.com",
+        Some("oacc@ex.com"),
         "read",
         &token_hash,
-        &expires,
+        Some(&expires),
         &owner.id,
+        Some(1),
     )
     .await
     .expect("insert invite");
@@ -457,12 +460,14 @@ async fn repo_invites_expired_token_fails() {
     let cookie = setup_owner_repo(&app, &db, "expown@ex.com", "expown1", "exp-repo").await;
     let (_, create_v) = rpc_json(
         &app,
-        r#"{"procedure":"repo.invites.create","input":{"owner":"expown1","name":"exp-repo","email":"late@ex.com","permission":"read"}}"#,
+        r#"{"procedure":"repo.invites.create","input":{"owner":"expown1","name":"exp-repo","emails":["late@ex.com"],"permission":"read"}}"#,
         Some(&cookie),
     )
     .await;
     assert_eq!(create_v["ok"], true, "{create_v}");
-    let invite_id = create_v["data"]["invite"]["id"].as_str().expect("id");
+    let invite_id = create_v["data"]["results"][0]["invite"]["id"]
+        .as_str()
+        .expect("id");
     let token = {
         let sent = recorder.sent.lock().expect("lock");
         extract_invite_token(&invite_email(&sent).text)

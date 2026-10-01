@@ -4,12 +4,14 @@ pub mod invites;
 pub mod users;
 
 pub use invites::{
-    create as invites_create, list as invites_list, revoke as invites_revoke,
+    create as invites_create, create_link as invites_create_link, list as invites_list,
+    revoke as invites_revoke,
 };
 pub use users::{
-    ban as users_ban, delete as users_delete, get_access as users_get_access, list as users_list,
-    revoke_sessions as users_revoke_sessions, unban as users_unban,
-    update_role as users_update_role,
+    ban as users_ban, delete as users_delete, get_access as users_get_access,
+    get_activity as users_get_activity, list as users_list,
+    list_sessions as users_list_sessions, revoke_sessions as users_revoke_sessions,
+    unban as users_unban, update_role as users_update_role,
 };
 
 use oxidean_core::AppError;

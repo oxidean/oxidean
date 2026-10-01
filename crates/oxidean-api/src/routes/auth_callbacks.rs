@@ -141,6 +141,7 @@ pub async fn workos_start(
 /// GET `/api/auth/workos/callback`
 pub async fn workos_callback(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Query(q): Query<CallbackQuery>,
 ) -> Response {
     if q.error.is_some() {
@@ -164,7 +165,7 @@ pub async fn workos_callback(
             }
         };
 
-    mint_session_and_redirect(&state, &identity, &return_to).await
+    mint_session_and_redirect(&state, &identity, &return_to, &headers).await
 }
 
 /// GET `/api/auth/oidc/start`
@@ -219,6 +220,7 @@ pub async fn oidc_start(
 /// GET `/api/auth/oidc/callback`
 pub async fn oidc_callback(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Query(q): Query<CallbackQuery>,
 ) -> Response {
     if q.error.is_some() {
@@ -241,13 +243,14 @@ pub async fn oidc_callback(
         }
     };
 
-    mint_session_and_redirect(&state, &identity, &return_to).await
+    mint_session_and_redirect(&state, &identity, &return_to, &headers).await
 }
 
 async fn mint_session_and_redirect(
     state: &AppState,
     identity: &crate::auth::external::ExternalIdentity,
     return_to: &str,
+    headers: &HeaderMap,
 ) -> Response {
     if let Some(res) = reject_if_setup_required(state).await {
         return res;
@@ -260,14 +263,35 @@ async fn mint_session_and_redirect(
         }
     };
 
+    let client = crate::rpc::ClientMeta::from_headers(headers);
     // SSO sessions: remember_me=false. Never use WorkOS sealed cookies (T-04-17).
-    let (_token, cookie) = match state.sessions.create(&state.db, &user.id, false).await {
+    let (_token, cookie) = match state
+        .sessions
+        .create(
+            &state.db,
+            &user.id,
+            false,
+            client.ip_address.as_deref(),
+            client.user_agent.as_deref(),
+        )
+        .await
+    {
         Ok(v) => v,
         Err(e) => {
             tracing::error!(error = %e, "session mint failed after SSO");
             return sso_error_redirect();
         }
     };
+
+    crate::audit::record_with(
+        &state.db,
+        &client,
+        Some((&user.id, &user.username)),
+        "auth.sso_login",
+        Some(("user", &user.id)),
+        None,
+    )
+    .await;
 
     let path = sanitize_return_to(Some(return_to));
     let session_header = cookie.to_string();

@@ -4,8 +4,8 @@ mod invites;
 mod members;
 
 pub use invites::{
-    accept as invites_accept, create as invites_create, list as invites_list,
-    revoke as invites_revoke,
+    accept as invites_accept, create as invites_create, create_link as invites_create_link,
+    list as invites_list, revoke as invites_revoke,
 };
 pub use members::{add as members_add, list as members_list, remove as members_remove, update_role as members_update_role};
 

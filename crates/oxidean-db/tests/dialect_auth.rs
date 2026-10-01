@@ -52,6 +52,8 @@ async fn migrate_auth_and_user_round_trip() {
         token_hash,
         "2099-01-01T00:00:00Z",
         false,
+        None,
+        None,
     )
     .await
     .expect("create session");

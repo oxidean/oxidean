@@ -190,7 +190,7 @@ async fn login_as(
     // Mint a session directly so we don't need the ENV admin password.
     let sessions = oxidean_api::auth::SessionService::new("development");
     let (raw, _cookie) = sessions
-        .create(db, user_id, false)
+        .create(db, user_id, false, None, None)
         .await
         .expect("create session");
     format!("oxidean_session={raw}")
@@ -290,18 +290,20 @@ async fn admin_invites_create_list_revoke_and_accept_closed_signup() {
 
     let (status, create_v) = rpc_json(
         &app,
-        r#"{"procedure":"admin.invites.create","input":{"email":"newbie@ex.com"}}"#,
+        r#"{"procedure":"admin.invites.create","input":{"emails":["newbie@ex.com"]}}"#,
         Some(&admin_cookie),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{create_v}");
     assert_eq!(create_v["ok"], true, "{create_v}");
-    assert_eq!(create_v["data"]["invite"]["email"], "newbie@ex.com");
-    let invite_url = create_v["data"]["invite_url"].as_str().expect("invite_url");
+    let first = &create_v["data"]["results"][0];
+    assert_eq!(first["ok"], true, "{create_v}");
+    assert_eq!(first["invite"]["email"], "newbie@ex.com");
+    let invite_url = first["invite_url"].as_str().expect("invite_url");
     assert!(invite_url.contains("/invites/"), "{create_v}");
     assert!(
-        create_v["data"]["invite"].get("token").is_none()
-            && create_v["data"]["invite"].get("token_hash").is_none(),
+        first["invite"].get("token").is_none()
+            && first["invite"].get("token_hash").is_none(),
         "must not return token: {create_v}"
     );
 
@@ -363,12 +365,14 @@ async fn admin_invites_create_list_revoke_and_accept_closed_signup() {
     // Create + revoke another invite.
     let (_, create2) = rpc_json(
         &app,
-        r#"{"procedure":"admin.invites.create","input":{"email":"revokee@ex.com"}}"#,
+        r#"{"procedure":"admin.invites.create","input":{"emails":["revokee@ex.com"]}}"#,
         Some(&admin_cookie),
     )
     .await;
     assert_eq!(create2["ok"], true, "{create2}");
-    let invite2_id = create2["data"]["invite"]["id"].as_str().expect("id");
+    let invite2_id = create2["data"]["results"][0]["invite"]["id"]
+        .as_str()
+        .expect("id");
 
     let (_, revoke_v) = rpc_json(
         &app,
@@ -579,12 +583,14 @@ async fn admin_invites_token_hash_at_rest() {
 
     let (_, create_v) = rpc_json(
         &app,
-        r#"{"procedure":"admin.invites.create","input":{"email":"hashed@ex.com"}}"#,
+        r#"{"procedure":"admin.invites.create","input":{"emails":["hashed@ex.com"]}}"#,
         Some(&admin_cookie),
     )
     .await;
     assert_eq!(create_v["ok"], true, "{create_v}");
-    let invite_id = create_v["data"]["invite"]["id"].as_str().expect("id");
+    let invite_id = create_v["data"]["results"][0]["invite"]["id"]
+        .as_str()
+        .expect("id");
     let token = {
         let sent = recorder.sent.lock().expect("lock");
         extract_invite_token(&invite_email(&sent).text)
@@ -597,6 +603,272 @@ async fn admin_invites_token_hash_at_rest() {
         .expect("row");
     assert_eq!(row.token_hash, expected);
     assert_ne!(row.token_hash, token);
+}
+
+#[tokio::test]
+async fn admin_invites_bulk_results_and_link_seats() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!(
+        "sqlite:{}",
+        dir.path().join("admin_invites_bulk.db").display()
+    );
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let (app, _recorder) = test_app_with_recorder(db.clone()).await;
+
+    let (admin_id, _name) = bootstrap_sysadmin(&db).await;
+    let admin_cookie = login_as(&app, &db, &admin_id).await;
+    let admin_row = db
+        .find_user_by_id(&admin_id)
+        .await
+        .expect("find")
+        .expect("admin");
+
+    // Bulk create: one valid, one invalid, one already-a-user.
+    let (status, bulk) = rpc_json(
+        &app,
+        &format!(
+            r#"{{"procedure":"admin.invites.create","input":{{"emails":["one@ex.com","not-an-email","{}"]}}}}"#,
+            admin_row.email
+        ),
+        Some(&admin_cookie),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{bulk}");
+    let results = bulk["data"]["results"].as_array().expect("results");
+    assert_eq!(results.len(), 3, "{bulk}");
+    assert_eq!(results[0]["email"], "one@ex.com");
+    assert_eq!(results[0]["ok"], true, "{bulk}");
+    assert_eq!(results[1]["ok"], false, "{bulk}");
+    assert_eq!(results[2]["ok"], false, "{bulk}");
+    assert_eq!(
+        results[2]["error"], "an account with this email already exists",
+        "{bulk}"
+    );
+
+    // Shareable link: 2 seats.
+    let (status, link) = rpc_json(
+        &app,
+        r#"{"procedure":"admin.invites.createLink","input":{"max_uses":2}}"#,
+        Some(&admin_cookie),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{link}");
+    let invite_url = link["data"]["invite_url"].as_str().expect("invite_url");
+    let token = invite_url.rsplit('/').next().expect("token");
+
+    // Preview: anonymous-safe shape.
+    let (status, preview) = rpc_json(
+        &app,
+        &format!(r#"{{"procedure":"invites.get","input":{{"token":"{token}"}}}}"#),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{preview}");
+    assert_eq!(preview["data"]["kind"], "instance");
+    assert!(preview["data"]["email"].is_null(), "{preview}");
+    assert_eq!(preview["data"]["seats_remaining"], 2, "{preview}");
+    assert_eq!(preview["data"]["acceptable"], true, "{preview}");
+
+    close_signup(&db).await;
+
+    // Anonymous link accept requires an email.
+    let (status, miss) = rpc_json(
+        &app,
+        &format!(
+            r#"{{"procedure":"invites.accept","input":{{"token":"{token}","username":"linkuser1","password":"password1"}}}}"#
+        ),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{miss}");
+    assert_eq!(miss["error"]["code"], "rpc.bad_input", "{miss}");
+
+    // Two accepts consume both seats.
+    for (email, username) in [("l1@ex.com", "linkuser1"), ("l2@ex.com", "linkuser2")] {
+        let (status, acc) = rpc_json(
+            &app,
+            &format!(
+                r#"{{"procedure":"invites.accept","input":{{"token":"{token}","email":"{email}","username":"{username}","password":"password1"}}}}"#
+            ),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{acc}");
+        assert_eq!(acc["data"]["kind"], "instance", "{acc}");
+    }
+    let (_, exhausted) = rpc_json(
+        &app,
+        &format!(r#"{{"procedure":"invites.get","input":{{"token":"{token}"}}}}"#),
+        None,
+    )
+    .await;
+    assert_eq!(exhausted["data"]["acceptable"], false, "{exhausted}");
+    assert_eq!(exhausted["data"]["reason"], "exhausted", "{exhausted}");
+    assert_eq!(exhausted["data"]["seats_remaining"], 0, "{exhausted}");
+
+    // Third accept fails.
+    let (status, third) = rpc_json(
+        &app,
+        &format!(
+            r#"{{"procedure":"invites.accept","input":{{"token":"{token}","email":"l3@ex.com","username":"linkuser3","password":"password1"}}}}"#
+        ),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{third}");
+    assert_eq!(third["error"]["code"], "invite.invalid", "{third}");
+}
+
+#[tokio::test]
+async fn admin_users_sessions_and_activity() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!(
+        "sqlite:{}",
+        dir.path().join("admin_users_activity.db").display()
+    );
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let (app, _recorder) = test_app_with_recorder(db.clone()).await;
+
+    let (admin_id, _) = bootstrap_sysadmin(&db).await;
+    let admin_cookie = login_as(&app, &db, &admin_id).await;
+
+    // Signup + login a user with client metadata headers.
+    let signup_body =
+        r#"{"procedure":"auth.signup","input":{"email":"target@ex.com","username":"target1","password":"password1"}}"#;
+    let signup = app.clone().oneshot(rpc_req(signup_body)).await.unwrap();
+    assert_eq!(signup.status(), StatusCode::OK);
+    let _ = signup.into_body().collect().await;
+    let login_body =
+        r#"{"procedure":"auth.login","input":{"identifier":"target@ex.com","password":"password1","remember_me":true}}"#;
+    let login_req = Request::builder()
+        .method("POST")
+        .uri("/api/rpc")
+        .header("content-type", "application/json")
+        .header("Oxidean-RPC-Version", "1")
+        .header("x-forwarded-for", "203.0.113.99")
+        .header(header::USER_AGENT, "TestClient/1.0")
+        .body(Body::from(login_body.to_owned()))
+        .unwrap();
+    let login = app.clone().oneshot(login_req).await.unwrap();
+    assert_eq!(login.status(), StatusCode::OK);
+    let _ = login.into_body().collect().await;
+
+    let target = db
+        .find_user_by_username("target1")
+        .await
+        .expect("find")
+        .expect("user");
+
+    // Sessions: client details captured.
+    let (status, sess) = rpc_json(
+        &app,
+        &format!(
+            r#"{{"procedure":"admin.users.listSessions","input":{{"user_id":"{}"}}}}"#,
+            target.id
+        ),
+        Some(&admin_cookie),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{sess}");
+    let sessions = sess["data"]["sessions"].as_array().expect("sessions");
+    // Signup mints a session (no client metadata headers) and login mints one
+    // with the request's X-Forwarded-For/User-Agent.
+    assert_eq!(sessions.len(), 2, "{sess}");
+    let login_session = sessions
+        .iter()
+        .find(|s| s["ip_address"] == "203.0.113.99")
+        .expect("login session");
+    assert_eq!(login_session["user_agent"], "TestClient/1.0", "{sess}");
+    assert_eq!(login_session["remember_me"], true, "{sess}");
+    assert!(
+        sessions.iter().all(|s| s.get("token_hash").is_none()),
+        "must not expose token_hash: {sess}"
+    );
+
+    // Activity: auth.signup + auth.login audit events for the target.
+    let (status, act) = rpc_json(
+        &app,
+        &format!(
+            r#"{{"procedure":"admin.users.getActivity","input":{{"user_id":"{}"}}}}"#,
+            target.id
+        ),
+        Some(&admin_cookie),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{act}");
+    let items = act["data"]["items"].as_array().expect("items");
+    let types: Vec<&str> = items
+        .iter()
+        .map(|i| i["event_type"].as_str().unwrap())
+        .collect();
+    assert!(types.contains(&"auth.signup"), "{act}");
+    assert!(types.contains(&"auth.login"), "{act}");
+    let login_item = items
+        .iter()
+        .find(|i| i["event_type"] == "auth.login")
+        .expect("login item");
+    assert_eq!(login_item["source"], "audit", "{act}");
+    assert_eq!(login_item["ip_address"], "203.0.113.99", "{act}");
+    assert_eq!(login_item["user_agent"], "TestClient/1.0", "{act}");
+
+    // Source filter: repository only → empty for a user with no pushes.
+    let (status, repo_only) = rpc_json(
+        &app,
+        &format!(
+            r#"{{"procedure":"admin.users.getActivity","input":{{"user_id":"{}","source":"repository"}}}}"#,
+            target.id
+        ),
+        Some(&admin_cookie),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{repo_only}");
+    assert_eq!(
+        repo_only["data"]["items"].as_array().expect("items").len(),
+        0,
+        "{repo_only}"
+    );
+    assert_eq!(
+        repo_only["data"]["event_types"]
+            .as_array()
+            .expect("event_types")
+            .len(),
+        0,
+        "repo-only source must not list audit types: {repo_only}"
+    );
+
+    // Event-type filter.
+    let (status, filtered) = rpc_json(
+        &app,
+        &format!(
+            r#"{{"procedure":"admin.users.getActivity","input":{{"user_id":"{}","event_type":"auth.login"}}}}"#,
+            target.id
+        ),
+        Some(&admin_cookie),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{filtered}");
+    let items = filtered["data"]["items"].as_array().expect("items");
+    assert_eq!(items.len(), 1, "{filtered}");
+    assert_eq!(items[0]["event_type"], "auth.login", "{filtered}");
+
+    // Non-admin cannot read sessions/activity.
+    let (user_cookie, _) = signup_and_login(&app, "plain@ex.com", "plainuser").await;
+    for proc in ["admin.users.listSessions", "admin.users.getActivity"] {
+        let (status, v) = rpc_json(
+            &app,
+            &format!(
+                r#"{{"procedure":"{proc}","input":{{"user_id":"{}"}}}}"#,
+                target.id
+            ),
+            Some(&user_cookie),
+        )
+        .await;
+        assert_ne!(status, StatusCode::OK, "{proc}: {v}");
+    }
 }
 
 #[tokio::test]
@@ -624,7 +896,7 @@ async fn invites_accept_routes_org_tokens() {
 
     let (_, create_inv) = rpc_json(
         &app,
-        r#"{"procedure":"org.invites.create","input":{"slug":"inv-unified","email":"orginvitee@ex.com","role":"member"}}"#,
+        r#"{"procedure":"org.invites.create","input":{"slug":"inv-unified","emails":["orginvitee@ex.com"],"role":"member"}}"#,
         Some(&cookie),
     )
     .await;

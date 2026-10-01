@@ -19,6 +19,8 @@ const createInviteMock = vi.fn();
 const banMock = vi.fn();
 const deleteUserMock = vi.fn();
 const getAccessMock = vi.fn();
+const listSessionsMock = vi.fn();
+const getActivityMock = vi.fn();
 
 const loaderState = vi.hoisted(() => {
   let data: unknown;
@@ -44,9 +46,12 @@ vi.mock("@/lib/api-client", () => ({
         unban: vi.fn(),
         delete: (...args: unknown[]) => deleteUserMock(...args),
         getAccess: (...args: unknown[]) => getAccessMock(...args),
+        listSessions: (...args: unknown[]) => listSessionsMock(...args),
+        getActivity: (...args: unknown[]) => getActivityMock(...args),
       },
       invites: {
         create: (...args: unknown[]) => createInviteMock(...args),
+        createLink: vi.fn(),
         list: (...args: unknown[]) => listInvitesMock(...args),
         revoke: vi.fn(),
       },
@@ -145,6 +150,8 @@ beforeEach(() => {
       repos: [{ owner: "acme", name: "app", permission: "write" }],
     },
   });
+  listSessionsMock.mockResolvedValue({ ok: true, data: { sessions: [] } });
+  getActivityMock.mockResolvedValue({ ok: true, data: { items: [], event_types: [] } });
 
   loaderState.set({
     kind: "ready",
@@ -296,6 +303,178 @@ describe("AdminUsersPage browser DOM races", () => {
         confirmation: "ada",
         delete_orgs: true,
       });
+
+      tracker.expectNoDomRaces();
+      expectNoOctaneOverlayInDocument();
+    } finally {
+      tracker.dispose();
+    }
+  }, 45_000);
+
+  it("invite dialog modes and user detail panel mount without DOM races", async () => {
+    const linkInvite = {
+      id: "inv-link",
+      email: null,
+      expires_at: null,
+      invited_by: sysAdmin.id,
+      created_at: "2026-01-20T00:00:00Z",
+      max_uses: 5,
+      use_count: 2,
+    };
+    listInvitesMock.mockResolvedValue({ ok: true, data: { invites: [linkInvite] } });
+    listSessionsMock.mockResolvedValue({
+      ok: true,
+      data: {
+        sessions: [
+          {
+            id: "s1",
+            created_at: "2026-01-20T00:00:00Z",
+            last_seen_at: "2026-01-21T00:00:00Z",
+            expires_at: "2026-02-20T00:00:00Z",
+            remember_me: true,
+            ip_address: "203.0.113.7",
+            user_agent: "Mozilla/5.0 test-agent",
+          },
+        ],
+      },
+    });
+    getActivityMock.mockResolvedValue({
+      ok: true,
+      data: {
+        items: [
+          {
+            id: "a1",
+            source: "audit",
+            event_type: "auth.login",
+            detail: "password",
+            target_type: null,
+            target_id: null,
+            repo_owner: null,
+            repo_name: null,
+            ref_name: null,
+            commit_message: null,
+            created_at: "2026-01-21T00:00:00Z",
+          },
+          {
+            id: "r1",
+            source: "repository",
+            event_type: "push",
+            detail: null,
+            target_type: null,
+            target_id: null,
+            repo_owner: "acme",
+            repo_name: "app",
+            ref_name: "refs/heads/main",
+            commit_message: "fix",
+            created_at: "2026-01-22T00:00:00Z",
+          },
+        ],
+        event_types: ["auth.login", "push"],
+      },
+    });
+    createInviteMock.mockResolvedValue({
+      ok: true,
+      data: {
+        results: [
+          {
+            email: "one@example.com",
+            ok: true,
+            error: null,
+            invite: linkInvite,
+            invite_url: "https://ox.example/invites/tok1",
+          },
+          { email: "bad", ok: false, error: "invalid email", invite: null, invite_url: null },
+        ],
+      },
+    });
+    loaderState.set({
+      kind: "ready",
+      me: sysAdmin,
+      users: {
+        users: [
+          {
+            id: sysAdmin.id,
+            email: sysAdmin.email,
+            username: sysAdmin.username,
+            display_name: sysAdmin.display_name,
+            role: "sys-admin" as const,
+            email_verified: true,
+            banned_at: null,
+            created_at: "2026-01-01T00:00:00Z",
+          },
+          listedUser,
+        ],
+        total: 2,
+      },
+      invites: [linkInvite],
+    });
+
+    const tracker = trackDomErrors();
+    try {
+      await mountWithQueryClient(AdminUsersPage, {});
+
+      await waitForTestId("admin-users-page");
+
+      // Pending link invite row renders its seat/expiry metadata.
+      const deadline = Date.now() + 10_000;
+      while (Date.now() < deadline) {
+        if (document.body.textContent?.includes("2/5 seats used")) break;
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      expect(document.body.textContent).toContain("Invite link");
+      expect(document.body.textContent).toContain("Never expires");
+      expect(document.body.textContent).toContain("2/5 seats used");
+
+      // Invite dialog: emails → link → emails mode switches mount cleanly.
+      await clickTestId("admin-invite-open");
+      await waitForTestId("admin-invite-dialog");
+      await waitForTestId("admin-invite-email");
+
+      await clickTestId("admin-invite-mode-link");
+      await waitForTestId("admin-invite-link-expiry");
+      await waitForTestId("admin-invite-link-seats");
+
+      await clickTestId("admin-invite-mode-emails");
+      await waitForTestId("admin-invite-email");
+
+      // Bulk textarea accepts multi-address input and submits per-email results.
+      await typeIntoTestId("admin-invite-email", "one@example.com, bad");
+      await clickTestId("admin-invite-create");
+      await waitForTestId("admin-invite-results");
+      expect(createInviteMock).toHaveBeenCalledWith({
+        emails: ["one@example.com", "bad"],
+      });
+
+      // Close the dialog, then open the per-user detail panel.
+      await act(async () => {
+        document
+          .querySelector('[data-testid="admin-invite-dialog"]')
+          ?.closest("[data-slot='dialog-content']")
+          ?.querySelector("button[data-slot='dialog-close'], button[aria-label='Close']")
+          ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+      await new Promise((r) => setTimeout(r, 150));
+
+      await openUserMenu("u2");
+      await clickTestId("admin-user-access-toggle-u2");
+      await waitForTestId("admin-user-access-u2");
+      await waitForTestId(`admin-user-sessions-u2`);
+      await waitForTestId(`admin-user-activity-u2`);
+
+      expect(listSessionsMock).toHaveBeenCalledWith({ user_id: "u2" });
+      expect(getActivityMock).toHaveBeenCalledWith(
+        expect.objectContaining({ user_id: "u2", source: null, limit: 100 }),
+      );
+      expect(document.body.textContent).toContain("203.0.113.7");
+      expect(document.body.textContent).toContain("auth.login");
+      expect(document.body.textContent).toContain("acme/app");
+
+      // Activity source filter buttons swap the query without a DOM race.
+      await clickTestId("admin-user-activity-src-audit-u2");
+      await new Promise((r) => setTimeout(r, 100));
+      expect(getActivityMock).toHaveBeenCalledWith(
+        expect.objectContaining({ user_id: "u2", source: "audit" }),
+      );
 
       tracker.expectNoDomRaces();
       expectNoOctaneOverlayInDocument();

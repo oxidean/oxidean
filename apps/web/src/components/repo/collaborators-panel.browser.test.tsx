@@ -29,6 +29,7 @@ vi.mock("@/lib/api-client", () => ({
       invites: {
         list: (...args: unknown[]) => listInvitesMock(...args),
         create: vi.fn(),
+        createLink: vi.fn(),
         revoke: vi.fn(),
       },
     },
@@ -83,6 +84,15 @@ describe("CollaboratorsPanel browser DOM races", () => {
       await waitForTestId("repo-invite-perm");
       await pickSelectOptionByTestId("repo-invite-perm", "repo-invite-perm-option-admin");
       await pickSelectOptionByTestId("repo-invite-perm", "repo-invite-perm-option-write");
+
+      // Invite mode switch: link inputs mount over the emails textarea cleanly.
+      await clickTestId("repo-invite-mode-link");
+      await waitForTestId("repo-invite-link-expiry");
+      await waitForTestId("repo-invite-link-seats");
+      await pickSelectOptionByTestId("repo-invite-perm", "repo-invite-perm-option-read");
+
+      await clickTestId("repo-invite-mode-emails");
+      await waitForTestId("repo-invite-emails");
 
       tracker.expectNoDomRaces();
       expectNoOctaneOverlayInDocument();

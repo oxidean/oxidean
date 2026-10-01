@@ -197,20 +197,22 @@ async fn org_invites_create() {
 
     let (status, v) = rpc_json(
         &app,
-        r#"{"procedure":"org.invites.create","input":{"slug":"inv-create","email":"newbie@ex.com","role":"member"}}"#,
+        r#"{"procedure":"org.invites.create","input":{"slug":"inv-create","emails":["newbie@ex.com"],"role":"member"}}"#,
         Some(&cookie),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "invites.create — {v}");
     assert_eq!(v["ok"], true, "{v}");
-    assert_eq!(v["data"]["invite"]["email"], "newbie@ex.com");
-    assert_eq!(v["data"]["invite"]["role"], "member");
-    assert!(v["data"]["invite"]["id"].as_str().is_some());
-    let invite_url = v["data"]["invite_url"].as_str().expect("invite_url");
+    let first = &v["data"]["results"][0];
+    assert_eq!(first["ok"], true, "{v}");
+    assert_eq!(first["invite"]["email"], "newbie@ex.com");
+    assert_eq!(first["invite"]["role"], "member");
+    assert!(first["invite"]["id"].as_str().is_some());
+    let invite_url = first["invite_url"].as_str().expect("invite_url");
     assert!(invite_url.contains("/invites/"), "{v}");
     assert!(
-        v["data"]["invite"].get("token").is_none()
-            && v["data"]["invite"].get("token_hash").is_none(),
+        first["invite"].get("token").is_none()
+            && first["invite"].get("token_hash").is_none(),
         "create must not return plaintext token or hash: {v}"
     );
 
@@ -219,6 +221,116 @@ async fn org_invites_create() {
     assert_eq!(invite.to, "newbie@ex.com");
     let token = extract_invite_token(&invite.text);
     assert_eq!(token.len(), 64, "32-byte hex magic expected");
+}
+
+/// `org.invites.createLink` — shareable seat-limited link; preview + accept.
+#[tokio::test]
+async fn org_invites_create_link_accept() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!(
+        "sqlite:{}",
+        dir.path().join("org_invites_link.db").display()
+    );
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let (app, _recorder) = test_app_with_recorder(db.clone()).await;
+
+    let cookie = setup_owner_org(&app, &db, "linkowner@ex.com", "linkowner1", "inv-link").await;
+
+    let (status, link) = rpc_json(
+        &app,
+        r#"{"procedure":"org.invites.createLink","input":{"slug":"inv-link","role":"member","max_uses":2}}"#,
+        Some(&cookie),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{link}");
+    let invite_url = link["data"]["invite_url"].as_str().expect("invite_url");
+    assert_eq!(link["data"]["invite"]["max_uses"], 2, "{link}");
+    assert!(link["data"]["invite"]["email"].is_null(), "{link}");
+    let token = invite_url.rsplit('/').next().expect("token");
+
+    let (status, preview) = rpc_json(
+        &app,
+        &format!(r#"{{"procedure":"invites.get","input":{{"token":"{token}"}}}}"#),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{preview}");
+    assert_eq!(preview["data"]["kind"], "org", "{preview}");
+    assert_eq!(preview["data"]["org_slug"], "inv-link", "{preview}");
+    assert_eq!(preview["data"]["grant"], "member", "{preview}");
+    assert_eq!(preview["data"]["seats_remaining"], 2, "{preview}");
+
+    // Two anonymous accepts consume the seats and grant membership.
+    for (email, username) in [("m1@ex.com", "member1"), ("m2@ex.com", "member2")] {
+        let (status, acc) = rpc_json(
+            &app,
+            &format!(
+                r#"{{"procedure":"invites.accept","input":{{"token":"{token}","email":"{email}","username":"{username}","password":"password1"}}}}"#
+            ),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{acc}");
+        assert_eq!(acc["data"]["kind"], "org", "{acc}");
+        assert_eq!(acc["data"]["org"]["slug"], "inv-link", "{acc}");
+    }
+    let org = db
+        .find_organization_by_slug("inv-link")
+        .await
+        .expect("find")
+        .expect("org");
+    let members = db.list_org_members(&org.id).await.expect("members");
+    assert_eq!(members.len(), 3, "owner + 2 invitees: {members:?}");
+
+    // Third accept is rejected — seats exhausted.
+    let (status, third) = rpc_json(
+        &app,
+        &format!(
+            r#"{{"procedure":"invites.accept","input":{{"token":"{token}","email":"m3@ex.com","username":"member3","password":"password1"}}}}"#
+        ),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{third}");
+    assert_eq!(third["error"]["code"], "invite.invalid", "{third}");
+
+    // Legacy org.invites.accept must reject a non-org token *without* the
+    // unified accept consuming it (instance invite here).
+    let inst_token = "a".repeat(64);
+    let inst_hash = sha256_hex(inst_token.as_bytes());
+    let owner_id = members[0].user_id.clone();
+    db.insert_instance_invite(
+        "inst-inv-1",
+        None,
+        &inst_hash,
+        None,
+        &owner_id,
+        Some(1),
+    )
+    .await
+    .expect("insert instance invite");
+    let (status, wrong_kind) = rpc_json(
+        &app,
+        &format!(
+            r#"{{"procedure":"org.invites.accept","input":{{"token":"{inst_token}","email":"m4@ex.com","username":"member4","password":"password1"}}}}"#
+        ),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{wrong_kind}");
+    assert_eq!(wrong_kind["error"]["code"], "org.invalid_invite", "{wrong_kind}");
+    let inst_row = db
+        .find_instance_invite_by_token_hash(&inst_hash)
+        .await
+        .expect("find")
+        .expect("instance invite");
+    assert_eq!(
+        inst_row.use_count, 0,
+        "cross-kind accept must not consume the invite"
+    );
+    assert!(inst_row.accepted_at.is_none());
 }
 
 /// `invites.list` returns pending invites without plaintext tokens (ORG-01 / T-10-SC).
@@ -238,7 +350,7 @@ async fn org_invites_list_omits_plaintext_token() {
 
     let (_, create_v) = rpc_json(
         &app,
-        r#"{"procedure":"org.invites.create","input":{"slug":"inv-list","email":"listed@ex.com","role":"admin"}}"#,
+        r#"{"procedure":"org.invites.create","input":{"slug":"inv-list","emails":["listed@ex.com"],"role":"admin"}}"#,
         Some(&cookie),
     )
     .await;
@@ -279,12 +391,14 @@ async fn org_invites_revoke() {
 
     let (_, create_v) = rpc_json(
         &app,
-        r#"{"procedure":"org.invites.create","input":{"slug":"inv-revoke","email":"revokee@ex.com","role":"member"}}"#,
+        r#"{"procedure":"org.invites.create","input":{"slug":"inv-revoke","emails":["revokee@ex.com"],"role":"member"}}"#,
         Some(&cookie),
     )
     .await;
     assert_eq!(create_v["ok"], true, "{create_v}");
-    let invite_id = create_v["data"]["invite"]["id"].as_str().expect("invite id");
+    let invite_id = create_v["data"]["results"][0]["invite"]["id"]
+        .as_str()
+        .expect("invite id");
 
     let (status, v) = rpc_json(
         &app,
@@ -328,7 +442,7 @@ async fn org_invites_accept_closed_signup_creates_or_links_account() {
 
     let (_, create_v) = rpc_json(
         &app,
-        r#"{"procedure":"org.invites.create","input":{"slug":"inv-accept","email":"invitee@ex.com","role":"member"}}"#,
+        r#"{"procedure":"org.invites.create","input":{"slug":"inv-accept","emails":["invitee@ex.com"],"role":"member"}}"#,
         Some(&cookie),
     )
     .await;
@@ -406,14 +520,14 @@ async fn org_invites_token_hash_at_rest() {
 
     let (_, create_v) = rpc_json(
         &app,
-        r#"{"procedure":"org.invites.create","input":{"slug":"inv-hash","email":"hashed@ex.com","role":"member"}}"#,
+        r#"{"procedure":"org.invites.create","input":{"slug":"inv-hash","emails":["hashed@ex.com"],"role":"member"}}"#,
         Some(&cookie),
     )
     .await;
     assert_eq!(create_v["ok"], true, "{create_v}");
     assert!(
-        create_v["data"]["invite"].get("token").is_none()
-            && create_v["data"]["invite"].get("token_hash").is_none()
+        create_v["data"]["results"][0]["invite"].get("token").is_none()
+            && create_v["data"]["results"][0]["invite"].get("token_hash").is_none()
             && create_v["data"].get("token").is_none()
             && create_v["data"].get("token_hash").is_none(),
         "RPC must not expose token or hash: {create_v}"
@@ -426,7 +540,11 @@ async fn org_invites_token_hash_at_rest() {
     assert_eq!(token.len(), 64);
     let expected_hash = sha256_hex(token.as_bytes());
     let row = db
-        .find_org_invite_by_id(create_v["data"]["invite"]["id"].as_str().expect("id"))
+        .find_org_invite_by_id(
+            create_v["data"]["results"][0]["invite"]["id"]
+                .as_str()
+                .expect("id"),
+        )
         .await
         .expect("find invite")
         .expect("invite row");
@@ -451,12 +569,14 @@ async fn org_invites_accept_expired_token_fails() {
 
     let (_, create_v) = rpc_json(
         &app,
-        r#"{"procedure":"org.invites.create","input":{"slug":"inv-exp","email":"expired@ex.com","role":"member"}}"#,
+        r#"{"procedure":"org.invites.create","input":{"slug":"inv-exp","emails":["expired@ex.com"],"role":"member"}}"#,
         Some(&cookie),
     )
     .await;
     assert_eq!(create_v["ok"], true, "{create_v}");
-    let invite_id = create_v["data"]["invite"]["id"].as_str().expect("id");
+    let invite_id = create_v["data"]["results"][0]["invite"]["id"]
+        .as_str()
+        .expect("id");
 
     let token = {
         let sent = recorder.sent.lock().expect("lock");

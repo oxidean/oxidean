@@ -137,17 +137,43 @@ export type AdminUsersGetAccessResponse = {
 
 export type InstanceInvitePublic = {
   id: string;
-  email: string;
-  expires_at: string;
+  /** null = shareable link (not bound to a recipient email). */
+  email?: string | null;
+  /** null = never expires. */
+  expires_at?: string | null;
   invited_by: string;
   created_at: string;
+  /** null = unlimited seats. */
+  max_uses?: number | null;
+  use_count: number;
 };
 
 export type AdminInvitesCreateRequest = {
+  /** Bulk: one email-bound invite per address (max 50). */
+  emails: string[];
+};
+
+export type AdminInvitesCreateItemResult = {
   email: string;
+  ok: boolean;
+  error?: string | null;
+  invite?: InstanceInvitePublic | null;
+  /** One-time copyable URL (present only when ok). */
+  invite_url?: string | null;
 };
 
 export type AdminInvitesCreateResponse = {
+  results: AdminInvitesCreateItemResult[];
+};
+
+export type AdminInvitesCreateLinkRequest = {
+  /** ISO-8601 UTC; absent = never expires. */
+  expires_at?: string | null;
+  /** Absent = unlimited seats. */
+  max_uses?: number | null;
+};
+
+export type AdminInvitesCreateLinkResponse = {
   invite: InstanceInvitePublic;
   invite_url: string;
 };
@@ -158,6 +184,54 @@ export type AdminInvitesListResponse = {
 
 export type AdminInvitesRevokeRequest = {
   invite_id: string;
+};
+
+export type AdminSessionPublic = {
+  id: string;
+  created_at: string;
+  last_seen_at: string;
+  expires_at: string;
+  remember_me: boolean;
+  ip_address?: string | null;
+  user_agent?: string | null;
+};
+
+export type AdminUsersListSessionsResponse = {
+  sessions: AdminSessionPublic[];
+};
+
+export type AdminUsersGetActivityRequest = {
+  user_id: string;
+  /** "audit" | "repository"; absent = both. */
+  source?: string | null;
+  /** Exact event-type filter (audit event_type / repo push_type). */
+  event_type?: string | null;
+  limit?: number | null;
+};
+
+export type AdminUserActivityItem = {
+  id: string;
+  /** "audit" | "repository". */
+  source: string;
+  /** Audit event_type or repo push_type. */
+  event_type: string;
+  created_at: string;
+  target_type?: string | null;
+  target_id?: string | null;
+  detail?: string | null;
+  ip_address?: string | null;
+  user_agent?: string | null;
+  repo_owner?: string | null;
+  repo_name?: string | null;
+  ref_name?: string | null;
+  commits_count?: number | null;
+  commit_message?: string | null;
+  pr_number?: number | null;
+};
+
+export type AdminUsersGetActivityResponse = {
+  items: AdminUserActivityItem[];
+  event_types: string[];
 };
 
 export type RepoGcRequest = {
@@ -1106,11 +1180,16 @@ export type RepoCollaboratorsRemoveRequest = {
 
 export type RepoInvitePublic = {
   id: string;
-  email: string;
+  /** null = shareable link (not bound to a recipient email). */
+  email?: string | null;
   permission: CollaboratorPermission;
-  expires_at: string;
+  /** null = never expires. */
+  expires_at?: string | null;
   invited_by: string;
   created_at: string;
+  /** null = unlimited seats. */
+  max_uses?: number | null;
+  use_count: number;
 };
 
 export type RepoInvitesListResponse = {
@@ -1120,11 +1199,35 @@ export type RepoInvitesListResponse = {
 export type RepoInvitesCreateRequest = {
   owner: string;
   name: string;
-  email: string;
+  /** Bulk: one email-bound invite per address (max 50). */
+  emails: string[];
   permission: CollaboratorPermission;
 };
 
+export type RepoInvitesCreateItemResult = {
+  email: string;
+  ok: boolean;
+  error?: string | null;
+  invite?: RepoInvitePublic | null;
+  /** One-time copyable URL (present only when ok). */
+  invite_url?: string | null;
+};
+
 export type RepoInvitesCreateResponse = {
+  results: RepoInvitesCreateItemResult[];
+};
+
+export type RepoInvitesCreateLinkRequest = {
+  owner: string;
+  name: string;
+  permission: CollaboratorPermission;
+  /** ISO-8601 UTC; absent = never expires. */
+  expires_at?: string | null;
+  /** Absent = unlimited seats. */
+  max_uses?: number | null;
+};
+
+export type RepoInvitesCreateLinkResponse = {
   invite: RepoInvitePublic;
   invite_url: string;
 };
@@ -1453,11 +1556,16 @@ export type OrgMembersRemoveRequest = {
 
 export type OrgInvitePublic = {
   id: string;
-  email: string;
+  /** null = shareable link (not bound to a recipient email). */
+  email?: string | null;
   role: OrgRole;
-  expires_at: string;
+  /** null = never expires. */
+  expires_at?: string | null;
   invited_by: string;
   created_at: string;
+  /** null = unlimited seats. */
+  max_uses?: number | null;
+  use_count: number;
 };
 
 export type OrgInvitesListResponse = {
@@ -1466,11 +1574,34 @@ export type OrgInvitesListResponse = {
 
 export type OrgInvitesCreateRequest = {
   slug: string;
-  email: string;
+  /** Bulk: one email-bound invite per address (max 50). */
+  emails: string[];
   role: OrgRole;
 };
 
+export type OrgInvitesCreateItemResult = {
+  email: string;
+  ok: boolean;
+  error?: string | null;
+  invite?: OrgInvitePublic | null;
+  /** One-time copyable URL (present only when ok). */
+  invite_url?: string | null;
+};
+
 export type OrgInvitesCreateResponse = {
+  results: OrgInvitesCreateItemResult[];
+};
+
+export type OrgInvitesCreateLinkRequest = {
+  slug: string;
+  role: OrgRole;
+  /** ISO-8601 UTC; absent = never expires. */
+  expires_at?: string | null;
+  /** Absent = unlimited seats. */
+  max_uses?: number | null;
+};
+
+export type OrgInvitesCreateLinkResponse = {
   invite: OrgInvitePublic;
   invite_url: string;
 };
@@ -1482,6 +1613,8 @@ export type OrgInvitesRevokeRequest = {
 
 export type OrgInvitesAcceptRequest = {
   token: string;
+  /** Account email — required for anonymous accept of unbound link invites. */
+  email?: string | null;
   username?: string | null;
   password?: string | null;
 };
@@ -1489,6 +1622,31 @@ export type OrgInvitesAcceptRequest = {
 export type OrgInvitesAcceptResponse = {
   org: OrgPublic;
   member: OrgMemberPublic;
+};
+
+export type InvitesGetRequest = {
+  token: string;
+};
+
+/** Anonymous-safe invite preview — scope + constraints; never token internals. */
+export type InvitesGetResponse = {
+  kind: "instance" | "org" | "repo" | string;
+  /** Present when bound to a recipient email (enforced on accept). */
+  email?: string | null;
+  /** null = never expires. */
+  expires_at?: string | null;
+  /** Seats remaining; null = unlimited. */
+  seats_remaining?: number | null;
+  org_slug?: string | null;
+  org_display_name?: string | null;
+  repo_owner?: string | null;
+  repo_name?: string | null;
+  /** Role/permission granted on accept (org/repo invites). */
+  grant?: string | null;
+  /** false when expired, revoked, or out of seats. */
+  acceptable: boolean;
+  /** "expired" | "revoked" | "exhausted" — set when acceptable is false. */
+  reason?: string | null;
 };
 
 /** Unified invite accept (instance, org, or repo). Same input shape as OrgInvitesAcceptRequest. */
@@ -2610,6 +2768,8 @@ export function createClient(opts: CreateClientOptions) {
       invites: {
         create: (input: RepoInvitesCreateRequest) =>
           rpcCall<RepoInvitesCreateResponse>(opts, "repo.invites.create", input),
+        createLink: (input: RepoInvitesCreateLinkRequest) =>
+          rpcCall<RepoInvitesCreateLinkResponse>(opts, "repo.invites.createLink", input),
         list: (input: RepoGetRequest) =>
           rpcCall<RepoInvitesListResponse>(opts, "repo.invites.list", input),
         revoke: (input: RepoInvitesRevokeRequest) =>
@@ -2679,6 +2839,8 @@ export function createClient(opts: CreateClientOptions) {
       invites: {
         create: (input: OrgInvitesCreateRequest) =>
           rpcCall<OrgInvitesCreateResponse>(opts, "org.invites.create", input),
+        createLink: (input: OrgInvitesCreateLinkRequest) =>
+          rpcCall<OrgInvitesCreateLinkResponse>(opts, "org.invites.createLink", input),
         list: (input: OrgSlugRequest) =>
           rpcCall<OrgInvitesListResponse>(opts, "org.invites.list", input),
         revoke: (input: OrgInvitesRevokeRequest) =>
@@ -2688,6 +2850,8 @@ export function createClient(opts: CreateClientOptions) {
       },
     },
     invites: {
+      get: (input: InvitesGetRequest) =>
+        rpcCall<InvitesGetResponse>(opts, "invites.get", input),
       accept: (input: InvitesAcceptRequest) =>
         rpcCall<InvitesAcceptResponse>(opts, "invites.accept", input),
     },
@@ -2979,10 +3143,28 @@ export function createClient(opts: CreateClientOptions) {
           rpcCall<AdminUsersDeleteResponse>(opts, "admin.users.delete", input),
         getAccess: (input: AdminUsersUserIdRequest) =>
           rpcCall<AdminUsersGetAccessResponse>(opts, "admin.users.getAccess", input),
+        listSessions: (input: AdminUsersUserIdRequest) =>
+          rpcCall<AdminUsersListSessionsResponse>(
+            opts,
+            "admin.users.listSessions",
+            input,
+          ),
+        getActivity: (input: AdminUsersGetActivityRequest) =>
+          rpcCall<AdminUsersGetActivityResponse>(
+            opts,
+            "admin.users.getActivity",
+            input,
+          ),
       },
       invites: {
         create: (input: AdminInvitesCreateRequest) =>
           rpcCall<AdminInvitesCreateResponse>(opts, "admin.invites.create", input),
+        createLink: (input: AdminInvitesCreateLinkRequest) =>
+          rpcCall<AdminInvitesCreateLinkResponse>(
+            opts,
+            "admin.invites.createLink",
+            input,
+          ),
         list: () => rpcCall<AdminInvitesListResponse>(opts, "admin.invites.list", {}),
         revoke: (input: AdminInvitesRevokeRequest) =>
           rpcCall<{ ok: boolean }>(opts, "admin.invites.revoke", input),

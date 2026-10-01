@@ -10,6 +10,7 @@ const updateSettingsMock = vi.fn();
 const membersListMock = vi.fn();
 const invitesListMock = vi.fn();
 const invitesCreateMock = vi.fn();
+const invitesCreateLinkMock = vi.fn();
 const invitesRevokeMock = vi.fn();
 const labelsListMock = vi.fn();
 
@@ -26,6 +27,7 @@ vi.mock("@/lib/api-client", () => ({
       invites: {
         list: (...args: unknown[]) => invitesListMock(...args),
         create: (...args: unknown[]) => invitesCreateMock(...args),
+        createLink: (...args: unknown[]) => invitesCreateLinkMock(...args),
         revoke: (...args: unknown[]) => invitesRevokeMock(...args),
       },
     },
@@ -106,19 +108,44 @@ beforeEach(() => {
   });
   invitesListMock.mockResolvedValue({ ok: true, data: { invites: [] } });
   invitesCreateMock.mockReset();
+  invitesCreateLinkMock.mockReset();
   invitesRevokeMock.mockReset();
   invitesCreateMock.mockResolvedValue({
     ok: true,
     data: {
+      results: [
+        {
+          email: "new@example.com",
+          ok: true,
+          invite: {
+            id: "oi1",
+            email: "new@example.com",
+            role: "member",
+            expires_at: "2026-10-07T00:00:00Z",
+            invited_by: "u1",
+            created_at: "2026-09-30T00:00:00Z",
+            max_uses: 1,
+            use_count: 0,
+          },
+          invite_url: "https://oxidean.example/invites/org-tok",
+        },
+      ],
+    },
+  });
+  invitesCreateLinkMock.mockResolvedValue({
+    ok: true,
+    data: {
       invite: {
-        id: "oi1",
-        email: "new@example.com",
+        id: "oi2",
+        email: null,
         role: "member",
-        expires_at: "2026-10-07T00:00:00Z",
+        expires_at: null,
         invited_by: "u1",
         created_at: "2026-09-30T00:00:00Z",
+        max_uses: null,
+        use_count: 0,
       },
-      invite_url: "https://oxidean.example/invites/org-tok",
+      invite_url: "https://oxidean.example/invites/org-link-tok",
     },
   });
   invitesRevokeMock.mockResolvedValue({ ok: true, data: { ok: true } });
@@ -188,10 +215,10 @@ describe("org settings members", () => {
     });
     expect(screen.getByRole("heading", { name: "Members" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Add member" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Email invitations" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Invitations" })).toBeInTheDocument();
   });
 
-  it("creates org invite and shows copyable invite URL", async () => {
+  it("creates org invites in bulk and shows per-recipient results", async () => {
     invitesListMock.mockResolvedValueOnce({ ok: true, data: { invites: [] } }).mockResolvedValue({
       ok: true,
       data: {
@@ -203,6 +230,8 @@ describe("org settings members", () => {
             expires_at: "2026-10-07T00:00:00Z",
             invited_by: "u1",
             created_at: "2026-09-30T00:00:00Z",
+            max_uses: 1,
+            use_count: 0,
           },
         ],
       },
@@ -211,23 +240,51 @@ describe("org settings members", () => {
     renderWithQueryClient(OrgMembersPage);
 
     await waitFor(() => {
-      expect(document.getElementById("invite-email")).toBeTruthy();
+      expect(document.getElementById("invite-emails")).toBeTruthy();
     });
 
-    fireEvent.input(document.getElementById("invite-email") as HTMLInputElement, {
+    fireEvent.input(document.getElementById("invite-emails") as HTMLTextAreaElement, {
       target: { value: "new@example.com" },
     });
-    fireEvent.click(screen.getByRole("button", { name: /^Send invitation$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^Send invitations$/i }));
 
     await waitFor(() => {
       expect(invitesCreateMock).toHaveBeenCalledWith({
         slug: "acme",
-        email: "new@example.com",
+        emails: ["new@example.com"],
         role: "member",
       });
-      expect(screen.getByDisplayValue("https://oxidean.example/invites/org-tok")).toBeTruthy();
+      expect(screen.getByTestId("org-invite-results")).toBeTruthy();
+      expect(screen.getByTestId("org-invite-result-copy-new@example.com")).toBeTruthy();
+    });
+  });
+
+  it("link mode creates a reusable org invite link", async () => {
+    renderWithQueryClient(OrgMembersPage);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("org-invite-mode-link")).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByTestId("org-invite-mode-link"));
+
+    await waitFor(() => {
+      expect(document.getElementById("invite-link-seats")).toBeTruthy();
+    });
+    fireEvent.input(document.getElementById("invite-link-seats")!, {
+      target: { value: "5" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^Create invite link$/i }));
+
+    await waitFor(() => {
+      expect(invitesCreateLinkMock).toHaveBeenCalledWith({
+        slug: "acme",
+        role: "member",
+        expires_at: null,
+        max_uses: 5,
+      });
+      expect(screen.getByDisplayValue("https://oxidean.example/invites/org-link-tok")).toBeTruthy();
       expect(screen.getByRole("button", { name: /^Copy link$/i })).toBeTruthy();
-      expect(screen.getByText("new@example.com")).toBeTruthy();
     });
   });
 
@@ -243,6 +300,8 @@ describe("org settings members", () => {
             expires_at: "2026-10-07T00:00:00Z",
             invited_by: "u1",
             created_at: "2026-09-30T00:00:00Z",
+            max_uses: 1,
+            use_count: 0,
           },
         ],
       },

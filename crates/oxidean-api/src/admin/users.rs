@@ -1,10 +1,12 @@
 //! `admin.users.*` — list, role, sessions, ban/unban, hard delete.
 
 use oxidean_core::{
-    AdminUserAccessOrg, AdminUserAccessRepo, AdminUserPublic, AdminUsersDeleteRequest,
-    AdminUsersDeleteResponse, AdminUsersGetAccessResponse, AdminUsersListRequest,
-    AdminUsersListResponse, AdminUsersUpdateRoleRequest, AdminUsersUserIdRequest, AppError,
-    CollaboratorPermission, OrgRole, Role,
+    AdminSessionPublic, AdminUserAccessOrg, AdminUserAccessRepo, AdminUserActivityItem,
+    AdminUserPublic, AdminUsersDeleteRequest, AdminUsersDeleteResponse,
+    AdminUsersGetAccessResponse, AdminUsersGetActivityRequest, AdminUsersGetActivityResponse,
+    AdminUsersListRequest, AdminUsersListResponse, AdminUsersListSessionsResponse,
+    AdminUsersUpdateRoleRequest, AdminUsersUserIdRequest, AppError, CollaboratorPermission,
+    OrgRole, Role,
 };
 use oxidean_db::UserRow;
 
@@ -151,6 +153,17 @@ pub async fn update_role(
         .set_user_role(&target.id, req.role.as_str())
         .await
         .map_err(db_err)?;
+    crate::audit::record(
+        ctx,
+        Some((&admin.id, &admin.username)),
+        "admin.user_role_change",
+        Some(("user", &target.id)),
+        Some(
+            serde_json::json!({ "username": target.username, "role": req.role.as_str() })
+                .to_string(),
+        ),
+    )
+    .await;
     Ok(to_admin_public(&updated))
 }
 
@@ -159,7 +172,7 @@ pub async fn revoke_sessions(
     ctx: &RpcCtx,
     input: serde_json::Value,
 ) -> Result<serde_json::Value, AppError> {
-    let _admin = require_admin_user(ctx).await?;
+    let admin = require_admin_user(ctx).await?;
     let req: AdminUsersUserIdRequest = serde_json::from_value(input).map_err(|e| {
         AppError::new(
             "rpc.bad_input",
@@ -172,7 +185,160 @@ pub async fn revoke_sessions(
         .revoke_all(&ctx.db, &target.id)
         .await
         .map_err(session_err)?;
+    crate::audit::record(
+        ctx,
+        Some((&admin.id, &admin.username)),
+        "admin.sessions_revoked",
+        Some(("user", &target.id)),
+        Some(serde_json::json!({ "revoked": n }).to_string()),
+    )
+    .await;
     Ok(serde_json::json!({ "ok": true, "revoked": n }))
+}
+
+/// `admin.users.listSessions` — session rows for one user (client details; no tokens).
+pub async fn list_sessions(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<AdminUsersListSessionsResponse, AppError> {
+    let _admin = require_admin_user(ctx).await?;
+    let req: AdminUsersUserIdRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid admin.users.listSessions input: {e}"),
+        )
+    })?;
+    let target = load_target(ctx, &req.user_id).await?;
+    let rows = ctx
+        .db
+        .list_sessions_for_user(&target.id)
+        .await
+        .map_err(db_err)?;
+    Ok(AdminUsersListSessionsResponse {
+        sessions: rows
+            .iter()
+            .map(|s| AdminSessionPublic {
+                id: s.id.clone(),
+                created_at: s.created_at.clone(),
+                last_seen_at: s.last_seen_at.clone(),
+                expires_at: s.expires_at.clone(),
+                remember_me: s.remember_me,
+                ip_address: s.ip_address.clone(),
+                user_agent: s.user_agent.clone(),
+            })
+            .collect(),
+    })
+}
+
+/// `admin.users.getActivity` — merged feed of audit events + repo activity by actor.
+pub async fn get_activity(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<AdminUsersGetActivityResponse, AppError> {
+    let _admin = require_admin_user(ctx).await?;
+    let req: AdminUsersGetActivityRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid admin.users.getActivity input: {e}"),
+        )
+    })?;
+    let target = load_target(ctx, &req.user_id).await?;
+    let limit = req.limit.unwrap_or(100).clamp(1, 200);
+    let source = req.source.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let event_type = req
+        .event_type
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    if let Some(s) = source {
+        if !matches!(s, "audit" | "repository") {
+            return Err(AppError::new(
+                "rpc.bad_input",
+                "source must be \"audit\" or \"repository\"",
+            ));
+        }
+    }
+
+    let mut items: Vec<AdminUserActivityItem> = Vec::new();
+    let want_audit = source.map(|s| s == "audit").unwrap_or(true);
+    let want_repo = source.map(|s| s == "repository").unwrap_or(true);
+
+    let mut event_types: Vec<String> = if want_audit {
+        ctx.db
+            .list_audit_event_types_for_actor(&target.id)
+            .await
+            .map_err(db_err)?
+    } else {
+        Vec::new()
+    };
+
+    if want_audit {
+        let rows = ctx
+            .db
+            .list_audit_events_for_actor(&target.id, event_type, limit)
+            .await
+            .map_err(db_err)?;
+        items.extend(rows.iter().map(|e| AdminUserActivityItem {
+            id: e.id.clone(),
+            source: "audit".into(),
+            event_type: e.event_type.clone(),
+            created_at: e.created_at.clone(),
+            target_type: e.target_type.clone(),
+            target_id: e.target_id.clone(),
+            detail: e.detail.clone(),
+            ip_address: e.ip_address.clone(),
+            user_agent: e.user_agent.clone(),
+            repo_owner: None,
+            repo_name: None,
+            ref_name: None,
+            commits_count: None,
+            commit_message: None,
+            pr_number: None,
+        }));
+    }
+
+    if want_repo {
+        let rows = ctx
+            .db
+            .list_repo_activity_by_actor(&target.id, limit)
+            .await
+            .map_err(db_err)?;
+        for r in rows {
+            if let Some(et) = event_type {
+                if r.push_type != et {
+                    continue;
+                }
+                if !event_types.iter().any(|t| t == &r.push_type) {
+                    event_types.push(r.push_type.clone());
+                }
+            } else if !event_types.iter().any(|t| t == &r.push_type) {
+                event_types.push(r.push_type.clone());
+            }
+            items.push(AdminUserActivityItem {
+                id: r.id.clone(),
+                source: "repository".into(),
+                event_type: r.push_type.clone(),
+                created_at: r.created_at.clone(),
+                target_type: None,
+                target_id: None,
+                detail: None,
+                ip_address: None,
+                user_agent: None,
+                repo_owner: r.repo_owner.clone(),
+                repo_name: r.repo_name.clone(),
+                ref_name: Some(r.ref_name.clone()),
+                commits_count: Some(r.commits_count),
+                commit_message: r.commit_message.clone(),
+                pr_number: r.pr_number,
+            });
+        }
+    }
+
+    items.sort_by(|a, b| b.created_at.cmp(&a.created_at).then(b.id.cmp(&a.id)));
+    items.truncate(limit as usize);
+    event_types.sort();
+
+    Ok(AdminUsersGetActivityResponse { items, event_types })
 }
 
 /// `admin.users.ban` — set banned_at + revoke sessions (PATs gated at resolve).
@@ -213,12 +379,20 @@ pub async fn ban(ctx: &RpcCtx, input: serde_json::Value) -> Result<AdminUserPubl
         .revoke_all(&ctx.db, &target.id)
         .await
         .map_err(session_err)?;
+    crate::audit::record(
+        ctx,
+        Some((&admin.id, &admin.username)),
+        "admin.user_ban",
+        Some(("user", &target.id)),
+        Some(serde_json::json!({ "username": target.username }).to_string()),
+    )
+    .await;
     Ok(to_admin_public(&updated))
 }
 
 /// `admin.users.unban` — clear banned_at (PATs become usable again).
 pub async fn unban(ctx: &RpcCtx, input: serde_json::Value) -> Result<AdminUserPublic, AppError> {
-    let _admin = require_admin_user(ctx).await?;
+    let admin = require_admin_user(ctx).await?;
     let req: AdminUsersUserIdRequest = serde_json::from_value(input).map_err(|e| {
         AppError::new(
             "rpc.bad_input",
@@ -234,6 +408,14 @@ pub async fn unban(ctx: &RpcCtx, input: serde_json::Value) -> Result<AdminUserPu
         .clear_user_banned_at(&target.id)
         .await
         .map_err(db_err)?;
+    crate::audit::record(
+        ctx,
+        Some((&admin.id, &admin.username)),
+        "admin.user_unban",
+        Some(("user", &target.id)),
+        Some(serde_json::json!({ "username": target.username }).to_string()),
+    )
+    .await;
     Ok(to_admin_public(&updated))
 }
 
@@ -350,6 +532,22 @@ pub async fn delete(
         .revoke_all(&ctx.db, &target.id)
         .await
         .map_err(session_err)?;
+    // Audit before delete — actor_id survives via ON DELETE SET NULL + username snapshot.
+    crate::audit::record(
+        ctx,
+        Some((&admin.id, &admin.username)),
+        "admin.user_delete",
+        Some(("user", &target.id)),
+        Some(
+            serde_json::json!({
+                "username": target.username,
+                "deleted_repos": deleted_repos,
+                "deleted_orgs": deleted_orgs,
+            })
+            .to_string(),
+        ),
+    )
+    .await;
     ctx.db.delete_user(&target.id).await.map_err(db_err)?;
 
     for slug in wipe_slugs {

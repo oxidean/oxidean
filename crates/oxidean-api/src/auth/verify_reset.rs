@@ -716,7 +716,13 @@ pub async fn reset_password(
         .map_err(session_err)?;
     let (_tok, cookie) = ctx
         .sessions
-        .create(&ctx.db, &user.id, false)
+        .create(
+            &ctx.db,
+            &user.id,
+            false,
+            ctx.client.ip_address.as_deref(),
+            ctx.client.user_agent.as_deref(),
+        )
         .await
         .map_err(session_err)?;
     ctx.set_cookie = Some(CookieChange::Set(cookie));
@@ -770,6 +776,7 @@ mod tests {
                 remember_me: false,
                 expires_at: Utc::now() + Duration::hours(1),
             }),
+            client: crate::rpc::ClientMeta::default(),
             set_cookie: None,
             lookup_limiter: Arc::new(std::sync::Mutex::new(
                 crate::user::rate_limit::LookupLimiter::new(),

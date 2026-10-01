@@ -32,7 +32,8 @@ pub use collaborators::{
     resolve_repo_for_admin, update as collaborators_update,
 };
 pub use invites::{
-    create as invites_create, list as invites_list, revoke as invites_revoke,
+    create as invites_create, create_link as invites_create_link, list as invites_list,
+    revoke as invites_revoke,
 };
 pub use fork_network::head_valid_for_base;
 pub use rename_transfer::{

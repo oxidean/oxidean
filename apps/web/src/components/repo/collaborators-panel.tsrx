@@ -2,8 +2,9 @@ import type {
   CollaboratorPermission,
   RepoCollaboratorPublic,
   RepoInvitePublic,
+  RepoInvitesCreateItemResult,
 } from "@oxidean/api-client";
-import { Check, ChevronDown } from "@octanejs/lucide";
+import { Check, ChevronDown, Link2 } from "@octanejs/lucide";
 import { useQuery, useQueryClient } from "@octanejs/tanstack-query";
 import { useForm } from "@octanejs/tanstack-form";
 import { useState } from "octane";
@@ -21,6 +22,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   SelectIcon,
   SelectItem,
@@ -46,6 +48,16 @@ const PERM_OPTIONS: { value: CollaboratorPermission; label: string }[] = [
 
 function permLabel(p: CollaboratorPermission): string {
   return PERM_OPTIONS.find((o) => o.value === p)?.label ?? p;
+}
+
+function inviteExpiryLabel(inv: { expires_at?: string | null }): string {
+  return inv.expires_at ? `expires ${inv.expires_at.slice(0, 10)}` : "never expires";
+}
+
+function inviteSeatsLabel(inv: { max_uses?: number | null; use_count: number }): string {
+  return inv.max_uses == null
+    ? `${inv.use_count} used · unlimited seats`
+    : `${inv.use_count}/${inv.max_uses} seats used`;
 }
 
 function collaboratorsQueryKey(owner: string, name: string) {
@@ -148,11 +160,17 @@ export function CollaboratorsPanel({ owner, name }: CollaboratorsPanelProps) @{
   const [addPending, setAddPending] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
 
+  const [inviteMode, setInviteMode] = useState<"emails" | "link">("emails");
+  const [inviteEmails, setInviteEmails] = useState("");
+  const [inviteLinkExpiry, setInviteLinkExpiry] = useState("");
+  const [inviteLinkMaxUses, setInviteLinkMaxUses] = useState("");
+  const [inviteResults, setInviteResults] = useState<RepoInvitesCreateItemResult[]>([]);
   const [inviteError, setInviteError] = useState("");
   const [inviteSuccess, setInviteSuccess] = useState("");
   const [invitePending, setInvitePending] = useState(false);
   const [createdInviteUrl, setCreatedInviteUrl] = useState("");
   const [copyState, setCopyState] = useState<"idle" | "copied" | "error">("idle");
+  const [copiedResultUrl, setCopiedResultUrl] = useState("");
 
   const addForm = useForm({
     defaultValues: {
@@ -192,7 +210,6 @@ export function CollaboratorsPanel({ owner, name }: CollaboratorsPanelProps) @{
 
   const inviteForm = useForm({
     defaultValues: {
-      email: "",
       permission: "write" as CollaboratorPermission,
     },
     onSubmit: async ({ value }) => {
@@ -200,17 +217,61 @@ export function CollaboratorsPanel({ owner, name }: CollaboratorsPanelProps) @{
       setInviteSuccess("");
       setCreatedInviteUrl("");
       setCopyState("idle");
-      const email = value.email.trim();
-      if (!email) {
-        setInviteError("Email is required.");
+      setCopiedResultUrl("");
+
+      if (inviteMode === "link") {
+        const maxUsesRaw = inviteLinkMaxUses.trim();
+        let maxUses: number | null = null;
+        if (maxUsesRaw) {
+          const parsed = Number(maxUsesRaw);
+          if (!Number.isInteger(parsed) || parsed <= 0) {
+            setInviteError("Max seats must be a positive whole number.");
+            return;
+          }
+          maxUses = parsed;
+        }
+        setInviteResults([]);
+        setInvitePending(true);
+        try {
+          const res = await apiClient.repo.invites.createLink({
+            owner,
+            name,
+            permission: value.permission,
+            expires_at: inviteLinkExpiry || null,
+            max_uses: maxUses,
+          });
+          if (!res.ok) {
+            setInviteError(res.error.message || NETWORK_ERROR);
+            setInvitePending(false);
+            return;
+          }
+          setCreatedInviteUrl(res.data.invite_url);
+          setInviteLinkExpiry("");
+          setInviteLinkMaxUses("");
+          setInvitePending(false);
+          await refreshInvites();
+        } catch {
+          setInviteError(NETWORK_ERROR);
+          setInvitePending(false);
+        }
         return;
       }
+
+      const emails = inviteEmails
+        .split(/[\s,;]+/)
+        .map((e) => e.trim())
+        .filter(Boolean);
+      if (emails.length === 0) {
+        setInviteError("Enter at least one email address.");
+        return;
+      }
+      setInviteResults([]);
       setInvitePending(true);
       try {
         const res = await apiClient.repo.invites.create({
           owner,
           name,
-          email,
+          emails,
           permission: value.permission,
         });
         if (!res.ok) {
@@ -218,9 +279,15 @@ export function CollaboratorsPanel({ owner, name }: CollaboratorsPanelProps) @{
           setInvitePending(false);
           return;
         }
-        inviteForm.reset();
-        setInviteSuccess("Invitation sent.");
-        setCreatedInviteUrl(res.data.invite_url);
+        setInviteResults(res.data.results);
+        setInviteEmails("");
+        const ok = res.data.results.filter((r) => r.ok).length;
+        const failed = res.data.results.length - ok;
+        setInviteSuccess(
+          failed > 0
+            ? `Created ${ok} invite${ok === 1 ? "" : "s"}; ${failed} recipient${failed === 1 ? "" : "s"} failed.`
+            : `Created ${ok} invite${ok === 1 ? "" : "s"}.`,
+        );
         setInvitePending(false);
         await refreshInvites();
       } catch {
@@ -261,6 +328,19 @@ export function CollaboratorsPanel({ owner, name }: CollaboratorsPanelProps) @{
       window.setTimeout(() => setCopyState("idle"), 2000);
     } catch {
       setCopyState("error");
+    }
+  }
+
+  async function copyResultUrl(url: string) {
+    try {
+      if (!navigator.clipboard?.writeText) {
+        throw new Error("clipboard unavailable");
+      }
+      await navigator.clipboard.writeText(url);
+      setCopiedResultUrl(url);
+      window.setTimeout(() => setCopiedResultUrl(""), 2000);
+    } catch {
+      setCopiedResultUrl("");
     }
   }
 
@@ -488,10 +568,11 @@ export function CollaboratorsPanel({ owner, name }: CollaboratorsPanelProps) @{
 
     <section className="mt-8 flex flex-col gap-4" aria-labelledby="repo-invites-heading">
       <h3 id="repo-invites-heading" className="text-[16px] font-semibold text-foreground">
-        Email invitations
+        Invitations
       </h3>
       <p className="text-[14px] text-muted-foreground">
-        Invite someone by email. They can join even when public sign-up is closed.
+        Invite people by email or share a reusable link. They can join even when public sign-up is
+        closed.
       </p>
 
       <form
@@ -503,6 +584,42 @@ export function CollaboratorsPanel({ owner, name }: CollaboratorsPanelProps) @{
           void inviteForm.handleSubmit();
         }}
       >
+        <div className="flex gap-2" role="group" aria-label="Invite mode">
+          <button
+            type="button"
+            data-testid="repo-invite-mode-emails"
+            aria-pressed={inviteMode === "emails"}
+            className={
+              "rounded-full border px-3 py-1 text-[13px] transition-colors " +
+              (inviteMode === "emails"
+                ? "border-primary bg-primary/10 text-foreground"
+                : "border-border text-muted-foreground hover:text-foreground")
+            }
+            onClick={() => {
+              setInviteMode("emails");
+              setInviteError("");
+            }}
+          >
+            By email
+          </button>
+          <button
+            type="button"
+            data-testid="repo-invite-mode-link"
+            aria-pressed={inviteMode === "link"}
+            className={
+              "rounded-full border px-3 py-1 text-[13px] transition-colors " +
+              (inviteMode === "link"
+                ? "border-primary bg-primary/10 text-foreground"
+                : "border-border text-muted-foreground hover:text-foreground")
+            }
+            onClick={() => {
+              setInviteMode("link");
+              setInviteError("");
+            }}
+          >
+            Invite link
+          </button>
+        </div>
         @if (inviteError) {
           <AuthErrorBanner message={inviteError} />;
         }
@@ -537,22 +654,98 @@ export function CollaboratorsPanel({ owner, name }: CollaboratorsPanelProps) @{
             }
           </div>;
         }
-        <inviteForm.Field name="email">
-          {(field) => (
+        @if (inviteResults.length > 0) {
+          <div
+            className="max-h-64 overflow-y-auto rounded-md border border-border"
+            data-testid="repo-invite-results"
+          >
+            <ul className="divide-y divide-border">
+              @for (const r of inviteResults; key r.email) {
+                <li className="flex flex-col gap-1 px-4 py-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="truncate text-[14px] font-medium text-foreground">
+                      {r.email as string}
+                    </p>
+                    @if (r.ok && r.invite_url) {
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="shrink-0"
+                        data-testid={`repo-invite-result-copy-${r.email}`}
+                        onClick={() => void copyResultUrl(r.invite_url!)}
+                      >
+                        {
+                          (copiedResultUrl === r.invite_url
+                            ? "Copied"
+                            : "Copy link") as string
+                        }
+                      </Button>;
+                    }
+                  </div>
+                  @if (!r.ok) {
+                    <p role="alert" className="text-[13px] text-destructive">
+                      {(r.error ?? "Failed") as string}
+                    </p>;
+                  }
+                </li>;
+              }
+            </ul>
+          </div>;
+        }
+        @if (inviteMode === "emails") {
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="repo-invite-emails">Emails</Label>
+            <Textarea
+              id="repo-invite-emails"
+              data-testid="repo-invite-emails"
+              placeholder={"one@example.com\ntwo@example.com" as string}
+              value={inviteEmails as string}
+              onInput={(ev) =>
+                setInviteEmails((ev.currentTarget as HTMLTextAreaElement).value)
+              }
+              disabled={invitePending}
+            />
+            <p className="text-[13px] text-muted-foreground">
+              Separate addresses with commas, spaces, or new lines (max 50).
+            </p>
+          </div>;
+        } @else {
+          <>
             <div className="flex flex-col gap-2">
-              <Label htmlFor="repo-invite-email">Email</Label>
+              <Label htmlFor="repo-invite-link-expiry">Expires on (optional)</Label>
               <Input
-                id="repo-invite-email"
-                name="email"
-                type="email"
-                autoComplete="email"
-                value={field.state.value}
-                onBlur={field.handleBlur}
-                onInput={(ev) => field.handleChange((ev.currentTarget as HTMLInputElement).value)}
+                id="repo-invite-link-expiry"
+                data-testid="repo-invite-link-expiry"
+                type="date"
+                value={inviteLinkExpiry as string}
+                onInput={(ev) =>
+                  setInviteLinkExpiry((ev.currentTarget as HTMLInputElement).value)
+                }
+                disabled={invitePending}
+              />
+              <p className="text-[13px] text-muted-foreground">
+                Leave empty for a link that never expires.
+              </p>
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="repo-invite-link-seats">Max seats (optional)</Label>
+              <Input
+                id="repo-invite-link-seats"
+                data-testid="repo-invite-link-seats"
+                type="number"
+                min={1}
+                step={1}
+                placeholder="Unlimited"
+                value={inviteLinkMaxUses as string}
+                onInput={(ev) =>
+                  setInviteLinkMaxUses((ev.currentTarget as HTMLInputElement).value)
+                }
+                disabled={invitePending}
               />
             </div>
-          )}
-        </inviteForm.Field>
+          </>;
+        }
         <inviteForm.Subscribe selector={(s) => s.values.permission}>
           {(invitePerm) => (
             <div className="flex flex-col gap-2">
@@ -570,7 +763,9 @@ export function CollaboratorsPanel({ owner, name }: CollaboratorsPanelProps) @{
           @if (invitePending) {
             <>Sending…</>;
           } @else {
-            <>Send invitation</>;
+            <>
+              {(inviteMode === "link" ? "Create invite link" : "Send invitations") as string}
+            </>;
           }
         </Button>
       </form>
@@ -593,14 +788,23 @@ export function CollaboratorsPanel({ owner, name }: CollaboratorsPanelProps) @{
           @for (const inv of invites; key inv.id) {
             <li className="flex flex-wrap items-center justify-between gap-3 py-3">
               <div>
-                <p className="text-[14px] font-medium text-foreground">
-                  {inv.email as string}
+                <p className="flex items-center gap-1.5 text-[14px] font-medium text-foreground">
+                  @if (inv.email == null) {
+                    <Link2
+                      aria-hidden
+                      size={14}
+                      className="text-muted-foreground"
+                    />;
+                  }
+                  {(inv.email ?? "Invite link") as string}
                 </p>
                 <p className="text-[13px] text-muted-foreground">
                   {
                     (permLabel(inv.permission) +
-                      " · expires " +
-                      inv.expires_at) as string
+                      " · " +
+                      inviteExpiryLabel(inv) +
+                      " · " +
+                      inviteSeatsLabel(inv)) as string
                   }
                 </p>
               </div>
@@ -677,7 +881,9 @@ export function CollaboratorsPanel({ owner, name }: CollaboratorsPanelProps) @{
           <AlertDialogDescription>
             {
               (revokeTarget
-                ? `Revokes the invitation for ${revokeTarget.email}. They will no longer be able to join with this link.`
+                ? revokeTarget.email
+                  ? `Revokes the invitation for ${revokeTarget.email}. They will no longer be able to join with this link.`
+                  : "Revokes this invite link. It will no longer be usable."
                 : "Revoke this invitation?") as string
             }
           </AlertDialogDescription>

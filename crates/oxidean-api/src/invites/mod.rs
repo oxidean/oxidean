@@ -1,9 +1,11 @@
-//! Unified invite accept (`invites.accept`) — instance then organization tokens.
+//! Unified invite accept (`invites.accept`) + invite preview (`invites.get`).
+//! Token lookup order: instance, then organization, then repository invites.
 
 use chrono::Utc;
 use oxidean_core::{
     is_reserved_username, validate_username, AppError, CollaboratorPermission, InvitesAcceptRequest,
-    InvitesAcceptResponse, OrgMemberPublic, OrgPublic, OrgRole, Role,
+    InvitesAcceptResponse, InvitesGetRequest, InvitesGetResponse, OrgMemberPublic, OrgPublic,
+    OrgRole, Role,
 };
 use oxidean_db::UserRow;
 use sha2::{Digest, Sha256};
@@ -80,15 +82,47 @@ fn parse_expires(raw: &str) -> Result<chrono::DateTime<Utc>, AppError> {
         .map_err(|_| invalid_invite())
 }
 
-/// Resolve or provision a user for an invite email (shared by instance + org accept).
+/// `Some(reason)` when the invite is not acceptable: revoked / expired / seats gone.
+fn not_acceptable_reason(
+    expires_at: Option<&str>,
+    revoked_at: Option<&str>,
+    max_uses: Option<i64>,
+    use_count: i64,
+) -> Option<&'static str> {
+    if revoked_at.is_some() {
+        return Some("revoked");
+    }
+    if let Some(raw) = expires_at {
+        match parse_expires(raw) {
+            Ok(dt) if dt > Utc::now() => {}
+            Ok(_) => return Some("expired"),
+            Err(_) => return Some("expired"),
+        }
+    }
+    if let Some(max) = max_uses {
+        if use_count >= max {
+            return Some("exhausted");
+        }
+    }
+    None
+}
+
+fn seats_remaining(max_uses: Option<i64>, use_count: i64) -> Option<i64> {
+    max_uses.map(|m| (m - use_count).max(0))
+}
+
+/// Resolve or provision the invitee.
+///
+/// `invite_email` is `Some` for email-bound invites (must match), `None` for
+/// shareable links — then any signed-in user may accept, and anonymous accepts
+/// must supply `request_email` so an account can be provisioned.
 pub async fn resolve_or_provision_invitee(
     ctx: &mut RpcCtx,
-    invite_email: &str,
+    invite_email: Option<&str>,
+    request_email: Option<&str>,
     username: Option<&str>,
     password: Option<&str>,
 ) -> Result<UserRow, AppError> {
-    let email = normalize_email(invite_email)?;
-
     if let Some(session) = &ctx.session {
         let session_user = ctx
             .db
@@ -102,14 +136,31 @@ pub async fn resolve_or_provision_invitee(
                 "This account has been suspended.",
             ));
         }
-        if session_user.email.eq_ignore_ascii_case(&email) {
-            return Ok(session_user);
+        // Email-bound invites still enforce the recipient match; link invites
+        // accept any signed-in user.
+        if let Some(bound) = invite_email {
+            if session_user.email.eq_ignore_ascii_case(&normalize_email(bound)?) {
+                return Ok(session_user);
+            }
+            return Err(AppError::new(
+                "invite.email_mismatch",
+                "signed-in email does not match this invitation",
+            ));
         }
-        return Err(AppError::new(
-            "invite.email_mismatch",
-            "signed-in email does not match this invitation",
-        ));
+        return Ok(session_user);
     }
+
+    // Anonymous accept — effective email is the bound invite email or the
+    // caller-supplied account email for shareable links.
+    let email = match invite_email {
+        Some(bound) => normalize_email(bound)?,
+        None => normalize_email(request_email.unwrap_or("")).map_err(|_| {
+            AppError::new(
+                "rpc.bad_input",
+                "email is required to accept this invitation",
+            )
+        })?,
+    };
 
     if ctx
         .db
@@ -193,7 +244,13 @@ pub async fn resolve_or_provision_invitee(
 
     let (_tok, cookie) = ctx
         .sessions
-        .create(&ctx.db, &created.id, false)
+        .create(
+            &ctx.db,
+            &created.id,
+            false,
+            ctx.client.ip_address.as_deref(),
+            ctx.client.user_agent.as_deref(),
+        )
         .await
         .map_err(session_err)?;
     ctx.set_cookie = Some(CookieChange::Set(cookie));
@@ -208,6 +265,7 @@ pub async fn resolve_or_provision_invitee(
 async fn accept_instance(
     ctx: &mut RpcCtx,
     token: &str,
+    email: Option<&str>,
     username: Option<&str>,
     password: Option<&str>,
 ) -> Result<Option<InvitesAcceptResponse>, AppError> {
@@ -221,19 +279,29 @@ async fn accept_instance(
         None => return Ok(None),
     };
 
-    if row.accepted_at.is_some() || row.revoked_at.is_some() {
-        return Err(invalid_invite());
-    }
-    let expires_at = parse_expires(&row.expires_at)?;
-    if expires_at <= Utc::now() {
+    if not_acceptable_reason(
+        row.expires_at.as_deref(),
+        row.revoked_at.as_deref(),
+        row.max_uses,
+        row.use_count,
+    )
+    .is_some()
+    {
         return Err(invalid_invite());
     }
 
-    let _user = resolve_or_provision_invitee(ctx, &row.email, username, password).await?;
+    let user = resolve_or_provision_invitee(
+        ctx,
+        row.email.as_deref(),
+        email,
+        username,
+        password,
+    )
+    .await?;
 
     let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
     ctx.db
-        .accept_instance_invite(&row.id, &now)
+        .consume_instance_invite(&row.id, &now)
         .await
         .map_err(|e| {
             if e.contains("not found") {
@@ -243,12 +311,22 @@ async fn accept_instance(
             }
         })?;
 
+    crate::audit::record(
+        ctx,
+        Some((&user.id, &user.username)),
+        "invite.accept",
+        Some(("invite", &row.id)),
+        Some(serde_json::json!({ "kind": "instance" }).to_string()),
+    )
+    .await;
+
     Ok(Some(InvitesAcceptResponse::Instance))
 }
 
 async fn accept_org(
     ctx: &mut RpcCtx,
     token: &str,
+    email: Option<&str>,
     username: Option<&str>,
     password: Option<&str>,
 ) -> Result<Option<InvitesAcceptResponse>, AppError> {
@@ -262,11 +340,14 @@ async fn accept_org(
         None => return Ok(None),
     };
 
-    if row.accepted_at.is_some() || row.revoked_at.is_some() {
-        return Err(invalid_invite());
-    }
-    let expires_at = parse_expires(&row.expires_at)?;
-    if expires_at <= Utc::now() {
+    if not_acceptable_reason(
+        row.expires_at.as_deref(),
+        row.revoked_at.as_deref(),
+        row.max_uses,
+        row.use_count,
+    )
+    .is_some()
+    {
         return Err(invalid_invite());
     }
 
@@ -281,7 +362,14 @@ async fn accept_org(
         .map_err(org_db_err)?
         .ok_or_else(invalid_invite)?;
 
-    let user = resolve_or_provision_invitee(ctx, &row.email, username, password).await?;
+    let user = resolve_or_provision_invitee(
+        ctx,
+        row.email.as_deref(),
+        email,
+        username,
+        password,
+    )
+    .await?;
 
     if ctx
         .db
@@ -290,23 +378,17 @@ async fn accept_org(
         .map_err(org_db_err)?
         .is_some()
     {
-        let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-        let _ = ctx.db.accept_org_invite(&row.id, &now).await;
+        // Already a member — do not consume a seat on shareable links.
         return Err(AppError::new(
             "org.already_member",
             "user is already a member of this organization",
         ));
     }
 
-    let member_row = ctx
-        .db
-        .insert_org_member(&org.id, &user.id, invite_role.as_str())
-        .await
-        .map_err(org_db_err)?;
-
+    // Consume a seat before granting membership so a race cannot over-grant.
     let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
     ctx.db
-        .accept_org_invite(&row.id, &now)
+        .consume_org_invite(&row.id, &now)
         .await
         .map_err(|e| {
             if e == "org invite not found" {
@@ -315,6 +397,21 @@ async fn accept_org(
                 org_db_err(e)
             }
         })?;
+
+    let member_row = ctx
+        .db
+        .insert_org_member(&org.id, &user.id, invite_role.as_str())
+        .await
+        .map_err(org_db_err)?;
+
+    crate::audit::record(
+        ctx,
+        Some((&user.id, &user.username)),
+        "invite.accept",
+        Some(("invite", &row.id)),
+        Some(serde_json::json!({ "kind": "org", "org": org.slug }).to_string()),
+    )
+    .await;
 
     let org_public: OrgPublic = to_public(&org)?;
     Ok(Some(InvitesAcceptResponse::Org {
@@ -331,6 +428,7 @@ async fn accept_org(
 async fn accept_repo(
     ctx: &mut RpcCtx,
     token: &str,
+    email: Option<&str>,
     username: Option<&str>,
     password: Option<&str>,
 ) -> Result<InvitesAcceptResponse, AppError> {
@@ -341,11 +439,14 @@ async fn accept_repo(
         .map_err(db_err)?
         .ok_or_else(invalid_invite)?;
 
-    if row.accepted_at.is_some() || row.revoked_at.is_some() {
-        return Err(invalid_invite());
-    }
-    let expires_at = parse_expires(&row.expires_at)?;
-    if expires_at <= Utc::now() {
+    if not_acceptable_reason(
+        row.expires_at.as_deref(),
+        row.revoked_at.as_deref(),
+        row.max_uses,
+        row.use_count,
+    )
+    .is_some()
+    {
         return Err(invalid_invite());
     }
 
@@ -379,7 +480,14 @@ async fn accept_repo(
             .ok_or_else(invalid_invite)?
     };
 
-    let user = resolve_or_provision_invitee(ctx, &row.email, username, password).await?;
+    let user = resolve_or_provision_invitee(
+        ctx,
+        row.email.as_deref(),
+        email,
+        username,
+        password,
+    )
+    .await?;
 
     if let Some(existing) = ctx
         .db
@@ -387,9 +495,7 @@ async fn accept_repo(
         .await
         .map_err(db_err)?
     {
-        let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-        let _ = ctx.db.accept_repo_invite(&row.id, &now).await;
-        // Already has a grant — mark invite used; do not change the existing permission.
+        // Already has a grant — do not burn a link seat; keep existing permission.
         let existing_perm = CollaboratorPermission::parse(&existing.permission).map_err(|_| {
             AppError::new("repo.internal", "repository operation failed")
         })?;
@@ -400,10 +506,8 @@ async fn accept_repo(
         });
     }
 
-    // Personal owner already has full access.
+    // Personal owner already has full access — no seat consumed.
     if repo.owner_type.eq_ignore_ascii_case("user") && repo.owner_id == user.id {
-        let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-        let _ = ctx.db.accept_repo_invite(&row.id, &now).await;
         return Ok(InvitesAcceptResponse::Repo {
             owner: owner_slug,
             name: repo.name,
@@ -411,14 +515,10 @@ async fn accept_repo(
         });
     }
 
-    ctx.db
-        .insert_repo_collaborator(&repo.id, &user.id, permission.as_str())
-        .await
-        .map_err(db_err)?;
-
+    // Consume a seat before granting access so a race cannot over-grant.
     let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
     ctx.db
-        .accept_repo_invite(&row.id, &now)
+        .consume_repo_invite(&row.id, &now)
         .await
         .map_err(|e| {
             if e == "repo invite not found" {
@@ -427,6 +527,20 @@ async fn accept_repo(
                 db_err(e)
             }
         })?;
+
+    ctx.db
+        .insert_repo_collaborator(&repo.id, &user.id, permission.as_str())
+        .await
+        .map_err(db_err)?;
+
+    crate::audit::record(
+        ctx,
+        Some((&user.id, &user.username)),
+        "invite.accept",
+        Some(("invite", &row.id)),
+        Some(serde_json::json!({ "kind": "repo", "repo": format!("{owner_slug}/{}", repo.name) }).to_string()),
+    )
+    .await;
 
     Ok(InvitesAcceptResponse::Repo {
         owner: owner_slug,
@@ -451,14 +565,145 @@ pub async fn accept(
         return Err(invalid_invite());
     }
 
+    let email = req.email.as_deref();
     let username = req.username.as_deref();
     let password = req.password.as_deref();
 
-    if let Some(resp) = accept_instance(ctx, token, username, password).await? {
+    if let Some(resp) = accept_instance(ctx, token, email, username, password).await? {
         return Ok(resp);
     }
-    if let Some(resp) = accept_org(ctx, token, username, password).await? {
+    if let Some(resp) = accept_org(ctx, token, email, username, password).await? {
         return Ok(resp);
     }
-    accept_repo(ctx, token, username, password).await
+    accept_repo(ctx, token, email, username, password).await
+}
+
+/// `invites.get` — anonymous-safe preview: scope, bound email, expiry, seats.
+/// Unknown tokens return `invite.invalid` (same message as accept).
+pub async fn get(
+    ctx: &mut RpcCtx,
+    input: serde_json::Value,
+) -> Result<InvitesGetResponse, AppError> {
+    let req: InvitesGetRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid invites.get input: {e}"),
+        )
+    })?;
+    let token = req.token.trim();
+    if token.is_empty() || token.len() != TOKEN_HEX_LEN {
+        return Err(invalid_invite());
+    }
+    let token_hash = sha256_hex(token.as_bytes());
+
+    if let Some(row) = ctx
+        .db
+        .find_instance_invite_by_token_hash(&token_hash)
+        .await
+        .map_err(db_err)?
+    {
+        let reason = not_acceptable_reason(
+            row.expires_at.as_deref(),
+            row.revoked_at.as_deref(),
+            row.max_uses,
+            row.use_count,
+        );
+        return Ok(InvitesGetResponse {
+            kind: "instance".into(),
+            email: row.email,
+            expires_at: row.expires_at,
+            seats_remaining: seats_remaining(row.max_uses, row.use_count),
+            org_slug: None,
+            org_display_name: None,
+            repo_owner: None,
+            repo_name: None,
+            grant: None,
+            acceptable: reason.is_none(),
+            reason: reason.map(|s| s.to_string()),
+        });
+    }
+
+    if let Some(row) = ctx
+        .db
+        .find_org_invite_by_token_hash(&token_hash)
+        .await
+        .map_err(org_db_err)?
+    {
+        let org = ctx
+            .db
+            .find_organization_by_id(&row.org_id)
+            .await
+            .map_err(org_db_err)?
+            .ok_or_else(invalid_invite)?;
+        let reason = not_acceptable_reason(
+            row.expires_at.as_deref(),
+            row.revoked_at.as_deref(),
+            row.max_uses,
+            row.use_count,
+        );
+        return Ok(InvitesGetResponse {
+            kind: "org".into(),
+            email: row.email,
+            expires_at: row.expires_at,
+            seats_remaining: seats_remaining(row.max_uses, row.use_count),
+            org_slug: Some(org.slug),
+            org_display_name: Some(org.display_name),
+            repo_owner: None,
+            repo_name: None,
+            grant: Some(row.role),
+            acceptable: reason.is_none(),
+            reason: reason.map(|s| s.to_string()),
+        });
+    }
+
+    let row = ctx
+        .db
+        .find_repo_invite_by_token_hash(&token_hash)
+        .await
+        .map_err(db_err)?
+        .ok_or_else(invalid_invite)?;
+
+    let repo = ctx
+        .db
+        .find_repository_by_id(&row.repository_id)
+        .await
+        .map_err(db_err)?
+        .ok_or_else(invalid_invite)?;
+    if repo.deleted_at.is_some() {
+        return Err(invalid_invite());
+    }
+    let owner_slug = if repo.owner_type.eq_ignore_ascii_case("org") {
+        ctx.db
+            .find_organization_by_id(&repo.owner_id)
+            .await
+            .map_err(db_err)?
+            .map(|o| o.slug)
+            .ok_or_else(invalid_invite)?
+    } else {
+        ctx.db
+            .find_user_by_id(&repo.owner_id)
+            .await
+            .map_err(db_err)?
+            .map(|u| u.username)
+            .ok_or_else(invalid_invite)?
+    };
+    let reason = not_acceptable_reason(
+        row.expires_at.as_deref(),
+        row.revoked_at.as_deref(),
+        row.max_uses,
+        row.use_count,
+    );
+    Ok(InvitesGetResponse {
+        kind: "repo".into(),
+        email: row.email,
+        expires_at: row.expires_at,
+        seats_remaining: seats_remaining(row.max_uses, row.use_count),
+        org_slug: None,
+        org_display_name: None,
+        repo_owner: Some(owner_slug),
+        repo_name: Some(repo.name),
+        grant: Some(row.permission),
+        acceptable: reason.is_none(),
+        reason: reason.map(|s| s.to_string()),
+    })
 }

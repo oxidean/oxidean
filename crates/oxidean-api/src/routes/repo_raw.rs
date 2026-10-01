@@ -143,8 +143,18 @@ fn parse_archive_filename(name: &str) -> Result<(&str, ArchiveFormat), Response>
 
 async fn build_ctx(state: &AppState, headers: &HeaderMap) -> RpcCtx {
     let token = session_token_from_headers(headers);
+    let client = crate::rpc::ClientMeta::from_headers(headers);
     let session = match token.as_deref() {
-        Some(t) => match state.sessions.resolve(&state.db, t).await {
+        Some(t) => match state
+            .sessions
+            .resolve(
+                &state.db,
+                t,
+                client.ip_address.as_deref(),
+                client.user_agent.as_deref(),
+            )
+            .await
+        {
             Ok(s) => s,
             Err(e) => {
                 tracing::warn!(error = %e, "session resolve failed on raw");
@@ -168,6 +178,7 @@ async fn build_ctx(state: &AppState, headers: &HeaderMap) -> RpcCtx {
         git: state.git.clone(),
         env_name: state.env_name.clone(),
         session,
+        client,
         set_cookie: None,
         lookup_limiter: state.lookup_limiter.clone(),
         search_timeout_ms: state.search_timeout_ms,

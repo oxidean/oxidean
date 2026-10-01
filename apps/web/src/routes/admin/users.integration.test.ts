@@ -6,6 +6,7 @@ const meMock = vi.fn();
 const listUsersMock = vi.fn();
 const listInvitesMock = vi.fn();
 const createInviteMock = vi.fn();
+const createLinkMock = vi.fn();
 const updateRoleMock = vi.fn();
 const revokeSessionsMock = vi.fn();
 const banMock = vi.fn();
@@ -13,6 +14,8 @@ const unbanMock = vi.fn();
 const deleteUserMock = vi.fn();
 const revokeInviteMock = vi.fn();
 const getAccessMock = vi.fn();
+const listSessionsMock = vi.fn();
+const getActivityMock = vi.fn();
 
 vi.mock("@/lib/api-client", () => ({
   apiClient: {
@@ -28,9 +31,12 @@ vi.mock("@/lib/api-client", () => ({
         unban: (...args: unknown[]) => unbanMock(...args),
         delete: (...args: unknown[]) => deleteUserMock(...args),
         getAccess: (...args: unknown[]) => getAccessMock(...args),
+        listSessions: (...args: unknown[]) => listSessionsMock(...args),
+        getActivity: (...args: unknown[]) => getActivityMock(...args),
       },
       invites: {
         create: (...args: unknown[]) => createInviteMock(...args),
+        createLink: (...args: unknown[]) => createLinkMock(...args),
         list: (...args: unknown[]) => listInvitesMock(...args),
         revoke: (...args: unknown[]) => revokeInviteMock(...args),
       },
@@ -92,6 +98,18 @@ const pendingInvite = {
   expires_at: "2026-10-07T00:00:00Z",
   invited_by: sysAdmin.id,
   created_at: "2026-09-30T00:00:00Z",
+  max_uses: 1,
+  use_count: 0,
+};
+
+const pendingLinkInvite = {
+  id: "inv-2",
+  email: null,
+  expires_at: null,
+  invited_by: sysAdmin.id,
+  created_at: "2026-09-30T00:00:00Z",
+  max_uses: 5,
+  use_count: 2,
 };
 
 type LoaderShape =
@@ -102,7 +120,7 @@ type LoaderShape =
       kind: "ready";
       me: typeof sysAdmin;
       users: typeof readyUsers;
-      invites: (typeof pendingInvite)[];
+      invites: (typeof pendingInvite | typeof pendingLinkInvite)[];
     };
 
 let loaderData: LoaderShape | undefined;
@@ -147,8 +165,68 @@ describe("/admin/users", () => {
     createInviteMock.mockResolvedValue({
       ok: true,
       data: {
-        invite: pendingInvite,
-        invite_url: "https://oxidean.example/invites/tok-abc",
+        results: [
+          {
+            email: "fresh@example.com",
+            ok: true,
+            invite: pendingInvite,
+            invite_url: "https://oxidean.example/invites/tok-abc",
+          },
+        ],
+      },
+    });
+    createLinkMock.mockResolvedValue({
+      ok: true,
+      data: {
+        invite: pendingLinkInvite,
+        invite_url: "https://oxidean.example/invites/tok-link",
+      },
+    });
+    listSessionsMock.mockResolvedValue({
+      ok: true,
+      data: {
+        sessions: [
+          {
+            id: "s1",
+            created_at: "2026-09-29T10:00:00Z",
+            last_seen_at: "2026-09-30T08:00:00Z",
+            expires_at: "2026-10-30T00:00:00Z",
+            remember_me: true,
+            ip_address: "203.0.113.7",
+            user_agent: "Mozilla/5.0 TestBrowser",
+          },
+        ],
+      },
+    });
+    getActivityMock.mockResolvedValue({
+      ok: true,
+      data: {
+        items: [
+          {
+            id: "ae-1",
+            source: "audit",
+            event_type: "admin.user_ban",
+            created_at: "2026-09-30T09:00:00Z",
+            target_type: "user",
+            target_id: "u9",
+            detail: '{"note":"spam"}',
+            ip_address: "198.51.100.4",
+            user_agent: "curl/8.0",
+          },
+          {
+            id: "ra-1",
+            source: "repository",
+            event_type: "push",
+            created_at: "2026-09-29T12:00:00Z",
+            repo_owner: "acme",
+            repo_name: "app",
+            ref_name: "main",
+            commits_count: 3,
+            commit_message: "fix things",
+            pr_number: null,
+          },
+        ],
+        event_types: ["admin.user_ban", "push"],
       },
     });
     banMock.mockResolvedValue({
@@ -249,7 +327,7 @@ describe("/admin/users", () => {
     });
   }, 15_000);
 
-  it("creates an invite and shows a copyable invite URL control", async () => {
+  it("creates a bulk invite and shows per-recipient results with copy controls", async () => {
     renderWithQueryClient(AdminUsersPage);
 
     await waitFor(() => {
@@ -268,13 +346,72 @@ describe("/admin/users", () => {
     fireEvent.click(screen.getByTestId("admin-invite-create"));
 
     await waitFor(() => {
-      expect(createInviteMock).toHaveBeenCalledWith({ email: "fresh@example.com" });
+      expect(createInviteMock).toHaveBeenCalledWith({ emails: ["fresh@example.com"] });
+      expect(screen.getByTestId("admin-invite-results")).toBeTruthy();
+      expect(screen.getByTestId("admin-invite-result-copy-fresh@example.com")).toBeTruthy();
+    });
+  });
+
+  it("creates a shareable invite link with expiry and seats", async () => {
+    renderWithQueryClient(AdminUsersPage);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("admin-invite-open")).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByTestId("admin-invite-open"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("admin-invite-dialog")).toHaveAttribute("data-open");
+    });
+
+    fireEvent.click(screen.getByTestId("admin-invite-mode-link"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("admin-invite-link-expiry")).toBeTruthy();
+    });
+    fireEvent.input(screen.getByTestId("admin-invite-link-expiry"), {
+      target: { value: "2026-12-31" },
+    });
+    fireEvent.input(screen.getByTestId("admin-invite-link-seats"), {
+      target: { value: "10" },
+    });
+    fireEvent.click(screen.getByTestId("admin-invite-create"));
+
+    await waitFor(() => {
+      expect(createLinkMock).toHaveBeenCalledWith({
+        expires_at: "2026-12-31",
+        max_uses: 10,
+      });
       expect(screen.getByTestId("admin-invite-url-panel")).toBeTruthy();
       expect(screen.getByTestId("admin-invite-url")).toHaveValue(
-        "https://oxidean.example/invites/tok-abc",
+        "https://oxidean.example/invites/tok-link",
       );
       expect(screen.getByTestId("admin-invite-url-copy")).toBeTruthy();
-      expect(screen.getByRole("button", { name: /Copy invite URL|Copy link/i })).toBeTruthy();
+    });
+  });
+
+  it("renders link invites with seat usage and no expiry", async () => {
+    listInvitesMock.mockResolvedValue({
+      ok: true,
+      data: { invites: [pendingInvite, pendingLinkInvite] },
+    });
+    loaderData = {
+      kind: "ready",
+      me: sysAdmin,
+      users: readyUsers,
+      invites: [pendingInvite, pendingLinkInvite],
+    };
+
+    renderWithQueryClient(AdminUsersPage);
+
+    await waitFor(() => {
+      expect(screen.getByText("new@example.com")).toBeTruthy();
+      // The invite dialog's "Invite link" mode button stays mounted (portal),
+      // so the pending row's label is not the only match.
+      expect(screen.getAllByText("Invite link").length).toBeGreaterThan(0);
+      expect(screen.getByText(/Never expires/)).toBeTruthy();
+      expect(screen.getByText(/2\/5 seats used/)).toBeTruthy();
     });
   });
 
@@ -397,6 +534,55 @@ describe("/admin/users", () => {
       expect(panel.textContent).toMatch(/write/i);
       expect(panel.querySelector('a[href="/acme"]')).toBeTruthy();
       expect(panel.querySelector('a[href="/acme/app"]')).toBeTruthy();
+    });
+  });
+
+  it("detail panel lists sessions with client metadata", async () => {
+    renderWithQueryClient(AdminUsersPage);
+
+    await openUserMenu("u2");
+    fireEvent.click(screen.getByTestId("admin-user-access-toggle-u2"));
+
+    await waitFor(() => {
+      expect(listSessionsMock).toHaveBeenCalledWith({ user_id: "u2" });
+      const sessions = screen.getByTestId("admin-user-sessions-u2");
+      expect(sessions.textContent).toMatch(/203\.0\.113\.7/);
+      expect(sessions.textContent).toMatch(/TestBrowser/);
+      expect(sessions.textContent).toMatch(/remember me/);
+      expect(sessions.textContent).toMatch(/Last seen/);
+    });
+  });
+
+  it("detail panel lists activity and filters by source", async () => {
+    renderWithQueryClient(AdminUsersPage);
+
+    await openUserMenu("u2");
+    fireEvent.click(screen.getByTestId("admin-user-access-toggle-u2"));
+
+    await waitFor(() => {
+      expect(getActivityMock).toHaveBeenCalledWith({
+        user_id: "u2",
+        source: null,
+        event_type: null,
+        limit: 100,
+      });
+      const activity = screen.getByTestId("admin-user-activity-u2");
+      expect(activity.textContent).toMatch(/admin\.user_ban/);
+      expect(activity.textContent).toMatch(/push/);
+      expect(activity.textContent).toMatch(/acme\/app/);
+      expect(activity.textContent).toMatch(/fix things/);
+      expect(screen.getByTestId("admin-user-activity-types-u2")).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByTestId("admin-user-activity-src-repository-u2"));
+
+    await waitFor(() => {
+      expect(getActivityMock).toHaveBeenCalledWith({
+        user_id: "u2",
+        source: "repository",
+        event_type: null,
+        limit: 100,
+      });
     });
   });
 

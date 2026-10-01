@@ -42,6 +42,33 @@ pub enum CookieChange {
     Clear,
 }
 
+/// Client request metadata captured from the HTTP edge (session details, audit).
+#[derive(Debug, Clone, Default)]
+pub struct ClientMeta {
+    /// Rightmost `X-Forwarded-For` hop (trusted-proxy convention — see
+    /// `routes::git_smart_http::client_ip`).
+    pub ip_address: Option<String>,
+    pub user_agent: Option<String>,
+}
+
+impl ClientMeta {
+    pub fn from_headers(headers: &axum::http::HeaderMap) -> Self {
+        let ip_address = headers
+            .get("x-forwarded-for")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.split(',').map(str::trim).filter(|p| !p.is_empty()).next_back())
+            .map(|s| s.to_string());
+        let user_agent = headers
+            .get(axum::http::header::USER_AGENT)
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.chars().take(512).collect());
+        Self {
+            ip_address,
+            user_agent,
+        }
+    }
+}
+
 /// Session-aware RPC context (RESEARCH Pattern 1).
 pub struct RpcCtx {
     pub db: Database,
@@ -58,6 +85,8 @@ pub struct RpcCtx {
     pub git: Arc<dyn GitBackend>,
     pub env_name: String,
     pub session: Option<ResolvedSession>,
+    /// Request client metadata (IP / user-agent) — sessions + audit events.
+    pub client: ClientMeta,
     pub set_cookie: Option<CookieChange>,
     /// Per-session `user.lookup` rate limiter (T-10-03).
     pub lookup_limiter: Arc<Mutex<LookupLimiter>>,
@@ -316,7 +345,19 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },
+        "admin.users.listSessions" => match admin::users_list_sessions(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "admin.users.getActivity" => match admin::users_get_activity(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
         "admin.invites.create" => match admin::invites_create(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "admin.invites.createLink" => match admin::invites_create_link(ctx, req.input).await {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },
@@ -376,7 +417,15 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },
+        "org.invites.createLink" => match org::invites_create_link(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
         "invites.accept" => match invites::accept(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "invites.get" => match invites::get(ctx, req.input).await {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },
@@ -609,6 +658,10 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Err(e) => RpcResponse::err(e),
         },
         "repo.invites.create" => match repo::invites_create(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "repo.invites.createLink" => match repo::invites_create_link(ctx, req.input).await {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },
