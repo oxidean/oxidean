@@ -41,21 +41,21 @@ Machine-facing surfaces beyond raw git/HTTP. These depend on API-02 (token auth)
 
 - [ ] **AGT-01** Instance MCP server: a streamable-HTTP MCP endpoint on the instance exposing repos, issues, PRs, action runs, packages, and search as tools and resources — functionality comparable to github-mcp-server and Forgejo's MCP support.
 - [ ] **AGT-02** WebMCP surface in the web app: the app advertises MCP capabilities to browser-side agents (WebMCP, as surfaced by Chrome DevTools) backed by the instance MCP endpoint.
-- [ ] **AGT-03** MCP auth and setup model: local/stdio MCP calls work with minimal configuration; remote third-party tools authenticate via PAT or OAuth with documented scopes, configured from settings.
+- [ ] **AGT-03** MCP auth and setup model: local development (localhost or stdio) works with minimal configuration; remote third-party tools authenticate via PAT or OAuth with documented scopes, configured from settings.
 - [ ] **CLI-01** Companion CLI (`ox`, gh-class): login, repo/issue/PR/actions/packages operations, scriptable JSON output, works against any instance URL.
 - [ ] **CLI-02** Server-driven compatibility contract: the CLI reads a versioned capability/procedure manifest from the connected instance (new `system.manifest`-style RPC) and feature-gates its commands, so API changes on the server never hard-break installed clients.
 
 ## Git and code surface
 
-- [ ] **GIT-21** Web file editing: create, edit, rename, delete, and upload files with a commit from the browser, signed by the existing web-flow key. Includes new-branch-with-PR flow.
-- [ ] **GIT-22** Repository archive flag: read-only mode that blocks push, issues, and PRs while keeping everything browsable and clonable.
-- [ ] **GIT-23** Protected tags and tag rulesets (branch protection covers branches only today).
-- [ ] **GIT-24** "Require signed commits" protection option. SSH/GPG signature verification is displayed on commits; enforcement is not a protection knob yet.
-- [ ] **GIT-25** Deploy keys: per-repo SSH keys with read or read/write scope, distinct from account keys.
-- [ ] **GIT-26** Sync fork and update-PR-branch: bring a fork or PR head up to date with the base branch from the UI/API.
-- [ ] **GIT-27** Repository size quotas for git objects. LFS and package quotas exist; the bare repo itself is unbounded.
-- [ ] **GIT-28** Repo insights: contributors, commit activity, and fork-network views on top of the existing repo activity feed.
-- [ ] **GIT-29** Git protocol surface audit: confirm protocol v2, partial clone/filter, and shallow clone behavior on both transports, then document or fix.
+- [ ] **GIT-19** Web file editing: create, edit, rename, delete, and upload files with a commit from the browser, signed by the existing web-flow key. Includes new-branch-with-PR flow.
+- [ ] **GIT-20** Repository archive flag: read-only mode that blocks push, issues, and PRs while keeping everything browsable and clonable.
+- [ ] **GIT-21** Protected tags and tag rulesets (branch protection covers branches only today).
+- [ ] **GIT-22** "Require signed commits" protection option. SSH/GPG signature verification is displayed on commits; enforcement is not a protection knob yet.
+- [ ] **GIT-23** Deploy keys: per-repo SSH keys with read or read/write scope, distinct from account keys.
+- [ ] **GIT-24** Sync fork and update-PR-branch: bring a fork or PR head up to date with the base branch from the UI/API.
+- [ ] **GIT-25** Repository size quotas for git objects. LFS and package quotas exist; the bare repo itself is unbounded.
+- [ ] **GIT-26** Repo insights: contributors, commit activity, and fork-network views on top of the existing repo activity feed.
+- [ ] **GIT-27** Git protocol surface audit: confirm protocol v2, partial clone/filter, and shallow clone behavior on both transports, then document or fix.
 
 ## Issues, PRs, and collaboration
 
@@ -73,6 +73,7 @@ The v1 loop (open, comment, review, merge, close) works. Parity is about the pla
 - [ ] **COL-10** Project boards / kanban scoped to repo or org (COLLAB-V2-01).
 - [ ] **COL-11** Wiki per repository (COLLAB-V2-02).
 - [ ] **COL-12** Contribution graph / profile activity and profile README support.
+- [ ] **COL-13** Per-repo unit toggles: enable/disable issues and PRs per repository (and future wiki/boards). Only Actions has an enable flag today (`repo.actions.setEnabled`).
 
 ## Actions (CI)
 
@@ -119,6 +120,7 @@ v1 runs push, pull_request, and manual dispatch on self-hosted runners. Parity n
 - [ ] **SEC-06** Audit log: admin, auth, repo-admin, and permission-changing events, queryable by sys-admin.
 - [ ] **SEC-07** User block/report and an admin moderation queue.
 - [ ] **SEC-08** Security advisories, dependency graph, and vulnerability scanning — staged last; pairs with CI and packages work.
+- [ ] **SEC-09** Private-instance mode: require sign-in for any view (Forgejo `REQUIRE_SIGNIN_VIEW` equivalent). Public repos are anonymously readable today with no instance-level opt-out.
 
 ## Migration and interoperability
 
@@ -156,9 +158,9 @@ Carried from [.planning/PROJECT.md](.planning/PROJECT.md) so this roadmap stays 
 
 1. **DEBT-\*** — close v1.0 residue; several items (DEBT-01, DEBT-04, DEBT-05) are prerequisites for later sections.
 2. **API-01..03** — the integration surface is the biggest parity blocker; it also unlocks MIG-01 tooling and is a prerequisite for AGT/CLI.
-3. **GIT-21..25** — web editing, archive, protected tags, deploy keys: the most-felt daily gaps for repo admins.
+3. **GIT-19..23** — web editing, archive, protected tags, deploy keys: the most-felt daily gaps for repo admins.
 4. **COL-01..08** — collaboration depth (milestones, templates, attachments, CODEOWNERS, merge queue).
-5. **CI-01..05** — scheduling, job graph, artifacts, cache, environments.
+5. **CI-01..05** — scheduling, job graph, artifacts, cache, environments. CI-06..11 (runner groups, badges, re-runs, OIDC tokens, external-provider spec and compat shim) can ride the same phase or a dedicated runners milestone.
 6. **SEC-01..04** — OAuth login, 2FA, LDAP, session controls.
 7. **SRCH, NOT, PKG, OPS, AGT, CLI** — breadth tracks, parallelizable once the API surface exists.
 8. **MIG-\*** — importers gain the most from the REST API landing first.
