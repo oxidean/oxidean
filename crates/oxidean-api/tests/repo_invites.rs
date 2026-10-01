@@ -308,6 +308,139 @@ async fn repo_invites_create_list_revoke_and_accept_closed_signup() {
 }
 
 #[tokio::test]
+async fn invites_accept_repo_returns_existing_collaborator_permission() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!(
+        "sqlite:{}",
+        dir.path().join("repo_invites_existing_perm.db").display()
+    );
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let repos_dir = dir.path().join("repos");
+    std::fs::create_dir_all(&repos_dir).expect("repos dir");
+    let (app, recorder) = test_app_with_recorder(db.clone(), repos_dir).await;
+
+    let owner_cookie = setup_owner_repo(&app, &db, "eown@ex.com", "eown1", "shared").await;
+
+    let (invitee_cookie, invitee_v) = signup_and_login(&app, "already@ex.com", "already1").await;
+    verify_user(&db, invitee_v["data"]["id"].as_str().expect("id")).await;
+
+    // Invite first (create rejects already-collaborators), then raise grant to admin.
+    let (_, create_v) = rpc_json(
+        &app,
+        r#"{"procedure":"repo.invites.create","input":{"owner":"eown1","name":"shared","email":"already@ex.com","permission":"read"}}"#,
+        Some(&owner_cookie),
+    )
+    .await;
+    assert_eq!(create_v["ok"], true, "{create_v}");
+    let token = {
+        let sent = recorder.sent.lock().expect("lock");
+        extract_invite_token(
+            &sent
+                .iter()
+                .rev()
+                .find(|m| m.to == "already@ex.com")
+                .expect("invite email")
+                .text,
+        )
+    };
+
+    let (_, add_v) = rpc_json(
+        &app,
+        r#"{"procedure":"repo.collaborators.add","input":{"owner":"eown1","name":"shared","username":"already1","permission":"admin"}}"#,
+        Some(&owner_cookie),
+    )
+    .await;
+    assert_eq!(add_v["ok"], true, "{add_v}");
+
+    let (status, accept_v) = rpc_json(
+        &app,
+        &format!(r#"{{"procedure":"invites.accept","input":{{"token":"{token}"}}}}"#),
+        Some(&invitee_cookie),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{accept_v}");
+    assert_eq!(accept_v["ok"], true, "{accept_v}");
+    assert_eq!(accept_v["data"]["kind"], "repo");
+    assert_eq!(
+        accept_v["data"]["permission"], "admin",
+        "must report existing grant, not invite read — {accept_v}"
+    );
+
+    let (_, collabs) = rpc_json(
+        &app,
+        r#"{"procedure":"repo.collaborators.list","input":{"owner":"eown1","name":"shared"}}"#,
+        Some(&owner_cookie),
+    )
+    .await;
+    assert_eq!(collabs["ok"], true, "{collabs}");
+    let rows = collabs["data"]["collaborators"].as_array().unwrap();
+    assert!(
+        rows.iter()
+            .any(|c| c["username"] == "already1" && c["permission"] == "admin"),
+        "existing grant must not be downgraded — {collabs}"
+    );
+}
+
+#[tokio::test]
+async fn invites_accept_repo_owner_short_circuit_returns_admin() {
+    // RPC create rejects inviting the personal owner; seed the invite row directly.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!(
+        "sqlite:{}",
+        dir.path().join("repo_invites_owner_accept.db").display()
+    );
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let repos_dir = dir.path().join("repos");
+    std::fs::create_dir_all(&repos_dir).expect("repos dir");
+    let (app, _) = test_app_with_recorder(db.clone(), repos_dir).await;
+
+    let owner_cookie = setup_owner_repo(&app, &db, "oacc@ex.com", "oacc1", "mine").await;
+    let owner = db
+        .find_user_by_username("oacc1")
+        .await
+        .expect("find")
+        .expect("owner");
+    let repo = db
+        .find_repository_by_owner_name(&owner.id, "mine")
+        .await
+        .expect("find repo")
+        .expect("repo");
+
+    let raw_token = "a".repeat(64);
+    let token_hash = sha256_hex(raw_token.as_bytes());
+    let expires = (chrono::Utc::now() + chrono::Duration::days(7))
+        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    db.insert_repo_invite(
+        "inv-owner-self",
+        &repo.id,
+        "oacc@ex.com",
+        "read",
+        &token_hash,
+        &expires,
+        &owner.id,
+    )
+    .await
+    .expect("insert invite");
+
+    let (status, accept_v) = rpc_json(
+        &app,
+        &format!(r#"{{"procedure":"invites.accept","input":{{"token":"{raw_token}"}}}}"#),
+        Some(&owner_cookie),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{accept_v}");
+    assert_eq!(accept_v["data"]["kind"], "repo");
+    assert_eq!(
+        accept_v["data"]["permission"], "admin",
+        "owner short-circuit must report admin — {accept_v}"
+    );
+}
+
+#[tokio::test]
 async fn repo_invites_expired_token_fails() {
     let dir = tempfile::tempdir().expect("tempdir");
     let url = format!(
