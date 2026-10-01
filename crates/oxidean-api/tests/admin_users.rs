@@ -2,10 +2,11 @@
 
 mod support;
 
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use axum::body::Body;
-use axum::http::{Request, StatusCode};
+use axum::http::{header, Request, StatusCode};
 use http_body_util::BodyExt;
 use oxidean_api::email::{EmailError, EmailSender, OutboundEmail};
 use oxidean_api::{build_cors, router_with_state, AppState};
@@ -28,12 +29,22 @@ impl EmailSender for RecordingSender {
 }
 
 async fn test_app_with_recorder(db: Database) -> (axum::Router, Arc<RecordingSender>) {
+    test_app_with_recorder_repos(db, None).await
+}
+
+async fn test_app_with_recorder_repos(
+    db: Database,
+    repos_dir: Option<PathBuf>,
+) -> (axum::Router, Arc<RecordingSender>) {
     let recorder = Arc::new(RecordingSender::default());
-    let state = AppState::new(
+    let mut state = AppState::new(
         db,
         recorder.clone() as Arc<dyn EmailSender>,
         "development",
     );
+    if let Some(dir) = repos_dir {
+        state = state.with_repos_dir(dir);
+    }
     let cors = build_cors("development", None).expect("cors");
     (router_with_state(state, cors), recorder)
 }
@@ -183,6 +194,42 @@ async fn login_as(
         .await
         .expect("create session");
     format!("oxidean_session={raw}")
+}
+
+fn info_refs_uri(owner: &str, repo: &str) -> String {
+    format!("/{owner}/{repo}.git/info/refs?service=git-upload-pack")
+}
+
+fn basic_header(user: &str, password: &str) -> String {
+    let raw = format!("{user}:{password}");
+    format!("Basic {}", encode_b64(raw.as_bytes()))
+}
+
+fn encode_b64(input: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::new();
+    for chunk in input.chunks(3) {
+        let mut n = (chunk[0] as u32) << 16;
+        if chunk.len() > 1 {
+            n |= (chunk[1] as u32) << 8;
+        }
+        if chunk.len() > 2 {
+            n |= chunk[2] as u32;
+        }
+        out.push(T[((n >> 18) & 63) as usize] as char);
+        out.push(T[((n >> 12) & 63) as usize] as char);
+        out.push(if chunk.len() > 1 {
+            T[((n >> 6) & 63) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            T[(n & 63) as usize] as char
+        } else {
+            '='
+        });
+    }
+    out
 }
 
 #[tokio::test]
@@ -599,4 +646,348 @@ async fn invites_accept_routes_org_tokens() {
     assert_eq!(v["data"]["kind"], "org");
     assert_eq!(v["data"]["org"]["slug"], "inv-unified");
     assert_eq!(v["data"]["member"]["username"], "orginvitee1");
+}
+
+#[tokio::test]
+async fn admin_users_revoke_sessions_forces_reauth() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!(
+        "sqlite:{}",
+        dir.path().join("admin_users_revoke.db").display()
+    );
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let (app, _) = test_app_with_recorder(db.clone()).await;
+
+    let (admin_id, _) = bootstrap_sysadmin(&db).await;
+    let admin_cookie = login_as(&app, &db, &admin_id).await;
+
+    let (user_cookie, login_v) = signup_and_login(&app, "revoke@ex.com", "revokeuser").await;
+    let user_id = login_v["data"]["id"].as_str().expect("id").to_string();
+    verify_user(&db, &user_id).await;
+
+    let (me_ok_status, me_ok) = rpc_json(
+        &app,
+        r#"{"procedure":"auth.me","input":{}}"#,
+        Some(&user_cookie),
+    )
+    .await;
+    assert_eq!(me_ok_status, StatusCode::OK, "{me_ok}");
+    assert_eq!(me_ok["ok"], true, "{me_ok}");
+    assert_eq!(me_ok["data"]["id"], user_id);
+
+    let (_, revoke_v) = rpc_json(
+        &app,
+        &format!(
+            r#"{{"procedure":"admin.users.revokeSessions","input":{{"user_id":"{user_id}"}}}}"#
+        ),
+        Some(&admin_cookie),
+    )
+    .await;
+    assert_eq!(revoke_v["ok"], true, "{revoke_v}");
+    assert!(
+        revoke_v["data"]["revoked"].as_i64().unwrap_or(0) >= 1,
+        "expected at least one revoked session — {revoke_v}"
+    );
+
+    let (me_status, me_v) = rpc_json(
+        &app,
+        r#"{"procedure":"auth.me","input":{}}"#,
+        Some(&user_cookie),
+    )
+    .await;
+    assert_eq!(me_status, StatusCode::UNAUTHORIZED, "{me_v}");
+    assert_eq!(me_v["error"]["code"], "auth.unauthenticated");
+}
+
+#[tokio::test]
+async fn admin_users_ban_blocks_classic_pat() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let url = format!(
+        "sqlite:{}",
+        dir.path().join("admin_users_ban_pat.db").display()
+    );
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let (app, _) = test_app_with_recorder_repos(db.clone(), Some(repos)).await;
+
+    let (admin_id, _) = bootstrap_sysadmin(&db).await;
+    let admin_cookie = login_as(&app, &db, &admin_id).await;
+
+    let (user_cookie, login_v) = signup_and_login(&app, "patban@ex.com", "patbanuser").await;
+    let user_id = login_v["data"]["id"].as_str().expect("id").to_string();
+    verify_user(&db, &user_id).await;
+
+    let (_, create_repo) = rpc_json(
+        &app,
+        r#"{"procedure":"repo.create","input":{"name":"hello","visibility":"public","description":""}}"#,
+        Some(&user_cookie),
+    )
+    .await;
+    assert_eq!(create_repo["ok"], true, "{create_repo}");
+
+    let (_, create_pat) = rpc_json(
+        &app,
+        r#"{"procedure":"pat.createClassic","input":{"name":"cli","scopes":["repo"]}}"#,
+        Some(&user_cookie),
+    )
+    .await;
+    assert_eq!(create_pat["ok"], true, "{create_pat}");
+    let token = create_pat["data"]["token"].as_str().expect("token").to_string();
+
+    let ok_req = Request::builder()
+        .method("GET")
+        .uri(info_refs_uri("patbanuser", "hello"))
+        .header(header::AUTHORIZATION, basic_header("patbanuser", &token))
+        .body(Body::empty())
+        .unwrap();
+    let ok_res = app.clone().oneshot(ok_req).await.unwrap();
+    assert_eq!(
+        ok_res.status(),
+        StatusCode::OK,
+        "classic PAT must work before ban"
+    );
+    let _ = ok_res.into_body().collect().await;
+
+    let (_, ban_v) = rpc_json(
+        &app,
+        &format!(r#"{{"procedure":"admin.users.ban","input":{{"user_id":"{user_id}"}}}}"#),
+        Some(&admin_cookie),
+    )
+    .await;
+    assert_eq!(ban_v["ok"], true, "{ban_v}");
+
+    let banned_req = Request::builder()
+        .method("GET")
+        .uri(info_refs_uri("patbanuser", "hello"))
+        .header(header::AUTHORIZATION, basic_header("patbanuser", &token))
+        .body(Body::empty())
+        .unwrap();
+    let banned_res = app.clone().oneshot(banned_req).await.unwrap();
+    assert_eq!(
+        banned_res.status(),
+        StatusCode::UNAUTHORIZED,
+        "banned user's PAT must fail auth"
+    );
+    let _ = banned_res.into_body().collect().await;
+
+    let (_, unban_v) = rpc_json(
+        &app,
+        &format!(r#"{{"procedure":"admin.users.unban","input":{{"user_id":"{user_id}"}}}}"#),
+        Some(&admin_cookie),
+    )
+    .await;
+    assert_eq!(unban_v["ok"], true, "{unban_v}");
+
+    let restored_req = Request::builder()
+        .method("GET")
+        .uri(info_refs_uri("patbanuser", "hello"))
+        .header(header::AUTHORIZATION, basic_header("patbanuser", &token))
+        .body(Body::empty())
+        .unwrap();
+    let restored_res = app.oneshot(restored_req).await.unwrap();
+    assert_eq!(
+        restored_res.status(),
+        StatusCode::OK,
+        "unban must restore classic PAT auth"
+    );
+}
+
+#[tokio::test]
+async fn admin_users_delete_removes_personal_repos_and_sole_owner_org() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let url = format!(
+        "sqlite:{}",
+        dir.path().join("admin_users_delete_cascade.db").display()
+    );
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let (app, _) = test_app_with_recorder_repos(db.clone(), Some(repos.clone())).await;
+
+    let (admin_id, _) = bootstrap_sysadmin(&db).await;
+    let admin_cookie = login_as(&app, &db, &admin_id).await;
+
+    let (user_cookie, login_v) = signup_and_login(&app, "wipe@ex.com", "wipeuser").await;
+    let user_id = login_v["data"]["id"].as_str().expect("id").to_string();
+    verify_user(&db, &user_id).await;
+
+    let (_, personal) = rpc_json(
+        &app,
+        r#"{"procedure":"repo.create","input":{"name":"personal-app","visibility":"public","description":""}}"#,
+        Some(&user_cookie),
+    )
+    .await;
+    assert_eq!(personal["ok"], true, "{personal}");
+    let personal_repo_id = personal["data"]["id"].as_str().expect("repo id").to_string();
+
+    let (_, create_org) = rpc_json(
+        &app,
+        r#"{"procedure":"org.create","input":{"slug":"wipe-org","display_name":"Wipe Org"}}"#,
+        Some(&user_cookie),
+    )
+    .await;
+    assert_eq!(create_org["ok"], true, "{create_org}");
+    let org_id = create_org["data"]["id"].as_str().expect("org id").to_string();
+
+    let (_, org_repo) = rpc_json(
+        &app,
+        r#"{"procedure":"repo.create","input":{"name":"org-app","visibility":"public","owner":"wipe-org"}}"#,
+        Some(&user_cookie),
+    )
+    .await;
+    assert_eq!(org_repo["ok"], true, "{org_repo}");
+    let org_repo_id = org_repo["data"]["id"].as_str().expect("org repo id").to_string();
+
+    assert!(repos.join("wipeuser").join("personal-app.git").exists());
+    assert!(repos.join("wipe-org").join("org-app.git").exists());
+
+    let (_, delete_v) = rpc_json(
+        &app,
+        &format!(
+            r#"{{"procedure":"admin.users.delete","input":{{"user_id":"{user_id}","confirmation":"wipeuser"}}}}"#
+        ),
+        Some(&admin_cookie),
+    )
+    .await;
+    assert_eq!(delete_v["ok"], true, "{delete_v}");
+    assert_eq!(delete_v["data"]["ok"], true);
+    assert!(
+        delete_v["data"]["deleted_repos"].as_i64().unwrap_or(0) >= 2,
+        "expected personal + org repos deleted — {delete_v}"
+    );
+    assert!(
+        delete_v["data"]["deleted_orgs"].as_i64().unwrap_or(0) >= 1,
+        "expected sole-owner org deleted — {delete_v}"
+    );
+
+    assert!(db.find_user_by_id(&user_id).await.expect("find user").is_none());
+    assert!(
+        db.find_organization_by_id(&org_id)
+            .await
+            .expect("find org")
+            .is_none()
+    );
+    assert!(
+        db.find_repository_by_id(&personal_repo_id)
+            .await
+            .expect("find personal repo")
+            .is_none()
+    );
+    assert!(
+        db.find_repository_by_id(&org_repo_id)
+            .await
+            .expect("find org repo")
+            .is_none()
+    );
+    assert!(
+        !repos.join("wipeuser").exists() || !repos.join("wipeuser").join("personal-app.git").exists(),
+        "personal repo disk path should be wiped"
+    );
+    assert!(
+        !repos.join("wipe-org").exists() || !repos.join("wipe-org").join("org-app.git").exists(),
+        "org repo disk path should be wiped"
+    );
+}
+
+#[tokio::test]
+async fn admin_users_get_access_lists_orgs_and_repos() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let url = format!(
+        "sqlite:{}",
+        dir.path().join("admin_users_get_access.db").display()
+    );
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let (app, _) = test_app_with_recorder_repos(db.clone(), Some(repos)).await;
+
+    let (admin_id, _) = bootstrap_sysadmin(&db).await;
+    let admin_cookie = login_as(&app, &db, &admin_id).await;
+
+    let (owner_cookie, owner_v) = signup_and_login(&app, "accessowner@ex.com", "accessowner").await;
+    let owner_id = owner_v["data"]["id"].as_str().expect("id").to_string();
+    verify_user(&db, &owner_id).await;
+
+    let (target_cookie, target_v) =
+        signup_and_login(&app, "accesstarget@ex.com", "accesstarget").await;
+    let target_id = target_v["data"]["id"].as_str().expect("id").to_string();
+    verify_user(&db, &target_id).await;
+
+    let (_, create_org) = rpc_json(
+        &app,
+        r#"{"procedure":"org.create","input":{"slug":"access-org","display_name":"Access Org"}}"#,
+        Some(&owner_cookie),
+    )
+    .await;
+    assert_eq!(create_org["ok"], true, "{create_org}");
+
+    let (_, add_member) = rpc_json(
+        &app,
+        r#"{"procedure":"org.members.add","input":{"slug":"access-org","username":"accesstarget","role":"member"}}"#,
+        Some(&owner_cookie),
+    )
+    .await;
+    assert_eq!(add_member["ok"], true, "{add_member}");
+
+    let (_, create_repo) = rpc_json(
+        &app,
+        r#"{"procedure":"repo.create","input":{"name":"shared","visibility":"private","description":""}}"#,
+        Some(&owner_cookie),
+    )
+    .await;
+    assert_eq!(create_repo["ok"], true, "{create_repo}");
+
+    let (_, add_collab) = rpc_json(
+        &app,
+        r#"{"procedure":"repo.collaborators.add","input":{"owner":"accessowner","name":"shared","username":"accesstarget","permission":"write"}}"#,
+        Some(&owner_cookie),
+    )
+    .await;
+    assert_eq!(add_collab["ok"], true, "{add_collab}");
+
+    let (forbidden_status, forbidden_v) = rpc_json(
+        &app,
+        &format!(
+            r#"{{"procedure":"admin.users.getAccess","input":{{"user_id":"{target_id}"}}}}"#
+        ),
+        Some(&target_cookie),
+    )
+    .await;
+    assert_eq!(forbidden_status, StatusCode::FORBIDDEN, "{forbidden_v}");
+    assert_eq!(forbidden_v["error"]["code"], "admin.forbidden");
+
+    let (status, access_v) = rpc_json(
+        &app,
+        &format!(
+            r#"{{"procedure":"admin.users.getAccess","input":{{"user_id":"{target_id}"}}}}"#
+        ),
+        Some(&admin_cookie),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{access_v}");
+    assert_eq!(access_v["ok"], true, "{access_v}");
+
+    let orgs = access_v["data"]["orgs"].as_array().expect("orgs");
+    assert!(
+        orgs.iter().any(|o| {
+            o["slug"] == "access-org" && o["role"] == "member"
+        }),
+        "expected access-org membership — {access_v}"
+    );
+
+    let repos_list = access_v["data"]["repos"].as_array().expect("repos");
+    assert!(
+        repos_list.iter().any(|r| {
+            r["owner"] == "accessowner"
+                && r["name"] == "shared"
+                && r["permission"] == "write"
+        }),
+        "expected shared collaborator grant — {access_v}"
+    );
 }
