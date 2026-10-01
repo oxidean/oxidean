@@ -38,6 +38,10 @@ Before editing UI under `apps/web`:
 - Prefer extending existing patterns over new frameworks, state libraries, or UI kits.
 - **No AI attribution** on commits or PRs: never add `Co-authored-by` / `Generated with` / `Made-with` (or similar) for Cursor, Claude, Copilot, or any AI/tool unless the user explicitly asks in the current turn. See [`.cursor/rules/no-ai-attribution.mdc`](.cursor/rules/no-ai-attribution.mdc).
 
+## In-repo skills (always)
+
+When a task matches a skill under [`.agents/skills/`](.agents/skills/), **read and follow that skill** before inventing a workflow. Cursor rule: [`.cursor/rules/use-in-repo-skills.mdc`](.cursor/rules/use-in-repo-skills.mdc). Claude Code loads the same trees via [`.claude/skills/`](.claude/skills/) symlinks. Examples: Octane UI → `octane`; Railway/deploy → `use-railway`; Rust async → `rust-async-patterns`; prose finalize → `clean-user-facing-text`; watermark strip → `remove-ai-marks`.
+
 ## AI watermarks / provenance hygiene
 
 Vendored skills (pin and refresh notes in [`.agents/skills/README-watermarks.md`](.agents/skills/README-watermarks.md)):
