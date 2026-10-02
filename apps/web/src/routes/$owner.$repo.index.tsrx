@@ -362,6 +362,7 @@ export function RepoCodeHome() @{
                   refName={phase.refName}
                   refs={phase.refs}
                   empty={false}
+                  canWrite={!!phase.repo.can_write}
                 />
                 <div className="mt-4">
                   <RepoLastCommitBar

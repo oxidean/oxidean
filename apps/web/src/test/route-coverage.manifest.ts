@@ -340,6 +340,51 @@ export const routeCoverageManifest: RouteCoverageEntry[] = [
     ],
   },
   {
+    route: "$owner.$repo.delete.$.tsrx",
+    coverage: [
+      {
+        kind: "happy-dom",
+        test: "apps/web/src/routes/$owner.$repo.file-editing.integration.test.ts",
+      },
+    ],
+  },
+  {
+    route: "$owner.$repo.edit.$.tsrx",
+    coverage: [
+      {
+        kind: "happy-dom",
+        test: "apps/web/src/routes/$owner.$repo.file-editing.integration.test.ts",
+      },
+    ],
+  },
+  {
+    route: "$owner.$repo.mkdir.$.tsrx",
+    coverage: [
+      {
+        kind: "happy-dom",
+        test: "apps/web/src/routes/$owner.$repo.file-editing.integration.test.ts",
+      },
+    ],
+  },
+  {
+    route: "$owner.$repo.new.$.tsrx",
+    coverage: [
+      {
+        kind: "happy-dom",
+        test: "apps/web/src/routes/$owner.$repo.file-editing.integration.test.ts",
+      },
+    ],
+  },
+  {
+    route: "$owner.$repo.upload.$.tsrx",
+    coverage: [
+      {
+        kind: "happy-dom",
+        test: "apps/web/src/routes/$owner.$repo.file-editing.integration.test.ts",
+      },
+    ],
+  },
+  {
     route: "$owner.$repo.blob.$.tsrx",
     coverage: [
       {

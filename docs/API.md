@@ -134,6 +134,8 @@ SSO start routes redirect to the IdP when configured. If WorkOS/OIDC ENV is miss
 | `notification.unreadCount` | Unread badge count for session user | Session |
 | `notification.markRead` | Mark own notification ids read (foreign ids no-op) | Session |
 | `notification.markAllRead` | Mark all own unread notifications read | Session |
+| `repo.file.create` / `update` / `delete` / `rename` / `upload` / `mkdir` | Browser file edits committed via the web-flow signing key; `new_branch` + `open_pr` for the protected-branch → PR flow | Session + Write+ |
+| `repo.file.commitPolicy` | Whether direct commits to `branch` are allowed or the PR flow is required | Session + Write+ |
 | `pull.create` / `get` / `list` / `update` / `close` / `reopen` | Pull requests; shared `#N` with issues | Session (+ capability) |
 | `pull.files` / `pull.commits` | Diff + commit list for a PR | Session (+ Read+) |
 | `pull.comments.list` / `create` / `resolve` | General + line comments; resolve threads | Session (+ capability) |

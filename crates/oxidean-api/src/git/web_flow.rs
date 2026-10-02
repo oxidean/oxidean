@@ -156,6 +156,52 @@ async fn materialize_env_key(dir: &Path, pem: &str) -> Result<PathBuf, String> {
     Ok(priv_path)
 }
 
+/// True when `web-flow` and `web-flow.pub` exist **and** the public key is the
+/// counterpart of the private key. Parallel first-run generation can otherwise
+/// persist a split pair (priv from one `ssh-keygen`, pub from another) that
+/// `try_exists` alone would accept forever — `git commit -S` then fails with
+/// "public key doesn't match private" on every sign.
+async fn keypair_matches(priv_path: &Path, pub_path: &Path) -> bool {
+    let (priv_bytes, pub_bytes) = match (
+        tokio::fs::read(priv_path).await,
+        tokio::fs::read(pub_path).await,
+    ) {
+        (Ok(p), Ok(u)) => (p, u),
+        _ => return false,
+    };
+    let key = match PrivateKey::from_openssh(&priv_bytes) {
+        Ok(k) => k,
+        Err(_) => return false,
+    };
+    let derived = match key.public_key().to_openssh() {
+        Ok(l) => l,
+        Err(_) => return false,
+    };
+    // Compare the first two fields (type + blob); the trailing comment differs
+    // between `ssh-keygen -C` output and re-serialized keys.
+    let pub_text = String::from_utf8_lossy(&pub_bytes).into_owned();
+    let mut want = derived.split_whitespace().take(2);
+    let mut got = pub_text.split_whitespace().take(2);
+    matches!(
+        (want.next(), want.next(), got.next(), got.next()),
+        (Some(a), Some(b), Some(c), Some(d)) if a == c && b == d
+    )
+}
+
+/// Wait for another process to finish generating the pair, up to
+/// `GENERATE_WAIT`. Returns `true` once a *valid* pair is on disk.
+async fn wait_for_pair(priv_path: &Path, pub_path: &Path) -> bool {
+    const GENERATE_WAIT: std::time::Duration = std::time::Duration::from_secs(15);
+    let deadline = std::time::Instant::now() + GENERATE_WAIT;
+    while std::time::Instant::now() < deadline {
+        if keypair_matches(priv_path, pub_path).await {
+            return true;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    keypair_matches(priv_path, pub_path).await
+}
+
 /// Ensure the Ed25519 web-flow key exists.
 ///
 /// Returns an **absolute** private-key path so `git -C <tmpdir> commit -S` can
@@ -163,10 +209,11 @@ async fn materialize_env_key(dir: &Path, pem: &str) -> Result<PathBuf, String> {
 ///
 /// Precedence:
 /// 1. `OXIDEAN_WEB_FLOW_PRIVATE_KEY` set → materialize files from it.
-/// 2. Existing `web-flow`/`web-flow.pub` on disk → use them.
+/// 2. Existing **matching** `web-flow`/`web-flow.pub` on disk → use them.
 /// 3. `production`/`cloud` → fail closed (must provision).
 /// 4. Anything else (development, compose, test, Railway `preview`/`staging`,
-///    PR environments) → generate with `ssh-keygen` if missing.
+///    PR environments) → generate with `ssh-keygen`, serialized through a
+///    `web-flow.lock` sentinel so concurrent first runs cannot split the pair.
 pub async fn ensure_web_flow_key() -> Result<PathBuf, String> {
     let dir = absolute_key_path(web_flow_dir())?;
     let priv_path = dir.join(WEB_FLOW_KEY_BASENAME);
@@ -180,15 +227,13 @@ pub async fn ensure_web_flow_key() -> Result<PathBuf, String> {
         return materialize_env_key(&dir, &pem).await;
     }
 
-    if tokio::fs::try_exists(&priv_path).await.unwrap_or(false)
-        && tokio::fs::try_exists(&pub_path).await.unwrap_or(false)
-    {
+    if keypair_matches(&priv_path, &pub_path).await {
         return Ok(priv_path);
     }
 
     if requires_provisioned_key(&oxidean_env()) {
         return Err(format!(
-            "web-flow signing key missing at {} (and {}.pub); set {} or provision the keypair under OXIDEAN_SSH_HOST_KEY_DIR",
+            "web-flow signing key missing or mismatched at {} (and {}.pub); set {} or provision the keypair under OXIDEAN_SSH_HOST_KEY_DIR",
             priv_path.display(),
             WEB_FLOW_KEY_BASENAME,
             WEB_FLOW_PRIVATE_KEY_ENV
@@ -198,6 +243,35 @@ pub async fn ensure_web_flow_key() -> Result<PathBuf, String> {
     tokio::fs::create_dir_all(&dir)
         .await
         .map_err(|e| format!("create web-flow key dir: {e}"))?;
+
+    // Cross-process lock: only one `ssh-keygen` may write the pair. `create_new`
+    // is atomic on every platform we target.
+    let lock_path = dir.join(format!("{WEB_FLOW_KEY_BASENAME}.lock"));
+    let mut attempts = 0u8;
+    let _guard = loop {
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&lock_path)
+        {
+            Ok(_) => break GenerationLock(lock_path.clone()),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                if wait_for_pair(&priv_path, &pub_path).await {
+                    return Ok(priv_path);
+                }
+                attempts += 1;
+                if attempts > 1 {
+                    return Err(
+                        "web-flow signing key still absent after waiting for concurrent generation"
+                            .to_string(),
+                    );
+                }
+                // Stale lock from a crashed generator — take over once.
+                let _ = std::fs::remove_file(&lock_path);
+            }
+            Err(e) => return Err(format!("web-flow lock {}: {e}", lock_path.display())),
+        }
+    };
 
     // Remove partial files before generating.
     let _ = tokio::fs::remove_file(&priv_path).await;
@@ -236,6 +310,15 @@ pub async fn ensure_web_flow_key() -> Result<PathBuf, String> {
     }
 
     Ok(priv_path)
+}
+
+/// Removes the `web-flow.lock` sentinel on drop.
+struct GenerationLock(PathBuf);
+
+impl Drop for GenerationLock {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
 }
 
 /// Read the OpenSSH public key line (`ssh-ed25519 AAAA… comment`), if present.
@@ -443,6 +526,66 @@ mod tests {
             err.contains(WEB_FLOW_PRIVATE_KEY_ENV),
             "error must name the env var: {err}"
         );
+    }
+
+    #[tokio::test]
+    async fn ensure_concurrent_generators_share_one_pair() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let ssh_keygen_ok = std::process::Command::new("ssh-keygen")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok();
+        if !ssh_keygen_ok {
+            eprintln!("skipping: ssh-keygen not available");
+            return;
+        }
+        let dir = tempfile::tempdir().expect("tempdir");
+
+        let prev_dir = std::env::var_os("OXIDEAN_SSH_HOST_KEY_DIR");
+        let prev_env = std::env::var_os("OXIDEAN_ENV");
+        let prev_key = std::env::var_os(WEB_FLOW_PRIVATE_KEY_ENV);
+        std::env::set_var("OXIDEAN_SSH_HOST_KEY_DIR", dir.path());
+        std::env::set_var("OXIDEAN_ENV", "preview");
+        std::env::remove_var(WEB_FLOW_PRIVATE_KEY_ENV);
+
+        // Cold cache, 6 callers racing — without the lock this splits the
+        // priv/pub pair across interleaved ssh-keygen runs.
+        let mut handles = Vec::new();
+        for _ in 0..6 {
+            handles.push(tokio::spawn(ensure_web_flow_key()));
+        }
+        let mut results = Vec::new();
+        for h in handles {
+            results.push(h.await.expect("join"));
+        }
+
+        match prev_dir {
+            Some(v) => std::env::set_var("OXIDEAN_SSH_HOST_KEY_DIR", v),
+            None => std::env::remove_var("OXIDEAN_SSH_HOST_KEY_DIR"),
+        }
+        match prev_env {
+            Some(v) => std::env::set_var("OXIDEAN_ENV", v),
+            None => std::env::remove_var("OXIDEAN_ENV"),
+        }
+        match prev_key {
+            Some(v) => std::env::set_var(WEB_FLOW_PRIVATE_KEY_ENV, v),
+            None => std::env::remove_var(WEB_FLOW_PRIVATE_KEY_ENV),
+        }
+
+        for r in &results {
+            let p = r.as_ref().expect("every caller gets a key");
+            assert_eq!(p, &dir.path().join(WEB_FLOW_KEY_BASENAME));
+        }
+        assert!(
+            keypair_matches(
+                &dir.path().join(WEB_FLOW_KEY_BASENAME),
+                &dir.path().join(format!("{WEB_FLOW_KEY_BASENAME}.pub")),
+            )
+            .await
+        );
+        assert!(!dir.path().join("web-flow.lock").exists(), "lock released");
     }
 
     #[tokio::test]

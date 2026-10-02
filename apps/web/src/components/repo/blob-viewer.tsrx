@@ -1,4 +1,4 @@
-import { Check, Copy, FileCode2 } from "@octanejs/lucide";
+import { Check, Copy, FileCode2, Pencil, Trash2 } from "@octanejs/lucide";
 import { useEffect, useEffectEvent, useState } from "octane";
 import type { RepoBlobResponse } from "@oxidean/api-client";
 import { MarkdownHtml } from "@/components/repo/markdown-body";
@@ -14,11 +14,14 @@ import {
 import { isMarkdownPath } from "@/lib/markdown";
 import {
   blameHref,
+  deleteHref,
+  editHref,
   formatFileSize,
   imageMimeForPath,
   isImagePath,
   parseLineHash,
   rawBlobUrl,
+  shortRefName,
 } from "@/lib/repo-browse";
 import { parseLfsPointer } from "@/lib/lfs-pointer";
 import { apiClient } from "@/lib/api-client";
@@ -28,6 +31,8 @@ type BlobViewerProps = {
   owner: string;
   repo: string;
   blob: RepoBlobResponse;
+  /** Write+ on the repo — shows Edit (text files) and Delete (GIT-19). */
+  canWrite?: boolean;
   /** SSR Shiki HTML when available. */
   highlightedHtml?: string | null;
   /** Theme used for `highlightedHtml` — skip client re-highlight when it matches. */
@@ -62,6 +67,7 @@ export function BlobViewer({
   owner,
   repo,
   blob,
+  canWrite = false,
   highlightedHtml = null,
   highlightTheme = null,
   markdownHtml = null,
@@ -78,8 +84,12 @@ export function BlobViewer({
   const [copied, setCopied] = useState(false);
   const [lfsDlPending, setLfsDlPending] = useState(false);
   const [lfsDlError, setLfsDlError] = useState("");
+  const refShort = shortRefName(blob.ref) || blob.ref;
   const rawUrl = rawBlobUrl(owner, repo, blob.ref, blob.path);
   const blameUrl = blameHref(owner, repo, blob.ref, blob.path);
+  const editable = !blob.is_binary && !blob.truncated && blob.encoding === "utf-8" && !lfsPointer;
+  const editUrl = editable ? editHref(owner, repo, refShort, blob.path) : "";
+  const deleteUrl = canWrite ? deleteHref(owner, repo, refShort, blob.path) : "";
   const baseName = fileBaseName(blob.path);
   const lineCount = countCodeLines(text);
   const lineNums = Array.from({ length: lineCount }, (_, i) => i + 1);
@@ -278,6 +288,19 @@ export function BlobViewer({
             {(lfsDlPending ? "Downloading…" : "Download via LFS") as string}
           </button>;
         }
+        @if (canWrite && editable) {
+          <a
+            href={editUrl as string}
+            className={cn(
+              buttonVariants({ variant: "ghost" }),
+              "h-8 gap-1.5 px-2.5 text-[13px]",
+            )}
+            data-testid="blob-edit"
+          >
+            <Pencil aria-hidden size={14} />
+            Edit
+          </a>;
+        }
         <a
           href={rawUrl as string}
           className={cn(buttonVariants({ variant: "ghost" }), "h-8 px-2.5 text-[13px]")}
@@ -318,6 +341,19 @@ export function BlobViewer({
             download
           >
             Download
+          </a>;
+        }
+        @if (canWrite) {
+          <a
+            href={deleteUrl as string}
+            className={cn(
+              buttonVariants({ variant: "ghost" }),
+              "h-8 gap-1.5 px-2.5 text-[13px] text-destructive hover:text-destructive",
+            )}
+            data-testid="blob-delete"
+          >
+            <Trash2 aria-hidden size={14} />
+            Delete
           </a>;
         }
       </div>

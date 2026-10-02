@@ -307,6 +307,7 @@ export function RepoTreePage() @{
               path={phase.path}
               showPathCrumbs={true}
               empty={false}
+              canWrite={!!phase.repo.can_write}
             />
             <div className="mt-4">
               <RepoLastCommitBar

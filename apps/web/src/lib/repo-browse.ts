@@ -105,6 +105,32 @@ export function blobHref(owner: string, repo: string, ref: string, path: string)
     .join("/")}`;
 }
 
+function relSuffix(path: string): string {
+  const rel = path.replace(/^\/+/, "");
+  return rel ? `/${rel.split("/").map(encodeURIComponent).join("/")}` : "";
+}
+
+/** Web file-editing routes (GIT-19) — `/edit|new|upload|mkdir|delete/<ref>/<path>`. */
+export function editHref(owner: string, repo: string, ref: string, path: string): string {
+  return `/${owner}/${repo}/edit/${encodeURIComponent(ref)}${relSuffix(path)}`;
+}
+
+export function newFileHref(owner: string, repo: string, ref: string, dir = ""): string {
+  return `/${owner}/${repo}/new/${encodeURIComponent(ref)}${relSuffix(dir)}`;
+}
+
+export function uploadHref(owner: string, repo: string, ref: string, dir = ""): string {
+  return `/${owner}/${repo}/upload/${encodeURIComponent(ref)}${relSuffix(dir)}`;
+}
+
+export function mkdirHref(owner: string, repo: string, ref: string, dir = ""): string {
+  return `/${owner}/${repo}/mkdir/${encodeURIComponent(ref)}${relSuffix(dir)}`;
+}
+
+export function deleteHref(owner: string, repo: string, ref: string, path: string): string {
+  return `/${owner}/${repo}/delete/${encodeURIComponent(ref)}${relSuffix(path)}`;
+}
+
 export function commitsHref(owner: string, repo: string, ref: string): string {
   return `/${owner}/${repo}/commits/${encodeURIComponent(ref)}`;
 }
