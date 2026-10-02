@@ -85,6 +85,11 @@ pub struct RpcCtx {
     pub git: Arc<dyn GitBackend>,
     pub env_name: String,
     pub session: Option<ResolvedSession>,
+    /// PAT Bearer identity (API-02) — `Some` only when the request authenticated
+    /// with `Authorization: Bearer <pat>` instead of the session cookie. When
+    /// set, `session` is a synthesized session-equivalent (user_id = token
+    /// owner) and `pat::bearer::authorize_rpc` gates the procedure at dispatch.
+    pub pat: Option<crate::pat::bearer::PatIdentity>,
     /// Request client metadata (IP / user-agent) — sessions + audit events.
     pub client: ClientMeta,
     pub set_cookie: Option<CookieChange>,
@@ -132,6 +137,12 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
         }
         Ok(false) => {}
         Err(e) => return RpcResponse::err(e),
+    }
+
+    // API-02: Bearer-authenticated requests are scope-gated at dispatch.
+    // Cookie sessions skip this entirely (`ctx.pat` is `None`).
+    if let Err(e) = crate::pat::bearer::authorize_rpc(ctx, &req.procedure, &req.input).await {
+        return RpcResponse::err(e);
     }
 
     match req.procedure.as_str() {

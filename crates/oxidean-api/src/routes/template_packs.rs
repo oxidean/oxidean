@@ -67,6 +67,7 @@ async fn build_ctx(state: &AppState, headers: &HeaderMap) -> RpcCtx {
         git: state.git.clone(),
         env_name: state.env_name.clone(),
         session,
+        pat: None,
         client,
         set_cookie: None,
         lookup_limiter: state.lookup_limiter.clone(),

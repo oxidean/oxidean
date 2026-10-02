@@ -149,7 +149,7 @@ Phase 8 adds HTTPS git clone/fetch/push beside the forge browse surface; Phase 1
 | Concern | Contract |
 | --- | --- |
 | **Wire protocol** | Axum mounts `info/refs`, `git-upload-pack`, `git-receive-pack` under `/{owner}/{repo}.git` and spawns **`git-http-backend`** CGI (`GIT_PROJECT_ROOT` = `OXIDEAN_REPOS_DIR`). |
-| **Auth split (D-01 / D-12)** | **Session cookies never authenticate git.** Smart HTTP uses HTTP Basic with password = PAT. Typed RPC (`/api/rpc`) stays on `oxidean_session` only — do **not** send `Authorization: Bearer <pat>`. |
+| **Auth split (D-01 / D-12)** | **Session cookies never authenticate git.** Smart HTTP uses HTTP Basic with password = PAT. Typed RPC (`/api/rpc`) accepts the `oxidean_session` cookie or `Authorization: Bearer <pat>` (API-02 — scope-gated per [API.md](API.md#pat-bearer-authentication)); the cookie wins when both are sent. |
 | **Hash-at-rest** | PAT plaintext is shown **once** at mint; DB stores SHA-256 of the secret (same pattern as sessions). Revoke soft-deletes; list never returns secrets. |
 | **Prefixes** | Classic `oxidean_pat_…`, fine-grained `oxidean_fg_…` (CSPRNG hex after the prefix). Redacted docs examples only (`oxidean_pat_REDACTED`). |
 | **Classic scopes** | Scope catalog includes `repo` (HTTPS fetch + push where **PAT subject ∩ Capability ACL** allows — not `owner_id` equality alone). |
