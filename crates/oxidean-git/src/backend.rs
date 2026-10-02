@@ -121,6 +121,14 @@ pub enum GitError {
     /// Object/path/ref missing (empty repo, bad path, etc.).
     #[error("not found: {0}")]
     NotFound(String),
+    /// Ref tip moved between read and update — caller should re-read and retry
+    /// (CAS / fast-forward race).
+    #[error("conflict: {0}")]
+    Conflict(String),
+    /// The update was refused by a repository hook (e.g. branch protection
+    /// `hooks/update` decline) after transport-level checks passed.
+    #[error("denied: {0}")]
+    Denied(String),
 }
 
 /// Kind of a tree entry (`git ls-tree` object type).
@@ -291,6 +299,37 @@ pub const ARCHIVE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(
 /// instance signs these commits with the web-flow SSH key under this principal.
 pub const FORGE_NOREPLY_EMAIL: &str = "noreply@oxidean.local";
 
+/// One file mutation inside a [`GitBackend::commit_files`] changeset (GIT-19).
+///
+/// Paths are repository-relative, normalized, and must not escape the repo
+/// (no `..`, no absolute/prefix components, no `.git` segment, no NUL).
+/// Directories are never passed explicitly — Git tracks files only; deleting
+/// `dir` removes every blob under `dir/` (see [`FileChange::Delete`]).
+#[derive(Debug, Clone)]
+pub enum FileChange {
+    /// Create or overwrite `path` with `content` bytes (mode `100644`).
+    /// An empty `content` creates an empty blob — a legitimate empty file.
+    Upsert { path: String, content: Vec<u8> },
+    /// Stage an existing blob `oid` (full hex) at `path` — renames preserve
+    /// blob identity so history/diffs stay clean.
+    UpsertOid { path: String, oid: String },
+    /// Remove `path` — the file itself, or every blob under `path/` when it
+    /// names a directory. Missing path → [`GitError::NotFound`].
+    Delete { path: String },
+}
+
+/// Result of [`GitBackend::commit_files`].
+#[derive(Debug, Clone)]
+pub struct FilesCommit {
+    /// New commit SHA.
+    pub sha: String,
+    /// Tip of `base` the commit was built on (`None` = root commit on an
+    /// unborn base — first commit of an empty repository).
+    pub base_sha: Option<String>,
+    /// Branch (short name) that received the commit.
+    pub branch: String,
+}
+
 /// Source archive format for [`GitBackend::archive`] (GIT-07 / D-29).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArchiveFormat {
@@ -351,6 +390,50 @@ pub trait GitBackend: Send + Sync {
         author_email: &str,
         signing_key_path: Option<&Path>,
     ) -> Result<(), GitError>;
+
+    /// Apply `changes` as a single commit on `branch` (GIT-19 web file editing).
+    ///
+    /// `base` is the branch whose tip seeds the starting tree and parents the
+    /// commit — for a plain in-place commit pass `base == branch`; to create
+    /// `branch` from another tip pass the source branch. A missing `base`
+    /// produces a root commit (first commit of an empty repository).
+    /// `branch` must not already exist when `branch != base`.
+    ///
+    /// Implementations apply changes via index plumbing (no worktree
+    /// checkout), then publish the commit through a push so bare
+    /// `hooks/update` (branch protection) still runs — non-fast-forward races
+    /// surface as [`GitError::Conflict`], hook declines as
+    /// [`GitError::Denied`]. Author is `author_name`/`author_email`; committer
+    /// is the forge identity; `signing_key_path` SSH-signs (`gpg.format=ssh`)
+    /// when set. A changeset that produces a tree identical to `base`'s is a
+    /// [`GitError::InvalidArg`] no-op rather than an empty commit.
+    ///
+    /// `actor_capability` is the pusher's forge capability label
+    /// (`admin`/`write`/`read`) exported to `hooks/update` as
+    /// `OXIDEAN_ACTOR_CAPABILITY` — pass the real actor (or `admin` for
+    /// system-initiated commits that already cleared API-layer policy).
+    async fn commit_files(
+        &self,
+        bare_path: &Path,
+        branch: &str,
+        base: &str,
+        message: &str,
+        changes: &[FileChange],
+        author_name: &str,
+        author_email: &str,
+        signing_key_path: Option<&Path>,
+        actor_capability: &str,
+    ) -> Result<FilesCommit, GitError>;
+
+    /// `git ls-tree <treeish> -- <path>` — the entry for `path` itself (blob /
+    /// tree / commit gitlink), not its children. `Ok(None)` when `treeish` or
+    /// `path` does not resolve (missing path, unborn ref).
+    async fn ls_tree_entry(
+        &self,
+        repo: &Path,
+        treeish: &str,
+        path: &str,
+    ) -> Result<Option<TreeEntry>, GitError>;
 
     /// List tree entries at `path` under `treeish` (branch/tag/sha). Empty repo /
     /// unborn HEAD → `Ok(vec![])` (not an error).

@@ -12,9 +12,10 @@ pub mod version;
 
 pub use backend::{
     ssh_host_from_remote_url, validate_remote_url, ArchiveFormat, BlameFile, BlameLine,
-    CommitDetail, CommitSummary, ContributorSummary, DiffFile, DiffResult, GitBackend, GitError,
-    GitRef, GrepHit, GrepResult, RemoteAuthKind, RemoteCredentials, SizedBlobEntry, TreeEntry,
-    TreeEntryKind, ARCHIVE_TIMEOUT, BLAME_SOFT_MAX_LINES, DIFF_SOFT_MAX_BYTES, FORGE_NOREPLY_EMAIL,
+    CommitDetail, CommitSummary, ContributorSummary, DiffFile, DiffResult, FileChange, FilesCommit,
+    GitBackend, GitError, GitRef, GrepHit, GrepResult, RemoteAuthKind, RemoteCredentials,
+    SizedBlobEntry, TreeEntry, TreeEntryKind, ARCHIVE_TIMEOUT, BLAME_SOFT_MAX_LINES,
+    DIFF_SOFT_MAX_BYTES, FORGE_NOREPLY_EMAIL,
 };
 pub use cli::{install_protection_hooks, reconcile_protection_hooks, CliGitBackend};
 pub use version::{assert_git_version, parse_git_version};
