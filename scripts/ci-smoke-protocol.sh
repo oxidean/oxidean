@@ -3,6 +3,8 @@
 # Brings up Compose, asserts Traefik/.git/LFS/SSH/packages routing (and SSH TCP),
 # then tears down. Client ls-remote/push/LFS transfer need a seeded repo — those
 # stay optional via SMOKE_SKIP_* (routing+TCP still prove protocol edges in CI).
+# DEBT-01: compose-smoke-protection runs last — it re-ups a fresh stack (wipes
+# volumes), seeds its own repo, and asserts HTTPS protected-push denial (ORG-06).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -66,5 +68,11 @@ echo "==> make smoke-git-lfs (routing; SMOKE_SKIP_LFS_CLIENT=${SMOKE_SKIP_LFS_CL
 
 echo "==> make smoke-packages (registry PathPrefix routing)"
 ./scripts/smoke-packages.sh
+
+# DEBT-01: ORG-06 protected-push denial. Self-contained — re-ups a fresh stack
+# (wipes volumes) to seed a repo; honors OXIDEAN_COMPOSE_SKIP_BUILD and maps
+# SMOKE_SKIP_LS_REMOTE=1 to skipping its SSH half (HTTPS denial stays mandatory).
+echo "==> make smoke-protection (ORG-06/D-PKG-03 protected-push denial; fresh stack)"
+./scripts/compose-smoke-protection.sh
 
 echo "==> ci-smoke-protocol OK"

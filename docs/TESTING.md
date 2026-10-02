@@ -214,7 +214,7 @@ Weighted forge-core gate (**D-QH-02**). Layers and weights:
 score = 0.25 * unit + 0.40 * integration + 0.35 * e2e
 ```
 
-**Initial floor:** bootstrap **`0.65`** (`COVERAGE_WEIGHTED_FLOOR` default in `scripts/coverage-weighted.sh`). Measured baseline after enabling `@vitest/coverage-v8` is ~0.68 (unit ≈61% / integration ≈45% / e2e checklist 1.0). **Ratchet target `0.70`** once integration depth and the forge e2e matrix (11.1-03) land — raise the env default and this doc together. Do not lower without an explicit residual note.
+**Floor:** **`0.70`** (`COVERAGE_WEIGHTED_FLOOR` default in `scripts/coverage-weighted.sh`, set in the `coverage-weighted` CI job). Bootstrap floor was `0.65` at a measured ~0.68 baseline; the ratchet to `0.70` landed after suites deepened (main measured ~0.73: unit ≈68% / integration ≈52% / e2e checklist 1.0). Do not lower without an explicit residual note.
 
 **E2E checklist formula (interim)**
 
@@ -242,7 +242,7 @@ Reports: `apps/web/coverage/{unit,integration}/` (`coverage-summary.json`, `lcov
 
 **Residual (this wave)**
 
-- Rust `cargo-llvm-cov` is preferred and wired as a Make target + CI install hook, but **CI does not yet fail on Rust coverage numbers** when llvm-cov is too heavy for the job budget — web unit/integration + e2e checklist drive the gate. Revisit when llvm-tools runtime is budgeted.
+- Rust `cargo-llvm-cov` runs in the `coverage-weighted` CI job as **collection only** (`var/coverage/rust-*` artifacts): the weighted gate composition is unchanged — web unit/integration + e2e checklist drive the score and **CI does not fail on Rust coverage numbers** yet. Revisit when the Rust layer joins the weighted composition.
 - Do not revive the removed Playwright component e2e project for coverage (**D-QH-03**).
 
 ## CI integration
@@ -256,15 +256,15 @@ Workflow: [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) (`name: CI`)
 | `route-coverage` | `make route-coverage-check` — every user-facing `.tsrx` page has happy-dom, stack-browser, or documented skip (G-11.1-15); change-aware: touched routes cannot stay skip-only |
 | `web-browser` | `make test-web-browser` — Vitest Chromium component DOM-race suite (`*.browser.test.tsx`) |
 | `browser-coverage` | `make browser-coverage-check` + change contract — high-risk UI (Checkbox/Radio/Select/Switch/portals/Subscribe) Chromium proof; touched/new surfaces cannot stay skip-only |
-| `coverage-weighted` | Bun install → `make coverage-contract` → `make coverage-web` → e2e checklist → `scripts/coverage-weighted.sh` (bootstrap floor `0.65`, ratchet target `0.70`); uploads `var/coverage/` + `apps/web/coverage/` on failure |
+| `coverage-weighted` | Rust toolchain (llvm-tools-preview) + `cargo-llvm-cov`/`nextest` → Bun install → `make coverage-contract` → `make coverage-rust` → `make coverage-web` → e2e checklist → `scripts/coverage-weighted.sh` (floor `0.70`); uploads `var/coverage/rust-*` always, `var/coverage/` + `apps/web/coverage/` on failure |
 | `e2e-stack` | Rust + Bun + Playwright → `make test-e2e-stack`; on failure uploads `var/e2e/` as `e2e-stack-logs` |
 | `rpc-sync` | `make rpc-sync-check` |
 | `compose` | `docker compose … config` for base, MySQL/SQLite overlays, and `docker-compose.dev-auth.yml` (config-only; does not build/bring-up) |
 | `compose-smoke` | Matrix `postgres` / `sqlite` / `mysql`: `./scripts/ci-compose-smoke.sh` → `make smoke` / `smoke-sqlite` / `smoke-mysql` (**D-CI-01…04**); fail-closed under `CI` / `SMOKE_REQUIRE_STACK`; image proof via `compose up --build` (**D-CI-06**); uploads `/tmp/oxidean-smoke*.json` on failure. Complements config-only `compose` and stays separate from `smoke-protocol` (**D-CI-05**) |
-| `smoke-protocol` | Compose up → `make smoke-git-https` + `smoke-git-ssh` + `smoke-git-lfs` + `smoke-packages` via `make smoke-protocol-ci` (**D-QH-04**); fail-closed when Docker/stack absent (`CI` / `SMOKE_REQUIRE_STACK`); default `SMOKE_SKIP_LS_REMOTE=1` / `SMOKE_SKIP_LFS_CLIENT=1` (routing + SSH TCP; no seeded-repo client) |
+| `smoke-protocol` | Compose up → `make smoke-git-https` + `smoke-git-ssh` + `smoke-git-lfs` + `smoke-packages` via `make smoke-protocol-ci` (**D-QH-04**), then `smoke-protection` — ORG-06/D-PKG-03 HTTPS protected-push denial on a fresh stack it re-ups itself (**DEBT-01**); fail-closed when Docker/stack absent (`CI` / `SMOKE_REQUIRE_STACK`); default `SMOKE_SKIP_LS_REMOTE=1` / `SMOKE_SKIP_LFS_CLIENT=1` (routing + SSH TCP; no seeded-repo client) |
 | `db-matrix` | Matrix `postgres` / `mysql` / `sqlite`: `cargo test -p oxidean-db --test dialect_probe -- --nocapture` with matching `DATABASE_URL` / `OXIDEAN_DB_DIALECT` (dialect probe only — not a substitute for Compose bring-up) |
 
-Default `web-octane` stays fast (no Docker auth stubs). True auth/email path coverage is the separate `e2e-stack` job. The `coverage-weighted` job enforces D-QH-02 without reviving component Playwright. Compose dialect health (Traefik `/` + `/health` + `system.db_probe`) is the `compose-smoke` matrix — not folded into `smoke-protocol`. Forge protocol edges (Smart HTTP / SSH TCP / LFS batch / packages PathPrefix) are the `smoke-protocol` job — not happy-dom only.
+Default `web-octane` stays fast (no Docker auth stubs). True auth/email path coverage is the separate `e2e-stack` job. The `coverage-weighted` job enforces D-QH-02 without reviving component Playwright. Compose dialect health (Traefik `/` + `/health` + `system.db_probe`) is the `compose-smoke` matrix — not folded into `smoke-protocol`. Forge protocol edges (Smart HTTP / SSH TCP / LFS batch / packages PathPrefix) plus ORG-06 protected-push denial are the `smoke-protocol` job — not happy-dom only.
 
 ### Compose dialect smokes (local + CI)
 
@@ -286,9 +286,9 @@ Oxidean Cloud (Railway IaC + Caddy gateway) is **not** exercised in PR CI — se
 | `make smoke-git-lfs` | `.git/info/lfs` batch routing not SPA; optional git-lfs client | `SMOKE_SKIP_LFS_CLIENT=1` for routing-only |
 | `make smoke-packages` | `/v2` `/npm` `/generic` PathPrefix → API | Needs running Compose API |
 | `make smoke-protection` | API image ships `oxidean-protection-hook`; HTTPS push to reviews-required protected branch denied (**ORG-06** / **D-PKG-03**) | Fresh Compose up (wipes volumes); `scripts/compose-smoke-protection.sh` |
-| `make smoke-protocol-ci` | All four fail-closed against a fresh Compose up | Same entrypoint as CI `smoke-protocol` |
+| `make smoke-protocol-ci` | All five fail-closed; `smoke-protection` re-ups a fresh stack (wipes volumes) to seed a repo and assert protected-push denial | Same entrypoint as CI `smoke-protocol` |
 
-Locally without Docker, individual `make smoke-git-*` / `smoke-packages` may skip (exit 0). Under `CI=true` or `SMOKE_REQUIRE_STACK=1`, those skips become failures.
+Locally without Docker, individual `make smoke-git-*` / `smoke-packages` / `smoke-protection` may skip (exit 0). Under `CI=true` or `SMOKE_REQUIRE_STACK=1`, those skips become failures.
 
 ## Dev-auth stubs (stack e2e)
 

@@ -1,5 +1,6 @@
 //! `repo.search` — in-repo code/commits/issues/pulls search (GIT-18 / D-SRCH-*).
 
+use oxidean_core::languages::{language_for_path, languages_named, LanguageSpec};
 use oxidean_core::{
     AppError, RepoSearchHit, RepoSearchRequest, RepoSearchResponse, RepoSearchType,
 };
@@ -9,7 +10,7 @@ use crate::git::bare_repo_path;
 use crate::rpc::RpcCtx;
 
 use super::search_query::parse_search_query;
-use super::{map_git_err, resolve_repo_for_read, AccessibleRepo};
+use super::{language_stats, map_git_err, resolve_repo_for_read, AccessibleRepo};
 
 /// `repo.search` — permission-aware in-repo search.
 pub async fn search(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoSearchResponse, AppError> {
@@ -51,9 +52,21 @@ async fn search_code(
     offset: u32,
     limit: u32,
 ) -> Result<(Vec<RepoSearchHit>, bool), AppError> {
+    // `language:` / `lang:` resolves against the shared taxonomy (issue #59).
+    // An explicit qualifier that names nothing matches nothing.
+    let langs: Vec<&'static LanguageSpec> = parsed
+        .language
+        .as_deref()
+        .map(languages_named)
+        .unwrap_or_default();
+    if parsed.language.as_deref().is_some_and(|v| !v.trim().is_empty()) && langs.is_empty() {
+        return Ok((Vec::new(), false));
+    }
+
     let pattern = parsed.keywords.trim();
     if pattern.is_empty() {
-        return Ok((Vec::new(), false));
+        // Browse mode: `language:`/`path:` without keywords lists matching files.
+        return browse_code_paths(ctx, accessible, req, parsed, &langs, offset, limit).await;
     }
     let path = bare_repo_path(
         &ctx.repos_dir,
@@ -70,9 +83,9 @@ async fn search_code(
         .saturating_add(limit)
         .saturating_add(1)
         .min(soft_cap.saturating_add(1));
-    let pathspec = parsed.path.as_deref();
+    let pathspecs = code_search_pathspecs(parsed.path.as_deref(), &langs);
     let timeout = std::time::Duration::from_millis(ctx.search_timeout_ms.max(1));
-    let grep_fut = ctx.git.grep(&path, &ref_name, pattern, pathspec, fetch);
+    let grep_fut = ctx.git.grep(&path, &ref_name, pattern, &pathspecs, fetch);
     let result = match tokio::time::timeout(timeout, grep_fut).await {
         Ok(Ok(r)) => r,
         Ok(Err(e)) => return Err(map_git_err(e)),
@@ -111,6 +124,121 @@ async fn search_code(
             line: h.line,
             content: h.content,
         })
+        .collect();
+    Ok((page, truncated))
+}
+
+/// Build `git grep` pathspecs intersecting `path:` prefix with `language:`
+/// matchers from the shared table. `:(icase)` keeps search consistent with
+/// `language_for_path` (lowercased basename); `:(glob)` `**/` pins filename and
+/// extension matches under the prefix at any depth. No qualifiers → no
+/// pathspecs (full-tree search).
+fn code_search_pathspecs(
+    path: Option<&str>,
+    langs: &[&'static LanguageSpec],
+) -> Vec<String> {
+    let prefix = path
+        .map(|p| p.trim().trim_matches('/'))
+        .filter(|p| !p.is_empty());
+    if langs.is_empty() {
+        return match (path, prefix) {
+            (Some(raw), Some(_)) => vec![raw.trim().to_string()],
+            (Some(raw), None) => vec![raw.trim().to_string()],
+            (None, _) => Vec::new(),
+        };
+    }
+    let mut specs = Vec::new();
+    for lang in langs {
+        for ext in lang.extensions {
+            match prefix {
+                Some(p) => specs.push(format!(":(icase,glob){p}/**/*.{ext}")),
+                None => specs.push(format!(":(icase)*.{ext}")),
+            }
+        }
+        for name in lang.filenames {
+            match prefix {
+                Some(p) => specs.push(format!(":(icase,glob){p}/**/{name}")),
+                None => specs.push(format!(":(icase,glob)**/{name}")),
+            }
+        }
+    }
+    specs
+}
+
+/// `language:` / `path:` without keywords — list matching tracked files instead
+/// of grepping contents (issue #59 browse mode). Hits carry `line: 0` and empty
+/// `content` so callers render a file list rather than grep rows.
+async fn browse_code_paths(
+    ctx: &RpcCtx,
+    accessible: &AccessibleRepo,
+    req: &RepoSearchRequest,
+    parsed: &super::search_query::ParsedSearchQuery,
+    langs: &[&'static LanguageSpec],
+    offset: u32,
+    limit: u32,
+) -> Result<(Vec<RepoSearchHit>, bool), AppError> {
+    let prefix = parsed
+        .path
+        .as_deref()
+        .map(|p| p.trim().trim_matches('/'))
+        .unwrap_or("");
+    if langs.is_empty() && prefix.is_empty() {
+        return Ok((Vec::new(), false));
+    }
+    let path = bare_repo_path(
+        &ctx.repos_dir,
+        &accessible.owner_username,
+        &accessible.row.name,
+    )?;
+    let ref_name = match req.ref_name.as_deref() {
+        Some(r) if !r.trim().is_empty() => r.trim().to_string(),
+        _ => accessible.row.default_branch.clone(),
+    };
+    let timeout = std::time::Duration::from_millis(ctx.search_timeout_ms.max(1));
+    let list_fut =
+        ctx.git
+            .ls_tree_sized_blobs(&path, &ref_name, language_stats::MAX_BLOBS);
+    let blobs = match tokio::time::timeout(timeout, list_fut).await {
+        Ok(Ok(b)) => b,
+        Ok(Err(e)) => return Err(map_git_err(e)),
+        Err(_) => {
+            return Err(AppError::new(
+                "search.timeout",
+                "code search timed out; narrow the query or raise OXIDEAN_SEARCH_TIMEOUT_MS",
+            ));
+        }
+    };
+
+    let stat_names: std::collections::HashSet<&'static str> =
+        langs.iter().map(|l| l.stat_name()).collect();
+    let scan_capped = blobs.len() as u32 >= language_stats::MAX_BLOBS;
+    let mut hits = Vec::new();
+    for b in &blobs {
+        let p = b.path.as_str();
+        if language_stats::is_vendored_path(p) {
+            continue;
+        }
+        if !prefix.is_empty() && p != prefix && !p.starts_with(&format!("{prefix}/")) {
+            continue;
+        }
+        if !stat_names.is_empty() {
+            let matches = language_for_path(p).is_some_and(|s| stat_names.contains(s.stat_name()));
+            if !matches {
+                continue;
+            }
+        }
+        hits.push(RepoSearchHit::Code {
+            path: b.path.clone(),
+            line: 0,
+            content: String::new(),
+        });
+    }
+
+    let truncated = scan_capped || hits.len() as u32 > offset.saturating_add(limit);
+    let page: Vec<RepoSearchHit> = hits
+        .into_iter()
+        .skip(offset as usize)
+        .take(limit as usize)
         .collect();
     Ok((page, truncated))
 }
@@ -292,4 +420,47 @@ async fn search_pulls(
         })
         .collect();
     Ok((page, truncated))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::code_search_pathspecs;
+    use oxidean_core::languages::languages_named;
+
+    #[test]
+    fn pathspecs_for_language_cover_extensions_and_filenames() {
+        let ts = languages_named("typescript");
+        // TypeScript + TSX rows → extension globs; no filenames.
+        let specs = code_search_pathspecs(None, &ts);
+        assert!(specs.contains(&":(icase)*.ts".to_string()));
+        assert!(specs.contains(&":(icase)*.tsx".to_string()));
+
+        let docker = languages_named("dockerfile");
+        let specs = code_search_pathspecs(None, &docker);
+        assert!(specs.contains(&":(icase)*.dockerfile".to_string()));
+        assert!(specs.contains(&":(icase,glob)**/dockerfile".to_string()));
+        assert!(specs.contains(&":(icase,glob)**/containerfile".to_string()));
+    }
+
+    #[test]
+    fn pathspecs_intersect_path_prefix_with_language() {
+        let rust = languages_named("Rust");
+        let specs = code_search_pathspecs(Some("src/"), &rust);
+        assert_eq!(specs, vec![":(icase,glob)src/**/*.rs".to_string()]);
+
+        // path: alone keeps the legacy raw prefix pathspec.
+        let specs = code_search_pathspecs(Some("src"), &[]);
+        assert_eq!(specs, vec!["src".to_string()]);
+
+        // No qualifiers → no pathspecs (whole tree).
+        assert!(code_search_pathspecs(None, &[]).is_empty());
+    }
+
+    #[test]
+    fn language_name_resolution_is_case_insensitive_and_grouped() {
+        assert_eq!(languages_named("RUBY").len(), 1);
+        assert!(languages_named("unknown-lang").is_empty());
+        // Group name (TypeScript) pulls in the TSX row too.
+        assert!(languages_named("typescript").len() > 1);
+    }
 }

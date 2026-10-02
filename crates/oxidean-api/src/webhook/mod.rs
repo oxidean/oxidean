@@ -20,7 +20,7 @@ use crate::rpc::RpcCtx;
 
 use self::deliver::validate_webhook_url;
 
-const ALLOWED_EVENTS: &[&str] = &["push", "pull_request", "issues", "ping", "*"];
+const ALLOWED_EVENTS: &[&str] = &["push", "pull_request", "issues", "issue_comment", "ping", "*"];
 
 fn db_err(e: String) -> AppError {
     if e == "database not configured" {

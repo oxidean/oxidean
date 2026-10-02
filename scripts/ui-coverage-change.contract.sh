@@ -20,12 +20,12 @@ grep -q 'mode=inventory-only' /tmp/rcc-inventory.txt \
 pass "inventory-only passes"
 
 # Touching a known skip-only high-risk surface must fail browser-coverage.
-if UI_COVERAGE_TOUCHED='components/repo/webhook-form.tsrx' \
+if UI_COVERAGE_TOUCHED='components/settings/gpg-key-add-form.tsrx' \
   ./scripts/browser-coverage-check.sh >/tmp/bcc-touch.txt 2>/tmp/bcc-touch.err; then
-  fail "expected browser-coverage-check to FAIL for touched skip-only webhook-form"
+  fail "expected browser-coverage-check to FAIL for touched skip-only gpg-key-add-form"
 fi
 grep -Eq 'skip-only|still skip-only' /tmp/bcc-touch.err \
-  || fail "expected skip-only failure message for webhook-form; got: $(cat /tmp/bcc-touch.err)"
+  || fail "expected skip-only failure message for gpg-key-add-form; got: $(cat /tmp/bcc-touch.err)"
 pass "touched skip-only high-risk UI fails browser-coverage"
 
 # Touching a covered high-risk surface must still pass.

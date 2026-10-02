@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Weighted coverage gate (D-QH-02): unit 25% + integration 40% + e2e 35%.
-# Bootstrap floor 0.65 (measured baseline ~0.68 after enabling Vitest v8).
-# Ratchet target 0.70 — raise COVERAGE_WEIGHTED_FLOOR in CI/docs when suites deepen.
+# Floor 0.70 (ratcheted from bootstrap 0.65; baseline ~0.68, main measured ~0.73).
+# Raise COVERAGE_WEIGHTED_FLOOR in CI/docs together when suites deepen further.
 set -euo pipefail
 
 WEIGHT_UNIT=0.25
 WEIGHT_INTEGRATION=0.40
 WEIGHT_E2E=0.35
-FLOOR="${COVERAGE_WEIGHTED_FLOOR:-0.65}"
+FLOOR="${COVERAGE_WEIGHTED_FLOOR:-0.70}"
 
 usage() {
   cat <<'EOF'
@@ -17,7 +17,7 @@ Usage: coverage-weighted.sh [--unit N] [--integration N] [--e2e N]
 
 Layer scores are 0..1. Defaults (env overrides):
   COVERAGE_UNIT, COVERAGE_INTEGRATION, COVERAGE_E2E
-  COVERAGE_WEIGHTED_FLOOR (default 0.65; ratchet target 0.70)
+  COVERAGE_WEIGHTED_FLOOR (default 0.70)
 
 Vitest json-summary: --unit-json / --integration-json read total.lines.pct / 100.
 --e2e-checklist runs scripts/coverage-e2e-checklist.sh for the e2e layer score.

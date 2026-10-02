@@ -1,7 +1,7 @@
 export type ThemePreference = "system" | "light" | "dark";
 
 export const THEME_STORAGE_KEY = "oxidean-theme";
-/** Cookie mirrors localStorage so SSR can pick github-light vs github-dark. */
+/** Cookie mirrors localStorage so SSR can pick oxidean-light vs oxidean-dark. */
 export const THEME_COOKIE_KEY = "oxidean-theme";
 /**
  * Resolved light/dark after system preference — set by the FOUC boot script so
