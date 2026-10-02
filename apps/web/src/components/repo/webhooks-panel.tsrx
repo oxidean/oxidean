@@ -168,6 +168,7 @@ export function WebhooksPanel(props: {
                 </p>
                 <Button
                   type="button"
+                  data-testid="webhook-add"
                   onClick={() => {
                     setMode("create");
                     setEditing(null);
