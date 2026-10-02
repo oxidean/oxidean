@@ -12,6 +12,7 @@ import { apiClient } from "@/lib/api-client";
 import { socialListHref } from "@/lib/repo-social-lists";
 import type { RepoLayoutLoaderData } from "@/lib/repo-store";
 import { fetchRepoGet, fetchRepoWatchers } from "@/lib/ssr-repo";
+import { AppLink } from "@/components/ui/app-link";
 
 export type WatchersLoaderData =
   | { kind: "not_found" }
@@ -183,7 +184,7 @@ export function RepoWatchersPage() @{
           <List className="mt-6" aria-label="Watchers">
             @for (const w of watchers; key w.user_id) {
               <ListRow className="flex items-center gap-3 py-3">
-                <a
+                <AppLink
                   href={("/" + w.username) as string}
                   className="inline-flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full border border-border bg-muted text-[12px] font-semibold text-foreground no-underline"
                 >
@@ -198,14 +199,14 @@ export function RepoWatchersPage() @{
                       {w.display_name.slice(0, 1).toUpperCase() as string}
                     </span>;
                   }
-                </a>
+                </AppLink>
                 <div className="min-w-0 flex-1">
-                  <a
+                  <AppLink
                     href={("/" + w.username) as string}
                     className="font-medium text-foreground no-underline hover:underline"
                   >
                     {w.username as string}
-                  </a>
+                  </AppLink>
                   @if (
                     w.display_name &&
                     w.display_name !== w.username

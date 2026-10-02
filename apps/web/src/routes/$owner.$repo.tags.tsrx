@@ -18,6 +18,7 @@ import {
 } from "@/lib/repo-browse";
 import { fetchRepoGet, fetchRepoRefs } from "@/lib/ssr-repo";
 import { formatRelative } from "@/lib/relative-time";
+import { AppLink } from "@/components/ui/app-link";
 
 export type TagsLoaderData =
   | { kind: "not_found" }
@@ -179,13 +180,13 @@ function TagRow({
   <ListRow className="flex-wrap gap-x-4 gap-y-2">
     <Tag aria-hidden size={16} className="shrink-0 text-muted-foreground" />
     <div className="min-w-0 flex-1">
-      <a
+      <AppLink
         href={href as string}
         className="block truncate text-[15px] font-semibold text-primary no-underline hover:underline"
         title={name as string}
       >
         {name as string}
-      </a>
+      </AppLink>
       <p className="mt-0.5 font-mono text-[12px] text-muted-foreground" title={tag.oid as string}>
         {tip as string}
       </p>

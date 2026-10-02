@@ -11,6 +11,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiClient } from "@/lib/api-client";
 import { fetchRepoActivity, fetchRepoGet } from "@/lib/ssr-repo";
+import { AppLink } from "@/components/ui/app-link";
 
 export type ActivityLoaderData =
   | { kind: "not_found" }
@@ -233,20 +234,20 @@ export function RepoActivityPage() @{
       />
       <div className="mt-4 flex flex-wrap gap-2" data-testid="repo-activity-filters">
         @for (const p of PERIODS; key p.id) {
-          <a
+          <AppLink
             href={activityHrefWithFilters(owner, repoName, p.id, phase.pushType) as string}
             className={filterChipClass(p.id === phase.period) as string}
           >
             {p.label as string}
-          </a>;
+          </AppLink>;
         }
         @for (const t of TYPES; key t.id) {
-          <a
+          <AppLink
             href={activityHrefWithFilters(owner, repoName, phase.period, t.value) as string}
             className={filterChipClass(t.value === phase.pushType) as string}
           >
             {t.label as string}
-          </a>;
+          </AppLink>;
         }
       </div>
       @if (phase.items.length === 0) {

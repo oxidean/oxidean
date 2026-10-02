@@ -11,6 +11,7 @@ import { apiClient } from "@/lib/api-client";
 import { renderGfm } from "@/lib/markdown";
 import type { RepoLayoutLoaderData } from "@/lib/repo-store";
 import { fetchRepoGet } from "@/lib/ssr-repo";
+import { AppLink } from "@/components/ui/app-link";
 
 export type ReleaseDetailLoaderData =
   | { kind: "not_found" }
@@ -187,6 +188,7 @@ export function RepoReleaseDetailPage() @{
           <ul className="mb-4 flex flex-col gap-2">
             @for (const a of release.assets; key a.id) {
               <li>
+                {/* raw-anchor-ok — /api download endpoint, not a router route */}
                 <a
                   href={`/api/releases/assets/${a.id}` as string}
                   className="text-[14px] text-primary underline"
@@ -235,12 +237,12 @@ export function RepoReleaseDetailPage() @{
         }
       </section>
       <p className="mt-8">
-        <a
+        <AppLink
           href={`/${owner}/${repoName}/releases` as string}
           className="text-[14px] text-primary underline"
         >
           All releases
-        </a>
+        </AppLink>
       </p>
     </>;
   }

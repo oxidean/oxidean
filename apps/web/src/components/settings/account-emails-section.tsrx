@@ -28,6 +28,7 @@ import { Label } from "@/components/ui/label";
 import { List, ListRow } from "@/components/ui/list";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiClient } from "@/lib/api-client";
+import { AppLink } from "@/components/ui/app-link";
 
 const LIST_ERROR = "Couldn't load email addresses. Check your connection and try again.";
 const VERIFY_INVALID = "That code is invalid or expired. Resend verification and try again.";
@@ -180,9 +181,9 @@ export function AccountEmailsSection(props: AccountEmailsSectionProps) @{
         }
         <p className="mt-1 text-[14px] text-muted-foreground">
           Signing keys are managed under{" "}
-          <a href="/settings/ssh-keys" className="underline underline-offset-2">
+          <AppLink href="/settings/ssh-keys" className="underline underline-offset-2">
             SSH and GPG keys
-          </a>
+          </AppLink>
           .
         </p>
       </div>

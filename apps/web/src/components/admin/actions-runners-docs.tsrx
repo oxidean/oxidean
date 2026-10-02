@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+import { AppLink } from "@/components/ui/app-link";
 
 type ActionsRunnersDocsProps = {
   className?: string;
@@ -130,12 +131,12 @@ docker run --rm -it \\
     @if (showAdminLink) {
       <p className="mt-4 text-[14px] text-muted-foreground">
         Instance admins register runners under{" "}
-        <a
+        <AppLink
           href="/admin/runners"
           className="font-medium text-primary no-underline hover:underline"
         >
           Admin → Actions runners
-        </a>
+        </AppLink>
         .
       </p>;
     }

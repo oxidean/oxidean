@@ -18,6 +18,7 @@ import {
 import { formatRelativeUpdated } from "@/lib/relative-time";
 import type { RepoLayoutLoaderData } from "@/lib/repo-store";
 import { fetchRepoForks, fetchRepoGet } from "@/lib/ssr-repo";
+import { AppLink } from "@/components/ui/app-link";
 
 export type ForksLoaderData =
   | { kind: "not_found" }
@@ -219,7 +220,7 @@ export function RepoForksPage() @{
             @for (const f of forks; key f.id) {
               <ListRow className="flex flex-col gap-2 py-4 sm:flex-row sm:items-start sm:justify-between">
                 <div className="flex min-w-0 items-start gap-3">
-                  <a
+                  <AppLink
                     href={("/" + f.owner_username) as string}
                     className="inline-flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full border border-border bg-muted text-[12px] font-semibold text-foreground no-underline"
                   >
@@ -234,22 +235,22 @@ export function RepoForksPage() @{
                         {f.owner_username.slice(0, 1).toUpperCase() as string}
                       </span>;
                     }
-                  </a>
+                  </AppLink>
                   <div className="min-w-0">
                     <h2 className="truncate text-[15px] font-semibold text-foreground">
-                      <a
+                      <AppLink
                         href={("/" + f.owner_username) as string}
                         className="text-foreground no-underline hover:underline"
                       >
                         {f.owner_username as string}
-                      </a>
+                      </AppLink>
                       <span className="text-muted-foreground"> / </span>
-                      <a
+                      <AppLink
                         href={("/" + f.owner_username + "/" + f.name) as string}
                         className="text-foreground no-underline hover:underline"
                       >
                         {f.name as string}
-                      </a>
+                      </AppLink>
                     </h2>
                     @if (f.description) {
                       <p className="mt-1 line-clamp-2 text-[13px] text-muted-foreground">

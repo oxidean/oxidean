@@ -317,6 +317,7 @@ ui-coverage-change-contract:
 web-lint:
 	bun run --filter @oxidean/web lint
 	bun run scripts/check-octane-dom-races.ts
+	bun run scripts/check-internal-anchors.ts
 
 web-format-check:
 	bun run --filter @oxidean/web format:check

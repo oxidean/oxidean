@@ -25,6 +25,7 @@ import {
   TOO_SHORT,
 } from "@/lib/reset-password-copy";
 import { readReturnToFromLocation, safeReturnTo } from "@/lib/return-to";
+import { AppLink } from "@/components/ui/app-link";
 
 export const Route = createFileRoute("/reset-password")({
   component: ResetPasswordPage,
@@ -189,12 +190,12 @@ export function ResetPasswordPage() @{
         </Button>
         <p className="text-[14px] text-muted-foreground">
           Remembered it?{" "}
-          <a
+          <AppLink
             href="/login"
             className="font-normal text-foreground underline-offset-4 hover:underline"
           >
             Sign in
-          </a>
+          </AppLink>
         </p>
       </AuthShell>;
     } @else {
@@ -280,12 +281,12 @@ export function ResetPasswordPage() @{
 
           <p className="text-[14px] text-muted-foreground">
             Remembered it?{" "}
-            <a
+            <AppLink
               href="/login"
               className="font-normal text-foreground underline-offset-4 hover:underline"
             >
               Sign in
-            </a>
+            </AppLink>
           </p>
         </AuthShell>;
       } @else {
@@ -411,12 +412,12 @@ export function ResetPasswordPage() @{
 
           <p className="text-[14px] text-muted-foreground">
             Remembered it?{" "}
-            <a
+            <AppLink
               href="/login"
               className="font-normal text-foreground underline-offset-4 hover:underline"
             >
               Sign in
-            </a>
+            </AppLink>
           </p>
         </AuthShell>;
       }

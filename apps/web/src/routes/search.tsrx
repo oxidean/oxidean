@@ -33,6 +33,7 @@ import { Input } from "@/components/ui/input";
 import { List, ListRow } from "@/components/ui/list";
 import { PageHeader } from "@/components/ui/page-header";
 import { cn } from "@/lib/utils";
+import { AppLink } from "@/components/ui/app-link";
 
 function ssrApiOrigin(): string {
   return (
@@ -223,12 +224,12 @@ function RepoRow({ hit }: { hit: GlobalSearchRepoHit }) @{
     <BookMarked aria-hidden size={18} className="mt-0.5 shrink-0 text-muted-foreground" />
     <div className="min-w-0 flex-1">
       <div className="flex flex-wrap items-center gap-2">
-        <a
+        <AppLink
           href={("/" + hit.owner + "/" + hit.name) as string}
           className="text-[16px] font-semibold text-primary no-underline hover:underline"
         >
           {repoFullName(hit.owner, hit.name) as string}
-        </a>
+        </AppLink>
         <Badge variant={hit.visibility === "private" ? "outline" : "success"}>
           {(hit.visibility === "private" ? "Private" : "Public") as string}
         </Badge>
@@ -246,12 +247,12 @@ function RepoRow({ hit }: { hit: GlobalSearchRepoHit }) @{
 function UserRow({ hit }: { hit: GlobalSearchUserHit }) @{
   <ListRow className="gap-2">
     <Users aria-hidden size={16} className="shrink-0 text-muted-foreground" />
-    <a
+    <AppLink
       href={("/" + hit.username) as string}
       className="text-[15px] font-semibold text-primary no-underline hover:underline"
     >
       {("@" + hit.username) as string}
-    </a>
+    </AppLink>
     @if (hit.display_name) {
       <span className="text-[14px] text-muted-foreground">{hit.display_name as string}</span>;
     }
@@ -261,12 +262,12 @@ function UserRow({ hit }: { hit: GlobalSearchUserHit }) @{
 function OrgRow({ hit }: { hit: GlobalSearchOrgHit }) @{
   <ListRow className="gap-2">
     <Building2 aria-hidden size={16} className="shrink-0 text-muted-foreground" />
-    <a
+    <AppLink
       href={("/" + hit.slug) as string}
       className="text-[15px] font-semibold text-primary no-underline hover:underline"
     >
       {hit.slug as string}
-    </a>
+    </AppLink>
     @if (hit.display_name) {
       <span className="text-[14px] text-muted-foreground">{hit.display_name as string}</span>;
     }
@@ -277,12 +278,12 @@ function IssueRow({ hit }: { hit: GlobalSearchIssueHit }) @{
   <ListRow className="items-start gap-3">
     <CircleDot aria-hidden size={16} className="mt-1 shrink-0 text-muted-foreground" />
     <div className="min-w-0 flex-1">
-      <a
+      <AppLink
         href={("/" + hit.repo_owner + "/" + hit.repo_name + "/issues/" + hit.number) as string}
         className="text-[15px] font-medium text-foreground no-underline hover:text-primary hover:underline"
       >
         {hit.title as string}
-      </a>
+      </AppLink>
       <p className="mt-0.5 text-[13px] text-muted-foreground">
         {
           (repoFullName(hit.repo_owner, hit.repo_name) +
@@ -303,12 +304,12 @@ function PullRow({ hit }: { hit: GlobalSearchPullHit }) @{
   <ListRow className="items-start gap-3">
     <GitPullRequest aria-hidden size={16} className="mt-1 shrink-0 text-muted-foreground" />
     <div className="min-w-0 flex-1">
-      <a
+      <AppLink
         href={("/" + hit.repo_owner + "/" + hit.repo_name + "/pull/" + hit.number) as string}
         className="text-[15px] font-medium text-foreground no-underline hover:text-primary hover:underline"
       >
         {hit.title as string}
-      </a>
+      </AppLink>
       <p className="mt-0.5 text-[13px] text-muted-foreground">
         {
           (repoFullName(hit.repo_owner, hit.repo_name) +
@@ -334,12 +335,12 @@ function CommitRow({ hit }: { hit: GlobalSearchCommitHit }) @{
   <ListRow className="items-start gap-3">
     <GitCommitHorizontal aria-hidden size={16} className="mt-1 shrink-0 text-muted-foreground" />
     <div className="min-w-0 flex-1">
-      <a
+      <AppLink
         href={("/" + hit.repo_owner + "/" + hit.repo_name + "/commit/" + hit.sha) as string}
         className="font-mono text-[13px] font-medium text-primary no-underline hover:underline"
       >
         {hit.short_sha as string}
-      </a>
+      </AppLink>
       <span className="ml-2 text-[14px] text-foreground">{hit.subject as string}</span>
       <p className="mt-0.5 text-[13px] text-muted-foreground">
         {
@@ -356,12 +357,12 @@ function CommitRow({ hit }: { hit: GlobalSearchCommitHit }) @{
 
 function CodeRow({ hit }: { hit: GlobalSearchCodeHit }) @{
   <ListRow className="block px-4 py-3">
-    <a
+    <AppLink
       href={("/" + hit.repo_owner + "/" + hit.repo_name + "/blob/" + hit.path) as string}
       className="font-mono text-[13px] font-medium text-primary no-underline hover:underline"
     >
       {(repoFullName(hit.repo_owner, hit.repo_name) + ":" + hit.path) as string}
-    </a>
+    </AppLink>
     <span className="font-mono text-[13px] text-muted-foreground">
       {(":" + hit.line) as string}
     </span>
@@ -390,12 +391,12 @@ function SectionHeader({
       </span>
     </h2>
     @if (moreHref) {
-      <a
+      <AppLink
         href={moreHref as string}
         className="text-[13px] text-muted-foreground no-underline hover:text-foreground hover:underline"
       >
         {"View all" as string}
-      </a>;
+      </AppLink>;
     }
   </div>;
 }
@@ -479,7 +480,7 @@ export function SearchPage() @{
     >
       @for (const tab of TABS; key tab.id) {
         const badge = tabBadge(data, tab.id);
-        <a
+        <AppLink
           href={tabHref(q0, tab.id) as string}
           className={tabClass(type === tab.id) as string}
           aria-current={type === tab.id ? "page" : undefined}
@@ -490,7 +491,7 @@ export function SearchPage() @{
               {badge as string}
             </span>;
           }
-        </a>;
+        </AppLink>;
       }
     </nav>
 
@@ -649,12 +650,12 @@ export function SearchPage() @{
         <>
           @if (type === "users" && !signedIn) {
             <p className="text-[15px] text-muted-foreground">
-              <a
+              <AppLink
                 href="/login?returnTo=/search"
                 className="text-primary hover:underline"
               >
                 Sign in
-              </a>{" "}
+              </AppLink>{" "}
               to search users.
             </p>;
           } @else if (!activeGroup || activeGroup.hits.length === 0) {
@@ -722,7 +723,7 @@ export function SearchPage() @{
                   data-testid="search-pager"
                 >
                   @if (hasPrev) {
-                    <a
+                    <AppLink
                       href={
                         tabHref(
                           q0,
@@ -733,17 +734,17 @@ export function SearchPage() @{
                       className="text-[14px] text-primary no-underline hover:underline"
                     >
                       {"← Newer" as string}
-                    </a>;
+                    </AppLink>;
                   } @else {
                     <span />;
                   }
                   @if (hasNext) {
-                    <a
+                    <AppLink
                       href={tabHref(q0, type, offset + TAB_LIMIT) as string}
                       className="text-[14px] text-primary no-underline hover:underline"
                     >
                       {"Older →" as string}
-                    </a>;
+                    </AppLink>;
                   }
                 </div>;
               }

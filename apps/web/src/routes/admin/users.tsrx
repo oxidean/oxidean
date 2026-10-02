@@ -65,6 +65,7 @@ import { authSessionQueryOptions, setAuthMeCache } from "@/lib/session-queries";
 import { fetchAdminInvitesList, fetchAdminUsersList, fetchSessionMe } from "@/lib/ssr-auth";
 import { toastSuccess, toastWarning } from "@/lib/toast";
 import { cn } from "@/lib/utils";
+import { AppLink } from "@/components/ui/app-link";
 
 export type AdminUsersLoaderData =
   | { kind: "unauthenticated" }
@@ -196,12 +197,12 @@ function AdminUserDetailPanel({ userId }: { userId: string }) @{
             <ul className="mt-1 list-inside list-disc text-muted-foreground">
               @for (const org of accessQ.data!.orgs; key org.slug) {
                 <li>
-                  <a
+                  <AppLink
                     href={`/${org.slug}`}
                     className="text-primary underline-offset-2 hover:underline"
                   >
                     {org.slug as string}
-                  </a>
+                  </AppLink>
                   {` · ${org.role} · ${org.display_name}` as string}
                 </li>;
               }
@@ -214,12 +215,12 @@ function AdminUserDetailPanel({ userId }: { userId: string }) @{
             <ul className="mt-1 list-inside list-disc text-muted-foreground">
               @for (const repo of accessQ.data!.repos; key `${repo.owner}/${repo.name}`) {
                 <li>
-                  <a
+                  <AppLink
                     href={`/${repo.owner}/${repo.name}`}
                     className="text-primary underline-offset-2 hover:underline"
                   >
                     {`${repo.owner}/${repo.name}` as string}
-                  </a>
+                  </AppLink>
                   {` · ${repo.permission}` as string}
                 </li>;
               }
@@ -860,12 +861,12 @@ export function AdminUsersPage() @{
           <p className="text-[16px] text-muted-foreground">
             Sign in as a system administrator to manage users.
           </p>
-          <a
+          <AppLink
             href="/login?returnTo=/admin/users"
             className="mt-4 inline-block text-primary underline-offset-2 hover:underline"
           >
             Sign in
-          </a>
+          </AppLink>
         </div>
       </SettingsShell>;
     } @else {

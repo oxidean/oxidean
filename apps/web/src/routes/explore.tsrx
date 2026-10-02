@@ -9,6 +9,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { List, ListRow } from "@/components/ui/list";
 import { PageHeader } from "@/components/ui/page-header";
+import { AppLink } from "@/components/ui/app-link";
 
 function ssrApiOrigin(): string {
   return (
@@ -115,12 +116,12 @@ export function ExplorePage() @{
           }
           action={
             q.trim() ? (
-              <a
+              <AppLink
                 href="/explore"
                 className="text-[14px] font-medium text-primary hover:underline"
               >
                 Clear filter
-              </a>
+              </AppLink>
             ) : undefined
           }
         />;

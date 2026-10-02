@@ -48,6 +48,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { AppLink } from "@/components/ui/app-link";
 
 export type AdminAuthLoaderData =
   | { kind: "unauthenticated" }
@@ -347,12 +348,12 @@ export function AdminAuthPage() @{
           <p className="text-[16px] text-muted-foreground">
             Sign in as a system administrator to manage auth settings.
           </p>
-          <a
+          <AppLink
             href="/login?returnTo=/admin/auth"
             className="mt-4 inline-block text-primary underline-offset-2 hover:underline"
           >
             Sign in
-          </a>
+          </AppLink>
         </div>
       </SettingsShell>;
     } @else {

@@ -4,6 +4,7 @@ import { useState } from "octane";
 import type { RepoSearchHit, RepoSearchType } from "@oxidean/api-client";
 import { apiClient } from "@/lib/api-client";
 import { CodeSnippet } from "@/components/code-snippet";
+import { AppLink } from "@/components/ui/app-link";
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
 
@@ -184,12 +185,12 @@ export function RepoSearchPage() @{
             @for (const hit of hits; key hitKey(hit)) {
               @if (hit.kind === "code") {
                 <li className="px-3 py-2 text-[14px]">
-                  <a
+                  <AppLink
                     className="font-medium text-primary underline"
                     href={`/${owner}/${repoName}/blob/${hit.path}` as string}
                   >
                     {hit.path as string}
-                  </a>
+                  </AppLink>
                   @if (hit.line > 0) {
                     <span className="text-muted-foreground">
                       :{String(hit.line)}
@@ -200,12 +201,12 @@ export function RepoSearchPage() @{
               } @else {
                 @if (hit.kind === "commit") {
                   <li className="px-3 py-2 text-[14px]">
-                    <a
+                    <AppLink
                       className="font-medium text-primary underline"
                       href={`/${owner}/${repoName}/commit/${hit.sha}` as string}
                     >
                       {hit.short_sha as string}
-                    </a>
+                    </AppLink>
                     <span className="ml-2 text-foreground">
                       {hit.subject as string}
                     </span>
@@ -216,24 +217,24 @@ export function RepoSearchPage() @{
                 } @else {
                   @if (hit.kind === "issue") {
                     <li className="px-3 py-2 text-[14px]">
-                      <a
+                      <AppLink
                         className="font-medium text-primary underline"
                         href={`/${owner}/${repoName}/issues/${hit.number}` as string}
                       >
                         {"#" + String(hit.number) + " " + hit.title}
-                      </a>
+                      </AppLink>
                       <span className="ml-2 text-[12px] text-muted-foreground">
                         {hit.state as string}
                       </span>
                     </li>;
                   } @else {
                     <li className="px-3 py-2 text-[14px]">
-                      <a
+                      <AppLink
                         className="font-medium text-primary underline"
                         href={`/${owner}/${repoName}/pull/${hit.number}` as string}
                       >
                         {"#" + String(hit.number) + " " + hit.title}
-                      </a>
+                      </AppLink>
                       <span className="ml-2 text-[12px] text-muted-foreground">
                         {hit.state as string}
                       </span>

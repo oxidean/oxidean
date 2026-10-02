@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { apiClient } from "@/lib/api-client";
 import type { RepoLayoutLoaderData } from "@/lib/repo-store";
 import { fetchRepoGet } from "@/lib/ssr-repo";
+import { AppLink } from "@/components/ui/app-link";
 
 export type RepoLabelsLoaderData =
   | { kind: "not_found" }
@@ -218,12 +219,12 @@ export function RepoIssueLabelsPage() @{
               Hide org defaults or add repository-local labels.
             </p>
           </div>
-          <a
+          <AppLink
             href={`/${owner}/${repoName}/issues` as string}
             className="text-[14px] text-primary no-underline hover:underline"
           >
             Back to issues
-          </a>
+          </AppLink>
         </div>
 
         @if (formError) {

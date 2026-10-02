@@ -9,6 +9,7 @@ import { MarkdownWritePreview } from "@/components/repo/markdown-write-preview";
 import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api-client";
 import { formatRelative } from "@/lib/relative-time";
+import { AppLink } from "@/components/ui/app-link";
 
 export type IssueCommentsProps = {
   owner: string;
@@ -178,12 +179,12 @@ function CommentItem(props: {
   <li className="rounded-md border border-border px-4 py-3" data-testid="issue-comment">
     <div className="flex flex-wrap items-start justify-between gap-2">
       <p className="text-[13px] text-muted-foreground">
-        <a
+        <AppLink
           href={`/${comment.author_username}` as string}
           className="font-semibold text-foreground no-underline hover:text-primary"
         >
           {`@${comment.author_username}` as string}
-        </a>
+        </AppLink>
         {` commented ` as string}
         <span title={comment.created_at as string}>
           {formatRelative(comment.created_at) as string}
@@ -417,9 +418,12 @@ export function IssueComments(props: IssueCommentsProps) @{
     }
     @if (!props.currentUserId && !props.canWrite) {
       <p className="rounded-md border border-border bg-muted/30 px-4 py-3 text-[13px] text-muted-foreground">
-        <a href="/login" className="font-medium text-primary no-underline hover:underline">
+        <AppLink
+          href="/login"
+          className="font-medium text-primary no-underline hover:underline"
+        >
           Sign in
-        </a>
+        </AppLink>
         {" to join this conversation." as string}
       </p>;
     }

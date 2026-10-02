@@ -9,6 +9,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { apiClient } from "@/lib/api-client";
 import { fetchSessionMe } from "@/lib/ssr-auth";
 import { cn } from "@/lib/utils";
+import { AppLink } from "@/components/ui/app-link";
 
 export type TokensNewLoaderData =
   | { kind: "unauthenticated" }
@@ -122,18 +123,18 @@ export function TokensNewPage() @{
           title="Verify your email"
           support="Verify your email before creating a personal access token."
         >
-          <a href="/verify" className={cn(buttonVariants({ variant: "default" }))}>
+          <AppLink href="/verify" className={cn(buttonVariants({ variant: "default" }))}>
             Verify email
-          </a>
+          </AppLink>
         </AuthShell>;
       } @else {
         <AccountSettingsLayout active="tokens">
-          <a
+          <AppLink
             href="/settings/tokens"
             className="text-[14px] text-muted-foreground no-underline hover:text-foreground"
           >
             ← Back
-          </a>
+          </AppLink>
           @if (plaintext) {
             <div className="mt-6">
               <PatReveal token={plaintext as string} />

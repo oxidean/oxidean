@@ -1,3 +1,5 @@
+import { AppLink } from "@/components/ui/app-link";
+
 export type CommitAuthorLinkProps = {
   name: string;
   username?: string | null;
@@ -12,7 +14,7 @@ export function CommitAuthorLink(props: CommitAuthorLinkProps) @{
   const avatar = props.avatarUrl?.trim() || "";
 
   @if (username) {
-    <a
+    <AppLink
       href={`/${username}` as string}
       className={
         ("inline-flex max-w-full items-center gap-1.5 text-foreground no-underline hover:text-primary hover:underline " +
@@ -30,7 +32,7 @@ export function CommitAuthorLink(props: CommitAuthorLinkProps) @{
         />;
       }
       <span className="truncate font-medium">{name}</span>
-    </a>;
+    </AppLink>;
   } @else {
     <span
       className={
