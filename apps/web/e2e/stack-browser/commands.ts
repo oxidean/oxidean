@@ -289,10 +289,6 @@ export const expectWorkosCta: BrowserCommand<[]> = async (ctx) => {
         .waitFor({ state: "visible", timeout: 30_000 });
     } catch (e) {
       const html = await page.content();
-      const visibleText = await page
-        .locator("body")
-        .innerText()
-        .catch(() => "<unreadable>");
       assertNoOctaneOverlay(html, "login WorkOS CTA");
       throw new Error(`WorkOS CTA not found. body snippet=${html.slice(0, 800)}`, { cause: e });
     }
@@ -1035,6 +1031,10 @@ export const expectReleaseAssetFlow: BrowserCommand<[]> = async (ctx) => {
         ? JSON.stringify(((relGet.data as { assets?: unknown[] }).assets ?? []).length)
         : `ERR ${JSON.stringify(relGet.error)}`;
       const html = await page.content();
+      const visibleText = await page
+        .locator("body")
+        .innerText()
+        .catch(() => "<unreadable>");
       const markers = [
         ["empty-assets", html.includes("No assets attached")],
         ["not-found", html.includes("not found") || html.includes("NotFound")],
