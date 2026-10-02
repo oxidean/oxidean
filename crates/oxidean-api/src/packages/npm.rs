@@ -547,6 +547,18 @@ async fn put_publish(
     let desc = serde_json::to_string(&meta).unwrap_or_default();
     let _ = update_package_description(&state.db, &pkg.id, &desc).await;
 
+    // API-04: fans out `registry_package` only when the package is linked to
+    // a repository (npm publish does not carry a repository link today).
+    crate::webhook::dispatch::notify_package_publish(
+        &state.db,
+        &pkg,
+        &version,
+        "published",
+        &identity.user_id,
+        &state.env_name,
+    )
+    .await;
+
     StatusCode::CREATED.into_response()
 }
 

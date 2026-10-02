@@ -184,6 +184,11 @@ pub async fn enqueue_run(
     {
         tracing::warn!(error = %e, run_id = %run_id, "failed to publish queued commit statuses");
     }
+    // API-04: `workflow_run` `requested`. `enqueue_run` is shared by push / PR /
+    // workflow_dispatch callers that do not all thread `AppState::env_name`, so
+    // resolve the same `OXIDEAN_ENV` source the app state was built from.
+    let env_name = std::env::var("OXIDEAN_ENV").unwrap_or_else(|_| "development".into());
+    crate::webhook::dispatch::notify_workflow_run(db, &run_id, "requested", &env_name).await;
     Ok((run_id, job_ids))
 }
 

@@ -696,8 +696,10 @@ async fn put_manifest(
     }
 
     // Tag reference (mutable retarget)
+    let mut tag_retargeted = false;
     if !reference.starts_with("sha256:") {
         if let Ok(Some(existing)) = state.db.find_package_version(&pkg.id, &reference).await {
+            tag_retargeted = true;
             // Retarget tag: update metadata/digest (version row stays)
             let _ = state
                 .db
@@ -729,6 +731,19 @@ async fn put_manifest(
         let _ = state.db.adjust_package_blob_refcount(&digest, 1).await;
         let _ = state.db.add_package_blob_ref(&vid, &digest, "manifest").await;
     }
+
+    // API-04: `registry_package` for repo-linked OCI packages (no-op when the
+    // package has no repository link, which `ensure_package` leaves unset).
+    let action = if tag_retargeted { "updated" } else { "published" };
+    crate::webhook::dispatch::notify_package_publish(
+        &state.db,
+        &pkg,
+        &reference,
+        action,
+        &identity.user_id,
+        &state.env_name,
+    )
+    .await;
 
     (
         StatusCode::CREATED,
