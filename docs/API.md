@@ -117,6 +117,7 @@ SSO start routes redirect to the IdP when configured. If WorkOS/OIDC ENV is miss
 | `repo.softDelete` | Soft-delete with type-confirm | Repo Admin |
 | `repo.collaborators.list` / `add` / `update` / `remove` | Per-repo collaborator grants | Repo Admin |
 | `repo.invites.create` / `createLink` / `list` / `revoke` | Bulk collaborator email invites (`{ emails, permission }`) and shareable links (optional `expires_at`, `max_uses`) | Repo Admin |
+| `repo.templates.list` | Issue/PR file templates read from the default-branch tree (`.oxidean/`/`.github/`/root/`docs` `ISSUE_TEMPLATE` + `PULL_REQUEST_TEMPLATE` locations; GitHub-style YAML frontmatter parsed) → `{ issues, pulls }` | Read+ (anonymous OK on public) |
 | `release.list` / `get` / `create` / `update` / `delete` / `deleteAsset` | Tag-based releases + notes; assets via HTTP | Session (+ capability) |
 | `admin.users.list` / `updateRole` / `ban` / `unban` / `delete` / `revokeSessions` / `getAccess` | User administration (type-confirm delete; `delete_orgs` opt-in for shared orgs) | Sys-admin |
 | `admin.users.listSessions` | Per-user sessions with client metadata (`ip_address`, `user_agent`, `remember_me`, last-seen/expiry) | Sys-admin |

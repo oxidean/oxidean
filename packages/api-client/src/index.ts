@@ -1085,6 +1085,33 @@ export type RepoTemplateEnabledResponse = {
   enabled: boolean;
 };
 
+/** `repo.templates.list` input (COL-02 — templates live in the git tree). */
+export type RepoTemplatesListRequest = {
+  owner: string;
+  name: string;
+};
+
+/** One issue/PR template file from the default-branch tree. */
+export type RepoFileTemplate = {
+  /** Frontmatter `name` or filename stem. */
+  name: string;
+  /** Frontmatter `title` — subject prefill. */
+  title?: string;
+  /** Frontmatter `about` — chooser blurb. */
+  description?: string;
+  /** Frontmatter `labels` (comma string or list). */
+  labels?: string[];
+  /** Markdown body with frontmatter stripped. */
+  body: string;
+  /** Repo-relative path, e.g. `.github/ISSUE_TEMPLATE/bug.md`. */
+  filename: string;
+};
+
+export type RepoTemplatesListResponse = {
+  issues: RepoFileTemplate[];
+  pulls: RepoFileTemplate[];
+};
+
 export type AdminLfsSettingsPublic = {
   max_object_bytes: number;
   quota_repo_bytes: number;
@@ -2746,6 +2773,8 @@ export function createClient(opts: CreateClientOptions) {
           rpcCall<RepoMirrorFetchHostKeyResponse>(opts, "repo.mirror.fetchHostKey", input),
       },
       templates: {
+        list: (input: RepoTemplatesListRequest) =>
+          rpcCall<RepoTemplatesListResponse>(opts, "repo.templates.list", input),
         getEnabled: (input: RepoTemplateGetEnabledRequest) =>
           rpcCall<RepoTemplateEnabledResponse>(opts, "repo.templates.getEnabled", input),
         setEnabled: (input: RepoTemplateSetEnabledRequest) =>

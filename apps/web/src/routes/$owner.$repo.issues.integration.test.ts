@@ -98,6 +98,10 @@ vi.mock("@/lib/use-chrome-account", () => ({
   resolveAllowSignup: () => true,
 }));
 
+/** Per-route loader data + search params for the issues routes under test. */
+let loaderDataByFrom: Record<string, unknown> = {};
+let searchState: Record<string, unknown> = {};
+
 vi.mock("@octanejs/tanstack-router", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@octanejs/tanstack-router")>();
   function MockLink(props: {
@@ -119,7 +123,9 @@ vi.mock("@octanejs/tanstack-router", async (importOriginal) => {
   return {
     ...actual,
     useParams: () => ({ owner: "ada", repo: "hello", n: "1" }),
-    useLoaderData: () => undefined,
+    useLoaderData: (opts?: { from?: string }) =>
+      opts?.from ? loaderDataByFrom[opts.from] : undefined,
+    useSearch: () => searchState,
     useNavigate: () => vi.fn(),
     Link: MockLink,
   };
@@ -156,6 +162,8 @@ const sampleIssue = {
 };
 
 beforeEach(() => {
+  loaderDataByFrom = {};
+  searchState = {};
   getMock.mockReset();
   listMock.mockReset();
   issueGetMock.mockReset();
@@ -489,6 +497,102 @@ describe("/{owner}/{repo}/issues/new Wave 0 (D-ISS-10)", () => {
       expect(screen.getByText(/^Write$/i)).toBeInTheDocument();
     });
     expect(screen.getByText(/^Preview$/i)).toBeInTheDocument();
+  }, 15_000);
+});
+
+describe("/{owner}/{repo}/issues/new template chooser (COL-02)", () => {
+  const loaderWithTemplates = {
+    kind: "ready",
+    repo: { ...readableRepo, can_write: true },
+    templates: {
+      issues: [
+        {
+          name: "Bug report",
+          description: "File a bug to help us improve",
+          title: "[BUG] ",
+          labels: ["bug"],
+          body: "**Steps to reproduce**\n\n1. …\n",
+          filename: ".github/ISSUE_TEMPLATE/bug.md",
+        },
+        {
+          name: "Feature request",
+          description: "Suggest an idea",
+          body: "## Summary\n\nDescribe it.\n",
+          filename: ".github/ISSUE_TEMPLATE/feature.md",
+        },
+      ],
+      pulls: [],
+    },
+  };
+
+  it("multi-template repos show a chooser; picking prefills title + body", async () => {
+    loaderDataByFrom["/$owner/$repo/issues/new"] = loaderWithTemplates;
+    const mod = await loadIssuesNewModule();
+    renderWithQueryClient(issuesNewPage(mod));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("issue-template-chooser")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Bug report")).toBeInTheDocument();
+    expect(screen.getByText("File a bug to help us improve")).toBeInTheDocument();
+    expect(screen.getByText("Feature request")).toBeInTheDocument();
+    expect(screen.getByTestId("issue-template-blank")).toBeInTheDocument();
+    // Form is not shown until a template is chosen.
+    expect(screen.queryByPlaceholderText("Issue title")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Bug report"));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("issue-template-chooser")).not.toBeInTheDocument();
+    });
+    expect((screen.getByPlaceholderText("Issue title") as HTMLInputElement).value).toBe("[BUG] ");
+    const bodyEl = document.getElementById("issue-body") as HTMLTextAreaElement | null;
+    expect(bodyEl?.value).toContain("Steps to reproduce");
+  }, 15_000);
+
+  it("blank issue skips the chooser with an empty form", async () => {
+    loaderDataByFrom["/$owner/$repo/issues/new"] = loaderWithTemplates;
+    const mod = await loadIssuesNewModule();
+    renderWithQueryClient(issuesNewPage(mod));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("issue-template-chooser")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId("issue-template-blank"));
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText("Issue title")).toBeInTheDocument();
+    });
+    expect((screen.getByPlaceholderText("Issue title") as HTMLInputElement).value).toBe("");
+  }, 15_000);
+
+  it("?template=<filename> selects directly without the chooser", async () => {
+    loaderDataByFrom["/$owner/$repo/issues/new"] = loaderWithTemplates;
+    searchState = { template: ".github/ISSUE_TEMPLATE/feature.md" };
+    const mod = await loadIssuesNewModule();
+    renderWithQueryClient(issuesNewPage(mod));
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText("Issue title")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("issue-template-chooser")).not.toBeInTheDocument();
+    const bodyEl = document.getElementById("issue-body") as HTMLTextAreaElement | null;
+    expect(bodyEl?.value).toContain("Describe it.");
+  }, 15_000);
+
+  it("template-less repos render the plain form (no chooser)", async () => {
+    loaderDataByFrom["/$owner/$repo/issues/new"] = {
+      kind: "ready",
+      repo: { ...readableRepo, can_write: true },
+      templates: { issues: [], pulls: [] },
+    };
+    const mod = await loadIssuesNewModule();
+    renderWithQueryClient(issuesNewPage(mod));
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText("Issue title")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("issue-template-chooser")).not.toBeInTheDocument();
   }, 15_000);
 });
 
