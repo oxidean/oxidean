@@ -52,7 +52,7 @@ Machine-facing surfaces beyond raw git/HTTP. These depend on API-02 (token auth)
 - [ ] **GIT-21** Protected tags and tag rulesets (branch protection covers branches only today).
 - [ ] **GIT-22** "Require signed commits" protection option. SSH/GPG signature verification is displayed on commits; enforcement is not a protection knob yet.
 - [ ] **GIT-23** Deploy keys: per-repo SSH keys with read or read/write scope, distinct from account keys.
-- [~] **GIT-24** Sync fork and update-PR-branch: bring a fork or PR head up to date with the base branch from the UI/API. Implemented on `feat/git-24-sync-fork-update-branch` (`repo.forkStatus`/`repo.syncFork`, `pull.branchStatus`/`pull.updateBranch`, fork + PR page controls); PR pending, not yet on `main`.
+- [x] **GIT-24** Sync fork and update-PR-branch: bring a fork or PR head up to date with the base branch from the UI/API. `repo.forkStatus`/`repo.syncFork` + `pull.branchStatus`/`pull.updateBranch`, fork + PR page controls. (#89)
 - [ ] **GIT-25** Repository size quotas for git objects. LFS and package quotas exist; the bare repo itself is unbounded.
 - [ ] **GIT-26** Repo insights: contributors, commit activity, and fork-network views on top of the existing repo activity feed.
 - [ ] **GIT-27** Git protocol surface audit: confirm protocol v2, partial clone/filter, and shallow clone behavior on both transports, then document or fix.
