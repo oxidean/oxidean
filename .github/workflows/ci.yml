@@ -343,7 +343,9 @@ jobs:
   # DEBT-01: also runs smoke-protection — ORG-06/D-PKG-03 protected-push denial on a
   # fresh stack it re-ups itself (wipes volumes; HTTPS denial mandatory, SSH half skipped).
   # Fail-closed — docker-missing / stack-down must not greenwash (T-11.1-40).
-  # Client ls-remote/LFS push remain optional (need seeded repo); routing+TCP are required.
+  # DEBT-11: ci-smoke-protocol.sh seeds a verified owner + public repo + PAT +
+  # session via RPC, so HTTPS/SSH smokes run real ls-remote/push
+  # (SMOKE_SEED_FIXTURES=0 restores routing/TCP-only). git-lfs stays opt-in.
   smoke-protocol:
     name: smoke-protocol
     needs: [docker-ci-images]
@@ -366,7 +368,6 @@ jobs:
         env:
           CI: "true"
           SMOKE_REQUIRE_STACK: "1"
-          SMOKE_SKIP_LS_REMOTE: "1"
           SMOKE_SKIP_LFS_CLIENT: "1"
           OXIDEAN_COMPOSE_SKIP_BUILD: "1"
         run: make smoke-protocol-ci # smoke-git-https smoke-git-ssh smoke-git-lfs smoke-packages smoke-protection

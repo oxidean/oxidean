@@ -22,7 +22,7 @@ Deferred items recorded at milestone close. Finish these first; several are chea
 - [ ] **DEBT-08** Nyquist validation backfill for the not-validated phases (10–13, 16–18, 21, 22.1; 11.1 missing entirely).
 - [ ] **DEBT-09** Backfill the AUTH-07a/07b requirement rows in the phase 06 VERIFICATION table (product shipped; table orphaned).
 - [~] **DEBT-10** Admin user management in the console: list, ban, delete, role change, access view, invites. First cut in flight, not yet on `main`.
-- [ ] **DEBT-11** Deeper live smokes: git-over-SSH `ls-remote`/push depth (phase 09 caveat) and releases/rename browser UAT (phase 15 caveat).
+- [~] **DEBT-11** Deeper live smokes: git-over-SSH `ls-remote`/push depth (phase 09 caveat) and releases/rename browser UAT (phase 15 caveat). In flight: seeded fixtures drive live HTTPS/SSH ls-remote+push in `smoke-protocol`; stack-browser covers release assets and Danger zone rename/transfer.
 
 ## API and integrations
 
