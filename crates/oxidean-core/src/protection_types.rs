@@ -60,6 +60,8 @@ pub struct BranchProtectionRulePublic {
     pub enforce_admins: bool,
     pub required_linear_history: bool,
     pub lock_branch: bool,
+    /// GIT-22: pushes introducing unsigned commits are denied by the update hook.
+    pub require_signed_commits: bool,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -100,6 +102,9 @@ pub struct BranchProtectionRuleInput {
     pub required_linear_history: bool,
     #[serde(default)]
     pub lock_branch: bool,
+    /// GIT-22: deny pushes introducing commits without a forge-verified signature.
+    #[serde(default)]
+    pub require_signed_commits: bool,
 }
 
 fn default_review_count() -> i32 {
@@ -137,6 +142,9 @@ pub struct BranchProtectionUpdateRequest {
     pub required_linear_history: bool,
     #[serde(default)]
     pub lock_branch: bool,
+    /// GIT-22: deny pushes introducing commits without a forge-verified signature.
+    #[serde(default)]
+    pub require_signed_commits: bool,
 }
 
 /// `repo.branchProtection.delete`.
@@ -265,4 +273,7 @@ pub struct ProtectionBlockReasons {
     pub approving_review_count: Option<i32>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub missing_status_contexts: Vec<String>,
+    /// GIT-22: commits newly introduced by the push lacking a verified signature.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unsigned_commits: Vec<String>,
 }

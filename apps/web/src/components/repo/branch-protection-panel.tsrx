@@ -51,6 +51,7 @@ export function BranchProtectionPanel(props: {
   const [enforceAdmins, setEnforceAdmins] = useState(false);
   const [linearHistory, setLinearHistory] = useState(false);
   const [lockBranch, setLockBranch] = useState(false);
+  const [requireSigned, setRequireSigned] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
@@ -70,6 +71,7 @@ export function BranchProtectionPanel(props: {
     setEnforceAdmins(false);
     setLinearHistory(false);
     setLockBranch(false);
+    setRequireSigned(false);
   }
 
   function loadRuleForEdit(rule: BranchProtectionRulePublic) {
@@ -87,6 +89,7 @@ export function BranchProtectionPanel(props: {
     setEnforceAdmins(rule.enforce_admins);
     setLinearHistory(rule.required_linear_history);
     setLockBranch(rule.lock_branch);
+    setRequireSigned(rule.require_signed_commits);
     setError("");
   }
 
@@ -115,6 +118,7 @@ export function BranchProtectionPanel(props: {
       enforce_admins: enforceAdmins,
       required_linear_history: linearHistory,
       lock_branch: lockBranch,
+      require_signed_commits: requireSigned,
     };
     try {
       const res = editingId
@@ -255,6 +259,11 @@ export function BranchProtectionPanel(props: {
                               }
                               .
                             </>;
+                          }
+                          @if (
+                            rule.require_signed_commits
+                          ) {
+                            <> Signed commits required.</>;
                           }
                         </p>
                       </li>;
@@ -414,6 +423,16 @@ export function BranchProtectionPanel(props: {
                         }
                       />
                       Lock branch
+                    </label>
+                    <label className="flex items-center gap-2 text-[14px]">
+                      <input
+                        type="checkbox"
+                        checked={requireSigned}
+                        onChange={(e) =>
+                          setRequireSigned((e.target as HTMLInputElement).checked)
+                        }
+                      />
+                      Require signed commits
                     </label>
                   </div>
                   @if (error) {

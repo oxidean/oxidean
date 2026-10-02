@@ -84,6 +84,7 @@ fn row_public(row: &BranchProtectionRuleRow) -> BranchProtectionRulePublic {
         enforce_admins: row.enforce_admins,
         required_linear_history: row.required_linear_history,
         lock_branch: row.lock_branch,
+        require_signed_commits: row.require_signed_commits,
         created_at: row.created_at.clone(),
         updated_at: row.updated_at.clone(),
     }
@@ -145,6 +146,7 @@ pub async fn create(
             req.enforce_admins,
             req.required_linear_history,
             req.lock_branch,
+            req.require_signed_commits,
         )
         .await
         .map_err(db_err)?;
@@ -184,6 +186,7 @@ pub async fn update(
             req.enforce_admins,
             req.required_linear_history,
             req.lock_branch,
+            req.require_signed_commits,
         )
         .await
         .map_err(db_err)?;
