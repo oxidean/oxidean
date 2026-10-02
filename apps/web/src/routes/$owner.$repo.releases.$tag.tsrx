@@ -138,7 +138,7 @@ export function RepoReleaseDetailPage() @{
     return () => {
       cancelled = true;
     };
-  });
+  }, [release, owner, repoName]);
 
   const notFound =
     layout?.status === "not_found" ||

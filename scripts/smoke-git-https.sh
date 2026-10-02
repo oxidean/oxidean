@@ -18,6 +18,10 @@
 #   SMOKE_PAT            if set, also git push a throwaway ref (Basic auth username=git)
 #   SMOKE_SKIP_LS_REMOTE  if 1, only assert non-HTML routing (no git client)
 #
+# CI note (DEBT-11): ci-smoke-protocol.sh seeds the repo + mints SMOKE_PAT, so
+# ls-remote + throwaway-ref push run live in the smoke-protocol job
+# (SMOKE_SEED_FIXTURES=0 → routing-only).
+#
 # Operator hosts without Docker: exits 0 with a skip message.
 # CI=true or SMOKE_REQUIRE_STACK=1 fails closed (T-11.1-40 / D-QH-04).
 set -euo pipefail
@@ -126,7 +130,7 @@ if [[ -n "${SMOKE_PAT:-}" ]]; then
   git -C "$work" commit -q -m "smoke-git-https"
   # Embed credentials in URL; do not print the secret.
   auth_url="http://git:${SMOKE_PAT}@${BASE_URL#http://}/${OWNER}/${REPO}.git"
-  GIT_TERMINAL_PROMPT=0 git -C "$work" push -q "$auth_url" "HEAD:refs/heads/smoke-https" \
+  GIT_TERMINAL_PROMPT=0 git -C "$work" push -q "$auth_url" "+HEAD:refs/heads/smoke-https" \
     || {
       echo "git push with SMOKE_PAT failed" >&2
       exit 1
