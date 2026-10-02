@@ -287,6 +287,14 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Ok(s) => RpcResponse::ok(s),
             Err(e) => RpcResponse::err(e),
         },
+        "admin.git.getSettings" => match auth_admin::git_get_settings(ctx).await {
+            Ok(s) => RpcResponse::ok(s),
+            Err(e) => RpcResponse::err(e),
+        },
+        "admin.git.updateSettings" => match auth_admin::git_update_settings(ctx, req.input).await {
+            Ok(s) => RpcResponse::ok(s),
+            Err(e) => RpcResponse::err(e),
+        },
         "admin.templates.list" => match crate::templates::handlers::admin_list(ctx).await {
             Ok(s) => RpcResponse::ok(s),
             Err(e) => RpcResponse::err(e),
@@ -618,6 +626,14 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Err(e) => RpcResponse::err(e),
         },
         "repo.lfs.getUsage" => match repo::lfs_get_usage(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "repo.quota.get" => match repo::quota_get(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "repo.quota.set" => match repo::quota_set(ctx, req.input).await {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },

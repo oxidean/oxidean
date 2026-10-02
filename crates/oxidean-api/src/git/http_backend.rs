@@ -47,6 +47,9 @@ pub struct ProtectionCgiEnv<'a> {
     pub helper_path: Option<&'a str>,
     /// Re-injected after `env_clear` so update hooks can see production vs compose (D-PKG-01).
     pub oxidean_env: Option<&'a str>,
+    /// `OXIDEAN_GIT_REPO_QUOTA_BYTES` pass-through so the update hook sees the
+    /// configured instance quota default (env_clear strips it otherwise, GIT-25).
+    pub git_repo_quota_bytes: Option<&'a str>,
 }
 
 /// Run git-http-backend and map CGI stdout to an Axum [`Response`].
@@ -92,6 +95,9 @@ pub async fn run_git_http_backend(req: CgiRequest<'_>) -> Result<Response, Strin
         }
         if let Some(env_name) = pe.oxidean_env {
             cmd.env("OXIDEAN_ENV", env_name);
+        }
+        if let Some(quota) = pe.git_repo_quota_bytes.filter(|s| !s.is_empty()) {
+            cmd.env("OXIDEAN_GIT_REPO_QUOTA_BYTES", quota);
         }
     }
 

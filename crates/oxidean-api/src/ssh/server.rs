@@ -237,6 +237,14 @@ impl Handler for SshHandler {
                     .unwrap_or(1);
                     if code == 0 && is_push {
                         if let Ok(Some(user)) = db.find_user_by_id(&user_id).await {
+                            // GIT-25: refresh cached size_bytes for UI/admin surfaces.
+                            if let Err(e) = crate::git::quota::refresh_repo_size_bytes(
+                                &db, &repo_id, &bare,
+                            )
+                            .await
+                            {
+                                tracing::warn!(error = %e, "refresh repo size_bytes failed");
+                            }
                             let after_refs = git.list_refs(&bare).await.unwrap_or_default();
                             let updates = ref_updates_from_lists(&before_refs, &after_refs);
                             crate::repo::record_ref_updates(

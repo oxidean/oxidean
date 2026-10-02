@@ -5,6 +5,7 @@
 //! HTTP CGI in [`http_backend`].
 
 pub mod http_backend;
+pub mod quota;
 pub mod web_flow;
 
 use std::path::{Path, PathBuf};

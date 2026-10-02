@@ -427,6 +427,13 @@ pub async fn merge(ctx: &RpcCtx, input: serde_json::Value) -> Result<MergePullRe
         accessible.row.id.clone(),
     );
 
+    // GIT-25: refresh cached size_bytes after merge objects landed.
+    if let Err(e) =
+        crate::git::quota::refresh_repo_size_bytes(&ctx.db, &accessible.row.id, &path).await
+    {
+        tracing::warn!(error = %e, "refresh repo size_bytes failed");
+    }
+
     if row.base_ref == accessible.row.default_branch {
         let mut nums = parse_closing_issue_numbers(&row.body);
         nums.extend(parse_closing_issue_numbers(&full_message));

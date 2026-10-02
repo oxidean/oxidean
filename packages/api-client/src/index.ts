@@ -920,6 +920,24 @@ export type RepoLfsDownloadRequest = {
   oid: string;
 };
 
+export type RepoGetQuotaRequest = {
+  owner: string;
+  name: string;
+};
+
+export type RepoQuotaPublic = {
+  size_bytes: number;
+  effective_quota_bytes?: number | null;
+  size_quota_bytes?: number | null;
+  instance_quota_bytes: number;
+};
+
+export type RepoSetQuotaRequest = {
+  owner: string;
+  name: string;
+  size_quota_bytes?: number | null;
+};
+
 export type RepoLfsDownloadResponse = {
   oid: string;
   size: number;
@@ -1098,6 +1116,16 @@ export type AdminLfsUpdateSettingsRequest = {
   max_object_bytes?: number | null;
   quota_repo_bytes?: number | null;
   quota_user_bytes?: number | null;
+  clear_overrides?: boolean;
+};
+
+export type AdminGitSettingsPublic = {
+  repo_quota_bytes: number;
+  repo_quota_bytes_overridden: boolean;
+};
+
+export type AdminGitUpdateSettingsRequest = {
+  repo_quota_bytes?: number | null;
   clear_overrides?: boolean;
 };
 
@@ -2725,6 +2753,12 @@ export function createClient(opts: CreateClientOptions) {
         download: (input: RepoLfsDownloadRequest) =>
           rpcCall<RepoLfsDownloadResponse>(opts, "repo.lfs.download", input),
       },
+      quota: {
+        get: (input: RepoGetQuotaRequest) =>
+          rpcCall<RepoQuotaPublic>(opts, "repo.quota.get", input),
+        set: (input: RepoSetQuotaRequest) =>
+          rpcCall<RepoQuotaPublic>(opts, "repo.quota.set", input),
+      },
       mirror: {
         get: (input: RepoMirrorGetRequest) =>
           rpcCall<RepoMirrorGetResponse>(opts, "repo.mirror.get", input),
@@ -3104,6 +3138,12 @@ export function createClient(opts: CreateClientOptions) {
         updateSettings: (input: AdminLfsUpdateSettingsRequest) =>
           rpcCall<AdminLfsSettingsPublic>(opts, "admin.lfs.updateSettings", input),
         getUsage: () => rpcCall<AdminLfsUsageResponse>(opts, "admin.lfs.getUsage", {}),
+      },
+      git: {
+        getSettings: () =>
+          rpcCall<AdminGitSettingsPublic>(opts, "admin.git.getSettings", {}),
+        updateSettings: (input: AdminGitUpdateSettingsRequest) =>
+          rpcCall<AdminGitSettingsPublic>(opts, "admin.git.updateSettings", input),
       },
       templates: {
         list: () => rpcCall<AdminTemplatesListResponse>(opts, "admin.templates.list", {}),

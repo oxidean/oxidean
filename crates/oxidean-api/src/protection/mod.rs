@@ -638,6 +638,10 @@ pub fn capability_from_env(raw: &str) -> Capability {
 pub const ZERO_SHA: &str = "0000000000000000000000000000000000000000";
 
 /// Hook/update check: load rules for repo resolved from GIT_DIR and evaluate intent.
+///
+/// GIT-25: before any branch-protection evaluation, deny non-delete updates
+/// (any ref namespace, not just heads) when the repo — including the still-
+/// quarantined incoming pack — is over its git object size quota.
 pub async fn check_ref_update(
     db: &Database,
     repos_dir: &Path,
@@ -647,10 +651,6 @@ pub async fn check_ref_update(
     new_sha: &str,
     capability: Capability,
 ) -> Result<(), AppError> {
-    let Some(branch) = branch_from_ref(git_ref) else {
-        // Non-branch refs are not subject to classic branch protection.
-        return Ok(());
-    };
     let (owner, name) = owner_name_from_git_dir(repos_dir, git_dir)
         .map_err(|e| AppError::new("repo.branch_protection", e))?;
     let owner_id = if let Some(u) = db
@@ -676,6 +676,17 @@ pub async fn check_ref_update(
             AppError::new("repo.internal", "repository operation failed")
         })?
         .ok_or_else(|| AppError::new("repo.not_found", "Repository not found"))?;
+
+    // Deletes (new_sha = 0) carry no objects — keep them allowed so an
+    // over-quota repo can still clean up refs (GIT-25).
+    if new_sha != ZERO_SHA {
+        crate::git::quota::enforce_push_quota(db, &repo, git_dir).await?;
+    }
+
+    let Some(branch) = branch_from_ref(git_ref) else {
+        // Non-branch refs are not subject to classic branch protection.
+        return Ok(());
+    };
     let eff = effective_for_branch(db, &repo.id, branch).await?;
     let intent = if new_sha == ZERO_SHA {
         ProtectionIntent::Delete
