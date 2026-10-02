@@ -112,6 +112,8 @@ SSO start routes redirect to the IdP when configured. If WorkOS/OIDC ENV is miss
 | `user.getPublicProfile` | Public profile by username (`username`, `display_name`, `bio`, `avatar_url` — **never email**) | Anonymous OK; unknown → `user.not_found` |
 | `repo.explore` | Public repos sorted by `star_count` desc then `updated_at` desc; optional `q` substring | Anonymous OK |
 | `repo.fork` | Fork public readable source (bare copy); sets `forked_from_repo_id` + `fork_network_id`; one active fork per (owner, network) | Session + Read on public source |
+| `repo.forkStatus` | Fork-vs-upstream divergence for a branch (default = repo default branch): `ahead_count` / `behind_count` / `status` (`up_to_date` \| `behind` \| `diverged`) | Session/anon + Read on fork and upstream |
+| `repo.syncFork` | Bring the fork branch up to date with the same-named upstream branch — fast-forward, or a merge commit when diverged. Errors: `repo.not_fork`, `repo.upstream_branch_not_found`, `repo.sync_diverged` (merge commits disabled), `repo.sync_conflict`, `repo.branch_protection` | Session + Write on the fork |
 | `repo.rename` | Rename repo; moves bare dir; inserts redirect | Repo Admin |
 | `repo.transfer` | Transfer ownership (type-confirm `confirmName`); moves bare dir; redirect | Repo Admin |
 | `repo.softDelete` | Soft-delete with type-confirm | Repo Admin |
@@ -140,6 +142,8 @@ SSO start routes redirect to the IdP when configured. If WorkOS/OIDC ENV is miss
 | `pull.reviews.list` / `submit` / `dismiss` | Approve / request changes / comment; dismiss | Session (+ Write+) |
 | `pull.reviewRequests.list` / `add` / `remove` | Optional requested reviewers (UX only) | Session (+ capability) |
 | `pull.merge` | Merge / squash / rebase; optional delete head; closing keywords on default branch | Session (+ Write+) |
+| `pull.branchStatus` | Live head-vs-base freshness for a PR: `status` (`up_to_date` \| `behind`), `ahead_count` / `behind_count`, `base_sha` / `head_sha`, `can_update` | Session/anon + Read on base repo |
+| `pull.updateBranch` | GitHub "Update branch" parity — merge the live base tip into the head branch (same-repo or fork head). Errors: `pull.invalid_state`, `pull.head_unavailable`, `pull.ref_not_found`, `pull.update_conflict`, `repo.branch_protection` | Session + Write on head **or** base repo |
 | `repo.mergeSettings.get` / `update` | Per-repo allow merge/squash/rebase (Admin for update) | Session (+ Admin for update) |
 | `label.listForRepo` / `listForOrg` / `create` / `update` / `delete` | Org/repo label definitions (Admin for defs) | Session (+ capability) |
 | `pat.createClassic` | Mint classic PAT (`oxidean_pat_…`); one-time plaintext in response. Classic scopes include optional `package:read` / `package:write` (repo scope does **not** imply packages) | Session + verified email |
@@ -382,6 +386,7 @@ Phase 12 ships pull requests (PR-01…07) on migration `0016_pull_requests`:
 | **Numbering** | Shared per-repo `#N` with issues (`issue_counters`). |
 | **ACL** | Read+ list/get/diff/comments; Write+ open/comment/review/merge/close/reopen; Admin merge-strategy settings. Author cannot Approve / Request changes on own PR. |
 | **Merge** | Methods `merge` \| `squash` \| `rebase` gated by `repo.mergeSettings.*` (defaults all enabled). Conflict → `pull.merge_conflict`. Optional `delete_branch`. |
+| **Update branch** | `pull.updateBranch` merges the base tip into the head branch (never rebases, never force-pushes); works for fork-head PRs and runs the same `synchronize` bookkeeping as a head push (stale line comments, review dismissal, webhooks, Actions). `pull.branchStatus` reports live `ahead_count`/`behind_count` + `can_update`. |
 | **Diff UX** | `pull.files` unified patch; web supports unified/split. Line comments carry path/side/line; outdated after head/base change. |
 
 Client surface: `client.pull.*` / `client.mergeSettings.*` / `client.issue.*` / `client.label.*` in `@oxidean/api-client` (regenerate with `make rpc-gen`).
