@@ -8,6 +8,7 @@ import {
   GitPullRequestClosed,
   GitPullRequestDraft,
 } from "@octanejs/lucide";
+import { PullChecks } from "@/components/repo/pull-checks";
 import { PullCommits } from "@/components/repo/pull-commits";
 import { PullConversation } from "@/components/repo/pull-conversation";
 import { PullFiles } from "@/components/repo/pull-files";
@@ -78,7 +79,7 @@ export function PullDetailPage() @{
   const repoName = params.repo ?? "";
   const number = Number(params.n ?? 0);
   const queryClient = useQueryClient();
-  const [tab, setTab] = useState<"conversation" | "commits" | "files">("conversation");
+  const [tab, setTab] = useState<"conversation" | "commits" | "checks" | "files">("conversation");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -247,6 +248,17 @@ export function PullDetailPage() @{
             <button
               type="button"
               className={
+                (tab === "checks"
+                  ? "border-b-2 border-primary pb-2 text-sm font-semibold"
+                  : "pb-2 text-sm text-muted-foreground") as string
+              }
+              onClick={() => setTab("checks")}
+            >
+              Checks
+            </button>
+            <button
+              type="button"
+              className={
                 (tab === "files"
                   ? "border-b-2 border-primary pb-2 text-sm font-semibold"
                   : "pb-2 text-sm text-muted-foreground") as string
@@ -276,6 +288,9 @@ export function PullDetailPage() @{
           }
           @if (tab === "commits") {
             <PullCommits owner={owner} repoName={repoName} number={number} />;
+          }
+          @if (tab === "checks") {
+            <PullChecks owner={owner} repoName={repoName} sha={pull.head_sha} />;
           }
           @if (tab === "files") {
             <PullFiles
