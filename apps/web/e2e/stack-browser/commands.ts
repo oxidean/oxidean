@@ -289,6 +289,10 @@ export const expectWorkosCta: BrowserCommand<[]> = async (ctx) => {
         .waitFor({ state: "visible", timeout: 30_000 });
     } catch (e) {
       const html = await page.content();
+      const visibleText = await page
+        .locator("body")
+        .innerText()
+        .catch(() => "<unreadable>");
       assertNoOctaneOverlay(html, "login WorkOS CTA");
       throw new Error(`WorkOS CTA not found. body snippet=${html.slice(0, 800)}`, { cause: e });
     }
@@ -969,6 +973,30 @@ export const expectReleaseAssetFlow: BrowserCommand<[]> = async (ctx) => {
   if (!downloadPath) {
     throw new Error(`asset upload returned no download_url: ${JSON.stringify(upJson)}`);
   }
+  const assetId = downloadPath.split("/").pop() ?? "";
+
+  // Wait for the write path to settle before the page load: tag push +
+  // release.create + multipart upload hit the API back-to-back, and an eager
+  // navigation can reach a loader whose repo.get/release.get is still queued
+  // behind those writes — the route then sits in an unresolved suspense shell
+  // (blank page) for the whole timeout. Poll the read path until the asset is
+  // visible to release.get, then navigate against an idle API.
+  let assetListed = false;
+  for (let i = 0; i < 30 && !assetListed; i++) {
+    const got = await rpc(
+      "release.get",
+      { owner: seed.owner, name: seed.repo, tag_name: tag },
+      seed.cookie,
+    );
+    if (got.ok) {
+      const assets = (got.data as { assets?: { id?: string }[] }).assets ?? [];
+      assetListed = assets.some((a) => a.id === assetId);
+    }
+    if (!assetListed) await new Promise((r) => setTimeout(r, 500));
+  }
+  if (!assetListed) {
+    throw new Error(`release.get never listed asset ${assetId}`);
+  }
 
   await injectSessionCookie(context, seed.cookie);
   const pageGuard = await newGuardedPage(context);
@@ -1019,7 +1047,7 @@ export const expectReleaseAssetFlow: BrowserCommand<[]> = async (ctx) => {
         .map(([k]) => k)
         .join(",");
       throw new Error(
-        `release asset link never rendered markers=${markers || "none"} apiAssets=${apiAssets} url=${page.url()} pageerrors=${pageGuard.pageErrors.join(" | ") || "none"} body=${html.slice(0, 3000)}`,
+        `release asset link never rendered markers=${markers || "none"} apiAssets=${apiAssets} url=${page.url()} pageerrors=${pageGuard.pageErrors.join(" | ") || "none"} visibleText=${visibleText.slice(0, 1200)} body=${html.slice(0, 3000)}`,
       );
     }
     await page.locator("#release-asset-file").waitFor({ state: "attached", timeout: 30_000 });
