@@ -1,0 +1,1640 @@
+openapi: 3.0.3
+info:
+  title: Oxidean REST API
+  version: "1"
+  description: |
+    Public REST API for Oxidean (API-01). Base path: `/api/v1`.
+
+    This surface is a companion to the typed JSON RPC at `POST /api/rpc` —
+    every route below dispatches to the same internal procedure the RPC layer
+    uses, so ACLs, PAT scope gates, and side effects (notifications, webhooks)
+    are identical. The RPC surface remains the primary API for the web UI.
+
+    **Authentication** — either credential works on every route:
+
+    - `Cookie: oxidean_session=<token>` — browser/session auth (wins if both sent).
+    - `Authorization: Bearer <pat>` — personal access token (API-02). Classic
+      `repo` scope covers the repo domain; fine-grained `contents` covers
+      covered repositories. `admin.*` and org/credential mutations are
+      session-only.
+
+    **Errors** — `{ "code": "domain.error_code", "message": "...", "data"? }`
+    with a mapped HTTP status (401 unauthenticated, 403 forbidden/scope, 404
+    `*.not_found`, 409 conflicts like `release.tag_taken`/`pull.merge_conflict`,
+    429 rate limited, 500 `*.internal`/`*_failed`).
+
+    **Pagination** — list endpoints accept `offset`/`limit` query params where
+    shown; defaults and caps are those of the underlying RPC procedure.
+
+    Not yet covered by v1: notifications, SSH/GPG keys, PAT management,
+    emails, packages, Actions runs, branch protection, collaborators,
+    invitations, mirrors, LFS objects, release asset upload/download (use the
+    dedicated routes under `/api/repos/{owner}/{repo}/releases/{id}/assets`
+    and `/api/releases/assets/{asset_id}`), raw file/archive downloads
+    (`/api/repos/{owner}/{repo}/raw/{ref}/{path}`, `.../archive/{file}`).
+servers:
+  - url: /api/v1
+
+tags:
+  - name: meta
+  - name: users
+  - name: orgs
+  - name: repos
+  - name: issues
+  - name: pulls
+  - name: releases
+  - name: admin
+
+paths:
+  /health:
+    get:
+      tags: [meta]
+      summary: Instance health/version
+      operationId: getHealth
+      security: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+
+  /user:
+    get:
+      tags: [users]
+      summary: Authenticated user (`auth.me`)
+      operationId: getAuthenticatedUser
+      responses:
+        "200": { $ref: "#/components/responses/User" }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /user/repos:
+    get:
+      tags: [users, repos]
+      summary: List repos owned by the caller (`repo.listMine`)
+      operationId: listMyRepos
+      responses:
+        "200": { $ref: "#/components/responses/RepoList" }
+    post:
+      tags: [users, repos]
+      summary: Create a repo owned by the caller (`repo.create`)
+      operationId: createMyRepo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateRepoBody" }
+      responses:
+        "201": { $ref: "#/components/responses/Repo" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /user/orgs:
+    get:
+      tags: [users, orgs]
+      summary: Orgs the caller belongs to (`org.listMine`)
+      operationId: listMyOrgs
+      responses:
+        "200": { $ref: "#/components/responses/OrgListMine" }
+
+  /user/starred:
+    get:
+      tags: [users, repos]
+      summary: Repos starred by the caller (`user.listStarred`)
+      operationId: listStarred
+      parameters:
+        - { $ref: "#/components/parameters/offset" }
+        - { $ref: "#/components/parameters/limit" }
+      responses:
+        "200": { $ref: "#/components/responses/RepoList" }
+
+  /users/{username}:
+    get:
+      tags: [users]
+      summary: Public profile (`user.getPublicProfile`)
+      operationId: getUser
+      parameters:
+        - { $ref: "#/components/parameters/username" }
+      responses:
+        "200":
+          description: Public profile (never includes email)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PublicUserProfile" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /users/{username}/repos:
+    get:
+      tags: [users, repos]
+      summary: Repos under a user (`repo.listByOwner`)
+      operationId: listUserRepos
+      parameters:
+        - { $ref: "#/components/parameters/username" }
+      responses:
+        "200": { $ref: "#/components/responses/RepoList" }
+
+  /orgs:
+    post:
+      tags: [orgs]
+      summary: Create an org (`org.create`) — session cookie only
+      operationId: createOrg
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateOrgBody" }
+      responses:
+        "201":
+          description: Created org
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Org" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /orgs/{slug}:
+    get:
+      tags: [orgs]
+      summary: Get an org (`org.get`)
+      operationId: getOrg
+      security: []
+      parameters:
+        - { $ref: "#/components/parameters/slug" }
+      responses:
+        "200":
+          description: Org profile
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Org" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /orgs/{slug}/members:
+    get:
+      tags: [orgs]
+      summary: Org members (`org.members.list`)
+      operationId: listOrgMembers
+      parameters:
+        - { $ref: "#/components/parameters/slug" }
+      responses:
+        "200":
+          description: Member list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  members:
+                    type: array
+                    items: { $ref: "#/components/schemas/OrgMember" }
+
+  /orgs/{slug}/repos:
+    get:
+      tags: [orgs, repos]
+      summary: Repos under an org (`repo.listByOwner`)
+      operationId: listOrgRepos
+      parameters:
+        - { $ref: "#/components/parameters/slug" }
+      responses:
+        "200": { $ref: "#/components/responses/RepoList" }
+    post:
+      tags: [orgs, repos]
+      summary: Create an org repo (`repo.create` with owner=slug)
+      operationId: createOrgRepo
+      parameters:
+        - { $ref: "#/components/parameters/slug" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateRepoBody" }
+      responses:
+        "201": { $ref: "#/components/responses/Repo" }
+
+  /repos:
+    get:
+      tags: [repos]
+      summary: Explore public repositories (`repo.explore`)
+      operationId: exploreRepos
+      security: []
+      parameters:
+        - { name: q, in: query, schema: { type: string } }
+        - { $ref: "#/components/parameters/offset" }
+        - { $ref: "#/components/parameters/limit" }
+      responses:
+        "200": { $ref: "#/components/responses/RepoList" }
+
+  /repos/{owner}/{repo}:
+    get:
+      tags: [repos]
+      summary: Get a repository (`repo.get`) — anonymous OK for public
+      operationId: getRepo
+      security: []
+      parameters:
+        - { $ref: "#/components/parameters/owner" }
+        - { $ref: "#/components/parameters/repo" }
+      responses:
+        "200": { $ref: "#/components/responses/Repo" }
+        "404": { $ref: "#/components/responses/Error" }
+    patch:
+      tags: [repos]
+      summary: Update repo metadata (`repo.updateMetadata`)
+      operationId: updateRepo
+      parameters:
+        - { $ref: "#/components/parameters/owner" }
+        - { $ref: "#/components/parameters/repo" }
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateRepoBody" }
+      responses:
+        "200": { $ref: "#/components/responses/Repo" }
+    delete:
+      tags: [repos]
+      summary: Soft-delete a repository (`repo.softDelete`; the URL is the typed confirmation)
+      operationId: deleteRepo
+      parameters:
+        - { $ref: "#/components/parameters/owner" }
+        - { $ref: "#/components/parameters/repo" }
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { name: { type: string } }
+
+  /repos/{owner}/{repo}/branches:
+    get:
+      tags: [repos]
+      summary: List branches (`repo.refs` filtered to refs/heads/*)
+      operationId: listBranches
+      parameters:
+        - { $ref: "#/components/parameters/owner" }
+        - { $ref: "#/components/parameters/repo" }
+      responses:
+        "200": { $ref: "#/components/responses/BranchList" }
+
+  /repos/{owner}/{repo}/tags:
+    get:
+      tags: [repos]
+      summary: List tags (`repo.refs` filtered to refs/tags/*)
+      operationId: listTags
+      parameters:
+        - { $ref: "#/components/parameters/owner" }
+        - { $ref: "#/components/parameters/repo" }
+      responses:
+        "200": { $ref: "#/components/responses/TagList" }
+
+  /repos/{owner}/{repo}/commits:
+    get:
+      tags: [repos]
+      summary: Commit log (`repo.commits`)
+      operationId: listCommits
+      parameters:
+        - { $ref: "#/components/parameters/owner" }
+        - { $ref: "#/components/parameters/repo" }
+        - { name: sha, in: query, description: "branch/tag/SHA to start from (alias `ref`; default: default branch)", schema: { type: string } }
+        - { name: skip, in: query, schema: { type: integer, default: 0 } }
+        - { name: limit, in: query, schema: { type: integer, default: 30, maximum: 100 } }
+      responses:
+        "200":
+          description: Commit list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  commits:
+                    type: array
+                    items: { $ref: "#/components/schemas/Commit" }
+
+  /repos/{owner}/{repo}/commits/{sha}:
+    get:
+      tags: [repos]
+      summary: Single commit with diff (`repo.commit`)
+      operationId: getCommit
+      parameters:
+        - { $ref: "#/components/parameters/owner" }
+        - { $ref: "#/components/parameters/repo" }
+        - { name: sha, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Commit detail
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CommitDetail" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /repos/{owner}/{repo}/compare/{basehead}:
+    get:
+      tags: [repos]
+      summary: Compare two refs (`repo.compare`); `{basehead}` = `base...head` (`..` accepted)
+      operationId: compareRefs
+      parameters:
+        - { $ref: "#/components/parameters/owner" }
+        - { $ref: "#/components/parameters/repo" }
+        - { name: basehead, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Diff
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CompareResult" }
+
+  /repos/{owner}/{repo}/tree:
+    get:
+      tags: [repos]
+      summary: Root tree listing (`repo.tree`)
+      operationId: getTreeRoot
+      parameters:
+        - { $ref: "#/components/parameters/owner" }
+        - { $ref: "#/components/parameters/repo" }
+        - { $ref: "#/components/parameters/ref" }
+      responses:
+        "200": { $ref: "#/components/responses/Tree" }
+
+  /repos/{owner}/{repo}/tree/{path}:
+    get:
+      tags: [repos]
+      summary: Directory listing (`repo.tree`); `{path}` may contain slashes
+      operationId: getTree
+      parameters:
+        - { $ref: "#/components/parameters/owner" }
+        - { $ref: "#/components/parameters/repo" }
+        - { name: path, in: path, required: true, schema: { type: string }, style: simple }
+        - { $ref: "#/components/parameters/ref" }
+      responses:
+        "200": { $ref: "#/components/responses/Tree" }
+
+  /repos/{owner}/{repo}/contents/{path}:
+    get:
+      tags: [repos]
+      summary: File content + metadata (`repo.blob`); `{path}` may contain slashes
+      operationId: getContents
+      parameters:
+        - { $ref: "#/components/parameters/owner" }
+        - { $ref: "#/components/parameters/repo" }
+        - { name: path, in: path, required: true, schema: { type: string }, style: simple }
+        - { $ref: "#/components/parameters/ref" }
+      responses:
+        "200":
+          description: Blob (base64 `content` unless binary/truncated)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Blob" }
+        "404": { $ref: "#/components/responses/Error" }
+
+  /repos/{owner}/{repo}/languages:
+    get:
+      tags: [repos]
+      summary: Language breakdown (`repo.languages`)
+      operationId: getLanguages
+      parameters:
+        - { $ref: "#/components/parameters/owner" }
+        - { $ref: "#/components/parameters/repo" }
+      responses:
+        "200":
+          description: Language stats
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  languages:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: { type: string }
+                        percent: { type: number }
+
+  /repos/{owner}/{repo}/labels:
+    get:
+      tags: [repos, issues]
+      summary: Effective labels (`label.listForRepo`, includes org labels)
+      operationId: listLabels
+      parameters:
+        - { $ref: "#/components/parameters/owner" }
+        - { $ref: "#/components/parameters/repo" }
+        - { name: includeHidden, in: query, schema: { type: boolean } }
+      responses:
+        "200":
+          description: Label list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  labels:
+                    type: array
+                    items: { $ref: "#/components/schemas/Label" }
+
+  /repos/{owner}/{repo}/stargazers:
+    get:
+      tags: [repos]
+      summary: Stargazers (`repo.stargazers.list`; Write+ only)
+      operationId: listStargazers
+      parameters:
+        - { $ref: "#/components/parameters/owner" }
+        - { $ref: "#/components/parameters/repo" }
+        - { name: q, in: query, schema: { type: string } }
+        - { $ref: "#/components/parameters/offset" }
+        - { $ref: "#/components/parameters/limit" }
+      responses:
+        "200":
+          description: Stargazer list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  users:
+                    type: array
+                    items: { $ref: "#/components/schemas/Stargazer" }
+
+  /repos/{owner}/{repo}/hooks:
+    get:
+      tags: [repos]
+      summary: List webhooks (`webhook.list`; repo Admin)
+      operationId: listHooks
+      parameters:
+        - { $ref: "#/components/parameters/owner" }
+        - { $ref: "#/components/parameters/repo" }
+      responses:
+        "200":
+          description: Hook list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  webhooks:
+                    type: array
+                    items: { $ref: "#/components/schemas/Webhook" }
+    post:
+      tags: [repos]
+      summary: Create webhook (`webhook.create`) — returns one-time `secret`
+      operationId: createHook
+      parameters:
+        - { $ref: "#/components/parameters/owner" }
+        - { $ref: "#/components/parameters/repo" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateWebhookBody" }
+      responses:
+        "201":
+          description: Created hook (includes one-time plaintext `secret`)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Webhook" }
+
+  /repos/{owner}/{repo}/hooks/{id}:
+    get:
+      tags: [repos]
+      summary: Get webhook (`webhook.get`)
+      operationId: getHook
+      parameters:
+        - { $ref: "#/components/parameters/owner" }
+        - { $ref: "#/components/parameters/repo" }
+        - { $ref: "#/components/parameters/hookId" }
+      responses:
+        "200":
+          description: Webhook
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Webhook" }
+    patch:
+      tags: [repos]
+      summary: Update webhook (`webhook.update`)
+      operationId: updateHook
+      parameters:
+        - { $ref: "#/components/parameters/owner" }
+        - { $ref: "#/components/parameters/repo" }
+        - { $ref: "#/components/parameters/hookId" }
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateWebhookBody" }
+      responses:
+        "200":
+          description: Webhook
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Webhook" }
+    delete:
+      tags: [repos]
+      summary: Delete webhook (`webhook.delete`)
+      operationId: deleteHook
+      parameters:
+        - { $ref: "#/components/parameters/owner" }
+        - { $ref: "#/components/parameters/repo" }
+        - { $ref: "#/components/parameters/hookId" }
+      responses:
+        "200": { $ref: "#/components/responses/OkBody" }
+
+  /repos/{owner}/{repo}/issues:
+    get:
+      tags: [issues]
+      summary: List issues (`issue.list`)
+      operationId: listIssues
+      parameters:
+        - { $ref: "#/components/parameters/owner" }
+        - { $ref: "#/components/parameters/repo" }
+        - { name: state, in: query, schema: { type: string, enum: [open, closed, all], default: open } }
+        - { name: author, in: query, schema: { type: string } }
+        - { name: label, in: query, schema: { type: string } }
+        - { name: assignee, in: query, schema: { type: string } }
+        - { name: q, in: query, schema: { type: string } }
+        - { $ref: "#/components/parameters/offset" }
+        - { $ref: "#/components/parameters/limit" }
+      responses:
+        "200":
+          description: Issues page
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IssueList" }
+    post:
+      tags: [issues]
+      summary: Create issue (`issue.create`)
+      operationId: createIssue
+      parameters:
+        - { $ref: "#/components/parameters/owner" }
+        - { $ref: "#/components/parameters/repo" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateIssueBody" }
+      responses:
+        "201":
+          description: Created issue
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Issue" }
+
+  /repos/{owner}/{repo}/issues/{number}:
+    get:
+      tags: [issues]
+      summary: Get issue (`issue.get`)
+      operationId: getIssue
+      parameters:
+        - { $ref: "#/components/parameters/owner" }
+        - { $ref: "#/components/parameters/repo" }
+        - { $ref: "#/components/parameters/number" }
+      responses:
+        "200":
+          description: Issue
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Issue" }
+        "404": { $ref: "#/components/responses/Error" }
+    patch:
+      tags: [issues]
+      summary: Update issue (`issue.update` + `issue.close`/`issue.reopen` when `state` is given)
+      operationId: updateIssue
+      parameters:
+        - { $ref: "#/components/parameters/owner" }
+        - { $ref: "#/components/parameters/repo" }
+        - { $ref: "#/components/parameters/number" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateIssueBody" }
+      responses:
+        "200":
+          description: Updated issue
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Issue" }
+
+  /repos/{owner}/{repo}/issues/{number}/comments:
+    get:
+      tags: [issues]
+      summary: Issue comments (`issue.comments.list`)
+      operationId: listIssueComments
+      parameters:
+        - { $ref: "#/components/parameters/owner" }
+        - { $ref: "#/components/parameters/repo" }
+        - { $ref: "#/components/parameters/number" }
+      responses:
+        "200":
+          description: Comment list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  comments:
+                    type: array
+                    items: { $ref: "#/components/schemas/Comment" }
+    post:
+      tags: [issues]
+      summary: Comment on issue (`issue.comments.create`)
+      operationId: createIssueComment
+      parameters:
+        - { $ref: "#/components/parameters/owner" }
+        - { $ref: "#/components/parameters/repo" }
+        - { $ref: "#/components/parameters/number" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties: { body: { type: string } }
+      responses:
+        "201":
+          description: Created comment
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Comment" }
+
+  /repos/{owner}/{repo}/issues/{number}/comments/{comment_id}:
+    patch:
+      tags: [issues]
+      summary: Edit comment (`issue.comments.update`; author only)
+      operationId: updateIssueComment
+      parameters:
+        - { $ref: "#/components/parameters/owner" }
+        - { $ref: "#/components/parameters/repo" }
+        - { $ref: "#/components/parameters/number" }
+        - { $ref: "#/components/parameters/commentId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties: { body: { type: string } }
+      responses:
+        "200":
+          description: Updated comment
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Comment" }
+    delete:
+      tags: [issues]
+      summary: Delete comment (`issue.comments.delete`)
+      operationId: deleteIssueComment
+      parameters:
+        - { $ref: "#/components/parameters/owner" }
+        - { $ref: "#/components/parameters/repo" }
+        - { $ref: "#/components/parameters/number" }
+        - { $ref: "#/components/parameters/commentId" }
+      responses:
+        "200": { $ref: "#/components/responses/OkBody" }
+
+  /repos/{owner}/{repo}/pulls:
+    get:
+      tags: [pulls]
+      summary: List pull requests (`pull.list`)
+      operationId: listPulls
+      parameters:
+        - { $ref: "#/components/parameters/owner" }
+        - { $ref: "#/components/parameters/repo" }
+        - { name: state, in: query, schema: { type: string, enum: [open, closed, merged, all], default: open } }
+        - { name: author, in: query, schema: { type: string } }
+        - { name: label, in: query, schema: { type: string } }
+        - { name: assignee, in: query, schema: { type: string } }
+        - { name: q, in: query, schema: { type: string } }
+        - { name: review_state, in: query, schema: { type: string, enum: [approved, changes_requested, review_required] } }
+        - { $ref: "#/components/parameters/offset" }
+        - { $ref: "#/components/parameters/limit" }
+      responses:
+        "200":
+          description: Pull list page
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PullList" }
+    post:
+      tags: [pulls]
+      summary: Create pull request (`pull.create`)
+      operationId: createPull
+      parameters:
+        - { $ref: "#/components/parameters/owner" }
+        - { $ref: "#/components/parameters/repo" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreatePullBody" }
+      responses:
+        "201":
+          description: Created pull
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Pull" }
+
+  /repos/{owner}/{repo}/pulls/{number}:
+    get:
+      tags: [pulls]
+      summary: Get pull request (`pull.get`)
+      operationId: getPull
+      parameters:
+        - { $ref: "#/components/parameters/owner" }
+        - { $ref: "#/components/parameters/repo" }
+        - { $ref: "#/components/parameters/number" }
+      responses:
+        "200":
+          description: Pull request
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Pull" }
+        "404": { $ref: "#/components/responses/Error" }
+    patch:
+      tags: [pulls]
+      summary: Update pull (`pull.update` + `pull.close`/`pull.reopen` when `state` is given)
+      operationId: updatePull
+      parameters:
+        - { $ref: "#/components/parameters/owner" }
+        - { $ref: "#/components/parameters/repo" }
+        - { $ref: "#/components/parameters/number" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdatePullBody" }
+      responses:
+        "200":
+          description: Updated pull
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Pull" }
+
+  /repos/{owner}/{repo}/pulls/{number}/merge:
+    post:
+      tags: [pulls]
+      summary: Merge pull request (`pull.merge`)
+      operationId: mergePull
+      parameters:
+        - { $ref: "#/components/parameters/owner" }
+        - { $ref: "#/components/parameters/repo" }
+        - { $ref: "#/components/parameters/number" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MergePullBody" }
+      responses:
+        "200":
+          description: Merged pull + merge commit SHA
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MergeResult" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /repos/{owner}/{repo}/pulls/{number}/files:
+    get:
+      tags: [pulls]
+      summary: Pull diff files (`pull.files`)
+      operationId: listPullFiles
+      parameters:
+        - { $ref: "#/components/parameters/owner" }
+        - { $ref: "#/components/parameters/repo" }
+        - { $ref: "#/components/parameters/number" }
+      responses:
+        "200":
+          description: Diff files
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PullFiles" }
+
+  /repos/{owner}/{repo}/pulls/{number}/commits:
+    get:
+      tags: [pulls]
+      summary: Pull commits (`pull.commits`)
+      operationId: listPullCommits
+      parameters:
+        - { $ref: "#/components/parameters/owner" }
+        - { $ref: "#/components/parameters/repo" }
+        - { $ref: "#/components/parameters/number" }
+      responses:
+        "200":
+          description: Commits in the pull
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PullCommits" }
+
+  /repos/{owner}/{repo}/pulls/{number}/comments:
+    get:
+      tags: [pulls]
+      summary: Pull review comments (`pull.comments.list`)
+      operationId: listPullComments
+      parameters:
+        - { $ref: "#/components/parameters/owner" }
+        - { $ref: "#/components/parameters/repo" }
+        - { $ref: "#/components/parameters/number" }
+      responses:
+        "200":
+          description: Comments
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  comments:
+                    type: array
+                    items: { $ref: "#/components/schemas/PullComment" }
+    post:
+      tags: [pulls]
+      summary: Add pull comment (`pull.comments.create`; diff placement optional)
+      operationId: createPullComment
+      parameters:
+        - { $ref: "#/components/parameters/owner" }
+        - { $ref: "#/components/parameters/repo" }
+        - { $ref: "#/components/parameters/number" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreatePullCommentBody" }
+      responses:
+        "201":
+          description: Created comment
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PullComment" }
+
+  /repos/{owner}/{repo}/pulls/{number}/reviews:
+    get:
+      tags: [pulls]
+      summary: Pull reviews (`pull.reviews.list`)
+      operationId: listPullReviews
+      parameters:
+        - { $ref: "#/components/parameters/owner" }
+        - { $ref: "#/components/parameters/repo" }
+        - { $ref: "#/components/parameters/number" }
+      responses:
+        "200":
+          description: Reviews
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reviews:
+                    type: array
+                    items: { $ref: "#/components/schemas/PullReview" }
+    post:
+      tags: [pulls]
+      summary: Submit review (`pull.reviews.submit`)
+      operationId: submitPullReview
+      parameters:
+        - { $ref: "#/components/parameters/owner" }
+        - { $ref: "#/components/parameters/repo" }
+        - { $ref: "#/components/parameters/number" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SubmitReviewBody" }
+      responses:
+        "201":
+          description: Submitted review
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PullReview" }
+
+  /repos/{owner}/{repo}/releases:
+    get:
+      tags: [releases]
+      summary: List releases (`release.list`)
+      operationId: listReleases
+      parameters:
+        - { $ref: "#/components/parameters/owner" }
+        - { $ref: "#/components/parameters/repo" }
+      responses:
+        "200":
+          description: Releases
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  releases:
+                    type: array
+                    items: { $ref: "#/components/schemas/Release" }
+    post:
+      tags: [releases]
+      summary: Create release (`release.create`; tag must exist)
+      operationId: createRelease
+      parameters:
+        - { $ref: "#/components/parameters/owner" }
+        - { $ref: "#/components/parameters/repo" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateReleaseBody" }
+      responses:
+        "201":
+          description: Created release
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Release" }
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+
+  /repos/{owner}/{repo}/releases/tags/{tag}:
+    get:
+      tags: [releases]
+      summary: Release by tag (`release.get`); slashed tags via %-encoding
+      operationId: getReleaseByTag
+      parameters:
+        - { $ref: "#/components/parameters/owner" }
+        - { $ref: "#/components/parameters/repo" }
+        - { name: tag, in: path, required: true, schema: { type: string }, style: simple }
+      responses:
+        "200":
+          description: Release
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Release" }
+        "404": { $ref: "#/components/responses/Error" }
+    patch:
+      tags: [releases]
+      summary: Update release (`release.update`)
+      operationId: updateRelease
+      parameters:
+        - { $ref: "#/components/parameters/owner" }
+        - { $ref: "#/components/parameters/repo" }
+        - { name: tag, in: path, required: true, schema: { type: string }, style: simple }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateReleaseBody" }
+      responses:
+        "200":
+          description: Release
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Release" }
+    delete:
+      tags: [releases]
+      summary: Delete release (`release.delete`)
+      operationId: deleteRelease
+      parameters:
+        - { $ref: "#/components/parameters/owner" }
+        - { $ref: "#/components/parameters/repo" }
+        - { name: tag, in: path, required: true, schema: { type: string }, style: simple }
+      responses:
+        "200": { $ref: "#/components/responses/OkBody" }
+
+  /admin/users:
+    get:
+      tags: [admin]
+      summary: List users (`admin.users.list`; sys-admin session only)
+      operationId: adminListUsers
+      parameters:
+        - { name: query, in: query, schema: { type: string } }
+        - { $ref: "#/components/parameters/limit" }
+        - { $ref: "#/components/parameters/offset" }
+      responses:
+        "200":
+          description: Admin user page (includes email + ban state)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminUserList" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /admin/lfs/usage:
+    get:
+      tags: [admin]
+      summary: Instance LFS usage stats (`admin.lfs.getUsage`; sys-admin session only)
+      operationId: adminLfsUsage
+      responses:
+        "200":
+          description: LFS usage
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+
+components:
+  parameters:
+    owner:
+      name: owner
+      in: path
+      required: true
+      schema: { type: string }
+      description: Owner slug (username or org slug)
+    repo:
+      name: repo
+      in: path
+      required: true
+      schema: { type: string }
+      description: Repository name
+    username:
+      name: username
+      in: path
+      required: true
+      schema: { type: string }
+    slug:
+      name: slug
+      in: path
+      required: true
+      schema: { type: string }
+    number:
+      name: number
+      in: path
+      required: true
+      schema: { type: integer }
+    commentId:
+      name: comment_id
+      in: path
+      required: true
+      schema: { type: string }
+    hookId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+    ref:
+      name: ref
+      in: query
+      schema: { type: string }
+      description: Branch, tag, or SHA (default branch when omitted)
+    offset:
+      name: offset
+      in: query
+      schema: { type: integer }
+    limit:
+      name: limit
+      in: query
+      schema: { type: integer }
+
+  responses:
+    Error:
+      description: Error
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    OkBody:
+      description: OK
+      content:
+        application/json:
+          schema:
+            type: object
+            properties: { ok: { type: boolean } }
+    User:
+      description: Authenticated user
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/User" }
+    Repo:
+      description: Repository
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Repo" }
+    RepoList:
+      description: Repository list
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              repos:
+                type: array
+                items: { $ref: "#/components/schemas/Repo" }
+    OrgListMine:
+      description: Orgs with caller role
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              orgs:
+                type: array
+                items: { $ref: "#/components/schemas/OrgMine" }
+    BranchList:
+      description: Branches (short names)
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              branches:
+                type: array
+                items: { $ref: "#/components/schemas/RefEntry" }
+    TagList:
+      description: Tags (short names)
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              tags:
+                type: array
+                items: { $ref: "#/components/schemas/RefEntry" }
+    Tree:
+      description: Tree listing
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Tree" }
+
+  schemas:
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: Stable machine code, e.g. `repo.not_found`
+        message: { type: string }
+        data: { type: object }
+
+    Health:
+      type: object
+      properties:
+        status: { type: string, enum: [ok] }
+        version: { type: string }
+        database: { type: string, enum: [ok, error, skipped] }
+
+    User:
+      type: object
+      description: Own account (includes email)
+      properties:
+        id: { type: string }
+        email: { type: string }
+        username: { type: string }
+        display_name: { type: string }
+        role: { type: string, enum: [user, sys-admin] }
+        email_verified: { type: boolean }
+
+    PublicUserProfile:
+      type: object
+      properties:
+        username: { type: string }
+        display_name: { type: string }
+        bio: { type: string }
+        avatar_url: { type: string, nullable: true }
+
+    Org:
+      type: object
+      properties:
+        id: { type: string }
+        slug: { type: string }
+        display_name: { type: string }
+        member_base_permission: { type: string, enum: [read, write] }
+        created_at: { type: string }
+        updated_at: { type: string }
+
+    OrgMine:
+      allOf:
+        - { $ref: "#/components/schemas/Org" }
+        - type: object
+          properties:
+            role: { type: string, enum: [member, admin, owner] }
+
+    OrgMember:
+      type: object
+      properties:
+        user_id: { type: string }
+        username: { type: string }
+        role: { type: string, enum: [member, admin, owner] }
+        created_at: { type: string }
+
+    Repo:
+      type: object
+      properties:
+        id: { type: string }
+        owner_id: { type: string }
+        owner_type: { type: string, enum: [user, org] }
+        owner_username: { type: string }
+        name: { type: string }
+        description: { type: string }
+        visibility: { type: string, enum: [public, private] }
+        default_branch: { type: string }
+        updated_at: { type: string }
+        can_admin: { type: boolean }
+        can_write: { type: boolean }
+        star_count: { type: integer }
+        open_issue_count: { type: integer }
+        open_pull_count: { type: integer }
+        viewer_has_starred: { type: boolean }
+        is_fork: { type: boolean }
+        is_template: { type: boolean }
+        homepage: { type: string }
+        topics: { type: array, items: { type: string } }
+        fork_count: { type: integer }
+        watch_count: { type: integer }
+        viewer_is_watching: { type: boolean }
+
+    CreateRepoBody:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        visibility: { type: string, enum: [public, private] }
+        stack_id: { type: string }
+        instance_pack_id: { type: string }
+        template_repo_id: { type: string }
+        license_id: { type: string }
+        gitignore_id: { type: string }
+        owner:
+          type: string
+          description: "Optional owner slug (org); defaults to the caller"
+
+    UpdateRepoBody:
+      type: object
+      properties:
+        description: { type: string }
+        homepage: { type: string }
+        topics: { type: array, items: { type: string } }
+
+    CreateOrgBody:
+      type: object
+      required: [slug]
+      properties:
+        slug: { type: string }
+        display_name: { type: string }
+
+    RefEntry:
+      type: object
+      properties:
+        name: { type: string, description: "Short name (`main`, `v1.0`)" }
+        oid: { type: string }
+        tip_author_name: { type: string }
+        tip_committed_at: { type: string }
+
+    TreeEntry:
+      type: object
+      properties:
+        mode: { type: string }
+        kind: { type: string, enum: [blob, tree, commit] }
+        oid: { type: string }
+        name: { type: string }
+
+    Tree:
+      type: object
+      properties:
+        empty: { type: boolean }
+        ref: { type: string }
+        path: { type: string }
+        entries:
+          type: array
+          items: { $ref: "#/components/schemas/TreeEntry" }
+
+    Blob:
+      type: object
+      properties:
+        path: { type: string }
+        ref: { type: string }
+        size: { type: integer }
+        truncated: { type: boolean }
+        is_binary: { type: boolean }
+        encoding: { type: string }
+        content: { type: string }
+        soft_max_bytes: { type: integer }
+
+    Commit:
+      type: object
+      properties:
+        sha: { type: string }
+        short_sha: { type: string }
+        subject: { type: string }
+        author_name: { type: string }
+        author_username: { type: string }
+        authored_at: { type: string }
+        committed_at: { type: string }
+
+    CommitDetail:
+      allOf:
+        - { $ref: "#/components/schemas/Commit" }
+        - type: object
+          properties:
+            body: { type: string }
+            files:
+              type: array
+              items: { $ref: "#/components/schemas/DiffFile" }
+
+    DiffFile:
+      type: object
+      properties:
+        path: { type: string }
+        status: { type: string }
+        patch: { type: string }
+
+    CompareResult:
+      type: object
+      properties:
+        base: { type: string }
+        head: { type: string }
+        empty: { type: boolean }
+        truncated: { type: boolean }
+        files:
+          type: array
+          items: { $ref: "#/components/schemas/DiffFile" }
+
+    Label:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        color: { type: string }
+        description: { type: string }
+        scope: { type: string, enum: [repo, org] }
+
+    Stargazer:
+      type: object
+      properties:
+        user_id: { type: string }
+        username: { type: string }
+        display_name: { type: string }
+        avatar_url: { type: string, nullable: true }
+        starred_at: { type: string }
+
+    Issue:
+      type: object
+      properties:
+        id: { type: string }
+        repo_id: { type: string }
+        number: { type: integer }
+        title: { type: string }
+        body: { type: string }
+        state: { type: string, enum: [open, closed] }
+        author_id: { type: string }
+        author_username: { type: string }
+        closed_at: { type: string }
+        created_at: { type: string }
+        updated_at: { type: string }
+        comment_count: { type: integer }
+
+    IssueList:
+      type: object
+      properties:
+        issues:
+          type: array
+          items: { $ref: "#/components/schemas/Issue" }
+        total: { type: integer }
+
+    CreateIssueBody:
+      type: object
+      required: [title]
+      properties:
+        title: { type: string }
+        body: { type: string }
+
+    UpdateIssueBody:
+      type: object
+      properties:
+        title: { type: string }
+        body: { type: string }
+        state: { type: string, enum: [open, closed] }
+
+    Comment:
+      type: object
+      properties:
+        id: { type: string }
+        issue_id: { type: string }
+        author_id: { type: string }
+        author_username: { type: string }
+        body: { type: string }
+        created_at: { type: string }
+        updated_at: { type: string }
+
+    Pull:
+      type: object
+      properties:
+        id: { type: string }
+        repo_id: { type: string }
+        number: { type: integer }
+        title: { type: string }
+        body: { type: string }
+        state: { type: string, enum: [open, closed, merged] }
+        base_ref: { type: string }
+        head_ref: { type: string }
+        head_owner: { type: string }
+        head_name: { type: string }
+        draft: { type: boolean }
+        author_id: { type: string }
+        author_username: { type: string }
+        merge_commit_sha: { type: string }
+        created_at: { type: string }
+        updated_at: { type: string }
+
+    PullList:
+      type: object
+      properties:
+        pulls:
+          type: array
+          items: { $ref: "#/components/schemas/Pull" }
+        total: { type: integer }
+        offset: { type: integer }
+        limit: { type: integer }
+
+    CreatePullBody:
+      type: object
+      required: [title, base_ref, head_ref]
+      properties:
+        title: { type: string }
+        body: { type: string }
+        base_ref: { type: string }
+        head_ref: { type: string }
+        head_owner: { type: string, description: "Fork owner for cross-repo pulls" }
+        head_name: { type: string, description: "Fork repo name" }
+        draft: { type: boolean }
+
+    UpdatePullBody:
+      type: object
+      properties:
+        title: { type: string }
+        body: { type: string }
+        base_ref: { type: string }
+        draft: { type: boolean }
+        state: { type: string, enum: [open, closed] }
+
+    MergePullBody:
+      type: object
+      required: [method]
+      properties:
+        method: { type: string, enum: [merge, squash, rebase] }
+        commit_title: { type: string }
+        commit_message: { type: string }
+        delete_branch: { type: boolean }
+
+    MergeResult:
+      type: object
+      properties:
+        pull: { $ref: "#/components/schemas/Pull" }
+        merge_commit_sha: { type: string }
+
+    PullFiles:
+      type: object
+      properties:
+        files:
+          type: array
+          items: { $ref: "#/components/schemas/DiffFile" }
+        empty: { type: boolean }
+
+    PullCommits:
+      type: object
+      properties:
+        commits:
+          type: array
+          items: { $ref: "#/components/schemas/Commit" }
+
+    PullComment:
+      type: object
+      properties:
+        id: { type: string }
+        pull_id: { type: string }
+        author_id: { type: string }
+        author_username: { type: string }
+        body: { type: string }
+        path: { type: string }
+        side: { type: string }
+        line: { type: integer }
+        resolved: { type: boolean }
+        created_at: { type: string }
+
+    CreatePullCommentBody:
+      type: object
+      required: [body]
+      properties:
+        body: { type: string }
+        path: { type: string }
+        side: { type: string }
+        line: { type: integer }
+        start_line: { type: integer }
+        commit_sha: { type: string }
+
+    PullReview:
+      type: object
+      properties:
+        id: { type: string }
+        pull_id: { type: string }
+        author_id: { type: string }
+        author_username: { type: string }
+        state: { type: string, enum: [approved, changes_requested, commented] }
+        body: { type: string }
+        submitted_at: { type: string }
+
+    SubmitReviewBody:
+      type: object
+      required: [state]
+      properties:
+        state: { type: string, enum: [approved, changes_requested, commented] }
+        body: { type: string }
+
+    Release:
+      type: object
+      properties:
+        id: { type: string }
+        repo_id: { type: string }
+        tag_name: { type: string }
+        title: { type: string }
+        body: { type: string }
+        draft: { type: boolean }
+        prerelease: { type: boolean }
+        author_id: { type: string }
+        author_username: { type: string }
+        created_at: { type: string }
+        updated_at: { type: string }
+        assets:
+          type: array
+          items: { $ref: "#/components/schemas/ReleaseAsset" }
+
+    ReleaseAsset:
+      type: object
+      properties:
+        id: { type: string }
+        release_id: { type: string }
+        filename: { type: string }
+        content_type: { type: string }
+        byte_size: { type: integer }
+
+    CreateReleaseBody:
+      type: object
+      required: [tag_name]
+      properties:
+        tag_name: { type: string }
+        title: { type: string }
+        body: { type: string }
+        draft: { type: boolean }
+        prerelease: { type: boolean }
+
+    UpdateReleaseBody:
+      type: object
+      properties:
+        title: { type: string }
+        body: { type: string }
+        draft: { type: boolean }
+        prerelease: { type: boolean }
+
+    Webhook:
+      type: object
+      properties:
+        id: { type: string }
+        repo_id: { type: string }
+        url: { type: string }
+        secret_masked: { type: string }
+        secret:
+          type: string
+          description: "Present only on create (one-time reveal)"
+        active: { type: boolean }
+        events: { type: array, items: { type: string } }
+        name: { type: string }
+
+    CreateWebhookBody:
+      type: object
+      required: [url, secret, events]
+      properties:
+        url: { type: string }
+        secret: { type: string }
+        events: { type: array, items: { type: string } }
+        active: { type: boolean }
+        description: { type: string }
+
+    UpdateWebhookBody:
+      type: object
+      properties:
+        url: { type: string }
+        secret: { type: string, description: "Rotate; new plaintext returned once" }
+        events: { type: array, items: { type: string } }
+        active: { type: boolean }
+        description: { type: string }
+
+    AdminUser:
+      type: object
+      properties:
+        id: { type: string }
+        email: { type: string }
+        username: { type: string }
+        display_name: { type: string }
+        role: { type: string, enum: [user, sys-admin] }
+        email_verified: { type: boolean }
+        banned_at: { type: string, nullable: true }
+        created_at: { type: string }
+
+    AdminUserList:
+      type: object
+      properties:
+        users:
+          type: array
+          items: { $ref: "#/components/schemas/AdminUser" }
+        total: { type: integer }
+
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: oxidean_session
+    bearerPat:
+      type: http
+      scheme: bearer
+      description: Personal access token (API-02); session cookie wins if both are sent
+
+security:
+  - sessionCookie: []
+  - bearerPat: []

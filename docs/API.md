@@ -72,6 +72,7 @@ Missing or mismatched value → error `rpc.version_mismatch` (HTTP 400).
 | `POST` | `/api/actions/update_task` | Job state transition | Bearer runner token |
 | `POST` | `/api/actions/update_log` | Append job log chunk | Bearer runner token |
 | `POST` | `/api/repos/{owner}/{repo}/mirror/hook` | Inbound push webhook (wake two-way mirror) | Shared secret (HMAC / token headers) |
+| `*` | `/api/v1/**` | REST facade over the core domain (API-01) — see [REST API](#rest-api-apiv1) | Cookie or PAT Bearer |
 
 SSO start routes redirect to the IdP when configured. If WorkOS/OIDC ENV is missing, start returns HTTP 503 with `auth.not_configured`. Failures typically redirect to `/login?error=sso`.
 
@@ -163,6 +164,77 @@ SSO start routes redirect to the IdP when configured. If WorkOS/OIDC ENV is miss
 | `admin.actions.listRunners` | List registered runners (no secrets) | Sys-admin |
 
 Unknown procedure → `rpc.unknown_procedure` (HTTP 404).
+
+## REST API (`/api/v1`)
+
+API-01 adds a resource-oriented REST surface alongside the RPC procedures. Every route translates path/query/body into the matching RPC procedure's input and dispatches through the same `rpc::dispatch` path — ACLs, PAT scope gates (`authorize_rpc`), the bootstrap lock, and side effects (notifications, webhook events) are identical for both surfaces. The REST API is a companion, not a replacement: `POST /api/rpc` remains the primary client contract and covers procedures REST does not expose.
+
+- **OpenAPI spec**: [`docs/openapi.yaml`](openapi.yaml) (OpenAPI 3.0, hand-maintained — keep it in sync when adding routes).
+- **Base path**: `/api/v1` (e.g. `GET /api/v1/repos/octo/hello`).
+- **Auth**: `Cookie: oxidean_session=…` or `Authorization: Bearer <pat>`; the cookie wins when both are sent (same as `/api/rpc`). Anonymous requests can reach public read endpoints. Session-only procedures (org creation, `admin.*`, credential management) return `403 auth.pat_scope` for PATs — see [PAT Bearer authentication](#pat-bearer-authentication).
+- **No version header**: unlike `/api/rpc`, REST requests do not send `Oxidean-RPC-Version`.
+- **Response shape**: success returns the procedure's `data` payload directly (no `{ok, data}` envelope); `POST` create endpoints return `201`. Errors return the `AppError` body `{code, message, data?}` with a mapped status: `*.not_found` → 404, `*.forbidden` / `auth.pat_scope` / `auth.email_unverified` → 403, `auth.unauthenticated` → 401, `auth.rate_limited` → 429, `release.tag_taken` / `pull.merge_conflict` / `auth.taken` → 409, `*.internal` / `*_failed` → 500, otherwise 400.
+- **Input mapping**: URL segments fill the procedure's identity fields (`{owner, name, number, …}`) and always override body fields of the same name; query params map to optional inputs.
+- **`PATCH` `state`**: `PATCH …/issues/{n}` and `PATCH …/pulls/{n}` accept `state: "closed" | "open"`, mapping to `issue.close` / `issue.reopen` (or `pull.close` / `pull.reopen`). When combined with field edits in one request, the field update runs first; the two updates are not atomic.
+- **Wildcard params**: `…/tree/{path}`, `…/contents/{path}`, and `…/releases/tags/{tag}` accept slashes — URL-encode slashed tags (`release%2F1.0`).
+
+```bash
+curl -sS http://127.0.0.1:8080/api/v1/repos/octo/hello   -H 'Authorization: Bearer oxidean_pat_…'
+```
+
+### REST endpoints
+
+All paths are under `/api/v1`. The procedure column names the RPC equivalent in the table above.
+
+| Method | Path | Procedure | Notes |
+| --- | --- | --- | --- |
+| `GET` | `/health` | `system.health` | Anonymous |
+| `GET` | `/user` | `auth.me` | Authenticated account |
+| `GET` | `/user/repos` | `repo.listMine` | Caller's repos |
+| `POST` | `/user/repos` | `repo.create` | Caller-owned repo |
+| `GET` | `/user/orgs` | `org.listMine` | |
+| `GET` | `/user/starred` | `user.listStarred` | `offset`, `limit` |
+| `GET` | `/users/{username}` | `user.getPublicProfile` | Anonymous OK |
+| `GET` | `/users/{username}/repos` | `repo.listByOwner` | |
+| `POST` | `/orgs` | `org.create` | Session only |
+| `GET` | `/orgs/{slug}` | `org.get` | Anonymous OK |
+| `GET` | `/orgs/{slug}/members` | `org.members.list` | |
+| `GET` | `/orgs/{slug}/repos` | `repo.listByOwner` | |
+| `POST` | `/orgs/{slug}/repos` | `repo.create` | `owner` = slug |
+| `GET` | `/repos` | `repo.explore` | Public discovery; `q`, `offset`, `limit` |
+| `GET` | `/repos/{owner}/{repo}` | `repo.get` | Anonymous OK for public |
+| `PATCH` | `/repos/{owner}/{repo}` | `repo.updateMetadata` | `description`, `homepage`, `topics` |
+| `DELETE` | `/repos/{owner}/{repo}` | `repo.softDelete` | URL is the typed confirmation |
+| `GET` | `/repos/{owner}/{repo}/branches` | `repo.refs` | `refs/heads/*`, short names |
+| `GET` | `/repos/{owner}/{repo}/tags` | `repo.refs` | `refs/tags/*`, short names |
+| `GET` | `/repos/{owner}/{repo}/commits` | `repo.commits` | `sha` (alias `ref`), `skip`, `limit` |
+| `GET` | `/repos/{owner}/{repo}/commits/{sha}` | `repo.commit` | |
+| `GET` | `/repos/{owner}/{repo}/compare/{basehead}` | `repo.compare` | `base...head` (`..` accepted) |
+| `GET` | `/repos/{owner}/{repo}/tree` | `repo.tree` | Root listing; `?ref=` |
+| `GET` | `/repos/{owner}/{repo}/tree/{path}` | `repo.tree` | `?ref=` |
+| `GET` | `/repos/{owner}/{repo}/contents/{path}` | `repo.blob` | `?ref=`; base64 content |
+| `GET` | `/repos/{owner}/{repo}/languages` | `repo.languages` | |
+| `GET` | `/repos/{owner}/{repo}/labels` | `label.listForRepo` | `includeHidden` |
+| `GET` | `/repos/{owner}/{repo}/stargazers` | `repo.stargazers.list` | Write+ only |
+| `GET`/`POST` | `/repos/{owner}/{repo}/hooks` | `webhook.list` / `webhook.create` | Repo Admin |
+| `GET`/`PATCH`/`DELETE` | `/repos/{owner}/{repo}/hooks/{id}` | `webhook.get` / `webhook.update` / `webhook.delete` | Repo Admin |
+| `GET`/`POST` | `/repos/{owner}/{repo}/issues` | `issue.list` / `issue.create` | Filters: `state`, `author`, `label`, `assignee`, `q`, `offset`, `limit` |
+| `GET`/`PATCH` | `/repos/{owner}/{repo}/issues/{number}` | `issue.get` / `issue.update` (+`close`/`reopen` via `state`) | |
+| `GET`/`POST` | `/repos/{owner}/{repo}/issues/{number}/comments` | `issue.comments.list` / `issue.comments.create` | |
+| `PATCH`/`DELETE` | `/repos/{owner}/{repo}/issues/{number}/comments/{comment_id}` | `issue.comments.update` / `issue.comments.delete` | Path carries `number` (RPC input requires it) — differs from GitHub's `/issues/comments/{id}` |
+| `GET`/`POST` | `/repos/{owner}/{repo}/pulls` | `pull.list` / `pull.create` | `state` incl. `merged`; `review_state` filter |
+| `GET`/`PATCH` | `/repos/{owner}/{repo}/pulls/{number}` | `pull.get` / `pull.update` (+`close`/`reopen` via `state`) | |
+| `POST` | `/repos/{owner}/{repo}/pulls/{number}/merge` | `pull.merge` | `method`: `merge`\|`squash`\|`rebase` |
+| `GET` | `/repos/{owner}/{repo}/pulls/{number}/files` | `pull.files` | |
+| `GET` | `/repos/{owner}/{repo}/pulls/{number}/commits` | `pull.commits` | |
+| `GET`/`POST` | `/repos/{owner}/{repo}/pulls/{number}/comments` | `pull.comments.list` / `pull.comments.create` | Optional diff placement fields |
+| `GET`/`POST` | `/repos/{owner}/{repo}/pulls/{number}/reviews` | `pull.reviews.list` / `pull.reviews.submit` | `state`: `approved`\|`changes_requested`\|`commented` |
+| `GET`/`POST` | `/repos/{owner}/{repo}/releases` | `release.list` / `release.create` | Tag must already exist |
+| `GET`/`PATCH`/`DELETE` | `/repos/{owner}/{repo}/releases/tags/{tag}` | `release.get` / `release.update` / `release.delete` | Slashed tags %-encoded |
+| `GET` | `/admin/users` | `admin.users.list` | Sys-admin session only |
+| `GET` | `/admin/lfs/usage` | `admin.lfs.getUsage` | Sys-admin session only |
+
+Not yet covered by v1 (use `/api/rpc`): notifications, SSH/GPG keys, PAT management, email addresses, packages, Actions runs, branch protection, collaborators, invitations, mirrors, LFS objects, issue delete/labels/assignees/reactions/links, pull review dismissal and review requests, `org.updateSettings` and org invites, `repo.rename`/`transfer`/`fork`, `repo.watch`/`star`/`unstar`, most `admin.*` procedures. Release asset upload/download, raw files, and archives keep their dedicated binary routes (`/api/repos/{owner}/{repo}/releases/{release_id}/assets`, `/api/releases/assets/{asset_id}`, `/api/repos/{owner}/{repo}/raw/{ref}/{path}`, `…/archive/{file}`).
 
 ## Request/response formats
 
