@@ -110,6 +110,32 @@ describe("repo search route (GIT-18 / D-SRCH-02 / D-SRCH-15)", () => {
     expect(await screen.findByTestId("search-empty")).toBeTruthy();
   });
 
+  it("renders language browse hits as file links without line/content", async () => {
+    searchState = { q: "language:Rust", type: "code" };
+    searchMock.mockResolvedValueOnce({
+      ok: true,
+      data: {
+        type: "code",
+        q: "language:Rust",
+        truncated: false,
+        offset: 0,
+        limit: 30,
+        hits: [
+          { kind: "code", path: "src/main.rs", line: 0, content: "" },
+          { kind: "code", path: "crates/lib.rs", line: 0, content: "" },
+        ],
+      },
+    });
+    renderWithQueryClient(RepoSearchPage);
+    const link = await screen.findByText("src/main.rs");
+    expect(link.closest("a")?.getAttribute("href")).toBe("/ada/hello/blob/src/main.rs");
+    expect(screen.queryByText(":0")).toBeNull();
+    expect(screen.getByText("crates/lib.rs")).toBeTruthy();
+    // No <pre> body for browse hits (empty content).
+    const li = link.closest("li");
+    expect(li?.querySelector("pre")).toBeNull();
+  });
+
   it("repo chrome search entry navigates to /search (D-SRCH-03)", async () => {
     const chrome = await import("../components/repo/repo-chrome.tsrx?raw").then((m) =>
       String((m as { default: string }).default),

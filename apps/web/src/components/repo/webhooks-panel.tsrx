@@ -133,7 +133,8 @@ export function WebhooksPanel(props: {
           Webhooks
         </h2>
         <p className="text-[14px] text-muted-foreground">
-          Deliver signed HTTPS payloads for repository events (push, pull requests, issues).
+          Deliver signed HTTPS payloads for repository events (push, pull requests, issues, issue
+          comments).
         </p>
 
         @if (mode === "create") {
@@ -167,6 +168,7 @@ export function WebhooksPanel(props: {
                 </p>
                 <Button
                   type="button"
+                  data-testid="webhook-add"
                   onClick={() => {
                     setMode("create");
                     setEditing(null);
