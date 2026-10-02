@@ -3001,6 +3001,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxidean-cli"
+version = "0.1.0"
+dependencies = [
+ "oxidean-core",
+ "reqwest 0.13.5",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tokio",
+ "wiremock",
+]
+
+[[package]]
 name = "oxidean-core"
 version = "0.1.0"
 dependencies = [

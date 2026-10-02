@@ -83,6 +83,7 @@ Canonical docs live under [`docs/`](docs/).
 - [`ROADMAP.md`](ROADMAP.md) — remaining work toward functional forge parity
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — system overview (git, SSH, LFS, orgs, packages)
 - [`docs/API.md`](docs/API.md) — RPC + Smart HTTP / LFS / SSH / registry surfaces
+- [`docs/CLI.md`](docs/CLI.md) — `ox`, the companion command-line client
 - [`docs/guides/stack-presets.md`](docs/guides/stack-presets.md) — in-repo `/new` stack presets
 
 **Develop**

@@ -11,6 +11,7 @@ Conventions for Oxidean humans and agents. Complements [CONTRIBUTING.md](../CONT
 | `crates/oxidean-api` | HTTP/RPC, auth, email, handlers | DB dialect `if` trees |
 | `crates/oxidean-core` | Shared domain types / pure logic | I/O, SQL, Axum |
 | `crates/oxidean-db` | Migrations + `Database` API (all dialects) | Product UI concerns |
+| `crates/oxidean-cli` | `ox` companion CLI (RPC client, `~/.config/ox` config) | Server-side crates (Axum, DB); session-cookie auth |
 
 Prefer the smallest change that fits an existing pattern. New dependencies need a clear gap (prefer `@octanejs/*` on the web; prefer crates already in the Cargo workspace on the API).
 
