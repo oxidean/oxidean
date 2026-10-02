@@ -30,4 +30,21 @@ describe("repo settings Branch protection (ORG-05 / D-25)", () => {
     expect(src).toMatch(/required reviews|Require pull request reviews/i);
     expect(src).toMatch(/status contexts/i);
   }, 30_000);
+
+  it("Protected tags section: list + Add tag rule controls (GIT-21)", async () => {
+    const src = await import("../components/repo/branch-protection-panel.tsrx?raw").then((m) =>
+      String((m as { default: string }).default),
+    );
+    expect(src).toMatch(/Protected tags/);
+    expect(src).toMatch(/Add tag rule/);
+    expect(src).toMatch(/tagProtection\.list/);
+    expect(src).toMatch(/tagProtection\.create/);
+    expect(src).toMatch(/tagProtection\.update/);
+    expect(src).toMatch(/tagProtection\.delete/);
+    expect(src).toMatch(/Allow tag creation/);
+    expect(src).toMatch(/Allow tag updates/);
+    expect(src).toMatch(/Allow tag deletion/);
+    expect(src).toMatch(/enforce_admins/);
+    expect(src).toMatch(/TagProtectionPanel/);
+  }, 30_000);
 });
