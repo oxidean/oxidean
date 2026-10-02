@@ -48,6 +48,7 @@ const PAT_BROWSER = "apps/web/src/components/settings/pat-mint.browser.test.tsx"
 const UI_BROWSER = "apps/web/src/components/ui/ui-controls.browser.test.tsx";
 const SSH_BROWSER = "apps/web/src/components/settings/ssh-key-add-form.browser.test.tsx";
 const MIRROR_BROWSER = "apps/web/src/components/repo/mirror-settings-panel.browser.test.tsx";
+const FEATURES_BROWSER = "apps/web/src/components/repo/repo-features-panel.browser.test.tsx";
 
 const AUTH_UI = "apps/web/e2e/stack-browser/auth-ui.stack.browser.test.tsx";
 const FORGE_ADMIN = "apps/web/e2e/stack-browser/forge-admin.stack.browser.test.tsx";
@@ -138,6 +139,10 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
   },
 
   // --- repo / chrome ---
+  {
+    surface: "components/repo/repo-features-panel.tsrx",
+    coverage: [{ kind: "browser", test: FEATURES_BROWSER, subject: "repo-features-panel" }],
+  },
   {
     surface: "components/repo/mirror-settings-panel.tsrx",
     coverage: [

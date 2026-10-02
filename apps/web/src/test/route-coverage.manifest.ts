@@ -539,9 +539,8 @@ export const routeCoverageManifest: RouteCoverageEntry[] = [
     route: "$owner.$repo.issues.labels.tsrx",
     coverage: [
       {
-        kind: "skip",
-        rationale:
-          "Repo labels settings UI deferred; issue label attach covered in issues happy-dom",
+        kind: "happy-dom",
+        test: "apps/web/src/routes/$owner.$repo.issues.labels.integration.test.ts",
       },
     ],
   },
