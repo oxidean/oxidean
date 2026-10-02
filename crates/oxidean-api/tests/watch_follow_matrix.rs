@@ -36,6 +36,7 @@ fn rpc_req_with_cookie(body: &str, cookie: &str) -> Request<Body> {
         .uri("/api/rpc")
         .header("content-type", "application/json")
         .header("cookie", cookie)
+        .header("Oxidean-RPC-Version", "1")
         .body(Body::from(body.to_owned()))
         .unwrap()
 }
