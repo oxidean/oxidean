@@ -159,12 +159,36 @@ pub async fn list_by_actor(
     actor_id: &str,
     limit: i64,
 ) -> Result<Vec<RepoActivityRow>, String> {
+    list_by_actor_impl(pool, actor_id, limit, false).await
+}
+
+/// Public-repo-only variant for user-facing Atom feeds (API-05): activity in
+/// private repositories must never leak into a feed anyone can subscribe to.
+pub async fn list_by_actor_public(
+    pool: &DbPool,
+    actor_id: &str,
+    limit: i64,
+) -> Result<Vec<RepoActivityRow>, String> {
+    list_by_actor_impl(pool, actor_id, limit, true).await
+}
+
+async fn list_by_actor_impl(
+    pool: &DbPool,
+    actor_id: &str,
+    limit: i64,
+    public_only: bool,
+) -> Result<Vec<RepoActivityRow>, String> {
     let limit = limit.clamp(1, 500);
+    let vis = if public_only {
+        "\n   AND r.visibility = 'public'"
+    } else {
+        ""
+    };
     match pool {
         DbPool::Postgres(p) => {
             let rows = sqlx::query(&format!(
                 "{ACTOR_SELECT_PG}
- WHERE a.actor_id = $1
+ WHERE a.actor_id = $1{vis}
  ORDER BY a.created_at DESC, a.id DESC
  LIMIT $2"
             ))
@@ -178,7 +202,7 @@ pub async fn list_by_actor(
         DbPool::MySql(p) => {
             let rows = sqlx::query(&format!(
                 "{ACTOR_SELECT_MYSQL}
- WHERE a.actor_id = ?
+ WHERE a.actor_id = ?{vis}
  ORDER BY a.created_at DESC, a.id DESC
  LIMIT ?"
             ))
@@ -192,7 +216,7 @@ pub async fn list_by_actor(
         DbPool::Sqlite(p) => {
             let rows = sqlx::query(&format!(
                 "{ACTOR_SELECT_SQLITE}
- WHERE a.actor_id = ?1
+ WHERE a.actor_id = ?1{vis}
  ORDER BY a.created_at DESC, a.id DESC
  LIMIT ?2"
             ))

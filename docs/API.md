@@ -72,6 +72,9 @@ Missing or mismatched value → error `rpc.version_mismatch` (HTTP 400).
 | `POST` | `/api/actions/update_task` | Job state transition | Bearer runner token |
 | `POST` | `/api/actions/update_log` | Append job log chunk | Bearer runner token |
 | `POST` | `/api/repos/{owner}/{repo}/mirror/hook` | Inbound push webhook (wake two-way mirror) | Shared secret (HMAC / token headers) |
+| `GET` | `/api/repos/{owner}/{repo}/activity.atom` | Atom 1.0 feed of repo pushes / branch events (newest 30) | No (Read+ when private) |
+| `GET` | `/api/repos/{owner}/{repo}/releases.atom` | Atom 1.0 feed of releases (drafts only for Write+) | No (Read+ when private) |
+| `GET` | `/api/users/{username}/activity.atom` | Atom 1.0 feed of a user's public repo activity | No |
 
 SSO start routes redirect to the IdP when configured. If WorkOS/OIDC ENV is missing, start returns HTTP 503 with `auth.not_configured`. Failures typically redirect to `/login?error=sso`.
 
@@ -399,6 +402,34 @@ Phase 17 ships in-app activity notifications (NOTF-01 / NOTF-02) on migration `0
 | **Fan-out** | Domain writes (e.g. `issue.comments.create`) insert best-effort rows; actors are never notified. Activity email is out of scope. |
 
 Client surface: `client.notification.*` in `@oxidean/api-client` (regenerate with `make rpc-gen`).
+
+### Atom feeds (API-05)
+
+Three `application/atom+xml; charset=utf-8` feeds sit under `/api` so the edge
+gateway routes them to the API service. Each returns the newest **30** entries
+with stable `urn:uuid:` entry ids, RFC 3339 `<published>` / `<updated>`
+timestamps, and HTML permalinks built from the resolved public origin
+(`OXIDEAN_PUBLIC_ORIGIN`).
+
+| Feed | Path | HTML alternate |
+| --- | --- | --- |
+| Repo activity | `GET /api/repos/{owner}/{repo}/activity.atom` | `/{owner}/{repo}/activity` |
+| Repo releases | `GET /api/repos/{owner}/{repo}/releases.atom` | `/{owner}/{repo}/releases` |
+| User activity | `GET /api/users/{username}/activity.atom` | `/{username}` |
+
+Repo feeds enforce the same Capability ACL as `repo.activity.list`: anonymous or
+unauthorized reads of private repos answer the identical `repo.not_found`
+**404** (no enumeration). Session cookie is honored, so a user with Read can
+subscribe to a private repo's feed. Draft releases appear only for Write+
+callers (same rule as `release.list`).
+
+The **user feed is public-only** — it is filtered at the SQL layer
+(`repositories.visibility = 'public'`), so private-repo pushes never leak
+titles, branch names, or links regardless of the caller's session.
+
+Feed autodiscovery: the repo page, activity page, releases page, and user
+profile emit `<link rel="alternate" type="application/atom+xml">` pointing at
+the matching feed.
 
 ### Git Smart HTTP
 

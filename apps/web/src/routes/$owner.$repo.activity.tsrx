@@ -136,6 +136,14 @@ export const Route = createFileRoute("/$owner/$repo/activity")({
         title: `Activity · ${(params as { owner: string }).owner}/${(params as { repo: string }).repo} · Oxidean`,
       },
     ],
+    links: [
+      {
+        rel: "alternate",
+        type: "application/atom+xml",
+        title: `Activity feed · ${(params as { owner: string }).owner}/${(params as { repo: string }).repo}`,
+        href: `/api/repos/${(params as { owner: string }).owner}/${(params as { repo: string }).repo}/activity.atom`,
+      },
+    ],
   }),
   loader: async ({ params, location }): Promise<ActivityLoaderData> => {
     const owner = String((params as { owner?: string }).owner ?? "");

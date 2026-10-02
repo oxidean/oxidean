@@ -23,7 +23,7 @@ use crate::auth::session::{
 };
 use crate::email::{self, EmailSender};
 use crate::pat::rate_limit::FailedAuthLimiter;
-use crate::routes::{auth_callbacks, avatar, git_lfs, git_smart_http, release_assets, repo_raw, template_packs};
+use crate::routes::{auth_callbacks, avatar, feeds, git_lfs, git_smart_http, release_assets, repo_raw, template_packs};
 use crate::rpc::{self, CookieChange, RpcCtx, VERSION_HEADER};
 use crate::user::rate_limit::LookupLimiter;
 
@@ -296,6 +296,19 @@ pub fn router_with_state(state: AppState, cors: CorsLayer) -> Router {
             "/api/repos/{owner}/{repo}/mirror/hook",
             axum::routing::post(crate::mirror::mirror_hook),
         )
+        // Atom feeds (API-05) — /api prefix keeps them on this service at the edge.
+        .route(
+            "/api/repos/{owner}/{repo}/activity.atom",
+            get(feeds::repo_activity_feed),
+        )
+        .route(
+            "/api/repos/{owner}/{repo}/releases.atom",
+            get(feeds::repo_releases_feed),
+        )
+        .route(
+            "/api/users/{username}/activity.atom",
+            get(feeds::user_activity_feed),
+        )
         // Smart HTTP — D-18/D-22: only on /{owner}/{repo}.git (segment includes .git suffix)
         .route(
             "/{owner}/{repo_git}/info/refs",
@@ -339,7 +352,7 @@ async fn health() -> Json<serde_json::Value> {
     Json(serde_json::json!({ "ok": true }))
 }
 
-fn session_token_from_headers(headers: &HeaderMap) -> Option<String> {
+pub(crate) fn session_token_from_headers(headers: &HeaderMap) -> Option<String> {
     let cookie_header = headers.get(header::COOKIE)?.to_str().ok()?;
     for part in cookie_header.split(';') {
         let part = part.trim();
@@ -351,7 +364,7 @@ fn session_token_from_headers(headers: &HeaderMap) -> Option<String> {
     None
 }
 
-async fn build_rpc_ctx(
+pub(crate) async fn build_rpc_ctx(
     state: &AppState,
     raw_token: Option<&str>,
     client: rpc::ClientMeta,
