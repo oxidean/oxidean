@@ -40,7 +40,8 @@ pub mod users;
 pub mod watches;
 
 pub use actions::{
-    ActionJobRow, ActionRunRow, ActionRunnerRow, ActionSecretCipherRow, ActionSecretMetaRow,
+    ActionJobRow, ActionRunFilter, ActionRunRow, ActionRunnerRow, ActionSecretCipherRow,
+    ActionSecretMetaRow,
 };
 pub use audit_events::AuditEventRow;
 pub use branch_protection::{BranchProtectionRuleRow, CommitStatusRow};
@@ -2587,18 +2588,30 @@ impl Database {
     pub async fn list_action_runs_for_repo(
         &self,
         repository_id: &str,
+        filter: &actions::ActionRunFilter,
         limit: i64,
         offset: i64,
     ) -> Result<Vec<actions::ActionRunRow>, String> {
-        actions::list_runs_for_repo(self.require_pool()?, repository_id, limit, offset).await
+        actions::list_runs_for_repo(self.require_pool()?, repository_id, filter, limit, offset).await
     }
 
-    pub async fn count_action_runs_for_repo(&self, repository_id: &str) -> Result<i64, String> {
-        actions::count_runs_for_repo(self.require_pool()?, repository_id).await
+    pub async fn count_action_runs_for_repo(
+        &self,
+        repository_id: &str,
+        filter: &actions::ActionRunFilter,
+    ) -> Result<i64, String> {
+        actions::count_runs_for_repo(self.require_pool()?, repository_id, filter).await
     }
 
-    pub async fn requeue_action_run(&self, run_id: &str) -> Result<(), String> {
-        actions::requeue_run(self.require_pool()?, run_id).await
+    /// `failed_only` requeues just failed/cancelled jobs; `job_id` requeues a
+    /// single job; both unset requeues all jobs.
+    pub async fn requeue_action_run(
+        &self,
+        run_id: &str,
+        failed_only: bool,
+        job_id: Option<&str>,
+    ) -> Result<(), String> {
+        actions::requeue_run(self.require_pool()?, run_id, failed_only, job_id).await
     }
 
     pub async fn cancel_action_run(&self, run_id: &str) -> Result<(), String> {

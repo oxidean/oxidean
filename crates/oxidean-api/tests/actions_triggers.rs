@@ -94,7 +94,7 @@ jobs:
     .await
     .expect("dispatch");
     assert_eq!(n, 1);
-    let runs = db.list_action_runs_for_repo(&repo_id, 100, 0).await.unwrap();
+    let runs = db.list_action_runs_for_repo(&repo_id, &Default::default(), 100, 0).await.unwrap();
     assert_eq!(runs.len(), 1);
     assert_eq!(runs[0].event, "push");
     assert_eq!(runs[0].status, "queued");
@@ -148,7 +148,7 @@ jobs:
         assert_eq!(n, 1, "{action:?}");
     }
 
-    let runs = db.list_action_runs_for_repo(&repo_id, 100, 0).await.unwrap();
+    let runs = db.list_action_runs_for_repo(&repo_id, &Default::default(), 100, 0).await.unwrap();
     assert_eq!(runs.len(), 3);
     assert!(runs.iter().all(|r| r.event == "pull_request"));
 

@@ -13,8 +13,15 @@ pub struct ActionRunPublic {
     pub head_ref: String,
     pub status: String,
     pub title: String,
+    /// 1-based per-workflow sequence number within the repository, computed at
+    /// read time (oldest run of the workflow = 1). 0 when not computed.
+    #[serde(default)]
+    pub run_number: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub actor: Option<String>,
+    /// Avatar URL for `actor` when resolved.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actor_avatar_url: Option<String>,
     #[serde(default)]
     pub created_at: String,
     #[serde(default)]
@@ -45,6 +52,25 @@ pub struct ActionRunsListRequest {
     pub page: Option<u32>,
     #[serde(default)]
     pub per_page: Option<u32>,
+    /// Optional exact status filter
+    /// (`queued` / `in_progress` / `success` / `failure` / `cancelled`).
+    #[serde(default)]
+    pub status: Option<String>,
+    /// Optional exact event filter (`push` / `pull_request` / `workflow_dispatch` / …).
+    #[serde(default)]
+    pub event: Option<String>,
+    /// Head-branch filter — accepts `main` or `refs/heads/main`.
+    #[serde(default)]
+    pub branch: Option<String>,
+    /// Workflow file filter, e.g. `.github/workflows/ci.yml`.
+    #[serde(default)]
+    pub workflow: Option<String>,
+    /// Triggering actor username filter (resolved to a user id server-side).
+    #[serde(default)]
+    pub actor: Option<String>,
+    /// Case-insensitive substring match against the run title.
+    #[serde(default)]
+    pub query: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -77,11 +103,22 @@ pub struct ActionJobLogRequest {
     pub name: String,
     pub run_id: String,
     pub job_id: String,
+    /// Byte offset for incremental reads — pass the previous response's
+    /// `next_offset` to receive only newly appended bytes.
+    #[serde(default)]
+    pub offset: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActionJobLogResponse {
+    /// Log bytes starting at the requested `offset` (lossy UTF-8).
     pub content: String,
+    /// Offset to pass as `offset` for the next incremental read.
+    #[serde(default)]
+    pub next_offset: u64,
+    /// Total log size in bytes at read time.
+    #[serde(default)]
+    pub size: u64,
 }
 
 /// `repo.actions.listWorkflows` — discovered workflow files at a ref.
@@ -134,6 +171,14 @@ pub struct ActionRunMutationRequest {
     pub owner: String,
     pub name: String,
     pub run_id: String,
+    /// `rerunRun` only: requeue just this job instead of the whole run
+    /// (GitHub "Re-run this job").
+    #[serde(default)]
+    pub job_id: Option<String>,
+    /// `rerunRun` only: requeue only failed/cancelled jobs
+    /// (GitHub "Re-run failed jobs").
+    #[serde(default)]
+    pub failed_only: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

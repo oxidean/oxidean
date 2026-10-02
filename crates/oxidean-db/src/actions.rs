@@ -29,11 +29,38 @@ pub struct ActionRunRow {
     pub head_ref: String,
     pub status: String,
     pub title: String,
+    /// 1-based per-workflow sequence number within the repository, computed at
+    /// read time ([`RUN_NUMBER_SQL`]). 0 on insert-returned rows (never
+    /// serialized — RPC paths always re-read).
+    pub run_number: i64,
     pub triggered_by: Option<String>,
     pub created_at: String,
     pub updated_at: String,
     pub finished_at: Option<String>,
 }
+
+/// GitHub-style optional filters for [`list_runs_for_repo`] /
+/// [`count_runs_for_repo`]. `None` fields are not applied.
+///
+/// `branch` matches `head_ref` against both the bare name and the
+/// `refs/heads/` form (dispatch stores short names, push events store full
+/// refs). `triggered_by` carries the resolved `users.id` — the RPC layer
+/// resolves the username first. `title_like` is a pre-wrapped `%pattern%`.
+#[derive(Debug, Clone, Default)]
+pub struct ActionRunFilter {
+    pub status: Option<String>,
+    pub event: Option<String>,
+    pub branch: Option<String>,
+    pub workflow_path: Option<String>,
+    pub triggered_by: Option<String>,
+    pub title_like: Option<String>,
+}
+
+/// Per-workflow 1-based run sequence computed at read time — the oldest run
+/// of the same `(repository_id, workflow_path)` is 1. A correlated COUNT
+/// avoids a schema migration/backfill; same-second `created_at` ties break
+/// by `id` so numbers are stable.
+pub const RUN_NUMBER_SQL: &str = "(SELECT COUNT(*) FROM action_runs rn2 WHERE rn2.repository_id = action_runs.repository_id AND rn2.workflow_path = action_runs.workflow_path AND (rn2.created_at < action_runs.created_at OR (rn2.created_at = action_runs.created_at AND rn2.id <= action_runs.id))) AS run_number";
 
 #[derive(Debug, Clone)]
 pub struct ActionJobRow {
@@ -207,7 +234,7 @@ pub async fn insert_run(
         id: id.into(), repository_id: repository_id.into(), workflow_path: workflow_path.into(),
         workflow_name: workflow_name.into(), event: event.into(), head_sha: head_sha.into(),
         head_ref: head_ref.into(), status: "queued".into(), title: title.into(),
-        triggered_by: triggered_by.map(str::to_string), created_at: String::new(),
+        run_number: 0, triggered_by: triggered_by.map(str::to_string), created_at: String::new(),
         updated_at: String::new(), finished_at: None,
     })
 }
@@ -215,7 +242,7 @@ pub async fn insert_run(
 pub async fn find_run_by_id(pool: &DbPool, id: &str) -> Result<Option<ActionRunRow>, String> {
     match pool {
         DbPool::Postgres(p) => {
-            let row = sqlx::query("SELECT id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, status, title, triggered_by, finished_at::text AS finished_at FROM action_runs WHERE id = $1")
+            let row = sqlx::query(&format!("SELECT id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, status, title, triggered_by, finished_at::text AS finished_at, {RUN_NUMBER_SQL} FROM action_runs WHERE id = $1"))
                 .bind(id).fetch_optional(p).await.map_err(|e| e.to_string())?;
             Ok(row.map(|r| ActionRunRow {
                 id: r.get("id"),
@@ -227,6 +254,7 @@ pub async fn find_run_by_id(pool: &DbPool, id: &str) -> Result<Option<ActionRunR
                 head_ref: r.get("head_ref"),
                 status: r.get("status"),
                 title: r.get("title"),
+                run_number: r.get("run_number"),
                 triggered_by: r.get("triggered_by"),
                 created_at: String::new(),
                 updated_at: String::new(),
@@ -234,7 +262,7 @@ pub async fn find_run_by_id(pool: &DbPool, id: &str) -> Result<Option<ActionRunR
             }))
         }
         DbPool::MySql(p) => {
-            let row = sqlx::query("SELECT id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, status, title, triggered_by, CAST(finished_at AS CHAR) AS finished_at FROM action_runs WHERE id = ?")
+            let row = sqlx::query(&format!("SELECT id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, status, title, triggered_by, CAST(finished_at AS CHAR) AS finished_at, {RUN_NUMBER_SQL} FROM action_runs WHERE id = ?"))
                 .bind(id).fetch_optional(p).await.map_err(|e| e.to_string())?;
             Ok(row.map(|r| ActionRunRow {
                 id: r.get("id"),
@@ -246,6 +274,7 @@ pub async fn find_run_by_id(pool: &DbPool, id: &str) -> Result<Option<ActionRunR
                 head_ref: r.get("head_ref"),
                 status: r.get("status"),
                 title: r.get("title"),
+                run_number: r.get("run_number"),
                 triggered_by: r.get("triggered_by"),
                 created_at: String::new(),
                 updated_at: String::new(),
@@ -253,7 +282,7 @@ pub async fn find_run_by_id(pool: &DbPool, id: &str) -> Result<Option<ActionRunR
             }))
         }
         DbPool::Sqlite(p) => {
-            let row = sqlx::query("SELECT id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, status, title, triggered_by, finished_at FROM action_runs WHERE id = ?")
+            let row = sqlx::query(&format!("SELECT id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, status, title, triggered_by, finished_at, {RUN_NUMBER_SQL} FROM action_runs WHERE id = ?"))
                 .bind(id).fetch_optional(p).await.map_err(|e| e.to_string())?;
             Ok(row.map(|r| ActionRunRow {
                 id: r.get("id"),
@@ -265,6 +294,7 @@ pub async fn find_run_by_id(pool: &DbPool, id: &str) -> Result<Option<ActionRunR
                 head_ref: r.get("head_ref"),
                 status: r.get("status"),
                 title: r.get("title"),
+                run_number: r.get("run_number"),
                 triggered_by: r.get("triggered_by"),
                 created_at: String::new(),
                 updated_at: String::new(),
@@ -973,18 +1003,75 @@ async fn assign_job_runner(pool: &DbPool, job_id: &str, runner_id: &str) -> Resu
     }
 }
 
+/// Shared run-list filter shape — `(param IS NULL OR col = param)` so a single
+/// statement serves filtered and unfiltered reads (same shape as issues).
+/// Macros (not fns) so `query`/`query_scalar`/`query_as` all bind cleanly and
+/// each dialect keeps its own placeholder style (`?` positional vs `$N`).
+macro_rules! bind_run_filter {
+    ($q:expr, $f:expr, $branch_ref:expr $(,)?) => {{
+        let f = $f;
+        let br = $branch_ref;
+        $q.bind(f.status.as_deref())
+            .bind(f.status.as_deref())
+            .bind(f.event.as_deref())
+            .bind(f.event.as_deref())
+            .bind(f.branch.as_deref())
+            .bind(f.branch.as_deref())
+            .bind(br.as_deref())
+            .bind(f.workflow_path.as_deref())
+            .bind(f.workflow_path.as_deref())
+            .bind(f.triggered_by.as_deref())
+            .bind(f.triggered_by.as_deref())
+            .bind(f.title_like.as_deref())
+            .bind(f.title_like.as_deref())
+    }};
+}
+
+/// Postgres variant — numbered params let each filter value bind once.
+macro_rules! bind_run_filter_pg {
+    ($q:expr, $f:expr, $branch_ref:expr $(,)?) => {{
+        let f = $f;
+        let br = $branch_ref;
+        $q.bind(f.status.as_deref())
+            .bind(f.event.as_deref())
+            .bind(f.branch.as_deref())
+            .bind(br.as_deref())
+            .bind(f.workflow_path.as_deref())
+            .bind(f.triggered_by.as_deref())
+            .bind(f.title_like.as_deref())
+    }};
+}
+
+const RUNS_FILTER_SQLITE: &str = " AND (? IS NULL OR status = ?) AND (? IS NULL OR event = ?) AND (? IS NULL OR head_ref = ? OR head_ref = ?) AND (? IS NULL OR workflow_path = ?) AND (? IS NULL OR triggered_by = ?) AND (? IS NULL OR title LIKE ? COLLATE NOCASE)";
+const RUNS_FILTER_MYSQL: &str = " AND (? IS NULL OR status = ?) AND (? IS NULL OR event = ?) AND (? IS NULL OR head_ref = ? OR head_ref = ?) AND (? IS NULL OR workflow_path = ?) AND (? IS NULL OR triggered_by = ?) AND (? IS NULL OR title LIKE ?)";
+const RUNS_FILTER_PG: &str = " AND ($2::text IS NULL OR status = $2) AND ($3::text IS NULL OR event = $3) AND ($4::text IS NULL OR head_ref = $4 OR head_ref = $5) AND ($6::text IS NULL OR workflow_path = $6) AND ($7::text IS NULL OR triggered_by = $7) AND ($8::text IS NULL OR title ILIKE $8)";
+
+/// `refs/heads/` variant of `filter.branch` for the third branch bind.
+fn branch_ref_of(f: &ActionRunFilter) -> Option<String> {
+    f.branch.as_ref().map(|b| {
+        let b = b.strip_prefix("refs/heads/").unwrap_or(b);
+        format!("refs/heads/{b}")
+    })
+}
+
 pub async fn list_runs_for_repo(
     pool: &DbPool,
     repository_id: &str,
+    filter: &ActionRunFilter,
     limit: i64,
     offset: i64,
 ) -> Result<Vec<ActionRunRow>, String> {
+    let branch_ref = branch_ref_of(filter);
     match pool {
         DbPool::Sqlite(p) => {
-            let rows = sqlx::query(
-                "SELECT id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, status, title, triggered_by, created_at, updated_at, finished_at FROM action_runs WHERE repository_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            let rows = bind_run_filter!(
+                sqlx::query(&format!(
+                    "SELECT id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, status, title, triggered_by, created_at, updated_at, finished_at, {RUN_NUMBER_SQL} FROM action_runs WHERE repository_id = ?{RUNS_FILTER_SQLITE} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?"
+                ))
+                .bind(repository_id),
+                filter,
+                &branch_ref,
             )
-            .bind(repository_id)
             .bind(limit)
             .bind(offset)
             .fetch_all(p)
@@ -1005,15 +1092,20 @@ pub async fn list_runs_for_repo(
                     triggered_by: r.get("triggered_by"),
                     created_at: r.get("created_at"),
                     updated_at: r.get("updated_at"),
+                    run_number: r.get("run_number"),
                     finished_at: r.get("finished_at"),
                 })
                 .collect())
         }
         DbPool::Postgres(p) => {
-            let rows = sqlx::query(
-                "SELECT id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, status, title, triggered_by, created_at::text AS created_at, updated_at::text AS updated_at, finished_at::text AS finished_at FROM action_runs WHERE repository_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3",
+            let rows = bind_run_filter_pg!(
+                sqlx::query(&format!(
+                    "SELECT id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, status, title, triggered_by, created_at::text AS created_at, updated_at::text AS updated_at, finished_at::text AS finished_at, {RUN_NUMBER_SQL} FROM action_runs WHERE repository_id = $1{RUNS_FILTER_PG} ORDER BY created_at DESC, id DESC LIMIT $9 OFFSET $10"
+                ))
+                .bind(repository_id),
+                filter,
+                &branch_ref,
             )
-            .bind(repository_id)
             .bind(limit)
             .bind(offset)
             .fetch_all(p)
@@ -1034,15 +1126,20 @@ pub async fn list_runs_for_repo(
                     triggered_by: r.get("triggered_by"),
                     created_at: r.get("created_at"),
                     updated_at: r.get("updated_at"),
+                    run_number: r.get("run_number"),
                     finished_at: r.get("finished_at"),
                 })
                 .collect())
         }
         DbPool::MySql(p) => {
-            let rows = sqlx::query(
-                "SELECT id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, status, title, triggered_by, CAST(created_at AS CHAR) AS created_at, CAST(updated_at AS CHAR) AS updated_at, CAST(finished_at AS CHAR) AS finished_at FROM action_runs WHERE repository_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            let rows = bind_run_filter!(
+                sqlx::query(&format!(
+                    "SELECT id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, status, title, triggered_by, CAST(created_at AS CHAR) AS created_at, CAST(updated_at AS CHAR) AS updated_at, CAST(finished_at AS CHAR) AS finished_at, {RUN_NUMBER_SQL} FROM action_runs WHERE repository_id = ?{RUNS_FILTER_MYSQL} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?"
+                ))
+                .bind(repository_id),
+                filter,
+                &branch_ref,
             )
-            .bind(repository_id)
             .bind(limit)
             .bind(offset)
             .fetch_all(p)
@@ -1063,6 +1160,7 @@ pub async fn list_runs_for_repo(
                     triggered_by: r.get("triggered_by"),
                     created_at: r.get("created_at"),
                     updated_at: r.get("updated_at"),
+                    run_number: r.get("run_number"),
                     finished_at: r.get("finished_at"),
                 })
                 .collect())
@@ -1270,33 +1368,50 @@ pub async fn update_runner_labels(
 }
 
 /// Total run count for a repository (pagination companion to [`list_runs_for_repo`]).
-pub async fn count_runs_for_repo(pool: &DbPool, repository_id: &str) -> Result<i64, String> {
+pub async fn count_runs_for_repo(
+    pool: &DbPool,
+    repository_id: &str,
+    filter: &ActionRunFilter,
+) -> Result<i64, String> {
+    let branch_ref = branch_ref_of(filter);
     match pool {
         DbPool::Sqlite(p) => {
-            let n: i64 = sqlx::query_scalar(
-                "SELECT COUNT(*) FROM action_runs WHERE repository_id = ?",
+            let n: i64 = bind_run_filter!(
+                sqlx::query_scalar(&format!(
+                    "SELECT COUNT(*) FROM action_runs WHERE repository_id = ?{RUNS_FILTER_SQLITE}"
+                ))
+                .bind(repository_id),
+                filter,
+                &branch_ref,
             )
-            .bind(repository_id)
             .fetch_one(p)
             .await
             .map_err(|e| e.to_string())?;
             Ok(n)
         }
         DbPool::Postgres(p) => {
-            let n: i64 = sqlx::query_scalar(
-                "SELECT COUNT(*) FROM action_runs WHERE repository_id = $1",
+            let n: i64 = bind_run_filter_pg!(
+                sqlx::query_scalar(&format!(
+                    "SELECT COUNT(*) FROM action_runs WHERE repository_id = $1{RUNS_FILTER_PG}"
+                ))
+                .bind(repository_id),
+                filter,
+                &branch_ref,
             )
-            .bind(repository_id)
             .fetch_one(p)
             .await
             .map_err(|e| e.to_string())?;
             Ok(n)
         }
         DbPool::MySql(p) => {
-            let n: i64 = sqlx::query_scalar(
-                "SELECT COUNT(*) FROM action_runs WHERE repository_id = ?",
+            let n: i64 = bind_run_filter!(
+                sqlx::query_scalar(&format!(
+                    "SELECT COUNT(*) FROM action_runs WHERE repository_id = ?{RUNS_FILTER_MYSQL}"
+                ))
+                .bind(repository_id),
+                filter,
+                &branch_ref,
             )
-            .bind(repository_id)
             .fetch_one(p)
             .await
             .map_err(|e| e.to_string())?;
@@ -1305,39 +1420,67 @@ pub async fn count_runs_for_repo(pool: &DbPool, repository_id: &str) -> Result<i
     }
 }
 
-/// Requeue a run for re-run: reset run + all jobs to queued and clear
-/// runner/timing fields so a runner can claim the jobs again.
-pub async fn requeue_run(pool: &DbPool, run_id: &str) -> Result<(), String> {
+/// Requeue a run for re-run: reset the run to queued and requeue its jobs so a
+/// runner can claim them again. `job_id` requeues a single job (GitHub
+/// "Re-run this job"); `failed_only` limits the reset to failed/cancelled
+/// jobs (GitHub "Re-run failed jobs"); otherwise every job resets.
+pub async fn requeue_run(
+    pool: &DbPool,
+    run_id: &str,
+    failed_only: bool,
+    job_id: Option<&str>,
+) -> Result<(), String> {
+    const JOB_RESET_SQLITE: &str = "UPDATE action_jobs SET status = 'queued', runner_id = NULL, started_at = NULL, finished_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE run_id = ?";
+    const JOB_RESET_PG: &str = "UPDATE action_jobs SET status = 'queued', runner_id = NULL, started_at = NULL, finished_at = NULL, updated_at = now() WHERE run_id = $1";
+    const JOB_RESET_MYSQL: &str = "UPDATE action_jobs SET status = 'queued', runner_id = NULL, started_at = NULL, finished_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE run_id = ?";
     match pool {
         DbPool::Sqlite(p) => {
             sqlx::query(
                 "UPDATE action_runs SET status = 'queued', finished_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
             )
             .bind(run_id).execute(p).await.map_err(|e| e.to_string())?;
-            sqlx::query(
-                "UPDATE action_jobs SET status = 'queued', runner_id = NULL, started_at = NULL, finished_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE run_id = ?",
-            )
-            .bind(run_id).execute(p).await.map_err(|e| e.to_string())?;
+            if let Some(j) = job_id {
+                sqlx::query(&format!("{JOB_RESET_SQLITE} AND id = ?"))
+                    .bind(run_id).bind(j).execute(p).await.map_err(|e| e.to_string())?;
+            } else if failed_only {
+                sqlx::query(&format!("{JOB_RESET_SQLITE} AND status IN ('failure','cancelled')"))
+                    .bind(run_id).execute(p).await.map_err(|e| e.to_string())?;
+            } else {
+                sqlx::query(JOB_RESET_SQLITE)
+                    .bind(run_id).execute(p).await.map_err(|e| e.to_string())?;
+            }
         }
         DbPool::Postgres(p) => {
             sqlx::query(
                 "UPDATE action_runs SET status = 'queued', finished_at = NULL, updated_at = now() WHERE id = $1",
             )
             .bind(run_id).execute(p).await.map_err(|e| e.to_string())?;
-            sqlx::query(
-                "UPDATE action_jobs SET status = 'queued', runner_id = NULL, started_at = NULL, finished_at = NULL, updated_at = now() WHERE run_id = $1",
-            )
-            .bind(run_id).execute(p).await.map_err(|e| e.to_string())?;
+            if let Some(j) = job_id {
+                sqlx::query(&format!("{JOB_RESET_PG} AND id = $2"))
+                    .bind(run_id).bind(j).execute(p).await.map_err(|e| e.to_string())?;
+            } else if failed_only {
+                sqlx::query(&format!("{JOB_RESET_PG} AND status IN ('failure','cancelled')"))
+                    .bind(run_id).execute(p).await.map_err(|e| e.to_string())?;
+            } else {
+                sqlx::query(JOB_RESET_PG)
+                    .bind(run_id).execute(p).await.map_err(|e| e.to_string())?;
+            }
         }
         DbPool::MySql(p) => {
             sqlx::query(
                 "UPDATE action_runs SET status = 'queued', finished_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
             )
             .bind(run_id).execute(p).await.map_err(|e| e.to_string())?;
-            sqlx::query(
-                "UPDATE action_jobs SET status = 'queued', runner_id = NULL, started_at = NULL, finished_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE run_id = ?",
-            )
-            .bind(run_id).execute(p).await.map_err(|e| e.to_string())?;
+            if let Some(j) = job_id {
+                sqlx::query(&format!("{JOB_RESET_MYSQL} AND id = ?"))
+                    .bind(run_id).bind(j).execute(p).await.map_err(|e| e.to_string())?;
+            } else if failed_only {
+                sqlx::query(&format!("{JOB_RESET_MYSQL} AND status IN ('failure','cancelled')"))
+                    .bind(run_id).execute(p).await.map_err(|e| e.to_string())?;
+            } else {
+                sqlx::query(JOB_RESET_MYSQL)
+                    .bind(run_id).execute(p).await.map_err(|e| e.to_string())?;
+            }
         }
     }
     Ok(())

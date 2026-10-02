@@ -44,7 +44,7 @@ async fn actions_rpc_list_runs() {
     )
     .await
     .unwrap();
-    let runs = db.list_action_runs_for_repo(&repo.id, 100, 0).await.unwrap();
+    let runs = db.list_action_runs_for_repo(&repo.id, &Default::default(), 100, 0).await.unwrap();
     assert_eq!(runs.len(), 1);
     assert_eq!(runs[0].id, "run-rpc");
 }
@@ -104,6 +104,9 @@ async fn actions_rpc_job_logs() {
     append_job_log(&log_dir, "run-x", "job-y", b"hello from runner\n")
         .await
         .unwrap();
-    let bytes = read_job_log(&log_dir, "run-x", "job-y").await.unwrap();
+    let (bytes, size) = read_job_log(&log_dir, "run-x", "job-y", 0).await.unwrap();
     assert_eq!(bytes, b"hello from runner\n");
+    assert_eq!(size, b"hello from runner\n".len() as u64);
+    let (tail, _) = read_job_log(&log_dir, "run-x", "job-y", 6).await.unwrap();
+    assert_eq!(tail, b"from runner\n");
 }
