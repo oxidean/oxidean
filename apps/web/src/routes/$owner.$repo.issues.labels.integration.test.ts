@@ -93,5 +93,4 @@ describe("RepoIssueLabelsPage (COL-13 unit toggles)", () => {
     // The label form must not render while the unit surface is off.
     expect(document.querySelector("#repo-label-name")).toBeNull();
   });
-
 });
