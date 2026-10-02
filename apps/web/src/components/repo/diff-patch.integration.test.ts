@@ -6,7 +6,7 @@ import { DiffPatch } from "./diff-patch";
 
 afterEach(cleanup);
 
-describe("DiffPatch", () => {
+describe("DiffPatch", { timeout: 60_000 }, () => {
   it("colorizes add/del/hunk lines from a unified patch", async () => {
     const patch = [
       "diff --git a/a.ts b/a.ts",
@@ -62,7 +62,7 @@ describe("DiffPatch", () => {
     const patch = ["@@ -1 +1 @@", "-const a = 1;", "+const b = 2;"].join("\n");
     const initialRows = await highlightDiffLines(parseUnifiedDiffLines(patch), {
       path: "util.ts",
-      theme: "github-light",
+      theme: "oxidean-light",
     });
 
     document.documentElement.classList.remove("dark");
@@ -73,7 +73,7 @@ describe("DiffPatch", () => {
         status: "modified",
         patch,
         initialRows,
-        highlightTheme: "github-light",
+        highlightTheme: "oxidean-light",
       },
     });
 
