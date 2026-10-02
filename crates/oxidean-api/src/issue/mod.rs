@@ -18,9 +18,9 @@ use uuid::Uuid;
 
 use crate::auth::gate::require_verified;
 use crate::notify;
-use crate::webhook::dispatch;
 use crate::repo::not_found;
 use crate::rpc::RpcCtx;
+use crate::webhook::dispatch;
 
 /// Title soft cap (~1k chars).
 const TITLE_MAX_CHARS: usize = 1_024;
@@ -711,6 +711,33 @@ pub async fn comments_create(
         .filter(|m| !participant_set.contains(m))
         .collect();
     notify::fanout(ctx, &user.id, mention_only, "issue_mention", &subject).await;
+    let payload = dispatch::issue_comment_payload(
+        "created",
+        issue.number,
+        &issue.title,
+        &issue.body,
+        &issue.state,
+        false,
+        &row.id,
+        &row.body,
+        None,
+        &user.username,
+        &user.id,
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.id,
+        &user.username,
+        &user.id,
+    );
+    dispatch::emit(
+        &ctx.db,
+        &accessible.row.id,
+        "issue_comment",
+        "created",
+        payload,
+        &ctx.env_name,
+    )
+    .await;
     comment_to_public(ctx, &row).await
 }
 
@@ -746,6 +773,33 @@ pub async fn comments_update(
         .update_issue_comment_body(&row.id, &new_body)
         .await
         .map_err(db_err)?;
+    let payload = dispatch::issue_comment_payload(
+        "edited",
+        issue.number,
+        &issue.title,
+        &issue.body,
+        &issue.state,
+        false,
+        &updated.id,
+        &updated.body,
+        Some(row.body.as_str()),
+        &user.username,
+        &user.id,
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.id,
+        &user.username,
+        &user.id,
+    );
+    dispatch::emit(
+        &ctx.db,
+        &accessible.row.id,
+        "issue_comment",
+        "edited",
+        payload,
+        &ctx.env_name,
+    )
+    .await;
     comment_to_public(ctx, &updated).await
 }
 
@@ -771,6 +825,41 @@ pub async fn comments_delete(
         .delete_issue_comment(&row.id)
         .await
         .map_err(db_err)?;
+    let author_login = match ctx.db.find_user_by_id(&row.author_id).await {
+        Ok(Some(u)) => u.username,
+        Ok(None) => String::new(),
+        Err(e) => {
+            tracing::warn!(error = %e, "issue_comment delete: author lookup failed");
+            String::new()
+        }
+    };
+    let payload = dispatch::issue_comment_payload(
+        "deleted",
+        issue.number,
+        &issue.title,
+        &issue.body,
+        &issue.state,
+        false,
+        &row.id,
+        &row.body,
+        None,
+        &author_login,
+        &row.author_id,
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.id,
+        &user.username,
+        &user.id,
+    );
+    dispatch::emit(
+        &ctx.db,
+        &accessible.row.id,
+        "issue_comment",
+        "deleted",
+        payload,
+        &ctx.env_name,
+    )
+    .await;
     Ok(DeleteIssueCommentResponse { ok: true })
 }
 
