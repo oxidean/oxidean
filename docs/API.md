@@ -50,6 +50,9 @@ Missing or mismatched value → error `rpc.version_mismatch` (HTTP 400).
 | `GET` | `/api/auth/workos/callback` | WorkOS code exchange; sets session cookie | No (redirect) |
 | `GET` | `/api/auth/oidc/start` | Start OIDC + PKCE (optional `?return_to=`) | No (redirect) |
 | `GET` | `/api/auth/oidc/callback` | OIDC code exchange; sets session cookie | No (redirect) |
+| `GET` | `/oauth/authorize` | OAuth2 authorization endpoint → consent page / login | Session cookie (or login redirect) |
+| `POST` | `/oauth/token` | OAuth2 token endpoint (`grant_type=authorization_code`) | Client secret |
+| `GET` | `/oauth/userinfo` | OAuth2 identity surface | `oxidean_oat_` Bearer |
 | `POST` | `/api/user/avatar` | Multipart avatar upload (field `avatar`) | Yes (`oxidean_session`) |
 | `DELETE` | `/api/user/avatar` | Remove profile picture | Yes (`oxidean_session`) |
 | `GET` | `/uploads/avatars/{file}` | Public WebP avatar bytes (`{user_id}.webp`) | No |
@@ -344,6 +347,55 @@ Add requires verified email (`auth.email_unverified` otherwise). Empty title →
 
 
 **PAT ∩ ACL:** Classic `repo` push/fetch requires the PAT subject to also `meets` the needed Capability on that repository (org membership, collaborator grant, or personal owner — not `owner_id == pat.user_id` alone). Fine-grained `all` covers personal-owned plus org Owner/Admin repos; collaborators must use `selected`.
+
+### OAuth applications (`oauthApp.*`)
+
+Oxidean can act as an OAuth2 authorization server (API-03) so external tools
+authenticate users — "sign in with Oxidean" — and act on their behalf.
+
+**Registering an app** (session cookie required):
+
+```json
+{ "procedure": "oauthApp.create", "input": { "name": "my-cli", "redirect_uris": ["https://app.example/callback"] } }
+```
+
+The create (and `oauthApp.regenerateSecret`) response includes a one-time
+plaintext `client_secret` (`oxidean_osec_…`) plus the `app` row — `client_id`
+(`oxidean_oc_…`), name, `client_secret_prefix`, `redirect_uris`, timestamps.
+Only the SHA-256 hash of the secret is stored. `oauthApp.list` /
+`oauthApp.update` / `oauthApp.delete` manage apps you own; update accepts
+`{ "id", "name"?, "redirect_uris"? }`. Redirect URIs must be absolute `https`
+(`http` only for `localhost` / `127.*` / `::1`), no fragments or userinfo,
+max 10 per app.
+
+**Authorization-code flow:**
+
+1. Send the user's browser to `GET /oauth/authorize?response_type=code&client_id=…&redirect_uri=…&scope=…&state=…`. Signed-in users land on the `/oauth/consent` SPA page; anonymous users bounce through `/login?returnTo=` first. `redirect_uri` must byte-match a registered URI or the request fails with a 400 JSON error (errors never redirect to unregistered URIs).
+2. On approve, the browser redirects to `redirect_uri?code=…&state=…`; deny yields `error=access_denied`. Codes are single-use and expire after 10 minutes.
+3. Exchange the code at `POST /oauth/token` (form-encoded, or JSON; HTTP Basic `client_id:client_secret` also accepted): `grant_type=authorization_code&code=…&redirect_uri=…&client_id=…&client_secret=…` → `{ "access_token": "oxidean_oat_…", "token_type": "bearer", "expires_in": 28800, "scope": "…" }`. Wrong secret → `invalid_client`; used/expired/mismatched code → `invalid_grant`.
+
+**Scopes** (space-delimited): `read:user` (default; identity via
+`/oauth/userinfo`), `user:email` (adds `email` to userinfo), `repo` (git smart
+HTTP), `package:read` / `package:write` (package registries).
+
+**Using the token:** `GET /oauth/userinfo` with `Authorization: Bearer
+oxidean_oat_…` returns `{ id, username, display_name, avatar_url?, email? }`.
+OAuth access tokens also authenticate anywhere a PAT does — as the HTTP Basic
+password for git clone/push, and as Basic or Bearer credentials on the OCI /
+npm / generic package registries — with the granted scopes mapped onto the
+classic-PAT scope set.
+
+**Consent + grants:** the consent screen resolves `oauthApp.authorizeInfo`
+(`{ "client_id", "redirect_uri"?, "scope"? }` → app name, owner username, parsed
+scopes) and submits `oauthApp.authorize` (`{ "client_id", "redirect_uri",
+"scope"?, "state"?, "approve" }` → `redirect_to`). Users review live grants via
+`oauthApp.listGrants` and cut access with `oauthApp.revoke` (`{ "id" }` — the
+application id from the grant row), which soft-revokes every live token for
+that app/user pair; revoked tokens fail immediately everywhere.
+
+Minting codes (`oauthApp.authorize` with `approve: true`) and registering apps
+require a verified email (`auth.email_unverified` otherwise), matching PAT
+minting posture.
 
 ### Organizations (`org.*`) & collaborators
 

@@ -21,6 +21,7 @@ use crate::invites;
 use crate::issue;
 use crate::label;
 use crate::notification;
+use crate::oauth;
 use crate::org;
 use crate::pat;
 use crate::pull;
@@ -1056,6 +1057,42 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Err(e) => RpcResponse::err(e),
         },
         "pat.revoke" => match pat::revoke(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "oauthApp.create" => match oauth::create(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "oauthApp.list" => match oauth::list(ctx).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "oauthApp.update" => match oauth::update(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "oauthApp.delete" => match oauth::delete_app(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "oauthApp.regenerateSecret" => match oauth::regenerate_secret(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "oauthApp.listGrants" => match oauth::list_grants(ctx).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "oauthApp.revoke" => match oauth::revoke_grant(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "oauthApp.authorizeInfo" => match oauth::authorize_info(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "oauthApp.authorize" => match oauth::authorize_rpc(ctx, req.input).await {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },
