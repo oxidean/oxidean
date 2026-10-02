@@ -261,10 +261,10 @@ Workflow: [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) (`name: CI`)
 | `rpc-sync` | `make rpc-sync-check` |
 | `compose` | `docker compose … config` for base, MySQL/SQLite overlays, and `docker-compose.dev-auth.yml` (config-only; does not build/bring-up) |
 | `compose-smoke` | Matrix `postgres` / `sqlite` / `mysql`: `./scripts/ci-compose-smoke.sh` → `make smoke` / `smoke-sqlite` / `smoke-mysql` (**D-CI-01…04**); fail-closed under `CI` / `SMOKE_REQUIRE_STACK`; image proof via `compose up --build` (**D-CI-06**); uploads `/tmp/oxidean-smoke*.json` on failure. Complements config-only `compose` and stays separate from `smoke-protocol` (**D-CI-05**) |
-| `smoke-protocol` | Compose up → `make smoke-git-https` + `smoke-git-ssh` + `smoke-git-lfs` + `smoke-packages` via `make smoke-protocol-ci` (**D-QH-04**); fail-closed when Docker/stack absent (`CI` / `SMOKE_REQUIRE_STACK`); default `SMOKE_SKIP_LS_REMOTE=1` / `SMOKE_SKIP_LFS_CLIENT=1` (routing + SSH TCP; no seeded-repo client) |
+| `smoke-protocol` | Compose up → `make smoke-git-https` + `smoke-git-ssh` + `smoke-git-lfs` + `smoke-packages` via `make smoke-protocol-ci` (**D-QH-04**), then `smoke-protection` — ORG-06/D-PKG-03 HTTPS protected-push denial on a fresh stack it re-ups itself (**DEBT-01**); fail-closed when Docker/stack absent (`CI` / `SMOKE_REQUIRE_STACK`); default `SMOKE_SKIP_LS_REMOTE=1` / `SMOKE_SKIP_LFS_CLIENT=1` (routing + SSH TCP; no seeded-repo client) |
 | `db-matrix` | Matrix `postgres` / `mysql` / `sqlite`: `cargo test -p oxidean-db --test dialect_probe -- --nocapture` with matching `DATABASE_URL` / `OXIDEAN_DB_DIALECT` (dialect probe only — not a substitute for Compose bring-up) |
 
-Default `web-octane` stays fast (no Docker auth stubs). True auth/email path coverage is the separate `e2e-stack` job. The `coverage-weighted` job enforces D-QH-02 without reviving component Playwright. Compose dialect health (Traefik `/` + `/health` + `system.db_probe`) is the `compose-smoke` matrix — not folded into `smoke-protocol`. Forge protocol edges (Smart HTTP / SSH TCP / LFS batch / packages PathPrefix) are the `smoke-protocol` job — not happy-dom only.
+Default `web-octane` stays fast (no Docker auth stubs). True auth/email path coverage is the separate `e2e-stack` job. The `coverage-weighted` job enforces D-QH-02 without reviving component Playwright. Compose dialect health (Traefik `/` + `/health` + `system.db_probe`) is the `compose-smoke` matrix — not folded into `smoke-protocol`. Forge protocol edges (Smart HTTP / SSH TCP / LFS batch / packages PathPrefix) plus ORG-06 protected-push denial are the `smoke-protocol` job — not happy-dom only.
 
 ### Compose dialect smokes (local + CI)
 
@@ -286,9 +286,9 @@ Oxidean Cloud (Railway IaC + Caddy gateway) is **not** exercised in PR CI — se
 | `make smoke-git-lfs` | `.git/info/lfs` batch routing not SPA; optional git-lfs client | `SMOKE_SKIP_LFS_CLIENT=1` for routing-only |
 | `make smoke-packages` | `/v2` `/npm` `/generic` PathPrefix → API | Needs running Compose API |
 | `make smoke-protection` | API image ships `oxidean-protection-hook`; HTTPS push to reviews-required protected branch denied (**ORG-06** / **D-PKG-03**) | Fresh Compose up (wipes volumes); `scripts/compose-smoke-protection.sh` |
-| `make smoke-protocol-ci` | All four fail-closed against a fresh Compose up | Same entrypoint as CI `smoke-protocol` |
+| `make smoke-protocol-ci` | All five fail-closed; `smoke-protection` re-ups a fresh stack (wipes volumes) to seed a repo and assert protected-push denial | Same entrypoint as CI `smoke-protocol` |
 
-Locally without Docker, individual `make smoke-git-*` / `smoke-packages` may skip (exit 0). Under `CI=true` or `SMOKE_REQUIRE_STACK=1`, those skips become failures.
+Locally without Docker, individual `make smoke-git-*` / `smoke-packages` / `smoke-protection` may skip (exit 0). Under `CI=true` or `SMOKE_REQUIRE_STACK=1`, those skips become failures.
 
 ## Dev-auth stubs (stack e2e)
 
