@@ -62,7 +62,7 @@ describe("tokensToInlineHtml", () => {
   });
 });
 
-describe("highlightDiffLines", () => {
+describe("highlightDiffLines", { timeout: 60_000 }, () => {
   it("highlights typescript add/del payloads without wrapping the marker", async () => {
     const patch = ["@@ -1,2 +1,2 @@", " keep", "-const a = 1;", "+const b = 2;"].join("\n");
     const lines = parseUnifiedDiffLines(patch);

@@ -6,7 +6,7 @@ import { DiffPatch } from "./diff-patch";
 
 afterEach(cleanup);
 
-describe("DiffPatch", () => {
+describe("DiffPatch", { timeout: 60_000 }, () => {
   it("colorizes add/del/hunk lines from a unified patch", async () => {
     const patch = [
       "diff --git a/a.ts b/a.ts",

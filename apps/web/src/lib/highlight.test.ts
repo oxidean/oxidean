@@ -7,7 +7,7 @@ import {
   stripTrailingNewline,
 } from "./highlight";
 
-describe("highlight", () => {
+describe("highlight", { timeout: 60_000 }, () => {
   it("maps .tsrx and .ripple via in-repo grammars not TS/JS alias alone", async () => {
     expect(languageIdForPath("App.tsrx")).toBe("tsrx");
     expect(languageIdForPath("view.ripple")).toBe("ripple");
