@@ -236,7 +236,7 @@ cloud-docs:
 	@echo "  Gateway:   deploy/cloud/Caddyfile"
 	@echo "  Operator:  docs/DEPLOYMENT.md (Oxidean Cloud section)"
 	@echo "  Plan only: make cloud-plan"
-	@echo "  Apply:     scripts/railway-apply.sh --environment <env> --apply  # human-approved only"
+	@echo "  Apply:     railway config apply  # human-approved only"
 
 smoke-mysql:
 	@COMPOSE_FILES="-f docker-compose.yml -f docker-compose.mysql.yml" COMPOSE_PROFILES=mysql EXPECT_DIALECT=mysql ./scripts/compose-smoke.sh
