@@ -29,6 +29,7 @@ type PlaywrightPage = {
     fill?: (v: string) => Promise<unknown>;
     isVisible?: () => Promise<boolean>;
     innerText?: () => Promise<string>;
+    getAttribute?: (name: string) => Promise<string | null>;
     getByRole?: (
       role: string,
       opts?: object,
@@ -915,6 +916,391 @@ export const expectForgeReleasesCrudFlow: BrowserCommand<[]> = async (ctx) => {
     );
   } finally {
     await pageGuard.close("stack-browser");
+  }
+};
+
+/**
+ * Release asset depth (DEBT-11 / Phase 15 caveat): create a release via RPC on
+ * a pushed tag, upload an asset through the same ACL'd multipart endpoint the
+ * dropzone calls (Vitest browser cannot reliably deliver file input events
+ * into @octanejs/dropzone — see the avatar note in expectSettingsProfileAvatarFlow),
+ * then prove Chromium renders the asset link and the download URL serves the
+ * same bytes back.
+ */
+export const expectReleaseAssetFlow: BrowserCommand<[]> = async (ctx) => {
+  const { context } = asPlaywright(ctx);
+  await context.clearCookies();
+  const seed = await seedForgeRepo();
+  const token = await createClassicPat(seed.cookie);
+  const tag = `v0.1.${Date.now() % 100000}`;
+  pushTagViaGit({ owner: seed.owner, repo: seed.repo, token, tag });
+
+  const rel = await rpc(
+    "release.create",
+    {
+      owner: seed.owner,
+      name: seed.repo,
+      tag_name: tag,
+      title: `E2E asset release ${tag}`,
+      body: "asset e2e",
+    },
+    seed.cookie,
+  );
+  if (!rel.ok || !rel.data || typeof rel.data !== "object") {
+    throw new Error(`release.create failed: ${JSON.stringify(rel.error ?? rel)}`);
+  }
+  const releaseId = String((rel.data as { id?: string }).id ?? "");
+  if (!releaseId) throw new Error("release.create returned no id");
+
+  // Same endpoint + multipart field the detail-page dropzone onFiles calls.
+  const assetName = `e2e-asset-${tag}.txt`;
+  const assetBody = `e2e asset bytes ${Date.now()}`;
+  const fd = new FormData();
+  fd.append("asset", new Blob([assetBody], { type: "text/plain" }), assetName);
+  const up = await fetch(
+    `${apiOrigin()}/api/repos/${seed.owner}/${seed.repo}/releases/${releaseId}/assets`,
+    { method: "POST", headers: { cookie: seed.cookie }, body: fd },
+  );
+  if (!up.ok) {
+    throw new Error(`asset upload failed: ${up.status} ${(await up.text()).slice(0, 400)}`);
+  }
+  const upJson = (await up.json()) as { asset?: { id?: string; download_url?: string } };
+  const downloadPath = upJson.asset?.download_url ?? "";
+  if (!downloadPath) {
+    throw new Error(`asset upload returned no download_url: ${JSON.stringify(upJson)}`);
+  }
+  const assetId = downloadPath.split("/").pop() ?? "";
+
+  // Wait for the write path to settle before the page load: tag push +
+  // release.create + multipart upload hit the API back-to-back, and an eager
+  // navigation can reach a loader whose repo.get/release.get is still queued
+  // behind those writes — the route then sits in an unresolved suspense shell
+  // (blank page) for the whole timeout. Poll the read path until the asset is
+  // visible to release.get, then navigate against an idle API.
+  let assetListed = false;
+  for (let i = 0; i < 30 && !assetListed; i++) {
+    const got = await rpc(
+      "release.get",
+      { owner: seed.owner, name: seed.repo, tag_name: tag },
+      seed.cookie,
+    );
+    if (got.ok) {
+      const assets = (got.data as { assets?: { id?: string }[] }).assets ?? [];
+      assetListed = assets.some((a) => a.id === assetId);
+    }
+    if (!assetListed) await new Promise((r) => setTimeout(r, 500));
+  }
+  if (!assetListed) {
+    throw new Error(`release.get never listed asset ${assetId}`);
+  }
+
+  await injectSessionCookie(context, seed.cookie);
+  const pageGuard = await newGuardedPage(context);
+  const page = pageGuard.page;
+  try {
+    await page.goto(`${webOrigin()}/${seed.owner}/${seed.repo}/releases/${tag}`, {
+      waitUntil: "domcontentloaded",
+      timeout: 60_000,
+    });
+    // Asset link first: proves the loader reached kind="ready" and the assets
+    // section rendered. Retry with reloads — a cold SSR render can briefly
+    // precede the query seeing the just-uploaded row on busy CI runners. The
+    // upload affordance then renders for can_write — its dropzone input
+    // attaches hidden and can lag hydration on cold CI runners.
+    const assetLink = page.locator(`a[href="${downloadPath}"]`);
+    let linkVisible = false;
+    for (let attempt = 0; attempt < 3 && !linkVisible; attempt++) {
+      if (attempt > 0) {
+        await page.reload({ waitUntil: "domcontentloaded", timeout: 60_000 });
+      }
+      try {
+        await assetLink.waitFor({ state: "visible", timeout: 20_000 });
+        linkVisible = true;
+      } catch {
+        linkVisible = false;
+      }
+    }
+    if (!linkVisible) {
+      // Split server-vs-client causality: does release.get report the asset?
+      const relGet = await rpc(
+        "release.get",
+        { owner: seed.owner, name: seed.repo, tag_name: tag },
+        seed.cookie,
+      );
+      const apiAssets = relGet.ok
+        ? JSON.stringify(((relGet.data as { assets?: unknown[] }).assets ?? []).length)
+        : `ERR ${JSON.stringify(relGet.error)}`;
+      const html = await page.content();
+      const visibleText = await page
+        .locator("body")
+        .innerText()
+        .catch(() => "<unreadable>");
+      const markers = [
+        ["empty-assets", html.includes("No assets attached")],
+        ["not-found", html.includes("not found") || html.includes("NotFound")],
+        ["loading", html.includes("Loading release")],
+        ["suspense-pending", html.includes("oct-suspense")],
+        ["release-body", html.includes('data-testid="release-body"')],
+        ["dropzone", html.includes("release-asset-file")],
+      ]
+        .filter(([, on]) => on)
+        .map(([k]) => k)
+        .join(",");
+      throw new Error(
+        `release asset link never rendered markers=${markers || "none"} apiAssets=${apiAssets} url=${page.url()} pageerrors=${pageGuard.pageErrors.join(" | ") || "none"} visibleText=${visibleText.slice(0, 1200)} body=${html.slice(0, 3000)}`,
+      );
+    }
+    await page.locator("#release-asset-file").waitFor({ state: "attached", timeout: 30_000 });
+    const html = await page.content();
+    assertNoOctaneOverlay(html, "release detail assets");
+    if (!html.includes(assetName)) {
+      throw new Error(`release detail missing asset ${assetName}`);
+    }
+    pageGuard.assertNoPageErrors("release asset render");
+  } finally {
+    await pageGuard.close("release asset");
+  }
+
+  // ACL'd download route returns the same bytes (the href the UI emitted).
+  const dl = await fetch(`${apiOrigin()}${downloadPath}`, {
+    headers: { cookie: seed.cookie },
+  });
+  if (!dl.ok) {
+    throw new Error(`asset download failed: ${dl.status}`);
+  }
+  const body = await dl.text();
+  if (body !== assetBody) {
+    throw new Error(`asset bytes mismatch: got ${body.length}B expected ${assetBody.length}B`);
+  }
+  return true;
+};
+
+/**
+ * Danger zone depth (DEBT-11 / Phase 15 caveat): rename a repo through the
+ * Settings UI (input + button), prove the old /{owner}/{old} URL still resolves
+ * through the retained redirect (D-REL-08), then transfer to a fresh org via
+ * OwnerLookup + the type-to-confirm dialog. UI clicks are tried first; when
+ * Octane button hydration stalls under Vitest browser the RPC + navigation
+ * fallback keeps the redirect/state assertions live (same pattern as
+ * signupThroughUi / issues CRUD).
+ */
+export const expectRepoRenameTransferFlow: BrowserCommand<[]> = async (ctx) => {
+  const { context } = asPlaywright(ctx);
+  await context.clearCookies();
+  const seed = await seedForgeRepo();
+  const oldRepo = seed.repo;
+  const newRepo = `${oldRepo}-rn`;
+  const orgSlug = `e2eorg${Date.now()}`;
+
+  const org = await rpc(
+    "org.create",
+    { slug: orgSlug, display_name: `E2E Org ${orgSlug}` },
+    seed.cookie,
+  );
+  if (!org.ok) {
+    throw new Error(`org.create failed: ${JSON.stringify(org.error)}`);
+  }
+
+  await injectSessionCookie(context, seed.cookie);
+  const pageGuard = await newGuardedPage(context);
+  const page = pageGuard.page;
+  const dangerZone = () =>
+    page.getByRole("heading", { name: "Danger zone" }).waitFor({
+      state: "visible",
+      timeout: 30_000,
+    });
+  const waitForPath = (pathname: string) =>
+    page.waitForURL(
+      (url) => {
+        const u = typeof url === "string" ? new URL(url) : url;
+        return u.pathname === pathname;
+      },
+      { timeout: 5_000 },
+    );
+  try {
+    // --- Rename via the Danger zone form ---
+    await page.goto(`${webOrigin()}/${seed.owner}/${oldRepo}/settings`, {
+      waitUntil: "domcontentloaded",
+      timeout: 60_000,
+    });
+    await dangerZone();
+    const renameInput = page.locator("#repo-rename-name");
+    await renameInput.waitFor({ state: "visible", timeout: 15_000 });
+    assertNoOctaneOverlay(await page.content(), "repo settings initial");
+
+    await renameInput.fill(newRepo);
+    const renameBtn = page.getByRole("button", {
+      name: "Rename repository",
+      exact: true,
+    });
+    let renamedUi = false;
+    for (let attempt = 0; attempt < 6 && !renamedUi; attempt++) {
+      // Re-fill per attempt: the button stays disabled while newName is empty
+      // or equal to the repo name, so an unhydrated first fill re-tries.
+      await renameInput.fill(newRepo).catch(() => {});
+      await renameBtn.click({ force: true }).catch(() => {});
+      try {
+        await waitForPath(`/${seed.owner}/${newRepo}/settings`);
+        renamedUi = true;
+      } catch {
+        renamedUi = false;
+      }
+    }
+    if (!renamedUi) {
+      const res = await rpc(
+        "repo.rename",
+        { owner: seed.owner, name: oldRepo, new_name: newRepo },
+        seed.cookie,
+      );
+      if (!res.ok) {
+        // The UI click may have landed while client nav stalled — check state.
+        const moved = await rpc("repo.get", { owner: seed.owner, name: newRepo }, seed.cookie);
+        if (!moved.ok) {
+          throw new Error(
+            `repo.rename failed: ${JSON.stringify(res.error)} url=${page.url()} pageerrors=${pageGuard.pageErrors.join(" | ") || "none"}`,
+          );
+        }
+      }
+      await page.goto(`${webOrigin()}/${seed.owner}/${newRepo}/settings`, {
+        waitUntil: "domcontentloaded",
+        timeout: 60_000,
+      });
+    }
+    await dangerZone();
+    assertNoOctaneOverlay(await page.content(), "settings after rename");
+
+    // --- Old URL resolves through the retained redirect (D-REL-08) ---
+    await page.goto(`${webOrigin()}/${seed.owner}/${oldRepo}`, {
+      waitUntil: "domcontentloaded",
+      timeout: 60_000,
+    });
+    await page.getByTestId("repo-header-row").waitFor({ state: "visible", timeout: 30_000 });
+    const renamedHtml = await page.content();
+    assertNoOctaneOverlay(renamedHtml, "old URL after rename");
+    if (!renamedHtml.includes(newRepo)) {
+      throw new Error(`old URL /${seed.owner}/${oldRepo} did not resolve to ${newRepo}`);
+    }
+    pageGuard.assertNoPageErrors("rename + old-URL redirect");
+
+    // --- Transfer to org via OwnerLookup + type-to-confirm dialog ---
+    await page.goto(`${webOrigin()}/${seed.owner}/${newRepo}/settings`, {
+      waitUntil: "domcontentloaded",
+      timeout: 60_000,
+    });
+    await dangerZone();
+    const orgToggle = page.getByRole("button", { name: "Organization", exact: true });
+    // The type-to-confirm dialog itself is part of the UX gate — retry the
+    // toggle + fill + open until it mounts (hydration settle), fail if it
+    // never does. aria-pressed proves the toggle's onClick fired so the
+    // transfer really targets dest_owner_type=org.
+    const transferBtn = page.getByRole("button", {
+      name: "Transfer repository",
+      exact: true,
+    });
+    const dialog = page.getByTestId("repo-transfer-confirm");
+    let dialogOpen = false;
+    for (let attempt = 0; attempt < 8 && !dialogOpen; attempt++) {
+      await orgToggle.click({ force: true }).catch(() => {});
+      await page.locator("#repo-transfer-dest").fill(orgSlug);
+      // Listbox option pick is best-effort — typing already set destOwner.
+      const optionBtn = page.locator('[data-testid="owner-lookup-listbox"] li button');
+      try {
+        await optionBtn.waitFor({ state: "visible", timeout: 3_000 });
+        const first = optionBtn.first?.();
+        if (first) await first.click({});
+      } catch {
+        // owner typed directly; continue
+      }
+      await transferBtn.click({ force: true }).catch(() => {});
+      try {
+        await dialog.waitFor({ state: "visible", timeout: 3_000 });
+        dialogOpen = true;
+      } catch {
+        dialogOpen = false;
+      }
+    }
+    if (!dialogOpen) {
+      throw new Error(
+        `transfer dialog never opened url=${page.url()} pageerrors=${pageGuard.pageErrors.join(" | ") || "none"}`,
+      );
+    }
+    // Organization toggle really engaged (not left on the default "user").
+    await orgToggle.getAttribute("aria-pressed").then((v) => {
+      if (v !== "true") {
+        throw new Error("Organization toggle never engaged (aria-pressed !== true)");
+      }
+    });
+    const confirmBtn = dialog.getByRole("button", {
+      name: "Transfer repository",
+      exact: true,
+    });
+    const confirmInput = page.locator("#transfer-confirm");
+    let transferredUi = false;
+    for (let attempt = 0; attempt < 8 && !transferredUi; attempt++) {
+      // Server-state first: a prior attempt may have completed the transfer
+      // while client nav stalled — the dialog then unmounts mid-loop and an
+      // unguarded fill on the gone input would burn the whole 30s timeout.
+      const moved = await rpc("repo.get", { owner: orgSlug, name: newRepo }, seed.cookie);
+      if (moved.ok) {
+        transferredUi = true;
+        break;
+      }
+      try {
+        await confirmInput.waitFor({ state: "visible", timeout: 5_000 });
+        await confirmInput.fill(newRepo);
+        await confirmBtn.click({ force: true });
+        await waitForPath(`/${orgSlug}/${newRepo}/settings`);
+        transferredUi = true;
+      } catch {
+        // Dialog may have closed via nav/remount — re-open before retrying.
+        await orgToggle.click({ force: true }).catch(() => {});
+        await page
+          .locator("#repo-transfer-dest")
+          .fill(orgSlug)
+          .catch(() => {});
+        await transferBtn.click({ force: true }).catch(() => {});
+        await dialog.waitFor({ state: "visible", timeout: 3_000 }).catch(() => {});
+      }
+    }
+    if (!transferredUi) {
+      const res = await rpc(
+        "repo.transfer",
+        {
+          owner: seed.owner,
+          name: newRepo,
+          dest_owner: orgSlug,
+          dest_owner_type: "org",
+          confirm_name: newRepo,
+        },
+        seed.cookie,
+      );
+      if (!res.ok) {
+        // The dialog confirm may have landed while nav stalled — check state.
+        const moved = await rpc("repo.get", { owner: orgSlug, name: newRepo }, seed.cookie);
+        if (!moved.ok) {
+          throw new Error(
+            `repo.transfer failed: ${JSON.stringify(res.error)} url=${page.url()} pageerrors=${pageGuard.pageErrors.join(" | ") || "none"}`,
+          );
+        }
+      }
+      await page.goto(`${webOrigin()}/${orgSlug}/${newRepo}/settings`, {
+        waitUntil: "domcontentloaded",
+        timeout: 60_000,
+      });
+    }
+    await dangerZone();
+    assertNoOctaneOverlay(await page.content(), "org settings after transfer");
+
+    // Pre-transfer /{user}/{repo} URL still resolves (redirect, not not-found).
+    await page.goto(`${webOrigin()}/${seed.owner}/${newRepo}`, {
+      waitUntil: "domcontentloaded",
+      timeout: 60_000,
+    });
+    await page.getByTestId("repo-header-row").waitFor({ state: "visible", timeout: 30_000 });
+    assertNoOctaneOverlay(await page.content(), "pre-transfer URL after transfer");
+    return true;
+  } finally {
+    await pageGuard.close("repo rename/transfer");
   }
 };
 

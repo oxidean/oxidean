@@ -159,6 +159,7 @@ SSO start routes redirect to the IdP when configured. If WorkOS/OIDC ENV is miss
 | `repo.actions.getEnabled` / `setEnabled` | Per-repo Actions enable toggle | Session + Read+ / Admin |
 | `repo.mirror.get` / `upsert` / `delete` / `syncNow` | Two-way remote mirror config + enqueue sync | Session + Admin |
 | `repo.mirror.generateSshKey` / `rotateWebhookSecret` / `fetchHostKey` | Deploy key, inbound webhook secret, ssh-keyscan | Session + Admin |
+| `webhook.create` / `list` / `get` / `update` / `delete` / `deliveries.list` / `deliveries.get` / `ping` / `redeliver` | Outbound repo webhooks; events: `push`, `pull_request`, `issues`, `issue_comment` (incl. PR conversation comments), `ping`, `*` | Session + Admin |
 | `repo.commitStatus.create` / `list` | Commit statuses (Phase 13 + Actions publisher) | Session + Write+ / Read+ |
 | `admin.actions.createRegistrationToken` | Mint one-time runner registration token | Sys-admin |
 | `admin.actions.listRunners` | List registered runners (no secrets) | Sys-admin |

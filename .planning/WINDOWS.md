@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 2
+open_count: 0
 waived_count: 52
-fixed_count: 4
+fixed_count: 6
 total_count: 58
-last_updated: 2026-09-19T16:39:51.416Z
+last_updated: 2026-10-02T00:27:48.664Z
 ---
 
 # Broken Windows Ledger
@@ -67,8 +67,8 @@ last_updated: 2026-09-19T16:39:51.416Z
 | 50 | 11 | unmet-truth | crates/oxidean-api/src/issue/mod.rs |  | Closing-keyword auto-close deferred to Phase 12 (D-ISS-15) — verified not enforced in issue_links_no_closing_keyword_enforcement | waived | Intentional Phase 12 deferral (D-ISS-15), not a defect | 2026-09-14T16:28:25.718Z | 2026-09-14T16:29:16.230Z |
 | 51 | 15 | stub | crates/oxidean-api/tests/release_rpc.rs |  | release_* tests #[ignore] until 15-01/15-02 | waived | Obsolete Wave 0 stub: release_* RPC tests greened in 15-01/15-02 | 2026-09-14T16:59:15.548Z | 2026-09-19T16:39:50.845Z |
 | 52 | 15 | deviation | crates/oxidean-api/src/repo/rename_transfer.rs |  | 15-03 combined T1-T3 into single commit due to shared redirect wiring | waived | Historical deviation noise: 15-03 combined rename/transfer commit (phase 15 shipped) | 2026-09-14T17:31:23.559Z | 2026-09-19T16:39:50.957Z |
-| 53 | 11.1 | deviation | scripts/coverage-weighted.sh |  | Bootstrap floor 0.65 instead of plan ~0.70; ratchet target 0.70 documented | open |  | 2026-09-15T16:21:58.576Z |  |
-| 54 | 11.1 | deviation | .github/workflows/ci.yml |  | CI skips cargo-llvm-cov collect (Make target remains); web+checklist drive gate | open |  | 2026-09-15T16:21:58.697Z |  |
+| 53 | 11.1 | deviation | scripts/coverage-weighted.sh |  | Bootstrap floor 0.65 instead of plan ~0.70; ratchet target 0.70 documented | fixed |  | 2026-09-15T16:21:58.576Z | 2026-10-02T00:27:48.664Z |
+| 54 | 11.1 | deviation | .github/workflows/ci.yml |  | CI skips cargo-llvm-cov collect (Make target remains); web+checklist drive gate | fixed |  | 2026-09-15T16:21:58.697Z | 2026-10-02T00:27:48.664Z |
 | 55 | 18 | stub | crates/oxidean-api/tests/webhook_rpc.rs |  | All webhook_* RPC tests #[ignore] until 18-01/18-02 | waived | Obsolete Wave 0 stub: webhook_* RPC tests greened in 18-01/18-02 | 2026-09-16T13:43:57.313Z | 2026-09-19T16:39:51.070Z |
 | 56 | 18 | stub | crates/oxidean-api/tests/webhook_delivery.rs |  | All webhook_* delivery tests #[ignore] until 18-01..18-03 | waived | Obsolete Wave 0 stub: webhook delivery tests greened in 18-01..18-03 | 2026-09-16T13:43:57.452Z | 2026-09-19T16:39:51.186Z |
 | 57 | 18 | stub | crates/oxidean-db/tests/dialect_webhooks.rs |  | dialect_webhooks #[ignore] until 18-01 | waived | Obsolete Wave 0 stub: dialect_webhooks greened in 18-01 | 2026-09-16T13:43:57.578Z | 2026-09-19T16:39:51.301Z |
@@ -707,10 +707,10 @@ last_updated: 2026-09-19T16:39:51.416Z
     "file": "scripts/coverage-weighted.sh",
     "line": null,
     "description": "Bootstrap floor 0.65 instead of plan ~0.70; ratchet target 0.70 documented",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-09-15T16:21:58.576Z",
-    "resolved_at": null
+    "resolved_at": "2026-10-02T00:27:48.664Z"
   },
   {
     "id": 54,
@@ -719,10 +719,10 @@ last_updated: 2026-09-19T16:39:51.416Z
     "file": ".github/workflows/ci.yml",
     "line": null,
     "description": "CI skips cargo-llvm-cov collect (Make target remains); web+checklist drive gate",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-09-15T16:21:58.697Z",
-    "resolved_at": null
+    "resolved_at": "2026-10-02T00:27:48.664Z"
   },
   {
     "id": 55,

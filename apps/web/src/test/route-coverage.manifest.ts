@@ -29,6 +29,7 @@ const FORGE_REPO = "apps/web/e2e/stack-browser/forge-repo.stack.browser.test.tsx
 const FORGE_ISSUES = "apps/web/e2e/stack-browser/forge-issues-releases.stack.browser.test.tsx";
 const FORGE_SSH_ORGS = "apps/web/e2e/stack-browser/forge-packages-ssh-orgs.stack.browser.test.tsx";
 const FORGE_ADMIN = "apps/web/e2e/stack-browser/forge-admin.stack.browser.test.tsx";
+const FORGE_DANGER = "apps/web/e2e/stack-browser/forge-repo-danger-zone.stack.browser.test.tsx";
 
 export const routeCoverageManifest: RouteCoverageEntry[] = [
   // --- shells / Outlet-only layouts (excluded from required set) ---
@@ -414,6 +415,10 @@ export const routeCoverageManifest: RouteCoverageEntry[] = [
         kind: "stack-browser",
         test: "apps/web/e2e/stack-browser/forge-mirror.stack.browser.test.tsx",
       },
+      {
+        kind: "stack-browser",
+        test: FORGE_DANGER,
+      },
     ],
   },
   {
@@ -501,6 +506,10 @@ export const routeCoverageManifest: RouteCoverageEntry[] = [
       {
         kind: "happy-dom",
         test: "apps/web/src/routes/$owner.$repo.pulls.integration.test.ts",
+      },
+      {
+        kind: "happy-dom",
+        test: "apps/web/src/routes/$owner.$repo.pull.checks.integration.test.ts",
       },
     ],
   },
