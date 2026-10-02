@@ -92,6 +92,27 @@ ox api issue.get -f owner=octo -f name=demo -F number=12
 numbers, booleans, arrays, objects). `owner/name` positionals may be replaced
 with `-R owner/name` anywhere a repo is expected.
 
+## Instance compatibility (capability manifest)
+
+Before running an RPC-backed command — including `auth status` — `ox` fetches
+`system.manifest` from the instance (public, like `system.health`) with a short
+timeout. The manifest is the server's compatibility contract: which procedures
+its dispatch table knows, its protocol and server versions, optional
+capabilities (`mcp`, `rest`, `oauth`), and the oldest supported CLI version.
+
+- A procedure missing from `procedures` fails fast:
+  `command not supported by instance (missing <procedure>)`, exit code 2 —
+  instead of an `rpc.unknown_procedure` round trip.
+- Instances that predate `system.manifest`, unreachable instances, and
+  malformed manifests **fail open**: `ox` prints a note on stderr and runs the
+  command anyway, so the compatibility layer itself never breaks a working
+  setup.
+- When `min_cli_version` is newer than the installed `ox`, or the instance
+  speaks a newer RPC protocol, `ox` prints an upgrade warning on stderr.
+  Notices never touch stdout, so `--json` pipelines stay clean.
+- The manifest is fetched once per invocation; multi-procedure commands
+  (`pr checks`) check all their calls against the same fetch.
+
 ## Output and scripting
 
 Default output is human-readable text. `--json` prints the raw RPC envelope
@@ -111,7 +132,7 @@ Exit codes:
 | --- | --- |
 | 0 | success |
 | 1 | API or transport error (any `{ok:false}` envelope, unreachable host) |
-| 2 | usage error (bad flags, missing arguments, no instance configured) |
+| 2 | usage error (bad flags, missing arguments, no instance configured, command unsupported by the instance manifest) |
 | 3 | auth error (`auth.unauthenticated`, HTTP 401/403, missing token) |
 
 ## Environment

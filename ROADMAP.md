@@ -43,7 +43,7 @@ Machine-facing surfaces beyond raw git/HTTP. These depend on API-02 (token auth)
 - [ ] **AGT-02** WebMCP surface in the web app: the app advertises MCP capabilities to browser-side agents (WebMCP, as surfaced by Chrome DevTools) backed by the instance MCP endpoint.
 - [ ] **AGT-03** MCP auth and setup model: local development (localhost or stdio) works with minimal configuration; remote third-party tools authenticate via PAT or OAuth with documented scopes, configured from settings.
 - [x] **CLI-01** Companion CLI (`ox`, gh-class): login, repo/issue/PR/actions/packages operations, scriptable JSON output, works against any instance URL. ([#92](https://github.com/oxidean/oxidean/pull/92))
-- [ ] **CLI-02** Server-driven compatibility contract: the CLI reads a versioned capability/procedure manifest from the connected instance (new `system.manifest`-style RPC) and feature-gates its commands, so API changes on the server never hard-break installed clients.
+- [x] **CLI-02** Server-driven compatibility contract: the CLI reads a versioned capability/procedure manifest from the connected instance (new `system.manifest`-style RPC) and feature-gates its commands, so API changes on the server never hard-break installed clients. ([#96](https://github.com/oxidean/oxidean/pull/96))
 
 ## Git and code surface
 
