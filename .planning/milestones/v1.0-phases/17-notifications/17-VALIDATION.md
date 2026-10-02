@@ -1,14 +1,10 @@
 ---
 phase: "17"
 slug: notifications
-# status lifecycle: draft (seeded by plan-phase) → validated (set by validate-phase §6)
-# audit-milestone §5.5 distinguishes NOT-VALIDATED (draft) from PARTIAL (validated + nyquist_compliant: false) (#2117)
-status: validated
+status: complete
 nyquist_compliant: true
 wave_0_complete: true
 created: "2026-09-16"
-updated: "2026-10-02"
-validated_at: "2026-10-02"
 ---
 
 # Phase 17 — Validation Strategy
@@ -44,13 +40,13 @@ validated_at: "2026-10-02"
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
 | 17-00-T1 | 00 | 0 | NOTF-01/02 | T-17-01 | stubs discoverable | nextest list | see 17-00-PLAN | ✅ | ✅ present |
 | 17-00-T2 | 00 | 0 | NOTF-02 | — | web stubs discoverable | file + vitest list | see 17-00-PLAN | ✅ | ✅ present |
-| 17-01-T1 | 01 | 1 | NOTF-01/02 | T-17-01 | own-rows RPC | nextest | `cargo nextest run -p oxidean-api -E 'test(notification)'` | ✅ | ✅ green |
-| 17-01-T2 | 01 | 1 | NOTF-01 | T-17-02 | comment→notify author | nextest | same filter | ✅ | ✅ green |
-| 17-02-T1 | 02 | 2 | NOTF-01 | T-17-02 | issue event fan-out | nextest | `cargo nextest run -p oxidean-api -E 'test(notification)'` | ✅ | ✅ green |
-| 17-02-T2 | 02 | 2 | NOTF-01 | — | @mention recipients | nextest | same | ✅ | ✅ green |
-| 17-03-T1 | 03 | 3 | NOTF-01 | T-17-02 | PR event fan-out | nextest | PR+notification filter | ✅ | ✅ green |
-| 17-04-T1 | 04 | 4 | NOTF-02 | T-17-03 | bell + badge | vitest | chrome notification filter | ✅ | ✅ green |
-| 17-04-T2 | 04 | 4 | NOTF-02 | T-17-01 | list + mark read UI | vitest | notifications route filter | ✅ | ✅ green |
+| 17-01-T1 | 01 | 1 | NOTF-01/02 | T-17-01 | own-rows RPC | nextest | `cargo nextest run -p oxidean-api -E 'test(notification)'` | ✅ | ⬜ pending |
+| 17-01-T2 | 01 | 1 | NOTF-01 | T-17-02 | comment→notify author | nextest | same filter | ✅ | ⬜ pending |
+| 17-02-T1 | 02 | 2 | NOTF-01 | T-17-02 | issue event fan-out | nextest | `cargo nextest run -p oxidean-api -E 'test(notification)'` | ✅ | ⬜ pending |
+| 17-02-T2 | 02 | 2 | NOTF-01 | — | @mention recipients | nextest | same | ✅ | ⬜ pending |
+| 17-03-T1 | 03 | 3 | NOTF-01 | T-17-02 | PR event fan-out | nextest | PR+notification filter | ✅ | ⬜ pending |
+| 17-04-T1 | 04 | 4 | NOTF-02 | T-17-03 | bell + badge | vitest | chrome notification filter | ✅ | ⬜ pending |
+| 17-04-T2 | 04 | 4 | NOTF-02 | T-17-01 | list + mark read UI | vitest | notifications route filter | ✅ | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -77,38 +73,16 @@ validated_at: "2026-10-02"
 
 ## Validation Sign-Off
 
-- [x] All tasks have `<automated>` verify or Wave 0 dependencies
-- [x] Sampling continuity: no 3 consecutive tasks without automated verify
-- [x] Wave 0 covers all MISSING references
-- [x] No watch-mode flags
-- [x] Feedback latency < 120s for focused filters
-- [x] `nyquist_compliant: true` set in frontmatter
+- [ ] All tasks have `<automated>` verify or Wave 0 dependencies
+- [ ] Sampling continuity: no 3 consecutive tasks without automated verify
+- [ ] Wave 0 covers all MISSING references
+- [ ] No watch-mode flags
+- [ ] Feedback latency < 120s for focused filters
+- [ ] `nyquist_compliant: true` set in frontmatter
 
-**Approval:** validated 2026-10-02 (retroactive audit below; `17-VERIFICATION.md` passed 2026-09-19)
+**Approval:** pending
 
 
 ## Gate status (integrate honesty pass)
 
 **Gate status: GREEN** — Wave 0 stubs greened; phase shipped on integrate `cursor/gsd-remaining-integrate-c82f` (2026-09-16).
-
----
-
-## Validation Audit 2026-10-02
-
-Retroactive Nyquist audit (ROADMAP DEBT-08) — same class of reconcile as `22.1-09` for phases 8/14/15/20. Scope: confirm every mapped command still names real files/tests on disk and that recorded green runs exist; suites not re-executed in this docs pass.
-
-| Metric | Count |
-|--------|-------|
-| Gaps found | 0 |
-| Resolved | 7 (six task-map rows ⬜→✅ on verified file/test presence + recorded green; `status: complete` → `validated`) |
-| Escalated | 0 |
-| Manual-only | 1 (live two-browser badge poll — unchanged, documented above) |
-
-| Check | Result |
-|-------|--------|
-| `crates/oxidean-api/tests/notification_rpc.rs` (`notification_*` own-rows, comment/assign/mention/PR fan-out, mark read, fail-closed unauthenticated) | ✅ present; 13 named tests exist |
-| `crates/oxidean-db/tests/dialect_notifications.rs` | ✅ present (`dialect_notifications_migration_module_present`) |
-| `apps/web/src/components/chrome.notifications.integration.test.ts` + `routes/notifications.integration.test.ts` | ✅ present |
-| Recorded green runs | `17-VERIFICATION.md` truths PASS (verified 2026-09-19), `status: passed`; integrate gate note GREEN 2026-09-16 above |
-
-**Verdict:** `status: validated`, `nyquist_compliant: true`. Prior `complete` lifecycle value + stale ⬜ rows were why audit-milestone §5.5 bucketed this phase NOT-VALIDATED; map content now matches disk.

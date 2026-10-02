@@ -54,7 +54,7 @@ help:
 	@echo "  make smoke-git-ssh   - Compose TCP SSH + git ls-remote/push smoke (GIT-03)"
 	@echo "  make smoke-git-lfs   - Traefik .git/info/lfs batch routing smoke (GIT-12)"
 	@echo "  make smoke-packages  - Traefik /v2|/npm|/generic → API smoke (PKG-01..03)"
-	@echo "  make smoke-protocol-ci - Compose up + smoke-git-* + smoke-packages + smoke-protection (D-QH-04; fail-closed)"
+	@echo "  make smoke-protocol-ci - Compose up + smoke-git-* + smoke-packages (D-QH-04; fail-closed)"
 	@echo "  make smoke-compose-ci - Compose dialect bring-up smoke for CI (D-CI-01; DIALECT=postgres|sqlite|mysql)"
 	@echo "  make smoke-mysql    - bring-up smoke asserting dialect=mysql"
 	@echo "  make smoke-sqlite   - bring-up smoke asserting dialect=sqlite"
@@ -206,9 +206,7 @@ smoke-packages:
 	@./scripts/smoke-packages.sh
 
 # D-QH-04: bring up Compose, run protocol smokes fail-closed, tear down.
-# Ends with smoke-protection (ORG-06/D-PKG-03; DEBT-01) which re-ups a fresh
-# stack, wiping volumes. Default skips client ls-remote/LFS push (no seeded
-# repo); set SMOKE_SKIP_*=0 + fixtures for full.
+# Default skips client ls-remote/LFS push (no seeded repo); set SMOKE_SKIP_*=0 + fixtures for full.
 smoke-protocol-ci:
 	@./scripts/ci-smoke-protocol.sh
 
@@ -236,7 +234,7 @@ cloud-docs:
 	@echo "  Gateway:   deploy/cloud/Caddyfile"
 	@echo "  Operator:  docs/DEPLOYMENT.md (Oxidean Cloud section)"
 	@echo "  Plan only: make cloud-plan"
-	@echo "  Apply:     scripts/railway-apply.sh --environment <env> --apply  # human-approved only"
+	@echo "  Apply:     railway config apply  # human-approved only"
 
 smoke-mysql:
 	@COMPOSE_FILES="-f docker-compose.yml -f docker-compose.mysql.yml" COMPOSE_PROFILES=mysql EXPECT_DIALECT=mysql ./scripts/compose-smoke.sh

@@ -1,14 +1,11 @@
 ---
 phase: "10"
 slug: "orgs-permissions"
-# status lifecycle: draft (seeded by plan-phase) → validated (set by validate-phase §6)
-# audit-milestone §5.5 distinguishes NOT-VALIDATED (draft) from PARTIAL (validated + nyquist_compliant: false) (#2117)
-status: validated
+status: complete
 nyquist_compliant: true
 wave_0_complete: true
 created: "2026-09-14"
-updated: "2026-10-02"
-validated_at: "2026-10-02"
+updated: "2026-09-14"
 ---
 
 # Phase 10 — Validation Strategy
@@ -73,30 +70,3 @@ validated_at: "2026-10-02"
 - member_base_permission none/read/write behavior on private org repo
 - Collaborator read/write/admin on personal and org-owned repo
 - Unauthorized cannot see private repo in UI; git gets 401
-
----
-
-## Validation Audit 2026-10-02
-
-Retroactive Nyquist audit (ROADMAP DEBT-08) — same class of reconcile as `22.1-09` for phases 8/14/15/20. Scope: confirm every mapped command still names real files/tests on disk and that recorded green runs exist; suites not re-executed in this docs pass.
-
-| Metric | Count |
-|--------|-------|
-| Gaps found | 0 |
-| Resolved | 1 (`status: complete` → `validated`; stale lifecycle value reconciled) |
-| Escalated | 0 |
-| Manual-only (UAT backstops) | 4 (unchanged; documented above) |
-
-| Check | Result |
-|-------|--------|
-| `crates/oxidean-api/tests/org_create_members.rs` (`org_create_*`, `org_members_*`, `org_member_base_*`, `org_lookup_shape_prefix_limit_no_email`) | ✅ present; named tests exist |
-| `crates/oxidean-api/tests/org_invites.rs` (`org_invites_*`) | ✅ present; named tests exist |
-| `crates/oxidean-api/tests/repo_collaborators_acl.rs` (`collab_*`) | ✅ present; named tests exist |
-| `crates/oxidean-api/tests/repo_private_404.rs` + `git_smart_http.rs` + `pat_*` | ✅ present; org/collab soft-404 + 401 + PAT push cases exist |
-| `crates/oxidean-api/tests/user_lookup.rs` (`user_lookup_*`) | ✅ present (shipped with admin-users follow-up) |
-| `crates/oxidean-api/src/repo/acl.rs` `coalesce_*` unit tests | ✅ present (8 cases incl. `coalesce_collaborator_raises_member_base_none`) |
-| `crates/oxidean-db/tests/factory_reset_orgs.rs` + `factory_reset_scope.rs` org rows | ✅ present (`factory_reset_wipes_org_acl_and_repository_rows`) |
-| Web: `orgs.new`, `new.owner-picker`, `settings.collaborators` integration tests | ✅ present under `apps/web/src/routes/` |
-| Recorded green runs | `10-VERIFICATION.md` behavioral spot-checks PASS (verified 2026-09-14; fingerprint refresh 2026-09-19), `status: passed` |
-
-**Verdict:** `status: validated`, `nyquist_compliant: true`. Prior `complete`/`executed` lifecycle value was why audit-milestone §5.5 bucketed this phase NOT-VALIDATED; map content already matched disk.
