@@ -46,6 +46,8 @@ Missing or mismatched value → error `rpc.version_mismatch` (HTTP 400).
 | `GET` | `/health` | Liveness: `{"ok":true}` | No |
 | `POST` | `/api/rpc` | JSON RPC dispatch | Cookie when procedure needs session |
 | `GET` | `/api/rpc/ws` | WebSocket upgrade; same procedures as HTTP | Cookie when procedure needs session |
+| `POST` | `/api/mcp` | MCP endpoint (JSON-RPC 2.0, streamable-HTTP) — see [MCP.md](MCP.md) | Cookie or `Bearer` PAT; anonymous for public data |
+| `GET` | `/api/mcp` | SSE stream (unsupported → `405`) | — |
 | `GET` | `/api/auth/workos/start` | Start WorkOS AuthKit (optional `?return_to=`) | No (redirect) |
 | `GET` | `/api/auth/workos/callback` | WorkOS code exchange; sets session cookie | No (redirect) |
 | `GET` | `/api/auth/oidc/start` | Start OIDC + PKCE (optional `?return_to=`) | No (redirect) |
@@ -597,6 +599,20 @@ Common `error.code` values:
 | `avatar.*` | Multipart/type/size/store failures on avatar upload |
 
 Avatar and SSO JSON errors use the same `{ ok: false, error: { code, message } }` shape where applicable.
+
+## MCP endpoint (AGT-01)
+
+`POST /api/mcp` is a [Model Context Protocol](https://modelcontextprotocol.io)
+server over the streamable-HTTP transport (single JSON-RPC 2.0 message per
+request, `application/json` responses, `202` for notifications). It exposes
+repositories, issues, pull requests, Actions runs, packages, and search as MCP
+tools, plus file/issue/PR bodies as `oxidean://` resources — each call is a thin
+wrapper over the same typed RPC handlers and ACL checks as `/api/rpc`.
+
+Auth: `oxidean_session` cookie or `Authorization: Bearer` with a classic
+(`oxidean_pat_…`) / fine-grained (`oxidean_fg_…`) PAT. Presented-but-invalid
+credentials return `401` + `WWW-Authenticate: Bearer`; missing credentials run
+as anonymous. Full method/tool/resource list and scope mapping: [MCP.md](MCP.md).
 
 ## Rate limits
 

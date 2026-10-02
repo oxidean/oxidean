@@ -19,7 +19,7 @@ use oxidean_git::{CliGitBackend, GitBackend};
 use crate::auth::pending::PendingAuthStore;
 use crate::auth::session::{
     build_session_presence_cookie, clear_session_cookie, clear_session_presence_cookie,
-    SessionService, SESSION_COOKIE_NAME, SESSION_IDLE,
+    ResolvedSession, SessionService, SESSION_COOKIE_NAME, SESSION_IDLE,
 };
 use crate::email::{self, EmailSender};
 use crate::pat::rate_limit::FailedAuthLimiter;
@@ -252,6 +252,10 @@ pub fn router_with_state(state: AppState, cors: CorsLayer) -> Router {
         .route("/health", get(health))
         .route("/api/rpc", post(rpc_http))
         .route("/api/rpc/ws", get(rpc_ws))
+        .route(
+            "/api/mcp",
+            post(crate::mcp::handle_post).get(crate::mcp::handle_get),
+        )
         .nest("/api/actions", crate::actions::runner_proto::router())
         .route("/api/auth/workos/start", get(auth_callbacks::workos_start))
         .route(
@@ -339,7 +343,7 @@ async fn health() -> Json<serde_json::Value> {
     Json(serde_json::json!({ "ok": true }))
 }
 
-fn session_token_from_headers(headers: &HeaderMap) -> Option<String> {
+pub(crate) fn session_token_from_headers(headers: &HeaderMap) -> Option<String> {
     let cookie_header = headers.get(header::COOKIE)?.to_str().ok()?;
     for part in cookie_header.split(';') {
         let part = part.trim();
@@ -351,12 +355,13 @@ fn session_token_from_headers(headers: &HeaderMap) -> Option<String> {
     None
 }
 
-async fn build_rpc_ctx(
+/// Resolve a raw `oxidean_session` cookie token to a session (shared by RPC + MCP).
+pub(crate) async fn resolve_session_token(
     state: &AppState,
     raw_token: Option<&str>,
-    client: rpc::ClientMeta,
-) -> RpcCtx {
-    let session = match raw_token {
+    client: &rpc::ClientMeta,
+) -> Option<ResolvedSession> {
+    match raw_token {
         Some(token) => match state
             .sessions
             .resolve(
@@ -374,7 +379,15 @@ async fn build_rpc_ctx(
             }
         },
         None => None,
-    };
+    }
+}
+
+/// Build an [`RpcCtx`] from an already-resolved session (cookie or token-derived).
+pub(crate) fn build_rpc_ctx_with_session(
+    state: &AppState,
+    session: Option<ResolvedSession>,
+    client: rpc::ClientMeta,
+) -> RpcCtx {
     let email = state.current_email();
     RpcCtx {
         db: state.db.clone(),
@@ -397,6 +410,15 @@ async fn build_rpc_ctx(
         search_max_matches: state.search_max_matches,
         search_max_files: state.search_max_files,
     }
+}
+
+async fn build_rpc_ctx(
+    state: &AppState,
+    raw_token: Option<&str>,
+    client: rpc::ClientMeta,
+) -> RpcCtx {
+    let session = resolve_session_token(state, raw_token, &client).await;
+    build_rpc_ctx_with_session(state, session, client)
 }
 
 fn append_set_cookie(response: &mut axum::response::Response, cookie: &cookie::Cookie<'_>) {
