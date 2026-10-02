@@ -1291,6 +1291,43 @@ export type BranchProtectionDeleteRequest = {
   id: string;
 };
 
+/** Protected tag ruleset rule (GIT-21). */
+export type TagProtectionRulePublic = {
+  id: string;
+  repo_id: string;
+  pattern: string;
+  allow_create: boolean;
+  allow_update: boolean;
+  allow_delete: boolean;
+  enforce_admins: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type TagProtectionListResponse = {
+  rules: TagProtectionRulePublic[];
+};
+
+export type TagProtectionRuleInput = {
+  owner: string;
+  name: string;
+  pattern: string;
+  allow_create?: boolean;
+  allow_update?: boolean;
+  allow_delete?: boolean;
+  enforce_admins?: boolean;
+};
+
+export type TagProtectionUpdateRequest = TagProtectionRuleInput & {
+  id: string;
+};
+
+export type TagProtectionDeleteRequest = {
+  owner: string;
+  name: string;
+  id: string;
+};
+
 export type CommitStatusState = "pending" | "success" | "failure" | "error";
 
 export type CommitStatusPublic = {
@@ -2784,6 +2821,16 @@ export function createClient(opts: CreateClientOptions) {
           rpcCall<BranchProtectionRulePublic>(opts, "repo.branchProtection.update", input),
         delete: (input: BranchProtectionDeleteRequest) =>
           rpcCall<{ ok: boolean }>(opts, "repo.branchProtection.delete", input),
+      },
+      tagProtection: {
+        list: (input: RepoGetRequest) =>
+          rpcCall<TagProtectionListResponse>(opts, "repo.tagProtection.list", input),
+        create: (input: TagProtectionRuleInput) =>
+          rpcCall<TagProtectionRulePublic>(opts, "repo.tagProtection.create", input),
+        update: (input: TagProtectionUpdateRequest) =>
+          rpcCall<TagProtectionRulePublic>(opts, "repo.tagProtection.update", input),
+        delete: (input: TagProtectionDeleteRequest) =>
+          rpcCall<{ ok: boolean }>(opts, "repo.tagProtection.delete", input),
       },
       commitStatus: {
         create: (input: CommitStatusCreateRequest) =>

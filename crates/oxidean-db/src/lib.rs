@@ -34,6 +34,7 @@ pub mod ssh_keys;
 pub mod gpg_keys;
 pub mod user_emails;
 pub mod stars;
+pub mod tag_protection;
 pub mod templates;
 pub mod topics;
 pub mod users;
@@ -44,6 +45,7 @@ pub use actions::{
 };
 pub use audit_events::AuditEventRow;
 pub use branch_protection::{BranchProtectionRuleRow, CommitStatusRow};
+pub use tag_protection::TagProtectionRuleRow;
 pub use dialect::{redact_url, resolve_dialect, resolve_dialect_from_env, Dialect};
 pub use issue_labels::{IssueAssigneeRow, LabelRow};
 pub use issues::{
@@ -1298,6 +1300,77 @@ impl Database {
         rule_id: &str,
     ) -> Result<(), String> {
         branch_protection::delete_rule(self.require_pool()?, repo_id, rule_id).await
+    }
+
+    // --- tag protection rulesets (GIT-21) ---
+
+    pub async fn list_tag_protection_rules(
+        &self,
+        repo_id: &str,
+    ) -> Result<Vec<TagProtectionRuleRow>, String> {
+        tag_protection::list_rules(self.require_pool()?, repo_id).await
+    }
+
+    pub async fn find_tag_protection_rule(
+        &self,
+        repo_id: &str,
+        rule_id: &str,
+    ) -> Result<Option<TagProtectionRuleRow>, String> {
+        tag_protection::find_rule(self.require_pool()?, repo_id, rule_id).await
+    }
+
+    pub async fn insert_tag_protection_rule(
+        &self,
+        id: &str,
+        repo_id: &str,
+        pattern: &str,
+        allow_create: bool,
+        allow_update: bool,
+        allow_delete: bool,
+        enforce_admins: bool,
+    ) -> Result<TagProtectionRuleRow, String> {
+        tag_protection::insert_rule(
+            self.require_pool()?,
+            id,
+            repo_id,
+            pattern,
+            allow_create,
+            allow_update,
+            allow_delete,
+            enforce_admins,
+        )
+        .await
+    }
+
+    pub async fn update_tag_protection_rule(
+        &self,
+        repo_id: &str,
+        rule_id: &str,
+        pattern: &str,
+        allow_create: bool,
+        allow_update: bool,
+        allow_delete: bool,
+        enforce_admins: bool,
+    ) -> Result<TagProtectionRuleRow, String> {
+        tag_protection::update_rule(
+            self.require_pool()?,
+            repo_id,
+            rule_id,
+            pattern,
+            allow_create,
+            allow_update,
+            allow_delete,
+            enforce_admins,
+        )
+        .await
+    }
+
+    pub async fn delete_tag_protection_rule(
+        &self,
+        repo_id: &str,
+        rule_id: &str,
+    ) -> Result<(), String> {
+        tag_protection::delete_rule(self.require_pool()?, repo_id, rule_id).await
     }
 
     pub async fn list_commit_statuses(
