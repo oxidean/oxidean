@@ -77,7 +77,7 @@ jobs:
     )
     .await
     .unwrap();
-    let runs = db.list_action_runs_for_repo(&repo.id, 100, 0).await.unwrap();
+    let runs = db.list_action_runs_for_repo(&repo.id, &Default::default(), 100, 0).await.unwrap();
     let jobs = db.list_action_jobs_for_run(&runs[0].id).await.unwrap();
     assert!(jobs[0].runner_id.is_none());
     assert_eq!(jobs[0].status, "queued");
