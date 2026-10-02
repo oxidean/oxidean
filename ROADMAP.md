@@ -12,7 +12,7 @@ v1.0 shipped 2026-09-19: 24 phases, 220 plans, 87/87 requirements. Git over HTTP
 
 Deferred items recorded at milestone close. Finish these first; several are cheap and unblock later sections.
 
-- [x] **DEBT-01** Wire `make smoke-protection` into `scripts/ci-smoke-protocol.sh` and the CI smoke job. The ORG-06 direct-push denial guard is green locally but absent from CI.
+- [ ] **DEBT-01** Wire `make smoke-protection` into `scripts/ci-smoke-protocol.sh` and the CI smoke job. The ORG-06 direct-push denial guard is green locally but absent from CI.
 - [ ] **DEBT-02** Raise the coverage floor from 0.65 toward ~0.70 and re-enable `cargo-llvm-cov` collection in CI (WINDOWS entries 53–54 open).
 - [ ] **DEBT-03** Sitewide GlobalSearch depth. Header search routes to `/explore?q=` today; extend to users, orgs, commits, PRs, and code.
 - [ ] **DEBT-04** `issue_comment` webhook event. The notification fan-out exists; webhook emission does not.
