@@ -167,12 +167,12 @@ Phase 9 adds SSH clone/fetch/push beside Smart HTTP:
 | --- | --- |
 | **Process** | In-process **`russh`** listener in `oxidean-api` (`crates/oxidean-api/src/ssh/`), gated by `OXIDEAN_SSH_ENABLED`. Shares DB + `OXIDEAN_REPOS_DIR` with Smart HTTP. |
 | **Pack** | Allowlist `git-upload-pack` / `git-receive-pack` only; spawn system `git` with argv (no shell). ACL reuses Smart HTTP owner / visibility / verified-email rules; denials via **git stderr** (not HTTP codes). |
-| **Auth** | Force SSH username **`git`**. Identity = registered public-key fingerprint (`ssh_public_keys`). Keys map to **full account** — no PAT scopes. |
+| **Auth** | Force SSH username **`git`**. Identity = registered public-key fingerprint (`ssh_public_keys`). Keys map to **full account** — no PAT scopes. When no account key matches, the handshake falls back to per-repo **deploy keys** (`deploy_keys`, GIT-23); each pack exec re-checks the fingerprint is attached to the target repo, and `can_write` gates receive-pack. Deploy keys are transport-only (no RPC/web). |
 | **Clone URL** | scp-style `git@{OXIDEAN_SSH_HOST}:{owner}/{repo}.git` (D-SSH-02). Port advertised separately; `~/.ssh/config` when ≠ 22. |
 | **Edge** | Compose **TCP `2222:2222`** on the API service — **not** Traefik. Host keys under `OXIDEAN_SSH_HOST_KEY_DIR` (volume). |
 | **Rate limit** | Failed pubkey auth: IP + fingerprint buckets (reuse PAT limiter pattern). |
 
-RPC: `sshKey.add` / `list` / `revoke` (session + verified email for add). Smoke: `make smoke-git-ssh`. See [CONFIGURATION.md](CONFIGURATION.md#git-over-ssh).
+RPC: `sshKey.add` / `list` / `revoke` (session + verified email for add); repo-admin `repo.deployKey.list` / `create` / `delete` for deploy keys. Smoke: `make smoke-git-ssh`. See [CONFIGURATION.md](CONFIGURATION.md#git-over-ssh).
 
 ### Git LFS
 

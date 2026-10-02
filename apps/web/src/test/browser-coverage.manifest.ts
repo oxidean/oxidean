@@ -166,6 +166,16 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
     ],
   },
   {
+    surface: "components/repo/deploy-keys-panel.tsrx",
+    coverage: [
+      {
+        kind: "browser",
+        test: "apps/web/src/components/repo/deploy-keys-panel.browser.test.tsx",
+        subject: "deploy-keys-panel",
+      },
+    ],
+  },
+  {
     surface: "components/repo/collaborators-panel.tsrx",
     coverage: [
       {

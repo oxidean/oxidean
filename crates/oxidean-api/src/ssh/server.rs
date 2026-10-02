@@ -34,6 +34,9 @@ struct SshHandler {
     peer: Option<SocketAddr>,
     user_id: Option<String>,
     key_id: Option<String>,
+    /// Deploy-key principal (GIT-23): fingerprint authenticated, repo scope
+    /// is re-checked per exec (auth completes before the repo is known).
+    deploy_key_fingerprint: Option<String>,
     session_channel: Option<Channel<Msg>>,
 }
 
@@ -46,6 +49,7 @@ impl RusshServer for SshServer {
             peer,
             user_id: None,
             key_id: None,
+            deploy_key_fingerprint: None,
             session_channel: None,
         }
     }
@@ -103,6 +107,23 @@ impl Handler for SshHandler {
                 Ok(Auth::Accept)
             }
             Ok(None) => {
+                // Deploy-key fallback (GIT-23): a fingerprint attached to any
+                // repo authenticates the transport; the repo binding is
+                // enforced per pack exec. Deploy keys are not account
+                // identities — they get no user_id, no session, no RPC/web.
+                match auth::find_deploy_key(&self.state.db, public_key).await {
+                    Ok(Some(row)) => {
+                        self.deploy_key_fingerprint = Some(row.fingerprint.clone());
+                        let mut lim =
+                            self.state.auth_limiter.lock().unwrap_or_else(|e| e.into_inner());
+                        lim.clear_user(&fp);
+                        return Ok(Auth::Accept);
+                    }
+                    Ok(None) => {}
+                    Err(e) => {
+                        tracing::error!(error = %e, "SSH deploy key lookup failed");
+                    }
+                }
                 let mut lim = self.state.auth_limiter.lock().unwrap_or_else(|e| e.into_inner());
                 lim.record_ip(&ip);
                 lim.record_user(&fp);
@@ -141,23 +162,38 @@ impl Handler for SshHandler {
         data: &[u8],
         session: &mut Session,
     ) -> Result<(), Self::Error> {
-        let Some(user_id) = self.user_id.clone() else {
-            session.channel_failure(channel)?;
-            return Ok(());
-        };
-
         let Some(cmd) = pack::parse_pack_exec(data) else {
             session.channel_failure(channel)?;
             return Ok(());
         };
 
-        let decision = pack::authorize_pack(
-            &self.state.db,
-            &self.state.repos_dir,
-            &user_id,
-            &cmd,
-        )
-        .await;
+        // Account keys authorize via the full capability ladder; deploy keys
+        // authorize only the repos they are attached to (GIT-23).
+        let decision = if let Some(user_id) = self.user_id.clone() {
+            pack::authorize_pack(
+                &self.state.db,
+                &self.state.repos_dir,
+                &user_id,
+                &cmd,
+            )
+            .await
+        } else if let Some(fp) = self.deploy_key_fingerprint.clone() {
+            let ip = self
+                .peer
+                .map(|p| p.ip().to_string())
+                .unwrap_or_else(|| "unknown".into());
+            pack::authorize_deploy_key_pack(
+                &self.state.db,
+                &self.state.repos_dir,
+                &fp,
+                &cmd,
+                &ip,
+            )
+            .await
+        } else {
+            session.channel_failure(channel)?;
+            return Ok(());
+        };
 
         match decision {
             AuthzDecision::Deny { message } => {
@@ -175,6 +211,7 @@ impl Handler for SshHandler {
                 repo_name,
                 is_push,
                 capability,
+                actor_user_id,
             } => {
                 let program = match &cmd {
                     PackCommand::UploadPack { .. } => "upload-pack",
@@ -189,7 +226,9 @@ impl Handler for SshHandler {
                 let db = self.state.db.clone();
                 let repos_dir = self.state.repos_dir.clone();
                 let env_name = std::env::var("OXIDEAN_ENV").unwrap_or_else(|_| "development".into());
-                let user_id = user_id.clone();
+                // Post-push hooks attribute to the account user, or to the
+                // admin who attached the authorizing deploy key (GIT-23).
+                let user_id = actor_user_id.clone();
                 let actor_capability = pack::capability_env_label(capability);
                 tokio::spawn(async move {
                     let git: std::sync::Arc<dyn oxidean_git::GitBackend> =

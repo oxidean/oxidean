@@ -31,6 +31,7 @@ pub mod repo_collaborators;
 pub mod repositories;
 pub mod sessions;
 pub mod ssh_keys;
+pub mod deploy_keys;
 pub mod gpg_keys;
 pub mod user_emails;
 pub mod stars;
@@ -72,6 +73,7 @@ pub use stars::{ForkListSort, RepoForkListRow, RepoStargazerListRow};
 pub use watches::RepoWatcherListRow;
 pub use repositories::{RepoDiskRef, RepositoryRow};
 pub use ssh_keys::SshKeyRow;
+pub use deploy_keys::DeployKeyRow;
 pub use gpg_keys::GpgKeyRow;
 pub use user_emails::UserEmailRow;
 pub use templates::{InstanceTemplatePackRow, TemplateRepoListRow};
@@ -2723,6 +2725,73 @@ impl Database {
         last_used_ip: Option<&str>,
     ) -> Result<(), String> {
         ssh_keys::touch_last_used(self.require_pool()?, id, last_used_at, last_used_ip).await
+    }
+
+    // --- deploy keys (GIT-23) ---
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn create_deploy_key(
+        &self,
+        id: &str,
+        repo_id: &str,
+        title: &str,
+        public_key: &str,
+        fingerprint: &str,
+        key_type: &str,
+        can_write: bool,
+        created_by: &str,
+    ) -> Result<(), String> {
+        deploy_keys::create(
+            self.require_pool()?,
+            id,
+            repo_id,
+            title,
+            public_key,
+            fingerprint,
+            key_type,
+            can_write,
+            created_by,
+        )
+        .await
+    }
+
+    /// Any deploy key row with this fingerprint (SSH auth-time lookup; the
+    /// repo binding is re-checked per pack exec via `find_deploy_key_for_repo`).
+    pub async fn find_deploy_key_by_fingerprint(
+        &self,
+        fingerprint: &str,
+    ) -> Result<Option<deploy_keys::DeployKeyRow>, String> {
+        deploy_keys::find_by_fingerprint(self.require_pool()?, fingerprint).await
+    }
+
+    /// The deploy key attached to `repo_id` carrying this fingerprint.
+    pub async fn find_deploy_key_for_repo(
+        &self,
+        repo_id: &str,
+        fingerprint: &str,
+    ) -> Result<Option<deploy_keys::DeployKeyRow>, String> {
+        deploy_keys::find_for_repo(self.require_pool()?, repo_id, fingerprint).await
+    }
+
+    pub async fn list_deploy_keys_for_repo(
+        &self,
+        repo_id: &str,
+    ) -> Result<Vec<deploy_keys::DeployKeyRow>, String> {
+        deploy_keys::list_for_repo(self.require_pool()?, repo_id).await
+    }
+
+    /// Hard-delete a deploy key scoped to its repo; returns true when removed.
+    pub async fn revoke_deploy_key(&self, repo_id: &str, id: &str) -> Result<bool, String> {
+        deploy_keys::revoke(self.require_pool()?, repo_id, id).await
+    }
+
+    pub async fn touch_deploy_key_last_used(
+        &self,
+        id: &str,
+        last_used_at: &str,
+        last_used_ip: Option<&str>,
+    ) -> Result<(), String> {
+        deploy_keys::touch_last_used(self.require_pool()?, id, last_used_at, last_used_ip).await
     }
 
     // --- gpg public keys ---
