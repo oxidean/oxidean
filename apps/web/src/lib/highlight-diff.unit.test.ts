@@ -68,7 +68,7 @@ describe("highlightDiffLines", () => {
     const lines = parseUnifiedDiffLines(patch);
     const rows = await highlightDiffLines(lines, {
       path: "src/util.ts",
-      theme: "github-dark",
+      theme: "oxidean-dark",
     });
 
     const del = rows.find((r) => r.kind === "del");
@@ -87,7 +87,7 @@ describe("highlightDiffLines", () => {
     const lines = parseUnifiedDiffLines("+hello world\n");
     const rows = await highlightDiffLines(lines, {
       path: "notes.txt",
-      theme: "github-light",
+      theme: "oxidean-light",
     });
     expect(rows[0]?.contentHtml).toBe("hello world");
     expect(rows[0]?.contentHtml).not.toMatch(/style=/);
@@ -98,7 +98,7 @@ describe("highlightDiffLines", () => {
     const lines = parseUnifiedDiffLines(`+${big}\n-${big}\n`);
     const rows = await highlightDiffLines(lines, {
       path: "big.ts",
-      theme: "github-dark",
+      theme: "oxidean-dark",
     });
     expect(rows[0]?.contentHtml).toBe(escapeHtml(big));
     expect(rows[0]?.contentHtml).not.toMatch(/style=/);

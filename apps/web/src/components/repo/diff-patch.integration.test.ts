@@ -62,7 +62,7 @@ describe("DiffPatch", () => {
     const patch = ["@@ -1 +1 @@", "-const a = 1;", "+const b = 2;"].join("\n");
     const initialRows = await highlightDiffLines(parseUnifiedDiffLines(patch), {
       path: "util.ts",
-      theme: "github-light",
+      theme: "oxidean-light",
     });
 
     document.documentElement.classList.remove("dark");
@@ -73,7 +73,7 @@ describe("DiffPatch", () => {
         status: "modified",
         patch,
         initialRows,
-        highlightTheme: "github-light",
+        highlightTheme: "oxidean-light",
       },
     });
 

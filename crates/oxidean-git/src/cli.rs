@@ -1492,7 +1492,7 @@ impl GitBackend for CliGitBackend {
         repo: &Path,
         treeish: &str,
         pattern: &str,
-        pathspec: Option<&str>,
+        pathspecs: &[String],
         max_matches: u32,
     ) -> Result<GrepResult, GitError> {
         let pattern = pattern.trim();
@@ -1508,10 +1508,12 @@ impl GitBackend for CliGitBackend {
         let treeish = validate_treeish(treeish)?;
         let repo_s = repo_str(repo)?;
         let max_matches = max_matches.clamp(1, 10_000);
-        let path_owned = match pathspec {
-            Some(p) if !p.trim().is_empty() => Some(validate_repo_rel_path(p)?),
-            _ => None,
-        };
+        let mut path_owned = Vec::new();
+        for p in pathspecs {
+            if !p.trim().is_empty() {
+                path_owned.push(validate_repo_rel_path(p)?);
+            }
+        }
 
         // Empty / unborn → empty hits.
         let rev = Command::new("git")
@@ -1539,8 +1541,9 @@ impl GitBackend for CliGitBackend {
         // Tree-ish must NOT follow `--` or git treats it as a pathspec (work-tree error on bare).
         let mut cmd = Command::new("git");
         cmd.args(["-C", repo_s, "grep", "-n", "-I", "-e", pattern, treeish]);
-        if let Some(ref p) = path_owned {
-            cmd.args(["--", p]);
+        if !path_owned.is_empty() {
+            cmd.arg("--");
+            cmd.args(&path_owned);
         }
         let output = cmd
             .stdin(Stdio::null())
@@ -2572,7 +2575,7 @@ mod tests {
         .await
         .unwrap();
         let hit = git
-            .grep(&bare, "main", "UNIQUE_GREP_TOKEN", None, 50)
+            .grep(&bare, "main", "UNIQUE_GREP_TOKEN", &[], 50)
             .await
             .expect("grep");
         assert_eq!(hit.hits.len(), 1);
@@ -2582,7 +2585,7 @@ mod tests {
         assert!(!hit.truncated);
 
         let miss = git
-            .grep(&bare, "main", "no_such_token_zzz", None, 50)
+            .grep(&bare, "main", "no_such_token_zzz", &[], 50)
             .await
             .expect("grep miss");
         assert!(miss.hits.is_empty());
@@ -2614,7 +2617,7 @@ mod tests {
         .await
         .unwrap();
         let capped = git
-            .grep(&bare, "main", "CAP_TOKEN", None, 5)
+            .grep(&bare, "main", "CAP_TOKEN", &[], 5)
             .await
             .expect("grep cap");
         assert_eq!(capped.hits.len(), 5);
@@ -2623,6 +2626,56 @@ mod tests {
             capped.hits.iter().all(|h| h.path != "bin.dat"),
             "binary file should be skipped with -I"
         );
+    }
+
+    #[tokio::test]
+    async fn grep_with_multiple_pathspecs_and_icase_glob() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bare = tmp.path().join("grep_paths.git");
+        let git = CliGitBackend::new();
+        git.init_bare(&bare, "main").await.unwrap();
+        git.seed_commit(
+            &bare,
+            "main",
+            "c",
+            &[
+                ("SRC/A.RS".into(), b"fn TOK() {}
+".to_vec()),
+                ("src/b.ts".into(), b"const TOK = 1;
+".to_vec()),
+                ("src/readme.md".into(), b"TOK docs
+".to_vec()),
+            ],
+        )
+        .await
+        .unwrap();
+        // Language-style pathspecs: `:(icase)` extension glob OR'd across specs.
+        let specs = vec![
+            ":(icase)*.rs".to_string(),
+            ":(icase)*.ts".to_string(),
+        ];
+        let hits = git
+            .grep(&bare, "main", "TOK", &specs, 50)
+            .await
+            .expect("grep pathspecs");
+        let mut paths: Vec<&str> = hits.hits.iter().map(|h| h.path.as_str()).collect();
+        paths.sort();
+        assert_eq!(paths, ["SRC/A.RS", "src/b.ts"]);
+
+        // `:(icase,glob)` prefix + filename matcher (`language:` filename rows).
+        let specs = vec![":(icase,glob)src/**/readme.md".to_string()];
+        let hits = git
+            .grep(&bare, "main", "TOK", &specs, 50)
+            .await
+            .expect("grep glob filename");
+        assert_eq!(hits.hits.len(), 1);
+        assert_eq!(hits.hits[0].path, "src/readme.md");
+
+        // An absolute path or `..` traversal pathspec is rejected outright.
+        let bad = vec!["/etc/passwd".to_string()];
+        assert!(git.grep(&bare, "main", "TOK", &bad, 50).await.is_err());
+        let bad = vec!["../escape.txt".to_string()];
+        assert!(git.grep(&bare, "main", "TOK", &bad, 50).await.is_err());
     }
 
     #[tokio::test]
