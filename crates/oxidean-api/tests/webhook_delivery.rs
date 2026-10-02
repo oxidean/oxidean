@@ -308,6 +308,254 @@ async fn webhook_issues_edited_closed_reopened() {
 
 
 #[tokio::test]
+async fn webhook_issue_comment_lifecycle() {
+    let sink = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/ic"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&sink)
+        .await;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("ic.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos).await;
+    let cookie = verified_owner(&app, &db, "ic@ex.com", "icown").await;
+    let _ = rpc_json(
+        &app,
+        r#"{"procedure":"repo.create","input":{"name":"demo","visibility":"public","description":""}}"#,
+        &cookie,
+    )
+    .await;
+    let hook_url = format!("{}/ic", sink.uri());
+    let created = rpc_json(
+        &app,
+        &format!(
+            r#"{{"procedure":"webhook.create","input":{{"owner":"icown","name":"demo","url":"{hook_url}","secret":"s","events":["issue_comment"]}}}}"#
+        ),
+        &cookie,
+    )
+    .await;
+    assert_eq!(created["ok"], true, "{created}");
+    let hook_id = created["data"]["id"].as_str().unwrap().to_string();
+
+    let issue = rpc_json(
+        &app,
+        r#"{"procedure":"issue.create","input":{"owner":"icown","name":"demo","title":"T","body":"b"}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(issue["ok"], true);
+    let comment = rpc_json(
+        &app,
+        r#"{"procedure":"issue.comments.create","input":{"owner":"icown","name":"demo","number":1,"body":"first take"}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(comment["ok"], true, "{comment}");
+    let comment_id = comment["data"]["id"].as_str().unwrap();
+    let edit = rpc_json(
+        &app,
+        &format!(
+            r#"{{"procedure":"issue.comments.update","input":{{"owner":"icown","name":"demo","number":1,"commentId":"{comment_id}","body":"second take"}}}}"#
+        ),
+        &cookie,
+    )
+    .await;
+    assert_eq!(edit["ok"], true, "{edit}");
+    let del = rpc_json(
+        &app,
+        &format!(
+            r#"{{"procedure":"issue.comments.delete","input":{{"owner":"icown","name":"demo","number":1,"commentId":"{comment_id}"}}}}"#
+        ),
+        &cookie,
+    )
+    .await;
+    assert_eq!(del["ok"], true, "{del}");
+
+    let mut actions = std::collections::HashSet::new();
+    for _ in 0..50 {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let deliveries = db.list_webhook_deliveries(&hook_id, 50).await.expect("list");
+        for d in deliveries.iter().filter(|d| d.event == "issue_comment") {
+            actions.insert(d.action.clone());
+        }
+        if actions.contains("created")
+            && actions.contains("edited")
+            && actions.contains("deleted")
+        {
+            break;
+        }
+    }
+    assert!(actions.contains("created"), "{actions:?}");
+    assert!(actions.contains("edited"), "{actions:?}");
+    assert!(actions.contains("deleted"), "{actions:?}");
+
+    // Delivery rows land inside `emit` before the spawned HTTP POST completes;
+    // wait for the sink to observe all three requests as well.
+    let mut requests = Vec::new();
+    for _ in 0..50 {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        requests = sink.received_requests().await.expect("received requests");
+        if requests.len() >= 3 {
+            break;
+        }
+    }
+    assert!(!requests.is_empty());
+    for req in &requests {
+        assert_eq!(
+            req.headers.get("x-github-event").map(|v| v.to_str().unwrap()),
+            Some("issue_comment")
+        );
+    }
+    let bodies: Vec<String> = requests
+        .iter()
+        .map(|r| String::from_utf8_lossy(&r.body).into_owned())
+        .collect();
+    assert!(
+        bodies
+            .iter()
+            .any(|b| b.contains("\"action\":\"created\"") && b.contains("first take")),
+        "{bodies:?}"
+    );
+    assert!(
+        bodies
+            .iter()
+            .any(|b| b.contains("\"action\":\"edited\"")
+                && b.contains("\"changes\"")
+                && b.contains("first take")),
+        "{bodies:?}"
+    );
+}
+
+/// GitHub parity: `issue_comment` fires for PR conversation comments too
+/// (`issue.pull_request` marker); line-anchored comments do not emit it (DEBT-04).
+#[tokio::test]
+async fn webhook_issue_comment_pull_conversation() {
+    let sink = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/icpr"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&sink)
+        .await;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("icpr.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos.clone()).await;
+    let cookie = verified_owner(&app, &db, "icpr@ex.com", "icprown").await;
+    let create = rpc_json(
+        &app,
+        r#"{"procedure":"repo.create","input":{"name":"demo","visibility":"public","description":"","stack_id":"rust","license_id":"MIT","gitignore_id":"Rust"}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(create["ok"], true, "{create}");
+    let br = rpc_json(
+        &app,
+        r#"{"procedure":"repo.branchCreate","input":{"owner":"icprown","name":"demo","branch":"feature","start":"main"}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(br["ok"], true, "{br}");
+
+    let bare = repos.join("icprown").join("demo.git");
+    commit_on_branch(&bare, "feature", "note", &[("NOTE.md", "line1\n")]).await;
+
+    let pr = rpc_json(
+        &app,
+        r#"{"procedure":"pull.create","input":{"owner":"icprown","name":"demo","title":"PR","base_ref":"main","head_ref":"feature"}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(pr["ok"], true, "{pr}");
+    let n = pr["data"]["number"].as_i64().unwrap();
+
+    let hook_url = format!("{}/icpr", sink.uri());
+    let created = rpc_json(
+        &app,
+        &format!(
+            r#"{{"procedure":"webhook.create","input":{{"owner":"icprown","name":"demo","url":"{hook_url}","secret":"s","events":["issue_comment"]}}}}"#
+        ),
+        &cookie,
+    )
+    .await;
+    assert_eq!(created["ok"], true, "{created}");
+    let hook_id = created["data"]["id"].as_str().unwrap().to_string();
+
+    let general = rpc_json(
+        &app,
+        &format!(
+            r#"{{"procedure":"pull.comments.create","input":{{"owner":"icprown","name":"demo","number":{n},"body":"conversation note"}}}}"#
+        ),
+        &cookie,
+    )
+    .await;
+    assert_eq!(general["ok"], true, "{general}");
+
+    let line = rpc_json(
+        &app,
+        &format!(
+            r#"{{"procedure":"pull.comments.create","input":{{"owner":"icprown","name":"demo","number":{n},"body":"nit","path":"NOTE.md","side":"RIGHT","line":1}}}}"#
+        ),
+        &cookie,
+    )
+    .await;
+    assert_eq!(line["ok"], true, "{line}");
+
+    // Delivery rows are inserted inside `emit` before the RPC returns, so the
+    // line-anchored comment must not have produced a second `issue_comment` row.
+    let deliveries = db.list_webhook_deliveries(&hook_id, 50).await.expect("list");
+    let ic: Vec<_> = deliveries
+        .iter()
+        .filter(|d| d.event == "issue_comment")
+        .collect();
+    assert_eq!(ic.len(), 1, "{deliveries:?}");
+    assert_eq!(ic[0].action, "created");
+    assert!(ic[0].payload_json.contains("conversation note"));
+    assert!(ic[0].payload_json.contains("\"pull_request\""));
+}
+
+async fn commit_on_branch(
+    bare: &std::path::Path,
+    branch: &str,
+    message: &str,
+    files: &[(&str, &str)],
+) {
+    let wt = tempfile::tempdir().unwrap();
+    let bare_s = bare.to_str().unwrap();
+    let wt_s = wt.path().to_str().unwrap();
+    let status = std::process::Command::new("git")
+        .args(["clone", "--branch", branch, bare_s, wt_s])
+        .status()
+        .unwrap();
+    assert!(status.success(), "clone");
+    for (path, content) in files {
+        let dest = wt.path().join(path);
+        if let Some(parent) = dest.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(&dest, content.as_bytes()).unwrap();
+    }
+    for args in [
+        vec!["-C", wt_s, "config", "user.email", "t@ex.com"],
+        vec!["-C", wt_s, "config", "user.name", "Test"],
+        vec!["-C", wt_s, "add", "-A"],
+        vec!["-C", wt_s, "commit", "-m", message],
+        vec!["-C", wt_s, "push", "origin", "HEAD"],
+    ] {
+        let status = std::process::Command::new("git").args(&args).status().unwrap();
+        assert!(status.success(), "git {args:?}");
+    }
+}
+
+#[tokio::test]
 async fn webhook_ssrf_rejects_unsafe_url() {
     let dir = tempfile::tempdir().expect("tempdir");
     let repos = dir.path().join("repos");
