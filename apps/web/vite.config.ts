@@ -9,6 +9,7 @@ import {
 } from "./vite-plugins/fix-type-only-imports.ts";
 import { parseViteAllowedHosts } from "./vite-plugins/vite-allowed-hosts.ts";
 import { webHealthPlugin } from "./vite-plugins/web-health.ts";
+import { webmcpWellKnownPlugin } from "./vite-plugins/webmcp-well-known.ts";
 import { swBuildIdPlugin } from "./vite-plugins/sw-build-id.ts";
 
 // NOTE (03-05): vite-plugin-pwa was evaluated here but does not emit a service
@@ -51,6 +52,8 @@ export default defineConfig(() => {
       webHealthPlugin(),
       // Per-deploy CACHE_NAME + VITE_OXIDEAN_SW_BUILD for SW update busting.
       swBuildIdPlugin(),
+      // AGT-02: /.well-known/{webmcp,mcp} discovery documents (dev + preview).
+      webmcpWellKnownPlugin(),
       fixTypeOnlyImports(RECHARTS_TYPE_ONLY_IMPORT_FIX),
       tanstackStart({
         // Keep colocated *.integration.test.* / *.unit.test.* out of the route tree
@@ -76,6 +79,8 @@ export default defineConfig(() => {
       proxy: {
         "/api/rpc/ws": { target: apiProxyTarget.replace(/^http/, "ws"), ws: true },
         "/api/rpc": { target: apiProxyTarget, changeOrigin: true },
+        // AGT-02: in-page WebMCP tools call the instance MCP endpoint same-origin.
+        "/api/mcp": { target: apiProxyTarget, changeOrigin: true },
         "/api/auth": { target: apiProxyTarget, changeOrigin: true },
         "/api/user": { target: apiProxyTarget, changeOrigin: true },
         "/api/repos": { target: apiProxyTarget, changeOrigin: true },

@@ -124,6 +124,15 @@ shapes via `resources/templates/list`:
 
 Reads go through the same ACL + token-scope seam as the matching tools.
 
+## Browser agents (WebMCP)
+
+The web app advertises this endpoint to browser-side agents: every page
+registers the live `tools/list` catalog as WebMCP tools (`document.modelContext`
+/ `navigator.modelContext`) that proxy `tools/call` here with the viewer's
+session cookie, and a `<link rel="webmcp">` tag points at
+`/.well-known/webmcp` for pre-navigation discovery. See
+[WEBMCP.md](WEBMCP.md).
+
 ## Error envelope
 
 ```json
