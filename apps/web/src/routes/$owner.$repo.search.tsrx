@@ -3,6 +3,7 @@ import { useQuery } from "@octanejs/tanstack-query";
 import { useState } from "octane";
 import type { RepoSearchHit, RepoSearchType } from "@oxidean/api-client";
 import { apiClient } from "@/lib/api-client";
+import { CodeSnippet } from "@/components/code-snippet";
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
 
@@ -193,9 +194,7 @@ export function RepoSearchPage() @{
                     <span className="text-muted-foreground">
                       :{String(hit.line)}
                     </span>;
-                    <pre className="mt-1 overflow-x-auto text-[13px] text-foreground">
-                      {hit.content as string}
-                    </pre>;
+                    <CodeSnippet code={hit.content} path={hit.path} />;
                   }
                 </li>;
               } @else {

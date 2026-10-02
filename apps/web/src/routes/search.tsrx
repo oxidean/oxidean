@@ -25,6 +25,7 @@ import {
   Search,
   Users,
 } from "@octanejs/lucide";
+import { CodeSnippet } from "@/components/code-snippet";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -364,7 +365,7 @@ function CodeRow({ hit }: { hit: GlobalSearchCodeHit }) @{
     <span className="font-mono text-[13px] text-muted-foreground">
       {(":" + hit.line) as string}
     </span>
-    <pre className="mt-1 overflow-x-auto text-[13px] text-foreground">{hit.content as string}</pre>
+    <CodeSnippet code={hit.content} path={hit.path} />
   </ListRow>;
 }
 
