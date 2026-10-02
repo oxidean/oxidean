@@ -773,13 +773,25 @@ export const expectForgeIssuesCrudFlow: BrowserCommand<[]> = async (ctx) => {
     assertNoOctaneOverlay(await page.content(), "new issue");
     await page.locator("#issue-title").fill(title);
     await page.getByRole("button", { name: /Submit new issue/i }).click();
-    await new Promise((r) => setTimeout(r, 800));
 
+    // Submit navigates client-side — wait for the detail URL to commit rather
+    // than polling page.url() after a fixed sleep: a pending router commit can
+    // land after the sleep, and a fallback page.goto fired while it is in
+    // flight aborts with net::ERR_ABORTED.
     let number = 0;
-    const pathMatch = page.url().match(/\/issues\/(\d+)/);
-    if (pathMatch) {
-      number = Number(pathMatch[1]);
-    } else {
+    try {
+      await page.waitForURL(
+        (url) => {
+          const u = typeof url === "string" ? new URL(url) : url;
+          return /\/issues\/\d+/.test(u.pathname);
+        },
+        { timeout: 15_000, waitUntil: "domcontentloaded" },
+      );
+      number = Number(page.url().match(/\/issues\/(\d+)/)?.[1] ?? 0);
+    } catch {
+      // no client navigation — fall through to the RPC fallback
+    }
+    if (!number) {
       const created = await rpc(
         "issue.create",
         {
@@ -876,9 +888,24 @@ export const expectForgeReleasesCrudFlow: BrowserCommand<[]> = async (ctx) => {
     assertNoOctaneOverlay(await page.content(), "new release");
     await page.locator("#release-title").fill(releaseTitle);
     await page.getByRole("button", { name: /Publish release/i }).click();
-    await new Promise((r) => setTimeout(r, 800));
 
-    if (!page.url().includes(`/releases/${tag}`)) {
+    // Same client-nav race as issues — wait for the release detail URL to
+    // commit before deciding the UI flow failed (see expectForgeIssuesCrudFlow).
+    let landedOnRelease = false;
+    try {
+      await page.waitForURL(
+        (url) => {
+          const u = typeof url === "string" ? new URL(url) : url;
+          return u.pathname.includes(`/releases/${tag}`);
+        },
+        { timeout: 15_000, waitUntil: "domcontentloaded" },
+      );
+      landedOnRelease = true;
+    } catch {
+      // no client navigation — fall through to the RPC fallback
+    }
+
+    if (!landedOnRelease) {
       const created = await rpc(
         "release.create",
         {

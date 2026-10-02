@@ -7,6 +7,36 @@ type AppLinkProps = ComponentProps<"a"> & {
 };
 
 /**
+ * Split an app-internal href into the router-facing pieces (`to`, raw
+ * `search`, `hash`) — the same decomposition `navigate({ href })` performs
+ * internally in `buildAndCommitLocation`. `Link`'s rendered `href`, active
+ * state, and preload target are computed by `buildLocation`, which reads
+ * `to`/`search`/`hash` and ignores a raw `href` prop — so passing these
+ * explicitly is what makes a fully-built path behave like a router link.
+ *
+ * Returns `undefined` for anything that is not an absolute-path internal
+ * URL (relative paths, protocol-relative, absolute external URLs, bare
+ * `#fragment`s, missing href) — those keep native anchor semantics.
+ */
+function splitInternalHref(
+  href: string | undefined,
+): { to: string; search: string; hash: string | undefined } | undefined {
+  if (typeof href !== "string" || !href.startsWith("/") || href.startsWith("//")) {
+    return undefined;
+  }
+  try {
+    const url = new URL(href, "http://internal.invalid");
+    return {
+      to: url.pathname,
+      search: url.search,
+      hash: url.hash.slice(1) || undefined,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Internal navigation link — the shared replacement for raw `<a>` elements
  * pointing at app routes.
  * Inside the app router it renders a router-aware anchor: client-side
@@ -21,14 +51,21 @@ type AppLinkProps = ComponentProps<"a"> & {
  */
 export function AppLink({ href, preload, children, ...rest }: AppLinkProps) @{
   const router = useRouter({ warn: false });
+  const dest = splitInternalHref(typeof href === "string" ? href : undefined);
   <>
-    @if (router) {
-      <Link href={href as string} preload={preload ?? "intent"} {...rest}>
+    @if (router && dest) {
+      <Link
+        to={dest.to}
+        search={router.options.parseSearch(dest.search) as Record<string, unknown>}
+        hash={dest.hash}
+        preload={preload ?? "intent"}
+        {...rest}
+      >
         {children}
       </Link>;
     } @else {
       {
-        /* raw-anchor-ok — intentional fallback when no RouterProvider (tests) */
+        /* raw-anchor-ok — no RouterProvider (tests) or non-route href */
       }
       <a href={href} {...rest}>
         {children}
