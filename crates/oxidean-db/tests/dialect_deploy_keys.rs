@@ -1,23 +1,23 @@
-//! GIT-23: `0033_deploy_keys` + deploy_keys CRUD (UNIQUE(repo_id, fingerprint)).
+//! GIT-23: `0035_deploy_keys` + deploy_keys CRUD (UNIQUE(repo_id, fingerprint)).
 
 use oxidean_core::Role;
 use oxidean_db::Database;
 
-/// Expect sqlite `0033_deploy_keys.sql` with `deploy_keys` + UNIQUE(repo_id,
+/// Expect sqlite `0035_deploy_keys.sql` with `deploy_keys` + UNIQUE(repo_id,
 /// fingerprint), then create/find/list/touch/revoke round-trip, cross-repo
 /// reuse, per-repo dedupe, and repo-delete cascade.
 #[tokio::test]
-async fn dialect_deploy_keys_migrate_0033_schema_presence() {
+async fn dialect_deploy_keys_migrate_0035_schema_presence() {
     let migration_path = concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/migrations/sqlite/0033_deploy_keys.sql"
+        "/migrations/sqlite/0035_deploy_keys.sql"
     );
     let sql = std::fs::read_to_string(migration_path).unwrap_or_default();
     assert!(
         !sql.is_empty(),
-        "0033_deploy_keys.sql must exist (deploy_keys + repo-scoped fingerprint UNIQUE)"
+        "0035_deploy_keys.sql must exist (deploy_keys + repo-scoped fingerprint UNIQUE)"
     );
-    assert!(sql.contains("deploy_keys"), "0033 must define deploy_keys");
+    assert!(sql.contains("deploy_keys"), "0035 must define deploy_keys");
     for col in [
         "id",
         "repo_id",
@@ -32,12 +32,12 @@ async fn dialect_deploy_keys_migrate_0033_schema_presence() {
     ] {
         assert!(
             sql.contains(col),
-            "0033 deploy_keys must mention column {col}"
+            "0035 deploy_keys must mention column {col}"
         );
     }
     assert!(
         sql.to_ascii_uppercase().contains("UNIQUE"),
-        "0033 must enforce UNIQUE(repo_id, fingerprint)"
+        "0035 must enforce UNIQUE(repo_id, fingerprint)"
     );
 
     let dir = tempfile::tempdir().expect("tempdir");
@@ -185,19 +185,19 @@ async fn dialect_deploy_keys_migrate_0033_schema_presence() {
 fn dialect_deploy_keys_tri_dialect_files() {
     let root = concat!(env!("CARGO_MANIFEST_DIR"), "/migrations");
     for dialect in ["sqlite", "postgres", "mysql"] {
-        let path = format!("{root}/{dialect}/0033_deploy_keys.sql");
+        let path = format!("{root}/{dialect}/0035_deploy_keys.sql");
         let sql = std::fs::read_to_string(&path).unwrap_or_default();
         assert!(
             !sql.is_empty(),
-            "missing {path} — tri-dialect 0033_deploy_keys required"
+            "missing {path} — tri-dialect 0035_deploy_keys required"
         );
         assert!(
             sql.contains("deploy_keys"),
-            "{dialect} 0033_deploy_keys must mention deploy_keys"
+            "{dialect} 0035_deploy_keys must mention deploy_keys"
         );
         assert!(
             sql.contains("fingerprint") && sql.contains("repo_id"),
-            "{dialect} 0033_deploy_keys must mention fingerprint + repo_id"
+            "{dialect} 0035_deploy_keys must mention fingerprint + repo_id"
         );
     }
 }
