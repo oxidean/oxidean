@@ -228,6 +228,14 @@ export const Route = createFileRoute("/$owner/$repo/")({
         title: `${params.owner}/${params.repo} · Oxidean`,
       },
     ],
+    links: [
+      {
+        rel: "alternate",
+        type: "application/atom+xml",
+        title: `${params.owner}/${params.repo} activity feed`,
+        href: `/api/repos/${params.owner}/${params.repo}/activity.atom`,
+      },
+    ],
   }),
   loader: async ({ params }): Promise<CodeHomeLoaderData> => {
     const owner = String((params as { owner?: string }).owner ?? "");

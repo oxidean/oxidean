@@ -3398,6 +3398,15 @@ impl Database {
         repo_activity::list_by_actor(self.require_pool()?, actor_id, limit).await
     }
 
+    /// Public-repo-only actor activity for Atom feeds (API-05) — private repos excluded.
+    pub async fn list_repo_activity_by_actor_public(
+        &self,
+        actor_id: &str,
+        limit: i64,
+    ) -> Result<Vec<RepoActivityRow>, String> {
+        repo_activity::list_by_actor_public(self.require_pool()?, actor_id, limit).await
+    }
+
     // --- audit events ---
 
     pub async fn insert_audit_event(

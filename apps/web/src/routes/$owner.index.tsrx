@@ -32,7 +32,18 @@ export const Route = createFileRoute("/$owner/")({
       const p = data.user.profile;
       title = `${p.display_name || p.username} · Oxidean`;
     }
-    return { meta: [{ title }] };
+    const links =
+      data?.kind === "user" && data.user.profile
+        ? [
+            {
+              rel: "alternate",
+              type: "application/atom+xml",
+              title: `${data.user.profile.username} activity feed`,
+              href: `/api/users/${data.user.profile.username}/activity.atom`,
+            },
+          ]
+        : [];
+    return { meta: [{ title }], links };
   },
   loader: async ({ params }): Promise<OwnerIndexLoaderData> => {
     const owner = String((params as { owner?: string }).owner ?? "");
