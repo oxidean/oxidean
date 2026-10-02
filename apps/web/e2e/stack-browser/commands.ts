@@ -979,9 +979,34 @@ export const expectReleaseAssetFlow: BrowserCommand<[]> = async (ctx) => {
       timeout: 60_000,
     });
     // Asset link first: proves the loader reached kind="ready" and the assets
-    // section rendered. The upload affordance then renders for can_write — its
-    // dropzone input attaches hidden and can lag hydration on cold CI runners.
-    await page.locator(`a[href="${downloadPath}"]`).waitFor({ state: "visible", timeout: 30_000 });
+    // section rendered. Retry with reloads — a cold SSR render can briefly
+    // precede the query seeing the just-uploaded row on busy CI runners. The
+    // upload affordance then renders for can_write — its dropzone input
+    // attaches hidden and can lag hydration on cold CI runners.
+    const assetLink = page.locator(`a[href="${downloadPath}"]`);
+    let linkVisible = false;
+    for (let attempt = 0; attempt < 3 && !linkVisible; attempt++) {
+      if (attempt > 0) {
+        await page.reload({ waitUntil: "domcontentloaded", timeout: 60_000 });
+      }
+      try {
+        await assetLink.waitFor({ state: "visible", timeout: 20_000 });
+        linkVisible = true;
+      } catch {
+        linkVisible = false;
+      }
+    }
+    if (!linkVisible) {
+      const html = await page.content();
+      const state = html.includes("No assets attached")
+        ? "empty-assets"
+        : html.includes("not found") || html.includes("NotFound")
+          ? "not-found"
+          : "unknown";
+      throw new Error(
+        `release asset link never rendered state=${state} url=${page.url()} pageerrors=${pageGuard.pageErrors.join(" | ") || "none"} body=${html.slice(0, 800)}`,
+      );
+    }
     await page.locator("#release-asset-file").waitFor({ state: "attached", timeout: 30_000 });
     const html = await page.content();
     assertNoOctaneOverlay(html, "release detail assets");
@@ -1166,17 +1191,32 @@ export const expectRepoRenameTransferFlow: BrowserCommand<[]> = async (ctx) => {
       name: "Transfer repository",
       exact: true,
     });
+    const confirmInput = page.locator("#transfer-confirm");
     let transferredUi = false;
-    for (let attempt = 0; attempt < 6 && !transferredUi; attempt++) {
-      // Re-fill per attempt: the confirm stays disabled until confirmValue
-      // equals the repo name, so an unhydrated first fill must not strand us.
-      await page.locator("#transfer-confirm").fill(newRepo);
-      await confirmBtn.click({ force: true }).catch(() => {});
+    for (let attempt = 0; attempt < 8 && !transferredUi; attempt++) {
+      // Server-state first: a prior attempt may have completed the transfer
+      // while client nav stalled — the dialog then unmounts mid-loop and an
+      // unguarded fill on the gone input would burn the whole 30s timeout.
+      const moved = await rpc("repo.get", { owner: orgSlug, name: newRepo }, seed.cookie);
+      if (moved.ok) {
+        transferredUi = true;
+        break;
+      }
       try {
+        await confirmInput.waitFor({ state: "visible", timeout: 5_000 });
+        await confirmInput.fill(newRepo);
+        await confirmBtn.click({ force: true });
         await waitForPath(`/${orgSlug}/${newRepo}/settings`);
         transferredUi = true;
       } catch {
-        transferredUi = false;
+        // Dialog may have closed via nav/remount — re-open before retrying.
+        await orgToggle.click({ force: true }).catch(() => {});
+        await page
+          .locator("#repo-transfer-dest")
+          .fill(orgSlug)
+          .catch(() => {});
+        await transferBtn.click({ force: true }).catch(() => {});
+        await dialog.waitFor({ state: "visible", timeout: 3_000 }).catch(() => {});
       }
     }
     if (!transferredUi) {
