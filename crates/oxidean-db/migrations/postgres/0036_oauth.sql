@@ -1,4 +1,4 @@
--- logical: 0033_oauth — OAuth2 provider surface (API-03): registered third-party
+-- logical: 0036_oauth — OAuth2 provider surface (API-03): registered third-party
 -- applications, single-use authorization codes, and hashed access tokens.
 -- Secrets/codes/tokens are stored as SHA-256 hex only (hash-at-rest like PATs).
 
