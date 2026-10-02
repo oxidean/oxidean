@@ -112,6 +112,7 @@ SSO start routes redirect to the IdP when configured. If WorkOS/OIDC ENV is miss
 | `user.getPublicProfile` | Public profile by username (`username`, `display_name`, `bio`, `avatar_url` — **never email**) | Anonymous OK; unknown → `user.not_found` |
 | `repo.explore` | Public repos sorted by `star_count` desc then `updated_at` desc; optional `q` substring | Anonymous OK |
 | `repo.fork` | Fork public readable source (bare copy); sets `forked_from_repo_id` + `fork_network_id`; one active fork per (owner, network) | Session + Read on public source |
+| `repo.insights.contributors` / `repo.insights.commitActivity` / `repo.insights.forkNetwork` | Repo insights — top committers, weekly commit buckets, fork-network tree; bounded git scans report `scanned_commits` + `truncated` | Session + Read |
 | `repo.rename` | Rename repo; moves bare dir; inserts redirect | Repo Admin |
 | `repo.transfer` | Transfer ownership (type-confirm `confirmName`); moves bare dir; redirect | Repo Admin |
 | `repo.softDelete` | Soft-delete with type-confirm | Repo Admin |
@@ -398,6 +399,18 @@ Phase 17 ships in-app activity notifications (NOTF-01 / NOTF-02) on migration `0
 | **Fan-out** | Domain writes (e.g. `issue.comments.create`) insert best-effort rows; actors are never notified. Activity email is out of scope. |
 
 Client surface: `client.notification.*` in `@oxidean/api-client` (regenerate with `make rpc-gen`).
+
+### Repository insights (`repo.insights.*`)
+
+Three read procedures back the repo **Insights** page (`/{owner}/{repo}/insights`). All gate on repo Read; private repos return soft `repo.not_found` for outsiders.
+
+| Procedure | Returns |
+|-----------|---------|
+| `repo.insights.contributors` | Top committers on the default branch: `name`, `email`, `commit_count`, first/last commit SHA + unix time, plus `username` / `avatar_url` when the author email matches an Oxidean account. Input `limit` clamps to 1–100. |
+| `repo.insights.commitActivity` | `weeks` Sunday-anchored buckets (`week` epoch, `days` Sun–Sat counts, `total`) ending at the current in-progress week, plus `total`. Input `weeks` defaults to 52, clamps to 1–104. |
+| `repo.insights.forkNetwork` | Fork-network members (network root + public forks + the queried repo even when private) with `parent_owner` / `parent_name` links, star/fork counts, `is_root` / `is_current` flags, oldest-first. Input `limit` defaults to 100, clamps to 1–500. |
+
+Git-backed sections walk at most 50k (contributors) / 100k (activity) commits and set `truncated` when the walk was clipped, so large repositories stay cheap.
 
 ### Git Smart HTTP
 

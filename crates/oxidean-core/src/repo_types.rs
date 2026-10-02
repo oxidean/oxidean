@@ -493,6 +493,131 @@ pub struct RepoActivityListResponse {
     pub limit: i64,
 }
 
+/// `repo.insights.contributors` — top committers on the default branch (GIT-26).
+/// The history walk is bounded by the server's scan cap (`truncated`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoInsightsContributorsRequest {
+    pub owner: String,
+    pub name: String,
+    /// Max authors returned (default 30, clamp 1..=100).
+    #[serde(default)]
+    pub limit: Option<i64>,
+}
+
+/// One committer row in the insights contributors view.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoInsightContributor {
+    /// Author name from the newest scanned commit (resolved user's display
+    /// name when the email maps to an account).
+    pub name: String,
+    /// Author email as recorded in git history (public commit data).
+    pub email: String,
+    pub commit_count: i64,
+    /// Oxidean username when the author email resolves to an account.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_url: Option<String>,
+    /// Oldest scanned commit by this author (for `/commit/` links).
+    pub first_commit_sha: String,
+    /// Committer unix timestamp of the author's oldest scanned commit.
+    pub first_commit_unix: i64,
+    /// Newest scanned commit by this author.
+    pub last_commit_sha: String,
+    /// Committer unix timestamp of the author's newest scanned commit.
+    pub last_commit_unix: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoInsightsContributorsResponse {
+    pub contributors: Vec<RepoInsightContributor>,
+    /// Default-branch commits walked (bounded by the server cap).
+    pub scanned_commits: u64,
+    /// True when history is deeper than the scan cap.
+    pub truncated: bool,
+}
+
+/// `repo.insights.commitActivity` — weekly commit buckets on the default
+/// branch, GitHub `/stats/commit_activity` shape (GIT-26).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoInsightsCommitActivityRequest {
+    pub owner: String,
+    pub name: String,
+    /// Trailing ISO weeks to include, ending with the current week
+    /// (default 52, clamp 1..=104).
+    #[serde(default)]
+    pub weeks: Option<i64>,
+}
+
+/// One ISO week bucket. `week` is the Sunday 00:00:00 UTC epoch; `days` is
+/// commits per weekday with index 0 = Sunday .. 6 = Saturday.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoCommitActivityWeek {
+    pub week: i64,
+    pub days: [i64; 7],
+    pub total: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoInsightsCommitActivityResponse {
+    /// Oldest-first week buckets; the last bucket is the in-progress week.
+    pub weeks: Vec<RepoCommitActivityWeek>,
+    /// Total commits counted inside the window.
+    pub total: i64,
+    /// Default-branch commits walked (bounded by the server cap).
+    pub scanned_commits: u64,
+    /// True when the walk hit the scan cap before covering the window.
+    pub truncated: bool,
+}
+
+/// `repo.insights.forkNetwork` — fork tree across the repo's network (GIT-26).
+/// Public members only (plus the queried repo itself); private forks of other
+/// users are not listed.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoInsightsForkNetworkRequest {
+    pub owner: String,
+    pub name: String,
+    /// Max member nodes returned (default 100, clamp 1..=500).
+    #[serde(default)]
+    pub limit: Option<i64>,
+}
+
+/// One node of the fork-network tree.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoForkNetworkNode {
+    pub id: String,
+    pub owner: String,
+    pub name: String,
+    /// Immediate parent (`forked_from`) owner/name when the row exists.
+    /// Absent on the network root and when the parent row is gone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_owner: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_name: Option<String>,
+    pub star_count: i64,
+    /// Direct forks of this node within the network.
+    pub fork_count: i64,
+    pub created_at: String,
+    pub updated_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_avatar_url: Option<String>,
+    /// True on the network root (id == `fork_network_id`).
+    pub is_root: bool,
+    /// True on the queried repository.
+    pub is_current: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoInsightsForkNetworkResponse {
+    /// Members oldest-first so clients can build the tree in one pass
+    /// (parents precede children apart from the queried repo edge case).
+    pub nodes: Vec<RepoForkNetworkNode>,
+    /// Total matching members before `limit` was applied.
+    pub total: i64,
+    /// True when `limit` clipped the member list.
+    pub truncated: bool,
+}
+
 /// `user.listStarred` — caller's starred repos (D-SOC-03).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ListStarredRequest {
