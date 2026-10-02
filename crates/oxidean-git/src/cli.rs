@@ -2671,10 +2671,13 @@ mod tests {
         assert_eq!(hits.hits.len(), 1);
         assert_eq!(hits.hits[0].path, "src/readme.md");
 
-        // An absolute path or `..` traversal pathspec is rejected outright.
-        let bad = vec!["/etc/passwd".to_string()];
-        assert!(git.grep(&bare, "main", "TOK", &bad, 50).await.is_err());
+        // `..` traversal and NUL injection pathspecs are rejected outright.
+        // (A leading `/` is normalized like the `path:` qualifier, so an
+        // absolute-looking spec can't escape the repo — git only sees
+        // repo-relative pathspecs.)
         let bad = vec!["../escape.txt".to_string()];
+        assert!(git.grep(&bare, "main", "TOK", &bad, 50).await.is_err());
+        let bad = vec!["a\0b".to_string()];
         assert!(git.grep(&bare, "main", "TOK", &bad, 50).await.is_err());
     }
 
