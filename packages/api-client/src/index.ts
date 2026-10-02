@@ -1123,6 +1123,20 @@ export type AdminLfsUsageResponse = {
   by_repo: AdminLfsRepoUsageEntry[];
   by_owner: AdminLfsOwnerUsageEntry[];
 };
+
+export type AdminMcpSettingsPublic = {
+  /** Effective state: stored admin override, else OXIDEAN_MCP_ENABLED env default. */
+  enabled: boolean;
+  /** True when an admin override row is stored; false → env default in force. */
+  enabled_overridden: boolean;
+};
+
+export type AdminMcpUpdateSettingsRequest = {
+  /** Stores an explicit override; omit to keep the stored value. */
+  enabled?: boolean | null;
+  /** When true, clear the override so the env default applies again. */
+  clear_overrides?: boolean;
+};
 export type RepoRenameRequest = {
   owner: string;
   name: string;
@@ -3104,6 +3118,12 @@ export function createClient(opts: CreateClientOptions) {
         updateSettings: (input: AdminLfsUpdateSettingsRequest) =>
           rpcCall<AdminLfsSettingsPublic>(opts, "admin.lfs.updateSettings", input),
         getUsage: () => rpcCall<AdminLfsUsageResponse>(opts, "admin.lfs.getUsage", {}),
+      },
+      mcp: {
+        getSettings: () =>
+          rpcCall<AdminMcpSettingsPublic>(opts, "admin.mcp.getSettings", {}),
+        updateSettings: (input: AdminMcpUpdateSettingsRequest) =>
+          rpcCall<AdminMcpSettingsPublic>(opts, "admin.mcp.updateSettings", input),
       },
       templates: {
         list: () => rpcCall<AdminTemplatesListResponse>(opts, "admin.templates.list", {}),

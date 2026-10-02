@@ -56,6 +56,7 @@ Related docs: [database.md](database.md), [dev-auth.md](dev-auth.md).
 | `OXIDEAN_TEMPLATE_PACK_MAX_BYTES` | Optional | `10485760` (10 MiB) | Max uploaded instance template zip size. |
 | `OXIDEAN_ACTIONS_LOG_DIR` | Optional | `var/actions-logs` | Root for Actions job logs (`{run_id}/{job_id}.log`). Compose binds `./var/actions-logs:/var/actions-logs` and sets `/var/actions-logs`. **Must not** share repos/LFS/packages/release-asset paths (D-ACT-13). |
 | `OXIDEAN_ACTIONS_ENABLED` | Optional | `true` | Instance-wide Actions gate. When `false`/`0`/`off`, no workflows are evaluated (D-ACT-06). Per-repo Admin toggle still applies when instance gate is on. |
+| `OXIDEAN_MCP_ENABLED` | Optional | `true` | Instance gate for the MCP endpoint (`POST /api/mcp`). Sys-admins can override at runtime under **Admin → MCP endpoint** (`admin.mcp.updateSettings`); clearing the override reverts to this env default. Disabled → `404 mcp.disabled`. See [MCP.md](MCP.md). |
 | `OXIDEAN_RUNNER_REGISTRATION_TOKEN` | Optional | — | Bootstrap registration token for official runners (Compose profile `actions`). **Reusable while set** — never leave on an internet-facing API; prefer `admin.actions.createRegistrationToken` (one-time). Unset after local runner bootstrap. Rotate on compromise (D-ACT-08). **Never commit real tokens.** |
 | `OXIDEAN_RUNNER_NAME` | Optional | `compose-runner` | Display name passed to runner register. |
 | `OXIDEAN_RUNNER_LABELS` | Optional | `ubuntu-latest:docker://node:20-bookworm,self-hosted` | Comma-separated runner labels (`label[:schema[:args]]`). |

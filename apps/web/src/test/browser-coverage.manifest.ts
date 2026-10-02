@@ -306,6 +306,16 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
     ],
   },
   {
+    surface: "routes/admin/mcp.tsrx",
+    coverage: [
+      {
+        kind: "browser",
+        test: "apps/web/src/routes/admin/mcp.browser.test.tsx",
+        subject: "admin-mcp-page",
+      },
+    ],
+  },
+  {
     surface: "routes/$owner.settings.index.tsrx",
     coverage: [
       {

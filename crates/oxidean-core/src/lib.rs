@@ -3,6 +3,7 @@
 pub mod action_types;
 pub mod auth_types;
 pub mod issue_types;
+pub mod mcp_types;
 pub mod mirror_types;
 pub mod notification_types;
 pub mod org_types;
@@ -20,6 +21,7 @@ pub mod webhook_types;
 pub use action_types::*;
 pub use auth_types::*;
 pub use issue_types::*;
+pub use mcp_types::*;
 pub use mirror_types::*;
 pub use notification_types::*;
 pub use org_types::*;

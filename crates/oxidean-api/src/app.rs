@@ -19,7 +19,7 @@ use oxidean_git::{CliGitBackend, GitBackend};
 use crate::auth::pending::PendingAuthStore;
 use crate::auth::session::{
     build_session_presence_cookie, clear_session_cookie, clear_session_presence_cookie,
-    SessionService, SESSION_COOKIE_NAME, SESSION_IDLE,
+    ResolvedSession, SessionService, SESSION_COOKIE_NAME, SESSION_IDLE,
 };
 use crate::email::{self, EmailSender};
 use crate::pat::rate_limit::FailedAuthLimiter;
@@ -51,6 +51,9 @@ pub struct AppState {
     pub actions_log_dir: PathBuf,
     /// Instance Actions gate (`OXIDEAN_ACTIONS_ENABLED`, default true) — D-ACT-06.
     pub actions_enabled: bool,
+    /// Env default for the MCP endpoint (`OXIDEAN_MCP_ENABLED`, default true) —
+    /// AGT-03. `instance_mcp_settings.enabled` (admin override) wins when set.
+    pub mcp_enabled: bool,
     /// Git forge backend — Phase 7 registers [`CliGitBackend`] only (D-32).
     pub git: Arc<dyn GitBackend>,
     pub sessions: SessionService,
@@ -149,6 +152,7 @@ impl AppState {
                 !(t.is_empty() || t == "0" || t == "false" || t == "no" || t == "off")
             })
             .unwrap_or(true);
+        let mcp_enabled = crate::mcp::env_mcp_enabled();
         let search_timeout_ms = std::env::var("OXIDEAN_SEARCH_TIMEOUT_MS")
             .ok()
             .and_then(|s| s.parse().ok())
@@ -174,6 +178,7 @@ impl AppState {
             packages_dir,
             actions_log_dir,
             actions_enabled,
+            mcp_enabled,
             git: Arc::new(CliGitBackend::new()) as Arc<dyn GitBackend>,
             sessions: SessionService::new(env_name.clone()),
             pending: PendingAuthStore::new(),
@@ -226,6 +231,12 @@ impl AppState {
         self
     }
 
+    /// Test hook — simulates `OXIDEAN_MCP_ENABLED=false` without process env.
+    pub fn with_mcp_enabled(mut self, enabled: bool) -> Self {
+        self.mcp_enabled = enabled;
+        self
+    }
+
     pub fn with_git(mut self, git: Arc<dyn GitBackend>) -> Self {
         self.git = git;
         self
@@ -252,6 +263,10 @@ pub fn router_with_state(state: AppState, cors: CorsLayer) -> Router {
         .route("/health", get(health))
         .route("/api/rpc", post(rpc_http))
         .route("/api/rpc/ws", get(rpc_ws))
+        .route(
+            "/api/mcp",
+            post(crate::mcp::handle_post).get(crate::mcp::handle_get),
+        )
         .nest("/api/actions", crate::actions::runner_proto::router())
         .route("/api/auth/workos/start", get(auth_callbacks::workos_start))
         .route(
@@ -339,7 +354,7 @@ async fn health() -> Json<serde_json::Value> {
     Json(serde_json::json!({ "ok": true }))
 }
 
-fn session_token_from_headers(headers: &HeaderMap) -> Option<String> {
+pub(crate) fn session_token_from_headers(headers: &HeaderMap) -> Option<String> {
     let cookie_header = headers.get(header::COOKIE)?.to_str().ok()?;
     for part in cookie_header.split(';') {
         let part = part.trim();
@@ -351,12 +366,13 @@ fn session_token_from_headers(headers: &HeaderMap) -> Option<String> {
     None
 }
 
-async fn build_rpc_ctx(
+/// Resolve a raw `oxidean_session` cookie token to a session (shared by RPC + MCP).
+pub(crate) async fn resolve_session_token(
     state: &AppState,
     raw_token: Option<&str>,
-    client: rpc::ClientMeta,
-) -> RpcCtx {
-    let session = match raw_token {
+    client: &rpc::ClientMeta,
+) -> Option<ResolvedSession> {
+    match raw_token {
         Some(token) => match state
             .sessions
             .resolve(
@@ -374,7 +390,15 @@ async fn build_rpc_ctx(
             }
         },
         None => None,
-    };
+    }
+}
+
+/// Build an [`RpcCtx`] from an already-resolved session (cookie or token-derived).
+pub(crate) fn build_rpc_ctx_with_session(
+    state: &AppState,
+    session: Option<ResolvedSession>,
+    client: rpc::ClientMeta,
+) -> RpcCtx {
     let email = state.current_email();
     RpcCtx {
         db: state.db.clone(),
@@ -397,6 +421,15 @@ async fn build_rpc_ctx(
         search_max_matches: state.search_max_matches,
         search_max_files: state.search_max_files,
     }
+}
+
+async fn build_rpc_ctx(
+    state: &AppState,
+    raw_token: Option<&str>,
+    client: rpc::ClientMeta,
+) -> RpcCtx {
+    let session = resolve_session_token(state, raw_token, &client).await;
+    build_rpc_ctx_with_session(state, session, client)
 }
 
 fn append_set_cookie(response: &mut axum::response::Response, cookie: &cookie::Cookie<'_>) {
