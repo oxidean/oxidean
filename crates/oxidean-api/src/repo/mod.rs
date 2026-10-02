@@ -14,6 +14,7 @@ mod search;
 mod search_query;
 pub(crate) mod signatures;
 mod social_lists;
+mod sync_fork;
 mod templates;
 
 pub use acl::{
@@ -46,6 +47,7 @@ pub use activity::{
 };
 pub use search::search;
 pub use social_lists::{forks_list, stargazers_list, watchers_list};
+pub use sync_fork::{fork_status, sync_fork};
 
 /// Soft size limit for blob preview / raw soft-cap (D-20 / T-07-16).
 /// 1 MiB keeps preview responses cheap without clipping most source files.
