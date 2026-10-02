@@ -383,6 +383,20 @@ pub async fn resolve_repo_for_read(
     })
 }
 
+/// GIT-20: archived repositories reject content writes with `repo.archived`.
+/// Reads, clone/fetch, and Admin settings (including unarchive) stay open.
+pub fn archived_error() -> AppError {
+    AppError::new("repo.archived", "Repository is archived (read-only)")
+}
+
+/// Reject a content write when the resolved repository is archived (GIT-20).
+pub fn ensure_not_archived(repo: &AccessibleRepo) -> Result<(), AppError> {
+    if repo.row.archived {
+        return Err(archived_error());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod coalesce_tests {
     //! ORG-02 / D-ORG-05: highest-wins coalesce matrix.

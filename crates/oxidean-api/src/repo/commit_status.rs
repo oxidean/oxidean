@@ -77,6 +77,8 @@ pub async fn create(
     if !meets(accessible.capability, Capability::Write) {
         return Err(acl::not_found());
     }
+    // GIT-20: commit statuses are writes — frozen while archived.
+    acl::ensure_not_archived(&accessible)?;
     let id = Uuid::new_v4().to_string();
     let row = ctx
         .db

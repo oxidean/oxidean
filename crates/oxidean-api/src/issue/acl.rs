@@ -18,6 +18,7 @@ pub async fn resolve_for_read(
 }
 
 /// Resolve repo for Write+ (create / close / reopen). Soft not_found when capability is insufficient.
+/// GIT-20: archived repositories reject every issue write (read-only).
 pub async fn resolve_for_write(
     ctx: &RpcCtx,
     owner: &str,
@@ -27,6 +28,7 @@ pub async fn resolve_for_write(
     if !meets(accessible.capability, Capability::Write) {
         return Err(not_found());
     }
+    crate::repo::ensure_not_archived(&accessible)?;
     Ok(accessible)
 }
 

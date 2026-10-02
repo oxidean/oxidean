@@ -136,7 +136,7 @@ export function RepoReleasesPage() @{
         icon={<Rocket aria-hidden size={22} />}
         title="Releases"
         actions={
-          repo.can_write ? (
+          repo.can_write && !repo.archived ? (
             <a href={newHref as string} className="no-underline">
               <Button type="button">Draft a new release</Button>
             </a>

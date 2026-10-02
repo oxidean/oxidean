@@ -143,8 +143,11 @@ export function IssueDetailPage() @{
   const repo = repoQ.data ?? null;
   const issue = issueQ.data ?? null;
   const userId = account.user?.id ?? "";
-  const canEdit = !!issue && (!!repo?.can_write || (!!userId && issue.author_id === userId));
-  const canWrite = !!repo?.can_write;
+  // GIT-20: archived repos hide all write affordances (edit/comment/close included).
+  const notArchived = !repo?.archived;
+  const canEdit =
+    !!issue && notArchived && (!!repo?.can_write || (!!userId && issue.author_id === userId));
+  const canWrite = !!repo?.can_write && notArchived;
   const canAdmin = !!repo?.can_admin;
   const showClose = canWrite && issue?.state === "open";
   const showReopen = canWrite && issue?.state === "closed";
@@ -380,7 +383,7 @@ export function IssueDetailPage() @{
                     Reopen
                   </Button>;
                 }
-                @if (canAdmin) {
+                @if (canAdmin && notArchived) {
                   <Button
                     type="button"
                     variant="destructive"

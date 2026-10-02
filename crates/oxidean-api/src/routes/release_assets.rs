@@ -157,6 +157,14 @@ pub async fn upload_asset(
     if !meets(capability, Capability::Write) {
         return err_response(StatusCode::NOT_FOUND, "repo.not_found", "Repository not found");
     }
+    // GIT-20: archived repositories are read-only — no asset uploads.
+    if repo_row.archived {
+        return err_response(
+            StatusCode::FORBIDDEN,
+            "repo.archived",
+            "Repository is archived (read-only)",
+        );
+    }
 
     let release = match state.db.find_release_by_id(&release_id).await {
         Ok(Some(r)) if r.repo_id == repo_row.id => r,

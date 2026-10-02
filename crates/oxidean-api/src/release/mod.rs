@@ -11,7 +11,9 @@ use uuid::Uuid;
 use crate::auth::gate::require_verified;
 use crate::git::bare_repo_path;
 use crate::repo::resolve_repo_for_admin;
-use crate::repo::{meets, not_found, resolve_repo_for_read, AccessibleRepo, Capability};
+use crate::repo::{
+    ensure_not_archived, meets, not_found, resolve_repo_for_read, AccessibleRepo, Capability,
+};
 use crate::routes::release_assets::{delete_asset_with_file, remove_asset_file};
 use crate::rpc::RpcCtx;
 
@@ -106,6 +108,8 @@ pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<ReleasePub
     if !meets(accessible.capability, Capability::Write) {
         return Err(not_found());
     }
+    // GIT-20: releases are content — frozen while archived.
+    ensure_not_archived(&accessible)?;
     if !tag_exists(ctx, &accessible, tag_name).await? {
         return Err(tag_missing());
     }
@@ -155,6 +159,8 @@ pub async fn update(ctx: &RpcCtx, input: serde_json::Value) -> Result<ReleasePub
         return Err(AppError::new("rpc.bad_input", "tag_name is required"));
     }
     let accessible = resolve_repo_for_read(ctx, &req.owner, &req.name).await?;
+    // GIT-20: releases are content — frozen while archived.
+    ensure_not_archived(&accessible)?;
     let existing = ctx.db.find_release_by_repo_tag(&accessible.row.id, tag_name).await.map_err(db_err)?.ok_or_else(release_not_found)?;
     let is_author = existing.author_id == user.id;
     if !is_author && !meets(accessible.capability, Capability::Write) {
@@ -177,6 +183,8 @@ pub async fn delete(ctx: &RpcCtx, input: serde_json::Value) -> Result<DeleteRele
         return Err(AppError::new("rpc.bad_input", "tag_name is required"));
     }
     let accessible = resolve_repo_for_admin(ctx, &req.owner, &req.name).await?;
+    // GIT-20: releases are content — frozen while archived.
+    ensure_not_archived(&accessible)?;
     let existing = ctx.db.find_release_by_repo_tag(&accessible.row.id, tag_name).await.map_err(db_err)?.ok_or_else(release_not_found)?;
     let assets = ctx
         .db
@@ -205,6 +213,8 @@ pub async fn delete_asset(
     if !meets(accessible.capability, Capability::Write) {
         return Err(not_found());
     }
+    // GIT-20: releases are content — frozen while archived.
+    ensure_not_archived(&accessible)?;
     let asset = ctx
         .db
         .find_release_asset_by_id(req.asset_id.trim())

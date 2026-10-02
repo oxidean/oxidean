@@ -70,7 +70,8 @@ export function IssuesList({
   pending = false,
 }: IssuesListProps) @{
   const base = `/${owner}/${repoName}`;
-  const canWrite = !!repo.can_write;
+  // GIT-20: archived repos hide write affordances (server still rejects mutations).
+  const canWrite = !!repo.can_write && !repo.archived;
   const canAdmin = !!repo.can_admin;
   const emptyCopy =
     filters.state === "closed"
