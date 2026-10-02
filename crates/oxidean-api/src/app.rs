@@ -263,6 +263,12 @@ pub fn router_with_state(state: AppState, cors: CorsLayer) -> Router {
             "/api/auth/oidc/callback",
             get(auth_callbacks::oidc_callback),
         )
+        // OAuth2 provider surface (API-03). The consent screen itself is the
+        // SPA route /oauth/consent; these three paths are API-owned and must be
+        // routed to the API at the edge (Caddyfile / Traefik / vite proxy).
+        .route("/oauth/authorize", get(crate::oauth::authorize))
+        .route("/oauth/token", post(crate::oauth::token))
+        .route("/oauth/userinfo", get(crate::oauth::userinfo))
         .route(
             "/api/user/avatar",
             post(avatar::upload_avatar)
@@ -339,7 +345,7 @@ async fn health() -> Json<serde_json::Value> {
     Json(serde_json::json!({ "ok": true }))
 }
 
-fn session_token_from_headers(headers: &HeaderMap) -> Option<String> {
+pub(crate) fn session_token_from_headers(headers: &HeaderMap) -> Option<String> {
     let cookie_header = headers.get(header::COOKIE)?.to_str().ok()?;
     for part in cookie_header.split(';') {
         let part = part.trim();

@@ -12,7 +12,7 @@ use axum::Json;
 use chrono::{DateTime, Utc};
 use oxidean_core::{
     ClassicPatScope, ContentsPerm, FgRepoAccess, PatKind, CLASSIC_PAT_PREFIX,
-    FINE_GRAINED_PAT_PREFIX,
+    FINE_GRAINED_PAT_PREFIX, OAUTH_ACCESS_TOKEN_PREFIX,
 };
 use oxidean_db::{PatRow, RepositoryRow, UserRow};
 use serde::Deserialize;
@@ -124,8 +124,12 @@ fn parse_basic(headers: &HeaderMap) -> Result<Option<(String, String)>, Response
     Ok(Some((user.to_string(), pass.to_string())))
 }
 
-fn looks_like_pat(password: &str) -> bool {
-    password.starts_with(CLASSIC_PAT_PREFIX) || password.starts_with(FINE_GRAINED_PAT_PREFIX)
+/// Smart HTTP credential check: PAT prefixes, or OAuth access tokens
+/// (`oxidean_oat_` — resolved via `oauth::authenticate_oauth_token`; API-03).
+fn looks_like_token(password: &str) -> bool {
+    password.starts_with(CLASSIC_PAT_PREFIX)
+        || password.starts_with(FINE_GRAINED_PAT_PREFIX)
+        || password.starts_with(OAUTH_ACCESS_TOKEN_PREFIX)
 }
 
 /// Client IP for last-used / rate-limit — rightmost `X-Forwarded-For` hop
@@ -158,6 +162,10 @@ fn pat_expired(expires_at: &Option<String>) -> bool {
 struct AuthedPat {
     pat: PatRow,
     owner: UserRow,
+    /// True when the credential was an `oxidean_oat_` access token
+    /// (`pat` is a synthesized classic-scope row — see
+    /// `oauth::OAuthTokenIdentity::synthetic_pat`).
+    is_oauth: bool,
 }
 
 /// Record a failed Basic/PAT attempt against IP and optional username→user bucket.
@@ -206,21 +214,39 @@ async fn authenticate_pat(
         }
     }
 
-    if !looks_like_pat(&password) {
+    if !looks_like_token(&password) {
         record_failed_auth(state, headers, Some(&username)).await;
         return Err(unauthorized_pat_hint());
     }
-    let token_hash = sha256_hex(password.as_bytes());
-    let pat = match state.db.find_pat_by_token_hash(&token_hash).await {
-        Ok(Some(p)) => p,
-        Ok(None) => {
-            record_failed_auth(state, headers, Some(&username)).await;
-            return Err(unauthorized_pat_hint());
+    let (pat, is_oauth) = if password.starts_with(OAUTH_ACCESS_TOKEN_PREFIX) {
+        // API-03: OAuth access tokens authenticate like classic PATs.
+        // The synthesized row carries `repo`/`package:*` scopes so
+        // `pat_allows_operation` applies unchanged downstream.
+        match crate::oauth::authenticate_oauth_token(&state.db, &password).await {
+            Ok(Some(ident)) => (ident.synthetic_pat(), true),
+            Ok(None) => {
+                record_failed_auth(state, headers, Some(&username)).await;
+                return Err(unauthorized_pat_hint());
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "authenticate_oauth_token failed");
+                return Err(StatusCode::INTERNAL_SERVER_ERROR.into_response());
+            }
         }
-        Err(e) => {
-            tracing::error!(error = %e, "find_pat_by_token_hash failed");
-            return Err(StatusCode::INTERNAL_SERVER_ERROR.into_response());
-        }
+    } else {
+        let token_hash = sha256_hex(password.as_bytes());
+        let pat = match state.db.find_pat_by_token_hash(&token_hash).await {
+            Ok(Some(p)) => p,
+            Ok(None) => {
+                record_failed_auth(state, headers, Some(&username)).await;
+                return Err(unauthorized_pat_hint());
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "find_pat_by_token_hash failed");
+                return Err(StatusCode::INTERNAL_SERVER_ERROR.into_response());
+            }
+        };
+        (pat, false)
     };
     if pat_expired(&pat.expires_at) {
         record_failed_auth(state, headers, Some(&username)).await;
@@ -251,7 +277,11 @@ async fn authenticate_pat(
     }
     // Successful auth clears user bucket only (D-26).
     limiter_lock(state).clear_user(&owner.id);
-    Ok(Some(AuthedPat { pat, owner }))
+    Ok(Some(AuthedPat {
+        pat,
+        owner,
+        is_oauth,
+    }))
 }
 
 struct ResolvedRepo {
@@ -365,15 +395,23 @@ fn strip_git_suffix(repo_git: &str) -> Option<&str> {
     repo_git.strip_suffix(".git").filter(|n| !n.is_empty())
 }
 
-async fn touch_last_used(state: &AppState, pat_id: &str, headers: &HeaderMap) {
+async fn touch_last_used(state: &AppState, auth: &AuthedPat, headers: &HeaderMap) {
     let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
     let ip = client_ip(headers);
-    if let Err(e) = state
-        .db
-        .touch_pat_last_used(pat_id, &now, ip.as_deref())
-        .await
-    {
-        tracing::warn!(error = %e, pat_id, "touch_pat_last_used failed");
+    let pat_id = auth.pat.id.as_str();
+    let res = if auth.is_oauth {
+        state
+            .db
+            .touch_oauth_token_last_used(pat_id, &now, ip.as_deref())
+            .await
+    } else {
+        state
+            .db
+            .touch_pat_last_used(pat_id, &now, ip.as_deref())
+            .await
+    };
+    if let Err(e) = res {
+        tracing::warn!(error = %e, pat_id, "token last_used touch failed");
     }
 }
 
@@ -474,7 +512,7 @@ async fn authorize_and_cgi(
             Ok(false) => return forbidden_insufficient_scope(),
             Err(r) => return r,
         }
-        touch_last_used(state, &auth.pat.id, headers).await;
+        touch_last_used(state, auth, headers).await;
     }
 
     let path_info = format!(
