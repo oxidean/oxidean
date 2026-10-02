@@ -34,6 +34,10 @@ pub enum AuthzDecision {
         is_push: bool,
         /// Forge capability for `OXIDEAN_ACTOR_CAPABILITY` on receive-pack (D-PKG-01).
         capability: Option<Capability>,
+        /// User the push is attributed to in post-receive hooks (webhooks,
+        /// PR sync, Actions). Account path: the authenticated user. Deploy-key
+        /// path (GIT-23): the admin who attached the authorizing key row.
+        actor_user_id: String,
     },
     Deny { message: String },
 }
@@ -160,6 +164,7 @@ pub async fn authorize_pack(
                 repo_name: disk_name.to_string(),
                 is_push: false,
                 capability,
+                actor_user_id: caller_user_id.to_string(),
             }
         }
         PackAction::Push => {
@@ -193,8 +198,102 @@ pub async fn authorize_pack(
                 repo_name: disk_name.to_string(),
                 is_push: true,
                 capability,
+                actor_user_id: caller_user_id.to_string(),
             }
         }
+    }
+}
+
+/// Authorize pack access for a deploy-key principal (GIT-23).
+///
+/// The fingerprint authenticated at handshake time; the repo binding is
+/// enforced here per exec because auth completes before the target repo is
+/// known. A deploy key grants exactly the repos it is attached to — nothing
+/// else (not even public read on other repos) — and never a user identity:
+/// no email-verified / collaborator / org checks apply. `can_write` gates
+/// receive-pack; upload-pack is allowed for any attached key. Push still runs
+/// the receive-pack protection env (`OXIDEAN_ACTOR_CAPABILITY=write`), so
+/// branch protection hooks apply unchanged.
+///
+/// `actor_user_id` on Allow is the attaching admin (`created_by`) — used for
+/// post-push webhook/PR-sync/Actions attribution only.
+pub async fn authorize_deploy_key_pack(
+    db: &Database,
+    repos_dir: &Path,
+    fingerprint: &str,
+    cmd: &PackCommand,
+    client_ip: &str,
+) -> AuthzDecision {
+    let (owner, name, action) = match cmd {
+        PackCommand::UploadPack { owner, name } => (owner.as_str(), name.as_str(), PackAction::Fetch),
+        PackCommand::ReceivePack { owner, name } => (owner.as_str(), name.as_str(), PackAction::Push),
+    };
+
+    let pair = match lookup_repo_row_or_redirect(db, owner, name).await {
+        Ok(Some(p)) => p,
+        Ok(None) => {
+            return AuthzDecision::Deny {
+                message: "ERROR: Repository not found.\n".into(),
+            };
+        }
+        Err(_) => {
+            return AuthzDecision::Deny {
+                message: "ERROR: Internal error.\n".into(),
+            };
+        }
+    };
+    let (row, owner_ref) = pair;
+    let disk_owner = owner_ref.slug();
+    let disk_name = row.name.as_str();
+
+    let bare = match resolve_bare(repos_dir, disk_owner, disk_name) {
+        Ok(p) if p.exists() => p,
+        _ => {
+            return AuthzDecision::Deny {
+                message: "ERROR: Repository not found.\n".into(),
+            };
+        }
+    };
+
+    // Fresh per-exec scope check — a key detached between auth and exec,
+    // or attached to a different repo under the same fingerprint, must not pass.
+    let key = match db.find_deploy_key_for_repo(&row.id, fingerprint).await {
+        Ok(Some(k)) => k,
+        Ok(None) => {
+            return AuthzDecision::Deny {
+                message: "ERROR: Permission denied to this repository.\n".into(),
+            };
+        }
+        Err(_) => {
+            return AuthzDecision::Deny {
+                message: "ERROR: Internal error.\n".into(),
+            };
+        }
+    };
+
+    if action == PackAction::Push && !key.can_write {
+        return AuthzDecision::Deny {
+            message: "ERROR: Permission denied to this repository.\n".into(),
+        };
+    }
+
+    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let _ = db
+        .touch_deploy_key_last_used(&key.id, &now, Some(client_ip))
+        .await;
+
+    AuthzDecision::Allow {
+        bare,
+        repo_id: row.id.clone(),
+        owner_slug: disk_owner.to_string(),
+        repo_name: disk_name.to_string(),
+        is_push: action == PackAction::Push,
+        capability: Some(if key.can_write {
+            Capability::Write
+        } else {
+            Capability::Read
+        }),
+        actor_user_id: key.created_by.clone(),
     }
 }
 
@@ -394,6 +493,7 @@ mod tests {
             repo_name: "n".into(),
             is_push: true,
             capability: Some(Capability::Admin),
+            actor_user_id: "u1".into(),
         };
         match allow {
             AuthzDecision::Allow { capability, .. } => {

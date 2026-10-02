@@ -54,7 +54,8 @@ fn row_to_list_item(row: &oxidean_db::SshKeyRow) -> SshKeyListItem {
 }
 
 /// Normalize OpenSSH line and validate algorithm / RSA size (D-SSH-05).
-fn parse_accepted_public_key(line: &str) -> Result<(PublicKey, String, String), AppError> {
+/// Shared with `deploy_keys` — error codes are `sshKey.*` by design.
+pub(crate) fn parse_accepted_public_key(line: &str) -> Result<(PublicKey, String, String), AppError> {
     let trimmed = line.trim();
     if trimmed.is_empty() {
         return Err(AppError::new(
@@ -161,6 +162,22 @@ pub async fn add(ctx: &RpcCtx, input: serde_json::Value) -> Result<SshKeyListIte
     if ctx
         .db
         .find_ssh_key_by_fingerprint(&fingerprint)
+        .await
+        .map_err(db_err)?
+        .is_some()
+    {
+        return Err(AppError::new(
+            "sshKey.fingerprint_taken",
+            "an SSH key with this fingerprint is already registered",
+        ));
+    }
+    // Deploy keys are a distinct credential class (GIT-23): a fingerprint
+    // attached as a repo deploy key must not also resolve to an account —
+    // the account path wins at SSH auth and would silently widen the scope
+    // a repo admin set to read-only.
+    if ctx
+        .db
+        .find_deploy_key_by_fingerprint(&fingerprint)
         .await
         .map_err(db_err)?
         .is_some()

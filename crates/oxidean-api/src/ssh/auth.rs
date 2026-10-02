@@ -1,6 +1,6 @@
 //! SSH pubkey → fingerprint → registered user (D-SSH-03).
 
-use oxidean_db::{Database, SshKeyRow};
+use oxidean_db::{Database, DeployKeyRow, SshKeyRow};
 use ssh_key::{HashAlg, PublicKey};
 
 /// OpenSSH-display fingerprint (`SHA256:…`) for a russh/ssh-key public key.
@@ -25,4 +25,19 @@ pub async fn find_registered_key(
         }
         _ => Ok(None),
     }
+}
+
+/// Look up a repo deploy key by fingerprint (GIT-23).
+///
+/// Any attached row accepts the handshake — the repo binding (`repo_id`) is
+/// enforced per pack exec via `authorize_deploy_key_pack`, because SSH auth
+/// completes before the target repository is known. Deploy keys never resolve
+/// to an account identity: they are transport-only credentials (no session,
+/// no RPC, no web access).
+pub async fn find_deploy_key(
+    db: &Database,
+    key: &PublicKey,
+) -> Result<Option<DeployKeyRow>, String> {
+    let fp = fingerprint_of(key);
+    db.find_deploy_key_by_fingerprint(&fp).await
 }

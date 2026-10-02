@@ -51,7 +51,7 @@ Machine-facing surfaces beyond raw git/HTTP. These depend on API-02 (token auth)
 - [ ] **GIT-20** Repository archive flag: read-only mode that blocks push, issues, and PRs while keeping everything browsable and clonable.
 - [ ] **GIT-21** Protected tags and tag rulesets (branch protection covers branches only today).
 - [ ] **GIT-22** "Require signed commits" protection option. SSH/GPG signature verification is displayed on commits; enforcement is not a protection knob yet.
-- [ ] **GIT-23** Deploy keys: per-repo SSH keys with read or read/write scope, distinct from account keys.
+- [x] **GIT-23** Deploy keys: per-repo SSH keys with read or read/write scope, distinct from account keys. (#84)
 - [ ] **GIT-24** Sync fork and update-PR-branch: bring a fork or PR head up to date with the base branch from the UI/API.
 - [ ] **GIT-25** Repository size quotas for git objects. LFS and package quotas exist; the bare repo itself is unbounded.
 - [ ] **GIT-26** Repo insights: contributors, commit activity, and fork-network views on top of the existing repo activity feed.
