@@ -340,6 +340,8 @@ jobs:
           if-no-files-found: ignore
 
   # D-QH-04: forge protocol smokes (Smart HTTP, SSH TCP, LFS routing, packages PathPrefix).
+  # DEBT-01: also runs smoke-protection — ORG-06/D-PKG-03 protected-push denial on a
+  # fresh stack it re-ups itself (wipes volumes; HTTPS denial mandatory, SSH half skipped).
   # Fail-closed — docker-missing / stack-down must not greenwash (T-11.1-40).
   # Client ls-remote/LFS push remain optional (need seeded repo); routing+TCP are required.
   smoke-protocol:
@@ -367,7 +369,7 @@ jobs:
           SMOKE_SKIP_LS_REMOTE: "1"
           SMOKE_SKIP_LFS_CLIENT: "1"
           OXIDEAN_COMPOSE_SKIP_BUILD: "1"
-        run: make smoke-protocol-ci # smoke-git-https smoke-git-ssh smoke-git-lfs smoke-packages
+        run: make smoke-protocol-ci # smoke-git-https smoke-git-ssh smoke-git-lfs smoke-packages smoke-protection
       - name: upload compose logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
