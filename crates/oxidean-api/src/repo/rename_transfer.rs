@@ -43,10 +43,15 @@ fn db_err(e: String) -> AppError {
     }
 }
 
-fn to_public(repo: &AccessibleRepo) -> RepoPublic {
+async fn to_public(ctx: &RpcCtx, repo: &AccessibleRepo) -> Result<RepoPublic, AppError> {
+    let flags = ctx
+        .db
+        .get_repo_unit_flags(&repo.row.id)
+        .await
+        .map_err(db_err)?;
     let visibility = RepoVisibility::parse(&repo.row.visibility).unwrap_or(RepoVisibility::Public);
     let owner_type = OwnerType::parse(&repo.row.owner_type).unwrap_or(OwnerType::User);
-    RepoPublic {
+    Ok(RepoPublic {
         id: repo.row.id.clone(),
         owner_id: repo.row.owner_id.clone(),
         owner_type,
@@ -69,13 +74,11 @@ fn to_public(repo: &AccessibleRepo) -> RepoPublic {
         fork_count: 0,
         watch_count: 0,
         viewer_is_watching: false,
-        // Unit flags default enabled; `repo.get`/enrich paths fill real
-        // values — rename/transfer responses keep the list-endpoint default.
-        issues_enabled: true,
-        pulls_enabled: true,
+        issues_enabled: flags.issues_enabled,
+        pulls_enabled: flags.pulls_enabled,
         fork_network_id: None,
         forked_from: None,
-    }
+    })
 }
 
 /// Resolve for ACL honoring redirects. Live path always wins.
@@ -149,7 +152,7 @@ pub async fn rename(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoRename
     let new_name = req.new_name.trim().to_string();
     if new_name == accessible.row.name {
         return Ok(RepoRenameResponse {
-            repo: to_public(&accessible),
+            repo: to_public(ctx, &accessible).await?,
         });
     }
 
@@ -211,11 +214,15 @@ pub async fn rename(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoRename
 
     let capability = accessible.capability;
     Ok(RepoRenameResponse {
-        repo: to_public(&AccessibleRepo {
-            row: updated,
-            owner_username: owner_slug,
-            capability,
-        }),
+        repo: to_public(
+            ctx,
+            &AccessibleRepo {
+                row: updated,
+                owner_username: owner_slug,
+                capability,
+            },
+        )
+        .await?,
     })
 }
 
@@ -306,7 +313,7 @@ pub async fn transfer(
         && dest_type.as_str() == accessible.row.owner_type.as_str()
     {
         return Ok(RepoTransferResponse {
-            repo: to_public(&accessible),
+            repo: to_public(ctx, &accessible).await?,
         });
     }
 
@@ -395,10 +402,14 @@ pub async fn transfer(
 
     let capability = accessible.capability;
     Ok(RepoTransferResponse {
-        repo: to_public(&AccessibleRepo {
-            row: updated,
-            owner_username: dest_slug,
-            capability,
-        }),
+        repo: to_public(
+            ctx,
+            &AccessibleRepo {
+                row: updated,
+                owner_username: dest_slug,
+                capability,
+            },
+        )
+        .await?,
     })
 }
