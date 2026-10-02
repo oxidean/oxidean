@@ -323,7 +323,8 @@ async fn rest_bearer_pat_scope_enforcement() {
     let (cookie, _uid) = signup_verified(&app, &db, "c@ex.com", "carol").await;
     create_repo(&app, &cookie, "patdemo").await;
 
-    // Mint a repo-scoped classic PAT via RPC (session-only procedure).
+    // Mint a repo-scoped classic PAT via RPC (pat.createClassic itself is a
+    // session-only procedure; classic tokens always carry `repo`).
     let res = app
         .clone()
         .oneshot(rpc_req(
@@ -335,19 +336,6 @@ async fn rest_bearer_pat_scope_enforcement() {
     let bytes = res.into_body().collect().await.unwrap().to_bytes();
     let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     let repo_token = v["data"]["token"].as_str().expect("token").to_string();
-
-    // Mint a package-scoped PAT (no repo scope).
-    let res = app
-        .clone()
-        .oneshot(rpc_req(
-            r#"{"procedure":"pat.createClassic","input":{"name":"pkgs","scopes":["package:read"]}}"#,
-            &cookie,
-        ))
-        .await
-        .unwrap();
-    let bytes = res.into_body().collect().await.unwrap().to_bytes();
-    let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-    let pkg_token = v["data"]["token"].as_str().expect("token").to_string();
 
     // repo scope: GET repo OK, GET /user OK (identity read).
     let (status, v) = json(
@@ -362,10 +350,11 @@ async fn rest_bearer_pat_scope_enforcement() {
     assert_eq!(status, StatusCode::OK, "{v}");
     assert_eq!(v["username"], "carol");
 
-    // package scope on repo read → 403 auth.pat_scope.
+    // admin.* is session-only for PATs → dispatch gate returns auth.pat_scope
+    // before any admin check (same gate as /api/rpc).
     let (status, v) = json(
         &app,
-        req_bearer("GET", "/api/v1/repos/carol/patdemo", None, &pkg_token),
+        req_bearer("GET", "/api/v1/admin/users", None, &repo_token),
     )
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{v}");
