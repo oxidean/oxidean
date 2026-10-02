@@ -14,7 +14,7 @@ Deferred items recorded at milestone close. Finish these first; several are chea
 
 - [ ] **DEBT-01** Wire `make smoke-protection` into `scripts/ci-smoke-protocol.sh` and the CI smoke job. The ORG-06 direct-push denial guard is green locally but absent from CI.
 - [ ] **DEBT-02** Raise the coverage floor from 0.65 toward ~0.70 and re-enable `cargo-llvm-cov` collection in CI (WINDOWS entries 53–54 open).
-- [~] **DEBT-03** Sitewide GlobalSearch depth. `search.global` returns ACL-filtered groups (repos, users, orgs, issues, PRs) plus bounded commits/code scans of the newest readable repos; `/search` renders them grouped. Indexed cross-repo code search remains SRCH-01. Landing, not yet on `main`.
+- [x] **DEBT-03** Sitewide GlobalSearch depth. `search.global` returns ACL-filtered groups (repos, users, orgs, issues, PRs) plus bounded commits/code scans of the newest readable repos; `/search` renders them grouped. Indexed cross-repo code search remains SRCH-01. (#74)
 - [ ] **DEBT-04** `issue_comment` webhook event. The notification fan-out exists; webhook emission does not.
 - [ ] **DEBT-05** Checks / commit-status viewer tab on PR pages. Status contexts already gate merges; there is no dedicated UI to inspect them.
 - [ ] **DEBT-06** Watch repositories and follow users, with a per-repo notification matrix.
