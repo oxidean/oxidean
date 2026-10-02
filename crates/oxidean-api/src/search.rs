@@ -14,6 +14,7 @@
 use std::collections::HashSet;
 use std::time::Duration;
 
+use oxidean_core::languages::{languages_named, LanguageSpec};
 use oxidean_core::{
     AppError, GlobalSearchCodeHit, GlobalSearchCommitHit, GlobalSearchGroup, GlobalSearchIssueHit,
     GlobalSearchKind, GlobalSearchOrgHit, GlobalSearchPullHit, GlobalSearchRepoHit,
@@ -24,6 +25,7 @@ use oxidean_git::GrepResult;
 
 use crate::auth::gate::require_verified;
 use crate::git::bare_repo_path;
+use crate::repo::code_search_pathspecs;
 use crate::repo::search_query::parse_search_query;
 use crate::rpc::RpcCtx;
 
@@ -270,7 +272,21 @@ pub async fn global(
     }
 
     // ── Bounded git scans (commits / code) ────────────────────────────────
-    let need_code = wanted.contains(&GlobalSearchKind::Code) && !keywords.is_empty();
+    // `language:` / `lang:` resolves against the shared taxonomy, same as
+    // repo.search — a qualifier naming nothing matches no code.
+    let langs: Vec<&'static LanguageSpec> = parsed
+        .language
+        .as_deref()
+        .map(languages_named)
+        .unwrap_or_default();
+    let lang_miss = parsed
+        .language
+        .as_deref()
+        .is_some_and(|v| !v.trim().is_empty())
+        && langs.is_empty();
+    let code_pathspecs = code_search_pathspecs(parsed.path.as_deref(), &langs);
+    let need_code =
+        wanted.contains(&GlobalSearchKind::Code) && !keywords.is_empty() && !lang_miss;
     let need_commits = wanted.contains(&GlobalSearchKind::Commits)
         && (!keywords.is_empty() || author_login.is_some_and(|s| !s.is_empty()));
     let mut commits = GlobalSearchGroup::<GlobalSearchCommitHit>::default();
@@ -293,15 +309,7 @@ pub async fn global(
             .min(soft_cap.saturating_add(1));
 
         if need_code {
-            code = scan_code(
-                ctx,
-                &scan,
-                &keywords,
-                parsed.path.as_deref(),
-                timeout,
-                fetch,
-            )
-            .await;
+            code = scan_code(ctx, &scan, &keywords, &code_pathspecs, timeout, fetch).await;
             code.truncated = code.truncated || capped;
             code.hits = code
                 .hits
@@ -340,7 +348,7 @@ async fn scan_code(
     ctx: &RpcCtx,
     scan: &[ScanRepoRow],
     keywords: &str,
-    pathspec: Option<&str>,
+    pathspecs: &[String],
     timeout: Duration,
     fetch: u32,
 ) -> GlobalSearchGroup<GlobalSearchCodeHit> {
@@ -352,13 +360,9 @@ async fn scan_code(
         let git = ctx.git.clone();
         let branch = r.default_branch.clone();
         let kw = keywords.to_string();
-        let spec = pathspec.map(str::to_string);
+        let specs = pathspecs.to_vec();
         set.spawn(async move {
-            let res = tokio::time::timeout(
-                timeout,
-                git.grep(&path, &branch, &kw, spec.as_deref(), fetch),
-            )
-            .await;
+            let res = tokio::time::timeout(timeout, git.grep(&path, &branch, &kw, &specs, fetch)).await;
             (idx, res)
         });
     }

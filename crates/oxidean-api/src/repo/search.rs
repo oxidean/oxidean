@@ -133,7 +133,7 @@ async fn search_code(
 /// `language_for_path` (lowercased basename); `:(glob)` `**/` pins filename and
 /// extension matches under the prefix at any depth. No qualifiers → no
 /// pathspecs (full-tree search).
-fn code_search_pathspecs(
+pub(crate) fn code_search_pathspecs(
     path: Option<&str>,
     langs: &[&'static LanguageSpec],
 ) -> Vec<String> {

@@ -45,6 +45,7 @@ pub use activity::{
     record_pr_merge, record_ref_updates,
 };
 pub use search::search;
+pub(crate) use search::code_search_pathspecs;
 pub use social_lists::{forks_list, stargazers_list, watchers_list};
 
 /// Soft size limit for blob preview / raw soft-cap (D-20 / T-07-16).
