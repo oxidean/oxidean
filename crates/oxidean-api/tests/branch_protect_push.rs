@@ -102,6 +102,52 @@ async fn verify_user(db: &Database, user_id: &str) {
     db.set_email_verified_at(user_id, &now).await.expect("verify");
 }
 
+fn deny_reasons(err: &oxidean_core::AppError) -> Vec<String> {
+    err.data.as_ref().unwrap()["reasons"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|r| r.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Run git in `dir` with a deterministic author identity; assert success.
+fn git_env(dir: &std::path::Path, args: &[&str], extra: &[(&str, &str)]) -> String {
+    let out = std::process::Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .env("GIT_AUTHOR_NAME", "Pusher")
+        .env("GIT_AUTHOR_EMAIL", "pusher@ex.com")
+        .env("GIT_COMMITTER_NAME", "Pusher")
+        .env("GIT_COMMITTER_EMAIL", "pusher@ex.com")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .envs(extra.iter().copied())
+        .output()
+        .expect("git spawn");
+    assert!(
+        out.status.success(),
+        "git {:?} in {} failed: {}",
+        args,
+        dir.display(),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8_lossy(&out.stdout).trim().to_string()
+}
+
+fn git_ok(dir: &std::path::Path, args: &[&str]) {
+    git_env(dir, args, &[]);
+}
+
+fn git_ok_env(dir: &std::path::Path, args: &[&str], extra: &[(&str, &str)]) {
+    git_env(dir, args, extra);
+}
+
+fn git_out(dir: &std::path::Path, args: &[&str]) -> String {
+    git_env(dir, args, &[])
+}
+
 /// Write non-Admin cannot push directly when required reviews are enabled (ORG-06, D-14).
 #[tokio::test]
 async fn branch_protect_push_denies_direct_push_when_reviews_required() {
@@ -198,6 +244,7 @@ async fn branch_protect_push_denies_force_push() {
         enforce_admins: false,
         required_linear_history: false,
         lock_branch: false,
+        require_signed_commits: false,
         created_at: String::new(),
         updated_at: String::new(),
     };
@@ -230,6 +277,7 @@ async fn branch_protect_push_lock_branch() {
         enforce_admins: false,
         required_linear_history: false,
         lock_branch: true,
+        require_signed_commits: false,
         created_at: String::new(),
         updated_at: String::new(),
     };
@@ -499,4 +547,173 @@ async fn sweep_protection_hooks_skips_non_bare() {
         stats.skipped >= 1 || stats.scanned == 0,
         "non-bare should be skipped or not scanned as bare — {stats:?}"
     );
+}
+
+/// GIT-22: `require_signed_commits` denies pushes that introduce unsigned
+/// commits, allows forge-verified signatures, and leaves non-matching branches
+/// alone.
+#[tokio::test]
+async fn branch_protect_push_requires_signed_commits() {
+    let _env_guard = support::lock_admin_env();
+    let dir = tempfile::tempdir().unwrap();
+    // The web-flow keypair lands here: repo.create seeds a forge-signed commit
+    // and the verify keyring binds noreply@oxidean.local to that public key.
+    let ssh_dir = dir.path().join("ssh");
+    std::fs::create_dir_all(&ssh_dir).unwrap();
+    // Pre-generate the web-flow keypair up front: repo.create early-returns on
+    // an existing key, so concurrent tests sharing this process env never race
+    // ssh-keygen.
+    let keygen = std::process::Command::new("ssh-keygen")
+        .args(["-t", "ed25519", "-N", "", "-q", "-f"])
+        .arg(ssh_dir.join("web-flow"))
+        .status()
+        .expect("ssh-keygen spawn");
+    assert!(keygen.success());
+    std::env::set_var("OXIDEAN_SSH_HOST_KEY_DIR", &ssh_dir);
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("bp_sig.db").display());
+    let db = Database::connect(&url).await.unwrap();
+    db.migrate().await.unwrap();
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos.clone()).await;
+
+    let (owner_cookie, owner_login) = signup_and_login(&app, "sig@ex.com", "sigown").await;
+    verify_user(&db, owner_login["data"]["id"].as_str().unwrap()).await;
+    let create = rpc_json(
+        &app,
+        &owner_cookie,
+        r#"{"procedure":"repo.create","input":{"name":"core","visibility":"public","license_id":"MIT"}}"#,
+    )
+    .await;
+    assert_eq!(create["ok"], true, "{create}");
+
+    let rule = rpc_json(
+        &app,
+        &owner_cookie,
+        r#"{"procedure":"repo.branchProtection.create","input":{"owner":"sigown","name":"core","pattern":"main","require_signed_commits":true}}"#,
+    )
+    .await;
+    assert_eq!(rule["ok"], true, "create rule — {rule}");
+
+    let bare = bare_repo_path(&repos, "sigown", "core").expect("bare path");
+    let bare_s = bare.to_str().unwrap();
+    let tip = git_out(&bare, &["rev-parse", "refs/heads/main"]);
+
+    // Unsigned commit staged into the bare object store via `fetch` (lands in
+    // FETCH_HEAD — no ref moves, mirroring what a real push introduces).
+    let work_u = dir.path().join("work-u");
+    let work_u_s = work_u.to_str().unwrap();
+    git_ok(dir.path(), &["clone", "-q", bare_s, work_u_s]);
+    std::fs::write(work_u.join("UNSIGNED.txt"), b"unsigned\n").unwrap();
+    git_ok(&work_u, &["add", "UNSIGNED.txt"]);
+    git_ok(
+        &work_u,
+        &[
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-q",
+            "-m",
+            "unsigned push",
+        ],
+    );
+    let unsigned_sha = git_out(&work_u, &["rev-parse", "HEAD"]);
+    git_ok(&bare, &["fetch", "-q", work_u_s, "HEAD"]);
+
+    // Write push introducing the unsigned commit → denied with signed_commits.
+    let err = check_ref_update(
+        &db,
+        &repos,
+        &bare,
+        "refs/heads/main",
+        &tip,
+        &unsigned_sha,
+        Capability::Write,
+    )
+    .await
+    .expect_err("unsigned commit must be denied on protected main");
+    assert_eq!(err.code, "repo.branch_protection");
+    assert!(
+        deny_reasons(&err).iter().any(|r| r == "signed_commits"),
+        "expected signed_commits reason — {err:?}"
+    );
+    let unsigned = err.data.as_ref().unwrap()["unsigned_commits"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        unsigned
+            .iter()
+            .any(|s| s.as_str() == Some(&unsigned_sha[..7])),
+        "denial must name the unsigned commit — {err:?}"
+    );
+
+    // Admin bypass still applies while enforce_admins=false.
+    check_ref_update(
+        &db,
+        &repos,
+        &bare,
+        "refs/heads/main",
+        &tip,
+        &unsigned_sha,
+        Capability::Admin,
+    )
+    .await
+    .expect("Admin may bypass when enforce_admins=false");
+
+    // Non-matching branch is unaffected by the signed-commits rule.
+    check_ref_update(
+        &db,
+        &repos,
+        &bare,
+        "refs/heads/feature",
+        ZERO_SHA,
+        &unsigned_sha,
+        Capability::Write,
+    )
+    .await
+    .expect("non-matching branch must allow unsigned push");
+
+    // A commit signed by the instance web-flow key under the forge committer
+    // verifies (ssh + noreply policy shortcut) → push allowed.
+    let work_s = dir.path().join("work-s");
+    let work_s_s = work_s.to_str().unwrap();
+    git_ok(dir.path(), &["clone", "-q", bare_s, work_s_s]);
+    std::fs::write(work_s.join("SIGNED.txt"), b"signed\n").unwrap();
+    git_ok(&work_s, &["add", "SIGNED.txt"]);
+    let key = ssh_dir.join("web-flow");
+    git_ok_env(
+        &work_s,
+        &[
+            "-c",
+            "gpg.format=ssh",
+            "-c",
+            &format!("user.signingkey={}", key.display()),
+            "commit",
+            "-q",
+            "-S",
+            "-m",
+            "signed push",
+        ],
+        &[
+            ("GIT_AUTHOR_EMAIL", oxidean_git::FORGE_NOREPLY_EMAIL),
+            ("GIT_COMMITTER_EMAIL", oxidean_git::FORGE_NOREPLY_EMAIL),
+        ],
+    );
+    let signed_sha = git_out(&work_s, &["rev-parse", "HEAD"]);
+    git_ok(&bare, &["fetch", "-q", work_s_s, "HEAD"]);
+
+    check_ref_update(
+        &db,
+        &repos,
+        &bare,
+        "refs/heads/main",
+        &tip,
+        &signed_sha,
+        Capability::Write,
+    )
+    .await
+    .expect("forge-verified signature must satisfy require_signed_commits");
+
+    std::env::remove_var("OXIDEAN_SSH_HOST_KEY_DIR");
 }

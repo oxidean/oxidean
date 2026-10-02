@@ -26,6 +26,24 @@ fn find_protection_migration(dialect: &str) -> Option<(PathBuf, String)> {
     None
 }
 
+fn find_migration_containing(dialect: &str, needle: &str) -> Option<(PathBuf, String)> {
+    let dir = migrations_dir(dialect);
+    let mut entries: Vec<_> = std::fs::read_dir(&dir)
+        .ok()?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|ext| ext == "sql"))
+        .collect();
+    entries.sort();
+    for path in entries {
+        let sql = std::fs::read_to_string(&path).unwrap_or_default();
+        if sql.contains(needle) {
+            return Some((path, sql));
+        }
+    }
+    None
+}
+
 fn assert_protection_sql(dialect: &str, sql: &str) {
     assert!(
         sql.contains("branch_protection_rules"),
@@ -56,6 +74,16 @@ async fn dialect_branch_protection_migrate_schema_presence() {
         let (_p, dsql) = find_protection_migration(dialect)
             .unwrap_or_else(|| panic!("missing {dialect} branch_protection migration"));
         assert_protection_sql(dialect, &dsql);
+    }
+
+    // GIT-22: require_signed_commits column migration exists in all dialects.
+    for dialect in ["sqlite", "postgres", "mysql"] {
+        let (_p, dsql) = find_migration_containing(dialect, "require_signed_commits")
+            .unwrap_or_else(|| panic!("missing {dialect} require_signed_commits migration"));
+        assert!(
+            dsql.contains("branch_protection_rules"),
+            "{dialect}: require_signed_commits must alter branch_protection_rules"
+        );
     }
 
     let dir = tempfile::tempdir().expect("tempdir");
