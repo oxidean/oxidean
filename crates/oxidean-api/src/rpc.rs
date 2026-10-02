@@ -3,8 +3,8 @@ use std::sync::{Arc, Mutex, RwLock};
 
 use cookie::Cookie;
 use oxidean_core::{
-    AppError, EchoRequest, EchoResponse, HealthResponse, RpcRequest, RpcResponse, ECHO_MAX_BYTES,
-    RPC_PROTOCOL_VERSION,
+    AppError, EchoRequest, EchoResponse, HealthResponse, ManifestCapabilities, ManifestResponse,
+    RpcRequest, RpcResponse, ECHO_MAX_BYTES, RPC_PROTOCOL_VERSION,
 };
 use oxidean_db::Database;
 use oxidean_git::GitBackend;
@@ -109,6 +109,259 @@ pub fn check_version_header(value: Option<&str>) -> Result<(), AppError> {
     }
 }
 
+/// Oldest `ox` CLI version this server guarantees to stay wire-compatible
+/// with (CLI-02). Bump when a breaking change makes older clients unsafe.
+pub const MIN_CLI_VERSION: &str = "0.1.0";
+
+/// Every procedure name the dispatch match below handles — single source of
+/// truth for `system.manifest`'s `procedures` map so clients can feature-gate
+/// without a hand-maintained second list. The `procedures_list_matches_dispatch`
+/// test scans this file's match arms and asserts the two stay in sync.
+pub const PROCEDURES: &[&str] = &[
+    "system.health",
+    "system.echo",
+    "system.db_probe",
+    "system.manifest",
+    "auth.signup",
+    "auth.login",
+    "auth.logout",
+    "auth.logout_all",
+    "auth.me",
+    "auth.provider_config",
+    "auth.bootstrap_status",
+    "auth.bootstrap_setup",
+    "auth.confirm_admin_credentials",
+    "auth.verify",
+    "auth.request_verify",
+    "auth.resend_verify",
+    "auth.request_password_reset",
+    "auth.reset_password",
+    "auth.dev.privileged_ping",
+    "user.get_profile",
+    "user.getPublicProfile",
+    "user.update_profile",
+    "user.lookup",
+    "user.listStarred",
+    "admin.auth.get_settings",
+    "admin.auth.update_settings",
+    "admin.lfs.getSettings",
+    "admin.lfs.updateSettings",
+    "admin.lfs.getUsage",
+    "admin.templates.list",
+    "admin.templates.update",
+    "admin.templates.setEnabled",
+    "admin.templates.delete",
+    "admin.instance.factory_reset",
+    "admin.repos.gc",
+    "admin.users.list",
+    "admin.users.updateRole",
+    "admin.users.revokeSessions",
+    "admin.users.ban",
+    "admin.users.unban",
+    "admin.users.delete",
+    "admin.users.getAccess",
+    "admin.users.listSessions",
+    "admin.users.getActivity",
+    "admin.invites.create",
+    "admin.invites.createLink",
+    "admin.invites.list",
+    "admin.invites.revoke",
+    "org.create",
+    "org.get",
+    "org.listMine",
+    "org.updateSettings",
+    "org.members.list",
+    "org.members.add",
+    "org.members.updateRole",
+    "org.members.remove",
+    "org.invites.create",
+    "org.invites.list",
+    "org.invites.revoke",
+    "org.invites.accept",
+    "org.invites.createLink",
+    "invites.accept",
+    "invites.get",
+    "repo.listMine",
+    "repo.listByOwner",
+    "repo.createDefaults",
+    "repo.create",
+    "repo.fork",
+    "repo.star",
+    "repo.unstar",
+    "repo.watch",
+    "repo.unwatch",
+    "repo.stargazers.list",
+    "repo.watchers.list",
+    "repo.forks.list",
+    "repo.updateMetadata",
+    "repo.topicsSuggest",
+    "repo.explore",
+    "repo.get",
+    "repo.tree",
+    "repo.blob",
+    "repo.refs",
+    "repo.commits",
+    "repo.pathLastCommits",
+    "repo.commitCount",
+    "repo.contributors.list",
+    "repo.languages",
+    "repo.activity.list",
+    "repo.commit",
+    "repo.compare",
+    "repo.blame",
+    "repo.search",
+    "repo.branchCreate",
+    "repo.branchRename",
+    "repo.branchDelete",
+    "repo.updateVisibility",
+    "repo.lfs.setEnabled",
+    "repo.lfs.getEnabled",
+    "repo.mirror.get",
+    "repo.mirror.upsert",
+    "repo.mirror.delete",
+    "repo.mirror.syncNow",
+    "repo.mirror.generateSshKey",
+    "repo.mirror.rotateWebhookSecret",
+    "repo.mirror.fetchHostKey",
+    "repo.templates.getEnabled",
+    "repo.templates.setEnabled",
+    "repo.lfs.getStatus",
+    "repo.lfs.getUsage",
+    "repo.lfs.listObjects",
+    "repo.lfs.download",
+    "repo.softDelete",
+    "repo.rename",
+    "repo.transfer",
+    "repo.collaborators.list",
+    "repo.collaborators.add",
+    "repo.collaborators.update",
+    "repo.collaborators.remove",
+    "repo.invites.create",
+    "repo.invites.createLink",
+    "repo.invites.list",
+    "repo.invites.revoke",
+    "repo.branchProtection.list",
+    "repo.branchProtection.create",
+    "repo.branchProtection.update",
+    "repo.branchProtection.delete",
+    "repo.commitStatus.create",
+    "repo.commitStatus.list",
+    "repo.actions.listRuns",
+    "repo.actions.getRun",
+    "repo.actions.getJobLog",
+    "repo.actions.listWorkflows",
+    "repo.actions.dispatchWorkflow",
+    "repo.actions.rerunRun",
+    "repo.actions.cancelRun",
+    "repo.actions.secrets.list",
+    "repo.actions.secrets.put",
+    "repo.actions.secrets.delete",
+    "repo.actions.getEnabled",
+    "repo.actions.setEnabled",
+    "admin.actions.createRegistrationToken",
+    "admin.actions.listRunners",
+    "issue.create",
+    "issue.get",
+    "issue.list",
+    "issue.update",
+    "issue.close",
+    "issue.reopen",
+    "issue.history",
+    "issue.delete",
+    "issue.comments.list",
+    "issue.comments.create",
+    "notification.list",
+    "notification.unreadCount",
+    "notification.markRead",
+    "notification.markAllRead",
+    "issue.comments.update",
+    "issue.comments.delete",
+    "issue.comments.history",
+    "issue.labels.set",
+    "issue.assignees.set",
+    "issue.assigneeCandidates",
+    "issue.reactions.toggle",
+    "issue.links.list",
+    "issue.links.add",
+    "issue.links.remove",
+    "pull.create",
+    "pull.get",
+    "pull.list",
+    "pull.update",
+    "pull.close",
+    "pull.reopen",
+    "pull.files",
+    "pull.commits",
+    "pull.comments.list",
+    "pull.comments.create",
+    "pull.comments.resolve",
+    "pull.reviews.list",
+    "pull.reviews.submit",
+    "pull.reviews.dismiss",
+    "pull.reviewRequests.list",
+    "pull.reviewRequests.add",
+    "pull.reviewRequests.remove",
+    "pull.merge",
+    "repo.mergeSettings.get",
+    "repo.mergeSettings.update",
+    "release.create",
+    "release.list",
+    "release.get",
+    "release.update",
+    "release.delete",
+    "release.deleteAsset",
+    "webhook.create",
+    "webhook.list",
+    "webhook.get",
+    "webhook.update",
+    "webhook.delete",
+    "webhook.deliveries.list",
+    "webhook.deliveries.get",
+    "webhook.ping",
+    "webhook.redeliver",
+    "label.listForRepo",
+    "label.listForOrg",
+    "label.create",
+    "label.update",
+    "label.delete",
+    "packages.list",
+    "packages.deleteVersion",
+    "packages.adminUsage",
+    "packages.adminSetQuota",
+    "pat.createClassic",
+    "pat.createFineGrained",
+    "pat.list",
+    "pat.revoke",
+    "sshKey.add",
+    "sshKey.list",
+    "sshKey.revoke",
+    "gpgKey.add",
+    "gpgKey.list",
+    "gpgKey.revoke",
+    "email.list",
+    "email.add",
+    "email.remove",
+    "email.setPrimary",
+    "email.resendVerify",
+];
+
+/// `system.manifest` payload — the versioned capability contract (CLI-02).
+pub fn manifest_response() -> ManifestResponse {
+    ManifestResponse {
+        protocol_version: RPC_PROTOCOL_VERSION,
+        server_version: env!("CARGO_PKG_VERSION").into(),
+        procedures: PROCEDURES.iter().map(|p| ((*p).to_string(), true)).collect(),
+        capabilities: ManifestCapabilities {
+            // No MCP endpoint (AGT-01), typed REST surface, or
+            // instance-as-OAuth-provider (API-03) yet.
+            mcp: false,
+            rest: false,
+            oauth: false,
+        },
+        min_cli_version: MIN_CLI_VERSION.into(),
+    }
+}
+
 pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
     // D-11 / T-06-06: empty-instance lock — bootstrap_* + health/db_probe diagnostics
     // until setup completes. confirm_admin_credentials stays off the list (ENV path
@@ -122,6 +375,7 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
                     | "auth.bootstrap_setup"
                     | "system.health"
                     | "system.db_probe"
+                    | "system.manifest"
             );
             if !allowed {
                 return RpcResponse::err(AppError::new(
@@ -174,6 +428,7 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
                 RpcResponse::err(AppError::new("db.probe_failed", "database probe failed"))
             }
         },
+        "system.manifest" => RpcResponse::ok(manifest_response()),
         "auth.signup" => match local::signup(ctx, req.input).await {
             Ok(user) => RpcResponse::ok(user),
             Err(e) => RpcResponse::err(e),
@@ -1107,5 +1362,67 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             "rpc.unknown_procedure",
             format!("unknown procedure: {other}"),
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `PROCEDURES` is the manifest's procedure map — it must exactly mirror
+    /// the `match req.procedure.as_str()` arms. Instead of trusting a hand
+    /// maintained list, scan this source file for `"name" =>` arm literals.
+    #[test]
+    fn procedures_list_matches_dispatch() {
+        let src = include_str!("rpc.rs");
+        let mut arms: Vec<&str> = Vec::new();
+        for line in src.lines() {
+            let line = line.trim_start();
+            if !line.starts_with('"') {
+                continue;
+            }
+            if let Some(end) = line[1..].find('"') {
+                let name = &line[1..1 + end];
+                let rest = line[2 + end..].trim_start();
+                if rest.starts_with("=>") {
+                    arms.push(name);
+                }
+            }
+        }
+        let listed: std::collections::BTreeSet<&str> = PROCEDURES.iter().copied().collect();
+        for arm in &arms {
+            assert!(
+                listed.contains(arm),
+                "dispatch arm `{arm}` missing from PROCEDURES — add it so the manifest stays accurate"
+            );
+        }
+        for name in &listed {
+            assert!(
+                arms.contains(name),
+                "PROCEDURES entry `{name}` has no dispatch arm — remove it"
+            );
+        }
+    }
+
+    #[test]
+    fn manifest_shape() {
+        let m = manifest_response();
+        assert_eq!(m.protocol_version, RPC_PROTOCOL_VERSION);
+        assert_eq!(m.server_version, env!("CARGO_PKG_VERSION"));
+        assert_eq!(m.min_cli_version, MIN_CLI_VERSION);
+        assert_eq!(m.procedures.len(), PROCEDURES.len());
+        assert_eq!(m.procedures.get("repo.listMine"), Some(&true));
+        assert_eq!(m.procedures.get("system.manifest"), Some(&true));
+        assert!(!m.capabilities.mcp && !m.capabilities.rest && !m.capabilities.oauth);
+        let v = serde_json::to_value(&m).unwrap();
+        for key in [
+            "protocol_version",
+            "server_version",
+            "procedures",
+            "capabilities",
+            "min_cli_version",
+        ] {
+            assert!(v.get(key).is_some(), "manifest missing `{key}`");
+        }
     }
 }
