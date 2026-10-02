@@ -18,7 +18,7 @@ Deferred items recorded at milestone close. Finish these first; several are chea
 - [x] **DEBT-04** `issue_comment` webhook event. The notification fan-out exists; webhook emission does not. (#66)
 - [x] **DEBT-05** Checks / commit-status viewer tab on PR pages. Status contexts already gate merges; there is no dedicated UI to inspect them. `PullChecks` panel + Checks tab on the PR detail page. (#72)
 - [ ] **DEBT-06** Watch repositories and follow users, with a per-repo notification matrix.
-- [ ] **DEBT-07** Live `railway config apply` operator path. Kept human-verify in v1; CI must not hold tokens.
+- [x] **DEBT-07** Live `railway config apply` operator path. Kept human-verify in v1; CI must not hold tokens. (#71)
 - [x] **DEBT-08** Nyquist validation backfill for the not-validated phases (10–13, 16–18, 21, 22.1; 11.1 missing entirely). (#73)
 - [x] **DEBT-09** Backfill the AUTH-07a/07b requirement rows in the phase 06 VERIFICATION table (product shipped; table orphaned). (#73)
 - [x] **DEBT-10** Admin user management in the console: list, ban, delete, role change, access view, invites. Shipped on `main` via `admin.users.*` RPCs and the `/admin/users` console. (#56)

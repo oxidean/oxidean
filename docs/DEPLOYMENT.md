@@ -43,9 +43,11 @@ Focused PR Environments (optional but recommended for this monorepo): enable in 
 
 #### Operator steps (D-CLOUD-07 — human apply only)
 
-1. Create/link a Railway project: `railway login` → `railway link` (token stays in the operator environment — never commit; never expose to fork PRs).
+Full runbook: [`.railway/README.md`](../.railway/README.md#operator-workflow-d-cloud-07). Summary:
+
+1. On your machine only, authenticate the Railway CLI: `railway login`, or export `RAILWAY_TOKEN` (project token scoped to the target environment — preferred) / `RAILWAY_API_TOKEN` (account/workspace token). **Tokens never enter CI or the repo** — no workflow runs `railway config plan`/`apply`, and fork-PR jobs see no Railway credential. The only CI-held Railway credential is the human-gated promote/rollback token on the `Oxidean / production` GitHub Environment (deploy scope, never IaC apply).
 2. Install IaC SDK: `cd .railway && npm ci` (isolated from the Bun monorepo).
-3. For each of `preview`, `staging`, and `production`: link that environment, then `make cloud-plan` (wraps `railway config plan`).
+3. For each of `preview`, `staging`, and `production`: `railway link --project <id> --environment <env>`, then preview with `scripts/railway-apply.sh --environment <env>` (or `make cloud-plan`). `config` commands take no `--project`/`--environment` flags — the link selects the target, and the script asserts it.
 4. In the Railway dashboard, set per-environment vars:
    - `OXIDEAN_ENV=preview` \| `staging` \| `production`
    - **`web`:** `OXIDEAN_VITE_ALLOWED_HOSTS` — comma-separated Vite Host allowlist. Cloud example: `.up.railway.app,app.oxidean.dev` (leading `.` allows all Railway `*.up.railway.app` PR/gateway hosts; add each custom apex/host you terminate on the gateway). Without this, `vite preview` returns “Blocked request. This host is not allowed.” See [CONFIGURATION.md](CONFIGURATION.md).
@@ -54,7 +56,7 @@ Focused PR Environments (optional but recommended for this monorepo): enable in 
    - **`api` (optional):** `OXIDEAN_WEB_FLOW_PRIVATE_KEY` — OpenSSH private key (PEM, or `ssh-keygen -t ed25519 -N '' -f key` output piped through `base64 -w0`) that signs forge-authored seed commits (template/stack/license/gitignore initial commits). When unset, environments other than `production`/`cloud` auto-generate the keypair on first use — so preview, staging, and PR Environments work out of the box. Set it on **production** (auto-generation fails closed there) and optionally on `preview` for a stable identity across recreated volumes; PR Environments inherit it from preview either way.
    - IaC wires `OXIDEAN_PUBLIC_ORIGIN`, `OXIDEAN_CORS_ORIGINS`, and `OXIDEAN_SSH_HOST` from the **gateway** public domain (`https://${{gateway.RAILWAY_PUBLIC_DOMAIN}}`). Do not `preserve()` those on preview/PR copies — stale preview hosts break setup/CORS. Production custom domains still need the gateway service domain (or override) to match the browser URL. At runtime, a stale `*.up.railway.app` `OXIDEAN_PUBLIC_ORIGIN` is replaced with `RAILWAY_SERVICE_GATEWAY_URL` / `RAILWAY_PUBLIC_DOMAIN`; custom domains are not overridden.
 5. Attach a Railway-provided (or custom) domain to **`gateway`** in each environment (required so PR Environments get automatic preview URLs).
-6. Review the plan, then **only with explicit approval**: `railway config apply`.
+6. Review the plan, then **only with explicit approval**: `scripts/railway-apply.sh --environment <env> --apply` (or `railway config apply` and answer the CLI confirmation prompt — the human-verify gate).
 7. **Deploy policy after apply (IaC does not set this):** `railway config apply` connects GitHub and may leave Autodeploy enabled. You must set triggers in the dashboard (or delete production `deploymentTriggers` via GraphQL) after every apply that recreates them:
    - `staging`: GitHub branch `main`, **Autodeploy on**, **Wait for CI** on
    - `preview` and `production`: GitHub **connected** (needed for promote-by-SHA), **Autodeploy off** (no deployment triggers). Production releases only via the manual **Production deploy** GitHub Action — never on merge to `main`.
@@ -222,7 +224,7 @@ No automated rollback is defined in CI or platform config files.
 2. Redeploy a known-good revision: check out the previous git tag/commit, then `make up` (or rebuild with the prior image tags if you publish images externally).
 3. Confirm with `make smoke` (or the dialect-specific smoke target) and `GET /health` / `system.health`.
 
-**Oxidean Cloud:** Redeploy the previous successful Railway deployment for `gateway` / `api` / `web`, or check out a known-good git revision and redeploy after `make cloud-plan` review.
+**Oxidean Cloud:** Redeploy the previous successful Railway deployment for `gateway` / `api` / `web`, or check out a known-good git revision and redeploy after `make cloud-plan` review. `railway config apply` has no undo and does not roll back deployments: revert the `.railway/railway.ts` edit in git, re-plan, and re-apply to restore configuration; use the **Production deploy** action (`action=rollback`) for deployment rollback.
 
 ## Monitoring
 
