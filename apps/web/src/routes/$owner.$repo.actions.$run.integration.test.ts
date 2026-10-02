@@ -13,12 +13,18 @@ describe("/$owner/$repo/actions/$run", () => {
     expect(src).toContain("actionsRunDetailQuery");
   });
 
-  it("renders job log panel from Actions log store", async () => {
+  it("renders the step-aware job log viewer from the Actions log query", async () => {
     const src = await import("./$owner.$repo.actions.$run.tsrx?raw").then(
       (m) => m.default as string,
     );
-    expect(src).toContain("repo-actions-job-log");
+    expect(src).toContain("ActionsLogViewer");
     expect(src).toContain("actionsJobLogQuery");
+    const viewer = await import("../components/repo/actions-log-viewer.tsrx?raw").then(
+      (m) => m.default as string,
+    );
+    expect(viewer).toContain("repo-actions-job-log");
+    expect(viewer).toContain("actions-log-steps");
+    expect(viewer).toContain("actions-log-search");
   });
 
   it("inherits layout chrome — no duplicate RepoChrome remount (D-QH-01)", async () => {

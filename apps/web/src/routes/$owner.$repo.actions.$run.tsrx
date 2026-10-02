@@ -1,7 +1,12 @@
-import { createFileRoute, useLoaderData, useParams } from "@octanejs/tanstack-router";
+import {
+  createFileRoute,
+  useLoaderData,
+  useNavigate,
+  useParams,
+  useSearch,
+} from "@octanejs/tanstack-router";
 import { useMutation, useQuery, useQueryClient } from "@octanejs/tanstack-query";
-import { useState } from "octane";
-import type { ActionRunGetResponse } from "@oxidean/api-client";
+import type { ActionJobLogResponse, ActionRunGetResponse } from "@oxidean/api-client";
 import { ArrowLeft, Ban, RotateCcw, Workflow } from "@octanejs/lucide";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -9,6 +14,8 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { List, ListRow } from "@/components/ui/list";
 import { PageHeader } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ActionsLogViewer } from "@/components/repo/actions-log-viewer";
+import { ActionsRerunMenu } from "@/components/repo/actions-rerun-menu";
 import { useRepoStore } from "@/lib/repo-store";
 import { formatRelative } from "@/lib/relative-time";
 import { fetchActionsGetJobLog, fetchActionsGetRun } from "@/lib/ssr-repo";
@@ -29,8 +36,12 @@ function runStatusVariant(status: string): "success" | "destructive" | "primary"
   return "default";
 }
 
+function isActiveStatus(status: string): boolean {
+  return ["queued", "in_progress", "pending", "running"].includes(status);
+}
+
 /** Short human duration between two ISO timestamps ("1m 5s"). */
-function jobDuration(started?: string, finished?: string): string {
+function spanDuration(started?: string, finished?: string): string {
   if (!started) return "";
   const start = Date.parse(started);
   const end = finished ? Date.parse(finished) : Date.now();
@@ -44,13 +55,15 @@ function jobDuration(started?: string, finished?: string): string {
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
 
+export type ActionsRunSearch = { job?: string };
+
 export type ActionsRunLoaderData =
   | { kind: "not_found" }
   | { kind: "error"; message: string }
   | {
       kind: "ready";
       detail: ActionRunGetResponse;
-      firstJobLog: string | null;
+      firstJobLog: ActionJobLogResponse | null;
     };
 
 async function loadActionsRunPage(
@@ -69,17 +82,20 @@ async function loadActionsRunPage(
     };
   }
   const firstJob = got.data.jobs[0];
-  let firstJobLog: string | null = null;
+  let firstJobLog: ActionJobLogResponse | null = null;
   if (firstJob) {
     const log = await fetchActionsGetJobLog({
       data: { owner, name: repoName, run_id: runId, job_id: firstJob.id },
     });
-    firstJobLog = log.ok ? log.data.content : "";
+    firstJobLog = log.ok ? log.data : { content: "", next_offset: 0, size: 0 };
   }
   return { kind: "ready", detail: got.data, firstJobLog };
 }
 
 export const Route = createFileRoute("/$owner/$repo/actions/$run")({
+  validateSearch: (search: Record<string, unknown>): ActionsRunSearch => ({
+    job: typeof search.job === "string" ? search.job : undefined,
+  }),
   component: RepoActionsRunPage,
   head: ({ params }) => {
     const p = params as { owner?: string; repo?: string; run?: string };
@@ -113,12 +129,13 @@ export function RepoActionsRunPage() @{
   const owner = String(params.owner ?? "");
   const repoName = String(params.repo ?? "");
   const runId = String(params.run ?? "");
+  const search = useSearch({ strict: false }) as ActionsRunSearch;
+  const navigate = useNavigate();
   const routeLoader = useLoaderData({ from: "/$owner/$repo/actions/$run" }) as
     | ActionsRunLoaderData
     | undefined;
   const repo = useRepoStore((s) => s.repo);
   const canWrite = !!repo?.can_write;
-  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
 
   const ssrDetail = routeLoader?.kind === "ready" ? routeLoader.detail : undefined;
   const detailQ = useQuery({
@@ -127,20 +144,26 @@ export function RepoActionsRunPage() @{
   });
   const jobs = detailQ.data?.jobs ?? ssrDetail?.jobs ?? [];
   const run = detailQ.data?.run ?? ssrDetail?.run;
-  const jobId = selectedJobId ?? jobs[0]?.id ?? "";
+
+  // `?job=` permalink — falls back to the first job when missing/unknown.
+  const selectedJobId =
+    search.job && jobs.some((j) => j.id === search.job) ? search.job : (jobs[0]?.id ?? "");
+  const selectedJob = jobs.find((j) => j.id === selectedJobId);
   const ssrFirstJobLog =
     routeLoader?.kind === "ready" &&
     routeLoader.firstJobLog !== null &&
-    jobId === routeLoader.detail.jobs[0]?.id
+    selectedJobId === routeLoader.detail.jobs[0]?.id
       ? routeLoader.firstJobLog
       : undefined;
   const logQ = useQuery({
-    ...actionsJobLogQuery(owner, repoName, runId, jobId),
-    enabled: !!jobId,
-    initialData: ssrFirstJobLog !== undefined ? { content: ssrFirstJobLog } : undefined,
+    ...actionsJobLogQuery(owner, repoName, runId, selectedJobId),
+    enabled: !!selectedJobId,
+    initialData: ssrFirstJobLog,
   });
   const logText =
-    logQ.data?.content ?? ssrFirstJobLog ?? (logQ.isPending ? "Loading log…" : "(empty log)");
+    logQ.data?.content ??
+    ssrFirstJobLog?.content ??
+    (logQ.isPending ? "Loading log…" : "(empty log)");
 
   const qc = useQueryClient();
   const rerunM = useMutation({
@@ -160,16 +183,38 @@ export function RepoActionsRunPage() @{
       ? String(rerunM.error?.message ?? cancelM.error?.message ?? "Action failed")
       : "";
 
-  const runActive = run
-    ? ["queued", "in_progress", "pending", "running"].includes(run.status)
-    : false;
+  const runActive = run ? isActiveStatus(run.status) : false;
+
+  function selectJob(id: string) {
+    void navigate({
+      to: "/$owner/$repo/actions/$run",
+      params: { owner, repo: repoName, run: runId },
+      search: { job: id },
+    });
+  }
+
+  function rerun(target: { job_id?: string; failed_only?: boolean }) {
+    rerunM.mutate({ owner, name: repoName, run_id: runId, ...target });
+  }
+
+  // GitHub's meta line: workflow #N · event · ref · commit · actor · timing.
+  const firstJobStart = jobs
+    .map((j) => j.started_at)
+    .filter((t): t is string => !!t)
+    .sort()[0];
   const runDescription = run
     ? [
-        run.workflow_name,
+        `${run.workflow_name} #${run.run_number}`,
         run.event,
-        run.head_ref.replace(/^refs\/heads\//, ""),
+        run.head_ref.replace(/^refs\/(heads|tags)\//, ""),
         run.head_sha.slice(0, 7),
         run.actor ? `by ${run.actor}` : "",
+        firstJobStart && run.created_at
+          ? `queued ${spanDuration(run.created_at, firstJobStart)}`
+          : runActive
+            ? "queued"
+            : "",
+        `total ${spanDuration(run.created_at, run.finished_at)}`,
         formatRelative(run.created_at),
       ]
         .filter(Boolean)
@@ -225,17 +270,7 @@ export function RepoActionsRunPage() @{
                     </Button>
                   ) : undefined}
                   {canWrite && !runActive ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      data-testid="actions-rerun-run"
-                      disabled={rerunM.isPending}
-                      onClick={() => rerunM.mutate({ owner, name: repoName, run_id: runId })}
-                    >
-                      <RotateCcw aria-hidden size={14} />
-                      Re-run jobs
-                    </Button>
+                    <ActionsRerunMenu jobs={jobs} busy={rerunM.isPending} onRerun={rerun} />
                   ) : undefined}
                 </div>
               }
@@ -249,35 +284,55 @@ export function RepoActionsRunPage() @{
               <List data-testid="repo-actions-jobs" className="self-start">
                 @for (const job of jobs; key job.id) {
                   <ListRow className="p-0">
-                    <button
-                      type="button"
-                      className={cn(
-                        "flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-[14px] outline-none transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-                        job.id === jobId
-                          ? "bg-muted/60 font-medium text-foreground"
-                          : "text-foreground",
-                      )}
-                      onClick={() => setSelectedJobId(job.id)}
-                    >
-                      <span className="min-w-0">
-                        <span className="block truncate">{job.name as string}</span>
-                        @if (
-                          jobDuration(job.started_at, job.finished_at)
-                        ) {
-                          <span className="block text-[11px] text-muted-foreground">
-                            {
-                              jobDuration(
-                                job.started_at,
-                                job.finished_at,
-                              ) as string
-                            }
-                          </span>;
-                        }
-                      </span>
-                      <Badge variant={runStatusVariant(job.status)}>
-                        {job.status as string}
-                      </Badge>
-                    </button>
+                    <div className="group flex items-center">
+                      <button
+                        type="button"
+                        data-testid={`actions-job-${job.id}`}
+                        className={cn(
+                          "flex min-w-0 flex-1 items-center justify-between gap-2 px-3 py-2 text-left text-[14px] outline-none transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+                          job.id === selectedJobId
+                            ? "bg-muted/60 font-medium text-foreground"
+                            : "text-foreground",
+                        )}
+                        onClick={() => selectJob(job.id)}
+                      >
+                        <span className="min-w-0">
+                          <span className="block truncate">{job.name as string}</span>
+                          @if (
+                            spanDuration(job.started_at, job.finished_at)
+                          ) {
+                            <span className="block text-[11px] text-muted-foreground">
+                              {
+                                spanDuration(
+                                  job.started_at,
+                                  job.finished_at,
+                                ) as string
+                              }
+                            </span>;
+                          }
+                        </span>
+                        <Badge variant={runStatusVariant(job.status)}>
+                          {job.status as string}
+                        </Badge>
+                      </button>
+                      @if (
+                        canWrite &&
+                        !runActive &&
+                        !isActiveStatus(job.status)
+                      ) {
+                        <button
+                          type="button"
+                          data-testid={`actions-rerun-job-${job.id}`}
+                          aria-label={`Re-run ${job.name}`}
+                          title="Re-run job"
+                          disabled={rerunM.isPending}
+                          className="mr-1 shrink-0 rounded p-1.5 text-muted-foreground opacity-0 outline-none transition-opacity hover:bg-muted hover:text-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100"
+                          onClick={() => rerun({ job_id: job.id })}
+                        >
+                          <RotateCcw aria-hidden size={13} />
+                        </button>;
+                      }
+                    </div>
                   </ListRow>;
                 } @empty {
                   <ListRow>
@@ -285,12 +340,11 @@ export function RepoActionsRunPage() @{
                   </ListRow>;
                 }
               </List>
-              <pre
-                data-testid="repo-actions-job-log"
-                className="max-h-[28rem] overflow-auto rounded-md border border-border bg-muted/40 p-4 font-mono text-[12px] text-foreground"
-              >
-                {logText as string}
-              </pre>
+              <ActionsLogViewer
+                log={logText}
+                jobStatus={selectedJob?.status ?? ""}
+                downloadName={selectedJob?.name || "job"}
+              />
             </div>
           </>;
         }
