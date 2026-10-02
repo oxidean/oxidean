@@ -25,7 +25,7 @@ Session auth uses an **opaque HttpOnly cookie** named `oxidean_session` (not JWT
 - Manual HTTP: include `Cookie: oxidean_session=<token>`.
 - Signup, login, and WorkOS/OIDC callbacks attach `Set-Cookie`. Logout / logout-all clear the cookie (`Max-Age=0`).
 
-**Personal access tokens (PATs) are not RPC Bearer credentials (D-01).** Typed `/api/rpc` and `/api/rpc/ws` use the session cookie only. PATs authenticate **Git Smart HTTP** over HTTPS via HTTP Basic (password = token). Do not send `Authorization: Bearer <pat>` to RPC — it is ignored for session resolution.
+**Personal access tokens (PATs) authenticate RPC for non-browser clients (API-02).** `POST /api/rpc` and `GET /api/rpc/ws` accept `Authorization: Bearer <pat>` when **no** `oxidean_session` cookie is present — the cookie always wins if both are sent. PATs also authenticate **Git Smart HTTP** over HTTPS via HTTP Basic (password = token) and the package registries. See [PAT Bearer authentication](#pat-bearer-authentication) for the scope model.
 
 **Provider modes** (instance setting via `admin.auth.*`): `local` | `workos` | `oidc`. Local signup/login RPC only works when mode is `local`. SSO browser flows require matching mode and ENV secrets (see [CONFIGURATION.md](CONFIGURATION.md)).
 
@@ -44,8 +44,8 @@ Missing or mismatched value → error `rpc.version_mismatch` (HTTP 400).
 | Method | Path | Description | Auth required |
 | --- | --- | --- | --- |
 | `GET` | `/health` | Liveness: `{"ok":true}` | No |
-| `POST` | `/api/rpc` | JSON RPC dispatch | Cookie when procedure needs session |
-| `GET` | `/api/rpc/ws` | WebSocket upgrade; same procedures as HTTP | Cookie when procedure needs session |
+| `POST` | `/api/rpc` | JSON RPC dispatch | Cookie or PAT Bearer when procedure needs auth |
+| `GET` | `/api/rpc/ws` | WebSocket upgrade; same procedures as HTTP | Cookie or PAT Bearer when procedure needs auth |
 | `GET` | `/api/auth/workos/start` | Start WorkOS AuthKit (optional `?return_to=`) | No (redirect) |
 | `GET` | `/api/auth/workos/callback` | WorkOS code exchange; sets session cookie | No (redirect) |
 | `GET` | `/api/auth/oidc/start` | Start OIDC + PKCE (optional `?return_to=`) | No (redirect) |
@@ -325,6 +325,44 @@ Manage tokens with the session cookie via RPC (or `@oxidean/api-client`). Token 
 Create responses include a one-time plaintext `token` (store it immediately) plus a metadata `item` **without** the secret. `pat.list` / list items never return the secret — only `token_prefix`, scopes/permissions, `last_used_at` / `last_used_ip`, etc. `pat.revoke` input: `{ "id": "…" }`.
 
 Minting requires a verified email (`auth.email_unverified` otherwise). Empty note/name → `pat.note_required`. Selected fine-grained with no repositories → `pat.repos_required`. Invalid classic scopes or foreign/empty-id fine-grained `selected` repos → `pat.invalid_scope`. Unknown or non-owned revoke id → `pat.not_found`.
+
+
+#### PAT Bearer authentication
+
+Non-browser clients (CLI, MCP, agents, scripts) call `/api/rpc` and `/api/rpc/ws` with a PAT instead of the session cookie:
+
+```bash
+curl -s https://oxidean.example.com/api/rpc \
+  -H 'content-type: application/json' \
+  -H 'Oxidean-RPC-Version: 1' \
+  -H 'Authorization: Bearer oxidean_pat_…' \
+  -d '{"procedure":"auth.me","input":{}}'
+```
+
+Rules:
+
+- The `oxidean_session` cookie always wins — if it is present, `Authorization` is ignored for session resolution.
+- Bearer-authenticated calls resolve the **token owner** as the request identity; repository ACL checks behave exactly as if the owner were signed in.
+- Bearer responses never carry `Set-Cookie`, and PAT calls never create, refresh, or clear sessions.
+- Bad, revoked, or expired tokens → `auth.unauthenticated` (HTTP 401 with `WWW-Authenticate: Bearer`; an RPC error frame on WebSocket). A Bearer header is an explicit credential — invalid tokens are never silently treated as anonymous.
+- Failed-auth rate limiting is shared with Git Smart HTTP PAT auth (per-IP and per-user windows); a tripped limiter → `auth.rate_limited` (HTTP 429 with `Retry-After`).
+
+**Scope model.** Procedures are classified at dispatch; insufficient scope → `auth.pat_scope` (HTTP 403).
+
+| Token | Allowed procedures |
+| --- | --- |
+| Classic `repo` | All repo-domain procedures: repo read/write (issues, pulls, releases, actions, LFS flags), repo administration (collaborators, webhooks, branch protection, mirrors, visibility), plus account-level repo reads (`repo.listMine`, notifications, `user.lookup`) |
+| Classic `package:read` | `packages.list` |
+| Classic `package:write` | `packages.list`, `packages.deleteVersion` |
+| Fine-grained `contents: read` | Repo-domain read procedures on covered repositories |
+| Fine-grained `contents: write` | Repo-domain read **and** write procedures on covered repositories |
+| Fine-grained `packages: read`/`write` | `packages.list` when `repository_id` names a covered repository |
+
+Fine-grained coverage = `repo_access` `selected` ids, or `all` (personal-owned plus org Owner/Admin repositories — same rule as Git Smart HTTP). Public repositories stay readable with any valid fine-grained token; denied reads on private repositories return `repo.not_found` rather than a scope error, matching the anti-enumeration rule for anonymous callers.
+
+**Never callable with a PAT** (session cookie required, `auth.pat_scope` otherwise): `admin.*` and `packages.admin*` (instance administration), auth lifecycle (`auth.login`/`signup`/`logout`/verify/reset/setup), credential management (`pat.*`, `sshKey.*`, `gpgKey.*`, `email.*`), org mutations and invites, profile writes, and any procedure not in the allowed classes above. Unrecognized procedures fail closed.
+
+WebSocket: send the `Authorization` header on the upgrade request. The credential is re-validated per RPC frame, so revoking or expiring a token takes effect on the next frame.
 
 ### SSH public keys (`sshKey.*`)
 

@@ -22,6 +22,7 @@ use crate::auth::session::{
     SessionService, SESSION_COOKIE_NAME, SESSION_IDLE,
 };
 use crate::email::{self, EmailSender};
+use crate::pat::bearer::{self, BearerRejection};
 use crate::pat::rate_limit::FailedAuthLimiter;
 use crate::routes::{auth_callbacks, avatar, git_lfs, git_smart_http, release_assets, repo_raw, template_packs};
 use crate::rpc::{self, CookieChange, RpcCtx, VERSION_HEADER};
@@ -351,32 +352,77 @@ fn session_token_from_headers(headers: &HeaderMap) -> Option<String> {
     None
 }
 
+/// Edge credential for `/api/rpc` (API-02): the session cookie always wins;
+/// `Authorization: Bearer <pat>` is consulted only when no cookie is present.
+#[derive(Debug, Clone)]
+enum RpcCredential {
+    Cookie(String),
+    Bearer(String),
+    Anonymous,
+}
+
+fn bearer_token_from_headers(headers: &HeaderMap) -> Option<String> {
+    let raw = headers.get(header::AUTHORIZATION)?.to_str().ok()?.trim();
+    let (scheme, token) = raw.split_once(' ')?;
+    if !scheme.eq_ignore_ascii_case("bearer") {
+        return None;
+    }
+    let token = token.trim();
+    (!token.is_empty()).then(|| token.to_string())
+}
+
+fn edge_credential(headers: &HeaderMap) -> RpcCredential {
+    if let Some(token) = session_token_from_headers(headers) {
+        return RpcCredential::Cookie(token);
+    }
+    if let Some(token) = bearer_token_from_headers(headers) {
+        return RpcCredential::Bearer(token);
+    }
+    RpcCredential::Anonymous
+}
+
 async fn build_rpc_ctx(
     state: &AppState,
-    raw_token: Option<&str>,
+    credential: RpcCredential,
     client: rpc::ClientMeta,
-) -> RpcCtx {
-    let session = match raw_token {
-        Some(token) => match state
-            .sessions
-            .resolve(
+) -> Result<RpcCtx, BearerRejection> {
+    let (session, pat) = match &credential {
+        RpcCredential::Cookie(token) => {
+            let session = match state
+                .sessions
+                .resolve(
+                    &state.db,
+                    token,
+                    client.ip_address.as_deref(),
+                    client.user_agent.as_deref(),
+                )
+                .await
+            {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::warn!(error = %e, "session resolve failed");
+                    None
+                }
+            };
+            (session, None)
+        }
+        RpcCredential::Bearer(token) => {
+            // Failed-auth limiter is shared with Smart HTTP PAT auth (D-26).
+            let (session, identity) = bearer::resolve_bearer(
                 &state.db,
+                &state.git_auth_limiter,
                 token,
                 client.ip_address.as_deref(),
-                client.user_agent.as_deref(),
             )
-            .await
-        {
-            Ok(s) => s,
-            Err(e) => {
-                tracing::warn!(error = %e, "session resolve failed");
-                None
-            }
-        },
-        None => None,
+            .await?;
+            bearer::touch_last_used(&state.db, &identity.token_id, client.ip_address.as_deref())
+                .await;
+            (Some(session), Some(identity))
+        }
+        RpcCredential::Anonymous => (None, None),
     };
     let email = state.current_email();
-    RpcCtx {
+    Ok(RpcCtx {
         db: state.db.clone(),
         email,
         email_slot: state.email.clone(),
@@ -390,13 +436,32 @@ async fn build_rpc_ctx(
         git: state.git.clone(),
         env_name: state.env_name.clone(),
         session,
+        pat,
         client,
         set_cookie: None,
         lookup_limiter: state.lookup_limiter.clone(),
         search_timeout_ms: state.search_timeout_ms,
         search_max_matches: state.search_max_matches,
         search_max_files: state.search_max_files,
+    })
+}
+
+/// Bearer auth failures are HTTP errors (401 + `WWW-Authenticate`, or 429 +
+/// `Retry-After`) with a standard RPC error body — never a silent downgrade.
+fn bearer_rejection_response(rejection: BearerRejection) -> axum::response::Response {
+    let status = rejection.status();
+    let mut res = (status, Json(RpcResponse::err(rejection.error))).into_response();
+    if status == StatusCode::UNAUTHORIZED {
+        if let Ok(v) = HeaderValue::from_str(r#"Bearer realm="Oxidean RPC""#) {
+            res.headers_mut().insert(header::WWW_AUTHENTICATE, v);
+        }
     }
+    if let Some(secs) = rejection.retry_after {
+        if let Ok(v) = HeaderValue::from_str(&secs.to_string()) {
+            res.headers_mut().insert(header::RETRY_AFTER, v);
+        }
+    }
+    res
 }
 
 fn append_set_cookie(response: &mut axum::response::Response, cookie: &cookie::Cookie<'_>) {
@@ -449,6 +514,12 @@ fn rpc_status(resp: &RpcResponse) -> StatusCode {
         RpcResponse::Err { error, .. } if error.code == "auth.email_unverified" => {
             StatusCode::FORBIDDEN
         }
+        RpcResponse::Err { error, .. } if error.code == "auth.pat_scope" => {
+            StatusCode::FORBIDDEN
+        }
+        RpcResponse::Err { error, .. } if error.code == "auth.rate_limited" => {
+            StatusCode::TOO_MANY_REQUESTS
+        }
         RpcResponse::Err { error, .. } if error.code == "repo.create_forbidden" => {
             StatusCode::FORBIDDEN
         }
@@ -476,11 +547,22 @@ async fn rpc_http(
         return (StatusCode::BAD_REQUEST, Json(RpcResponse::err(err))).into_response();
     }
 
-    let token = session_token_from_headers(&headers);
-    let mut ctx = build_rpc_ctx(&state, token.as_deref(), rpc::ClientMeta::from_headers(&headers)).await;
+    let credential = edge_credential(&headers);
+    let bearer_auth = matches!(credential, RpcCredential::Bearer(_));
+    let mut ctx = match build_rpc_ctx(&state, credential, rpc::ClientMeta::from_headers(&headers))
+        .await
+    {
+        Ok(ctx) => ctx,
+        Err(rejection) => return bearer_rejection_response(rejection),
+    };
     let resp = rpc::dispatch(&mut ctx, body).await;
     let status = rpc_status(&resp);
-    let set_cookie = ctx.set_cookie.take();
+    // PAT Bearer calls never mint or mutate cookies (API-02).
+    let set_cookie = if bearer_auth {
+        None
+    } else {
+        ctx.set_cookie.take()
+    };
     let env_name = ctx.env_name.clone();
     let response = (status, Json(resp)).into_response();
     attach_set_cookie(response, set_cookie, &env_name)
@@ -495,15 +577,15 @@ async fn rpc_ws(
     if let Err(err) = rpc::check_version_header(version) {
         return (StatusCode::BAD_REQUEST, Json(RpcResponse::err(err))).into_response();
     }
-    let token = session_token_from_headers(&headers);
+    let credential = edge_credential(&headers);
     let client = rpc::ClientMeta::from_headers(&headers);
-    ws.on_upgrade(move |socket| handle_socket(socket, state, token, client))
+    ws.on_upgrade(move |socket| handle_socket(socket, state, credential, client))
 }
 
 async fn handle_socket(
     socket: WebSocket,
     state: AppState,
-    token: Option<String>,
+    credential: RpcCredential,
     client: rpc::ClientMeta,
 ) {
     let (mut sender, mut receiver) = socket.split();
@@ -515,9 +597,12 @@ async fn handle_socket(
         };
         let resp = match serde_json::from_str::<RpcRequest>(&text) {
             Ok(req) => {
-                let mut ctx =
-                    build_rpc_ctx(&state, token.as_deref(), client.clone()).await;
-                rpc::dispatch(&mut ctx, req).await
+                // Bearer tokens re-resolve per frame, matching session-cookie
+                // semantics (revocation/expiry takes effect on the next frame).
+                match build_rpc_ctx(&state, credential.clone(), client.clone()).await {
+                    Ok(mut ctx) => rpc::dispatch(&mut ctx, req).await,
+                    Err(rejection) => RpcResponse::err(rejection.error),
+                }
             }
             Err(e) => RpcResponse::err(AppError::new(
                 "rpc.bad_input",
