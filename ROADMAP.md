@@ -33,7 +33,7 @@ The forge is only as useful as what third-party tools can drive. PATs authentica
 - [ ] **API-03** OAuth apps: instance acts as an OAuth2/OIDC provider so external tools authenticate users ("sign in with Oxidean") and act on their behalf. Tracked as PLAT-V2-02 alongside fine-grained PAT depth.
 - [ ] **API-04** Broader webhook events beyond `push`, `pull_request`, `issues`, `ping`, `*`: `issue_comment` (DEBT-04), `release`, `star`, `fork`, `create`/`delete` refs, workflow run status, package publish.
 - [ ] **API-05** Atom/RSS feeds for repo activity, releases, and user activity.
-- [ ] **API-06** GitHub-compatible subset for common tooling (commit statuses API shape, PR refs `refs/pull/N/head`, known webhook payload conventions) so existing CI/deploy bots work unchanged where practical.
+- [x] **API-06** GitHub-compatible subset for common tooling (commit statuses API shape, PR refs `refs/pull/N/head`, known webhook payload conventions) so existing CI/deploy bots work unchanged where practical. ([#94](https://github.com/oxidean/oxidean/pull/94))
 
 ## Agents, MCP, and CLI
 
