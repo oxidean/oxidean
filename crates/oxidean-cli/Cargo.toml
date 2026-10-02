@@ -1,0 +1,26 @@
+[package]
+name = "oxidean-cli"
+description = "ox — companion CLI for Oxidean forge instances (typed /api/rpc client)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "oxidean_cli"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ox"
+path = "src/main.rs"
+
+[dependencies]
+oxidean-core = { path = "../oxidean-core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+reqwest = { version = "0.13.5", features = ["rustls", "json"], default-features = false }
+thiserror = "2"
+
+[dev-dependencies]
+tempfile = "3"
+wiremock = "0.6.5"
