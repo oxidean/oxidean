@@ -225,16 +225,41 @@ impl Handler for SshHandler {
                     } else {
                         None
                     };
-                    let code = pack::run_pack_command(
-                        program,
-                        &bare,
-                        reader,
-                        writer,
-                        stderr_writer,
-                        protection_pairs.as_deref(),
-                    )
-                    .await
-                    .unwrap_or(1);
+                    let code = if is_push {
+                        // API-06: scan receive-pack commands for refs/pull/*
+                        // targets — the gate yields EOF to receive-pack so no
+                        // ref update is applied (git applies refs only after
+                        // the full command list + pack is read).
+                        let mut pull_gate = pack::PullRefGate::new(reader);
+                        let code = pack::run_pack_command(
+                            program,
+                            &bare,
+                            &mut pull_gate,
+                            writer,
+                            stderr_writer,
+                            protection_pairs.as_deref(),
+                        )
+                        .await
+                        .unwrap_or(1);
+                        if let Some(bad) = pull_gate.forbidden_ref() {
+                            let msg = format!(
+                                "ERROR: denying push to {bad} — refs/pull/* is a synthesized read-only namespace.\n"
+                            );
+                            let _ = handle.extended_data(channel, 1, msg.into_bytes()).await;
+                        }
+                        code
+                    } else {
+                        pack::run_pack_command(
+                            program,
+                            &bare,
+                            reader,
+                            writer,
+                            stderr_writer,
+                            protection_pairs.as_deref(),
+                        )
+                        .await
+                        .unwrap_or(1)
+                    };
                     if code == 0 && is_push {
                         if let Ok(Some(user)) = db.find_user_by_id(&user_id).await {
                             let after_refs = git.list_refs(&bare).await.unwrap_or_default();

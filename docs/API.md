@@ -209,6 +209,9 @@ All paths are under `/api/v1`. The procedure column names the RPC equivalent in 
 | `GET` | `/repos/{owner}/{repo}/tags` | `repo.refs` | `refs/tags/*`, short names |
 | `GET` | `/repos/{owner}/{repo}/commits` | `repo.commits` | `sha` (alias `ref`), `skip`, `limit` |
 | `GET` | `/repos/{owner}/{repo}/commits/{sha}` | `repo.commit` | |
+| `GET`/`POST` | `/repos/{owner}/{repo}/statuses/{sha}` | `repo.commitStatus.list` / `repo.commitStatus.create` | GitHub-shaped fields — see [GitHub compatibility](#github-compatibility) |
+| `GET` | `/repos/{owner}/{repo}/commits/{sha}/statuses` | `repo.commitStatus.list` | Alias of the list above |
+| `GET` | `/repos/{owner}/{repo}/commits/{sha}/status` | `repo.commitStatus.list` | Combined rollup: `state`, `statuses`, `total_count` |
 | `GET` | `/repos/{owner}/{repo}/compare/{basehead}` | `repo.compare` | `base...head` (`..` accepted) |
 | `GET` | `/repos/{owner}/{repo}/tree` | `repo.tree` | Root listing; `?ref=` |
 | `GET` | `/repos/{owner}/{repo}/tree/{path}` | `repo.tree` | `?ref=` |
@@ -564,6 +567,38 @@ git add .gitattributes
 Clone / fetch / push over SSH use an in-process listener (Compose TCP **2222** by default — not Traefik). Remotes are **scp-style** `git@{host}:{owner}/{repo}.git` (D-SSH-02). The SSH username must be `git`; identity comes only from a registered public-key fingerprint (full account ACL — no PAT scopes). When advertised port ≠ 22, clients set `Port` in `~/.ssh/config` (or `ssh -p`); do not treat `ssh://` as the primary CloneBox URL.
 
 Failed pubkey auth is rate-limited like Smart HTTP PAT failures (IP + fingerprint buckets). See [CONFIGURATION.md](CONFIGURATION.md) for `OXIDEAN_SSH_*`.
+
+### GitHub compatibility (API-06)
+
+Oxidean speaks a GitHub-compatible subset so existing CI/deploy tooling can target it unchanged where practical. Deliberate deltas are called out rather than mimicked silently.
+
+**Pull request refs.** Every open pull request exposes synthesized refs in the base repository, advertised by `git-upload-pack` over both Smart HTTP and SSH:
+
+| Ref | Resolves to |
+| --- | --- |
+| `refs/pull/{N}/head` | The PR's current head tip (`head_sha`), refreshed on create / head-branch push / reopen. Fork heads are fetched into the base repo so the object is always fetchable. |
+| `refs/pull/{N}/merge` | The recorded merge commit, written when the PR merges. **Delta from GitHub:** no speculative test-merge commit is computed while the PR is open, so `/merge` simply does not exist until merge — `ls-remote`/`fetch` will not see it. |
+
+`refs/pull/*` is a **read-only namespace**: pushes that create, update, or delete it are denied (`git.pull_refs_read_only` over Smart HTTP; the pack bridge closes the stream over SSH; the installed `hooks/update` denies it as a backstop when the protection helper is wired). Refs persist after close/merge like GitHub's.
+
+```bash
+git fetch origin pull/123/head && git checkout FETCH_HEAD   # same as GitHub
+```
+
+**Commit statuses.** `POST /api/v1/repos/{owner}/{repo}/statuses/{sha}` accepts the GitHub body (`state`, `context`, `target_url`, `description`; `state` ∈ `pending` | `success` | `failure` | `error`, `context` defaults to `default`) and `GET` on the same path returns the GitHub-shaped list (`state`, `context`, `target_url`, `description`, `created_at`, `creator`). `GET /repos/{owner}/{repo}/commits/{sha}/status` returns the combined rollup; `…/commits/{sha}/statuses` is a list alias.
+
+**Webhook payload conventions.** Outbound deliveries use GitHub-shaped top-level keys, so handlers keyed on `action` + resource objects work unchanged:
+
+| Event | Top-level keys |
+| --- | --- |
+| Pull request (`pull_request`) | `action`, `number`, `pull_request`, `repository`, `sender` |
+| Issue (`issues`) | `action`, `issue`, `repository`, `sender` |
+| Push (`push`) | `ref`, `before`, `after`, `created`, `deleted`, `forced`, `commits`, `head_commit`, `pusher`, `sender`, `repository` |
+| Ping (`ping`) | `zen`, `hook_id`, `repository` |
+
+Conventions: `action` names the transition (`opened`, `closed`, `reopened`, `synchronize`, `edited`, …); `repository` identifies the repo (`name`, `full_name`, `owner`); `sender` is the acting user (`login`, `id`). Payloads are *GitHub-shaped but not exhaustive* — nested objects carry the fields Oxidean models; consumers that read a fixed key subset work unchanged.
+
+Deltas: `issue_comment` events are not emitted today (issue/PR comments do not fan out to webhooks), and the push payload leaves `commits`/`head_commit` empty — fetch `after`/`refs/pull/{N}/head` for commit data.
 
 ### Two-way repository mirroring
 

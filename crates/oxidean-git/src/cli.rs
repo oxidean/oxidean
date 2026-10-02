@@ -2230,6 +2230,23 @@ impl GitBackend for CliGitBackend {
         let stdout = run_git_stdout(&["-C", repo_s, "rev-parse", rev]).await?;
         Ok(String::from_utf8_lossy(&stdout).trim().to_string())
     }
+
+    async fn update_ref(&self, repo: &Path, refname: &str, sha: &str) -> Result<(), GitError> {
+        let refname = validate_treeish(refname)?;
+        if !refname.starts_with("refs/") {
+            return Err(GitError::InvalidArg(format!(
+                "update_ref requires a fully-qualified refs/* name: {refname}"
+            )));
+        }
+        let sha = validate_treeish(sha)?;
+        if !(7..=64).contains(&sha.len()) || !sha.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(GitError::InvalidArg(format!(
+                "update_ref target must be a sha: {sha}"
+            )));
+        }
+        let repo_s = repo_str(repo)?;
+        run_git(&["-C", repo_s, "update-ref", refname, sha]).await
+    }
 }
 
 /// Parse `git ls-tree -r -l` lines: `mode type oid size\tpath` (blobs only).

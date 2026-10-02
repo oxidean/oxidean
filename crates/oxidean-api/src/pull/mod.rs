@@ -3,6 +3,7 @@
 pub(crate) mod acl;
 mod comments;
 mod merge_ops;
+pub(crate) mod refs;
 mod reviews;
 
 pub use comments::{comments_create, comments_list, comments_resolve};
@@ -303,6 +304,14 @@ async fn sync_open_pulls_for_branch(
             .await?;
         }
         db.update_pull_head_sha(&pull.id, after_sha).await?;
+        // API-06: keep refs/pull/{N}/head tracking the new head tip. The ref
+        // lives in the PR's *base* repo — for fork heads `sync_head_ref`
+        // fetches the object in first (this branch may belong to a fork).
+        let mut pull = pull;
+        pull.head_sha = after_sha.to_string();
+        if let Some((base_owner, base_name)) = refs::repo_disk_coords(db, &pull.repo_id).await {
+            refs::sync_head_ref(git, repos_dir, db, &base_owner, &base_name, &pull).await;
+        }
         let _ = db.mark_pull_line_comments_outdated(&pull.id).await;
 
         let eff = protection::effective_for_branch(db, repository_id, &pull.base_ref)
@@ -701,6 +710,16 @@ pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullPublic
         )
         .await
         .map_err(db_err)?;
+    // API-06: synthesize refs/pull/{N}/head so upload-pack advertises it.
+    refs::sync_head_ref(
+        ctx.git.as_ref(),
+        &ctx.repos_dir,
+        &ctx.db,
+        &accessible.owner_username,
+        &accessible.row.name,
+        &row,
+    )
+    .await;
     let subject = notify::subject_for_pull(&row);
     let mentions = notify::resolve_mention_user_ids(ctx, &body).await;
     let requested = ctx
@@ -1021,6 +1040,17 @@ pub async fn reopen(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullPublic
         .await
         .map_err(db_err)?;
     let updated = load_pull_in_repo(ctx, &accessible.row.id, req.number).await?;
+    // API-06: self-heal the pull head ref for PRs opened before the namespace
+    // existed (or after a ref write was lost).
+    refs::sync_head_ref(
+        ctx.git.as_ref(),
+        &ctx.repos_dir,
+        &ctx.db,
+        &accessible.owner_username,
+        &accessible.row.name,
+        &updated,
+    )
+    .await;
     let subject = notify::subject_for_pull(&updated);
     let recipients = notify::pull_participant_ids(ctx, &updated.id, &updated.author_id).await;
     notify::fanout(ctx, &user.id, recipients, "pr_reopened", &subject).await;
@@ -1149,6 +1179,20 @@ pub async fn update(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullPublic
             .update_pull_head_sha(&row.id, &new_head_sha)
             .await
             .map_err(db_err)?;
+        // API-06: refresh refs/pull/{N}/head (same-repo refresh — object present).
+        if let Ok(bare) = bare_repo_path(
+            &ctx.repos_dir,
+            &accessible.owner_username,
+            &accessible.row.name,
+        ) {
+            if let Err(e) = ctx
+                .git
+                .update_ref(&bare, &refs::head_ref_name(row.number), &new_head_sha)
+                .await
+            {
+                tracing::warn!(error = %e, pull = %row.id, "pull refs: head ref write failed");
+            }
+        }
     }
     if head_changed || base_changed {
         ctx.db

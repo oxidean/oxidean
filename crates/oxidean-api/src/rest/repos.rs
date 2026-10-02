@@ -193,9 +193,9 @@ async fn list_commits(
 
 #[derive(Deserialize)]
 pub struct ShaPath {
-    owner: String,
-    repo: String,
-    sha: String,
+    pub owner: String,
+    pub repo: String,
+    pub sha: String,
 }
 
 /// `GET /api/v1/repos/{owner}/{repo}/commits/{sha}` (`repo.commit`).
