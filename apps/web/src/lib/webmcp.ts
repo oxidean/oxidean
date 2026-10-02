@@ -35,6 +35,33 @@ export const MCP_WELL_KNOWN_PATH = "/.well-known/mcp";
 export const MCP_PROTOCOL_VERSIONS = ["2024-11-05", "2025-03-26", "2025-06-18"];
 
 /**
+ * Declarative WebMCP surface (the spec's second API): `toolname` /
+ * `tooldescription` turn a plain GET `<form>` into a tool the browser fills
+ * and submits on the agent's behalf — `toolautosubmit` skips the manual-submit
+ * review step, which is safe here because searching is read-only. Browsers
+ * without WebMCP ignore the attributes and the form keeps working normally.
+ * The attributes are not in DOM typings yet, so templates apply them via
+ * spread.
+ */
+export const WEBMCP_SEARCH_FORM_ATTRS: Record<string, string> = {
+  toolname: "search_site",
+  tooldescription:
+    "Search this Oxidean instance across repositories, users, organizations, code, issues, and pull requests; navigates to the results page.",
+  toolautosubmit: "",
+};
+
+/** `toolparamdescription` for the search query field. */
+export const WEBMCP_SEARCH_QUERY_ATTRS: Record<string, string> = {
+  toolparamdescription: "Search query text",
+};
+
+/** `toolparamdescription` for the fixed result-type field. */
+export const WEBMCP_SEARCH_TYPE_ATTRS: Record<string, string> = {
+  toolparamdescription:
+    "Result tab: repositories (default), users, organizations, code, issues, or pulls",
+};
+
+/**
  * Inline registration snippet for `dangerouslySetInnerHTML` in the root shell.
  * Fully static — no interpolation, so nothing user-controlled reaches the
  * markup (same contract as the SW register script, T-03-19).
@@ -168,6 +195,7 @@ export function buildWebMcpWellKnownDocument(): Record<string, unknown> {
       api: "document.modelContext (navigator.modelContext fallback)",
       registration:
         "each page registers the instance tools/list catalog as WebMCP tools; execute() proxies tools/call to the MCP endpoint",
+      declarative: `${WEBMCP_SEARCH_FORM_ATTRS.toolname} form tool via toolname/tooldescription attributes`,
     },
     mcp: buildMcpWellKnownDocument(),
     tools: {

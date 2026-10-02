@@ -6,6 +6,9 @@ import {
   buildWebMcpWellKnownDocument,
   MCP_ENDPOINT_PATH,
   MCP_WELL_KNOWN_PATH,
+  WEBMCP_SEARCH_FORM_ATTRS,
+  WEBMCP_SEARCH_QUERY_ATTRS,
+  WEBMCP_SEARCH_TYPE_ATTRS,
   WEBMCP_WELL_KNOWN_PATH,
 } from "./webmcp";
 
@@ -52,5 +55,17 @@ describe("well-known discovery documents", () => {
     expect(doc.links.mcp_endpoint).toBe(MCP_ENDPOINT_PATH);
     expect(doc.links.mcp_metadata).toBe(MCP_WELL_KNOWN_PATH);
     expect(doc.webmcp.api).toContain("document.modelContext");
+    expect(doc.webmcp.declarative).toContain("search_site");
+  });
+});
+
+describe("declarative WebMCP search form attrs", () => {
+  it("carries toolname/tooldescription/toolautosubmit and param descriptions", () => {
+    expect(WEBMCP_SEARCH_FORM_ATTRS.toolname).toBe("search_site");
+    expect(WEBMCP_SEARCH_FORM_ATTRS.tooldescription).toBeTruthy();
+    // Present-but-empty marks the boolean toolautosubmit attribute.
+    expect(WEBMCP_SEARCH_FORM_ATTRS.toolautosubmit).toBe("");
+    expect(WEBMCP_SEARCH_QUERY_ATTRS.toolparamdescription).toBeTruthy();
+    expect(WEBMCP_SEARCH_TYPE_ATTRS.toolparamdescription).toBeTruthy();
   });
 });

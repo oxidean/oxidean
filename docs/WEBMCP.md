@@ -28,6 +28,12 @@ Every page carries:
    unaffected). When present, the script fetches `tools/list` from `/api/mcp`
    and registers each entry as a WebMCP tool via `registerTool` (with a
    `provideContext` fallback for earlier-draft implementations).
+3. **A declarative form tool** — the spec's second API. The header search
+   `<form>` carries `toolname="search_site"` / `tooldescription` /
+   `toolautosubmit`, and its fields carry `toolparamdescription`, so supporting
+   browsers expose a `search_site` tool that fills the form and navigates to
+   `/search` results. It is a plain `GET` form: the tool works with no
+   JavaScript wiring of ours, and unsupporting browsers ignore the attributes.
 
 ## How tool calls work
 
@@ -38,6 +44,11 @@ implementations or credentials; it is a thin bridge, so tool behavior, ACLs,
 and error shapes match the instance endpoint exactly. The registered catalog
 is whatever the instance advertises at page-load time — new server-side tools
 appear without web changes.
+
+`search_site` is the exception: as a declarative tool the browser submits the
+real search form instead of running `execute`, so it reads `q` (and the
+`type` tab) from the submitted `FormData` rather than component state and
+navigates to `/search?q=…&type=…`.
 
 ### Sequence
 
@@ -76,9 +87,9 @@ directly; do not put tokens into page script.
 1. Run Chrome 155+ with `--enable-experimental-web-platform-features` (or a
    browser/extension that implements the draft, such as MCP-B).
 2. Open any page on the instance and sign in for full access.
-3. From Chrome DevTools MCP: `list_webmcp_tools` shows `repo_list`,
-   `issue_get`, `search_code`, and the rest of the instance catalog;
-   `call_webmcp_tool` invokes them.
+3. From Chrome DevTools MCP: `list_webmcp_tools` shows `search_site` plus
+   `repo_list`, `issue_get`, `search_code`, and the rest of the instance
+   catalog; `call_webmcp_tool` invokes them.
 
 The same checks work without a browser agent:
 
