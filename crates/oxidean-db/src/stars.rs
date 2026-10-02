@@ -1129,6 +1129,209 @@ pub async fn list_network_forks(
     }
 }
 
+/// Network member row for `repo.insights.forkNetwork` (GIT-26) — includes the
+/// network root and each repo's immediate parent (`forked_from`).
+#[derive(Debug, Clone)]
+pub struct ForkNetworkRow {
+    pub id: String,
+    pub owner_username: String,
+    pub name: String,
+    /// `forked_from_repo_id`; `None` on the network root.
+    pub parent_repo_id: Option<String>,
+    /// Parent repo owner slug when the parent row still exists.
+    pub parent_owner: Option<String>,
+    /// Parent repo name when the parent row still exists.
+    pub parent_name: Option<String>,
+    pub star_count: i64,
+    pub fork_count: i64,
+    pub created_at: String,
+    pub updated_at: String,
+    /// Set when owner is a user and has an avatar.
+    pub owner_user_id: Option<String>,
+    pub has_owner_avatar: bool,
+}
+
+macro_rules! map_fork_network {
+    ($row:expr) => {{
+        let row = $row;
+        let owner_avatar_path: Option<String> = row
+            .try_get("owner_avatar_path")
+            .map_err(|e| format!("fork network row: {e}"))?;
+        ForkNetworkRow {
+            id: row.try_get("id").map_err(|e| format!("fork network row: {e}"))?,
+            owner_username: row
+                .try_get("owner_username")
+                .map_err(|e| format!("fork network row: {e}"))?,
+            name: row
+                .try_get("name")
+                .map_err(|e| format!("fork network row: {e}"))?,
+            parent_repo_id: row
+                .try_get("parent_repo_id")
+                .map_err(|e| format!("fork network row: {e}"))?,
+            parent_owner: row
+                .try_get("parent_owner")
+                .map_err(|e| format!("fork network row: {e}"))?,
+            parent_name: row
+                .try_get("parent_name")
+                .map_err(|e| format!("fork network row: {e}"))?,
+            star_count: row
+                .try_get("star_count")
+                .map_err(|e| format!("fork network row: {e}"))?,
+            fork_count: row
+                .try_get("fork_count")
+                .map_err(|e| format!("fork network row: {e}"))?,
+            created_at: row
+                .try_get("created_at")
+                .map_err(|e| format!("fork network row: {e}"))?,
+            updated_at: row
+                .try_get("updated_at")
+                .map_err(|e| format!("fork network row: {e}"))?,
+            owner_user_id: row
+                .try_get("owner_user_id")
+                .map_err(|e| format!("fork network row: {e}"))?,
+            has_owner_avatar: owner_avatar_path.is_some(),
+        }
+    }};
+}
+
+// Member select shared by `list_fork_network` / `count_fork_network_members`.
+// Includes the network root (forked_from IS NULL) and the queried repo even
+// when private — the caller already resolved Read on it, so listing it leaks
+// nothing the repo.get response does not already expose.
+const FORK_NETWORK_SELECT: &str = "
+    SELECT r.id,
+           CASE WHEN r.owner_type = 'org' THEN o.slug ELSE u.username END AS owner_username,
+           r.name,
+           r.forked_from_repo_id AS parent_repo_id,
+           CASE WHEN p.owner_type = 'org' THEN po.slug ELSE pu.username END AS parent_owner,
+           p.name AS parent_name,
+           COALESCE(r.star_count, 0) AS star_count,
+           COALESCE(r.fork_count, 0) AS fork_count,
+           {created_at} AS created_at,
+           {updated_at} AS updated_at,
+           CASE WHEN r.owner_type = 'user' THEN u.id ELSE NULL END AS owner_user_id,
+           CASE WHEN r.owner_type = 'user' THEN u.avatar_path ELSE NULL END AS owner_avatar_path
+    FROM repositories r
+    LEFT JOIN users u ON r.owner_type = 'user' AND u.id = r.owner_id
+    LEFT JOIN organizations o ON r.owner_type = 'org' AND o.id = r.owner_id
+    LEFT JOIN repositories p ON p.id = r.forked_from_repo_id
+    LEFT JOIN users pu ON p.owner_type = 'user' AND pu.id = p.owner_id
+    LEFT JOIN organizations po ON p.owner_type = 'org' AND po.id = p.owner_id";
+
+/// Public members of a fork network (root included), oldest first — plus
+/// `current_repo_id` regardless of visibility. Capped by `limit`.
+pub async fn list_fork_network(
+    pool: &DbPool,
+    fork_network_id: &str,
+    current_repo_id: &str,
+    limit: i64,
+) -> Result<Vec<ForkNetworkRow>, String> {
+    let limit = limit.clamp(1, 500);
+    match pool {
+        DbPool::Postgres(p) => {
+            let sql = FORK_NETWORK_SELECT
+                .replace("{created_at}", "to_char(r.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"')")
+                .replace("{updated_at}", "to_char(r.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"')")
+                + "
+    WHERE r.fork_network_id = $1
+      AND r.deleted_at IS NULL
+      AND (lower(r.visibility) = 'public' OR r.id = $2)
+    ORDER BY r.created_at ASC, r.id ASC
+    LIMIT $3";
+            let rows = sqlx::query(&sql)
+                .bind(fork_network_id)
+                .bind(current_repo_id)
+                .bind(limit)
+                .fetch_all(p)
+                .await
+                .map_err(|e| format!("list fork network: {e}"))?;
+            rows.into_iter().map(|r| Ok(map_fork_network!(&r))).collect()
+        }
+        DbPool::MySql(p) => {
+            let sql = FORK_NETWORK_SELECT
+                .replace("{created_at}", "DATE_FORMAT(r.created_at, '%Y-%m-%dT%H:%i:%sZ')")
+                .replace("{updated_at}", "DATE_FORMAT(r.updated_at, '%Y-%m-%dT%H:%i:%sZ')")
+                + "
+    WHERE r.fork_network_id = ?
+      AND r.deleted_at IS NULL
+      AND (lower(r.visibility) = 'public' OR r.id = ?)
+    ORDER BY r.created_at ASC, r.id ASC
+    LIMIT ?";
+            let rows = sqlx::query(&sql)
+                .bind(fork_network_id)
+                .bind(current_repo_id)
+                .bind(limit)
+                .fetch_all(p)
+                .await
+                .map_err(|e| format!("list fork network: {e}"))?;
+            rows.into_iter().map(|r| Ok(map_fork_network!(&r))).collect()
+        }
+        DbPool::Sqlite(p) => {
+            let sql = FORK_NETWORK_SELECT
+                .replace("{created_at}", "strftime('%Y-%m-%dT%H:%M:%SZ', r.created_at)")
+                .replace("{updated_at}", "strftime('%Y-%m-%dT%H:%M:%SZ', r.updated_at)")
+                + "
+    WHERE r.fork_network_id = ?1
+      AND r.deleted_at IS NULL
+      AND (lower(r.visibility) = 'public' OR r.id = ?2)
+    ORDER BY r.created_at ASC, r.id ASC
+    LIMIT ?3";
+            let rows = sqlx::query(&sql)
+                .bind(fork_network_id)
+                .bind(current_repo_id)
+                .bind(limit)
+                .fetch_all(p)
+                .await
+                .map_err(|e| format!("list fork network: {e}"))?;
+            rows.into_iter().map(|r| Ok(map_fork_network!(&r))).collect()
+        }
+    }
+}
+
+/// Total rows `list_fork_network` can return for the same filter (for the
+/// `truncated` flag; a COUNT over the same visibility window).
+pub async fn count_fork_network_members(
+    pool: &DbPool,
+    fork_network_id: &str,
+    current_repo_id: &str,
+) -> Result<i64, String> {
+    match pool {
+        DbPool::Postgres(p) => sqlx::query_scalar(
+            "SELECT COUNT(*) FROM repositories r
+             WHERE r.fork_network_id = $1
+               AND r.deleted_at IS NULL
+               AND (lower(r.visibility) = 'public' OR r.id = $2)",
+        )
+        .bind(fork_network_id)
+        .bind(current_repo_id)
+        .fetch_one(p)
+        .await
+        .map_err(|e| format!("count fork network: {e}")),
+        DbPool::MySql(p) => sqlx::query_scalar(
+            "SELECT COUNT(*) FROM repositories r
+             WHERE r.fork_network_id = ?
+               AND r.deleted_at IS NULL
+               AND (lower(r.visibility) = 'public' OR r.id = ?)",
+        )
+        .bind(fork_network_id)
+        .bind(current_repo_id)
+        .fetch_one(p)
+        .await
+        .map_err(|e| format!("count fork network: {e}")),
+        DbPool::Sqlite(p) => sqlx::query_scalar(
+            "SELECT COUNT(*) FROM repositories r
+             WHERE r.fork_network_id = ?1
+               AND r.deleted_at IS NULL
+               AND (lower(r.visibility) = 'public' OR r.id = ?2)",
+        )
+        .bind(fork_network_id)
+        .bind(current_repo_id)
+        .fetch_one(p)
+        .await
+        .map_err(|e| format!("count fork network: {e}")),
+    }
+}
+
 pub async fn count_network_forks(
     pool: &DbPool,
     fork_network_id: &str,

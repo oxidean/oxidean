@@ -210,6 +210,54 @@ export const fetchRepoActivity = createServerFn({ method: "GET" })
     });
   });
 
+/** SSR: `repo.insights.contributors` — Insights tab committer table (GIT-26). */
+export const fetchRepoInsightsContributors = createServerFn({ method: "GET" })
+  .validator((data: OwnerName & { limit?: number }) => ({
+    owner: String(data?.owner ?? ""),
+    name: String(data?.name ?? ""),
+    limit: typeof data?.limit === "number" ? data.limit : 30,
+  }))
+  .handler(async ({ data }) => {
+    const client = createSsrClient(incomingCookie());
+    return client.repo.insightsContributors({
+      owner: data.owner,
+      name: data.name,
+      limit: data.limit,
+    });
+  });
+
+/** SSR: `repo.insights.commitActivity` — weekly buckets (GIT-26). */
+export const fetchRepoInsightsCommitActivity = createServerFn({ method: "GET" })
+  .validator((data: OwnerName & { weeks?: number }) => ({
+    owner: String(data?.owner ?? ""),
+    name: String(data?.name ?? ""),
+    weeks: typeof data?.weeks === "number" ? data.weeks : 52,
+  }))
+  .handler(async ({ data }) => {
+    const client = createSsrClient(incomingCookie());
+    return client.repo.insightsCommitActivity({
+      owner: data.owner,
+      name: data.name,
+      weeks: data.weeks,
+    });
+  });
+
+/** SSR: `repo.insights.forkNetwork` — fork-network member rows (GIT-26). */
+export const fetchRepoInsightsForkNetwork = createServerFn({ method: "GET" })
+  .validator((data: OwnerName & { limit?: number }) => ({
+    owner: String(data?.owner ?? ""),
+    name: String(data?.name ?? ""),
+    limit: typeof data?.limit === "number" ? data.limit : 100,
+  }))
+  .handler(async ({ data }) => {
+    const client = createSsrClient(incomingCookie());
+    return client.repo.insightsForkNetwork({
+      owner: data.owner,
+      name: data.name,
+      limit: data.limit,
+    });
+  });
+
 /** SSR: `packages.list` filtered by repository_id (issue #23 About). */
 export const fetchPackagesForRepo = createServerFn({ method: "GET" })
   .validator((data: { repository_id: string }) => ({

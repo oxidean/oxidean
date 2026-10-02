@@ -733,6 +733,79 @@ export type RepoActivityListResponse = {
   limit: number;
 };
 
+export type RepoInsightsContributorsRequest = {
+  owner: string;
+  name: string;
+  limit?: number | null;
+};
+
+export type RepoInsightContributor = {
+  name: string;
+  email: string;
+  commit_count: number;
+  username?: string | null;
+  avatar_url?: string | null;
+  first_commit_sha: string;
+  first_commit_unix: number;
+  last_commit_sha: string;
+  last_commit_unix: number;
+};
+
+export type RepoInsightsContributorsResponse = {
+  contributors: RepoInsightContributor[];
+  scanned_commits: number;
+  truncated: boolean;
+};
+
+export type RepoInsightsCommitActivityRequest = {
+  owner: string;
+  name: string;
+  weeks?: number | null;
+};
+
+export type RepoCommitActivityWeek = {
+  /** Sunday 00:00:00 UTC epoch of the bucket. */
+  week: number;
+  /** Commits per weekday; index 0 = Sunday .. 6 = Saturday. */
+  days: number[];
+  total: number;
+};
+
+export type RepoInsightsCommitActivityResponse = {
+  /** Oldest-first week buckets; last bucket is the in-progress week. */
+  weeks: RepoCommitActivityWeek[];
+  total: number;
+  scanned_commits: number;
+  truncated: boolean;
+};
+
+export type RepoInsightsForkNetworkRequest = {
+  owner: string;
+  name: string;
+  limit?: number | null;
+};
+
+export type RepoForkNetworkNode = {
+  id: string;
+  owner: string;
+  name: string;
+  parent_owner?: string | null;
+  parent_name?: string | null;
+  star_count: number;
+  fork_count: number;
+  created_at: string;
+  updated_at: string;
+  owner_avatar_url?: string | null;
+  is_root: boolean;
+  is_current: boolean;
+};
+
+export type RepoInsightsForkNetworkResponse = {
+  nodes: RepoForkNetworkNode[];
+  total: number;
+  truncated: boolean;
+};
+
 export type RepoCommitRequest = {
   owner: string;
   name: string;
@@ -2704,6 +2777,24 @@ export function createClient(opts: CreateClientOptions) {
         rpcCall<RepoLanguagesResponse>(opts, "repo.languages", input),
       activityList: (input: RepoActivityListRequest) =>
         rpcCall<RepoActivityListResponse>(opts, "repo.activity.list", input),
+      insightsContributors: (input: RepoInsightsContributorsRequest) =>
+        rpcCall<RepoInsightsContributorsResponse>(
+          opts,
+          "repo.insights.contributors",
+          input,
+        ),
+      insightsCommitActivity: (input: RepoInsightsCommitActivityRequest) =>
+        rpcCall<RepoInsightsCommitActivityResponse>(
+          opts,
+          "repo.insights.commitActivity",
+          input,
+        ),
+      insightsForkNetwork: (input: RepoInsightsForkNetworkRequest) =>
+        rpcCall<RepoInsightsForkNetworkResponse>(
+          opts,
+          "repo.insights.forkNetwork",
+          input,
+        ),
       commit: (input: RepoCommitRequest) =>
         rpcCall<RepoCommitResponse>(opts, "repo.commit", input),
       compare: (input: RepoCompareRequest) =>

@@ -21,6 +21,10 @@ describe("repoChromeActiveFromPath", () => {
     expect(repoChromeActiveFromPath("/ada/hello/")).toBe("code");
   });
 
+  it("maps /owner/repo/insights → insights", () => {
+    expect(repoChromeActiveFromPath("/ada/hello/insights")).toBe("insights");
+  });
+
   it("maps known chrome segments; unknown → code", () => {
     expect(repoChromeActiveFromPath("/ada/hello/releases")).toBe("releases");
     expect(repoChromeActiveFromPath("/ada/hello/settings")).toBe("settings");

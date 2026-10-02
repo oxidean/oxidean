@@ -47,6 +47,7 @@ import { Route as OwnerRepoActivityRouteImport } from './routes/$owner.$repo.act
 import { Route as OwnerRepoBranchesRouteImport } from './routes/$owner.$repo.branches'
 import { Route as OwnerRepoForkRouteImport } from './routes/$owner.$repo.fork'
 import { Route as OwnerRepoForksRouteImport } from './routes/$owner.$repo.forks'
+import { Route as OwnerRepoInsightsRouteImport } from './routes/$owner.$repo.insights'
 import { Route as OwnerRepoIssuesRouteImport } from './routes/$owner.$repo.issues'
 import { Route as OwnerRepoPackagesRouteImport } from './routes/$owner.$repo.packages'
 import { Route as OwnerRepoPullsRouteImport } from './routes/$owner.$repo.pulls'
@@ -273,6 +274,11 @@ const OwnerRepoForksRoute = OwnerRepoForksRouteImport.update({
   path: '/forks',
   getParentRoute: () => OwnerRepoRoute,
 } as any)
+const OwnerRepoInsightsRoute = OwnerRepoInsightsRouteImport.update({
+  id: '/insights',
+  path: '/insights',
+  getParentRoute: () => OwnerRepoRoute,
+} as any)
 const OwnerRepoIssuesRoute = OwnerRepoIssuesRouteImport.update({
   id: '/issues',
   path: '/issues',
@@ -489,6 +495,7 @@ export interface FileRoutesByFullPath {
   '/$owner/$repo/branches': typeof OwnerRepoBranchesRoute
   '/$owner/$repo/fork': typeof OwnerRepoForkRoute
   '/$owner/$repo/forks': typeof OwnerRepoForksRoute
+  '/$owner/$repo/insights': typeof OwnerRepoInsightsRoute
   '/$owner/$repo/issues': typeof OwnerRepoIssuesRouteWithChildren
   '/$owner/$repo/packages': typeof OwnerRepoPackagesRoute
   '/$owner/$repo/pulls': typeof OwnerRepoPullsRouteWithChildren
@@ -558,6 +565,7 @@ export interface FileRoutesByTo {
   '/$owner/$repo/branches': typeof OwnerRepoBranchesRoute
   '/$owner/$repo/fork': typeof OwnerRepoForkRoute
   '/$owner/$repo/forks': typeof OwnerRepoForksRoute
+  '/$owner/$repo/insights': typeof OwnerRepoInsightsRoute
   '/$owner/$repo/packages': typeof OwnerRepoPackagesRoute
   '/$owner/$repo/search': typeof OwnerRepoSearchRoute
   '/$owner/$repo/settings': typeof OwnerRepoSettingsRouteWithChildren
@@ -630,6 +638,7 @@ export interface FileRoutesById {
   '/$owner/$repo/branches': typeof OwnerRepoBranchesRoute
   '/$owner/$repo/fork': typeof OwnerRepoForkRoute
   '/$owner/$repo/forks': typeof OwnerRepoForksRoute
+  '/$owner/$repo/insights': typeof OwnerRepoInsightsRoute
   '/$owner/$repo/issues': typeof OwnerRepoIssuesRouteWithChildren
   '/$owner/$repo/packages': typeof OwnerRepoPackagesRoute
   '/$owner/$repo/pulls': typeof OwnerRepoPullsRouteWithChildren
@@ -707,6 +716,7 @@ export interface FileRouteTypes {
     | '/$owner/$repo/branches'
     | '/$owner/$repo/fork'
     | '/$owner/$repo/forks'
+    | '/$owner/$repo/insights'
     | '/$owner/$repo/issues'
     | '/$owner/$repo/packages'
     | '/$owner/$repo/pulls'
@@ -776,6 +786,7 @@ export interface FileRouteTypes {
     | '/$owner/$repo/branches'
     | '/$owner/$repo/fork'
     | '/$owner/$repo/forks'
+    | '/$owner/$repo/insights'
     | '/$owner/$repo/packages'
     | '/$owner/$repo/search'
     | '/$owner/$repo/settings'
@@ -847,6 +858,7 @@ export interface FileRouteTypes {
     | '/$owner/$repo/branches'
     | '/$owner/$repo/fork'
     | '/$owner/$repo/forks'
+    | '/$owner/$repo/insights'
     | '/$owner/$repo/issues'
     | '/$owner/$repo/packages'
     | '/$owner/$repo/pulls'
@@ -1182,6 +1194,13 @@ declare module '@octanejs/tanstack-router' {
       preLoaderRoute: typeof OwnerRepoForksRouteImport
       parentRoute: typeof OwnerRepoRoute
     }
+    '/$owner/$repo/insights': {
+      id: '/$owner/$repo/insights'
+      path: '/insights'
+      fullPath: '/$owner/$repo/insights'
+      preLoaderRoute: typeof OwnerRepoInsightsRouteImport
+      parentRoute: typeof OwnerRepoRoute
+    }
     '/$owner/$repo/issues': {
       id: '/$owner/$repo/issues'
       path: '/issues'
@@ -1507,6 +1526,7 @@ interface OwnerRepoRouteChildren {
   OwnerRepoBranchesRoute: typeof OwnerRepoBranchesRoute
   OwnerRepoForkRoute: typeof OwnerRepoForkRoute
   OwnerRepoForksRoute: typeof OwnerRepoForksRoute
+  OwnerRepoInsightsRoute: typeof OwnerRepoInsightsRoute
   OwnerRepoIssuesRoute: typeof OwnerRepoIssuesRouteWithChildren
   OwnerRepoPackagesRoute: typeof OwnerRepoPackagesRoute
   OwnerRepoPullsRoute: typeof OwnerRepoPullsRouteWithChildren
@@ -1532,6 +1552,7 @@ const OwnerRepoRouteChildren: OwnerRepoRouteChildren = {
   OwnerRepoBranchesRoute: OwnerRepoBranchesRoute,
   OwnerRepoForkRoute: OwnerRepoForkRoute,
   OwnerRepoForksRoute: OwnerRepoForksRoute,
+  OwnerRepoInsightsRoute: OwnerRepoInsightsRoute,
   OwnerRepoIssuesRoute: OwnerRepoIssuesRouteWithChildren,
   OwnerRepoPackagesRoute: OwnerRepoPackagesRoute,
   OwnerRepoPullsRoute: OwnerRepoPullsRouteWithChildren,

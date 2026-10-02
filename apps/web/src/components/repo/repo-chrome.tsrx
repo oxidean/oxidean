@@ -46,6 +46,7 @@ export function RepoChrome({ repo, active, showSettings = false }: RepoChromePro
   const releasesHref = `${base}/releases`;
   const packagesHref = `${base}/packages`;
   const actionsHref = `${base}/actions`;
+  const insightsHref = `${base}/insights`;
   const settingsHref = `${base}/settings`;
   const forkHref = `${base}/fork`;
   const signedIn = !!account.user;
@@ -288,6 +289,14 @@ export function RepoChrome({ repo, active, showSettings = false }: RepoChromePro
         data-testid="repo-chrome-actions"
       >
         Actions
+      </a>
+      <a
+        href={insightsHref as string}
+        className={navClass(active === "insights") as string}
+        aria-current={active === "insights" ? "page" : undefined}
+        data-testid="repo-chrome-insights"
+      >
+        Insights
       </a>
       @if (settingsVisible) {
         <a
