@@ -17,7 +17,7 @@ Deferred items recorded at milestone close. Finish these first; several are chea
 - [ ] **DEBT-03** Sitewide GlobalSearch depth. Header search routes to `/explore?q=` today; extend to users, orgs, commits, PRs, and code.
 - [ ] **DEBT-04** `issue_comment` webhook event. The notification fan-out exists; webhook emission does not.
 - [ ] **DEBT-05** Checks / commit-status viewer tab on PR pages. Status contexts already gate merges; there is no dedicated UI to inspect them.
-- [ ] **DEBT-06** Watch repositories and follow users, with a per-repo notification matrix.
+- [x] **DEBT-06** Watch repositories and follow users, with a per-repo notification matrix. ([#76](https://github.com/oxidean/oxidean/pull/76))
 - [ ] **DEBT-07** Live `railway config apply` operator path. Kept human-verify in v1; CI must not hold tokens.
 - [ ] **DEBT-08** Nyquist validation backfill for the not-validated phases (10–13, 16–18, 21, 22.1; 11.1 missing entirely).
 - [ ] **DEBT-09** Backfill the AUTH-07a/07b requirement rows in the phase 06 VERIFICATION table (product shipped; table orphaned).
