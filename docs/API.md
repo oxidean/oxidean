@@ -48,6 +48,8 @@ Missing or mismatched value → error `rpc.version_mismatch` (HTTP 400).
 | `GET` | `/api/rpc/ws` | WebSocket upgrade; same procedures as HTTP | Cookie when procedure needs session |
 | `POST` | `/api/mcp` | MCP endpoint (JSON-RPC 2.0, streamable-HTTP) — see [MCP.md](MCP.md) | Cookie or `Bearer` PAT; anonymous for public data |
 | `GET` | `/api/mcp` | SSE stream (unsupported → `405`) | — |
+| `GET` | `/.well-known/webmcp` | WebMCP discovery document (served by the web app, not this router) — see [WEBMCP.md](WEBMCP.md) | No |
+| `GET` | `/.well-known/mcp` | MCP server metadata for the instance endpoint (served by the web app) | No |
 | `GET` | `/api/auth/workos/start` | Start WorkOS AuthKit (optional `?return_to=`) | No (redirect) |
 | `GET` | `/api/auth/workos/callback` | WorkOS code exchange; sets session cookie | No (redirect) |
 | `GET` | `/api/auth/oidc/start` | Start OIDC + PKCE (optional `?return_to=`) | No (redirect) |
