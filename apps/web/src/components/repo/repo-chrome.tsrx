@@ -1,4 +1,4 @@
-import { Eye, Lock, Star } from "@octanejs/lucide";
+import { Archive, Eye, Lock, Star } from "@octanejs/lucide";
 import { useState } from "octane";
 import type { RepoPublic } from "@oxidean/api-client";
 import { Badge } from "@/components/ui/badge";
@@ -124,6 +124,14 @@ export function RepoChrome({ repo, active, showSettings = false }: RepoChromePro
         }
         {(live.visibility === "private" ? "Private" : "Public") as string}
       </Badge>
+      @if (live.archived) {
+        <span data-testid="repo-archived-badge">
+          <Badge variant="secondary">
+            <Archive aria-hidden size={12} />
+            Archived
+          </Badge>
+        </span>;
+      }
       <div className="ml-auto flex flex-wrap items-center gap-2">
         <RepoSearchEntry owner={owner as string} repo={name as string} />
         @if (signedIn) {
@@ -202,6 +210,19 @@ export function RepoChrome({ repo, active, showSettings = false }: RepoChromePro
         }
       </div>
     </div>
+    @if (live.archived) {
+      <div
+        data-testid="repo-archived-banner"
+        role="status"
+        className="mb-4 flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[14px] text-amber-800 dark:text-amber-300"
+      >
+        <Archive aria-hidden size={16} className="mt-0.5 shrink-0" />
+        <span>
+          This repository is archived and read-only. Browsing and cloning still work; pushes,
+          issues, pull requests, and releases are disabled until it is unarchived.
+        </span>
+      </div>;
+    }
     @if (live.forked_from) {
       <p className="mt-2 text-[14px] text-muted-foreground">
         Forked from{" "}

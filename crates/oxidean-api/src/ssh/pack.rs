@@ -168,6 +168,12 @@ pub async fn authorize_pack(
                     message: "ERROR: Permission denied to this repository.\n".into(),
                 };
             }
+            // GIT-20: archived repositories are read-only — fetch stays open, push denied.
+            if row.archived {
+                return AuthzDecision::Deny {
+                    message: "ERROR: Repository is archived (read-only).\n".into(),
+                };
+            }
             let caller = match db.find_user_by_id(caller_user_id).await {
                 Ok(Some(u)) if u.banned_at.is_none() => u,
                 _ => {

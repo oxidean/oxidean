@@ -290,6 +290,10 @@ pub async fn authorize_lfs(
         if auth.owner.email_verified_at.is_none() {
             return Err(email_unverified_lfs());
         }
+        // GIT-20: archived repositories are read-only — downloads stay open.
+        if repo.archived {
+            return Err(forbidden_lfs("Repository is archived (read-only)"));
+        }
         match pat_allows_operation(state, &auth.pat, repo, owner, true).await {
             Ok(true) => {}
             Ok(false) => {

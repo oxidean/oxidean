@@ -188,7 +188,7 @@ export function PullsListPage() @{
               All
             </button>
           </div>
-          @if (repo?.can_write) {
+          @if (repo?.can_write && !repo?.archived) {
             <a
               href={`/${owner}/${repoName}/pulls/new` as string}
               className={repoListPrimaryCtaClass() as string}

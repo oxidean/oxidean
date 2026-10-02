@@ -866,6 +866,15 @@ impl Database {
         repositories::update_owner(self.require_pool()?, id, owner_id, owner_type).await
     }
 
+    /// Read-only archive toggle (GIT-20) — returns the updated row.
+    pub async fn set_repository_archived(
+        &self,
+        id: &str,
+        archived: bool,
+    ) -> Result<RepositoryRow, String> {
+        repositories::set_archived(self.require_pool()?, id, archived).await
+    }
+
     pub async fn soft_delete_repository(&self, id: &str) -> Result<(), String> {
         repositories::soft_delete(self.require_pool()?, id).await
     }

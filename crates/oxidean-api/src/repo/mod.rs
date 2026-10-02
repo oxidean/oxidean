@@ -17,10 +17,10 @@ mod social_lists;
 mod templates;
 
 pub use acl::{
-    can_read_as_owner, coalesce, effective_capability, fg_all_covers_repo, is_private_visibility,
-    login_slug_taken, lookup_repo_row_or_redirect, meets, not_found, owner_ref_for_repo,
-    resolve_owner_slug, resolve_repo_for_read, AccessibleRepo, Capability, MemberBasePermission,
-    OrgRole, OwnerRef,
+    archived_error, can_read_as_owner, coalesce, effective_capability, ensure_not_archived,
+    fg_all_covers_repo, is_private_visibility, login_slug_taken, lookup_repo_row_or_redirect,
+    meets, not_found, owner_ref_for_repo, resolve_owner_slug, resolve_repo_for_read,
+    AccessibleRepo, Capability, MemberBasePermission, OrgRole, OwnerRef,
 };
 pub use branch_protection::{
     create as branch_protection_create, delete as branch_protection_delete,
@@ -64,8 +64,8 @@ use oxidean_core::{
     RepoLfsGetEnabledRequest, RepoLfsListObjectsRequest, RepoLfsListObjectsResponse,
     RepoLfsObjectEntry, RepoLfsSetEnabledRequest, RepoLfsStatusResponse, RepoLfsUsageResponse,
     RepoListByOwnerRequest, RepoListMineResponse, RepoPublic, RepoRefEntry, RepoRefsResponse,
-    RepoSoftDeleteRequest, RepoSoftDeleteResponse, RepoTemplateOption, RepoTreeEntry,
-    RepoTreeRequest, RepoTreeResponse, RepoUpdateVisibilityRequest, RepoVisibility,
+    RepoSetArchivedRequest, RepoSoftDeleteRequest, RepoSoftDeleteResponse, RepoTemplateOption,
+    RepoTreeEntry, RepoTreeRequest, RepoTreeResponse, RepoUpdateVisibilityRequest, RepoVisibility,
     TemplateProvenance,
 };
 use uuid::Uuid;
@@ -325,6 +325,7 @@ pub(crate) fn to_public(repo: &AccessibleRepo) -> RepoPublic {
         viewer_has_starred: false,
         is_fork: false,
         is_template: false,
+        archived: repo.row.archived,
         homepage: String::new(),
         topics: Vec::new(),
         fork_count: 0,
@@ -713,6 +714,7 @@ pub async fn list_mine(ctx: &RpcCtx) -> Result<RepoListMineResponse, AppError> {
                 viewer_has_starred: false,
                 is_fork: false,
                 is_template: false,
+                archived: row.archived,
                 homepage: String::new(),
                 topics: Vec::new(),
                 fork_count: 0,
@@ -1397,6 +1399,8 @@ async fn resolve_repo_for_owner_mutate(
     if !meets(accessible.capability, Capability::Write) {
         return Err(acl::not_found());
     }
+    // GIT-20: archived repos freeze branch create/rename/delete (D-27/D-28 surface).
+    acl::ensure_not_archived(&accessible)?;
     Ok(accessible)
 }
 
@@ -1646,6 +1650,28 @@ pub async fn update_visibility(
     let row = ctx
         .db
         .update_repository_visibility(&accessible.row.id, map_visibility(req.visibility))
+        .await
+        .map_err(db_err)?;
+    Ok(to_public(&AccessibleRepo {
+        row,
+        owner_username: accessible.owner_username,
+        capability: Some(Capability::Admin),
+    }))
+}
+
+/// `repo.setArchived` — Admin-only read-only archive toggle (GIT-20).
+/// Stays reachable while archived so owners can unarchive.
+pub async fn set_archived(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoPublic, AppError> {
+    let req: RepoSetArchivedRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid repo.setArchived input: {e}"),
+        )
+    })?;
+    let accessible = resolve_repo_for_admin(ctx, &req.owner, &req.name).await?;
+    let row = ctx
+        .db
+        .set_repository_archived(&accessible.row.id, req.archived)
         .await
         .map_err(db_err)?;
     Ok(to_public(&AccessibleRepo {
@@ -2163,6 +2189,7 @@ pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoPublic
                 viewer_has_starred: false,
                 is_fork: false,
                 is_template: false,
+                archived: row.archived,
                 homepage: String::new(),
                 topics: Vec::new(),
                 fork_count: 0,
