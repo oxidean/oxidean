@@ -424,12 +424,22 @@ function MobileNavSheet({ onClose }: { onClose: () => void }) @{
               <p className="px-3 pt-2 pb-1 text-[12px] font-medium text-muted-foreground">
                 Create
               </p>
-              <a href="/new" className={mobileNavItemClass} onClick={onClose}>
+              <Link
+                to="/new"
+                preload="intent"
+                className={mobileNavItemClass}
+                onClick={onClose}
+              >
                 New repository
-              </a>
-              <a href="/orgs/new" className={mobileNavItemClass} onClick={onClose}>
+              </Link>
+              <Link
+                to="/orgs/new"
+                preload="intent"
+                className={mobileNavItemClass}
+                onClick={onClose}
+              >
                 New organization
-              </a>
+              </Link>
               @if (repo) {
                 <>
                   <a
@@ -451,19 +461,34 @@ function MobileNavSheet({ onClose }: { onClose: () => void }) @{
               <p className="px-3 pt-2 pb-1 text-[12px] font-medium text-muted-foreground">
                 Account
               </p>
-              <a href="/notifications" className={mobileNavItemClass} onClick={onClose}>
+              <Link
+                to="/notifications"
+                preload="intent"
+                className={mobileNavItemClass}
+                onClick={onClose}
+              >
                 Notifications
-              </a>
-              <a href="/" className={mobileNavItemClass} onClick={onClose}>
+              </Link>
+              <Link to="/" preload="intent" className={mobileNavItemClass} onClick={onClose}>
                 Your repositories
-              </a>
-              <a href="/settings/general" className={mobileNavItemClass} onClick={onClose}>
+              </Link>
+              <Link
+                to="/settings/general"
+                preload="intent"
+                className={mobileNavItemClass}
+                onClick={onClose}
+              >
                 Settings
-              </a>
+              </Link>
               @if (user.role === "sys-admin") {
-                <a href="/admin/auth" className={mobileNavItemClass} onClick={onClose}>
+                <Link
+                  to="/admin/auth"
+                  preload="intent"
+                  className={mobileNavItemClass}
+                  onClick={onClose}
+                >
                   Admin
-                </a>;
+                </Link>;
               }
               @if (orgs.length > 0) {
                 <>
