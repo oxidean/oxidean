@@ -1,5 +1,5 @@
 import type { ThemedToken } from "shiki";
-import { getHighlighter, languageIdForPath, type HighlightTheme } from "@/lib/highlight";
+import { getHighlighter, languageIdForPath, THEMES, type HighlightTheme } from "@/lib/highlight";
 import type { DiffLine, DiffLineKind } from "@/lib/parse-unified-diff";
 
 /** Skip Shiki when reconstructed sides exceed this (keep first paint snappy). */
@@ -169,7 +169,7 @@ export async function highlightDiffLines(
     return plain;
   }
 
-  const theme = options.theme ?? "github-dark";
+  const theme = options.theme ?? THEMES.dark;
   const [oldHtml, newHtml] = await Promise.all([
     highlightSideLines(oldParts, lang, theme),
     highlightSideLines(newParts, lang, theme),

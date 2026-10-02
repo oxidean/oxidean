@@ -148,13 +148,13 @@ export const fetchSystemHealth = createServerFn({ method: "GET" }).handler(async
 
 /** SSR: resolved Shiki theme (cookie + resolved scheme + Client Hints). */
 export const resolveSsrHighlightTheme = createServerFn({ method: "GET" }).handler(
-  async (): Promise<"github-light" | "github-dark"> => {
+  async (): Promise<"oxidean-light" | "oxidean-dark"> => {
     const cookie = incomingCookie();
     const pref = themePreferenceFromCookieHeader(cookie);
     const resolvedBoot = resolvedColorSchemeFromCookieHeader(cookie);
     const ch = getRequestHeader("sec-ch-prefers-color-scheme");
     const resolved = resolveThemeForSsr(pref, ch, resolvedBoot);
-    return resolved === "dark" ? "github-dark" : "github-light";
+    return resolved === "dark" ? "oxidean-dark" : "oxidean-light";
   },
 );
 

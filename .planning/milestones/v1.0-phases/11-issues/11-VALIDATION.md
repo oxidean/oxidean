@@ -1,11 +1,14 @@
 ---
 phase: "11"
 slug: "issues"
-status: complete
+# status lifecycle: draft (seeded by plan-phase) → validated (set by validate-phase §6)
+# audit-milestone §5.5 distinguishes NOT-VALIDATED (draft) from PARTIAL (validated + nyquist_compliant: false) (#2117)
+status: validated
 nyquist_compliant: true
 wave_0_complete: true
 created: "2026-09-14"
-updated: "2026-09-15"
+updated: "2026-10-02"
+validated_at: "2026-10-02"
 ---
 
 # Phase 11 — Validation Strategy
@@ -97,3 +100,29 @@ Cross-ref full table in [`11-VERIFICATION.md`](./11-VERIFICATION.md#known-stubs-
 | `pr_stub` / `IssueLinkKind::PrStub` | UI “PR stub #N”; real PRs are Phase 12 |
 | Closing keywords (D-ISS-15) | Not enforced; deferred to Phase 12 |
 | Stack-browser issues e2e | Wave 0 UI map uses Vitest integration only; no issues flow under `apps/web/e2e/stack-browser/` yet |
+
+---
+
+## Validation Audit 2026-10-02
+
+Retroactive Nyquist audit (ROADMAP DEBT-08) — same class of reconcile as `22.1-09` for phases 8/14/15/20. Scope: confirm every mapped command still names real files/tests on disk and that recorded green runs exist; suites not re-executed in this docs pass.
+
+| Metric | Count |
+|--------|-------|
+| Gaps found | 0 |
+| Resolved | 1 (`status: complete` → `validated`; stale lifecycle value reconciled) |
+| Escalated | 0 |
+| Documented residuals | 3 (unchanged — see Known stubs table above) |
+
+| Check | Result |
+|-------|--------|
+| `issue_lifecycle.rs` / `issue_delete.rs` / `issue_comments.rs` / `issue_labels.rs` / `issue_assignees.rs` / `issue_links.rs` / `issue_reactions.rs` | ✅ all present under `crates/oxidean-api/tests/`; named `issue_*` tests exist |
+| `repo_private_404.rs` issue cases (`repo_private_404_issue_*_unauthorized`) | ✅ present |
+| `crates/oxidean-db/tests/dialect_issues.rs` + `factory_reset_issues.rs` | ✅ present (`dialect_issues_*`, `factory_reset_issues_*`) |
+| `apps/web/src/routes/$owner.$repo.issues.integration.test.ts` | ✅ present |
+| `apps/web/src/lib/markdown.test.ts` + `markdown.issues.test.ts` | ✅ present |
+| Recorded green runs | `11-VERIFICATION.md` must-haves + spot-checks PASS (verified 2026-09-14, honesty fixup 2026-09-15; fingerprint refresh 2026-09-19), `status: passed` |
+
+Residual status (truthful, not re-litigated): `pr_stub` was a deliberate Phase-12 dependency — closing-keyword enforcement later landed in `pull_merge_merge_commit_and_closes_keyword_issue` (Phase 12, on disk). Stack-browser issues coverage now exists as `apps/web/e2e/stack-browser/forge-issues-releases.stack.browser.test.tsx` (Phase 11.1). No thin-e2e gap remains unrecorded.
+
+**Verdict:** `status: validated`, `nyquist_compliant: true`.
