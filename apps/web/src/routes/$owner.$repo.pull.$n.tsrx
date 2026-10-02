@@ -12,6 +12,7 @@ import { PullCommits } from "@/components/repo/pull-commits";
 import { PullConversation } from "@/components/repo/pull-conversation";
 import { PullFiles } from "@/components/repo/pull-files";
 import { PullMergePanel } from "@/components/repo/pull-merge-panel";
+import { PullUpdateBranch } from "@/components/repo/pull-update-branch";
 import { PullReviews } from "@/components/repo/pull-reviews";
 import { RepoNotFound } from "@/components/repo/repo-not-found";
 import { Badge } from "@/components/ui/badge";
@@ -214,6 +215,13 @@ export function PullDetailPage() @{
           @if (error) {
             <p className="text-sm text-destructive">{error as string}</p>;
           }
+          <PullUpdateBranch
+            owner={owner}
+            repoName={repoName}
+            number={number}
+            pullState={(pull.state as string) ?? "open"}
+            baseRef={(pull.base_ref as string) ?? ""}
+          />
           <PullMergePanel
             owner={owner}
             repoName={repoName}

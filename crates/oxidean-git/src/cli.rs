@@ -2185,6 +2185,35 @@ impl GitBackend for CliGitBackend {
         }
     }
 
+    async fn ahead_behind(
+        &self,
+        repo: &Path,
+        head: &str,
+        base: &str,
+    ) -> Result<(u64, u64), GitError> {
+        let head = validate_treeish(head)?;
+        let base = validate_treeish(base)?;
+        let repo_s = repo_str(repo)?;
+        let range = format!("{head}...{base}");
+        let stdout =
+            run_git_stdout(&["-C", repo_s, "rev-list", "--left-right", "--count", &range]).await?;
+        let text = String::from_utf8_lossy(&stdout);
+        let mut parts = text.split_whitespace();
+        let ahead = parts
+            .next()
+            .and_then(|s| s.parse::<u64>().ok())
+            .ok_or_else(|| {
+                GitError::Process(format!("unexpected rev-list output: {}", text.trim()))
+            })?;
+        let behind = parts
+            .next()
+            .and_then(|s| s.parse::<u64>().ok())
+            .ok_or_else(|| {
+                GitError::Process(format!("unexpected rev-list output: {}", text.trim()))
+            })?;
+        Ok((ahead, behind))
+    }
+
     async fn fast_forward_ref(
         &self,
         repo: &Path,
@@ -3077,6 +3106,42 @@ mod tests {
             msg.contains("conflict") || msg.contains("failed"),
             "unexpected err: {msg}"
         );
+    }
+
+    #[tokio::test]
+    async fn ahead_behind_counts_between_refs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bare = tmp.path().join("ab.git");
+        let git = CliGitBackend::new();
+        git.init_bare(&bare, "main").await.unwrap();
+        git.seed_commit(
+            &bare,
+            "main",
+            "seed",
+            &[("a.txt".into(), b"base\n".to_vec())],
+        )
+        .await
+        .unwrap();
+        push_branch_with_file(&bare, "feature", "main", "b.txt", b"feat\n", "feat").await;
+        // feature ahead by 1, not behind.
+        let (ahead, behind) = git
+            .ahead_behind(&bare, "refs/heads/feature", "refs/heads/main")
+            .await
+            .expect("ahead_behind");
+        assert_eq!((ahead, behind), (1, 0));
+        // Reverse: main is behind feature by 1.
+        let (ahead, behind) = git
+            .ahead_behind(&bare, "refs/heads/main", "refs/heads/feature")
+            .await
+            .expect("ahead_behind reverse");
+        assert_eq!((ahead, behind), (0, 1));
+        // Advance main once: now diverged 1 / 1.
+        push_branch_with_file(&bare, "main", "main", "c.txt", b"mainline\n", "main").await;
+        let (ahead, behind) = git
+            .ahead_behind(&bare, "refs/heads/feature", "refs/heads/main")
+            .await
+            .expect("ahead_behind diverged");
+        assert_eq!((ahead, behind), (1, 1));
     }
 
     /// D-FORK-02/03: clone_bare must install hooks/update (same as init_bare).

@@ -4,6 +4,7 @@ pub(crate) mod acl;
 mod comments;
 mod merge_ops;
 mod reviews;
+mod update_branch;
 
 pub use comments::{comments_create, comments_list, comments_resolve};
 pub use merge_ops::{
@@ -13,6 +14,7 @@ pub use reviews::{
     review_requests_add, review_requests_list, review_requests_remove, reviews_dismiss,
     reviews_list, reviews_submit,
 };
+pub use update_branch::{branch_status, update_branch};
 
 use std::path::Path;
 
@@ -282,81 +284,120 @@ async fn sync_open_pulls_for_branch(
         return Ok(());
     }
 
-    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
     for pull in matching {
-        if pull.head_sha == after_sha {
-            continue;
-        }
-        let base_sha = resolve_ref_sha_at(git, repos_dir, owner, repo_name, &pull.base_ref)
-            .await
-            .unwrap_or_else(|| pull.base_sha.clone());
-        let base_changed = base_sha != pull.base_sha;
-        if base_changed {
-            db.update_pull_fields(
-                &pull.id,
-                &pull.title,
-                &pull.body,
-                pull.draft,
-                &pull.base_ref,
-                &base_sha,
-            )
-            .await?;
-        }
-        db.update_pull_head_sha(&pull.id, after_sha).await?;
-        let _ = db.mark_pull_line_comments_outdated(&pull.id).await;
-
-        let eff = protection::effective_for_branch(db, repository_id, &pull.base_ref)
-            .await
-            .map_err(|e| e.message)?;
-        if eff.dismiss_stale_reviews {
-            if let Ok(reviews) = db.list_pull_reviews(&pull.id).await {
-                for r in reviews {
-                    if r.state == "approved" && r.commit_sha.as_deref() != Some(after_sha) {
-                        let _ = db
-                            .dismiss_pull_review(
-                                &r.id,
-                                Some("New commits pushed to the head branch"),
-                                &now,
-                            )
-                            .await;
-                    }
-                }
-            }
-        }
-
-        let updated = db
-            .find_pull_by_repo_number(repository_id, pull.number)
-            .await?
-            .ok_or_else(|| "pull missing after synchronize".to_string())?;
-        emit_pull_event_db(
+        synchronize_pull_after_head_move(
             db,
+            repos_dir,
+            git,
+            &pull,
             owner,
             repo_name,
-            repository_id,
-            &updated,
-            "synchronize",
-            pusher_login,
-            pusher_id,
-            false,
-            env_name,
-        )
-        .await;
-        // Same-repo synchronize only (head_repo_id == repository_id filter above).
-        notify_actions_for_pull(
-            db,
-            git,
-            repos_dir,
-            repository_id,
             owner,
             repo_name,
             after_sha,
-            &updated.head_ref,
-            Some(pusher_id),
-            crate::actions::PullRequestAction::Synchronize,
+            pusher_login,
+            pusher_id,
+            env_name,
         )
-        .await;
+        .await?;
     }
     Ok(())
+}
+
+/// After a pull's head moved to `new_head_sha` — either via a same-repo push
+/// (`sync_open_pulls_for_branch`) or via `pull.updateBranch` / `repo.syncFork`
+/// on the head repo — run the synchronize bookkeeping: refresh stored base SHA,
+/// mark line comments outdated, dismiss stale approvals per base-branch
+/// protection, emit `pull_request:synchronize`, and soft-notify Actions.
+///
+/// `base_owner`/`base_name` identify the repo hosting the PR (`pull.repo_id`);
+/// `head_owner`/`head_name` identify the bare holding the new head tip (same for
+/// same-repo PRs, the fork for cross-repo PRs). Returns the refreshed row.
+pub(crate) async fn synchronize_pull_after_head_move(
+    db: &Database,
+    repos_dir: &Path,
+    git: &dyn GitBackend,
+    pull: &PullRow,
+    base_owner: &str,
+    base_name: &str,
+    head_owner: &str,
+    head_name: &str,
+    new_head_sha: &str,
+    actor_login: &str,
+    actor_id: &str,
+    env_name: &str,
+) -> Result<PullRow, String> {
+    if pull.head_sha == new_head_sha {
+        return Ok(pull.clone());
+    }
+    let base_sha = resolve_ref_sha_at(git, repos_dir, base_owner, base_name, &pull.base_ref)
+        .await
+        .unwrap_or_else(|| pull.base_sha.clone());
+    if base_sha != pull.base_sha {
+        db.update_pull_fields(
+            &pull.id,
+            &pull.title,
+            &pull.body,
+            pull.draft,
+            &pull.base_ref,
+            &base_sha,
+        )
+        .await?;
+    }
+    db.update_pull_head_sha(&pull.id, new_head_sha).await?;
+    let _ = db.mark_pull_line_comments_outdated(&pull.id).await;
+
+    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let eff = protection::effective_for_branch(db, &pull.repo_id, &pull.base_ref)
+        .await
+        .map_err(|e| e.message)?;
+    if eff.dismiss_stale_reviews {
+        if let Ok(reviews) = db.list_pull_reviews(&pull.id).await {
+            for r in reviews {
+                if r.state == "approved" && r.commit_sha.as_deref() != Some(new_head_sha) {
+                    let _ = db
+                        .dismiss_pull_review(
+                            &r.id,
+                            Some("New commits pushed to the head branch"),
+                            &now,
+                        )
+                        .await;
+                }
+            }
+        }
+    }
+
+    let updated = db
+        .find_pull_by_repo_number(&pull.repo_id, pull.number)
+        .await?
+        .ok_or_else(|| "pull missing after synchronize".to_string())?;
+    emit_pull_event_db(
+        db,
+        base_owner,
+        base_name,
+        &pull.repo_id,
+        &updated,
+        "synchronize",
+        actor_login,
+        actor_id,
+        false,
+        env_name,
+    )
+    .await;
+    notify_actions_for_pull(
+        db,
+        git,
+        repos_dir,
+        &pull.repo_id,
+        head_owner,
+        head_name,
+        new_head_sha,
+        &updated.head_ref,
+        Some(actor_id),
+        crate::actions::PullRequestAction::Synchronize,
+    )
+    .await;
+    Ok(updated)
 }
 
 fn pull_not_found() -> AppError {
