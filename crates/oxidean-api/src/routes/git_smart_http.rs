@@ -497,12 +497,14 @@ async fn authorize_and_cgi(
         .unwrap_or_default();
     let helper = crate::protection::resolve_protection_helper();
     let oxidean_env = std::env::var("OXIDEAN_ENV").ok();
+    let git_repo_quota = std::env::var(crate::git::quota::REPO_QUOTA_ENV).ok();
     let protection = if receive && !db_url.is_empty() {
         Some(http_backend::ProtectionCgiEnv {
             database_url: &db_url,
             actor_capability: actor_capability_label,
             helper_path: helper.as_deref(),
             oxidean_env: oxidean_env.as_deref(),
+            git_repo_quota_bytes: git_repo_quota.as_deref(),
         })
     } else {
         None
@@ -543,6 +545,14 @@ async fn authorize_and_cgi(
                             let bare = repos_dir
                                 .join(&owner_slug)
                                 .join(format!("{repo_name}.git"));
+                            // GIT-25: refresh cached size_bytes for UI/admin surfaces.
+                            if let Err(e) = crate::git::quota::refresh_repo_size_bytes(
+                                &db, &repo_id, &bare,
+                            )
+                            .await
+                            {
+                                tracing::warn!(error = %e, "refresh repo size_bytes failed");
+                            }
                             crate::repo::record_ref_updates(
                                 &db,
                                 &repo_id,

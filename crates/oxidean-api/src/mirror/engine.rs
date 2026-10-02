@@ -33,7 +33,21 @@ pub async fn run_mirror_sync(
         .update_mirror_status(mirror_id, "running", "", false)
         .await;
 
-    match run_mirror_sync_inner(db, git, repos_dir, &mirror).await {
+    let inner_result = run_mirror_sync_inner(db, git, repos_dir, &mirror).await;
+    // GIT-25: refresh cached size_bytes — fetches land objects without update
+    // hooks, and even a partial-error sync may have written objects.
+    if let Ok(Some(repo)) = db.find_repository_by_id(&mirror.repository_id).await {
+        if let Ok(owner_slug) = owner_slug_for_repo(db, &repo).await {
+            if let Ok(bare) = bare_repo_path(repos_dir, &owner_slug, &repo.name) {
+                if let Err(e) =
+                    crate::git::quota::refresh_repo_size_bytes(db, &repo.id, &bare).await
+                {
+                    tracing::warn!(error = %e, "refresh repo size_bytes failed");
+                }
+            }
+        }
+    }
+    match inner_result {
         Ok(status) => {
             let err = if status == "ok" {
                 ""
@@ -71,6 +85,18 @@ async fn run_mirror_sync_inner(
     let url = validate_remote_url(&mirror.remote_url)
         .map_err(|e| e.to_string())?
         .to_string();
+
+    // GIT-25: `git fetch` lands objects without running hooks/update, so a repo
+    // already over quota pauses mirror syncs here (same "block the next write
+    // once over" semantics as push enforcement).
+    if let Some(quota) = crate::git::quota::effective_repo_quota_bytes(db, &repo).await? {
+        let used = crate::git::quota::repo_disk_usage_bytes(&bare).await?;
+        if used > quota {
+            return Err(format!(
+                "repository is over its git storage quota ({used} > {quota} bytes)"
+            ));
+        }
+    }
 
     git.fetch_from_url(&bare, &url, &credentials)
         .await

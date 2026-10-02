@@ -981,6 +981,59 @@ pub struct RepoLfsDownloadResponse {
     pub content: String,
 }
 
+/// `repo.quota.get` / `repo.quota.set` — bare-repo disk usage + git object size quota (GIT-25).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoQuotaPublic {
+    /// Measured on-disk size of the bare repository (bytes).
+    pub size_bytes: i64,
+    /// Effective quota: per-repo override → instance setting → env default.
+    /// `null` = unlimited.
+    pub effective_quota_bytes: Option<i64>,
+    /// Per-repo override stored on the repository row (`null` = inherit instance default).
+    pub size_quota_bytes: Option<i64>,
+    /// Resolved instance default (admin override when set, else env/built-in).
+    /// `0` or negative = unlimited default.
+    pub instance_quota_bytes: i64,
+}
+
+/// `repo.quota.get` input (GIT-25).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoGetQuotaRequest {
+    pub owner: String,
+    pub name: String,
+}
+
+/// `repo.quota.set` input — repo Admin capability (GIT-25).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoSetQuotaRequest {
+    pub owner: String,
+    pub name: String,
+    /// Per-repo quota in bytes; `null`/omitted clears the override.
+    /// `0` or negative stores an explicit "unlimited" override.
+    #[serde(default)]
+    pub size_quota_bytes: Option<i64>,
+}
+
+/// `admin.git.getSettings` / `admin.git.updateSettings` — instance git quota
+/// default (GIT-25).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminGitSettingsPublic {
+    /// Effective instance default (admin override when set, else env/built-in).
+    pub repo_quota_bytes: i64,
+    /// True when an Admin override row is stored (vs env/built-in default).
+    pub repo_quota_bytes_overridden: bool,
+}
+
+/// `admin.git.updateSettings` input — `null` keeps the current override; see `clear_overrides`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminGitUpdateSettingsRequest {
+    #[serde(default)]
+    pub repo_quota_bytes: Option<i64>,
+    /// When true, clears all stored overrides back to env/built-in defaults.
+    #[serde(default)]
+    pub clear_overrides: bool,
+}
+
 /// Instance-admin template pack metadata (issue #18).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InstanceTemplatePackPublic {

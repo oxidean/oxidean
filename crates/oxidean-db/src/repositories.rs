@@ -14,6 +14,11 @@ pub struct RepositoryRow {
     pub visibility: String,
     pub description: String,
     pub default_branch: String,
+    /// Cached on-disk size of the bare repo in bytes (GIT-25 bookkeeping).
+    pub size_bytes: i64,
+    /// Per-repo git object size quota override; NULL = inherit instance default
+    /// (GIT-25). `<= 0` is stored but treated as unlimited by enforcement.
+    pub size_quota_bytes: Option<i64>,
     pub deleted_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
@@ -40,6 +45,12 @@ macro_rules! map_repo {
             default_branch: row
                 .try_get("default_branch")
                 .map_err(|e| format!("repo row: {e}"))?,
+            size_bytes: row
+                .try_get("size_bytes")
+                .map_err(|e| format!("repo row: {e}"))?,
+            size_quota_bytes: row
+                .try_get("size_quota_bytes")
+                .map_err(|e| format!("repo row: {e}"))?,
             deleted_at: row
                 .try_get("deleted_at")
                 .map_err(|e| format!("repo row: {e}"))?,
@@ -53,21 +64,21 @@ macro_rules! map_repo {
     }};
 }
 
-const REPO_SELECT_PG: &str = "SELECT id, owner_id, owner_type, name, visibility, description, default_branch,
+const REPO_SELECT_PG: &str = "SELECT id, owner_id, owner_type, name, visibility, description, default_branch, size_bytes, size_quota_bytes,
        CASE WHEN deleted_at IS NULL THEN NULL
             ELSE to_char(deleted_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') END AS deleted_at,
        to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS created_at,
        to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS updated_at
 FROM repositories";
 
-const REPO_SELECT_MYSQL: &str = "SELECT id, owner_id, owner_type, name, visibility, description, default_branch,
+const REPO_SELECT_MYSQL: &str = "SELECT id, owner_id, owner_type, name, visibility, description, default_branch, size_bytes, size_quota_bytes,
        CASE WHEN deleted_at IS NULL THEN NULL
             ELSE DATE_FORMAT(deleted_at, '%Y-%m-%dT%H:%i:%sZ') END AS deleted_at,
        DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at,
        DATE_FORMAT(updated_at, '%Y-%m-%dT%H:%i:%sZ') AS updated_at
 FROM repositories";
 
-const REPO_SELECT_SQLITE: &str = "SELECT id, owner_id, owner_type, name, visibility, description, default_branch,
+const REPO_SELECT_SQLITE: &str = "SELECT id, owner_id, owner_type, name, visibility, description, default_branch, size_bytes, size_quota_bytes,
        CASE WHEN deleted_at IS NULL THEN NULL
             ELSE strftime('%Y-%m-%dT%H:%M:%SZ', deleted_at) END AS deleted_at,
        strftime('%Y-%m-%dT%H:%M:%SZ', created_at) AS created_at,
@@ -402,6 +413,97 @@ WHERE id = ?1 AND deleted_at IS NULL",
     find_by_id(pool, id)
         .await?
         .ok_or_else(|| "repository not found after visibility update".into())
+}
+
+/// Persist the measured on-disk size of the bare repo (GIT-25 bookkeeping).
+pub async fn update_size_bytes(pool: &DbPool, id: &str, size_bytes: i64) -> Result<(), String> {
+    match pool {
+        DbPool::Postgres(p) => {
+            sqlx::query("UPDATE repositories SET size_bytes = $2 WHERE id = $1")
+                .bind(id)
+                .bind(size_bytes)
+                .execute(p)
+                .await
+                .map_err(|e| format!("update repository size_bytes failed: {e}"))?;
+        }
+        DbPool::MySql(p) => {
+            sqlx::query("UPDATE repositories SET size_bytes = ? WHERE id = ?")
+                .bind(size_bytes)
+                .bind(id)
+                .execute(p)
+                .await
+                .map_err(|e| format!("update repository size_bytes failed: {e}"))?;
+        }
+        DbPool::Sqlite(p) => {
+            sqlx::query("UPDATE repositories SET size_bytes = ?2 WHERE id = ?1")
+                .bind(id)
+                .bind(size_bytes)
+                .execute(p)
+                .await
+                .map_err(|e| format!("update repository size_bytes failed: {e}"))?;
+        }
+    }
+    Ok(())
+}
+
+/// Set/clear the per-repo git object size quota override (GIT-25).
+/// `None` restores the instance default; `Some(v <= 0)` is stored but treated
+/// as unlimited by the enforcement path.
+pub async fn update_size_quota_bytes(
+    pool: &DbPool,
+    id: &str,
+    size_quota_bytes: Option<i64>,
+) -> Result<RepositoryRow, String> {
+    match pool {
+        DbPool::Postgres(p) => {
+            let n = sqlx::query(
+                "UPDATE repositories SET size_quota_bytes = $2, updated_at = now()
+WHERE id = $1 AND deleted_at IS NULL",
+            )
+            .bind(id)
+            .bind(size_quota_bytes)
+            .execute(p)
+            .await
+            .map_err(|e| format!("update repository size quota failed: {e}"))?
+            .rows_affected();
+            if n == 0 {
+                return Err("repository not found".into());
+            }
+        }
+        DbPool::MySql(p) => {
+            let n = sqlx::query(
+                "UPDATE repositories SET size_quota_bytes = ?, updated_at = NOW()
+WHERE id = ? AND deleted_at IS NULL",
+            )
+            .bind(size_quota_bytes)
+            .bind(id)
+            .execute(p)
+            .await
+            .map_err(|e| format!("update repository size quota failed: {e}"))?
+            .rows_affected();
+            if n == 0 {
+                return Err("repository not found".into());
+            }
+        }
+        DbPool::Sqlite(p) => {
+            let n = sqlx::query(
+                "UPDATE repositories SET size_quota_bytes = ?2, updated_at = strftime('%Y-%m-%d %H:%M:%S','now')
+WHERE id = ?1 AND deleted_at IS NULL",
+            )
+            .bind(id)
+            .bind(size_quota_bytes)
+            .execute(p)
+            .await
+            .map_err(|e| format!("update repository size quota failed: {e}"))?
+            .rows_affected();
+            if n == 0 {
+                return Err("repository not found".into());
+            }
+        }
+    }
+    find_by_id(pool, id)
+        .await?
+        .ok_or_else(|| "repository not found after size quota update".into())
 }
 
 /// Soft-delete: set `deleted_at` (disk purge deferred — D-35).

@@ -16,7 +16,9 @@ pub use backend::{
     GitRef, GrepHit, GrepResult, RemoteAuthKind, RemoteCredentials, SizedBlobEntry, TreeEntry,
     TreeEntryKind, ARCHIVE_TIMEOUT, BLAME_SOFT_MAX_LINES, DIFF_SOFT_MAX_BYTES, FORGE_NOREPLY_EMAIL,
 };
-pub use cli::{install_protection_hooks, reconcile_protection_hooks, CliGitBackend};
+pub use cli::{
+    install_protection_hooks, reconcile_protection_hooks, repo_disk_usage, CliGitBackend,
+};
 pub use version::{assert_git_version, parse_git_version};
 
 pub fn crate_name() -> &'static str {
