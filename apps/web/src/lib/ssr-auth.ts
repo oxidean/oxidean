@@ -74,6 +74,12 @@ export const fetchUserGetProfile = createServerFn({ method: "GET" }).handler(asy
   return client.user.getProfile();
 });
 
+/** SSR: user.listWatched with Cookie forward (settings notifications matrix, DEBT-06). */
+export const fetchWatchedRepos = createServerFn({ method: "GET" }).handler(async () => {
+  const client = createSsrClient(incomingCookie());
+  return client.user.listWatched({ offset: 0, limit: 50 });
+});
+
 /** SSR: pat.list with Cookie forward. */
 export const fetchPatList = createServerFn({ method: "GET" }).handler(async () => {
   const client = createSsrClient(incomingCookie());

@@ -57,6 +57,97 @@ pub async fn fanout(
     }
 }
 
+/// Watch-level-aware fan-out for repo activity (DEBT-06): subscription rows on
+/// the subject's repo apply the notification matrix —
+///   * `all` watchers join the caller-computed participating/mentioned set for
+///     every repo activity event;
+///   * `participating` watchers receive only when already in that set;
+///   * `ignore` watchers are suppressed even when they participate;
+///   * users with no subscription row keep legacy participating delivery.
+/// Soft-fails like `fanout`: a watch-level lookup error falls back to the
+/// participant set so delivery is never lost.
+pub async fn fanout_activity(
+    ctx: &RpcCtx,
+    actor_id: &str,
+    recipients: impl IntoIterator<Item = String>,
+    reason: &str,
+    subject: &NotifySubject,
+) {
+    let base: HashSet<String> = recipients
+        .into_iter()
+        .filter(|r| !r.is_empty() && r != actor_id)
+        .collect();
+    match ctx.db.list_repo_watch_levels(&subject.repo_id).await {
+        Ok(rows) => {
+            let watched: HashSet<&str> = rows.iter().map(|(uid, _)| uid.as_str()).collect();
+            // Non-watchers keep legacy participating/mention delivery.
+            let mut out: HashSet<String> = base
+                .iter()
+                .filter(|uid| !watched.contains(uid.as_str()))
+                .cloned()
+                .collect();
+            for (uid, level) in &rows {
+                let include = match oxidean_core::WatchLevel::parse(level) {
+                    Ok(oxidean_core::WatchLevel::All) => true,
+                    Ok(oxidean_core::WatchLevel::Participating) => base.contains(uid),
+                    Ok(oxidean_core::WatchLevel::Ignore) | Err(_) => false,
+                };
+                if include {
+                    out.insert(uid.clone());
+                }
+            }
+            fanout(ctx, actor_id, out, reason, subject).await;
+        }
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                repo_id = %subject.repo_id,
+                "watch-level lookup failed; participant-only fanout"
+            );
+            fanout(ctx, actor_id, base, reason, subject).await;
+        }
+    }
+}
+
+/// Suppression-only variant for direct-address notifications (mentions,
+/// assignments, review requests): the caller-computed recipients pass through
+/// unchanged except watchers at `ignore`, which suppresses even @-mentions
+/// (GitHub "Ignore" semantics, DEBT-06).
+pub async fn fanout_suppress_ignored(
+    ctx: &RpcCtx,
+    actor_id: &str,
+    recipients: impl IntoIterator<Item = String>,
+    reason: &str,
+    subject: &NotifySubject,
+) {
+    let list: Vec<String> = recipients.into_iter().collect();
+    match ctx.db.list_repo_watch_levels(&subject.repo_id).await {
+        Ok(rows) => {
+            let ignored: HashSet<&str> = rows
+                .iter()
+                .filter(|(_, l)| l == "ignore")
+                .map(|(uid, _)| uid.as_str())
+                .collect();
+            fanout(
+                ctx,
+                actor_id,
+                list.into_iter().filter(|uid| !ignored.contains(uid.as_str())),
+                reason,
+                subject,
+            )
+            .await;
+        }
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                repo_id = %subject.repo_id,
+                "watch-level lookup failed; unfiltered fanout"
+            );
+            fanout(ctx, actor_id, list, reason, subject).await;
+        }
+    }
+}
+
 /// Extract `@username` handles from plain text.
 pub fn extract_mention_usernames(body: &str) -> Vec<String> {
     let mut out = Vec::new();

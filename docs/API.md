@@ -109,6 +109,11 @@ SSO start routes redirect to the IdP when configured. If WorkOS/OIDC ENV is miss
 | `repo.create` / `repo.get` / browse / branch / settings | Forge RPC (Capability ACL) | Session (+ capability) |
 | `repo.star` / `repo.unstar` | Idempotent star membership + `star_count` / `viewer_has_starred` on `RepoPublic` | Session + Read (anonymous rejected; private without Read → `repo.not_found`) |
 | `user.listStarred` | Caller's starred repos (newest-starred first; Read ACL filter; offset/limit) | Session + verified |
+| `repo.watch` / `repo.unwatch` | Subscription upsert at `level` (`all` \| `participating` \| `ignore`; default `all`) / remove row; `watch_count` + `viewer_watch_level` on `RepoPublic` count non-`ignore` rows only | Session + Read |
+| `repo.watchers.list` | Public watchers (non-`ignore` rows), paginated + `q` filter | Anonymous OK |
+| `user.listWatched` | Caller's repo subscriptions at any level incl. `ignore` (Read ACL filter; offset/limit) | Session + verified |
+| `user.follow` / `user.unfollow` | Idempotent user-follow edge writes; returns target `PublicUserProfile` with refreshed counts | Session + verified |
+| `user.followers.list` / `user.following.list` | Public follower/following lists (`username` filter via `q`; offset/limit) | Anonymous OK; unknown → `user.not_found` |
 | `user.getPublicProfile` | Public profile by username (`username`, `display_name`, `bio`, `avatar_url` — **never email**) | Anonymous OK; unknown → `user.not_found` |
 | `repo.explore` | Public repos sorted by `star_count` desc then `updated_at` desc; optional `q` substring | Anonymous OK |
 | `repo.fork` | Fork public readable source (bare copy); sets `forked_from_repo_id` + `fork_network_id`; one active fork per (owner, network) | Session + Read on public source |

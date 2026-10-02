@@ -69,6 +69,7 @@ fn to_public(repo: &AccessibleRepo) -> RepoPublic {
         fork_count: 0,
         watch_count: 0,
         viewer_is_watching: false,
+        viewer_watch_level: None,
         fork_network_id: None,
         forked_from: None,
     }

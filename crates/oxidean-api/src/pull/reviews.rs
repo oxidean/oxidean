@@ -120,7 +120,7 @@ pub async fn reviews_submit(
         .await
         .map_err(db_err)?;
     let subject = notify::subject_for_pull(&pull);
-    notify::fanout(
+    notify::fanout_activity(
         ctx,
         &user.id,
         std::iter::once(pull.author_id.clone()),
@@ -221,7 +221,7 @@ pub async fn review_requests_add(
         .await
         .map_err(db_err)?;
     let subject = notify::subject_for_pull(&pull);
-    notify::fanout(
+    notify::fanout_suppress_ignored(
         ctx,
         &user.id,
         std::iter::once(target.id.clone()),

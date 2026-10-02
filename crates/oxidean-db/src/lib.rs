@@ -7,6 +7,7 @@ pub mod auth_settings;
 pub mod branch_protection;
 pub mod dialect;
 pub mod email_tokens;
+pub mod follows;
 pub mod issue_labels;
 pub mod issues;
 pub mod lfs;
@@ -69,6 +70,7 @@ pub use repo_collaborators::{
     RepoCollaboratorGrantRow, RepoCollaboratorListRow, RepoCollaboratorRow,
 };
 pub use stars::{ForkListSort, RepoForkListRow, RepoStargazerListRow};
+pub use follows::UserFollowListRow;
 pub use watches::RepoWatcherListRow;
 pub use repositories::{RepoDiskRef, RepositoryRow};
 pub use ssh_keys::SshKeyRow;
@@ -629,12 +631,44 @@ impl Database {
         stars::has_starred(self.require_pool()?, user_id, repository_id).await
     }
 
+    /// Upsert the viewer's subscription row at `level` (`all` | `participating`
+    /// | `ignore`); `watch_count` counts only non-ignore rows (DEBT-06).
     pub async fn watch_repository(
         &self,
         user_id: &str,
         repository_id: &str,
+        level: &str,
     ) -> Result<i64, String> {
-        watches::watch_repository(self.require_pool()?, user_id, repository_id).await
+        watches::watch_repository(self.require_pool()?, user_id, repository_id, level).await
+    }
+
+    /// Viewer's subscription level for a repo, `None` when no row exists (DEBT-06).
+    pub async fn get_repo_watch_level(
+        &self,
+        user_id: &str,
+        repository_id: &str,
+    ) -> Result<Option<String>, String> {
+        watches::get_watch_level(self.require_pool()?, user_id, repository_id).await
+    }
+
+    /// `(user_id, level)` for every subscription row on a repo — the fan-out
+    /// matrix input (DEBT-06).
+    pub async fn list_repo_watch_levels(
+        &self,
+        repository_id: &str,
+    ) -> Result<Vec<(String, String)>, String> {
+        watches::list_repo_watch_levels(self.require_pool()?, repository_id).await
+    }
+
+    /// Repo ids with a subscription row at any level, newest first — the
+    /// settings notification matrix (DEBT-06).
+    pub async fn list_watched_repo_ids(
+        &self,
+        user_id: &str,
+        offset: i64,
+        limit: i64,
+    ) -> Result<Vec<String>, String> {
+        watches::list_watched_repo_ids(self.require_pool()?, user_id, offset, limit).await
     }
 
     pub async fn unwatch_repository(
@@ -683,6 +717,72 @@ impl Database {
         q: Option<&str>,
     ) -> Result<i64, String> {
         watches::count_repo_watchers(self.require_pool()?, repository_id, q).await
+    }
+
+    // --- user follows (DEBT-06) -------------------------------------------
+
+    /// Idempotent follow edge. Returns `true` when a new edge was created.
+    pub async fn follow_user(&self, follower_id: &str, followed_id: &str) -> Result<bool, String> {
+        follows::follow_user(self.require_pool()?, follower_id, followed_id).await
+    }
+
+    /// Idempotent unfollow. Returns `true` when an edge was removed.
+    pub async fn unfollow_user(
+        &self,
+        follower_id: &str,
+        followed_id: &str,
+    ) -> Result<bool, String> {
+        follows::unfollow_user(self.require_pool()?, follower_id, followed_id).await
+    }
+
+    pub async fn is_following_user(
+        &self,
+        follower_id: &str,
+        followed_id: &str,
+    ) -> Result<bool, String> {
+        follows::is_following(self.require_pool()?, follower_id, followed_id).await
+    }
+
+    /// Accounts following `user_id`.
+    pub async fn user_follower_count(&self, user_id: &str) -> Result<i64, String> {
+        follows::follower_count(self.require_pool()?, user_id).await
+    }
+
+    /// Accounts `user_id` follows.
+    pub async fn user_following_count(&self, user_id: &str) -> Result<i64, String> {
+        follows::following_count(self.require_pool()?, user_id).await
+    }
+
+    /// Followers of `user_id`, newest first; `q` filters username/display_name.
+    pub async fn list_user_followers(
+        &self,
+        user_id: &str,
+        q: Option<&str>,
+        offset: i64,
+        limit: i64,
+    ) -> Result<Vec<UserFollowListRow>, String> {
+        follows::list_followers(self.require_pool()?, user_id, q, offset, limit).await
+    }
+
+    /// Accounts `user_id` follows, newest first; `q` filters username/display_name.
+    pub async fn list_user_following(
+        &self,
+        user_id: &str,
+        q: Option<&str>,
+        offset: i64,
+        limit: i64,
+    ) -> Result<Vec<UserFollowListRow>, String> {
+        follows::list_following(self.require_pool()?, user_id, q, offset, limit).await
+    }
+
+    /// Follower count matching the `q` filter used by `list_user_followers`.
+    pub async fn count_user_followers(&self, user_id: &str, q: Option<&str>) -> Result<i64, String> {
+        follows::count_followers(self.require_pool()?, user_id, q).await
+    }
+
+    /// Following count matching the `q` filter used by `list_user_following`.
+    pub async fn count_user_following(&self, user_id: &str, q: Option<&str>) -> Result<i64, String> {
+        follows::count_following(self.require_pool()?, user_id, q).await
     }
 
     pub async fn list_repo_stargazers(

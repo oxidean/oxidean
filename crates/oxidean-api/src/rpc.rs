@@ -267,6 +267,26 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Ok(list) => RpcResponse::ok(list),
             Err(e) => RpcResponse::err(e),
         },
+        "user.listWatched" => match user::list_watched(ctx, req.input).await {
+            Ok(list) => RpcResponse::ok(list),
+            Err(e) => RpcResponse::err(e),
+        },
+        "user.follow" => match user::follow(ctx, req.input).await {
+            Ok(profile) => RpcResponse::ok(profile),
+            Err(e) => RpcResponse::err(e),
+        },
+        "user.unfollow" => match user::unfollow(ctx, req.input).await {
+            Ok(profile) => RpcResponse::ok(profile),
+            Err(e) => RpcResponse::err(e),
+        },
+        "user.followers.list" => match user::followers_list(ctx, req.input).await {
+            Ok(list) => RpcResponse::ok(list),
+            Err(e) => RpcResponse::err(e),
+        },
+        "user.following.list" => match user::following_list(ctx, req.input).await {
+            Ok(list) => RpcResponse::ok(list),
+            Err(e) => RpcResponse::err(e),
+        },
         "admin.auth.get_settings" => match auth_admin::get_settings(ctx).await {
             Ok(settings) => RpcResponse::ok(settings),
             Err(e) => RpcResponse::err(e),

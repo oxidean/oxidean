@@ -714,8 +714,8 @@ pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullPublic
             recipients.push(m.clone());
         }
     }
-    notify::fanout(ctx, &user.id, recipients.clone(), "pr_opened", &subject).await;
-    notify::fanout(ctx, &user.id, mentions, "pr_mention", &subject).await;
+    notify::fanout_activity(ctx, &user.id, recipients.clone(), "pr_opened", &subject).await;
+    notify::fanout_suppress_ignored(ctx, &user.id, mentions, "pr_mention", &subject).await;
     emit_pull_event(
         ctx,
         &accessible,
@@ -988,7 +988,7 @@ pub async fn close(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullPublic,
     let updated = load_pull_in_repo(ctx, &accessible.row.id, req.number).await?;
     let subject = notify::subject_for_pull(&updated);
     let recipients = notify::pull_participant_ids(ctx, &updated.id, &updated.author_id).await;
-    notify::fanout(ctx, &user.id, recipients, "pr_closed", &subject).await;
+    notify::fanout_activity(ctx, &user.id, recipients, "pr_closed", &subject).await;
     emit_pull_event(
         ctx,
         &accessible,
@@ -1023,7 +1023,7 @@ pub async fn reopen(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullPublic
     let updated = load_pull_in_repo(ctx, &accessible.row.id, req.number).await?;
     let subject = notify::subject_for_pull(&updated);
     let recipients = notify::pull_participant_ids(ctx, &updated.id, &updated.author_id).await;
-    notify::fanout(ctx, &user.id, recipients, "pr_reopened", &subject).await;
+    notify::fanout_activity(ctx, &user.id, recipients, "pr_reopened", &subject).await;
     emit_pull_event(
         ctx,
         &accessible,
