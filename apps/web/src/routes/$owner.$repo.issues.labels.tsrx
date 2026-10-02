@@ -5,6 +5,7 @@ import { useForm } from "@octanejs/tanstack-form";
 import { useState } from "octane";
 import { AuthErrorBanner } from "@/components/auth-shell";
 import { RepoNotFound } from "@/components/repo/repo-not-found";
+import { RepoUnitDisabled } from "@/components/repo/repo-unit-disabled";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -15,6 +16,8 @@ import { fetchRepoGet } from "@/lib/ssr-repo";
 export type RepoLabelsLoaderData =
   | { kind: "not_found" }
   | { kind: "error"; message: string }
+  // Both label-consuming units (issues + pulls) are disabled (COL-13).
+  | { kind: "disabled"; repo: RepoPublic }
   | { kind: "ready"; repo: RepoPublic };
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
@@ -36,6 +39,11 @@ async function loadRepoLabels(owner: string, repoName: string): Promise<RepoLabe
       kind: "error",
       message: got.error.message || "Could not load repository.",
     };
+  }
+  // Labels are shared repo metadata — only pointless when BOTH units that
+  // consume them are off (COL-13).
+  if (got.data.issues_enabled === false && got.data.pulls_enabled === false) {
+    return { kind: "disabled", repo: got.data };
   }
   if (!got.data.can_admin) return { kind: "not_found" };
   return { kind: "ready", repo: got.data };
@@ -84,7 +92,7 @@ export function RepoIssueLabelsPage() @{
     },
     enabled: !!owner && !!repoName,
     initialData:
-      routeLoader?.kind === "ready"
+      routeLoader?.kind === "ready" || routeLoader?.kind === "disabled"
         ? routeLoader.repo
         : layout?.status === "ok"
           ? (layout.repo ?? undefined)
@@ -149,6 +157,9 @@ export function RepoIssueLabelsPage() @{
 
   const repo = repoQ.data ?? null;
   const canAdmin = !!repo?.can_admin;
+  const unitDisabled =
+    routeLoader?.kind === "disabled" ||
+    (repo?.issues_enabled === false && repo?.pulls_enabled === false);
   const labels: LabelPublic[] = labelsQ.data ?? [];
   const notFound =
     layout?.status === "not_found" ||
@@ -204,7 +215,9 @@ export function RepoIssueLabelsPage() @{
     }
   }
 
-  @if (notFound) {
+  @if (unitDisabled) {
+    <RepoUnitDisabled unit="issues" canAdmin={canAdmin} />;
+  } @else if (notFound) {
     <RepoNotFound />;
   } @else {
     @if (!repo) {

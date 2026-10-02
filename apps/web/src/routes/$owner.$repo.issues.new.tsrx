@@ -6,6 +6,7 @@ import { useState } from "octane";
 import { AuthErrorBanner } from "@/components/auth-shell";
 import { MarkdownWritePreview } from "@/components/repo/markdown-write-preview";
 import { RepoNotFound } from "@/components/repo/repo-not-found";
+import { RepoUnitDisabled } from "@/components/repo/repo-unit-disabled";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,6 +17,8 @@ import { fetchRepoGet } from "@/lib/ssr-repo";
 export type IssuesNewLoaderData =
   | { kind: "not_found" }
   | { kind: "error"; message: string }
+  // Issues unit disabled for this repo (COL-13).
+  | { kind: "disabled"; repo: RepoPublic }
   | { kind: "ready"; repo: RepoPublic }
   | { kind: "forbidden"; repo: RepoPublic };
 
@@ -29,6 +32,10 @@ async function loadNewIssuePage(owner: string, repoName: string): Promise<Issues
       kind: "error",
       message: got.error.message || "Could not load repository.",
     };
+  }
+  // Unit toggle (COL-13): Issues off → disabled view before the write check.
+  if (got.data.issues_enabled === false) {
+    return { kind: "disabled", repo: got.data };
   }
   if (!got.data.can_write) {
     return { kind: "forbidden", repo: got.data };
@@ -121,7 +128,9 @@ export function IssuesNewPage() @{
     },
     enabled: !!owner && !!repoName,
     initialData:
-      routeLoader?.kind === "ready" || routeLoader?.kind === "forbidden"
+      routeLoader?.kind === "ready" ||
+      routeLoader?.kind === "forbidden" ||
+      routeLoader?.kind === "disabled"
         ? routeLoader.repo
         : layout?.status === "ok"
           ? (layout.repo ?? undefined)
@@ -129,9 +138,12 @@ export function IssuesNewPage() @{
   });
 
   const repo = repoQ.data ?? null;
+  const unitDisabled = routeLoader?.kind === "disabled" || repo?.issues_enabled === false;
 
   @if (layout?.status === "not_found" || (!repoQ.isPending && !repo)) {
     <RepoNotFound />;
+  } @else if (unitDisabled) {
+    <RepoUnitDisabled unit="issues" canAdmin={repo?.can_admin ?? false} />;
   } @else if (!repo) {
     <p className="text-[16px] text-muted-foreground">Loading…</p>;
   } @else if (!repo.can_write) {

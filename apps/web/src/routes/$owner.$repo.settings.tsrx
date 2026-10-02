@@ -11,6 +11,7 @@ import { MergeSettingsPanel } from "@/components/repo/merge-settings-panel";
 import { OwnerLookup } from "@/components/repo/owner-lookup";
 import { TopicChipsInput } from "@/components/repo/topics-input";
 import { RepoNotFound } from "@/components/repo/repo-not-found";
+import { RepoFeaturesPanel } from "@/components/repo/repo-features-panel";
 import { WebhooksPanel } from "@/components/repo/webhooks-panel";
 import { MirrorSettingsPanel } from "@/components/repo/mirror-settings-panel";
 import { TypeToConfirmDialog } from "@/components/repo/type-to-confirm-dialog";
@@ -329,6 +330,7 @@ export function RepoSettingsPage() @{
 
         <LfsSettingsPanel owner={owner} name={repoName} can_admin={canAdmin} />
         <TemplateRepoSettingsPanel owner={owner} name={repoName} can_admin={canAdmin} />
+        <RepoFeaturesPanel owner={owner} name={repoName} can_admin={canAdmin} repo={repo} />
         <ActionsSettingsPanel owner={owner} name={repoName} can_admin={canAdmin} />
 
         <MergeSettingsPanel owner={owner} name={repoName} can_admin={canAdmin} />

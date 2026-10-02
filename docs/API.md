@@ -156,6 +156,8 @@ SSO start routes redirect to the IdP when configured. If WorkOS/OIDC ENV is miss
 | `repo.actions.listRuns` / `getRun` / `getJobLog` | Workflow run list, detail, job log text | Session + Read+ |
 | `repo.actions.secrets.list` / `put` / `delete` | Repo Actions secrets (names only on list) | Session + Admin |
 | `repo.actions.getEnabled` / `setEnabled` | Per-repo Actions enable toggle | Session + Read+ / Admin |
+| `repo.issues.getEnabled` / `setEnabled` | Per-repo Issues unit toggle (COL-13) | Session + Read+ / Admin |
+| `repo.pulls.getEnabled` / `setEnabled` | Per-repo Pull-requests unit toggle (COL-13) | Session + Read+ / Admin |
 | `repo.mirror.get` / `upsert` / `delete` / `syncNow` | Two-way remote mirror config + enqueue sync | Session + Admin |
 | `repo.mirror.generateSshKey` / `rotateWebhookSecret` / `fetchHostKey` | Deploy key, inbound webhook secret, ssh-keyscan | Session + Admin |
 | `repo.commitStatus.create` / `list` | Commit statuses (Phase 13 + Actions publisher) | Session + Write+ / Read+ |
@@ -163,6 +165,20 @@ SSO start routes redirect to the IdP when configured. If WorkOS/OIDC ENV is miss
 | `admin.actions.listRunners` | List registered runners (no secrets) | Sys-admin |
 
 Unknown procedure → `rpc.unknown_procedure` (HTTP 404).
+
+### Per-repo unit toggles (COL-13)
+
+Repository admins can turn the **Issues** and **Pull requests** units off per
+repository (`Settings → Features` in the web UI). `repo.get` reports the flags
+additively as `issues_enabled` / `pulls_enabled` (`true` by default; list
+endpoints may omit them and clients should treat missing as enabled). While a
+unit is off, every RPC under its surface — `issue.*` including comments,
+labels, assignees, reactions, and links, or `pull.*` including files, commits,
+comments, reviews, review requests, and merge — fails with the stable error
+code `repo.issues.disabled` / `repo.pulls.disabled`. Disabling never deletes
+data; re-enabling restores the unit immediately. Shared repo surfaces
+(`repo.*`, `label.*`, `repo.mergeSettings.*`) and git clone/fetch/push are
+unaffected.
 
 ## Request/response formats
 
@@ -589,6 +605,7 @@ Common `error.code` values:
 | `invite.email_mismatch` | Bound invite accepted under a different email |
 | `invite.login_required` | Link-invite email already registered — sign in to accept |
 | `repo.not_found` | Missing or unauthorized private (web/RPC soft 404) |
+| `repo.issues.disabled` / `repo.pulls.disabled` | Per-repo Issues / Pulls unit is off (COL-13); re-enable via `repo.<unit>.setEnabled` |
 | `repo.create_forbidden` | Org Member cannot create under that org |
 | `issue.not_found` / `issue.comment_not_found` / `issue.link_not_found` | Missing issue/comment/link (private soft-404 where applicable) |
 | `issue.confirm_mismatch` | Admin hard-delete confirmation number mismatch |

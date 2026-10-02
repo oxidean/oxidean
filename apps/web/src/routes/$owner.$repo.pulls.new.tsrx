@@ -3,6 +3,7 @@ import { useState } from "octane";
 import { MemberLookup } from "@/components/org/member-lookup";
 import { MarkdownWritePreview } from "@/components/repo/markdown-write-preview";
 import { RepoNotFound } from "@/components/repo/repo-not-found";
+import { RepoUnitDisabled } from "@/components/repo/repo-unit-disabled";
 import { apiClient } from "@/lib/api-client";
 import { fetchRepoGet, fetchRepoRefs } from "@/lib/ssr-repo";
 
@@ -29,6 +30,10 @@ export const Route = createFileRoute("/$owner/$repo/pulls/new")({
       if (got.error.code === "repo.not_found") return { kind: "not_found" as const };
       return { kind: "error" as const, message: got.error.message || NETWORK_ERROR };
     }
+    // Unit toggle (COL-13): Pulls off → disabled view, skip ref enumeration.
+    if (got.data.pulls_enabled === false) {
+      return { kind: "disabled" as const, repo: got.data };
+    }
     const refs = await fetchRepoRefs({ data: { owner, name: repoName } });
     return {
       kind: "ready" as const,
@@ -50,6 +55,7 @@ export function NewPullPage() @{
   const loader = Route.useLoaderData() as
     | { kind: "not_found" }
     | { kind: "error"; message: string }
+    | { kind: "disabled"; repo: { can_admin?: boolean } }
     | {
         kind: "ready";
         repo: { default_branch: string; can_write?: boolean };
@@ -99,7 +105,9 @@ export function NewPullPage() @{
   @if (loader.kind === "not_found") {
     <RepoNotFound />;
   } @else {
-    @if (loader.kind === "error") {
+    @if (loader.kind === "disabled") {
+      <RepoUnitDisabled unit="pulls" canAdmin={loader.repo.can_admin ?? false} />;
+    } @else if (loader.kind === "error") {
       <p className="text-destructive">{loader.message as string}</p>;
     } @else {
       <div className="mx-auto max-w-2xl space-y-4">

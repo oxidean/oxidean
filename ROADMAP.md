@@ -73,7 +73,7 @@ The v1 loop (open, comment, review, merge, close) works. Parity is about the pla
 - [ ] **COL-10** Project boards / kanban scoped to repo or org (COLLAB-V2-01).
 - [ ] **COL-11** Wiki per repository (COLLAB-V2-02).
 - [ ] **COL-12** Contribution graph / profile activity and profile README support.
-- [ ] **COL-13** Per-repo unit toggles: enable/disable issues and PRs per repository (and future wiki/boards). Only Actions has an enable flag today (`repo.actions.setEnabled`).
+- [x] **COL-13** Per-repo unit toggles: enable/disable issues and PRs per repository (`repo.issues.*`/`repo.pulls.*` `getEnabled`/`setEnabled`, `issue.*`/`pull.*` reject `repo.<unit>.disabled` while off, Settings → Features). Wiki/boards remain future units following the same pattern.
 
 ## Actions (CI)
 

@@ -14,6 +14,7 @@ import { PullFiles } from "@/components/repo/pull-files";
 import { PullMergePanel } from "@/components/repo/pull-merge-panel";
 import { PullReviews } from "@/components/repo/pull-reviews";
 import { RepoNotFound } from "@/components/repo/repo-not-found";
+import { RepoUnitDisabled } from "@/components/repo/repo-unit-disabled";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api-client";
@@ -25,6 +26,8 @@ const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.
 type PullDetailLoaderData =
   | { kind: "not_found" }
   | { kind: "error"; message: string }
+  // Pulls unit disabled for this repo (COL-13).
+  | { kind: "disabled"; repo: RepoPublic }
   | { kind: "ready"; repo: RepoPublic; pull: PullPublic };
 
 async function loadPullDetail(
@@ -37,8 +40,15 @@ async function loadPullDetail(
     if (got.error.code === "repo.not_found") return { kind: "not_found" };
     return { kind: "error", message: got.error.message || NETWORK_ERROR };
   }
+  // Unit toggle (COL-13): Pulls off → disabled view, skip pull.get.
+  if (got.data.pulls_enabled === false) {
+    return { kind: "disabled", repo: got.data };
+  }
   const pull = await fetchPullGet({ data: { owner, name: repoName, number } });
   if (!pull.ok) {
+    if (pull.error.code === "repo.pulls.disabled") {
+      return { kind: "disabled", repo: got.data };
+    }
     if (pull.error.code === "repo.not_found" || pull.error.code === "pull.not_found") {
       return { kind: "not_found" };
     }
@@ -91,13 +101,15 @@ export function PullDetailPage() @{
       if (!res.ok) throw new Error(res.error.message || NETWORK_ERROR);
       return res.data;
     },
-    enabled: !!owner && !!repoName && number > 0,
+    enabled: !!owner && !!repoName && number > 0 && loader.kind !== "disabled",
     initialData: loader.kind === "ready" ? loader.pull : undefined,
   });
 
   const account = useChromeAccountState();
   const pull = pullQ.data;
   const canWrite = loader.kind === "ready" && !!loader.repo.can_write;
+  const canAdmin =
+    loader.kind !== "not_found" && loader.kind !== "error" && !!loader.repo.can_admin;
   const isAuthor = !!pull && !!account.user && account.user.id === (pull.author_id as string);
 
   async function closePull() {
@@ -131,7 +143,9 @@ export function PullDetailPage() @{
   @if (loader.kind === "not_found") {
     <RepoNotFound />;
   } @else {
-    @if (loader.kind === "error") {
+    @if (loader.kind === "disabled") {
+      <RepoUnitDisabled unit="pulls" canAdmin={canAdmin} />;
+    } @else if (loader.kind === "error") {
       <p className="text-destructive">{loader.message as string}</p>;
     } @else {
       @if (!pull) {

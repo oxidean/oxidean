@@ -69,6 +69,10 @@ fn to_public(repo: &AccessibleRepo) -> RepoPublic {
         fork_count: 0,
         watch_count: 0,
         viewer_is_watching: false,
+        // Unit flags default enabled; `repo.get`/enrich paths fill real
+        // values — rename/transfer responses keep the list-endpoint default.
+        issues_enabled: true,
+        pulls_enabled: true,
         fork_network_id: None,
         forked_from: None,
     }

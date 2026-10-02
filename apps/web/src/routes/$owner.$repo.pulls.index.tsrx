@@ -14,6 +14,7 @@ import {
   repoListTablistClass,
 } from "@/components/repo/repo-list-toolbar";
 import { RepoNotFound } from "@/components/repo/repo-not-found";
+import { RepoUnitDisabled } from "@/components/repo/repo-unit-disabled";
 import { apiClient } from "@/lib/api-client";
 import type { RepoLayoutLoaderData } from "@/lib/repo-store";
 import { fetchPullList, fetchRepoGet } from "@/lib/ssr-repo";
@@ -21,6 +22,8 @@ import { fetchPullList, fetchRepoGet } from "@/lib/ssr-repo";
 export type PullsLoaderData =
   | { kind: "not_found" }
   | { kind: "error"; message: string }
+  // Pulls unit disabled for this repo (COL-13).
+  | { kind: "disabled"; repo: RepoPublic }
   | {
       kind: "ready";
       repo: RepoPublic;
@@ -57,10 +60,18 @@ async function loadPullsPage(
   }
   if (!listRes.ok) {
     if (listRes.error.code === "repo.not_found") return { kind: "not_found" };
+    if (listRes.error.code === "repo.pulls.disabled") {
+      return { kind: "disabled", repo: got.data };
+    }
     return {
       kind: "error",
       message: listRes.error.message || "Could not load pull requests.",
     };
+  }
+  // Unit toggle (COL-13): repo.get says Pulls is off even though the list came
+  // back (race / cache) → disabled view.
+  if (got.data.pulls_enabled === false) {
+    return { kind: "disabled", repo: got.data };
   }
   return {
     kind: "ready",
@@ -112,6 +123,11 @@ export function PullsListPage() @{
   const [appliedQ, setAppliedQ] = useState("");
   const [appliedReviewState, setAppliedReviewState] = useState("");
 
+  // Pulls unit off (COL-13) — from the loader or the layout repo payload.
+  const unitDisabled =
+    routeLoader?.kind === "disabled" ||
+    (routeLoader?.kind === "ready" ? routeLoader.repo : layout?.repo)?.pulls_enabled === false;
+
   const ssrListMatches =
     routeLoader?.kind === "ready" &&
     state === "open" &&
@@ -147,18 +163,20 @@ export function PullsListPage() @{
       if (!res.ok) throw new Error(res.error.message || NETWORK_ERROR);
       return res.data;
     },
-    enabled: !!owner && !!repoName,
+    enabled: !!owner && !!repoName && !unitDisabled,
     initialData: ssrListMatches ? routeLoader.list : undefined,
   });
 
   const repo =
-    (routeLoader?.kind === "ready" ? routeLoader.repo : null) ??
+    (routeLoader?.kind === "ready" || routeLoader?.kind === "disabled" ? routeLoader.repo : null) ??
     (layout?.status === "ok" ? layout.repo : null) ??
     null;
   const list = listQ.data ?? (ssrListMatches ? routeLoader.list : undefined);
 
   @if (routeLoader?.kind === "not_found" || layout?.status === "not_found") {
     <RepoNotFound />;
+  } @else if (unitDisabled) {
+    <RepoUnitDisabled unit="pulls" canAdmin={repo?.can_admin ?? false} />;
   } @else {
     @if (routeLoader?.kind === "error") {
       <p className="text-destructive">{routeLoader.message as string}</p>;

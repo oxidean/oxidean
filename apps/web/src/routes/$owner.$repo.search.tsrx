@@ -3,6 +3,7 @@ import { useQuery } from "@octanejs/tanstack-query";
 import { useState } from "octane";
 import type { RepoSearchHit, RepoSearchType } from "@oxidean/api-client";
 import { apiClient } from "@/lib/api-client";
+import { useRepoStore } from "@/lib/repo-store";
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
 
@@ -69,6 +70,16 @@ export function RepoSearchPage() @{
   const qParam = search.q ?? "";
   const typeParam = parseType(search.type);
   const [draft, setDraft] = useState(qParam);
+  // Unit toggles (COL-13): hide Issues/Pulls result tabs when off. A deep link
+  // to a disabled type still answers with the `repo.<unit>.disabled` message.
+  const storeRepo = useRepoStore((s) => s.repo);
+  const typeTabs = TYPE_TABS.filter((t) =>
+    t.id === "issues"
+      ? storeRepo?.issues_enabled !== false
+      : t.id === "pulls"
+        ? storeRepo?.pulls_enabled !== false
+        : true,
+  );
 
   const searchQ = useQuery({
     queryKey: ["repo", "search", owner, repoName, typeParam, qParam] as const,
@@ -142,7 +153,7 @@ export function RepoSearchPage() @{
       </form>
 
       <nav className="flex flex-wrap gap-4 border-b border-border" aria-label="Search type">
-        @for (const tab of TYPE_TABS; key tab.id) {
+        @for (const tab of typeTabs; key tab.id) {
           <button
             type="button"
             className={tabClass(tab.id) as string}
