@@ -210,7 +210,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: e2e-stack-logs
-          path: var/e2e/
+          path: |
+            var/e2e/
+            apps/web/.vitest/attachments/
           if-no-files-found: ignore
 
   # Actions pipeline e2e: API (sqlite) + native oxidean-runner (host mode,

@@ -997,14 +997,29 @@ export const expectReleaseAssetFlow: BrowserCommand<[]> = async (ctx) => {
       }
     }
     if (!linkVisible) {
+      // Split server-vs-client causality: does release.get report the asset?
+      const relGet = await rpc(
+        "release.get",
+        { owner: seed.owner, name: seed.repo, tag_name: tag },
+        seed.cookie,
+      );
+      const apiAssets = relGet.ok
+        ? JSON.stringify(((relGet.data as { assets?: unknown[] }).assets ?? []).length)
+        : `ERR ${JSON.stringify(relGet.error)}`;
       const html = await page.content();
-      const state = html.includes("No assets attached")
-        ? "empty-assets"
-        : html.includes("not found") || html.includes("NotFound")
-          ? "not-found"
-          : "unknown";
+      const markers = [
+        ["empty-assets", html.includes("No assets attached")],
+        ["not-found", html.includes("not found") || html.includes("NotFound")],
+        ["loading", html.includes("Loading release")],
+        ["suspense-pending", html.includes("oct-suspense")],
+        ["release-body", html.includes('data-testid="release-body"')],
+        ["dropzone", html.includes("release-asset-file")],
+      ]
+        .filter(([, on]) => on)
+        .map(([k]) => k)
+        .join(",");
       throw new Error(
-        `release asset link never rendered state=${state} url=${page.url()} pageerrors=${pageGuard.pageErrors.join(" | ") || "none"} body=${html.slice(0, 800)}`,
+        `release asset link never rendered markers=${markers || "none"} apiAssets=${apiAssets} url=${page.url()} pageerrors=${pageGuard.pageErrors.join(" | ") || "none"} body=${html.slice(0, 3000)}`,
       );
     }
     await page.locator("#release-asset-file").waitFor({ state: "attached", timeout: 30_000 });
