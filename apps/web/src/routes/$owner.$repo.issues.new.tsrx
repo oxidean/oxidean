@@ -1,9 +1,16 @@
-import { createFileRoute, useLoaderData, useNavigate, useParams } from "@octanejs/tanstack-router";
+import {
+  createFileRoute,
+  useLoaderData,
+  useNavigate,
+  useParams,
+  useSearch,
+} from "@octanejs/tanstack-router";
 import { useForm } from "@octanejs/tanstack-form";
 import { useQuery } from "@octanejs/tanstack-query";
-import type { RepoPublic } from "@oxidean/api-client";
-import { useState } from "octane";
+import type { RepoFileTemplate, RepoPublic, RepoTemplatesListResponse } from "@oxidean/api-client";
+import { useEffect, useState } from "octane";
 import { AuthErrorBanner } from "@/components/auth-shell";
+import { FileTemplateChooser } from "@/components/repo/file-template-chooser";
 import { MarkdownWritePreview } from "@/components/repo/markdown-write-preview";
 import { RepoNotFound } from "@/components/repo/repo-not-found";
 import { Button } from "@/components/ui/button";
@@ -11,12 +18,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiClient } from "@/lib/api-client";
 import type { RepoLayoutLoaderData } from "@/lib/repo-store";
-import { fetchRepoGet } from "@/lib/ssr-repo";
+import { fetchRepoFileTemplates, fetchRepoGet } from "@/lib/ssr-repo";
+
+const EMPTY_TEMPLATES: RepoTemplatesListResponse = { issues: [], pulls: [] };
 
 export type IssuesNewLoaderData =
   | { kind: "not_found" }
   | { kind: "error"; message: string }
-  | { kind: "ready"; repo: RepoPublic }
+  | { kind: "ready"; repo: RepoPublic; templates: RepoTemplatesListResponse }
   | { kind: "forbidden"; repo: RepoPublic };
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
@@ -33,11 +42,30 @@ async function loadNewIssuePage(owner: string, repoName: string): Promise<Issues
   if (!got.data.can_write) {
     return { kind: "forbidden", repo: got.data };
   }
-  return { kind: "ready", repo: got.data };
+  // COL-02: template listing failure must not block the create form.
+  const tpl = await fetchRepoFileTemplates({ data: { owner, name: repoName } }).catch(() => null);
+  return { kind: "ready", repo: got.data, templates: tpl?.ok ? tpl.data : EMPTY_TEMPLATES };
+}
+
+/** `?template=` selects by repo-relative filename or basename (GitHub deep-link). */
+function matchTemplate(
+  templates: RepoFileTemplate[],
+  param: string | undefined,
+): RepoFileTemplate | null {
+  const want = param?.trim();
+  if (!want) return null;
+  return (
+    templates.find((t) => t.filename === want) ??
+    templates.find((t) => t.filename.split("/").pop() === want) ??
+    null
+  );
 }
 
 export const Route = createFileRoute("/$owner/$repo/issues/new")({
   component: IssuesNewPage,
+  validateSearch: (search: Record<string, unknown>) => ({
+    template: typeof search.template === "string" ? search.template : undefined,
+  }),
   head: ({ params }) => ({
     meta: [
       {
@@ -56,12 +84,13 @@ export const Route = createFileRoute("/$owner/$repo/issues/new")({
   },
 });
 
-/** Create issue form with Write | Preview (D-ISS-10 / D-ISS-19). */
+/** Create issue form with Write | Preview (D-ISS-10 / D-ISS-19) + COL-02 template chooser. */
 export function IssuesNewPage() @{
   const params = useParams({ strict: false }) as {
     owner?: string;
     repo?: string;
   };
+  const search = useSearch({ strict: false }) as { template?: string };
   const owner = params.owner ?? "";
   const repoName = params.repo ?? "";
   const navigate = useNavigate();
@@ -70,13 +99,24 @@ export function IssuesNewPage() @{
     | IssuesNewLoaderData
     | undefined;
 
+  const issueTemplates = routeLoader?.kind === "ready" ? (routeLoader.templates?.issues ?? []) : [];
+  const requestedTemplate = matchTemplate(issueTemplates, search.template);
+  const initialTemplate =
+    requestedTemplate ?? (issueTemplates.length === 1 ? issueTemplates[0] : null);
+
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
+  // Chooser resolves when a template (or blank) is picked — or `?template=` /
+  // a single template already picked one. Repos with no templates never see it.
+  const [templateChosen, setTemplateChosen] = useState(
+    initialTemplate !== null || issueTemplates.length <= 1,
+  );
+  const [appliedTemplate, setAppliedTemplate] = useState<RepoFileTemplate | null>(initialTemplate);
 
   const form = useForm({
     defaultValues: {
-      title: "",
-      body: "",
+      title: initialTemplate?.title ?? "",
+      body: initialTemplate?.body ?? "",
     },
     onSubmit: async ({ value }) => {
       setError("");
@@ -112,6 +152,24 @@ export function IssuesNewPage() @{
     },
   });
 
+  function pickIssueTemplate(t: RepoFileTemplate | null) {
+    if (t) {
+      form.setFieldValue("title", t.title ?? "");
+      form.setFieldValue("body", t.body);
+      setAppliedTemplate(t);
+    } else {
+      setAppliedTemplate(null);
+    }
+    setTemplateChosen(true);
+  }
+
+  // Covers client-side navigations where loader data arrives after mount.
+  useEffect(() => {
+    if (templateChosen) return;
+    const t = requestedTemplate ?? (issueTemplates.length === 1 ? issueTemplates[0] : null);
+    if (t) pickIssueTemplate(t);
+  }, [issueTemplates, requestedTemplate, templateChosen]);
+
   const repoQ = useQuery({
     queryKey: ["repo", "get", owner, repoName] as const,
     queryFn: async () => {
@@ -141,62 +199,91 @@ export function IssuesNewPage() @{
   } @else {
     <>
       <h2 className="mb-4 text-[18px] font-semibold text-foreground">New issue</h2>
-      <form
-        method="post"
-        action="#"
-        className="flex max-w-2xl flex-col gap-4"
-        onSubmit={(e) => {
-          e.preventDefault();
-          void form.handleSubmit();
-        }}
-      >
-        @if (error) {
-          <AuthErrorBanner message={error} />;
-        }
-        <form.Field name="title">
-          {(field) => (
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="issue-title">Title</Label>
-              <Input
-                id="issue-title"
-                name="title"
-                value={field.state.value}
-                onBlur={field.handleBlur}
-                onInput={(e) => field.handleChange((e.target as HTMLInputElement).value)}
-                placeholder="Issue title"
-                required
-              />
-            </div>
-          )}
-        </form.Field>
-        <form.Field name="body">
-          {(field) => (
-            <div className="flex flex-col gap-2">
-              <MarkdownWritePreview
-                id="issue-body"
-                value={field.state.value}
-                onValueChange={field.handleChange}
-                rows={12}
-                disabled={pending}
-                placeholder="Describe the issue (markdown supported)"
-                owner={owner}
-                repo={repoName}
-              />
-            </div>
-          )}
-        </form.Field>
-        <div className="flex gap-3">
-          <Button type="submit" disabled={pending}>
-            {(pending ? "Creating…" : "Submit new issue") as string}
-          </Button>
-          <a
-            href={`/${owner}/${repoName}/issues` as string}
-            className="inline-flex h-11 items-center text-[14px] text-muted-foreground no-underline hover:text-foreground"
+      @if (issueTemplates.length > 1 && !templateChosen) {
+        <FileTemplateChooser
+          kindLabel="issue"
+          templates={issueTemplates}
+          onPick={pickIssueTemplate}
+          testId="issue-template-chooser"
+          blankTestId="issue-template-blank"
+        />;
+      } @else {
+        <>
+          @if (issueTemplates.length > 1) {
+            <p className="mb-4 max-w-2xl text-[13px] text-muted-foreground">
+              {
+                (appliedTemplate
+                  ? `Template: ${appliedTemplate.name}`
+                  : "Blank issue") as string
+              }
+              {" · " as string}
+              <button
+                type="button"
+                className="text-foreground underline underline-offset-4 hover:text-primary"
+                onClick={() => setTemplateChosen(false)}
+              >
+                Change template
+              </button>
+            </p>;
+          }
+          <form
+            method="post"
+            action="#"
+            className="flex max-w-2xl flex-col gap-4"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void form.handleSubmit();
+            }}
           >
-            Cancel
-          </a>
-        </div>
-      </form>
+            @if (error) {
+              <AuthErrorBanner message={error} />;
+            }
+            <form.Field name="title">
+              {(field) => (
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="issue-title">Title</Label>
+                  <Input
+                    id="issue-title"
+                    name="title"
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onInput={(e) => field.handleChange((e.target as HTMLInputElement).value)}
+                    placeholder="Issue title"
+                    required
+                  />
+                </div>
+              )}
+            </form.Field>
+            <form.Field name="body">
+              {(field) => (
+                <div className="flex flex-col gap-2">
+                  <MarkdownWritePreview
+                    id="issue-body"
+                    value={field.state.value}
+                    onValueChange={field.handleChange}
+                    rows={12}
+                    disabled={pending}
+                    placeholder="Describe the issue (markdown supported)"
+                    owner={owner}
+                    repo={repoName}
+                  />
+                </div>
+              )}
+            </form.Field>
+            <div className="flex gap-3">
+              <Button type="submit" disabled={pending}>
+                {(pending ? "Creating…" : "Submit new issue") as string}
+              </Button>
+              <a
+                href={`/${owner}/${repoName}/issues` as string}
+                className="inline-flex h-11 items-center text-[14px] text-muted-foreground no-underline hover:text-foreground"
+              >
+                Cancel
+              </a>
+            </div>
+          </form>
+        </>;
+      }
     </>;
   }
 }

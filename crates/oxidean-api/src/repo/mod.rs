@@ -6,6 +6,7 @@ pub(crate) mod author_resolve;
 mod branch_protection;
 mod commit_status;
 mod collaborators;
+mod file_templates;
 mod fork_network;
 mod invites;
 mod language_stats;
@@ -35,6 +36,7 @@ pub use invites::{
     create as invites_create, create_link as invites_create_link, list as invites_list,
     revoke as invites_revoke,
 };
+pub use file_templates::file_templates;
 pub use fork_network::head_valid_for_base;
 pub use rename_transfer::{
     redirect_retention_days, rename, resolve_repo_or_redirect, supersede_redirect_on_create,

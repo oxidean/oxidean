@@ -601,6 +601,10 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },
+        "repo.templates.list" => match repo::file_templates(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
         "repo.templates.getEnabled" => {
             match crate::templates::handlers::repo_get_enabled(ctx, req.input).await {
                 Ok(v) => RpcResponse::ok(v),
