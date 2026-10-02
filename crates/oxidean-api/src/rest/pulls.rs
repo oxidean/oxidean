@@ -119,6 +119,11 @@ async fn update_pull(
     if !has_fields && state_change.is_none() {
         return bad_input("PATCH requires at least one of: title, body, base_ref, draft, state");
     }
+    if let Some(other) = state_change {
+        if !matches!(other, "open" | "closed") {
+            return bad_input(&format!("invalid state: {other} (expected open|closed)"));
+        }
+    }
 
     let mut ctx = match ctx_for(&state, &headers).await {
         Ok(ctx) => ctx,
@@ -142,8 +147,7 @@ async fn update_pull(
             let resp = dispatch(&mut ctx, "pull.reopen", p.ref_input()).await;
             return respond(resp, StatusCode::OK);
         }
-        Some(other) => return bad_input(&format!("invalid state: {other} (expected open|closed)")),
-        None => {}
+        _ => {}
     }
     match last {
         Some(resp) => respond(resp, StatusCode::OK),
