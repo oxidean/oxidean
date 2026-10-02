@@ -978,9 +978,11 @@ export const expectReleaseAssetFlow: BrowserCommand<[]> = async (ctx) => {
       waitUntil: "domcontentloaded",
       timeout: 60_000,
     });
-    // Upload affordance renders for can_write (dropzone input attaches hidden).
-    await page.locator("#release-asset-file").waitFor({ state: "attached", timeout: 15_000 });
+    // Asset link first: proves the loader reached kind="ready" and the assets
+    // section rendered. The upload affordance then renders for can_write — its
+    // dropzone input attaches hidden and can lag hydration on cold CI runners.
     await page.locator(`a[href="${downloadPath}"]`).waitFor({ state: "visible", timeout: 30_000 });
+    await page.locator("#release-asset-file").waitFor({ state: "attached", timeout: 30_000 });
     const html = await page.content();
     assertNoOctaneOverlay(html, "release detail assets");
     if (!html.includes(assetName)) {
