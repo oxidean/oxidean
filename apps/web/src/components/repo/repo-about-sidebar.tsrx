@@ -521,9 +521,23 @@ export function RepoAboutSidebar({
                   }}
                   aria-hidden
                 />
-                <span className="truncate font-semibold text-foreground">
-                  {lang.name as string}
-                </span>
+                @if (lang.name === "Other") {
+                  <span className="truncate font-semibold text-foreground">
+                    {lang.name as string}
+                  </span>;
+                } @else {
+                  <a
+                    href={
+                      (base +
+                        "/search?q=" +
+                        encodeURIComponent("language:" + lang.name) +
+                        "&type=code") as string
+                    }
+                    className="truncate font-semibold text-foreground no-underline hover:text-link hover:underline"
+                  >
+                    {lang.name as string}
+                  </a>;
+                }
                 <span className="shrink-0 text-muted-foreground">
                   {languagePercent(Number(lang.bytes), langTotal) as string}
                 </span>

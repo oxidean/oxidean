@@ -13,10 +13,10 @@ v1.0 shipped 2026-09-19: 24 phases, 220 plans, 87/87 requirements. Git over HTTP
 Deferred items recorded at milestone close. Finish these first; several are cheap and unblock later sections.
 
 - [x] **DEBT-01** Wire `make smoke-protection` into `scripts/ci-smoke-protocol.sh` and the CI smoke job. The ORG-06 direct-push denial guard is green locally but absent from CI. (#70)
-- [ ] **DEBT-02** Raise the coverage floor from 0.65 toward ~0.70 and re-enable `cargo-llvm-cov` collection in CI (WINDOWS entries 53–54 open).
+- [x] **DEBT-02** Raise the coverage floor from 0.65 toward ~0.70 and re-enable `cargo-llvm-cov` collection in CI (WINDOWS entries 53–54 open). (#63)
 - [ ] **DEBT-03** Sitewide GlobalSearch depth. Header search routes to `/explore?q=` today; extend to users, orgs, commits, PRs, and code.
-- [ ] **DEBT-04** `issue_comment` webhook event. The notification fan-out exists; webhook emission does not.
-- [ ] **DEBT-05** Checks / commit-status viewer tab on PR pages. Status contexts already gate merges; there is no dedicated UI to inspect them.
+- [x] **DEBT-04** `issue_comment` webhook event. The notification fan-out exists; webhook emission does not. (#66)
+- [x] **DEBT-05** Checks / commit-status viewer tab on PR pages. Status contexts already gate merges; there is no dedicated UI to inspect them. `PullChecks` panel + Checks tab on the PR detail page. (#72)
 - [ ] **DEBT-06** Watch repositories and follow users, with a per-repo notification matrix.
 - [ ] **DEBT-07** Live `railway config apply` operator path. Kept human-verify in v1; CI must not hold tokens.
 - [ ] **DEBT-08** Nyquist validation backfill for the not-validated phases (10–13, 16–18, 21, 22.1; 11.1 missing entirely).

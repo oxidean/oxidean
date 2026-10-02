@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/highlight", () => ({
   languageIdForPath: () => "javascript",
-  clientHighlightTheme: () => "github-dark",
+  clientHighlightTheme: () => "oxidean-dark",
   countCodeLines: (code: string) => {
     if (!code) return 0;
     const parts = code.split("\n");
@@ -34,7 +34,7 @@ describe("BlobViewer file chrome", () => {
         repo: "hello",
         highlightedHtml:
           '<pre data-language="javascript"><code>export default function App() {\n  return null;\n}</code></pre>',
-        highlightTheme: "github-dark",
+        highlightTheme: "oxidean-dark",
         blob: {
           path: "src/App.jsx",
           ref: "main",

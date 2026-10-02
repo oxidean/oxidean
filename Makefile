@@ -43,7 +43,7 @@ help:
 	@echo "  make test           - cargo nextest + JS Vitest (unit/integration/e2e)"
 	@echo "  make coverage-web   - Vitest unit+integration coverage (json-summary/lcov)"
 	@echo "  make coverage-rust  - Rust lib/test coverage via cargo-llvm-cov (optional)"
-	@echo "  make coverage-weighted - D-QH-02 weighted gate (25/40/35, floor 0.65→0.70)"
+	@echo "  make coverage-weighted - D-QH-02 weighted gate (25/40/35, floor 0.70)"
 	@echo "  make coverage-contract - aggregator contract self-test"
 	@echo "  make route-coverage-check / browser-coverage-check - page + high-risk UI coverage gates"
 	@echo "  make web-lint / web-format-check / test-web-browser - oxlint, oxfmt, Chromium DOM races"
@@ -274,17 +274,23 @@ coverage-web:
 	@cp -f apps/web/coverage/integration/coverage-summary.json var/coverage/web-integration-summary.json
 	@echo "==> web coverage summaries in var/coverage/"
 
-# Prefer cargo-llvm-cov when installed. Residual: CI may skip until llvm-tools are budgeted.
+# Prefer cargo-llvm-cov; nextest keeps process-per-test isolation when installed.
+# CI installs both via taiki-e/install-action (tool: cargo-llvm-cov,nextest) plus
+# the llvm-tools-preview component on the Rust toolchain.
 coverage-rust:
 	@mkdir -p var/coverage
 	@if command -v cargo-llvm-cov >/dev/null 2>&1; then \
-		cargo llvm-cov --workspace --lcov --output-path var/coverage/rust-lcov.info; \
+		if command -v cargo-nextest >/dev/null 2>&1; then \
+			cargo llvm-cov nextest --workspace --lcov --output-path var/coverage/rust-lcov.info; \
+		else \
+			cargo llvm-cov --workspace --lcov --output-path var/coverage/rust-lcov.info; \
+		fi; \
 		cargo llvm-cov report --json --output-path var/coverage/rust-summary.json; \
 		echo "==> rust coverage in var/coverage/rust-*.{info,json}"; \
 	else \
 		echo "==> cargo-llvm-cov not installed; skipping Rust coverage collect"; \
 		echo "    install: cargo install cargo-llvm-cov --locked"; \
-		echo "    CI: taiki-e/install-action tool: cargo-llvm-cov"; \
+		echo "    CI: taiki-e/install-action tool: cargo-llvm-cov,nextest"; \
 		echo "skipped" > var/coverage/rust-skipped.txt; \
 	fi
 
