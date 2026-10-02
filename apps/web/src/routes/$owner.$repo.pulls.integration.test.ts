@@ -82,10 +82,12 @@ describe("Phase 12 Pulls UI", () => {
     expect(compare).toMatch(/pulls\/new/);
   });
 
-  it("detail tabs Conversation | Commits | Files changed", () => {
+  it("detail tabs Conversation | Commits | Checks | Files changed", () => {
     expect(pullDetail).toMatch(/Conversation/);
     expect(pullDetail).toMatch(/Commits/);
+    expect(pullDetail).toMatch(/Checks/);
     expect(pullDetail).toMatch(/Files changed/);
+    expect(pullDetail).toMatch(/PullChecks/);
   });
 
   it("unified and split diff toggle", () => {
