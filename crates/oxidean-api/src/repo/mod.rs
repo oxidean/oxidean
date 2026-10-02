@@ -11,7 +11,7 @@ mod invites;
 mod language_stats;
 mod rename_transfer;
 mod search;
-mod search_query;
+pub(crate) mod search_query;
 pub(crate) mod signatures;
 mod social_lists;
 mod templates;

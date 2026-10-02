@@ -1,4 +1,13 @@
-import { Building2, Code2, GitPullRequest, CircleDot, Lock, Search, Users } from "@octanejs/lucide";
+import {
+  Building2,
+  Code2,
+  GitCommitHorizontal,
+  GitPullRequest,
+  CircleDot,
+  Lock,
+  Search,
+  Users,
+} from "@octanejs/lucide";
 import { useEffect, useEffectEvent, useState } from "octane";
 import { Input } from "@/components/ui/input";
 import {
@@ -46,6 +55,8 @@ function actionIcon(type: SearchActionSuggestion["type"]) {
       return Building2;
     case "code":
       return Code2;
+    case "commits":
+      return GitCommitHorizontal;
     case "issues":
       return CircleDot;
     case "pulls":
@@ -104,7 +115,7 @@ export function GlobalSearch({ className }: GlobalSearchProps) @{
 
   function goResults() {
     const next = q.trim();
-    window.location.assign(searchResultsHref(next, "repositories"));
+    window.location.assign(searchResultsHref(next));
   }
 
   function activate(item: FlatItem) {

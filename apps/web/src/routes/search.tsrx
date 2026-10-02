@@ -1,21 +1,36 @@
-import { createFileRoute, Link, useLoaderData } from "@octanejs/tanstack-router";
+import { createFileRoute, useLoaderData } from "@octanejs/tanstack-router";
 import { createServerFn } from "@octanejs/tanstack-start";
 import { getRequestHeader } from "@octanejs/tanstack-start/server";
 import { useState } from "octane";
 import {
   createClient,
-  type OrgMineEntry,
-  type RepoPublic,
-  type UserLookupHit,
+  type GlobalSearchCodeHit,
+  type GlobalSearchCommitHit,
+  type GlobalSearchGroup,
+  type GlobalSearchIssueHit,
+  type GlobalSearchKind,
+  type GlobalSearchOrgHit,
+  type GlobalSearchPullHit,
+  type GlobalSearchRepoHit,
+  type GlobalSearchResponse,
+  type GlobalSearchUserHit,
 } from "@oxidean/api-client";
-import { Building2, BookMarked, Search, Users } from "@octanejs/lucide";
+import {
+  BookMarked,
+  Building2,
+  CircleDot,
+  Code,
+  GitCommitHorizontal,
+  GitPullRequest,
+  Search,
+  Users,
+} from "@octanejs/lucide";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { List, ListRow } from "@/components/ui/list";
 import { PageHeader } from "@/components/ui/page-header";
-import type { SearchEntityType } from "@/lib/global-search-suggest";
 import { cn } from "@/lib/utils";
 
 function ssrApiOrigin(): string {
@@ -26,61 +41,45 @@ function ssrApiOrigin(): string {
   );
 }
 
-const TABS: { id: SearchEntityType; label: string }[] = [
+type TabId = "overview" | GlobalSearchKind;
+
+const TABS: { id: TabId; label: string }[] = [
+  { id: "overview", label: "All results" },
   { id: "repositories", label: "Repositories" },
-  { id: "users", label: "Users" },
-  { id: "organizations", label: "Organizations" },
   { id: "code", label: "Code" },
+  { id: "commits", label: "Commits" },
   { id: "issues", label: "Issues" },
   { id: "pulls", label: "Pull requests" },
+  { id: "users", label: "Users" },
+  { id: "organizations", label: "Organizations" },
 ];
 
-function parseType(raw: string | null): SearchEntityType {
-  const t = (raw ?? "repositories").toLowerCase();
-  if (TABS.some((x) => x.id === t)) return t as SearchEntityType;
-  return "repositories";
+const OVERVIEW_LIMIT = 5;
+const TAB_LIMIT = 20;
+
+/** Git-scan kinds only produce hits when requested (bounded repo scan). */
+const SCAN_KINDS: ReadonlySet<TabId> = new Set(["code", "commits"]);
+
+function parseType(raw: string | null | undefined): TabId {
+  const t = (raw ?? "").toLowerCase();
+  if (TABS.some((x) => x.id === t)) return t as TabId;
+  return "overview";
 }
 
 type SearchLoaderData = {
   q: string;
-  type: SearchEntityType;
-  repos: RepoPublic[];
-  users: UserLookupHit[];
-  orgs: OrgMineEntry[];
+  type: TabId;
+  offset: number;
+  results: GlobalSearchResponse | null;
+  error: string | null;
   signedIn: boolean;
 };
 
-async function loadAccessibleRepos(
-  client: ReturnType<typeof createClient>,
-  q: string,
-  signedIn: boolean,
-): Promise<RepoPublic[]> {
-  const [exploreRes, mineRes] = await Promise.all([
-    client.repo.explore({ q: q || null, offset: 0, limit: 40 }),
-    signedIn ? client.repo.listMine() : Promise.resolve(null),
-  ]);
-  const byId = new Map<string, RepoPublic>();
-  if (exploreRes.ok) {
-    for (const r of exploreRes.data.repos) byId.set(r.id, r);
-  }
-  if (mineRes?.ok) {
-    const needle = q.toLowerCase();
-    for (const r of mineRes.data.repos) {
-      if (!needle) {
-        byId.set(r.id, r);
-        continue;
-      }
-      const key = `${r.owner_username}/${r.name} ${r.description ?? ""}`.toLowerCase();
-      if (key.includes(needle)) byId.set(r.id, r);
-    }
-  }
-  return [...byId.values()];
-}
-
 const fetchSearch = createServerFn({ method: "GET" })
-  .validator((data: { q?: string; type?: string }) => ({
+  .validator((data: { q?: string; type?: string; offset?: string | number }) => ({
     q: data?.q ? String(data.q) : "",
-    type: data?.type ? String(data.type) : "repositories",
+    type: data?.type ? String(data.type) : "",
+    offset: data?.offset ? Number(data.offset) : 0,
   }))
   .handler(async ({ data }): Promise<SearchLoaderData> => {
     const cookie = getRequestHeader("cookie") ?? "";
@@ -96,34 +95,26 @@ const fetchSearch = createServerFn({ method: "GET" })
 
     const q = data.q.trim();
     const type = parseType(data.type);
+    const offset = Number.isFinite(data.offset) ? Math.max(0, Math.floor(data.offset)) : 0;
     const me = await client.auth.me();
     const signedIn = me.ok;
 
-    let repos: RepoPublic[] = [];
-    let users: UserLookupHit[] = [];
-    let orgs: OrgMineEntry[] = [];
-
-    if (type === "repositories" || type === "code" || type === "issues" || type === "pulls") {
-      repos = await loadAccessibleRepos(client, q, signedIn);
+    if (!q) {
+      return { q, type, offset, results: null, error: null, signedIn };
     }
 
-    if (type === "users" && signedIn && q.length >= 2 && !q.includes("@")) {
-      const res = await client.user.lookup({ prefix: q });
-      users = res.ok ? res.data.users : [];
+    const res = await client.search.global({
+      q,
+      // `types` limits the expensive commits/code git scans; database-backed
+      // groups always report `total` either way (tab badges).
+      types: type === "overview" ? null : [type as GlobalSearchKind],
+      offset,
+      limit: type === "overview" ? OVERVIEW_LIMIT : TAB_LIMIT,
+    });
+    if (!res.ok) {
+      return { q, type, offset, results: null, error: res.error.message, signedIn };
     }
-
-    if (type === "organizations" && signedIn) {
-      const res = await client.org.listMine();
-      if (res.ok) {
-        orgs = q
-          ? res.data.orgs.filter((o) =>
-              `${o.slug} ${o.display_name ?? ""}`.toLowerCase().includes(q.toLowerCase()),
-            )
-          : res.data.orgs;
-      }
-    }
-
-    return { q, type, repos, users, orgs, signedIn };
+    return { q, type, offset, results: res.data, error: null, signedIn };
   });
 
 export const Route = createFileRoute("/search")({
@@ -139,17 +130,20 @@ export const Route = createFileRoute("/search")({
     return fetchSearch({
       data: {
         q: params.get("q") ?? "",
-        type: params.get("type") ?? "repositories",
+        type: params.get("type") ?? "",
+        offset: params.get("offset") ?? "0",
       },
     });
   },
 });
 
-function tabHref(q: string, type: SearchEntityType): string {
+function tabHref(q: string, type: TabId, offset = 0): string {
   const p = new URLSearchParams();
   if (q.trim()) p.set("q", q.trim());
-  p.set("type", type);
-  return `/search?${p.toString()}`;
+  if (type !== "overview") p.set("type", type);
+  if (offset > 0) p.set("offset", String(offset));
+  const s = p.toString();
+  return s ? `/search?${s}` : "/search";
 }
 
 function tabClass(active: boolean): string {
@@ -161,25 +155,289 @@ function tabClass(active: boolean): string {
   );
 }
 
-/** Sitewide search results — repos (incl. private you can access), users, orgs. */
+function groupFor<T>(results: GlobalSearchResponse | null, id: TabId): GlobalSearchGroup<T> | null {
+  if (!results) return null;
+  switch (id) {
+    case "repositories":
+      return results.repositories as GlobalSearchGroup<T>;
+    case "users":
+      return results.users as GlobalSearchGroup<T>;
+    case "organizations":
+      return results.organizations as GlobalSearchGroup<T>;
+    case "issues":
+      return results.issues as GlobalSearchGroup<T>;
+    case "pulls":
+      return results.pulls as GlobalSearchGroup<T>;
+    case "commits":
+      return results.commits as GlobalSearchGroup<T>;
+    case "code":
+      return results.code as GlobalSearchGroup<T>;
+    default:
+      return null;
+  }
+}
+
+/**
+ * Tab badge: exact COUNT for SQL-backed groups. Commits/code only scan the
+ * newest visible repos, so their totals are only meaningful when that group
+ * was populated (active tab or the overview) — and `truncated` → "N+".
+ */
+function tabBadge(data: SearchLoaderData | undefined, id: TabId): string | null {
+  if (id === "overview") return null;
+  const g = groupFor<unknown>(data?.results ?? null, id);
+  if (!g) return null;
+  if (SCAN_KINDS.has(id) && data?.type !== id && data?.type !== "overview") return null;
+  if (g.total <= 0) return null;
+  return g.truncated && SCAN_KINDS.has(id) ? `${g.total}+` : `${g.total}`;
+}
+
+function issueKey(h: GlobalSearchIssueHit): string {
+  return `${h.repo_owner}/${h.repo_name}#${h.number}`;
+}
+function pullKey(h: GlobalSearchPullHit): string {
+  return `${h.repo_owner}/${h.repo_name}#${h.number}`;
+}
+function commitKey(h: GlobalSearchCommitHit): string {
+  return `${h.repo_owner}/${h.repo_name}@${h.sha}`;
+}
+function codeKey(h: GlobalSearchCodeHit): string {
+  return `${h.repo_owner}/${h.repo_name}:${h.path}:${h.line}`;
+}
+function repoKey(h: GlobalSearchRepoHit): string {
+  return `${h.owner}/${h.name}`;
+}
+
+function stateBadgeVariant(state: string): "open" | "closed" | "merged" | "draft" {
+  if (state === "open") return "open";
+  if (state === "merged") return "merged";
+  return "closed";
+}
+
+function repoFullName(owner: string, name: string): string {
+  return `${owner}/${name}`;
+}
+
+function RepoRow({ hit }: { hit: GlobalSearchRepoHit }) @{
+  <ListRow className="items-start gap-3 py-4">
+    <BookMarked aria-hidden size={18} className="mt-0.5 shrink-0 text-muted-foreground" />
+    <div className="min-w-0 flex-1">
+      <div className="flex flex-wrap items-center gap-2">
+        <a
+          href={("/" + hit.owner + "/" + hit.name) as string}
+          className="text-[16px] font-semibold text-primary no-underline hover:underline"
+        >
+          {repoFullName(hit.owner, hit.name) as string}
+        </a>
+        <Badge variant={hit.visibility === "private" ? "outline" : "success"}>
+          {(hit.visibility === "private" ? "Private" : "Public") as string}
+        </Badge>
+      </div>
+      @if (hit.description?.trim()) {
+        <p className="mt-1 text-[14px] text-muted-foreground">{hit.description as string}</p>;
+      }
+      <p className="mt-1 text-[12px] text-muted-foreground">
+        {(String(hit.star_count) + (hit.star_count === 1 ? " star" : " stars")) as string}
+      </p>
+    </div>
+  </ListRow>;
+}
+
+function UserRow({ hit }: { hit: GlobalSearchUserHit }) @{
+  <ListRow className="gap-2">
+    <Users aria-hidden size={16} className="shrink-0 text-muted-foreground" />
+    <a
+      href={("/" + hit.username) as string}
+      className="text-[15px] font-semibold text-primary no-underline hover:underline"
+    >
+      {("@" + hit.username) as string}
+    </a>
+    @if (hit.display_name) {
+      <span className="text-[14px] text-muted-foreground">{hit.display_name as string}</span>;
+    }
+  </ListRow>;
+}
+
+function OrgRow({ hit }: { hit: GlobalSearchOrgHit }) @{
+  <ListRow className="gap-2">
+    <Building2 aria-hidden size={16} className="shrink-0 text-muted-foreground" />
+    <a
+      href={("/" + hit.slug) as string}
+      className="text-[15px] font-semibold text-primary no-underline hover:underline"
+    >
+      {hit.slug as string}
+    </a>
+    @if (hit.display_name) {
+      <span className="text-[14px] text-muted-foreground">{hit.display_name as string}</span>;
+    }
+  </ListRow>;
+}
+
+function IssueRow({ hit }: { hit: GlobalSearchIssueHit }) @{
+  <ListRow className="items-start gap-3">
+    <CircleDot aria-hidden size={16} className="mt-1 shrink-0 text-muted-foreground" />
+    <div className="min-w-0 flex-1">
+      <a
+        href={("/" + hit.repo_owner + "/" + hit.repo_name + "/issues/" + hit.number) as string}
+        className="text-[15px] font-medium text-foreground no-underline hover:text-primary hover:underline"
+      >
+        {hit.title as string}
+      </a>
+      <p className="mt-0.5 text-[13px] text-muted-foreground">
+        {
+          (repoFullName(hit.repo_owner, hit.repo_name) +
+            " #" +
+            hit.number +
+            (hit.author_username ? " · " + hit.author_username : "") +
+            (hit.comment_count > 0 ? " · " + hit.comment_count + " comments" : "")) as string
+        }
+      </p>
+    </div>
+    <Badge variant={stateBadgeVariant(hit.state)} className="mt-1 shrink-0">
+      {hit.state as string}
+    </Badge>
+  </ListRow>;
+}
+
+function PullRow({ hit }: { hit: GlobalSearchPullHit }) @{
+  <ListRow className="items-start gap-3">
+    <GitPullRequest aria-hidden size={16} className="mt-1 shrink-0 text-muted-foreground" />
+    <div className="min-w-0 flex-1">
+      <a
+        href={("/" + hit.repo_owner + "/" + hit.repo_name + "/pull/" + hit.number) as string}
+        className="text-[15px] font-medium text-foreground no-underline hover:text-primary hover:underline"
+      >
+        {hit.title as string}
+      </a>
+      <p className="mt-0.5 text-[13px] text-muted-foreground">
+        {
+          (repoFullName(hit.repo_owner, hit.repo_name) +
+            " #" +
+            hit.number +
+            (hit.author_username ? " · " + hit.author_username : "") +
+            (hit.comment_count > 0 ? " · " + hit.comment_count + " comments" : "")) as string
+        }
+      </p>
+    </div>
+    @if (hit.draft) {
+      <Badge variant="draft" className="mt-1 shrink-0">
+        {"Draft" as string}
+      </Badge>;
+    }
+    <Badge variant={stateBadgeVariant(hit.state)} className="mt-1 shrink-0">
+      {hit.state as string}
+    </Badge>
+  </ListRow>;
+}
+
+function CommitRow({ hit }: { hit: GlobalSearchCommitHit }) @{
+  <ListRow className="items-start gap-3">
+    <GitCommitHorizontal aria-hidden size={16} className="mt-1 shrink-0 text-muted-foreground" />
+    <div className="min-w-0 flex-1">
+      <a
+        href={("/" + hit.repo_owner + "/" + hit.repo_name + "/commit/" + hit.sha) as string}
+        className="font-mono text-[13px] font-medium text-primary no-underline hover:underline"
+      >
+        {hit.short_sha as string}
+      </a>
+      <span className="ml-2 text-[14px] text-foreground">{hit.subject as string}</span>
+      <p className="mt-0.5 text-[13px] text-muted-foreground">
+        {
+          (repoFullName(hit.repo_owner, hit.repo_name) +
+            " · " +
+            hit.author_name +
+            " · " +
+            hit.authored_at) as string
+        }
+      </p>
+    </div>
+  </ListRow>;
+}
+
+function CodeRow({ hit }: { hit: GlobalSearchCodeHit }) @{
+  <ListRow className="block px-4 py-3">
+    <a
+      href={("/" + hit.repo_owner + "/" + hit.repo_name + "/blob/" + hit.path) as string}
+      className="font-mono text-[13px] font-medium text-primary no-underline hover:underline"
+    >
+      {(repoFullName(hit.repo_owner, hit.repo_name) + ":" + hit.path) as string}
+    </a>
+    <span className="font-mono text-[13px] text-muted-foreground">
+      {(":" + hit.line) as string}
+    </span>
+    <pre className="mt-1 overflow-x-auto text-[13px] text-foreground">{hit.content as string}</pre>
+  </ListRow>;
+}
+
+/** Grouped section header used on the overview + tab pages. */
+function SectionHeader({
+  icon,
+  title,
+  count,
+  moreHref,
+}: {
+  icon: unknown;
+  title: string;
+  count: number;
+  moreHref: string | null;
+}) @{
+  <div className="flex items-baseline justify-between gap-3">
+    <h2 className="flex items-center gap-2 text-[15px] font-semibold text-foreground">
+      {icon}
+      {title as string}
+      <span className="text-[13px] font-normal text-muted-foreground">
+        {String(count) as string}
+      </span>
+    </h2>
+    @if (moreHref) {
+      <a
+        href={moreHref as string}
+        className="text-[13px] text-muted-foreground no-underline hover:text-foreground hover:underline"
+      >
+        {"View all" as string}
+      </a>;
+    }
+  </div>;
+}
+
+/** Sitewide search results — one `search.global` RPC, grouped by entity. */
 export function SearchPage() @{
   const data = useLoaderData({ from: "/search" }) as SearchLoaderData | undefined;
   const q0 = data?.q ?? "";
-  const type = data?.type ?? "repositories";
-  const repos = data?.repos ?? [];
-  const users = data?.users ?? [];
-  const orgs = data?.orgs ?? [];
+  const type: TabId = data?.type ?? "overview";
+  const offset = data?.offset ?? 0;
+  const results = data?.results ?? null;
   const signedIn = data?.signedIn === true;
   const [q, setQ] = useState(q0);
 
-  const scoped = type === "code" || type === "issues" || type === "pulls";
-  const scopedLabel = type === "code" ? "code" : type === "issues" ? "issues" : "pull requests";
+  const repos = results?.repositories;
+  const usersG = results?.users;
+  const orgsG = results?.organizations;
+  const issuesG = results?.issues;
+  const pullsG = results?.pulls;
+  const commitsG = results?.commits;
+  const codeG = results?.code;
+
+  const overviewEmpty =
+    !!results &&
+    (repos?.hits.length ?? 0) === 0 &&
+    (usersG?.hits.length ?? 0) === 0 &&
+    (orgsG?.hits.length ?? 0) === 0 &&
+    (issuesG?.hits.length ?? 0) === 0 &&
+    (pullsG?.hits.length ?? 0) === 0 &&
+    (commitsG?.hits.length ?? 0) === 0 &&
+    (codeG?.hits.length ?? 0) === 0;
+
+  const activeGroup = groupFor<unknown>(results, type);
+  const hasPrev = offset > 0;
+  const hasNext =
+    !!activeGroup &&
+    (offset + activeGroup.hits.length < activeGroup.total || activeGroup.truncated);
 
   <div className="mx-auto max-w-5xl px-4 py-10 sm:px-6" data-testid="search-page">
     <PageHeader
       icon={<Search aria-hidden size={22} />}
       title="Search"
-      description="Find repositories you can access (including private), users, and organizations."
+      description="Repositories, code, commits, issues, pull requests, users, and organizations — scoped to what you can access."
       divider={false}
     />
 
@@ -208,7 +466,9 @@ export function SearchPage() @{
           data-testid="search-page-input"
         />
       </div>
-      <input type="hidden" name="type" value={type as string} />
+      @if (type !== "overview") {
+        <input type="hidden" name="type" value={type as string} />;
+      }
       <Button type="submit">Search</Button>
     </form>
 
@@ -217,195 +477,278 @@ export function SearchPage() @{
       aria-label="Search categories"
     >
       @for (const tab of TABS; key tab.id) {
+        const badge = tabBadge(data, tab.id);
         <a
           href={tabHref(q0, tab.id) as string}
           className={tabClass(type === tab.id) as string}
           aria-current={type === tab.id ? "page" : undefined}
         >
           {tab.label as string}
+          @if (badge) {
+            <span className="ml-1 rounded-full bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
+              {badge as string}
+            </span>;
+          }
         </a>;
       }
     </nav>
 
     <div className="mt-8">
-      @if (scoped) {
-        <div
-          className="rounded-md border border-border bg-card p-5"
-          data-testid="search-scoped-hint"
-        >
-          <h2 className="text-[16px] font-semibold text-foreground">
-            {
-              (type === "code"
-                ? "Code search"
-                : type === "issues"
-                  ? "Issue search"
-                  : "Pull request search") as string
-            }
-          </h2>
-          <p className="mt-2 text-[14px] leading-relaxed text-muted-foreground">
-            {scopedLabel as string} are searched inside a repository. Open a repository below,
-            then use its Search page — same scoped-search pattern.
-          </p>
-          @if (repos.length === 0) {
-            <p className="mt-4 text-[14px] text-muted-foreground">
-              {q0.trim()
-                ? "No matching repositories."
-                : "Enter a query to list repositories to search in."}
-            </p>;
-          } @else {
-            <List className="mt-4">
-              @for (const repo of repos; key repo.id) {
-                <ListRow className="justify-between gap-2">
-                  <a
-                    href={"/" + repo.owner_username + "/" + repo.name}
-                    className="flex min-w-0 items-center gap-2 font-medium text-primary no-underline hover:underline"
-                  >
-                    <BookMarked
-                      aria-hidden
-                      size={16}
-                      className="shrink-0 text-muted-foreground"
-                    />
-                    <span className="truncate">
-                      {(repo.owner_username + "/" + repo.name) as string}
-                    </span>
-                  </a>
-                  <a
-                    href={"/" + repo.owner_username + "/" + repo.name + "/search"}
-                    className="shrink-0 text-[13px] text-muted-foreground no-underline hover:text-foreground hover:underline"
-                  >
-                    Search in repository
-                  </a>
-                </ListRow>;
-              }
-            </List>;
-          }
-        </div>;
-      } @else if (type === "repositories") {
-        @if (repos.length === 0) {
+      @if (!q0) {
+        <EmptyState
+          icon={<Search aria-hidden size={22} />}
+          title="Search Oxidean"
+          description="Type a query to search repositories, code, commits, issues, pull requests, users, and organizations you can access."
+        />;
+      } @else if (data?.error) {
+        <p className="text-[15px] text-muted-foreground" data-testid="search-error">
+          {(data?.error ?? "") as string}
+        </p>;
+      } @else if (type === "overview") {
+        @if (overviewEmpty) {
           <EmptyState
-            icon={<BookMarked aria-hidden size={22} />}
-            title="No repositories found"
-            description={
-              q0.trim()
-                ? "No repositories match your search. Try different keywords."
-                : "Search for repositories by name or description."
-            }
+            icon={<Search aria-hidden size={22} />}
+            title="No results"
+            description="Nothing matched your search across repositories, code, commits, issues, pull requests, users, or organizations."
           />;
         } @else {
-          <List>
-            @for (const repo of repos; key repo.id) {
-              <ListRow className="items-start gap-3 py-4">
-                <BookMarked
-                  aria-hidden
-                  size={18}
-                  className="mt-0.5 shrink-0 text-muted-foreground"
-                />
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <a
-                      href={"/" + repo.owner_username + "/" + repo.name}
-                      className="text-[16px] font-semibold text-primary no-underline hover:underline"
-                    >
-                      {(repo.owner_username + "/" + repo.name) as string}
-                    </a>
-                    <Badge
-                      variant={repo.visibility === "private" ? "outline" : "success"}
-                    >
-                      {(repo.visibility === "private" ? "Private" : "Public") as string}
-                    </Badge>
-                  </div>
-                  @if (repo.description?.trim()) {
-                    <p className="mt-1 text-[14px] text-muted-foreground">
-                      {repo.description as string}
-                    </p>;
+          <>
+            @if (repos && repos.hits.length > 0) {
+              <section data-testid="search-section-repositories">
+                <SectionHeader
+                  icon={<BookMarked aria-hidden size={16} />}
+                  title="Repositories"
+                  count={repos.total}
+                  moreHref={
+                    repos.total > repos.hits.length ? tabHref(q0, "repositories") : null
                   }
-                </div>
-              </ListRow>;
-            }
-          </List>;
-        }
-      } @else if (type === "users") {
-        @if (!signedIn) {
-          <p className="text-[15px] text-muted-foreground">
-            <a href="/login?returnTo=/search" className="text-primary hover:underline">
-              Sign in
-            </a>{" "}
-            to search users.
-          </p>;
-        } @else if (q0.trim().length < 2) {
-          <p className="text-[15px] text-muted-foreground">
-            Type at least 2 characters to search users.
-          </p>;
-        } @else if (users.length === 0) {
-          <EmptyState
-            icon={<Users aria-hidden size={22} />}
-            title="No users found"
-            description="No users match your search. Try a different username."
-          />;
-        } @else {
-          <List>
-            @for (const u of users; key u.username) {
-              <ListRow className="gap-2">
-                <Users
-                  aria-hidden
-                  size={16}
-                  className="shrink-0 text-muted-foreground"
                 />
-                <a
-                  href={"/" + u.username}
-                  className="text-[15px] font-semibold text-primary no-underline hover:underline"
-                >
-                  {"@" + (u.username as string)}
-                </a>
-                @if (u.display_name) {
-                  <span className="text-[14px] text-muted-foreground">
-                    {u.display_name as string}
-                  </span>;
-                }
-              </ListRow>;
+                <List className="mt-2">
+                  @for (const hit of repos.hits; key repoKey(hit)) {
+                    <RepoRow hit={hit} />;
+                  }
+                </List>
+              </section>;
             }
-          </List>;
+            @if (issuesG && issuesG.hits.length > 0) {
+              <section className="mt-8" data-testid="search-section-issues">
+                <SectionHeader
+                  icon={<CircleDot aria-hidden size={16} />}
+                  title="Issues"
+                  count={issuesG.total}
+                  moreHref={
+                    issuesG.total > issuesG.hits.length ? tabHref(q0, "issues") : null
+                  }
+                />
+                <List className="mt-2">
+                  @for (const hit of issuesG.hits; key issueKey(hit)) {
+                    <IssueRow hit={hit} />;
+                  }
+                </List>
+              </section>;
+            }
+            @if (pullsG && pullsG.hits.length > 0) {
+              <section className="mt-8" data-testid="search-section-pulls">
+                <SectionHeader
+                  icon={<GitPullRequest aria-hidden size={16} />}
+                  title="Pull requests"
+                  count={pullsG.total}
+                  moreHref={
+                    pullsG.total > pullsG.hits.length ? tabHref(q0, "pulls") : null
+                  }
+                />
+                <List className="mt-2">
+                  @for (const hit of pullsG.hits; key pullKey(hit)) {
+                    <PullRow hit={hit} />;
+                  }
+                </List>
+              </section>;
+            }
+            @if (commitsG && commitsG.hits.length > 0) {
+              <section className="mt-8" data-testid="search-section-commits">
+                <SectionHeader
+                  icon={<GitCommitHorizontal aria-hidden size={16} />}
+                  title="Commits"
+                  count={commitsG.total}
+                  moreHref={tabHref(q0, "commits")}
+                />
+                <List className="mt-2">
+                  @for (const hit of commitsG.hits; key commitKey(hit)) {
+                    <CommitRow hit={hit} />;
+                  }
+                </List>
+                @if (commitsG.truncated) {
+                  <p className="mt-2 text-[12px] text-muted-foreground">
+                    Showing hits found in your most recently updated repositories.
+                  </p>;
+                }
+              </section>;
+            }
+            @if (codeG && codeG.hits.length > 0) {
+              <section className="mt-8" data-testid="search-section-code">
+                <SectionHeader
+                  icon={<Code aria-hidden size={16} />}
+                  title="Code"
+                  count={codeG.total}
+                  moreHref={tabHref(q0, "code")}
+                />
+                <List className="mt-2">
+                  @for (const hit of codeG.hits; key codeKey(hit)) {
+                    <CodeRow hit={hit} />;
+                  }
+                </List>
+                <p className="mt-2 text-[12px] text-muted-foreground">
+                  {
+                    (codeG.truncated
+                      ? "Partial coverage — code search scans your most recently updated repositories."
+                      : "Code search covers your most recently updated repositories.") as string
+                  }
+                </p>
+              </section>;
+            }
+            @if (usersG && usersG.hits.length > 0) {
+              <section className="mt-8" data-testid="search-section-users">
+                <SectionHeader
+                  icon={<Users aria-hidden size={16} />}
+                  title="Users"
+                  count={usersG.total}
+                  moreHref={
+                    usersG.total > usersG.hits.length ? tabHref(q0, "users") : null
+                  }
+                />
+                <List className="mt-2">
+                  @for (const hit of usersG.hits; key hit.username) {
+                    <UserRow hit={hit} />;
+                  }
+                </List>
+              </section>;
+            }
+            @if (orgsG && orgsG.hits.length > 0) {
+              <section className="mt-8" data-testid="search-section-organizations">
+                <SectionHeader
+                  icon={<Building2 aria-hidden size={16} />}
+                  title="Organizations"
+                  count={orgsG.total}
+                  moreHref={
+                    orgsG.total > orgsG.hits.length
+                      ? tabHref(q0, "organizations")
+                      : null
+                  }
+                />
+                <List className="mt-2">
+                  @for (const hit of orgsG.hits; key hit.slug) {
+                    <OrgRow hit={hit} />;
+                  }
+                </List>
+              </section>;
+            }
+          </>;
         }
       } @else {
-        @if (!signedIn) {
-          <p className="text-[15px] text-muted-foreground">
-            <a href="/login?returnTo=/search" className="text-primary hover:underline">
-              Sign in
-            </a>{" "}
-            to search organizations you belong to.
-          </p>;
-        } @else if (orgs.length === 0) {
-          <EmptyState
-            icon={<Building2 aria-hidden size={22} />}
-            title="No organizations found"
-            description="You don't belong to any matching organizations."
-          />;
-        } @else {
-          <List>
-            @for (const o of orgs; key o.slug) {
-              <ListRow className="gap-2">
-                <Building2
-                  aria-hidden
-                  size={16}
-                  className="shrink-0 text-muted-foreground"
-                />
-                <Link
-                  to="/$owner"
-                  params={{ owner: o.slug }}
-                  preload="intent"
-                  className="text-[15px] font-semibold text-primary no-underline hover:underline"
+        <>
+          @if (type === "users" && !signedIn) {
+            <p className="text-[15px] text-muted-foreground">
+              <a
+                href="/login?returnTo=/search"
+                className="text-primary hover:underline"
+              >
+                Sign in
+              </a>{" "}
+              to search users.
+            </p>;
+          } @else if (!activeGroup || activeGroup.hits.length === 0) {
+            <EmptyState
+              icon={<Search aria-hidden size={22} />}
+              title="No results"
+              description={
+                SCAN_KINDS.has(type)
+                  ? "No matches in the repositories scanned (your most recently updated, readable repos)."
+                  : "Nothing matched your search. Try different keywords."
+              }
+            />;
+          } @else {
+            <>
+              @if (SCAN_KINDS.has(type)) {
+                <p
+                  className="mb-3 text-[13px] text-muted-foreground"
+                  data-testid="search-scan-note"
                 >
-                  {o.slug as string}
-                </Link>
-                @if (o.display_name) {
-                  <span className="text-[14px] text-muted-foreground">
-                    {o.display_name as string}
-                  </span>;
+                  {
+                    "Scanning the most recently updated repositories you can read — instance-wide indexed search is planned." as string
+                  }
+                </p>;
+              }
+              <List>
+                @if (type === "repositories") {
+                  @for (const hit of repos?.hits ?? []; key repoKey(hit)) {
+                    <RepoRow hit={hit} />;
+                  }
                 }
-              </ListRow>;
-            }
-          </List>;
-        }
+                @if (type === "issues") {
+                  @for (const hit of issuesG?.hits ?? []; key issueKey(hit)) {
+                    <IssueRow hit={hit} />;
+                  }
+                }
+                @if (type === "pulls") {
+                  @for (const hit of pullsG?.hits ?? []; key pullKey(hit)) {
+                    <PullRow hit={hit} />;
+                  }
+                }
+                @if (type === "commits") {
+                  @for (const hit of commitsG?.hits ?? []; key commitKey(hit)) {
+                    <CommitRow hit={hit} />;
+                  }
+                }
+                @if (type === "code") {
+                  @for (const hit of codeG?.hits ?? []; key codeKey(hit)) {
+                    <CodeRow hit={hit} />;
+                  }
+                }
+                @if (type === "users") {
+                  @for (const hit of usersG?.hits ?? []; key hit.username) {
+                    <UserRow hit={hit} />;
+                  }
+                }
+                @if (type === "organizations") {
+                  @for (const hit of orgsG?.hits ?? []; key hit.slug) {
+                    <OrgRow hit={hit} />;
+                  }
+                }
+              </List>
+              @if (hasPrev || hasNext) {
+                <div
+                  className="mt-6 flex items-center justify-between"
+                  data-testid="search-pager"
+                >
+                  @if (hasPrev) {
+                    <a
+                      href={
+                        tabHref(
+                          q0,
+                          type,
+                          Math.max(0, offset - TAB_LIMIT),
+                        ) as string
+                      }
+                      className="text-[14px] text-primary no-underline hover:underline"
+                    >
+                      {"← Newer" as string}
+                    </a>;
+                  } @else {
+                    <span />;
+                  }
+                  @if (hasNext) {
+                    <a
+                      href={tabHref(q0, type, offset + TAB_LIMIT) as string}
+                      className="text-[14px] text-primary no-underline hover:underline"
+                    >
+                      {"Older →" as string}
+                    </a>;
+                  }
+                </div>;
+              }
+            </>;
+          }
+        </>;
       }
     </div>
   </div>;
