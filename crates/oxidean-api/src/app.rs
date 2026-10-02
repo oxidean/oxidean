@@ -51,6 +51,9 @@ pub struct AppState {
     pub actions_log_dir: PathBuf,
     /// Instance Actions gate (`OXIDEAN_ACTIONS_ENABLED`, default true) — D-ACT-06.
     pub actions_enabled: bool,
+    /// Env default for the MCP endpoint (`OXIDEAN_MCP_ENABLED`, default true) —
+    /// AGT-03. `instance_mcp_settings.enabled` (admin override) wins when set.
+    pub mcp_enabled: bool,
     /// Git forge backend — Phase 7 registers [`CliGitBackend`] only (D-32).
     pub git: Arc<dyn GitBackend>,
     pub sessions: SessionService,
@@ -149,6 +152,7 @@ impl AppState {
                 !(t.is_empty() || t == "0" || t == "false" || t == "no" || t == "off")
             })
             .unwrap_or(true);
+        let mcp_enabled = crate::mcp::env_mcp_enabled();
         let search_timeout_ms = std::env::var("OXIDEAN_SEARCH_TIMEOUT_MS")
             .ok()
             .and_then(|s| s.parse().ok())
@@ -174,6 +178,7 @@ impl AppState {
             packages_dir,
             actions_log_dir,
             actions_enabled,
+            mcp_enabled,
             git: Arc::new(CliGitBackend::new()) as Arc<dyn GitBackend>,
             sessions: SessionService::new(env_name.clone()),
             pending: PendingAuthStore::new(),
@@ -223,6 +228,12 @@ impl AppState {
 
     pub fn with_actions_enabled(mut self, enabled: bool) -> Self {
         self.actions_enabled = enabled;
+        self
+    }
+
+    /// Test hook — simulates `OXIDEAN_MCP_ENABLED=false` without process env.
+    pub fn with_mcp_enabled(mut self, enabled: bool) -> Self {
+        self.mcp_enabled = enabled;
         self
     }
 

@@ -14,6 +14,16 @@
 //! protocol-level failure (same `repo.not_found` anti-enumeration shape as the
 //! RPC layer).
 //!
+//! `oxidean_oat_…` OAuth access tokens are dispatched to [`resolve_oat_bearer`]
+//! — the documented seam where the OAuth provider work (API-03) plugs in token
+//! resolution. Until that lands they are rejected like any other invalid
+//! credential; prefix dispatch keeps the three token families disjoint.
+//!
+//! Instance gate (AGT-03): the endpoint only serves while MCP is enabled —
+//! `instance_mcp_settings.enabled` (admin override) falling back to the
+//! `OXIDEAN_MCP_ENABLED` env default (on when unset). Disabled → `404` with a
+//! `mcp.disabled` JSON-RPC error for both POST and GET.
+//!
 //! Token scope mapping mirrors Smart HTTP / registry auth: classic `repo`
 //! covers repository tools and `package:read`/`package:write` covers
 //! `packages_list`; fine-grained `contents` plus the repository selection gate
@@ -135,8 +145,54 @@ fn internal_error_response() -> Response {
         .into_response()
 }
 
+// ---------------------------------------------------------------------------
+// Instance gate (AGT-03) — `instance_mcp_settings` override else env default.
+// ---------------------------------------------------------------------------
+
+/// `OXIDEAN_MCP_ENABLED` parse — same truthy semantics as
+/// `OXIDEAN_ACTIONS_ENABLED`: unset or anything but `0`/`false`/`no`/`off`/`""`
+/// means on. Default **on** so self-host/local dev needs zero configuration.
+pub(crate) fn env_mcp_enabled() -> bool {
+    std::env::var("OXIDEAN_MCP_ENABLED")
+        .map(|v| {
+            let t = v.trim().to_ascii_lowercase();
+            !(t.is_empty() || t == "0" || t == "false" || t == "no" || t == "off")
+        })
+        .unwrap_or(true)
+}
+
+/// Effective enable state: admin override row wins; env default otherwise.
+/// Fails closed when the settings row cannot be read (a DB-less instance has
+/// nothing to serve over MCP anyway).
+async fn mcp_enabled(state: &AppState) -> bool {
+    match state.db.get_mcp_settings().await {
+        Ok(row) => row.enabled.unwrap_or(state.mcp_enabled),
+        Err(e) => {
+            tracing::error!(error = %e, "mcp settings read failed; endpoint disabled");
+            false
+        }
+    }
+}
+
+/// Disabled surface — `404` (the endpoint is "not there" when off), still a
+/// well-formed JSON-RPC error so clients can tell toggle-off from a bad URL.
+fn mcp_disabled() -> Response {
+    (
+        StatusCode::NOT_FOUND,
+        Json(json!({
+            "jsonrpc": "2.0",
+            "id": null,
+            "error": {"code": SERVER_ERROR, "message": "mcp.disabled: the MCP endpoint is disabled on this instance"},
+        })),
+    )
+        .into_response()
+}
+
 /// `GET /api/mcp` — no standalone SSE stream (server→client pushes unsupported).
-pub async fn handle_get() -> Response {
+pub async fn handle_get(State(state): State<AppState>) -> Response {
+    if !mcp_enabled(&state).await {
+        return mcp_disabled();
+    }
     (
         StatusCode::METHOD_NOT_ALLOWED,
         [(header::ALLOW, "POST")],
@@ -155,6 +211,9 @@ pub async fn handle_post(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    if !mcp_enabled(&state).await {
+        return mcp_disabled();
+    }
     let msg: Value = match serde_json::from_slice(&body) {
         Ok(v) => v,
         Err(e) => {
@@ -279,8 +338,31 @@ fn limiter_lock(
         .unwrap_or_else(|e| e.into_inner())
 }
 
-fn looks_like_pat(token: &str) -> bool {
-    token.starts_with(CLASSIC_PAT_PREFIX) || token.starts_with(FINE_GRAINED_PAT_PREFIX)
+/// `oxidean_oat_…` OAuth access-token prefix (API-03). Declared here so bearer
+/// dispatch is stable ahead of the OAuth provider; switch to the canonical
+/// constant once that stack lands.
+const OAT_PREFIX: &str = "oxidean_oat_";
+
+/// Bearer credential families recognized at this endpoint. Prefix dispatch is
+/// the single point that routes a token to its resolver — `oxidean_pat_`,
+/// `oxidean_fg_`, and `oxidean_oat_` stay disjoint by construction.
+enum BearerToken<'a> {
+    /// `oxidean_pat_…` / `oxidean_fg_…` — resolved against the PAT tables.
+    Pat(&'a str),
+    /// `oxidean_oat_…` — OAuth2 access token minted by this instance (API-03).
+    Oat(&'a str),
+    /// Unrecognized prefix — failed auth.
+    Unknown,
+}
+
+fn classify_bearer(token: &str) -> BearerToken<'_> {
+    if token.starts_with(CLASSIC_PAT_PREFIX) || token.starts_with(FINE_GRAINED_PAT_PREFIX) {
+        BearerToken::Pat(token)
+    } else if token.starts_with(OAT_PREFIX) {
+        BearerToken::Oat(token)
+    } else {
+        BearerToken::Unknown
+    }
 }
 
 fn pat_expired(expires_at: &Option<String>) -> bool {
@@ -309,7 +391,7 @@ async fn authenticate(state: &AppState, headers: &HeaderMap) -> Result<McpAuth, 
         else {
             return Err(unauthorized());
         };
-        return authenticate_pat(state, headers, token.trim()).await;
+        return resolve_bearer_identity(state, headers, token.trim()).await;
     }
     let token = session_token_from_headers(headers);
     let client = ClientMeta::from_headers(headers);
@@ -317,10 +399,13 @@ async fn authenticate(state: &AppState, headers: &HeaderMap) -> Result<McpAuth, 
     Ok(McpAuth { session, pat: None })
 }
 
-/// Bearer token → PAT row + owner. Mirrors `git_smart_http::authenticate_pat`
-/// (hash lookup, expiry, banned-owner) without the username/alias dance —
-/// identity comes from the token hash alone.
-async fn authenticate_pat(
+/// Resolve `Authorization: Bearer <token>` to an [`McpAuth`].
+///
+/// Extension point (AGT-03): `oxidean_pat_`/`oxidean_fg_` tokens resolve through
+/// [`authenticate_pat`] today; `oxidean_oat_…` OAuth access tokens route to
+/// [`resolve_oat_bearer`], the seam the OAuth provider resolver lands in. Any
+/// other prefix is failed auth — recorded against the shared D-26 IP limiter.
+async fn resolve_bearer_identity(
     state: &AppState,
     headers: &HeaderMap,
     token: &str,
@@ -334,11 +419,52 @@ async fn authenticate_pat(
     if let Err(retry) = limiter_lock(state).check_ip(&ip) {
         return Err(too_many_requests(retry));
     }
-
-    if !looks_like_pat(token) {
-        limiter_lock(state).record_ip(&ip);
-        return Err(unauthorized());
+    match classify_bearer(token) {
+        BearerToken::Pat(token) => authenticate_pat(state, &client, token).await,
+        BearerToken::Oat(token) => resolve_oat_bearer(state, &client, token).await,
+        BearerToken::Unknown => {
+            limiter_lock(state).record_ip(&ip);
+            Err(unauthorized())
+        }
     }
+}
+
+/// OAuth access-token (`oxidean_oat_…`) resolution seam.
+///
+/// TODO(API-03): once the OAuth provider stack lands, look the token up by
+/// SHA-256 hash in the OAuth access-token tables, enforce expiry and
+/// revocation, load the granted user, and translate granted OAuth scopes onto
+/// the `Access` gates this module applies to PATs (read ≈ `Access::RepoRead`,
+/// write ≈ `Access::RepoWrite`) — synthesizing a `pat:`-style session like
+/// [`authenticate_pat`] does. Until then OAT credentials fail closed: recorded
+/// and `401`, never silently accepted.
+async fn resolve_oat_bearer(
+    state: &AppState,
+    client: &ClientMeta,
+    _token: &str,
+) -> Result<McpAuth, Response> {
+    let ip = client
+        .ip_address
+        .clone()
+        .unwrap_or_else(|| "unknown".into());
+    limiter_lock(state).record_ip(&ip);
+    Err(unauthorized())
+}
+
+/// Bearer PAT → PAT row + owner. Mirrors `git_smart_http::authenticate_pat`
+/// (hash lookup, expiry, banned-owner) without the username/alias dance —
+/// identity comes from the token hash alone. The caller
+/// (`resolve_bearer_identity`) has already classified the prefix and run the
+/// IP rate-limit check.
+async fn authenticate_pat(
+    state: &AppState,
+    client: &ClientMeta,
+    token: &str,
+) -> Result<McpAuth, Response> {
+    let ip = client
+        .ip_address
+        .clone()
+        .unwrap_or_else(|| "unknown".into());
     let token_hash = sha256_hex(token.as_bytes());
     let pat = match state.db.find_pat_by_token_hash(&token_hash).await {
         Ok(Some(p)) => p,

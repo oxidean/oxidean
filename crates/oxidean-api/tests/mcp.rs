@@ -9,10 +9,12 @@ use std::sync::Arc;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
+use oxidean_api::auth::hash_password_str;
 use oxidean_api::email::{EmailSender, LogSink};
 use oxidean_api::{build_cors, router_with_state, AppState};
 use oxidean_db::Database;
 use tower::ServiceExt;
+use uuid::Uuid;
 
 async fn test_app(db: Database) -> axum::Router {
     let state = AppState::new(db, Arc::new(LogSink) as Arc<dyn EmailSender>, "development");
@@ -589,4 +591,200 @@ async fn mcp_get_returns_405() {
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::METHOD_NOT_ALLOWED);
+}
+
+/// AGT-03: instance gate — admin override off → 404 `mcp.disabled` for POST and
+/// GET; clearing the override falls back to the env default (on).
+#[tokio::test]
+async fn mcp_instance_toggle_gate() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!("sqlite:{}", dir.path().join("mcp_gate.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    let app = test_app(db.clone()).await;
+
+    // Default: migration seeds no override → env default on.
+    let (status, v) = mcp_json(&app, mcp_req(&rpc_call(1, "ping", serde_json::json!({})))).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+
+    // Admin override off → 404 + mcp.disabled (POST and GET alike).
+    db.update_mcp_settings(Some(false)).await.expect("disable mcp");
+    let (status, v) = mcp_json(&app, mcp_req(&rpc_call(2, "ping", serde_json::json!({})))).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{v}");
+    let msg = v["error"]["message"].as_str().unwrap_or_default();
+    assert!(msg.contains("mcp.disabled"), "{msg}");
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/mcp")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+
+    // Clear override → env default applies again.
+    db.update_mcp_settings(None).await.expect("clear override");
+    let (status, v) = mcp_json(&app, mcp_req(&rpc_call(3, "ping", serde_json::json!({})))).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+
+    // Env default off (OXIDEAN_MCP_ENABLED=false) + no override → 404.
+    let state = AppState::new(
+        db.clone(),
+        Arc::new(LogSink) as Arc<dyn EmailSender>,
+        "development",
+    )
+    .with_mcp_enabled(false);
+    let cors = build_cors("development", None).expect("cors");
+    let app_off = router_with_state(state, cors);
+    let (status, v) = mcp_json(
+        &app_off,
+        mcp_req(&rpc_call(4, "ping", serde_json::json!({}))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{v}");
+
+    // Admin override still wins over a `false` env default (env is the
+    // default, not a hard kill switch — same split as admin.lfs.*).
+    db.update_mcp_settings(Some(true)).await.expect("enable mcp");
+    let (status, v) = mcp_json(
+        &app_off,
+        mcp_req(&rpc_call(5, "ping", serde_json::json!({}))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+}
+
+/// AGT-03: `oxidean_oat_` bearer tokens dispatch to the OAuth seam — until the
+/// OAuth resolver lands (API-03) they fail closed with 401 + WWW-Authenticate.
+#[tokio::test]
+async fn mcp_oat_bearer_fails_closed() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!("sqlite:{}", dir.path().join("mcp_oat.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    let app = test_app(db).await;
+
+    let res = app
+        .clone()
+        .oneshot(mcp_req_bearer(
+            &rpc_call(1, "ping", serde_json::json!({})),
+            "oxidean_oat_deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    let www = res
+        .headers()
+        .get("www-authenticate")
+        .expect("WWW-Authenticate")
+        .to_str()
+        .unwrap();
+    assert!(www.starts_with("Bearer"), "{www}");
+}
+
+/// AGT-03: `admin.mcp.*` RPCs — sys-admin reads/toggles the endpoint state;
+/// non-admins are refused with `admin.forbidden`.
+#[tokio::test]
+async fn admin_mcp_settings_rpc() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!("sqlite:{}", dir.path().join("mcp_admin.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+
+    let hash = hash_password_str("password1").expect("hash");
+    let admin_id = Uuid::new_v4().to_string();
+    db.create_user(
+        &admin_id,
+        "mcp-admin@ex.com",
+        "mcpadmin",
+        Some(&hash),
+        "Admin",
+        "",
+        None,
+        oxidean_core::Role::SysAdmin,
+    )
+    .await
+    .expect("create admin");
+
+    let app = test_app(db.clone()).await;
+
+    // Non-admin → admin.forbidden.
+    let res = app
+        .clone()
+        .oneshot(rpc_req(
+            r#"{"procedure":"auth.signup","input":{"email":"non@ex.com","username":"nonadmin","password":"password1"}}"#,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let _ = res.into_body().collect().await;
+    let login = app
+        .clone()
+        .oneshot(rpc_req(
+            r#"{"procedure":"auth.login","input":{"identifier":"non@ex.com","password":"password1","remember_me":false}}"#,
+        ))
+        .await
+        .unwrap();
+    let non_admin_cookie = session_cookie_from_response(&login);
+    let res = app
+        .clone()
+        .oneshot(rpc_req_with_cookie(
+            r#"{"procedure":"admin.mcp.getSettings","input":{}}"#,
+            &non_admin_cookie,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+
+    // Sys-admin login.
+    let login = app
+        .clone()
+        .oneshot(rpc_req(
+            r#"{"procedure":"auth.login","input":{"identifier":"mcp-admin@ex.com","password":"password1","remember_me":false}}"#,
+        ))
+        .await
+        .unwrap();
+    let cookie = session_cookie_from_response(&login);
+
+    // getSettings — env default on, no override.
+    let (status, v) = rpc_json(
+        &app,
+        r#"{"procedure":"admin.mcp.getSettings","input":{}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["data"]["enabled"], true);
+    assert_eq!(v["data"]["enabled_overridden"], false);
+
+    // updateSettings enabled:false → endpoint gates off.
+    let (status, v) = rpc_json(
+        &app,
+        r#"{"procedure":"admin.mcp.updateSettings","input":{"enabled":false}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["data"]["enabled"], false);
+    assert_eq!(v["data"]["enabled_overridden"], true);
+    let (status, _) = mcp_json(&app, mcp_req(&rpc_call(9, "ping", serde_json::json!({})))).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // clear_overrides → env default again.
+    let (status, v) = rpc_json(
+        &app,
+        r#"{"procedure":"admin.mcp.updateSettings","input":{"clear_overrides":true}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["data"]["enabled"], true);
+    assert_eq!(v["data"]["enabled_overridden"], false);
+    let (status, _) = mcp_json(&app, mcp_req(&rpc_call(10, "ping", serde_json::json!({})))).await;
+    assert_eq!(status, StatusCode::OK);
 }

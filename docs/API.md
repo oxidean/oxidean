@@ -127,6 +127,7 @@ SSO start routes redirect to the IdP when configured. If WorkOS/OIDC ENV is miss
 | `admin.auth.get_settings` | Auth/email settings including `allow_signup` (no secrets) | Admin session |
 | `admin.auth.update_settings` | Update provider/email/`allow_signup`; rebuild email sender | Admin session |
 | `admin.instance.factory_reset` | Wipe users, orgs, repos + issue domain (DB); optional disk wipe via `scope` | Sys-admin |
+| `admin.mcp.getSettings` / `updateSettings` | Instance MCP endpoint gate — `enabled` env-default vs stored override; `clear_overrides` reverts | Sys-admin |
 | `issue.create` / `get` / `list` / `update` / `close` / `reopen` / `history` / `delete` | Per-repo issues (`#N`); Capability ACL | Session (+ capability) |
 | `issue.comments.*` | Comment CRUD + history; author or Write+ moderate-delete | Session (+ capability) |
 | `issue.labels.set` / `assignees.set` / `assigneeCandidates` | Assign labels / assignees (Write+; assignees must have Read+) | Session (+ capability) |
@@ -600,7 +601,7 @@ Common `error.code` values:
 
 Avatar and SSO JSON errors use the same `{ ok: false, error: { code, message } }` shape where applicable.
 
-## MCP endpoint (AGT-01)
+## MCP endpoint (AGT-01, AGT-03)
 
 `POST /api/mcp` is a [Model Context Protocol](https://modelcontextprotocol.io)
 server over the streamable-HTTP transport (single JSON-RPC 2.0 message per
@@ -610,9 +611,18 @@ tools, plus file/issue/PR bodies as `oxidean://` resources — each call is a th
 wrapper over the same typed RPC handlers and ACL checks as `/api/rpc`.
 
 Auth: `oxidean_session` cookie or `Authorization: Bearer` with a classic
-(`oxidean_pat_…`) / fine-grained (`oxidean_fg_…`) PAT. Presented-but-invalid
-credentials return `401` + `WWW-Authenticate: Bearer`; missing credentials run
-as anonymous. Full method/tool/resource list and scope mapping: [MCP.md](MCP.md).
+(`oxidean_pat_…`) / fine-grained (`oxidean_fg_…`) PAT. The `oxidean_oat_…` OAuth
+access-token prefix is dispatched to a dedicated resolver seam — it fails closed
+(`401`) until the OAuth provider (API-03) lands; the three prefixes stay
+disjoint by construction. Presented-but-invalid credentials return `401` +
+`WWW-Authenticate: Bearer`; missing credentials run as anonymous.
+
+Instance gate: enabled by default via `OXIDEAN_MCP_ENABLED`; a sys-admin
+override under **Admin → MCP endpoint** (`admin.mcp.getSettings` /
+`updateSettings`) wins at runtime — while off, `/api/mcp` answers `404` with a
+`mcp.disabled` JSON-RPC error. Full method/tool/resource list, scope mapping,
+and client setup (Claude Code, Cursor, `mcp-remote`, direct HTTP):
+[MCP.md](MCP.md).
 
 ## Rate limits
 

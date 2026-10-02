@@ -6,9 +6,10 @@ use std::path::Path;
 
 use oxidean_core::{
     AdminLfsSettingsPublic, AdminLfsUpdateSettingsRequest, AdminLfsUsageResponse,
-    AdminLfsOwnerUsageEntry, AdminLfsRepoUsageEntry, AppError, AuthSettingsPublic,
-    EmailProviderKind, FactoryResetRequest, FactoryResetResponse, FactoryResetScope, ProviderMode,
-    RepoVisibility, UpdateAuthSettingsRequest,
+    AdminLfsOwnerUsageEntry, AdminLfsRepoUsageEntry, AdminMcpSettingsPublic,
+    AdminMcpUpdateSettingsRequest, AppError, AuthSettingsPublic, EmailProviderKind,
+    FactoryResetRequest, FactoryResetResponse, FactoryResetScope, ProviderMode, RepoVisibility,
+    UpdateAuthSettingsRequest,
 };
 use oxidean_db::AuthSettingsRow;
 
@@ -494,6 +495,40 @@ pub async fn lfs_get_usage(ctx: &RpcCtx) -> Result<AdminLfsUsageResponse, AppErr
         by_repo,
         by_owner,
     })
+}
+
+/// `admin.mcp.getSettings` — effective MCP enable state + override flag (AGT-03).
+pub async fn mcp_get_settings(ctx: &RpcCtx) -> Result<AdminMcpSettingsPublic, AppError> {
+    require_admin(ctx).await?;
+    let row = ctx.db.get_mcp_settings().await.map_err(db_err)?;
+    Ok(AdminMcpSettingsPublic {
+        enabled: row.enabled.unwrap_or_else(crate::mcp::env_mcp_enabled),
+        enabled_overridden: row.enabled.is_some(),
+    })
+}
+
+/// `admin.mcp.updateSettings` — persist or clear the MCP enable override.
+pub async fn mcp_update_settings(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<AdminMcpSettingsPublic, AppError> {
+    require_admin(ctx).await?;
+    let req: AdminMcpUpdateSettingsRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid admin.mcp.updateSettings input: {e}"),
+        )
+    })?;
+    if req.clear_overrides {
+        ctx.db.update_mcp_settings(None).await.map_err(db_err)?;
+    } else {
+        let current = ctx.db.get_mcp_settings().await.map_err(db_err)?;
+        ctx.db
+            .update_mcp_settings(req.enabled.or(current.enabled))
+            .await
+            .map_err(db_err)?;
+    }
+    mcp_get_settings(ctx).await
 }
 
 fn path_is_under(path: &Path, root: &Path) -> bool {

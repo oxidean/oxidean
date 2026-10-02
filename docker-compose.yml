@@ -70,6 +70,8 @@ services:
       # Actions job logs (D-ACT-13) — distinct from repos / LFS / packages / release-assets.
       OXIDEAN_ACTIONS_LOG_DIR: /var/actions-logs
       OXIDEAN_ACTIONS_ENABLED: ${OXIDEAN_ACTIONS_ENABLED:-true}
+      # Instance MCP endpoint gate (AGT-03) — admin UI override wins at runtime.
+      OXIDEAN_MCP_ENABLED: ${OXIDEAN_MCP_ENABLED:-true}
       # Local-only default so repo Actions secrets work out of the box (D-ACT-17).
       # Production must set a unique OXIDEAN_ACTIONS_SECRETS_KEY — never reuse this value.
       OXIDEAN_ACTIONS_SECRETS_KEY: ${OXIDEAN_ACTIONS_SECRETS_KEY:-compose-dev-actions-secrets-key-not-for-production}
