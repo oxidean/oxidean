@@ -187,12 +187,8 @@ Plans declare `*.tsx` artifact paths; Octane ships `*.tsrx` (documented plan ass
 | --- | --- | --- | --- | --- |
 | AUTH-06 | 06-00..09 (esp. 02, 06) | Empty instance ENV admin seed + forced credential change | ✓ SATISFIED | seed + confirm + credentials UI + tests |
 | AUTH-07 | 06-00..09 (esp. 03, 06) | Empty instance one-time setup wizard | ✓ SATISFIED | bootstrap RPC + `/setup` + SSR gate + tests |
-| AUTH-07a | post-close addendum 2026-09-12 (`deferred-items.md`, resolved) | Setup wizard can choose instance auth stack (local / WorkOS / OIDC public fields); secrets remain ENV-only | ✓ SATISFIED | `BootstrapSetupRequest.provider_mode` + `oidc_issuer`/`oidc_client_id`/`workos_client_id` (public fields only — `crates/oxidean-core/src/auth_types.rs`); `bootstrap_setup` persists via `update_auth_settings` (`crates/oxidean-api/src/auth/bootstrap.rs`); wizard `PROVIDER_OPTIONS` local/WorkOS/OIDC + conditional public fields (`apps/web/src/routes/setup.index.tsrx`); secrets ENV-only (`OXIDEAN_OIDC_CLIENT_SECRET` in `auth/oidc.rs`, `WORKOS_API_KEY` in `auth/workos.rs`, `docs/CONFIGURATION.md`); tests `provider_mode_serde_lowercase` (`auth_types.rs`), `admin_auth_settings.rs` update roundtrip, `auth_bootstrap.rs` wizard persistence |
-| AUTH-07b | post-close addendum 2026-09-12 (`deferred-items.md`, resolved) | Sys-admin can factory-reset the instance database (confirm phrase) back to empty setup | ✓ SATISFIED | `admin.instance.factory_reset` requires `confirmation == "RESET"` else `admin.factory_reset_confirm` (`crates/oxidean-api/src/auth/admin.rs`); `FactoryResetRequest`/`FactoryResetScope` (`auth_types.rs`); `Database::factory_reset_instance` + repo/LFS wipe scope; danger zone typed-RESET gate (`apps/web/src/routes/admin/auth.tsrx`); tests `factory_reset_scope.rs` (`factory_reset_wrong_phrase_rejected`, `_defaults_scope_to_database_only`, `_wipes_org_acl_and_repository_rows`, `_wipes_issue_domain_rows`, `_wipes_lfs_dir_children`), `crates/oxidean-db/tests/factory_reset_{orgs,issues,pulls,actions}.rs` |
 
-AUTH-07a/AUTH-07b rows backfilled 2026-10-02 (ROADMAP DEBT-09): both shipped post-close on 2026-09-12 and are Complete in REQUIREMENTS.md; the table omission was a process orphan, not missing product coverage.
-
-No orphaned Phase 6 requirement IDs in REQUIREMENTS.md beyond AUTH-06/AUTH-07/AUTH-07a/AUTH-07b.
+No orphaned Phase 6 requirement IDs in REQUIREMENTS.md beyond AUTH-06/AUTH-07.
 
 ### Decision Coverage
 
@@ -225,7 +221,7 @@ None — prior backstop (`max-w-md` wrap) closed via `06-UAT.md` (complete, 1/1 
 
 ### Gaps Summary
 
-No gaps. All 11 must-haves verified. Roadmap success criteria and AUTH-06/AUTH-07/AUTH-07a/AUTH-07b are met. Security `threats_open: 0`; Nyquist `nyquist_compliant: true`. Fingerprint refreshed after post-verify commits.
+No gaps. All 11 must-haves verified. Roadmap success criteria and AUTH-06/AUTH-07 are met. Security `threats_open: 0`; Nyquist `nyquist_compliant: true`. Fingerprint refreshed after post-verify commits.
 
 ---
 
