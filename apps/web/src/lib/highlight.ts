@@ -21,7 +21,7 @@ export function clientHighlightTheme(): HighlightTheme {
   return resolveTheme(readThemePreference()) === "dark" ? "github-dark" : "github-light";
 }
 
-const GITHUB_CLASS_LANGS = [
+const CORE_LANGS = [
   "typescript",
   "tsx",
   "javascript",
@@ -71,7 +71,7 @@ export async function getHighlighter(): Promise<Highlighter> {
   if (!highlighterPromise) {
     highlighterPromise = createHighlighter({
       themes: [...THEMES],
-      langs: [...GITHUB_CLASS_LANGS, tsrxLang, rippleLang],
+      langs: [...CORE_LANGS, tsrxLang, rippleLang],
       engine: createJavaScriptRegexEngine({ forgiving: true }),
     });
   }
