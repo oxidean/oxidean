@@ -73,6 +73,7 @@ use uuid::Uuid;
 use crate::auth::gate::require_verified;
 use crate::git::bare_repo_path;
 use crate::rpc::RpcCtx;
+use crate::webhook::dispatch;
 
 fn db_err(e: String) -> AppError {
     if e == "database not configured" {
@@ -445,11 +446,29 @@ pub async fn star(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoPublic, 
         AppError::new("rpc.bad_input", format!("invalid repo.star input: {e}"))
     })?;
     let accessible = resolve_repo_for_read(ctx, &req.owner, &req.name).await?;
+    let was_starred = ctx
+        .db
+        .has_starred_repo(&user.id, &accessible.row.id)
+        .await
+        .unwrap_or(false);
     let _count = ctx
         .db
         .star_repository(&user.id, &accessible.row.id)
         .await
         .map_err(db_err)?;
+    // `star` webhooks fire only on an actual state transition (API-04).
+    if !was_starred {
+        let payload = dispatch::star_payload(
+            "created",
+            &accessible.owner_username,
+            &accessible.row.name,
+            &accessible.row.id,
+            &user.username,
+            &user.id,
+        );
+        dispatch::emit(&ctx.db, &accessible.row.id, "star", "created", payload, &ctx.env_name)
+            .await;
+    }
     enrich_social(ctx, to_public(&accessible), Some(&user.id)).await
 }
 
@@ -460,11 +479,28 @@ pub async fn unstar(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoPublic
         AppError::new("rpc.bad_input", format!("invalid repo.unstar input: {e}"))
     })?;
     let accessible = resolve_repo_for_read(ctx, &req.owner, &req.name).await?;
+    let was_starred = ctx
+        .db
+        .has_starred_repo(&user.id, &accessible.row.id)
+        .await
+        .unwrap_or(false);
     let _count = ctx
         .db
         .unstar_repository(&user.id, &accessible.row.id)
         .await
         .map_err(db_err)?;
+    if was_starred {
+        let payload = dispatch::star_payload(
+            "deleted",
+            &accessible.owner_username,
+            &accessible.row.name,
+            &accessible.row.id,
+            &user.username,
+            &user.id,
+        );
+        dispatch::emit(&ctx.db, &accessible.row.id, "star", "deleted", payload, &ctx.env_name)
+            .await;
+    }
     enrich_social(ctx, to_public(&accessible), Some(&user.id)).await
 }
 
@@ -1470,6 +1506,23 @@ pub async fn branch_create(
         &after_oid,
     )
     .await;
+    let sender_login = match ctx.db.find_user_by_id(&actor_id).await {
+        Ok(Some(u)) => u.username,
+        _ => String::new(),
+    };
+    let payload = dispatch::ref_event_payload(
+        "create",
+        branch,
+        "branch",
+        &accessible.row.default_branch,
+        &accessible.row.description,
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.id,
+        &sender_login,
+        &actor_id,
+    );
+    dispatch::emit(&ctx.db, &accessible.row.id, "create", "", payload, &ctx.env_name).await;
     crate::mirror::notify_mirror_after_local_mutation(
         ctx.db.clone(),
         ctx.git.clone(),
@@ -1619,6 +1672,23 @@ pub async fn branch_delete(
         &before_oid,
     )
     .await;
+    let sender_login = match ctx.db.find_user_by_id(&actor_id).await {
+        Ok(Some(u)) => u.username,
+        _ => String::new(),
+    };
+    let payload = dispatch::ref_event_payload(
+        "delete",
+        branch,
+        "branch",
+        &accessible.row.default_branch,
+        &accessible.row.description,
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.id,
+        &sender_login,
+        &actor_id,
+    );
+    dispatch::emit(&ctx.db, &accessible.row.id, "delete", "", payload, &ctx.env_name).await;
     crate::mirror::notify_mirror_after_local_mutation(
         ctx.db.clone(),
         ctx.git.clone(),
@@ -2282,6 +2352,19 @@ pub async fn fork(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoPublic, 
             "failed to copy repository storage",
         ));
     }
+
+    // API-04: `fork` fires on the source repo's hooks; `forkee` is the new repo.
+    let payload = dispatch::fork_payload(
+        &source.owner_username,
+        &source.row.name,
+        &source.row.id,
+        &user.username,
+        &into_name,
+        &row.id,
+        &user.username,
+        &user.id,
+    );
+    dispatch::emit(&ctx.db, &source.row.id, "fork", "created", payload, &ctx.env_name).await;
 
     let accessible = AccessibleRepo {
         row,

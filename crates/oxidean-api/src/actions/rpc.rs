@@ -521,6 +521,14 @@ pub async fn rerun_run(
 ) -> Result<ActionRunMutationResponse, AppError> {
     let (req, accessible) = run_mutation_target(ctx, input, "rerunRun").await?;
     ctx.db.requeue_action_run(&req.run_id).await.map_err(db_err)?;
+    // API-04: a requeued run is a new `workflow_run` `requested` delivery.
+    crate::webhook::dispatch::notify_workflow_run(
+        &ctx.db,
+        &req.run_id,
+        "requested",
+        &ctx.env_name,
+    )
+    .await;
     run_mutation_response(ctx, &accessible.row.id, &req.run_id).await
 }
 
@@ -531,6 +539,14 @@ pub async fn cancel_run(
 ) -> Result<ActionRunMutationResponse, AppError> {
     let (req, accessible) = run_mutation_target(ctx, input, "cancelRun").await?;
     ctx.db.cancel_action_run(&req.run_id).await.map_err(db_err)?;
+    // API-04: cancellation completes the run with conclusion `cancelled`.
+    crate::webhook::dispatch::notify_workflow_run(
+        &ctx.db,
+        &req.run_id,
+        "completed",
+        &ctx.env_name,
+    )
+    .await;
     run_mutation_response(ctx, &accessible.row.id, &req.run_id).await
 }
 

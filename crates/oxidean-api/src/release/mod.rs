@@ -14,6 +14,7 @@ use crate::repo::resolve_repo_for_admin;
 use crate::repo::{meets, not_found, resolve_repo_for_read, AccessibleRepo, Capability};
 use crate::routes::release_assets::{delete_asset_with_file, remove_asset_file};
 use crate::rpc::RpcCtx;
+use crate::webhook::dispatch;
 
 fn db_err(e: String) -> AppError {
     if e == "database not configured" {
@@ -112,7 +113,26 @@ pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<ReleasePub
     let title = if req.title.trim().is_empty() { tag_name.to_string() } else { req.title.trim().to_string() };
     let id = Uuid::new_v4().to_string();
     let row = ctx.db.insert_release(&id, &accessible.row.id, tag_name, &title, &req.body, req.draft, req.prerelease, &user.id).await.map_err(db_err)?;
-    to_public(ctx, &row).await
+    let public = to_public(ctx, &row).await?;
+    // GitHub parity: draft create → `created`, visible create → `published`.
+    let action = if row.draft { "created" } else { "published" };
+    let payload = dispatch::release_payload(
+        action,
+        &row.tag_name,
+        &row.title,
+        &row.body,
+        row.draft,
+        row.prerelease,
+        &public.author_username,
+        &row.author_id,
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.id,
+        &user.username,
+        &user.id,
+    );
+    dispatch::emit(&ctx.db, &accessible.row.id, "release", action, payload, &ctx.env_name).await;
+    Ok(public)
 }
 
 pub async fn list(ctx: &RpcCtx, input: serde_json::Value) -> Result<ReleaseListResponse, AppError> {
@@ -165,10 +185,37 @@ pub async fn update(ctx: &RpcCtx, input: serde_json::Value) -> Result<ReleasePub
     let draft = req.draft.unwrap_or(existing.draft);
     let prerelease = req.prerelease.unwrap_or(existing.prerelease);
     let row = ctx.db.update_release(&existing.id, &title, &body, draft, prerelease).await.map_err(db_err)?;
-    to_public(ctx, &row).await
+    let public = to_public(ctx, &row).await?;
+    // GitHub parity: draft→visible is `published`, visible→draft is
+    // `unpublished`, any other mutation is `edited`.
+    let action = if existing.draft && !row.draft {
+        "published"
+    } else if !existing.draft && row.draft {
+        "unpublished"
+    } else {
+        "edited"
+    };
+    let payload = dispatch::release_payload(
+        action,
+        &row.tag_name,
+        &row.title,
+        &row.body,
+        row.draft,
+        row.prerelease,
+        &public.author_username,
+        &row.author_id,
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.id,
+        &user.username,
+        &user.id,
+    );
+    dispatch::emit(&ctx.db, &accessible.row.id, "release", action, payload, &ctx.env_name).await;
+    Ok(public)
 }
 
 pub async fn delete(ctx: &RpcCtx, input: serde_json::Value) -> Result<DeleteReleaseResponse, AppError> {
+    let user = require_verified(ctx).await?;
     let req: DeleteReleaseRequest = serde_json::from_value(input).map_err(|e| {
         AppError::new("rpc.bad_input", format!("invalid release.delete input: {e}"))
     })?;
@@ -187,6 +234,30 @@ pub async fn delete(ctx: &RpcCtx, input: serde_json::Value) -> Result<DeleteRele
         remove_asset_file(&ctx.release_assets_dir, &asset.id).await;
     }
     ctx.db.delete_release(&existing.id).await.map_err(db_err)?;
+    let author_login = match ctx.db.find_user_by_id(&existing.author_id).await {
+        Ok(Some(u)) => u.username,
+        Ok(None) => String::new(),
+        Err(e) => {
+            tracing::warn!(error = %e, "release delete: author lookup failed");
+            String::new()
+        }
+    };
+    let payload = dispatch::release_payload(
+        "deleted",
+        &existing.tag_name,
+        &existing.title,
+        &existing.body,
+        existing.draft,
+        existing.prerelease,
+        &author_login,
+        &existing.author_id,
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.id,
+        &user.username,
+        &user.id,
+    );
+    dispatch::emit(&ctx.db, &accessible.row.id, "release", "deleted", payload, &ctx.env_name).await;
     Ok(DeleteReleaseResponse { ok: true })
 }
 

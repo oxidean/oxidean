@@ -306,6 +306,15 @@ async fn update_task(
         "in_progress" | "success" | "failure" | "cancelled" => req.state.as_str(),
         _ => return Err(StatusCode::BAD_REQUEST),
     };
+    // API-04: capture the pre-update run status so the queued→in_progress
+    // transition emits `workflow_run` `in_progress` exactly once.
+    let prev_run_status = state
+        .db
+        .find_action_run_by_id(&job.run_id)
+        .await
+        .ok()
+        .flatten()
+        .map(|r| r.status);
     state
         .db
         .update_action_job_status(&job.id, status)
@@ -313,6 +322,24 @@ async fn update_task(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     if let Err(e) = state.db.recompute_action_run_status(&job.run_id).await {
         tracing::warn!(error = %e, run_id = %job.run_id, "failed to roll up run status");
+    }
+    if let Ok(Some(run)) = state.db.find_action_run_by_id(&job.run_id).await {
+        let action = match run.status.as_str() {
+            "success" | "failure" | "cancelled" => Some("completed"),
+            "in_progress" if prev_run_status.as_deref() == Some("queued") => {
+                Some("in_progress")
+            }
+            _ => None,
+        };
+        if let Some(action) = action {
+            crate::webhook::dispatch::notify_workflow_run(
+                &state.db,
+                &run.id,
+                action,
+                &state.env_name,
+            )
+            .await;
+        }
     }
     let origin = std::env::var("OXIDEAN_PUBLIC_ORIGIN").ok();
     if let Err(e) = crate::actions::statuses::publish_from_job_update(
