@@ -517,9 +517,6 @@ fn rpc_status(resp: &RpcResponse) -> StatusCode {
         RpcResponse::Err { error, .. } if error.code == "auth.pat_scope" => {
             StatusCode::FORBIDDEN
         }
-        RpcResponse::Err { error, .. } if error.code == "auth.rate_limited" => {
-            StatusCode::TOO_MANY_REQUESTS
-        }
         RpcResponse::Err { error, .. } if error.code == "repo.create_forbidden" => {
             StatusCode::FORBIDDEN
         }

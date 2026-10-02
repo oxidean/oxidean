@@ -770,8 +770,10 @@ async fn pat_bearer_revoked_token_unauthenticated() {
     assert_eq!(v["error"]["code"], "auth.unauthenticated", "{v}");
 }
 
-/// API-02: classic PAT without `repo` scope → 403 `auth.pat_scope` on
-/// repo-domain procedures (scope denial is not an auth failure).
+/// API-02: scope denial is not an auth failure — a classic `repo` token cannot
+/// call `packages.*`, and a package-only token row (not mintable via
+/// `pat.createClassic`, which requires `repo`, but valid at rest) cannot call
+/// repo-domain procedures. Both → 403 `auth.pat_scope`.
 #[tokio::test]
 async fn pat_bearer_scope_denied() {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -784,17 +786,47 @@ async fn pat_bearer_scope_denied() {
     support::unlock_signup(&db).await;
     let app = test_app(db.clone()).await;
 
-    let (_user_id, _cookie, token) = verified_user_with_classic_pat(
+    // Minted classic tokens always carry `repo`; `packages.*` stays out of scope.
+    let (_user_id, _cookie, repo_token) =
+        verified_user_with_classic_pat(&app, &db, "scope@ex.com", "scopeuser", r#"["repo"]"#).await;
+    let (status, _, v) = rpc_json_bearer(
         &app,
-        &db,
-        "scope@ex.com",
-        "scopeuser",
-        r#"["package:read"]"#,
+        r#"{"procedure":"packages.list","input":{"owner":"scopeuser"}}"#,
+        &repo_token,
     )
     .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{v}");
+    assert_eq!(v["error"]["code"], "auth.pat_scope", "{v}");
 
-    let (status, _, v) =
-        rpc_json_bearer(&app, r#"{"procedure":"repo.listMine","input":{}}"#, &token).await;
+    // A package-only token at rest is denied on repo-domain procedures even
+    // though the mint path refuses to create one.
+    let (_cookie2, login2) = signup_and_login(&app, "scope2@ex.com", "scopeuser2").await;
+    let user2 = login2["data"]["id"].as_str().expect("id").to_string();
+    let pkg_token = format!("{CLASSIC_PAT_PREFIX}{}", "a".repeat(64));
+    let pkg_hash = sha256_hex(pkg_token.as_bytes());
+    let pkg_prefix = &pkg_token[..CLASSIC_PAT_PREFIX.len() + 8];
+    db.create_pat(
+        "pat-pkg-1",
+        &user2,
+        "classic",
+        "pkg-only",
+        pkg_prefix,
+        &pkg_hash,
+        Some(r#"["package:read"]"#),
+        None,
+        None,
+        None,
+        &[],
+    )
+    .await
+    .expect("insert package-only pat");
+
+    let (status, _, v) = rpc_json_bearer(
+        &app,
+        r#"{"procedure":"repo.listMine","input":{}}"#,
+        &pkg_token,
+    )
+    .await;
     assert_eq!(status, StatusCode::FORBIDDEN, "{v}");
     assert_eq!(v["error"]["code"], "auth.pat_scope", "{v}");
 }
