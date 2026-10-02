@@ -189,10 +189,14 @@ export function RepoSearchPage() @{
                   >
                     {hit.path as string}
                   </a>
-                  <span className="text-muted-foreground">:{String(hit.line)}</span>
-                  <pre className="mt-1 overflow-x-auto text-[13px] text-foreground">
-                    {hit.content as string}
-                  </pre>
+                  @if (hit.line > 0) {
+                    <span className="text-muted-foreground">
+                      :{String(hit.line)}
+                    </span>;
+                    <pre className="mt-1 overflow-x-auto text-[13px] text-foreground">
+                      {hit.content as string}
+                    </pre>;
+                  }
                 </li>;
               } @else {
                 @if (hit.kind === "commit") {

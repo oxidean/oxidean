@@ -19,16 +19,16 @@ rc_high=$?
 set -e
 [[ "$rc_high" -eq 0 ]] || fail "expected zero exit when weighted score above floor (got $rc_high)"
 
-# Exact boundary: bootstrap floor 0.65 should pass
+# Exact boundary: floor 0.70 should pass
 set +e
-COVERAGE_UNIT=0.65 COVERAGE_INTEGRATION=0.65 COVERAGE_E2E=0.65 "$SCRIPT" >/dev/null 2>&1
+COVERAGE_UNIT=0.70 COVERAGE_INTEGRATION=0.70 COVERAGE_E2E=0.70 "$SCRIPT" >/dev/null 2>&1
 rc_eq=$?
 set -e
-[[ "$rc_eq" -eq 0 ]] || fail "expected zero exit at exact floor 0.65"
+[[ "$rc_eq" -eq 0 ]] || fail "expected zero exit at exact floor 0.70"
 
 grep -q '0\.25' "$SCRIPT" || fail "unit weight 0.25 missing"
 grep -q '0\.40' "$SCRIPT" || fail "integration weight 0.40 missing"
 grep -q '0\.35' "$SCRIPT" || fail "e2e weight 0.35 missing"
-grep -q '0\.65' "$SCRIPT" || fail "bootstrap floor 0.65 missing"
+grep -q '0\.70' "$SCRIPT" || fail "floor 0.70 missing"
 
 echo "PASS: coverage-weighted aggregator contract"

@@ -507,6 +507,10 @@ export const routeCoverageManifest: RouteCoverageEntry[] = [
         kind: "happy-dom",
         test: "apps/web/src/routes/$owner.$repo.pulls.integration.test.ts",
       },
+      {
+        kind: "happy-dom",
+        test: "apps/web/src/routes/$owner.$repo.pull.checks.integration.test.ts",
+      },
     ],
   },
 

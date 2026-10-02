@@ -214,7 +214,7 @@ Weighted forge-core gate (**D-QH-02**). Layers and weights:
 score = 0.25 * unit + 0.40 * integration + 0.35 * e2e
 ```
 
-**Initial floor:** bootstrap **`0.65`** (`COVERAGE_WEIGHTED_FLOOR` default in `scripts/coverage-weighted.sh`). Measured baseline after enabling `@vitest/coverage-v8` is ~0.68 (unit ≈61% / integration ≈45% / e2e checklist 1.0). **Ratchet target `0.70`** once integration depth and the forge e2e matrix (11.1-03) land — raise the env default and this doc together. Do not lower without an explicit residual note.
+**Floor:** **`0.70`** (`COVERAGE_WEIGHTED_FLOOR` default in `scripts/coverage-weighted.sh`, set in the `coverage-weighted` CI job). Bootstrap floor was `0.65` at a measured ~0.68 baseline; the ratchet to `0.70` landed after suites deepened (main measured ~0.73: unit ≈68% / integration ≈52% / e2e checklist 1.0). Do not lower without an explicit residual note.
 
 **E2E checklist formula (interim)**
 
@@ -242,7 +242,7 @@ Reports: `apps/web/coverage/{unit,integration}/` (`coverage-summary.json`, `lcov
 
 **Residual (this wave)**
 
-- Rust `cargo-llvm-cov` is preferred and wired as a Make target + CI install hook, but **CI does not yet fail on Rust coverage numbers** when llvm-cov is too heavy for the job budget — web unit/integration + e2e checklist drive the gate. Revisit when llvm-tools runtime is budgeted.
+- Rust `cargo-llvm-cov` runs in the `coverage-weighted` CI job as **collection only** (`var/coverage/rust-*` artifacts): the weighted gate composition is unchanged — web unit/integration + e2e checklist drive the score and **CI does not fail on Rust coverage numbers** yet. Revisit when the Rust layer joins the weighted composition.
 - Do not revive the removed Playwright component e2e project for coverage (**D-QH-03**).
 
 ## CI integration
@@ -256,7 +256,7 @@ Workflow: [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) (`name: CI`)
 | `route-coverage` | `make route-coverage-check` — every user-facing `.tsrx` page has happy-dom, stack-browser, or documented skip (G-11.1-15); change-aware: touched routes cannot stay skip-only |
 | `web-browser` | `make test-web-browser` — Vitest Chromium component DOM-race suite (`*.browser.test.tsx`) |
 | `browser-coverage` | `make browser-coverage-check` + change contract — high-risk UI (Checkbox/Radio/Select/Switch/portals/Subscribe) Chromium proof; touched/new surfaces cannot stay skip-only |
-| `coverage-weighted` | Bun install → `make coverage-contract` → `make coverage-web` → e2e checklist → `scripts/coverage-weighted.sh` (bootstrap floor `0.65`, ratchet target `0.70`); uploads `var/coverage/` + `apps/web/coverage/` on failure |
+| `coverage-weighted` | Rust toolchain (llvm-tools-preview) + `cargo-llvm-cov`/`nextest` → Bun install → `make coverage-contract` → `make coverage-rust` → `make coverage-web` → e2e checklist → `scripts/coverage-weighted.sh` (floor `0.70`); uploads `var/coverage/rust-*` always, `var/coverage/` + `apps/web/coverage/` on failure |
 | `e2e-stack` | Rust + Bun + Playwright → `make test-e2e-stack`; on failure uploads `var/e2e/` as `e2e-stack-logs` |
 | `rpc-sync` | `make rpc-sync-check` |
 | `compose` | `docker compose … config` for base, MySQL/SQLite overlays, and `docker-compose.dev-auth.yml` (config-only; does not build/bring-up) |
