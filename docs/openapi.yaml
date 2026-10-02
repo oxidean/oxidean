@@ -326,6 +326,78 @@ paths:
               schema: { $ref: "#/components/schemas/CommitDetail" }
         "404": { $ref: "#/components/responses/Error" }
 
+  /repos/{owner}/{repo}/statuses/{sha}:
+    get:
+      tags: [repos]
+      summary: List commit statuses (`repo.commitStatus.list`) — GitHub shape
+      operationId: listCommitStatuses
+      parameters:
+        - { $ref: "#/components/parameters/owner" }
+        - { $ref: "#/components/parameters/repo" }
+        - { name: sha, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Statuses ordered newest-first
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Status" }
+    post:
+      tags: [repos]
+      summary: Create a commit status (`repo.commitStatus.create`) — GitHub shape
+      operationId: createCommitStatus
+      parameters:
+        - { $ref: "#/components/parameters/owner" }
+        - { $ref: "#/components/parameters/repo" }
+        - { name: sha, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/StatusCreateBody" }
+      responses:
+        "201":
+          description: Created status
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Status" }
+        "400": { $ref: "#/components/responses/Error" }
+
+  /repos/{owner}/{repo}/commits/{sha}/statuses:
+    get:
+      tags: [repos]
+      summary: List commit statuses (`repo.commitStatus.list`) — alias of `/statuses/{sha}`
+      operationId: listCommitStatusesAlias
+      parameters:
+        - { $ref: "#/components/parameters/owner" }
+        - { $ref: "#/components/parameters/repo" }
+        - { name: sha, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Statuses ordered newest-first
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Status" }
+
+  /repos/{owner}/{repo}/commits/{sha}/status:
+    get:
+      tags: [repos]
+      summary: Combined commit status rollup (`repo.commitStatus.list`)
+      operationId: combinedCommitStatus
+      parameters:
+        - { $ref: "#/components/parameters/owner" }
+        - { $ref: "#/components/parameters/repo" }
+        - { name: sha, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Combined status (`state` rolls up all contexts)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CombinedStatus" }
+
   /repos/{owner}/{repo}/compare/{basehead}:
     get:
       tags: [repos]
@@ -1335,6 +1407,56 @@ components:
         files:
           type: array
           items: { $ref: "#/components/schemas/DiffFile" }
+
+    StatusCreateBody:
+      type: object
+      required: [state]
+      properties:
+        state:
+          type: string
+          enum: [pending, success, failure, error]
+          description: GitHub classic status state
+        context:
+          type: string
+          description: Status context (default "default")
+        target_url: { type: string }
+        description: { type: string }
+
+    Status:
+      type: object
+      description: GitHub-shaped commit status row (API-06)
+      properties:
+        id: { type: string }
+        sha: { type: string }
+        state: { type: string, enum: [pending, success, failure, error] }
+        context: { type: string }
+        description: { type: string }
+        target_url: { type: string, nullable: true }
+        url: { type: string }
+        created_at: { type: string }
+        updated_at: { type: string }
+        creator:
+          type: object
+          nullable: true
+          properties:
+            login: { type: string }
+            id: { type: string }
+
+    CombinedStatus:
+      type: object
+      description: GitHub combined-status rollup (API-06)
+      properties:
+        state: { type: string, enum: [pending, success, failure] }
+        sha: { type: string }
+        total_count: { type: integer }
+        statuses:
+          type: array
+          items: { $ref: "#/components/schemas/Status" }
+        repository:
+          type: object
+          properties:
+            name: { type: string }
+            full_name: { type: string }
 
     Label:
       type: object

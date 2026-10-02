@@ -647,6 +647,15 @@ pub async fn check_ref_update(
     new_sha: &str,
     capability: Capability,
 ) -> Result<(), AppError> {
+    // API-06: refs/pull/* is a synthesized read-only namespace written by the
+    // forge itself (git update-ref, hook-free). No push — regardless of
+    // capability or protection rules — may create/update/delete it.
+    if git_ref.starts_with("refs/pull/") {
+        return Err(AppError::new(
+            "repo.pull_refs_read_only",
+            "pushes to refs/pull/* are denied: pull refs are synthesized read-only",
+        ));
+    }
     let Some(branch) = branch_from_ref(git_ref) else {
         // Non-branch refs are not subject to classic branch protection.
         return Ok(());

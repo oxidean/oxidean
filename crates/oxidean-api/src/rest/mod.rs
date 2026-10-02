@@ -21,6 +21,7 @@ mod orgs;
 mod pulls;
 mod releases;
 mod repos;
+mod statuses;
 mod users;
 
 use axum::extract::State;
@@ -41,6 +42,7 @@ pub fn router() -> Router<AppState> {
         .merge(users::router())
         .merge(orgs::router())
         .merge(repos::router())
+        .merge(statuses::router())
         .merge(issues::router())
         .merge(pulls::router())
         .merge(releases::router())
