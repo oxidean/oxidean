@@ -180,10 +180,12 @@ pub async fn list_for_repo(
             format!("invalid label.listForRepo input: {e}"),
         )
     })?;
-    let accessible = crate::issue::acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
+    // Labels are shared repo metadata (issues AND pulls) — resolve via the
+    // repo acl so they stay reachable when one unit is disabled (COL-13).
+    let accessible = crate::repo::resolve_repo_for_read(ctx, &req.owner, &req.name).await?;
     let want_hidden = req.include_hidden.unwrap_or(false);
     if want_hidden {
-        let admin = crate::issue::acl::resolve_for_admin(ctx, &req.owner, &req.name).await?;
+        let admin = crate::repo::resolve_repo_for_admin(ctx, &req.owner, &req.name).await?;
         let labels = effective_labels_for_repo(
             ctx,
             &admin.row.id,
@@ -257,7 +259,7 @@ pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<LabelPubli
                 .filter(|s| !s.is_empty())
                 .ok_or_else(|| AppError::new("rpc.bad_input", "repo is required for repo scope"))?;
             let accessible =
-                crate::issue::acl::resolve_for_admin(ctx, &req.owner, repo_name).await?;
+                crate::repo::resolve_repo_for_admin(ctx, &req.owner, repo_name).await?;
             let row = ctx
                 .db
                 .insert_label(
@@ -303,7 +305,7 @@ pub async fn update(ctx: &RpcCtx, input: serde_json::Value) -> Result<LabelPubli
                 "only org labels can be hidden on a repository",
             ));
         }
-        let accessible = crate::issue::acl::resolve_for_admin(ctx, &req.owner, repo_name).await?;
+        let accessible = crate::repo::resolve_repo_for_admin(ctx, &req.owner, repo_name).await?;
         if accessible.row.owner_type != "org"
             || accessible.row.owner_id != row.org_id.as_deref().unwrap_or("")
         {
@@ -349,7 +351,7 @@ pub async fn update(ctx: &RpcCtx, input: serde_json::Value) -> Result<LabelPubli
             .ok_or_else(|| {
                 AppError::new("rpc.bad_input", "repo is required to update a repo label")
             })?;
-        let accessible = crate::issue::acl::resolve_for_admin(ctx, &req.owner, repo_name).await?;
+        let accessible = crate::repo::resolve_repo_for_admin(ctx, &req.owner, repo_name).await?;
         if row.repo_id.as_deref() != Some(accessible.row.id.as_str()) {
             return Err(not_found());
         }
@@ -393,7 +395,7 @@ pub async fn delete(
             .ok_or_else(|| {
                 AppError::new("rpc.bad_input", "repo is required to delete a repo label")
             })?;
-        let accessible = crate::issue::acl::resolve_for_admin(ctx, &req.owner, repo_name).await?;
+        let accessible = crate::repo::resolve_repo_for_admin(ctx, &req.owner, repo_name).await?;
         if row.repo_id.as_deref() != Some(accessible.row.id.as_str()) {
             return Err(not_found());
         }

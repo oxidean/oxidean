@@ -466,17 +466,16 @@ pub async fn merge(ctx: &RpcCtx, input: serde_json::Value) -> Result<MergePullRe
     })
 }
 
+/// `repo.mergeSettings.get` — repo Read+; NOT gated on the pulls unit so the
+/// merge-settings panel in repository settings stays usable while pulls are
+/// disabled (COL-13).
 pub async fn merge_settings_get(
     ctx: &RpcCtx,
     input: serde_json::Value,
 ) -> Result<RepoMergeSettings, AppError> {
-    let req: RepoGetRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new(
-            "rpc.bad_input",
-            format!("invalid merge settings get: {e}"),
-        )
-    })?;
-    let accessible = acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
+    let req: RepoGetRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid merge settings get: {e}")))?;
+    let accessible = crate::repo::resolve_repo_for_read(ctx, &req.owner, &req.name).await?;
     let s = ctx
         .db
         .get_repo_merge_settings(&accessible.row.id)

@@ -759,6 +759,22 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },
+        "repo.issues.getEnabled" => match repo::issues_get_enabled(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "repo.issues.setEnabled" => match repo::issues_set_enabled(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "repo.pulls.getEnabled" => match repo::pulls_get_enabled(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "repo.pulls.setEnabled" => match repo::pulls_set_enabled(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
         "admin.actions.createRegistrationToken" => {
             match crate::actions::rpc::admin_create_registration_token(ctx, req.input).await {
                 Ok(v) => RpcResponse::ok(v),

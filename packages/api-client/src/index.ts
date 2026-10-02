@@ -401,6 +401,8 @@ export type RepoPublic = {
   fork_count?: number;
   watch_count?: number;
   viewer_is_watching?: boolean;
+  issues_enabled?: boolean;
+  pulls_enabled?: boolean;
   fork_network_id?: string | null;
   forked_from?: ForkParentSummary | null;
 };
@@ -1082,6 +1084,21 @@ export type RepoTemplateGetEnabledRequest = {
 };
 
 export type RepoTemplateEnabledResponse = {
+  enabled: boolean;
+};
+
+export type RepoUnitGetEnabledRequest = {
+  owner: string;
+  name: string;
+};
+
+export type RepoUnitSetEnabledRequest = {
+  owner: string;
+  name: string;
+  enabled: boolean;
+};
+
+export type RepoUnitEnabledResponse = {
   enabled: boolean;
 };
 
@@ -2818,6 +2835,18 @@ export function createClient(opts: CreateClientOptions) {
           rpcCall<ActionEnabledResponse>(opts, "repo.actions.getEnabled", input),
         setEnabled: (input: ActionSetEnabledRequest) =>
           rpcCall<ActionEnabledResponse>(opts, "repo.actions.setEnabled", input),
+      },
+      issues: {
+        getEnabled: (input: RepoUnitGetEnabledRequest) =>
+          rpcCall<RepoUnitEnabledResponse>(opts, "repo.issues.getEnabled", input),
+        setEnabled: (input: RepoUnitSetEnabledRequest) =>
+          rpcCall<RepoUnitEnabledResponse>(opts, "repo.issues.setEnabled", input),
+      },
+      pulls: {
+        getEnabled: (input: RepoUnitGetEnabledRequest) =>
+          rpcCall<RepoUnitEnabledResponse>(opts, "repo.pulls.getEnabled", input),
+        setEnabled: (input: RepoUnitSetEnabledRequest) =>
+          rpcCall<RepoUnitEnabledResponse>(opts, "repo.pulls.setEnabled", input),
       },
     },
     org: {

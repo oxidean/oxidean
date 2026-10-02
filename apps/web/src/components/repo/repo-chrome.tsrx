@@ -33,6 +33,10 @@ export function RepoChrome({ repo, active, showSettings = false }: RepoChromePro
   const watchCount = live.watch_count ?? 0;
   const watching = !!live.viewer_is_watching;
   const forkCount = live.fork_count ?? 0;
+  // COL-13: repo admin unit toggles hide the Issues / Pulls tabs (list
+  // endpoints may omit the flags → default enabled).
+  const issuesEnabled = live.issues_enabled !== false;
+  const pullsEnabled = live.pulls_enabled !== false;
 
   const owner = live.owner_username;
   const name = live.name;
@@ -243,30 +247,36 @@ export function RepoChrome({ repo, active, showSettings = false }: RepoChromePro
       >
         Tags
       </a>
-      <a
-        href={issuesHref as string}
-        className={navClass(active === "issues") as string}
-        aria-current={active === "issues" ? "page" : undefined}
-      >
-        Issues
-        @if ((live.open_issue_count ?? 0) > 0) {
-          <span className="ml-1 inline-flex min-w-5 items-center justify-center rounded-full bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
-            {String(live.open_issue_count)}
-          </span>;
-        }
-      </a>
-      <a
-        href={pullsHref as string}
-        className={navClass(active === "pulls") as string}
-        aria-current={active === "pulls" ? "page" : undefined}
-      >
-        Pulls
-        @if ((live.open_pull_count ?? 0) > 0) {
-          <span className="ml-1 inline-flex min-w-5 items-center justify-center rounded-full bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
-            {String(live.open_pull_count)}
-          </span>;
-        }
-      </a>
+      @if (issuesEnabled) {
+        <a
+          href={issuesHref as string}
+          className={navClass(active === "issues") as string}
+          aria-current={active === "issues" ? "page" : undefined}
+          data-testid="repo-chrome-issues"
+        >
+          Issues
+          @if ((live.open_issue_count ?? 0) > 0) {
+            <span className="ml-1 inline-flex min-w-5 items-center justify-center rounded-full bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
+              {String(live.open_issue_count)}
+            </span>;
+          }
+        </a>;
+      }
+      @if (pullsEnabled) {
+        <a
+          href={pullsHref as string}
+          className={navClass(active === "pulls") as string}
+          aria-current={active === "pulls" ? "page" : undefined}
+          data-testid="repo-chrome-pulls"
+        >
+          Pulls
+          @if ((live.open_pull_count ?? 0) > 0) {
+            <span className="ml-1 inline-flex min-w-5 items-center justify-center rounded-full bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
+              {String(live.open_pull_count)}
+            </span>;
+          }
+        </a>;
+      }
       <a
         href={releasesHref as string}
         className={navClass(active === "releases") as string}
