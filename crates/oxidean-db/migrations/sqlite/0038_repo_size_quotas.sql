@@ -1,4 +1,4 @@
--- logical: 0036_repo_size_quotas — bare-repo disk usage + git object size quota (GIT-25)
+-- logical: 0038_repo_size_quotas — bare-repo disk usage + git object size quota (GIT-25)
 ALTER TABLE repositories ADD COLUMN size_bytes INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE repositories ADD COLUMN size_quota_bytes INTEGER;
 
