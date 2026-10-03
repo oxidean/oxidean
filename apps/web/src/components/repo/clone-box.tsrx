@@ -204,6 +204,8 @@ export function CloneBox({
         <>
           <DropdownMenuItem
             onClick={() => {
+              // raw-nav-ok — /api/ archive download; the browser must stream the
+              // file, not router-commit it
               window.location.assign(zipHref);
             }}
           >
@@ -211,6 +213,8 @@ export function CloneBox({
           </DropdownMenuItem>
           <DropdownMenuItem
             onClick={() => {
+              // raw-nav-ok — /api/ archive download; the browser must stream the
+              // file, not router-commit it
               window.location.assign(tarHref);
             }}
           >

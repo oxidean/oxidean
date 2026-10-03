@@ -10,6 +10,8 @@ export async function redirectIfNeedsSetup(): Promise<boolean> {
     const status = await apiClient.auth.bootstrapStatus();
     if (status.ok && status.data.needs_setup) {
       if (window.location.pathname !== "/setup") {
+        // raw-nav-ok — boot guard runs before/outside the router; full document
+        // navigation to /setup is the intended behavior
         window.location.assign("/setup");
       }
       return true;
