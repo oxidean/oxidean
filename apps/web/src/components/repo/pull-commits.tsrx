@@ -8,6 +8,7 @@ import { List, ListRow } from "@/components/ui/list";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiClient } from "@/lib/api-client";
 import { commitHref } from "@/lib/repo-browse";
+import { AppLink } from "@/components/ui/app-link";
 
 export type PullCommitsProps = {
   owner: string;
@@ -60,12 +61,12 @@ export function PullCommits(props: PullCommitsProps) @{
           <List>
             @for (const c of commits; key c.sha) {
               <ListRow className="flex-wrap items-baseline gap-3 text-sm">
-                <a
+                <AppLink
                   href={commitHref(props.owner, props.repoName, c.sha) as string}
                   className="font-mono text-[13px] text-primary no-underline hover:underline"
                 >
                   {c.short_sha as string}
-                </a>
+                </AppLink>
                 <span className="min-w-0 flex-1 truncate font-medium">
                   {c.subject as string}
                 </span>

@@ -6,6 +6,7 @@ import { MarkdownWritePreview } from "@/components/repo/markdown-write-preview";
 import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api-client";
 import { formatRelative } from "@/lib/relative-time";
+import { AppLink } from "@/components/ui/app-link";
 
 export type PullConversationProps = {
   owner: string;
@@ -99,12 +100,12 @@ export function PullConversation(props: PullConversationProps) @{
           @for (const c of comments; key c.id) {
             <li className="rounded-md border border-border p-3">
               <div className="mb-1 flex flex-wrap items-center gap-2 text-sm">
-                <a
+                <AppLink
                   href={`/${c.author_username}` as string}
                   className="font-semibold text-foreground no-underline hover:text-primary"
                 >
                   {("@" + c.author_username) as string}
-                </a>
+                </AppLink>
                 <span
                   className="text-[12px] text-muted-foreground"
                   title={c.created_at as string}

@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+import { AppLink } from "@/components/ui/app-link";
 
 export type SettingsNavActive = "general" | "profile" | "notifications" | "tokens" | "ssh-keys";
 
@@ -38,13 +39,13 @@ export function SettingsNav({ active }: SettingsNavProps) @{
       Settings
     </p>
     @for (const link of LINKS; key link.id) {
-      <a
+      <AppLink
         href={link.href as string}
         className={linkClass(active === link.id) as string}
         aria-current={active === link.id ? "page" : undefined}
       >
         {link.label as string}
-      </a>;
+      </AppLink>;
     }
   </nav>;
 }

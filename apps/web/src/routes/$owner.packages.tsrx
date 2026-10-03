@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { List, ListRow } from "@/components/ui/list";
 import { DeleteVersionDialog } from "@/components/packages/delete-version-dialog";
+import { AppLink } from "@/components/ui/app-link";
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
 
@@ -136,12 +137,12 @@ export function OwnerPackagesPage() @{
                   <ul className="mt-2 space-y-1 text-[14px]">
                     @for (const v of pkg.versions; key v.version) {
                       <li className="flex items-center gap-3">
-                        <a
+                        <AppLink
                           className="text-foreground underline-offset-4 hover:underline"
                           href={`/${owner}/packages#${pkg.name}@${v.version}`}
                         >
                           {(pkg.name + "@" + v.version) as string}
-                        </a>
+                        </AppLink>
                         <span
                           className="text-[12px] text-muted-foreground"
                           title={v.created_at as string}

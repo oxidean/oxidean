@@ -26,5 +26,4 @@
 **Known residual debt (not blockers):**
 
 - CI omits `smoke-protection` (ORG-06 regression guard)
-- WINDOWS open_count 2 (coverage floor; CI llvm-cov skip)
 - Nyquist partial on several mid phases; Class C deferred (GlobalSearch depth, issue_comment webhook, Checks tab, follow/watch, live Railway apply)

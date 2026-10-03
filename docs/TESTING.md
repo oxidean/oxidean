@@ -214,7 +214,7 @@ Weighted forge-core gate (**D-QH-02**). Layers and weights:
 score = 0.25 * unit + 0.40 * integration + 0.35 * e2e
 ```
 
-**Initial floor:** bootstrap **`0.65`** (`COVERAGE_WEIGHTED_FLOOR` default in `scripts/coverage-weighted.sh`). Measured baseline after enabling `@vitest/coverage-v8` is ~0.68 (unit ≈61% / integration ≈45% / e2e checklist 1.0). **Ratchet target `0.70`** once integration depth and the forge e2e matrix (11.1-03) land — raise the env default and this doc together. Do not lower without an explicit residual note.
+**Floor:** **`0.70`** (`COVERAGE_WEIGHTED_FLOOR` default in `scripts/coverage-weighted.sh`, set in the `coverage-weighted` CI job). Bootstrap floor was `0.65` at a measured ~0.68 baseline; the ratchet to `0.70` landed after suites deepened (main measured ~0.73: unit ≈68% / integration ≈52% / e2e checklist 1.0). Do not lower without an explicit residual note.
 
 **E2E checklist formula (interim)**
 
@@ -242,7 +242,7 @@ Reports: `apps/web/coverage/{unit,integration}/` (`coverage-summary.json`, `lcov
 
 **Residual (this wave)**
 
-- Rust `cargo-llvm-cov` is preferred and wired as a Make target + CI install hook, but **CI does not yet fail on Rust coverage numbers** when llvm-cov is too heavy for the job budget — web unit/integration + e2e checklist drive the gate. Revisit when llvm-tools runtime is budgeted.
+- Rust `cargo-llvm-cov` runs in the `coverage-weighted` CI job as **collection only** (`var/coverage/rust-*` artifacts): the weighted gate composition is unchanged — web unit/integration + e2e checklist drive the score and **CI does not fail on Rust coverage numbers** yet. Revisit when the Rust layer joins the weighted composition.
 - Do not revive the removed Playwright component e2e project for coverage (**D-QH-03**).
 
 ## CI integration
@@ -256,15 +256,15 @@ Workflow: [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) (`name: CI`)
 | `route-coverage` | `make route-coverage-check` — every user-facing `.tsrx` page has happy-dom, stack-browser, or documented skip (G-11.1-15); change-aware: touched routes cannot stay skip-only |
 | `web-browser` | `make test-web-browser` — Vitest Chromium component DOM-race suite (`*.browser.test.tsx`) |
 | `browser-coverage` | `make browser-coverage-check` + change contract — high-risk UI (Checkbox/Radio/Select/Switch/portals/Subscribe) Chromium proof; touched/new surfaces cannot stay skip-only |
-| `coverage-weighted` | Bun install → `make coverage-contract` → `make coverage-web` → e2e checklist → `scripts/coverage-weighted.sh` (bootstrap floor `0.65`, ratchet target `0.70`); uploads `var/coverage/` + `apps/web/coverage/` on failure |
+| `coverage-weighted` | Rust toolchain (llvm-tools-preview) + `cargo-llvm-cov`/`nextest` → Bun install → `make coverage-contract` → `make coverage-rust` → `make coverage-web` → e2e checklist → `scripts/coverage-weighted.sh` (floor `0.70`); uploads `var/coverage/rust-*` always, `var/coverage/` + `apps/web/coverage/` on failure |
 | `e2e-stack` | Rust + Bun + Playwright → `make test-e2e-stack`; on failure uploads `var/e2e/` as `e2e-stack-logs` |
 | `rpc-sync` | `make rpc-sync-check` |
 | `compose` | `docker compose … config` for base, MySQL/SQLite overlays, and `docker-compose.dev-auth.yml` (config-only; does not build/bring-up) |
 | `compose-smoke` | Matrix `postgres` / `sqlite` / `mysql`: `./scripts/ci-compose-smoke.sh` → `make smoke` / `smoke-sqlite` / `smoke-mysql` (**D-CI-01…04**); fail-closed under `CI` / `SMOKE_REQUIRE_STACK`; image proof via `compose up --build` (**D-CI-06**); uploads `/tmp/oxidean-smoke*.json` on failure. Complements config-only `compose` and stays separate from `smoke-protocol` (**D-CI-05**) |
-| `smoke-protocol` | Compose up → `make smoke-git-https` + `smoke-git-ssh` + `smoke-git-lfs` + `smoke-packages` via `make smoke-protocol-ci` (**D-QH-04**); fail-closed when Docker/stack absent (`CI` / `SMOKE_REQUIRE_STACK`); default `SMOKE_SKIP_LS_REMOTE=1` / `SMOKE_SKIP_LFS_CLIENT=1` (routing + SSH TCP; no seeded-repo client) |
+| `smoke-protocol` | Compose up → seeds verified owner + public repo + PAT + session cookie via RPC (**DEBT-11**), then `make smoke-git-https` + `smoke-git-ssh` + `smoke-git-lfs` + `smoke-packages` via `make smoke-protocol-ci` (**D-QH-04**), then `smoke-protection` — ORG-06/D-PKG-03 HTTPS protected-push denial on a fresh stack it re-ups itself (**DEBT-01**); fail-closed when Docker/stack absent (`CI` / `SMOKE_REQUIRE_STACK`); live `git ls-remote` + push over HTTPS **and** SSH by default (`SMOKE_SEED_FIXTURES=0` → routing/TCP-only, `SMOKE_SKIP_LS_REMOTE` defaults back to 1); `SMOKE_SKIP_LFS_CLIENT=1` (git-lfs binary transfer still opt-in) |
 | `db-matrix` | Matrix `postgres` / `mysql` / `sqlite`: `cargo test -p oxidean-db --test dialect_probe -- --nocapture` with matching `DATABASE_URL` / `OXIDEAN_DB_DIALECT` (dialect probe only — not a substitute for Compose bring-up) |
 
-Default `web-octane` stays fast (no Docker auth stubs). True auth/email path coverage is the separate `e2e-stack` job. The `coverage-weighted` job enforces D-QH-02 without reviving component Playwright. Compose dialect health (Traefik `/` + `/health` + `system.db_probe`) is the `compose-smoke` matrix — not folded into `smoke-protocol`. Forge protocol edges (Smart HTTP / SSH TCP / LFS batch / packages PathPrefix) are the `smoke-protocol` job — not happy-dom only.
+Default `web-octane` stays fast (no Docker auth stubs). True auth/email path coverage is the separate `e2e-stack` job. The `coverage-weighted` job enforces D-QH-02 without reviving component Playwright. Compose dialect health (Traefik `/` + `/health` + `system.db_probe`) is the `compose-smoke` matrix — not folded into `smoke-protocol`. Forge protocol edges (Smart HTTP / SSH TCP / LFS batch / packages PathPrefix) plus ORG-06 protected-push denial are the `smoke-protocol` job — not happy-dom only.
 
 ### Compose dialect smokes (local + CI)
 
@@ -281,14 +281,14 @@ Oxidean Cloud (Railway IaC + Caddy gateway) is **not** exercised in PR CI — se
 
 | Target | Proves | Notes |
 |--------|--------|-------|
-| `make smoke-git-https` | Traefik `/{owner}/{repo}.git` is not SPA HTML; optional `git ls-remote` | Needs stack up; set `SMOKE_SKIP_LS_REMOTE=1` for routing-only |
-| `make smoke-git-ssh` | TCP `OXIDEAN_SSH_PORT` (2222); optional scp-style ls-remote/push | Needs SSH-enabled Compose API |
+| `make smoke-git-https` | Traefik `/{owner}/{repo}.git` is not SPA HTML; `git ls-remote` + PAT push when seeded | Needs stack up; set `SMOKE_SKIP_LS_REMOTE=1` for routing-only |
+| `make smoke-git-ssh` | TCP `OXIDEAN_SSH_PORT` (2222); scp-style `ls-remote` + `refs/heads/smoke-ssh` push when seeded (ephemeral key via `sshKey.add` + `SMOKE_SESSION_COOKIE`) | Needs SSH-enabled Compose API |
 | `make smoke-git-lfs` | `.git/info/lfs` batch routing not SPA; optional git-lfs client | `SMOKE_SKIP_LFS_CLIENT=1` for routing-only |
 | `make smoke-packages` | `/v2` `/npm` `/generic` PathPrefix → API | Needs running Compose API |
 | `make smoke-protection` | API image ships `oxidean-protection-hook`; HTTPS push to reviews-required protected branch denied (**ORG-06** / **D-PKG-03**) | Fresh Compose up (wipes volumes); `scripts/compose-smoke-protection.sh` |
-| `make smoke-protocol-ci` | All four fail-closed against a fresh Compose up | Same entrypoint as CI `smoke-protocol` |
+| `make smoke-protocol-ci` | All five fail-closed; seeds fixtures then runs live HTTPS/SSH client checks; `smoke-protection` re-ups a fresh stack (wipes volumes) to seed a repo and assert protected-push denial | Same entrypoint as CI `smoke-protocol`; `SMOKE_SEED_FIXTURES=0` for routing/TCP-only |
 
-Locally without Docker, individual `make smoke-git-*` / `smoke-packages` may skip (exit 0). Under `CI=true` or `SMOKE_REQUIRE_STACK=1`, those skips become failures.
+Locally without Docker, individual `make smoke-git-*` / `smoke-packages` / `smoke-protection` may skip (exit 0). Under `CI=true` or `SMOKE_REQUIRE_STACK=1`, those skips become failures.
 
 ## Dev-auth stubs (stack e2e)
 
@@ -300,7 +300,7 @@ See [dev-auth.md](./dev-auth.md) for interactive setup. Stack e2e depends on:
 | OIDC mock | Issuer `http://127.0.0.1:9090/default` | OIDC login without a real IdP |
 | HTTP stubs | `http://127.0.0.1:9092` | Resend `POST /emails` + WorkOS AuthKit |
 
-`e2e-stack` proves SMTP→Mailpit, Resend→stub, WorkOS stub login, and OIDC mock login over HTTP. `e2e-stack-browser` exercises signup UI, WorkOS CTA, and the D-QH-03 forge matrix (repo/packages, issues/releases, SSH keys, org members) against the live web/API in Chromium.
+`e2e-stack` proves SMTP→Mailpit, Resend→stub, WorkOS stub login, and OIDC mock login over HTTP. `e2e-stack-browser` exercises signup UI, WorkOS CTA, and the D-QH-03 forge matrix (repo/packages, issues/releases, release asset upload+download, repo Danger zone rename/transfer, SSH keys, org members) against the live web/API in Chromium.
 
 The e2e stack script also builds and attaches a native `oxidean-runner` (host execution, labels `ubuntu-latest,self-hosted`) to the API via the `OXIDEAN_RUNNER_REGISTRATION_TOKEN` bootstrap. `forge-actions-pipeline.stack.browser.test.tsx` pushes a real `.github/workflows/ci.yml` over Smart HTTP, waits for the runner to drive the run green, and asserts the run detail page streams the job log marker in Chromium.
 

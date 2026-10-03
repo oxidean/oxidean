@@ -48,6 +48,7 @@ const PAT_BROWSER = "apps/web/src/components/settings/pat-mint.browser.test.tsx"
 const UI_BROWSER = "apps/web/src/components/ui/ui-controls.browser.test.tsx";
 const SSH_BROWSER = "apps/web/src/components/settings/ssh-key-add-form.browser.test.tsx";
 const MIRROR_BROWSER = "apps/web/src/components/repo/mirror-settings-panel.browser.test.tsx";
+const WEBHOOK_FORM_BROWSER = "apps/web/src/components/repo/webhook-form.browser.test.tsx";
 
 const AUTH_UI = "apps/web/e2e/stack-browser/auth-ui.stack.browser.test.tsx";
 const FORGE_ADMIN = "apps/web/e2e/stack-browser/forge-admin.stack.browser.test.tsx";
@@ -159,9 +160,9 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
     surface: "components/repo/webhook-form.tsrx",
     coverage: [
       {
-        kind: "skip",
-        rationale:
-          "Webhook events Checkbox live behind repo settings webhooks panel; no dedicated Chromium mount yet. Add *.browser.test.tsx when webhook UI is next touched.",
+        kind: "browser",
+        test: WEBHOOK_FORM_BROWSER,
+        subject: "webhook-form",
       },
     ],
   },
@@ -169,9 +170,9 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
     surface: "components/repo/webhooks-panel.tsrx",
     coverage: [
       {
-        kind: "skip",
-        rationale:
-          "Panel hosts webhook-form; no stack-browser click-through for webhooks yet. Promote with webhook-form browser mount.",
+        kind: "browser",
+        test: WEBHOOK_FORM_BROWSER,
+        subject: "webhooks-panel",
       },
     ],
   },
@@ -261,9 +262,9 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
     surface: "routes/verify.tsrx",
     coverage: [
       {
-        kind: "skip",
-        rationale:
-          "Checkbox is secondary; happy-dom mount + auth stack covers verify. Promote to browser mount if verify gains Indicator toggles beside panels.",
+        kind: "browser",
+        test: "apps/web/src/routes/verify.browser.test.tsx",
+        subject: "VerifyPage",
       },
     ],
   },

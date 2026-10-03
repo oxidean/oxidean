@@ -24,6 +24,10 @@
 #                          (D-PKG-03); HTTPS denial there remains mandatory.
 #   SMOKE_SSH_PUSH         if 1, also push a throwaway ref (needs write + verified email)
 #
+# CI note (DEBT-11): ci-smoke-protocol.sh seeds the owner/repo + session and
+# exports SMOKE_SESSION_COOKIE + SMOKE_SSH_PUSH=1, so this script runs live
+# ls-remote/push in the smoke-protocol job (SMOKE_SEED_FIXTURES=0 → TCP only).
+#
 # Operator hosts without Docker: exits 0 with a skip message.
 # CI=true or SMOKE_REQUIRE_STACK=1 fails closed (T-11.1-40 / D-QH-04).
 set -euo pipefail
@@ -164,7 +168,7 @@ if [[ "${SMOKE_SSH_PUSH:-0}" == "1" ]]; then
   echo "smoke $(date -u +%Y%m%dT%H%M%SZ)" >"$work/SMOKE.txt"
   git -C "$work" add SMOKE.txt
   git -C "$work" commit -q -m "smoke-git-ssh"
-  GIT_TERMINAL_PROMPT=0 git -C "$work" push -q "${GIT_SSH_URL}" "HEAD:refs/heads/smoke-ssh" \
+  GIT_TERMINAL_PROMPT=0 git -C "$work" push -q "${GIT_SSH_URL}" "+HEAD:refs/heads/smoke-ssh" \
     || {
       echo "git push over SSH failed (need owner + verified email)" >&2
       exit 1

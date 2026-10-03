@@ -12,17 +12,17 @@ v1.0 shipped 2026-09-19: 24 phases, 220 plans, 87/87 requirements. Git over HTTP
 
 Deferred items recorded at milestone close. Finish these first; several are cheap and unblock later sections.
 
-- [ ] **DEBT-01** Wire `make smoke-protection` into `scripts/ci-smoke-protocol.sh` and the CI smoke job. The ORG-06 direct-push denial guard is green locally but absent from CI.
-- [ ] **DEBT-02** Raise the coverage floor from 0.65 toward ~0.70 and re-enable `cargo-llvm-cov` collection in CI (WINDOWS entries 53–54 open).
-- [ ] **DEBT-03** Sitewide GlobalSearch depth. Header search routes to `/explore?q=` today; extend to users, orgs, commits, PRs, and code.
-- [ ] **DEBT-04** `issue_comment` webhook event. The notification fan-out exists; webhook emission does not.
-- [ ] **DEBT-05** Checks / commit-status viewer tab on PR pages. Status contexts already gate merges; there is no dedicated UI to inspect them.
+- [x] **DEBT-01** Wire `make smoke-protection` into `scripts/ci-smoke-protocol.sh` and the CI smoke job. The ORG-06 direct-push denial guard is green locally but absent from CI. (#70)
+- [x] **DEBT-02** Raise the coverage floor from 0.65 toward ~0.70 and re-enable `cargo-llvm-cov` collection in CI (WINDOWS entries 53–54 open). (#63)
+- [x] **DEBT-03** Sitewide GlobalSearch depth. `search.global` returns ACL-filtered groups (repos, users, orgs, issues, PRs) plus bounded commits/code scans of the newest readable repos; `/search` renders them grouped. Indexed cross-repo code search remains SRCH-01. (#74)
+- [x] **DEBT-04** `issue_comment` webhook event. The notification fan-out exists; webhook emission does not. (#66)
+- [x] **DEBT-05** Checks / commit-status viewer tab on PR pages. Status contexts already gate merges; there is no dedicated UI to inspect them. `PullChecks` panel + Checks tab on the PR detail page. (#72)
 - [x] **DEBT-06** Watch repositories and follow users, with a per-repo notification matrix. ([#76](https://github.com/oxidean/oxidean/pull/76))
-- [ ] **DEBT-07** Live `railway config apply` operator path. Kept human-verify in v1; CI must not hold tokens.
-- [ ] **DEBT-08** Nyquist validation backfill for the not-validated phases (10–13, 16–18, 21, 22.1; 11.1 missing entirely).
-- [ ] **DEBT-09** Backfill the AUTH-07a/07b requirement rows in the phase 06 VERIFICATION table (product shipped; table orphaned).
-- [~] **DEBT-10** Admin user management in the console: list, ban, delete, role change, access view, invites. First cut in flight, not yet on `main`.
-- [ ] **DEBT-11** Deeper live smokes: git-over-SSH `ls-remote`/push depth (phase 09 caveat) and releases/rename browser UAT (phase 15 caveat).
+- [x] **DEBT-07** Live `railway config apply` operator path. Kept human-verify in v1; CI must not hold tokens. (#71)
+- [x] **DEBT-08** Nyquist validation backfill for the not-validated phases (10–13, 16–18, 21, 22.1; 11.1 missing entirely). (#73)
+- [x] **DEBT-09** Backfill the AUTH-07a/07b requirement rows in the phase 06 VERIFICATION table (product shipped; table orphaned). (#73)
+- [x] **DEBT-10** Admin user management in the console: list, ban, delete, role change, access view, invites. Shipped on `main` via `admin.users.*` RPCs and the `/admin/users` console. (#56)
+- [x] **DEBT-11** Deeper live smokes: git-over-SSH `ls-remote`/push depth (phase 09 caveat) and releases/rename browser UAT (phase 15 caveat). Seeded fixtures drive live HTTPS/SSH ls-remote+push in `smoke-protocol`; stack-browser covers release assets and Danger zone rename/transfer. (#67)
 
 ## API and integrations
 

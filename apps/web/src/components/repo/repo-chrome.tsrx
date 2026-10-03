@@ -15,6 +15,7 @@ import { apiClient } from "@/lib/api-client";
 import type { RepoChromeActive } from "@/lib/repo-chrome-active";
 import { useChromeAccountState } from "@/lib/use-chrome-account";
 import { useRepoStore } from "@/lib/repo-store";
+import { AppLink } from "@/components/ui/app-link";
 
 type RepoChromeProps = {
   repo: RepoPublic;
@@ -154,9 +155,9 @@ export function RepoChrome({ repo, active, showSettings = false }: RepoChromePro
   <div className="mb-8">
     <div data-testid="repo-header-row" className="mb-4 flex flex-wrap items-center gap-3">
       <h1 className="font-[family-name:var(--font-display)] text-[24px] font-semibold tracking-tight leading-[1.2] text-foreground">
-        <a href={"/" + owner} className="text-primary no-underline hover:underline">
+        <AppLink href={"/" + owner} className="text-primary no-underline hover:underline">
           {owner as string}
-        </a>
+        </AppLink>
         <span className="mx-1 text-muted-foreground">/</span>
         <span>{name as string}</span>
       </h1>
@@ -267,41 +268,41 @@ export function RepoChrome({ repo, active, showSettings = false }: RepoChromePro
           </>;
         } @else {
           <>
-            <a
+            <AppLink
               href={("/login?next=" + encodeURIComponent(base)) as string}
               className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-[13px] text-foreground no-underline hover:bg-muted"
             >
               <Eye aria-hidden size={14} />
               <span>Watch</span>
               <span className="text-muted-foreground">{String(watchCount)}</span>
-            </a>
-            <a
+            </AppLink>
+            <AppLink
               href={("/login?next=" + encodeURIComponent(base)) as string}
               className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-[13px] text-foreground no-underline hover:bg-muted"
             >
               <Star aria-hidden size={14} />
               <span>Star</span>
               <span className="text-muted-foreground">{String(starCount)}</span>
-            </a>
+            </AppLink>
           </>;
         }
         @if (signedIn && live.visibility === "public") {
-          <a
+          <AppLink
             href={forkHref as string}
             className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-[13px] text-foreground no-underline hover:bg-muted"
           >
             Fork
             <span className="text-muted-foreground">{String(forkCount)}</span>
-          </a>;
+          </AppLink>;
         } @else {
           @if (!signedIn) {
-            <a
+            <AppLink
               href={("/login?next=" + encodeURIComponent(forkHref)) as string}
               className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-[13px] text-foreground no-underline hover:bg-muted"
             >
               Fork
               <span className="text-muted-foreground">{String(forkCount)}</span>
-            </a>;
+            </AppLink>;
           }
         }
       </div>
@@ -309,45 +310,45 @@ export function RepoChrome({ repo, active, showSettings = false }: RepoChromePro
     @if (live.forked_from) {
       <p className="mt-2 text-[14px] text-muted-foreground">
         Forked from{" "}
-        <a
+        <AppLink
           href={("/" + live.forked_from.owner + "/" + live.forked_from.name) as string}
           className="text-primary no-underline hover:underline"
         >
           {(live.forked_from.owner + "/" + live.forked_from.name) as string}
-        </a>
+        </AppLink>
       </p>;
     }
 
     <nav className="mt-6 flex flex-wrap gap-4 border-b border-border pb-0" aria-label="Repository">
-      <a
+      <AppLink
         href={codeHref as string}
         className={navClass(active === "code") as string}
         aria-current={active === "code" ? "page" : undefined}
       >
         Code
-      </a>
-      <a
+      </AppLink>
+      <AppLink
         href={commitsHref as string}
         className={navClass(active === "commits") as string}
         aria-current={active === "commits" ? "page" : undefined}
       >
         Commits
-      </a>
-      <a
+      </AppLink>
+      <AppLink
         href={branchesHref as string}
         className={navClass(active === "branches") as string}
         aria-current={active === "branches" ? "page" : undefined}
       >
         Branches
-      </a>
-      <a
+      </AppLink>
+      <AppLink
         href={tagsHref as string}
         className={navClass(active === "tags") as string}
         aria-current={active === "tags" ? "page" : undefined}
       >
         Tags
-      </a>
-      <a
+      </AppLink>
+      <AppLink
         href={issuesHref as string}
         className={navClass(active === "issues") as string}
         aria-current={active === "issues" ? "page" : undefined}
@@ -358,8 +359,8 @@ export function RepoChrome({ repo, active, showSettings = false }: RepoChromePro
             {String(live.open_issue_count)}
           </span>;
         }
-      </a>
-      <a
+      </AppLink>
+      <AppLink
         href={pullsHref as string}
         className={navClass(active === "pulls") as string}
         aria-current={active === "pulls" ? "page" : undefined}
@@ -370,37 +371,37 @@ export function RepoChrome({ repo, active, showSettings = false }: RepoChromePro
             {String(live.open_pull_count)}
           </span>;
         }
-      </a>
-      <a
+      </AppLink>
+      <AppLink
         href={releasesHref as string}
         className={navClass(active === "releases") as string}
         aria-current={active === "releases" ? "page" : undefined}
       >
         Releases
-      </a>
-      <a
+      </AppLink>
+      <AppLink
         href={packagesHref as string}
         className={navClass(active === "packages") as string}
         aria-current={active === "packages" ? "page" : undefined}
       >
         Packages
-      </a>
-      <a
+      </AppLink>
+      <AppLink
         href={actionsHref as string}
         className={navClass(active === "actions") as string}
         aria-current={active === "actions" ? "page" : undefined}
         data-testid="repo-chrome-actions"
       >
         Actions
-      </a>
+      </AppLink>
       @if (settingsVisible) {
-        <a
+        <AppLink
           href={settingsHref as string}
           className={navClass(active === "settings") as string}
           aria-current={active === "settings" ? "page" : undefined}
         >
           Settings
-        </a>;
+        </AppLink>;
       }
     </nav>
   </div>;

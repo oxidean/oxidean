@@ -19,6 +19,7 @@ import {
   actionsRerunRunMutation,
   actionsRunDetailQuery,
 } from "@/lib/actions-queries";
+import { AppLink } from "@/components/ui/app-link";
 
 /** Map a workflow run/job status to a status Badge variant. */
 function runStatusVariant(status: string): "success" | "destructive" | "primary" | "default" {
@@ -179,13 +180,13 @@ export function RepoActionsRunPage() @{
   @{
     <div data-testid="repo-actions-run">
       <p className="mb-4">
-        <a
+        <AppLink
           href={`/${owner}/${repoName}/actions` as string}
           className="inline-flex items-center gap-1 text-[13px] text-muted-foreground no-underline hover:text-foreground hover:underline"
         >
           <ArrowLeft aria-hidden size={14} />
           Actions
-        </a>
+        </AppLink>
       </p>
       @if (detailQ.isPending && routeLoader?.kind !== "not_found") {
         <>

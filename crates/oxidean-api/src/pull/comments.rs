@@ -11,6 +11,7 @@ use crate::auth::gate::require_verified;
 use crate::notify;
 use crate::pull::acl;
 use crate::rpc::RpcCtx;
+use crate::webhook::dispatch;
 
 use super::{db_err, load_pull_in_repo, validate_body};
 
@@ -179,6 +180,42 @@ pub async fn comments_create(
         .filter(|m| !participant_set.contains(m))
         .collect();
     notify::fanout_suppress_ignored(&ctx.db, &user.id, mention_only, "pr_mention", &subject).await;
+    // GitHub parity (DEBT-04): `issue_comment` covers PR conversation comments;
+    // line-anchored comments map to `pull_request_review_comment` instead.
+    if row.path.is_none() {
+        let state = if pull.state == "merged" {
+            "closed"
+        } else {
+            pull.state.as_str()
+        };
+        let payload = dispatch::issue_comment_payload(
+            "created",
+            pull.number,
+            &pull.title,
+            &pull.body,
+            state,
+            true,
+            &row.id,
+            &row.body,
+            None,
+            &user.username,
+            &user.id,
+            &accessible.owner_username,
+            &accessible.row.name,
+            &accessible.row.id,
+            &user.username,
+            &user.id,
+        );
+        dispatch::emit(
+            &ctx.db,
+            &accessible.row.id,
+            "issue_comment",
+            "created",
+            payload,
+            &ctx.env_name,
+        )
+        .await;
+    }
     comment_to_public(ctx, &row).await
 }
 

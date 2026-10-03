@@ -2,6 +2,7 @@ import type { RepoActivityItem } from "@oxidean/api-client";
 import { commitHref } from "@/lib/repo-browse";
 import { formatRelativeUpdated } from "@/lib/relative-time";
 import { ListRow } from "@/components/ui/list";
+import { AppLink } from "@/components/ui/app-link";
 
 function relativeActivityTime(iso: string): string {
   return formatRelativeUpdated(iso).replace(/^Updated\s+/i, "");
@@ -56,7 +57,7 @@ export function RepoActivityRow(props: RepoActivityRowProps) @{
   const commitCountLabel = item.commits_count > 1 ? `${String(item.commits_count)} commits` : "";
 
   <ListRow className="items-start gap-3 py-3">
-    <a
+    <AppLink
       href={item.pusher.path as string}
       className="inline-flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full border border-border bg-muted text-[11px] font-semibold text-foreground no-underline"
       title={item.pusher.login as string}
@@ -72,26 +73,26 @@ export function RepoActivityRow(props: RepoActivityRowProps) @{
           {initial as string}
         </span>;
       }
-    </a>
+    </AppLink>
     <div className="min-w-0 flex-1 text-[14px] leading-5">
       <div className="text-foreground">
-        <a
+        <AppLink
           href={item.pusher.path as string}
           className="font-semibold text-foreground no-underline hover:underline"
         >
           {item.pusher.login as string}
-        </a>
+        </AppLink>
         <span className="text-muted-foreground">{" " + action}</span>
       </div>
       @if (item.commit_message) {
         <div className="mt-0.5 truncate text-[13px] text-muted-foreground">
           @if (showCommitLink) {
-            <a
+            <AppLink
               href={commitHref(owner, repoName, item.after) as string}
               className="text-primary no-underline hover:underline"
             >
               {item.commit_message as string}
-            </a>;
+            </AppLink>;
           } @else {
             <span>{item.commit_message as string}</span>;
           }

@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+import { AppLink } from "@/components/ui/app-link";
 
 export type OrgSettingsNavActive = "general" | "members" | "labels";
 
@@ -29,13 +30,13 @@ export function OrgSettingsNav({ slug, active }: OrgSettingsNavProps) @{
       Organization
     </p>
     @for (const link of links; key link.id) {
-      <a
+      <AppLink
         href={link.href as string}
         className={linkClass(active === link.id) as string}
         aria-current={active === link.id ? "page" : undefined}
       >
         {link.label as string}
-      </a>;
+      </AppLink>;
     }
   </nav>;
 }

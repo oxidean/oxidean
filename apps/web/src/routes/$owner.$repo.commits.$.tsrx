@@ -14,6 +14,7 @@ import { apiClient } from "@/lib/api-client";
 import { commitHref } from "@/lib/repo-browse";
 import { formatRelativeUpdated } from "@/lib/relative-time";
 import { fetchRepoCommits, fetchRepoGet } from "@/lib/ssr-repo";
+import { AppLink } from "@/components/ui/app-link";
 
 export type CommitsLoaderData =
   | { kind: "not_found" }
@@ -216,20 +217,20 @@ export function RepoCommitsPage() @{
           <List className="mt-6">
             @for (const c of phase.commits; key c.sha) {
               <ListRow className="flex-wrap items-baseline gap-x-4 gap-y-1">
-                <a
+                <AppLink
                   href={commitHref(owner, repoName, c.sha) as string}
                   className="font-mono text-[13px] text-primary no-underline hover:underline"
                   title={c.sha as string}
                 >
                   {c.short_sha as string}
-                </a>
-                <a
+                </AppLink>
+                <AppLink
                   href={commitHref(owner, repoName, c.sha) as string}
                   className="min-w-0 flex-1 truncate text-[15px] font-medium text-foreground no-underline hover:underline"
                   title={c.subject as string}
                 >
                   {c.subject as string}
-                </a>
+                </AppLink>
                 <CommitVerifiedBadge
                   status={c.signature_status}
                   kind={c.signature_kind}

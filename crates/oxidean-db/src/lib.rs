@@ -30,6 +30,7 @@ pub mod webhooks;
 pub mod repo_activity;
 pub mod repo_collaborators;
 pub mod repositories;
+pub mod search;
 pub mod sessions;
 pub mod ssh_keys;
 pub mod gpg_keys;
@@ -68,6 +69,10 @@ pub use releases::{ReleaseAssetRow, ReleaseRow};
 pub use repo_activity::RepoActivityRow;
 pub use repo_collaborators::{
     RepoCollaboratorGrantRow, RepoCollaboratorListRow, RepoCollaboratorRow,
+};
+pub use search::{
+    GlobalIssueHitRow, GlobalOrgHitRow, GlobalPullHitRow, GlobalRepoHitRow, GlobalUserHitRow,
+    ScanRepoRow,
 };
 pub use stars::{ForkListSort, RepoForkListRow, RepoStargazerListRow};
 pub use follows::UserFollowListRow;
@@ -912,6 +917,92 @@ impl Database {
         limit: i64,
     ) -> Result<Vec<RepositoryRow>, String> {
         stars::list_explore(self.require_pool()?, q, offset, limit).await
+    }
+
+    // ── Sitewide search (`search.global`, DEBT-03) ─────────────────────────
+    //
+    // All repo-scoped queries apply the viewer-visibility predicate (public +
+    // owned/collaborator/org-readable) inside `search.rs` — same policy as
+    // `repo::acl::effective_capability` Read.
+
+    pub async fn search_global_repositories(
+        &self,
+        viewer_user_id: Option<&str>,
+        q: &str,
+        offset: i64,
+        limit: i64,
+    ) -> Result<(Vec<GlobalRepoHitRow>, i64), String> {
+        search::search_repositories(self.require_pool()?, viewer_user_id, q, offset, limit).await
+    }
+
+    pub async fn search_global_issues(
+        &self,
+        viewer_user_id: Option<&str>,
+        q: Option<&str>,
+        state: Option<&str>,
+        author_id: Option<&str>,
+        offset: i64,
+        limit: i64,
+    ) -> Result<(Vec<GlobalIssueHitRow>, i64), String> {
+        search::search_issues(
+            self.require_pool()?,
+            viewer_user_id,
+            q,
+            state,
+            author_id,
+            offset,
+            limit,
+        )
+        .await
+    }
+
+    pub async fn search_global_pulls(
+        &self,
+        viewer_user_id: Option<&str>,
+        q: Option<&str>,
+        state: Option<&str>,
+        author_id: Option<&str>,
+        offset: i64,
+        limit: i64,
+    ) -> Result<(Vec<GlobalPullHitRow>, i64), String> {
+        search::search_pulls(
+            self.require_pool()?,
+            viewer_user_id,
+            q,
+            state,
+            author_id,
+            offset,
+            limit,
+        )
+        .await
+    }
+
+    /// Caller must gate on a verified session (anti-enumeration).
+    pub async fn search_global_users(
+        &self,
+        q: &str,
+        offset: i64,
+        limit: i64,
+    ) -> Result<(Vec<GlobalUserHitRow>, i64), String> {
+        search::search_users(self.require_pool()?, q, offset, limit).await
+    }
+
+    pub async fn search_global_orgs(
+        &self,
+        q: &str,
+        offset: i64,
+        limit: i64,
+    ) -> Result<(Vec<GlobalOrgHitRow>, i64), String> {
+        search::search_orgs(self.require_pool()?, q, offset, limit).await
+    }
+
+    /// Bounded candidate set for the cross-repo commits/code git scans.
+    pub async fn list_global_scan_repos(
+        &self,
+        viewer_user_id: Option<&str>,
+        limit: i64,
+    ) -> Result<Vec<ScanRepoRow>, String> {
+        search::list_scan_repos(self.require_pool()?, viewer_user_id, limit).await
     }
 
     pub async fn find_repository_by_owner_name(

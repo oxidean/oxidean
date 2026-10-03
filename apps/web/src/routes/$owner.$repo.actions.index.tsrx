@@ -21,6 +21,7 @@ import {
   actionsWorkflowsQuery,
 } from "@/lib/actions-queries";
 import { cn } from "@/lib/utils";
+import { AppLink } from "@/components/ui/app-link";
 
 /** Map a workflow run status to a status Badge variant. */
 function runStatusVariant(status: string): "success" | "destructive" | "primary" | "default" {
@@ -245,12 +246,12 @@ export function RepoActionsPage() @{
                   <ListRow className="gap-3">
                     <RunStatusIcon status={run.status} />
                     <div className="min-w-0 flex-1">
-                      <a
+                      <AppLink
                         href={`/${owner}/${repoName}/actions/${run.id}` as string}
                         className="block truncate font-medium text-foreground no-underline hover:text-primary hover:underline"
                       >
                         {run.title as string}
-                      </a>
+                      </AppLink>
                       <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[12px] text-muted-foreground">
                         <span>{run.workflow_name as string}</span>
                         <span aria-hidden>·</span>

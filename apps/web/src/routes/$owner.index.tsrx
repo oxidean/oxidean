@@ -17,6 +17,7 @@ import { fetchOrgOverview, type OrgOverviewPayload } from "@/lib/ssr-org";
 import { fetchUserProfile, type UserProfilePayload } from "@/lib/ssr-user-profile";
 import { useChromeAccountState } from "@/lib/use-chrome-account";
 import { cn } from "@/lib/utils";
+import { AppLink } from "@/components/ui/app-link";
 
 export type OwnerIndexLoaderData =
   | { kind: "org"; org: OrgOverviewPayload }
@@ -90,24 +91,24 @@ export function OrgOverviewPage() @{
         </div>
         @if (canAdmin) {
           <div className="flex flex-wrap gap-2">
-            <a
+            <AppLink
               href={`/${slug}/settings`}
               className={cn(buttonVariants({ variant: "secondary" }), "h-11")}
             >
               Settings
-            </a>
-            <a
+            </AppLink>
+            <AppLink
               href={`/${slug}/settings/members`}
               className={cn(buttonVariants({ variant: "outline" }), "h-11")}
             >
               Members
-            </a>
-            <a
+            </AppLink>
+            <AppLink
               href={`/${slug}/settings/labels`}
               className={cn(buttonVariants({ variant: "outline" }), "h-11")}
             >
               Labels
-            </a>
+            </AppLink>
           </div>;
         }
       </div>
@@ -319,14 +320,14 @@ export function UserProfilePage() @{
                     className="mt-0.5 shrink-0 text-muted-foreground"
                   />
                   <div className="min-w-0 flex-1">
-                    <a
+                    <AppLink
                       href={
                         ("/" + repo.owner_username + "/" + repo.name) as string
                       }
                       className="text-[16px] font-semibold text-primary no-underline hover:underline"
                     >
                       {(repo.owner_username + "/" + repo.name) as string}
-                    </a>
+                    </AppLink>
                     @if (
                       repo.description?.trim()
                     ) {
@@ -353,12 +354,12 @@ export function UserProfilePage() @{
               }
               action={
                 isSelf ? (
-                  <a
+                  <AppLink
                     href="/new"
                     className={cn(buttonVariants({ variant: "default", size: "sm" }))}
                   >
                     New repository
-                  </a>
+                  </AppLink>
                 ) : undefined
               }
             />;

@@ -28,6 +28,7 @@ import { languagePercent } from "@/lib/language-bar";
 import { useRepoStore } from "@/lib/repo-store";
 import { safeExternalHttpUrl } from "@/lib/safe-external-url";
 import { toastError, toastSuccess } from "@/lib/toast";
+import { AppLink } from "@/components/ui/app-link";
 
 type RepoAboutSidebarProps = {
   repo: RepoPublic;
@@ -221,6 +222,9 @@ export function RepoAboutSidebar({
             </p>;
           }
           @if (homeHref) {
+            {
+              /* raw-anchor-ok — external homepage URL */
+            }
             <a
               href={homeHref as string}
               className="inline-flex max-w-full items-center gap-1.5 truncate text-[12px] text-primary no-underline hover:underline"
@@ -256,48 +260,51 @@ export function RepoAboutSidebar({
         data-testid="repo-about-social"
       >
         @if (hasReadme) {
+          {
+            /* raw-anchor-ok — same-page #readme hash anchor */
+          }
           <a href="#readme" className={META_ROW as string}>
             <BookOpen aria-hidden size={16} className="shrink-0" />
             <span>Readme</span>
           </a>;
         }
         @if (licenseHref) {
-          <a href={licenseHref as string} className={META_ROW as string}>
+          <AppLink href={licenseHref as string} className={META_ROW as string}>
             <Scale aria-hidden size={16} className="shrink-0" />
             <span>{licenseText as string}</span>
-          </a>;
+          </AppLink>;
         }
         @if (contributingHref) {
-          <a href={contributingHref as string} className={META_ROW as string}>
+          <AppLink href={contributingHref as string} className={META_ROW as string}>
             <User aria-hidden size={16} className="shrink-0" />
             <span>Contributing</span>
-          </a>;
+          </AppLink>;
         }
         @if (showActivity) {
-          <a href={activityHrefResolved as string} className={META_ROW as string}>
+          <AppLink href={activityHrefResolved as string} className={META_ROW as string}>
             <Activity aria-hidden size={16} className="shrink-0" />
             <span>Activity</span>
-          </a>;
+          </AppLink>;
         }
         @if (canWrite) {
-          <a href={(base + "/stargazers") as string} className={META_ROW as string}>
+          <AppLink href={(base + "/stargazers") as string} className={META_ROW as string}>
             <Star aria-hidden size={16} className="shrink-0" />
             <span>{starLabel as string}</span>
-          </a>;
+          </AppLink>;
         } @else {
           <span className={META_ROW_PLAIN as string}>
             <Star aria-hidden size={16} className="shrink-0" />
             <span>{starLabel as string}</span>
           </span>;
         }
-        <a href={(base + "/watchers") as string} className={META_ROW as string}>
+        <AppLink href={(base + "/watchers") as string} className={META_ROW as string}>
           <Eye aria-hidden size={16} className="shrink-0" />
           <span>{watchLabel as string}</span>
-        </a>
-        <a href={(base + "/forks") as string} className={META_ROW as string}>
+        </AppLink>
+        <AppLink href={(base + "/forks") as string} className={META_ROW as string}>
           <GitFork aria-hidden size={16} className="shrink-0" />
           <span>{forkLabel as string}</span>
-        </a>
+        </AppLink>
       </div>
     </section>
 
@@ -309,31 +316,31 @@ export function RepoAboutSidebar({
       </h2>
       @if (latestRelease) {
         <>
-          <a
+          <AppLink
             href={
               (base + "/releases/" + encodeURIComponent(latestRelease.tag_name)) as string
             }
             className="text-[14px] text-primary no-underline hover:underline"
           >
             {(latestRelease.title || latestRelease.tag_name) as string}
-          </a>
-          <a
+          </AppLink>
+          <AppLink
             href={(base + "/releases") as string}
             className="text-[12px] text-muted-foreground no-underline hover:text-foreground hover:underline"
           >
             View all releases
-          </a>
+          </AppLink>
         </>;
       } @else {
         <>
           <p className="text-[12px] text-muted-foreground">No releases published</p>
           @if (canWrite) {
-            <a
+            <AppLink
               href={(base + "/releases/new") as string}
               className="text-[12px] text-primary no-underline hover:underline"
             >
               Create a new release
-            </a>;
+            </AppLink>;
           }
         </>;
       }
@@ -354,30 +361,30 @@ export function RepoAboutSidebar({
               </li>;
             }
           </ul>
-          <a
+          <AppLink
             href={(base + "/packages") as string}
             className="text-[12px] text-muted-foreground no-underline hover:text-foreground hover:underline"
           >
             View packages
-          </a>
+          </AppLink>
         </>;
       } @else {
         <>
           <p className="text-[12px] text-muted-foreground">No packages published</p>
           @if (canWrite) {
-            <a
+            <AppLink
               href={(base + "/packages") as string}
               className="text-[12px] text-primary no-underline hover:underline"
             >
               Publish your first package
-            </a>;
+            </AppLink>;
           } @else {
-            <a
+            <AppLink
               href={(base + "/packages") as string}
               className="text-[12px] text-muted-foreground no-underline hover:text-foreground hover:underline"
             >
               View packages
-            </a>;
+            </AppLink>;
           }
         </>;
       }
@@ -406,7 +413,7 @@ export function RepoAboutSidebar({
             <li className="flex min-w-0 items-center gap-2">
               @if (c.username) {
                 <>
-                  <a
+                  <AppLink
                     href={("/" + c.username) as string}
                     className="inline-flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full border border-border bg-muted text-[11px] font-semibold text-foreground no-underline"
                     title={
@@ -430,14 +437,14 @@ export function RepoAboutSidebar({
                         {c.display_name.slice(0, 1).toUpperCase() as string}
                       </span>;
                     }
-                  </a>
+                  </AppLink>
                   <div className="min-w-0 truncate text-[12px] leading-5">
-                    <a
+                    <AppLink
                       href={("/" + c.username) as string}
                       className="font-semibold text-foreground no-underline hover:underline"
                     >
                       {c.username as string}
-                    </a>
+                    </AppLink>
                     @if (
                       c.display_name &&
                       c.display_name !== c.username
@@ -521,9 +528,23 @@ export function RepoAboutSidebar({
                   }}
                   aria-hidden
                 />
-                <span className="truncate font-semibold text-foreground">
-                  {lang.name as string}
-                </span>
+                @if (lang.name === "Other") {
+                  <span className="truncate font-semibold text-foreground">
+                    {lang.name as string}
+                  </span>;
+                } @else {
+                  <AppLink
+                    href={
+                      (base +
+                        "/search?q=" +
+                        encodeURIComponent("language:" + lang.name) +
+                        "&type=code") as string
+                    }
+                    className="truncate font-semibold text-foreground no-underline hover:text-link hover:underline"
+                  >
+                    {lang.name as string}
+                  </AppLink>;
+                }
                 <span className="shrink-0 text-muted-foreground">
                   {languagePercent(Number(lang.bytes), langTotal) as string}
                 </span>

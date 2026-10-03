@@ -14,6 +14,7 @@ import type { HighlightedDiffLine } from "@/lib/highlight-diff";
 import { compareHref, shortRefName } from "@/lib/repo-browse";
 import { ssrHighlightDiffFiles } from "@/lib/ssr-diff-highlight";
 import { fetchRepoCompare, fetchRepoGet, fetchRepoRefs } from "@/lib/ssr-repo";
+import { AppLink } from "@/components/ui/app-link";
 
 export type CompareLoaderData =
   | { kind: "not_found" }
@@ -241,7 +242,7 @@ export function RepoComparePage() @{
           !phase.compare.empty &&
           phase.repo.can_write
         ) {
-          <a
+          <AppLink
             className="no-underline"
             href={
               `/${owner}/${repoName}/pulls/new?base=${encodeURIComponent(phase.base)}&head=${encodeURIComponent(phase.head)}` as string
@@ -250,7 +251,7 @@ export function RepoComparePage() @{
             <Button type="button" variant="outline">
               Create pull request
             </Button>
-          </a>;
+          </AppLink>;
         }
       </div>
       @if (!phase.compare) {

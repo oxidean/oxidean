@@ -2,6 +2,7 @@ import { createFileRoute, useLoaderData } from "@octanejs/tanstack-router";
 import type { RepoPublic, UserPublic, WatchLevel } from "@oxidean/api-client";
 import { useEffect, useState } from "octane";
 import { AccountSettingsLayout, SettingsShell } from "@/components/settings/settings-shell";
+import { AppLink } from "@/components/ui/app-link";
 import { EmptyState } from "@/components/ui/empty-state";
 import { List, ListRow } from "@/components/ui/list";
 import { apiClient } from "@/lib/api-client";
@@ -189,12 +190,12 @@ export function NotificationsSettingsPage() @{
               @for (const repo of repos ?? []; key repo.id) {
                 <ListRow className="items-center gap-4 py-4">
                   <div className="min-w-0 flex-1">
-                    <a
+                    <AppLink
                       href={("/" + repo.owner_username + "/" + repo.name) as string}
                       className="text-[15px] font-semibold text-primary no-underline hover:underline"
                     >
                       {(repo.owner_username + "/" + repo.name) as string}
-                    </a>
+                    </AppLink>
                     <p className="mt-0.5 text-[13px] text-muted-foreground">
                       {
                         (LEVELS.find((l) => l.value === levelOf(repo))?.hint ??
