@@ -138,6 +138,9 @@ export const Route = createFileRoute("/$owner/$repo/activity")({
       },
     ],
   }),
+  // Loader consumes ?period/?type — loaderDeps keeps the match id search-aware
+  // so filter navigations refetch instead of reusing stale loaderData.
+  loaderDeps: ({ search }) => search,
   loader: async ({ params, location }): Promise<ActivityLoaderData> => {
     const owner = String((params as { owner?: string }).owner ?? "");
     const repoName = String((params as { repo?: string }).repo ?? "");

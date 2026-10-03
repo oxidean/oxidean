@@ -72,6 +72,9 @@ export const Route = createFileRoute("/$owner/$repo/stargazers")({
       },
     ],
   }),
+  // Loader consumes ?q — loaderDeps keeps the match id search-aware so a
+  // search-only navigation refetches instead of reusing stale loaderData.
+  loaderDeps: ({ search }) => search,
   loader: async ({ params, location }): Promise<StargazersLoaderData> => {
     const owner = String((params as { owner?: string }).owner ?? "");
     const repoName = String((params as { repo?: string }).repo ?? "");

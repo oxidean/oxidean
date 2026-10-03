@@ -48,6 +48,9 @@ export type ExploreLoaderData = { repos: RepoPublic[]; q: string };
 export const Route = createFileRoute("/explore")({
   component: ExplorePage,
   head: () => ({ meta: [{ title: "Explore · Oxidean" }] }),
+  // Loader consumes ?q — loaderDeps keeps the match id search-aware so a
+  // search-only navigation refetches instead of reusing stale loaderData.
+  loaderDeps: ({ search }) => search,
   loader: async ({ location }): Promise<ExploreLoaderData> => {
     const q = new URLSearchParams(location.searchStr.replace(/^\?/, "")).get("q") ?? "";
     return fetchExplore({ data: { q } });

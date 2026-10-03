@@ -3,15 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithQueryClient } from "@/test/render-with-query";
 
 const searchMock = vi.fn();
-const getMock = vi.fn();
 
-vi.mock("@/lib/api-client", () => ({
-  apiClient: {
-    repo: {
-      get: (...args: unknown[]) => getMock(...args),
-      search: (...args: unknown[]) => searchMock(...args),
-    },
-  },
+vi.mock("@/lib/ssr-repo", () => ({
+  fetchRepoSearch: (opts: { data: unknown }) => searchMock(opts.data),
 }));
 
 const navigateMock = vi.fn();
@@ -32,7 +26,6 @@ import { RepoSearchPage } from "./$owner.$repo.search";
 afterEach(() => {
   cleanup();
   searchMock.mockReset();
-  getMock.mockReset();
   navigateMock.mockReset();
   searchState = { q: "UNIQUE_HIT", type: "code" };
 });
@@ -52,9 +45,11 @@ beforeEach(() => {
           path: "src/needle.txt",
           line: 2,
           content: "UNIQUE_HIT line",
+          html: '<pre class="shiki" data-language="text"><code><span style="color:#cf222e">UNIQUE_HIT line</span></code></pre>',
         },
       ],
     },
+    highlightTheme: "oxidean-light",
   });
 });
 
@@ -104,6 +99,7 @@ describe("repo search route (GIT-18 / D-SRCH-02 / D-SRCH-15)", () => {
         limit: 30,
         hits: [],
       },
+      highlightTheme: "oxidean-light",
     });
     cleanup();
     renderWithQueryClient(RepoSearchPage);
@@ -125,6 +121,7 @@ describe("repo search route (GIT-18 / D-SRCH-02 / D-SRCH-15)", () => {
           { kind: "code", path: "crates/lib.rs", line: 0, content: "" },
         ],
       },
+      highlightTheme: "oxidean-light",
     });
     renderWithQueryClient(RepoSearchPage);
     const link = await screen.findByText("src/main.rs");

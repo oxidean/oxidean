@@ -4,6 +4,12 @@ import type { ComponentProps } from "octane";
 type AppLinkProps = ComponentProps<"a"> & {
   /** Preload behavior; defaults to "intent" (hover/focus/touch). */
   preload?: "intent" | "viewport" | "render" | false;
+  /**
+   * Router active-state control, forwarded to Link. Pass `{ exact: true }` for
+   * same-path destinations that differ only in search/hash (e.g. tab bars) —
+   * the default fuzzy match would otherwise mark every variant active.
+   */
+  activeOptions?: { exact?: boolean; includeSearch?: boolean; includeHash?: boolean };
 };
 
 /**
@@ -49,7 +55,13 @@ function splitInternalHref(
  * downloads, `#` same-page anchors, and `/api/` endpoints that are not
  * router routes.
  */
-export function AppLink({ href, preload, children, ...rest }: AppLinkProps) @{
+export function AppLink({
+  href,
+  preload,
+  activeOptions,
+  children,
+  ...rest
+}: AppLinkProps) @{
   const router = useRouter({ warn: false });
   const dest = splitInternalHref(typeof href === "string" ? href : undefined);
   <>
@@ -59,6 +71,7 @@ export function AppLink({ href, preload, children, ...rest }: AppLinkProps) @{
         search={router.options.parseSearch(dest.search) as Record<string, unknown>}
         hash={dest.hash}
         preload={preload ?? "intent"}
+        activeOptions={activeOptions}
         {...rest}
       >
         {children}

@@ -16,6 +16,7 @@ type LoaderShape = {
   q: string;
   type: string;
   offset: number;
+  highlightTheme?: string | null;
   results: {
     q: string;
     repositories: Group<Record<string, unknown>>;
@@ -52,15 +53,36 @@ vi.mock("@octanejs/tanstack-router", async (importOriginal) => {
   };
 });
 
-import { SearchPage } from "./search";
+import { Route, SearchPage } from "./search";
 
 afterEach(cleanup);
+
+describe("/search route options", () => {
+  // Match ids ignore search params unless loaderDeps declares them — without
+  // it every /search?… variant shares one match and search-only tab clicks
+  // keep showing the previous params' loaderData until a second click forces
+  // a reload (scripts/check-loader-deps.ts enforces the same rule).
+  it("declares loaderDeps keyed on the full search object", () => {
+    const deps = (Route as unknown as { loaderDeps: (o: { search: unknown }) => unknown })
+      .loaderDeps;
+    expect(typeof deps).toBe("function");
+    const overview = deps({ search: { q: "kernel" } });
+    const code = deps({ search: { q: "kernel", type: "code" } });
+    const paged = deps({ search: { q: "kernel", type: "code", offset: 20 } });
+    expect(overview).toEqual({ q: "kernel" });
+    expect(code).not.toEqual(overview);
+    expect(paged).not.toEqual(code);
+  });
+});
 
 beforeEach(() => {
   loaderData = {
     q: "kernel",
     type: "overview",
     offset: 0,
+    // happy-dom has no `dark` class → clientHighlightTheme() = oxidean-light,
+    // so SSR markup sticks and the client highlighter is never invoked.
+    highlightTheme: "oxidean-light",
     results: {
       ...emptyResults,
       repositories: group(
@@ -135,6 +157,7 @@ beforeEach(() => {
             path: "src/sched.rs",
             line: 42,
             content: "fn kernel_main() {}",
+            html: '<pre class="shiki" data-language="rust"><code><span style="color:#cf222e">fn</span> kernel_main() {}</code></pre>',
           },
         ],
         1,
@@ -184,6 +207,12 @@ describe("/search overview", () => {
       "href",
       "/ada/kernel/blob/src/sched.rs",
     );
+
+    // Code hits render the SSR Shiki markup on first paint (no client upgrade).
+    const snippet = document.querySelector("pre[data-language='rust']");
+    expect(snippet).toBeInTheDocument();
+    expect(snippet?.textContent).toContain("fn kernel_main()");
+    expect(snippet?.querySelector("span[style*='color']")).not.toBeNull();
 
     // Users + orgs.
     expect(screen.getByRole("link", { name: "@ada" })).toHaveAttribute("href", "/ada");

@@ -26,6 +26,8 @@ import {
   Users,
 } from "@octanejs/lucide";
 import { CodeSnippet } from "@/components/code-snippet";
+import { highlightCode, languageIdForPath, type HighlightTheme } from "@/lib/highlight";
+import { ssrHighlightTheme } from "@/lib/ssr-auth";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -68,11 +70,21 @@ function parseType(raw: string | null | undefined): TabId {
   return "overview";
 }
 
+/** Code hit carrying pre-rendered Shiki HTML when the server highlighted it. */
+export type HighlightedCodeHit = GlobalSearchCodeHit & { html?: string };
+
+/** GlobalSearchResponse with code hits optionally carrying SSR Shiki HTML. */
+type SearchResults = Omit<GlobalSearchResponse, "code"> & {
+  code: GlobalSearchGroup<HighlightedCodeHit>;
+};
+
 type SearchLoaderData = {
   q: string;
   type: TabId;
   offset: number;
-  results: GlobalSearchResponse | null;
+  results: SearchResults | null;
+  /** Theme used for SSR-highlighted code hits (null → not highlighted server-side). */
+  highlightTheme: HighlightTheme | null;
   error: string | null;
   signedIn: boolean;
 };
@@ -102,7 +114,7 @@ const fetchSearch = createServerFn({ method: "GET" })
     const signedIn = me.ok;
 
     if (!q) {
-      return { q, type, offset, results: null, error: null, signedIn };
+      return { q, type, offset, results: null, highlightTheme: null, error: null, signedIn };
     }
 
     const res = await client.search.global({
@@ -114,9 +126,52 @@ const fetchSearch = createServerFn({ method: "GET" })
       limit: type === "overview" ? OVERVIEW_LIMIT : TAB_LIMIT,
     });
     if (!res.ok) {
-      return { q, type, offset, results: null, error: res.error.message, signedIn };
+      return {
+        q,
+        type,
+        offset,
+        results: null,
+        highlightTheme: null,
+        error: res.error.message,
+        signedIn,
+      };
     }
-    return { q, type, offset, results: res.data, error: null, signedIn };
+
+    // Highlight code hits server-side so first paint ships Shiki markup — the
+    // client highlighter (which eagerly loads ~100 grammars) only ever runs on
+    // a theme flip. Same SSR-then-upgrade pattern as the blob viewer.
+    const codeHits = res.data.code.hits;
+    if (codeHits.length === 0) {
+      return { q, type, offset, results: res.data, highlightTheme: null, error: null, signedIn };
+    }
+    const hits = codeHits.map((hit): HighlightedCodeHit => ({ ...hit }));
+    let highlightTheme: HighlightTheme | null = null;
+    try {
+      const theme = ssrHighlightTheme();
+      const htmls = await Promise.all(
+        hits.map(async (hit) => {
+          try {
+            return await highlightCode(hit.content, {
+              lang: languageIdForPath(hit.path),
+              theme,
+            });
+          } catch {
+            return undefined;
+          }
+        }),
+      );
+      hits.forEach((hit, i) => {
+        hit.html = htmls[i];
+      });
+      highlightTheme = theme;
+    } catch {
+      highlightTheme = null;
+    }
+    const results: SearchResults = {
+      ...res.data,
+      code: { ...res.data.code, hits },
+    };
+    return { q, type, offset, results, highlightTheme, error: null, signedIn };
   });
 
 export const Route = createFileRoute("/search")({
@@ -127,6 +182,12 @@ export const Route = createFileRoute("/search")({
       meta: [{ title: q ? `Search · ${q} · Oxidean` : "Search · Oxidean" }],
     };
   },
+  // The loader's output depends on location.search — without loaderDeps all
+  // /search?… URLs share one match id, so search-only navigations keep serving
+  // the previous match's loaderData (tab clicks appear to do nothing until a
+  // second click forces a reload). Hashing search into the match gives each
+  // query/type/offset combination its own loaderData and preload slot.
+  loaderDeps: ({ search }) => search,
   loader: async ({ location }): Promise<SearchLoaderData> => {
     const params = new URLSearchParams(location.searchStr.replace(/^\?/, ""));
     return fetchSearch({
@@ -355,7 +416,13 @@ function CommitRow({ hit }: { hit: GlobalSearchCommitHit }) @{
   </ListRow>;
 }
 
-function CodeRow({ hit }: { hit: GlobalSearchCodeHit }) @{
+function CodeRow({
+  hit,
+  highlightTheme,
+}: {
+  hit: HighlightedCodeHit;
+  highlightTheme: HighlightTheme | null;
+}) @{
   <ListRow className="block px-4 py-3">
     <AppLink
       href={("/" + hit.repo_owner + "/" + hit.repo_name + "/blob/" + hit.path) as string}
@@ -366,7 +433,12 @@ function CodeRow({ hit }: { hit: GlobalSearchCodeHit }) @{
     <span className="font-mono text-[13px] text-muted-foreground">
       {(":" + hit.line) as string}
     </span>
-    <CodeSnippet code={hit.content} path={hit.path} />
+    <CodeSnippet
+      code={hit.content}
+      path={hit.path}
+      highlightedHtml={hit.html ?? null}
+      highlightTheme={highlightTheme}
+    />
   </ListRow>;
 }
 
@@ -484,6 +556,7 @@ export function SearchPage() @{
           href={tabHref(q0, tab.id) as string}
           className={tabClass(type === tab.id) as string}
           aria-current={type === tab.id ? "page" : undefined}
+          activeOptions={{ exact: true }}
         >
           {tab.label as string}
           @if (badge) {
@@ -596,7 +669,10 @@ export function SearchPage() @{
                 />
                 <List className="mt-2">
                   @for (const hit of codeG.hits; key codeKey(hit)) {
-                    <CodeRow hit={hit} />;
+                    <CodeRow
+                      hit={hit}
+                      highlightTheme={data?.highlightTheme ?? null}
+                    />;
                   }
                 </List>
                 <p className="mt-2 text-[12px] text-muted-foreground">
@@ -703,7 +779,10 @@ export function SearchPage() @{
                 }
                 @if (type === "code") {
                   @for (const hit of codeG?.hits ?? []; key codeKey(hit)) {
-                    <CodeRow hit={hit} />;
+                    <CodeRow
+                      hit={hit}
+                      highlightTheme={data?.highlightTheme ?? null}
+                    />;
                   }
                 }
                 @if (type === "users") {

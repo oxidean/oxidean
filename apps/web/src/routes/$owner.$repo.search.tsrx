@@ -1,8 +1,9 @@
 import { createFileRoute, useNavigate, useParams, useSearch } from "@octanejs/tanstack-router";
 import { useQuery } from "@octanejs/tanstack-query";
 import { useState } from "octane";
-import type { RepoSearchHit, RepoSearchType } from "@oxidean/api-client";
-import { apiClient } from "@/lib/api-client";
+import type { RepoSearchType } from "@oxidean/api-client";
+import type { HighlightTheme } from "@/lib/highlight";
+import { fetchRepoSearch, type SsrRepoSearchHit } from "@/lib/ssr-repo";
 import { CodeSnippet } from "@/components/code-snippet";
 import { AppLink } from "@/components/ui/app-link";
 
@@ -33,7 +34,7 @@ function parseType(raw: string | undefined): RepoSearchType {
   }
 }
 
-function hitKey(hit: RepoSearchHit): string {
+function hitKey(hit: SsrRepoSearchHit): string {
   switch (hit.kind) {
     case "code":
       return `code-${hit.path}-${hit.line}`;
@@ -75,20 +76,18 @@ export function RepoSearchPage() @{
   const searchQ = useQuery({
     queryKey: ["repo", "search", owner, repoName, typeParam, qParam] as const,
     queryFn: async () => {
-      const res = await apiClient.repo.search({
-        owner,
-        name: repoName,
-        type: typeParam,
-        q: qParam,
+      const res = await fetchRepoSearch({
+        data: { owner, name: repoName, type: typeParam, q: qParam },
       });
       if (!res.ok) throw new Error(res.error.message || NETWORK_ERROR);
-      return res.data;
+      return res;
     },
     enabled: !!owner && !!repoName,
   });
 
-  const hits: RepoSearchHit[] = searchQ.data?.hits ?? [];
-  const truncated = searchQ.data?.truncated ?? false;
+  const hits: SsrRepoSearchHit[] = searchQ.data?.data?.hits ?? [];
+  const truncated = searchQ.data?.data?.truncated ?? false;
+  const highlightTheme: HighlightTheme | null = searchQ.data?.highlightTheme ?? null;
 
   function go(next: { q?: string; type?: RepoSearchType }) {
     void navigate({
@@ -195,7 +194,12 @@ export function RepoSearchPage() @{
                     <span className="text-muted-foreground">
                       :{String(hit.line)}
                     </span>;
-                    <CodeSnippet code={hit.content} path={hit.path} />;
+                    <CodeSnippet
+                      code={hit.content}
+                      path={hit.path}
+                      highlightedHtml={hit.html ?? null}
+                      highlightTheme={highlightTheme}
+                    />;
                   }
                 </li>;
               } @else {

@@ -79,6 +79,9 @@ export const Route = createFileRoute("/$owner/$repo/forks")({
       },
     ],
   }),
+  // Loader consumes ?q/?sort — loaderDeps keeps the match id search-aware so
+  // filter navigations refetch instead of reusing stale loaderData.
+  loaderDeps: ({ search }) => search,
   loader: async ({ params, location }): Promise<ForksLoaderData> => {
     const owner = String((params as { owner?: string }).owner ?? "");
     const repoName = String((params as { repo?: string }).repo ?? "");
