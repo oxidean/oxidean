@@ -16,6 +16,9 @@ vi.mock("@octanejs/tanstack-router", () => ({
     ),
   useNavigate: () => () => undefined,
   useParams: () => ({}),
+  // No RouterProvider — useAppNavigate must see "no router" and fall back to
+  // location.assign (spied on in tests below).
+  useRouter: () => undefined,
 }));
 
 vi.mock("@/lib/api-client", () => ({

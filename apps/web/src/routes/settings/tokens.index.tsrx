@@ -3,15 +3,17 @@ import type { PatListItem, UserPublic } from "@oxidean/api-client";
 import { useEffect, useState } from "octane";
 import { ChevronDown } from "@octanejs/lucide";
 import { PatList } from "@/components/settings/pat-list";
+import { SettingsPageSkeleton } from "@/components/page-skeletons";
 import { AccountSettingsLayout, SettingsShell } from "@/components/settings/settings-shell";
 import { buttonVariants } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
+  DropdownMenuLinkItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { apiClient } from "@/lib/api-client";
+import { useAppNavigate } from "@/lib/app-navigate";
 import { fetchPatList, fetchSessionMe } from "@/lib/ssr-auth";
 import { cn } from "@/lib/utils";
 
@@ -59,12 +61,13 @@ type Phase =
 /** Exported for tokens.integration.test.ts (GIT-11 / D-14). */
 export function TokensPage() @{
   const loaderData = useLoaderData({ from: "/settings/tokens/" }) as TokensLoaderData | undefined;
+  const navigateApp = useAppNavigate();
 
   useEffect(() => {
     if (loaderData?.kind === "unauthenticated") {
-      window.location.assign("/login?returnTo=/settings/tokens");
+      void navigateApp("/login?returnTo=/settings/tokens");
     }
-  }, [loaderData]);
+  }, [loaderData, navigateApp]);
 
   const [phase, setPhase] = useState<Phase>(() => {
     if (loaderData?.kind === "ready") {
@@ -104,7 +107,7 @@ export function TokensPage() @{
         const res = await apiClient.auth.me();
         if (cancelled) return;
         if (!res.ok) {
-          window.location.assign("/login?returnTo=/settings/tokens");
+          void navigateApp("/login?returnTo=/settings/tokens");
           return;
         }
         const listRes = await apiClient.pat.list();
@@ -131,7 +134,9 @@ export function TokensPage() @{
   const verified = phase.kind === "ready" ? phase.user.email_verified === true : false;
 
   @if (phase.kind === "loading") {
-    <></>;
+    <AccountSettingsLayout active="tokens">
+      <SettingsPageSkeleton />
+    </AccountSettingsLayout>;
   } @else {
     @if (phase.kind === "error") {
       <SettingsShell bare>
@@ -163,20 +168,10 @@ export function TokensPage() @{
               <ChevronDown aria-hidden size={16} />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="min-w-48">
-              <DropdownMenuItem
-                onClick={() => {
-                  window.location.assign("/settings/tokens/new");
-                }}
-              >
-                Classic token
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => {
-                  window.location.assign("/settings/tokens/new/fine-grained");
-                }}
-              >
+              <DropdownMenuLinkItem href="/settings/tokens/new">Classic token</DropdownMenuLinkItem>
+              <DropdownMenuLinkItem href="/settings/tokens/new/fine-grained">
                 Fine-grained token
-              </DropdownMenuItem>
+              </DropdownMenuLinkItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>

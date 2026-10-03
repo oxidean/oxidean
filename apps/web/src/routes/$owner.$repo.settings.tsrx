@@ -185,7 +185,10 @@ export function RepoSettingsPage() @{
       setTransferPending(false);
       setTransferOpen(false);
       toastSuccess("Repository transferred.");
-      window.location.assign(`/${nextOwner}/${nextName}/settings`);
+      await navigate({
+        to: "/$owner/$repo/settings",
+        params: { owner: nextOwner, repo: nextName },
+      });
     } catch {
       setTransferError(NETWORK_ERROR);
       setTransferPending(false);
@@ -209,7 +212,7 @@ export function RepoSettingsPage() @{
       }
       setDeletePending(false);
       setDeleteOpen(false);
-      window.location.assign("/");
+      await navigate({ to: "/" });
     } catch {
       setDeleteError(NETWORK_ERROR);
       setDeletePending(false);

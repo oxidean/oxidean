@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { apiClient } from "@/lib/api-client";
+import { useAppNavigate } from "@/lib/app-navigate";
 import { networkErrorMessage, rpcErrorMessage } from "@/lib/rpc-error-message";
 import { readReturnToFromLocation, safeReturnTo } from "@/lib/return-to";
 import { fetchSessionMe } from "@/lib/ssr-auth";
@@ -36,6 +37,7 @@ export const Route = createFileRoute("/setup/credentials")({
 
 /** Exported for AUTH-06 integration tests (Keep password Switch + default username). */
 export function CredentialsPage() @{
+  const navigateApp = useAppNavigate();
   const [ready, setReady] = useState(false);
   const [error, setError] = useState("");
 
@@ -86,16 +88,18 @@ export function CredentialsPage() @{
           ) {
             setError(`${res.error.message}. Fix the highlighted fields and try again.`);
           } else if (code === "auth.credentials_not_required") {
-            window.location.assign(safeReturnTo(readReturnToFromLocation()));
+            void navigateApp(safeReturnTo(readReturnToFromLocation()));
             return;
           } else if (code === "auth.unauthenticated") {
-            window.location.assign(`/login?returnTo=${encodeURIComponent("/setup/credentials")}`);
+            void navigateApp(`/login?returnTo=${encodeURIComponent("/setup/credentials")}`);
             return;
           } else {
             setError(rpcErrorMessage(res.error));
           }
           return;
         }
+        // raw-nav-ok — post-auth: credential change may rotate/revoke the
+        // session; reload re-establishes auth state app-wide atomically
         window.location.assign(safeReturnTo(readReturnToFromLocation()));
       } catch {
         setError(NETWORK_ERROR);
@@ -110,11 +114,11 @@ export function CredentialsPage() @{
         const me = await apiClient.auth.me();
         if (cancelled) return;
         if (!me.ok) {
-          window.location.assign(`/login?returnTo=${encodeURIComponent("/setup/credentials")}`);
+          void navigateApp(`/login?returnTo=${encodeURIComponent("/setup/credentials")}`);
           return;
         }
         if (!me.data.must_change_credentials) {
-          window.location.assign(safeReturnTo(readReturnToFromLocation()));
+          void navigateApp(safeReturnTo(readReturnToFromLocation()));
           return;
         }
         form.setFieldValue("email", me.data.email);
@@ -129,7 +133,7 @@ export function CredentialsPage() @{
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [navigateApp]);
 
   <AuthShell
     title="Confirm admin account"

@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiClient } from "@/lib/api-client";
+import { useAppNavigate } from "@/lib/app-navigate";
 import { AppLink } from "@/components/ui/app-link";
 
 export const Route = createFileRoute("/invites/$token")({
@@ -63,6 +64,7 @@ export function InviteAcceptPage() @{
   const [phase, setPhase] = useState<Phase>({ kind: "loading" });
   const [invite, setInvite] = useState<InvitesGetResponse | null>(null);
   const [error, setError] = useState("");
+  const navigateApp = useAppNavigate();
 
   const acceptForm = useForm({
     defaultValues: {},
@@ -174,13 +176,20 @@ export function InviteAcceptPage() @{
         }
         return;
       }
+      const wasLoggedIn = phase.kind === "logged-in";
       setPhase({ kind: "done", accept: res.data });
-      if (res.data.kind === "org") {
-        window.location.assign(`/${res.data.org.slug}`);
-      } else if (res.data.kind === "repo") {
-        window.location.assign(`/${res.data.owner}/${res.data.name}`);
+      const href =
+        res.data.kind === "org"
+          ? `/${res.data.org.slug}`
+          : res.data.kind === "repo"
+            ? `/${res.data.owner}/${res.data.name}`
+            : "/";
+      if (wasLoggedIn) {
+        void navigateApp(href);
       } else {
-        window.location.assign("/");
+        // raw-nav-ok — anonymous accept may mint a session cookie; the reload
+        // re-establishes auth state app-wide (chrome, authMe cache) atomically
+        window.location.assign(href);
       }
     } catch {
       setError(NETWORK_ERROR);

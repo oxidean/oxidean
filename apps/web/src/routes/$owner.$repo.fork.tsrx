@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiClient } from "@/lib/api-client";
+import { useAppNavigate } from "@/lib/app-navigate";
 import { fetchSessionMe } from "@/lib/ssr-auth";
 import { fetchRepoGet } from "@/lib/ssr-repo";
 
@@ -67,6 +68,7 @@ export function ForkConfirmPage() @{
   const [name, setName] = useState(source?.name ?? params.repo ?? "");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const navigateApp = useAppNavigate();
 
   const sourceLabel = source
     ? `${source.owner_username}/${source.name}`
@@ -94,7 +96,7 @@ export function ForkConfirmPage() @{
         return;
       }
       const dest = res.data;
-      window.location.assign(`/${dest.owner_username}/${dest.name}`);
+      void navigateApp(`/${dest.owner_username}/${dest.name}`);
     } catch {
       setError("Can't reach Oxidean. Check your connection and try again.");
     } finally {

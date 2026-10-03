@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiClient } from "@/lib/api-client";
+import { useAppNavigate } from "@/lib/app-navigate";
 import { readReturnToFromLocation, safeReturnTo } from "@/lib/return-to";
 import { fetchProviderConfig, fetchSessionMe } from "@/lib/ssr-auth";
 import { AppLink } from "@/components/ui/app-link";
@@ -65,6 +66,7 @@ export const Route = createFileRoute("/signup")({
 
 /** Exported for AUTH-05 integration tests (no invite UI). */
 export function SignupPage() @{
+  const navigateApp = useAppNavigate();
   const data = useLoaderData({ from: "/signup" }) as SignupLoaderData | undefined;
   const mode = data?.mode ?? "local";
   const loadError = data?.loadError ?? "";
@@ -98,7 +100,7 @@ export function SignupPage() @{
           else if (code === "auth.reserved_username") setError(RESERVED_ERROR);
           else if (code === "auth.setup_required") {
             setError(SETUP_ERROR);
-            window.location.assign("/setup");
+            void navigateApp("/setup");
             return;
           } else if (
             code === "auth.invalid_username" ||
@@ -111,6 +113,8 @@ export function SignupPage() @{
           }
           return;
         }
+        // raw-nav-ok — post-auth: signup just minted the session cookie; reload
+        // re-establishes auth state app-wide (chrome, authMe cache) atomically
         window.location.assign(safeReturnTo(returnTo));
       } catch {
         setError(NETWORK_ERROR);
@@ -120,6 +124,8 @@ export function SignupPage() @{
 
   function startSso(kind: "workos" | "oidc") {
     const path = kind === "workos" ? "/api/auth/workos/start" : "/api/auth/oidc/start";
+    // raw-nav-ok — /api/ SSO handshake endpoint; the IdP round-trip is a
+    // full-document flow, not an app route
     window.location.assign(`${path}?returnTo=${encodeURIComponent(returnTo)}`);
   }
 

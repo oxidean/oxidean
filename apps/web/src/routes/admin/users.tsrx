@@ -25,6 +25,7 @@ import {
 } from "@octanejs/lucide";
 import { useEffect, useState } from "octane";
 import { AvatarPreview } from "@/components/avatar-preview";
+import { SettingsPageSkeleton } from "@/components/page-skeletons";
 import { AdminSettingsLayout, SettingsShell } from "@/components/settings/settings-shell";
 import {
   AlertDialog,
@@ -60,9 +61,15 @@ import { Textarea } from "@/components/ui/textarea";
 import { List, ListHeader, ListRow } from "@/components/ui/list";
 import { PageHeader } from "@/components/ui/page-header";
 import { apiClient } from "@/lib/api-client";
+import { useAppNavigate } from "@/lib/app-navigate";
 import { formatRelative } from "@/lib/relative-time";
 import { authSessionQueryOptions, setAuthMeCache } from "@/lib/session-queries";
-import { fetchAdminInvitesList, fetchAdminUsersList, fetchSessionMe } from "@/lib/ssr-auth";
+import {
+  fetchAdminInvitesList,
+  fetchAdminUsersList,
+  fetchSessionMe,
+  requireSessionRedirect,
+} from "@/lib/ssr-auth";
 import { toastSuccess, toastWarning } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { AppLink } from "@/components/ui/app-link";
@@ -397,6 +404,7 @@ function formatShortDate(iso: string): string {
 export const Route = createFileRoute("/admin/users")({
   component: AdminUsersPage,
   head: () => ({ meta: [{ title: "Users · Oxidean" }] }),
+  beforeLoad: () => requireSessionRedirect("/admin/users"),
   loader: async (): Promise<AdminUsersLoaderData> => {
     try {
       const meRes = await fetchSessionMe();
@@ -449,6 +457,7 @@ export const Route = createFileRoute("/admin/users")({
 /** Exported for admin/users integration tests. */
 export function AdminUsersPage() @{
   const queryClient = useQueryClient();
+  const navigateApp = useAppNavigate();
   const loaderData = useLoaderData({ from: "/admin/users" }) as AdminUsersLoaderData | undefined;
 
   const [searchDraft, setSearchDraft] = useState("");
@@ -482,7 +491,7 @@ export function AdminUsersPage() @{
 
   useEffect(() => {
     if (loaderData?.kind === "unauthenticated") {
-      window.location.assign("/login?returnTo=/admin/users");
+      void navigateApp("/login?returnTo=/admin/users");
       return;
     }
     if (loaderData?.kind === "ready") {
@@ -490,7 +499,7 @@ export function AdminUsersPage() @{
       queryClient.setQueryData(usersQueryKey("", 0), loaderData.users);
       queryClient.setQueryData(invitesQueryKey, loaderData.invites);
     }
-  }, [loaderData, queryClient]);
+  }, [loaderData, queryClient, navigateApp]);
 
   const me = useQuery({
     ...authSessionQueryOptions(),
@@ -535,9 +544,9 @@ export function AdminUsersPage() @{
     if (me.isPending) return;
     if (me.isError) return;
     if (me.data === null) {
-      window.location.assign("/login?returnTo=/admin/users");
+      void navigateApp("/login?returnTo=/admin/users");
     }
-  }, [loaderData, me.isPending, me.isError, me.data]);
+  }, [loaderData, me.isPending, me.isError, me.data, navigateApp]);
 
   async function refreshUsers() {
     await queryClient.invalidateQueries({ queryKey: ["admin", "users", "list"] });
@@ -853,7 +862,9 @@ export function AdminUsersPage() @{
               : "Confirm";
 
   @if (!sessionKnown) {
-    <></>;
+    <AdminSettingsLayout active="users">
+      <SettingsPageSkeleton />
+    </AdminSettingsLayout>;
   } @else {
     @if (signedOut) {
       <SettingsShell bare>

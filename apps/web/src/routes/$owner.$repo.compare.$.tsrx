@@ -11,6 +11,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { HighlightTheme } from "@/lib/highlight";
 import type { HighlightedDiffLine } from "@/lib/highlight-diff";
+import { useAppNavigate } from "@/lib/app-navigate";
 import { compareHref, shortRefName } from "@/lib/repo-browse";
 import { ssrHighlightDiffFiles } from "@/lib/ssr-diff-highlight";
 import { fetchRepoCompare, fetchRepoGet, fetchRepoRefs } from "@/lib/ssr-repo";
@@ -179,12 +180,12 @@ export function RepoComparePage() @{
     };
   }, [owner, repoName, parsed.base, parsed.head, loaderData, params._splat]);
 
+  const navigateApp = useAppNavigate();
+
   function goCompare() {
     const b = baseDraft.trim() || "main";
     const h = headDraft.trim() || "main";
-    if (typeof window !== "undefined") {
-      window.location.href = compareHref(owner, repoName, b, h);
-    }
+    void navigateApp(compareHref(owner, repoName, b, h));
   }
 
   @if (phase.kind === "not_found") {

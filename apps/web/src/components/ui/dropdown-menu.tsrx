@@ -1,6 +1,7 @@
 import { Menu as MenuPrimitive } from "@octanejs/base-ui/menu";
 import type { ComponentProps } from "octane";
 import { cn } from "@/lib/utils";
+import { AppLink } from "@/components/ui/app-link";
 
 export function DropdownMenu(props: ComponentProps<typeof MenuPrimitive.Root>) @{
   <MenuPrimitive.Root data-slot="dropdown-menu" {...props} />;
@@ -56,6 +57,34 @@ export function DropdownMenuItem({
     )}
     {...props}
   />;
+}
+
+/**
+ * Menu item rendered as a real anchor — internal navigation goes through
+ * <AppLink> (client-side routing + intent preload) so picking a menu item no
+ * longer full-reloads the app. `closeOnClick` is forced: LinkItem defaults to
+ * false because an anchor click does not necessarily mean "done".
+ */
+export function DropdownMenuLinkItem({
+  className,
+  href,
+  children,
+  ...props
+}: ComponentProps<typeof MenuPrimitive.LinkItem>) @{
+  <MenuPrimitive.LinkItem
+    data-slot="dropdown-menu-item"
+    className={cn(
+      "flex h-11 cursor-default select-none items-center gap-2 rounded-sm px-2 text-[14px] font-normal no-underline outline-none",
+      "data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground",
+      "data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+      className,
+    )}
+    {...props}
+    closeOnClick
+    render={<AppLink href={href as string} />}
+  >
+    {children}
+  </MenuPrimitive.LinkItem>;
 }
 
 export function DropdownMenuSeparator({

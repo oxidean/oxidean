@@ -29,6 +29,7 @@ Before editing UI under `apps/web`:
 3. Author components in **`.tsrx`** with `function Comp() @{ … }`, `@if` / `@else` (no `@else if`), `@for`, native `onInput` for text fields.
 4. Never mix `return (` JSX with Rivet `@{` / `@if` in the same component — that breaks exports/hydration.
 5. Server domain data: **TanStack Query** (`@octanejs/tanstack-query`) via `apps/web/src/lib/session-queries.ts` and friends. Forms: **`@octanejs/tanstack-form`** (`useForm` / `form.Field`, text via `onInput` + `field.handleChange`). File uploads: **`@octanejs/dropzone`** via `apps/web/src/components/ui/file-dropzone.tsrx` (does not upload — callers own `FormData`/`fetch`). Local ephemeral UI state may still use `useState`. Do not add Zustand for server/session data.
+6. Internal navigation: `<AppLink>` for links, `useAppNavigate()` (`apps/web/src/lib/app-navigate.ts`) for imperative hops. Raw `window.location.assign` / `location.href` are full reloads — only for session transitions, `/api/` downloads, or non-router code; mark keeps `// raw-nav-ok` (`scripts/check-internal-nav.ts` runs under `make web-lint`).
 
 ## Hard boundaries
 

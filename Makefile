@@ -318,6 +318,7 @@ web-lint:
 	bun run --filter @oxidean/web lint
 	bun run scripts/check-octane-dom-races.ts
 	bun run scripts/check-internal-anchors.ts
+	bun run scripts/check-internal-nav.ts
 	bun run scripts/check-loader-deps.ts
 
 web-format-check:

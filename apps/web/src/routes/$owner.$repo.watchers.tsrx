@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { List, ListRow } from "@/components/ui/list";
 import { PageHeader } from "@/components/ui/page-header";
 import { apiClient } from "@/lib/api-client";
+import { useAppNavigate } from "@/lib/app-navigate";
 import { socialListHref } from "@/lib/repo-social-lists";
 import type { RepoLayoutLoaderData } from "@/lib/repo-store";
 import { fetchRepoGet, fetchRepoWatchers } from "@/lib/ssr-repo";
@@ -96,6 +97,7 @@ export function RepoWatchersPage() @{
   const errorMessage = data?.kind === "error" ? data.message : "";
   const ready = data?.kind === "ready" ? data : null;
   const [q, setQ] = useState(ready?.q ?? "");
+  const navigateApp = useAppNavigate();
   const [watchers, setWatchers] = useState(ready?.watchers ?? []);
   const [offset, setOffset] = useState(ready?.offset ?? 0);
   const [total, setTotal] = useState(ready?.total ?? 0);
@@ -154,7 +156,7 @@ export function RepoWatchersPage() @{
               className="flex w-full gap-2 sm:w-auto"
               onSubmit={(e) => {
                 e.preventDefault();
-                window.location.assign(socialListHref(base, { q }));
+                navigateApp(socialListHref(base, { q }));
               }}
             >
               <div className="relative flex-1 sm:w-72">

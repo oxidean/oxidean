@@ -1,3 +1,4 @@
+import { redirect } from "@octanejs/tanstack-router";
 import { createServerFn, createServerOnlyFn } from "@octanejs/tanstack-start";
 import { getRequestHeader } from "@octanejs/tanstack-start/server";
 import { createClient, type OxideanClient, type RepoPublic } from "@oxidean/api-client";
@@ -49,6 +50,26 @@ export const fetchSessionMe = createServerFn({ method: "GET" }).handler(async ()
   const client = createSsrClient(incomingCookie());
   return client.auth.me();
 });
+
+/**
+ * Route `beforeLoad` auth gate — throws `redirect("/login?returnTo=…")` when
+ * the session cookie doesn't resolve. Runs in SSR and during client-side
+ * navigations (fetchSessionMe is a server fn), so gated pages redirect before
+ * their loader/component renders — replaces useEffect + location.assign gates,
+ * which rendered a blank shell while redirecting.
+ */
+export async function requireSessionRedirect(returnTo: string): Promise<void> {
+  try {
+    const me = await fetchSessionMe();
+    if (!me.ok && me.error.code === "auth.unauthenticated") {
+      throw redirect({ href: `/login?returnTo=${returnTo}` });
+    }
+  } catch (e) {
+    if (e && typeof e === "object" && "href" in e) throw e;
+    // Transport/other errors fall through: the route loader renders its own
+    // error state instead of bouncing an API outage to /login.
+  }
+}
 
 /** SSR: repo.createDefaults for /new visibility + catalogs (D-02, D-08). */
 export const fetchRepoCreateDefaults = createServerFn({ method: "GET" }).handler(async () => {

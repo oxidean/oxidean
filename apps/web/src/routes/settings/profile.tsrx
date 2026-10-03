@@ -5,14 +5,16 @@ import type { EmailListItem, UserPublic } from "@oxidean/api-client";
 import { useEffect, useState } from "octane";
 import { AccountEmailsSection } from "@/components/settings/account-emails-section";
 import { ProfileAvatarField } from "@/components/settings/profile-avatar-field";
+import { SettingsPageSkeleton } from "@/components/page-skeletons";
 import { AccountSettingsLayout, SettingsShell } from "@/components/settings/settings-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { apiClient } from "@/lib/api-client";
+import { useAppNavigate } from "@/lib/app-navigate";
 import { setAuthMeCache } from "@/lib/session-queries";
-import { fetchEmailList, fetchUserGetProfile } from "@/lib/ssr-auth";
+import { fetchEmailList, fetchUserGetProfile, requireSessionRedirect } from "@/lib/ssr-auth";
 import { toastError, toastSuccess, toastWarning } from "@/lib/toast";
 
 export type ProfileLoaderData =
@@ -26,6 +28,7 @@ const BIO_MAX = 160;
 export const Route = createFileRoute("/settings/profile")({
   component: ProfilePage,
   head: () => ({ meta: [{ title: "Account · Oxidean" }] }),
+  beforeLoad: () => requireSessionRedirect("/settings/profile"),
   loader: async (): Promise<ProfileLoaderData> => {
     try {
       const res = await fetchUserGetProfile();
@@ -60,13 +63,14 @@ type Phase =
 /** Exported for profile.integration.test.ts (RESEARCH P1 / D-QH-03). */
 export function ProfilePage() @{
   const queryClient = useQueryClient();
+  const navigateApp = useAppNavigate();
   const loaderData = useLoaderData({ from: "/settings/profile" }) as ProfileLoaderData | undefined;
 
   useEffect(() => {
     if (loaderData?.kind === "unauthenticated") {
-      window.location.assign("/login?returnTo=/settings/profile");
+      void navigateApp("/login?returnTo=/settings/profile");
     }
-  }, [loaderData]);
+  }, [loaderData, navigateApp]);
 
   const initialUser = loaderData?.kind === "ready" ? loaderData.user : null;
 
@@ -152,7 +156,7 @@ export function ProfilePage() @{
         const res = await apiClient.user.getProfile();
         if (cancelled) return;
         if (!res.ok) {
-          window.location.assign("/login?returnTo=/settings/profile");
+          void navigateApp("/login?returnTo=/settings/profile");
           return;
         }
         const listRes = await apiClient.email.list();
@@ -253,7 +257,9 @@ export function ProfilePage() @{
   }
 
   @if (phase.kind === "loading") {
-    <></>;
+    <AccountSettingsLayout active="profile">
+      <SettingsPageSkeleton />
+    </AccountSettingsLayout>;
   } @else {
     @if (phase.kind === "error") {
       <SettingsShell bare>

@@ -205,6 +205,8 @@ function TagRow({
         variant="outline"
         size="sm"
         onClick={() => {
+          // raw-nav-ok — /api/ archive download; the browser must stream the
+          // file, not router-commit it
           window.location.assign(zipHref);
         }}
       >
@@ -216,6 +218,8 @@ function TagRow({
         variant="outline"
         size="sm"
         onClick={() => {
+          // raw-nav-ok — /api/ archive download; the browser must stream the
+          // file, not router-commit it
           window.location.assign(tarHref);
         }}
       >

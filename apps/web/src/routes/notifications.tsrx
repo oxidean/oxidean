@@ -9,6 +9,7 @@ import { List, ListRow } from "@/components/ui/list";
 import { PageHeader } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiClient } from "@/lib/api-client";
+import { useAppNavigate } from "@/lib/app-navigate";
 import {
   invalidateNotificationQueries,
   notificationListQueryOptions,
@@ -39,6 +40,7 @@ export const Route = createFileRoute("/notifications")({
 /** Exported for integration tests (NOTF-02 / D-09 / D-12). */
 export function NotificationsPage() @{
   const qc = useQueryClient();
+  const navigateApp = useAppNavigate();
   const [filter, setFilter] = useState<"unread" | "all">("unread");
   const [offset, setOffset] = useState(0);
   const listQ = useQuery(notificationListQueryOptions(filter, offset));
@@ -61,7 +63,7 @@ export function NotificationsPage() @{
       await apiClient.notification.markRead({ ids: [n.id] });
       invalidateNotificationQueries(qc);
     }
-    window.location.assign(subjectHref(n));
+    navigateApp(subjectHref(n));
   }
 
   <div className="mx-auto max-w-3xl px-4 py-10">

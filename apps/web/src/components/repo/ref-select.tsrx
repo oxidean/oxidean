@@ -13,6 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useAppNavigate } from "@/lib/app-navigate";
 import { shortRefName, treeHref } from "@/lib/repo-browse";
 
 type RefSelectProps = {
@@ -42,13 +43,15 @@ export function RefSelect({
   const current =
     unique.find((o) => o.value === value) ?? ({ value, label: value, full: value } as const);
 
+  const navigateApp = useAppNavigate();
+
   function navigate(next: string) {
     if (mode === "home" || !pathUnderRef) {
-      window.location.assign(treeHref(owner, repo, next, ""));
+      navigateApp(treeHref(owner, repo, next, ""));
       return;
     }
     if (mode === "blob") {
-      window.location.assign(
+      navigateApp(
         `/${owner}/${repo}/blob/${encodeURIComponent(next)}/${pathUnderRef
           .split("/")
           .map(encodeURIComponent)
@@ -56,7 +59,7 @@ export function RefSelect({
       );
       return;
     }
-    window.location.assign(treeHref(owner, repo, next, pathUnderRef));
+    navigateApp(treeHref(owner, repo, next, pathUnderRef));
   }
 
   <SelectRoot

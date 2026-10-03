@@ -23,8 +23,9 @@ import {
   DEFAULT_OWNER_QUOTA_LABEL,
   packageFormatLabel,
 } from "@/lib/package-quota-copy";
+import { useAppNavigate } from "@/lib/app-navigate";
 import { authSessionQueryOptions, setAuthMeCache } from "@/lib/session-queries";
-import { fetchSessionMe } from "@/lib/ssr-auth";
+import { fetchSessionMe, requireSessionRedirect } from "@/lib/ssr-auth";
 import { toastError, toastSuccess, toastWarning } from "@/lib/toast";
 import { AppLink } from "@/components/ui/app-link";
 
@@ -40,6 +41,7 @@ const FORBIDDEN = "You need admin access to manage package storage.";
 export const Route = createFileRoute("/admin/packages")({
   component: AdminPackagesPage,
   head: () => ({ meta: [{ title: "Package storage · Oxidean" }] }),
+  beforeLoad: () => requireSessionRedirect("/admin/packages"),
   loader: async (): Promise<AdminGateLoader> => {
     try {
       const meRes = await fetchSessionMe();
@@ -80,17 +82,18 @@ export function AdminPackagesPage() @{
   const [pending, setPending] = useState(false);
   const [draft, setDraft] = useState<QuotaDraft>({ amount: "", unit: "GiB" });
   const qc = useQueryClient();
+  const navigateApp = useAppNavigate();
   const loaderData = useLoaderData({ from: "/admin/packages" }) as AdminGateLoader | undefined;
 
   useEffect(() => {
     if (loaderData?.kind === "unauthenticated") {
-      window.location.assign("/login?returnTo=/admin/packages");
+      void navigateApp("/login?returnTo=/admin/packages");
       return;
     }
     if (loaderData?.kind === "ready") {
       setAuthMeCache(qc, loaderData.me);
     }
-  }, [loaderData, qc]);
+  }, [loaderData, qc, navigateApp]);
 
   const me = useQuery({
     ...authSessionQueryOptions(),

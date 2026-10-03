@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { apiClient } from "@/lib/api-client";
+import { useAppNavigate } from "@/lib/app-navigate";
 import { listLicensePickerOptions } from "@/lib/spdx-licenses";
 import { fetchRepoCreateDefaults, fetchSessionMe } from "@/lib/ssr-auth";
 import { fetchOrgListMine } from "@/lib/ssr-org";
@@ -109,6 +110,7 @@ export function NewPage() @{
   const [pending, setPending] = useState(false);
 
   const selfUsername = user?.username ?? "";
+  const navigateApp = useAppNavigate();
 
   const form = useForm({
     defaultValues: {
@@ -154,7 +156,7 @@ export function NewPage() @{
           setPending(false);
           return;
         }
-        window.location.assign(`/${res.data.owner_username}/${res.data.name}`);
+        void navigateApp(`/${res.data.owner_username}/${res.data.name}`);
       } catch {
         setFormError(NETWORK_ERROR);
         setPending(false);

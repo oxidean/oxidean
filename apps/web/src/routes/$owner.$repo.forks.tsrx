@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { List, ListRow } from "@/components/ui/list";
 import { PageHeader } from "@/components/ui/page-header";
 import { apiClient } from "@/lib/api-client";
+import { useAppNavigate } from "@/lib/app-navigate";
 import {
   forksSortLabel,
   parseForksSort,
@@ -107,6 +108,7 @@ export function RepoForksPage() @{
   const errorMessage = data?.kind === "error" ? data.message : "";
   const ready = data?.kind === "ready" ? data : null;
   const [q, setQ] = useState(ready?.q ?? "");
+  const navigateApp = useAppNavigate();
   const [sort, setSort] = useState<ForksSortOption>(ready?.sort ?? "stars");
   const [forks, setForks] = useState(ready?.forks ?? []);
   const [offset, setOffset] = useState(ready?.offset ?? 0);
@@ -173,7 +175,7 @@ export function RepoForksPage() @{
                   onChange={(e) => {
                     const next = parseForksSort((e.currentTarget as HTMLSelectElement).value);
                     setSort(next);
-                    window.location.assign(socialListHref(base, { q, sort: next }));
+                    navigateApp(socialListHref(base, { q, sort: next }));
                   }}
                 >
                   <option value="stars">{forksSortLabel("stars") as string}</option>
@@ -187,7 +189,7 @@ export function RepoForksPage() @{
                 className="flex flex-1 gap-2"
                 onSubmit={(e) => {
                   e.preventDefault();
-                  window.location.assign(socialListHref(base, { q, sort }));
+                  navigateApp(socialListHref(base, { q, sort }));
                 }}
               >
                 <input type="hidden" name="sort" value={sort as string} />

@@ -62,6 +62,29 @@ export function ProfilePageSkeleton() @{
   </div>;
 }
 
+/**
+ * Body-column placeholder for `/settings/*` + `/admin/*` pages — render inside
+ * {@link AccountSettingsLayout} / {@link AdminSettingsLayout} so the sidebar
+ * nav paints immediately instead of flashing a blank document.
+ */
+export function SettingsPageSkeleton() @{
+  <div role="status" aria-busy="true" aria-label="Loading settings">
+    <Skeleton className="h-8 w-40" />
+    <Skeleton className="mt-2 h-5 w-full max-w-lg" />
+    <div className="mt-8 flex flex-col gap-6">
+      <div className="flex flex-col gap-2">
+        <Skeleton className="h-4 w-28" />
+        <Skeleton className="h-11 w-full" />
+      </div>
+      <div className="flex flex-col gap-2">
+        <Skeleton className="h-4 w-32" />
+        <Skeleton className="h-11 w-full" />
+      </div>
+      <Skeleton className="h-11 w-36" />
+    </div>
+  </div>;
+}
+
 export function AdminAuthSkeleton() @{
   <div
     className={`mx-auto w-full px-4 py-10 sm:px-6 ${SETTINGS_SHELL_MAX}`}
