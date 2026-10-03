@@ -29,6 +29,7 @@ use crate::ssh_keys;
 use crate::gpg_keys;
 use crate::emails;
 use crate::repo;
+use crate::search;
 use crate::user;
 use crate::user::rate_limit::LookupLimiter;
 use crate::webhook;
@@ -542,6 +543,10 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Err(e) => RpcResponse::err(e),
         },
         "repo.search" => match repo::search(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "search.global" => match search::global(ctx, req.input).await {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },

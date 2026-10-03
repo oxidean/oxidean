@@ -13,6 +13,7 @@ import { apiClient } from "@/lib/api-client";
 import { isTagRef, shortRefName } from "@/lib/repo-browse";
 import type { RepoLayoutLoaderData } from "@/lib/repo-store";
 import { fetchRepoGet, fetchRepoRefs } from "@/lib/ssr-repo";
+import { AppLink } from "@/components/ui/app-link";
 
 export type ReleaseNewLoaderData =
   | { kind: "not_found" }
@@ -271,12 +272,12 @@ export function RepoReleaseNewPage() @{
           <Button type="submit" disabled={pending || tags.length === 0}>
             {(pending ? "Publishing…" : "Publish release") as string}
           </Button>
-          <a
+          <AppLink
             href={`/${owner}/${repoName}/releases` as string}
             className="text-[14px] text-muted-foreground underline"
           >
             Cancel
-          </a>
+          </AppLink>
         </div>
       </form>
     </>;

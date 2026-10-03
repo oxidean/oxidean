@@ -111,6 +111,7 @@ SSO start routes redirect to the IdP when configured. If WorkOS/OIDC ENV is miss
 | `user.listStarred` | Caller's starred repos (newest-starred first; Read ACL filter; offset/limit) | Session + verified |
 | `user.getPublicProfile` | Public profile by username (`username`, `display_name`, `bio`, `avatar_url` — **never email**) | Anonymous OK; unknown → `user.not_found` |
 | `repo.explore` | Public repos sorted by `star_count` desc then `updated_at` desc; optional `q` substring | Anonymous OK |
+| `search.global` | Sitewide grouped search — `repositories`, `users`, `organizations`, `issues`, `pulls` (SQL, ACL-filtered to readable repos); `commits`/`code` via a bounded scan of the newest ~10 readable repos (`truncated` marks partial coverage). `types` limits which groups get hits; DB groups always report `total`. Users group requires a verified session. Indexed cross-repo code search is SRCH-01 | Anonymous OK |
 | `repo.fork` | Fork public readable source (bare copy); sets `forked_from_repo_id` + `fork_network_id`; one active fork per (owner, network) | Session + Read on public source |
 | `repo.rename` | Rename repo; moves bare dir; inserts redirect | Repo Admin |
 | `repo.transfer` | Transfer ownership (type-confirm `confirmName`); moves bare dir; redirect | Repo Admin |

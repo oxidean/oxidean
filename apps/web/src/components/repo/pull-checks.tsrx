@@ -123,6 +123,9 @@ export function PullChecks(props: PullChecksProps) @{
                   <CheckStateIcon state={s.state} />
                   <div className="min-w-0 flex-1">
                     @if (s.target_url) {
+                      {
+                        /* raw-anchor-ok — external CI status URL */
+                      }
                       <a
                         href={(s.target_url ?? "#") as string}
                         target="_blank"

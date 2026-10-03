@@ -1,4 +1,4 @@
-import { createServerFn } from "@octanejs/tanstack-start";
+import { createServerFn, createServerOnlyFn } from "@octanejs/tanstack-start";
 import { getRequestHeader } from "@octanejs/tanstack-start/server";
 import { createClient, type OxideanClient } from "@oxidean/api-client";
 import {
@@ -146,16 +146,23 @@ export const fetchSystemHealth = createServerFn({ method: "GET" }).handler(async
   return client.system.health();
 });
 
+/**
+ * Resolved Shiki theme for the current request (cookie + resolved scheme +
+ * Client Hints). Server-only — for use inside other server fn handlers, so
+ * callers never pay an extra RPC hop for theme resolution.
+ */
+export const ssrHighlightTheme = createServerOnlyFn((): "oxidean-light" | "oxidean-dark" => {
+  const cookie = incomingCookie();
+  const pref = themePreferenceFromCookieHeader(cookie);
+  const resolvedBoot = resolvedColorSchemeFromCookieHeader(cookie);
+  const ch = getRequestHeader("sec-ch-prefers-color-scheme");
+  const resolved = resolveThemeForSsr(pref, ch, resolvedBoot);
+  return resolved === "dark" ? "oxidean-dark" : "oxidean-light";
+});
+
 /** SSR: resolved Shiki theme (cookie + resolved scheme + Client Hints). */
 export const resolveSsrHighlightTheme = createServerFn({ method: "GET" }).handler(
-  async (): Promise<"oxidean-light" | "oxidean-dark"> => {
-    const cookie = incomingCookie();
-    const pref = themePreferenceFromCookieHeader(cookie);
-    const resolvedBoot = resolvedColorSchemeFromCookieHeader(cookie);
-    const ch = getRequestHeader("sec-ch-prefers-color-scheme");
-    const resolved = resolveThemeForSsr(pref, ch, resolvedBoot);
-    return resolved === "dark" ? "oxidean-dark" : "oxidean-light";
-  },
+  async (): Promise<"oxidean-light" | "oxidean-dark"> => ssrHighlightTheme(),
 );
 
 export type AppAccessRedirectInput = {

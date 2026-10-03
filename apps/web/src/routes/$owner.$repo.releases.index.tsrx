@@ -13,6 +13,7 @@ import { apiClient } from "@/lib/api-client";
 import { formatRelative } from "@/lib/relative-time";
 import type { RepoLayoutLoaderData } from "@/lib/repo-store";
 import { fetchReleaseList, fetchRepoGet } from "@/lib/ssr-repo";
+import { AppLink } from "@/components/ui/app-link";
 
 export type ReleasesLoaderData =
   | { kind: "not_found" }
@@ -137,9 +138,9 @@ export function RepoReleasesPage() @{
         title="Releases"
         actions={
           repo.can_write ? (
-            <a href={newHref as string} className="no-underline">
+            <AppLink href={newHref as string} className="no-underline">
               <Button type="button">Draft a new release</Button>
-            </a>
+            </AppLink>
           ) : undefined
         }
       />
@@ -165,14 +166,14 @@ export function RepoReleasesPage() @{
               />
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  <a
+                  <AppLink
                     href={
                       `/${owner}/${repoName}/releases/${encodeURIComponent(rel.tag_name)}` as string
                     }
                     className="text-[16px] font-semibold text-primary no-underline hover:underline"
                   >
                     {(rel.title.trim() || rel.tag_name) as string}
-                  </a>
+                  </AppLink>
                   @if (rel.draft) {
                     <Badge variant="draft">Draft</Badge>;
                   }

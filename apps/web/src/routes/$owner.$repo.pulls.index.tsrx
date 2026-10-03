@@ -17,6 +17,7 @@ import { RepoNotFound } from "@/components/repo/repo-not-found";
 import { apiClient } from "@/lib/api-client";
 import type { RepoLayoutLoaderData } from "@/lib/repo-store";
 import { fetchPullList, fetchRepoGet } from "@/lib/ssr-repo";
+import { AppLink } from "@/components/ui/app-link";
 
 export type PullsLoaderData =
   | { kind: "not_found" }
@@ -189,12 +190,12 @@ export function PullsListPage() @{
             </button>
           </div>
           @if (repo?.can_write) {
-            <a
+            <AppLink
               href={`/${owner}/${repoName}/pulls/new` as string}
               className={repoListPrimaryCtaClass() as string}
             >
               New pull request
-            </a>;
+            </AppLink>;
           }
         </div>
         <form

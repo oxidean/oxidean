@@ -53,7 +53,12 @@ fi
 
 mkdir -p "$(dirname "$DB_PATH")"
 rm -f "$DB_PATH"
-mkdir -p "$ROOT/var/e2e/repos" "$ROOT/var/e2e/actions-logs"
+# Redirect every writable storage dir into var/e2e so stale root-owned dirs
+# left by `docker compose`/`make up` runs can't fail the host-run API
+# (release-assets / packages / lfs upload flows).
+mkdir -p "$ROOT/var/e2e/repos" "$ROOT/var/e2e/actions-logs" \
+  "$ROOT/var/e2e/lfs" "$ROOT/var/e2e/release-assets" "$ROOT/var/e2e/packages" \
+  "$ROOT/var/e2e/template-packs"
 
 echo "==> starting dev-auth stubs (Mailpit, OIDC mock, HTTP stubs)"
 $COMPOSE -f docker-compose.dev-auth.yml --profile dev-auth up --build -d
@@ -116,6 +121,10 @@ export OXIDEAN_ADMIN_PASSWORD="password1"
 # with a different cwd, so relative paths resolve against the wrong directory.
 export OXIDEAN_REPOS_DIR="$ROOT/var/e2e/repos"
 export OXIDEAN_ACTIONS_LOG_DIR="$ROOT/var/e2e/actions-logs"
+export OXIDEAN_LFS_DIR="$ROOT/var/e2e/lfs"
+export OXIDEAN_RELEASE_ASSETS_DIR="$ROOT/var/e2e/release-assets"
+export OXIDEAN_PACKAGES_DIR="$ROOT/var/e2e/packages"
+export OXIDEAN_TEMPLATE_PACKS_DIR="$ROOT/var/e2e/template-packs"
 # Bootstrap runner registration so the bundled oxidean-runner can self-register.
 export OXIDEAN_RUNNER_REGISTRATION_TOKEN="e2e-runner-registration-token"
 export RUST_LOG="${RUST_LOG:-info,oxidean=debug}"

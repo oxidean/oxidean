@@ -30,6 +30,7 @@ const FORGE_ISSUES = "apps/web/e2e/stack-browser/forge-issues-releases.stack.bro
 const FORGE_SSH_ORGS = "apps/web/e2e/stack-browser/forge-packages-ssh-orgs.stack.browser.test.tsx";
 const FORGE_ADMIN = "apps/web/e2e/stack-browser/forge-admin.stack.browser.test.tsx";
 const FORGE_DANGER = "apps/web/e2e/stack-browser/forge-repo-danger-zone.stack.browser.test.tsx";
+const FORGE_BRANCHES = "apps/web/e2e/stack-browser/forge-branches.stack.browser.test.tsx";
 
 export const routeCoverageManifest: RouteCoverageEntry[] = [
   // --- shells / Outlet-only layouts (excluded from required set) ---
@@ -171,9 +172,8 @@ export const routeCoverageManifest: RouteCoverageEntry[] = [
     route: "settings/tokens.new.fine-grained.tsrx",
     coverage: [
       {
-        kind: "skip",
-        rationale:
-          "Fine-grained token wizard deferred; classic tokens happy-dom + packages scope tests cover PAT surface",
+        kind: "happy-dom",
+        test: "apps/web/src/routes/settings/tokens.new.fine-grained.integration.test.ts",
       },
     ],
   },
@@ -256,9 +256,8 @@ export const routeCoverageManifest: RouteCoverageEntry[] = [
     route: "admin/runners.tsrx",
     coverage: [
       {
-        kind: "skip",
-        rationale:
-          "Phase 19 admin registration-token UI; happy-dom deferred — covered by actions_secrets/dispatch_policy nextest + manual Admin runners smoke",
+        kind: "happy-dom",
+        test: "apps/web/src/routes/admin/runners.integration.test.ts",
       },
     ],
   },
@@ -353,9 +352,8 @@ export const routeCoverageManifest: RouteCoverageEntry[] = [
     route: "$owner.$repo.blame.$.tsrx",
     coverage: [
       {
-        kind: "skip",
-        rationale:
-          "Blame view deferred behind blob/tree happy-dom; add mount when blame UX changes",
+        kind: "happy-dom",
+        test: "apps/web/src/routes/$owner.$repo.blame.$.integration.test.ts",
       },
     ],
   },
@@ -363,8 +361,8 @@ export const routeCoverageManifest: RouteCoverageEntry[] = [
     route: "$owner.$repo.commits.$.tsrx",
     coverage: [
       {
-        kind: "skip",
-        rationale: "Commits list not in D-QH-03 matrix; deferred stack-browser",
+        kind: "happy-dom",
+        test: "apps/web/src/routes/$owner.$repo.commits.$.integration.test.ts",
       },
     ],
   },
@@ -381,8 +379,8 @@ export const routeCoverageManifest: RouteCoverageEntry[] = [
     route: "$owner.$repo.compare.$.tsrx",
     coverage: [
       {
-        kind: "skip",
-        rationale: "Compare view deferred; no happy-dom mount yet",
+        kind: "happy-dom",
+        test: "apps/web/src/routes/$owner.$repo.compare.$.integration.test.ts",
       },
     ],
   },
@@ -390,17 +388,18 @@ export const routeCoverageManifest: RouteCoverageEntry[] = [
     route: "$owner.$repo.branches.tsrx",
     coverage: [
       {
-        kind: "skip",
-        rationale: "Branches list deferred behind refs chrome on code home",
+        kind: "happy-dom",
+        test: "apps/web/src/routes/$owner.$repo.branches.integration.test.ts",
       },
+      { kind: "stack-browser", test: FORGE_BRANCHES },
     ],
   },
   {
     route: "$owner.$repo.tags.tsrx",
     coverage: [
       {
-        kind: "skip",
-        rationale: "Tags list deferred; release create covers tag selection path",
+        kind: "happy-dom",
+        test: "apps/web/src/routes/$owner.$repo.tags.integration.test.ts",
       },
     ],
   },
@@ -548,9 +547,8 @@ export const routeCoverageManifest: RouteCoverageEntry[] = [
     route: "$owner.$repo.issues.labels.tsrx",
     coverage: [
       {
-        kind: "skip",
-        rationale:
-          "Repo labels settings UI deferred; issue label attach covered in issues happy-dom",
+        kind: "happy-dom",
+        test: "apps/web/src/routes/$owner.$repo.issues.labels.integration.test.ts",
       },
     ],
   },

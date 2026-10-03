@@ -252,9 +252,9 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
     surface: "routes/verify.tsrx",
     coverage: [
       {
-        kind: "skip",
-        rationale:
-          "Checkbox is secondary; happy-dom mount + auth stack covers verify. Promote to browser mount if verify gains Indicator toggles beside panels.",
+        kind: "browser",
+        test: "apps/web/src/routes/verify.browser.test.tsx",
+        subject: "VerifyPage",
       },
     ],
   },

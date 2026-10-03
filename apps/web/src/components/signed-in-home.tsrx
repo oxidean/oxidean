@@ -7,6 +7,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { formatRelativeUpdated } from "@/lib/relative-time";
 import { cn } from "@/lib/utils";
+import { AppLink } from "@/components/ui/app-link";
 
 type SignedInHomeProps = {
   user: UserPublic;
@@ -43,12 +44,12 @@ export function SignedInHome({ user, repos, reposError = null }: SignedInHomePro
         className="mb-6 rounded-md border border-primary/25 bg-primary/5 px-4 py-3 text-[14px] text-foreground"
       >
         Choose a username to finish setup.{" "}
-        <a
+        <AppLink
           href="/settings/profile"
           className="font-semibold text-primary underline-offset-4 hover:underline"
         >
           Profile
-        </a>
+        </AppLink>
       </p>;
     }
 
@@ -128,7 +129,7 @@ export function SignedInHome({ user, repos, reposError = null }: SignedInHomePro
             <ul className="flex flex-col gap-0.5">
               @for (const repo of visibleRepos; key repo.id) {
                 <li>
-                  <a
+                  <AppLink
                     href={"/" + repo.owner_username + "/" + repo.name}
                     className="group flex items-center gap-2 rounded-md px-2 py-1.5 text-[14px] text-foreground no-underline transition-colors hover:bg-muted"
                   >
@@ -142,7 +143,7 @@ export function SignedInHome({ user, repos, reposError = null }: SignedInHomePro
                         className="shrink-0 text-muted-foreground"
                       />;
                     }
-                  </a>
+                  </AppLink>
                 </li>;
               }
             </ul>
@@ -228,12 +229,12 @@ export function SignedInHome({ user, repos, reposError = null }: SignedInHomePro
               <ul className="divide-y divide-border">
                 @for (const repo of repos.slice(0, 8); key repo.id) {
                   <li className="flex flex-wrap items-center gap-3 px-5 py-3.5 transition-colors hover:bg-muted/35">
-                    <a
+                    <AppLink
                       href={"/" + repo.owner_username + "/" + repo.name}
                       className="min-w-0 flex-1 truncate text-[15px] font-semibold text-primary no-underline hover:underline"
                     >
                       {repo.owner_username + "/" + repo.name}
-                    </a>
+                    </AppLink>
                     <Badge variant="outline">
                       {
                         (repo.visibility === "private"

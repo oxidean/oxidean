@@ -1,6 +1,14 @@
 import { createServerFn } from "@octanejs/tanstack-start";
 import { getRequestHeader } from "@octanejs/tanstack-start/server";
-import { createClient, type OxideanClient } from "@oxidean/api-client";
+import {
+  createClient,
+  type OxideanClient,
+  type RepoSearchHit,
+  type RepoSearchResponse,
+  type RepoSearchType,
+} from "@oxidean/api-client";
+import { highlightCode, languageIdForPath, type HighlightTheme } from "@/lib/highlight";
+import { ssrHighlightTheme } from "@/lib/ssr-auth";
 import { resolvePublicOriginFromEnv, resolveSshHost, resolveSshPort } from "@/lib/public-origin";
 
 /** API origin for SSR Cookie-forward RPCs — never the browser origin during SSR. */
@@ -423,6 +431,62 @@ export const fetchRepoCompare = createServerFn({ method: "GET" })
       base: data.base,
       head: data.head,
     });
+  });
+
+/** `repo.search` hit carrying SSR Shiki HTML when the server highlighted it. */
+export type SsrRepoSearchHit = RepoSearchHit & { html?: string };
+
+export type SsrRepoSearchResult =
+  | {
+      ok: true;
+      data: Omit<RepoSearchResponse, "hits"> & { hits: SsrRepoSearchHit[] };
+      highlightTheme: HighlightTheme | null;
+    }
+  | { ok: false; error: { code?: string; message?: string } };
+
+/**
+ * SSR: `repo.search` with Cookie forward + server-side Shiki for code hits —
+ * first paint ships highlighted markup so the client highlighter (which
+ * eagerly loads ~100 grammars) only runs on a theme flip.
+ */
+export const fetchRepoSearch = createServerFn({ method: "GET" })
+  .validator((data: OwnerName & { type?: string; q?: string }) => ({
+    owner: String(data?.owner ?? ""),
+    name: String(data?.name ?? ""),
+    type: (data?.type ? String(data.type) : "code") as RepoSearchType,
+    q: String(data?.q ?? ""),
+  }))
+  .handler(async ({ data }): Promise<SsrRepoSearchResult> => {
+    const client = createSsrClient(incomingCookie());
+    const res = await client.repo.search({
+      owner: data.owner,
+      name: data.name,
+      type: data.type,
+      q: data.q,
+    });
+    if (!res.ok) {
+      return { ok: false, error: res.error };
+    }
+    try {
+      const theme = ssrHighlightTheme();
+      const hits = await Promise.all(
+        res.data.hits.map(async (hit): Promise<SsrRepoSearchHit> => {
+          if (hit.kind !== "code" || !hit.content) return { ...hit };
+          try {
+            const html = await highlightCode(hit.content, {
+              lang: languageIdForPath(hit.path),
+              theme,
+            });
+            return { ...hit, html };
+          } catch {
+            return { ...hit };
+          }
+        }),
+      );
+      return { ok: true, data: { ...res.data, hits }, highlightTheme: theme };
+    } catch {
+      return { ok: true, data: { ...res.data }, highlightTheme: null };
+    }
   });
 
 /** SSR: `issue.list` with Cookie forward. */

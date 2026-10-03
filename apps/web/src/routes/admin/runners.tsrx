@@ -13,6 +13,7 @@ import { apiClient } from "@/lib/api-client";
 import { authSessionQueryOptions, setAuthMeCache } from "@/lib/session-queries";
 import { fetchSessionMe } from "@/lib/ssr-auth";
 import { toastError, toastSuccess } from "@/lib/toast";
+import { AppLink } from "@/components/ui/app-link";
 
 type AdminGateLoader =
   | { kind: "unauthenticated" }
@@ -110,12 +111,12 @@ export function AdminRunnersPage() @{
       <p className="text-[15px] text-muted-foreground">
         Sign in as a system administrator to manage Actions runners.
       </p>
-      <a
+      <AppLink
         href="/login?returnTo=/admin/runners"
         className="mt-4 inline-block text-[14px] font-medium text-primary hover:underline"
       >
         Sign in
-      </a>
+      </AppLink>
     </SettingsShell>;
   } @else {
     @if (forbidden) {

@@ -21,6 +21,7 @@ import { syncSessionPresenceHint } from "@/lib/session-hint";
 import { useChromeAccountState } from "@/lib/use-chrome-account";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
+import { AppLink } from "@/components/ui/app-link";
 
 function initialsFor(user: UserPublic): string {
   const source = user.display_name?.trim() || user.username || "?";
@@ -394,7 +395,7 @@ function MobileNavSheet({ onClose }: { onClose: () => void }) @{
       } @else {
         @if (user) {
           <div className="flex flex-col">
-            <a
+            <AppLink
               href={`/${user.username}`}
               className="mb-1 flex items-center gap-3 rounded-md px-3 py-2 no-underline outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
               aria-label={`View @${user.username}'s profile`}
@@ -409,7 +410,7 @@ function MobileNavSheet({ onClose }: { onClose: () => void }) @{
                   {"@" + user.username}
                 </p>
               </div>
-            </a>
+            </AppLink>
             <div className="flex flex-col gap-0.5" role="list">
               <button
                 type="button"
@@ -424,46 +425,71 @@ function MobileNavSheet({ onClose }: { onClose: () => void }) @{
               <p className="px-3 pt-2 pb-1 text-[12px] font-medium text-muted-foreground">
                 Create
               </p>
-              <a href="/new" className={mobileNavItemClass} onClick={onClose}>
+              <Link
+                to="/new"
+                preload="intent"
+                className={mobileNavItemClass}
+                onClick={onClose}
+              >
                 New repository
-              </a>
-              <a href="/orgs/new" className={mobileNavItemClass} onClick={onClose}>
+              </Link>
+              <Link
+                to="/orgs/new"
+                preload="intent"
+                className={mobileNavItemClass}
+                onClick={onClose}
+              >
                 New organization
-              </a>
+              </Link>
               @if (repo) {
                 <>
-                  <a
+                  <AppLink
                     href={`/${repo.owner}/${repo.repo}/issues/new`}
                     className={mobileNavItemClass}
                     onClick={onClose}
                   >
                     New issue
-                  </a>
-                  <a
+                  </AppLink>
+                  <AppLink
                     href={`/${repo.owner}/${repo.repo}/releases/new`}
                     className={mobileNavItemClass}
                     onClick={onClose}
                   >
                     New release
-                  </a>
+                  </AppLink>
                 </>;
               }
               <p className="px-3 pt-2 pb-1 text-[12px] font-medium text-muted-foreground">
                 Account
               </p>
-              <a href="/notifications" className={mobileNavItemClass} onClick={onClose}>
+              <Link
+                to="/notifications"
+                preload="intent"
+                className={mobileNavItemClass}
+                onClick={onClose}
+              >
                 Notifications
-              </a>
-              <a href="/" className={mobileNavItemClass} onClick={onClose}>
+              </Link>
+              <Link to="/" preload="intent" className={mobileNavItemClass} onClick={onClose}>
                 Your repositories
-              </a>
-              <a href="/settings/general" className={mobileNavItemClass} onClick={onClose}>
+              </Link>
+              <Link
+                to="/settings/general"
+                preload="intent"
+                className={mobileNavItemClass}
+                onClick={onClose}
+              >
                 Settings
-              </a>
+              </Link>
               @if (user.role === "sys-admin") {
-                <a href="/admin/auth" className={mobileNavItemClass} onClick={onClose}>
+                <Link
+                  to="/admin/auth"
+                  preload="intent"
+                  className={mobileNavItemClass}
+                  onClick={onClose}
+                >
                   Admin
-                </a>;
+                </Link>;
               }
               @if (orgs.length > 0) {
                 <>
@@ -471,13 +497,13 @@ function MobileNavSheet({ onClose }: { onClose: () => void }) @{
                     Organizations
                   </p>
                   @for (const org of orgs; key org.id) {
-                    <a
+                    <AppLink
                       href={`/${org.slug}`}
                       className={mobileNavItemClass}
                       onClick={onClose}
                     >
                       {(org.display_name?.trim() || org.slug) as string}
-                    </a>;
+                    </AppLink>;
                   }
                 </>;
               }

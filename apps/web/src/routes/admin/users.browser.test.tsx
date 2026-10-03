@@ -10,7 +10,7 @@ import {
   mountWithQueryClient,
 } from "@/test/browser-mount";
 import { trackDomErrors } from "@/test/dom-errors";
-import { act } from "octane";
+import { act, createElement } from "octane";
 
 const meMock = vi.fn();
 const listUsersMock = vi.fn();
@@ -76,6 +76,10 @@ vi.mock("@/lib/ssr-auth", () => ({
 vi.mock("@octanejs/tanstack-router", () => ({
   createFileRoute: () => (opts: unknown) => opts,
   useLoaderData: () => loaderState.get(),
+  // No RouterProvider — AppLink must see "no router" and render its <a> fallback.
+  useRouter: () => undefined,
+  Link: (props: { href?: string; children?: unknown }) =>
+    createElement("a", { href: props.href }, props.children as never),
 }));
 
 import { AdminUsersPage } from "./users";

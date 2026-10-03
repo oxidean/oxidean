@@ -838,6 +838,108 @@ export type RepoSearchResponse = {
   limit: number;
 };
 
+// ── search.global (DEBT-03) — sitewide grouped search ──────────────────────
+// Database-backed groups always report `total`; `hits` are populated only for
+// kinds listed in `types` (all kinds when `types` is absent). Commits/code run
+// a bounded git scan over the newest visible repos — `total` counts hits found
+// within that window and `truncated` reports partial coverage (SRCH-01 index).
+
+export type GlobalSearchKind =
+  | "repositories"
+  | "users"
+  | "organizations"
+  | "issues"
+  | "pulls"
+  | "commits"
+  | "code";
+
+export type GlobalSearchRequest = {
+  q: string;
+  types?: GlobalSearchKind[] | null;
+  offset?: number | null;
+  limit?: number | null;
+};
+
+export type GlobalSearchRepoHit = {
+  owner: string;
+  owner_type: string;
+  name: string;
+  description: string;
+  visibility: string;
+  star_count: number;
+  updated_at: string;
+};
+
+export type GlobalSearchUserHit = {
+  username: string;
+  display_name: string;
+  avatar_url?: string | null;
+};
+
+export type GlobalSearchOrgHit = {
+  slug: string;
+  display_name: string;
+};
+
+export type GlobalSearchIssueHit = {
+  repo_owner: string;
+  repo_name: string;
+  number: number;
+  title: string;
+  state: string;
+  author_username?: string | null;
+  comment_count: number;
+  updated_at: string;
+};
+
+export type GlobalSearchPullHit = {
+  repo_owner: string;
+  repo_name: string;
+  number: number;
+  title: string;
+  state: string;
+  draft: boolean;
+  author_username?: string | null;
+  comment_count: number;
+  updated_at: string;
+};
+
+export type GlobalSearchCommitHit = {
+  repo_owner: string;
+  repo_name: string;
+  sha: string;
+  short_sha: string;
+  subject: string;
+  author_name: string;
+  authored_at: string;
+};
+
+export type GlobalSearchCodeHit = {
+  repo_owner: string;
+  repo_name: string;
+  ref: string;
+  path: string;
+  line: number;
+  content: string;
+};
+
+export type GlobalSearchGroup<T> = {
+  hits: T[];
+  total: number;
+  truncated: boolean;
+};
+
+export type GlobalSearchResponse = {
+  q: string;
+  repositories: GlobalSearchGroup<GlobalSearchRepoHit>;
+  users: GlobalSearchGroup<GlobalSearchUserHit>;
+  organizations: GlobalSearchGroup<GlobalSearchOrgHit>;
+  issues: GlobalSearchGroup<GlobalSearchIssueHit>;
+  pulls: GlobalSearchGroup<GlobalSearchPullHit>;
+  commits: GlobalSearchGroup<GlobalSearchCommitHit>;
+  code: GlobalSearchGroup<GlobalSearchCodeHit>;
+};
+
 export type RepoBranchCreateRequest = {
   owner: string;
   name: string;
@@ -2664,6 +2766,10 @@ export function createClient(opts: CreateClientOptions) {
       getPublicProfile: (input: GetPublicProfileRequest) =>
         rpcCall<PublicUserProfile>(opts, "user.getPublicProfile", input),
     },
+    search: {
+      global: (input: GlobalSearchRequest) =>
+        rpcCall<GlobalSearchResponse>(opts, "search.global", input),
+    },
     repo: {
       listMine: () => rpcCall<RepoListMineResponse>(opts, "repo.listMine", {}),
       listByOwner: (input: RepoListByOwnerRequest) =>
@@ -3537,6 +3643,27 @@ export function repoSearchQueryOptions(
     ] as const,
     queryFn: async () => {
       const res = await client.repo.search(input);
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
+export function searchGlobalQueryOptions(
+  client: OxideanClient,
+  input: GlobalSearchRequest,
+) {
+  return {
+    queryKey: [
+      "search",
+      "global",
+      input.q,
+      (input.types ?? []).join(","),
+      input.offset ?? 0,
+      input.limit ?? 0,
+    ] as const,
+    queryFn: async () => {
+      const res = await client.search.global(input);
       if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
       return res.data;
     },

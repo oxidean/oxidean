@@ -23,6 +23,7 @@ import {
 import { parseLfsPointer } from "@/lib/lfs-pointer";
 import { apiClient } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
+import { AppLink } from "@/components/ui/app-link";
 
 type BlobViewerProps = {
   owner: string;
@@ -278,6 +279,7 @@ export function BlobViewer({
             {(lfsDlPending ? "Downloading…" : "Download via LFS") as string}
           </button>;
         }
+        {/* raw-anchor-ok — /api raw blob endpoint, opens in new tab */}
         <a
           href={rawUrl as string}
           className={cn(buttonVariants({ variant: "ghost" }), "h-8 px-2.5 text-[13px]")}
@@ -286,12 +288,12 @@ export function BlobViewer({
         >
           Raw
         </a>
-        <a
+        <AppLink
           href={blameUrl as string}
           className={cn(buttonVariants({ variant: "ghost" }), "h-8 px-2.5 text-[13px]")}
         >
           Blame
-        </a>
+        </AppLink>
         @if (!blob.is_binary && text) {
           <button
             type="button"
@@ -312,6 +314,9 @@ export function BlobViewer({
           </button>;
         }
         @if (blob.truncated || blob.is_binary) {
+          {
+            /* raw-anchor-ok — /api raw blob download */
+          }
           <a
             href={rawUrl as string}
             className={cn(buttonVariants({ variant: "secondary" }), "h-8 px-2.5 text-[13px]")}
