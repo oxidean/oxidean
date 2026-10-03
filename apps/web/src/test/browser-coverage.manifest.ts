@@ -140,6 +140,16 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
 
   // --- repo / chrome ---
   {
+    surface: "components/repo/repo-chrome.tsrx",
+    coverage: [
+      {
+        kind: "browser",
+        test: "apps/web/src/components/repo/repo-chrome.browser.test.tsx",
+        subject: "repo-watch-menu",
+      },
+    ],
+  },
+  {
     surface: "components/repo/mirror-settings-panel.tsrx",
     coverage: [
       { kind: "browser", test: MIRROR_BROWSER, subject: "mirror-settings-panel" },

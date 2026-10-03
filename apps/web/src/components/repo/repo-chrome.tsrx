@@ -1,7 +1,14 @@
-import { Eye, Lock, Star } from "@octanejs/lucide";
+import { Check, Eye, Lock, Star } from "@octanejs/lucide";
 import { useState } from "octane";
-import type { RepoPublic } from "@oxidean/api-client";
+import type { RepoPublic, WatchLevel } from "@oxidean/api-client";
 import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { RepoSearchEntry } from "@/components/repo/repo-search-entry";
 import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api-client";
@@ -32,6 +39,9 @@ export function RepoChrome({ repo, active, showSettings = false }: RepoChromePro
   const starCount = live.star_count ?? 0;
   const starred = !!live.viewer_has_starred;
   const watchCount = live.watch_count ?? 0;
+  // Subscription row exists at any level — "ignore" rows are still subscriptions.
+  const watchLevel = live.viewer_watch_level ?? null;
+  const subscribed = watchLevel != null;
   const watching = !!live.viewer_is_watching;
   const forkCount = live.fork_count ?? 0;
 
@@ -78,20 +88,21 @@ export function RepoChrome({ repo, active, showSettings = false }: RepoChromePro
     }
   }
 
-  async function toggleWatch() {
+  /** Upsert the viewer's subscription at `next` level — optimistic (DEBT-06). */
+  async function setWatchLevel(next: WatchLevel) {
     if (!signedIn || watchBusy) return;
     setWatchBusy(true);
     const prev = live;
-    const nextWatching = !watching;
+    const wasActive = prev.viewer_watch_level != null && prev.viewer_watch_level !== "ignore";
+    const nextActive = next !== "ignore";
     setRepo({
       ...prev,
-      viewer_is_watching: nextWatching,
-      watch_count: Math.max(0, (prev.watch_count ?? 0) + (nextWatching ? 1 : -1)),
+      viewer_watch_level: next,
+      viewer_is_watching: nextActive,
+      watch_count: Math.max(0, (prev.watch_count ?? 0) + Number(nextActive) - Number(wasActive)),
     });
     try {
-      const res = nextWatching
-        ? await apiClient.repo.watch({ owner, name })
-        : await apiClient.repo.unwatch({ owner, name });
+      const res = await apiClient.repo.watch({ owner, name, level: next });
       if (res.ok && res.data) {
         setRepo(res.data);
       } else {
@@ -102,6 +113,37 @@ export function RepoChrome({ repo, active, showSettings = false }: RepoChromePro
     } finally {
       setWatchBusy(false);
     }
+  }
+
+  /** Remove the subscription row entirely — optimistic. */
+  async function unwatchRepo() {
+    if (!signedIn || watchBusy) return;
+    setWatchBusy(true);
+    const prev = live;
+    const wasActive = prev.viewer_watch_level != null && prev.viewer_watch_level !== "ignore";
+    setRepo({
+      ...prev,
+      viewer_watch_level: null,
+      viewer_is_watching: false,
+      watch_count: Math.max(0, (prev.watch_count ?? 0) - Number(wasActive)),
+    });
+    try {
+      const res = await apiClient.repo.unwatch({ owner, name });
+      if (res.ok && res.data) {
+        setRepo(res.data);
+      } else {
+        setRepo(prev);
+      }
+    } catch {
+      setRepo(prev);
+    } finally {
+      setWatchBusy(false);
+    }
+  }
+
+  function watchLabel(): string {
+    if (watchLevel === "ignore") return "Ignored";
+    return watching ? "Watching" : "Watch";
   }
 
   function navClass(isActive: boolean): string {
@@ -129,22 +171,84 @@ export function RepoChrome({ repo, active, showSettings = false }: RepoChromePro
         <RepoSearchEntry owner={owner as string} repo={name as string} />
         @if (signedIn) {
           <>
-            <Button
-              type="button"
-              variant="secondary"
-              className="h-8 gap-1.5 px-2.5 text-[13px]"
-              disabled={watchBusy}
-              aria-pressed={watching}
-              onClick={() => void toggleWatch()}
-            >
-              <Eye
-                aria-hidden
-                size={14}
-                className={watching ? "text-secondary" : undefined}
-              />
-              <span>{(watching ? "Watching" : "Watch") as string}</span>
-              <span className="text-muted-foreground">{String(watchCount)}</span>
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-card px-2.5 text-[13px] font-medium text-foreground outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+                disabled={watchBusy}
+                aria-label="Watch options"
+                data-testid="repo-watch-menu"
+              >
+                <Eye
+                  aria-hidden
+                  size={14}
+                  className={watching ? "text-secondary" : undefined}
+                />
+                <span>{watchLabel() as string}</span>
+                <span className="text-muted-foreground">{String(watchCount)}</span>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="min-w-60">
+                <DropdownMenuItem
+                  onClick={() => void setWatchLevel("all")}
+                  data-testid="repo-watch-level-all"
+                >
+                  <Check
+                    aria-hidden
+                    size={14}
+                    className={watchLevel === "all" ? "text-primary" : "invisible"}
+                  />
+                  <span className="flex flex-col">
+                    <span>All activity</span>
+                    <span className="text-[12px] text-muted-foreground">
+                      Every issue and pull request event
+                    </span>
+                  </span>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => void setWatchLevel("participating")}
+                  data-testid="repo-watch-level-participating"
+                >
+                  <Check
+                    aria-hidden
+                    size={14}
+                    className={watchLevel === "participating" ? "text-primary" : "invisible"}
+                  />
+                  <span className="flex flex-col">
+                    <span>Participating and @mentions</span>
+                    <span className="text-[12px] text-muted-foreground">
+                      Only threads you take part in
+                    </span>
+                  </span>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => void setWatchLevel("ignore")}
+                  data-testid="repo-watch-level-ignore"
+                >
+                  <Check
+                    aria-hidden
+                    size={14}
+                    className={watchLevel === "ignore" ? "text-primary" : "invisible"}
+                  />
+                  <span className="flex flex-col">
+                    <span>Ignore</span>
+                    <span className="text-[12px] text-muted-foreground">
+                      Never notified for this repository
+                    </span>
+                  </span>
+                </DropdownMenuItem>
+                @if (subscribed) {
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onClick={() => void unwatchRepo()}
+                      data-testid="repo-watch-unwatch"
+                    >
+                      <Check aria-hidden size={14} className="invisible" />
+                      <span>Unwatch</span>
+                    </DropdownMenuItem>
+                  </>;
+                }
+              </DropdownMenuContent>
+            </DropdownMenu>
             <Button
               type="button"
               variant="secondary"

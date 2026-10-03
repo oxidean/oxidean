@@ -378,6 +378,8 @@ export type RepoCreateDefaults = {
   gitignores: RepoTemplateOption[];
 };
 
+export type WatchLevel = "all" | "participating" | "ignore";
+
 export type RepoPublic = {
   id: string;
   owner_id: string;
@@ -401,6 +403,7 @@ export type RepoPublic = {
   fork_count?: number;
   watch_count?: number;
   viewer_is_watching?: boolean;
+  viewer_watch_level?: WatchLevel | null;
   fork_network_id?: string | null;
   forked_from?: ForkParentSummary | null;
 };
@@ -419,6 +422,7 @@ export type RepoStarRequest = {
 export type RepoWatchRequest = {
   owner: string;
   name: string;
+  level?: WatchLevel | null;
 };
 
 export type RepoStargazerPublic = {
@@ -518,6 +522,11 @@ export type ListStarredRequest = {
   limit?: number | null;
 };
 
+export type ListWatchedRequest = {
+  offset?: number | null;
+  limit?: number | null;
+};
+
 export type RepoExploreRequest = {
   q?: string | null;
   offset?: number | null;
@@ -533,6 +542,33 @@ export type PublicUserProfile = {
   display_name: string;
   bio: string;
   avatar_url?: string | null;
+  follower_count?: number;
+  following_count?: number;
+  viewer_is_following?: boolean;
+};
+
+export type UserFollowRequest = {
+  username: string;
+};
+
+export type UserFollowListRequest = {
+  username: string;
+  q?: string | null;
+  offset?: number | null;
+  limit?: number | null;
+};
+
+export type UserFollowPublic = {
+  user_id: string;
+  username: string;
+  display_name: string;
+  avatar_url?: string | null;
+  followed_at: string;
+};
+
+export type UserFollowListResponse = {
+  users: UserFollowPublic[];
+  total: number;
 };
 
 export type RepoListMineResponse = {
@@ -2226,6 +2262,7 @@ export type NotificationPublic = {
   repo: string;
   subject_number: number;
   subject_title: string;
+  subject_ref?: string | null;
   actor_id: string;
   actor_username: string;
   created_at: string;
@@ -2753,8 +2790,18 @@ export function createClient(opts: CreateClientOptions) {
         rpcCall<UserLookupResponse>(opts, "user.lookup", input),
       listStarred: (input: ListStarredRequest) =>
         rpcCall<RepoListMineResponse>(opts, "user.listStarred", input),
+      listWatched: (input: ListWatchedRequest) =>
+        rpcCall<RepoListMineResponse>(opts, "user.listWatched", input),
       getPublicProfile: (input: GetPublicProfileRequest) =>
         rpcCall<PublicUserProfile>(opts, "user.getPublicProfile", input),
+      follow: (input: UserFollowRequest) =>
+        rpcCall<PublicUserProfile>(opts, "user.follow", input),
+      unfollow: (input: UserFollowRequest) =>
+        rpcCall<PublicUserProfile>(opts, "user.unfollow", input),
+      followersList: (input: UserFollowListRequest) =>
+        rpcCall<UserFollowListResponse>(opts, "user.followers.list", input),
+      followingList: (input: UserFollowListRequest) =>
+        rpcCall<UserFollowListResponse>(opts, "user.following.list", input),
     },
     search: {
       global: (input: GlobalSearchRequest) =>

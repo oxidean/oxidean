@@ -122,6 +122,15 @@ export const routeCoverageManifest: RouteCoverageEntry[] = [
     ],
   },
   {
+    route: "settings/notifications.tsrx",
+    coverage: [
+      {
+        kind: "happy-dom",
+        test: "apps/web/src/routes/settings/notifications.integration.test.ts",
+      },
+    ],
+  },
+  {
     route: "settings/emails.tsrx",
     coverage: [
       {
@@ -580,6 +589,10 @@ export const routeCoverageManifest: RouteCoverageEntry[] = [
       {
         kind: "happy-dom",
         test: "apps/web/src/routes/$owner.layout.integration.test.ts",
+      },
+      {
+        kind: "happy-dom",
+        test: "apps/web/src/routes/$owner.profile-follow.integration.test.ts",
       },
     ],
   },

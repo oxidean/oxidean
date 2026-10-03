@@ -171,15 +171,15 @@ pub async fn comments_create(
         .await
         .map_err(db_err)?;
     let subject = notify::subject_for_pull(&pull);
-    let participants = notify::pull_participant_ids(ctx, &pull.id, &pull.author_id).await;
-    let mentions = notify::resolve_mention_user_ids(ctx, &body).await;
-    notify::fanout(ctx, &user.id, participants.clone(), "pr_comment", &subject).await;
+    let participants = notify::pull_participant_ids(&ctx.db, &pull.id, &pull.author_id).await;
+    let mentions = notify::resolve_mention_user_ids(&ctx.db, &body).await;
+    notify::fanout_activity(&ctx.db, &user.id, participants.clone(), "pr_comment", &subject).await;
     let participant_set: std::collections::HashSet<_> = participants.into_iter().collect();
     let mention_only: Vec<_> = mentions
         .into_iter()
         .filter(|m| !participant_set.contains(m))
         .collect();
-    notify::fanout(ctx, &user.id, mention_only, "pr_mention", &subject).await;
+    notify::fanout_suppress_ignored(&ctx.db, &user.id, mention_only, "pr_mention", &subject).await;
     // GitHub parity (DEBT-04): `issue_comment` covers PR conversation comments;
     // line-anchored comments map to `pull_request_review_comment` instead.
     if row.path.is_none() {

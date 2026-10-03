@@ -109,6 +109,11 @@ SSO start routes redirect to the IdP when configured. If WorkOS/OIDC ENV is miss
 | `repo.create` / `repo.get` / browse / branch / settings | Forge RPC (Capability ACL) | Session (+ capability) |
 | `repo.star` / `repo.unstar` | Idempotent star membership + `star_count` / `viewer_has_starred` on `RepoPublic` | Session + Read (anonymous rejected; private without Read → `repo.not_found`) |
 | `user.listStarred` | Caller's starred repos (newest-starred first; Read ACL filter; offset/limit) | Session + verified |
+| `repo.watch` / `repo.unwatch` | Subscription upsert at `level` (`all` \| `participating` \| `ignore`; default `all`) / remove row; `watch_count` + `viewer_watch_level` on `RepoPublic` count non-`ignore` rows only | Session + Read |
+| `repo.watchers.list` | Public watchers (non-`ignore` rows), paginated + `q` filter | Anonymous OK |
+| `user.listWatched` | Caller's repo subscriptions at any level incl. `ignore` (Read ACL filter; offset/limit) | Session + verified |
+| `user.follow` / `user.unfollow` | Idempotent user-follow edge writes; returns target `PublicUserProfile` with refreshed counts | Session + verified |
+| `user.followers.list` / `user.following.list` | Public follower/following lists (`username` filter via `q`; offset/limit) | Anonymous OK; unknown → `user.not_found` |
 | `user.getPublicProfile` | Public profile by username (`username`, `display_name`, `bio`, `avatar_url` — **never email**) | Anonymous OK; unknown → `user.not_found` |
 | `repo.explore` | Public repos sorted by `star_count` desc then `updated_at` desc; optional `q` substring | Anonymous OK |
 | `search.global` | Sitewide grouped search — `repositories`, `users`, `organizations`, `issues`, `pulls` (SQL, ACL-filtered to readable repos); `commits`/`code` via a bounded scan of the newest ~10 readable repos (`truncated` marks partial coverage). `types` limits which groups get hits; DB groups always report `total`. Users group requires a verified session. Indexed cross-repo code search is SRCH-01 | Anonymous OK |
@@ -155,6 +160,7 @@ SSO start routes redirect to the IdP when configured. If WorkOS/OIDC ENV is miss
 | `sshKey.list` | List registered SSH public keys (no private keys) | Session |
 | `sshKey.revoke` | Hard-delete an SSH public key by `id` | Session |
 | `repo.actions.listRuns` / `getRun` / `getJobLog` | Workflow run list, detail, job log text | Session + Read+ |
+| `repo.actions.rerunRun` / `cancelRun` | Requeue or cancel a run; cancel on a finished run → `repo.actions.run_finished` | Session + Write+ |
 | `repo.actions.secrets.list` / `put` / `delete` | Repo Actions secrets (names only on list) | Session + Admin |
 | `repo.actions.getEnabled` / `setEnabled` | Per-repo Actions enable toggle | Session + Read+ / Admin |
 | `repo.mirror.get` / `upsert` / `delete` / `syncNow` | Two-way remote mirror config + enqueue sync | Session + Admin |
@@ -396,8 +402,9 @@ Phase 17 ships in-app activity notifications (NOTF-01 / NOTF-02) on migration `0
 | --- | --- |
 | **Ownership** | Every list/mark/unread query is forced to `recipient_id = session.user_id`. Clients cannot address another user's inbox. |
 | **Read model** | `read_at` null = unread. `notification.list` filter `unread` (default) or `all`; newest-first offset pagination. |
-| **Payload** | Rows include `reason`, `subject_kind` (`issue` \| `pull_request`), `owner` / `repo` slugs, `subject_number`, `subject_title`, `actor_username` for deep links `/{owner}/{repo}/issues\|pull/{n}`. |
-| **Fan-out** | Domain writes (e.g. `issue.comments.create`) insert best-effort rows; actors are never notified. Activity email is out of scope. |
+| **Payload** | Rows include `reason`, `subject_kind` (`issue` \| `pull_request` \| `release` \| `workflow_run` \| `push`), `owner` / `repo` slugs, `subject_number`, `subject_title`, `subject_ref` (tag / run id / ref for non-numbered subjects), `actor_username`. Deep links: `/{owner}/{repo}/issues\|pull/{n}` for numbered subjects; `/{owner}/{repo}/releases/{tag}`, `/{owner}/{repo}/actions/{run_id}`, `/{owner}/{repo}/commits/{ref}` via `subject_ref`. |
+| **Fan-out** | Domain writes (e.g. `issue.comments.create`) insert best-effort rows; actors are never notified (workflow-run completion includes the triggering user). Activity email is out of scope. |
+| **Access** | `notification.list` / `notification.unreadCount` re-check repository read access at read time; rows for repos the recipient can no longer read are pruned together with the watch row (GitHub auto-unwatch on access loss). ACL mutations — collaborator remove/update, visibility flip to private, org member remove/demote or `member_base_permission` change, transfer, soft-delete — sweep eagerly. |
 
 Client surface: `client.notification.*` in `@oxidean/api-client` (regenerate with `make rpc-gen`).
 

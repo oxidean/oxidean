@@ -314,6 +314,18 @@ async fn update_task(
     if let Err(e) = state.db.recompute_action_run_status(&job.run_id).await {
         tracing::warn!(error = %e, run_id = %job.run_id, "failed to roll up run status");
     }
+    // DEBT-06: at-most-once run-completion notification routed through the
+    // watch matrix (all watchers + triggering user; ignore suppresses).
+    if state
+        .db
+        .claim_run_completion_notice(&job.run_id)
+        .await
+        .unwrap_or(false)
+    {
+        if let Ok(Some(run)) = state.db.find_action_run_by_id(&job.run_id).await {
+            crate::notify::fanout_workflow_completed(&state.db, &run).await;
+        }
+    }
     let origin = std::env::var("OXIDEAN_PUBLIC_ORIGIN").ok();
     if let Err(e) = crate::actions::statuses::publish_from_job_update(
         &state.db,

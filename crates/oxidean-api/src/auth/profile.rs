@@ -53,6 +53,40 @@ pub async fn get_profile(ctx: &RpcCtx) -> Result<UserPublic, AppError> {
     Ok(user_to_public(&user))
 }
 
+/// Build the public profile DTO for `user` with follow counts and viewer
+/// follow state (DEBT-06). Never includes email (D-SOC-06).
+pub(crate) async fn public_profile_for(
+    ctx: &RpcCtx,
+    user: &oxidean_db::UserRow,
+    viewer_user_id: Option<&str>,
+) -> Result<oxidean_core::PublicUserProfile, AppError> {
+    let follower_count = ctx
+        .db
+        .user_follower_count(&user.id)
+        .await
+        .map_err(db_err)?;
+    let following_count = ctx
+        .db
+        .user_following_count(&user.id)
+        .await
+        .map_err(db_err)?;
+    let viewer_is_following = match viewer_user_id {
+        Some(uid) if uid != user.id => {
+            ctx.db.is_following_user(uid, &user.id).await.map_err(db_err)?
+        }
+        _ => false,
+    };
+    Ok(oxidean_core::PublicUserProfile {
+        username: user.username.clone(),
+        display_name: user.display_name.clone(),
+        bio: user.bio.clone(),
+        avatar_url: user.avatar_path.clone(),
+        follower_count,
+        following_count,
+        viewer_is_following,
+    })
+}
+
 /// `user.getPublicProfile` — public profile by username; never includes email (D-SOC-06/08).
 pub async fn get_public_profile(
     ctx: &RpcCtx,
@@ -77,12 +111,8 @@ pub async fn get_public_profile(
     if user.banned_at.is_some() {
         return Err(AppError::new("user.not_found", "User not found"));
     }
-    Ok(oxidean_core::PublicUserProfile {
-        username: user.username,
-        display_name: user.display_name,
-        bio: user.bio,
-        avatar_url: user.avatar_path,
-    })
+    let viewer_id = ctx.session.as_ref().map(|s| s.user_id.as_str());
+    public_profile_for(ctx, &user, viewer_id).await
 }
 
 /// `user.update_profile` — display name, username, bio (avatar via multipart route).

@@ -36,6 +36,7 @@ import { Route as InvitesTokenRouteImport } from './routes/invites.$token'
 import { Route as OrgsNewRouteImport } from './routes/orgs.new'
 import { Route as SettingsEmailsRouteImport } from './routes/settings/emails'
 import { Route as SettingsGeneralRouteImport } from './routes/settings/general'
+import { Route as SettingsNotificationsRouteImport } from './routes/settings/notifications'
 import { Route as SettingsProfileRouteImport } from './routes/settings/profile'
 import { Route as SettingsSshKeysRouteImport } from './routes/settings/ssh-keys'
 import { Route as SettingsTokensRouteImport } from './routes/settings/tokens'
@@ -216,6 +217,11 @@ const SettingsEmailsRoute = SettingsEmailsRouteImport.update({
 const SettingsGeneralRoute = SettingsGeneralRouteImport.update({
   id: '/settings/general',
   path: '/settings/general',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsNotificationsRoute = SettingsNotificationsRouteImport.update({
+  id: '/settings/notifications',
+  path: '/settings/notifications',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SettingsProfileRoute = SettingsProfileRouteImport.update({
@@ -478,6 +484,7 @@ export interface FileRoutesByFullPath {
   '/orgs/new': typeof OrgsNewRoute
   '/settings/emails': typeof SettingsEmailsRoute
   '/settings/general': typeof SettingsGeneralRoute
+  '/settings/notifications': typeof SettingsNotificationsRoute
   '/settings/profile': typeof SettingsProfileRoute
   '/settings/ssh-keys': typeof SettingsSshKeysRoute
   '/settings/tokens': typeof SettingsTokensRouteWithChildren
@@ -549,6 +556,7 @@ export interface FileRoutesByTo {
   '/orgs/new': typeof OrgsNewRoute
   '/settings/emails': typeof SettingsEmailsRoute
   '/settings/general': typeof SettingsGeneralRoute
+  '/settings/notifications': typeof SettingsNotificationsRoute
   '/settings/profile': typeof SettingsProfileRoute
   '/settings/ssh-keys': typeof SettingsSshKeysRoute
   '/setup/credentials': typeof SetupCredentialsRoute
@@ -619,6 +627,7 @@ export interface FileRoutesById {
   '/orgs/new': typeof OrgsNewRoute
   '/settings/emails': typeof SettingsEmailsRoute
   '/settings/general': typeof SettingsGeneralRoute
+  '/settings/notifications': typeof SettingsNotificationsRoute
   '/settings/profile': typeof SettingsProfileRoute
   '/settings/ssh-keys': typeof SettingsSshKeysRoute
   '/settings/tokens': typeof SettingsTokensRouteWithChildren
@@ -696,6 +705,7 @@ export interface FileRouteTypes {
     | '/orgs/new'
     | '/settings/emails'
     | '/settings/general'
+    | '/settings/notifications'
     | '/settings/profile'
     | '/settings/ssh-keys'
     | '/settings/tokens'
@@ -767,6 +777,7 @@ export interface FileRouteTypes {
     | '/orgs/new'
     | '/settings/emails'
     | '/settings/general'
+    | '/settings/notifications'
     | '/settings/profile'
     | '/settings/ssh-keys'
     | '/setup/credentials'
@@ -836,6 +847,7 @@ export interface FileRouteTypes {
     | '/orgs/new'
     | '/settings/emails'
     | '/settings/general'
+    | '/settings/notifications'
     | '/settings/profile'
     | '/settings/ssh-keys'
     | '/settings/tokens'
@@ -909,6 +921,7 @@ export interface RootRouteChildren {
   OrgsNewRoute: typeof OrgsNewRoute
   SettingsEmailsRoute: typeof SettingsEmailsRoute
   SettingsGeneralRoute: typeof SettingsGeneralRoute
+  SettingsNotificationsRoute: typeof SettingsNotificationsRoute
   SettingsProfileRoute: typeof SettingsProfileRoute
   SettingsSshKeysRoute: typeof SettingsSshKeysRoute
   SettingsTokensRoute: typeof SettingsTokensRouteWithChildren
@@ -1103,6 +1116,13 @@ declare module '@octanejs/tanstack-router' {
       path: '/settings/general'
       fullPath: '/settings/general'
       preLoaderRoute: typeof SettingsGeneralRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings/notifications': {
+      id: '/settings/notifications'
+      path: '/settings/notifications'
+      fullPath: '/settings/notifications'
+      preLoaderRoute: typeof SettingsNotificationsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/settings/profile': {
@@ -1650,6 +1670,7 @@ const rootRouteChildren: RootRouteChildren = {
   OrgsNewRoute: OrgsNewRoute,
   SettingsEmailsRoute: SettingsEmailsRoute,
   SettingsGeneralRoute: SettingsGeneralRoute,
+  SettingsNotificationsRoute: SettingsNotificationsRoute,
   SettingsProfileRoute: SettingsProfileRoute,
   SettingsSshKeysRoute: SettingsSshKeysRoute,
   SettingsTokensRoute: SettingsTokensRouteWithChildren,

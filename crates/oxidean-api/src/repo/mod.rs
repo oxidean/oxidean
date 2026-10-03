@@ -331,6 +331,7 @@ pub(crate) fn to_public(repo: &AccessibleRepo) -> RepoPublic {
         fork_count: 0,
         watch_count: 0,
         viewer_is_watching: false,
+        viewer_watch_level: None,
         fork_network_id: None,
         forked_from: None,
     }
@@ -363,11 +364,15 @@ pub async fn enrich_social(
             .has_starred_repo(uid, &public.id)
             .await
             .map_err(db_err)?;
-        public.viewer_is_watching = ctx
+        public.viewer_watch_level = ctx
             .db
-            .has_watched_repo(uid, &public.id)
+            .get_repo_watch_level(uid, &public.id)
             .await
-            .map_err(db_err)?;
+            .map_err(db_err)?
+            .and_then(|l| oxidean_core::WatchLevel::parse(&l).ok());
+        public.viewer_is_watching = public
+            .viewer_watch_level
+            .is_some_and(|l| l != oxidean_core::WatchLevel::Ignore);
     }
     public.watch_count = ctx
         .db
@@ -469,16 +474,18 @@ pub async fn unstar(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoPublic
     enrich_social(ctx, to_public(&accessible), Some(&user.id)).await
 }
 
-/// `repo.watch` — idempotent watch (issue #23).
+/// `repo.watch` — upsert the viewer's subscription at `level`
+/// (`all` | `participating` | `ignore`, default `all`) (issue #23, DEBT-06).
 pub async fn watch(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoPublic, AppError> {
     let user = require_verified(ctx).await?;
     let req: oxidean_core::RepoWatchRequest = serde_json::from_value(input).map_err(|e| {
         AppError::new("rpc.bad_input", format!("invalid repo.watch input: {e}"))
     })?;
     let accessible = resolve_repo_for_read(ctx, &req.owner, &req.name).await?;
+    let level = req.level.unwrap_or_default();
     let _count = ctx
         .db
-        .watch_repository(&user.id, &accessible.row.id)
+        .watch_repository(&user.id, &accessible.row.id, level.as_str())
         .await
         .map_err(db_err)?;
     enrich_social(ctx, to_public(&accessible), Some(&user.id)).await
@@ -719,6 +726,7 @@ pub async fn list_mine(ctx: &RpcCtx) -> Result<RepoListMineResponse, AppError> {
                 fork_count: 0,
                 watch_count: 0,
                 viewer_is_watching: false,
+                viewer_watch_level: None,
                 fork_network_id: None,
                 forked_from: None,
             }
@@ -1649,6 +1657,11 @@ pub async fn update_visibility(
         .update_repository_visibility(&accessible.row.id, map_visibility(req.visibility))
         .await
         .map_err(db_err)?;
+    // DEBT-06: going private removes the public-read grant — auto-unwatch and
+    // drop notification rows for users who just lost access.
+    if is_private_visibility(&row.visibility) {
+        crate::notify::sweep_repo_access(&ctx.db, &row.id).await;
+    }
     Ok(to_public(&AccessibleRepo {
         row,
         owner_username: accessible.owner_username,
@@ -1901,6 +1914,9 @@ pub async fn soft_delete(
         .soft_delete_repository(&accessible.row.id)
         .await
         .map_err(db_err)?;
+    // DEBT-06: a deleted repo is unreadable — auto-unwatch and drop
+    // notification rows for everyone.
+    crate::notify::sweep_repo_access(&ctx.db, &accessible.row.id).await;
     Ok(RepoSoftDeleteResponse {
         name: accessible.row.name,
     })
@@ -2169,6 +2185,7 @@ pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoPublic
                 fork_count: 0,
                 watch_count: 0,
                 viewer_is_watching: false,
+                viewer_watch_level: None,
                 fork_network_id: None,
                 forked_from: None,
     })

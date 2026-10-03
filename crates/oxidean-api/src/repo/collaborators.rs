@@ -10,6 +10,7 @@ use oxidean_core::{
 use oxidean_db::RepoCollaboratorListRow;
 
 use crate::auth::gate::require_verified;
+use crate::notify;
 use crate::repo::{acl, meets, resolve_repo_for_read, AccessibleRepo, Capability};
 use crate::rpc::RpcCtx;
 
@@ -161,6 +162,10 @@ pub async fn update(
         .await
         .map_err(db_err)?;
 
+    // DEBT-06: re-check read — if the new permission revoked access, auto-unwatch
+    // and drop stale notification rows (GitHub behavior).
+    notify::prune_if_repo_read_lost(&ctx.db, &req.user_id, &accessible.row.id).await;
+
     let user = ctx
         .db
         .find_user_by_id(&row.user_id)
@@ -189,5 +194,8 @@ pub async fn remove(ctx: &RpcCtx, input: serde_json::Value) -> Result<serde_json
         .remove_repo_collaborator(&accessible.row.id, &req.user_id)
         .await
         .map_err(db_err)?;
+    // DEBT-06: re-check read — if removal revoked access, auto-unwatch and drop
+    // stale notification rows (GitHub behavior).
+    notify::prune_if_repo_read_lost(&ctx.db, &req.user_id, &accessible.row.id).await;
     Ok(serde_json::json!({ "ok": true }))
 }

@@ -249,9 +249,9 @@ pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssuePubli
     if accessible.row.owner_type == "user" && accessible.row.owner_id != user.id {
         opened_recipients.push(accessible.row.owner_id.clone());
     }
-    notify::fanout(ctx, &user.id, opened_recipients, "issue_opened", &subject).await;
-    let mentions = notify::resolve_mention_user_ids(ctx, &body).await;
-    notify::fanout(ctx, &user.id, mentions, "issue_mention", &subject).await;
+    notify::fanout_activity(&ctx.db, &user.id, opened_recipients, "issue_opened", &subject).await;
+    let mentions = notify::resolve_mention_user_ids(&ctx.db, &body).await;
+    notify::fanout_suppress_ignored(&ctx.db, &user.id, mentions, "issue_mention", &subject).await;
     let payload = dispatch::issues_payload(
         "opened",
         row.number,
@@ -433,8 +433,8 @@ pub async fn close(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssuePublic
         .await
         .map_err(db_err)?;
     let subject = notify::subject_for_issue(&updated);
-    let recipients = notify::issue_participant_ids(ctx, &updated.id, &updated.author_id).await;
-    notify::fanout(ctx, &user.id, recipients, "issue_closed", &subject).await;
+    let recipients = notify::issue_participant_ids(&ctx.db, &updated.id, &updated.author_id).await;
+    notify::fanout_activity(&ctx.db, &user.id, recipients, "issue_closed", &subject).await;
     let payload = dispatch::issues_payload(
         "closed",
         updated.number,
@@ -467,8 +467,8 @@ pub async fn reopen(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssuePubli
     }
     let updated = ctx.db.reopen_issue(&row.id).await.map_err(db_err)?;
     let subject = notify::subject_for_issue(&updated);
-    let recipients = notify::issue_participant_ids(ctx, &updated.id, &updated.author_id).await;
-    notify::fanout(ctx, &_user.id, recipients, "issue_reopened", &subject).await;
+    let recipients = notify::issue_participant_ids(&ctx.db, &updated.id, &updated.author_id).await;
+    notify::fanout_activity(&ctx.db, &_user.id, recipients, "issue_reopened", &subject).await;
     let payload = dispatch::issues_payload(
         "reopened",
         updated.number,
@@ -702,15 +702,15 @@ pub async fn comments_create(
         .await
         .map_err(db_err)?;
     let subject = notify::subject_for_issue(&issue);
-    let participants = notify::issue_participant_ids(ctx, &issue.id, &issue.author_id).await;
-    let mentions = notify::resolve_mention_user_ids(ctx, &body).await;
-    notify::fanout(ctx, &user.id, participants.clone(), "issue_comment", &subject).await;
+    let participants = notify::issue_participant_ids(&ctx.db, &issue.id, &issue.author_id).await;
+    let mentions = notify::resolve_mention_user_ids(&ctx.db, &body).await;
+    notify::fanout_activity(&ctx.db, &user.id, participants.clone(), "issue_comment", &subject).await;
     let participant_set: std::collections::HashSet<_> = participants.into_iter().collect();
     let mention_only: Vec<_> = mentions
         .into_iter()
         .filter(|m| !participant_set.contains(m))
         .collect();
-    notify::fanout(ctx, &user.id, mention_only, "issue_mention", &subject).await;
+    notify::fanout_suppress_ignored(&ctx.db, &user.id, mention_only, "issue_mention", &subject).await;
     let payload = dispatch::issue_comment_payload(
         "created",
         issue.number,
@@ -1030,8 +1030,8 @@ pub async fn assignees_set(
     let newly_assigned: Vec<_> = after.difference(&before).cloned().collect();
     let newly_unassigned: Vec<_> = before.difference(&after).cloned().collect();
     let subject = notify::subject_for_issue(&issue);
-    notify::fanout(ctx, &user.id, newly_assigned, "issue_assigned", &subject).await;
-    notify::fanout(ctx, &user.id, newly_unassigned, "issue_unassigned", &subject).await;
+    notify::fanout_suppress_ignored(&ctx.db, &user.id, newly_assigned, "issue_assigned", &subject).await;
+    notify::fanout_suppress_ignored(&ctx.db, &user.id, newly_unassigned, "issue_unassigned", &subject).await;
 
     let refreshed = ctx
         .db
