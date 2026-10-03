@@ -40,7 +40,13 @@ import {
   resolvedColorSchemeFromCookieHeader,
 } from "@/lib/theme";
 import { buildSwRegisterScript } from "@/lib/sw-register";
-import "@/styles.css";
+// The stylesheet href must be the file the client build actually emitted:
+// a bare side-effect import goes through the positionally-keyed managed
+// head-asset pipeline (removed/re-inserted per route, flashing unstyled
+// content) and a direct `?url` import resolves per-build, so the SSR bundle
+// can point at a filename that was never deployed. The plugin hands the SSR
+// bundle the emitted filename and leaves client/dev on `?url`.
+import appStylesHref from "virtual:oxidean-app-styles-href";
 
 // Build id is Vite-defined at compile time (commit SHA / local stamp). Script
 // body stays free of user input (T-03-19).
@@ -152,6 +158,11 @@ export const Route = createRootRoute({
 function RootShell({ children }: { children?: unknown }) @{
   <Html lang="en">
     <Head>
+      {/* `precedence` marks this a hoisted stylesheet resource: it emits with
+          the earliest head bytes and is deduplicated by href on the client, so
+          it is never removed and re-inserted like positionally-keyed managed
+          assets were (that churn flashed unstyled content on navigation). */}
+      <link rel="stylesheet" href={appStylesHref} precedence="app" />
       <script dangerouslySetInnerHTML={{ __html: THEME_BOOT_SCRIPT }} />
       <script dangerouslySetInnerHTML={{ __html: FONT_WARM_SCRIPT }} />
       <meta charSet="utf-8" />
