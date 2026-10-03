@@ -85,6 +85,8 @@ export function LoginPage() @{
         const dest = res.data.must_change_credentials
           ? `/setup/credentials?returnTo=${encodeURIComponent(returnTo)}`
           : safeReturnTo(returnTo);
+        // raw-nav-ok — post-auth: login just minted the session cookie; reload
+        // re-establishes auth state app-wide (chrome, authMe cache) atomically
         window.location.assign(dest);
       } catch {
         setError(NETWORK_ERROR);
@@ -94,6 +96,8 @@ export function LoginPage() @{
 
   function startSso(kind: "workos" | "oidc") {
     const path = kind === "workos" ? "/api/auth/workos/start" : "/api/auth/oidc/start";
+    // raw-nav-ok — /api/ SSO handshake endpoint; the IdP round-trip is a
+    // full-document flow, not an app route
     window.location.assign(`${path}?returnTo=${encodeURIComponent(returnTo)}`);
   }
 

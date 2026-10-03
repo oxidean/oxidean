@@ -116,6 +116,8 @@ export function ResetPasswordPage() @{
           submitLock.current = false;
           return;
         }
+        // raw-nav-ok — post-auth: reset revokes and re-mints the session (D-27);
+        // reload re-establishes auth state app-wide atomically
         window.location.assign(safeReturnTo(readReturnToFromLocation()));
       } catch {
         setError(NETWORK_ERROR);
@@ -156,6 +158,8 @@ export function ResetPasswordPage() @{
   function startSso(kind: "workos" | "oidc") {
     const returnTo = readReturnToFromLocation();
     const path = kind === "workos" ? "/api/auth/workos/start" : "/api/auth/oidc/start";
+    // raw-nav-ok — /api/ SSO handshake endpoint; the IdP round-trip is a
+    // full-document flow, not an app route
     window.location.assign(`${path}?returnTo=${encodeURIComponent(returnTo)}`);
   }
 

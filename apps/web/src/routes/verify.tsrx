@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { InputOtp } from "@/components/ui/input-otp";
 import { Label } from "@/components/ui/label";
 import { apiClient } from "@/lib/api-client";
+import { useAppNavigate } from "@/lib/app-navigate";
 import { safeReturnTo } from "@/lib/return-to";
 import { AppLink } from "@/components/ui/app-link";
 
@@ -71,6 +72,7 @@ type Phase =
 
 /** Exported for verify.integration.test.ts (RESEARCH P1 / D-QH-03). */
 export function VerifyPage() @{
+  const navigateApp = useAppNavigate();
   const [phase, setPhase] = useState<Phase>({ kind: "loading" });
   const [error, setError] = useState("");
   const [tokenPending, setTokenPending] = useState(false);
@@ -101,7 +103,7 @@ export function VerifyPage() @{
           submitLock.current = false;
           return;
         }
-        window.location.assign(verifySuccessHref(primaryAlreadyVerified));
+        void navigateApp(verifySuccessHref(primaryAlreadyVerified));
       } catch {
         setError(NETWORK_ERROR);
         submitLock.current = false;
@@ -169,7 +171,7 @@ export function VerifyPage() @{
           setTokenPending(false);
           return;
         }
-        window.location.assign(verifySuccessHref(primaryAlreadyVerified));
+        void navigateApp(verifySuccessHref(primaryAlreadyVerified));
       } catch {
         if (cancelled) return;
         setError(NETWORK_ERROR);
@@ -257,7 +259,7 @@ export function VerifyPage() @{
           type="button"
           className="w-full"
           onClick={() => {
-            window.location.assign(loginHrefWithToken(phase.token));
+            void navigateApp(loginHrefWithToken(phase.token));
           }}
         >
           Sign in
@@ -279,7 +281,7 @@ export function VerifyPage() @{
             type="button"
             className="w-full"
             onClick={() => {
-              window.location.assign("/");
+              void navigateApp("/");
             }}
           >
             Go to home

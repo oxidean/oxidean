@@ -114,6 +114,9 @@ export function SetupPage() @{
           return;
         }
         syncSessionPresenceHint(true);
+        // raw-nav-ok — post-auth: bootstrap just minted the admin session and
+        // flipped needs_setup; reload re-establishes auth + bootstrap state
+        // app-wide atomically
         window.location.assign("/");
       } catch {
         setError(NETWORK_ERROR);
