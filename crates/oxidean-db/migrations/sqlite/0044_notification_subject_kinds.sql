@@ -3,7 +3,9 @@
 -- (release tag / run id for deep links) and the `completion_notified` claim
 -- flag on action_runs so run-completion notifications fire at most once.
 
-PRAGMA foreign_keys = OFF;
+-- Table rebuild for the CHECK change: nothing references `notifications`, so
+-- drop/copy/rename is safe with FK enforcement left on (PRAGMA foreign_keys
+-- cannot toggle inside sqlx's per-migration transaction — omit it).
 CREATE TABLE notifications_new (
   id               TEXT PRIMARY KEY,
   recipient_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -29,6 +31,5 @@ CREATE INDEX IF NOT EXISTS idx_notifications_recipient_created
 CREATE INDEX IF NOT EXISTS idx_notifications_recipient_unread
   ON notifications (recipient_id, created_at DESC)
   WHERE read_at IS NULL;
-PRAGMA foreign_keys = ON;
 
 ALTER TABLE action_runs ADD COLUMN completion_notified INTEGER NOT NULL DEFAULT 0;

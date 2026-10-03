@@ -15,6 +15,7 @@ export type NotificationsSettingsLoaderData =
       kind: "ready";
       user: UserPublic;
       repos: RepoPublic[];
+      truncated: boolean;
     };
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
@@ -41,7 +42,12 @@ export const Route = createFileRoute("/settings/notifications")({
           message: watched.error.message || "Could not load watched repositories.",
         };
       }
-      return { kind: "ready", user: res.data, repos: watched.data.repos };
+      return {
+        kind: "ready",
+        user: res.data,
+        repos: watched.data.repos,
+        truncated: watched.data.truncated,
+      };
     } catch {
       return { kind: "error", message: NETWORK_ERROR };
     }
@@ -86,6 +92,9 @@ export function NotificationsSettingsPage() @{
   const [repos, setRepos] = useState<RepoPublic[] | undefined>(() =>
     loaderData?.kind === "ready" ? loaderData.repos : undefined,
   );
+  const [truncated, setTruncated] = useState(() =>
+    loaderData?.kind === "ready" ? loaderData.truncated : false,
+  );
   const [busy, setBusy] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
@@ -93,6 +102,7 @@ export function NotificationsSettingsPage() @{
     if (loaderData.kind === "ready") {
       setPhase({ kind: "ready" });
       setRepos(loaderData.repos);
+      setTruncated(loaderData.truncated);
       return;
     }
     if (loaderData.kind === "error") {
@@ -111,16 +121,26 @@ export function NotificationsSettingsPage() @{
           window.location.assign("/login?returnTo=/settings/notifications");
           return;
         }
-        const watched = await apiClient.user.listWatched({ offset: 0, limit: 50 });
-        if (cancelled) return;
-        if (!watched.ok) {
-          setPhase({
-            kind: "error",
-            message: watched.error.message || "Could not load watched repositories.",
-          });
-          return;
+        const all: RepoPublic[] = [];
+        let hitCap = false;
+        for (let offset = 0; offset < 500; offset += 50) {
+          const watched = await apiClient.user.listWatched({ offset, limit: 50 });
+          if (cancelled) return;
+          if (!watched.ok) {
+            setPhase({
+              kind: "error",
+              message: watched.error.message || "Could not load watched repositories.",
+            });
+            return;
+          }
+          all.push(...watched.data.repos);
+          if (watched.data.repos.length < 50) {
+            break;
+          }
+          hitCap = true;
         }
-        setRepos(watched.data.repos);
+        setRepos(all);
+        setTruncated(hitCap);
         setPhase({ kind: "ready" });
       } catch {
         if (cancelled) return;
@@ -167,8 +187,8 @@ export function NotificationsSettingsPage() @{
             Notifications
           </h1>
           <p className="mt-2 text-[16px] text-muted-foreground">
-            Choose how much each repository you watch notifies you. These levels apply to issue and
-            pull request activity.
+            Choose how much each repository you watch notifies you. These levels apply to issue,
+            pull request, release, and workflow run activity.
           </p>
         </div>
 
@@ -232,6 +252,11 @@ export function NotificationsSettingsPage() @{
                 </ListRow>;
               }
             </List>;
+          }
+          @if (truncated) {
+            <p className="mt-3 text-[13px] text-muted-foreground">
+              Showing the first 500 watched repositories.
+            </p>;
           }
         </section>
       </AccountSettingsLayout>;

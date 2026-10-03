@@ -25,6 +25,7 @@ pub mod pool;
 pub mod probe;
 pub mod pulls;
 pub mod redirects;
+pub mod repo_access;
 pub mod releases;
 pub mod webhooks;
 pub mod repo_activity;
@@ -1706,6 +1707,27 @@ impl Database {
         .await
     }
 
+    /// Bulk read-ACL check (DEBT-06): which of `repo_ids` `user_id` can still
+    /// read — one `IN (...)` round trip for access-loss pruning.
+    pub async fn readable_repo_ids(
+        &self,
+        user_id: &str,
+        repo_ids: &[String],
+    ) -> Result<std::collections::HashSet<String>, String> {
+        repo_access::readable_repo_ids(self.require_pool()?, user_id, repo_ids).await
+    }
+
+    /// Bulk read-ACL check (DEBT-06): which of `user_ids` can still read
+    /// `repo_id` — one round trip for repo-wide access sweeps. Caller must
+    /// shortcut non-private repos (everyone) and missing/deleted (nobody).
+    pub async fn readers_of_repo(
+        &self,
+        repo_id: &str,
+        user_ids: &[String],
+    ) -> Result<std::collections::HashSet<String>, String> {
+        repo_access::readers_of_repo(self.require_pool()?, repo_id, user_ids).await
+    }
+
     pub async fn list_notifications(
         &self,
         recipient_id: &str,
@@ -2836,7 +2858,8 @@ impl Database {
         actions::requeue_run(self.require_pool()?, run_id).await
     }
 
-    pub async fn cancel_action_run(&self, run_id: &str) -> Result<(), String> {
+    /// `false` when the run had already finished — nothing was clobbered.
+    pub async fn cancel_action_run(&self, run_id: &str) -> Result<bool, String> {
         actions::cancel_run(self.require_pool()?, run_id).await
     }
 

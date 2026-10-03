@@ -246,8 +246,9 @@ pub async fn update_settings(
         .map_err(db_err)?;
 
     // DEBT-06: member_base → `none` revokes Members' read on private org repos
-    // — auto-unwatch + drop their notification rows across org repos.
-    if base.as_deref() == Some("none") {
+    // — auto-unwatch + drop their notification rows across org repos. Only on
+    // a real transition; re-saving `none` doesn't revoke anything new.
+    if base.as_deref() == Some("none") && !org.member_base_permission.eq_ignore_ascii_case("none") {
         notify::sweep_org_access(&ctx.db, &org.id).await;
     }
 

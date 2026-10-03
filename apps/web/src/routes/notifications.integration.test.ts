@@ -169,4 +169,43 @@ describe("/notifications page (D-09 / D-12 / NOTF-02)", () => {
       expect(assign).toHaveBeenCalledWith("/ada/hello/releases/v1.0.0");
     });
   });
+
+  it("falls back to the index route when subject_ref is null (DEBT-06 review)", async () => {
+    vi.mocked(apiClient.notification.list).mockResolvedValue({
+      ok: true,
+      data: {
+        total: 1,
+        notifications: [
+          {
+            id: "n4",
+            reason: "release_deleted",
+            subject_kind: "release",
+            subject_repo_id: "r1",
+            owner: "ada",
+            repo: "hello",
+            subject_number: 0,
+            subject_title: "v0.9",
+            subject_ref: null,
+            actor_id: "u2",
+            actor_username: "bob",
+            created_at: "2026-09-19T00:00:00Z",
+            read_at: null,
+          },
+        ],
+      },
+    } as never);
+
+    renderWithQueryClient(NotificationsPage);
+
+    const row = await waitFor(() =>
+      screen.getByRole("button", { name: /bob deleted a release on ada\/hello/i }),
+    );
+
+    const assign = vi.fn();
+    vi.stubGlobal("location", { assign });
+    row.click();
+    await waitFor(() => {
+      expect(assign).toHaveBeenCalledWith("/ada/hello/releases");
+    });
+  });
 });

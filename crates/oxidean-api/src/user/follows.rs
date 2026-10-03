@@ -47,7 +47,13 @@ fn parse_follow_request(input: serde_json::Value, proc: &str) -> Result<UserFoll
         .map_err(|e| AppError::new("rpc.bad_input", format!("invalid {proc} input: {e}")))
 }
 
-async fn resolve_target(ctx: &RpcCtx, username: &str) -> Result<oxidean_db::UserRow, AppError> {
+/// `allow_banned` is set for `user.unfollow` — a banned account's followers
+/// must still be able to drop their edge; everything else hides them.
+async fn resolve_target(
+    ctx: &RpcCtx,
+    username: &str,
+    allow_banned: bool,
+) -> Result<oxidean_db::UserRow, AppError> {
     let username = username.trim();
     if username.is_empty() {
         return Err(AppError::new("user.not_found", "User not found"));
@@ -58,7 +64,7 @@ async fn resolve_target(ctx: &RpcCtx, username: &str) -> Result<oxidean_db::User
         .await
         .map_err(db_err)?
         .ok_or_else(|| AppError::new("user.not_found", "User not found"))?;
-    if user.banned_at.is_some() {
+    if user.banned_at.is_some() && !allow_banned {
         return Err(AppError::new("user.not_found", "User not found"));
     }
     Ok(user)
@@ -69,7 +75,7 @@ async fn resolve_target(ctx: &RpcCtx, username: &str) -> Result<oxidean_db::User
 pub async fn follow(ctx: &RpcCtx, input: serde_json::Value) -> Result<PublicUserProfile, AppError> {
     let user = require_verified(ctx).await?;
     let req = parse_follow_request(input, "user.follow")?;
-    let target = resolve_target(ctx, &req.username).await?;
+    let target = resolve_target(ctx, &req.username, false).await?;
     if target.id == user.id {
         return Err(AppError::new(
             "user.self_follow",
@@ -87,7 +93,7 @@ pub async fn follow(ctx: &RpcCtx, input: serde_json::Value) -> Result<PublicUser
 pub async fn unfollow(ctx: &RpcCtx, input: serde_json::Value) -> Result<PublicUserProfile, AppError> {
     let user = require_verified(ctx).await?;
     let req = parse_follow_request(input, "user.unfollow")?;
-    let target = resolve_target(ctx, &req.username).await?;
+    let target = resolve_target(ctx, &req.username, true).await?;
     ctx.db
         .unfollow_user(&user.id, &target.id)
         .await
@@ -108,7 +114,7 @@ async fn follow_list(
     req: UserFollowListRequest,
     followers: bool,
 ) -> Result<UserFollowListResponse, AppError> {
-    let user = resolve_target(ctx, &req.username).await?;
+    let user = resolve_target(ctx, &req.username, false).await?;
     let (offset, limit) = clamp_page(req.offset, req.limit);
     let q = req.q.as_deref().map(str::trim).filter(|s| !s.is_empty());
     let (total, rows) = if followers {
@@ -189,24 +195,39 @@ pub async fn list_watched(
     let offset = req.offset.unwrap_or(0).max(0);
     let limit = req.limit.unwrap_or(30).clamp(1, 50);
 
-    let ids = ctx
+    // DEBT-06: prune stale watch rows across ALL subscriptions first (one
+    // bulk read-ACL query), then page — a pruned row can't shrink a page.
+    let all_ids = ctx
         .db
-        .list_watched_repo_ids(&user.id, offset, limit)
+        .list_watched_repo_ids(&user.id, 0, i64::MAX)
         .await
         .map_err(db_err)?;
+    let mut page_ids: Vec<String> = all_ids.clone();
+    match ctx.db.readable_repo_ids(&user.id, &all_ids).await {
+        Ok(readable) => {
+            for id in &all_ids {
+                if !readable.contains(id) {
+                    crate::notify::drop_access_rows(&ctx.db, &user.id, id).await;
+                }
+            }
+            page_ids.retain(|id| readable.contains(id));
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "listWatched: readable check failed — rows re-checked below")
+        }
+    }
 
     let mut repos = Vec::new();
-    for id in ids {
-        // DEBT-06: a watch row for a repo the user can no longer read is stale
-        // — auto-prune it (plus its notification rows) GitHub-style.
+    for id in page_ids
+        .into_iter()
+        .skip(offset as usize)
+        .take(limit as usize)
+    {
         let Some(row) = ctx.db.find_repository_by_id(&id).await.map_err(db_err)? else {
-            crate::notify::prune_if_repo_read_lost(&ctx.db, &user.id, &id).await;
+            // Raced delete after the bulk check.
+            crate::notify::drop_access_rows(&ctx.db, &user.id, &id).await;
             continue;
         };
-        if row.deleted_at.is_some() {
-            crate::notify::prune_if_repo_read_lost(&ctx.db, &user.id, &id).await;
-            continue;
-        }
         let owner_username = if row.owner_type == "org" {
             ctx.db
                 .find_organization_by_id(&row.owner_id)
@@ -223,7 +244,7 @@ pub async fn list_watched(
                 .map(|u| u.username)
         };
         let Some(owner_username) = owner_username else {
-            crate::notify::prune_if_repo_read_lost(&ctx.db, &user.id, &id).await;
+            crate::notify::drop_access_rows(&ctx.db, &user.id, &id).await;
             continue;
         };
         let Ok(Some(owner)) = resolve_owner_slug(&ctx.db, &owner_username).await else {
@@ -234,7 +255,7 @@ pub async fn list_watched(
             continue;
         };
         if !meets(capability, Capability::Read) {
-            crate::notify::prune_if_repo_read_lost(&ctx.db, &user.id, &id).await;
+            crate::notify::drop_access_rows(&ctx.db, &user.id, &id).await;
             continue;
         }
         let accessible = AccessibleRepo {

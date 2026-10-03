@@ -34,6 +34,7 @@ type LoaderShape =
       kind: "ready";
       user: { id: string; username: string };
       repos: unknown[];
+      truncated?: boolean;
     };
 
 let loaderData: LoaderShape | undefined;

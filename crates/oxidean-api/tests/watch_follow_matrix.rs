@@ -1021,3 +1021,301 @@ jobs:
     assert_eq!(n["subject_kind"], "workflow_run");
     assert_eq!(n["subject_ref"].as_str().unwrap().len() > 8, true);
 }
+
+/// DEBT-06 review coverage: a failed run emits `workflow_run_failure` through
+/// the same matrix (all watcher + triggerer, once).
+#[tokio::test]
+async fn workflow_run_failure_fanout() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("wf_fail.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos).await;
+
+    let (pusher_cookie, pusher_v) = signup_and_login(&app, "fpush@ex.com", "fpush").await;
+    let pusher_id = pusher_v["data"]["id"].as_str().unwrap().to_string();
+    verify_user(&db, &pusher_id).await;
+    create_repo_vis(&app, &pusher_cookie, "ci", "public").await;
+    let repo = db
+        .find_repository_by_owner_name(&pusher_id, "ci")
+        .await
+        .unwrap()
+        .unwrap();
+
+    let (watch_cookie, wv) = signup_and_login(&app, "fw@ex.com", "fw").await;
+    verify_user(&db, wv["data"]["id"].as_str().unwrap()).await;
+    assert_eq!(watch(&app, &watch_cookie, "fpush", "ci", "all").await["ok"], true);
+
+    let doc = parse_workflow_yaml(b"name: CI\non: [push]\njobs:\n  b:\n    runs-on: x\n    steps:\n      - run: echo hi\n").unwrap();
+    enqueue_run(
+        &db,
+        &repo.id,
+        ".github/workflows/ci.yml",
+        &doc,
+        "push",
+        "deadbeef",
+        "refs/heads/main",
+        Some(&pusher_id),
+    )
+    .await
+    .unwrap();
+
+    let reg = mint_registration_token(&db).await.unwrap();
+    let reg_res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/actions/register")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({"name":"r1","labels":["x"],"token":reg}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let reg_body = reg_res.into_body().collect().await.unwrap().to_bytes();
+    let reg_v: serde_json::Value = serde_json::from_slice(&reg_body).unwrap();
+    let runner_token = reg_v["runner_token"].as_str().unwrap().to_string();
+
+    let fetch = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/actions/fetch_task")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {runner_token}"))
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let fetch_v: serde_json::Value =
+        serde_json::from_slice(&fetch.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    let job_id = fetch_v["job_id"].as_str().expect("job claimed").to_string();
+
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/actions/update_task")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {runner_token}"))
+                .body(Body::from(
+                    serde_json::json!({ "job_id": job_id, "state": "failure" }).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let reasons = unread_reasons(&app, &watch_cookie).await;
+    assert_eq!(
+        reasons.iter().filter(|r| **r == "workflow_run_failure").count(),
+        1,
+        "all watcher should see exactly one workflow_run_failure — {reasons:?}"
+    );
+    let pusher_reasons = unread_reasons(&app, &pusher_cookie).await;
+    assert_eq!(
+        pusher_reasons
+            .iter()
+            .filter(|r| **r == "workflow_run_failure")
+            .count(),
+        1,
+        "triggering user learns the failure — {pusher_reasons:?}"
+    );
+}
+
+/// DEBT-06 review coverage: `repo.actions.cancelRun` claims the completion
+/// notice (watcher sees `workflow_run_cancelled` once) and a second cancel on
+/// the now-finished run is rejected with `repo.actions.run_finished` instead
+/// of clobbering terminal state.
+#[tokio::test]
+async fn workflow_run_cancel_fanout_and_finished_guard() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("wf_cancel.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos).await;
+
+    let (owner_cookie, owner_v) = signup_and_login(&app, "cown@ex.com", "cown").await;
+    let owner_id = owner_v["data"]["id"].as_str().unwrap().to_string();
+    verify_user(&db, &owner_id).await;
+    create_repo_vis(&app, &owner_cookie, "ci", "public").await;
+    let repo = db
+        .find_repository_by_owner_name(&owner_id, "ci")
+        .await
+        .unwrap()
+        .unwrap();
+
+    let (watch_cookie, wv) = signup_and_login(&app, "cw@ex.com", "cw").await;
+    verify_user(&db, wv["data"]["id"].as_str().unwrap()).await;
+    assert_eq!(watch(&app, &watch_cookie, "cown", "ci", "all").await["ok"], true);
+
+    let doc = parse_workflow_yaml(b"name: CI\non: [push]\njobs:\n  b:\n    runs-on: x\n    steps:\n      - run: echo hi\n").unwrap();
+    let (run_id, _jobs) = enqueue_run(
+        &db,
+        &repo.id,
+        ".github/workflows/ci.yml",
+        &doc,
+        "push",
+        "deadbeef",
+        "refs/heads/main",
+        Some(&owner_id),
+    )
+    .await
+    .unwrap();
+
+    let cancel = rpc_json(
+        &app,
+        &owner_cookie,
+        &format!(
+            r#"{{"procedure":"repo.actions.cancelRun","input":{{"owner":"cown","name":"ci","run_id":"{run_id}"}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(cancel["ok"], true, "cancel — {cancel}");
+    assert_eq!(cancel["data"]["run"]["status"], "cancelled");
+
+    let reasons = unread_reasons(&app, &watch_cookie).await;
+    assert_eq!(
+        reasons
+            .iter()
+            .filter(|r| **r == "workflow_run_cancelled")
+            .count(),
+        1,
+        "all watcher should see workflow_run_cancelled — {reasons:?}"
+    );
+    let owner_reasons = unread_reasons(&app, &owner_cookie).await;
+    assert_eq!(
+        owner_reasons
+            .iter()
+            .filter(|r| **r == "workflow_run_cancelled")
+            .count(),
+        1,
+        "cancelling owner learns the outcome — {owner_reasons:?}"
+    );
+
+    // Second cancel on the finished run: run_finished, status preserved.
+    let again = rpc_json(
+        &app,
+        &owner_cookie,
+        &format!(
+            r#"{{"procedure":"repo.actions.cancelRun","input":{{"owner":"cown","name":"ci","run_id":"{run_id}"}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(again["ok"], false, "cancel on finished run — {again}");
+    assert_eq!(again["error"]["code"], "repo.actions.run_finished");
+    let run = db.find_action_run_by_id(&run_id).await.unwrap().unwrap();
+    assert_eq!(run.status, "cancelled");
+    assert_eq!(
+        unread_reasons(&app, &watch_cookie)
+            .await
+            .iter()
+            .filter(|r| **r == "workflow_run_cancelled")
+            .count(),
+        1,
+        "no duplicate cancel notification"
+    );
+}
+
+/// Banned accounts (DEBT-06 review): followers can still `unfollow` them, but
+/// `follow` stays rejected and banned users vanish from followers/following
+/// lists and profile counts.
+#[tokio::test]
+async fn banned_users_unfollowable_and_hidden_from_follow_lists() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!("sqlite:{}", dir.path().join("ban_follow.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), dir.path().join("repos")).await;
+
+    let (a_cookie, av) = signup_and_login(&app, "aa@ex.com", "aa").await;
+    let a_id = av["data"]["id"].as_str().unwrap().to_string();
+    verify_user(&db, &a_id).await;
+    let (_b_cookie, bv) = signup_and_login(&app, "bb@ex.com", "bb").await;
+    let b_id = bv["data"]["id"].as_str().unwrap().to_string();
+    verify_user(&db, &b_id).await;
+    let (c_cookie, cv) = signup_and_login(&app, "cc@ex.com", "cc").await;
+    let c_id = cv["data"]["id"].as_str().unwrap().to_string();
+    verify_user(&db, &c_id).await;
+
+    // a follows b; c follows a.
+    let f = rpc_json(
+        &app,
+        &a_cookie,
+        r#"{"procedure":"user.follow","input":{"username":"bb"}}"#,
+    )
+    .await;
+    assert_eq!(f["ok"], true, "follow bb — {f}");
+    let f = rpc_json(
+        &app,
+        &c_cookie,
+        r#"{"procedure":"user.follow","input":{"username":"aa"}}"#,
+    )
+    .await;
+    assert_eq!(f["ok"], true, "cc follows aa — {f}");
+
+    // Ban b and c.
+    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    db.set_user_banned_at(&b_id, &now).await.expect("ban b");
+    db.set_user_banned_at(&c_id, &now).await.expect("ban c");
+
+    // a can still unfollow the banned b.
+    let un = rpc_json(
+        &app,
+        &a_cookie,
+        r#"{"procedure":"user.unfollow","input":{"username":"bb"}}"#,
+    )
+    .await;
+    assert_eq!(un["ok"], true, "unfollow banned bb — {un}");
+    assert_eq!(un["data"]["viewer_is_following"], false);
+
+    // …but cannot re-follow them.
+    let f = rpc_json(
+        &app,
+        &a_cookie,
+        r#"{"procedure":"user.follow","input":{"username":"bb"}}"#,
+    )
+    .await;
+    assert_eq!(f["ok"], false, "follow banned bb must fail — {f}");
+
+    // c (banned) is hidden from a's followers list and counts.
+    let list = rpc_json(
+        &app,
+        &a_cookie,
+        r#"{"procedure":"user.followers.list","input":{"username":"aa"}}"#,
+    )
+    .await;
+    assert_eq!(list["ok"], true, "followers.list — {list}");
+    assert_eq!(list["data"]["total"], 0, "banned follower hidden from total");
+    assert_eq!(list["data"]["users"].as_array().unwrap().len(), 0);
+
+    let profile = rpc_json(
+        &app,
+        &a_cookie,
+        r#"{"procedure":"user.getPublicProfile","input":{"username":"aa"}}"#,
+    )
+    .await;
+    assert_eq!(profile["ok"], true, "getPublicProfile — {profile}");
+    assert_eq!(
+        profile["data"]["follower_count"].as_i64().unwrap(),
+        0,
+        "banned follower excluded from profile count"
+    );
+    assert_eq!(
+        profile["data"]["following_count"].as_i64().unwrap(),
+        0,
+        "banned followed user excluded from profile count"
+    );
+}

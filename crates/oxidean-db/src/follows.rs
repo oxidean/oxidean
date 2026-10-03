@@ -115,25 +115,31 @@ pub async fn is_following(
     Ok(count > 0)
 }
 
-/// Accounts following `user_id`.
+/// Accounts following `user_id` (banned users hidden — edges persist for unban).
 pub async fn follower_count(pool: &DbPool, user_id: &str) -> Result<i64, String> {
     match pool {
         DbPool::Postgres(p) => sqlx::query_scalar(
-            "SELECT COUNT(*) FROM user_follows WHERE followed_id = $1",
+            "SELECT COUNT(*) FROM user_follows f
+             JOIN users u ON u.id = f.follower_id
+             WHERE f.followed_id = $1 AND u.banned_at IS NULL",
         )
         .bind(user_id)
         .fetch_one(p)
         .await
         .map_err(|e| format!("follower_count: {e}")),
         DbPool::MySql(p) => sqlx::query_scalar(
-            "SELECT COUNT(*) FROM user_follows WHERE followed_id = ?",
+            "SELECT COUNT(*) FROM user_follows f
+             JOIN users u ON u.id = f.follower_id
+             WHERE f.followed_id = ? AND u.banned_at IS NULL",
         )
         .bind(user_id)
         .fetch_one(p)
         .await
         .map_err(|e| format!("follower_count: {e}")),
         DbPool::Sqlite(p) => sqlx::query_scalar(
-            "SELECT COUNT(*) FROM user_follows WHERE followed_id = ?1",
+            "SELECT COUNT(*) FROM user_follows f
+             JOIN users u ON u.id = f.follower_id
+             WHERE f.followed_id = ?1 AND u.banned_at IS NULL",
         )
         .bind(user_id)
         .fetch_one(p)
@@ -142,25 +148,31 @@ pub async fn follower_count(pool: &DbPool, user_id: &str) -> Result<i64, String>
     }
 }
 
-/// Accounts `user_id` follows.
+/// Accounts `user_id` follows (banned users hidden — edges persist for unban).
 pub async fn following_count(pool: &DbPool, user_id: &str) -> Result<i64, String> {
     match pool {
         DbPool::Postgres(p) => sqlx::query_scalar(
-            "SELECT COUNT(*) FROM user_follows WHERE follower_id = $1",
+            "SELECT COUNT(*) FROM user_follows f
+             JOIN users u ON u.id = f.followed_id
+             WHERE f.follower_id = $1 AND u.banned_at IS NULL",
         )
         .bind(user_id)
         .fetch_one(p)
         .await
         .map_err(|e| format!("following_count: {e}")),
         DbPool::MySql(p) => sqlx::query_scalar(
-            "SELECT COUNT(*) FROM user_follows WHERE follower_id = ?",
+            "SELECT COUNT(*) FROM user_follows f
+             JOIN users u ON u.id = f.followed_id
+             WHERE f.follower_id = ? AND u.banned_at IS NULL",
         )
         .bind(user_id)
         .fetch_one(p)
         .await
         .map_err(|e| format!("following_count: {e}")),
         DbPool::Sqlite(p) => sqlx::query_scalar(
-            "SELECT COUNT(*) FROM user_follows WHERE follower_id = ?1",
+            "SELECT COUNT(*) FROM user_follows f
+             JOIN users u ON u.id = f.followed_id
+             WHERE f.follower_id = ?1 AND u.banned_at IS NULL",
         )
         .bind(user_id)
         .fetch_one(p)
@@ -230,7 +242,7 @@ async fn list_follow_edges(
                             to_char(f.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS followed_at
                      FROM user_follows f
                      JOIN users u ON u.id = {join_col}
-                     WHERE {edge_col} = $1
+                     WHERE {edge_col} = $1 AND u.banned_at IS NULL
                        AND (u.username ILIKE $2 ESCAPE '\\' OR COALESCE(u.display_name, '') ILIKE $2 ESCAPE '\\')
                      ORDER BY f.created_at DESC
                      LIMIT $3 OFFSET $4",
@@ -247,7 +259,7 @@ async fn list_follow_edges(
                             to_char(f.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS followed_at
                      FROM user_follows f
                      JOIN users u ON u.id = {join_col}
-                     WHERE {edge_col} = $1
+                     WHERE {edge_col} = $1 AND u.banned_at IS NULL
                      ORDER BY f.created_at DESC
                      LIMIT $2 OFFSET $3",
                 ))
@@ -267,7 +279,7 @@ async fn list_follow_edges(
                             DATE_FORMAT(f.created_at, '%Y-%m-%dT%H:%i:%sZ') AS followed_at
                      FROM user_follows f
                      JOIN users u ON u.id = {join_col}
-                     WHERE {edge_col} = ?
+                     WHERE {edge_col} = ? AND u.banned_at IS NULL
                        AND (u.username LIKE ? ESCAPE '\\\\' OR COALESCE(u.display_name, '') LIKE ? ESCAPE '\\\\')
                      ORDER BY f.created_at DESC
                      LIMIT ? OFFSET ?",
@@ -285,7 +297,7 @@ async fn list_follow_edges(
                             DATE_FORMAT(f.created_at, '%Y-%m-%dT%H:%i:%sZ') AS followed_at
                      FROM user_follows f
                      JOIN users u ON u.id = {join_col}
-                     WHERE {edge_col} = ?
+                     WHERE {edge_col} = ? AND u.banned_at IS NULL
                      ORDER BY f.created_at DESC
                      LIMIT ? OFFSET ?",
                 ))
@@ -305,7 +317,7 @@ async fn list_follow_edges(
                             strftime('%Y-%m-%dT%H:%M:%SZ', f.created_at) AS followed_at
                      FROM user_follows f
                      JOIN users u ON u.id = {join_col}
-                     WHERE {edge_col} = ?1
+                     WHERE {edge_col} = ?1 AND u.banned_at IS NULL
                        AND (u.username LIKE ?2 ESCAPE '\\' OR COALESCE(u.display_name, '') LIKE ?2 ESCAPE '\\')
                      ORDER BY f.created_at DESC
                      LIMIT ?3 OFFSET ?4",
@@ -322,7 +334,7 @@ async fn list_follow_edges(
                             strftime('%Y-%m-%dT%H:%M:%SZ', f.created_at) AS followed_at
                      FROM user_follows f
                      JOIN users u ON u.id = {join_col}
-                     WHERE {edge_col} = ?1
+                     WHERE {edge_col} = ?1 AND u.banned_at IS NULL
                      ORDER BY f.created_at DESC
                      LIMIT ?2 OFFSET ?3",
                 ))
@@ -380,7 +392,7 @@ async fn count_follow_edges(
                 sqlx::query_scalar(&format!(
                     "SELECT COUNT(*) FROM user_follows f
                      JOIN users u ON u.id = {join_col}
-                     WHERE {edge_col} = $1
+                     WHERE {edge_col} = $1 AND u.banned_at IS NULL
                        AND (u.username ILIKE $2 ESCAPE '\\' OR COALESCE(u.display_name, '') ILIKE $2 ESCAPE '\\')",
                 ))
                 .bind(user_id)
@@ -389,7 +401,9 @@ async fn count_follow_edges(
                 .await
             } else {
                 sqlx::query_scalar(&format!(
-                    "SELECT COUNT(*) FROM user_follows f WHERE {edge_col} = $1"
+                    "SELECT COUNT(*) FROM user_follows f
+                     JOIN users u ON u.id = {join_col}
+                     WHERE {edge_col} = $1 AND u.banned_at IS NULL"
                 ))
                 .bind(user_id)
                 .fetch_one(p)
@@ -402,7 +416,7 @@ async fn count_follow_edges(
                 sqlx::query_scalar(&format!(
                     "SELECT COUNT(*) FROM user_follows f
                      JOIN users u ON u.id = {join_col}
-                     WHERE {edge_col} = ?
+                     WHERE {edge_col} = ? AND u.banned_at IS NULL
                        AND (u.username LIKE ? ESCAPE '\\\\' OR COALESCE(u.display_name, '') LIKE ? ESCAPE '\\\\')",
                 ))
                 .bind(user_id)
@@ -412,7 +426,9 @@ async fn count_follow_edges(
                 .await
             } else {
                 sqlx::query_scalar(&format!(
-                    "SELECT COUNT(*) FROM user_follows f WHERE {edge_col} = ?"
+                    "SELECT COUNT(*) FROM user_follows f
+                     JOIN users u ON u.id = {join_col}
+                     WHERE {edge_col} = ? AND u.banned_at IS NULL"
                 ))
                 .bind(user_id)
                 .fetch_one(p)
@@ -425,7 +441,7 @@ async fn count_follow_edges(
                 sqlx::query_scalar(&format!(
                     "SELECT COUNT(*) FROM user_follows f
                      JOIN users u ON u.id = {join_col}
-                     WHERE {edge_col} = ?1
+                     WHERE {edge_col} = ?1 AND u.banned_at IS NULL
                        AND (u.username LIKE ?2 ESCAPE '\\' OR COALESCE(u.display_name, '') LIKE ?2 ESCAPE '\\')",
                 ))
                 .bind(user_id)
@@ -434,7 +450,9 @@ async fn count_follow_edges(
                 .await
             } else {
                 sqlx::query_scalar(&format!(
-                    "SELECT COUNT(*) FROM user_follows f WHERE {edge_col} = ?1"
+                    "SELECT COUNT(*) FROM user_follows f
+                     JOIN users u ON u.id = {join_col}
+                     WHERE {edge_col} = ?1 AND u.banned_at IS NULL"
                 ))
                 .bind(user_id)
                 .fetch_one(p)

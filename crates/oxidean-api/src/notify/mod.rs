@@ -302,11 +302,7 @@ async fn repo_can_read(db: &Database, user_id: &str, repo_id: &str) -> Option<bo
 
 /// Drop one user's watch row and notification rows for a repo they can no
 /// longer read (GitHub auto-unwatch on access loss, DEBT-06). Soft-fails.
-pub async fn prune_if_repo_read_lost(db: &Database, user_id: &str, repo_id: &str) {
-    match repo_can_read(db, user_id, repo_id).await {
-        Some(false) => {}
-        Some(true) | None => return,
-    }
+pub(crate) async fn drop_access_rows(db: &Database, user_id: &str, repo_id: &str) {
     if let Err(e) = db.unwatch_repository(user_id, repo_id).await {
         tracing::warn!(
             error = %e,
@@ -328,9 +324,19 @@ pub async fn prune_if_repo_read_lost(db: &Database, user_id: &str, repo_id: &str
     }
 }
 
+/// Single-user entry point: re-check then drop rows on confirmed access loss.
+pub async fn prune_if_repo_read_lost(db: &Database, user_id: &str, repo_id: &str) {
+    match repo_can_read(db, user_id, repo_id).await {
+        Some(false) => {}
+        Some(true) | None => return,
+    }
+    drop_access_rows(db, user_id, repo_id).await;
+}
+
 /// Repo-wide re-check after an ACL change that can revoke read for many users
 /// (visibility flip, transfer, soft-delete, member-base change). Every watcher
-/// and notification recipient is re-validated. Soft-fails.
+/// and notification recipient is re-validated via one bulk reader query.
+/// Soft-fails.
 pub async fn sweep_repo_access(db: &Database, repo_id: &str) {
     let mut candidates: HashSet<String> = HashSet::new();
     match db.list_repo_watch_levels(repo_id).await {
@@ -345,8 +351,40 @@ pub async fn sweep_repo_access(db: &Database, repo_id: &str) {
             tracing::warn!(error = %e, repo_id = %repo_id, "access sweep: recipients failed")
         }
     }
-    for user_id in candidates {
-        prune_if_repo_read_lost(db, &user_id, repo_id).await;
+    if candidates.is_empty() {
+        return;
+    }
+    // Fresh fetch keeps this correct for softDelete callers holding a
+    // pre-delete row: missing/deleted → everyone loses access.
+    match db.find_repository_by_id(repo_id).await {
+        Ok(None) => {
+            for user_id in candidates {
+                drop_access_rows(db, &user_id, repo_id).await;
+            }
+        }
+        Ok(Some(repo)) => {
+            if !crate::repo::is_private_visibility(&repo.visibility) {
+                return;
+            }
+            match db
+                .readers_of_repo(repo_id, &candidates.iter().cloned().collect::<Vec<_>>())
+                .await
+            {
+                Ok(readers) => {
+                    for user_id in candidates {
+                        if !readers.contains(&user_id) {
+                            drop_access_rows(db, &user_id, repo_id).await;
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, repo_id = %repo_id, "access sweep: readers failed")
+                }
+            }
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, repo_id = %repo_id, "access sweep: repo lookup failed")
+        }
     }
 }
 
@@ -357,8 +395,18 @@ pub async fn sweep_repo_access(db: &Database, repo_id: &str) {
 pub async fn sweep_user_access_on_owner_repos(db: &Database, user_id: &str, owner_id: &str) {
     match db.list_repositories_by_owner(owner_id).await {
         Ok(repos) => {
-            for repo in repos {
-                prune_if_repo_read_lost(db, user_id, &repo.id).await;
+            let repo_ids: Vec<String> = repos.into_iter().map(|r| r.id).collect();
+            match db.readable_repo_ids(user_id, &repo_ids).await {
+                Ok(readable) => {
+                    for repo_id in repo_ids {
+                        if !readable.contains(&repo_id) {
+                            drop_access_rows(db, user_id, &repo_id).await;
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, owner_id = %owner_id, "access sweep: readable check failed")
+                }
             }
         }
         Err(e) => {
@@ -384,13 +432,23 @@ pub async fn sweep_org_access(db: &Database, org_id: &str) {
 }
 
 /// Read-time access re-check (DEBT-06 follow-up): every repository the user
-/// still holds notifications for is re-validated; rows for repos they can no
-/// longer read are deleted together with the watch row.
+/// still holds notifications for is re-validated in one bulk query; rows for
+/// repos they can no longer read are deleted together with the watch row.
+/// Soft-fails.
 pub async fn prune_stale_notifications(db: &Database, user_id: &str) {
     match db.list_notification_repo_ids_for_recipient(user_id).await {
         Ok(repo_ids) => {
-            for repo_id in repo_ids {
-                prune_if_repo_read_lost(db, user_id, &repo_id).await;
+            match db.readable_repo_ids(user_id, &repo_ids).await {
+                Ok(readable) => {
+                    for repo_id in repo_ids {
+                        if !readable.contains(&repo_id) {
+                            drop_access_rows(db, user_id, &repo_id).await;
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, user_id = %user_id, "stale notification readable check failed")
+                }
             }
         }
         Err(e) => {

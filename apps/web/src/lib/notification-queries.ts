@@ -56,9 +56,13 @@ export function subjectHref(n: NotificationPublic): string {
     case "pull_request":
       return `/${n.owner}/${n.repo}/pull/${n.subject_number}`;
     case "release":
-      return `/${n.owner}/${n.repo}/releases/${n.subject_ref ?? ""}`;
+      return n.subject_ref
+        ? `/${n.owner}/${n.repo}/releases/${n.subject_ref}`
+        : `/${n.owner}/${n.repo}/releases`;
     case "workflow_run":
-      return `/${n.owner}/${n.repo}/actions/${n.subject_ref ?? ""}`;
+      return n.subject_ref
+        ? `/${n.owner}/${n.repo}/actions/${n.subject_ref}`
+        : `/${n.owner}/${n.repo}/actions`;
     case "push":
       return n.subject_ref
         ? `/${n.owner}/${n.repo}/commits/${n.subject_ref}`
