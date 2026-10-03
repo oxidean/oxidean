@@ -30,8 +30,15 @@ import {
   fetchProviderConfig,
   fetchSessionMe,
   resolveAppAccessRedirect,
+  ssrResolvedTheme,
 } from "@/lib/ssr-auth";
-import { THEME_BOOT_SCRIPT, FONT_WARM_SCRIPT } from "@/lib/theme";
+import {
+  THEME_BOOT_SCRIPT,
+  FONT_WARM_SCRIPT,
+  resolveThemeForSsr,
+  themePreferenceFromCookieHeader,
+  resolvedColorSchemeFromCookieHeader,
+} from "@/lib/theme";
 import { buildSwRegisterScript } from "@/lib/sw-register";
 import "@/styles.css";
 
@@ -48,6 +55,8 @@ const PROVIDER_CONFIG_LOCKED: ProviderConfigPublic = {
 
 export type RootLoaderData = {
   dehydratedState: DehydratedState;
+  /** Resolved theme for the SSR `<html class>` — keeps reloads flash-free. */
+  ssrTheme: "light" | "dark";
 };
 
 /**
@@ -57,8 +66,16 @@ export type RootLoaderData = {
 export const Route = createRootRoute({
   component: RootComponent,
   shellComponent: RootShell,
-  head: () => ({
-    meta: [{ title: "Oxidean" }],
+  head: ({ loaderData }) => ({
+    meta: [
+      { title: "Oxidean" },
+      // Pinned per request: the UA canvas (pre-CSS gap + scrollbars/controls)
+      // matches the resolved theme, so document loads don't flash light.
+      {
+        name: "color-scheme",
+        content: (loaderData as RootLoaderData | undefined)?.ssrTheme ?? "light",
+      },
+    ],
   }),
   loader: async ({ location }): Promise<RootLoaderData> => {
     const qc = createAppQueryClient();
@@ -111,8 +128,25 @@ export const Route = createRootRoute({
       throw redirect({ href: target });
     }
 
-    return { dehydratedState: dehydrate(qc) };
+    // Resolve the theme from the same cookies the FOUC boot script mirrors so
+    // the SSR <html> already carries `dark` — no post-paint theme flip on
+    // full-document loads. The request-header read lives behind a
+    // createServerOnlyFn (start import-protection); client-side loader reruns
+    // read document.cookie, which holds the same mirrored values.
+    const ssrTheme =
+      typeof document === "undefined"
+        ? ssrResolvedTheme()
+        : resolveThemeForSsr(
+            themePreferenceFromCookieHeader(document.cookie),
+            null,
+            resolvedColorSchemeFromCookieHeader(document.cookie),
+          );
+
+    return { dehydratedState: dehydrate(qc), ssrTheme };
   },
+  // Documents must revalidate every load: HTML is unpinned while /assets/*
+  // is content-hashed, so a cached page would reference a deleted bundle.
+  headers: () => ({ "cache-control": "no-cache" }),
 });
 
 function RootShell({ children }: { children?: unknown }) @{

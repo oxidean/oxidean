@@ -183,6 +183,21 @@ export const resolveSsrHighlightTheme = createServerFn({ method: "GET" }).handle
   async (): Promise<"oxidean-light" | "oxidean-dark"> => ssrHighlightTheme(),
 );
 
+/**
+ * Resolved app theme for the document root — same cookie + resolved scheme +
+ * Client Hints chain as {@link ssrHighlightTheme}. Server-only (reads request
+ * headers); loaders must guard the call site because getRequestHeader cannot
+ * be imported into the client bundle (start import-protection).
+ */
+export const ssrResolvedTheme = createServerOnlyFn((): "light" | "dark" => {
+  const cookie = incomingCookie();
+  return resolveThemeForSsr(
+    themePreferenceFromCookieHeader(cookie),
+    getRequestHeader("sec-ch-prefers-color-scheme"),
+    resolvedColorSchemeFromCookieHeader(cookie),
+  );
+});
+
 export type AppAccessRedirectInput = {
   pathname: string;
   needsSetup: boolean;
