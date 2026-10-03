@@ -190,9 +190,9 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
     surface: "components/repo/ref-select.tsrx",
     coverage: [
       {
-        kind: "skip",
-        rationale:
-          "Branch/tag Select used across forge chrome; covered indirectly by forge-repo/branches flows. Dedicated browser Select pick when next edited.",
+        kind: "browser",
+        test: "apps/web/src/components/repo/ref-select.browser.test.tsx",
+        subject: "RefSelect",
       },
     ],
   },
@@ -228,9 +228,9 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
     surface: "components/repo/clone-box.tsrx",
     coverage: [
       {
-        kind: "skip",
-        rationale:
-          "Clone URL Select; forge-repo stack-browser covers repo home chrome. Dedicated Select pick when clone-box is next touched.",
+        kind: "browser",
+        test: "apps/web/src/components/repo/clone-box.browser.test.tsx",
+        subject: "CloneBox",
       },
     ],
   },
@@ -282,9 +282,9 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
     surface: "routes/setup.credentials.tsrx",
     coverage: [
       {
-        kind: "skip",
-        rationale:
-          "Credentials step covered by happy-dom setup.credentials.integration; promote on next edit.",
+        kind: "browser",
+        test: "apps/web/src/routes/setup.credentials.browser.test.tsx",
+        subject: "CredentialsPage",
       },
     ],
   },
@@ -310,9 +310,9 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
     surface: "routes/admin/templates.tsrx",
     coverage: [
       {
-        kind: "skip",
-        rationale:
-          "Admin templates Switch/Select; forge-admin does not open /admin/templates yet. Add browser or stack-browser on next templates edit.",
+        kind: "browser",
+        test: "apps/web/src/routes/admin/templates.browser.test.tsx",
+        subject: "AdminTemplatesPage",
       },
     ],
   },
