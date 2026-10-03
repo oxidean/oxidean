@@ -10,6 +10,7 @@ import {
 } from "@octanejs/lucide";
 import { useEffect, useEffectEvent, useState } from "octane";
 import { Input } from "@/components/ui/input";
+import { useAppNavigate } from "@/lib/app-navigate";
 import {
   fetchSearchSuggestions,
   searchResultsHref,
@@ -68,6 +69,7 @@ function actionIcon(type: SearchActionSuggestion["type"]) {
 }
 
 export function GlobalSearch({ className }: GlobalSearchProps) @{
+  const navigateApp = useAppNavigate();
   const { user } = useChromeAccountState();
   const signedIn = !!user;
   const [q, setQ] = useState("");
@@ -116,11 +118,11 @@ export function GlobalSearch({ className }: GlobalSearchProps) @{
 
   function goResults() {
     const next = q.trim();
-    window.location.assign(searchResultsHref(next));
+    navigateApp(searchResultsHref(next));
   }
 
   function activate(item: FlatItem) {
-    window.location.assign(item.item.href);
+    navigateApp(item.item.href);
   }
 
   function onKeyDown(ev: KeyboardEvent) {

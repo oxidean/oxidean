@@ -11,6 +11,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLinkItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -89,41 +90,27 @@ function CreateMenu({ onNavigated }: { onNavigated?: () => void }) @{
       <Plus aria-hidden size={18} />
     </DropdownMenuTrigger>
     <DropdownMenuContent align="end" className="min-w-52">
-      <DropdownMenuItem
-        onClick={() => {
-          onNavigated?.();
-          window.location.assign("/new");
-        }}
-      >
+      <DropdownMenuLinkItem href="/new" onClick={onNavigated}>
         New repository
-      </DropdownMenuItem>
-      <DropdownMenuItem
-        onClick={() => {
-          onNavigated?.();
-          window.location.assign("/orgs/new");
-        }}
-      >
+      </DropdownMenuLinkItem>
+      <DropdownMenuLinkItem href="/orgs/new" onClick={onNavigated}>
         New organization
-      </DropdownMenuItem>
+      </DropdownMenuLinkItem>
       @if (repo) {
         <>
           <DropdownMenuSeparator />
-          <DropdownMenuItem
-            onClick={() => {
-              onNavigated?.();
-              window.location.assign(`/${repo.owner}/${repo.repo}/issues/new`);
-            }}
+          <DropdownMenuLinkItem
+            href={`/${repo.owner}/${repo.repo}/issues/new`}
+            onClick={onNavigated}
           >
             New issue
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            onClick={() => {
-              onNavigated?.();
-              window.location.assign(`/${repo.owner}/${repo.repo}/releases/new`);
-            }}
+          </DropdownMenuLinkItem>
+          <DropdownMenuLinkItem
+            href={`/${repo.owner}/${repo.repo}/releases/new`}
+            onClick={onNavigated}
           >
             New release
-          </DropdownMenuItem>
+          </DropdownMenuLinkItem>
         </>;
       }
     </DropdownMenuContent>
@@ -150,6 +137,7 @@ function AccountMenu({
     syncSessionPresenceHint(false);
     clearSessionQueries(queryClient);
     onNavigated?.();
+    // raw-nav-ok — post-auth teardown: session destroyed, reload clears all chrome state
     window.location.assign("/");
   }
 
@@ -167,43 +155,26 @@ function AccountMenu({
       <span className="hidden text-muted-foreground md:inline">{"@" + user.username}</span>
     </DropdownMenuTrigger>
     <DropdownMenuContent align="end" className="min-w-56">
-      <DropdownMenuItem
+      <DropdownMenuLinkItem
         className="h-auto cursor-pointer flex-col items-start gap-0.5 py-2"
         aria-label={`View @${user.username}'s profile`}
-        onClick={() => {
-          onNavigated?.();
-          window.location.assign(`/${user.username}`);
-        }}
+        href={`/${user.username}`}
+        onClick={onNavigated}
       >
         <span className="truncate text-[14px] font-medium text-foreground">{displayName}</span>
         <span className="truncate text-[13px] text-muted-foreground">{"@" + user.username}</span>
-      </DropdownMenuItem>
+      </DropdownMenuLinkItem>
       <DropdownMenuSeparator />
-      <DropdownMenuItem
-        onClick={() => {
-          onNavigated?.();
-          window.location.assign("/");
-        }}
-      >
+      <DropdownMenuLinkItem href="/" onClick={onNavigated}>
         Your repositories
-      </DropdownMenuItem>
-      <DropdownMenuItem
-        onClick={() => {
-          onNavigated?.();
-          window.location.assign("/settings/general");
-        }}
-      >
+      </DropdownMenuLinkItem>
+      <DropdownMenuLinkItem href="/settings/general" onClick={onNavigated}>
         Settings
-      </DropdownMenuItem>
+      </DropdownMenuLinkItem>
       @if (user.role === "sys-admin") {
-        <DropdownMenuItem
-          onClick={() => {
-            onNavigated?.();
-            window.location.assign("/admin/auth");
-          }}
-        >
+        <DropdownMenuLinkItem href="/admin/auth" onClick={onNavigated}>
           Admin
-        </DropdownMenuItem>;
+        </DropdownMenuLinkItem>;
       }
       @if (orgs.length > 0) {
         <>
@@ -215,14 +186,9 @@ function AccountMenu({
             Organizations
           </div>
           @for (const org of orgs; key org.id) {
-            <DropdownMenuItem
-              onClick={() => {
-                onNavigated?.();
-                window.location.assign(`/${org.slug}`);
-              }}
-            >
+            <DropdownMenuLinkItem href={`/${org.slug}`} onClick={onNavigated}>
               {(org.display_name?.trim() || org.slug) as string}
-            </DropdownMenuItem>;
+            </DropdownMenuLinkItem>;
           }
         </>;
       }
@@ -363,6 +329,7 @@ function MobileNavSheet({ onClose }: { onClose: () => void }) @{
     syncSessionPresenceHint(false);
     clearSessionQueries(queryClient);
     onClose();
+    // raw-nav-ok — post-auth teardown: session destroyed, reload clears all chrome state
     window.location.assign("/");
   }
 

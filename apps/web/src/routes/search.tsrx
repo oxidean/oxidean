@@ -35,6 +35,7 @@ import { Input } from "@/components/ui/input";
 import { List, ListRow } from "@/components/ui/list";
 import { PageHeader } from "@/components/ui/page-header";
 import { cn } from "@/lib/utils";
+import { useAppNavigate } from "@/lib/app-navigate";
 import { AppLink } from "@/components/ui/app-link";
 
 function ssrApiOrigin(): string {
@@ -482,6 +483,7 @@ export function SearchPage() @{
   const results = data?.results ?? null;
   const signedIn = data?.signedIn === true;
   const [q, setQ] = useState(q0);
+  const navigateApp = useAppNavigate();
 
   const repos = results?.repositories;
   const usersG = results?.users;
@@ -521,7 +523,7 @@ export function SearchPage() @{
       className="mt-6 flex max-w-xl gap-2"
       onSubmit={(e) => {
         e.preventDefault();
-        window.location.assign(tabHref(q, type));
+        navigateApp(tabHref(q, type));
       }}
     >
       <div className="relative flex-1">

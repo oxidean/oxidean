@@ -9,6 +9,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { List, ListRow } from "@/components/ui/list";
 import { PageHeader } from "@/components/ui/page-header";
+import { useAppNavigate } from "@/lib/app-navigate";
 import { AppLink } from "@/components/ui/app-link";
 
 function ssrApiOrigin(): string {
@@ -61,6 +62,7 @@ export function ExplorePage() @{
   const data = useLoaderData({ from: "/explore" }) as ExploreLoaderData | undefined;
   const repos = data?.repos ?? [];
   const [q, setQ] = useState(data?.q ?? "");
+  const navigateApp = useAppNavigate();
 
   <div className="relative overflow-hidden">
     <div
@@ -84,7 +86,7 @@ export function ExplorePage() @{
             onSubmit={(e) => {
               e.preventDefault();
               const next = q.trim();
-              window.location.assign(next ? `/explore?q=${encodeURIComponent(next)}` : "/explore");
+              navigateApp(next ? `/explore?q=${encodeURIComponent(next)}` : "/explore");
             }}
           >
             <div className="relative flex-1 sm:w-72">

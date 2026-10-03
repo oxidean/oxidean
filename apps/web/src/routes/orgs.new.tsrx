@@ -7,6 +7,7 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiClient } from "@/lib/api-client";
+import { useAppNavigate } from "@/lib/app-navigate";
 import { fetchSessionMe } from "@/lib/ssr-auth";
 import { cn } from "@/lib/utils";
 import { AppLink } from "@/components/ui/app-link";
@@ -53,6 +54,7 @@ export function OrgsNewPage() @{
   const [slugError, setSlugError] = useState("");
   const [formError, setFormError] = useState("");
   const [pending, setPending] = useState(false);
+  const navigateApp = useAppNavigate();
 
   const form = useForm({
     defaultValues: {
@@ -89,7 +91,7 @@ export function OrgsNewPage() @{
           setPending(false);
           return;
         }
-        window.location.assign(`/${res.data.slug}`);
+        void navigateApp(`/${res.data.slug}`);
       } catch {
         setFormError(NETWORK_ERROR);
         setPending(false);
