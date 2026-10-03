@@ -197,10 +197,14 @@ pub async fn list_watched(
 
     let mut repos = Vec::new();
     for id in ids {
+        // DEBT-06: a watch row for a repo the user can no longer read is stale
+        // — auto-prune it (plus its notification rows) GitHub-style.
         let Some(row) = ctx.db.find_repository_by_id(&id).await.map_err(db_err)? else {
+            crate::notify::prune_if_repo_read_lost(&ctx.db, &user.id, &id).await;
             continue;
         };
         if row.deleted_at.is_some() {
+            crate::notify::prune_if_repo_read_lost(&ctx.db, &user.id, &id).await;
             continue;
         }
         let owner_username = if row.owner_type == "org" {
@@ -219,6 +223,7 @@ pub async fn list_watched(
                 .map(|u| u.username)
         };
         let Some(owner_username) = owner_username else {
+            crate::notify::prune_if_repo_read_lost(&ctx.db, &user.id, &id).await;
             continue;
         };
         let Ok(Some(owner)) = resolve_owner_slug(&ctx.db, &owner_username).await else {
@@ -229,6 +234,7 @@ pub async fn list_watched(
             continue;
         };
         if !meets(capability, Capability::Read) {
+            crate::notify::prune_if_repo_read_lost(&ctx.db, &user.id, &id).await;
             continue;
         }
         let accessible = AccessibleRepo {

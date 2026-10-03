@@ -14,6 +14,8 @@ pub struct NotificationRow {
     pub subject_repo_id: String,
     pub subject_number: i64,
     pub subject_title: String,
+    /// Deep-link ref for non-numbered subjects: release tag, workflow run id.
+    pub subject_ref: Option<String>,
     pub read_at: Option<String>,
     pub created_at: String,
 }
@@ -44,6 +46,9 @@ macro_rules! map_notification {
             subject_title: row
                 .try_get("subject_title")
                 .map_err(|e| format!("notification row: {e}"))?,
+            subject_ref: row
+                .try_get("subject_ref")
+                .map_err(|e| format!("notification row: {e}"))?,
             read_at: row
                 .try_get("read_at")
                 .map_err(|e| format!("notification row: {e}"))?,
@@ -55,21 +60,21 @@ macro_rules! map_notification {
 }
 
 const NOTIF_SELECT_PG: &str = "SELECT id, recipient_id, actor_id, reason, subject_kind, subject_repo_id,
-       subject_number, subject_title,
+       subject_number, subject_title, subject_ref,
        CASE WHEN read_at IS NULL THEN NULL
             ELSE to_char(read_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') END AS read_at,
        to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS created_at
 FROM notifications";
 
 const NOTIF_SELECT_MYSQL: &str = "SELECT id, recipient_id, actor_id, reason, subject_kind, subject_repo_id,
-       subject_number, subject_title,
+       subject_number, subject_title, subject_ref,
        CASE WHEN read_at IS NULL THEN NULL
             ELSE DATE_FORMAT(read_at, '%Y-%m-%dT%H:%i:%sZ') END AS read_at,
        DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at
 FROM notifications";
 
 const NOTIF_SELECT_SQLITE: &str = "SELECT id, recipient_id, actor_id, reason, subject_kind, subject_repo_id,
-       subject_number, subject_title,
+       subject_number, subject_title, subject_ref,
        CASE WHEN read_at IS NULL THEN NULL
             ELSE strftime('%Y-%m-%dT%H:%M:%SZ', read_at) END AS read_at,
        strftime('%Y-%m-%dT%H:%M:%SZ', created_at) AS created_at
@@ -85,13 +90,14 @@ pub async fn insert_notification(
     subject_repo_id: &str,
     subject_number: i64,
     subject_title: &str,
+    subject_ref: Option<&str>,
 ) -> Result<NotificationRow, String> {
     match pool {
         DbPool::Postgres(p) => {
             sqlx::query(
                 "INSERT INTO notifications
- (id, recipient_id, actor_id, reason, subject_kind, subject_repo_id, subject_number, subject_title)
- VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+ (id, recipient_id, actor_id, reason, subject_kind, subject_repo_id, subject_number, subject_title, subject_ref)
+ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
             )
             .bind(id)
             .bind(recipient_id)
@@ -101,6 +107,7 @@ pub async fn insert_notification(
             .bind(subject_repo_id)
             .bind(subject_number)
             .bind(subject_title)
+            .bind(subject_ref)
             .execute(p)
             .await
             .map_err(|e| format!("insert notification failed: {e}"))?;
@@ -108,8 +115,8 @@ pub async fn insert_notification(
         DbPool::MySql(p) => {
             sqlx::query(
                 "INSERT INTO notifications
- (id, recipient_id, actor_id, reason, subject_kind, subject_repo_id, subject_number, subject_title)
- VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+ (id, recipient_id, actor_id, reason, subject_kind, subject_repo_id, subject_number, subject_title, subject_ref)
+ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(id)
             .bind(recipient_id)
@@ -119,6 +126,7 @@ pub async fn insert_notification(
             .bind(subject_repo_id)
             .bind(subject_number)
             .bind(subject_title)
+            .bind(subject_ref)
             .execute(p)
             .await
             .map_err(|e| format!("insert notification failed: {e}"))?;
@@ -126,8 +134,8 @@ pub async fn insert_notification(
         DbPool::Sqlite(p) => {
             sqlx::query(
                 "INSERT INTO notifications
- (id, recipient_id, actor_id, reason, subject_kind, subject_repo_id, subject_number, subject_title)
- VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+ (id, recipient_id, actor_id, reason, subject_kind, subject_repo_id, subject_number, subject_title, subject_ref)
+ VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             )
             .bind(id)
             .bind(recipient_id)
@@ -137,6 +145,7 @@ pub async fn insert_notification(
             .bind(subject_repo_id)
             .bind(subject_number)
             .bind(subject_title)
+            .bind(subject_ref)
             .execute(p)
             .await
             .map_err(|e| format!("insert notification failed: {e}"))?;
@@ -431,4 +440,107 @@ pub async fn mark_all_read(
         .rows_affected(),
     };
     Ok(n as i64)
+}
+
+/// Delete every notification row a recipient has for one repository. Used by
+/// access-loss pruning (DEBT-06): once read access is gone, stale inbox rows
+/// must not linger.
+pub async fn delete_notifications_for_repo_recipient(
+    pool: &DbPool,
+    recipient_id: &str,
+    subject_repo_id: &str,
+) -> Result<i64, String> {
+    let n = match pool {
+        DbPool::Postgres(p) => sqlx::query(
+            "DELETE FROM notifications WHERE recipient_id = $1 AND subject_repo_id = $2",
+        )
+        .bind(recipient_id)
+        .bind(subject_repo_id)
+        .execute(p)
+        .await
+        .map_err(|e| format!("delete notifications for repo failed: {e}"))?
+        .rows_affected(),
+        DbPool::MySql(p) => sqlx::query(
+            "DELETE FROM notifications WHERE recipient_id = ? AND subject_repo_id = ?",
+        )
+        .bind(recipient_id)
+        .bind(subject_repo_id)
+        .execute(p)
+        .await
+        .map_err(|e| format!("delete notifications for repo failed: {e}"))?
+        .rows_affected(),
+        DbPool::Sqlite(p) => sqlx::query(
+            "DELETE FROM notifications WHERE recipient_id = ?1 AND subject_repo_id = ?2",
+        )
+        .bind(recipient_id)
+        .bind(subject_repo_id)
+        .execute(p)
+        .await
+        .map_err(|e| format!("delete notifications for repo failed: {e}"))?
+        .rows_affected(),
+    };
+    Ok(n as i64)
+}
+
+/// Distinct repositories a recipient has notifications for — the sweep set for
+/// the read-time access re-check (DEBT-06).
+pub async fn list_notification_repo_ids_for_recipient(
+    pool: &DbPool,
+    recipient_id: &str,
+) -> Result<Vec<String>, String> {
+    match pool {
+        DbPool::Postgres(p) => sqlx::query_scalar(
+            "SELECT DISTINCT subject_repo_id FROM notifications WHERE recipient_id = $1",
+        )
+        .bind(recipient_id)
+        .fetch_all(p)
+        .await
+        .map_err(|e| format!("list notification repo ids failed: {e}")),
+        DbPool::MySql(p) => sqlx::query_scalar(
+            "SELECT DISTINCT subject_repo_id FROM notifications WHERE recipient_id = ?",
+        )
+        .bind(recipient_id)
+        .fetch_all(p)
+        .await
+        .map_err(|e| format!("list notification repo ids failed: {e}")),
+        DbPool::Sqlite(p) => sqlx::query_scalar(
+            "SELECT DISTINCT subject_repo_id FROM notifications WHERE recipient_id = ?1",
+        )
+        .bind(recipient_id)
+        .fetch_all(p)
+        .await
+        .map_err(|e| format!("list notification repo ids failed: {e}")),
+    }
+}
+
+/// Distinct recipients holding notifications for one repository — joined with
+/// the watch list, this is the affected-user set when a repo-wide ACL change
+/// happens (DEBT-06).
+pub async fn list_notification_recipient_ids_for_repo(
+    pool: &DbPool,
+    subject_repo_id: &str,
+) -> Result<Vec<String>, String> {
+    match pool {
+        DbPool::Postgres(p) => sqlx::query_scalar(
+            "SELECT DISTINCT recipient_id FROM notifications WHERE subject_repo_id = $1",
+        )
+        .bind(subject_repo_id)
+        .fetch_all(p)
+        .await
+        .map_err(|e| format!("list notification recipient ids failed: {e}")),
+        DbPool::MySql(p) => sqlx::query_scalar(
+            "SELECT DISTINCT recipient_id FROM notifications WHERE subject_repo_id = ?",
+        )
+        .bind(subject_repo_id)
+        .fetch_all(p)
+        .await
+        .map_err(|e| format!("list notification recipient ids failed: {e}")),
+        DbPool::Sqlite(p) => sqlx::query_scalar(
+            "SELECT DISTINCT recipient_id FROM notifications WHERE subject_repo_id = ?1",
+        )
+        .bind(subject_repo_id)
+        .fetch_all(p)
+        .await
+        .map_err(|e| format!("list notification recipient ids failed: {e}")),
+    }
 }

@@ -7,6 +7,7 @@ use oxidean_core::{
 use oxidean_db::{OrganizationRow, UserRow};
 
 use crate::auth::gate::require_verified;
+use crate::notify;
 use crate::org::{db_err, load_org_by_slug, member_public, require_org_role};
 use crate::rpc::RpcCtx;
 
@@ -168,6 +169,12 @@ pub async fn update_role(
         .await
         .map_err(db_err)?;
 
+    // DEBT-06: demotion to Member drops Owner/Admin grants — the user may no
+    // longer read private org repos (member_base decides). Re-check each.
+    if req.role == OrgRole::Member {
+        notify::sweep_user_access_on_owner_repos(&ctx.db, &req.user_id, &org.id).await;
+    }
+
     let user = ctx
         .db
         .find_user_by_id(&row.user_id)
@@ -215,6 +222,10 @@ pub async fn remove(ctx: &RpcCtx, input: serde_json::Value) -> Result<serde_json
         .remove_org_member(&org.id, &req.user_id)
         .await
         .map_err(db_err)?;
+
+    // DEBT-06: membership removal drops org role grants — re-check read on
+    // every org repo and auto-unwatch where access is gone.
+    notify::sweep_user_access_on_owner_repos(&ctx.db, &req.user_id, &org.id).await;
 
     Ok(serde_json::json!({ "ok": true }))
 }

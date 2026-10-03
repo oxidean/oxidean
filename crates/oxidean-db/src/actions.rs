@@ -1311,7 +1311,7 @@ pub async fn requeue_run(pool: &DbPool, run_id: &str) -> Result<(), String> {
     match pool {
         DbPool::Sqlite(p) => {
             sqlx::query(
-                "UPDATE action_runs SET status = 'queued', finished_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                "UPDATE action_runs SET status = 'queued', finished_at = NULL, completion_notified = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
             )
             .bind(run_id).execute(p).await.map_err(|e| e.to_string())?;
             sqlx::query(
@@ -1321,7 +1321,7 @@ pub async fn requeue_run(pool: &DbPool, run_id: &str) -> Result<(), String> {
         }
         DbPool::Postgres(p) => {
             sqlx::query(
-                "UPDATE action_runs SET status = 'queued', finished_at = NULL, updated_at = now() WHERE id = $1",
+                "UPDATE action_runs SET status = 'queued', finished_at = NULL, completion_notified = false, updated_at = now() WHERE id = $1",
             )
             .bind(run_id).execute(p).await.map_err(|e| e.to_string())?;
             sqlx::query(
@@ -1331,7 +1331,7 @@ pub async fn requeue_run(pool: &DbPool, run_id: &str) -> Result<(), String> {
         }
         DbPool::MySql(p) => {
             sqlx::query(
-                "UPDATE action_runs SET status = 'queued', finished_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                "UPDATE action_runs SET status = 'queued', finished_at = NULL, completion_notified = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
             )
             .bind(run_id).execute(p).await.map_err(|e| e.to_string())?;
             sqlx::query(
@@ -1341,6 +1341,43 @@ pub async fn requeue_run(pool: &DbPool, run_id: &str) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// Atomically claim the right to emit the "run completed" in-app notification
+/// for a finished run (DEBT-06). `finished_at` is set exactly once per run
+/// lifetime (requeue clears it), so a successful claim means this caller is the
+/// single emitter for that completion.
+pub async fn claim_run_completion_notice(pool: &DbPool, run_id: &str) -> Result<bool, String> {
+    let n = match pool {
+        DbPool::Sqlite(p) => sqlx::query(
+            "UPDATE action_runs SET completion_notified = 1
+             WHERE id = ? AND finished_at IS NOT NULL AND completion_notified = 0",
+        )
+        .bind(run_id)
+        .execute(p)
+        .await
+        .map_err(|e| e.to_string())?
+        .rows_affected(),
+        DbPool::Postgres(p) => sqlx::query(
+            "UPDATE action_runs SET completion_notified = true
+             WHERE id = $1 AND finished_at IS NOT NULL AND completion_notified = false",
+        )
+        .bind(run_id)
+        .execute(p)
+        .await
+        .map_err(|e| e.to_string())?
+        .rows_affected(),
+        DbPool::MySql(p) => sqlx::query(
+            "UPDATE action_runs SET completion_notified = 1
+             WHERE id = ? AND finished_at IS NOT NULL AND completion_notified = 0",
+        )
+        .bind(run_id)
+        .execute(p)
+        .await
+        .map_err(|e| e.to_string())?
+        .rows_affected(),
+    };
+    Ok(n > 0)
 }
 
 /// Cancel a run and any unfinished jobs (queued/in_progress). Finished jobs

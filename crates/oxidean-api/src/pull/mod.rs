@@ -702,7 +702,7 @@ pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullPublic
         .await
         .map_err(db_err)?;
     let subject = notify::subject_for_pull(&row);
-    let mentions = notify::resolve_mention_user_ids(ctx, &body).await;
+    let mentions = notify::resolve_mention_user_ids(&ctx.db, &body).await;
     let requested = ctx
         .db
         .list_pull_review_request_user_ids(&row.id)
@@ -714,8 +714,8 @@ pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullPublic
             recipients.push(m.clone());
         }
     }
-    notify::fanout_activity(ctx, &user.id, recipients.clone(), "pr_opened", &subject).await;
-    notify::fanout_suppress_ignored(ctx, &user.id, mentions, "pr_mention", &subject).await;
+    notify::fanout_activity(&ctx.db, &user.id, recipients.clone(), "pr_opened", &subject).await;
+    notify::fanout_suppress_ignored(&ctx.db, &user.id, mentions, "pr_mention", &subject).await;
     emit_pull_event(
         ctx,
         &accessible,
@@ -987,8 +987,8 @@ pub async fn close(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullPublic,
         .map_err(db_err)?;
     let updated = load_pull_in_repo(ctx, &accessible.row.id, req.number).await?;
     let subject = notify::subject_for_pull(&updated);
-    let recipients = notify::pull_participant_ids(ctx, &updated.id, &updated.author_id).await;
-    notify::fanout_activity(ctx, &user.id, recipients, "pr_closed", &subject).await;
+    let recipients = notify::pull_participant_ids(&ctx.db, &updated.id, &updated.author_id).await;
+    notify::fanout_activity(&ctx.db, &user.id, recipients, "pr_closed", &subject).await;
     emit_pull_event(
         ctx,
         &accessible,
@@ -1022,8 +1022,8 @@ pub async fn reopen(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullPublic
         .map_err(db_err)?;
     let updated = load_pull_in_repo(ctx, &accessible.row.id, req.number).await?;
     let subject = notify::subject_for_pull(&updated);
-    let recipients = notify::pull_participant_ids(ctx, &updated.id, &updated.author_id).await;
-    notify::fanout_activity(ctx, &user.id, recipients, "pr_reopened", &subject).await;
+    let recipients = notify::pull_participant_ids(&ctx.db, &updated.id, &updated.author_id).await;
+    notify::fanout_activity(&ctx.db, &user.id, recipients, "pr_reopened", &subject).await;
     emit_pull_event(
         ctx,
         &accessible,

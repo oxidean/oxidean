@@ -15,6 +15,7 @@ import {
   notificationUnreadCountQueryOptions,
   reasonLabel,
   subjectHref,
+  subjectTail,
 } from "@/lib/notification-queries";
 import { fetchSessionMe } from "@/lib/ssr-auth";
 import { cn } from "@/lib/utils";
@@ -154,7 +155,7 @@ export function NotificationsPage() @{
                       "flex w-full items-start gap-3 px-4 py-3 text-left outline-none",
                       "transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
                     )}
-                    aria-label={`${n.actor_username} ${reasonLabel(n.reason)} ${n.owner}/${n.repo} #${n.subject_number}`}
+                    aria-label={`${n.actor_username} ${reasonLabel(n.reason)} ${n.owner}/${n.repo} ${subjectTail(n)}`}
                     onClick={() => void activateRow(n)}
                   >
                     <span
@@ -178,8 +179,8 @@ export function NotificationsPage() @{
                         </span>{" "}
                         {reasonLabel(n.reason) as string}{" "}
                         <span className="text-foreground">
-                          {n.owner as string}/{n.repo as string}#
-                          {String(n.subject_number) as string}
+                          {n.owner as string}/{n.repo as string}
+                          {" " + subjectTail(n)}
                         </span>
                       </span>
                       <span className="truncate text-[13px] text-muted-foreground">

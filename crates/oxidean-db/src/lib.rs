@@ -1539,6 +1539,7 @@ impl Database {
         issues::insert_issue_comment(self.require_pool()?, id, issue_id, author_id, body).await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn insert_notification(
         &self,
         id: &str,
@@ -1549,6 +1550,7 @@ impl Database {
         subject_repo_id: &str,
         subject_number: i64,
         subject_title: &str,
+        subject_ref: Option<&str>,
     ) -> Result<NotificationRow, String> {
         notifications::insert_notification(
             self.require_pool()?,
@@ -1560,6 +1562,7 @@ impl Database {
             subject_repo_id,
             subject_number,
             subject_title,
+            subject_ref,
         )
         .await
     }
@@ -1569,6 +1572,47 @@ impl Database {
         id: &str,
     ) -> Result<Option<NotificationRow>, String> {
         notifications::find_notification_by_id(self.require_pool()?, id).await
+    }
+
+    /// Access-loss pruning (DEBT-06): drop a recipient's notification rows for
+    /// one repository once read access is gone.
+    pub async fn delete_notifications_for_repo_recipient(
+        &self,
+        recipient_id: &str,
+        subject_repo_id: &str,
+    ) -> Result<i64, String> {
+        notifications::delete_notifications_for_repo_recipient(
+            self.require_pool()?,
+            recipient_id,
+            subject_repo_id,
+        )
+        .await
+    }
+
+    /// Distinct repositories a recipient holds notifications for (read-time
+    /// access re-check sweep set, DEBT-06).
+    pub async fn list_notification_repo_ids_for_recipient(
+        &self,
+        recipient_id: &str,
+    ) -> Result<Vec<String>, String> {
+        notifications::list_notification_repo_ids_for_recipient(
+            self.require_pool()?,
+            recipient_id,
+        )
+        .await
+    }
+
+    /// Distinct recipients holding notifications for one repository (affected
+    /// set on repo-wide ACL changes, DEBT-06).
+    pub async fn list_notification_recipient_ids_for_repo(
+        &self,
+        subject_repo_id: &str,
+    ) -> Result<Vec<String>, String> {
+        notifications::list_notification_recipient_ids_for_repo(
+            self.require_pool()?,
+            subject_repo_id,
+        )
+        .await
     }
 
     pub async fn list_notifications(
@@ -2703,6 +2747,12 @@ impl Database {
 
     pub async fn cancel_action_run(&self, run_id: &str) -> Result<(), String> {
         actions::cancel_run(self.require_pool()?, run_id).await
+    }
+
+    /// Atomically claim emitting the "run completed" in-app notification once
+    /// per finished run (DEBT-06).
+    pub async fn claim_run_completion_notice(&self, run_id: &str) -> Result<bool, String> {
+        actions::claim_run_completion_notice(self.require_pool()?, run_id).await
     }
 
     pub async fn list_action_jobs_for_run(

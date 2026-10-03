@@ -399,8 +399,9 @@ Phase 17 ships in-app activity notifications (NOTF-01 / NOTF-02) on migration `0
 | --- | --- |
 | **Ownership** | Every list/mark/unread query is forced to `recipient_id = session.user_id`. Clients cannot address another user's inbox. |
 | **Read model** | `read_at` null = unread. `notification.list` filter `unread` (default) or `all`; newest-first offset pagination. |
-| **Payload** | Rows include `reason`, `subject_kind` (`issue` \| `pull_request`), `owner` / `repo` slugs, `subject_number`, `subject_title`, `actor_username` for deep links `/{owner}/{repo}/issues\|pull/{n}`. |
-| **Fan-out** | Domain writes (e.g. `issue.comments.create`) insert best-effort rows; actors are never notified. Activity email is out of scope. |
+| **Payload** | Rows include `reason`, `subject_kind` (`issue` \| `pull_request` \| `release` \| `workflow_run` \| `push`), `owner` / `repo` slugs, `subject_number`, `subject_title`, `subject_ref` (tag / run id / ref for non-numbered subjects), `actor_username`. Deep links: `/{owner}/{repo}/issues\|pull/{n}` for numbered subjects; `/{owner}/{repo}/releases/{tag}`, `/{owner}/{repo}/actions/{run_id}`, `/{owner}/{repo}/commits/{ref}` via `subject_ref`. |
+| **Fan-out** | Domain writes (e.g. `issue.comments.create`) insert best-effort rows; actors are never notified (workflow-run completion includes the triggering user). Activity email is out of scope. |
+| **Access** | `notification.list` / `notification.unreadCount` re-check repository read access at read time; rows for repos the recipient can no longer read are pruned together with the watch row (GitHub auto-unwatch on access loss). ACL mutations — collaborator remove/update, visibility flip to private, org member remove/demote or `member_base_permission` change, transfer, soft-delete — sweep eagerly. |
 
 Client surface: `client.notification.*` in `@oxidean/api-client` (regenerate with `make rpc-gen`).
 

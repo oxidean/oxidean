@@ -17,6 +17,7 @@ use oxidean_db::{OrgMemberListRow, OrganizationRow};
 use uuid::Uuid;
 
 use crate::auth::gate::require_verified;
+use crate::notify;
 use crate::rpc::RpcCtx;
 
 pub(crate) fn db_err(e: String) -> AppError {
@@ -243,5 +244,12 @@ pub async fn update_settings(
         .update_organization_settings(&org.id, base.as_deref(), display.as_deref())
         .await
         .map_err(db_err)?;
+
+    // DEBT-06: member_base → `none` revokes Members' read on private org repos
+    // — auto-unwatch + drop their notification rows across org repos.
+    if base.as_deref() == Some("none") {
+        notify::sweep_org_access(&ctx.db, &org.id).await;
+    }
+
     to_public(&row)
 }

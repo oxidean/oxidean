@@ -1656,6 +1656,11 @@ pub async fn update_visibility(
         .update_repository_visibility(&accessible.row.id, map_visibility(req.visibility))
         .await
         .map_err(db_err)?;
+    // DEBT-06: going private removes the public-read grant — auto-unwatch and
+    // drop notification rows for users who just lost access.
+    if is_private_visibility(&row.visibility) {
+        crate::notify::sweep_repo_access(&ctx.db, &row.id).await;
+    }
     Ok(to_public(&AccessibleRepo {
         row,
         owner_username: accessible.owner_username,
@@ -1908,6 +1913,9 @@ pub async fn soft_delete(
         .soft_delete_repository(&accessible.row.id)
         .await
         .map_err(db_err)?;
+    // DEBT-06: a deleted repo is unreadable — auto-unwatch and drop
+    // notification rows for everyone.
+    crate::notify::sweep_repo_access(&ctx.db, &accessible.row.id).await;
     Ok(RepoSoftDeleteResponse {
         name: accessible.row.name,
     })

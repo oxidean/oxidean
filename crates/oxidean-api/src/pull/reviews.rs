@@ -121,7 +121,7 @@ pub async fn reviews_submit(
         .map_err(db_err)?;
     let subject = notify::subject_for_pull(&pull);
     notify::fanout_activity(
-        ctx,
+        &ctx.db,
         &user.id,
         std::iter::once(pull.author_id.clone()),
         "pr_review",
@@ -222,7 +222,7 @@ pub async fn review_requests_add(
         .map_err(db_err)?;
     let subject = notify::subject_for_pull(&pull);
     notify::fanout_suppress_ignored(
-        ctx,
+        &ctx.db,
         &user.id,
         std::iter::once(target.id.clone()),
         "pr_review_requested",

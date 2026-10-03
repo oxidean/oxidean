@@ -112,4 +112,61 @@ describe("/notifications page (D-09 / D-12 / NOTF-02)", () => {
     });
     expect(assign).toHaveBeenCalledWith("/ada/hello/issues/1");
   });
+
+  it("renders release and workflow_run subjects with ref deep links (DEBT-06)", async () => {
+    vi.mocked(apiClient.notification.list).mockResolvedValue({
+      ok: true,
+      data: {
+        total: 2,
+        notifications: [
+          {
+            id: "n2",
+            reason: "release_published",
+            subject_kind: "release",
+            subject_repo_id: "r1",
+            owner: "ada",
+            repo: "hello",
+            subject_number: 0,
+            subject_title: "Ship it",
+            subject_ref: "v1.0.0",
+            actor_id: "u2",
+            actor_username: "bob",
+            created_at: "2026-09-17T00:00:00Z",
+            read_at: null,
+          },
+          {
+            id: "n3",
+            reason: "workflow_run_failure",
+            subject_kind: "workflow_run",
+            subject_repo_id: "r1",
+            owner: "ada",
+            repo: "hello",
+            subject_number: 0,
+            subject_title: "CI",
+            subject_ref: "run-42",
+            actor_id: "u2",
+            actor_username: "bob",
+            created_at: "2026-09-18T00:00:00Z",
+            read_at: null,
+          },
+        ],
+      },
+    } as never);
+
+    renderWithQueryClient(NotificationsPage);
+
+    const release = await waitFor(() =>
+      screen.getByRole("button", { name: /bob published a release on ada\/hello v1\.0\.0/i }),
+    );
+    expect(
+      screen.getByRole("button", { name: /bob workflow run failed on ada\/hello/i }),
+    ).toBeInTheDocument();
+
+    const assign = vi.fn();
+    vi.stubGlobal("location", { assign });
+    release.click();
+    await waitFor(() => {
+      expect(assign).toHaveBeenCalledWith("/ada/hello/releases/v1.0.0");
+    });
+  });
 });

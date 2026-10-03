@@ -531,6 +531,17 @@ pub async fn cancel_run(
 ) -> Result<ActionRunMutationResponse, AppError> {
     let (req, accessible) = run_mutation_target(ctx, input, "cancelRun").await?;
     ctx.db.cancel_action_run(&req.run_id).await.map_err(db_err)?;
+    // DEBT-06: cancelled runs complete — claim + emit through the watch matrix.
+    if ctx
+        .db
+        .claim_run_completion_notice(&req.run_id)
+        .await
+        .unwrap_or(false)
+    {
+        if let Ok(Some(run)) = ctx.db.find_action_run_by_id(&req.run_id).await {
+            crate::notify::fanout_workflow_completed(&ctx.db, &run).await;
+        }
+    }
     run_mutation_response(ctx, &accessible.row.id, &req.run_id).await
 }
 

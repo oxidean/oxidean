@@ -52,10 +52,29 @@ export function invalidateNotificationQueries(qc: QueryClient) {
 }
 
 export function subjectHref(n: NotificationPublic): string {
-  if (n.subject_kind === "pull_request") {
-    return `/${n.owner}/${n.repo}/pull/${n.subject_number}`;
+  switch (n.subject_kind) {
+    case "pull_request":
+      return `/${n.owner}/${n.repo}/pull/${n.subject_number}`;
+    case "release":
+      return `/${n.owner}/${n.repo}/releases/${n.subject_ref ?? ""}`;
+    case "workflow_run":
+      return `/${n.owner}/${n.repo}/actions/${n.subject_ref ?? ""}`;
+    case "push":
+      return n.subject_ref
+        ? `/${n.owner}/${n.repo}/commits/${n.subject_ref}`
+        : `/${n.owner}/${n.repo}`;
+    default:
+      return `/${n.owner}/${n.repo}/issues/${n.subject_number}`;
   }
-  return `/${n.owner}/${n.repo}/issues/${n.subject_number}`;
+}
+
+/** Display suffix after `owner/repo` — `#42` for numbered subjects, the
+ * release tag / ref for the rest (DEBT-06). */
+export function subjectTail(n: NotificationPublic): string {
+  if (n.subject_kind === "issue" || n.subject_kind === "pull_request") {
+    return `#${n.subject_number}`;
+  }
+  return n.subject_ref ?? "";
 }
 
 export function reasonLabel(reason: string): string {
@@ -90,6 +109,18 @@ export function reasonLabel(reason: string): string {
       return "requested your review";
     case "pr_mention":
       return "mentioned you";
+    case "release_published":
+      return "published a release on";
+    case "release_edited":
+      return "edited a release on";
+    case "release_deleted":
+      return "deleted a release on";
+    case "workflow_run_success":
+      return "workflow run succeeded on";
+    case "workflow_run_failure":
+      return "workflow run failed on";
+    case "workflow_run_cancelled":
+      return "workflow run cancelled on";
     default:
       return reason.replace(/_/g, " ");
   }

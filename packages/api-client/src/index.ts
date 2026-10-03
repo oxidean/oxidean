@@ -2160,6 +2160,7 @@ export type NotificationPublic = {
   repo: string;
   subject_number: number;
   subject_title: string;
+  subject_ref?: string | null;
   actor_id: string;
   actor_username: string;
   created_at: string;

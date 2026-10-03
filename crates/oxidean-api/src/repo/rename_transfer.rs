@@ -390,6 +390,11 @@ pub async fn transfer(
         }
     }
 
+    // DEBT-06: transfer changes the owner grants — watchers who can no longer
+    // read (old personal owner, old org members) are auto-unwatched and their
+    // notification rows dropped.
+    crate::notify::sweep_repo_access(&ctx.db, &updated.id).await;
+
     let capability = accessible.capability;
     Ok(RepoTransferResponse {
         repo: to_public(&AccessibleRepo {
