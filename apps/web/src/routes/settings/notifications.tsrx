@@ -1,12 +1,14 @@
 import { createFileRoute, useLoaderData } from "@octanejs/tanstack-router";
 import type { RepoPublic, UserPublic, WatchLevel } from "@oxidean/api-client";
 import { useEffect, useState } from "octane";
+import { SettingsPageSkeleton } from "@/components/page-skeletons";
 import { AccountSettingsLayout, SettingsShell } from "@/components/settings/settings-shell";
 import { AppLink } from "@/components/ui/app-link";
 import { EmptyState } from "@/components/ui/empty-state";
 import { List, ListRow } from "@/components/ui/list";
 import { apiClient } from "@/lib/api-client";
-import { fetchSessionMe, fetchWatchedRepos } from "@/lib/ssr-auth";
+import { useAppNavigate } from "@/lib/app-navigate";
+import { fetchSessionMe, fetchWatchedRepos, requireSessionRedirect } from "@/lib/ssr-auth";
 
 export type NotificationsSettingsLoaderData =
   | { kind: "unauthenticated" }
@@ -23,6 +25,7 @@ const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.
 export const Route = createFileRoute("/settings/notifications")({
   component: NotificationsSettingsPage,
   head: () => ({ meta: [{ title: "Notifications · Oxidean" }] }),
+  beforeLoad: () => requireSessionRedirect("/settings/notifications"),
   loader: async (): Promise<NotificationsSettingsLoaderData> => {
     try {
       const res = await fetchSessionMe();
@@ -76,11 +79,13 @@ export function NotificationsSettingsPage() @{
     | NotificationsSettingsLoaderData
     | undefined;
 
+  const navigateApp = useAppNavigate();
+
   useEffect(() => {
     if (loaderData?.kind === "unauthenticated") {
-      window.location.assign("/login?returnTo=/settings/notifications");
+      void navigateApp("/login?returnTo=/settings/notifications");
     }
-  }, [loaderData]);
+  }, [loaderData, navigateApp]);
 
   const [phase, setPhase] = useState<Phase>(() => {
     if (loaderData?.kind === "ready") return { kind: "ready" };
@@ -118,7 +123,7 @@ export function NotificationsSettingsPage() @{
         const res = await apiClient.auth.me();
         if (cancelled) return;
         if (!res.ok) {
-          window.location.assign("/login?returnTo=/settings/notifications");
+          void navigateApp("/login?returnTo=/settings/notifications");
           return;
         }
         const all: RepoPublic[] = [];
@@ -172,7 +177,9 @@ export function NotificationsSettingsPage() @{
   }
 
   @if (phase.kind === "loading") {
-    <></>;
+    <AccountSettingsLayout active="notifications">
+      <SettingsPageSkeleton />
+    </AccountSettingsLayout>;
   } @else {
     @if (phase.kind === "error") {
       <SettingsShell bare>

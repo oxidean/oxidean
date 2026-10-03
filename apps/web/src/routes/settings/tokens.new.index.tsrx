@@ -2,11 +2,13 @@ import { createFileRoute, useLoaderData } from "@octanejs/tanstack-router";
 import type { UserPublic } from "@oxidean/api-client";
 import { useEffect, useState } from "octane";
 import { AuthShell } from "@/components/auth-shell";
+import { SettingsPageSkeleton } from "@/components/page-skeletons";
 import { AccountSettingsLayout, SettingsShell } from "@/components/settings/settings-shell";
 import { PatClassicForm } from "@/components/settings/pat-classic-form";
 import { PatReveal } from "@/components/settings/pat-reveal";
 import { buttonVariants } from "@/components/ui/button";
 import { apiClient } from "@/lib/api-client";
+import { useAppNavigate } from "@/lib/app-navigate";
 import { fetchSessionMe } from "@/lib/ssr-auth";
 import { cn } from "@/lib/utils";
 import { AppLink } from "@/components/ui/app-link";
@@ -51,11 +53,13 @@ export function TokensNewPage() @{
     | TokensNewLoaderData
     | undefined;
 
+  const navigateApp = useAppNavigate();
+
   useEffect(() => {
     if (loaderData?.kind === "unauthenticated") {
-      window.location.assign("/login?returnTo=/settings/tokens/new");
+      void navigateApp("/login?returnTo=/settings/tokens/new");
     }
-  }, [loaderData]);
+  }, [loaderData, navigateApp]);
 
   const [phase, setPhase] = useState<Phase>(() => {
     if (loaderData?.kind === "ready") {
@@ -91,7 +95,7 @@ export function TokensNewPage() @{
         const res = await apiClient.auth.me();
         if (cancelled) return;
         if (!res.ok) {
-          window.location.assign("/login?returnTo=/settings/tokens/new");
+          void navigateApp("/login?returnTo=/settings/tokens/new");
           return;
         }
         setPhase({ kind: "ready", user: res.data });
@@ -109,7 +113,9 @@ export function TokensNewPage() @{
   const showWall = phase.kind === "ready" && !verified;
 
   @if (phase.kind === "loading") {
-    <></>;
+    <AccountSettingsLayout active="tokens">
+      <SettingsPageSkeleton />
+    </AccountSettingsLayout>;
   } @else {
     @if (phase.kind === "error") {
       <SettingsShell bare>

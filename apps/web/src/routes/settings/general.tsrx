@@ -1,17 +1,19 @@
-import { createFileRoute, redirect, useLoaderData } from "@octanejs/tanstack-router";
+import { createFileRoute, useLoaderData } from "@octanejs/tanstack-router";
 import { useForm } from "@octanejs/tanstack-form";
 import { useQueryClient } from "@octanejs/tanstack-query";
 import type { UserPublic } from "@oxidean/api-client";
 import { useEffect, useState } from "octane";
+import { SettingsPageSkeleton } from "@/components/page-skeletons";
 import { AccountSettingsLayout, SettingsShell } from "@/components/settings/settings-shell";
 import { ThemeSelect } from "@/components/theme-select";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiClient } from "@/lib/api-client";
+import { useAppNavigate } from "@/lib/app-navigate";
 import { clearSessionQueries, setAuthMeCache } from "@/lib/session-queries";
 import { syncSessionPresenceHint } from "@/lib/session-hint";
-import { fetchSessionMe, fetchUserGetProfile } from "@/lib/ssr-auth";
+import { fetchUserGetProfile, requireSessionRedirect } from "@/lib/ssr-auth";
 import { toastError, toastSuccess } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 
@@ -27,17 +29,7 @@ const LOGIN_RETURN = "/login?returnTo=/settings/general";
 export const Route = createFileRoute("/settings/general")({
   component: GeneralPage,
   head: () => ({ meta: [{ title: "General · Oxidean" }] }),
-  beforeLoad: async () => {
-    try {
-      const me = await fetchSessionMe();
-      if (!me.ok) {
-        throw redirect({ href: LOGIN_RETURN });
-      }
-    } catch (e) {
-      if (e && typeof e === "object" && "href" in e) throw e;
-      throw redirect({ href: LOGIN_RETURN });
-    }
-  },
+  beforeLoad: () => requireSessionRedirect("/settings/general"),
   loader: async (): Promise<GeneralLoaderData> => {
     try {
       const res = await fetchUserGetProfile();
@@ -64,13 +56,14 @@ type Phase =
 /** Account General: theme, default branch, session logout. */
 export function GeneralPage() @{
   const queryClient = useQueryClient();
+  const navigateApp = useAppNavigate();
   const loaderData = useLoaderData({ from: "/settings/general" }) as GeneralLoaderData | undefined;
 
   useEffect(() => {
     if (loaderData?.kind === "unauthenticated") {
-      window.location.assign(LOGIN_RETURN);
+      void navigateApp(LOGIN_RETURN);
     }
-  }, [loaderData]);
+  }, [loaderData, navigateApp]);
 
   const initialUser = loaderData?.kind === "ready" ? loaderData.user : null;
 
@@ -141,7 +134,7 @@ export function GeneralPage() @{
         const res = await apiClient.user.getProfile();
         if (cancelled) return;
         if (!res.ok) {
-          window.location.assign(LOGIN_RETURN);
+          void navigateApp(LOGIN_RETURN);
           return;
         }
         const user = res.data;
@@ -166,6 +159,7 @@ export function GeneralPage() @{
     }
     syncSessionPresenceHint(false);
     clearSessionQueries(queryClient);
+    // raw-nav-ok — post-auth teardown: session destroyed, reload clears all app state
     window.location.assign("/");
   }
 
@@ -178,11 +172,14 @@ export function GeneralPage() @{
     }
     syncSessionPresenceHint(false);
     clearSessionQueries(queryClient);
+    // raw-nav-ok — post-auth teardown: session destroyed, reload clears all app state
     window.location.assign("/");
   }
 
   @if (phase.kind === "loading") {
-    <></>;
+    <AccountSettingsLayout active="general">
+      <SettingsPageSkeleton />
+    </AccountSettingsLayout>;
   } @else {
     @if (phase.kind === "error") {
       <SettingsShell bare>

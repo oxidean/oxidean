@@ -10,8 +10,9 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { List, ListRow } from "@/components/ui/list";
 import { PageHeader } from "@/components/ui/page-header";
 import { apiClient } from "@/lib/api-client";
+import { useAppNavigate } from "@/lib/app-navigate";
 import { authSessionQueryOptions, setAuthMeCache } from "@/lib/session-queries";
-import { fetchSessionMe } from "@/lib/ssr-auth";
+import { fetchSessionMe, requireSessionRedirect } from "@/lib/ssr-auth";
 import { toastError, toastSuccess } from "@/lib/toast";
 import { AppLink } from "@/components/ui/app-link";
 
@@ -27,6 +28,7 @@ const FORBIDDEN = "You need admin access to manage Actions runners.";
 export const Route = createFileRoute("/admin/runners")({
   component: AdminRunnersPage,
   head: () => ({ meta: [{ title: "Actions runners · Oxidean" }] }),
+  beforeLoad: () => requireSessionRedirect("/admin/runners"),
   loader: async (): Promise<AdminGateLoader> => {
     try {
       const meRes = await fetchSessionMe();
@@ -53,15 +55,17 @@ export function AdminRunnersPage() @{
   const [tokenOnce, setTokenOnce] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  const navigateApp = useAppNavigate();
+
   useEffect(() => {
     if (loaderData?.kind === "unauthenticated") {
-      window.location.assign("/login?returnTo=/admin/runners");
+      void navigateApp("/login?returnTo=/admin/runners");
       return;
     }
     if (loaderData?.kind === "ready") {
       setAuthMeCache(queryClient, loaderData.me);
     }
-  }, [loaderData, queryClient]);
+  }, [loaderData, queryClient, navigateApp]);
 
   const me = useQuery({
     ...authSessionQueryOptions(),

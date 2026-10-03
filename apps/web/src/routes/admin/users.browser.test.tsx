@@ -70,6 +70,7 @@ vi.mock("@/lib/ssr-auth", () => ({
   fetchSessionMe: vi.fn(),
   fetchAdminUsersList: vi.fn(),
   fetchAdminInvitesList: vi.fn(),
+  requireSessionRedirect: vi.fn(),
 }));
 
 // Avoid importing Start/router entry points in the Chromium iframe.

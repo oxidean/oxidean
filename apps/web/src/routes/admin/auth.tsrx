@@ -11,6 +11,7 @@ import type {
 import { useForm } from "@octanejs/tanstack-form";
 import { useEffect, useState } from "octane";
 import { apiClient } from "@/lib/api-client";
+import { useAppNavigate } from "@/lib/app-navigate";
 import {
   adminAuthSettingsQueryOptions,
   authSessionQueryOptions,
@@ -19,8 +20,9 @@ import {
   setAuthMeCache,
 } from "@/lib/session-queries";
 import { syncSessionPresenceHint } from "@/lib/session-hint";
-import { fetchAdminAuthSettings, fetchSessionMe } from "@/lib/ssr-auth";
+import { fetchAdminAuthSettings, fetchSessionMe, requireSessionRedirect } from "@/lib/ssr-auth";
 import { toastError, toastSuccess } from "@/lib/toast";
+import { SettingsPageSkeleton } from "@/components/page-skeletons";
 import { AdminSettingsLayout, SettingsShell } from "@/components/settings/settings-shell";
 import { Button } from "@/components/ui/button";
 import {
@@ -66,6 +68,7 @@ const FORBIDDEN = "You need admin access to manage auth settings.";
 export const Route = createFileRoute("/admin/auth")({
   component: AdminAuthPage,
   head: () => ({ meta: [{ title: "Auth settings · Oxidean" }] }),
+  beforeLoad: () => requireSessionRedirect("/admin/auth"),
   loader: async (): Promise<AdminAuthLoaderData> => {
     try {
       const meRes = await fetchSessionMe();
@@ -205,18 +208,19 @@ function ModeSelect<T extends string>({
 /** Exported for D-08 integration tests (Allow open signup Switch). */
 export function AdminAuthPage() @{
   const queryClient = useQueryClient();
+  const navigateApp = useAppNavigate();
   const loaderData = useLoaderData({ from: "/admin/auth" }) as AdminAuthLoaderData | undefined;
 
   useEffect(() => {
     if (loaderData?.kind === "unauthenticated") {
-      window.location.assign("/login?returnTo=/admin/auth");
+      void navigateApp("/login?returnTo=/admin/auth");
       return;
     }
     if (loaderData?.kind === "ready") {
       setAuthMeCache(queryClient, loaderData.me);
       setAdminAuthSettingsCache(queryClient, loaderData.settings);
     }
-  }, [loaderData, queryClient]);
+  }, [loaderData, queryClient, navigateApp]);
 
   const me = useQuery({
     ...authSessionQueryOptions(),
@@ -303,9 +307,9 @@ export function AdminAuthPage() @{
     if (me.isPending) return;
     if (me.isError) return;
     if (me.data === null) {
-      window.location.assign("/login?returnTo=/admin/auth");
+      void navigateApp("/login?returnTo=/admin/auth");
     }
-  }, [loaderData, me.isPending, me.isError, me.data]);
+  }, [loaderData, me.isPending, me.isError, me.data, navigateApp]);
 
   useEffect(() => {
     if (settingsQ.isSuccess && settingsQ.data) {
@@ -340,7 +344,9 @@ export function AdminAuthPage() @{
     !readyFromLoader && isSysAdmin && (settingsQ.isPending || (settingsQ.isSuccess && !draftReady));
 
   @if (!sessionKnown || waitingForDraft) {
-    <></>;
+    <AdminSettingsLayout active="auth">
+      <SettingsPageSkeleton />
+    </AdminSettingsLayout>;
   } @else {
     @if (signedOut) {
       <SettingsShell bare>
@@ -602,6 +608,8 @@ function FactoryResetSection() @{
       }
       syncSessionPresenceHint(false);
       clearSessionQueries(queryClient);
+      // raw-nav-ok — factory reset wipes all auth state; reload re-enters the
+      // setup wizard through the bootstrap gate
       window.location.assign("/setup");
     } catch {
       setError(NETWORK_ERROR);

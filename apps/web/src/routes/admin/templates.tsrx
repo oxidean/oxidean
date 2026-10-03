@@ -15,8 +15,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { apiClient } from "@/lib/api-client";
+import { useAppNavigate } from "@/lib/app-navigate";
 import { authSessionQueryOptions, setAuthMeCache } from "@/lib/session-queries";
-import { fetchSessionMe } from "@/lib/ssr-auth";
+import { fetchSessionMe, requireSessionRedirect } from "@/lib/ssr-auth";
 import { toastError, toastSuccess } from "@/lib/toast";
 
 type AdminGateLoader =
@@ -45,6 +46,7 @@ function uniqueSorted(values: string[]): string[] {
 export const Route = createFileRoute("/admin/templates")({
   component: AdminTemplatesPage,
   head: () => ({ meta: [{ title: "Templates · Oxidean" }] }),
+  beforeLoad: () => requireSessionRedirect("/admin/templates"),
   loader: async (): Promise<AdminGateLoader> => {
     try {
       const meRes = await fetchSessionMe();
@@ -76,15 +78,17 @@ export function AdminTemplatesPage() @{
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
 
+  const navigateApp = useAppNavigate();
+
   useEffect(() => {
     if (loaderData?.kind === "unauthenticated") {
-      window.location.assign("/login?returnTo=/admin/templates");
+      void navigateApp("/login?returnTo=/admin/templates");
       return;
     }
     if (loaderData?.kind === "ready") {
       setAuthMeCache(qc, loaderData.me);
     }
-  }, [loaderData, qc]);
+  }, [loaderData, qc, navigateApp]);
 
   const me = useQuery({
     ...authSessionQueryOptions(),

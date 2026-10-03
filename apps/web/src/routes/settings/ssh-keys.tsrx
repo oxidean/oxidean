@@ -12,10 +12,17 @@ import { GpgKeyAddForm } from "@/components/settings/gpg-key-add-form";
 import { GpgKeyList } from "@/components/settings/gpg-key-list";
 import { SshKeyAddForm } from "@/components/settings/ssh-key-add-form";
 import { SshKeyList } from "@/components/settings/ssh-key-list";
+import { SettingsPageSkeleton } from "@/components/page-skeletons";
 import { AccountSettingsLayout, SettingsShell } from "@/components/settings/settings-shell";
 import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api-client";
-import { fetchGpgKeyList, fetchSessionMe, fetchSshKeyList } from "@/lib/ssr-auth";
+import { useAppNavigate } from "@/lib/app-navigate";
+import {
+  fetchGpgKeyList,
+  fetchSessionMe,
+  fetchSshKeyList,
+  requireSessionRedirect,
+} from "@/lib/ssr-auth";
 
 export type SshKeysLoaderData =
   | { kind: "unauthenticated" }
@@ -32,6 +39,7 @@ const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.
 export const Route = createFileRoute("/settings/ssh-keys")({
   component: SshKeysPage,
   head: () => ({ meta: [{ title: "SSH and GPG keys · Oxidean" }] }),
+  beforeLoad: () => requireSessionRedirect("/settings/ssh-keys"),
   loader: async (): Promise<SshKeysLoaderData> => {
     try {
       const res = await fetchSessionMe();
@@ -78,12 +86,13 @@ type Phase =
 /** Exported for ssh-keys.integration.test.ts (GIT-04 / D-SSH-06). */
 export function SshKeysPage() @{
   const loaderData = useLoaderData({ from: "/settings/ssh-keys" }) as SshKeysLoaderData | undefined;
+  const navigateApp = useAppNavigate();
 
   useEffect(() => {
     if (loaderData?.kind === "unauthenticated") {
-      window.location.assign("/login?returnTo=/settings/ssh-keys");
+      void navigateApp("/login?returnTo=/settings/ssh-keys");
     }
-  }, [loaderData]);
+  }, [loaderData, navigateApp]);
 
   const [phase, setPhase] = useState<Phase>(() => {
     if (loaderData?.kind === "ready") {
@@ -128,7 +137,7 @@ export function SshKeysPage() @{
         const res = await apiClient.auth.me();
         if (cancelled) return;
         if (!res.ok) {
-          window.location.assign("/login?returnTo=/settings/ssh-keys");
+          void navigateApp("/login?returnTo=/settings/ssh-keys");
           return;
         }
         const listRes = await apiClient.sshKey.list();
@@ -182,7 +191,9 @@ export function SshKeysPage() @{
   const canAddGpg = verified && !atGpgCap;
 
   @if (phase.kind === "loading") {
-    <></>;
+    <AccountSettingsLayout active="ssh-keys">
+      <SettingsPageSkeleton />
+    </AccountSettingsLayout>;
   } @else {
     @if (phase.kind === "error") {
       <SettingsShell bare>

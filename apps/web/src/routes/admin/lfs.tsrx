@@ -9,6 +9,7 @@ import { useForm } from "@octanejs/tanstack-form";
 import { useEffect, useState } from "octane";
 import { ByteQuotaField } from "@/components/admin/byte-quota-field";
 import { LfsUsageBarChartGate } from "@/components/admin/lfs-usage-charts-gate";
+import { SettingsPageSkeleton } from "@/components/page-skeletons";
 import { AdminSettingsLayout, SettingsShell } from "@/components/settings/settings-shell";
 import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api-client";
@@ -21,8 +22,14 @@ import {
   unitValueToBytes,
   type ByteUnit,
 } from "@/lib/byte-units";
+import { useAppNavigate } from "@/lib/app-navigate";
 import { authSessionQueryOptions, setAuthMeCache } from "@/lib/session-queries";
-import { fetchAdminLfsSettings, fetchAdminLfsUsage, fetchSessionMe } from "@/lib/ssr-auth";
+import {
+  fetchAdminLfsSettings,
+  fetchAdminLfsUsage,
+  fetchSessionMe,
+  requireSessionRedirect,
+} from "@/lib/ssr-auth";
 import { toastError, toastSuccess, toastWarning } from "@/lib/toast";
 import { AppLink } from "@/components/ui/app-link";
 
@@ -69,6 +76,7 @@ function settingsToFormValues(settings: AdminLfsSettingsPublic): QuotaFormValues
 export const Route = createFileRoute("/admin/lfs")({
   component: AdminLfsPage,
   head: () => ({ meta: [{ title: "LFS quotas · Oxidean" }] }),
+  beforeLoad: () => requireSessionRedirect("/admin/lfs"),
   loader: async (): Promise<AdminLfsLoaderData> => {
     try {
       const meRes = await fetchSessionMe();
@@ -115,11 +123,12 @@ export const Route = createFileRoute("/admin/lfs")({
 /** Exported for admin/lfs integration tests (D-LFS-12 / D-LFS-13 / D-LFS-19). */
 export function AdminLfsPage() @{
   const queryClient = useQueryClient();
+  const navigateApp = useAppNavigate();
   const loaderData = useLoaderData({ from: "/admin/lfs" }) as AdminLfsLoaderData | undefined;
 
   useEffect(() => {
     if (loaderData?.kind === "unauthenticated") {
-      window.location.assign("/login?returnTo=/admin/lfs");
+      void navigateApp("/login?returnTo=/admin/lfs");
       return;
     }
     if (loaderData?.kind === "ready") {
@@ -127,7 +136,7 @@ export function AdminLfsPage() @{
       queryClient.setQueryData(settingsQueryKey, loaderData.settings);
       queryClient.setQueryData(usageQueryKey, loaderData.usage);
     }
-  }, [loaderData, queryClient]);
+  }, [loaderData, queryClient, navigateApp]);
 
   const me = useQuery({
     ...authSessionQueryOptions(),
@@ -211,9 +220,9 @@ export function AdminLfsPage() @{
     if (me.isPending) return;
     if (me.isError) return;
     if (me.data === null) {
-      window.location.assign("/login?returnTo=/admin/lfs");
+      void navigateApp("/login?returnTo=/admin/lfs");
     }
-  }, [loaderData, me.isPending, me.isError, me.data]);
+  }, [loaderData, me.isPending, me.isError, me.data, navigateApp]);
 
   useEffect(() => {
     if (settingsQ.isSuccess && settingsQ.data) {
@@ -281,7 +290,9 @@ export function AdminLfsPage() @{
     : [];
 
   @if (!sessionKnown) {
-    <></>;
+    <AdminSettingsLayout active="lfs">
+      <SettingsPageSkeleton />
+    </AdminSettingsLayout>;
   } @else {
     @if (signedOut) {
       <SettingsShell bare>
