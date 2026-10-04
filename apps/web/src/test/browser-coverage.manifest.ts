@@ -281,6 +281,27 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
     coverage: [{ kind: "stack-browser", test: CHROME_MENUS, subject: "chrome" }],
   },
 
+  {
+    surface: "components/repo/file-commit-form.tsrx",
+    coverage: [
+      {
+        kind: "browser",
+        test: "apps/web/src/components/repo/file-commit-form.browser.test.tsx",
+        subject: "file-commit-form",
+      },
+    ],
+  },
+  {
+    surface: "components/repo/repo-browse-toolbar.tsrx",
+    coverage: [
+      {
+        kind: "browser",
+        test: "apps/web/src/components/repo/file-commit-form.browser.test.tsx",
+        subject: "repo-browse-toolbar",
+      },
+    ],
+  },
+
   // --- routes ---
   {
     surface: "routes/login.tsrx",

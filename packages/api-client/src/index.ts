@@ -1005,6 +1005,100 @@ export type RepoBranchMutationResponse = {
   branch: string;
 };
 
+/** Shared commit-target fields flattened into repo.file.* requests (GIT-19). */
+export type RepoFileCommitOptions = {
+  /** Base branch (default: repository default branch). */
+  branch?: string | null;
+  /** Create this branch at the base tip and commit there. */
+  new_branch?: string | null;
+  /** Open a PR new_branch → branch (default true when new_branch is set). */
+  open_pr?: boolean | null;
+  pr_title?: string | null;
+  pr_body?: string | null;
+};
+
+export type RepoFileCreateRequest = RepoFileCommitOptions & {
+  owner: string;
+  name: string;
+  path: string;
+  /** UTF-8 text content; may be empty (empty file). */
+  content?: string | null;
+  /** Base64 bytes — binary-safe; mutually exclusive with `content`. */
+  content_base64?: string | null;
+  /** Commit message (server supplies a default when blank). */
+  message: string;
+};
+
+export type RepoFileUpdateRequest = RepoFileCommitOptions & {
+  owner: string;
+  name: string;
+  path: string;
+  content?: string | null;
+  content_base64?: string | null;
+  message: string;
+};
+
+export type RepoFileDeleteRequest = RepoFileCommitOptions & {
+  owner: string;
+  name: string;
+  /** File path, or directory path (removes every blob under it). */
+  path: string;
+  message: string;
+};
+
+export type RepoFileRenameRequest = RepoFileCommitOptions & {
+  owner: string;
+  name: string;
+  from_path: string;
+  to_path: string;
+  /** Optional new content; absent preserves the blob (pure rename). */
+  content?: string | null;
+  content_base64?: string | null;
+  message: string;
+};
+
+export type RepoFileUploadEntry = {
+  path: string;
+  content_base64: string;
+};
+
+export type RepoFileUploadRequest = RepoFileCommitOptions & {
+  owner: string;
+  name: string;
+  files: RepoFileUploadEntry[];
+  message: string;
+};
+
+export type RepoFileMkdirRequest = RepoFileCommitOptions & {
+  owner: string;
+  name: string;
+  /** Directory to create (materialized as `{path}/.gitkeep`). */
+  path: string;
+  message: string;
+};
+
+export type RepoFileCommitPolicyRequest = {
+  owner: string;
+  name: string;
+  branch?: string | null;
+};
+
+export type RepoFileCommitPolicyResponse = {
+  branch: string;
+  /** Caller may commit directly onto `branch`. */
+  direct_commit_allowed: boolean;
+  /** Protection requires the new-branch + PR flow. */
+  requires_pr: boolean;
+};
+
+export type RepoFileCommitResponse = {
+  commit_sha: string;
+  /** Branch that received the commit. */
+  branch: string;
+  created_branch: boolean;
+  pr_number?: number | null;
+};
+
 export type RepoUpdateVisibilityRequest = {
   owner: string;
   name: string;
@@ -3056,6 +3150,22 @@ export function createClient(opts: CreateClientOptions) {
         rpcCall<RepoBranchMutationResponse>(opts, "repo.branchRename", input),
       branchDelete: (input: RepoBranchDeleteRequest) =>
         rpcCall<RepoBranchMutationResponse>(opts, "repo.branchDelete", input),
+      file: {
+        create: (input: RepoFileCreateRequest) =>
+          rpcCall<RepoFileCommitResponse>(opts, "repo.file.create", input),
+        update: (input: RepoFileUpdateRequest) =>
+          rpcCall<RepoFileCommitResponse>(opts, "repo.file.update", input),
+        delete: (input: RepoFileDeleteRequest) =>
+          rpcCall<RepoFileCommitResponse>(opts, "repo.file.delete", input),
+        rename: (input: RepoFileRenameRequest) =>
+          rpcCall<RepoFileCommitResponse>(opts, "repo.file.rename", input),
+        upload: (input: RepoFileUploadRequest) =>
+          rpcCall<RepoFileCommitResponse>(opts, "repo.file.upload", input),
+        mkdir: (input: RepoFileMkdirRequest) =>
+          rpcCall<RepoFileCommitResponse>(opts, "repo.file.mkdir", input),
+        commitPolicy: (input: RepoFileCommitPolicyRequest) =>
+          rpcCall<RepoFileCommitPolicyResponse>(opts, "repo.file.commitPolicy", input),
+      },
       updateVisibility: (input: RepoUpdateVisibilityRequest) =>
         rpcCall<RepoPublic>(opts, "repo.updateVisibility", input),
       setArchived: (input: RepoSetArchivedRequest) =>

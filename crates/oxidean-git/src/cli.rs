@@ -7,9 +7,9 @@ use tokio::process::Command;
 
 use crate::backend::{
     validate_remote_url, ArchiveFormat, BlameFile, BlameLine, CommitDetail, CommitSummary,
-    ContributorSummary, DiffFile, DiffResult, GitBackend, GitError, GitRef, GrepHit, GrepResult,
-    RemoteAuthKind, RemoteCredentials, SizedBlobEntry, TreeEntry, TreeEntryKind, ARCHIVE_TIMEOUT,
-    BLAME_SOFT_MAX_LINES, DIFF_SOFT_MAX_BYTES, FORGE_NOREPLY_EMAIL,
+    ContributorSummary, DiffFile, DiffResult, FileChange, FilesCommit, GitBackend, GitError,
+    GitRef, GrepHit, GrepResult, RemoteAuthKind, RemoteCredentials, SizedBlobEntry, TreeEntry,
+    TreeEntryKind, ARCHIVE_TIMEOUT, BLAME_SOFT_MAX_LINES, DIFF_SOFT_MAX_BYTES, FORGE_NOREPLY_EMAIL,
 };
 
 /// System `git` CLI adapter (D-32). Only backend registered in Phase 7.
@@ -175,10 +175,13 @@ async fn run_git_with_env(args: &[&str], extra_env: &[(&str, &str)]) -> Result<(
 /// protection helper (D-PKG-01/02). Prefer `OXIDEAN_PROTECTION_HELPER`; else a
 /// sibling `oxidean-protection-hook` next to the current executable (API image).
 ///
-/// Sets `OXIDEAN_ACTOR_CAPABILITY=admin` for system ref updates (mirror FF /
-/// internal sync) that already passed API-layer policy — without this, production
-/// fail-closed hooks deny with default capability `read`.
-fn protection_hook_push_env() -> Vec<(String, String)> {
+/// `actor_capability` lands in `OXIDEAN_ACTOR_CAPABILITY` for the hook.
+/// System ref updates (mirror FF / internal sync) pass `"admin"` — they already
+/// passed API-layer policy, and production fail-closed hooks would otherwise
+/// deny with default capability `read`. User-attributed commits (GIT-19
+/// `commit_files`) pass the actor's real capability so a protection rule
+/// created between the API-side check and the push still bites.
+fn protection_hook_push_env(actor_capability: &str) -> Vec<(String, String)> {
     let mut out = Vec::with_capacity(2);
     let helper = std::env::var("OXIDEAN_PROTECTION_HELPER")
         .ok()
@@ -192,7 +195,10 @@ fn protection_hook_push_env() -> Vec<(String, String)> {
     if let Some(h) = helper {
         out.push(("OXIDEAN_PROTECTION_HELPER".into(), h));
     }
-    out.push(("OXIDEAN_ACTOR_CAPABILITY".into(), "admin".into()));
+    out.push((
+        "OXIDEAN_ACTOR_CAPABILITY".into(),
+        actor_capability.to_string(),
+    ));
     out
 }
 
@@ -233,6 +239,59 @@ async fn run_git_stdout_env(args: &[&str], extra_env: &[(&str, &str)]) -> Result
             "OpenSSH client is not installed on this Oxidean API host (install openssh-client / ensure `ssh` is on PATH)".into(),
         ));
     }
+    Err(GitError::Process(format!(
+        "git {} failed (status {:?}): {}{}",
+        args.join(" "),
+        output.status.code(),
+        stderr.trim(),
+        if stdout.trim().is_empty() {
+            String::new()
+        } else {
+            format!(" | {}", stdout.trim())
+        }
+    )))
+}
+
+/// `run_git_stdout_env` variant that pipes `stdin_bytes` to the child —
+/// for `hash-object -w --stdin` and `update-index --index-info`, where the
+/// payload may contain NULs and cannot ride on argv (GIT-19).
+async fn run_git_stdout_env_stdin(
+    args: &[&str],
+    extra_env: &[(&str, &str)],
+    stdin_bytes: &[u8],
+) -> Result<Vec<u8>, GitError> {
+    use tokio::io::AsyncWriteExt;
+    let mut cmd = Command::new("git");
+    cmd.args(args)
+        .env("GIT_AUTHOR_NAME", "Oxidean")
+        .env("GIT_AUTHOR_EMAIL", FORGE_NOREPLY_EMAIL)
+        .env("GIT_COMMITTER_NAME", "Oxidean")
+        .env("GIT_COMMITTER_EMAIL", FORGE_NOREPLY_EMAIL)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    for (k, v) in extra_env {
+        cmd.env(k, v);
+    }
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| GitError::Process(format!("failed to spawn git: {e}")))?;
+    let mut stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| GitError::Process("failed to open git stdin".into()))?;
+    stdin.write_all(stdin_bytes).await.map_err(GitError::Io)?;
+    drop(stdin);
+    let output = child
+        .wait_with_output()
+        .await
+        .map_err(|e| GitError::Process(format!("failed to wait on git: {e}")))?;
+    if output.status.success() {
+        return Ok(output.stdout);
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
     Err(GitError::Process(format!(
         "git {} failed (status {:?}): {}{}",
         args.join(" "),
@@ -447,6 +506,32 @@ fn validate_repo_rel_path(path: &str) -> Result<String, GitError> {
         return Err(GitError::InvalidArg(format!("path escapes repo: {path}")));
     }
     Ok(rel.to_string())
+}
+
+/// Stricter repo-relative path validation for file *writes* (GIT-19):
+/// [`validate_repo_rel_path`] traversal/NUL/absolute checks plus non-empty,
+/// no empty segments (`a//b`, trailing `/`), no `.` segments, and no `.git`
+/// component (reserved by git checkout).
+fn validate_edit_path(path: &str) -> Result<String, GitError> {
+    // Writes reject absolute paths outright — the read-path helper tolerates a
+    // leading `/` for URL-derived inputs, but a file mutation must name an
+    // unambiguous repo-relative path.
+    if path.trim().starts_with('/') {
+        return Err(GitError::InvalidArg(format!(
+            "absolute paths are not allowed: {path}"
+        )));
+    }
+    let rel = validate_repo_rel_path(path)?;
+    if rel.is_empty() {
+        return Err(GitError::InvalidArg("path is required".into()));
+    }
+    if rel
+        .split('/')
+        .any(|seg| seg.is_empty() || seg == "." || seg == ".git")
+    {
+        return Err(GitError::InvalidArg(format!("invalid repo path: {path}")));
+    }
+    Ok(rel)
 }
 
 fn parse_ls_tree_line(line: &str) -> Option<TreeEntry> {
@@ -1143,14 +1228,7 @@ impl GitBackend for CliGitBackend {
         }
 
         // Committer is always the forge web-flow identity; author is the acting user.
-        run_git(&[
-            "-C",
-            work_str,
-            "config",
-            "user.email",
-            FORGE_NOREPLY_EMAIL,
-        ])
-        .await?;
+        run_git(&["-C", work_str, "config", "user.email", FORGE_NOREPLY_EMAIL]).await?;
         run_git(&["-C", work_str, "config", "user.name", "Oxidean"]).await?;
         run_git(&["-C", work_str, "add", "-A"]).await?;
 
@@ -1195,6 +1273,315 @@ impl GitBackend for CliGitBackend {
         let refspec = format!("HEAD:refs/heads/{branch}");
         run_git(&["-C", work_str, "push", "origin", &refspec]).await?;
         Ok(())
+    }
+
+    async fn commit_files(
+        &self,
+        bare_path: &Path,
+        branch: &str,
+        base: &str,
+        message: &str,
+        changes: &[FileChange],
+        author_name: &str,
+        author_email: &str,
+        signing_key_path: Option<&Path>,
+        actor_capability: &str,
+    ) -> Result<FilesCommit, GitError> {
+        let branch = validate_treeish(branch)?;
+        let base = validate_treeish(base)?;
+        if changes.is_empty() {
+            return Err(GitError::InvalidArg("no file changes to commit".into()));
+        }
+        if message.trim().is_empty() || message.contains('\0') {
+            return Err(GitError::InvalidArg("commit message is required".into()));
+        }
+        let author_name = author_name.trim();
+        let author_email = author_email.trim();
+        if author_name.is_empty() || author_email.is_empty() {
+            return Err(GitError::InvalidArg(
+                "author name and email are required".into(),
+            ));
+        }
+        // Normalize every path up front so a bad entry fails before any
+        // object writes.
+        let normalized: Vec<FileChange> = changes
+            .iter()
+            .map(|c| match c {
+                FileChange::Upsert { path, content } => Ok(FileChange::Upsert {
+                    path: validate_edit_path(path)?,
+                    content: content.clone(),
+                }),
+                FileChange::UpsertOid { path, oid } => {
+                    let oid = oid.trim();
+                    if oid.len() != 40 || !oid.bytes().all(|b| b.is_ascii_hexdigit()) {
+                        return Err(GitError::InvalidArg(format!("invalid blob oid: {oid}")));
+                    }
+                    Ok(FileChange::UpsertOid {
+                        path: validate_edit_path(path)?,
+                        oid: oid.to_string(),
+                    })
+                }
+                FileChange::Delete { path } => Ok(FileChange::Delete {
+                    path: validate_edit_path(path)?,
+                }),
+            })
+            .collect::<Result<_, GitError>>()?;
+
+        let bare_abs = absolute_path(bare_path)?;
+        let bare_str = bare_abs.to_str().ok_or_else(|| {
+            GitError::InvalidArg(format!("non-utf8 bare path: {}", bare_abs.display()))
+        })?;
+
+        // New-branch commits must not silently land on an existing head.
+        if branch != base {
+            let existing = run_git_stdout(&[
+                "-C",
+                bare_str,
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                &format!("refs/heads/{branch}"),
+            ])
+            .await;
+            if let Ok(out) = existing {
+                if !out.is_empty() {
+                    return Err(GitError::Conflict(format!(
+                        "branch already exists: {branch}"
+                    )));
+                }
+            }
+        }
+
+        // Scratch repo — all work happens on index plumbing (no checkout), and
+        // the commit ships back through `push` so bare `hooks/update` runs.
+        let tmp = tempfile::tempdir().map_err(GitError::Io)?;
+        let work = tmp.path();
+        let work_str = work
+            .to_str()
+            .ok_or_else(|| GitError::InvalidArg("non-utf8 temp worktree path".into()))?;
+        run_git(&["init", work_str]).await?;
+
+        // Pull the base tip (shallow, single ref) so its tree/blob objects are
+        // local for read-tree / hash-object / commit-tree. Absent base → the
+        // changeset builds a root commit (empty repository).
+        let base_ref = format!("refs/heads/{base}");
+        let base_tip = run_git_stdout(&[
+            "-C",
+            bare_str,
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &base_ref,
+        ])
+        .await
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o).trim().to_string())
+        .filter(|s| !s.is_empty());
+        let base_sha: Option<String> = if base_tip.is_some() {
+            run_git(&["-C", work_str, "fetch", "--depth=1", bare_str, &base_ref]).await?;
+            let out = run_git_stdout(&["-C", work_str, "rev-parse", "FETCH_HEAD"]).await?;
+            Some(String::from_utf8_lossy(&out).trim().to_string())
+        } else {
+            None
+        };
+
+        // Scratch index file — real repo index is never touched.
+        let index = work.join("oxidean-index");
+        let index_s = index
+            .to_str()
+            .ok_or_else(|| GitError::InvalidArg("non-utf8 index path".into()))?;
+        let idx_env: Vec<(&str, &str)> = vec![("GIT_INDEX_FILE", index_s)];
+        match &base_sha {
+            Some(sha) => run_git_with_env(&["-C", work_str, "read-tree", sha], &idx_env).await?,
+            None => run_git_with_env(&["-C", work_str, "read-tree", "--empty"], &idx_env).await?,
+        }
+
+        // Stage the changeset via `update-index --index-info`: deletions are
+        // emitted first (mode 0 records) so a delete+upsert of the same path
+        // resolves to the upsert.
+        let mut batch: Vec<u8> = Vec::new();
+        for change in &normalized {
+            match change {
+                FileChange::Delete { path } => {
+                    // `:(literal)` — literal pathspec; `path` matches the file
+                    // itself and every blob under `path/` (directory delete).
+                    let spec = format!(":(literal){path}");
+                    let matched = run_git_stdout_env(
+                        &["-C", work_str, "ls-files", "-z", "--", &spec],
+                        &idx_env,
+                    )
+                    .await?;
+                    if matched.is_empty() {
+                        return Err(GitError::NotFound(format!("path not found: {path}")));
+                    }
+                    for entry in matched.split(|b| *b == 0) {
+                        if entry.is_empty() {
+                            continue;
+                        }
+                        batch.extend_from_slice(b"0 0000000000000000000000000000000000000000\t");
+                        batch.extend_from_slice(entry);
+                        batch.push(0);
+                    }
+                }
+                FileChange::Upsert { path, content } => {
+                    let oid = run_git_stdout_env_stdin(
+                        &["-C", work_str, "hash-object", "-w", "--stdin"],
+                        &idx_env,
+                        content,
+                    )
+                    .await?;
+                    let oid = String::from_utf8_lossy(&oid).trim().to_string();
+                    batch.extend_from_slice(format!("100644 {oid}\t").as_bytes());
+                    batch.extend_from_slice(path.as_bytes());
+                    batch.push(0);
+                }
+                FileChange::UpsertOid { path, oid } => {
+                    run_git(&["-C", work_str, "cat-file", "-e", oid])
+                        .await
+                        .map_err(|_| GitError::NotFound(format!("unknown blob oid: {oid}")))?;
+                    batch.extend_from_slice(format!("100644 {oid}\t").as_bytes());
+                    batch.extend_from_slice(path.as_bytes());
+                    batch.push(0);
+                }
+            }
+        }
+        run_git_stdout_env_stdin(
+            &["-C", work_str, "update-index", "-z", "--index-info"],
+            &idx_env,
+            &batch,
+        )
+        .await?;
+
+        let new_tree = {
+            let out = run_git_stdout_env(&["-C", work_str, "write-tree"], &idx_env).await?;
+            String::from_utf8_lossy(&out).trim().to_string()
+        };
+        if let Some(base) = &base_sha {
+            let base_tree = {
+                let out = run_git_stdout(&[
+                    "-C",
+                    work_str,
+                    "rev-parse",
+                    "--verify",
+                    &format!("{base}^{{tree}}"),
+                ])
+                .await?;
+                String::from_utf8_lossy(&out).trim().to_string()
+            };
+            if base_tree == new_tree {
+                return Err(GitError::InvalidArg("changeset produces no changes".into()));
+            }
+        }
+
+        // commit-tree in the scratch repo; committer = forge identity, author
+        // = acting user, optional web-flow SSH signature (D-signing parity
+        // with seed_commit_authored).
+        let mut commit_args: Vec<String> = vec!["-C".into(), work_str.into()];
+        if let Some(key) = signing_key_path {
+            let key_abs = absolute_path(key)?;
+            let key_s = key_abs.to_str().ok_or_else(|| {
+                GitError::InvalidArg(format!("non-utf8 signing key path: {}", key_abs.display()))
+            })?;
+            commit_args.push("-c".into());
+            commit_args.push("gpg.format=ssh".into());
+            commit_args.push("-c".into());
+            commit_args.push(format!("user.signingkey={key_s}"));
+            commit_args.push("commit-tree".into());
+            commit_args.push("-S".into());
+        } else {
+            commit_args.push("-c".into());
+            commit_args.push("commit.gpgsign=false".into());
+            commit_args.push("commit-tree".into());
+        }
+        commit_args.push("-m".into());
+        commit_args.push(message.to_string());
+        commit_args.push(new_tree);
+        if let Some(base) = &base_sha {
+            commit_args.push("-p".into());
+            commit_args.push(base.clone());
+        }
+        let commit_refs: Vec<&str> = commit_args.iter().map(String::as_str).collect();
+        let commit_env: Vec<(&str, String)> = vec![
+            ("GIT_AUTHOR_NAME", author_name.to_string()),
+            ("GIT_AUTHOR_EMAIL", author_email.to_string()),
+            ("GIT_COMMITTER_NAME", "Oxidean".into()),
+            ("GIT_COMMITTER_EMAIL", FORGE_NOREPLY_EMAIL.into()),
+        ];
+        let env_pairs: Vec<(&str, &str)> =
+            commit_env.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        let sha = {
+            let out = run_git_stdout_env(&commit_refs, &env_pairs).await?;
+            String::from_utf8_lossy(&out).trim().to_string()
+        };
+
+        // Publish through a real push: hooks/update runs (D-19) and
+        // receive-pack enforces fast-forward — a moved tip surfaces as
+        // Conflict, a protection-hook decline as Denied.
+        let hook_env = protection_hook_push_env(actor_capability);
+        let hook_pairs: Vec<(&str, &str)> = hook_env
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+        let refspec = format!("{sha}:refs/heads/{branch}");
+        match run_git_with_env(&["-C", work_str, "push", bare_str, &refspec], &hook_pairs).await {
+            Ok(()) => Ok(FilesCommit {
+                sha,
+                base_sha,
+                branch: branch.to_string(),
+            }),
+            Err(GitError::Process(msg)) => {
+                if msg.contains("non-fast-forward")
+                    || msg.contains("fetch first")
+                    || msg.contains("stale info")
+                {
+                    Err(GitError::Conflict(
+                        "branch tip moved while committing — retry the change".into(),
+                    ))
+                } else if msg.contains("hook declined") || msg.contains("protected") {
+                    Err(GitError::Denied(msg))
+                } else {
+                    Err(GitError::Process(msg))
+                }
+            }
+            Err(other) => Err(other),
+        }
+    }
+
+    async fn ls_tree_entry(
+        &self,
+        repo: &Path,
+        treeish: &str,
+        path: &str,
+    ) -> Result<Option<TreeEntry>, GitError> {
+        let treeish = validate_treeish(treeish)?;
+        let path = validate_edit_path(path)?;
+        let repo_str = repo.to_str().ok_or_else(|| {
+            GitError::InvalidArg(format!("non-utf8 repo path: {}", repo.display()))
+        })?;
+        match run_git_stdout(&["-C", repo_str, "ls-tree", "-z", treeish, "--", &path]).await {
+            Ok(bytes) => {
+                for chunk in bytes.split(|b| *b == 0) {
+                    if chunk.is_empty() {
+                        continue;
+                    }
+                    let line = String::from_utf8_lossy(chunk);
+                    if let Some(entry) = parse_ls_tree_line(&line) {
+                        if entry.name == path {
+                            return Ok(Some(entry));
+                        }
+                    }
+                }
+                Ok(None)
+            }
+            Err(GitError::Process(msg))
+                if msg.contains("Not a valid object name")
+                    || msg.contains("does not exist")
+                    || msg.contains("not exist") =>
+            {
+                Ok(None)
+            }
+            Err(e) => Err(e),
+        }
     }
 
     async fn ls_tree(
@@ -2603,7 +2990,7 @@ impl GitBackend for CliGitBackend {
         run_git(&["clone", bare_s, work_s]).await?;
         run_git(&["-C", work_s, "checkout", "--detach", target_sha]).await?;
 
-        let hook_env = protection_hook_push_env();
+        let hook_env = protection_hook_push_env("admin");
         let hook_env_refs: Vec<(&str, &str)> = hook_env
             .iter()
             .map(|(k, v)| (k.as_str(), v.as_str()))
@@ -2723,13 +3110,11 @@ impl GitBackend for CliGitBackend {
             .to_str()
             .ok_or_else(|| GitError::InvalidArg("non-utf8 temp worktree".into()))?;
         run_git(&["clone", bare_s, work_s]).await?;
-        let branch = refname
-            .strip_prefix("refs/heads/")
-            .unwrap_or(refname);
+        let branch = refname.strip_prefix("refs/heads/").unwrap_or(refname);
         // Detached checkout of target, then push to branch (FF only — no +).
         run_git(&["-C", work_s, "checkout", "--detach", target_sha]).await?;
         let refspec = format!("HEAD:refs/heads/{branch}");
-        let hook_env = protection_hook_push_env();
+        let hook_env = protection_hook_push_env("admin");
         let hook_env_refs: Vec<(&str, &str)> = hook_env
             .iter()
             .map(|(k, v)| (k.as_str(), v.as_str()))
@@ -2889,21 +3274,14 @@ async fn merge_via_worktree(
                 return Err(e);
             }
             run_git(&["-C", work_s, "checkout", base_ref]).await?;
-            run_git(&[
-                "-C",
-                work_s,
-                "merge",
-                "--ff-only",
-                "oxidean-rebase-head",
-            ])
-            .await?;
+            run_git(&["-C", work_s, "merge", "--ff-only", "oxidean-rebase-head"]).await?;
         }
     }
 
     let sha_bytes = run_git_stdout(&["-C", work_s, "rev-parse", "HEAD"]).await?;
     let sha = String::from_utf8_lossy(&sha_bytes).trim().to_string();
     let refspec = format!("HEAD:refs/heads/{base_ref}");
-    let hook_env = protection_hook_push_env();
+    let hook_env = protection_hook_push_env("admin");
     let hook_env_refs: Vec<(&str, &str)> = hook_env
         .iter()
         .map(|(k, v)| (k.as_str(), v.as_str()))
@@ -3694,7 +4072,7 @@ mod tests {
             "OXIDEAN_PROTECTION_HELPER",
             "/usr/local/bin/oxidean-protection-hook",
         );
-        let env = protection_hook_push_env();
+        let env = protection_hook_push_env("admin");
         match prev {
             Some(v) => std::env::set_var("OXIDEAN_PROTECTION_HELPER", v),
             None => std::env::remove_var("OXIDEAN_PROTECTION_HELPER"),
@@ -4011,10 +4389,23 @@ mod tests {
         let key_path = key_dir.join("web-flow");
         let key_s = key_path.to_str().unwrap();
         let gen = std::process::Command::new("ssh-keygen")
-            .args(["-t", "ed25519", "-N", "", "-f", key_s, "-C", "oxidean-web-flow"])
+            .args([
+                "-t",
+                "ed25519",
+                "-N",
+                "",
+                "-f",
+                key_s,
+                "-C",
+                "oxidean-web-flow",
+            ])
             .output()
             .expect("ssh-keygen");
-        assert!(gen.status.success(), "ssh-keygen failed: {}", String::from_utf8_lossy(&gen.stderr));
+        assert!(
+            gen.status.success(),
+            "ssh-keygen failed: {}",
+            String::from_utf8_lossy(&gen.stderr)
+        );
 
         let pub_line = std::fs::read_to_string(key_dir.join("web-flow.pub")).unwrap();
         let mut parts = pub_line.split_whitespace();
@@ -4776,5 +5167,312 @@ mod tests {
             ssh.signature_status
         );
         assert_eq!(ssh.signature_kind, "ssh");
+    }
+
+    /// GIT-19 helpers — temp bare repo seeded with two files on `main`.
+    async fn seeded_bare() -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let bare = dir.path().join("r.git");
+        let git = CliGitBackend::new();
+        git.init_bare(&bare, "main").await.unwrap();
+        git.seed_commit(
+            &bare,
+            "main",
+            "seed",
+            &[
+                ("README.md".into(), b"hi\n".to_vec()),
+                ("docs/a.md".into(), b"doc\n".to_vec()),
+            ],
+        )
+        .await
+        .unwrap();
+        (dir, bare)
+    }
+
+    async fn show_file(bare: &Path, path: &str) -> String {
+        let out = Command::new("git")
+            .args([
+                "-C",
+                bare.to_str().unwrap(),
+                "show",
+                &format!("main:{path}"),
+            ])
+            .output()
+            .await
+            .unwrap();
+        assert!(out.status.success(), "show {path} failed");
+        String::from_utf8(out.stdout).unwrap()
+    }
+
+    #[tokio::test]
+    async fn commit_files_creates_updates_and_deletes() {
+        let (_d, bare) = seeded_bare().await;
+        let git = CliGitBackend::new();
+        let res = git
+            .commit_files(
+                &bare,
+                "main",
+                "main",
+                "web edit",
+                &[
+                    FileChange::Upsert {
+                        path: "src/new.txt".into(),
+                        content: b"hello".to_vec(),
+                    },
+                    FileChange::Upsert {
+                        path: "README.md".into(),
+                        content: b"updated".to_vec(),
+                    },
+                    FileChange::Delete {
+                        path: "docs".into(), // directory delete
+                    },
+                ],
+                "Web User",
+                "web@example.com",
+                None,
+                "admin",
+            )
+            .await
+            .expect("commit_files");
+        assert_eq!(res.branch, "main");
+        assert!(res.base_sha.is_some());
+        assert_eq!(show_file(&bare, "src/new.txt").await, "hello");
+        assert_eq!(show_file(&bare, "README.md").await, "updated");
+        // Directory delete removed its child; the dir itself is gone.
+        assert_eq!(
+            git.ls_tree_entry(&bare, "main", "docs").await.expect("ls"),
+            None
+        );
+        // Commit author/committer metadata.
+        let log = git.log(&bare, "main", 0, 1, None, None).await.unwrap();
+        assert_eq!(log[0].author_name, "Web User");
+        assert_eq!(log[0].author_email, "web@example.com");
+        assert_eq!(log[0].committer_email, FORGE_NOREPLY_EMAIL);
+    }
+
+    #[tokio::test]
+    async fn commit_files_empty_file_and_unborn_repo() {
+        let dir = tempfile::tempdir().unwrap();
+        let bare = dir.path().join("empty.git");
+        let git = CliGitBackend::new();
+        git.init_bare(&bare, "main").await.unwrap();
+        // Root commit on unborn base — empty file included.
+        git.commit_files(
+            &bare,
+            "main",
+            "main",
+            "first",
+            &[
+                FileChange::Upsert {
+                    path: "blank.txt".into(),
+                    content: Vec::new(),
+                },
+                FileChange::Upsert {
+                    path: "dir/.gitkeep".into(),
+                    content: Vec::new(),
+                },
+            ],
+            "Oxidean",
+            FORGE_NOREPLY_EMAIL,
+            None,
+            "admin",
+        )
+        .await
+        .expect("root commit");
+        assert_eq!(show_file(&bare, "blank.txt").await, "");
+        assert_eq!(show_file(&bare, "dir/.gitkeep").await, "");
+    }
+
+    #[tokio::test]
+    async fn commit_files_rename_via_oid_and_traversal_rejects() {
+        let (_d, bare) = seeded_bare().await;
+        let git = CliGitBackend::new();
+        let entry = git
+            .ls_tree_entry(&bare, "main", "README.md")
+            .await
+            .unwrap()
+            .expect("entry");
+        assert_eq!(entry.kind, TreeEntryKind::Blob);
+        git.commit_files(
+            &bare,
+            "main",
+            "main",
+            "mv",
+            &[
+                FileChange::Delete {
+                    path: "README.md".into(),
+                },
+                FileChange::UpsertOid {
+                    path: "docs/README-moved.md".into(),
+                    oid: entry.oid.clone(),
+                },
+            ],
+            "Oxidean",
+            FORGE_NOREPLY_EMAIL,
+            None,
+            "admin",
+        )
+        .await
+        .unwrap();
+        assert_eq!(show_file(&bare, "docs/README-moved.md").await, "hi\n");
+        // blob object id preserved across the rename
+        let moved = git
+            .ls_tree_entry(&bare, "main", "docs/README-moved.md")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(moved.oid, entry.oid);
+
+        // Write paths reject leading `/` outright (unlike the read-path
+        // helper, which normalizes URL-derived inputs).
+        assert!(validate_edit_path("/abs/path").is_err());
+        for bad in [
+            "../etc",
+            "a/../../b",
+            "a/../b",
+            ".git/hook",
+            "a//b",
+            "x/./y",
+            "trailing/",
+            "/abs/path",
+            "",
+        ] {
+            let err = git
+                .commit_files(
+                    &bare,
+                    "main",
+                    "main",
+                    "bad",
+                    &[FileChange::Upsert {
+                        path: bad.into(),
+                        content: b"x".to_vec(),
+                    }],
+                    "Oxidean",
+                    FORGE_NOREPLY_EMAIL,
+                    None,
+                    "admin",
+                )
+                .await
+                .expect_err("traversal must reject");
+            assert!(matches!(err, GitError::InvalidArg(_)), "{bad} → {err:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn commit_files_new_branch_and_noop_and_race() {
+        let (_d, bare) = seeded_bare().await;
+        let git = CliGitBackend::new();
+        // new branch off main
+        let res = git
+            .commit_files(
+                &bare,
+                "feat/x",
+                "main",
+                "branch commit",
+                &[FileChange::Upsert {
+                    path: "feat.txt".into(),
+                    content: b"f".to_vec(),
+                }],
+                "Oxidean",
+                FORGE_NOREPLY_EMAIL,
+                None,
+                "admin",
+            )
+            .await
+            .unwrap();
+        assert!(res.base_sha.is_some());
+        assert_eq!(res.branch, "feat/x");
+        // branch exists now
+        let e = git
+            .commit_files(
+                &bare,
+                "feat/x",
+                "main",
+                "again",
+                &[FileChange::Upsert {
+                    path: "z.txt".into(),
+                    content: b"z".to_vec(),
+                }],
+                "Oxidean",
+                FORGE_NOREPLY_EMAIL,
+                None,
+                "admin",
+            )
+            .await
+            .expect_err("existing branch as new must fail");
+        assert!(matches!(e, GitError::Conflict(_)), "{e:?}");
+
+        // no-op changeset (same content) → error, no commit
+        let err = git
+            .commit_files(
+                &bare,
+                "main",
+                "main",
+                "noop",
+                &[FileChange::Upsert {
+                    path: "README.md".into(),
+                    content: b"hi\n".to_vec(),
+                }],
+                "Oxidean",
+                FORGE_NOREPLY_EMAIL,
+                None,
+                "admin",
+            )
+            .await
+            .expect_err("no-op must error");
+        assert!(matches!(err, GitError::InvalidArg(_)), "{err:?}");
+
+        // delete of missing path → NotFound
+        let err = git
+            .commit_files(
+                &bare,
+                "main",
+                "main",
+                "rm missing",
+                &[FileChange::Delete {
+                    path: "nope.txt".into(),
+                }],
+                "Oxidean",
+                FORGE_NOREPLY_EMAIL,
+                None,
+                "admin",
+            )
+            .await
+            .expect_err("missing delete must fail");
+        assert!(matches!(err, GitError::NotFound(_)), "{err:?}");
+    }
+
+    #[tokio::test]
+    async fn commit_files_hook_decline_maps_denied() {
+        let (_d, bare) = seeded_bare().await;
+        let git = CliGitBackend::new();
+        // Install a deny-all update hook on the bare repo.
+        let hook = bare.join("hooks/update");
+        std::fs::write(&hook, "#!/bin/sh\necho denied >&2\nexit 1\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut p = std::fs::metadata(&hook).unwrap().permissions();
+            p.set_mode(0o755);
+            std::fs::set_permissions(&hook, p).unwrap();
+        }
+        let err = git
+            .commit_files(
+                &bare,
+                "main",
+                "main",
+                "blocked",
+                &[FileChange::Upsert {
+                    path: "x.txt".into(),
+                    content: b"x".to_vec(),
+                }],
+                "Oxidean",
+                FORGE_NOREPLY_EMAIL,
+                None,
+                "admin",
+            )
+            .await
+            .expect_err("hook decline must surface");
+        assert!(matches!(err, GitError::Denied(_)), "{err:?}");
     }
 }

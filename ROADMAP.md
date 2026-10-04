@@ -47,7 +47,7 @@ Machine-facing surfaces beyond raw git/HTTP. These depend on API-02 (token auth)
 
 ## Git and code surface
 
-- [ ] **GIT-19** Web file editing: create, edit, rename, delete, and upload files with a commit from the browser, signed by the existing web-flow key. Includes new-branch-with-PR flow.
+- [x] **GIT-19** Web file editing: create, edit, rename, delete, and upload files with a commit from the browser, signed by the existing web-flow key. Includes new-branch-with-PR flow. (#88)
 - [x] **GIT-20** Repository archive flag: read-only mode that blocks push, issues, and PRs while keeping everything browsable and clonable. (#82)
 - [x] **GIT-21** Protected tags and tag rulesets (branch protection covers branches only today). (#81)
 - [x] **GIT-22** "Require signed commits" protection option. SSH/GPG signature verification is displayed on commits; enforcement is not a protection knob yet. (#86)

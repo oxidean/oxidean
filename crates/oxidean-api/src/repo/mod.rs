@@ -4,8 +4,9 @@ mod acl;
 mod activity;
 pub(crate) mod author_resolve;
 mod branch_protection;
-mod commit_status;
 mod collaborators;
+mod commit_status;
+mod files;
 mod fork_network;
 mod invites;
 mod language_stats;
@@ -27,14 +28,18 @@ pub use branch_protection::{
     create as branch_protection_create, delete as branch_protection_delete,
     list as branch_protection_list, update as branch_protection_update,
 };
-pub use commit_status::{create as commit_status_create, list as commit_status_list};
-pub use tag_protection::{
-    create as tag_protection_create, delete as tag_protection_delete,
-    list as tag_protection_list, update as tag_protection_update,
-};
 pub use collaborators::{
     add as collaborators_add, list as collaborators_list, remove as collaborators_remove,
     resolve_repo_for_admin, update as collaborators_update,
+};
+pub use commit_status::{create as commit_status_create, list as commit_status_list};
+pub use files::{
+    commit_policy as file_commit_policy, create as file_create, delete as file_delete,
+    mkdir as file_mkdir, rename as file_rename, update as file_update, upload as file_upload,
+};
+pub use tag_protection::{
+    create as tag_protection_create, delete as tag_protection_delete,
+    list as tag_protection_list, update as tag_protection_update,
 };
 pub use invites::{
     create as invites_create, create_link as invites_create_link, list as invites_list,

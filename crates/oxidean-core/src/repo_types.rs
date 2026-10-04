@@ -1002,6 +1002,179 @@ pub struct RepoBranchMutationResponse {
     pub branch: String,
 }
 
+/// Shared commit-target options for `repo.file.*` mutations (GIT-19).
+///
+/// Flattened into every file-mutation request: the change applies on top of
+/// `branch` (default: repository default branch). When `new_branch` is set the
+/// server creates it at `branch`'s tip and commits there instead — the
+/// protected-branch web flow. When `open_pr` is true (default once
+/// `new_branch` is set) the server also opens a pull request
+/// `new_branch` → `branch`.
+///
+/// When `branch` is protected and no `new_branch` is supplied, the server
+/// performs the same fallback automatically (generated `web-edit/*` branch +
+/// PR) rather than rejecting the write.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RepoFileCommitOptions {
+    /// Base branch the change applies on top of (default branch when absent).
+    #[serde(default)]
+    pub branch: Option<String>,
+    /// Create this branch at `branch`'s tip and commit the change there.
+    #[serde(default)]
+    pub new_branch: Option<String>,
+    /// Open a pull request `new_branch` → `branch` (default: true when
+    /// `new_branch` is set, false otherwise).
+    #[serde(default)]
+    pub open_pr: Option<bool>,
+    /// Pull request title (default: first line of the commit message).
+    #[serde(default)]
+    pub pr_title: Option<String>,
+    /// Pull request body.
+    #[serde(default)]
+    pub pr_body: Option<String>,
+}
+
+/// `repo.file.create` input — create a file (GIT-19). `path` must not exist.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoFileCreateRequest {
+    pub owner: String,
+    pub name: String,
+    /// Repository-relative destination path (no `..`, absolute, or `.git`
+    /// segments; empty file allowed).
+    pub path: String,
+    /// UTF-8 text content (text-editor path; may be empty for an empty file).
+    #[serde(default)]
+    pub content: Option<String>,
+    /// Base64-encoded bytes (binary-safe upload path). Exactly one of
+    /// `content` / `content_base64` may be set.
+    #[serde(default)]
+    pub content_base64: Option<String>,
+    /// Commit message (subject line; required, non-empty).
+    pub message: String,
+    #[serde(flatten)]
+    pub target: RepoFileCommitOptions,
+}
+
+/// `repo.file.update` input — overwrite an existing text file (GIT-19).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoFileUpdateRequest {
+    pub owner: String,
+    pub name: String,
+    pub path: String,
+    /// UTF-8 text content (may be empty — truncating to empty file is legal).
+    #[serde(default)]
+    pub content: Option<String>,
+    /// Base64-encoded bytes — only way to replace a binary file's content.
+    #[serde(default)]
+    pub content_base64: Option<String>,
+    pub message: String,
+    #[serde(flatten)]
+    pub target: RepoFileCommitOptions,
+}
+
+/// `repo.file.delete` input — delete a file or a whole directory (GIT-19).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoFileDeleteRequest {
+    pub owner: String,
+    pub name: String,
+    /// File path, or a directory path (removes every blob under it).
+    pub path: String,
+    pub message: String,
+    #[serde(flatten)]
+    pub target: RepoFileCommitOptions,
+}
+
+/// `repo.file.rename` input — move/rename a file (GIT-19). File-only:
+/// renaming a directory is rejected (rename its children instead).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoFileRenameRequest {
+    pub owner: String,
+    pub name: String,
+    /// Existing file path.
+    pub from_path: String,
+    /// Destination path (must not exist).
+    pub to_path: String,
+    /// Optional new content — absent preserves the file's bytes (pure rename).
+    #[serde(default)]
+    pub content: Option<String>,
+    #[serde(default)]
+    pub content_base64: Option<String>,
+    pub message: String,
+    #[serde(flatten)]
+    pub target: RepoFileCommitOptions,
+}
+
+/// `repo.file.upload` input — multi-file commit (GIT-19). Each path is
+/// created or overwritten; binaries go through `content_base64`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoFileUploadEntry {
+    /// Repository-relative destination path.
+    pub path: String,
+    /// Base64-encoded file bytes.
+    pub content_base64: String,
+}
+
+/// `repo.file.upload` input — commit several files atomically (GIT-19).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoFileUploadRequest {
+    pub owner: String,
+    pub name: String,
+    pub files: Vec<RepoFileUploadEntry>,
+    pub message: String,
+    #[serde(flatten)]
+    pub target: RepoFileCommitOptions,
+}
+
+/// `repo.file.mkdir` input — create a directory (GIT-19). Git does not track
+/// empty directories; the commit materializes `{path}/.gitkeep` (empty file),
+/// matching the common convention. `path` must not exist.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoFileMkdirRequest {
+    pub owner: String,
+    pub name: String,
+    /// Directory path to create.
+    pub path: String,
+    pub message: String,
+    #[serde(flatten)]
+    pub target: RepoFileCommitOptions,
+}
+
+/// `repo.file.commitPolicy` input — which commit target the caller may use.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoFileCommitPolicyRequest {
+    pub owner: String,
+    pub name: String,
+    /// Branch being considered (default: repository default branch).
+    #[serde(default)]
+    pub branch: Option<String>,
+}
+
+/// `repo.file.commitPolicy` response — drives the commit-target picker.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoFileCommitPolicyResponse {
+    /// Resolved base branch.
+    pub branch: String,
+    /// Caller may commit directly onto `branch`.
+    pub direct_commit_allowed: bool,
+    /// A matching protection rule blocks direct push — commit must go through
+    /// the new-branch + pull-request flow.
+    pub requires_pr: bool,
+}
+
+/// `repo.file.*` mutation response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoFileCommitResponse {
+    /// New commit SHA.
+    pub commit_sha: String,
+    /// Branch that received the commit (== `new_branch` when one was used).
+    pub branch: String,
+    /// True when the commit landed on a branch this call created.
+    pub created_branch: bool,
+    /// Pull request number when a PR was opened.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pr_number: Option<i64>,
+}
+
 /// `repo.updateVisibility` input (D-26).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RepoUpdateVisibilityRequest {
