@@ -1,6 +1,12 @@
 # Ignore build artifacts and local secrets for faster/safer image builds
 .git
+.github
 .planning
+.cursor
+.claude
+.agents
+.gsd
+.railway
 node_modules
 **/node_modules
 target
@@ -9,11 +15,25 @@ dist
 **/dist
 .turbo
 .env
-.env.local
+.env.*
+!.env.example
 data
 coverage
+apps/web/dist
+apps/web/.turbo
 test-results
 playwright-report
+.playwright-mcp
+
+# Not needed by any image build (context is repo root; builds COPY only
+# Cargo.toml/Cargo.lock/crates for Rust, or package manifests + apps/web +
+# packages/api-client for the web image).
+tmp
+var
+docs
+brand
+scripts
+packages/*/dist
 *.log
+*.tgz
 .DS_Store
-apps/web/dist

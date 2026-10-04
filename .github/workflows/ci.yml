@@ -39,6 +39,8 @@ jobs:
           df -h /
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "rust-debug"
       - uses: taiki-e/install-action@v2
         with:
           tool: nextest
@@ -47,13 +49,10 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq mold protobuf-compiler
       - name: cargo nextest
         # Full-workspace debug link has hit lld bus errors (signal 7) on GHA.
-        # mold + modest job count + thinner debuginfo keeps link stable/disk-safe;
+        # mold + thin debuginfo (dev profile in Cargo.toml) keeps link stable/disk-safe;
         # retry once on flake.
         env:
-          CARGO_BUILD_JOBS: "2"
           CARGO_INCREMENTAL: "0"
-          CARGO_PROFILE_DEV_DEBUG: "line-tables-only"
-          CARGO_PROFILE_TEST_DEBUG: "line-tables-only"
           RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
         run: |
           cargo nextest run --workspace --profile ci \
@@ -169,6 +168,10 @@ jobs:
         with:
           components: llvm-tools-preview
       - uses: Swatinem/rust-cache@v2
+        with:
+          # Instrumented artifacts differ from the debug-build jobs' — keep a
+          # separate cache entry so the two don't evict each other's fingerprints.
+          shared-key: "rust-cov"
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-llvm-cov,nextest
@@ -186,10 +189,7 @@ jobs:
         # Same link/disk stability env as api-rust. Collection only — the
         # weighted gate composition (25/40/35) does not consume these numbers.
         env:
-          CARGO_BUILD_JOBS: "2"
           CARGO_INCREMENTAL: "0"
-          CARGO_PROFILE_DEV_DEBUG: "line-tables-only"
-          CARGO_PROFILE_TEST_DEBUG: "line-tables-only"
           NEXTEST_PROFILE: "ci"
           RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
         run: make coverage-rust
@@ -228,8 +228,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: install protoc
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq protobuf-compiler
+        with:
+          shared-key: "rust-debug"
+      - name: install protoc + mold
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq protobuf-compiler mold
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.4.0"
@@ -238,6 +240,9 @@ jobs:
       - name: Playwright Chromium (stack browser e2e)
         run: bunx playwright install --with-deps chromium
       - name: stack e2e (API + Mailpit/OIDC/stubs + web)
+        env:
+          CARGO_INCREMENTAL: "0"
+          RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
         run: make test-e2e-stack
       - name: upload e2e logs on failure
         if: failure()
@@ -263,11 +268,12 @@ jobs:
             /usr/local/share/boost /usr/share/swift || true
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "rust-debug"
       - name: install protoc + mold
         run: sudo apt-get update -qq && sudo apt-get install -y -qq protobuf-compiler mold jq
       - name: pipeline e2e
         env:
-          CARGO_BUILD_JOBS: "2"
           CARGO_INCREMENTAL: "0"
           RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
         run: ./scripts/e2e-actions-pipeline.sh
@@ -280,14 +286,19 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: install protoc
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq protobuf-compiler
+        with:
+          shared-key: "rust-debug"
+      - name: install protoc + mold
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq protobuf-compiler mold
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.4.0"
       - name: bun install
         run: bun install --frozen-lockfile
       - name: check-rpc-sync
+        env:
+          CARGO_INCREMENTAL: "0"
+          RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
         run: make rpc-sync-check
 
   compose:
@@ -305,7 +316,7 @@ jobs:
       - name: docker compose dev-auth stubs config
         run: docker compose -f docker-compose.dev-auth.yml --profile dev-auth config
 
-  # Same-run api+web image build (no cross-run GHA/Buildx/registry layer cache).
+  # api+web image build for same-run consumers + cross-run gha layer cache.
   # Consumers download the artifact and bring the stack up without --build.
   docker-ci-images:
     name: docker-ci-images
@@ -318,10 +329,35 @@ jobs:
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
             /usr/local/share/boost /usr/share/swift || true
           df -h /
-      - name: build api + web images
-        run: docker compose -f docker-compose.yml build api web
+      - uses: docker/setup-buildx-action@v3
+      # cargo-chef dep layer + cache mounts export via type=gha (mode=max keeps
+      # cache-mount contents), so the Rust deps only rebuild when Cargo.lock moves.
+      - name: build api image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: crates/oxidean-api/Dockerfile
+          load: true
+          tags: oxidean-api:ci
+          cache-from: type=gha,scope=oxidean-api
+          cache-to: type=gha,mode=max,scope=oxidean-api
       - name: build runner image (compile gate)
-        run: docker compose -f docker-compose.yml --profile actions build runner
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/oxidean-runner/Dockerfile
+          push: false
+          cache-from: type=gha,scope=oxidean-runner
+          cache-to: type=gha,mode=max,scope=oxidean-runner
+      - name: build web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          load: true
+          tags: oxidean-web:ci
+          cache-from: type=gha,scope=oxidean-web
+          cache-to: type=gha,mode=max,scope=oxidean-web
       - name: export images tarball
         run: |
           docker save oxidean-api:ci oxidean-web:ci | gzip -1 > /tmp/oxidean-ci-images.tgz
@@ -456,8 +492,92 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "rust-debug"
+      - name: install mold
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq mold
       - name: migrate + probe (${{ matrix.dialect }})
         env:
           DATABASE_URL: ${{ matrix.database_url }}
           OXIDEAN_DB_DIALECT: ${{ matrix.dialect }}
+          CARGO_INCREMENTAL: "0"
+          RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
         run: cargo test -p oxidean-db --test dialect_probe -- --nocapture
+
+  # Release-build evidence: `cargo build --timings` HTML + binary size, so build
+  # performance changes are measurable on the PR that makes them. Runs on pushes
+  # to main (baseline) and PRs that touch Rust-relevant files.
+  build-metrics:
+    name: build-metrics
+    needs: [makefile-lint]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: gate to Rust-affecting changes
+        id: gate
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch --no-tags origin "${{ github.base_ref }}"
+            BASE="origin/${{ github.base_ref }}"
+          else
+            git fetch --no-tags origin main
+            BASE="origin/main"
+          fi
+          # Push events always run (baseline data). PRs run only when the diff
+          # touches Rust manifests, crates, CI, or image build inputs.
+          if [ "${{ github.event_name }}" != "pull_request" ] \
+            || git diff --name-only "$BASE"...HEAD \
+               | grep -qE '^(Cargo\.(toml|lock)|crates/|\.github/workflows/|\.dockerignore|.*Dockerfile)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "No Rust-affecting changes — skipping release metrics build."
+          fi
+      - name: free disk for release build
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /usr/local/share/boost /usr/share/swift || true
+          df -h /
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.gate.outputs.run == 'true'
+      - uses: Swatinem/rust-cache@v2
+        if: steps.gate.outputs.run == 'true'
+        with:
+          shared-key: "rust-release"
+      - name: install mold + protoc + time
+        if: steps.gate.outputs.run == 'true'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq mold protobuf-compiler time
+      - name: cargo build --release --timings
+        if: steps.gate.outputs.run == 'true'
+        env:
+          CARGO_INCREMENTAL: "0"
+          RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
+        run: |
+          /usr/bin/time -v cargo build --release --timings \
+            -p oxidean-api --bin oxidean-api --bin oxidean-protection-hook 2>&1 \
+            | grep -E "Elapsed|Maximum resident|Finished" || true
+      - name: report sizes + dep count
+        if: steps.gate.outputs.run == 'true'
+        run: |
+          echo "## Build metrics" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| artifact | size |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          for bin in oxidean-api oxidean-protection-hook; do
+            BYTES=$(stat -c%s "target/release/$bin")
+            HUMAN=$(ls -lh "target/release/$bin" | awk '{print $5}')
+            echo "| \`$bin\` | $HUMAN ($BYTES B) |" >> "$GITHUB_STEP_SUMMARY"
+          done
+          DEPS=$(cargo tree -p oxidean-api --prefix none 2>/dev/null | sort -u | wc -l)
+          echo "| dep tree (oxidean-api) | $DEPS crates |" >> "$GITHUB_STEP_SUMMARY"
+          ls -lh target/release/oxidean-api target/release/oxidean-protection-hook
+      - name: upload cargo timings
+        if: steps.gate.outputs.run == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: cargo-timings
+          path: target/cargo-timings/
+          if-no-files-found: ignore

@@ -29,7 +29,6 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 axum = { version = "0.8", features = ["ws", "multipart"] }
 tower-http = { version = "0.6", features = ["cors", "trace"] }
-tower = "0.5"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 futures-util = "0.3"
@@ -37,7 +36,13 @@ http = "1"
 async-trait = "0.1.92"
 thiserror = "2"
 lettre = { version = "0.11.23", features = ["tokio1", "tokio1-rustls", "smtp-transport", "builder", "hostname", "rustls-native-certs", "aws-lc-rs"], default-features = false }
-reqwest = { version = "0.13.5", features = ["rustls", "json"] }
+reqwest = { version = "0.12", default-features = false, features = [
+  "rustls-tls-native-roots",
+  "json",
+  "charset",
+  "http2",
+  "system-proxy",
+] }
 argon2 = "0.6"
 password-hash = { version = "0.6", features = ["alloc", "phc", "getrandom"] }
 sha2 = "0.11.0"
@@ -50,19 +55,34 @@ cookie = "0.18.2"
 workos = "3.4"
 url = "2.5.8"
 openidconnect = { version = "4.0", features = ["reqwest"] }
-image = { version = "0.25", features = ["jpeg", "png", "webp"] }
+image = { version = "0.25", default-features = false, features = [
+  "bmp",
+  "dds",
+  "ff",
+  "gif",
+  "hdr",
+  "ico",
+  "jpeg",
+  "png",
+  "pnm",
+  "qoi",
+  "rayon",
+  "tga",
+  "tiff",
+  "webp",
+] }
 include_dir = "0.7.4"
 tempfile = "3"
 ssh-key = { version = "=0.7.0-rc.11", features = ["std", "alloc"] }
 russh = { version = "0.63", features = ["aws-lc-rs"] }
 serde_yaml = "0.9"
 prost = "0.13"
-zip = "2.2"
+zip = { version = "2.2", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 http-body-util = "0.1"
 tower = { version = "0.5", features = ["util"] }
-tokio-tungstenite = "0.26"
+tokio-tungstenite = "0.29"
 tempfile = "3"
 wiremock = "0.6.5"
 
