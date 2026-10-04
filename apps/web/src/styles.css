@@ -84,6 +84,7 @@
   distinct from the warm primary.
 */
 :root {
+  color-scheme: light;
   --radius: 0.5rem;
 
   --background: #ffffff;
@@ -130,6 +131,7 @@
 }
 
 .dark {
+  color-scheme: dark;
   /* Deep charcoal canvas (#121212) with elevated near-black surfaces. */
   --background: #121212;
   --foreground: #f0f3f6;
