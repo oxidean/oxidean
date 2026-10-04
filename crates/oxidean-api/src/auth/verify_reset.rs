@@ -776,6 +776,7 @@ mod tests {
                 remember_me: false,
                 expires_at: Utc::now() + Duration::hours(1),
             }),
+            pat: None,
             client: crate::rpc::ClientMeta::default(),
             set_cookie: None,
             lookup_limiter: Arc::new(std::sync::Mutex::new(

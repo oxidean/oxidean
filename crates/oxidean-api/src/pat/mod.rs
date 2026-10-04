@@ -1,5 +1,6 @@
 //! Personal access token RPC (`pat.createClassic` / `createFineGrained` / `list` / `revoke`).
 
+pub mod bearer;
 pub mod rate_limit;
 
 use oxidean_core::{
