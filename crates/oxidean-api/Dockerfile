@@ -1,9 +1,10 @@
-# cargo-chef splits dependency compilation from workspace compilation so
-# source-only changes reuse the deps layer (local BuildKit cache; in CI the
-# type=gha backend exports it — see docker-ci-images). BuildKit cache mounts
-# keep the cargo registry and target/ warm between builds, and mold links.
-# Cache mounts carry explicit `id=` — Railway's strict frontend rejects id-less
-# mounts (plain ids degrade to uncached there; gha/local caching unaffected).
+# cargo-chef splits dependency compilation from workspace compilation into its
+# own layer, so source-only changes reuse the cooked deps (local BuildKit layer
+# cache; in CI the type=gha backend exports it — see docker-ci-images; Railway's
+# layer cache covers deploys). mold links the release binaries.
+# Note: no RUN --mount — Railway's builder only accepts cache mounts whose id
+# carries a per-service `s/<service-id>-` cacheKey, which can't be expressed
+# portably in a shared Dockerfile. The chef layer below is the cache mechanism.
 FROM lukemathwalker/cargo-chef:latest-rust-1-bookworm AS chef
 WORKDIR /app
 
@@ -20,16 +21,11 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 ENV RUSTFLAGS="-C link-arg=-fuse-ld=mold"
 COPY --from=planner /app/recipe.json recipe.json
-RUN --mount=type=cache,id=oxidean-api-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
-    --mount=type=cache,id=oxidean-api-target,target=/app/target \
-    cargo chef cook --release --recipe-path recipe.json -p oxidean-api
+RUN cargo chef cook --release --recipe-path recipe.json -p oxidean-api
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
-# target/ is a cache mount, so copy binaries out of it within this RUN.
-RUN --mount=type=cache,id=oxidean-api-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
-    --mount=type=cache,id=oxidean-api-target,target=/app/target \
-    cargo build --release -p oxidean-api --bin oxidean-api --bin oxidean-protection-hook \
-    && cp /app/target/release/oxidean-api /app/target/release/oxidean-protection-hook /usr/local/bin/
+RUN cargo build --release -p oxidean-api --bin oxidean-api --bin oxidean-protection-hook \
+  && cp /app/target/release/oxidean-api /app/target/release/oxidean-protection-hook /usr/local/bin/
 
 FROM debian:bookworm-slim
 # git: forge ops + D-33 boot gate (GIT-09); ca-certificates/curl: TLS + healthcheck;

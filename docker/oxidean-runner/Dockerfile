@@ -6,8 +6,8 @@
 #
 # Build context is the REPOSITORY ROOT (needs workspace Cargo.toml/lock +
 # crates/), matching crates/oxidean-api/Dockerfile. cargo-chef splits deps from
-# workspace builds so source-only changes reuse the cached deps layer. Cache
-# mounts carry explicit `id=` for Railway's strict frontend.
+# workspace builds so source-only changes reuse the cached deps layer. No
+# RUN --mount: Railway's builder requires a per-service cacheKey in mount ids.
 FROM lukemathwalker/cargo-chef:latest-rust-1-bookworm AS chef
 WORKDIR /app
 
@@ -22,15 +22,11 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 ENV RUSTFLAGS="-C link-arg=-fuse-ld=mold"
 COPY --from=planner /app/recipe.json recipe.json
-RUN --mount=type=cache,id=oxidean-runner-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
-    --mount=type=cache,id=oxidean-runner-target,target=/app/target \
-    cargo chef cook --release --recipe-path recipe.json -p oxidean-runner
+RUN cargo chef cook --release --recipe-path recipe.json -p oxidean-runner
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
-RUN --mount=type=cache,id=oxidean-runner-cargo-registry,target=/usr/local/cargo/registry,sharing=locked \
-    --mount=type=cache,id=oxidean-runner-target,target=/app/target \
-    cargo build --release -p oxidean-runner --bin oxidean-runner \
-    && cp /app/target/release/oxidean-runner /usr/local/bin/
+RUN cargo build --release -p oxidean-runner --bin oxidean-runner \
+  && cp /app/target/release/oxidean-runner /usr/local/bin/
 
 FROM debian:bookworm-slim
 # git: actions/checkout clones over smart HTTP; ca-certificates: TLS origins.

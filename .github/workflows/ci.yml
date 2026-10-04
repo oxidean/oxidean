@@ -330,8 +330,8 @@ jobs:
             /usr/local/share/boost /usr/share/swift || true
           df -h /
       - uses: docker/setup-buildx-action@v3
-      # cargo-chef dep layer + cache mounts export via type=gha (mode=max keeps
-      # cache-mount contents), so the Rust deps only rebuild when Cargo.lock moves.
+      # cargo-chef dep layer exports via type=gha (mode=max keeps intermediate
+      # stages), so the Rust deps only rebuild when Cargo.lock moves.
       - name: build api image
         uses: docker/build-push-action@v6
         with:

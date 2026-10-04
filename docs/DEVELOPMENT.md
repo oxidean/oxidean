@@ -177,7 +177,7 @@ Optional local speedups:
 - **mold linker** — `sudo apt install mold` then `export RUSTFLAGS="-C link-arg=-fuse-ld=mold"` (CI and the Docker builds already link with mold).
 - **Nightly-only boosters** — the repo builds on stable, so these belong in your user config (`$CARGO_HOME/config.toml`), not the repo: the parallel frontend (`[build] rustflags = "-Zthreads=8"`) and the Cranelift codegen backend for `dev` (`rustup component add rustc-codegen-cranelift-preview --toolchain nightly` + `-Zcodegen-backend=cranelift`). See <https://doc.rust-lang.org/cargo/guide/build-performance.html>.
 
-The Docker builds use [cargo-chef](https://github.com/LukeMathWalker/cargo-chef) + BuildKit cache mounts; local `docker compose build` reuses deps automatically. In CI, layer caches persist via the `type=gha` backend, and `cargo build --timings` HTML from the `build-metrics` job shows the per-crate critical path.
+The Docker builds use [cargo-chef](https://github.com/LukeMathWalker/cargo-chef) to split dependency compilation into its own layer; local `docker compose build` reuses deps automatically via the BuildKit layer cache. In CI, layer caches persist via the `type=gha` backend, and `cargo build --timings` HTML from the `build-metrics` job shows the per-crate critical path.
 
 ## Code style
 
