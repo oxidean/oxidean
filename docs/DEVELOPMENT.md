@@ -170,7 +170,7 @@ Turbo task graph: `turbo.json` (`build`, `dev`, `test`, `lint`).
 
 ## Rust build performance
 
-Profiles in the root `Cargo.toml` already favor fast iteration: `dev` emits `line-tables-only` debuginfo and no dep debuginfo at all; `release` uses `lto = "thin"` + `strip = "symbols"`. For a full debugger session, use the opt-in `debugging` profile (`cargo build --profile debugging`).
+Profiles in the root `Cargo.toml` already favor fast iteration: `dev` emits `line-tables-only` debuginfo, compiles deps with no debuginfo at `opt-level = 1` (the test suite is CPU-bound on dep code), and builds `argon2`/`blake2` at `opt-level = 3` so test fixtures don't pay debug-speed hashing; `release` uses `lto = "thin"` + `strip = "symbols"`. For a full debugger session, use the opt-in `debugging` profile (`cargo build --profile debugging`).
 
 Optional local speedups:
 

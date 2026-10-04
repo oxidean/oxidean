@@ -33,8 +33,18 @@ tokio = { version = "1", features = [
 [profile.dev]
 debug = "line-tables-only"
 
+# Deps get no debuginfo and opt-level 1: the integration suite is CPU-bound on
+# dependency code (sqlx/serde/axum), so unoptimized deps cost real test time.
+# crypto gets O3 — tests exercise argon2 via auth.signup/auth.login fixtures.
 [profile.dev.package."*"]
 debug = false
+opt-level = 1
+
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.dev.package.blake2]
+opt-level = 3
 
 [profile.debugging]
 inherits = "dev"
