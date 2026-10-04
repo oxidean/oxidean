@@ -690,6 +690,18 @@ pub trait GitBackend: Send + Sync {
         tip: &str,
     ) -> Result<bool, GitError>;
 
+    /// `(ahead, behind)` commit counts between `head` and `base`
+    /// (`git rev-list --left-right --count head...base`): commits reachable
+    /// from `head` but not `base`, then commits reachable from `base` but
+    /// not `head`. Both revs must resolve to commits in `repo` (fetch first
+    /// for cross-repo comparisons).
+    async fn ahead_behind(
+        &self,
+        repo: &Path,
+        head: &str,
+        base: &str,
+    ) -> Result<(u64, u64), GitError>;
+
     /// Fast-forward (or create) `refname` to `target_sha` via a worktree push so
     /// bare `hooks/update` runs. Non-FF → [`GitError::Process`].
     async fn fast_forward_ref(

@@ -10,6 +10,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { RepoSearchEntry } from "@/components/repo/repo-search-entry";
+import { SyncForkPanel } from "@/components/repo/sync-fork-panel";
 import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api-client";
 import type { RepoChromeActive } from "@/lib/repo-chrome-active";
@@ -338,6 +339,7 @@ export function RepoChrome({ repo, active, showSettings = false }: RepoChromePro
           {(live.forked_from.owner + "/" + live.forked_from.name) as string}
         </AppLink>
       </p>;
+      <SyncForkPanel owner={owner} repoName={name} canWrite={!!live.can_write} />;
     }
 
     <nav className="mt-6 flex flex-wrap gap-4 border-b border-border pb-0" aria-label="Repository">

@@ -520,6 +520,41 @@ export type RepoForksListResponse = {
   total: number;
 };
 
+export type RepoForkStatusRequest = {
+  owner: string;
+  name: string;
+  branch?: string | null;
+};
+
+export type RepoForkStatusResponse = {
+  branch: string;
+  upstream_owner: string;
+  upstream_name: string;
+  upstream_branch: string;
+  ahead_count: number;
+  behind_count: number;
+  /** `up_to_date` | `behind` | `diverged` (fork-only `ahead` reports as `up_to_date`). */
+  status: string;
+};
+
+export type RepoSyncForkRequest = {
+  owner: string;
+  name: string;
+  branch?: string | null;
+};
+
+export type RepoSyncForkResponse = {
+  /** `up_to_date` | `fast_forwarded` | `merged`. */
+  status: string;
+  branch: string;
+  upstream_owner: string;
+  upstream_name: string;
+  upstream_branch: string;
+  before_sha: string;
+  after_sha: string;
+  merge_commit_sha?: string | null;
+};
+
 export type RepoUpdateMetadataRequest = {
   owner: string;
   name: string;
@@ -2418,6 +2453,23 @@ export type MergePullResponse = {
   merge_commit_sha: string;
 };
 
+export type PullBranchStatusResponse = {
+  /** `up_to_date` | `behind` (head lacks commits the base branch added). */
+  status: string;
+  ahead_count: number;
+  behind_count: number;
+  base_sha: string;
+  head_sha: string;
+  can_update?: boolean;
+};
+
+export type UpdatePullBranchResponse = {
+  pull: PullPublic;
+  /** `up_to_date` (no-op) | `updated` (merge commit created on the head). */
+  status: string;
+  merge_commit_sha?: string | null;
+};
+
 export type RepoMergeSettings = {
   allow_merge_commit: boolean;
   allow_squash_merge: boolean;
@@ -3125,6 +3177,10 @@ export function createClient(opts: CreateClientOptions) {
         rpcCall<RepoWatchersListResponse>(opts, "repo.watchers.list", input),
       forksList: (input: RepoForksListRequest) =>
         rpcCall<RepoForksListResponse>(opts, "repo.forks.list", input),
+      forkStatus: (input: RepoForkStatusRequest) =>
+        rpcCall<RepoForkStatusResponse>(opts, "repo.forkStatus", input),
+      syncFork: (input: RepoSyncForkRequest) =>
+        rpcCall<RepoSyncForkResponse>(opts, "repo.syncFork", input),
       updateMetadata: (input: RepoUpdateMetadataRequest) =>
         rpcCall<RepoPublic>(opts, "repo.updateMetadata", input),
       topicsSuggest: (input: RepoTopicsSuggestRequest) =>
@@ -3413,6 +3469,10 @@ export function createClient(opts: CreateClientOptions) {
         rpcCall<PullCommitsResponse>(opts, "pull.commits", input),
       merge: (input: MergePullRequest) =>
         rpcCall<MergePullResponse>(opts, "pull.merge", input),
+      branchStatus: (input: PullRefRequest) =>
+        rpcCall<PullBranchStatusResponse>(opts, "pull.branchStatus", input),
+      updateBranch: (input: PullRefRequest) =>
+        rpcCall<UpdatePullBranchResponse>(opts, "pull.updateBranch", input),
       comments: {
         list: (input: PullRefRequest) =>
           rpcCall<PullCommentsListResponse>(opts, "pull.comments.list", input),
@@ -4001,6 +4061,37 @@ export function repoCompareQueryOptions(
     ] as const,
     queryFn: async () => {
       const res = await client.repo.compare(input);
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
+export function repoForkStatusQueryOptions(
+  client: OxideanClient,
+  input: RepoForkStatusRequest,
+) {
+  return {
+    queryKey: [
+      "repo",
+      "forkStatus",
+      input.owner,
+      input.name,
+      input.branch ?? "",
+    ] as const,
+    queryFn: async () => {
+      const res = await client.repo.forkStatus(input);
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
+export function repoSyncForkMutationOptions(client: OxideanClient) {
+  return {
+    mutationKey: ["repo", "syncFork"] as const,
+    mutationFn: async (input: RepoSyncForkRequest) => {
+      const res = await client.repo.syncFork(input);
       if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
       return res.data;
     },
@@ -4822,6 +4913,37 @@ export function labelDeleteMutationOptions(client: OxideanClient) {
   };
 }
 
+export function pullBranchStatusQueryOptions(
+  client: OxideanClient,
+  input: PullRefRequest,
+) {
+  return {
+    queryKey: [
+      "pull",
+      "branchStatus",
+      input.owner,
+      input.name,
+      input.number,
+    ] as const,
+    queryFn: async () => {
+      const res = await client.pull.branchStatus(input);
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
+export function pullUpdateBranchMutationOptions(client: OxideanClient) {
+  return {
+    mutationKey: ["pull", "updateBranch"] as const,
+    mutationFn: async (input: PullRefRequest) => {
+      const res = await client.pull.updateBranch(input);
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
 export function adminAuthGetSettingsQueryOptions(client: OxideanClient) {
   return {
     queryKey: ["admin", "auth", "getSettings"] as const,
@@ -4860,7 +4982,9 @@ export const queryOptions = {
   repoCommits: repoCommitsQueryOptions,
   repoCommit: repoCommitQueryOptions,
   repoCompare: repoCompareQueryOptions,
+  repoForkStatus: repoForkStatusQueryOptions,
   repoBlame: repoBlameQueryOptions,
+  pullBranchStatus: pullBranchStatusQueryOptions,
   repoSearch: repoSearchQueryOptions,
   patList: patListQueryOptions,
   oauthAppList: oauthAppListQueryOptions,
@@ -4878,6 +5002,8 @@ export const mutationOptions = {
   authLogoutAll: authLogoutAllMutationOptions,
   userUpdateProfile: userUpdateProfileMutationOptions,
   repoCreate: repoCreateMutationOptions,
+  repoSyncFork: repoSyncForkMutationOptions,
+  pullUpdateBranch: pullUpdateBranchMutationOptions,
   patCreateClassic: patCreateClassicMutationOptions,
   patCreateFineGrained: patCreateFineGrainedMutationOptions,
   patRevoke: patRevokeMutationOptions,

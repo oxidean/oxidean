@@ -218,6 +218,37 @@ pub struct MergePullResponse {
     pub merge_commit_sha: String,
 }
 
+/// `pull.branchStatus` response — head vs live base tip freshness (GIT-24).
+/// `PullRefRequest` input.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PullBranchStatusResponse {
+    /// `up_to_date` when the base tip is already reachable from the head,
+    /// otherwise `behind` (the base branch has commits the head lacks).
+    pub status: String,
+    /// Commits on the head branch the base lacks (the PR's own commits).
+    pub ahead_count: i64,
+    /// Commits on the base branch the head lacks.
+    pub behind_count: i64,
+    /// Live base branch tip.
+    pub base_sha: String,
+    /// Live head branch tip.
+    pub head_sha: String,
+    /// Caller can update the head branch (Write on base repo or head repo).
+    #[serde(default)]
+    pub can_update: bool,
+}
+
+/// `pull.updateBranch` response (GIT-24). `PullRefRequest` input.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdatePullBranchResponse {
+    pub pull: PullPublic,
+    /// `up_to_date` (no-op) | `updated` (merge commit created on the head).
+    pub status: String,
+    /// Merge commit SHA when `status == "updated"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub merge_commit_sha: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RepoMergeSettings {
     pub allow_merge_commit: bool,

@@ -930,6 +930,63 @@ pub struct RepoCompareResponse {
     pub files: Vec<RepoDiffFile>,
 }
 
+/// `repo.forkStatus` input (GIT-24).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoForkStatusRequest {
+    pub owner: String,
+    pub name: String,
+    /// Fork branch to compare (default → the repository's default branch);
+    /// compared against the same-named branch on the upstream repository.
+    #[serde(default)]
+    pub branch: Option<String>,
+}
+
+/// `repo.forkStatus` response — fork branch vs upstream branch freshness.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoForkStatusResponse {
+    /// Fork-side branch name.
+    pub branch: String,
+    pub upstream_owner: String,
+    pub upstream_name: String,
+    /// Upstream branch compared against (same name as `branch`).
+    pub upstream_branch: String,
+    /// Commits on the fork branch that upstream lacks.
+    pub ahead_count: i64,
+    /// Commits on the upstream branch that the fork branch lacks.
+    pub behind_count: i64,
+    /// `up_to_date` | `behind` | `diverged` (`ahead` reports as `up_to_date`).
+    pub status: String,
+}
+
+/// `repo.syncFork` input (GIT-24).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoSyncForkRequest {
+    pub owner: String,
+    pub name: String,
+    /// Branch to sync (default → the repository's default branch); synced
+    /// from the same-named branch on the upstream repository.
+    #[serde(default)]
+    pub branch: Option<String>,
+}
+
+/// `repo.syncFork` response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoSyncForkResponse {
+    /// `up_to_date` | `fast_forwarded` | `merged`.
+    pub status: String,
+    pub branch: String,
+    pub upstream_owner: String,
+    pub upstream_name: String,
+    pub upstream_branch: String,
+    /// Fork branch tip before the operation.
+    pub before_sha: String,
+    /// Fork branch tip after the operation.
+    pub after_sha: String,
+    /// Merge commit SHA when `status == "merged"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub merge_commit_sha: Option<String>,
+}
+
 /// `repo.blame` input.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RepoBlameRequest {
