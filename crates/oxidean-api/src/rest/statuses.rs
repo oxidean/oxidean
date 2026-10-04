@@ -18,7 +18,8 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::repos::ShaPath;
-use super::{ctx_for, dispatch, status_for_error, AppState};
+use super::{ctx_for, dispatch, status_for_error};
+use crate::app::AppState;
 
 pub fn router() -> Router<AppState> {
     Router::new()
