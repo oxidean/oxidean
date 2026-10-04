@@ -309,16 +309,19 @@ pub async fn authorize_deploy_key_pack(
 
 /// Spawn `git-upload-pack` or `git-receive-pack` with argv only (no shell) and bridge stdio.
 ///
-/// When `protection_env` is `Some` (receive-pack), inject helper/DB/repos/capability/ENV
-/// so bare-repo update hooks can evaluate branch protection (D-PKG-01). Upload-pack
-/// callers pass `None`.
+/// `extra_env` injects transport env for the spawned service:
+/// - `GIT_PROTOCOL` — protocol v2 negotiation forwarded from the SSH env
+///   request (GIT-27); applies to upload-pack and receive-pack alike.
+/// - `GIT_CONFIG_*` — `uploadpack.allowFilter` for upload-pack (GIT-27).
+/// - `OXIDEAN_*` — helper/DB/repos/capability pairs so bare-repo update hooks
+///   can evaluate branch protection on receive-pack (D-PKG-01).
 pub async fn run_pack_command<R, W, E>(
     program: &str,
     bare: &Path,
     mut stdin_rx: R,
     mut stdout_tx: W,
     mut stderr_tx: E,
-    protection_env: Option<&[(String, String)]>,
+    extra_env: Option<&[(String, String)]>,
 ) -> Result<i32, String>
 where
     R: AsyncRead + Unpin,
@@ -332,7 +335,7 @@ where
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
-    if let Some(pairs) = protection_env {
+    if let Some(pairs) = extra_env {
         for (k, v) in pairs {
             cmd.env(k, v);
         }
@@ -345,7 +348,13 @@ where
     let mut child_stdout = child.stdout.take().ok_or("missing stdout")?;
     let mut child_stderr = child.stderr.take().ok_or("missing stderr")?;
 
-    let stdin_pipe = async {
+    // NOTE: `ChildStdin::shutdown()` is a no-op for process pipes (tokio's
+    // `ChildStdio::poll_shutdown` resolves without closing). The fd must be
+    // *dropped* to deliver EOF to the child — so the handle is moved into the
+    // async block: it closes as soon as the channel-reader copy finishes.
+    // Without this, `git upload-pack`/`receive-pack` keep waiting on stdin and
+    // real OpenSSH clients hang at session teardown (GIT-27).
+    let stdin_pipe = async move {
         let _ = tokio::io::copy(&mut stdin_rx, &mut child_stdin).await;
         // Dropping ChildStdin closes the pipe — `receive-pack` waits for stdin
         // EOF before finalizing updates, and `shutdown()` alone does not
@@ -558,6 +567,19 @@ pub fn capability_env_label(capability: Option<Capability>) -> &'static str {
         Some(Capability::Write) => "write",
         Some(Capability::Read) | None => "read",
     }
+}
+
+/// Env pairs injected into `git upload-pack` (GIT-27).
+///
+/// `GIT_CONFIG_*` advertises the `filter` capability so partial clone
+/// (`--filter=blob:none`, `tree:0`, …) works; env config covers repos created
+/// before the flag existed and is inert on non-upload-pack git commands.
+pub fn upload_pack_config_env() -> Vec<(String, String)> {
+    vec![
+        ("GIT_CONFIG_COUNT".into(), "1".into()),
+        ("GIT_CONFIG_KEY_0".into(), "uploadpack.allowFilter".into()),
+        ("GIT_CONFIG_VALUE_0".into(), "true".into()),
+    ]
 }
 
 /// Env pairs injected into `git receive-pack` for protection hooks (D-PKG-01).
@@ -787,6 +809,20 @@ mod tests {
             !chk.status.success(),
             "refs/pull/1/head must not be created by the denied push"
         );
+    }
+
+    #[test]
+    fn upload_pack_config_env_enables_filter() {
+        let vars = upload_pack_config_env();
+        let map: HashMap<&str, &str> =
+            vars.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+        assert_eq!(map.get("GIT_CONFIG_COUNT").copied(), Some("1"));
+        assert_eq!(
+            map.get("GIT_CONFIG_KEY_0").copied(),
+            Some("uploadpack.allowFilter"),
+            "upload-pack must advertise the filter capability (GIT-27)"
+        );
+        assert_eq!(map.get("GIT_CONFIG_VALUE_0").copied(), Some("true"));
     }
 
     #[test]

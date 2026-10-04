@@ -1,5 +1,6 @@
 //! In-process russh Git SSH listener (D-SSH-01 / D-SSH-03 / D-SSH-04 / D-SSH-07).
 
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -38,6 +39,8 @@ struct SshHandler {
     /// is re-checked per exec (auth completes before the repo is known).
     deploy_key_fingerprint: Option<String>,
     session_channel: Option<Channel<Msg>>,
+    /// Allowlisted env accepted via `env` requests, per channel (GIT-27).
+    channel_env: HashMap<ChannelId, Vec<(String, String)>>,
 }
 
 impl RusshServer for SshServer {
@@ -51,8 +54,22 @@ impl RusshServer for SshServer {
             key_id: None,
             deploy_key_fingerprint: None,
             session_channel: None,
+            channel_env: HashMap::new(),
         }
     }
+}
+
+/// Env request names forwarded to the spawned pack service (GIT-27).
+///
+/// OpenSSH sends `GIT_PROTOCOL=version=2` as a channel `env` request so
+/// upload-pack/receive-pack negotiate protocol v2. Only allowlisted names
+/// reach the child env; everything else is refused with `channel_failure`.
+const PACK_ENV_ALLOWLIST: &[&str] = &["GIT_PROTOCOL"];
+
+/// Env values must be nonempty, short, and printable ASCII — protocol tokens
+/// only, never arbitrary client-supplied content.
+fn env_value_ok(v: &str) -> bool {
+    !v.is_empty() && v.len() <= 256 && v.bytes().all(|b| (0x20..=0x7e).contains(&b))
 }
 
 impl Handler for SshHandler {
@@ -218,6 +235,14 @@ impl Handler for SshHandler {
                     PackCommand::ReceivePack { .. } => "receive-pack",
                 };
                 session.channel_success(channel)?;
+                // GIT-27: last GIT_PROTOCOL env on this channel wins (matches
+                // OpenSSH `setenv` semantics for repeated names).
+                let git_protocol = self.channel_env.remove(&channel).and_then(|vars| {
+                    vars.into_iter()
+                        .rev()
+                        .find(|(k, _)| k == "GIT_PROTOCOL")
+                        .map(|(_, v)| v)
+                });
                 let Some(mut ch) = self.session_channel.take() else {
                     session.channel_failure(channel)?;
                     return Ok(());
@@ -244,26 +269,31 @@ impl Handler for SshHandler {
                     let stderr_writer = ch.make_writer_ext(Some(1));
                     let reader = ch.make_reader();
                     // D-PKG-01: receive-pack gets helper/DB/repos/capability/ENV for hooks.
-                    let protection_pairs = if is_push {
+                    // GIT-27: upload-pack gets GIT_CONFIG_* allowFilter so it
+                    // advertises the partial-clone `filter` capability.
+                    let mut extra_env = if is_push {
                         let db_url = std::env::var("OXIDEAN_DATABASE_URL")
                             .or_else(|_| std::env::var("DATABASE_URL"))
                             .unwrap_or_default();
                         let helper = crate::protection::resolve_protection_helper();
                         let oxidean_env = std::env::var("OXIDEAN_ENV").ok();
                         if db_url.is_empty() {
-                            None
+                            Vec::new()
                         } else {
-                            Some(pack::receive_pack_protection_env(
+                            pack::receive_pack_protection_env(
                                 &db_url,
                                 &repos_dir,
                                 actor_capability,
                                 helper.as_deref(),
                                 oxidean_env.as_deref(),
-                            ))
+                            )
                         }
                     } else {
-                        None
+                        pack::upload_pack_config_env()
                     };
+                    if let Some(v) = git_protocol {
+                        extra_env.push(("GIT_PROTOCOL".into(), v));
+                    }
                     let code = if is_push {
                         // API-06: scan receive-pack commands for refs/pull/*
                         // targets — the gate yields EOF to receive-pack so no
@@ -276,7 +306,7 @@ impl Handler for SshHandler {
                             &mut pull_gate,
                             writer,
                             stderr_writer,
-                            protection_pairs.as_deref(),
+                            Some(extra_env.as_slice()),
                         )
                         .await
                         .unwrap_or(1);
@@ -294,7 +324,7 @@ impl Handler for SshHandler {
                             reader,
                             writer,
                             stderr_writer,
-                            protection_pairs.as_deref(),
+                            Some(extra_env.as_slice()),
                         )
                         .await
                         .unwrap_or(1)
@@ -384,6 +414,38 @@ impl Handler for SshHandler {
                 Ok(())
             }
         }
+    }
+
+    async fn env_request(
+        &mut self,
+        channel: ChannelId,
+        variable_name: &str,
+        variable_value: &str,
+        session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        // GIT-27: accept only allowlisted names with sane values; exec_request
+        // replays the stored list into the pack service's environment.
+        let accept =
+            PACK_ENV_ALLOWLIST.contains(&variable_name) && env_value_ok(variable_value);
+        if accept {
+            self.channel_env
+                .entry(channel)
+                .or_default()
+                .push((variable_name.to_string(), variable_value.to_string()));
+            session.channel_success(channel)?;
+        } else {
+            session.channel_failure(channel)?;
+        }
+        Ok(())
+    }
+
+    async fn channel_close(
+        &mut self,
+        channel: ChannelId,
+        _session: &mut Session,
+    ) -> Result<(), Self::Error> {
+        self.channel_env.remove(&channel);
+        Ok(())
     }
 
     async fn shell_request(

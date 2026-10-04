@@ -75,7 +75,14 @@ pub async fn run_git_http_backend(req: CgiRequest<'_>) -> Result<Response, Strin
         .env("QUERY_STRING", req.query_string)
         .env("CONTENT_LENGTH", req.body.len().to_string())
         .env("GATEWAY_INTERFACE", "CGI/1.1")
-        .env("REMOTE_ADDR", "127.0.0.1");
+        .env("REMOTE_ADDR", "127.0.0.1")
+        // GIT-27: advertise partial-clone filtering (`filter` capability) on
+        // upload-pack. Env config (vs per-repo `git config`) applies uniformly
+        // to repos created before this flag existed, and `uploadpack.*` keys
+        // are inert when the CGI dispatches receive-pack instead.
+        .env("GIT_CONFIG_COUNT", "1")
+        .env("GIT_CONFIG_KEY_0", "uploadpack.allowFilter")
+        .env("GIT_CONFIG_VALUE_0", "true");
 
     if let Some(ct) = req.content_type {
         cmd.env("CONTENT_TYPE", ct);

@@ -156,6 +156,7 @@ Phase 8 adds HTTPS git clone/fetch/push beside the forge browse surface; Phase 1
 | **Fine-grained** | `selected` binds repository ids; `all` covers personal-owned plus org Owner/Admin repos. Collaborators use `selected`. Insufficient scope → HTTP 403; ACL denials stay 401 Basic. |
 | **Clone URL** | `https://{OXIDEAN_PUBLIC_ORIGIN host}/{owner}/{repo}.git` (D-18 / D-19). |
 | **Edge** | Compose Traefik `PathRegexp` for `.git` → API (priority 110). See [CONFIGURATION.md](CONFIGURATION.md#git-smart-http--personal-access-tokens). |
+| **Protocol surface** | The `Git-Protocol` request header is forwarded as CGI `GIT_PROTOCOL` (protocol v2); `GIT_CONFIG_*` env sets `uploadpack.allowFilter` so partial clone works; shallow fetch/push is delegated to `git-http-backend`. Full matrix: [GIT-PROTOCOL.md](GIT-PROTOCOL.md). |
 
 RPC lifecycle: `pat.createClassic`, `pat.createFineGrained`, `pat.list`, `pat.revoke` (session + verified email for mint). Full path/auth/error matrix: [API.md](API.md).
 
@@ -171,6 +172,7 @@ Phase 9 adds SSH clone/fetch/push beside Smart HTTP:
 | **Clone URL** | scp-style `git@{OXIDEAN_SSH_HOST}:{owner}/{repo}.git` (D-SSH-02). Port advertised separately; `~/.ssh/config` when ≠ 22. |
 | **Edge** | Compose **TCP `2222:2222`** on the API service — **not** Traefik. Host keys under `OXIDEAN_SSH_HOST_KEY_DIR` (volume). |
 | **Rate limit** | Failed pubkey auth: IP + fingerprint buckets (reuse PAT limiter pattern). |
+| **Protocol surface** | Channel `env` requests are allowlisted — only `GIT_PROTOCOL` is accepted and forwarded (protocol v2); upload-pack gets `GIT_CONFIG_*` `uploadpack.allowFilter`; shallow clone/fetch/push is delegated to system git. Full matrix: [GIT-PROTOCOL.md](GIT-PROTOCOL.md). |
 
 RPC: `sshKey.add` / `list` / `revoke` (session + verified email for add); repo-admin `repo.deployKey.list` / `create` / `delete` for deploy keys. Smoke: `make smoke-git-ssh`. See [CONFIGURATION.md](CONFIGURATION.md#git-over-ssh).
 
