@@ -773,6 +773,15 @@ pub async fn check_ref_update(
     new_sha: &str,
     capability: Capability,
 ) -> Result<(), AppError> {
+    // API-06: refs/pull/* is a synthesized read-only namespace written by the
+    // forge itself (git update-ref, hook-free). No push — regardless of
+    // capability or protection rules — may create/update/delete it.
+    if git_ref.starts_with("refs/pull/") {
+        return Err(AppError::new(
+            "repo.pull_refs_read_only",
+            "pushes to refs/pull/* are denied: pull refs are synthesized read-only",
+        ));
+    }
     let (owner, name) = owner_name_from_git_dir(repos_dir, git_dir)
         .map_err(|e| AppError::new("repo.ref_protection", e))?;
     let owner_id = if let Some(u) = db

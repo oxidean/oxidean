@@ -529,6 +529,30 @@ async fn authorize_and_cgi(
         touch_last_used(state, auth, headers).await;
     }
 
+    // API-06: refs/pull/* is a synthesized read-only namespace. Reject pushes
+    // that target it at the edge (before git-receive-pack CGI) — the installed
+    // hooks/update also denies it, but only when the protection helper is
+    // wired, so this scan is the deterministic gate.
+    if receive && path_tail == "git-receive-pack" {
+        let updates = crate::webhook::payloads::parse_receive_ref_updates(body);
+        if let Some((_, _, bad)) = updates
+            .iter()
+            .find(|(_, _, r)| crate::pull::refs::is_pull_ref(r))
+        {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(serde_json::json!({
+                    "ok": false,
+                    "error": {
+                        "code": "git.pull_refs_read_only",
+                        "message": format!("pushes to {bad} are denied: refs/pull/* is a synthesized read-only namespace"),
+                    }
+                })),
+            )
+                .into_response();
+        }
+    }
+
     let path_info = format!(
         "/{}/{}.git/{}",
         resolved.disk_owner, resolved.disk_name, path_tail

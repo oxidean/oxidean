@@ -775,6 +775,12 @@ pub trait GitBackend: Send + Sync {
 
     /// Resolve a ref / SHA to a commit OID (`git rev-parse`).
     async fn rev_parse(&self, repo: &Path, rev: &str) -> Result<String, GitError>;
+
+    /// Point `refname` at `sha` via `git update-ref` — a direct write that does
+    /// **not** run `hooks/update`. Reserved for forge-synthesized namespaces
+    /// (e.g. `refs/pull/*` in API-06) that no push path may write; callers must
+    /// ensure `sha` resolves to an object already present in `repo`.
+    async fn update_ref(&self, repo: &Path, refname: &str, sha: &str) -> Result<(), GitError>;
 }
 
 #[cfg(test)]

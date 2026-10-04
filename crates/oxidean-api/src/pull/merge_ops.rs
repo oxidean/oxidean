@@ -424,6 +424,20 @@ pub async fn merge(ctx: &RpcCtx, input: serde_json::Value) -> Result<MergePullRe
         .await
         .map_err(db_err)?;
 
+    // API-06: refs/pull/{N}/merge resolves to the recorded merge commit — the
+    // merge object was pushed into the base repo by the worktree merge above.
+    // (`/head` keeps tracking pull.head_sha; GitHub's /merge is a test-merge
+    // which we do not compute, so it exists only after a real merge.)
+    super::refs::sync_merge_ref(
+        ctx.git.as_ref(),
+        &ctx.repos_dir,
+        &accessible.owner_username,
+        &accessible.row.name,
+        row.number,
+        &sha,
+    )
+    .await;
+
     let merge_subject = full_message.lines().next().unwrap_or("").trim();
     crate::repo::record_pr_merge(
         &ctx.db,
