@@ -833,6 +833,24 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },
+        "repo.insights.contributors" => {
+            match repo::insights_contributors(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
+        "repo.insights.commitActivity" => {
+            match repo::insights_commit_activity(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
+        "repo.insights.forkNetwork" => {
+            match repo::insights_fork_network(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
         "repo.commit" => match repo::commit(ctx, req.input).await {
             Ok(commit) => RpcResponse::ok(commit),
             Err(e) => RpcResponse::err(e),

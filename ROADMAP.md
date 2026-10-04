@@ -54,7 +54,7 @@ Machine-facing surfaces beyond raw git/HTTP. These depend on API-02 (token auth)
 - [x] **GIT-23** Deploy keys: per-repo SSH keys with read or read/write scope, distinct from account keys. (#84)
 - [x] **GIT-24** Sync fork and update-PR-branch: bring a fork or PR head up to date with the base branch from the UI/API. `repo.forkStatus`/`repo.syncFork` + `pull.branchStatus`/`pull.updateBranch`, fork + PR page controls. (#89)
 - [x] **GIT-25** Repository size quotas for git objects. LFS and package quotas exist; the bare repo itself is unbounded. (Enforced in `hooks/update` via `check_ref_update`; `repo.quota.get`/`repo.quota.set` + `admin.git.*Settings` RPCs; `OXIDEAN_GIT_REPO_QUOTA_BYTES`. See docs/CONFIGURATION.md. #90)
-- [ ] **GIT-26** Repo insights: contributors, commit activity, and fork-network views on top of the existing repo activity feed.
+- [x] **GIT-26** Repo insights: contributors, commit activity, and fork-network views on top of the existing repo activity feed. (#91)
 - [ ] **GIT-27** Git protocol surface audit: confirm protocol v2, partial clone/filter, and shallow clone behavior on both transports, then document or fix.
 
 ## Issues, PRs, and collaboration

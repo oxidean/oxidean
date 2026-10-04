@@ -7,9 +7,10 @@ use tokio::process::Command;
 
 use crate::backend::{
     validate_remote_url, ArchiveFormat, BlameFile, BlameLine, CommitDetail, CommitSummary,
-    ContributorSummary, DiffFile, DiffResult, FileChange, FilesCommit, GitBackend, GitError,
-    GitRef, GrepHit, GrepResult, RemoteAuthKind, RemoteCredentials, SizedBlobEntry, TreeEntry,
-    TreeEntryKind, ARCHIVE_TIMEOUT, BLAME_SOFT_MAX_LINES, DIFF_SOFT_MAX_BYTES, FORGE_NOREPLY_EMAIL,
+    CommitTimesResult, ContributorScan, ContributorStat, ContributorSummary, DiffFile, DiffResult,
+    FileChange, FilesCommit, GitBackend, GitError, GitRef, GrepHit, GrepResult, RemoteAuthKind,
+    RemoteCredentials, SizedBlobEntry, TreeEntry, TreeEntryKind, ARCHIVE_TIMEOUT,
+    BLAME_SOFT_MAX_LINES, DIFF_SOFT_MAX_BYTES, FORGE_NOREPLY_EMAIL,
 };
 
 /// System `git` CLI adapter (D-32). Only backend registered in Phase 7.
@@ -523,6 +524,139 @@ async fn run_git_remote(
     let files = RemoteAuthFiles::prepare(credentials)?;
     let pairs = files.as_pairs();
     run_git_stdout_env(args, &pairs).await
+}
+
+/// Parse `git shortlog -sn -e` output into [`ContributorSummary`] rows
+/// (count, name, email), capped at `limit` authors.
+fn parse_shortlog_stdout(stdout: &[u8], limit: u32) -> Vec<ContributorSummary> {
+    let text = String::from_utf8_lossy(stdout);
+    let mut out = Vec::new();
+    for line in text.split('\n') {
+        if out.len() as u32 >= limit {
+            break;
+        }
+        let line = line.trim_end_matches('\r').trim();
+        if line.is_empty() {
+            continue;
+        }
+        // "    42\tName <email@x>" or spaces then count then name <email>
+        let rest = line.trim_start();
+        let (count_s, after) = rest
+            .split_once(|c: char| c.is_whitespace())
+            .unwrap_or((rest, ""));
+        let count: i64 = count_s.trim().parse().unwrap_or(0);
+        if count <= 0 {
+            continue;
+        }
+        let after = after.trim();
+        let (name, email) = if let Some((n, e)) = after.rsplit_once(" <") {
+            let email = e.trim().trim_end_matches('>').trim().to_string();
+            (n.trim().to_string(), email)
+        } else {
+            (after.to_string(), String::new())
+        };
+        if name.is_empty() {
+            continue;
+        }
+        out.push(ContributorSummary {
+            name,
+            email,
+            commit_count: count,
+        });
+    }
+    out
+}
+
+/// Aggregate `git log --format=%aN%x00%aE%x00%ct%x00%H` output (one line per
+/// commit, newest first) into per-author [`ContributorStat`] rows.
+///
+/// Authors are keyed by lowercased email, falling back to lowercased name when
+/// the email is empty. `name`/`email`/`last_commit_*` come from the author's
+/// newest scanned commit (first line seen); `first_commit_*` from the oldest
+/// (last line seen). Sorted by commit count desc, then newest commit, then
+/// name; capped at `limit` authors.
+fn aggregate_author_log(stdout: &[u8], limit: u32) -> Vec<ContributorStat> {
+    struct Acc {
+        name: String,
+        email: String,
+        commit_count: i64,
+        first_sha: String,
+        first_unix: i64,
+        last_sha: String,
+        last_unix: i64,
+    }
+    let text = String::from_utf8_lossy(stdout);
+    let mut by_author: std::collections::HashMap<String, Acc> =
+        std::collections::HashMap::new();
+    let mut order: Vec<String> = Vec::new();
+    for line in text.split('\n') {
+        let line = line.trim_end_matches('\r');
+        if line.is_empty() {
+            continue;
+        }
+        let mut parts = line.split('\x00');
+        let (Some(name), Some(email), Some(ct), Some(sha)) =
+            (parts.next(), parts.next(), parts.next(), parts.next())
+        else {
+            continue;
+        };
+        let name = name.trim().to_string();
+        let email = email.trim().to_string();
+        let unix = ct.trim().parse::<i64>().unwrap_or(0);
+        let sha = sha.trim().to_string();
+        if name.is_empty() && email.is_empty() {
+            continue;
+        }
+        let key = if email.is_empty() {
+            name.to_ascii_lowercase()
+        } else {
+            email.to_ascii_lowercase()
+        };
+        match by_author.get_mut(&key) {
+            Some(acc) => {
+                acc.commit_count += 1;
+                // Walking newest-first: every later line is an older commit.
+                acc.first_sha = sha;
+                acc.first_unix = unix;
+            }
+            None => {
+                order.push(key.clone());
+                by_author.insert(
+                    key,
+                    Acc {
+                        name,
+                        email,
+                        commit_count: 1,
+                        first_sha: sha.clone(),
+                        first_unix: unix,
+                        last_sha: sha,
+                        last_unix: unix,
+                    },
+                );
+            }
+        }
+    }
+    let mut out: Vec<ContributorStat> = order
+        .into_iter()
+        .filter_map(|k| by_author.remove(&k))
+        .map(|a| ContributorStat {
+            name: a.name,
+            email: a.email,
+            commit_count: a.commit_count,
+            first_commit_sha: a.first_sha,
+            first_commit_unix: a.first_unix,
+            last_commit_sha: a.last_sha,
+            last_commit_unix: a.last_unix,
+        })
+        .collect();
+    out.sort_by(|a, b| {
+        b.commit_count
+            .cmp(&a.commit_count)
+            .then_with(|| b.last_commit_unix.cmp(&a.last_commit_unix))
+            .then_with(|| a.name.cmp(&b.name))
+    });
+    out.truncate(limit as usize);
+    out
 }
 
 /// Reject NUL / `..` / leading `-` / absolute-looking refs (T-07-15 / T-07-17 / CR-02).
@@ -2797,42 +2931,130 @@ impl GitBackend for CliGitBackend {
         }
 
         let stdout = run_git_stdout(&["-C", repo_s, "shortlog", "-sn", "-e", refname]).await?;
-        let text = String::from_utf8_lossy(&stdout);
-        let mut out = Vec::new();
-        for line in text.split('\n') {
-            if out.len() as u32 >= limit {
-                break;
-            }
-            let line = line.trim_end_matches('\r').trim();
-            if line.is_empty() {
-                continue;
-            }
-            // "    42\tName <email@x>" or spaces then count then name <email>
-            let rest = line.trim_start();
-            let (count_s, after) = rest
-                .split_once(|c: char| c.is_whitespace())
-                .unwrap_or((rest, ""));
-            let count: i64 = count_s.trim().parse().unwrap_or(0);
-            if count <= 0 {
-                continue;
-            }
-            let after = after.trim();
-            let (name, email) = if let Some((n, e)) = after.rsplit_once(" <") {
-                let email = e.trim().trim_end_matches('>').trim().to_string();
-                (n.trim().to_string(), email)
-            } else {
-                (after.to_string(), String::new())
-            };
-            if name.is_empty() {
-                continue;
-            }
-            out.push(ContributorSummary {
-                name,
-                email,
-                commit_count: count,
+        Ok(parse_shortlog_stdout(&stdout, limit))
+    }
+
+    async fn contributor_scan(
+        &self,
+        repo: &Path,
+        refname: &str,
+        limit: u32,
+        max_commits: u64,
+    ) -> Result<ContributorScan, GitError> {
+        let refname = validate_treeish(refname)?;
+        let repo_s = repo_str(repo)?;
+        let limit = limit.clamp(1, 100);
+        let max_commits = max_commits.clamp(1, 1_000_000);
+
+        let rev = Command::new("git")
+            .args([
+                "-C",
+                repo_s,
+                "rev-parse",
+                "--verify",
+                &format!("{refname}^{{commit}}"),
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .await
+            .map_err(|e| GitError::Process(format!("failed to spawn git: {e}")))?;
+        if !rev.status.success() {
+            return Ok(ContributorScan {
+                contributors: Vec::new(),
+                scanned_commits: 0,
+                truncated: false,
             });
         }
-        Ok(out)
+
+        // A `max + 1` rev-list count detects a clipped walk without counting
+        // the full history on huge repositories.
+        let cap_probe = max_commits.saturating_add(1);
+        let counted = run_git_stdout(&[
+            "-C",
+            repo_s,
+            "rev-list",
+            "--count",
+            &format!("--max-count={cap_probe}"),
+            refname,
+        ])
+        .await?;
+        let walked = String::from_utf8_lossy(&counted)
+            .trim()
+            .parse::<u64>()
+            .unwrap_or(0);
+        let truncated = walked > max_commits;
+        let scanned_commits = walked.min(max_commits);
+
+        // One bounded `git log` pass yields count + first/last commit per
+        // author — `git shortlog` cannot emit per-author timestamps.
+        let stdout = run_git_stdout(&[
+            "-C",
+            repo_s,
+            "log",
+            "--format=%aN%x00%aE%x00%ct%x00%H",
+            &format!("--max-count={max_commits}"),
+            refname,
+        ])
+        .await?;
+        Ok(ContributorScan {
+            contributors: aggregate_author_log(&stdout, limit),
+            scanned_commits,
+            truncated,
+        })
+    }
+
+    async fn commit_times(
+        &self,
+        repo: &Path,
+        refname: &str,
+        since_unix: Option<i64>,
+        max_commits: u64,
+    ) -> Result<CommitTimesResult, GitError> {
+        let refname = validate_treeish(refname)?;
+        let repo_s = repo_str(repo)?;
+        let max_commits = max_commits.clamp(1, 1_000_000);
+
+        let rev = Command::new("git")
+            .args([
+                "-C",
+                repo_s,
+                "rev-parse",
+                "--verify",
+                &format!("{refname}^{{commit}}"),
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .await
+            .map_err(|e| GitError::Process(format!("failed to spawn git: {e}")))?;
+        if !rev.status.success() {
+            return Ok(CommitTimesResult {
+                times: Vec::new(),
+                truncated: false,
+            });
+        }
+
+        // `@<epoch>` only parses for plausible dates (`@0` is not a real
+        // cutoff), so a non-positive bound simply skips the filter.
+        let since_arg =
+            since_unix.and_then(|s| (s > 0).then(|| format!("--since=@{s}")));
+        let max_count_arg = format!("--max-count={}", max_commits.saturating_add(1));
+        let mut args = vec!["-C", repo_s, "log", "--format=%ct", &max_count_arg];
+        if let Some(arg) = &since_arg {
+            args.push(arg);
+        }
+        args.push(refname);
+        let stdout = run_git_stdout(&args).await?;
+        let mut times: Vec<i64> = String::from_utf8_lossy(&stdout)
+            .split('\n')
+            .filter_map(|line| line.trim().parse::<i64>().ok())
+            .collect();
+        let truncated = times.len() as u64 > max_commits;
+        times.truncate(max_commits as usize);
+        Ok(CommitTimesResult { times, truncated })
     }
 
     async fn ls_tree_sized_blobs(
@@ -5597,5 +5819,165 @@ mod tests {
             .await
             .expect_err("hook decline must surface");
         assert!(matches!(err, GitError::Denied(_)), "{err:?}");
+    }
+
+    /// Commit `(message, author_name, author_email, committer_unix_date)` rows
+    /// onto `branch` in `bare`, in order, via a scratch clone (seed_commit
+    /// creates root commits only, so a real history needs a shared worktree).
+    /// An empty committer date uses the wall clock.
+    async fn seed_history(bare: &Path, branch: &str, commits: &[(&str, &str, &str, &str)]) {
+        let wt = tempfile::tempdir().unwrap();
+        let wt_s = wt.path().to_str().unwrap().to_string();
+        let bare_s = bare.to_str().unwrap().to_string();
+        run_git(&["clone", &bare_s, &wt_s]).await.unwrap();
+        run_git(&["-C", &wt_s, "checkout", "-B", branch])
+            .await
+            .unwrap();
+        for (i, &(msg, name, email, date)) in commits.iter().enumerate() {
+            let file = wt.path().join(format!("f{i}.txt"));
+            std::fs::write(&file, format!("{i}\n")).unwrap();
+            run_git(&["-C", &wt_s, "add", "-A"]).await.unwrap();
+            let mut env: Vec<(&str, &str)> = vec![
+                ("GIT_AUTHOR_NAME", name),
+                ("GIT_AUTHOR_EMAIL", email),
+                ("GIT_COMMITTER_NAME", "Oxidean"),
+                ("GIT_COMMITTER_EMAIL", FORGE_NOREPLY_EMAIL),
+            ];
+            if !date.is_empty() {
+                env.push(("GIT_AUTHOR_DATE", date));
+                env.push(("GIT_COMMITTER_DATE", date));
+            }
+            run_git_stdout_env(&["-C", &wt_s, "commit", "-m", msg], &env)
+                .await
+                .unwrap();
+        }
+        run_git(&["-C", &wt_s, "push", "origin", &format!("HEAD:{branch}")])
+            .await
+            .unwrap();
+    }
+
+    fn now_ts() -> i64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64
+    }
+
+    #[tokio::test]
+    async fn contributor_scan_aggregates_and_reports_truncation() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bare = tmp.path().join("scan.git");
+        let git = CliGitBackend::new();
+        git.init_bare(&bare, "main").await.unwrap();
+        seed_history(
+            &bare,
+            "main",
+            &[
+                ("a1", "Alice", "alice@ex.com", ""),
+                ("a2", "Alice", "alice@ex.com", ""),
+                ("a3", "Alice", "alice@ex.com", ""),
+                ("b1", "Bob", "bob@ex.com", ""),
+            ],
+        )
+        .await;
+
+        let full = git
+            .contributor_scan(&bare, "main", 10, 100)
+            .await
+            .expect("full scan");
+        assert_eq!(full.scanned_commits, 4);
+        assert!(!full.truncated);
+        let alice = full
+            .contributors
+            .iter()
+            .find(|c| c.email == "alice@ex.com")
+            .expect("alice row");
+        assert_eq!(alice.name, "Alice");
+        assert_eq!(alice.commit_count, 3);
+        // Three Alice commits: first/last differ and timestamps are ordered.
+        assert_ne!(alice.first_commit_sha, alice.last_commit_sha);
+        assert!(alice.first_commit_unix <= alice.last_commit_unix);
+        assert!(alice.first_commit_unix > 0);
+        let bob = full
+            .contributors
+            .iter()
+            .find(|c| c.email == "bob@ex.com")
+            .expect("bob row");
+        assert_eq!(bob.commit_count, 1);
+        // Single-commit author: first == last.
+        assert_eq!(bob.first_commit_sha, bob.last_commit_sha);
+        assert_eq!(bob.first_commit_unix, bob.last_commit_unix);
+
+        // Only the two newest commits are walked when the cap clips history.
+        let clipped = git
+            .contributor_scan(&bare, "main", 10, 2)
+            .await
+            .expect("clipped scan");
+        assert_eq!(clipped.scanned_commits, 2);
+        assert!(clipped.truncated);
+        let scanned: i64 = clipped.contributors.iter().map(|c| c.commit_count).sum();
+        assert_eq!(scanned, 2);
+
+        // Unborn / missing ref -> empty scan.
+        let empty = git
+            .contributor_scan(&bare, "refs/heads/nope", 10, 100)
+            .await
+            .expect("missing ref");
+        assert!(empty.contributors.is_empty());
+        assert_eq!(empty.scanned_commits, 0);
+        assert!(!empty.truncated);
+    }
+
+    #[tokio::test]
+    async fn commit_times_returns_bounded_newest_first_timestamps() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bare = tmp.path().join("times.git");
+        let git = CliGitBackend::new();
+        git.init_bare(&bare, "main").await.unwrap();
+        seed_history(
+            &bare,
+            "main",
+            &[
+                ("c1", "Alice", "alice@ex.com", "@1700000000"),
+                ("c2", "Alice", "alice@ex.com", ""),
+                ("c3", "Alice", "alice@ex.com", ""),
+            ],
+        )
+        .await;
+
+        let res = git
+            .commit_times(&bare, "main", Some(0), 100)
+            .await
+            .expect("commit_times");
+        assert_eq!(res.times.len(), 3);
+        assert!(!res.truncated);
+        assert!(res.times.iter().all(|t| *t > 0));
+        // Newest-first order.
+        assert!(res.times.windows(2).all(|w| w[0] >= w[1]));
+
+        // `--since` between commits excludes the older history. (git still
+        // emits the boundary tip when `since` exceeds it — the API layer
+        // buckets times itself, so a leaked tip is harmless.)
+        let windowed = git
+            .commit_times(&bare, "main", Some(now_ts() - 60), 100)
+            .await
+            .expect("windowed since");
+        assert_eq!(windowed.times.len(), 2, "{:?}", windowed.times);
+
+        // Cap clips the oldest commits out and marks truncation.
+        let capped = git
+            .commit_times(&bare, "main", Some(0), 2)
+            .await
+            .expect("capped");
+        assert_eq!(capped.times.len(), 2);
+        assert!(capped.truncated);
+
+        // Missing ref -> empty, not an error.
+        let missing = git
+            .commit_times(&bare, "refs/heads/nope", None, 100)
+            .await
+            .expect("missing ref");
+        assert!(missing.times.is_empty());
+        assert!(!missing.truncated);
     }
 }

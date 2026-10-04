@@ -538,6 +538,15 @@ export const routeCoverageManifest: RouteCoverageEntry[] = [
     ],
   },
   {
+    route: "$owner.$repo.insights.tsrx",
+    coverage: [
+      {
+        kind: "happy-dom",
+        test: "apps/web/src/routes/$owner.$repo.insights.integration.test.ts",
+      },
+    ],
+  },
+  {
     route: "$owner.$repo.search.tsrx",
     coverage: [
       {

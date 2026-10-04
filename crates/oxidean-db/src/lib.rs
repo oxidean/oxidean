@@ -84,7 +84,7 @@ pub use search::{
     GlobalIssueHitRow, GlobalOrgHitRow, GlobalPullHitRow, GlobalRepoHitRow, GlobalUserHitRow,
     ScanRepoRow,
 };
-pub use stars::{ForkListSort, RepoForkListRow, RepoStargazerListRow};
+pub use stars::{ForkListSort, ForkNetworkRow, RepoForkListRow, RepoStargazerListRow};
 pub use follows::UserFollowListRow;
 pub use watches::RepoWatcherListRow;
 pub use repositories::{RepoDiskRef, RepositoryRow};
@@ -837,6 +837,28 @@ impl Database {
         q: Option<&str>,
     ) -> Result<i64, String> {
         stars::count_network_forks(self.require_pool()?, fork_network_id, q).await
+    }
+
+    /// Fork-network members for `repo.insights.forkNetwork` (GIT-26): public
+    /// network repos (root included) plus `current_repo_id` itself.
+    pub async fn list_fork_network(
+        &self,
+        fork_network_id: &str,
+        current_repo_id: &str,
+        limit: i64,
+    ) -> Result<Vec<stars::ForkNetworkRow>, String> {
+        stars::list_fork_network(self.require_pool()?, fork_network_id, current_repo_id, limit)
+            .await
+    }
+
+    /// Total rows [`Database::list_fork_network`] can return (same filter).
+    pub async fn count_fork_network_members(
+        &self,
+        fork_network_id: &str,
+        current_repo_id: &str,
+    ) -> Result<i64, String> {
+        stars::count_fork_network_members(self.require_pool()?, fork_network_id, current_repo_id)
+            .await
     }
 
     pub async fn get_repo_homepage(&self, repository_id: &str) -> Result<String, String> {

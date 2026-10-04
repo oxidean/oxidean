@@ -205,6 +205,44 @@ pub struct ContributorSummary {
     pub commit_count: i64,
 }
 
+/// Per-author aggregate from [`GitBackend::contributor_scan`] (GIT-26 insights).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContributorStat {
+    /// Author name from the newest scanned commit (`%aN`, mailmap-aware).
+    pub name: String,
+    /// Author email from the newest scanned commit (`%aE`, mailmap-aware).
+    pub email: String,
+    pub commit_count: i64,
+    /// Oldest scanned commit by this author.
+    pub first_commit_sha: String,
+    /// Oldest scanned commit committer unix timestamp (`%ct`).
+    pub first_commit_unix: i64,
+    /// Newest scanned commit by this author.
+    pub last_commit_sha: String,
+    /// Newest scanned commit committer unix timestamp (`%ct`).
+    pub last_commit_unix: i64,
+}
+
+/// Bounded contributor scan over a ref's history (GIT-26 insights).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContributorScan {
+    /// Top authors by commit count within the scanned window.
+    pub contributors: Vec<ContributorStat>,
+    /// Commits actually walked (`min(total_commits, max_commits)`).
+    pub scanned_commits: u64,
+    /// True when the ref's history exceeds `max_commits` and the scan was clipped.
+    pub truncated: bool,
+}
+
+/// Bounded committer-timestamp walk for weekly commit-activity buckets (GIT-26).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommitTimesResult {
+    /// Unix committer timestamps (`%ct`), newest first, capped at `max_commits`.
+    pub times: Vec<i64>,
+    /// True when the window held more commits than `max_commits`.
+    pub truncated: bool,
+}
+
 /// Blob path + byte size from `git ls-tree -r -l` (About language stats).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SizedBlobEntry {
@@ -614,6 +652,30 @@ pub trait GitBackend: Send + Sync {
         refname: &str,
         limit: u32,
     ) -> Result<Vec<ContributorSummary>, GitError>;
+
+    /// Per-author commit stats over at most `max_commits` commits of `refname`
+    /// (`git log` author fields aggregated per author email) with truncation
+    /// metadata for the Insights page (GIT-26). Sorted by commit count desc,
+    /// then most-recent commit. Unborn/missing ref -> empty scan.
+    async fn contributor_scan(
+        &self,
+        repo: &Path,
+        refname: &str,
+        limit: u32,
+        max_commits: u64,
+    ) -> Result<ContributorScan, GitError>;
+
+    /// Committer timestamps (`git log --format=%ct`) for `refname`, newest
+    /// first, bounded by `max_commits`. A positive `since_unix` adds a
+    /// `--since` floor (commit date); `<= 0` scans the full capped history.
+    /// Unborn/missing ref -> empty result.
+    async fn commit_times(
+        &self,
+        repo: &Path,
+        refname: &str,
+        since_unix: Option<i64>,
+        max_commits: u64,
+    ) -> Result<CommitTimesResult, GitError>;
 
     /// Recursive `git ls-tree -r -l` blob paths + sizes for language stats.
     /// Empty / unborn → `Ok(vec![])`. Soft-capped by `max_entries`.

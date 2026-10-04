@@ -8,6 +8,7 @@ mod collaborators;
 mod commit_status;
 mod files;
 mod fork_network;
+mod insights;
 mod invites;
 mod language_stats;
 mod rename_transfer;
@@ -47,6 +48,10 @@ pub use invites::{
     revoke as invites_revoke,
 };
 pub use fork_network::head_valid_for_base;
+pub use insights::{
+    commit_activity as insights_commit_activity, contributors as insights_contributors,
+    fork_network as insights_fork_network,
+};
 pub use rename_transfer::{
     redirect_retention_days, rename, resolve_repo_or_redirect, supersede_redirect_on_create,
     transfer, DEFAULT_REPO_REDIRECT_RETENTION_DAYS,
