@@ -195,6 +195,10 @@ pub struct RepoPublic {
     /// True when owners expose this repo as a create-from template (issue #18).
     #[serde(default)]
     pub is_template: bool,
+    /// Read-only archive mode (GIT-20): browse/clone stay open; pushes and
+    /// content writes (issues, pulls, releases, branches, LFS uploads) are blocked.
+    #[serde(default)]
+    pub archived: bool,
     /// Project homepage URL / text (issue #23).
     #[serde(default)]
     pub homepage: String,
@@ -1004,6 +1008,14 @@ pub struct RepoUpdateVisibilityRequest {
     pub owner: String,
     pub name: String,
     pub visibility: RepoVisibility,
+}
+
+/// `repo.setArchived` input — Admin-only read-only archive toggle (GIT-20).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoSetArchivedRequest {
+    pub owner: String,
+    pub name: String,
+    pub archived: bool,
 }
 
 /// `repo.lfs.setEnabled` input — Admin-only per-repo LFS toggle (D-LFS-10).

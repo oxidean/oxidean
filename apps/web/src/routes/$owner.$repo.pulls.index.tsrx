@@ -187,7 +187,7 @@ export function PullsListPage() @{
               All
             </button>
           </div>
-          @if (account.user?.email_verified) {
+          @if (account.user?.email_verified && !repo?.archived) {
             <AppLink
               href={`/${owner}/${repoName}/pulls/new` as string}
               className={repoListPrimaryCtaClass() as string}

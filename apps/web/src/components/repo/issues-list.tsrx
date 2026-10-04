@@ -74,6 +74,8 @@ export function IssuesList({
   canInteract = false,
 }: IssuesListProps) @{
   const base = `/${owner}/${repoName}`;
+  // GIT-20: archived repos hide write affordances (server still rejects mutations).
+  const canCreateIssue = canInteract && !repo.archived;
   const canAdmin = !!repo.can_admin;
   const emptyCopy =
     filters.state === "closed"
@@ -143,7 +145,7 @@ export function IssuesList({
             Labels
           </AppLink>;
         }
-        @if (canInteract) {
+        @if (canCreateIssue) {
           <AppLink
             href={`${base}/issues/new` as string}
             className={repoListPrimaryCtaClass() as string}

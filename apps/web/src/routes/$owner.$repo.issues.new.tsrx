@@ -133,6 +133,10 @@ export function IssuesNewPage() @{
     <RepoNotFound />;
   } @else if (!repo) {
     <p className="text-[16px] text-muted-foreground">Loading…</p>;
+  } @else if (repo.archived) {
+    <p role="alert" className="text-[16px] text-muted-foreground">
+      This repository is archived and read-only. Issues can't be created.
+    </p>;
   } @else if (!account.user) {
     <p className="rounded-md border border-border bg-muted/30 px-4 py-3 text-[13px] text-muted-foreground">
       <AppLink href="/login" className="font-medium text-primary no-underline hover:underline">

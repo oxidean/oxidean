@@ -60,6 +60,15 @@ fn unauthorized_basic() -> Response {
         .into_response()
 }
 
+fn forbidden_archived() -> Response {
+    (
+        StatusCode::FORBIDDEN,
+        [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
+        "Repository is archived (read-only)",
+    )
+        .into_response()
+}
+
 fn forbidden_insufficient_scope() -> Response {
     (
         StatusCode::FORBIDDEN,
@@ -463,6 +472,11 @@ async fn authorize_and_cgi(
         // Push needs Write capability (ORG-04 / D-ORG-05).
         if receive && !meets(capability, Capability::Write) {
             return unauthorized_basic();
+        }
+        // GIT-20: archived repositories are read-only — receive-pack (push) is
+        // rejected after ACL so missing/unauthorized responses stay identical.
+        if receive && resolved.row.archived {
+            return forbidden_archived();
         }
         // D-24 / Open Q2: unverified may fetch; push denied with email_unverified.
         if receive && auth.owner.email_verified_at.is_none() {

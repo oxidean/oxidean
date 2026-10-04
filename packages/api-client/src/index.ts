@@ -412,6 +412,7 @@ export type RepoPublic = {
   viewer_has_starred?: boolean;
   is_fork?: boolean;
   is_template?: boolean;
+  archived?: boolean;
   homepage?: string;
   topics?: string[];
   fork_count?: number;
@@ -1008,6 +1009,12 @@ export type RepoUpdateVisibilityRequest = {
   owner: string;
   name: string;
   visibility: RepoVisibility;
+};
+
+export type RepoSetArchivedRequest = {
+  owner: string;
+  name: string;
+  archived: boolean;
 };
 
 export type RepoSoftDeleteRequest = {
@@ -2931,6 +2938,8 @@ export function createClient(opts: CreateClientOptions) {
         rpcCall<RepoBranchMutationResponse>(opts, "repo.branchDelete", input),
       updateVisibility: (input: RepoUpdateVisibilityRequest) =>
         rpcCall<RepoPublic>(opts, "repo.updateVisibility", input),
+      setArchived: (input: RepoSetArchivedRequest) =>
+        rpcCall<RepoPublic>(opts, "repo.setArchived", input),
       softDelete: (input: RepoSoftDeleteRequest) =>
         rpcCall<RepoSoftDeleteResponse>(opts, "repo.softDelete", input),
       lfs: {

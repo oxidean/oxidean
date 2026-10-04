@@ -64,6 +64,7 @@ fn to_public(repo: &AccessibleRepo) -> RepoPublic {
         viewer_has_starred: false,
         is_fork: false,
         is_template: false,
+        archived: repo.row.archived,
         homepage: String::new(),
         topics: Vec::new(),
         fork_count: 0,

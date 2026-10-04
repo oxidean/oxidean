@@ -14,9 +14,25 @@ pub struct RepositoryRow {
     pub visibility: String,
     pub description: String,
     pub default_branch: String,
+    /// Read-only archive mode (GIT-20): blocks pushes + content writes; browse/clone stay open.
+    pub archived: bool,
     pub deleted_at: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+}
+
+macro_rules! flag_col {
+    ($row:expr, $col:expr) => {{
+        match $row.try_get::<bool, _>($col) {
+            Ok(v) => v,
+            Err(_) => {
+                let n: i64 = $row
+                    .try_get($col)
+                    .map_err(|e| format!("repo row {}: {e}", $col))?;
+                n != 0
+            }
+        }
+    }};
 }
 
 macro_rules! map_repo {
@@ -40,6 +56,7 @@ macro_rules! map_repo {
             default_branch: row
                 .try_get("default_branch")
                 .map_err(|e| format!("repo row: {e}"))?,
+            archived: flag_col!(row, "archived"),
             deleted_at: row
                 .try_get("deleted_at")
                 .map_err(|e| format!("repo row: {e}"))?,
@@ -53,21 +70,21 @@ macro_rules! map_repo {
     }};
 }
 
-const REPO_SELECT_PG: &str = "SELECT id, owner_id, owner_type, name, visibility, description, default_branch,
+const REPO_SELECT_PG: &str = "SELECT id, owner_id, owner_type, name, visibility, description, default_branch, archived,
        CASE WHEN deleted_at IS NULL THEN NULL
             ELSE to_char(deleted_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') END AS deleted_at,
        to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS created_at,
        to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS updated_at
 FROM repositories";
 
-const REPO_SELECT_MYSQL: &str = "SELECT id, owner_id, owner_type, name, visibility, description, default_branch,
+const REPO_SELECT_MYSQL: &str = "SELECT id, owner_id, owner_type, name, visibility, description, default_branch, archived,
        CASE WHEN deleted_at IS NULL THEN NULL
             ELSE DATE_FORMAT(deleted_at, '%Y-%m-%dT%H:%i:%sZ') END AS deleted_at,
        DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at,
        DATE_FORMAT(updated_at, '%Y-%m-%dT%H:%i:%sZ') AS updated_at
 FROM repositories";
 
-const REPO_SELECT_SQLITE: &str = "SELECT id, owner_id, owner_type, name, visibility, description, default_branch,
+const REPO_SELECT_SQLITE: &str = "SELECT id, owner_id, owner_type, name, visibility, description, default_branch, archived,
        CASE WHEN deleted_at IS NULL THEN NULL
             ELSE strftime('%Y-%m-%dT%H:%M:%SZ', deleted_at) END AS deleted_at,
        strftime('%Y-%m-%dT%H:%M:%SZ', created_at) AS created_at,
@@ -402,6 +419,65 @@ WHERE id = ?1 AND deleted_at IS NULL",
     find_by_id(pool, id)
         .await?
         .ok_or_else(|| "repository not found after visibility update".into())
+}
+
+/// Archive/unarchive — read-only mode toggle (GIT-20). Admin-gated in the API layer.
+pub async fn set_archived(
+    pool: &DbPool,
+    id: &str,
+    archived: bool,
+) -> Result<RepositoryRow, String> {
+    match pool {
+        DbPool::Postgres(p) => {
+            let n = sqlx::query(
+                "UPDATE repositories SET archived = $2, updated_at = now()
+WHERE id = $1 AND deleted_at IS NULL",
+            )
+            .bind(id)
+            .bind(archived)
+            .execute(p)
+            .await
+            .map_err(|e| format!("set repository archived failed: {e}"))?
+            .rows_affected();
+            if n == 0 {
+                return Err("repository not found".into());
+            }
+        }
+        DbPool::MySql(p) => {
+            let n = sqlx::query(
+                "UPDATE repositories SET archived = ?, updated_at = NOW()
+WHERE id = ? AND deleted_at IS NULL",
+            )
+            .bind(archived)
+            .bind(id)
+            .execute(p)
+            .await
+            .map_err(|e| format!("set repository archived failed: {e}"))?
+            .rows_affected();
+            if n == 0 {
+                return Err("repository not found".into());
+            }
+        }
+        DbPool::Sqlite(p) => {
+            let archived_i: i64 = if archived { 1 } else { 0 };
+            let n = sqlx::query(
+                "UPDATE repositories SET archived = ?2, updated_at = strftime('%Y-%m-%d %H:%M:%S','now')
+WHERE id = ?1 AND deleted_at IS NULL",
+            )
+            .bind(id)
+            .bind(archived_i)
+            .execute(p)
+            .await
+            .map_err(|e| format!("set repository archived failed: {e}"))?
+            .rows_affected();
+            if n == 0 {
+                return Err("repository not found".into());
+            }
+        }
+    }
+    find_by_id(pool, id)
+        .await?
+        .ok_or_else(|| "repository not found after archived update".into())
 }
 
 /// Soft-delete: set `deleted_at` (disk purge deferred — D-35).

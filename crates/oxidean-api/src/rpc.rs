@@ -852,6 +852,10 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Ok(repo) => RpcResponse::ok(repo),
             Err(e) => RpcResponse::err(e),
         },
+        "repo.setArchived" => match repo::set_archived(ctx, req.input).await {
+            Ok(repo) => RpcResponse::ok(repo),
+            Err(e) => RpcResponse::err(e),
+        },
         "repo.lfs.setEnabled" => match repo::lfs_set_enabled(ctx, req.input).await {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),

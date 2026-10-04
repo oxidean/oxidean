@@ -98,7 +98,8 @@ export function PullDetailPage() @{
 
   const account = useChromeAccountState();
   const pull = pullQ.data;
-  const canWrite = loader.kind === "ready" && !!loader.repo.can_write;
+  // GIT-20: archived repos hide all pull write affordances (merge/comment/review).
+  const canWrite = loader.kind === "ready" && !!loader.repo.can_write && !loader.repo.archived;
   const isAuthor = !!pull && !!account.user && account.user.id === (pull.author_id as string);
   // Verified signed-in users participate on any repo they can view (D-PR-29).
   const canInteract = !!account.user?.email_verified;
