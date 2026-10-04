@@ -419,6 +419,8 @@ export type RepoPublic = {
   watch_count?: number;
   viewer_is_watching?: boolean;
   viewer_watch_level?: WatchLevel | null;
+  issues_enabled?: boolean;
+  pulls_enabled?: boolean;
   fork_network_id?: string | null;
   forked_from?: ForkParentSummary | null;
 };
@@ -1470,6 +1472,11 @@ export type RepoTemplatesListRequest = {
   name: string;
 };
 
+export type RepoUnitGetEnabledRequest = {
+  owner: string;
+  name: string;
+};
+
 /** One issue/PR template file from the default-branch tree. */
 export type RepoFileTemplate = {
   /** Frontmatter `name` or filename stem. */
@@ -1489,6 +1496,16 @@ export type RepoFileTemplate = {
 export type RepoTemplatesListResponse = {
   issues: RepoFileTemplate[];
   pulls: RepoFileTemplate[];
+};
+
+export type RepoUnitSetEnabledRequest = {
+  owner: string;
+  name: string;
+  enabled: boolean;
+};
+
+export type RepoUnitEnabledResponse = {
+  enabled: boolean;
 };
 
 export type AdminLfsSettingsPublic = {
@@ -3521,6 +3538,18 @@ export function createClient(opts: CreateClientOptions) {
           rpcCall<ActionEnabledResponse>(opts, "repo.actions.getEnabled", input),
         setEnabled: (input: ActionSetEnabledRequest) =>
           rpcCall<ActionEnabledResponse>(opts, "repo.actions.setEnabled", input),
+      },
+      issues: {
+        getEnabled: (input: RepoUnitGetEnabledRequest) =>
+          rpcCall<RepoUnitEnabledResponse>(opts, "repo.issues.getEnabled", input),
+        setEnabled: (input: RepoUnitSetEnabledRequest) =>
+          rpcCall<RepoUnitEnabledResponse>(opts, "repo.issues.setEnabled", input),
+      },
+      pulls: {
+        getEnabled: (input: RepoUnitGetEnabledRequest) =>
+          rpcCall<RepoUnitEnabledResponse>(opts, "repo.pulls.getEnabled", input),
+        setEnabled: (input: RepoUnitSetEnabledRequest) =>
+          rpcCall<RepoUnitEnabledResponse>(opts, "repo.pulls.setEnabled", input),
       },
     },
     org: {

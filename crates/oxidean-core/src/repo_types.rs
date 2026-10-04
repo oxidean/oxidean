@@ -157,6 +157,13 @@ pub struct ForkParentSummary {
     pub name: String,
 }
 
+/// Deserialization default for per-repo unit flags (COL-13): payloads that
+/// predate `issues_enabled` / `pulls_enabled` mean "enabled" — unit toggles
+/// never hide data unless an admin explicitly turned the unit off.
+fn repo_unit_enabled_default() -> bool {
+    true
+}
+
 /// Public repository metadata returned over RPC.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RepoPublic {
@@ -219,6 +226,14 @@ pub struct RepoPublic {
     /// absent when the viewer has no subscription row (DEBT-06).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub viewer_watch_level: Option<WatchLevel>,
+    /// Issues unit enabled — gates `issue.*` RPCs + the Issues tab (COL-13).
+    /// Populated by `repo.get`; list endpoints may report the default `true`.
+    #[serde(default = "repo_unit_enabled_default")]
+    pub issues_enabled: bool,
+    /// Pull-requests unit enabled — gates `pull.*` RPCs + the Pulls tab (COL-13).
+    /// Populated by `repo.get`; list endpoints may report the default `true`.
+    #[serde(default = "repo_unit_enabled_default")]
+    pub pulls_enabled: bool,
     /// Fork network root id (own id for roots) — D-SOC-14 / D-PR-01.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fork_network_id: Option<String>,
@@ -1580,6 +1595,22 @@ pub struct RepoTemplatesListRequest {
     pub name: String,
 }
 
+/// `repo.issues.setEnabled` / `repo.pulls.setEnabled` input — Admin-only
+/// per-repo unit toggle (COL-13).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoUnitSetEnabledRequest {
+    pub owner: String,
+    pub name: String,
+    pub enabled: bool,
+}
+
+/// `repo.issues.getEnabled` / `repo.pulls.getEnabled` input (COL-13).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoUnitGetEnabledRequest {
+    pub owner: String,
+    pub name: String,
+}
+
 /// One issue/PR template file discovered in the default-branch tree
 /// (GitHub-style `---` YAML frontmatter parsed when present).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1606,6 +1637,12 @@ pub struct RepoFileTemplate {
 pub struct RepoTemplatesListResponse {
     pub issues: Vec<RepoFileTemplate>,
     pub pulls: Vec<RepoFileTemplate>,
+}
+
+/// `repo.issues.*` / `repo.pulls.*` unit-toggle response (COL-13).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoUnitEnabledResponse {
+    pub enabled: bool,
 }
 
 /// Per-repo row in admin instance usage breakdown.

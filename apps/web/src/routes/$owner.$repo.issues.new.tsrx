@@ -13,6 +13,7 @@ import { AuthErrorBanner } from "@/components/auth-shell";
 import { FileTemplateChooser } from "@/components/repo/file-template-chooser";
 import { MarkdownWritePreview } from "@/components/repo/markdown-write-preview";
 import { RepoNotFound } from "@/components/repo/repo-not-found";
+import { RepoUnitDisabled } from "@/components/repo/repo-unit-disabled";
 import { AppLink } from "@/components/ui/app-link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,6 +28,8 @@ const EMPTY_TEMPLATES: RepoTemplatesListResponse = { issues: [], pulls: [] };
 export type IssuesNewLoaderData =
   | { kind: "not_found" }
   | { kind: "error"; message: string }
+  // Issues unit disabled for this repo (COL-13).
+  | { kind: "disabled"; repo: RepoPublic }
   | { kind: "ready"; repo: RepoPublic; templates: RepoTemplatesListResponse };
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
@@ -39,6 +42,10 @@ async function loadNewIssuePage(owner: string, repoName: string): Promise<Issues
       kind: "error",
       message: got.error.message || "Could not load repository.",
     };
+  }
+  // Unit toggle (COL-13): Issues off → disabled view before template fetch.
+  if (got.data.issues_enabled === false) {
+    return { kind: "disabled", repo: got.data };
   }
   // COL-02: template listing failure must not block the create form.
   const tpl = await fetchRepoFileTemplates({ data: { owner, name: repoName } }).catch(() => null);
@@ -178,7 +185,7 @@ export function IssuesNewPage() @{
     },
     enabled: !!owner && !!repoName,
     initialData:
-      routeLoader?.kind === "ready"
+      routeLoader?.kind === "ready" || routeLoader?.kind === "disabled"
         ? routeLoader.repo
         : layout?.status === "ok"
           ? (layout.repo ?? undefined)
@@ -186,6 +193,7 @@ export function IssuesNewPage() @{
   });
 
   const repo = repoQ.data ?? null;
+  const unitDisabled = routeLoader?.kind === "disabled" || repo?.issues_enabled === false;
 
   @if (layout?.status === "not_found" || (!repoQ.isPending && !repo)) {
     <RepoNotFound />;
@@ -195,6 +203,8 @@ export function IssuesNewPage() @{
     <p role="alert" className="text-[16px] text-muted-foreground">
       This repository is archived and read-only. Issues can't be created.
     </p>;
+  } @else if (unitDisabled) {
+    <RepoUnitDisabled unit="issues" canAdmin={repo?.can_admin ?? false} />;
   } @else if (!account.user) {
     <p className="rounded-md border border-border bg-muted/30 px-4 py-3 text-[13px] text-muted-foreground">
       <AppLink href="/login" className="font-medium text-primary no-underline hover:underline">

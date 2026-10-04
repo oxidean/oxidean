@@ -36,6 +36,7 @@ pub mod repo_activity;
 pub mod repo_collaborators;
 pub mod repositories;
 pub mod search;
+pub mod repo_units;
 pub mod sessions;
 pub mod ssh_keys;
 pub mod deploy_keys;
@@ -90,6 +91,7 @@ pub use stars::{ForkListSort, ForkNetworkRow, RepoForkListRow, RepoStargazerList
 pub use follows::UserFollowListRow;
 pub use watches::RepoWatcherListRow;
 pub use repositories::{RepoDiskRef, RepositoryRow};
+pub use repo_units::RepoUnitFlags;
 pub use ssh_keys::SshKeyRow;
 pub use deploy_keys::DeployKeyRow;
 pub use gpg_keys::GpgKeyRow;
@@ -3196,6 +3198,19 @@ impl Database {
 
     pub async fn set_repo_actions_enabled(&self, repo_id: &str, enabled: bool) -> Result<(), String> {
         actions::set_actions_enabled(self.require_pool()?, repo_id, enabled).await
+    }
+
+    /// Per-repo unit enable flags (COL-13): issues / pulls, future wiki/boards.
+    pub async fn get_repo_unit_flags(&self, repo_id: &str) -> Result<RepoUnitFlags, String> {
+        repo_units::get_unit_flags(self.require_pool()?, repo_id).await
+    }
+
+    pub async fn set_repo_issues_enabled(&self, repo_id: &str, enabled: bool) -> Result<(), String> {
+        repo_units::set_issues_enabled(self.require_pool()?, repo_id, enabled).await
+    }
+
+    pub async fn set_repo_pulls_enabled(&self, repo_id: &str, enabled: bool) -> Result<(), String> {
+        repo_units::set_pulls_enabled(self.require_pool()?, repo_id, enabled).await
     }
 
     pub async fn consume_action_runner_registration_token(

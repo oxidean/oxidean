@@ -14,6 +14,7 @@ import { IssueReactionsBar } from "@/components/repo/issue-reactions";
 import { MarkdownHtml } from "@/components/repo/markdown-body";
 import { MarkdownWritePreview } from "@/components/repo/markdown-write-preview";
 import { RepoNotFound } from "@/components/repo/repo-not-found";
+import { RepoUnitDisabled } from "@/components/repo/repo-unit-disabled";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,6 +29,8 @@ import { fetchIssueGet, fetchRepoGet } from "@/lib/ssr-repo";
 export type IssueDetailLoaderData =
   | { kind: "not_found" }
   | { kind: "error"; message: string }
+  // Issues unit disabled for this repo (COL-13).
+  | { kind: "disabled"; repo: RepoPublic }
   | { kind: "ready"; repo: RepoPublic; issue: IssuePublic };
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
@@ -45,10 +48,17 @@ async function loadIssueDetail(
       message: got.error.message || "Could not load repository.",
     };
   }
+  // Unit toggle (COL-13): Issues off → disabled view, skip issue.get.
+  if (got.data.issues_enabled === false) {
+    return { kind: "disabled", repo: got.data };
+  }
   const issueRes = await fetchIssueGet({
     data: { owner, name: repoName, number },
   });
   if (!issueRes.ok) {
+    if (issueRes.error.code === "repo.issues.disabled") {
+      return { kind: "disabled", repo: got.data };
+    }
     if (issueRes.error.code === "repo.not_found" || issueRes.error.code === "issue.not_found") {
       return { kind: "not_found" };
     }
@@ -136,12 +146,22 @@ export function IssueDetailPage() @{
       if (!res.ok) throw new Error(res.error.message || NETWORK_ERROR);
       return res.data;
     },
-    enabled: !!owner && !!repoName && number > 0,
+    enabled:
+      !!owner &&
+      !!repoName &&
+      number > 0 &&
+      routeLoader?.kind !== "disabled" &&
+      (layout?.status === "ok" ? layout.repo?.issues_enabled !== false : true),
     initialData: routeLoader?.kind === "ready" ? routeLoader.issue : undefined,
   });
 
-  const repo = repoQ.data ?? null;
+  const repo =
+    repoQ.data ??
+    (routeLoader?.kind === "disabled" ? routeLoader.repo : null) ??
+    (layout?.status === "ok" ? layout.repo : null) ??
+    null;
   const issue = issueQ.data ?? null;
+  const unitDisabled = routeLoader?.kind === "disabled" || repo?.issues_enabled === false;
   const userId = account.user?.id ?? "";
   // GIT-20: archived repos hide all write affordances (edit/comment/close included).
   const notArchived = !repo?.archived;
@@ -305,7 +325,9 @@ export function IssueDetailPage() @{
   @if (notFound) {
     <RepoNotFound />;
   } @else {
-    @if (loading) {
+    @if (unitDisabled) {
+      <RepoUnitDisabled unit="issues" canAdmin={canAdmin} />;
+    } @else if (loading) {
       <p className="text-[16px] text-muted-foreground">Loading issue…</p>;
     } @else {
       <>

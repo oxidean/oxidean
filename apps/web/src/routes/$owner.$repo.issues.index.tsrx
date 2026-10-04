@@ -9,6 +9,7 @@ import {
   type IssueListStateFilter,
 } from "@/components/repo/issues-list";
 import { RepoNotFound } from "@/components/repo/repo-not-found";
+import { RepoUnitDisabled } from "@/components/repo/repo-unit-disabled";
 import { apiClient } from "@/lib/api-client";
 import type { RepoLayoutLoaderData } from "@/lib/repo-store";
 import { fetchIssueList, fetchLabelListForRepo, fetchRepoGet } from "@/lib/ssr-repo";
@@ -17,6 +18,8 @@ import { useChromeAccountState } from "@/lib/use-chrome-account";
 export type IssuesLoaderData =
   | { kind: "not_found" }
   | { kind: "error"; message: string }
+  // Issues unit disabled for this repo (COL-13).
+  | { kind: "disabled"; repo: RepoPublic }
   | {
       kind: "ready";
       repo: RepoPublic;
@@ -41,6 +44,11 @@ async function loadIssuesPage(
     };
   }
 
+  // Unit toggle (COL-13): skip unit RPCs when the repo says Issues is off.
+  if (got.data.issues_enabled === false) {
+    return { kind: "disabled", repo: got.data };
+  }
+
   const [listRes, labelsRes] = await Promise.all([
     fetchIssueList({
       data: {
@@ -56,6 +64,10 @@ async function loadIssuesPage(
 
   if (!listRes.ok) {
     if (listRes.error.code === "repo.not_found") return { kind: "not_found" };
+    // Toggled off between the repo.get and the list call.
+    if (listRes.error.code === "repo.issues.disabled") {
+      return { kind: "disabled", repo: got.data };
+    }
     return {
       kind: "error",
       message: listRes.error.message || "Could not load issues.",
@@ -137,6 +149,13 @@ export function IssuesListPage() @{
           : undefined,
   });
 
+  // Issues unit off (COL-13): loader flag, live repo.get flag, or the loader's
+  // own repo payload (layout fallback may carry a list-defaulted flag).
+  const unitDisabled =
+    routeLoader?.kind === "disabled" ||
+    (routeLoader?.kind === "ready" ? routeLoader.repo : layout?.repo)?.issues_enabled === false ||
+    repoQ.data?.issues_enabled === false;
+
   const labelsQ = useQuery({
     queryKey: ["label", "listForRepo", owner, repoName] as const,
     queryFn: async () => {
@@ -147,7 +166,7 @@ export function IssuesListPage() @{
       if (!res.ok) throw new Error(res.error.message || NETWORK_ERROR);
       return res.data.labels;
     },
-    enabled: !!owner && !!repoName,
+    enabled: !!owner && !!repoName && !unitDisabled,
     initialData: routeLoader?.kind === "ready" ? routeLoader.labels : undefined,
   });
 
@@ -189,7 +208,7 @@ export function IssuesListPage() @{
       if (!res.ok) throw new Error(res.error.message || NETWORK_ERROR);
       return res.data;
     },
-    enabled: !!owner && !!repoName,
+    enabled: !!owner && !!repoName && !unitDisabled,
     initialData: ssrListMatches ? routeLoader.list : undefined,
   });
 
@@ -237,6 +256,8 @@ export function IssuesListPage() @{
 
   @if (notFound || (!repoQ.isPending && !repo && routeLoader?.kind !== "ready")) {
     <RepoNotFound />;
+  } @else if (unitDisabled) {
+    <RepoUnitDisabled unit="issues" canAdmin={repo?.can_admin ?? false} />;
   } @else if (!repo) {
     <p className="text-[16px] text-muted-foreground">Loading issues…</p>;
   } @else {

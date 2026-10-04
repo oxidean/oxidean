@@ -20,6 +20,7 @@ mod social_lists;
 mod sync_fork;
 mod tag_protection;
 mod templates;
+pub(crate) mod units;
 
 pub use acl::{
     archived_error, can_read_as_owner, coalesce, effective_capability, ensure_not_archived,
@@ -66,6 +67,7 @@ pub use search::search;
 pub(crate) use search::code_search_pathspecs;
 pub use social_lists::{forks_list, stargazers_list, watchers_list};
 pub use sync_fork::{fork_status, sync_fork};
+pub use units::{issues_get_enabled, issues_set_enabled, pulls_get_enabled, pulls_set_enabled};
 
 /// Soft size limit for blob preview / raw soft-cap (D-20 / T-07-16).
 /// 1 MiB keeps preview responses cheap without clipping most source files.
@@ -355,6 +357,10 @@ pub(crate) fn to_public(repo: &AccessibleRepo) -> RepoPublic {
         watch_count: 0,
         viewer_is_watching: false,
         viewer_watch_level: None,
+        // Unit flags default enabled here; `enrich_social` fills real values
+        // on single-repo responses (COL-13).
+        issues_enabled: true,
+        pulls_enabled: true,
         fork_network_id: None,
         forked_from: None,
     }
@@ -464,6 +470,14 @@ pub async fn enrich_social(
         .get_repo_is_template(&public.id)
         .await
         .map_err(db_err)?;
+    // Per-repo unit toggles (COL-13) drive Issues/Pulls tab visibility.
+    let unit_flags = ctx
+        .db
+        .get_repo_unit_flags(&public.id)
+        .await
+        .map_err(db_err)?;
+    public.issues_enabled = unit_flags.issues_enabled;
+    public.pulls_enabled = unit_flags.pulls_enabled;
     Ok(public)
 }
 
@@ -786,6 +800,8 @@ pub async fn list_mine(ctx: &RpcCtx) -> Result<RepoListMineResponse, AppError> {
                 watch_count: 0,
                 viewer_is_watching: false,
                 viewer_watch_level: None,
+                issues_enabled: true,
+                pulls_enabled: true,
                 fork_network_id: None,
                 forked_from: None,
             }
@@ -2421,6 +2437,8 @@ pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoPublic
                 watch_count: 0,
                 viewer_is_watching: false,
                 viewer_watch_level: None,
+                issues_enabled: true,
+                pulls_enabled: true,
                 fork_network_id: None,
                 forked_from: None,
     })

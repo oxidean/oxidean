@@ -187,6 +187,8 @@ SSO start routes redirect to the IdP when configured. If WorkOS/OIDC ENV is miss
 | `repo.actions.rerunRun` / `cancelRun` | Requeue or cancel a run; cancel on a finished run → `repo.actions.run_finished` | Session + Write+ |
 | `repo.actions.secrets.list` / `put` / `delete` | Repo Actions secrets (names only on list) | Session + Admin |
 | `repo.actions.getEnabled` / `setEnabled` | Per-repo Actions enable toggle | Session + Read+ / Admin |
+| `repo.issues.getEnabled` / `setEnabled` | Per-repo Issues unit toggle (COL-13) | Session + Read+ / Admin |
+| `repo.pulls.getEnabled` / `setEnabled` | Per-repo Pull-requests unit toggle (COL-13) | Session + Read+ / Admin |
 | `repo.mirror.get` / `upsert` / `delete` / `syncNow` | Two-way remote mirror config + enqueue sync | Session + Admin |
 | `repo.mirror.generateSshKey` / `rotateWebhookSecret` / `fetchHostKey` | Deploy key, inbound webhook secret, ssh-keyscan | Session + Admin |
 | `webhook.create` / `list` / `get` / `update` / `delete` / `deliveries.list` / `deliveries.get` / `ping` / `redeliver` | Outbound repo webhooks; events: `push`, `pull_request`, `issues`, `issue_comment` (incl. PR conversation comments), `release` (`published`/`created`/`edited`/`unpublished`/`deleted`), `star` (`created`/`deleted`), `fork`, `create`/`delete` (branch + tag refs via RPC or receive-pack; no action — the event is the action), `workflow_run` (`requested`/`in_progress`/`completed` with GitHub-style `conclusion`), `registry_package` (`published`/`updated`; repo-linked packages only), `ping`, `*` | Session + Admin |
@@ -269,6 +271,20 @@ All paths are under `/api/v1`. The procedure column names the RPC equivalent in 
 | `GET` | `/admin/lfs/usage` | `admin.lfs.getUsage` | Sys-admin session only |
 
 Not yet covered by v1 (use `/api/rpc`): notifications, SSH/GPG keys, PAT management, email addresses, packages, Actions runs, branch protection, collaborators, invitations, mirrors, LFS objects, issue delete/labels/assignees/reactions/links, pull review dismissal and review requests, `org.updateSettings` and org invites, `repo.rename`/`transfer`/`fork`, `repo.watch`/`star`/`unstar`, most `admin.*` procedures. Release asset upload/download, raw files, and archives keep their dedicated binary routes (`/api/repos/{owner}/{repo}/releases/{release_id}/assets`, `/api/releases/assets/{asset_id}`, `/api/repos/{owner}/{repo}/raw/{ref}/{path}`, `…/archive/{file}`).
+
+### Per-repo unit toggles (COL-13)
+
+Repository admins can turn the **Issues** and **Pull requests** units off per
+repository (`Settings → Features` in the web UI). `repo.get` reports the flags
+additively as `issues_enabled` / `pulls_enabled` (`true` by default; list
+endpoints may omit them and clients should treat missing as enabled). While a
+unit is off, every RPC under its surface — `issue.*` including comments,
+labels, assignees, reactions, and links, or `pull.*` including files, commits,
+comments, reviews, review requests, and merge — fails with the stable error
+code `repo.issues.disabled` / `repo.pulls.disabled`. Disabling never deletes
+data; re-enabling restores the unit immediately. Shared repo surfaces
+(`repo.*`, `label.*`, `repo.mergeSettings.*`) and git clone/fetch/push are
+unaffected.
 
 ## Request/response formats
 
@@ -885,6 +901,7 @@ Common `error.code` values:
 | `invite.email_mismatch` | Bound invite accepted under a different email |
 | `invite.login_required` | Link-invite email already registered — sign in to accept |
 | `repo.not_found` | Missing or unauthorized private (web/RPC soft 404) |
+| `repo.issues.disabled` / `repo.pulls.disabled` | Per-repo Issues / Pulls unit is off (COL-13); re-enable via `repo.<unit>.setEnabled` |
 | `repo.create_forbidden` | Org Member cannot create under that org |
 | `issue.not_found` / `issue.comment_not_found` / `issue.link_not_found` | Missing issue/comment/link (private soft-404 where applicable) |
 | `issue.confirm_mismatch` | Admin hard-delete confirmation number mismatch |
