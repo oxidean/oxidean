@@ -1539,7 +1539,9 @@ export type ActionRunPublic = {
   head_ref: string;
   status: string;
   title: string;
+  run_number: number;
   actor?: string;
+  actor_avatar_url?: string | null;
   created_at?: string;
   updated_at?: string;
   finished_at?: string;
@@ -1561,6 +1563,12 @@ export type ActionRunsListRequest = {
   name: string;
   page?: number;
   per_page?: number;
+  status?: string;
+  event?: string;
+  branch?: string;
+  workflow?: string;
+  actor?: string;
+  query?: string;
 };
 
 export type ActionRunsListResponse = {
@@ -1586,10 +1594,13 @@ export type ActionJobLogRequest = {
   name: string;
   run_id: string;
   job_id: string;
+  offset?: number;
 };
 
 export type ActionJobLogResponse = {
   content: string;
+  next_offset: number;
+  size: number;
 };
 
 export type ActionWorkflowsListRequest = {
@@ -1625,6 +1636,8 @@ export type ActionRunMutationRequest = {
   owner: string;
   name: string;
   run_id: string;
+  job_id?: string;
+  failed_only?: boolean;
 };
 
 export type ActionRunMutationResponse = {
@@ -3813,7 +3826,23 @@ export function actionsListRunsQueryOptions(
   input: ActionRunsListRequest,
 ) {
   return {
-    queryKey: ["repo", "actions", "listRuns", input.owner, input.name] as const,
+    // Filters are part of the cache key — different filter sets must not share
+    // a cached page.
+    queryKey: [
+      "repo",
+      "actions",
+      "listRuns",
+      input.owner,
+      input.name,
+      input.page ?? 1,
+      input.per_page ?? 0,
+      input.status ?? "",
+      input.event ?? "",
+      input.branch ?? "",
+      input.workflow ?? "",
+      input.actor ?? "",
+      input.query ?? "",
+    ] as const,
     queryFn: async () => {
       const res = await client.repo.actions.listRuns(input);
       if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);

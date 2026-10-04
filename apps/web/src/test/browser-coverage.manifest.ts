@@ -49,6 +49,8 @@ const UI_BROWSER = "apps/web/src/components/ui/ui-controls.browser.test.tsx";
 const SSH_BROWSER = "apps/web/src/components/settings/ssh-key-add-form.browser.test.tsx";
 const MIRROR_BROWSER = "apps/web/src/components/repo/mirror-settings-panel.browser.test.tsx";
 const WEBHOOK_FORM_BROWSER = "apps/web/src/components/repo/webhook-form.browser.test.tsx";
+const ACTIONS_RERUN_BROWSER = "apps/web/src/components/repo/actions-rerun-menu.browser.test.tsx";
+const ACTIONS_FILTERS_BROWSER = "apps/web/src/components/repo/actions-filters.browser.test.tsx";
 
 const AUTH_UI = "apps/web/e2e/stack-browser/auth-ui.stack.browser.test.tsx";
 const FORGE_ADMIN = "apps/web/e2e/stack-browser/forge-admin.stack.browser.test.tsx";
@@ -231,6 +233,26 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
         kind: "skip",
         rationale:
           "Clone URL Select; forge-repo stack-browser covers repo home chrome. Dedicated Select pick when clone-box is next touched.",
+      },
+    ],
+  },
+  {
+    surface: "components/repo/actions-rerun-menu.tsrx",
+    coverage: [
+      {
+        kind: "browser",
+        test: ACTIONS_RERUN_BROWSER,
+        subject: "actions-rerun-menu",
+      },
+    ],
+  },
+  {
+    surface: "components/repo/actions-filters.tsrx",
+    coverage: [
+      {
+        kind: "browser",
+        test: ACTIONS_FILTERS_BROWSER,
+        subject: "actions-filters",
       },
     ],
   },

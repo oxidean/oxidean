@@ -244,12 +244,31 @@ export const fetchPackagesList = createServerFn({ method: "GET" })
 
 /** SSR: `repo.actions.listRuns` with Cookie forward (anonymous reads on public repos). */
 export const fetchActionsListRuns = createServerFn({ method: "GET" })
-  .validator((data: OwnerName & { page?: number; per_page?: number }) => ({
-    owner: String(data?.owner ?? ""),
-    name: String(data?.name ?? ""),
-    page: typeof data?.page === "number" ? data.page : 1,
-    per_page: typeof data?.per_page === "number" ? data.per_page : 25,
-  }))
+  .validator(
+    (
+      data: OwnerName & {
+        page?: number;
+        per_page?: number;
+        status?: string;
+        event?: string;
+        branch?: string;
+        workflow?: string;
+        actor?: string;
+        query?: string;
+      },
+    ) => ({
+      owner: String(data?.owner ?? ""),
+      name: String(data?.name ?? ""),
+      page: typeof data?.page === "number" ? data.page : 1,
+      per_page: typeof data?.per_page === "number" ? data.per_page : 25,
+      status: data?.status ? String(data.status) : undefined,
+      event: data?.event ? String(data.event) : undefined,
+      branch: data?.branch ? String(data.branch) : undefined,
+      workflow: data?.workflow ? String(data.workflow) : undefined,
+      actor: data?.actor ? String(data.actor) : undefined,
+      query: data?.query ? String(data.query) : undefined,
+    }),
+  )
   .handler(async ({ data }) => {
     const client = createSsrClient(incomingCookie());
     return client.repo.actions.listRuns({
@@ -257,6 +276,12 @@ export const fetchActionsListRuns = createServerFn({ method: "GET" })
       name: data.name,
       page: data.page,
       per_page: data.per_page,
+      status: data.status,
+      event: data.event,
+      branch: data.branch,
+      workflow: data.workflow,
+      actor: data.actor,
+      query: data.query,
     });
   });
 
