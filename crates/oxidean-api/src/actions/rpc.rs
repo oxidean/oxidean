@@ -611,6 +611,14 @@ pub async fn rerun_run(
         )
         .await
         .map_err(db_err)?;
+    // API-04: a requeued run is a new `workflow_run` `requested` delivery.
+    crate::webhook::dispatch::notify_workflow_run(
+        &ctx.db,
+        &req.run_id,
+        "requested",
+        &ctx.env_name,
+    )
+    .await;
     run_mutation_response(ctx, &accessible.row.id, &req.run_id).await
 }
 
@@ -649,6 +657,14 @@ pub async fn cancel_run(
             crate::notify::fanout_workflow_completed(&ctx.db, &run).await;
         }
     }
+    // API-04: cancellation completes the run with conclusion `cancelled`.
+    crate::webhook::dispatch::notify_workflow_run(
+        &ctx.db,
+        &req.run_id,
+        "completed",
+        &ctx.env_name,
+    )
+    .await;
     run_mutation_response(ctx, &accessible.row.id, &req.run_id).await
 }
 

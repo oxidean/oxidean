@@ -615,6 +615,18 @@ async fn authorize_and_cgi(
                                 &env_name,
                             )
                             .await;
+                            // API-04: create/delete refs fan out beside `push`.
+                            crate::webhook::dispatch::notify_ref_events(
+                                &db,
+                                &repo_id,
+                                &owner_slug,
+                                &repo_name,
+                                &login,
+                                &uid,
+                                &updates_wh,
+                                &env_name,
+                            )
+                            .await;
                             crate::pull::synchronize_after_push(
                                 &db,
                                 &repos_dir,

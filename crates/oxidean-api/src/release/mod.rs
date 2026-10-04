@@ -17,6 +17,7 @@ use crate::repo::{
 };
 use crate::routes::release_assets::{delete_asset_with_file, remove_asset_file};
 use crate::rpc::RpcCtx;
+use crate::webhook::dispatch;
 
 fn db_err(e: String) -> AppError {
     if e == "database not configured" {
@@ -123,7 +124,26 @@ pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<ReleasePub
         let subject = notify::subject_for_release(&row.repo_id, &row.tag_name, &row.title);
         notify::fanout_activity(&ctx.db, &user.id, [], "release_published", &subject).await;
     }
-    to_public(ctx, &row).await
+    let public = to_public(ctx, &row).await?;
+    // GitHub parity: draft create → `created`, visible create → `published`.
+    let action = if row.draft { "created" } else { "published" };
+    let payload = dispatch::release_payload(
+        action,
+        &row.tag_name,
+        &row.title,
+        &row.body,
+        row.draft,
+        row.prerelease,
+        &public.author_username,
+        &row.author_id,
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.id,
+        &user.username,
+        &user.id,
+    );
+    dispatch::emit(&ctx.db, &accessible.row.id, "release", action, payload, &ctx.env_name).await;
+    Ok(public)
 }
 
 pub async fn list(ctx: &RpcCtx, input: serde_json::Value) -> Result<ReleaseListResponse, AppError> {
@@ -191,7 +211,33 @@ pub async fn update(ctx: &RpcCtx, input: serde_json::Value) -> Result<ReleasePub
         let subject = notify::subject_for_release(&row.repo_id, &row.tag_name, &row.title);
         notify::fanout_activity(&ctx.db, &user.id, [], reason, &subject).await;
     }
-    to_public(ctx, &row).await
+    let public = to_public(ctx, &row).await?;
+    // GitHub parity: draft→visible is `published`, visible→draft is
+    // `unpublished`, any other mutation is `edited`.
+    let action = if existing.draft && !row.draft {
+        "published"
+    } else if !existing.draft && row.draft {
+        "unpublished"
+    } else {
+        "edited"
+    };
+    let payload = dispatch::release_payload(
+        action,
+        &row.tag_name,
+        &row.title,
+        &row.body,
+        row.draft,
+        row.prerelease,
+        &public.author_username,
+        &row.author_id,
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.id,
+        &user.username,
+        &user.id,
+    );
+    dispatch::emit(&ctx.db, &accessible.row.id, "release", action, payload, &ctx.env_name).await;
+    Ok(public)
 }
 
 pub async fn delete(ctx: &RpcCtx, input: serde_json::Value) -> Result<DeleteReleaseResponse, AppError> {
@@ -222,6 +268,30 @@ pub async fn delete(ctx: &RpcCtx, input: serde_json::Value) -> Result<DeleteRele
             notify::subject_for_release(&accessible.row.id, &existing.tag_name, &existing.title);
         notify::fanout_activity(&ctx.db, &user.id, [], "release_deleted", &subject).await;
     }
+    let author_login = match ctx.db.find_user_by_id(&existing.author_id).await {
+        Ok(Some(u)) => u.username,
+        Ok(None) => String::new(),
+        Err(e) => {
+            tracing::warn!(error = %e, "release delete: author lookup failed");
+            String::new()
+        }
+    };
+    let payload = dispatch::release_payload(
+        "deleted",
+        &existing.tag_name,
+        &existing.title,
+        &existing.body,
+        existing.draft,
+        existing.prerelease,
+        &author_login,
+        &existing.author_id,
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.id,
+        &user.username,
+        &user.id,
+    );
+    dispatch::emit(&ctx.db, &accessible.row.id, "release", "deleted", payload, &ctx.env_name).await;
     Ok(DeleteReleaseResponse { ok: true })
 }
 

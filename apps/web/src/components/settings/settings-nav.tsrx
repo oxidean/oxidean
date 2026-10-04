@@ -1,11 +1,13 @@
 import { cn } from "@/lib/utils";
 import { AppLink } from "@/components/ui/app-link";
 
-<<<<<<< HEAD
-export type SettingsNavActive = "general" | "profile" | "notifications" | "tokens" | "ssh-keys";
-=======
-export type SettingsNavActive = "general" | "profile" | "tokens" | "ssh-keys" | "applications";
->>>>>>> origin/feat/api-03-oauth-apps
+export type SettingsNavActive =
+  | "general"
+  | "profile"
+  | "notifications"
+  | "tokens"
+  | "ssh-keys"
+  | "applications";
 
 type SettingsNavProps = {
   active: SettingsNavActive;
@@ -37,11 +39,7 @@ function linkClass(isActive: boolean): string {
   );
 }
 
-<<<<<<< HEAD
-/** Account settings sidebar: General | Account | Notifications | Personal access tokens | SSH and GPG keys. */
-=======
-/** Account settings sidebar: General | Account | Personal access tokens | SSH and GPG keys | OAuth applications. */
->>>>>>> origin/feat/api-03-oauth-apps
+/** Account settings sidebar: General | Account | Notifications | PATs | SSH/GPG | OAuth applications. */
 export function SettingsNav({ active }: SettingsNavProps) @{
   <nav className="flex flex-col gap-1" aria-label="Account settings">
     <p className="mb-2 px-3 text-[12px] font-semibold uppercase tracking-wide text-muted-foreground">

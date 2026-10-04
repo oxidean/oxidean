@@ -13,6 +13,7 @@ use crate::protection::{
 };
 use crate::pull::acl;
 use crate::rpc::RpcCtx;
+use crate::webhook::dispatch;
 
 use super::{db_err, load_pull_in_repo, to_public};
 
@@ -461,7 +462,23 @@ pub async fn merge(ctx: &RpcCtx, input: serde_json::Value) -> Result<MergePullRe
     }
 
     if req.delete_branch.unwrap_or(false) && row.head_repo_id == row.repo_id {
-        let _ = ctx.git.branch_delete(&path, &row.head_ref).await;
+        if ctx.git.branch_delete(&path, &row.head_ref).await.is_ok() {
+            // API-04: deleting the head branch on merge fires `delete`.
+            let payload = dispatch::ref_event_payload(
+                "delete",
+                &row.head_ref,
+                "branch",
+                &accessible.row.default_branch,
+                &accessible.row.description,
+                &accessible.owner_username,
+                &accessible.row.name,
+                &accessible.row.id,
+                &user.username,
+                &user.id,
+            );
+            dispatch::emit(&ctx.db, &accessible.row.id, "delete", "", payload, &ctx.env_name)
+                .await;
+        }
     }
 
     let updated = load_pull_in_repo(ctx, &accessible.row.id, req.number).await?;

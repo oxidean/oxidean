@@ -134,7 +134,7 @@ export function WebhooksPanel(props: {
         </h2>
         <p className="text-[14px] text-muted-foreground">
           Deliver signed HTTPS payloads for repository events (push, pull requests, issues, issue
-          comments).
+          comments, releases, stars, forks, ref changes, workflow runs, packages).
         </p>
 
         @if (mode === "create") {

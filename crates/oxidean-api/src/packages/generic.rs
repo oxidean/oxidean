@@ -309,6 +309,7 @@ async fn put_file(
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     };
+    let is_new_version = existing_ver.is_none();
 
     if let Some(ver) = existing_ver {
         let mut meta = parse_meta(&ver.metadata_json);
@@ -391,6 +392,19 @@ async fn put_file(
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     }
+
+    // API-04: repo-linked packages fan out `registry_package` (no-op when the
+    // package is not linked to a repository).
+    let action = if is_new_version { "published" } else { "updated" };
+    crate::webhook::dispatch::notify_package_publish(
+        &state.db,
+        &package,
+        &version,
+        action,
+        &identity.user_id,
+        &state.env_name,
+    )
+    .await;
 
     (StatusCode::CREATED, Json(json!({ "ok": true, "digest": digest, "size": size }))).into_response()
 }
