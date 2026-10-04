@@ -257,6 +257,48 @@ pub async fn find_by_username(pool: &DbPool, username: &str) -> Result<Option<Us
     }
 }
 
+/// Batch `find_by_username` — one `IN (...)` round trip (mention resolution).
+pub async fn find_many_by_username(
+    pool: &DbPool,
+    usernames: &[String],
+) -> Result<Vec<UserRow>, String> {
+    if usernames.is_empty() {
+        return Ok(Vec::new());
+    }
+    match pool {
+        DbPool::Postgres(p) => {
+            let rows = sqlx::query(&format!("{USER_SELECT_PG} WHERE username = ANY($1)"))
+                .bind(usernames)
+                .fetch_all(p)
+                .await
+                .map_err(|e| format!("find users by usernames failed: {e}"))?;
+            rows.iter().map(|r| Ok(map_user!(r))).collect()
+        }
+        DbPool::MySql(p) => {
+            let in_list =
+                crate::dialect::in_placeholders(crate::dialect::Dialect::MySql, 1, usernames.len());
+            let q_str = format!("{USER_SELECT_MYSQL} WHERE username IN ({in_list})");
+            let q = usernames.iter().fold(sqlx::query(&q_str), |q, u| q.bind(u));
+            let rows = q
+                .fetch_all(p)
+                .await
+                .map_err(|e| format!("find users by usernames failed: {e}"))?;
+            rows.iter().map(|r| Ok(map_user!(r))).collect()
+        }
+        DbPool::Sqlite(p) => {
+            let in_list =
+                crate::dialect::in_placeholders(crate::dialect::Dialect::Sqlite, 1, usernames.len());
+            let q_str = format!("{USER_SELECT_SQLITE} WHERE username IN ({in_list})");
+            let q = usernames.iter().fold(sqlx::query(&q_str), |q, u| q.bind(u));
+            let rows = q
+                .fetch_all(p)
+                .await
+                .map_err(|e| format!("find users by usernames failed: {e}"))?;
+            rows.iter().map(|r| Ok(map_user!(r))).collect()
+        }
+    }
+}
+
 pub async fn find_by_id(pool: &DbPool, id: &str) -> Result<Option<UserRow>, String> {
     match pool {
         DbPool::Postgres(p) => {
@@ -291,6 +333,52 @@ pub async fn find_by_id(pool: &DbPool, id: &str) -> Result<Option<UserRow>, Stri
                 Some(r) => Some(map_user!(&r)),
                 None => None,
             })
+        }
+    }
+}
+
+/// Batch `find_by_email` on the legacy `users.email` fallback column —
+/// one `IN (...)` round trip (commit author resolution).
+/// `emails` are matched case-insensitively.
+pub async fn find_many_by_email(pool: &DbPool, emails: &[String]) -> Result<Vec<UserRow>, String> {
+    let emails: Vec<String> = emails
+        .iter()
+        .map(|e| e.trim().to_ascii_lowercase())
+        .filter(|e| !e.is_empty())
+        .collect();
+    if emails.is_empty() {
+        return Ok(Vec::new());
+    }
+    match pool {
+        DbPool::Postgres(p) => {
+            let rows = sqlx::query(&format!("{USER_SELECT_PG} WHERE lower(email) = ANY($1)"))
+                .bind(&emails)
+                .fetch_all(p)
+                .await
+                .map_err(|e| format!("find users by emails failed: {e}"))?;
+            rows.iter().map(|r| Ok(map_user!(r))).collect()
+        }
+        DbPool::MySql(p) => {
+            let in_list =
+                crate::dialect::in_placeholders(crate::dialect::Dialect::MySql, 1, emails.len());
+            let q_str = format!("{USER_SELECT_MYSQL} WHERE lower(email) IN ({in_list})");
+            let q = emails.iter().fold(sqlx::query(&q_str), |q, e| q.bind(e));
+            let rows = q
+                .fetch_all(p)
+                .await
+                .map_err(|e| format!("find users by emails failed: {e}"))?;
+            rows.iter().map(|r| Ok(map_user!(r))).collect()
+        }
+        DbPool::Sqlite(p) => {
+            let in_list =
+                crate::dialect::in_placeholders(crate::dialect::Dialect::Sqlite, 1, emails.len());
+            let q_str = format!("{USER_SELECT_SQLITE} WHERE lower(email) IN ({in_list})");
+            let q = emails.iter().fold(sqlx::query(&q_str), |q, e| q.bind(e));
+            let rows = q
+                .fetch_all(p)
+                .await
+                .map_err(|e| format!("find users by emails failed: {e}"))?;
+            rows.iter().map(|r| Ok(map_user!(r))).collect()
         }
     }
 }

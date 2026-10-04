@@ -92,7 +92,7 @@ pub async fn comments_list(
     Ok(PullCommentsListResponse { comments })
 }
 
-/// `pull.comments.create` — Write+ general or line-anchored.
+/// `pull.comments.create` — Read+ verified general or line-anchored.
 pub async fn comments_create(
     ctx: &RpcCtx,
     input: serde_json::Value,
@@ -105,7 +105,7 @@ pub async fn comments_create(
         )
     })?;
     let body = validate_body(Some(req.body.as_str()))?;
-    let accessible = acl::resolve_for_write(ctx, &req.owner, &req.name).await?;
+    let accessible = acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
     let pull = load_pull_in_repo(ctx, &accessible.row.id, req.number).await?;
 
     let path = req
@@ -173,13 +173,15 @@ pub async fn comments_create(
     let subject = notify::subject_for_pull(&pull);
     let participants = notify::pull_participant_ids(&ctx.db, &pull.id, &pull.author_id).await;
     let mentions = notify::resolve_mention_user_ids(&ctx.db, &body).await;
-    notify::fanout_activity(&ctx.db, &user.id, participants.clone(), "pr_comment", &subject).await;
+    // One watch-level lookup serves both fanouts below.
+    let watch = ctx.db.list_repo_watch_levels(&subject.repo_id).await;
+    notify::fanout_activity_with_watch(&ctx.db, &user.id, participants.clone(), "pr_comment", &subject, &watch).await;
     let participant_set: std::collections::HashSet<_> = participants.into_iter().collect();
     let mention_only: Vec<_> = mentions
         .into_iter()
         .filter(|m| !participant_set.contains(m))
         .collect();
-    notify::fanout_suppress_ignored(&ctx.db, &user.id, mention_only, "pr_mention", &subject).await;
+    notify::fanout_suppress_ignored_with_watch(&ctx.db, &user.id, mention_only, "pr_mention", &subject, &watch).await;
     // GitHub parity (DEBT-04): `issue_comment` covers PR conversation comments;
     // line-anchored comments map to `pull_request_review_comment` instead.
     if row.path.is_none() {

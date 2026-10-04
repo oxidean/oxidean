@@ -28,7 +28,7 @@ export type IssueReactionsBarProps = {
   target: ReactionTarget;
   commentId?: string;
   reactions: ReactionGroupPublic[];
-  canWrite: boolean;
+  canInteract: boolean;
   /** Extra work after a successful toggle (optional). */
   onToggled?: () => Promise<void>;
 };
@@ -46,13 +46,13 @@ function ReactionChip(props: {
   label: string;
   count: number;
   mine: boolean;
-  canWrite: boolean;
+  canInteract: boolean;
   disabled: boolean;
   onToggle: (content: ReactionContent) => void;
 }) @{
   const title = props.count > 0 ? `${props.label} · ${props.count}` : props.label;
 
-  @if (props.canWrite) {
+  @if (props.canInteract) {
     <button
       type="button"
       className={
@@ -97,7 +97,7 @@ export function IssueReactionsBar(props: IssueReactionsBarProps) @{
   }, [props.reactions]);
 
   async function toggle(content: ReactionContent) {
-    if (!props.canWrite || pending) return;
+    if (!props.canInteract || pending) return;
     setError("");
     setPending(true);
     try {
@@ -145,7 +145,7 @@ export function IssueReactionsBar(props: IssueReactionsBarProps) @{
           label={item.label}
           count={groupFor(local, item.content)?.count ?? 0}
           mine={!!groupFor(local, item.content)?.viewerHasReacted}
-          canWrite={props.canWrite}
+          canInteract={props.canInteract}
           disabled={pending}
           onToggle={(c) => void toggle(c)}
         />;

@@ -247,16 +247,7 @@ async fn pull_lifecycle_fork_head_pr() {
     assert_eq!(forked["data"]["owner_username"], "forkown");
     assert_eq!(forked["data"]["name"], "upstream");
 
-    // Collaborator write on upstream so forker can open PR... actually Write+ on base required.
-    // Grant write to forker on upstream.
-    let collab = rpc_json(
-        &app,
-        &owner_cookie,
-        r#"{"procedure":"repo.collaborators.add","input":{"owner":"srcown","name":"upstream","username":"forkown","permission":"write"}}"#,
-    )
-    .await;
-    assert_eq!(collab["ok"], true, "{collab}");
-
+    // No collaborator grant needed: fork head ⇒ Write+ on head + Read on base (D-PR-29).
     let pr = rpc_json(
         &app,
         &fork_cookie,
@@ -265,4 +256,59 @@ async fn pull_lifecycle_fork_head_pr() {
     .await;
     assert_eq!(pr["ok"], true, "{pr}");
     assert_eq!(pr["data"]["head_owner"], "forkown");
+
+    // Author (Read-only on base) edits and closes their own PR.
+    let upd = rpc_json(
+        &app,
+        &fork_cookie,
+        r#"{"procedure":"pull.update","input":{"owner":"srcown","name":"upstream","number":1,"title":"Renamed PR"}}"#,
+    )
+    .await;
+    assert_eq!(upd["ok"], true, "author updates own PR — {upd}");
+    let close = rpc_json(
+        &app,
+        &fork_cookie,
+        r#"{"procedure":"pull.close","input":{"owner":"srcown","name":"upstream","number":1}}"#,
+    )
+    .await;
+    assert_eq!(close["ok"], true, "author closes own PR — {close}");
+    let reopen = rpc_json(
+        &app,
+        &fork_cookie,
+        r#"{"procedure":"pull.reopen","input":{"owner":"srcown","name":"upstream","number":1}}"#,
+    )
+    .await;
+    assert_eq!(reopen["ok"], true, "author reopens own PR — {reopen}");
+
+    // Verified stranger (no collaborator row) can comment on the PR conversation.
+    let (stranger_cookie, stranger_v) =
+        signup_and_login(&app, "prstranger@ex.com", "prstranger").await;
+    verify_user(&db, stranger_v["data"]["id"].as_str().unwrap()).await;
+    let comment = rpc_json(
+        &app,
+        &stranger_cookie,
+        r#"{"procedure":"pull.comments.create","input":{"owner":"srcown","name":"upstream","number":1,"body":"drive-by review note"}}"#,
+    )
+    .await;
+    assert_eq!(comment["ok"], true, "stranger comments — {comment}");
+
+    // Stranger cannot close/update the PR.
+    let denied = rpc_json(
+        &app,
+        &stranger_cookie,
+        r#"{"procedure":"pull.close","input":{"owner":"srcown","name":"upstream","number":1}}"#,
+    )
+    .await;
+    assert_eq!(denied["ok"], false, "stranger cannot close — {denied}");
+    assert_eq!(denied["error"]["code"], "repo.not_found");
+
+    // Read-only on base cannot open a same-repo PR from someone else's branch.
+    let same_repo_denied = rpc_json(
+        &app,
+        &stranger_cookie,
+        r#"{"procedure":"pull.create","input":{"owner":"srcown","name":"upstream","title":"nope","base_ref":"main","head_ref":"feature"}}"#,
+    )
+    .await;
+    assert_eq!(same_repo_denied["ok"], false, "same-repo head needs Write — {same_repo_denied}");
+    assert_eq!(same_repo_denied["error"]["code"], "repo.not_found");
 }

@@ -224,7 +224,7 @@ async fn load_issue_in_repo(
         .ok_or_else(issue_not_found)
 }
 
-/// `issue.create` — Write+; allocates per-repo `#N` (D-ISS-01 / D-ISS-20).
+/// `issue.create` — Read+ verified; allocates per-repo `#N` (D-ISS-01 / D-ISS-20).
 pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssuePublic, AppError> {
     let user = require_verified(ctx).await?;
     let req: CreateIssueRequest = serde_json::from_value(input).map_err(|e| {
@@ -235,7 +235,7 @@ pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssuePubli
     })?;
     let title = validate_title(&req.title)?.to_string();
     let body = validate_body(req.body.as_deref())?;
-    let accessible = acl::resolve_for_write(ctx, &req.owner, &req.name).await?;
+    let accessible = acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
 
     let id = Uuid::new_v4().to_string();
     let row = ctx
@@ -249,9 +249,11 @@ pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssuePubli
     if accessible.row.owner_type == "user" && accessible.row.owner_id != user.id {
         opened_recipients.push(accessible.row.owner_id.clone());
     }
-    notify::fanout_activity(&ctx.db, &user.id, opened_recipients, "issue_opened", &subject).await;
+    // One watch-level lookup serves both fanouts below.
+    let watch = ctx.db.list_repo_watch_levels(&subject.repo_id).await;
+    notify::fanout_activity_with_watch(&ctx.db, &user.id, opened_recipients, "issue_opened", &subject, &watch).await;
     let mentions = notify::resolve_mention_user_ids(&ctx.db, &body).await;
-    notify::fanout_suppress_ignored(&ctx.db, &user.id, mentions, "issue_mention", &subject).await;
+    notify::fanout_suppress_ignored_with_watch(&ctx.db, &user.id, mentions, "issue_mention", &subject, &watch).await;
     let payload = dispatch::issues_payload(
         "opened",
         row.number,
@@ -416,14 +418,17 @@ pub async fn update(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssuePubli
     to_public(ctx, &updated).await
 }
 
-/// `issue.close` — Write+; open → closed (D-ISS-02 / D-ISS-20).
+/// `issue.close` — Author or Write+; open → closed (D-ISS-02 / D-ISS-20).
 pub async fn close(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssuePublic, AppError> {
     let user = require_verified(ctx).await?;
     let req: IssueRefRequest = serde_json::from_value(input).map_err(|e| {
         AppError::new("rpc.bad_input", format!("invalid issue.close input: {e}"))
     })?;
-    let accessible = acl::resolve_for_write(ctx, &req.owner, &req.name).await?;
+    let accessible = acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
     let row = load_issue_in_repo(ctx, &accessible.row.id, req.number).await?;
+    if !acl::can_edit_issue(&user.id, &row, accessible.capability) {
+        return Err(not_found());
+    }
     if row.state == IssueState::Closed.as_str() {
         return to_public(ctx, &row).await;
     }
@@ -451,24 +456,27 @@ pub async fn close(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssuePublic
     to_public(ctx, &updated).await
 }
 
-/// `issue.reopen` — Write+; closed → open (D-ISS-02 / D-ISS-20).
+/// `issue.reopen` — Author or Write+; closed → open (D-ISS-02 / D-ISS-20).
 pub async fn reopen(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssuePublic, AppError> {
-    let _user = require_verified(ctx).await?;
+    let user = require_verified(ctx).await?;
     let req: IssueRefRequest = serde_json::from_value(input).map_err(|e| {
         AppError::new(
             "rpc.bad_input",
             format!("invalid issue.reopen input: {e}"),
         )
     })?;
-    let accessible = acl::resolve_for_write(ctx, &req.owner, &req.name).await?;
+    let accessible = acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
     let row = load_issue_in_repo(ctx, &accessible.row.id, req.number).await?;
+    if !acl::can_edit_issue(&user.id, &row, accessible.capability) {
+        return Err(not_found());
+    }
     if row.state == IssueState::Open.as_str() {
         return to_public(ctx, &row).await;
     }
     let updated = ctx.db.reopen_issue(&row.id).await.map_err(db_err)?;
     let subject = notify::subject_for_issue(&updated);
     let recipients = notify::issue_participant_ids(&ctx.db, &updated.id, &updated.author_id).await;
-    notify::fanout_activity(&ctx.db, &_user.id, recipients, "issue_reopened", &subject).await;
+    notify::fanout_activity(&ctx.db, &user.id, recipients, "issue_reopened", &subject).await;
     let payload = dispatch::issues_payload(
         "reopened",
         updated.number,
@@ -478,8 +486,8 @@ pub async fn reopen(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssuePubli
         &accessible.owner_username,
         &accessible.row.name,
         &accessible.row.id,
-        &_user.username,
-        &_user.id,
+        &user.username,
+        &user.id,
     );
     dispatch::emit(&ctx.db, &accessible.row.id, "issues", "reopened", payload, &ctx.env_name).await;
     to_public(ctx, &updated).await
@@ -680,7 +688,7 @@ pub async fn comments_list(
     Ok(IssueCommentsListResponse { comments })
 }
 
-/// `issue.comments.create` — Write+ (ISS-02 / D-ISS-20).
+/// `issue.comments.create` — Read+ verified (ISS-02 / D-ISS-20).
 pub async fn comments_create(
     ctx: &RpcCtx,
     input: serde_json::Value,
@@ -693,7 +701,7 @@ pub async fn comments_create(
         )
     })?;
     let body = validate_body(Some(req.body.as_str()))?;
-    let accessible = acl::resolve_for_write(ctx, &req.owner, &req.name).await?;
+    let accessible = acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
     let issue = load_issue_in_repo(ctx, &accessible.row.id, req.number).await?;
     let id = Uuid::new_v4().to_string();
     let row = ctx
@@ -704,13 +712,15 @@ pub async fn comments_create(
     let subject = notify::subject_for_issue(&issue);
     let participants = notify::issue_participant_ids(&ctx.db, &issue.id, &issue.author_id).await;
     let mentions = notify::resolve_mention_user_ids(&ctx.db, &body).await;
-    notify::fanout_activity(&ctx.db, &user.id, participants.clone(), "issue_comment", &subject).await;
+    // One watch-level lookup serves both fanouts below.
+    let watch = ctx.db.list_repo_watch_levels(&subject.repo_id).await;
+    notify::fanout_activity_with_watch(&ctx.db, &user.id, participants.clone(), "issue_comment", &subject, &watch).await;
     let participant_set: std::collections::HashSet<_> = participants.into_iter().collect();
     let mention_only: Vec<_> = mentions
         .into_iter()
         .filter(|m| !participant_set.contains(m))
         .collect();
-    notify::fanout_suppress_ignored(&ctx.db, &user.id, mention_only, "issue_mention", &subject).await;
+    notify::fanout_suppress_ignored_with_watch(&ctx.db, &user.id, mention_only, "issue_mention", &subject, &watch).await;
     let payload = dispatch::issue_comment_payload(
         "created",
         issue.number,
@@ -1030,8 +1040,10 @@ pub async fn assignees_set(
     let newly_assigned: Vec<_> = after.difference(&before).cloned().collect();
     let newly_unassigned: Vec<_> = before.difference(&after).cloned().collect();
     let subject = notify::subject_for_issue(&issue);
-    notify::fanout_suppress_ignored(&ctx.db, &user.id, newly_assigned, "issue_assigned", &subject).await;
-    notify::fanout_suppress_ignored(&ctx.db, &user.id, newly_unassigned, "issue_unassigned", &subject).await;
+    // One watch-level lookup serves both fanouts below.
+    let watch = ctx.db.list_repo_watch_levels(&subject.repo_id).await;
+    notify::fanout_suppress_ignored_with_watch(&ctx.db, &user.id, newly_assigned, "issue_assigned", &subject, &watch).await;
+    notify::fanout_suppress_ignored_with_watch(&ctx.db, &user.id, newly_unassigned, "issue_unassigned", &subject, &watch).await;
 
     let refreshed = ctx
         .db
@@ -1145,7 +1157,7 @@ pub async fn assignee_candidates(
     Ok(AssigneeCandidatesResponse { users })
 }
 
-/// `issue.reactions.toggle` — Write+; the eight contents on issue|comment (D-ISS-11 / D-ISS-20).
+/// `issue.reactions.toggle` — Read+ verified; the eight contents on issue|comment (D-ISS-11 / D-ISS-20).
 pub async fn reactions_toggle(
     ctx: &RpcCtx,
     input: serde_json::Value,
@@ -1157,7 +1169,7 @@ pub async fn reactions_toggle(
             format!("invalid issue.reactions.toggle input: {e}"),
         )
     })?;
-    let accessible = acl::resolve_for_write(ctx, &req.owner, &req.name).await?;
+    let accessible = acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
     let issue = load_issue_in_repo(ctx, &accessible.row.id, req.number).await?;
     let content = req.content.as_str();
 

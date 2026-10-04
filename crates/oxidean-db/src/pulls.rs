@@ -630,7 +630,7 @@ pub async fn set_state(
         }
         DbPool::Postgres(p) => {
             sqlx::query(
-                "UPDATE pull_requests SET state = $1, closed_at = $2, closed_by = $3,
+                "UPDATE pull_requests SET state = $1, closed_at = $2::timestamptz, closed_by = $3,
                  updated_at = now() WHERE id = $4",
             )
             .bind(state)
@@ -918,7 +918,7 @@ pub async fn mark_merged(
         DbPool::Postgres(p) => {
             sqlx::query(
                 "UPDATE pull_requests SET state = 'merged', merged_by = $1, merge_commit_sha = $2,
-                 merge_method = $3, merged_at = $4, closed_at = $4, closed_by = $1,
+                 merge_method = $3, merged_at = $4::timestamptz, closed_at = $4::timestamptz, closed_by = $1,
                  updated_at = now() WHERE id = $5",
             )
             .bind(merged_by)
@@ -1196,6 +1196,43 @@ pub async fn list_pull_comments(
                 out.push(map_pull_comment!(&r));
             }
             Ok(out)
+        }
+    }
+}
+
+/// Distinct comment author ids for a pull — participant fan-out needs only
+/// the ids, not the comment bodies.
+pub async fn list_pull_comment_author_ids(
+    pool: &DbPool,
+    pull_id: &str,
+) -> Result<Vec<String>, String> {
+    match pool {
+        DbPool::Postgres(p) => {
+            sqlx::query_scalar::<_, String>(
+                "SELECT DISTINCT author_id FROM pull_comments WHERE pull_id = $1",
+            )
+            .bind(pull_id)
+            .fetch_all(p)
+            .await
+            .map_err(|e| format!("list pull comment author ids failed: {e}"))
+        }
+        DbPool::MySql(p) => {
+            sqlx::query_scalar::<_, String>(
+                "SELECT DISTINCT author_id FROM pull_comments WHERE pull_id = ?",
+            )
+            .bind(pull_id)
+            .fetch_all(p)
+            .await
+            .map_err(|e| format!("list pull comment author ids failed: {e}"))
+        }
+        DbPool::Sqlite(p) => {
+            sqlx::query_scalar::<_, String>(
+                "SELECT DISTINCT author_id FROM pull_comments WHERE pull_id = ?1",
+            )
+            .bind(pull_id)
+            .fetch_all(p)
+            .await
+            .map_err(|e| format!("list pull comment author ids failed: {e}"))
         }
     }
 }
@@ -1545,6 +1582,43 @@ pub async fn list_pull_reviews(
     }
 }
 
+/// Distinct review author ids for a pull — participant fan-out needs only
+/// the ids, not the review rows.
+pub async fn list_pull_review_author_ids(
+    pool: &DbPool,
+    pull_id: &str,
+) -> Result<Vec<String>, String> {
+    match pool {
+        DbPool::Postgres(p) => {
+            sqlx::query_scalar::<_, String>(
+                "SELECT DISTINCT author_id FROM pull_reviews WHERE pull_id = $1",
+            )
+            .bind(pull_id)
+            .fetch_all(p)
+            .await
+            .map_err(|e| format!("list pull review author ids failed: {e}"))
+        }
+        DbPool::MySql(p) => {
+            sqlx::query_scalar::<_, String>(
+                "SELECT DISTINCT author_id FROM pull_reviews WHERE pull_id = ?",
+            )
+            .bind(pull_id)
+            .fetch_all(p)
+            .await
+            .map_err(|e| format!("list pull review author ids failed: {e}"))
+        }
+        DbPool::Sqlite(p) => {
+            sqlx::query_scalar::<_, String>(
+                "SELECT DISTINCT author_id FROM pull_reviews WHERE pull_id = ?1",
+            )
+            .bind(pull_id)
+            .fetch_all(p)
+            .await
+            .map_err(|e| format!("list pull review author ids failed: {e}"))
+        }
+    }
+}
+
 /// Batch `list_pull_reviews` — one `IN (...)` round trip for many pulls.
 pub async fn list_reviews_for_pulls(
     pool: &DbPool,
@@ -1614,7 +1688,7 @@ pub async fn dismiss_pull_review(
     match pool {
         DbPool::Postgres(p) => {
             sqlx::query(
-                "UPDATE pull_reviews SET state = 'dismissed', dismissed_at = $2, dismiss_reason = $3 WHERE id = $1",
+                "UPDATE pull_reviews SET state = 'dismissed', dismissed_at = $2::timestamptz, dismiss_reason = $3 WHERE id = $1",
             )
             .bind(id)
             .bind(dismissed_at)

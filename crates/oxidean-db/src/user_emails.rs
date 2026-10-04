@@ -214,6 +214,133 @@ pub async fn find_by_email(pool: &DbPool, email: &str) -> Result<Option<UserEmai
     }
 }
 
+/// Batch `find_by_email` — one `IN (...)` round trip (commit author resolution).
+/// `emails` are matched case-insensitively against stored `email`.
+pub async fn find_many_by_email(
+    pool: &DbPool,
+    emails: &[String],
+) -> Result<Vec<UserEmailRow>, String> {
+    let emails: Vec<String> = emails
+        .iter()
+        .map(|e| e.trim().to_ascii_lowercase())
+        .filter(|e| !e.is_empty())
+        .collect();
+    if emails.is_empty() {
+        return Ok(Vec::new());
+    }
+    match pool {
+        DbPool::Postgres(p) => {
+            let rows = sqlx::query(&format!("{SELECT_PG} WHERE lower(email) = ANY($1)"))
+                .bind(&emails)
+                .fetch_all(p)
+                .await
+                .map_err(|e| format!("find user emails by addresses failed: {e}"))?;
+            rows.iter().map(|r| Ok(map_user_email!(r))).collect()
+        }
+        DbPool::MySql(p) => {
+            let in_list =
+                crate::dialect::in_placeholders(crate::dialect::Dialect::MySql, 1, emails.len());
+            let q_str = format!("{SELECT_MYSQL} WHERE lower(email) IN ({in_list})");
+            let q = emails.iter().fold(sqlx::query(&q_str), |q, e| q.bind(e));
+            let rows = q
+                .fetch_all(p)
+                .await
+                .map_err(|e| format!("find user emails by addresses failed: {e}"))?;
+            rows.iter().map(|r| Ok(map_user_email!(r))).collect()
+        }
+        DbPool::Sqlite(p) => {
+            let in_list =
+                crate::dialect::in_placeholders(crate::dialect::Dialect::Sqlite, 1, emails.len());
+            let q_str = format!("{SELECT_SQLITE} WHERE lower(email) IN ({in_list})");
+            let q = emails.iter().fold(sqlx::query(&q_str), |q, e| q.bind(e));
+            let rows = q
+                .fetch_all(p)
+                .await
+                .map_err(|e| format!("find user emails by addresses failed: {e}"))?;
+            rows.iter().map(|r| Ok(map_user_email!(r))).collect()
+        }
+    }
+}
+
+/// Verified `(user_id, email)` pairs for many users — one round trip
+/// (commit signature policy + allowed_signers batching).
+pub async fn list_verified_emails_for_users(
+    pool: &DbPool,
+    user_ids: &[String],
+) -> Result<Vec<(String, String)>, String> {
+    if user_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    match pool {
+        DbPool::Postgres(p) => {
+            let rows = sqlx::query(
+                "SELECT user_id, email FROM user_emails
+                 WHERE user_id = ANY($1) AND verified_at IS NOT NULL",
+            )
+            .bind(user_ids)
+            .fetch_all(p)
+            .await
+            .map_err(|e| format!("list verified user emails failed: {e}"))?;
+            rows.iter()
+                .map(|r| {
+                    Ok((
+                        r.try_get::<String, _>("user_id")
+                            .map_err(|e| format!("verified email row: {e}"))?,
+                        r.try_get::<String, _>("email")
+                            .map_err(|e| format!("verified email row: {e}"))?,
+                    ))
+                })
+                .collect()
+        }
+        DbPool::MySql(p) => {
+            let in_list =
+                crate::dialect::in_placeholders(crate::dialect::Dialect::MySql, 1, user_ids.len());
+            let q_str = format!(
+                "SELECT user_id, email FROM user_emails
+                 WHERE user_id IN ({in_list}) AND verified_at IS NOT NULL"
+            );
+            let q = user_ids.iter().fold(sqlx::query(&q_str), |q, id| q.bind(id));
+            let rows = q
+                .fetch_all(p)
+                .await
+                .map_err(|e| format!("list verified user emails failed: {e}"))?;
+            rows.iter()
+                .map(|r| {
+                    Ok((
+                        r.try_get::<String, _>("user_id")
+                            .map_err(|e| format!("verified email row: {e}"))?,
+                        r.try_get::<String, _>("email")
+                            .map_err(|e| format!("verified email row: {e}"))?,
+                    ))
+                })
+                .collect()
+        }
+        DbPool::Sqlite(p) => {
+            let in_list =
+                crate::dialect::in_placeholders(crate::dialect::Dialect::Sqlite, 1, user_ids.len());
+            let q_str = format!(
+                "SELECT user_id, email FROM user_emails
+                 WHERE user_id IN ({in_list}) AND verified_at IS NOT NULL"
+            );
+            let q = user_ids.iter().fold(sqlx::query(&q_str), |q, id| q.bind(id));
+            let rows = q
+                .fetch_all(p)
+                .await
+                .map_err(|e| format!("list verified user emails failed: {e}"))?;
+            rows.iter()
+                .map(|r| {
+                    Ok((
+                        r.try_get::<String, _>("user_id")
+                            .map_err(|e| format!("verified email row: {e}"))?,
+                        r.try_get::<String, _>("email")
+                            .map_err(|e| format!("verified email row: {e}"))?,
+                    ))
+                })
+                .collect()
+        }
+    }
+}
+
 pub async fn list_for_user(pool: &DbPool, user_id: &str) -> Result<Vec<UserEmailRow>, String> {
     match pool {
         DbPool::Postgres(p) => {

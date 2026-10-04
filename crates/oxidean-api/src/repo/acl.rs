@@ -241,27 +241,36 @@ pub async fn effective_capability(
     let personal_owner = matches!(owner, OwnerRef::User { .. })
         && caller_user_id.is_some_and(|id| id == owner.id());
 
-    let mut org_role: Option<OrgRole> = None;
-    let mut member_base = MemberBasePermission::None;
-    if matches!(owner, OwnerRef::Org { .. }) {
-        if let Some(caller) = caller_user_id {
-            if let Some(role) = db.find_org_member_role(owner.id(), caller).await? {
-                org_role = parse_org_role(&role);
+    // Role / base-permission / collaborator lookups are independent — run them
+    // concurrently instead of three sequential round trips.
+    let (org_role_row, base_row, collab_row) = tokio::try_join!(
+        async {
+            if matches!(owner, OwnerRef::Org { .. }) {
+                if let Some(caller) = caller_user_id {
+                    return db.find_org_member_role(owner.id(), caller).await;
+                }
             }
-        }
-        if let Some(base) = db.find_org_member_base_permission(owner.id()).await? {
-            member_base = parse_member_base(&base);
-        }
-    }
+            Ok(None)
+        },
+        async {
+            if matches!(owner, OwnerRef::Org { .. }) {
+                return db.find_org_member_base_permission(owner.id()).await;
+            }
+            Ok(None)
+        },
+        async {
+            if let Some(caller) = caller_user_id {
+                return db.find_repo_collaborator(&repo.id, caller).await;
+            }
+            Ok(None)
+        },
+    )?;
 
-    let collaborator = if let Some(caller) = caller_user_id {
-        match db.find_repo_collaborator(&repo.id, caller).await? {
-            Some(row) => parse_collaborator_capability(&row.permission),
-            None => None,
-        }
-    } else {
-        None
-    };
+    let org_role: Option<OrgRole> = org_role_row.and_then(|role| parse_org_role(&role));
+    let member_base = base_row
+        .map(|base| parse_member_base(&base))
+        .unwrap_or(MemberBasePermission::None);
+    let collaborator = collab_row.and_then(|row| parse_collaborator_capability(&row.permission));
 
     let public_repo = !is_private_visibility(&repo.visibility);
     Ok(coalesce(

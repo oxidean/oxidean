@@ -32,12 +32,18 @@ impl VerifyKeyring {
     }
 }
 
-/// Collect allowed_signers + GNUPGHOME for the given committer/author emails.
-pub async fn keyring_for_emails(db: &Database, emails: &[String]) -> VerifyKeyring {
-    let resolved = author_resolve::resolve_authors_for_emails(db, emails).await;
+/// Collect allowed_signers + GNUPGHOME for a page of committer/author emails.
+/// `resolved` must be the [`author_resolve::resolve_authors_for_emails`] map
+/// for `emails` — callers resolve once and reuse the map for output rows,
+/// avoiding a second lookup pass.
+pub async fn keyring_for_resolved(
+    db: &Database,
+    emails: &[String],
+    resolved: &std::collections::HashMap<String, author_resolve::ResolvedAuthor>,
+) -> VerifyKeyring {
     let mut out = VerifyKeyring::empty();
 
-    if let Some(named) = author_resolve::build_allowed_signers_file(db, emails, &resolved).await {
+    if let Some(named) = author_resolve::build_allowed_signers_file(db, emails, resolved).await {
         if let Ok(dir) = tempfile::TempDir::new() {
             let path = dir.path().join("allowed_signers");
             if tokio::fs::copy(named.path(), &path).await.is_ok() {
@@ -47,7 +53,7 @@ pub async fn keyring_for_emails(db: &Database, emails: &[String]) -> VerifyKeyri
         }
     }
 
-    if let Some(home) = build_gpg_home(db, &resolved).await {
+    if let Some(home) = build_gpg_home(db, resolved).await {
         out.gpg_home = Some(home.path().to_path_buf());
         out._gpg_dir = Some(home);
     }
@@ -61,7 +67,9 @@ pub async fn allowed_signers_for_emails(
     db: &Database,
     emails: &[String],
 ) -> Option<(tempfile::TempDir, PathBuf)> {
-    let ring = keyring_for_emails(db, emails).await;
+    let resolved =
+        author_resolve::resolve_authors_for_emails(db, emails.iter().map(String::as_str)).await;
+    let ring = keyring_for_resolved(db, emails, &resolved).await;
     match (ring._signers_dir, ring.allowed_signers) {
         (Some(dir), Some(path)) => {
             // path is inside dir; return dir + path
@@ -76,21 +84,23 @@ async fn build_gpg_home(
     resolved: &std::collections::HashMap<String, author_resolve::ResolvedAuthor>,
 ) -> Option<tempfile::TempDir> {
     let mut seen = std::collections::HashSet::new();
-    let mut armors: Vec<String> = Vec::new();
+    let mut uids: Vec<String> = Vec::new();
     for author in resolved.values() {
-        let Some(uid) = author.user_id.as_deref() else {
-            continue;
-        };
-        if !seen.insert(uid.to_string()) {
-            continue;
-        }
-        let Ok(keys) = db.list_gpg_keys_for_user(uid).await else {
-            continue;
-        };
-        for k in keys {
-            armors.push(k.armored_public_key);
+        if let Some(uid) = author.user_id.as_deref() {
+            if seen.insert(uid.to_string()) {
+                uids.push(uid.to_string());
+            }
         }
     }
+    // One batched query; on error no keys are imported, same as the old
+    // per-user `continue` on `list_gpg_keys_for_user` failure.
+    let armors: Vec<String> = db
+        .list_gpg_keys_for_users(&uids)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|k| k.armored_public_key)
+        .collect();
     if armors.is_empty() {
         return None;
     }
@@ -120,11 +130,149 @@ async fn build_gpg_home(
     Some(dir)
 }
 
+/// Prefetched inputs for [`VerifiedPolicy::status`] — verified addresses and
+/// GPG UID emails for all resolved users on a commit page, each fetched with a
+/// single batched query. `None` on a map means the lookup failed (the old
+/// per-call error path returned `"unknown"`).
+pub struct VerifiedPolicy {
+    verified: Option<std::collections::HashMap<String, std::collections::HashSet<String>>>,
+    gpg_uids: Option<std::collections::HashMap<String, std::collections::HashSet<String>>>,
+}
+
+impl VerifiedPolicy {
+    /// No data — equivalent to `load` with an empty user set. Every `status`
+    /// on an unsigned commit early-returns before touching these maps.
+    pub fn none() -> Self {
+        Self {
+            verified: Some(std::collections::HashMap::new()),
+            gpg_uids: Some(std::collections::HashMap::new()),
+        }
+    }
+
+    /// Fetch policy inputs for the given resolved users. `needs_gpg` should be
+    /// true when any commit in the page reports `signature_kind == "gpg"`.
+    pub async fn load(db: &Database, user_ids: &[String], needs_gpg: bool) -> Self {
+        let verified = match db.list_verified_emails_for_users(user_ids).await {
+            Ok(pairs) => {
+                let mut m: std::collections::HashMap<String, std::collections::HashSet<String>> =
+                    std::collections::HashMap::new();
+                for (uid, email) in pairs {
+                    m.entry(uid).or_default().insert(email.to_ascii_lowercase());
+                }
+                Some(m)
+            }
+            Err(_) => None,
+        };
+        let gpg_uids = if needs_gpg {
+            match db.list_gpg_keys_for_users(user_ids).await {
+                Ok(keys) => {
+                    let mut m: std::collections::HashMap<
+                        String,
+                        std::collections::HashSet<String>,
+                    > = std::collections::HashMap::new();
+                    for k in keys {
+                        let entry = m.entry(k.user_id.clone()).or_default();
+                        for u in
+                            serde_json::from_str::<Vec<String>>(&k.uid_emails).unwrap_or_default()
+                        {
+                            entry.insert(u.to_ascii_lowercase());
+                        }
+                    }
+                    Some(m)
+                }
+                Err(_) => None,
+            }
+        } else {
+            Some(std::collections::HashMap::new())
+        };
+        Self { verified, gpg_uids }
+    }
+
+    /// Apply forge Verified policy to one commit, using prefetched data.
+    /// `resolved` is the author-resolution map for the page.
+    pub fn status(
+        &self,
+        resolved: &std::collections::HashMap<String, author_resolve::ResolvedAuthor>,
+        committer_email: &str,
+        author_email: &str,
+        signature_status: &str,
+        signature_kind: &str,
+    ) -> String {
+        if signature_status != "valid" {
+            return signature_status.to_string();
+        }
+        let email = if !committer_email.trim().is_empty() {
+            committer_email.trim()
+        } else {
+            author_email.trim()
+        };
+        if email.is_empty() {
+            return "unknown".into();
+        }
+        if signature_kind == "ssh" && email.eq_ignore_ascii_case(FORGE_NOREPLY_EMAIL) {
+            return "valid".into();
+        }
+        let Some(user_id) = resolved.get(email).and_then(|r| r.user_id.as_deref()) else {
+            return "unknown".into();
+        };
+
+        if !author_resolve::is_forge_noreply_email(email) {
+            let Some(verified) = self.verified.as_ref() else {
+                return "unknown".into();
+            };
+            let email_l = email.to_ascii_lowercase();
+            let addr_ok = verified.get(user_id).is_some_and(|v| v.contains(&email_l));
+            if !addr_ok {
+                return "unknown".into();
+            }
+        }
+
+        if signature_kind == "gpg" {
+            let Some(gpg_uids) = self.gpg_uids.as_ref() else {
+                return "unknown".into();
+            };
+            let email_l = email.to_ascii_lowercase();
+            let uid_ok = gpg_uids
+                .get(user_id)
+                .is_some_and(|uids| uids.contains(&email_l));
+            if !uid_ok {
+                return "invalid".into();
+            }
+        }
+
+        "valid".into()
+    }
+}
+
+/// User ids that need [`VerifiedPolicy`] data for a commit page — only commits
+/// reporting crypto-valid signatures reach the policy checks.
+pub fn needs_verified_policy<S, K>(commits: impl IntoIterator<Item = (S, K)>) -> (bool, bool)
+where
+    S: AsRef<str>,
+    K: AsRef<str>,
+{
+    let mut any_valid = false;
+    let mut any_gpg = false;
+    for (status, kind) in commits {
+        if status.as_ref() == "valid" {
+            any_valid = true;
+            if kind.as_ref() == "gpg" {
+                any_gpg = true;
+            }
+        }
+    }
+    (any_valid, any_gpg)
+}
+
 /// Apply forge Verified policy after crypto `%G?` succeeded.
 ///
 /// - Committer email must resolve to a user, and that exact address must be
 ///   verified on the account (or be a forge noreply address).
 /// - For GPG signatures, committer email must appear in a registered key UID.
+///
+/// Single-commit convenience over [`VerifiedPolicy::status`] — list endpoints
+/// build one [`VerifiedPolicy`] per page instead.
+#[allow(dead_code)]
 pub async fn apply_verified_policy(
     db: &Database,
     committer_email: &str,
@@ -132,65 +280,33 @@ pub async fn apply_verified_policy(
     signature_status: &str,
     signature_kind: &str,
 ) -> String {
-    if signature_status != "valid" {
-        return signature_status.to_string();
-    }
     let email = if !committer_email.trim().is_empty() {
         committer_email.trim()
     } else {
         author_email.trim()
     };
-    if email.is_empty() {
-        return "unknown".into();
-    }
-
-    // Forge-authored commits (seed/web-flow) sign under the instance identity,
-    // which backs no user account. `allowedSignersFile` binds that principal
-    // only to the web-flow key, so a crypto-valid SSH signature is already the
-    // instance vouching for the commit — skip user resolution (the forge
-    // marks web-flow commits Verified via its own key).
-    if signature_kind == "ssh" && email.eq_ignore_ascii_case(FORGE_NOREPLY_EMAIL) {
-        return "valid".into();
-    }
-
-    let resolved = author_resolve::resolve_author_email(db, email).await;
-    let Some(user_id) = resolved.user_id.as_deref() else {
-        return "unknown".into();
-    };
-
-    // Noreply is always forge-recognized for the resolved user.
-    if author_resolve::is_forge_noreply_email(email) {
-        // fall through to GPG UID check below when kind is gpg
-    } else {
-        let Ok(verified) = db.list_verified_emails_for_user(user_id).await else {
-            return "unknown".into();
-        };
-        let email_l = email.to_ascii_lowercase();
-        let addr_ok = verified
-            .iter()
-            .any(|v| v.eq_ignore_ascii_case(&email_l));
-        if !addr_ok {
-            return "unknown".into();
+    let mut resolved_map = std::collections::HashMap::new();
+    let mut uids: Vec<String> = Vec::new();
+    if !email.is_empty() {
+        let resolved = author_resolve::resolve_author_email(db, email).await;
+        if let Some(uid) = resolved.user_id.clone() {
+            uids.push(uid);
         }
+        resolved_map.insert(email.to_string(), resolved);
     }
-
-    if signature_kind == "gpg" {
-        let Ok(keys) = db.list_gpg_keys_for_user(user_id).await else {
-            return "unknown".into();
-        };
-        let email_l = email.to_ascii_lowercase();
-        let uid_ok = keys.iter().any(|k| {
-            serde_json::from_str::<Vec<String>>(&k.uid_emails)
-                .unwrap_or_default()
-                .iter()
-                .any(|u| u.eq_ignore_ascii_case(&email_l))
-        });
-        if !uid_ok {
-            return "invalid".into();
-        }
-    }
-
-    "valid".into()
+    let policy = VerifiedPolicy::load(
+        db,
+        &uids,
+        signature_kind == "gpg" && signature_status == "valid",
+    )
+    .await;
+    policy.status(
+        &resolved_map,
+        committer_email,
+        author_email,
+        signature_status,
+        signature_kind,
+    )
 }
 
 #[allow(dead_code)]

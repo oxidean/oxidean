@@ -42,8 +42,8 @@ describe("Phase 12 Pulls UI", () => {
     expect(pullsIndex).toMatch(/All/);
   });
 
-  it("New pull request gated by can_write", () => {
-    expect(pullsIndex).toMatch(/can_write/);
+  it("New pull request gated by verified session (D-PR-29)", () => {
+    expect(pullsIndex).toMatch(/email_verified/);
     expect(pullsNew).toMatch(/Create pull request/);
   });
 

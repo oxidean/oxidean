@@ -253,6 +253,8 @@ pub fn router_with_state(state: AppState, cors: CorsLayer) -> Router {
         .route("/health", get(health))
         .route("/api/rpc", post(rpc_http))
         .route("/api/rpc/ws", get(rpc_ws))
+        // REST facade over the RPC domain (API-01).
+        .nest("/api/v1", crate::rest::router())
         .nest("/api/actions", crate::actions::runner_proto::router())
         .route("/api/auth/workos/start", get(auth_callbacks::workos_start))
         .route(
@@ -355,7 +357,7 @@ fn session_token_from_headers(headers: &HeaderMap) -> Option<String> {
 /// Edge credential for `/api/rpc` (API-02): the session cookie always wins;
 /// `Authorization: Bearer <pat>` is consulted only when no cookie is present.
 #[derive(Debug, Clone)]
-enum RpcCredential {
+pub(crate) enum RpcCredential {
     Cookie(String),
     Bearer(String),
     Anonymous,
@@ -371,7 +373,7 @@ fn bearer_token_from_headers(headers: &HeaderMap) -> Option<String> {
     (!token.is_empty()).then(|| token.to_string())
 }
 
-fn edge_credential(headers: &HeaderMap) -> RpcCredential {
+pub(crate) fn edge_credential(headers: &HeaderMap) -> RpcCredential {
     if let Some(token) = session_token_from_headers(headers) {
         return RpcCredential::Cookie(token);
     }
@@ -381,7 +383,7 @@ fn edge_credential(headers: &HeaderMap) -> RpcCredential {
     RpcCredential::Anonymous
 }
 
-async fn build_rpc_ctx(
+pub(crate) async fn build_rpc_ctx(
     state: &AppState,
     credential: RpcCredential,
     client: rpc::ClientMeta,

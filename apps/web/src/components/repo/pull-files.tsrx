@@ -17,7 +17,7 @@ export type PullFilesProps = {
   owner: string;
   repoName: string;
   number: number;
-  canWrite: boolean;
+  canInteract: boolean;
 };
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
@@ -232,7 +232,7 @@ export function PullFiles(props: PullFilesProps) @{
                 } @else {
                   <SplitDiff path={f.path} status={f.status} patch={f.patch} />;
                 }
-                @if (props.canWrite) {
+                @if (props.canInteract) {
                   <div className="mt-1 px-1">
                     @if (linePath === f.path) {
                       <div className="flex flex-wrap items-center gap-2">

@@ -1266,6 +1266,14 @@ impl Database {
         pulls::list_pull_comments(self.require_pool()?, pull_id).await
     }
 
+    /// Distinct comment author ids — participant fan-out (no body transfer).
+    pub async fn list_pull_comment_author_ids(
+        &self,
+        pull_id: &str,
+    ) -> Result<Vec<String>, String> {
+        pulls::list_pull_comment_author_ids(self.require_pool()?, pull_id).await
+    }
+
     pub async fn set_pull_comment_resolved(
         &self,
         id: &str,
@@ -1352,6 +1360,14 @@ impl Database {
 
     pub async fn list_pull_reviews(&self, pull_id: &str) -> Result<Vec<PullReviewRow>, String> {
         pulls::list_pull_reviews(self.require_pool()?, pull_id).await
+    }
+
+    /// Distinct review author ids — participant fan-out (no row transfer).
+    pub async fn list_pull_review_author_ids(
+        &self,
+        pull_id: &str,
+    ) -> Result<Vec<String>, String> {
+        pulls::list_pull_review_author_ids(self.require_pool()?, pull_id).await
     }
 
     pub async fn dismiss_pull_review(
@@ -1780,6 +1796,14 @@ impl Database {
         issues::list_issue_comments(self.require_pool()?, issue_id).await
     }
 
+    /// Distinct comment author ids — participant fan-out (no body transfer).
+    pub async fn list_issue_comment_author_ids(
+        &self,
+        issue_id: &str,
+    ) -> Result<Vec<String>, String> {
+        issues::list_issue_comment_author_ids(self.require_pool()?, issue_id).await
+    }
+
     pub async fn update_issue_comment_body(
         &self,
         id: &str,
@@ -2061,6 +2085,28 @@ impl Database {
 
     pub async fn find_user_by_email(&self, email: &str) -> Result<Option<UserRow>, String> {
         users::find_by_email(self.require_pool()?, email).await
+    }
+
+    /// Rows in `user_emails` for many addresses — one `IN` round trip
+    /// (commit author batch resolution).
+    pub async fn find_user_emails_by_addresses(
+        &self,
+        emails: &[String],
+    ) -> Result<Vec<user_emails::UserEmailRow>, String> {
+        user_emails::find_many_by_email(self.require_pool()?, emails).await
+    }
+
+    /// Legacy `users.email` fallback matches for many addresses — one round trip.
+    pub async fn find_users_by_emails(&self, emails: &[String]) -> Result<Vec<UserRow>, String> {
+        users::find_many_by_email(self.require_pool()?, emails).await
+    }
+
+    /// Users for many usernames — one `IN` round trip (mention resolution).
+    pub async fn find_users_by_usernames(
+        &self,
+        usernames: &[String],
+    ) -> Result<Vec<UserRow>, String> {
+        users::find_many_by_username(self.require_pool()?, usernames).await
     }
 
     pub async fn find_user_by_username(&self, username: &str) -> Result<Option<UserRow>, String> {
@@ -2383,6 +2429,14 @@ impl Database {
         user_id: &str,
     ) -> Result<Vec<String>, String> {
         user_emails::list_verified_emails_for_user(self.require_pool()?, user_id).await
+    }
+
+    /// `(user_id, email)` verified pairs for many users — one `IN` round trip.
+    pub async fn list_verified_emails_for_users(
+        &self,
+        user_ids: &[String],
+    ) -> Result<Vec<(String, String)>, String> {
+        user_emails::list_verified_emails_for_users(self.require_pool()?, user_ids).await
     }
 
     // --- sessions ---
@@ -2976,6 +3030,14 @@ impl Database {
         ssh_keys::list_for_user(self.require_pool()?, user_id).await
     }
 
+    /// Keys for many users — one `IN` round trip (commit keyring batching).
+    pub async fn list_ssh_keys_for_users(
+        &self,
+        user_ids: &[String],
+    ) -> Result<Vec<ssh_keys::SshKeyRow>, String> {
+        ssh_keys::list_for_users(self.require_pool()?, user_ids).await
+    }
+
     pub async fn revoke_ssh_key(&self, id: &str) -> Result<(), String> {
         ssh_keys::revoke(self.require_pool()?, id).await
     }
@@ -3027,6 +3089,14 @@ impl Database {
         user_id: &str,
     ) -> Result<Vec<gpg_keys::GpgKeyRow>, String> {
         gpg_keys::list_for_user(self.require_pool()?, user_id).await
+    }
+
+    /// Keys for many users — one `IN` round trip (commit keyring batching).
+    pub async fn list_gpg_keys_for_users(
+        &self,
+        user_ids: &[String],
+    ) -> Result<Vec<gpg_keys::GpgKeyRow>, String> {
+        gpg_keys::list_for_users(self.require_pool()?, user_ids).await
     }
 
     pub async fn revoke_gpg_key(&self, id: &str) -> Result<(), String> {

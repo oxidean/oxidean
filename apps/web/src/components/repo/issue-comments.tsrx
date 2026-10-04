@@ -1,5 +1,9 @@
 import { useQuery, useQueryClient } from "@octanejs/tanstack-query";
-import type { CommentRevisionPublic, IssueCommentPublic } from "@oxidean/api-client";
+import type {
+  CommentRevisionPublic,
+  IssueCommentPublic,
+  IssueCommentsListResponse,
+} from "@oxidean/api-client";
 import { useForm } from "@octanejs/tanstack-form";
 import { useState } from "octane";
 import { AuthErrorBanner } from "@/components/auth-shell";
@@ -16,6 +20,7 @@ export type IssueCommentsProps = {
   repoName: string;
   number: number;
   canWrite: boolean;
+  canInteract: boolean;
   currentUserId: string;
 };
 
@@ -114,8 +119,10 @@ function CommentItem(props: {
   repoName: string;
   number: number;
   canWrite: boolean;
+  canInteract: boolean;
   currentUserId: string;
-  onChanged: () => Promise<void>;
+  onUpdated: (comment: IssueCommentPublic) => void;
+  onDeleted: (id: string) => void;
 }) @{
   const comment = props.comment;
   const isAuthor = !!props.currentUserId && comment.author_id === props.currentUserId;
@@ -143,7 +150,7 @@ function CommentItem(props: {
           setPending(false);
           return;
         }
-        await props.onChanged();
+        props.onUpdated(res.data);
         setEditing(false);
         setPending(false);
       } catch {
@@ -168,7 +175,7 @@ function CommentItem(props: {
         setPending(false);
         return;
       }
-      await props.onChanged();
+      props.onDeleted(comment.id);
       setPending(false);
     } catch {
       setError(NETWORK_ERROR);
@@ -272,8 +279,7 @@ function CommentItem(props: {
           target="comment"
           commentId={comment.id}
           reactions={comment.reactions ?? []}
-          canWrite={props.canWrite}
-          onToggled={props.onChanged}
+          canInteract={props.canInteract}
         />
         <CommentHistoryDisclosure
           owner={props.owner}
@@ -308,9 +314,19 @@ export function IssueComments(props: IssueCommentsProps) @{
 
   const comments: IssueCommentPublic[] = listQ.data?.comments ?? [];
 
+  const listKey = ["issue", "comments", "list", props.owner, props.repoName, props.number] as const;
+
+  // Patch the cached thread with the mutation response instead of refetching
+  // the whole list — the API returns the full comment row.
+  function patchComments(fn: (cs: IssueCommentPublic[]) => IssueCommentPublic[]) {
+    queryClient.setQueryData<IssueCommentsListResponse>(listKey, (old) =>
+      old ? { comments: fn(old.comments) } : old,
+    );
+  }
+
   async function invalidate() {
     await queryClient.invalidateQueries({
-      queryKey: ["issue", "comments", "list", props.owner, props.repoName, props.number],
+      queryKey: listKey,
     });
   }
 
@@ -336,7 +352,11 @@ export function IssueComments(props: IssueCommentsProps) @{
           return;
         }
         composeForm.reset();
-        await invalidate();
+        if (listQ.data) {
+          patchComments((cs) => [...cs, res.data]);
+        } else {
+          await invalidate();
+        }
         setPending(false);
       } catch {
         setError(NETWORK_ERROR);
@@ -372,8 +392,12 @@ export function IssueComments(props: IssueCommentsProps) @{
                 repoName={props.repoName}
                 number={props.number}
                 canWrite={props.canWrite}
+                canInteract={props.canInteract}
                 currentUserId={props.currentUserId}
-                onChanged={invalidate}
+                onUpdated={(c) =>
+                  patchComments((cs) => cs.map((x) => (x.id === c.id ? c : x)))
+                }
+                onDeleted={(id) => patchComments((cs) => cs.filter((x) => x.id !== id))}
               />;
             }
           </ul>;
@@ -381,7 +405,7 @@ export function IssueComments(props: IssueCommentsProps) @{
       }
     }
 
-    @if (props.canWrite) {
+    @if (props.canInteract) {
       <form
         method="post"
         action="#"
@@ -416,7 +440,7 @@ export function IssueComments(props: IssueCommentsProps) @{
         </div>
       </form>;
     }
-    @if (!props.currentUserId && !props.canWrite) {
+    @if (!props.currentUserId && !props.canInteract) {
       <p className="rounded-md border border-border bg-muted/30 px-4 py-3 text-[13px] text-muted-foreground">
         <AppLink
           href="/login"
@@ -425,6 +449,11 @@ export function IssueComments(props: IssueCommentsProps) @{
           Sign in
         </AppLink>
         {" to join this conversation." as string}
+      </p>;
+    }
+    @if (props.currentUserId && !props.canInteract) {
+      <p className="rounded-md border border-border bg-muted/30 px-4 py-3 text-[13px] text-muted-foreground">
+        {"Verify your email to join this conversation." as string}
       </p>;
     }
   </section>;

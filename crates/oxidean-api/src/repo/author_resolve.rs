@@ -65,6 +65,7 @@ pub fn parse_noreply_local_part(local: &str) -> Option<(String, Option<String>)>
 }
 
 /// Resolve a single author email to a user (exact match, then noreply forms).
+#[allow(dead_code)]
 pub async fn resolve_author_email(db: &Database, email: &str) -> ResolvedAuthor {
     let email = email.trim();
     if email.is_empty() {
@@ -113,21 +114,134 @@ pub async fn resolve_author_emails(
 }
 
 /// Batch-resolve unique author emails for a page of commits / blame lines.
+///
+/// Same result as calling [`resolve_author_email`] per email, but bounded to a
+/// handful of `IN`-list round trips instead of ~2 sequential queries per email.
 pub async fn resolve_authors_for_emails(
     db: &Database,
     emails: impl IntoIterator<Item = impl AsRef<str>>,
 ) -> HashMap<String, ResolvedAuthor> {
-    let mut unique = HashSet::new();
+    let mut unique: Vec<String> = Vec::new();
+    let mut seen = HashSet::new();
     for e in emails {
         let trimmed = e.as_ref().trim().to_string();
-        if !trimmed.is_empty() {
-            unique.insert(trimmed);
+        if !trimmed.is_empty() && seen.insert(trimmed.clone()) {
+            unique.push(trimmed);
         }
     }
-    let mut out = HashMap::with_capacity(unique.len());
-    for email in unique {
-        let resolved = resolve_author_email(db, &email).await;
-        out.insert(email, resolved);
+    let mut out: HashMap<String, ResolvedAuthor> = HashMap::with_capacity(unique.len());
+    if unique.is_empty() {
+        return out;
+    }
+
+    // Stage 1 — `user_emails` rows. An email with a row resolves to that row's
+    // user (when the user row exists); without a row it falls through to the
+    // legacy `users.email` fallback, exactly like `resolve_author_email`.
+    let ue_rows = db
+        .find_user_emails_by_addresses(&unique)
+        .await
+        .unwrap_or_default();
+    let mut email_user_id: HashMap<String, String> = HashMap::new();
+    let mut ue_hit: HashSet<String> = HashSet::new();
+    let mut wanted_ids: Vec<String> = Vec::new();
+    let mut wanted_seen = HashSet::new();
+    for row in &ue_rows {
+        let key = row.email.to_ascii_lowercase();
+        ue_hit.insert(key.clone());
+        email_user_id.insert(key, row.user_id.clone());
+        if wanted_seen.insert(row.user_id.clone()) {
+            wanted_ids.push(row.user_id.clone());
+        }
+    }
+    let mut users_by_id: HashMap<String, UserRow> = db
+        .find_users_by_ids(&wanted_ids)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|u| (u.id.clone(), u))
+        .collect();
+
+    let mut remaining: Vec<String> = Vec::new();
+    let mut stage3: Vec<String> = Vec::new();
+    for email in &unique {
+        let key = email.to_ascii_lowercase();
+        if ue_hit.contains(&key) {
+            if let Some(user) = email_user_id.get(&key).and_then(|id| users_by_id.get(id)) {
+                out.insert(email.clone(), from_user(user));
+            } else {
+                // user_emails row exists but user row missing →
+                // find_user_by_email → None → noreply path only (no
+                // users.email fallback), same as resolve_author_email.
+                stage3.push(email.clone());
+            }
+        } else {
+            remaining.push(email.clone());
+        }
+    }
+
+    // Stage 2 — legacy `users.email` fallback for emails with no user_emails row.
+    if !remaining.is_empty() {
+        let fallback = db
+            .find_users_by_emails(&remaining)
+            .await
+            .unwrap_or_default();
+        let mut by_email: HashMap<String, &UserRow> = HashMap::new();
+        for u in &fallback {
+            by_email.entry(u.email.to_ascii_lowercase()).or_insert(u);
+        }
+        for email in &remaining {
+            match by_email.get(&email.to_ascii_lowercase()) {
+                Some(u) => {
+                    out.insert(email.clone(), from_user(u));
+                }
+                None => stage3.push(email.clone()),
+            }
+        }
+    }
+
+    // Stage 3 — `{id}[+{username}]@users.noreply.<host>` resolution.
+    let expected = format!("users.noreply.{}", noreply_host());
+    let mut noreply: HashMap<String, (String, Option<String>)> = HashMap::new();
+    for email in &stage3 {
+        let Some((local, domain)) = email.split_once('@') else {
+            continue;
+        };
+        if domain.to_ascii_lowercase() != expected {
+            continue;
+        }
+        if let Some((user_id, maybe_username)) = parse_noreply_local_part(local) {
+            noreply.insert(email.clone(), (user_id, maybe_username));
+        }
+    }
+    if !noreply.is_empty() {
+        let missing: Vec<String> = noreply
+            .values()
+            .map(|(id, _)| id.clone())
+            .filter(|id| !users_by_id.contains_key(id))
+            .collect();
+        if !missing.is_empty() {
+            users_by_id.extend(
+                db.find_users_by_ids(&missing)
+                    .await
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|u| (u.id.clone(), u)),
+            );
+        }
+        for (email, (user_id, maybe_username)) in noreply {
+            let Some(user) = users_by_id.get(&user_id) else {
+                continue;
+            };
+            if let Some(expected_username) = maybe_username {
+                if !user
+                    .username
+                    .eq_ignore_ascii_case(expected_username.trim())
+                {
+                    continue;
+                }
+            }
+            out.insert(email, from_user(user));
+        }
     }
     out
 }
@@ -190,24 +304,45 @@ pub async fn build_allowed_signers_file(
         }
     }
 
-    let mut seen_users = HashSet::new();
-    for (_email, author) in resolved {
-        let Some(uid) = author.user_id.as_deref() else {
-            continue;
-        };
-        if !seen_users.insert(uid.to_string()) {
+    let mut uids: Vec<String> = Vec::new();
+    {
+        let mut seen = HashSet::new();
+        for author in resolved.values() {
+            if let Some(uid) = author.user_id.as_deref() {
+                if seen.insert(uid.to_string()) {
+                    uids.push(uid.to_string());
+                }
+            }
+        }
+    }
+    // Batched lookups — one round trip each instead of two per user. On error
+    // the maps stay empty, which mirrors the old per-user `continue` path.
+    let all_keys: Vec<oxidean_db::ssh_keys::SshKeyRow> =
+        db.list_ssh_keys_for_users(&uids).await.unwrap_or_default();
+    let verified_pairs: Option<Vec<(String, String)>> =
+        db.list_verified_emails_for_users(&uids).await.ok();
+    let mut keys_by_user: HashMap<&str, Vec<&oxidean_db::ssh_keys::SshKeyRow>> = HashMap::new();
+    for k in &all_keys {
+        keys_by_user.entry(k.user_id.as_str()).or_default().push(k);
+    }
+    let mut verified_by_user: HashMap<&str, Vec<&str>> = HashMap::new();
+    for (uid, email) in verified_pairs.iter().flatten() {
+        verified_by_user
+            .entry(uid.as_str())
+            .or_default()
+            .push(email.as_str());
+    }
+
+    for uid in &uids {
+        let uid = uid.as_str();
+        // A verified-emails lookup failure used to skip the user entirely.
+        if verified_pairs.is_none() {
             continue;
         }
-        let Ok(keys) = db.list_ssh_keys_for_user(uid).await else {
-            continue;
-        };
-        let Ok(verified_emails) = db.list_verified_emails_for_user(uid).await else {
-            continue;
-        };
         // Always include the commit email that resolved this user, plus every
         // verified address on the account (forge multi-email principals).
         let mut principals: HashSet<String> = HashSet::new();
-        for e in verified_emails {
+        for e in verified_by_user.get(uid).into_iter().flatten().copied() {
             let t = e.trim().to_string();
             if !t.is_empty() {
                 principals.insert(t);
@@ -221,7 +356,7 @@ pub async fn build_allowed_signers_file(
                 }
             }
         }
-        for key_row in keys {
+        for key_row in keys_by_user.get(uid).into_iter().flatten().copied() {
             if !key_row.can_sign {
                 continue;
             }

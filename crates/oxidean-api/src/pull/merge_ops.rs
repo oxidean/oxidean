@@ -153,7 +153,14 @@ pub async fn commits(
         }
         emails.push(c.author_email.clone());
     }
-    let keyring = crate::repo::signatures::keyring_for_emails(&ctx.db, &emails).await;
+    // Resolve all committer/author emails once — the same map drives the
+    // response rows, the signature keyring, and the verified policy.
+    let resolved = crate::repo::author_resolve::resolve_authors_for_emails(
+        &ctx.db,
+        emails.iter().map(String::as_str),
+    )
+    .await;
+    let keyring = crate::repo::signatures::keyring_for_resolved(&ctx.db, &emails, &resolved).await;
     let summaries = if keyring.has_any() {
         ctx.git
             .log(
@@ -169,22 +176,34 @@ pub async fn commits(
     } else {
         summaries
     };
-    let resolved = crate::repo::author_resolve::resolve_author_emails(
-        &ctx.db,
-        summaries.iter().map(|c| c.author_email.as_str()),
-    )
-    .await;
+    let (any_valid, any_gpg) = crate::repo::signatures::needs_verified_policy(
+        summaries
+            .iter()
+            .map(|c| (&c.signature_status, &c.signature_kind)),
+    );
+    let policy = if any_valid {
+        let uids: Vec<String> = {
+            let mut seen = std::collections::HashSet::new();
+            resolved
+                .values()
+                .filter_map(|r| r.user_id.clone())
+                .filter(|id| seen.insert(id.clone()))
+                .collect()
+        };
+        crate::repo::signatures::VerifiedPolicy::load(&ctx.db, &uids, any_gpg).await
+    } else {
+        crate::repo::signatures::VerifiedPolicy::none()
+    };
     let mut commits = Vec::with_capacity(summaries.len());
     for c in summaries {
         let r = resolved.get(&c.author_email).cloned().unwrap_or_default();
-        let signature_status = crate::repo::signatures::apply_verified_policy(
-            &ctx.db,
+        let signature_status = policy.status(
+            &resolved,
             &c.committer_email,
             &c.author_email,
             &c.signature_status,
             &c.signature_kind,
-        )
-        .await;
+        );
         commits.push(PullCommitSummary {
             sha: c.sha,
             short_sha: c.short_sha,

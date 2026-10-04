@@ -21,6 +21,7 @@ pub mod protection;
 pub mod public_origin;
 pub mod pull;
 pub mod release;
+pub mod rest;
 pub mod ssh;
 pub mod ssh_keys;
 pub mod gpg_keys;

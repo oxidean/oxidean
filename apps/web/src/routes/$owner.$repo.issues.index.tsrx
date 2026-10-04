@@ -12,6 +12,7 @@ import { RepoNotFound } from "@/components/repo/repo-not-found";
 import { apiClient } from "@/lib/api-client";
 import type { RepoLayoutLoaderData } from "@/lib/repo-store";
 import { fetchIssueList, fetchLabelListForRepo, fetchRepoGet } from "@/lib/ssr-repo";
+import { useChromeAccountState } from "@/lib/use-chrome-account";
 
 export type IssuesLoaderData =
   | { kind: "not_found" }
@@ -116,6 +117,7 @@ export function IssuesListPage() @{
   const routeLoader = useLoaderData({ from: "/$owner/$repo/issues/" }) as
     | IssuesLoaderData
     | undefined;
+  const account = useChromeAccountState();
 
   const [filters, setFilters] = useState<IssueListFilters>(() => emptyFilters("open"));
 
@@ -247,6 +249,7 @@ export function IssuesListPage() @{
         owner={owner}
         repoName={repoName}
         repo={repo}
+        canInteract={!!account.user?.email_verified}
         issues={list?.issues ?? []}
         total={list?.total ?? 0}
         filters={filters}

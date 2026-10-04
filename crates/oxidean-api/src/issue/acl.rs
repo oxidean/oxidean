@@ -39,7 +39,7 @@ pub async fn resolve_for_admin(
     resolve_repo_for_admin(ctx, owner, name).await
 }
 
-/// Author **or** Write+ may edit title/body (D-ISS-03 / D-ISS-20).
+/// Author **or** Write+ may edit title/body or close/reopen (D-ISS-02 / D-ISS-03 / D-ISS-20).
 pub fn can_edit_issue(user_id: &str, issue: &IssueRow, capability: Option<Capability>) -> bool {
     issue.author_id == user_id || meets(capability, Capability::Write)
 }

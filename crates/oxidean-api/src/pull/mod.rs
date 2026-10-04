@@ -607,7 +607,8 @@ async fn load_pull_in_repo(
         .ok_or_else(pull_not_found)
 }
 
-/// `pull.create` — Write+; shared `#N` with issues (D-PR-02).
+/// `pull.create` — Read+ on base; Write+ on the head repo (same-repo head ⇒ Write+ on
+/// base; fork head ⇒ the caller owns the branch). Shared `#N` with issues (D-PR-02 / D-PR-29).
 pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullPublic, AppError> {
     let user = require_verified(ctx).await?;
     let req: CreatePullRequest = serde_json::from_value(input).map_err(|e| {
@@ -622,7 +623,7 @@ pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullPublic
     let head_ref = validate_ref_name(&req.head_ref, "head_ref")?;
     let draft = req.draft.unwrap_or(false);
 
-    let accessible = acl::resolve_for_write(ctx, &req.owner, &req.name).await?;
+    let accessible = acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
 
     let head_owner = req
         .head_owner
@@ -641,6 +642,9 @@ pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullPublic
 
     let (head_repo_id, head_owner_slug, head_repo_name) =
         if head_owner == accessible.owner_username && head_name == accessible.row.name {
+            if !crate::repo::meets(accessible.capability, crate::repo::Capability::Write) {
+                return Err(crate::repo::not_found());
+            }
             (
                 accessible.row.id.clone(),
                 accessible.owner_username.clone(),
@@ -648,6 +652,9 @@ pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullPublic
             )
         } else {
             let head = crate::repo::resolve_repo_for_read(ctx, &head_owner, &head_name).await?;
+            if !crate::repo::meets(head.capability, crate::repo::Capability::Write) {
+                return Err(crate::repo::not_found());
+            }
             let network = ctx
                 .db
                 .get_repo_fork_network_id(&head.row.id)
@@ -714,8 +721,10 @@ pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullPublic
             recipients.push(m.clone());
         }
     }
-    notify::fanout_activity(&ctx.db, &user.id, recipients.clone(), "pr_opened", &subject).await;
-    notify::fanout_suppress_ignored(&ctx.db, &user.id, mentions, "pr_mention", &subject).await;
+    // One watch-level lookup serves both fanouts below.
+    let watch = ctx.db.list_repo_watch_levels(&subject.repo_id).await;
+    notify::fanout_activity_with_watch(&ctx.db, &user.id, recipients.clone(), "pr_opened", &subject, &watch).await;
+    notify::fanout_suppress_ignored_with_watch(&ctx.db, &user.id, mentions, "pr_mention", &subject, &watch).await;
     emit_pull_event(
         ctx,
         &accessible,
@@ -966,14 +975,17 @@ fn pull_review_state_matches(
     actual == want
 }
 
-/// `pull.close` — Write+; open → closed (PR-06).
+/// `pull.close` — Author or Write+; open → closed (PR-06 / D-PR-29).
 pub async fn close(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullPublic, AppError> {
     let user = require_verified(ctx).await?;
     let req: PullRefRequest = serde_json::from_value(input).map_err(|e| {
         AppError::new("rpc.bad_input", format!("invalid pull.close input: {e}"))
     })?;
-    let accessible = acl::resolve_for_write(ctx, &req.owner, &req.name).await?;
+    let accessible = acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
     let row = load_pull_in_repo(ctx, &accessible.row.id, req.number).await?;
+    if !acl::can_edit_pull(&user.id, &row, accessible.capability) {
+        return Err(crate::repo::not_found());
+    }
     if row.state != "open" {
         return Err(AppError::new(
             "pull.invalid_state",
@@ -1002,14 +1014,17 @@ pub async fn close(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullPublic,
     to_public(ctx, &updated).await
 }
 
-/// `pull.reopen` — Write+; closed → open (not merged) (PR-06).
+/// `pull.reopen` — Author or Write+; closed → open (not merged) (PR-06 / D-PR-29).
 pub async fn reopen(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullPublic, AppError> {
     let user = require_verified(ctx).await?;
     let req: PullRefRequest = serde_json::from_value(input).map_err(|e| {
         AppError::new("rpc.bad_input", format!("invalid pull.reopen input: {e}"))
     })?;
-    let accessible = acl::resolve_for_write(ctx, &req.owner, &req.name).await?;
+    let accessible = acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
     let row = load_pull_in_repo(ctx, &accessible.row.id, req.number).await?;
+    if !acl::can_edit_pull(&user.id, &row, accessible.capability) {
+        return Err(crate::repo::not_found());
+    }
     if row.state != "closed" {
         return Err(AppError::new(
             "pull.invalid_state",
@@ -1081,7 +1096,7 @@ pub async fn reopen(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullPublic
     to_public(ctx, &updated).await
 }
 
-/// `pull.update` — Write+; title/body/base_ref/draft (D-PR-04 partial).
+/// `pull.update` — Author or Write+; title/body/base_ref/draft (D-PR-04 partial / D-PR-29).
 pub async fn update(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullPublic, AppError> {
     let user = require_verified(ctx).await?;
     let req: UpdatePullRequest = serde_json::from_value(input).map_err(|e| {
@@ -1090,8 +1105,11 @@ pub async fn update(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullPublic
             format!("invalid pull.update input: {e}"),
         )
     })?;
-    let accessible = acl::resolve_for_write(ctx, &req.owner, &req.name).await?;
+    let accessible = acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
     let row = load_pull_in_repo(ctx, &accessible.row.id, req.number).await?;
+    if !acl::can_edit_pull(&user.id, &row, accessible.capability) {
+        return Err(crate::repo::not_found());
+    }
     if row.state == "merged" {
         return Err(AppError::new(
             "pull.invalid_state",

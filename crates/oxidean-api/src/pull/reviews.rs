@@ -186,12 +186,8 @@ pub async fn review_requests_list(
         .list_pull_review_request_user_ids(&pull.id)
         .await
         .map_err(db_err)?;
-    let mut usernames = Vec::new();
-    for id in ids {
-        if let Some(u) = ctx.db.find_user_by_id(&id).await.map_err(db_err)? {
-            usernames.push(u.username);
-        }
-    }
+    let users = ctx.db.find_users_by_ids(&ids).await.map_err(db_err)?;
+    let mut usernames: Vec<String> = users.into_iter().map(|u| u.username).collect();
     usernames.sort();
     Ok(PullReviewRequestsListResponse { usernames })
 }

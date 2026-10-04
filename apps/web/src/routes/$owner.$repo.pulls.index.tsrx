@@ -17,6 +17,7 @@ import { RepoNotFound } from "@/components/repo/repo-not-found";
 import { apiClient } from "@/lib/api-client";
 import type { RepoLayoutLoaderData } from "@/lib/repo-store";
 import { fetchPullList, fetchRepoGet } from "@/lib/ssr-repo";
+import { useChromeAccountState } from "@/lib/use-chrome-account";
 import { AppLink } from "@/components/ui/app-link";
 
 export type PullsLoaderData =
@@ -98,6 +99,7 @@ export function PullsListPage() @{
   };
   const owner = params.owner ?? "";
   const repoName = params.repo ?? "";
+  const account = useChromeAccountState();
   const layout = useLoaderData({ from: "/$owner/$repo" }) as RepoLayoutLoaderData | undefined;
   const routeLoader = useLoaderData({ from: "/$owner/$repo/pulls/" }) as
     | PullsLoaderData
@@ -152,10 +154,6 @@ export function PullsListPage() @{
     initialData: ssrListMatches ? routeLoader.list : undefined,
   });
 
-  const repo =
-    (routeLoader?.kind === "ready" ? routeLoader.repo : null) ??
-    (layout?.status === "ok" ? layout.repo : null) ??
-    null;
   const list = listQ.data ?? (ssrListMatches ? routeLoader.list : undefined);
 
   @if (routeLoader?.kind === "not_found" || layout?.status === "not_found") {
@@ -189,7 +187,7 @@ export function PullsListPage() @{
               All
             </button>
           </div>
-          @if (repo?.can_write) {
+          @if (account.user?.email_verified) {
             <AppLink
               href={`/${owner}/${repoName}/pulls/new` as string}
               className={repoListPrimaryCtaClass() as string}

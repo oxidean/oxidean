@@ -5,7 +5,7 @@
 //! are deleted — eagerly at every ACL mutation point and lazily when the user
 //! reads their inbox / watch list.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use oxidean_db::Database;
 use uuid::Uuid;
@@ -36,18 +36,25 @@ async fn fanout_inner(
     exclude_actor: bool,
 ) {
     let mut seen = HashSet::new();
+    let mut targets: Vec<String> = Vec::new();
     for recipient_id in recipients {
         if recipient_id.is_empty() || (exclude_actor && recipient_id == actor_id) {
             continue;
         }
-        if !seen.insert(recipient_id.clone()) {
-            continue;
+        if seen.insert(recipient_id.clone()) {
+            targets.push(recipient_id);
         }
-        let id = Uuid::new_v4().to_string();
-        if let Err(e) = db
-            .insert_notification(
-                &id,
-                &recipient_id,
+    }
+    // Independent inserts run concurrently; each still soft-fails alone.
+    let ids: Vec<String> = targets
+        .iter()
+        .map(|_| Uuid::new_v4().to_string())
+        .collect();
+    let results = futures_util::future::join_all(targets.iter().zip(&ids).map(
+        |(recipient_id, id)| {
+            db.insert_notification(
+                id,
+                recipient_id,
                 actor_id,
                 reason,
                 subject.kind,
@@ -56,8 +63,11 @@ async fn fanout_inner(
                 &subject.title,
                 subject.subject_ref.as_deref(),
             )
-            .await
-        {
+        },
+    ))
+    .await;
+    for (recipient_id, result) in targets.iter().zip(results) {
+        if let Err(e) = result {
             tracing::warn!(
                 error = %e,
                 recipient_id = %recipient_id,
@@ -80,21 +90,26 @@ pub async fn fanout(
     fanout_inner(db, actor_id, recipients, reason, subject, true).await;
 }
 
+/// Watch rows prefetched by the caller — comment paths run two watch-aware
+/// fanouts and share one `list_repo_watch_levels` round trip between them.
+pub type WatchRows = Result<Vec<(String, String)>, String>;
+
 /// Watch-level-aware fan-out inner: `exclude_actor` controls whether the actor
 /// is dropped from the participating set and the watch rows before insertion.
-async fn fanout_activity_inner(
+async fn fanout_activity_inner_with_watch(
     db: &Database,
     actor_id: &str,
     recipients: impl IntoIterator<Item = String>,
     reason: &str,
     subject: &NotifySubject,
     exclude_actor: bool,
+    watch: &WatchRows,
 ) {
     let base: HashSet<String> = recipients
         .into_iter()
         .filter(|r| !r.is_empty() && (!exclude_actor || r != actor_id))
         .collect();
-    match db.list_repo_watch_levels(&subject.repo_id).await {
+    match watch {
         Ok(rows) => {
             let watched: HashSet<&str> = rows.iter().map(|(uid, _)| uid.as_str()).collect();
             // Non-watchers keep legacy participating/mention delivery.
@@ -103,7 +118,7 @@ async fn fanout_activity_inner(
                 .filter(|uid| !watched.contains(uid.as_str()))
                 .cloned()
                 .collect();
-            for (uid, level) in &rows {
+            for (uid, level) in rows {
                 let include = match oxidean_core::WatchLevel::parse(level) {
                     Ok(oxidean_core::WatchLevel::All) => true,
                     Ok(oxidean_core::WatchLevel::Participating) => base.contains(uid),
@@ -126,6 +141,27 @@ async fn fanout_activity_inner(
     }
 }
 
+async fn fanout_activity_inner(
+    db: &Database,
+    actor_id: &str,
+    recipients: impl IntoIterator<Item = String>,
+    reason: &str,
+    subject: &NotifySubject,
+    exclude_actor: bool,
+) {
+    let watch = db.list_repo_watch_levels(&subject.repo_id).await;
+    fanout_activity_inner_with_watch(
+        db,
+        actor_id,
+        recipients,
+        reason,
+        subject,
+        exclude_actor,
+        &watch,
+    )
+    .await;
+}
+
 /// Watch-level-aware fan-out for repo activity (DEBT-06): subscription rows on
 /// the subject's repo apply the notification matrix —
 ///   * `all` watchers join the caller-computed participating/mentioned set for
@@ -145,6 +181,19 @@ pub async fn fanout_activity(
     fanout_activity_inner(db, actor_id, recipients, reason, subject, true).await;
 }
 
+/// [`fanout_activity`] over prefetched watch rows — for call sites that run
+/// multiple watch-aware fanouts (comment create) and share one lookup.
+pub async fn fanout_activity_with_watch(
+    db: &Database,
+    actor_id: &str,
+    recipients: impl IntoIterator<Item = String>,
+    reason: &str,
+    subject: &NotifySubject,
+    watch: &WatchRows,
+) {
+    fanout_activity_inner_with_watch(db, actor_id, recipients, reason, subject, true, watch).await;
+}
+
 /// [`fanout_activity`] but the actor stays eligible for delivery — used by
 /// workflow run completion, where the triggering user must learn the outcome
 /// of the run their push started (GitHub ci_activity parity, DEBT-06).
@@ -158,19 +207,15 @@ pub async fn fanout_activity_including_actor(
     fanout_activity_inner(db, actor_id, recipients, reason, subject, false).await;
 }
 
-/// Suppression-only variant for direct-address notifications (mentions,
-/// assignments, review requests): the caller-computed recipients pass through
-/// unchanged except watchers at `ignore`, which suppresses even @-mentions
-/// (GitHub "Ignore" semantics, DEBT-06).
-pub async fn fanout_suppress_ignored(
+async fn fanout_suppress_ignored_inner(
     db: &Database,
     actor_id: &str,
-    recipients: impl IntoIterator<Item = String>,
+    list: Vec<String>,
     reason: &str,
     subject: &NotifySubject,
+    watch: &WatchRows,
 ) {
-    let list: Vec<String> = recipients.into_iter().collect();
-    match db.list_repo_watch_levels(&subject.repo_id).await {
+    match watch {
         Ok(rows) => {
             let ignored: HashSet<&str> = rows
                 .iter()
@@ -195,6 +240,36 @@ pub async fn fanout_suppress_ignored(
             fanout(db, actor_id, list, reason, subject).await;
         }
     }
+}
+
+/// Suppression-only variant for direct-address notifications (mentions,
+/// assignments, review requests): the caller-computed recipients pass through
+/// unchanged except watchers at `ignore`, which suppresses even @-mentions
+/// (GitHub "Ignore" semantics, DEBT-06).
+pub async fn fanout_suppress_ignored(
+    db: &Database,
+    actor_id: &str,
+    recipients: impl IntoIterator<Item = String>,
+    reason: &str,
+    subject: &NotifySubject,
+) {
+    let list: Vec<String> = recipients.into_iter().collect();
+    let watch = db.list_repo_watch_levels(&subject.repo_id).await;
+    fanout_suppress_ignored_inner(db, actor_id, list, reason, subject, &watch).await;
+}
+
+/// [`fanout_suppress_ignored`] over prefetched watch rows — shares the caller's
+/// `list_repo_watch_levels` result with other watch-aware fanouts.
+pub async fn fanout_suppress_ignored_with_watch(
+    db: &Database,
+    actor_id: &str,
+    recipients: impl IntoIterator<Item = String>,
+    reason: &str,
+    subject: &NotifySubject,
+    watch: &WatchRows,
+) {
+    let list: Vec<String> = recipients.into_iter().collect();
+    fanout_suppress_ignored_inner(db, actor_id, list, reason, subject, watch).await;
 }
 
 /// Workflow-run completion fan-out (DEBT-06 follow-up): emits once per run via
@@ -503,14 +578,23 @@ pub fn extract_mention_usernames(body: &str) -> Vec<String> {
 
 /// Resolve `@username` mentions to user ids (unknown handles ignored).
 pub async fn resolve_mention_user_ids(db: &Database, body: &str) -> Vec<String> {
+    let usernames = extract_mention_usernames(body);
+    if usernames.is_empty() {
+        return Vec::new();
+    }
+    // One `IN` round trip for all handles; unknown ones simply have no row,
+    // preserving skip-on-miss semantics (and per-handle iteration order).
+    let by_name: HashMap<String, String> = match db.find_users_by_usernames(&usernames).await {
+        Ok(rows) => rows.into_iter().map(|u| (u.username, u.id)).collect(),
+        Err(e) => {
+            tracing::warn!(error = %e, "mention resolve failed");
+            return Vec::new();
+        }
+    };
     let mut ids = Vec::new();
-    for username in extract_mention_usernames(body) {
-        match db.find_user_by_username(&username).await {
-            Ok(Some(u)) => ids.push(u.id),
-            Ok(None) => {}
-            Err(e) => {
-                tracing::warn!(error = %e, username = %username, "mention resolve failed");
-            }
+    for username in usernames {
+        if let Some(id) = by_name.get(&username) {
+            ids.push(id.clone());
         }
     }
     ids
@@ -530,10 +614,11 @@ pub async fn issue_participant_ids(db: &Database, issue_id: &str, author_id: &st
         }
         Err(e) => tracing::warn!(error = %e, "list_issue_assignees for notify failed"),
     }
-    match db.list_issue_comments(issue_id).await {
-        Ok(rows) => {
-            for c in rows {
-                ids.insert(c.author_id);
+    // Author-id scan only — no comment rows needed for recipients.
+    match db.list_issue_comment_author_ids(issue_id).await {
+        Ok(author_ids) => {
+            for id in author_ids {
+                ids.insert(id);
             }
         }
         Err(e) => tracing::warn!(error = %e, "list_issue_comments for notify failed"),
@@ -598,10 +683,11 @@ pub async fn pull_participant_ids(db: &Database, pull_id: &str, author_id: &str)
     if !author_id.is_empty() {
         ids.insert(author_id.to_string());
     }
-    match db.list_pull_comments(pull_id).await {
-        Ok(rows) => {
-            for c in rows {
-                ids.insert(c.author_id);
+    // Author-id scans only — full comment/review rows not needed for recipients.
+    match db.list_pull_comment_author_ids(pull_id).await {
+        Ok(author_ids) => {
+            for id in author_ids {
+                ids.insert(id);
             }
         }
         Err(e) => tracing::warn!(error = %e, "list_pull_comments for notify failed"),
@@ -614,10 +700,10 @@ pub async fn pull_participant_ids(db: &Database, pull_id: &str, author_id: &str)
         }
         Err(e) => tracing::warn!(error = %e, "list_pull_review_requests for notify failed"),
     }
-    match db.list_pull_reviews(pull_id).await {
-        Ok(rows) => {
-            for r in rows {
-                ids.insert(r.author_id);
+    match db.list_pull_review_author_ids(pull_id).await {
+        Ok(author_ids) => {
+            for id in author_ids {
+                ids.insert(id);
             }
         }
         Err(e) => tracing::warn!(error = %e, "list_pull_reviews for notify failed"),

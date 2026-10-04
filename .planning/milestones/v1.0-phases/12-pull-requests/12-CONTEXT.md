@@ -75,7 +75,7 @@ Users can open, review, comment, and merge pull requests with configurable merge
 - **D-PR-28:** Compare / PR create should work for **same-repo and fork** heads per D-PR-01…03 — **Reversibility:** reversible
 
 ### ACL (carry forward)
-- **D-PR-29:** Reuse Phase 10 `Capability::{Read,Write,Admin}`: **Read** → list/view PR + diff; **Write** → open/comment/review/merge/close/reopen; **Admin** → merge-strategy settings. Private repos keep **`repo.not_found`** anti-enumeration.
+- **D-PR-29:** Reuse Phase 10 `Capability::{Read,Write,Admin}`: **Read** → list/view PR + diff; **Read + verified sign-in** → comment on the conversation; **author or Write+** → edit title/body, close/reopen; **fork head** → open PR needs Read on base + Write on head repo; **Write** → same-repo open, review, resolve threads, merge; **Admin** → merge-strategy settings. Private repos keep **`repo.not_found`** anti-enumeration.
 
 ### Claude's Discretion
 - Exact URL path (`/pulls` vs `/pull`) — prefer GitHub `/pulls` + `/pull/{n}`
