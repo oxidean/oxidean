@@ -137,6 +137,14 @@ export const Route = createFileRoute("/$owner/$repo/activity")({
         title: `Activity · ${(params as { owner: string }).owner}/${(params as { repo: string }).repo} · Oxidean`,
       },
     ],
+    links: [
+      {
+        rel: "alternate",
+        type: "application/atom+xml",
+        title: `Activity feed · ${(params as { owner: string }).owner}/${(params as { repo: string }).repo}`,
+        href: `/api/repos/${(params as { owner: string }).owner}/${(params as { repo: string }).repo}/activity.atom`,
+      },
+    ],
   }),
   // Loader consumes ?period/?type — loaderDeps keeps the match id search-aware
   // so filter navigations refetch instead of reusing stale loaderData.
