@@ -257,6 +257,48 @@ pub async fn find_by_username(pool: &DbPool, username: &str) -> Result<Option<Us
     }
 }
 
+/// Batch `find_by_username` — one `IN (...)` round trip (mention resolution).
+pub async fn find_many_by_username(
+    pool: &DbPool,
+    usernames: &[String],
+) -> Result<Vec<UserRow>, String> {
+    if usernames.is_empty() {
+        return Ok(Vec::new());
+    }
+    match pool {
+        DbPool::Postgres(p) => {
+            let rows = sqlx::query(&format!("{USER_SELECT_PG} WHERE username = ANY($1)"))
+                .bind(usernames)
+                .fetch_all(p)
+                .await
+                .map_err(|e| format!("find users by usernames failed: {e}"))?;
+            rows.iter().map(|r| Ok(map_user!(r))).collect()
+        }
+        DbPool::MySql(p) => {
+            let in_list =
+                crate::dialect::in_placeholders(crate::dialect::Dialect::MySql, 1, usernames.len());
+            let q_str = format!("{USER_SELECT_MYSQL} WHERE username IN ({in_list})");
+            let q = usernames.iter().fold(sqlx::query(&q_str), |q, u| q.bind(u));
+            let rows = q
+                .fetch_all(p)
+                .await
+                .map_err(|e| format!("find users by usernames failed: {e}"))?;
+            rows.iter().map(|r| Ok(map_user!(r))).collect()
+        }
+        DbPool::Sqlite(p) => {
+            let in_list =
+                crate::dialect::in_placeholders(crate::dialect::Dialect::Sqlite, 1, usernames.len());
+            let q_str = format!("{USER_SELECT_SQLITE} WHERE username IN ({in_list})");
+            let q = usernames.iter().fold(sqlx::query(&q_str), |q, u| q.bind(u));
+            let rows = q
+                .fetch_all(p)
+                .await
+                .map_err(|e| format!("find users by usernames failed: {e}"))?;
+            rows.iter().map(|r| Ok(map_user!(r))).collect()
+        }
+    }
+}
+
 pub async fn find_by_id(pool: &DbPool, id: &str) -> Result<Option<UserRow>, String> {
     match pool {
         DbPool::Postgres(p) => {

@@ -714,8 +714,10 @@ pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullPublic
             recipients.push(m.clone());
         }
     }
-    notify::fanout_activity(&ctx.db, &user.id, recipients.clone(), "pr_opened", &subject).await;
-    notify::fanout_suppress_ignored(&ctx.db, &user.id, mentions, "pr_mention", &subject).await;
+    // One watch-level lookup serves both fanouts below.
+    let watch = ctx.db.list_repo_watch_levels(&subject.repo_id).await;
+    notify::fanout_activity_with_watch(&ctx.db, &user.id, recipients.clone(), "pr_opened", &subject, &watch).await;
+    notify::fanout_suppress_ignored_with_watch(&ctx.db, &user.id, mentions, "pr_mention", &subject, &watch).await;
     emit_pull_event(
         ctx,
         &accessible,

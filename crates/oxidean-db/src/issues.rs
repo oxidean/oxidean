@@ -1174,6 +1174,43 @@ pub async fn list_issue_comments(
     }
 }
 
+/// Distinct comment author ids for an issue — participant fan-out needs only
+/// the ids, not the comment bodies.
+pub async fn list_issue_comment_author_ids(
+    pool: &DbPool,
+    issue_id: &str,
+) -> Result<Vec<String>, String> {
+    match pool {
+        DbPool::Postgres(p) => {
+            sqlx::query_scalar::<_, String>(
+                "SELECT DISTINCT author_id FROM issue_comments WHERE issue_id = $1",
+            )
+            .bind(issue_id)
+            .fetch_all(p)
+            .await
+            .map_err(|e| format!("list issue comment author ids failed: {e}"))
+        }
+        DbPool::MySql(p) => {
+            sqlx::query_scalar::<_, String>(
+                "SELECT DISTINCT author_id FROM issue_comments WHERE issue_id = ?",
+            )
+            .bind(issue_id)
+            .fetch_all(p)
+            .await
+            .map_err(|e| format!("list issue comment author ids failed: {e}"))
+        }
+        DbPool::Sqlite(p) => {
+            sqlx::query_scalar::<_, String>(
+                "SELECT DISTINCT author_id FROM issue_comments WHERE issue_id = ?1",
+            )
+            .bind(issue_id)
+            .fetch_all(p)
+            .await
+            .map_err(|e| format!("list issue comment author ids failed: {e}"))
+        }
+    }
+}
+
 pub async fn update_issue_comment_body(
     pool: &DbPool,
     id: &str,

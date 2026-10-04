@@ -1200,6 +1200,43 @@ pub async fn list_pull_comments(
     }
 }
 
+/// Distinct comment author ids for a pull — participant fan-out needs only
+/// the ids, not the comment bodies.
+pub async fn list_pull_comment_author_ids(
+    pool: &DbPool,
+    pull_id: &str,
+) -> Result<Vec<String>, String> {
+    match pool {
+        DbPool::Postgres(p) => {
+            sqlx::query_scalar::<_, String>(
+                "SELECT DISTINCT author_id FROM pull_comments WHERE pull_id = $1",
+            )
+            .bind(pull_id)
+            .fetch_all(p)
+            .await
+            .map_err(|e| format!("list pull comment author ids failed: {e}"))
+        }
+        DbPool::MySql(p) => {
+            sqlx::query_scalar::<_, String>(
+                "SELECT DISTINCT author_id FROM pull_comments WHERE pull_id = ?",
+            )
+            .bind(pull_id)
+            .fetch_all(p)
+            .await
+            .map_err(|e| format!("list pull comment author ids failed: {e}"))
+        }
+        DbPool::Sqlite(p) => {
+            sqlx::query_scalar::<_, String>(
+                "SELECT DISTINCT author_id FROM pull_comments WHERE pull_id = ?1",
+            )
+            .bind(pull_id)
+            .fetch_all(p)
+            .await
+            .map_err(|e| format!("list pull comment author ids failed: {e}"))
+        }
+    }
+}
+
 pub async fn set_pull_comment_resolved(
     pool: &DbPool,
     id: &str,
@@ -1541,6 +1578,43 @@ pub async fn list_pull_reviews(
                 out.push(map_pull_review!(&r));
             }
             Ok(out)
+        }
+    }
+}
+
+/// Distinct review author ids for a pull — participant fan-out needs only
+/// the ids, not the review rows.
+pub async fn list_pull_review_author_ids(
+    pool: &DbPool,
+    pull_id: &str,
+) -> Result<Vec<String>, String> {
+    match pool {
+        DbPool::Postgres(p) => {
+            sqlx::query_scalar::<_, String>(
+                "SELECT DISTINCT author_id FROM pull_reviews WHERE pull_id = $1",
+            )
+            .bind(pull_id)
+            .fetch_all(p)
+            .await
+            .map_err(|e| format!("list pull review author ids failed: {e}"))
+        }
+        DbPool::MySql(p) => {
+            sqlx::query_scalar::<_, String>(
+                "SELECT DISTINCT author_id FROM pull_reviews WHERE pull_id = ?",
+            )
+            .bind(pull_id)
+            .fetch_all(p)
+            .await
+            .map_err(|e| format!("list pull review author ids failed: {e}"))
+        }
+        DbPool::Sqlite(p) => {
+            sqlx::query_scalar::<_, String>(
+                "SELECT DISTINCT author_id FROM pull_reviews WHERE pull_id = ?1",
+            )
+            .bind(pull_id)
+            .fetch_all(p)
+            .await
+            .map_err(|e| format!("list pull review author ids failed: {e}"))
         }
     }
 }

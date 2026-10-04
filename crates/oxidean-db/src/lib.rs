@@ -1266,6 +1266,14 @@ impl Database {
         pulls::list_pull_comments(self.require_pool()?, pull_id).await
     }
 
+    /// Distinct comment author ids — participant fan-out (no body transfer).
+    pub async fn list_pull_comment_author_ids(
+        &self,
+        pull_id: &str,
+    ) -> Result<Vec<String>, String> {
+        pulls::list_pull_comment_author_ids(self.require_pool()?, pull_id).await
+    }
+
     pub async fn set_pull_comment_resolved(
         &self,
         id: &str,
@@ -1352,6 +1360,14 @@ impl Database {
 
     pub async fn list_pull_reviews(&self, pull_id: &str) -> Result<Vec<PullReviewRow>, String> {
         pulls::list_pull_reviews(self.require_pool()?, pull_id).await
+    }
+
+    /// Distinct review author ids — participant fan-out (no row transfer).
+    pub async fn list_pull_review_author_ids(
+        &self,
+        pull_id: &str,
+    ) -> Result<Vec<String>, String> {
+        pulls::list_pull_review_author_ids(self.require_pool()?, pull_id).await
     }
 
     pub async fn dismiss_pull_review(
@@ -1780,6 +1796,14 @@ impl Database {
         issues::list_issue_comments(self.require_pool()?, issue_id).await
     }
 
+    /// Distinct comment author ids — participant fan-out (no body transfer).
+    pub async fn list_issue_comment_author_ids(
+        &self,
+        issue_id: &str,
+    ) -> Result<Vec<String>, String> {
+        issues::list_issue_comment_author_ids(self.require_pool()?, issue_id).await
+    }
+
     pub async fn update_issue_comment_body(
         &self,
         id: &str,
@@ -2075,6 +2099,14 @@ impl Database {
     /// Legacy `users.email` fallback matches for many addresses — one round trip.
     pub async fn find_users_by_emails(&self, emails: &[String]) -> Result<Vec<UserRow>, String> {
         users::find_many_by_email(self.require_pool()?, emails).await
+    }
+
+    /// Users for many usernames — one `IN` round trip (mention resolution).
+    pub async fn find_users_by_usernames(
+        &self,
+        usernames: &[String],
+    ) -> Result<Vec<UserRow>, String> {
+        users::find_many_by_username(self.require_pool()?, usernames).await
     }
 
     pub async fn find_user_by_username(&self, username: &str) -> Result<Option<UserRow>, String> {

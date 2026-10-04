@@ -249,9 +249,11 @@ pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssuePubli
     if accessible.row.owner_type == "user" && accessible.row.owner_id != user.id {
         opened_recipients.push(accessible.row.owner_id.clone());
     }
-    notify::fanout_activity(&ctx.db, &user.id, opened_recipients, "issue_opened", &subject).await;
+    // One watch-level lookup serves both fanouts below.
+    let watch = ctx.db.list_repo_watch_levels(&subject.repo_id).await;
+    notify::fanout_activity_with_watch(&ctx.db, &user.id, opened_recipients, "issue_opened", &subject, &watch).await;
     let mentions = notify::resolve_mention_user_ids(&ctx.db, &body).await;
-    notify::fanout_suppress_ignored(&ctx.db, &user.id, mentions, "issue_mention", &subject).await;
+    notify::fanout_suppress_ignored_with_watch(&ctx.db, &user.id, mentions, "issue_mention", &subject, &watch).await;
     let payload = dispatch::issues_payload(
         "opened",
         row.number,
@@ -704,13 +706,15 @@ pub async fn comments_create(
     let subject = notify::subject_for_issue(&issue);
     let participants = notify::issue_participant_ids(&ctx.db, &issue.id, &issue.author_id).await;
     let mentions = notify::resolve_mention_user_ids(&ctx.db, &body).await;
-    notify::fanout_activity(&ctx.db, &user.id, participants.clone(), "issue_comment", &subject).await;
+    // One watch-level lookup serves both fanouts below.
+    let watch = ctx.db.list_repo_watch_levels(&subject.repo_id).await;
+    notify::fanout_activity_with_watch(&ctx.db, &user.id, participants.clone(), "issue_comment", &subject, &watch).await;
     let participant_set: std::collections::HashSet<_> = participants.into_iter().collect();
     let mention_only: Vec<_> = mentions
         .into_iter()
         .filter(|m| !participant_set.contains(m))
         .collect();
-    notify::fanout_suppress_ignored(&ctx.db, &user.id, mention_only, "issue_mention", &subject).await;
+    notify::fanout_suppress_ignored_with_watch(&ctx.db, &user.id, mention_only, "issue_mention", &subject, &watch).await;
     let payload = dispatch::issue_comment_payload(
         "created",
         issue.number,
@@ -1030,8 +1034,10 @@ pub async fn assignees_set(
     let newly_assigned: Vec<_> = after.difference(&before).cloned().collect();
     let newly_unassigned: Vec<_> = before.difference(&after).cloned().collect();
     let subject = notify::subject_for_issue(&issue);
-    notify::fanout_suppress_ignored(&ctx.db, &user.id, newly_assigned, "issue_assigned", &subject).await;
-    notify::fanout_suppress_ignored(&ctx.db, &user.id, newly_unassigned, "issue_unassigned", &subject).await;
+    // One watch-level lookup serves both fanouts below.
+    let watch = ctx.db.list_repo_watch_levels(&subject.repo_id).await;
+    notify::fanout_suppress_ignored_with_watch(&ctx.db, &user.id, newly_assigned, "issue_assigned", &subject, &watch).await;
+    notify::fanout_suppress_ignored_with_watch(&ctx.db, &user.id, newly_unassigned, "issue_unassigned", &subject, &watch).await;
 
     let refreshed = ctx
         .db
