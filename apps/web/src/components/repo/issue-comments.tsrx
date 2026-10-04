@@ -1,5 +1,9 @@
 import { useQuery, useQueryClient } from "@octanejs/tanstack-query";
-import type { CommentRevisionPublic, IssueCommentPublic } from "@oxidean/api-client";
+import type {
+  CommentRevisionPublic,
+  IssueCommentPublic,
+  IssueCommentsListResponse,
+} from "@oxidean/api-client";
 import { useForm } from "@octanejs/tanstack-form";
 import { useState } from "octane";
 import { AuthErrorBanner } from "@/components/auth-shell";
@@ -115,7 +119,8 @@ function CommentItem(props: {
   number: number;
   canWrite: boolean;
   currentUserId: string;
-  onChanged: () => Promise<void>;
+  onUpdated: (comment: IssueCommentPublic) => void;
+  onDeleted: (id: string) => void;
 }) @{
   const comment = props.comment;
   const isAuthor = !!props.currentUserId && comment.author_id === props.currentUserId;
@@ -143,7 +148,7 @@ function CommentItem(props: {
           setPending(false);
           return;
         }
-        await props.onChanged();
+        props.onUpdated(res.data);
         setEditing(false);
         setPending(false);
       } catch {
@@ -168,7 +173,7 @@ function CommentItem(props: {
         setPending(false);
         return;
       }
-      await props.onChanged();
+      props.onDeleted(comment.id);
       setPending(false);
     } catch {
       setError(NETWORK_ERROR);
@@ -308,9 +313,19 @@ export function IssueComments(props: IssueCommentsProps) @{
 
   const comments: IssueCommentPublic[] = listQ.data?.comments ?? [];
 
+  const listKey = ["issue", "comments", "list", props.owner, props.repoName, props.number] as const;
+
+  // Patch the cached thread with the mutation response instead of refetching
+  // the whole list — the API returns the full comment row.
+  function patchComments(fn: (cs: IssueCommentPublic[]) => IssueCommentPublic[]) {
+    queryClient.setQueryData<IssueCommentsListResponse>(listKey, (old) =>
+      old ? { comments: fn(old.comments) } : old,
+    );
+  }
+
   async function invalidate() {
     await queryClient.invalidateQueries({
-      queryKey: ["issue", "comments", "list", props.owner, props.repoName, props.number],
+      queryKey: listKey,
     });
   }
 
@@ -336,7 +351,11 @@ export function IssueComments(props: IssueCommentsProps) @{
           return;
         }
         composeForm.reset();
-        await invalidate();
+        if (listQ.data) {
+          patchComments((cs) => [...cs, res.data]);
+        } else {
+          await invalidate();
+        }
         setPending(false);
       } catch {
         setError(NETWORK_ERROR);
@@ -373,7 +392,10 @@ export function IssueComments(props: IssueCommentsProps) @{
                 number={props.number}
                 canWrite={props.canWrite}
                 currentUserId={props.currentUserId}
-                onChanged={invalidate}
+                onUpdated={(c) =>
+                  patchComments((cs) => cs.map((x) => (x.id === c.id ? c : x)))
+                }
+                onDeleted={(id) => patchComments((cs) => cs.filter((x) => x.id !== id))}
               />;
             }
           </ul>;

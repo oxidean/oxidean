@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@octanejs/tanstack-query";
-import type { PullCommentPublic } from "@oxidean/api-client";
+import type { PullCommentPublic, PullCommentsListResponse } from "@oxidean/api-client";
 import { useState } from "octane";
 import { MarkdownBody } from "@/components/repo/markdown-body";
 import { MarkdownWritePreview } from "@/components/repo/markdown-write-preview";
@@ -43,6 +43,16 @@ export function PullConversation(props: PullConversationProps) @{
 
   const comments: PullCommentPublic[] = commentsQ.data?.comments ?? [];
 
+  const listKey = ["pull", "comments", props.owner, props.repoName, props.number] as const;
+
+  // Patch the cached thread with the mutation response instead of refetching
+  // the whole list — the API returns the full comment row.
+  function patchComments(fn: (cs: PullCommentPublic[]) => PullCommentPublic[]) {
+    queryClient.setQueryData<PullCommentsListResponse>(listKey, (old) =>
+      old ? { comments: fn(old.comments) } : old,
+    );
+  }
+
   async function submitComment() {
     if (!draft.trim()) return;
     setBusy(true);
@@ -59,9 +69,11 @@ export function PullConversation(props: PullConversationProps) @{
       return;
     }
     setDraft("");
-    await queryClient.invalidateQueries({
-      queryKey: ["pull", "comments", props.owner, props.repoName, props.number],
-    });
+    if (commentsQ.data) {
+      patchComments((cs) => [...cs, res.data]);
+    } else {
+      await queryClient.invalidateQueries({ queryKey: listKey });
+    }
   }
 
   async function toggleResolve(c: PullCommentPublic) {
@@ -79,9 +91,7 @@ export function PullConversation(props: PullConversationProps) @{
       setError(res.error.message || "Could not update thread");
       return;
     }
-    await queryClient.invalidateQueries({
-      queryKey: ["pull", "comments", props.owner, props.repoName, props.number],
-    });
+    patchComments((cs) => cs.map((x) => (x.id === res.data.id ? res.data : x)));
   }
 
   <div className="space-y-4" data-testid="pull-conversation">
