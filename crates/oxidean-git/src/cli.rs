@@ -432,7 +432,198 @@ fn signature_kind_from_commit(raw: &str) -> String {
     }
 }
 
-fn parse_commit_summary_record(record: &str) -> Option<CommitSummary> {
+/// Whether the commit object carries a signature header — mirrors what git's
+/// signature_check scans for (`gpgsig`, plus the legacy `openpgp` header).
+/// Header block ends at the first blank line.
+fn commit_has_signature(raw: &str) -> bool {
+    let headers = raw.split("\n\n").next().unwrap_or(raw);
+    headers.starts_with("gpgsig ")
+        || headers.starts_with("openpgp ")
+        || headers.contains("\ngpgsig ")
+        || headers.contains("\nopenpgp ")
+}
+
+/// Result of a batched raw-object scan for one commit.
+pub(crate) struct SignatureScan {
+    pub has_signature: bool,
+    pub kind: String,
+}
+
+/// Signature presence + kind for many commits via a single
+/// `git cat-file --batch` process (replaces a `cat-file -p` spawn per commit).
+/// `None` on spawn/protocol failure so callers can fall back — the same
+/// silent best-effort as the per-commit calls. Every requested sha is present
+/// in the map on success.
+async fn signature_scan_batch(
+    repo_s: &str,
+    shas: &[String],
+) -> Option<std::collections::HashMap<String, SignatureScan>> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let mut child = Command::new("git")
+        .args(["-C", repo_s, "cat-file", "--batch"])
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let (Some(mut stdin), Some(mut stdout)) = (child.stdin.take(), child.stdout.take()) else {
+        return None;
+    };
+    let feed = {
+        let mut s = shas.join("\n");
+        s.push('\n');
+        s
+    };
+    // Feed stdin on a task so a large request list can't deadlock on the
+    // pipe buffer while we drain stdout.
+    let writer = tokio::spawn(async move {
+        let _ = stdin.write_all(feed.as_bytes()).await;
+        let _ = stdin.shutdown().await;
+    });
+    let mut buf = Vec::new();
+    let _ = stdout.read_to_end(&mut buf).await;
+    let _ = writer.await;
+    let _ = child.wait().await;
+
+    let mut out = std::collections::HashMap::new();
+    // Response per object: "<sha> <type> <size>\n<content>\n" — or
+    // "<sha> missing\n". Order follows the request order.
+    let mut cursor: &[u8] = buf.as_slice();
+    for sha in shas {
+        let nl = cursor.iter().position(|&b| b == b'\n')?;
+        let header = String::from_utf8_lossy(&cursor[..nl]).to_string();
+        cursor = &cursor[nl + 1..];
+        let mut parts = header.split_whitespace();
+        let _obj = parts.next();
+        let obj_type = parts.next().unwrap_or("");
+        if obj_type == "missing" {
+            out.insert(
+                sha.clone(),
+                SignatureScan {
+                    has_signature: false,
+                    kind: String::new(),
+                },
+            );
+            continue;
+        }
+        let size: usize = parts.next().and_then(|s| s.parse().ok())?;
+        if cursor.len() < size + 1 {
+            return None;
+        }
+        let body = String::from_utf8_lossy(&cursor[..size]);
+        out.insert(
+            sha.clone(),
+            SignatureScan {
+                has_signature: commit_has_signature(&body),
+                kind: signature_kind_from_commit(&body),
+            },
+        );
+        cursor = &cursor[size + 1..];
+    }
+    Some(out)
+}
+
+/// True when no signature in this repo could ever verify: no `gpg.*` config
+/// (signers files, program shims, trust/format overrides) and an empty
+/// default OpenPGP keyring. Under those conditions `%G?` deterministically
+/// reports `E` (→ "unknown") for every signed commit, so verification spawns
+/// are pure cost. Any doubt → false → callers run the real %G? pass.
+async fn default_sig_verify_impossible(repo_s: &str) -> bool {
+    default_sig_verify_impossible_env(repo_s, &[]).await
+}
+
+/// `extra_env` overrides for the probes (tests point GNUPGHOME / git config
+/// at controlled paths).
+async fn default_sig_verify_impossible_env(repo_s: &str, extra_env: &[(&str, &str)]) -> bool {
+    match Command::new("git")
+        .args(["-C", repo_s, "config", "--get-regexp", "^gpg\\."])
+        .envs(extra_env.iter().copied())
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .await
+    {
+        // Match(es) found — some gpg.* config exists.
+        Ok(o) if o.status.success() => return false,
+        // Exit 1 = "no matches" → no gpg.* config. Anything else is a real
+        // error — treat as not provable.
+        Ok(o) if o.status.code() == Some(1) => {}
+        _ => return false,
+    }
+    // `gpg --list-keys` consults the same default home (GNUPGHOME/~/.gnupg)
+    // git would verify against. Empty keyring → every sig is unverifiable.
+    match Command::new("gpg")
+        .args(["--batch", "--list-keys"])
+        .envs(extra_env.iter().copied())
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .await
+    {
+        Ok(o) => o.status.success() && o.stdout.is_empty(),
+        Err(_) => false,
+    }
+}
+
+/// Single-commit `cat-file -p` fallback used only when the batch scan fails.
+async fn signature_kind_for_sha(repo_s: &str, sha: &str) -> String {
+    match run_git_stdout(&["-C", repo_s, "cat-file", "-p", sha]).await {
+        Ok(raw) => signature_kind_from_commit(&String::from_utf8_lossy(&raw)),
+        Err(_) => String::new(),
+    }
+}
+
+fn signed_shas(summaries: &[CommitSummary]) -> Vec<String> {
+    summaries
+        .iter()
+        .filter(|s| s.signature_status != "none")
+        .map(|s| s.sha.clone())
+        .collect()
+}
+
+/// Attach `signature_kind` to non-"none" commits — batched when the scan
+/// succeeded, per-commit cat-file as the (rare) fallback. "none" commits are
+/// skipped exactly like the old per-commit loop: a signature git itself
+/// reported 'N' (e.g. an SSH sig with no signers file) carries no kind.
+async fn apply_signature_kinds(
+    repo_s: &str,
+    out: &mut [CommitSummary],
+    scan: Option<std::collections::HashMap<String, SignatureScan>>,
+) {
+    match scan {
+        Some(scan) => {
+            for s in out.iter_mut() {
+                if s.signature_status == "none" {
+                    continue;
+                }
+                if let Some(sc) = scan.get(&s.sha) {
+                    if !sc.kind.is_empty() {
+                        s.signature_kind = sc.kind.clone();
+                    }
+                }
+            }
+        }
+        None => {
+            for s in out.iter_mut() {
+                if s.signature_status == "none" {
+                    continue;
+                }
+                let kind = signature_kind_for_sha(repo_s, &s.sha).await;
+                if !kind.is_empty() {
+                    s.signature_kind = kind;
+                }
+            }
+        }
+    }
+}
+
+/// `expect_sig` says whether the record's format appended a %G? field — the
+/// log path uses formats without %G? for unverified listings.
+fn parse_commit_summary_record(record: &str, expect_sig: bool) -> Option<CommitSummary> {
     let parts: Vec<&str> = record.split('\0').collect();
     // sha, short, subject, author_name, author_email, authored_at, committer_email, %G?
     if parts.len() < 6 {
@@ -447,11 +638,15 @@ fn parse_commit_summary_record(record: &str) -> Option<CommitSummary> {
     } else {
         String::new()
     };
-    let g = if parts.len() >= 8 {
-        parts[7]
-    } else if parts.len() >= 7 {
-        // Back-compat if committer missing.
-        parts[6]
+    let g = if expect_sig {
+        if parts.len() >= 8 {
+            parts[7]
+        } else if parts.len() >= 7 {
+            // Back-compat if committer missing.
+            parts[6]
+        } else {
+            "N"
+        }
     } else {
         "N"
     };
@@ -1032,13 +1227,22 @@ impl GitBackend for CliGitBackend {
             return Ok(Vec::new());
         }
 
+        let configured = allowed_signers.is_some() || gpg_home.is_some();
         let mut args: Vec<String> = vec!["-C".into(), repo_s.into()];
         let mut extra_env: Vec<(String, String)> = Vec::new();
         push_signature_verify_config(&mut args, &mut extra_env, allowed_signers, gpg_home)?;
         args.push("log".into());
         args.push(format!("--skip={skip_s}"));
         args.push(format!("--max-count={limit_s}"));
-        args.push("--format=%H%x00%h%x00%s%x00%an%x00%ae%x00%aI%x00%ce%x00%G?".into());
+        // %G? makes git spawn a verifier subprocess per signed commit. The
+        // configured path needs it for real statuses; the unconfigured
+        // (default-keyring) path resolves statuses lazily below — signed
+        // commits are detected from the raw objects instead.
+        if configured {
+            args.push("--format=%H%x00%h%x00%s%x00%an%x00%ae%x00%aI%x00%ce%x00%G?".into());
+        } else {
+            args.push("--format=%H%x00%h%x00%s%x00%an%x00%ae%x00%aI%x00%ce".into());
+        }
         args.push(refname.to_string());
         let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
         let env_refs: Vec<(&str, &str)> = extra_env
@@ -1053,22 +1257,84 @@ impl GitBackend for CliGitBackend {
             if record.is_empty() {
                 continue;
             }
-            if let Some(mut summary) = parse_commit_summary_record(record) {
-                if summary.signature_status != "none" {
-                    // Best-effort kind from raw commit object.
-                    if let Ok(raw) =
-                        run_git_stdout(&["-C", repo_s, "cat-file", "-p", &summary.sha]).await
-                    {
-                        let kind = signature_kind_from_commit(&String::from_utf8_lossy(&raw));
-                        if !kind.is_empty() {
-                            summary.signature_kind = kind;
-                        }
-                    }
-                }
+            if let Some(summary) = parse_commit_summary_record(record, configured) {
                 out.push(summary);
             }
         }
-        Ok(out)
+        if out.is_empty() {
+            return Ok(out);
+        }
+        if configured {
+            // Statuses are real %G? results; attach kinds for signed commits.
+            let signed = signed_shas(&out);
+            if signed.is_empty() {
+                return Ok(out);
+            }
+            let scan = signature_scan_batch(repo_s, &signed).await;
+            apply_signature_kinds(repo_s, &mut out, scan).await;
+            return Ok(out);
+        }
+        // Unconfigured call: decide whether real verification could matter.
+        // Signed commits on an empty default keyring deterministically verify
+        // 'E' → "unknown"; unsigned pages need no verification at all.
+        let shas: Vec<String> = out.iter().map(|s| s.sha.clone()).collect();
+        let scan = signature_scan_batch(repo_s, &shas).await;
+        let must_verify = match &scan {
+            // Nothing signed — statuses are all 'N'.
+            Some(scan) if !scan.values().any(|v| v.has_signature) => false,
+            // Only safe to skip %G? when every signed commit is OpenPGP and
+            // the ambient keyring provably can't verify: OpenPGP verify with
+            // an empty keyring is 'E' unconditionally. SSH/unknown sig kinds
+            // give version- and config-dependent answers ('N' vs 'E'), so
+            // those pages take the real %G? pass.
+            Some(scan)
+                if scan
+                    .values()
+                    .all(|v| !v.has_signature || v.kind == "gpg") =>
+            {
+                !default_sig_verify_impossible(repo_s).await
+            }
+            _ => true,
+        };
+        if !must_verify {
+            let scan = scan.unwrap_or_default();
+            for s in out.iter_mut() {
+                if let Some(sc) = scan.get(&s.sha) {
+                    if sc.has_signature {
+                        s.signature_status = "unknown".into();
+                        s.signature_kind = sc.kind.clone();
+                    }
+                }
+            }
+            return Ok(out);
+        }
+        // Signed commits + a keyring that could produce real statuses — run
+        // the %G? pass without forge config (identical to the old behavior).
+        let vskip = format!("--skip={skip_s}");
+        let vlimit = format!("--max-count={limit_s}");
+        let vargs: Vec<&str> = vec![
+            "-C",
+            repo_s,
+            "log",
+            &vskip,
+            &vlimit,
+            "--format=%H%x00%h%x00%s%x00%an%x00%ae%x00%aI%x00%ce%x00%G?",
+            refname,
+        ];
+        let vstdout = run_git_stdout_env(&vargs, &[]).await?;
+        let vtext = String::from_utf8_lossy(&vstdout);
+        let mut vout = Vec::new();
+        for record in vtext.split('\n') {
+            let record = record.trim_end_matches('\r');
+            if record.is_empty() {
+                continue;
+            }
+            if let Some(summary) = parse_commit_summary_record(record, true) {
+                vout.push(summary);
+            }
+        }
+        apply_signature_kinds(repo_s, &mut vout, scan).await;
+        Ok(vout)
     }
 
     async fn show_commit(
@@ -1081,15 +1347,23 @@ impl GitBackend for CliGitBackend {
         let sha = validate_treeish(sha)?;
         let repo_s = repo_str(repo)?;
 
+        let configured = allowed_signers.is_some() || gpg_home.is_some();
         let mut meta_args: Vec<String> = vec!["-C".into(), repo_s.into()];
         let mut extra_env: Vec<(String, String)> = Vec::new();
         push_signature_verify_config(&mut meta_args, &mut extra_env, allowed_signers, gpg_home)?;
-        meta_args.extend([
-            "show".into(),
-            "-s".into(),
-            "--format=%H%x00%h%x00%s%x00%b%x00%an%x00%ae%x00%aI%x00%P%x00%ce%x00%G?".into(),
-            sha.to_string(),
-        ]);
+        meta_args.extend(["show".into(), "-s".into()]);
+        // Same %G? policy as `log`: required for real statuses under a forge
+        // keyring, deferred for the unconfigured pass.
+        if configured {
+            meta_args.push(
+                "--format=%H%x00%h%x00%s%x00%b%x00%an%x00%ae%x00%aI%x00%P%x00%ce%x00%G?".into(),
+            );
+        } else {
+            meta_args.push(
+                "--format=%H%x00%h%x00%s%x00%b%x00%an%x00%ae%x00%aI%x00%P%x00%ce".into(),
+            );
+        }
+        meta_args.push(sha.to_string());
         let meta_refs: Vec<&str> = meta_args.iter().map(String::as_str).collect();
         let env_refs: Vec<(&str, &str)> = extra_env
             .iter()
@@ -1133,11 +1407,50 @@ impl GitBackend for CliGitBackend {
             String::new()
         };
         let g = if parts.len() >= 10 { parts[9] } else { "N" };
-        let signature_status = map_signature_status(g);
+        let mut signature_status = map_signature_status(g);
         let mut signature_kind = String::new();
-        if signature_status != "none" {
-            if let Ok(raw) = run_git_stdout(&["-C", repo_s, "cat-file", "-p", &full_sha]).await {
-                signature_kind = signature_kind_from_commit(&String::from_utf8_lossy(&raw));
+        if configured {
+            if signature_status != "none" {
+                signature_kind = signature_kind_for_sha(repo_s, &full_sha).await;
+            }
+        } else {
+            // Unconfigured: inspect the raw object, then verify only when it
+            // could produce a real status — same policy as `log`.
+            let scan = signature_scan_batch(repo_s, std::slice::from_ref(&full_sha)).await;
+            let entry = scan.as_ref().and_then(|m| m.get(&full_sha));
+            let has_sig = entry.map(|e| e.has_signature).unwrap_or(true);
+            if has_sig {
+                let provable_e = entry.map(|e| e.kind == "gpg").unwrap_or(false)
+                    && default_sig_verify_impossible(repo_s).await;
+                if provable_e {
+                    // OpenPGP sig on a provably-empty ambient keyring → 'E'.
+                    signature_status = "unknown".into();
+                    signature_kind = entry
+                        .map(|e| e.kind.clone())
+                        .unwrap_or_else(|| "gpg".into());
+                } else {
+                    // Real %G? for this commit — ssh/unknown sig kinds and
+                    // verifiable keyrings need git's own answer.
+                    if let Ok(g) = run_git_stdout(&[
+                        "-C",
+                        repo_s,
+                        "show",
+                        "-s",
+                        "--format=%G?",
+                        &full_sha,
+                    ])
+                    .await
+                    {
+                        signature_status =
+                            map_signature_status(String::from_utf8_lossy(&g).trim());
+                    }
+                    if signature_status != "none" {
+                        signature_kind = match &entry {
+                            Some(e) if !e.kind.is_empty() => e.kind.clone(),
+                            _ => signature_kind_for_sha(repo_s, &full_sha).await,
+                        };
+                    }
+                }
             }
         }
 
@@ -1654,7 +1967,7 @@ impl GitBackend for CliGitBackend {
             if record.is_empty() {
                 continue;
             }
-            if let Some(summary) = parse_commit_summary_record(record) {
+            if let Some(summary) = parse_commit_summary_record(record, true) {
                 out.push(summary);
             }
         }
@@ -1723,7 +2036,7 @@ impl GitBackend for CliGitBackend {
             if record.is_empty() {
                 continue;
             }
-            if let Some(summary) = parse_commit_summary_record(record) {
+            if let Some(summary) = parse_commit_summary_record(record, true) {
                 out.push(summary);
             }
         }
@@ -3726,5 +4039,427 @@ mod tests {
             page[0].signature_status, page[0].signature_kind
         );
         assert_eq!(page[0].signature_kind, "gpg");
+    }
+
+    /// SSH-sign a seed commit in `bare` (fresh ed25519 key). Returns the key
+    /// path and the allowed_signers file for verifying it.
+    async fn seed_ssh_signed(
+        git: &CliGitBackend,
+        tmp: &tempfile::TempDir,
+        bare: &Path,
+    ) -> (std::path::PathBuf, std::path::PathBuf) {
+        let key_dir = tmp.path().join("keys");
+        std::fs::create_dir_all(&key_dir).unwrap();
+        let key_path = key_dir.join("web-flow");
+        let gen = std::process::Command::new("ssh-keygen")
+            .args([
+                "-t",
+                "ed25519",
+                "-N",
+                "",
+                "-f",
+                key_path.to_str().unwrap(),
+                "-C",
+                "oxidean-web-flow",
+            ])
+            .output()
+            .expect("ssh-keygen");
+        assert!(
+            gen.status.success(),
+            "ssh-keygen failed: {}",
+            String::from_utf8_lossy(&gen.stderr)
+        );
+        let pub_line = std::fs::read_to_string(key_dir.join("web-flow.pub")).unwrap();
+        let mut parts = pub_line.split_whitespace();
+        let key_type = parts.next().unwrap().to_string();
+        let key_b64 = parts.next().unwrap().to_string();
+        let allowed = tmp.path().join("allowed_signers");
+        std::fs::write(
+            &allowed,
+            format!("{FORGE_NOREPLY_EMAIL} namespaces=\"git\" {key_type} {key_b64}\n"),
+        )
+        .unwrap();
+        git.init_bare(bare, "main").await.unwrap();
+        git.seed_commit_authored(
+            bare,
+            "main",
+            "signed seed",
+            &[("README.md".into(), b"signed\n".to_vec())],
+            "Ada Lovelace",
+            "ada@example.com",
+            Some(&key_path),
+        )
+        .await
+        .expect("signed seed");
+        (key_path, allowed)
+    }
+
+    #[tokio::test]
+    async fn unconfigured_log_matches_real_gq_statuses() {
+        // Equivalence contract: with no forge keyring the unconfigured log
+        // must report exactly what `git log %G?` reports — the fast path and
+        // the verifying path are interchangeable.
+        let tmp = tempfile::tempdir().unwrap();
+        let bare = tmp.path().join("signed.git");
+        let git = CliGitBackend::new();
+        let (_key, _allowed) = seed_ssh_signed(&git, &tmp, &bare).await;
+        // Unsigned follow-up via a real clone — seed_commit would push a
+        // second root and get rejected.
+        let work = tmp.path().join("work");
+        let bare_s = bare.to_str().unwrap();
+        let work_s = work.to_str().unwrap();
+        assert!(
+            std::process::Command::new("git")
+                .args(["clone", bare_s, work_s])
+                .status()
+                .unwrap()
+                .success()
+        );
+        for (k, v) in [
+            ("commit.gpgsign", "false"),
+            ("user.email", "t@example.com"),
+            ("user.name", "T"),
+        ] {
+            assert!(
+                std::process::Command::new("git")
+                    .args(["-C", work_s, "config", k, v])
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+        }
+        std::fs::write(work.join("b.txt"), "v2\n").unwrap();
+        for args in [
+            vec!["add", "b.txt"],
+            vec!["commit", "-qm", "unsigned follow-up"],
+            vec!["push", "-q", "origin", "main"],
+        ] {
+            assert!(
+                std::process::Command::new("git")
+                    .args(["-C", work_s])
+                    .args(&args)
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+        }
+
+        let page = git
+            .log(&bare, "main", 0, 10, None, None)
+            .await
+            .expect("unconfigured log");
+        assert_eq!(page.len(), 2);
+
+        // Ground truth straight from git.
+        let raw = run_git_stdout(&[
+            "-C",
+            bare.to_str().unwrap(),
+            "log",
+            "--format=%H%x00%G?",
+            "main",
+        ])
+        .await
+        .expect("git log %G?");
+        let expected: std::collections::HashMap<String, String> = String::from_utf8_lossy(&raw)
+            .lines()
+            .filter_map(|l| {
+                let (sha, g) = l.split_once('\0')?;
+                Some((sha.trim().to_string(), map_signature_status(g)))
+            })
+            .collect();
+
+        for s in &page {
+            let want = expected
+                .get(&s.sha)
+                .unwrap_or_else(|| panic!("missing ground truth for {}", s.sha));
+            assert_eq!(
+                &s.signature_status, want,
+                "sha {} status mismatch (kind={})",
+                s.sha, s.signature_kind
+            );
+            if s.signature_status == "none" {
+                assert_eq!(s.signature_kind, "");
+            } else {
+                assert_eq!(s.signature_kind, "ssh");
+            }
+        }
+    }
+
+    /// Create a bare repo with one OpenPGP-signed commit signed by a fresh
+    /// key living in `sign_home` (never imported into the ambient keyring).
+    /// Returns `false` when gpg is unavailable.
+    async fn gpg_sign_seed(
+        tmp: &tempfile::TempDir,
+        bare: &Path,
+        sign_home: &Path,
+        email: &str,
+    ) -> bool {
+        std::fs::create_dir_all(sign_home).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(sign_home, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let gen = std::process::Command::new("gpg")
+            .args([
+                "--batch",
+                "--passphrase",
+                "",
+                "--quick-generate-key",
+                &format!("GPG Signer <{email}>"),
+                "ed25519",
+                "default",
+                "never",
+            ])
+            .env("GNUPGHOME", sign_home)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+        if !gen.map(|s| s.success()).unwrap_or(false) {
+            return false;
+        }
+        let list_keys = std::process::Command::new("gpg")
+            .args(["--list-secret-keys", "--with-colons"])
+            .env("GNUPGHOME", sign_home)
+            .output()
+            .expect("list secret keys");
+        let list_out = String::from_utf8_lossy(&list_keys.stdout);
+        let Some(key_id) = list_out.lines().find_map(|line| {
+            let mut parts = line.split(':');
+            if parts.next()? != "sec" {
+                return None;
+            }
+            parts.nth(3).map(|s| s.to_string())
+        }) else {
+            return false;
+        };
+        let git = CliGitBackend::new();
+        git.init_bare(bare, "main").await.unwrap();
+        let bare_s = bare.to_str().unwrap();
+        let work = tmp.path().join("gpg-work");
+        let work_s = work.to_str().unwrap();
+        let ok = std::process::Command::new("git")
+            .args(["clone", bare_s, work_s])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        assert!(ok);
+        std::fs::write(work.join("README.md"), "gpg signed\n").unwrap();
+        let env = [("GNUPGHOME", sign_home.to_str().unwrap())];
+        for args in [
+            vec!["config", "user.email", email],
+            vec!["config", "user.name", "GPG Signer"],
+            vec!["add", "README.md"],
+            vec![
+                "-c",
+                &format!("user.signingkey={key_id}"),
+                "-c",
+                "commit.gpgsign=true",
+                "commit",
+                "-qm",
+                "gpg seed",
+            ],
+            vec!["push", "-q", "origin", "main"],
+        ] {
+            let status = std::process::Command::new("git")
+                .args(["-C", work_s])
+                .args(&args)
+                .envs(env)
+                .env_remove("GPG_TTY")
+                .status()
+                .unwrap();
+            assert!(status.success(), "step failed: {args:?}");
+        }
+        true
+    }
+
+    #[tokio::test]
+    async fn unconfigured_log_empty_keyring_fast_path_reports_unknown() {
+        // Provable-E fast path: empty ambient keyring + no gpg.* config →
+        // signed commits report "unknown" without any verify subprocess.
+        let gpg_ok = std::process::Command::new("gpg")
+            .arg("--version")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !gpg_ok {
+            eprintln!("skipping: gpg not available");
+            return;
+        }
+        let tmp = tempfile::tempdir().unwrap();
+        let empty_home = tmp.path().join("empty-gnupg");
+        std::fs::create_dir_all(&empty_home).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&empty_home, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let empty_gitconfig = tmp.path().join("empty-gitconfig");
+        std::fs::write(&empty_gitconfig, "").unwrap();
+
+        let bare = tmp.path().join("signed.git");
+        let sign_home = tmp.path().join("sign-gnupg");
+        if !gpg_sign_seed(&tmp, &bare, &sign_home, "gpg-signer@example.com").await {
+            eprintln!("skipping: gpg keygen failed");
+            return;
+        }
+        let git = CliGitBackend::new();
+
+        // Probe must agree the ambient keyring cannot verify.
+        assert!(
+            default_sig_verify_impossible_env(
+                bare.to_str().unwrap(),
+                &[
+                    ("GNUPGHOME", empty_home.to_str().unwrap()),
+                    ("GIT_CONFIG_GLOBAL", empty_gitconfig.to_str().unwrap()),
+                    ("GIT_CONFIG_SYSTEM", "/dev/null"),
+                ],
+            )
+            .await,
+            "expected provable-unverifiable ambient keyring"
+        );
+
+        // Route the whole log call's ambient env the same way — nextest runs
+        // each test in its own process; restore for cargo test anyway.
+        let saved: Vec<(&str, Option<std::ffi::OsString>)> =
+            ["GNUPGHOME", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM"]
+                .iter()
+                .map(|k| (*k, std::env::var_os(k)))
+                .collect();
+        std::env::set_var("GNUPGHOME", &empty_home);
+        std::env::set_var("GIT_CONFIG_GLOBAL", &empty_gitconfig);
+        std::env::set_var("GIT_CONFIG_SYSTEM", "/dev/null");
+
+        let page = git.log(&bare, "main", 0, 10, None, None).await;
+
+        for (k, v) in saved {
+            match v {
+                Some(v) => std::env::set_var(k, v),
+                None => std::env::remove_var(k),
+            }
+        }
+
+        let page = page.expect("unconfigured log on empty keyring");
+        assert_eq!(page.len(), 1);
+        assert_eq!(page[0].signature_status, "unknown");
+        assert_eq!(page[0].signature_kind, "gpg");
+    }
+
+    #[tokio::test]
+    async fn unconfigured_log_ssh_signed_falls_back_to_gq_status() {
+        // SSH-signed commits take the real %G? pass — their unverifiable
+        // outcome is git-version/config dependent, never shortcut.
+        let tmp = tempfile::tempdir().unwrap();
+        let bare = tmp.path().join("signed.git");
+        let git = CliGitBackend::new();
+        let (_key, _allowed) = seed_ssh_signed(&git, &tmp, &bare).await;
+
+        let page = git
+            .log(&bare, "main", 0, 1, None, None)
+            .await
+            .expect("unconfigured log");
+        assert_eq!(page.len(), 1);
+        // Whatever %G? itself reports must be mirrored.
+        let raw = run_git_stdout(&[
+            "-C",
+            bare.to_str().unwrap(),
+            "log",
+            "--format=%G?",
+            "main",
+        ])
+        .await
+        .unwrap();
+        let want = map_signature_status(String::from_utf8_lossy(&raw).trim());
+        assert_eq!(page[0].signature_status, want);
+        if want == "none" {
+            assert_eq!(page[0].signature_kind, "");
+        } else {
+            assert_eq!(page[0].signature_kind, "ssh");
+        }
+    }
+
+    #[tokio::test]
+    async fn default_sig_verify_impossible_false_with_key_or_gpg_config() {
+        let gpg_ok = std::process::Command::new("gpg")
+            .arg("--version")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !gpg_ok {
+            eprintln!("skipping: gpg not available");
+            return;
+        }
+        let tmp = tempfile::tempdir().unwrap();
+        let bare = tmp.path().join("r.git");
+        let git = CliGitBackend::new();
+        git.init_bare(&bare, "main").await.unwrap();
+        let repo_s = bare.to_str().unwrap();
+        let empty_gitconfig = tmp.path().join("empty-gitconfig");
+        std::fs::write(&empty_gitconfig, "").unwrap();
+        let cfg_env = [
+            ("GIT_CONFIG_GLOBAL", empty_gitconfig.to_str().unwrap()),
+            ("GIT_CONFIG_SYSTEM", "/dev/null"),
+        ];
+
+        // Empty keyring → provable.
+        let empty_home = tmp.path().join("empty-gnupg");
+        std::fs::create_dir_all(&empty_home).unwrap();
+        let env: Vec<(&str, &str)> = cfg_env
+            .iter()
+            .copied()
+            .chain([("GNUPGHOME", empty_home.to_str().unwrap())])
+            .collect();
+        assert!(default_sig_verify_impossible_env(repo_s, &env).await);
+
+        // Keyring with a key → not provable (a 'G' outcome is possible).
+        let key_home = tmp.path().join("key-gnupg");
+        std::fs::create_dir_all(&key_home).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&key_home, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let gen = std::process::Command::new("gpg")
+            .args([
+                "--batch",
+                "--passphrase",
+                "",
+                "--quick-generate-key",
+                "Probe <probe@example.com>",
+                "ed25519",
+                "default",
+                "never",
+            ])
+            .env("GNUPGHOME", &key_home)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .expect("gpg gen");
+        assert!(gen.success());
+        let env: Vec<(&str, &str)> = cfg_env
+            .iter()
+            .copied()
+            .chain([("GNUPGHOME", key_home.to_str().unwrap())])
+            .collect();
+        assert!(!default_sig_verify_impossible_env(repo_s, &env).await);
+
+        // Repo-local gpg.* config → not provable even on an empty keyring.
+        assert!(
+            std::process::Command::new("git")
+                .args(["-C", repo_s, "config", "gpg.ssh.allowedSignersFile", "/tmp/x"])
+                .status()
+                .unwrap()
+                .success()
+        );
+        let env: Vec<(&str, &str)> = cfg_env
+            .iter()
+            .copied()
+            .chain([("GNUPGHOME", empty_home.to_str().unwrap())])
+            .collect();
+        assert!(!default_sig_verify_impossible_env(repo_s, &env).await);
     }
 }
