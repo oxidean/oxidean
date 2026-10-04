@@ -1,10 +1,10 @@
-//! Shared branch-protection evaluator (D-02, D-14..22) — used by hooks and `pull.merge`.
+//! Shared branch/tag protection evaluator (D-02, D-14..22, GIT-21) — used by hooks and `pull.merge`.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use oxidean_core::{AppError, CommitStatusState, ProtectionBlockReasons};
-use oxidean_db::{BranchProtectionRuleRow, Database};
+use oxidean_db::{BranchProtectionRuleRow, Database, TagProtectionRuleRow};
 
 use crate::repo::Capability;
 
@@ -240,6 +240,119 @@ pub fn evaluate_push(
         "Branch protection rules block this update",
     )
     .with_data(serde_json::to_value(ProtectionBlockReasons { reasons, ..Default::default() }).unwrap_or_default()))
+}
+
+/// What the actor is attempting on a tag ref (GIT-21).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TagProtectionIntent {
+    /// Create `refs/tags/*` (old rev is zero).
+    Create,
+    /// Move/re-target an existing tag (old and new non-zero).
+    Update,
+    /// Delete `refs/tags/*` (new rev is zero).
+    Delete,
+}
+
+/// Effective union of matching tag protection rules (GIT-21).
+#[derive(Debug, Clone, Default)]
+pub struct EffectiveTagProtection {
+    pub matched: bool,
+    pub allow_create: bool,
+    pub allow_update: bool,
+    pub allow_delete: bool,
+    pub enforce_admins: bool,
+}
+
+/// Union matching rules for a tag name — most restrictive wins (same rule as
+/// branch `allow_*`: any matching rule with an action disallowed denies it).
+pub fn union_tag_rules(rules: &[TagProtectionRuleRow], tag: &str) -> EffectiveTagProtection {
+    let mut eff = EffectiveTagProtection {
+        allow_create: true,
+        allow_update: true,
+        allow_delete: true,
+        ..Default::default()
+    };
+    let mut any = false;
+    for rule in rules {
+        if !pattern_matches(&rule.pattern, tag) {
+            continue;
+        }
+        any = true;
+        if !rule.allow_create {
+            eff.allow_create = false;
+        }
+        if !rule.allow_update {
+            eff.allow_update = false;
+        }
+        if !rule.allow_delete {
+            eff.allow_delete = false;
+        }
+        if rule.enforce_admins {
+            eff.enforce_admins = true;
+        }
+    }
+    if !any {
+        return EffectiveTagProtection::default();
+    }
+    eff.matched = true;
+    eff
+}
+
+fn tag_actor_bypasses(eff: &EffectiveTagProtection, capability: Option<Capability>) -> bool {
+    !eff.enforce_admins && matches!(capability, Some(Capability::Admin))
+}
+
+/// Evaluate tag create/update/delete intents (GIT-21).
+pub fn evaluate_tag_push(
+    eff: &EffectiveTagProtection,
+    intent: TagProtectionIntent,
+    capability: Option<Capability>,
+) -> Result<(), AppError> {
+    if !eff.matched {
+        return Ok(());
+    }
+    if tag_actor_bypasses(eff, capability) {
+        return Ok(());
+    }
+    let (allowed, reason) = match intent {
+        TagProtectionIntent::Create => (eff.allow_create, "create"),
+        TagProtectionIntent::Update => (eff.allow_update, "update"),
+        TagProtectionIntent::Delete => (eff.allow_delete, "delete"),
+    };
+    if allowed {
+        return Ok(());
+    }
+    Err(AppError::new(
+        "repo.tag_protection",
+        "Tag protection rules block this update",
+    )
+    .with_data(
+        serde_json::to_value(ProtectionBlockReasons {
+            reasons: vec![reason.to_string()],
+            ..Default::default()
+        })
+        .unwrap_or_default(),
+    ))
+}
+
+/// Load rules and return effective protection for a tag.
+pub async fn effective_for_tag(
+    db: &Database,
+    repo_id: &str,
+    tag: &str,
+) -> Result<EffectiveTagProtection, AppError> {
+    let rules = db.list_tag_protection_rules(repo_id).await.map_err(|e| {
+        tracing::error!(error = %e, "list tag_protection_rules");
+        AppError::new("repo.internal", "repository operation failed")
+    })?;
+    Ok(union_tag_rules(&rules, tag))
+}
+
+/// Strip `refs/tags/` prefix.
+pub fn tag_from_ref(git_ref: &str) -> Option<&str> {
+    git_ref
+        .strip_prefix("refs/tags/")
+        .filter(|t| !t.is_empty() && !t.contains('\0'))
 }
 
 /// Evaluate merge intent (PR-08 / D-22).
@@ -638,6 +751,9 @@ pub fn capability_from_env(raw: &str) -> Capability {
 pub const ZERO_SHA: &str = "0000000000000000000000000000000000000000";
 
 /// Hook/update check: load rules for repo resolved from GIT_DIR and evaluate intent.
+///
+/// Covers `refs/heads/*` (classic branch protection, D-14) and `refs/tags/*`
+/// (tag rulesets, GIT-21). Other namespaces are not ref-protected.
 pub async fn check_ref_update(
     db: &Database,
     repos_dir: &Path,
@@ -647,12 +763,20 @@ pub async fn check_ref_update(
     new_sha: &str,
     capability: Capability,
 ) -> Result<(), AppError> {
-    let Some(branch) = branch_from_ref(git_ref) else {
-        // Non-branch refs are not subject to classic branch protection.
+    enum RefTarget<'a> {
+        Branch(&'a str),
+        Tag(&'a str),
+    }
+    let target = if let Some(branch) = branch_from_ref(git_ref) {
+        RefTarget::Branch(branch)
+    } else if let Some(tag) = tag_from_ref(git_ref) {
+        RefTarget::Tag(tag)
+    } else {
+        // Non-branch/non-tag refs are not subject to ref protection.
         return Ok(());
     };
     let (owner, name) = owner_name_from_git_dir(repos_dir, git_dir)
-        .map_err(|e| AppError::new("repo.branch_protection", e))?;
+        .map_err(|e| AppError::new("repo.ref_protection", e))?;
     let owner_id = if let Some(u) = db
         .find_user_by_username(&owner)
         .await
@@ -676,23 +800,40 @@ pub async fn check_ref_update(
             AppError::new("repo.internal", "repository operation failed")
         })?
         .ok_or_else(|| AppError::new("repo.not_found", "Repository not found"))?;
-    let eff = effective_for_branch(db, &repo.id, branch).await?;
-    let intent = if new_sha == ZERO_SHA {
-        ProtectionIntent::Delete
-    } else if old_sha == ZERO_SHA {
-        ProtectionIntent::Push
-    } else {
-        // Detect force-push: not a fast-forward.
-        let is_ff = git_is_fast_forward(git_dir, old_sha, new_sha)
-            .await
-            .unwrap_or(true);
-        if is_ff {
-            ProtectionIntent::Push
-        } else {
-            ProtectionIntent::ForcePush
+    match target {
+        RefTarget::Branch(branch) => {
+            let eff = effective_for_branch(db, &repo.id, branch).await?;
+            let intent = if new_sha == ZERO_SHA {
+                ProtectionIntent::Delete
+            } else if old_sha == ZERO_SHA {
+                ProtectionIntent::Push
+            } else {
+                // Detect force-push: not a fast-forward.
+                let is_ff = git_is_fast_forward(git_dir, old_sha, new_sha)
+                    .await
+                    .unwrap_or(true);
+                if is_ff {
+                    ProtectionIntent::Push
+                } else {
+                    ProtectionIntent::ForcePush
+                }
+            };
+            evaluate_push(&eff, intent, Some(capability))
         }
-    };
-    evaluate_push(&eff, intent, Some(capability))
+        RefTarget::Tag(tag) => {
+            let eff = effective_for_tag(db, &repo.id, tag).await?;
+            let intent = if new_sha == ZERO_SHA {
+                TagProtectionIntent::Delete
+            } else if old_sha == ZERO_SHA {
+                TagProtectionIntent::Create
+            } else {
+                // Any retarget of an existing tag is an update (tags do not
+                // fast-forward as refs).
+                TagProtectionIntent::Update
+            };
+            evaluate_tag_push(&eff, intent, Some(capability))
+        }
+    }
 }
 
 async fn git_is_fast_forward(git_dir: &Path, old_sha: &str, new_sha: &str) -> Result<bool, String> {
@@ -756,6 +897,62 @@ mod tests {
     fn protection_helper_none_when_env_and_default_missing() {
         assert!(resolve_protection_helper_with(None, None).is_none());
         assert!(resolve_protection_helper_with(Some(String::new()), None).is_none());
+    }
+
+    #[test]
+    fn tag_from_ref_strips_prefix() {
+        assert_eq!(tag_from_ref("refs/tags/v1.0.0"), Some("v1.0.0"));
+        assert_eq!(tag_from_ref("refs/tags/release/v2"), Some("release/v2"));
+        assert_eq!(tag_from_ref("refs/tags/"), None);
+        assert_eq!(tag_from_ref("refs/heads/main"), None);
+        assert_eq!(tag_from_ref("HEAD"), None);
+    }
+
+    #[test]
+    fn tag_union_and_evaluate() {
+        let rule = TagProtectionRuleRow {
+            id: "1".into(),
+            repo_id: "r".into(),
+            pattern: "v*".into(),
+            allow_create: false,
+            allow_update: false,
+            allow_delete: false,
+            enforce_admins: true,
+            created_at: String::new(),
+            updated_at: String::new(),
+        };
+        let eff = union_tag_rules(&[rule], "v1");
+        assert!(eff.matched);
+        for intent in [
+            TagProtectionIntent::Create,
+            TagProtectionIntent::Update,
+            TagProtectionIntent::Delete,
+        ] {
+            let err = evaluate_tag_push(&eff, intent, Some(Capability::Admin))
+                .expect_err("enforce_admins must block admin too");
+            assert_eq!(err.code, "repo.tag_protection");
+        }
+        // Write bypass is never allowed on a matching all-deny rule.
+        assert!(
+            evaluate_tag_push(&eff, TagProtectionIntent::Create, Some(Capability::Write)).is_err()
+        );
+        // Non-matching tag stays free.
+        let miss = union_tag_rules(
+            &[TagProtectionRuleRow {
+                id: "2".into(),
+                repo_id: "r".into(),
+                pattern: "release-*".into(),
+                allow_create: false,
+                allow_update: false,
+                allow_delete: false,
+                enforce_admins: false,
+                created_at: String::new(),
+                updated_at: String::new(),
+            }],
+            "v2",
+        );
+        assert!(!miss.matched);
+        assert!(evaluate_tag_push(&miss, TagProtectionIntent::Delete, Some(Capability::Read)).is_ok());
     }
 
     #[test]

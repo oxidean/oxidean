@@ -124,6 +124,8 @@ SSO start routes redirect to the IdP when configured. If WorkOS/OIDC ENV is miss
 | `repo.softDelete` | Soft-delete with type-confirm | Repo Admin |
 | `repo.collaborators.list` / `add` / `update` / `remove` | Per-repo collaborator grants | Repo Admin |
 | `repo.invites.create` / `createLink` / `list` / `revoke` | Bulk collaborator email invites (`{ emails, permission }`) and shareable links (optional `expires_at`, `max_uses`) | Repo Admin |
+| `repo.branchProtection.list` / `create` / `update` / `delete` | Classic branch protection rules (glob pattern on `refs/heads/*`); enforced by the bare-repo `update` hook on HTTPS + SSH pushes | Repo Admin |
+| `repo.tagProtection.list` / `create` / `update` / `delete` | Protected tag rulesets (glob pattern on `refs/tags/*`); `allow_create`/`allow_update`/`allow_delete` carve out actions for non-admins, `enforce_admins` removes the admin bypass | Repo Admin |
 | `release.list` / `get` / `create` / `update` / `delete` / `deleteAsset` | Tag-based releases + notes; assets via HTTP | Session (+ capability) |
 | `admin.users.list` / `updateRole` / `ban` / `unban` / `delete` / `revokeSessions` / `getAccess` | User administration (type-confirm delete; `delete_orgs` opt-in for shared orgs) | Sys-admin |
 | `admin.users.listSessions` | Per-user sessions with client metadata (`ip_address`, `user_agent`, `remember_me`, last-seen/expiry) | Sys-admin |

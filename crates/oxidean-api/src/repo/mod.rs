@@ -14,6 +14,7 @@ mod search;
 pub(crate) mod search_query;
 pub(crate) mod signatures;
 mod social_lists;
+mod tag_protection;
 mod templates;
 
 pub use acl::{
@@ -27,6 +28,10 @@ pub use branch_protection::{
     list as branch_protection_list, update as branch_protection_update,
 };
 pub use commit_status::{create as commit_status_create, list as commit_status_list};
+pub use tag_protection::{
+    create as tag_protection_create, delete as tag_protection_delete,
+    list as tag_protection_list, update as tag_protection_update,
+};
 pub use collaborators::{
     add as collaborators_add, list as collaborators_list, remove as collaborators_remove,
     resolve_repo_for_admin, update as collaborators_update,

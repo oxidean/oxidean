@@ -22,8 +22,8 @@ impl CliGitBackend {
     }
 }
 
-/// Install bare-repo `hooks/update` for branch protection (Phase 13 / D-19).
-/// Idempotent — overwrites with the known-good script.
+/// Install bare-repo `hooks/update` for ref protection — branches (Phase 13 /
+/// D-19) and tags (GIT-21). Idempotent — overwrites with the known-good script.
 pub async fn install_protection_hooks(bare: &Path) -> Result<(), GitError> {
     let hooks = bare.join("hooks");
     tokio::fs::create_dir_all(&hooks).await?;
@@ -31,7 +31,7 @@ pub async fn install_protection_hooks(bare: &Path) -> Result<(), GitError> {
     // D-PKG-02: fail-closed when helper missing in production|cloud
     // (mirrors webhook deliver.rs env signal); fail-open for compose/dev.
     let script = r#"#!/bin/sh
-# Oxidean branch protection update hook (Phase 13 / D-19; D-PKG-02)
+# Oxidean ref protection update hook (Phase 13 / D-19; D-PKG-02; GIT-21)
 refname="$1"
 oldrev="$2"
 newrev="$3"

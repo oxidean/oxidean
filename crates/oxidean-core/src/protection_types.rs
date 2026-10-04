@@ -147,6 +147,68 @@ pub struct BranchProtectionDeleteRequest {
     pub id: String,
 }
 
+/// Public tag protection rule (GIT-21) — restricts create/update/delete on
+/// matching `refs/tags/*` for non-bypass actors.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TagProtectionRulePublic {
+    pub id: String,
+    pub repo_id: String,
+    pub pattern: String,
+    pub allow_create: bool,
+    pub allow_update: bool,
+    pub allow_delete: bool,
+    pub enforce_admins: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// `repo.tagProtection.list` response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TagProtectionListResponse {
+    pub rules: Vec<TagProtectionRulePublic>,
+}
+
+/// Shared fields for tag rule create/update.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TagProtectionRuleInput {
+    pub owner: String,
+    pub name: String,
+    pub pattern: String,
+    #[serde(default)]
+    pub allow_create: bool,
+    #[serde(default)]
+    pub allow_update: bool,
+    #[serde(default)]
+    pub allow_delete: bool,
+    #[serde(default)]
+    pub enforce_admins: bool,
+}
+
+/// `repo.tagProtection.update` — includes rule id.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TagProtectionUpdateRequest {
+    pub owner: String,
+    pub name: String,
+    pub id: String,
+    pub pattern: String,
+    #[serde(default)]
+    pub allow_create: bool,
+    #[serde(default)]
+    pub allow_update: bool,
+    #[serde(default)]
+    pub allow_delete: bool,
+    #[serde(default)]
+    pub enforce_admins: bool,
+}
+
+/// `repo.tagProtection.delete`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TagProtectionDeleteRequest {
+    pub owner: String,
+    pub name: String,
+    pub id: String,
+}
+
 /// Public commit status (D-11).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommitStatusPublic {
