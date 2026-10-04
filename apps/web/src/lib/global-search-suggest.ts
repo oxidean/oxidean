@@ -10,6 +10,16 @@ export type SearchEntityType =
   | "issues"
   | "pulls";
 
+/** Valid `type` values for `/search` — the same set the route's `parseType` accepts. */
+export const SEARCH_ENTITY_TYPES: readonly SearchEntityType[] = [
+  "repositories",
+  "users",
+  "organizations",
+  "code",
+  "issues",
+  "pulls",
+];
+
 export type SearchRepoSuggestion = {
   kind: "repo";
   id: string;

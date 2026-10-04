@@ -12,14 +12,21 @@ import { useEffect, useEffectEvent, useState } from "octane";
 import { Input } from "@/components/ui/input";
 import {
   fetchSearchSuggestions,
+  SEARCH_ENTITY_TYPES,
   searchResultsHref,
   type SearchActionSuggestion,
+  type SearchEntityType,
   type SearchOrgSuggestion,
   type SearchRepoSuggestion,
   type SearchSuggestions,
   type SearchUserSuggestion,
 } from "@/lib/global-search-suggest";
 import { useChromeAccountState } from "@/lib/use-chrome-account";
+import {
+  WEBMCP_SEARCH_FORM_ATTRS,
+  WEBMCP_SEARCH_QUERY_ATTRS,
+  WEBMCP_SEARCH_TYPE_ATTRS,
+} from "@/lib/webmcp";
 import { cn } from "@/lib/utils";
 import { AppLink } from "@/components/ui/app-link";
 
@@ -114,9 +121,16 @@ export function GlobalSearch({ className }: GlobalSearchProps) @{
     return () => document.removeEventListener("pointerdown", onDocPointer);
   }, [open]);
 
-  function goResults() {
-    const next = q.trim();
-    window.location.assign(searchResultsHref(next));
+  function submitSearch(form: HTMLFormElement) {
+    const fd = new FormData(form);
+    const qEntry = fd.get("q");
+    const typeEntry = fd.get("type");
+    const nextQ = (typeof qEntry === "string" ? qEntry : q).trim();
+    const rawType = (typeof typeEntry === "string" ? typeEntry : "repositories").trim();
+    const nextType: SearchEntityType = (SEARCH_ENTITY_TYPES as readonly string[]).includes(rawType)
+      ? (rawType as SearchEntityType)
+      : "repositories";
+    window.location.assign(searchResultsHref(nextQ, nextType));
   }
 
   function activate(item: FlatItem) {
@@ -149,13 +163,14 @@ export function GlobalSearch({ className }: GlobalSearchProps) @{
       method="get"
       action="/search"
       className="relative"
+      {...WEBMCP_SEARCH_FORM_ATTRS}
       onSubmit={(e) => {
         e.preventDefault();
         if (activeIndex >= 0 && items[activeIndex]) {
           activate(items[activeIndex]!);
           return;
         }
-        goResults();
+        submitSearch(e.currentTarget as HTMLFormElement);
       }}
     >
       <Search
@@ -186,8 +201,9 @@ export function GlobalSearch({ className }: GlobalSearchProps) @{
         title="Search repositories, users, organizations, and more"
         aria-label={GLOBAL_SEARCH_LABEL}
         data-testid="global-search-input"
+        {...WEBMCP_SEARCH_QUERY_ATTRS}
       />
-      <input type="hidden" name="type" value="repositories" />
+      <input type="hidden" name="type" value="repositories" {...WEBMCP_SEARCH_TYPE_ATTRS} />
     </form>
 
     @if (showPanel) {
