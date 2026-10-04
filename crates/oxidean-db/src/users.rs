@@ -295,6 +295,52 @@ pub async fn find_by_id(pool: &DbPool, id: &str) -> Result<Option<UserRow>, Stri
     }
 }
 
+/// Batch `find_by_email` on the legacy `users.email` fallback column —
+/// one `IN (...)` round trip (commit author resolution).
+/// `emails` are matched case-insensitively.
+pub async fn find_many_by_email(pool: &DbPool, emails: &[String]) -> Result<Vec<UserRow>, String> {
+    let emails: Vec<String> = emails
+        .iter()
+        .map(|e| e.trim().to_ascii_lowercase())
+        .filter(|e| !e.is_empty())
+        .collect();
+    if emails.is_empty() {
+        return Ok(Vec::new());
+    }
+    match pool {
+        DbPool::Postgres(p) => {
+            let rows = sqlx::query(&format!("{USER_SELECT_PG} WHERE lower(email) = ANY($1)"))
+                .bind(&emails)
+                .fetch_all(p)
+                .await
+                .map_err(|e| format!("find users by emails failed: {e}"))?;
+            rows.iter().map(|r| Ok(map_user!(r))).collect()
+        }
+        DbPool::MySql(p) => {
+            let in_list =
+                crate::dialect::in_placeholders(crate::dialect::Dialect::MySql, 1, emails.len());
+            let q_str = format!("{USER_SELECT_MYSQL} WHERE lower(email) IN ({in_list})");
+            let q = emails.iter().fold(sqlx::query(&q_str), |q, e| q.bind(e));
+            let rows = q
+                .fetch_all(p)
+                .await
+                .map_err(|e| format!("find users by emails failed: {e}"))?;
+            rows.iter().map(|r| Ok(map_user!(r))).collect()
+        }
+        DbPool::Sqlite(p) => {
+            let in_list =
+                crate::dialect::in_placeholders(crate::dialect::Dialect::Sqlite, 1, emails.len());
+            let q_str = format!("{USER_SELECT_SQLITE} WHERE lower(email) IN ({in_list})");
+            let q = emails.iter().fold(sqlx::query(&q_str), |q, e| q.bind(e));
+            let rows = q
+                .fetch_all(p)
+                .await
+                .map_err(|e| format!("find users by emails failed: {e}"))?;
+            rows.iter().map(|r| Ok(map_user!(r))).collect()
+        }
+    }
+}
+
 /// Batch `find_by_id` — one `IN (...)` round trip instead of N (list enrichment).
 pub async fn find_many_by_id(pool: &DbPool, ids: &[String]) -> Result<Vec<UserRow>, String> {
     if ids.is_empty() {

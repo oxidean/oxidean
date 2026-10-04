@@ -997,7 +997,12 @@ pub async fn commits(
         }
         emails.push(c.author_email.clone());
     }
-    let keyring = signatures::keyring_for_emails(&ctx.db, &emails).await;
+    // Resolve all committer/author emails once — the same map drives the
+    // response rows, the signature keyring, and the verified policy.
+    let resolved =
+        author_resolve::resolve_authors_for_emails(&ctx.db, emails.iter().map(String::as_str))
+            .await;
+    let keyring = signatures::keyring_for_resolved(&ctx.db, &emails, &resolved).await;
     let commits = if keyring.has_any() {
         ctx.git
             .log(
@@ -1013,20 +1018,34 @@ pub async fn commits(
     } else {
         emails_probe
     };
-    let resolved =
-        author_resolve::resolve_author_emails(&ctx.db, commits.iter().map(|c| c.author_email.as_str()))
-            .await;
+    let (any_valid, any_gpg) = signatures::needs_verified_policy(
+        commits
+            .iter()
+            .map(|c| (&c.signature_status, &c.signature_kind)),
+    );
+    let policy = if any_valid {
+        let uids: Vec<String> = {
+            let mut seen = std::collections::HashSet::new();
+            resolved
+                .values()
+                .filter_map(|r| r.user_id.clone())
+                .filter(|id| seen.insert(id.clone()))
+                .collect()
+        };
+        signatures::VerifiedPolicy::load(&ctx.db, &uids, any_gpg).await
+    } else {
+        signatures::VerifiedPolicy::none()
+    };
     let mut out_commits = Vec::with_capacity(commits.len());
     for c in commits {
         let r = resolved.get(&c.author_email).cloned().unwrap_or_default();
-        let signature_status = signatures::apply_verified_policy(
-            &ctx.db,
+        let signature_status = policy.status(
+            &resolved,
             &c.committer_email,
             &c.author_email,
             &c.signature_status,
             &c.signature_kind,
-        )
-        .await;
+        );
         out_commits.push(RepoCommitSummary {
             sha: c.sha,
             short_sha: c.short_sha,
@@ -1253,7 +1272,10 @@ pub async fn commit(
     if !detail.committer_email.trim().is_empty() {
         emails.push(detail.committer_email.clone());
     }
-    let keyring = signatures::keyring_for_emails(&ctx.db, &emails).await;
+    let resolved =
+        author_resolve::resolve_authors_for_emails(&ctx.db, emails.iter().map(String::as_str))
+            .await;
+    let keyring = signatures::keyring_for_resolved(&ctx.db, &emails, &resolved).await;
     let detail = if keyring.has_any() {
         ctx.git
             .show_commit(
@@ -1267,15 +1289,30 @@ pub async fn commit(
     } else {
         detail
     };
-    let r = author_resolve::resolve_author_email(&ctx.db, &detail.author_email).await;
-    let signature_status = signatures::apply_verified_policy(
-        &ctx.db,
+    let r = resolved
+        .get(detail.author_email.trim())
+        .cloned()
+        .unwrap_or_default();
+    let (any_valid, any_gpg) = signatures::needs_verified_policy(std::iter::once((
+        &detail.signature_status,
+        &detail.signature_kind,
+    )));
+    let policy = if any_valid {
+        let uids: Vec<String> = resolved
+            .values()
+            .filter_map(|a| a.user_id.clone())
+            .collect();
+        signatures::VerifiedPolicy::load(&ctx.db, &uids, any_gpg).await
+    } else {
+        signatures::VerifiedPolicy::none()
+    };
+    let signature_status = policy.status(
+        &resolved,
         &detail.committer_email,
         &detail.author_email,
         &detail.signature_status,
         &detail.signature_kind,
-    )
-    .await;
+    );
     Ok(RepoCommitResponse {
         sha: detail.sha,
         short_sha: detail.short_sha,

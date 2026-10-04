@@ -264,6 +264,64 @@ pub async fn list_for_user(pool: &DbPool, user_id: &str) -> Result<Vec<SshKeyRow
     }
 }
 
+/// Keys for many users in one `IN (...)` round trip, newest first
+/// (commit signature keyring batching).
+pub async fn list_for_users(pool: &DbPool, user_ids: &[String]) -> Result<Vec<SshKeyRow>, String> {
+    if user_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    match pool {
+        DbPool::Postgres(p) => {
+            let rows = sqlx::query(&format!(
+                "{SSH_SELECT_PG} WHERE user_id = ANY($1) ORDER BY created_at DESC, id DESC"
+            ))
+            .bind(user_ids)
+            .fetch_all(p)
+            .await
+            .map_err(|e| format!("list ssh keys failed: {e}"))?;
+            let mut mapped = Vec::with_capacity(rows.len());
+            for r in rows {
+                mapped.push(map_ssh_key!(&r));
+            }
+            Ok(mapped)
+        }
+        DbPool::MySql(p) => {
+            let in_list =
+                crate::dialect::in_placeholders(crate::dialect::Dialect::MySql, 1, user_ids.len());
+            let q_str = format!(
+                "{SSH_SELECT_MYSQL} WHERE user_id IN ({in_list}) ORDER BY created_at DESC, id DESC"
+            );
+            let q = user_ids.iter().fold(sqlx::query(&q_str), |q, id| q.bind(id));
+            let rows = q
+                .fetch_all(p)
+                .await
+                .map_err(|e| format!("list ssh keys failed: {e}"))?;
+            let mut mapped = Vec::with_capacity(rows.len());
+            for r in rows {
+                mapped.push(map_ssh_key!(&r));
+            }
+            Ok(mapped)
+        }
+        DbPool::Sqlite(p) => {
+            let in_list =
+                crate::dialect::in_placeholders(crate::dialect::Dialect::Sqlite, 1, user_ids.len());
+            let q_str = format!(
+                "{SSH_SELECT_SQLITE} WHERE user_id IN ({in_list}) ORDER BY created_at DESC, id DESC"
+            );
+            let q = user_ids.iter().fold(sqlx::query(&q_str), |q, id| q.bind(id));
+            let rows = q
+                .fetch_all(p)
+                .await
+                .map_err(|e| format!("list ssh keys failed: {e}"))?;
+            let mut mapped = Vec::with_capacity(rows.len());
+            for r in rows {
+                mapped.push(map_ssh_key!(&r));
+            }
+            Ok(mapped)
+        }
+    }
+}
+
 /// Hard-delete a key by id. Idempotent when missing.
 pub async fn revoke(pool: &DbPool, id: &str) -> Result<(), String> {
     match pool {
