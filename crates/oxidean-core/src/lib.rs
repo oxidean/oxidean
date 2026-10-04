@@ -95,6 +95,32 @@ pub struct EchoResponse {
     pub message: String,
 }
 
+/// Optional-instance-feature flags advertised by `system.manifest` (CLI-02).
+/// All `false` today — they flip on as the corresponding surfaces land
+/// (MCP: AGT-01, a typed REST surface, instance-as-OAuth-provider: API-03).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ManifestCapabilities {
+    pub mcp: bool,
+    pub rest: bool,
+    pub oauth: bool,
+}
+
+/// `system.manifest` response — the server-driven compatibility contract that
+/// lets clients (the `ox` CLI, third-party tools) feature-gate on the exact
+/// procedure set this instance's dispatch table knows.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ManifestResponse {
+    /// RPC wire protocol version (`RPC_PROTOCOL_VERSION`).
+    pub protocol_version: u32,
+    /// Server build version (`oxidean-api` crate version).
+    pub server_version: String,
+    /// Every procedure the dispatch table handles, mapped to `true`.
+    pub procedures: std::collections::BTreeMap<String, bool>,
+    pub capabilities: ManifestCapabilities,
+    /// Oldest `ox` CLI version this instance guarantees compatibility with.
+    pub min_cli_version: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum RpcInput {

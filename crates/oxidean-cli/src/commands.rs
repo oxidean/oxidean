@@ -9,6 +9,7 @@ use serde_json::{json, Value};
 
 use crate::args::{parse_repo, Command, Global, Invocation, ListFilters};
 use crate::config::{self, Config, InstanceEntry};
+use crate::manifest;
 use crate::output;
 use crate::rpc::{self, CallError, Client};
 
@@ -22,6 +23,9 @@ pub const EXIT_AUTH: u8 = 3;
 pub enum CliError {
     /// Exit 2 — bad flags, bad repo spec, no instance configured.
     Usage(String),
+    /// Exit 2 — the instance manifest doesn't list a procedure this command
+    /// needs (server older/different than the command expects).
+    Unsupported(String),
     /// Exit 3 — no credentials, or the instance rejected them.
     Auth(String),
     /// Exit code derived from the error code (`auth.unauthenticated` → 3).
@@ -35,7 +39,7 @@ pub enum CliError {
 impl CliError {
     pub fn exit_code(&self) -> u8 {
         match self {
-            Self::Usage(_) => EXIT_USAGE,
+            Self::Usage(_) | Self::Unsupported(_) => EXIT_USAGE,
             Self::Auth(_) => EXIT_AUTH,
             Self::Api(e) => rpc::error_exit_code(e),
             Self::Transport(_) | Self::Config(_) => EXIT_API,
@@ -46,7 +50,9 @@ impl CliError {
 impl std::fmt::Display for CliError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Usage(m) | Self::Auth(m) | Self::Transport(m) => f.write_str(m),
+            Self::Usage(m) | Self::Unsupported(m) | Self::Auth(m) | Self::Transport(m) => {
+                f.write_str(m)
+            }
             Self::Api(e) => write!(f, "{}: {}", e.code, e.message),
             Self::Config(e) => write!(f, "{e}"),
         }
@@ -315,8 +321,61 @@ async fn pr_checks(
     })
 }
 
+/// Procedures a command will call — the manifest gates on exactly these.
+/// `Help`/`Version` are local-only (empty list → no fetch, no instance needed).
+fn required_procedures(command: &Command) -> Vec<String> {
+    match command {
+        Command::AuthLogin { .. } => vec!["system.health".into(), "auth.me".into()],
+        Command::AuthStatus => vec!["auth.me".into()],
+        Command::RepoList { owner } => vec![if owner.is_some() {
+            "repo.listByOwner"
+        } else {
+            "repo.listMine"
+        }
+        .into()],
+        Command::RepoView { .. } => vec!["repo.get".into()],
+        Command::IssueList { .. } => vec!["issue.list".into()],
+        Command::IssueView { .. } => vec!["issue.get".into()],
+        Command::IssueCreate { .. } => vec!["issue.create".into()],
+        Command::PrList { .. } => vec!["pull.list".into()],
+        Command::PrView { .. } => vec!["pull.get".into()],
+        Command::PrChecks { .. } => vec!["pull.get".into(), "repo.commitStatus.list".into()],
+        Command::RunList { .. } => vec!["repo.actions.listRuns".into()],
+        Command::RunView { .. } => vec!["repo.actions.getRun".into()],
+        Command::PkgList { .. } => vec!["packages.list".into()],
+        Command::Api { procedure, .. } => vec![procedure.clone()],
+        Command::Help | Command::Version => vec![],
+    }
+}
+
+/// CLI-02 compatibility gate: fetch `system.manifest` once (fail-open on
+/// pre-manifest/unreachable instances), print advisory notices, and reject
+/// commands whose procedures the instance doesn't advertise.
+async fn gate(inv: &Invocation, rt: &Runtime) -> Result<(), CliError> {
+    let required = required_procedures(&inv.command);
+    if required.is_empty() {
+        return Ok(());
+    }
+    let client = client(&inv.global, rt)?;
+    let Some(manifest) = manifest::fetch(&client).await else {
+        return Ok(());
+    };
+    for notice in manifest::compat_notices(&manifest, env!("CARGO_PKG_VERSION")) {
+        eprintln!("ox: {notice}");
+    }
+    for procedure in required {
+        if !manifest.supports(&procedure) {
+            return Err(CliError::Unsupported(format!(
+                "command not supported by instance (missing {procedure})"
+            )));
+        }
+    }
+    Ok(())
+}
+
 pub async fn dispatch(inv: &Invocation, rt: &Runtime) -> Result<Out, CliError> {
     let g = &inv.global;
+    gate(inv, rt).await?;
     match &inv.command {
         Command::Help => Ok(Out::Report {
             text: crate::args::USAGE.to_string(),
@@ -485,6 +544,7 @@ mod tests {
     #[test]
     fn cli_error_exit_codes() {
         assert_eq!(CliError::Usage("x".into()).exit_code(), 2);
+        assert_eq!(CliError::Unsupported("x".into()).exit_code(), 2);
         assert_eq!(CliError::Auth("x".into()).exit_code(), 3);
         assert_eq!(CliError::Transport("x".into()).exit_code(), 1);
         assert_eq!(
@@ -503,5 +563,35 @@ mod tests {
             .exit_code(),
             3
         );
+    }
+
+    #[test]
+    fn required_procedures_map_commands() {
+        assert_eq!(
+            required_procedures(&Command::PrChecks {
+                repo: "o/n".into(),
+                number: 1
+            }),
+            vec!["pull.get".to_string(), "repo.commitStatus.list".to_string()]
+        );
+        assert_eq!(
+            required_procedures(&Command::RepoList { owner: None }),
+            vec!["repo.listMine".to_string()]
+        );
+        assert_eq!(
+            required_procedures(&Command::RepoList {
+                owner: Some("org".into())
+            }),
+            vec!["repo.listByOwner".to_string()]
+        );
+        assert_eq!(
+            required_procedures(&Command::Api {
+                procedure: "repo.explore".into(),
+                input: json!({})
+            }),
+            vec!["repo.explore".to_string()]
+        );
+        assert!(required_procedures(&Command::Help).is_empty());
+        assert!(required_procedures(&Command::Version).is_empty());
     }
 }

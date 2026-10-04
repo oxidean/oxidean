@@ -39,6 +39,20 @@ export type DbProbeResponse = {
   probed_at: string;
 };
 
+export type ManifestCapabilities = {
+  mcp: boolean;
+  rest: boolean;
+  oauth: boolean;
+};
+
+export type ManifestResponse = {
+  protocol_version: number;
+  server_version: string;
+  procedures: Record<string, boolean>;
+  capabilities: ManifestCapabilities;
+  min_cli_version: string;
+};
+
 export type ProviderMode = "local" | "workos" | "oidc";
 
 export type EmailProviderKind = "log" | "smtp" | "resend";
@@ -2808,6 +2822,7 @@ export function createClient(opts: CreateClientOptions) {
       health: () => rpcCall<HealthResponse>(opts, "system.health", {}),
       echo: (input: EchoRequest) => rpcCall<EchoResponse>(opts, "system.echo", input),
       dbProbe: () => rpcCall<DbProbeResponse>(opts, "system.db_probe", {}),
+      manifest: () => rpcCall<ManifestResponse>(opts, "system.manifest", {}),
     },
     auth: {
       signup: (input: SignupRequest) => rpcCall<UserPublic>(opts, "auth.signup", input),
@@ -3417,6 +3432,17 @@ export function systemDbProbeQueryOptions(client: OxideanClient) {
     queryKey: ["system", "dbProbe"] as const,
     queryFn: async () => {
       const res = await client.system.dbProbe();
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
+export function systemManifestQueryOptions(client: OxideanClient) {
+  return {
+    queryKey: ["system", "manifest"] as const,
+    queryFn: async () => {
+      const res = await client.system.manifest();
       if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
       return res.data;
     },
@@ -4450,6 +4476,7 @@ export function adminAuthUpdateSettingsMutationOptions(client: OxideanClient) {
 export const queryOptions = {
   systemHealth: systemHealthQueryOptions,
   systemDbProbe: systemDbProbeQueryOptions,
+  systemManifest: systemManifestQueryOptions,
   authMe: authMeQueryOptions,
   authProviderConfig: authProviderConfigQueryOptions,
   userGetProfile: userGetProfileQueryOptions,

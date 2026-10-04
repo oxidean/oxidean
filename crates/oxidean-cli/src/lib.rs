@@ -7,5 +7,6 @@
 pub mod args;
 pub mod commands;
 pub mod config;
+pub mod manifest;
 pub mod output;
 pub mod rpc;

@@ -87,6 +87,7 @@ SSO start routes redirect to the IdP when configured. If WorkOS/OIDC ENV is miss
 | `system.health` | Status, API crate version, DB ping string | No |
 | `system.echo` | Echo `message` (max 8192 bytes) | No |
 | `system.db_probe` | Dialect probe / `instances` counter | No |
+| `system.manifest` | Compatibility contract: `protocol_version`, `server_version`, `procedures` map (every dispatch procedure → `true`), `capabilities` (`mcp`/`rest`/`oauth`), `min_cli_version` — clients feature-gate on this (CLI-02) | No |
 | `auth.signup` | Local signup; sets session cookie. Rejected with `auth.setup_required` while empty-instance setup is needed; rejected when instance `allow_signup` is false | No (local mode) |
 | `auth.login` | Local login; sets session cookie. ENV-seeded admins with `must_change_credentials` are redirected to `/setup/credentials` in the SPA | No (local mode) |
 | `auth.logout` | Revoke current session; clear cookie | Session |
