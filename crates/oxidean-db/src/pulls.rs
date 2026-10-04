@@ -630,7 +630,7 @@ pub async fn set_state(
         }
         DbPool::Postgres(p) => {
             sqlx::query(
-                "UPDATE pull_requests SET state = $1, closed_at = $2, closed_by = $3,
+                "UPDATE pull_requests SET state = $1, closed_at = $2::timestamptz, closed_by = $3,
                  updated_at = now() WHERE id = $4",
             )
             .bind(state)
@@ -918,7 +918,7 @@ pub async fn mark_merged(
         DbPool::Postgres(p) => {
             sqlx::query(
                 "UPDATE pull_requests SET state = 'merged', merged_by = $1, merge_commit_sha = $2,
-                 merge_method = $3, merged_at = $4, closed_at = $4, closed_by = $1,
+                 merge_method = $3, merged_at = $4::timestamptz, closed_at = $4::timestamptz, closed_by = $1,
                  updated_at = now() WHERE id = $5",
             )
             .bind(merged_by)
@@ -1614,7 +1614,7 @@ pub async fn dismiss_pull_review(
     match pool {
         DbPool::Postgres(p) => {
             sqlx::query(
-                "UPDATE pull_reviews SET state = 'dismissed', dismissed_at = $2, dismiss_reason = $3 WHERE id = $1",
+                "UPDATE pull_reviews SET state = 'dismissed', dismissed_at = $2::timestamptz, dismiss_reason = $3 WHERE id = $1",
             )
             .bind(id)
             .bind(dismissed_at)
