@@ -5,6 +5,7 @@ import { renderWithQueryClient } from "@/test/render-with-query";
 import type { RepoLayoutLoaderData } from "@/lib/repo-store";
 
 const collaboratorsListMock = vi.fn();
+const deployKeyListMock = vi.fn();
 const lfsGetUsageMock = vi.fn();
 const lfsListObjectsMock = vi.fn();
 const setArchivedMock = vi.fn();
@@ -14,6 +15,11 @@ vi.mock("@/lib/api-client", () => ({
     repo: {
       collaborators: {
         list: (...args: unknown[]) => collaboratorsListMock(...args),
+      },
+      deployKey: {
+        list: (...args: unknown[]) => deployKeyListMock(...args),
+        create: vi.fn(),
+        delete: vi.fn(),
       },
       lfs: {
         getUsage: (...args: unknown[]) => lfsGetUsageMock(...args),
@@ -76,11 +82,16 @@ afterEach(cleanup);
 describe("/$owner/$repo/settings render mount (G-11.1-15)", () => {
   beforeEach(() => {
     collaboratorsListMock.mockReset();
+    deployKeyListMock.mockReset();
     lfsGetUsageMock.mockReset();
     lfsListObjectsMock.mockReset();
     collaboratorsListMock.mockResolvedValue({
       ok: true,
       data: { collaborators: [] },
+    });
+    deployKeyListMock.mockResolvedValue({
+      ok: true,
+      data: { keys: [] },
     });
     lfsGetUsageMock.mockResolvedValue({
       ok: true,

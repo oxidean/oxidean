@@ -19,7 +19,7 @@ use axum::Json;
 use oxidean_core::AppError;
 use oxidean_db::RepoActivityRow;
 
-use crate::app::{build_rpc_ctx, session_token_from_headers, AppState};
+use crate::app::{build_rpc_ctx_with_session, resolve_session_token, session_token_from_headers, AppState};
 use crate::public_origin::resolve_public_origin;
 use crate::repo::{self, meets, Capability};
 use crate::rpc::{self, RpcCtx};
@@ -171,12 +171,9 @@ fn atom_response(xml: String) -> Response {
 
 async fn feed_ctx(state: &AppState, headers: &HeaderMap) -> RpcCtx {
     let token = session_token_from_headers(headers);
-    build_rpc_ctx(
-        state,
-        token.as_deref(),
-        rpc::ClientMeta::from_headers(headers),
-    )
-    .await
+    let client = rpc::ClientMeta::from_headers(headers);
+    let session = resolve_session_token(state, token.as_deref(), &client).await;
+    build_rpc_ctx_with_session(state, session, client)
 }
 
 /// Map a [`repo::resolve_repo_for_read`] failure like the raw/archive routes:

@@ -25,6 +25,7 @@ pub mod release;
 pub mod rest;
 pub mod ssh;
 pub mod ssh_keys;
+pub mod deploy_keys;
 pub mod gpg_keys;
 pub mod emails;
 pub mod templates;

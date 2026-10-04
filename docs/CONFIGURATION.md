@@ -171,7 +171,7 @@ Bare `/{owner}/{repo}` (no `.git` suffix) stays on the web UI. Self-hosted rever
 
 ## Git over SSH
 
-Phase 9 adds Git **clone/fetch/push over SSH** beside Smart HTTP. Keys are registered via session RPC `sshKey.*` (Settings → SSH keys). Architecture: [ARCHITECTURE.md](ARCHITECTURE.md#git-over-ssh). API shapes: [API.md](API.md).
+Phase 9 adds Git **clone/fetch/push over SSH** beside Smart HTTP. Keys are registered via session RPC `sshKey.*` (Settings → SSH keys). Per-repo **deploy keys** (read or read/write scope, GIT-23) are managed by repo admins via `repo.deployKey.*` (repository Settings → Deploy keys); they are transport-only credentials — no session, RPC, or web access. Architecture: [ARCHITECTURE.md](ARCHITECTURE.md#git-over-ssh). API shapes: [API.md](API.md).
 
 | Env | Role |
 | --- | --- |

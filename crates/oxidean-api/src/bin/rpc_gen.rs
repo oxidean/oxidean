@@ -1501,6 +1501,46 @@ export type TagProtectionDeleteRequest = {
   id: string;
 };
 
+/**
+ * Per-repo deploy key (GIT-23). Transport-only SSH credential — never an
+ * account identity, no session/RPC/web access.
+ */
+export type DeployKeyPublic = {
+  id: string;
+  repo_id: string;
+  title: string;
+  fingerprint: string;
+  key_type: string;
+  /** false = read-only (upload-pack); true = read/write (also receive-pack). */
+  can_write: boolean;
+  public_key?: string;
+  last_used_at?: string | null;
+  last_used_ip?: string | null;
+  created_by: string;
+  created_at: string;
+};
+
+export type DeployKeyListResponse = {
+  keys: DeployKeyPublic[];
+};
+
+export type DeployKeyCreateRequest = {
+  owner: string;
+  name: string;
+  title: string;
+  /** OpenSSH authorized_keys line (`ssh-ed25519 AAAA… comment`). */
+  public_key: string;
+  /** Defaults to false (read-only). */
+  can_write?: boolean;
+};
+
+export type DeployKeyDeleteRequest = {
+  owner: string;
+  name: string;
+  id: string;
+};
+
+
 export type CommitStatusState = "pending" | "success" | "failure" | "error";
 
 export type CommitStatusPublic = {
@@ -3035,6 +3075,14 @@ export function createClient(opts: CreateClientOptions) {
           rpcCall<TagProtectionRulePublic>(opts, "repo.tagProtection.update", input),
         delete: (input: TagProtectionDeleteRequest) =>
           rpcCall<{ ok: boolean }>(opts, "repo.tagProtection.delete", input),
+      },
+      deployKey: {
+        list: (input: RepoGetRequest) =>
+          rpcCall<DeployKeyListResponse>(opts, "repo.deployKey.list", input),
+        create: (input: DeployKeyCreateRequest) =>
+          rpcCall<DeployKeyPublic>(opts, "repo.deployKey.create", input),
+        delete: (input: DeployKeyDeleteRequest) =>
+          rpcCall<{ ok: boolean }>(opts, "repo.deployKey.delete", input),
       },
       commitStatus: {
         create: (input: CommitStatusCreateRequest) =>

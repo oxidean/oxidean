@@ -131,6 +131,7 @@ SSO start routes redirect to the IdP when configured. If WorkOS/OIDC ENV is miss
 | `repo.transfer` | Transfer ownership (type-confirm `confirmName`); moves bare dir; redirect | Repo Admin |
 | `repo.softDelete` | Soft-delete with type-confirm | Repo Admin |
 | `repo.collaborators.list` / `add` / `update` / `remove` | Per-repo collaborator grants | Repo Admin |
+| `repo.deployKey.list` / `create` / `delete` | Per-repo deploy keys for Git-over-SSH (read or read/write scope) | Repo Admin |
 | `repo.invites.create` / `createLink` / `list` / `revoke` | Bulk collaborator email invites (`{ emails, permission }`) and shareable links (optional `expires_at`, `max_uses`) | Repo Admin |
 | `repo.branchProtection.list` / `create` / `update` / `delete` | Classic branch protection rules (glob pattern on `refs/heads/*`); enforced by the bare-repo `update` hook on HTTPS + SSH pushes. `require_signed_commits` denies pushes introducing commits without a forge-verified SSH/GPG signature | Repo Admin |
 | `repo.tagProtection.list` / `create` / `update` / `delete` | Protected tag rulesets (glob pattern on `refs/tags/*`); `allow_create`/`allow_update`/`allow_delete` carve out actions for non-admins, `enforce_admins` removes the admin bypass | Repo Admin |
@@ -470,6 +471,31 @@ Accepted key types: `ssh-ed25519` and RSA ≥2048. Response is a list item with 
 
 Add requires verified email (`auth.email_unverified` otherwise). Empty title → `sshKey.title_required`. Invalid/unsupported key → `sshKey.invalid_key`. Duplicate fingerprint → `sshKey.fingerprint_taken`. More than **25** keys → `sshKey.limit_exceeded`. Unknown or non-owned revoke id → `sshKey.not_found`.
 
+### Deploy keys (`repo.deployKey.*`)
+
+Per-repo OpenSSH **public** keys for Git-over-SSH, distinct from account `sshKey.*` keys (GIT-23). A deploy key resolves a fingerprint directly to **one repository** plus a scope — never to an account identity. They are **transport-only credentials**: a deploy key authorizes `git-upload-pack` (and `git-receive-pack` when `can_write`) over SSH and nothing else — no session, no RPC, no web/API access, no capability on any other repository.
+
+`repo.deployKey.create` input:
+
+```json
+{
+  "owner": "ada",
+  "name": "hello",
+  "title": "ci-runner",
+  "public_key": "ssh-ed25519 AAAA… comment",
+  "can_write": false
+}
+```
+
+`owner` / `name` select the repository (same lookup as `repo.get`); `can_write` defaults to `false` (read-only). Accepted key types match `sshKey.add` (`ssh-ed25519`, RSA ≥2048). Response is a `DeployKeyPublic` item: `id`, `repo_id`, `title`, `fingerprint` (SHA256), `key_type`, `can_write`, `public_key`, `created_by`, `created_at`, optional `last_used_at` / `last_used_ip`. There is no secret field — nothing to copy on create.
+
+`repo.deployKey.list` input is `{ "owner", "name" }` and returns `{ "keys": [...] }`. `repo.deployKey.delete` input is `{ "owner", "name", "id" }` (hard-delete; revocation takes effect on the next pack exec — in-flight connections are not cut mid-transfer).
+
+Fingerprint rules (deliberate): one key may be attached to **multiple** repositories (one row each — a CI key can read several repos), but not twice to the same repo (`UNIQUE(repo_id, fingerprint)`). A fingerprint already registered as an **account** key is rejected on `deployKey.create`, and `sshKey.add` rejects fingerprints attached as deploy keys — a key is either an account credential or a deploy credential, never both, so a read-only deploy key cannot be silently widened by registering it as an account key. At most **50** deploy keys per repository.
+
+All three procedures require repo **Admin** (`admin.forbidden` otherwise); anonymous → `auth.unauthenticated`. Empty title → `deployKey.title_required`; invalid key → `sshKey.invalid_key` (shared validator); duplicate fingerprint on the repo → `deployKey.fingerprint_taken`; over 50 keys → `deployKey.limit_exceeded`; unknown delete id → `deployKey.not_found`.
+
+Pushes authorized by a deploy key still run the receive-pack protection env (`OXIDEAN_ACTOR_CAPABILITY=write`), so branch protection and archived-repo rules apply unchanged; post-push webhook / PR-sync / Actions attribution uses the admin who attached the key (`created_by`).
 
 **PAT ∩ ACL:** Classic `repo` push/fetch requires the PAT subject to also `meets` the needed Capability on that repository (org membership, collaborator grant, or personal owner — not `owner_id == pat.user_id` alone). Fine-grained `all` covers personal-owned plus org Owner/Admin repos; collaborators must use `selected`.
 
@@ -608,7 +634,7 @@ git add .gitattributes
 
 ### Git over SSH
 
-Clone / fetch / push over SSH use an in-process listener (Compose TCP **2222** by default — not Traefik). Remotes are **scp-style** `git@{host}:{owner}/{repo}.git` (D-SSH-02). The SSH username must be `git`; identity comes only from a registered public-key fingerprint (full account ACL — no PAT scopes). When advertised port ≠ 22, clients set `Port` in `~/.ssh/config` (or `ssh -p`); do not treat `ssh://` as the primary CloneBox URL.
+Clone / fetch / push over SSH use an in-process listener (Compose TCP **2222** by default — not Traefik). Remotes are **scp-style** `git@{host}:{owner}/{repo}.git` (D-SSH-02). The SSH username must be `git`; identity comes only from a registered public-key fingerprint (full account ACL — no PAT scopes). When the fingerprint matches no account key, the handshake falls back to repo **deploy keys** (`repo.deployKey.*` above): the key authenticates the connection, and each `git-upload-pack` / `git-receive-pack` exec re-checks that the fingerprint is attached to the target repo (`can_write` required for push). Deploy keys are transport-only — no RPC/web access — and are rate-limited like account keys. When advertised port ≠ 22, clients set `Port` in `~/.ssh/config` (or `ssh -p`); do not treat `ssh://` as the primary CloneBox URL.
 
 Failed pubkey auth is rate-limited like Smart HTTP PAT failures (IP + fingerprint buckets). See [CONFIGURATION.md](CONFIGURATION.md) for `OXIDEAN_SSH_*`.
 
@@ -738,6 +764,10 @@ Common `error.code` values:
 | `sshKey.fingerprint_taken` | Fingerprint already registered |
 | `sshKey.limit_exceeded` | More than 25 SSH keys for the user |
 | `sshKey.not_found` | Revoke target missing or not owned |
+| `deployKey.title_required` | Deploy key title empty |
+| `deployKey.fingerprint_taken` | Key already attached to that repo, or registered as an account SSH key |
+| `deployKey.limit_exceeded` | More than 50 deploy keys on the repository |
+| `deployKey.not_found` | Delete target missing or not on that repo |
 | `org.slug_taken` | Org slug collides with user or org |
 | `org.forbidden` / `org.not_found` | Org ACL / missing org |
 | `org.invite_login_required` | Invite email already registered — sign in to accept |
