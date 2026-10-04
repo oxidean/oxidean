@@ -9,6 +9,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { List, ListRow } from "@/components/ui/list";
 import { PageHeader } from "@/components/ui/page-header";
+import { AppLink } from "@/components/ui/app-link";
 
 function ssrApiOrigin(): string {
   return (
@@ -47,6 +48,9 @@ export type ExploreLoaderData = { repos: RepoPublic[]; q: string };
 export const Route = createFileRoute("/explore")({
   component: ExplorePage,
   head: () => ({ meta: [{ title: "Explore · Oxidean" }] }),
+  // Loader consumes ?q — loaderDeps keeps the match id search-aware so a
+  // search-only navigation refetches instead of reusing stale loaderData.
+  loaderDeps: ({ search }) => search,
   loader: async ({ location }): Promise<ExploreLoaderData> => {
     const q = new URLSearchParams(location.searchStr.replace(/^\?/, "")).get("q") ?? "";
     return fetchExplore({ data: { q } });
@@ -115,12 +119,12 @@ export function ExplorePage() @{
           }
           action={
             q.trim() ? (
-              <a
+              <AppLink
                 href="/explore"
                 className="text-[14px] font-medium text-primary hover:underline"
               >
                 Clear filter
-              </a>
+              </AppLink>
             ) : undefined
           }
         />;

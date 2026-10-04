@@ -32,6 +32,7 @@ import { listLicensePickerOptions } from "@/lib/spdx-licenses";
 import { fetchRepoCreateDefaults, fetchSessionMe } from "@/lib/ssr-auth";
 import { fetchOrgListMine } from "@/lib/ssr-org";
 import { cn } from "@/lib/utils";
+import { AppLink } from "@/components/ui/app-link";
 
 export type NewLoaderData = {
   user: UserPublic;
@@ -163,9 +164,9 @@ export function NewPage() @{
 
   @if (showWall) {
     <AuthShell title="Verify your email" support="Verify your email before creating a repository.">
-      <a href="/verify" className={cn(buttonVariants({ variant: "default" }))}>
+      <AppLink href="/verify" className={cn(buttonVariants({ variant: "default" }))}>
         Verify email
-      </a>
+      </AppLink>
     </AuthShell>;
   } @else {
     {

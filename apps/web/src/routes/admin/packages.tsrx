@@ -26,6 +26,7 @@ import {
 import { authSessionQueryOptions, setAuthMeCache } from "@/lib/session-queries";
 import { fetchSessionMe } from "@/lib/ssr-auth";
 import { toastError, toastSuccess, toastWarning } from "@/lib/toast";
+import { AppLink } from "@/components/ui/app-link";
 
 type AdminGateLoader =
   | { kind: "unauthenticated" }
@@ -187,12 +188,12 @@ export function AdminPackagesPage() @{
       <p className="text-[15px] text-muted-foreground">
         Sign in as a system administrator to manage package storage.
       </p>
-      <a
+      <AppLink
         href="/login?returnTo=/admin/packages"
         className="mt-4 inline-block text-[14px] font-medium text-primary hover:underline"
       >
         Sign in
-      </a>
+      </AppLink>
     </SettingsShell>;
   } @else {
     @if (forbidden) {

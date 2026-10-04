@@ -16,4 +16,40 @@ version = "0.1.0"
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = [
+  "fs",
+  "io-util",
+  "macros",
+  "net",
+  "process",
+  "rt-multi-thread",
+  "signal",
+  "sync",
+  "time",
+] }
+
+# Thin debuginfo keeps fast links + useful panic backtraces without paying for
+# full dep debug data. `cargo build --profile debugging` restores full debuginfo.
+[profile.dev]
+debug = "line-tables-only"
+
+# Deps get no debuginfo and opt-level 1: the integration suite is CPU-bound on
+# dependency code (sqlx/serde/axum), so unoptimized deps cost real test time.
+# crypto gets O3 — tests exercise argon2 via auth.signup/auth.login fixtures.
+[profile.dev.package."*"]
+debug = false
+opt-level = 1
+
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.dev.package.blake2]
+opt-level = 3
+
+[profile.debugging]
+inherits = "dev"
+debug = true
+
+[profile.release]
+lto = "thin"
+strip = "symbols"

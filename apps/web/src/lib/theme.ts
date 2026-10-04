@@ -1,7 +1,7 @@
 export type ThemePreference = "system" | "light" | "dark";
 
 export const THEME_STORAGE_KEY = "oxidean-theme";
-/** Cookie mirrors localStorage so SSR can pick github-light vs github-dark. */
+/** Cookie mirrors localStorage so SSR can pick oxidean-light vs oxidean-dark. */
 export const THEME_COOKIE_KEY = "oxidean-theme";
 /**
  * Resolved light/dark after system preference — set by the FOUC boot script so
@@ -88,8 +88,8 @@ export const THEME_BOOT_SCRIPT =
   "}catch(e){}})();";
 
 /**
- * Warm webfonts into `document.fonts` so View Transitions / soft navigations
- * do not paint a long stretch of metric fallbacks after CSS re-applies.
+ * Warm webfonts into `document.fonts` so full-document navigations do not
+ * paint a long stretch of metric fallbacks after CSS re-applies.
  * Static literal — no interpolation (same threat model as theme boot).
  */
 export const FONT_WARM_SCRIPT =

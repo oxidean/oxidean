@@ -479,12 +479,14 @@ pub trait GitBackend: Send + Sync {
     /// Search file contents with `git grep -n -I` on `treeish` (D-SRCH-06 / D-SRCH-08).
     /// Empty pattern or no matches → empty `hits` (not an error). Exit code 1 from git
     /// grep (no match) is mapped to empty. Soft-caps at `max_matches` and sets `truncated`.
+    /// `pathspecs` OR together after `--` (git pathspec magic like `:(icase)` allowed);
+    /// empty slice searches the whole tree.
     async fn grep(
         &self,
         repo: &Path,
         treeish: &str,
         pattern: &str,
-        pathspec: Option<&str>,
+        pathspecs: &[String],
         max_matches: u32,
     ) -> Result<GrepResult, GitError>;
 

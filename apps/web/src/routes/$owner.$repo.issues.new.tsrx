@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { apiClient } from "@/lib/api-client";
 import type { RepoLayoutLoaderData } from "@/lib/repo-store";
 import { fetchRepoGet } from "@/lib/ssr-repo";
+import { AppLink } from "@/components/ui/app-link";
 
 export type IssuesNewLoaderData =
   | { kind: "not_found" }
@@ -189,12 +190,12 @@ export function IssuesNewPage() @{
           <Button type="submit" disabled={pending}>
             {(pending ? "Creating…" : "Submit new issue") as string}
           </Button>
-          <a
+          <AppLink
             href={`/${owner}/${repoName}/issues` as string}
             className="inline-flex h-11 items-center text-[14px] text-muted-foreground no-underline hover:text-foreground"
           >
             Cancel
-          </a>
+          </AppLink>
         </div>
       </form>
     </>;

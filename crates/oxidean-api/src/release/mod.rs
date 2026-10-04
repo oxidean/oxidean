@@ -10,6 +10,7 @@ use uuid::Uuid;
 
 use crate::auth::gate::require_verified;
 use crate::git::bare_repo_path;
+use crate::notify;
 use crate::repo::resolve_repo_for_admin;
 use crate::repo::{meets, not_found, resolve_repo_for_read, AccessibleRepo, Capability};
 use crate::routes::release_assets::{delete_asset_with_file, remove_asset_file};
@@ -112,6 +113,12 @@ pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<ReleasePub
     let title = if req.title.trim().is_empty() { tag_name.to_string() } else { req.title.trim().to_string() };
     let id = Uuid::new_v4().to_string();
     let row = ctx.db.insert_release(&id, &accessible.row.id, tag_name, &title, &req.body, req.draft, req.prerelease, &user.id).await.map_err(db_err)?;
+    // DEBT-06: publish fan-out through the watch matrix — `all` watchers are
+    // notified; drafts stay silent until they publish.
+    if !row.draft {
+        let subject = notify::subject_for_release(&row.repo_id, &row.tag_name, &row.title);
+        notify::fanout_activity(&ctx.db, &user.id, [], "release_published", &subject).await;
+    }
     to_public(ctx, &row).await
 }
 
@@ -165,10 +172,24 @@ pub async fn update(ctx: &RpcCtx, input: serde_json::Value) -> Result<ReleasePub
     let draft = req.draft.unwrap_or(existing.draft);
     let prerelease = req.prerelease.unwrap_or(existing.prerelease);
     let row = ctx.db.update_release(&existing.id, &title, &body, draft, prerelease).await.map_err(db_err)?;
+    // DEBT-06: draft→non-draft is a publish; edits to a live release notify.
+    // Draft edits stay invisible to watchers.
+    let reason = if existing.draft && !row.draft {
+        Some("release_published")
+    } else if !existing.draft {
+        Some("release_edited")
+    } else {
+        None
+    };
+    if let Some(reason) = reason {
+        let subject = notify::subject_for_release(&row.repo_id, &row.tag_name, &row.title);
+        notify::fanout_activity(&ctx.db, &user.id, [], reason, &subject).await;
+    }
     to_public(ctx, &row).await
 }
 
 pub async fn delete(ctx: &RpcCtx, input: serde_json::Value) -> Result<DeleteReleaseResponse, AppError> {
+    let user = require_verified(ctx).await?;
     let req: DeleteReleaseRequest = serde_json::from_value(input).map_err(|e| {
         AppError::new("rpc.bad_input", format!("invalid release.delete input: {e}"))
     })?;
@@ -187,6 +208,12 @@ pub async fn delete(ctx: &RpcCtx, input: serde_json::Value) -> Result<DeleteRele
         remove_asset_file(&ctx.release_assets_dir, &asset.id).await;
     }
     ctx.db.delete_release(&existing.id).await.map_err(db_err)?;
+    // DEBT-06: deleting a live release notifies watchers; drafts never existed.
+    if !existing.draft {
+        let subject =
+            notify::subject_for_release(&accessible.row.id, &existing.tag_name, &existing.title);
+        notify::fanout_activity(&ctx.db, &user.id, [], "release_deleted", &subject).await;
+    }
     Ok(DeleteReleaseResponse { ok: true })
 }
 

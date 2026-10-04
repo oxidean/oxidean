@@ -21,4 +21,14 @@ describe("repo-chrome social (Wave 0)", () => {
     const src = readFileSync(chromePath, "utf8");
     expect(src).toMatch(/[Ff]ork/);
   });
+
+  it("exposes the watch-level matrix (DEBT-06)", () => {
+    const src = readFileSync(chromePath, "utf8");
+    expect(src).toMatch(/viewer_watch_level/);
+    expect(src).toMatch(/repo\.watch\(\{[^}]*level/);
+    expect(src).toMatch(/All activity/);
+    expect(src).toMatch(/Participating and @mentions/);
+    expect(src).toMatch(/Ignore/);
+    expect(src).toMatch(/Unwatch/);
+  });
 });

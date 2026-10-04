@@ -40,6 +40,15 @@ describe("repo about sidebar social links", () => {
     // Homepage links must go through safeExternalHttpUrl (no raw javascript: href).
     expect(src).toMatch(/safeExternalHttpUrl/);
   });
+
+  it("links language legend rows to repo search; Other stays unlinked (issue #59)", () => {
+    const src = readFileSync(join(dir, "repo-about-sidebar.tsrx"), "utf8");
+    // language:<Name> deep-links into the repo code search.
+    expect(src).toMatch(/\/search\?q=/);
+    expect(src).toMatch(/encodeURIComponent\("language:" \+ lang\.name\)/);
+    // "Other" is a rollup bucket — not a real language qualifier.
+    expect(src).toMatch(/lang\.name === "Other"/);
+  });
 });
 
 describe("empty + populated code home About", () => {

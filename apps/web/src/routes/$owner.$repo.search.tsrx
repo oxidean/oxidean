@@ -1,8 +1,11 @@
 import { createFileRoute, useNavigate, useParams, useSearch } from "@octanejs/tanstack-router";
 import { useQuery } from "@octanejs/tanstack-query";
 import { useState } from "octane";
-import type { RepoSearchHit, RepoSearchType } from "@oxidean/api-client";
-import { apiClient } from "@/lib/api-client";
+import type { RepoSearchType } from "@oxidean/api-client";
+import type { HighlightTheme } from "@/lib/highlight";
+import { fetchRepoSearch, type SsrRepoSearchHit } from "@/lib/ssr-repo";
+import { CodeSnippet } from "@/components/code-snippet";
+import { AppLink } from "@/components/ui/app-link";
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
 
@@ -31,7 +34,7 @@ function parseType(raw: string | undefined): RepoSearchType {
   }
 }
 
-function hitKey(hit: RepoSearchHit): string {
+function hitKey(hit: SsrRepoSearchHit): string {
   switch (hit.kind) {
     case "code":
       return `code-${hit.path}-${hit.line}`;
@@ -73,20 +76,18 @@ export function RepoSearchPage() @{
   const searchQ = useQuery({
     queryKey: ["repo", "search", owner, repoName, typeParam, qParam] as const,
     queryFn: async () => {
-      const res = await apiClient.repo.search({
-        owner,
-        name: repoName,
-        type: typeParam,
-        q: qParam,
+      const res = await fetchRepoSearch({
+        data: { owner, name: repoName, type: typeParam, q: qParam },
       });
       if (!res.ok) throw new Error(res.error.message || NETWORK_ERROR);
-      return res.data;
+      return res;
     },
     enabled: !!owner && !!repoName,
   });
 
-  const hits: RepoSearchHit[] = searchQ.data?.hits ?? [];
-  const truncated = searchQ.data?.truncated ?? false;
+  const hits: SsrRepoSearchHit[] = searchQ.data?.data?.hits ?? [];
+  const truncated = searchQ.data?.data?.truncated ?? false;
+  const highlightTheme: HighlightTheme | null = searchQ.data?.highlightTheme ?? null;
 
   function go(next: { q?: string; type?: RepoSearchType }) {
     void navigate({
@@ -183,26 +184,33 @@ export function RepoSearchPage() @{
             @for (const hit of hits; key hitKey(hit)) {
               @if (hit.kind === "code") {
                 <li className="px-3 py-2 text-[14px]">
-                  <a
+                  <AppLink
                     className="font-medium text-primary underline"
                     href={`/${owner}/${repoName}/blob/${hit.path}` as string}
                   >
                     {hit.path as string}
-                  </a>
-                  <span className="text-muted-foreground">:{String(hit.line)}</span>
-                  <pre className="mt-1 overflow-x-auto text-[13px] text-foreground">
-                    {hit.content as string}
-                  </pre>
+                  </AppLink>
+                  @if (hit.line > 0) {
+                    <span className="text-muted-foreground">
+                      :{String(hit.line)}
+                    </span>;
+                    <CodeSnippet
+                      code={hit.content}
+                      path={hit.path}
+                      highlightedHtml={hit.html ?? null}
+                      highlightTheme={highlightTheme}
+                    />;
+                  }
                 </li>;
               } @else {
                 @if (hit.kind === "commit") {
                   <li className="px-3 py-2 text-[14px]">
-                    <a
+                    <AppLink
                       className="font-medium text-primary underline"
                       href={`/${owner}/${repoName}/commit/${hit.sha}` as string}
                     >
                       {hit.short_sha as string}
-                    </a>
+                    </AppLink>
                     <span className="ml-2 text-foreground">
                       {hit.subject as string}
                     </span>
@@ -213,24 +221,24 @@ export function RepoSearchPage() @{
                 } @else {
                   @if (hit.kind === "issue") {
                     <li className="px-3 py-2 text-[14px]">
-                      <a
+                      <AppLink
                         className="font-medium text-primary underline"
                         href={`/${owner}/${repoName}/issues/${hit.number}` as string}
                       >
                         {"#" + String(hit.number) + " " + hit.title}
-                      </a>
+                      </AppLink>
                       <span className="ml-2 text-[12px] text-muted-foreground">
                         {hit.state as string}
                       </span>
                     </li>;
                   } @else {
                     <li className="px-3 py-2 text-[14px]">
-                      <a
+                      <AppLink
                         className="font-medium text-primary underline"
                         href={`/${owner}/${repoName}/pull/${hit.number}` as string}
                       >
                         {"#" + String(hit.number) + " " + hit.title}
-                      </a>
+                      </AppLink>
                       <span className="ml-2 text-[12px] text-muted-foreground">
                         {hit.state as string}
                       </span>

@@ -184,13 +184,13 @@ function AnonLanding({ allowSignup }: { allowSignup: boolean }) @{
                 Get started
               </Link>;
             }
-            <a
-              href="#explore"
+            <Link
+              to="/explore"
+              preload="intent"
               className={cn(buttonVariants({ variant: "secondary" }))}
-              onClick={revealExploreTarget}
             >
               Explore
-            </a>
+            </Link>
           </div>
         </div>
       </div>
@@ -257,13 +257,13 @@ function AnonLanding({ allowSignup }: { allowSignup: boolean }) @{
               Get started
             </Link>;
           }
-          <a
-            href="#explore"
+          <Link
+            to="/explore"
+            preload="intent"
             className={cn(buttonVariants({ variant: "secondary" }))}
-            onClick={revealExploreTarget}
           >
             Explore
-          </a>
+          </Link>
         </div>
       </div>
     </section>

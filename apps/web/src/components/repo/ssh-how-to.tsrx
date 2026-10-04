@@ -1,3 +1,5 @@
+import { AppLink } from "@/components/ui/app-link";
+
 type SshHowToProps = {
   /** Compact layout inside CloneBox dropdown. */
   compact?: boolean;
@@ -25,12 +27,12 @@ export function SshHowTo({ compact }: SshHowToProps) @{
       <li>Register a public key, then clone with the scp-style URL above.</li>
     </ul>
     <p className="mt-3">
-      <a
+      <AppLink
         href="/settings/ssh-keys"
         className="text-[14px] font-semibold text-primary underline-offset-4 hover:underline"
       >
         Add an SSH key
-      </a>
+      </AppLink>
     </p>
   </div>;
 }

@@ -12,6 +12,7 @@ import { apiClient } from "@/lib/api-client";
 import { socialListHref } from "@/lib/repo-social-lists";
 import type { RepoLayoutLoaderData } from "@/lib/repo-store";
 import { fetchRepoGet, fetchRepoStargazers } from "@/lib/ssr-repo";
+import { AppLink } from "@/components/ui/app-link";
 
 export type StargazersLoaderData =
   | { kind: "not_found" }
@@ -71,6 +72,9 @@ export const Route = createFileRoute("/$owner/$repo/stargazers")({
       },
     ],
   }),
+  // Loader consumes ?q — loaderDeps keeps the match id search-aware so a
+  // search-only navigation refetches instead of reusing stale loaderData.
+  loaderDeps: ({ search }) => search,
   loader: async ({ params, location }): Promise<StargazersLoaderData> => {
     const owner = String((params as { owner?: string }).owner ?? "");
     const repoName = String((params as { repo?: string }).repo ?? "");
@@ -188,7 +192,7 @@ export function RepoStargazersPage() @{
           <List className="mt-6" aria-label="Stargazers">
             @for (const s of stargazers; key s.user_id) {
               <ListRow className="flex items-center gap-3 py-3">
-                <a
+                <AppLink
                   href={("/" + s.username) as string}
                   className="inline-flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full border border-border bg-muted text-[12px] font-semibold text-foreground no-underline"
                 >
@@ -203,14 +207,14 @@ export function RepoStargazersPage() @{
                       {s.display_name.slice(0, 1).toUpperCase() as string}
                     </span>;
                   }
-                </a>
+                </AppLink>
                 <div className="min-w-0 flex-1">
-                  <a
+                  <AppLink
                     href={("/" + s.username) as string}
                     className="font-medium text-foreground no-underline hover:underline"
                   >
                     {s.username as string}
-                  </a>
+                  </AppLink>
                   @if (
                     s.display_name &&
                     s.display_name !== s.username

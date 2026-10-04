@@ -51,18 +51,60 @@ Ephemeral PR environments clone `preview` (services, networking, variables) when
 
 ## Operator workflow (D-CLOUD-07)
 
-1. Install CLI ≥ 5.42.1 and link a project: `railway link`
-2. From repo root: `cd .railway && npm ci` (or `npm install`)
-3. Link the target environment, then preview: `make cloud-plan` (or `railway config plan`)
-4. **Apply only with explicit human approval** — never from fork PR CI; never commit `RAILWAY_TOKEN`
-5. Apply the same topology to `preview`, `staging`, and `production` (link each environment before plan/apply)
+`railway config apply` runs from an **operator machine**, never from CI: no workflow invokes `config plan`/`config apply`, and apply credentials exist only as the operator's own `railway login` session or env vars — **tokens never enter CI or the repo**. The single CI-held Railway credential is the human-gated promote/rollback token on the `Oxidean / production` GitHub Environment, which deploys commits only and is never used for IaC apply.
+
+### Prerequisites
+
+| Prerequisite | Command / note |
+|--------------|----------------|
+| Railway CLI ≥ 5.42.1 | `railway --version` |
+| `jq` | `scripts/railway-apply.sh` uses it to verify the linked context |
+| IaC SDK | `cd .railway && npm ci` once per checkout (isolated npm env — not Bun) |
+| Auth on the operator machine | `railway login`, or export `RAILWAY_TOKEN` / `RAILWAY_API_TOKEN` |
+| Linked context | `railway link --project <project-id> --environment <env>` |
+
+Token choice: a **project token** (`RAILWAY_TOKEN`, project Settings → Tokens) is scoped to one environment — preferred for apply. An **account/workspace token** (`RAILWAY_API_TOKEN`) or CLI login suits operators applying across environments. Keep tokens in the shell: not in files, Make targets, CI secrets, or IaC source. `config plan`/`apply` take **no** `--project`/`--environment` flags — the link selects the mutation target, so verify it before every run.
+
+### Preview and apply one environment
 
 ```bash
-railway link --project <project-id> --environment preview
-railway config plan
-# review the plan, then only if approved:
-railway config apply
+# 1. Link the target environment (repeat per environment)
+railway link --project <project-id> --environment staging
+
+# 2. Preview — checks auth, prints the linked project/environment, then runs
+#    `railway config plan`. --environment asserts the link before proceeding.
+scripts/railway-apply.sh --environment staging        # plan only (default)
+# or: make cloud-plan                                 # bare plan, no assertion
+
+# 3. Review the plan: expect only intended diffs — new resources on first
+#    apply, small variable/trigger deltas after. Secrets stay preserve() /
+#    hidden; never `--show-values` into a shared terminal or file.
+
+# 4. Apply — the CLI reprints the plan and asks for confirmation; that
+#    prompt is the human-verify gate.
+scripts/railway-apply.sh --environment staging --apply
+# equivalent: railway config apply                    # answer the prompt
 ```
+
+Apply the same topology to `preview`, `staging`, and `production` — relink and re-plan for each. `scripts/railway-apply.sh --apply` refuses to run when `CI` is set. To apply **exactly** the reviewed plan (CLI ≥ 5.45.1): `railway config plan --out tmp/railway-plan.json` then `railway config apply --plan tmp/railway-plan.json --yes` — keep the artifact under gitignored `tmp/`; it can carry secret-bearing values.
+
+### After apply — dashboard steps IaC cannot do
+
+1. **Deploy triggers:** `config apply` connects GitHub and may create `deploymentTriggers`. Per the [environments table](#environments): `staging` keeps `main` autodeploy + Wait for CI; `preview` and `production` get autodeploy **off** (service → Settings → GitHub → Disable). Verify with `make cloud-production-autodeploy-check`.
+2. **Per-environment `preserve()` secrets:** set in the dashboard on `api` / `web` / `runner` — see the secrets paragraph below (runner token pair, web-flow key, `OXIDEAN_VITE_ALLOWED_HOSTS`).
+3. **Domain:** attach a Railway or custom domain to `gateway` — the advertise vars reference `${{gateway.RAILWAY_PUBLIC_DOMAIN}}`.
+
+### Verify and rollback
+
+```bash
+railway status --json                          # linked context
+railway service list --json                    # api, web, runner, gateway, postgres
+railway variable list --service api --json     # IaC vars materialized; preserves intact
+```
+
+Config apply mutates configuration, not running deployments — the next deploy picks it up (staging autodeploys; production promotes via the GitHub Action). Then `GET https://<domain>/health` must return 200.
+
+There is no IaC undo. To revert config: check out the prior git revision of `.railway/railway.ts`, re-plan, review, re-apply. Destructive diffs (resource removal) require the CLI's `--confirm-destructive` — treat them as data-loss operations. To roll back a bad **deploy**, use the Production deploy action below — not a config re-apply.
 
 Secrets (`OXIDEAN_ENV`, `OXIDEAN_VITE_ALLOWED_HOSTS`, `OXIDEAN_ACTIONS_SECRETS_KEY`, SSO/email keys, etc.) stay in the Railway dashboard or `preserve()` — not in git. Set a unique `OXIDEAN_ACTIONS_SECRETS_KEY` on each environment’s **api** service (`openssl rand -base64 32`); without it, mirror credentials and Actions secrets cannot be saved. `OXIDEAN_WEB_FLOW_PRIVATE_KEY` (optional, **api**) pins the web-flow commit-signing key — required on `production`/`cloud` where auto-generation fails closed; preview/staging/PR Environments auto-generate on first use when unset.
 

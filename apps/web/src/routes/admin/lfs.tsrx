@@ -24,6 +24,7 @@ import {
 import { authSessionQueryOptions, setAuthMeCache } from "@/lib/session-queries";
 import { fetchAdminLfsSettings, fetchAdminLfsUsage, fetchSessionMe } from "@/lib/ssr-auth";
 import { toastError, toastSuccess, toastWarning } from "@/lib/toast";
+import { AppLink } from "@/components/ui/app-link";
 
 export type AdminLfsLoaderData =
   | { kind: "unauthenticated" }
@@ -288,12 +289,12 @@ export function AdminLfsPage() @{
           <p className="text-[16px] text-muted-foreground">
             Sign in as a system administrator to manage LFS quotas.
           </p>
-          <a
+          <AppLink
             href="/login?returnTo=/admin/lfs"
             className="mt-4 inline-block text-primary underline-offset-2 hover:underline"
           >
             Sign in
-          </a>
+          </AppLink>
         </div>
       </SettingsShell>;
     } @else {

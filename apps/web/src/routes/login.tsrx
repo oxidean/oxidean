@@ -11,6 +11,7 @@ import { apiClient } from "@/lib/api-client";
 import { networkErrorMessage, rpcErrorMessage } from "@/lib/rpc-error-message";
 import { readReturnToFromLocation, safeReturnTo } from "@/lib/return-to";
 import { fetchProviderConfig, fetchSessionMe } from "@/lib/ssr-auth";
+import { AppLink } from "@/components/ui/app-link";
 
 export type LoginLoaderData = {
   mode: ProviderMode;
@@ -157,12 +158,12 @@ export function LoginPage() @{
                 required
               />
               <p className="text-[14px] font-normal leading-[1.4] text-muted-foreground">
-                <a
+                <AppLink
                   href="/reset-password"
                   className="font-normal text-foreground underline-offset-4 hover:underline"
                 >
                   Forgot password?
-                </a>
+                </AppLink>
               </p>
             </div>
           )}
@@ -204,12 +205,12 @@ export function LoginPage() @{
     @if (allowSignup) {
       <p className="text-[14px] text-muted-foreground">
         New to Oxidean?{" "}
-        <a
+        <AppLink
           href={signupHref as string}
           className="font-normal text-foreground underline-offset-4 hover:underline"
         >
           Create an account
-        </a>
+        </AppLink>
       </p>;
     }
   </AuthShell>;

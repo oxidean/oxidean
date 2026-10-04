@@ -378,6 +378,8 @@ export type RepoCreateDefaults = {
   gitignores: RepoTemplateOption[];
 };
 
+export type WatchLevel = "all" | "participating" | "ignore";
+
 export type RepoPublic = {
   id: string;
   owner_id: string;
@@ -401,6 +403,7 @@ export type RepoPublic = {
   fork_count?: number;
   watch_count?: number;
   viewer_is_watching?: boolean;
+  viewer_watch_level?: WatchLevel | null;
   fork_network_id?: string | null;
   forked_from?: ForkParentSummary | null;
 };
@@ -419,6 +422,7 @@ export type RepoStarRequest = {
 export type RepoWatchRequest = {
   owner: string;
   name: string;
+  level?: WatchLevel | null;
 };
 
 export type RepoStargazerPublic = {
@@ -518,6 +522,11 @@ export type ListStarredRequest = {
   limit?: number | null;
 };
 
+export type ListWatchedRequest = {
+  offset?: number | null;
+  limit?: number | null;
+};
+
 export type RepoExploreRequest = {
   q?: string | null;
   offset?: number | null;
@@ -533,6 +542,33 @@ export type PublicUserProfile = {
   display_name: string;
   bio: string;
   avatar_url?: string | null;
+  follower_count?: number;
+  following_count?: number;
+  viewer_is_following?: boolean;
+};
+
+export type UserFollowRequest = {
+  username: string;
+};
+
+export type UserFollowListRequest = {
+  username: string;
+  q?: string | null;
+  offset?: number | null;
+  limit?: number | null;
+};
+
+export type UserFollowPublic = {
+  user_id: string;
+  username: string;
+  display_name: string;
+  avatar_url?: string | null;
+  followed_at: string;
+};
+
+export type UserFollowListResponse = {
+  users: UserFollowPublic[];
+  total: number;
 };
 
 export type RepoListMineResponse = {
@@ -826,6 +862,108 @@ export type RepoSearchResponse = {
   truncated: boolean;
   offset: number;
   limit: number;
+};
+
+// ── search.global (DEBT-03) — sitewide grouped search ──────────────────────
+// Database-backed groups always report `total`; `hits` are populated only for
+// kinds listed in `types` (all kinds when `types` is absent). Commits/code run
+// a bounded git scan over the newest visible repos — `total` counts hits found
+// within that window and `truncated` reports partial coverage (SRCH-01 index).
+
+export type GlobalSearchKind =
+  | "repositories"
+  | "users"
+  | "organizations"
+  | "issues"
+  | "pulls"
+  | "commits"
+  | "code";
+
+export type GlobalSearchRequest = {
+  q: string;
+  types?: GlobalSearchKind[] | null;
+  offset?: number | null;
+  limit?: number | null;
+};
+
+export type GlobalSearchRepoHit = {
+  owner: string;
+  owner_type: string;
+  name: string;
+  description: string;
+  visibility: string;
+  star_count: number;
+  updated_at: string;
+};
+
+export type GlobalSearchUserHit = {
+  username: string;
+  display_name: string;
+  avatar_url?: string | null;
+};
+
+export type GlobalSearchOrgHit = {
+  slug: string;
+  display_name: string;
+};
+
+export type GlobalSearchIssueHit = {
+  repo_owner: string;
+  repo_name: string;
+  number: number;
+  title: string;
+  state: string;
+  author_username?: string | null;
+  comment_count: number;
+  updated_at: string;
+};
+
+export type GlobalSearchPullHit = {
+  repo_owner: string;
+  repo_name: string;
+  number: number;
+  title: string;
+  state: string;
+  draft: boolean;
+  author_username?: string | null;
+  comment_count: number;
+  updated_at: string;
+};
+
+export type GlobalSearchCommitHit = {
+  repo_owner: string;
+  repo_name: string;
+  sha: string;
+  short_sha: string;
+  subject: string;
+  author_name: string;
+  authored_at: string;
+};
+
+export type GlobalSearchCodeHit = {
+  repo_owner: string;
+  repo_name: string;
+  ref: string;
+  path: string;
+  line: number;
+  content: string;
+};
+
+export type GlobalSearchGroup<T> = {
+  hits: T[];
+  total: number;
+  truncated: boolean;
+};
+
+export type GlobalSearchResponse = {
+  q: string;
+  repositories: GlobalSearchGroup<GlobalSearchRepoHit>;
+  users: GlobalSearchGroup<GlobalSearchUserHit>;
+  organizations: GlobalSearchGroup<GlobalSearchOrgHit>;
+  issues: GlobalSearchGroup<GlobalSearchIssueHit>;
+  pulls: GlobalSearchGroup<GlobalSearchPullHit>;
+  commits: GlobalSearchGroup<GlobalSearchCommitHit>;
+  code: GlobalSearchGroup<GlobalSearchCodeHit>;
 };
 
 export type RepoBranchCreateRequest = {
@@ -2124,6 +2262,7 @@ export type NotificationPublic = {
   repo: string;
   subject_number: number;
   subject_title: string;
+  subject_ref?: string | null;
   actor_id: string;
   actor_username: string;
   created_at: string;
@@ -2651,8 +2790,22 @@ export function createClient(opts: CreateClientOptions) {
         rpcCall<UserLookupResponse>(opts, "user.lookup", input),
       listStarred: (input: ListStarredRequest) =>
         rpcCall<RepoListMineResponse>(opts, "user.listStarred", input),
+      listWatched: (input: ListWatchedRequest) =>
+        rpcCall<RepoListMineResponse>(opts, "user.listWatched", input),
       getPublicProfile: (input: GetPublicProfileRequest) =>
         rpcCall<PublicUserProfile>(opts, "user.getPublicProfile", input),
+      follow: (input: UserFollowRequest) =>
+        rpcCall<PublicUserProfile>(opts, "user.follow", input),
+      unfollow: (input: UserFollowRequest) =>
+        rpcCall<PublicUserProfile>(opts, "user.unfollow", input),
+      followersList: (input: UserFollowListRequest) =>
+        rpcCall<UserFollowListResponse>(opts, "user.followers.list", input),
+      followingList: (input: UserFollowListRequest) =>
+        rpcCall<UserFollowListResponse>(opts, "user.following.list", input),
+    },
+    search: {
+      global: (input: GlobalSearchRequest) =>
+        rpcCall<GlobalSearchResponse>(opts, "search.global", input),
     },
     repo: {
       listMine: () => rpcCall<RepoListMineResponse>(opts, "repo.listMine", {}),
@@ -3533,6 +3686,27 @@ export function repoSearchQueryOptions(
   };
 }
 
+export function searchGlobalQueryOptions(
+  client: OxideanClient,
+  input: GlobalSearchRequest,
+) {
+  return {
+    queryKey: [
+      "search",
+      "global",
+      input.q,
+      (input.types ?? []).join(","),
+      input.offset ?? 0,
+      input.limit ?? 0,
+    ] as const,
+    queryFn: async () => {
+      const res = await client.search.global(input);
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
 export function packagesListQueryOptions(
   client: OxideanClient,
   input: PackagesListRequest,
@@ -4255,3 +4429,5 @@ export const mutationOptions = {
   emailResendVerify: emailResendVerifyMutationOptions,
   adminAuthUpdateSettings: adminAuthUpdateSettingsMutationOptions,
 };
+
+export * from "./languages";

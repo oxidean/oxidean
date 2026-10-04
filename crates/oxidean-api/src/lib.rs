@@ -28,6 +28,7 @@ pub mod gpg_keys;
 pub mod emails;
 pub mod templates;
 pub mod repo;
+pub mod search;
 pub mod routes;
 pub mod rpc;
 pub mod user;

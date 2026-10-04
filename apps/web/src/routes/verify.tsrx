@@ -9,6 +9,7 @@ import { InputOtp } from "@/components/ui/input-otp";
 import { Label } from "@/components/ui/label";
 import { apiClient } from "@/lib/api-client";
 import { safeReturnTo } from "@/lib/return-to";
+import { AppLink } from "@/components/ui/app-link";
 
 export const Route = createFileRoute("/verify")({
   component: VerifyPage,
@@ -263,12 +264,12 @@ export function VerifyPage() @{
         </Button>
         <p className="text-[14px] text-muted-foreground">
           Need a different account?{" "}
-          <a
+          <AppLink
             href={loginHrefWithToken(phase.token) as string}
             className="font-normal text-foreground underline-offset-4 hover:underline"
           >
             Sign in
-          </a>
+          </AppLink>
         </p>
       </AuthShell>;
     } @else {
@@ -366,12 +367,12 @@ export function VerifyPage() @{
 
           <p className="text-[14px] text-muted-foreground">
             Need a different account?{" "}
-            <a
+            <AppLink
               href="/login"
               className="font-normal text-foreground underline-offset-4 hover:underline"
             >
               Sign in
-            </a>
+            </AppLink>
           </p>
         </AuthShell>;
       }

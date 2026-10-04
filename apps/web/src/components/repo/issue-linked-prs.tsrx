@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiClient } from "@/lib/api-client";
+import { AppLink } from "@/components/ui/app-link";
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
 
@@ -146,7 +147,7 @@ export function IssueLinkedPrsPanel({
                 link.kind === "pr" &&
                 link.target_number != null
               ) {
-                <a
+                <AppLink
                   className="text-primary underline-offset-2 hover:underline"
                   href={
                     `/${owner}/${repoName}/pull/${link.target_number}` as string
@@ -154,7 +155,7 @@ export function IssueLinkedPrsPanel({
                   data-testid={`issue-link-${link.id}`}
                 >
                   {stubLabel(link) as string}
-                </a>;
+                </AppLink>;
               } @else {
                 <span data-testid={`issue-link-${link.id}`}>
                   {stubLabel(link) as string}

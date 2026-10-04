@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { apiClient } from "@/lib/api-client";
 import { fetchSessionMe } from "@/lib/ssr-auth";
 import { cn } from "@/lib/utils";
+import { AppLink } from "@/components/ui/app-link";
 
 export type OrgsNewLoaderData = {
   user: UserPublic;
@@ -101,9 +102,9 @@ export function OrgsNewPage() @{
       title="Verify your email"
       support="Verify your email before creating an organization."
     >
-      <a href="/verify" className={cn(buttonVariants({ variant: "default" }))}>
+      <AppLink href="/verify" className={cn(buttonVariants({ variant: "default" }))}>
         Verify email
-      </a>
+      </AppLink>
     </AuthShell>;
   } @else {
     <div className="mx-auto max-w-2xl px-4 py-16">

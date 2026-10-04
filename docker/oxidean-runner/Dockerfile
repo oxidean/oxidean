@@ -5,12 +5,28 @@
 # `run:` steps on the host or in docker:// containers.
 #
 # Build context is the REPOSITORY ROOT (needs workspace Cargo.toml/lock +
-# crates/), matching crates/oxidean-api/Dockerfile.
-FROM rust:1-bookworm AS builder
+# crates/), matching crates/oxidean-api/Dockerfile. cargo-chef splits deps from
+# workspace builds so source-only changes reuse the cached deps layer. No
+# RUN --mount: Railway's builder requires a per-service cacheKey in mount ids.
+FROM lukemathwalker/cargo-chef:latest-rust-1-bookworm AS chef
 WORKDIR /app
+
+FROM chef AS planner
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
-RUN cargo build --release -p oxidean-runner --bin oxidean-runner
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM chef AS builder
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends mold \
+  && rm -rf /var/lib/apt/lists/*
+ENV RUSTFLAGS="-C link-arg=-fuse-ld=mold"
+COPY --from=planner /app/recipe.json recipe.json
+RUN cargo chef cook --release --recipe-path recipe.json -p oxidean-runner
+COPY Cargo.toml Cargo.lock ./
+COPY crates ./crates
+RUN cargo build --release -p oxidean-runner --bin oxidean-runner \
+  && cp /app/target/release/oxidean-runner /usr/local/bin/
 
 FROM debian:bookworm-slim
 # git: actions/checkout clones over smart HTTP; ca-certificates: TLS origins.
@@ -24,7 +40,7 @@ RUN apt-get update \
 ARG DOCKER_CLI_VERSION=28.5.2
 RUN curl -fsSL "https://download.docker.com/linux/static/stable/x86_64/docker-${DOCKER_CLI_VERSION}.tgz" \
     | tar -xz --strip-components=1 -C /usr/local/bin docker/docker
-COPY --from=builder /app/target/release/oxidean-runner /usr/local/bin/oxidean-runner
+COPY --from=builder /usr/local/bin/oxidean-runner /usr/local/bin/oxidean-runner
 
 # Keep this file to the instruction subset Railway's Railpack validator
 # accepts: no LABEL, no VOLUME (volumes attach via service config), no

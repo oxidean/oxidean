@@ -168,6 +168,17 @@ oxidean/
 
 Turbo task graph: `turbo.json` (`build`, `dev`, `test`, `lint`).
 
+## Rust build performance
+
+Profiles in the root `Cargo.toml` already favor fast iteration: `dev` emits `line-tables-only` debuginfo, compiles deps with no debuginfo at `opt-level = 1` (the test suite is CPU-bound on dep code), and builds `argon2`/`blake2` at `opt-level = 3` so test fixtures don't pay debug-speed hashing; `release` uses `lto = "thin"` + `strip = "symbols"`. For a full debugger session, use the opt-in `debugging` profile (`cargo build --profile debugging`).
+
+Optional local speedups:
+
+- **mold linker** — `sudo apt install mold` then `export RUSTFLAGS="-C link-arg=-fuse-ld=mold"` (CI and the Docker builds already link with mold).
+- **Nightly-only boosters** — the repo builds on stable, so these belong in your user config (`$CARGO_HOME/config.toml`), not the repo: the parallel frontend (`[build] rustflags = "-Zthreads=8"`) and the Cranelift codegen backend for `dev` (`rustup component add rustc-codegen-cranelift-preview --toolchain nightly` + `-Zcodegen-backend=cranelift`). See <https://doc.rust-lang.org/cargo/guide/build-performance.html>.
+
+The Docker builds use [cargo-chef](https://github.com/LukeMathWalker/cargo-chef) to split dependency compilation into its own layer; local `docker compose build` reuses deps automatically via the BuildKit layer cache. In CI, layer caches persist via the `type=gha` backend, and `cargo build --timings` HTML from the `build-metrics` job shows the per-crate critical path.
+
 ## Code style
 
 - **JavaScript / TypeScript / TSRX** — Lint and format with [`@tsrx/oxc`](https://oxc.tsrx.dev/guide/getting-started) in `@oxidean/web`: type-aware `oxlint` (`oxlint-tsgolint`) and `oxfmt` (scripts `lint`, `format`, `format:check`; Make `web-lint` / `web-format-check`). CI `web-octane` runs lint + format check. No ESLint or Prettier. Prefer existing patterns in `apps/web` (TypeScript, Octane/TanStack, Tailwind v4). Full `tsc --noEmit` is not the gate yet (`.tsrx` needs `@tsrx/typescript-plugin`, which still peers TypeScript 5.9.x while this app uses TypeScript 7) — type-aware oxlint is the enforced substitute.

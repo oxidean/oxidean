@@ -7,6 +7,7 @@ use oxidean_core::{
 };
 use oxidean_db::NotificationRow;
 
+use crate::notify;
 use crate::rpc::RpcCtx;
 
 fn db_err(e: String) -> AppError {
@@ -28,13 +29,18 @@ fn require_session_user_id(ctx: &RpcCtx) -> Result<&str, AppError> {
         .ok_or_else(|| AppError::new("auth.unauthenticated", "not authenticated"))
 }
 
-async fn owner_slug_for_repo(ctx: &RpcCtx, repo_id: &str) -> Result<(String, String), AppError> {
-    let repo = ctx
+async fn owner_slug_for_repo(
+    ctx: &RpcCtx,
+    repo_id: &str,
+) -> Result<Option<(String, String)>, AppError> {
+    let Some(repo) = ctx
         .db
         .find_repository_by_id(repo_id)
         .await
         .map_err(db_err)?
-        .ok_or_else(|| AppError::new("notification.internal", "subject repository missing"))?;
+    else {
+        return Ok(None);
+    };
     let owner = if repo.owner_type == "org" {
         ctx.db
             .find_organization_by_id(&repo.owner_id)
@@ -50,17 +56,24 @@ async fn owner_slug_for_repo(ctx: &RpcCtx, repo_id: &str) -> Result<(String, Str
             .map(|u| u.username)
             .unwrap_or_default()
     };
-    Ok((owner, repo.name))
+    Ok(Some((owner, repo.name)))
 }
 
-async fn row_to_public(ctx: &RpcCtx, row: &NotificationRow) -> Result<NotificationPublic, AppError> {
-    let (owner, repo) = owner_slug_for_repo(ctx, &row.subject_repo_id).await?;
+async fn row_to_public(
+    ctx: &RpcCtx,
+    row: &NotificationRow,
+) -> Result<Option<NotificationPublic>, AppError> {
+    // A subject repo deleted between the read-time prune and this map is a
+    // raced stale row — drop it rather than failing the whole list.
+    let Some((owner, repo)) = owner_slug_for_repo(ctx, &row.subject_repo_id).await? else {
+        return Ok(None);
+    };
     let actor_username = match ctx.db.find_user_by_id(&row.actor_id).await {
         Ok(Some(u)) => u.username,
         Ok(None) => String::new(),
         Err(e) => return Err(db_err(e)),
     };
-    Ok(NotificationPublic {
+    Ok(Some(NotificationPublic {
         id: row.id.clone(),
         reason: row.reason.clone(),
         subject_kind: row.subject_kind.clone(),
@@ -69,11 +82,12 @@ async fn row_to_public(ctx: &RpcCtx, row: &NotificationRow) -> Result<Notificati
         repo,
         subject_number: row.subject_number,
         subject_title: row.subject_title.clone(),
+        subject_ref: row.subject_ref.clone(),
         actor_id: row.actor_id.clone(),
         actor_username,
         created_at: row.created_at.clone(),
         read_at: row.read_at.clone(),
-    })
+    }))
 }
 
 /// `notification.list` — own rows only; filter `unread` (default) | `all` (D-09 / D-15).
@@ -105,6 +119,10 @@ pub async fn list(
     };
     let offset = req.offset.unwrap_or(0);
     let limit = req.limit.unwrap_or(30);
+    // DEBT-06 follow-up: re-check repository read access at read time — stale
+    // rows for repos the recipient can no longer read are pruned (watch row
+    // dropped GitHub-style) before listing.
+    notify::prune_stale_notifications(&ctx.db, user_id).await;
     let (rows, total) = ctx
         .db
         .list_notifications(user_id, unread_only, offset, limit)
@@ -112,7 +130,9 @@ pub async fn list(
         .map_err(db_err)?;
     let mut notifications = Vec::with_capacity(rows.len());
     for row in &rows {
-        notifications.push(row_to_public(ctx, row).await?);
+        if let Some(n) = row_to_public(ctx, row).await? {
+            notifications.push(n);
+        }
     }
     Ok(NotificationListResponse {
         notifications,
@@ -126,6 +146,9 @@ pub async fn unread_count(
     _input: serde_json::Value,
 ) -> Result<NotificationUnreadCountResponse, AppError> {
     let user_id = require_session_user_id(ctx)?;
+    // Same read-time access re-check as `notification.list` so the badge never
+    // counts rows for repos the recipient can no longer read (DEBT-06).
+    notify::prune_stale_notifications(&ctx.db, user_id).await;
     let count = ctx
         .db
         .notification_unread_count(user_id)

@@ -4,6 +4,9 @@ import { cleanup, fireEvent, render, screen } from "@octanejs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@octanejs/tanstack-router", () => ({
+  // No RouterProvider in this harness — AppLink must see "no router" and
+  // render its plain <a> fallback.
+  useRouter: () => undefined,
   Link: (props: { to?: string; children?: unknown; className?: string }) =>
     createElement(
       "a",

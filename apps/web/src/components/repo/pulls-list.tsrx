@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { List, ListRow } from "@/components/ui/list";
 import { formatRelative } from "@/lib/relative-time";
+import { AppLink } from "@/components/ui/app-link";
 
 type PullsListProps = {
   owner: string;
@@ -41,11 +42,11 @@ export function PullsList(props: PullsListProps) @{
       title="No pull requests"
       description="No pull requests match this filter. Open one to propose changes."
       action={
-        <a href={`/${owner}/${repo}/pulls/new` as string} className="no-underline">
+        <AppLink href={`/${owner}/${repo}/pulls/new` as string} className="no-underline">
           <Button type="button" size="sm">
             New pull request
           </Button>
-        </a>
+        </AppLink>
       }
     />;
   } @else {
@@ -73,12 +74,12 @@ export function PullsList(props: PullsListProps) @{
           }
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-              <a
+              <AppLink
                 href={`/${owner}/${repo}/pull/${pull.number}` as string}
                 className="text-[15px] font-semibold text-foreground no-underline hover:text-primary"
               >
                 {pull.title as string}
-              </a>
+              </AppLink>
               @if (pull.draft) {
                 <Badge variant="draft">Draft</Badge>;
               }
@@ -98,7 +99,7 @@ export function PullsList(props: PullsListProps) @{
             </p>
           </div>
           @if ((pull.comment_count ?? 0) > 0) {
-            <a
+            <AppLink
               href={`/${owner}/${repo}/pull/${pull.number}` as string}
               className="mt-0.5 flex shrink-0 items-center gap-1 text-[12px] text-muted-foreground no-underline hover:text-primary"
               aria-label={
@@ -107,7 +108,7 @@ export function PullsList(props: PullsListProps) @{
             >
               <MessageSquare aria-hidden size={14} />
               {pull.comment_count as number}
-            </a>;
+            </AppLink>;
           }
         </ListRow>;
       }

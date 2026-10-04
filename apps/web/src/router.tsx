@@ -7,9 +7,11 @@ export function getRouter() {
     // Typed route tree is registered below — Link `to` / params infer from it.
     defaultPreload: "intent",
     defaultPreloadDelay: 50,
-    // Smooth cross-route transitions via the View Transitions API (Octane adapter
-    // commits match updates inside startViewTransition).
-    defaultViewTransition: true,
+    // View Transitions stay off: the adapter defers the match commit to a
+    // browser-scheduled callback (skipped callbacks can wedge pending commits),
+    // the cross-fade flashes a light canvas behind dark pages, and the snapshot
+    // swap visibly jumps the layout.
+    defaultViewTransition: false,
     // Restore scroll on route changes; same-document hash jumps stay native.
     scrollRestoration: true,
   });

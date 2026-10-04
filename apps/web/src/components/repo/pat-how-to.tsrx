@@ -1,3 +1,5 @@
+import { AppLink } from "@/components/ui/app-link";
+
 type PatHowToProps = {
   /** HTTPS clone URL for the example `git clone` block (D-13 / D-19). */
   httpsUrl: string;
@@ -8,7 +10,8 @@ type PatHowToProps = {
 /**
  * Shared HTTPS PAT credential how-to (D-13 / GIT-02).
  * Username aliases: account username / git / token / oauth2; password is the PAT.
- * Plain `<a>` CTA so CloneBox/QuickSetup work without RouterProvider in tests;
+ * AppLink CTA renders a plain `<a>` without a RouterProvider, so
+ * CloneBox/QuickSetup keep working in tests;
  * unauthenticated users are redirected by the tokens settings route.
  */
 export function PatHowTo({ httpsUrl, compact }: PatHowToProps) @{
@@ -30,12 +33,12 @@ export function PatHowTo({ httpsUrl, compact }: PatHowToProps) @{
       <li>Password: a personal access token — not your account password.</li>
     </ul>
     <p className="mt-3">
-      <a
+      <AppLink
         href="/settings/tokens"
         className="text-[14px] font-semibold text-primary underline-offset-4 hover:underline"
       >
         Create a personal access token
-      </a>
+      </AppLink>
     </p>
     <p className="mt-3 text-[13px] text-muted-foreground">
       When Git asks for a password, paste your token.

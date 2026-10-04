@@ -1,4 +1,13 @@
-import { Building2, Code2, GitPullRequest, CircleDot, Lock, Search, Users } from "@octanejs/lucide";
+import {
+  Building2,
+  Code2,
+  GitCommitHorizontal,
+  GitPullRequest,
+  CircleDot,
+  Lock,
+  Search,
+  Users,
+} from "@octanejs/lucide";
 import { useEffect, useEffectEvent, useState } from "octane";
 import { Input } from "@/components/ui/input";
 import {
@@ -12,6 +21,7 @@ import {
 } from "@/lib/global-search-suggest";
 import { useChromeAccountState } from "@/lib/use-chrome-account";
 import { cn } from "@/lib/utils";
+import { AppLink } from "@/components/ui/app-link";
 
 /** Header omnibar — multi-entity suggest + full /search results. */
 export const GLOBAL_SEARCH_LABEL = "Search Oxidean";
@@ -46,6 +56,8 @@ function actionIcon(type: SearchActionSuggestion["type"]) {
       return Building2;
     case "code":
       return Code2;
+    case "commits":
+      return GitCommitHorizontal;
     case "issues":
       return CircleDot;
     case "pulls":
@@ -104,7 +116,7 @@ export function GlobalSearch({ className }: GlobalSearchProps) @{
 
   function goResults() {
     const next = q.trim();
-    window.location.assign(searchResultsHref(next, "repositories"));
+    window.location.assign(searchResultsHref(next));
   }
 
   function activate(item: FlatItem) {
@@ -203,7 +215,7 @@ export function GlobalSearch({ className }: GlobalSearchProps) @{
                     (i) => i.key === `repo:${r.id}`,
                   );
                   const active = idx === activeIndex;
-                  <a
+                  <AppLink
                     id={`global-search-opt-repo:${r.id}`}
                     role="option"
                     aria-selected={active}
@@ -228,7 +240,7 @@ export function GlobalSearch({ className }: GlobalSearchProps) @{
                         className="shrink-0 text-muted-foreground"
                       />;
                     }
-                  </a>;
+                  </AppLink>;
                 }
               </>;
             }
@@ -243,7 +255,7 @@ export function GlobalSearch({ className }: GlobalSearchProps) @{
                     (i) => i.key === `user:${u.username}`,
                   );
                   const active = idx === activeIndex;
-                  <a
+                  <AppLink
                     id={`global-search-opt-user:${u.username}`}
                     role="option"
                     aria-selected={active}
@@ -269,7 +281,7 @@ export function GlobalSearch({ className }: GlobalSearchProps) @{
                         {u.display_name as string}
                       </span>;
                     }
-                  </a>;
+                  </AppLink>;
                 }
               </>;
             }
@@ -287,7 +299,7 @@ export function GlobalSearch({ className }: GlobalSearchProps) @{
                     (i) => i.key === `org:${o.slug}`,
                   );
                   const active = idx === activeIndex;
-                  <a
+                  <AppLink
                     id={`global-search-opt-org:${o.slug}`}
                     role="option"
                     aria-selected={active}
@@ -308,7 +320,7 @@ export function GlobalSearch({ className }: GlobalSearchProps) @{
                     <span className="min-w-0 flex-1 truncate font-medium">
                       {o.slug as string}
                     </span>
-                  </a>;
+                  </AppLink>;
                 }
               </>;
             }
@@ -321,7 +333,7 @@ export function GlobalSearch({ className }: GlobalSearchProps) @{
                   );
                   const active = idx === activeIndex;
                   const Icon = actionIcon(a.type);
-                  <a
+                  <AppLink
                     id={`global-search-opt-action:${a.type}`}
                     role="option"
                     aria-selected={active}
@@ -338,7 +350,7 @@ export function GlobalSearch({ className }: GlobalSearchProps) @{
                     <span className="min-w-0 flex-1 truncate">
                       {a.label as string}
                     </span>
-                  </a>;
+                  </AppLink>;
                 }
               </div>;
             }

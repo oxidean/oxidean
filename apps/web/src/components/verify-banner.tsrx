@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api-client";
 import { authSessionQueryOptions } from "@/lib/session-queries";
 import { toastError, toastSuccess } from "@/lib/toast";
+import { AppLink } from "@/components/ui/app-link";
 
 const BANNER_MESSAGE =
   "Verify your email to unlock creating repositories and other privileged actions.";
@@ -102,12 +103,12 @@ export function VerifyBanner() {
             >
               {resendLabel}
             </Button>
-            <a
+            <AppLink
               href="/verify"
               className="inline-flex h-10 items-center rounded-md px-3 text-[13px] font-medium text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               Enter code
-            </a>
+            </AppLink>
           </div>
         </div>
       </div>

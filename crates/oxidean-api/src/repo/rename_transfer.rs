@@ -69,6 +69,7 @@ fn to_public(repo: &AccessibleRepo) -> RepoPublic {
         fork_count: 0,
         watch_count: 0,
         viewer_is_watching: false,
+        viewer_watch_level: None,
         fork_network_id: None,
         forked_from: None,
     }
@@ -388,6 +389,11 @@ pub async fn transfer(
             }
         }
     }
+
+    // DEBT-06: transfer changes the owner grants — watchers who can no longer
+    // read (old personal owner, old org members) are auto-unwatched and their
+    // notification rows dropped.
+    crate::notify::sweep_repo_access(&ctx.db, &updated.id).await;
 
     let capability = accessible.capability;
     Ok(RepoTransferResponse {

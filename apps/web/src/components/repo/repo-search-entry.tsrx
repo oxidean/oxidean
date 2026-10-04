@@ -1,4 +1,5 @@
 import { Search } from "@octanejs/lucide";
+import { AppLink } from "@/components/ui/app-link";
 
 type RepoSearchEntryProps = {
   owner: string;
@@ -14,7 +15,7 @@ export function RepoSearchEntry({ owner, repo, q = "" }: RepoSearchEntryProps) @
       ? `/${owner}/${repo}/search?q=${encodeURIComponent(q)}`
       : `/${owner}/${repo}/search`;
 
-  <a
+  <AppLink
     href={href as string}
     className="inline-flex items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-[13px] text-muted-foreground no-underline hover:bg-muted/40 hover:text-foreground"
     aria-label="Search this repository"
@@ -22,5 +23,5 @@ export function RepoSearchEntry({ owner, repo, q = "" }: RepoSearchEntryProps) @
   >
     <Search aria-hidden size={14} />
     <span>Search</span>
-  </a>;
+  </AppLink>;
 }

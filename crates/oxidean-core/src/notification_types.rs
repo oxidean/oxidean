@@ -2,12 +2,15 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Subject kind for deep links (D-05).
+/// Subject kind for deep links (D-05, DEBT-06).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NotificationSubjectKind {
     Issue,
     PullRequest,
+    Release,
+    WorkflowRun,
+    Push,
 }
 
 impl NotificationSubjectKind {
@@ -15,6 +18,9 @@ impl NotificationSubjectKind {
         match self {
             Self::Issue => "issue",
             Self::PullRequest => "pull_request",
+            Self::Release => "release",
+            Self::WorkflowRun => "workflow_run",
+            Self::Push => "push",
         }
     }
 
@@ -22,6 +28,9 @@ impl NotificationSubjectKind {
         match s {
             "issue" => Ok(Self::Issue),
             "pull_request" => Ok(Self::PullRequest),
+            "release" => Ok(Self::Release),
+            "workflow_run" => Ok(Self::WorkflowRun),
+            "push" => Ok(Self::Push),
             other => Err(format!("unknown notification subject_kind: {other}")),
         }
     }
@@ -38,6 +47,9 @@ pub struct NotificationPublic {
     pub repo: String,
     pub subject_number: i64,
     pub subject_title: String,
+    /// Deep-link ref for non-numbered subjects (release tag, run id; DEBT-06).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subject_ref: Option<String>,
     pub actor_id: String,
     pub actor_username: String,
     pub created_at: String,

@@ -6,6 +6,7 @@ export type SearchEntityType =
   | "users"
   | "organizations"
   | "code"
+  | "commits"
   | "issues"
   | "pulls";
 
@@ -129,6 +130,12 @@ function actionRows(q: string): SearchActionSuggestion[] {
     },
     {
       kind: "action",
+      type: "commits",
+      label: `Search commits for “${q}”`,
+      href: `/search?q=${encoded}&type=commits`,
+    },
+    {
+      kind: "action",
       type: "issues",
       label: `Search issues for “${q}”`,
       href: `/search?q=${encoded}&type=issues`,
@@ -198,8 +205,12 @@ export async function fetchSearchSuggestions(
   };
 }
 
-export function searchResultsHref(q: string, type: SearchEntityType = "repositories"): string {
+/// No `type` → the grouped overview; a kind scopes to that tab.
+export function searchResultsHref(q: string, type?: SearchEntityType): string {
   const trimmed = q.trim();
-  if (!trimmed) return `/search?type=${type}`;
-  return `/search?q=${encodeURIComponent(trimmed)}&type=${type}`;
+  const p = new URLSearchParams();
+  if (trimmed) p.set("q", trimmed);
+  if (type) p.set("type", type);
+  const s = p.toString();
+  return s ? `/search?${s}` : "/search";
 }
