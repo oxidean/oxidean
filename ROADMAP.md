@@ -62,7 +62,7 @@ Machine-facing surfaces beyond raw git/HTTP. These depend on API-02 (token auth)
 The v1 loop (open, comment, review, merge, close) works. Parity is about the planning and review depth around it.
 
 - [ ] **COL-01** Milestones: group issues/PRs by release goal with progress and due dates.
-- [ ] **COL-02** Issue and PR templates from `ISSUE_TEMPLATE/` and `PULL_REQUEST_TEMPLATE` in-repo files, including multi-template chooser.
+- [x] **COL-02** Issue and PR templates from `ISSUE_TEMPLATE/` and `PULL_REQUEST_TEMPLATE` in-repo files, including multi-template chooser. (#99)
 - [ ] **COL-03** Comment attachments: image and file uploads in issue/PR/release discussions.
 - [ ] **COL-04** Pinned issues/PRs per repo and pinned repos on user/org profiles.
 - [ ] **COL-05** Org teams: named groups with their own repo access lists. Orgs are flat `owner`/`admin`/`member` today.

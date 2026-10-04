@@ -6,6 +6,7 @@ pub(crate) mod author_resolve;
 mod branch_protection;
 mod collaborators;
 mod commit_status;
+mod file_templates;
 mod files;
 mod fork_network;
 mod insights;
@@ -47,6 +48,7 @@ pub use invites::{
     create as invites_create, create_link as invites_create_link, list as invites_list,
     revoke as invites_revoke,
 };
+pub use file_templates::file_templates;
 pub use fork_network::head_valid_for_base;
 pub use insights::{
     commit_activity as insights_commit_activity, contributors as insights_contributors,

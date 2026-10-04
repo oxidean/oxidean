@@ -85,6 +85,14 @@ export const fetchRepoRefs = createServerFn({ method: "GET" })
     return client.repo.refs({ owner: data.owner, name: data.name });
   });
 
+/** SSR: `repo.templates.list` — issue/PR file templates from the git tree (COL-02). */
+export const fetchRepoFileTemplates = createServerFn({ method: "GET" })
+  .validator(ownerNameValidator)
+  .handler(async ({ data }) => {
+    const client = createSsrClient(incomingCookie());
+    return client.repo.templates.list({ owner: data.owner, name: data.name });
+  });
+
 /** SSR: `repo.blob` with Cookie forward. */
 export const fetchRepoBlob = createServerFn({ method: "GET" })
   .validator((data: OwnerName & { ref: string; path: string }) => ({

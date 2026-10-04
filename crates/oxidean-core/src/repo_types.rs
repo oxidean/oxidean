@@ -1572,6 +1572,42 @@ pub struct RepoTemplateEnabledResponse {
     pub enabled: bool,
 }
 
+/// `repo.templates.list` input — issue/PR templates live in the repo's git tree
+/// (COL-02), so the request only needs the repo (default branch is read).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoTemplatesListRequest {
+    pub owner: String,
+    pub name: String,
+}
+
+/// One issue/PR template file discovered in the default-branch tree
+/// (GitHub-style `---` YAML frontmatter parsed when present).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoFileTemplate {
+    /// Display name — frontmatter `name`, else filename stem.
+    pub name: String,
+    /// Frontmatter `title` — prefill for the subject field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// Frontmatter `about` — chooser blurb.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Frontmatter `labels` (comma string or list — GitHub-style).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub labels: Vec<String>,
+    /// Markdown body with the frontmatter block stripped.
+    pub body: String,
+    /// Repo-relative path, e.g. `.github/ISSUE_TEMPLATE/bug.md`.
+    pub filename: String,
+}
+
+/// `repo.templates.list` response — grouped by target surface.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RepoTemplatesListResponse {
+    pub issues: Vec<RepoFileTemplate>,
+    pub pulls: Vec<RepoFileTemplate>,
+}
+
 /// Per-repo row in admin instance usage breakdown.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AdminLfsRepoUsageEntry {
