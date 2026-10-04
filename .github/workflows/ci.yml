@@ -52,7 +52,7 @@ jobs:
           tool: nextest
       - name: install mold linker + protoc
         # protobuf-compiler: prost-build for crates/oxidean-api/proto/runner.proto (Phase 19).
-        run: sudo apt-get update -qq && apt-get install -y -qq mold protobuf-compiler
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq mold protobuf-compiler
       - name: cargo nextest (shard ${{ matrix.shard }}/3)
         # Full-workspace debug link has hit lld bus errors (signal 7) on GHA.
         # mold + thin debuginfo (dev profile in Cargo.toml) keeps link stable/disk-safe;
