@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
   "crates/oxidean-api",
+  "crates/oxidean-cli",
   "crates/oxidean-core",
   "crates/oxidean-db",
   "crates/oxidean-git",
