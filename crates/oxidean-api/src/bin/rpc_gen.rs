@@ -1403,6 +1403,8 @@ export type BranchProtectionRulePublic = {
   enforce_admins: boolean;
   required_linear_history: boolean;
   lock_branch: boolean;
+  /** GIT-22: pushes introducing unsigned commits are denied by the update hook. */
+  require_signed_commits: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -1427,6 +1429,8 @@ export type BranchProtectionRuleInput = {
   enforce_admins?: boolean;
   required_linear_history?: boolean;
   lock_branch?: boolean;
+  /** GIT-22: deny pushes introducing commits without a verified signature. */
+  require_signed_commits?: boolean;
 };
 
 export type BranchProtectionUpdateRequest = BranchProtectionRuleInput & {

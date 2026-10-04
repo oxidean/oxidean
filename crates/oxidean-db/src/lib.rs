@@ -1440,6 +1440,7 @@ impl Database {
         enforce_admins: bool,
         required_linear_history: bool,
         lock_branch: bool,
+        require_signed_commits: bool,
     ) -> Result<BranchProtectionRuleRow, String> {
         branch_protection::insert_rule(
             self.require_pool()?,
@@ -1458,6 +1459,7 @@ impl Database {
             enforce_admins,
             required_linear_history,
             lock_branch,
+            require_signed_commits,
         )
         .await
     }
@@ -1480,6 +1482,7 @@ impl Database {
         enforce_admins: bool,
         required_linear_history: bool,
         lock_branch: bool,
+        require_signed_commits: bool,
     ) -> Result<BranchProtectionRuleRow, String> {
         branch_protection::update_rule(
             self.require_pool()?,
@@ -1498,6 +1501,7 @@ impl Database {
             enforce_admins,
             required_linear_history,
             lock_branch,
+            require_signed_commits,
         )
         .await
     }

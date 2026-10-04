@@ -70,6 +70,97 @@ pub async fn reconcile_protection_hooks(bare: &Path) -> Result<(), GitError> {
     install_protection_hooks(bare).await
 }
 
+/// One commit a push introduces, with identity + signature verdict (GIT-22).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PushedCommit {
+    pub sha: String,
+    pub committer_email: String,
+    pub author_email: String,
+    /// `none` | `valid` | `invalid` | `unknown` (from `%G?` + optional keyring).
+    pub signature_status: String,
+    /// `ssh` | `gpg` | empty when unsigned / unknown.
+    pub signature_kind: String,
+}
+
+/// `git log <new_sha> --not <exclude>` — commits the push introduces.
+///
+/// `exclude` selection (GIT-22):
+/// - updates / force-pushes (`old_sha` non-zero): `old..new` — commits newly
+///   reachable on *this* branch, even if they already exist on another ref;
+/// - creates (`old_sha` zero/empty): `--all` — commits no existing ref reaches,
+///   so branching off already-present history does not re-check it.
+///
+/// `allowed_signers` / `gpg_home` feed `%G?` verification exactly like
+/// [`CliGitBackend::log`] (allowedSignersFile + `GNUPGHOME` /
+/// `gpg.trustModel=always`). Pass `None` for a no-keyring probe (emails +
+/// unsigned detection only).
+///
+/// Runs inside `hooks/update` too — quarantine `GIT_OBJECT_DIRECTORY` env is
+/// inherited by the spawned `git` process.
+pub async fn pushed_commits(
+    repo: &Path,
+    old_sha: &str,
+    new_sha: &str,
+    allowed_signers: Option<&Path>,
+    gpg_home: Option<&Path>,
+) -> Result<Vec<PushedCommit>, GitError> {
+    let new_sha = validate_treeish(new_sha)?;
+    let repo_s = repo_str(repo)?;
+
+    let mut args: Vec<String> = vec!["-C".into(), repo_s.into()];
+    let mut extra_env: Vec<(String, String)> = Vec::new();
+    push_signature_verify_config(&mut args, &mut extra_env, allowed_signers, gpg_home)?;
+    args.push("log".into());
+    args.push("--format=%H%x00%ce%x00%ae%x00%G?".into());
+    args.push(new_sha.to_string());
+    args.push("--not".into());
+    let old_sha = old_sha.trim();
+    if old_sha.is_empty() || old_sha.bytes().all(|b| b == b'0') {
+        args.push("--all".into());
+    } else {
+        args.push(validate_treeish(old_sha)?.to_string());
+    }
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    let env_refs: Vec<(&str, &str)> = extra_env
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect();
+    let stdout = run_git_stdout_env(&arg_refs, &env_refs).await?;
+    let text = String::from_utf8_lossy(&stdout);
+
+    let mut out = Vec::new();
+    for record in text.split('\n') {
+        let record = record.trim_end_matches('\r');
+        if record.is_empty() {
+            continue;
+        }
+        let parts: Vec<&str> = record.split('\0').collect();
+        if parts.len() < 4 {
+            continue;
+        }
+        let sha = parts[0].trim();
+        if sha.is_empty() {
+            continue;
+        }
+        let signature_status = map_signature_status(parts[3]);
+        let mut signature_kind = String::new();
+        if signature_status != "none" {
+            // Best-effort kind from the raw commit object (same as `log`).
+            if let Ok(raw) = run_git_stdout(&["-C", repo_s, "cat-file", "-p", sha]).await {
+                signature_kind = signature_kind_from_commit(&String::from_utf8_lossy(&raw));
+            }
+        }
+        out.push(PushedCommit {
+            sha: sha.to_string(),
+            committer_email: parts[1].trim().to_string(),
+            author_email: parts[2].trim().to_string(),
+            signature_status,
+            signature_kind,
+        });
+    }
+    Ok(out)
+}
+
 async fn run_git(args: &[&str]) -> Result<(), GitError> {
     let _ = run_git_stdout(args).await?;
     Ok(())
