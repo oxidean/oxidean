@@ -14,6 +14,7 @@ pub mod lfs;
 pub mod migrate;
 pub mod mirrors;
 pub mod notifications;
+pub mod oauth;
 pub mod instance_invites;
 pub mod org_invites;
 pub mod org_members;
@@ -59,6 +60,7 @@ pub use issues::{
 pub use lfs::LfsObjectRow;
 pub use mirrors::{RepositoryMirrorRefResultRow, RepositoryMirrorRow};
 pub use notifications::NotificationRow;
+pub use oauth::{OAuthAppRow, OAuthCodeRow, OAuthTokenRow};
 pub use oxidean_core::DbProbeResponse;
 pub use pool::DbPool;
 pub use instance_invites::InstanceInviteRow;
@@ -2651,6 +2653,183 @@ impl Database {
         last_used_ip: Option<&str>,
     ) -> Result<(), String> {
         pats::touch_last_used(self.require_pool()?, id, last_used_at, last_used_ip).await
+    }
+
+    // --- oauth applications / codes / tokens (API-03) ---
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn insert_oauth_app(
+        &self,
+        id: &str,
+        owner_id: &str,
+        name: &str,
+        client_id: &str,
+        client_secret_hash: &str,
+        client_secret_prefix: &str,
+        redirect_uris_json: &str,
+    ) -> Result<(), String> {
+        oauth::insert_app(
+            self.require_pool()?,
+            id,
+            owner_id,
+            name,
+            client_id,
+            client_secret_hash,
+            client_secret_prefix,
+            redirect_uris_json,
+        )
+        .await
+    }
+
+    pub async fn find_oauth_app_by_id(
+        &self,
+        id: &str,
+    ) -> Result<Option<oauth::OAuthAppRow>, String> {
+        oauth::find_app_by_id(self.require_pool()?, id).await
+    }
+
+    pub async fn find_oauth_app_by_client_id(
+        &self,
+        client_id: &str,
+    ) -> Result<Option<oauth::OAuthAppRow>, String> {
+        oauth::find_app_by_client_id(self.require_pool()?, client_id).await
+    }
+
+    pub async fn list_oauth_apps_for_owner(
+        &self,
+        owner_id: &str,
+    ) -> Result<Vec<oauth::OAuthAppRow>, String> {
+        oauth::list_apps_for_owner(self.require_pool()?, owner_id).await
+    }
+
+    pub async fn update_oauth_app(
+        &self,
+        id: &str,
+        name: &str,
+        redirect_uris_json: &str,
+        updated_at: &str,
+    ) -> Result<(), String> {
+        oauth::update_app(
+            self.require_pool()?,
+            id,
+            name,
+            redirect_uris_json,
+            updated_at,
+        )
+        .await
+    }
+
+    pub async fn update_oauth_app_secret(
+        &self,
+        id: &str,
+        client_secret_hash: &str,
+        client_secret_prefix: &str,
+        updated_at: &str,
+    ) -> Result<(), String> {
+        oauth::update_app_secret(
+            self.require_pool()?,
+            id,
+            client_secret_hash,
+            client_secret_prefix,
+            updated_at,
+        )
+        .await
+    }
+
+    pub async fn delete_oauth_app(&self, id: &str) -> Result<(), String> {
+        oauth::delete_app(self.require_pool()?, id).await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn insert_oauth_code(
+        &self,
+        id: &str,
+        code_hash: &str,
+        application_id: &str,
+        user_id: &str,
+        redirect_uri: &str,
+        scopes: &str,
+        expires_at: &str,
+    ) -> Result<(), String> {
+        oauth::insert_code(
+            self.require_pool()?,
+            id,
+            code_hash,
+            application_id,
+            user_id,
+            redirect_uri,
+            scopes,
+            expires_at,
+        )
+        .await
+    }
+
+    /// Atomically mark a code used; `None` when unknown or already consumed.
+    pub async fn consume_oauth_code(
+        &self,
+        code_hash: &str,
+        used_at: &str,
+    ) -> Result<Option<oauth::OAuthCodeRow>, String> {
+        oauth::consume_code(self.require_pool()?, code_hash, used_at).await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn insert_oauth_token(
+        &self,
+        id: &str,
+        application_id: &str,
+        user_id: &str,
+        token_prefix: &str,
+        token_hash: &str,
+        scopes: &str,
+        expires_at: &str,
+    ) -> Result<(), String> {
+        oauth::insert_token(
+            self.require_pool()?,
+            id,
+            application_id,
+            user_id,
+            token_prefix,
+            token_hash,
+            scopes,
+            expires_at,
+        )
+        .await
+    }
+
+    /// Lookup by SHA-256 hex — `None` when missing or revoked.
+    pub async fn find_oauth_token_by_hash(
+        &self,
+        token_hash: &str,
+    ) -> Result<Option<oauth::OAuthTokenRow>, String> {
+        oauth::find_token_by_hash(self.require_pool()?, token_hash).await
+    }
+
+    pub async fn list_active_oauth_tokens_for_user(
+        &self,
+        user_id: &str,
+    ) -> Result<Vec<oauth::OAuthTokenRow>, String> {
+        oauth::list_active_tokens_for_user(self.require_pool()?, user_id).await
+    }
+
+    /// Revoke all of a user's tokens for one application; returns count revoked.
+    pub async fn revoke_oauth_tokens_for_user_app(
+        &self,
+        user_id: &str,
+        application_id: &str,
+        revoked_at: &str,
+    ) -> Result<u64, String> {
+        oauth::revoke_tokens_for_user_app(self.require_pool()?, user_id, application_id, revoked_at)
+            .await
+    }
+
+    pub async fn touch_oauth_token_last_used(
+        &self,
+        id: &str,
+        last_used_at: &str,
+        last_used_ip: Option<&str>,
+    ) -> Result<(), String> {
+        oauth::touch_token_last_used(self.require_pool()?, id, last_used_at, last_used_ip).await
     }
 
     // --- packages registry ---

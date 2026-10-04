@@ -33,7 +33,9 @@ import { Route as AdminRunnersRouteImport } from './routes/admin/runners'
 import { Route as AdminTemplatesRouteImport } from './routes/admin/templates'
 import { Route as AdminUsersRouteImport } from './routes/admin/users'
 import { Route as InvitesTokenRouteImport } from './routes/invites.$token'
+import { Route as OauthConsentRouteImport } from './routes/oauth.consent'
 import { Route as OrgsNewRouteImport } from './routes/orgs.new'
+import { Route as SettingsApplicationsRouteImport } from './routes/settings/applications'
 import { Route as SettingsEmailsRouteImport } from './routes/settings/emails'
 import { Route as SettingsGeneralRouteImport } from './routes/settings/general'
 import { Route as SettingsNotificationsRouteImport } from './routes/settings/notifications'
@@ -204,9 +206,19 @@ const InvitesTokenRoute = InvitesTokenRouteImport.update({
   path: '/invites/$token',
   getParentRoute: () => rootRouteImport,
 } as any)
+const OauthConsentRoute = OauthConsentRouteImport.update({
+  id: '/oauth/consent',
+  path: '/oauth/consent',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const OrgsNewRoute = OrgsNewRouteImport.update({
   id: '/orgs/new',
   path: '/orgs/new',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsApplicationsRoute = SettingsApplicationsRouteImport.update({
+  id: '/settings/applications',
+  path: '/settings/applications',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SettingsEmailsRoute = SettingsEmailsRouteImport.update({
@@ -481,7 +493,9 @@ export interface FileRoutesByFullPath {
   '/admin/templates': typeof AdminTemplatesRoute
   '/admin/users': typeof AdminUsersRoute
   '/invites/$token': typeof InvitesTokenRoute
+  '/oauth/consent': typeof OauthConsentRoute
   '/orgs/new': typeof OrgsNewRoute
+  '/settings/applications': typeof SettingsApplicationsRoute
   '/settings/emails': typeof SettingsEmailsRoute
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/notifications': typeof SettingsNotificationsRoute
@@ -553,7 +567,9 @@ export interface FileRoutesByTo {
   '/admin/templates': typeof AdminTemplatesRoute
   '/admin/users': typeof AdminUsersRoute
   '/invites/$token': typeof InvitesTokenRoute
+  '/oauth/consent': typeof OauthConsentRoute
   '/orgs/new': typeof OrgsNewRoute
+  '/settings/applications': typeof SettingsApplicationsRoute
   '/settings/emails': typeof SettingsEmailsRoute
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/notifications': typeof SettingsNotificationsRoute
@@ -624,7 +640,9 @@ export interface FileRoutesById {
   '/admin/templates': typeof AdminTemplatesRoute
   '/admin/users': typeof AdminUsersRoute
   '/invites/$token': typeof InvitesTokenRoute
+  '/oauth/consent': typeof OauthConsentRoute
   '/orgs/new': typeof OrgsNewRoute
+  '/settings/applications': typeof SettingsApplicationsRoute
   '/settings/emails': typeof SettingsEmailsRoute
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/notifications': typeof SettingsNotificationsRoute
@@ -702,7 +720,9 @@ export interface FileRouteTypes {
     | '/admin/templates'
     | '/admin/users'
     | '/invites/$token'
+    | '/oauth/consent'
     | '/orgs/new'
+    | '/settings/applications'
     | '/settings/emails'
     | '/settings/general'
     | '/settings/notifications'
@@ -774,7 +794,9 @@ export interface FileRouteTypes {
     | '/admin/templates'
     | '/admin/users'
     | '/invites/$token'
+    | '/oauth/consent'
     | '/orgs/new'
+    | '/settings/applications'
     | '/settings/emails'
     | '/settings/general'
     | '/settings/notifications'
@@ -844,7 +866,9 @@ export interface FileRouteTypes {
     | '/admin/templates'
     | '/admin/users'
     | '/invites/$token'
+    | '/oauth/consent'
     | '/orgs/new'
+    | '/settings/applications'
     | '/settings/emails'
     | '/settings/general'
     | '/settings/notifications'
@@ -918,7 +942,9 @@ export interface RootRouteChildren {
   AdminTemplatesRoute: typeof AdminTemplatesRoute
   AdminUsersRoute: typeof AdminUsersRoute
   InvitesTokenRoute: typeof InvitesTokenRoute
+  OauthConsentRoute: typeof OauthConsentRoute
   OrgsNewRoute: typeof OrgsNewRoute
+  SettingsApplicationsRoute: typeof SettingsApplicationsRoute
   SettingsEmailsRoute: typeof SettingsEmailsRoute
   SettingsGeneralRoute: typeof SettingsGeneralRoute
   SettingsNotificationsRoute: typeof SettingsNotificationsRoute
@@ -1097,11 +1123,25 @@ declare module '@octanejs/tanstack-router' {
       preLoaderRoute: typeof InvitesTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/oauth/consent': {
+      id: '/oauth/consent'
+      path: '/oauth/consent'
+      fullPath: '/oauth/consent'
+      preLoaderRoute: typeof OauthConsentRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/orgs/new': {
       id: '/orgs/new'
       path: '/orgs/new'
       fullPath: '/orgs/new'
       preLoaderRoute: typeof OrgsNewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings/applications': {
+      id: '/settings/applications'
+      path: '/settings/applications'
+      fullPath: '/settings/applications'
+      preLoaderRoute: typeof SettingsApplicationsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/settings/emails': {
@@ -1667,7 +1707,9 @@ const rootRouteChildren: RootRouteChildren = {
   AdminTemplatesRoute: AdminTemplatesRoute,
   AdminUsersRoute: AdminUsersRoute,
   InvitesTokenRoute: InvitesTokenRoute,
+  OauthConsentRoute: OauthConsentRoute,
   OrgsNewRoute: OrgsNewRoute,
+  SettingsApplicationsRoute: SettingsApplicationsRoute,
   SettingsEmailsRoute: SettingsEmailsRoute,
   SettingsGeneralRoute: SettingsGeneralRoute,
   SettingsNotificationsRoute: SettingsNotificationsRoute,

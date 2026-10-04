@@ -15,6 +15,7 @@ pub mod mcp;
 pub mod mirror;
 pub mod notification;
 pub mod notify;
+pub mod oauth;
 pub mod org;
 pub mod packages;
 pub mod pat;

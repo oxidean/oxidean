@@ -1,7 +1,11 @@
 import { cn } from "@/lib/utils";
 import { AppLink } from "@/components/ui/app-link";
 
+<<<<<<< HEAD
 export type SettingsNavActive = "general" | "profile" | "notifications" | "tokens" | "ssh-keys";
+=======
+export type SettingsNavActive = "general" | "profile" | "tokens" | "ssh-keys" | "applications";
+>>>>>>> origin/feat/api-03-oauth-apps
 
 type SettingsNavProps = {
   active: SettingsNavActive;
@@ -21,6 +25,7 @@ const LINKS: { id: SettingsNavActive; href: string; label: string }[] = [
     label: "Personal access tokens",
   },
   { id: "ssh-keys", href: "/settings/ssh-keys", label: "SSH and GPG keys" },
+  { id: "applications", href: "/settings/applications", label: "OAuth applications" },
 ];
 
 function linkClass(isActive: boolean): string {
@@ -32,7 +37,11 @@ function linkClass(isActive: boolean): string {
   );
 }
 
+<<<<<<< HEAD
 /** Account settings sidebar: General | Account | Notifications | Personal access tokens | SSH and GPG keys. */
+=======
+/** Account settings sidebar: General | Account | Personal access tokens | SSH and GPG keys | OAuth applications. */
+>>>>>>> origin/feat/api-03-oauth-apps
 export function SettingsNav({ active }: SettingsNavProps) @{
   <nav className="flex flex-col gap-1" aria-label="Account settings">
     <p className="mb-2 px-3 text-[12px] font-semibold uppercase tracking-wide text-muted-foreground">

@@ -104,6 +104,30 @@ export const fetchSshKeyList = createServerFn({ method: "GET" }).handler(async (
   return client.sshKey.list();
 });
 
+/** SSR: oauthApp.list with Cookie forward (developer apps). */
+export const fetchOAuthAppList = createServerFn({ method: "GET" }).handler(async () => {
+  const client = createSsrClient(incomingCookie());
+  return client.oauthApp.list();
+});
+
+/** SSR: oauthApp.listGrants with Cookie forward (authorized apps). */
+export const fetchOAuthGrantList = createServerFn({ method: "GET" }).handler(async () => {
+  const client = createSsrClient(incomingCookie());
+  return client.oauthApp.listGrants();
+});
+
+/** SSR: oauthApp.authorizeInfo with Cookie forward (consent screen payload). */
+export const fetchOAuthAuthorizeInfo = createServerFn({ method: "GET" })
+  .validator((data: { client_id?: string; redirect_uri?: string; scope?: string } = {}) => ({
+    client_id: data.client_id ?? "",
+    redirect_uri: data.redirect_uri,
+    scope: data.scope,
+  }))
+  .handler(async ({ data }) => {
+    const client = createSsrClient(incomingCookie());
+    return client.oauthApp.authorizeInfo(data);
+  });
+
 /** SSR: gpgKey.list with Cookie forward. */
 export const fetchGpgKeyList = createServerFn({ method: "GET" }).handler(async () => {
   const client = createSsrClient(incomingCookie());

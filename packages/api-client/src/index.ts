@@ -2036,6 +2036,86 @@ export type RevokePatRequest = {
   id: string;
 };
 
+// --- OAuth2 provider (API-03) ---
+
+/** `read:user` | `user:email` | `repo` | `package:read` | `package:write` */
+export type OAuthScope =
+  | "read:user"
+  | "user:email"
+  | "repo"
+  | "package:read"
+  | "package:write";
+
+/** Registered OAuth app — never carries a plaintext `client_secret`. */
+export type OAuthAppPublic = {
+  id: string;
+  name: string;
+  client_id: string;
+  client_secret_prefix: string;
+  redirect_uris: string[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type CreateOAuthAppRequest = {
+  name: string;
+  redirect_uris: string[];
+};
+
+/** `oauthApp.create` / `oauthApp.regenerateSecret` — one-time secret reveal. */
+export type CreateOAuthAppResponse = {
+  app: OAuthAppPublic;
+  client_secret: string;
+};
+
+export type UpdateOAuthAppRequest = {
+  id: string;
+  name?: string;
+  redirect_uris?: string[];
+};
+
+export type OAuthAppIdRequest = {
+  id: string;
+};
+
+/** `oauthApp.listGrants` row — one grant per (app, user). */
+export type OAuthGrantPublic = {
+  application_id: string;
+  app_name: string;
+  client_id: string;
+  scopes: string[];
+  granted_at: string;
+  last_used_at?: string | null;
+};
+
+/** `oauthApp.authorizeInfo` input — mirrors the `/oauth/authorize` query. */
+export type OAuthAuthorizeInfoRequest = {
+  client_id: string;
+  redirect_uri?: string;
+  scope?: string;
+};
+
+export type OAuthAuthorizeInfo = {
+  app_name: string;
+  client_id: string;
+  redirect_uri: string;
+  scopes: string[];
+  owner_username: string;
+};
+
+/** `oauthApp.authorize` input — consent decision. */
+export type OAuthAuthorizeRequest = {
+  client_id: string;
+  redirect_uri: string;
+  scope?: string;
+  state?: string;
+  approve: boolean;
+};
+
+export type OAuthAuthorizeResponse = {
+  redirect_to: string;
+};
+
 /** `sshKey.add` input — OpenSSH one-line public key (not a private key). */
 export type AddSshKeyRequest = {
   title: string;
@@ -3345,6 +3425,25 @@ export function createClient(opts: CreateClientOptions) {
       revoke: (input: RevokePatRequest) =>
         rpcCall<{ ok: boolean }>(opts, "pat.revoke", input),
     },
+    oauthApp: {
+      create: (input: CreateOAuthAppRequest) =>
+        rpcCall<CreateOAuthAppResponse>(opts, "oauthApp.create", input),
+      list: () => rpcCall<OAuthAppPublic[]>(opts, "oauthApp.list", {}),
+      update: (input: UpdateOAuthAppRequest) =>
+        rpcCall<OAuthAppPublic>(opts, "oauthApp.update", input),
+      delete: (input: OAuthAppIdRequest) =>
+        rpcCall<{ ok: boolean }>(opts, "oauthApp.delete", input),
+      regenerateSecret: (input: OAuthAppIdRequest) =>
+        rpcCall<CreateOAuthAppResponse>(opts, "oauthApp.regenerateSecret", input),
+      listGrants: () =>
+        rpcCall<OAuthGrantPublic[]>(opts, "oauthApp.listGrants", {}),
+      revoke: (input: OAuthAppIdRequest) =>
+        rpcCall<{ ok: boolean }>(opts, "oauthApp.revoke", input),
+      authorizeInfo: (input: OAuthAuthorizeInfoRequest) =>
+        rpcCall<OAuthAuthorizeInfo>(opts, "oauthApp.authorizeInfo", input),
+      authorize: (input: OAuthAuthorizeRequest) =>
+        rpcCall<OAuthAuthorizeResponse>(opts, "oauthApp.authorize", input),
+    },
     sshKey: {
       add: (input: AddSshKeyRequest) =>
         rpcCall<SshKeyListItem>(opts, "sshKey.add", input),
@@ -4068,6 +4167,83 @@ export function patRevokeMutationOptions(client: OxideanClient) {
   };
 }
 
+export function oauthAppListQueryOptions(client: OxideanClient) {
+  return {
+    queryKey: ["oauthApp", "list"] as const,
+    queryFn: async () => {
+      const res = await client.oauthApp.list();
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
+export function oauthAppGrantsQueryOptions(client: OxideanClient) {
+  return {
+    queryKey: ["oauthApp", "listGrants"] as const,
+    queryFn: async () => {
+      const res = await client.oauthApp.listGrants();
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
+export function oauthAppCreateMutationOptions(client: OxideanClient) {
+  return {
+    mutationKey: ["oauthApp", "create"] as const,
+    mutationFn: async (input: CreateOAuthAppRequest) => {
+      const res = await client.oauthApp.create(input);
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
+export function oauthAppUpdateMutationOptions(client: OxideanClient) {
+  return {
+    mutationKey: ["oauthApp", "update"] as const,
+    mutationFn: async (input: UpdateOAuthAppRequest) => {
+      const res = await client.oauthApp.update(input);
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
+export function oauthAppDeleteMutationOptions(client: OxideanClient) {
+  return {
+    mutationKey: ["oauthApp", "delete"] as const,
+    mutationFn: async (input: OAuthAppIdRequest) => {
+      const res = await client.oauthApp.delete(input);
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
+export function oauthAppRegenerateSecretMutationOptions(client: OxideanClient) {
+  return {
+    mutationKey: ["oauthApp", "regenerateSecret"] as const,
+    mutationFn: async (input: OAuthAppIdRequest) => {
+      const res = await client.oauthApp.regenerateSecret(input);
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
+export function oauthAppRevokeMutationOptions(client: OxideanClient) {
+  return {
+    mutationKey: ["oauthApp", "revoke"] as const,
+    mutationFn: async (input: OAuthAppIdRequest) => {
+      const res = await client.oauthApp.revoke(input);
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
 export function sshKeyListQueryOptions(client: OxideanClient) {
   return {
     queryKey: ["sshKey", "list"] as const,
@@ -4567,6 +4743,8 @@ export const queryOptions = {
   repoBlame: repoBlameQueryOptions,
   repoSearch: repoSearchQueryOptions,
   patList: patListQueryOptions,
+  oauthAppList: oauthAppListQueryOptions,
+  oauthAppGrants: oauthAppGrantsQueryOptions,
   sshKeyList: sshKeyListQueryOptions,
   gpgKeyList: gpgKeyListQueryOptions,
   emailList: emailListQueryOptions,
@@ -4583,6 +4761,11 @@ export const mutationOptions = {
   patCreateClassic: patCreateClassicMutationOptions,
   patCreateFineGrained: patCreateFineGrainedMutationOptions,
   patRevoke: patRevokeMutationOptions,
+  oauthAppCreate: oauthAppCreateMutationOptions,
+  oauthAppUpdate: oauthAppUpdateMutationOptions,
+  oauthAppDelete: oauthAppDeleteMutationOptions,
+  oauthAppRegenerateSecret: oauthAppRegenerateSecretMutationOptions,
+  oauthAppRevoke: oauthAppRevokeMutationOptions,
   sshKeyAdd: sshKeyAddMutationOptions,
   sshKeyRevoke: sshKeyRevokeMutationOptions,
   gpgKeyAdd: gpgKeyAddMutationOptions,
