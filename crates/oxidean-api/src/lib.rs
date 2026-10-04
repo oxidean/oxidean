@@ -11,6 +11,7 @@ pub mod issue;
 pub mod jobs;
 pub mod label;
 pub mod lfs;
+pub mod mcp;
 pub mod mirror;
 pub mod notification;
 pub mod notify;

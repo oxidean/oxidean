@@ -39,7 +39,7 @@ The forge is only as useful as what third-party tools can drive. PATs authentica
 
 Machine-facing surfaces beyond raw git/HTTP. These depend on API-02 (token auth) and benefit from API-03 (OAuth apps).
 
-- [ ] **AGT-01** Instance MCP server: a streamable-HTTP MCP endpoint on the instance exposing repos, issues, PRs, action runs, packages, and search as tools and resources — functionality comparable to github-mcp-server and Forgejo's MCP support.
+- [x] **AGT-01** Instance MCP server: a streamable-HTTP MCP endpoint on the instance exposing repos, issues, PRs, action runs, packages, and search as tools and resources — functionality comparable to github-mcp-server and Forgejo's MCP support. (#93)
 - [ ] **AGT-02** WebMCP surface in the web app: the app advertises MCP capabilities to browser-side agents (WebMCP, as surfaced by Chrome DevTools) backed by the instance MCP endpoint.
 - [ ] **AGT-03** MCP auth and setup model: local development (localhost or stdio) works with minimal configuration; remote third-party tools authenticate via PAT or OAuth with documented scopes, configured from settings.
 - [ ] **CLI-01** Companion CLI (`ox`, gh-class): login, repo/issue/PR/actions/packages operations, scriptable JSON output, works against any instance URL.

@@ -19,7 +19,7 @@ use oxidean_git::{CliGitBackend, GitBackend};
 use crate::auth::pending::PendingAuthStore;
 use crate::auth::session::{
     build_session_presence_cookie, clear_session_cookie, clear_session_presence_cookie,
-    SessionService, SESSION_COOKIE_NAME, SESSION_IDLE,
+    ResolvedSession, SessionService, SESSION_COOKIE_NAME, SESSION_IDLE,
 };
 use crate::email::{self, EmailSender};
 use crate::pat::bearer::{self, BearerRejection};
@@ -255,6 +255,10 @@ pub fn router_with_state(state: AppState, cors: CorsLayer) -> Router {
         .route("/api/rpc/ws", get(rpc_ws))
         // REST facade over the RPC domain (API-01).
         .nest("/api/v1", crate::rest::router())
+        .route(
+            "/api/mcp",
+            post(crate::mcp::handle_post).get(crate::mcp::handle_get),
+        )
         .nest("/api/actions", crate::actions::runner_proto::router())
         .route("/api/auth/workos/start", get(auth_callbacks::workos_start))
         .route(
@@ -342,7 +346,7 @@ async fn health() -> Json<serde_json::Value> {
     Json(serde_json::json!({ "ok": true }))
 }
 
-fn session_token_from_headers(headers: &HeaderMap) -> Option<String> {
+pub(crate) fn session_token_from_headers(headers: &HeaderMap) -> Option<String> {
     let cookie_header = headers.get(header::COOKIE)?.to_str().ok()?;
     for part in cookie_header.split(';') {
         let part = part.trim();
@@ -352,6 +356,65 @@ fn session_token_from_headers(headers: &HeaderMap) -> Option<String> {
         }
     }
     None
+}
+
+/// Resolve a raw `oxidean_session` cookie token to a session (shared by RPC + MCP).
+pub(crate) async fn resolve_session_token(
+    state: &AppState,
+    raw_token: Option<&str>,
+    client: &rpc::ClientMeta,
+) -> Option<ResolvedSession> {
+    match raw_token {
+        Some(token) => match state
+            .sessions
+            .resolve(
+                &state.db,
+                token,
+                client.ip_address.as_deref(),
+                client.user_agent.as_deref(),
+            )
+            .await
+        {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!(error = %e, "session resolve failed");
+                None
+            }
+        },
+        None => None,
+    }
+}
+
+/// Build an [`RpcCtx`] from an already-resolved session (cookie or token-derived).
+/// Used by the MCP endpoint; PAT Bearer identity is applied separately there.
+pub(crate) fn build_rpc_ctx_with_session(
+    state: &AppState,
+    session: Option<ResolvedSession>,
+    client: rpc::ClientMeta,
+) -> RpcCtx {
+    let email = state.current_email();
+    RpcCtx {
+        db: state.db.clone(),
+        email,
+        email_slot: state.email.clone(),
+        sessions: state.sessions.clone(),
+        uploads_dir: state.uploads_dir.clone(),
+        repos_dir: state.repos_dir.clone(),
+        lfs_dir: state.lfs_dir.clone(),
+        release_assets_dir: state.release_assets_dir.clone(),
+        template_packs_dir: state.template_packs_dir.clone(),
+        actions_log_dir: state.actions_log_dir.clone(),
+        git: state.git.clone(),
+        env_name: state.env_name.clone(),
+        session,
+        pat: None,
+        client,
+        set_cookie: None,
+        lookup_limiter: state.lookup_limiter.clone(),
+        search_timeout_ms: state.search_timeout_ms,
+        search_max_matches: state.search_max_matches,
+        search_max_files: state.search_max_files,
+    }
 }
 
 /// Edge credential for `/api/rpc` (API-02): the session cookie always wins;
