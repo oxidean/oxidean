@@ -758,8 +758,12 @@ pub const ZERO_SHA: &str = "0000000000000000000000000000000000000000";
 
 /// Hook/update check: load rules for repo resolved from GIT_DIR and evaluate intent.
 ///
+/// GIT-25: before any branch/tag-protection evaluation, deny non-delete updates
+/// (any ref namespace, not just heads) when the repo — including the still-
+/// quarantined incoming pack — is over its git object size quota.
+///
 /// Covers `refs/heads/*` (classic branch protection, D-14) and `refs/tags/*`
-/// (tag rulesets, GIT-21). Other namespaces are not ref-protected.
+/// (tag rulesets, GIT-21). Other namespaces are not ref-protected (after quota).
 pub async fn check_ref_update(
     db: &Database,
     repos_dir: &Path,
@@ -769,18 +773,6 @@ pub async fn check_ref_update(
     new_sha: &str,
     capability: Capability,
 ) -> Result<(), AppError> {
-    enum RefTarget<'a> {
-        Branch(&'a str),
-        Tag(&'a str),
-    }
-    let target = if let Some(branch) = branch_from_ref(git_ref) {
-        RefTarget::Branch(branch)
-    } else if let Some(tag) = tag_from_ref(git_ref) {
-        RefTarget::Tag(tag)
-    } else {
-        // Non-branch/non-tag refs are not subject to ref protection.
-        return Ok(());
-    };
     let (owner, name) = owner_name_from_git_dir(repos_dir, git_dir)
         .map_err(|e| AppError::new("repo.ref_protection", e))?;
     let owner_id = if let Some(u) = db
@@ -806,6 +798,26 @@ pub async fn check_ref_update(
             AppError::new("repo.internal", "repository operation failed")
         })?
         .ok_or_else(|| AppError::new("repo.not_found", "Repository not found"))?;
+
+    // Deletes (new_sha = 0) carry no objects — keep them allowed so an
+    // over-quota repo can still clean up refs (GIT-25).
+    if new_sha != ZERO_SHA {
+        crate::git::quota::enforce_push_quota(db, &repo, git_dir).await?;
+    }
+
+    enum RefTarget<'a> {
+        Branch(&'a str),
+        Tag(&'a str),
+    }
+    let target = if let Some(branch) = branch_from_ref(git_ref) {
+        RefTarget::Branch(branch)
+    } else if let Some(tag) = tag_from_ref(git_ref) {
+        RefTarget::Tag(tag)
+    } else {
+        // Non-branch/non-tag refs are not subject to ref protection.
+        return Ok(());
+    };
+
     match target {
         RefTarget::Branch(branch) => {
             let eff = effective_for_branch(db, &repo.id, branch).await?;

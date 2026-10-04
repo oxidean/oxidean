@@ -18,8 +18,8 @@ pub use backend::{
     DIFF_SOFT_MAX_BYTES, FORGE_NOREPLY_EMAIL,
 };
 pub use cli::{
-    install_protection_hooks, pushed_commits, reconcile_protection_hooks, CliGitBackend,
-    PushedCommit,
+    install_protection_hooks, pushed_commits, reconcile_protection_hooks, repo_disk_usage,
+    CliGitBackend, PushedCommit,
 };
 pub use version::{assert_git_version, parse_git_version};
 

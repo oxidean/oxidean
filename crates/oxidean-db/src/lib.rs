@@ -8,6 +8,8 @@ pub mod branch_protection;
 pub mod dialect;
 pub mod email_tokens;
 pub mod follows;
+pub mod git_settings;
+
 pub mod issue_labels;
 pub mod issues;
 pub mod lfs;
@@ -53,6 +55,7 @@ pub use audit_events::AuditEventRow;
 pub use branch_protection::{BranchProtectionRuleRow, CommitStatusRow};
 pub use tag_protection::TagProtectionRuleRow;
 pub use dialect::{redact_url, resolve_dialect, resolve_dialect_from_env, Dialect};
+pub use git_settings::GitSettingsRow;
 pub use issue_labels::{IssueAssigneeRow, LabelRow};
 pub use issues::{
     CommentRevisionRow, IssueCommentRow, IssueLinkRow, IssueListFilters, IssueRevisionRow, IssueRow,
@@ -1072,6 +1075,36 @@ impl Database {
         archived: bool,
     ) -> Result<RepositoryRow, String> {
         repositories::set_archived(self.require_pool()?, id, archived).await
+    }
+
+    /// Persist the measured on-disk size of the bare repo (GIT-25 bookkeeping).
+    pub async fn update_repository_size_bytes(
+        &self,
+        id: &str,
+        size_bytes: i64,
+    ) -> Result<(), String> {
+        repositories::update_size_bytes(self.require_pool()?, id, size_bytes).await
+    }
+
+    /// Set/clear the per-repo git object size quota override (GIT-25).
+    pub async fn update_repository_size_quota(
+        &self,
+        id: &str,
+        size_quota_bytes: Option<i64>,
+    ) -> Result<RepositoryRow, String> {
+        repositories::update_size_quota_bytes(self.require_pool()?, id, size_quota_bytes).await
+    }
+
+    /// Instance git settings singleton (`instance_git_settings`, GIT-25).
+    pub async fn get_git_settings(&self) -> Result<git_settings::GitSettingsRow, String> {
+        git_settings::get_git_settings(self.require_pool()?).await
+    }
+
+    pub async fn update_git_settings(
+        &self,
+        repo_quota_bytes: Option<i64>,
+    ) -> Result<git_settings::GitSettingsRow, String> {
+        git_settings::update_git_settings(self.require_pool()?, repo_quota_bytes).await
     }
 
     pub async fn soft_delete_repository(&self, id: &str) -> Result<(), String> {

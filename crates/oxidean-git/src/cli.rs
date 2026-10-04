@@ -161,6 +161,64 @@ pub async fn pushed_commits(
     Ok(out)
 }
 
+/// Disk usage of a repository directory in bytes — `du`-equivalent without
+/// shelling out (GIT-25). Sums apparent file sizes (`Metadata::len`), counts a
+/// hardlinked inode once per walk on unix, and never follows symlinks. Runs
+/// inside `spawn_blocking` so callers stay on the async scheduler.
+///
+/// Called from `hooks/update` while receive-pack quarantine objects still live
+/// under `GIT_DIR`, so the result includes the incoming pack — callers can
+/// treat it as the projected post-push size.
+pub async fn repo_disk_usage(dir: &Path) -> Result<u64, GitError> {
+    let dir = dir.to_path_buf();
+    tokio::task::spawn_blocking(move || dir_disk_usage_sync(&dir))
+        .await
+        .map_err(|e| GitError::Process(format!("disk usage task join: {e}")))?
+}
+
+fn dir_disk_usage_sync(dir: &Path) -> Result<u64, GitError> {
+    let mut total = 0u64;
+    let mut stack = vec![dir.to_path_buf()];
+    // (dev, ino) dedup so hardlinked objects (local clones / alternates) count once.
+    #[cfg(unix)]
+    let mut seen_inodes = std::collections::HashSet::new();
+    while let Some(path) = stack.pop() {
+        let entries = match std::fs::read_dir(&path) {
+            Ok(e) => e,
+            Err(e) if path == *dir => return Err(GitError::Io(e)),
+            // Unreadable subdir (race / permissions): skip, do not fail the walk.
+            Err(_) => continue,
+        };
+        for entry in entries.flatten() {
+            // file_type does not traverse symlinks: links are counted (their own
+            // dirent size via metadata below) but never followed.
+            let ft = match entry.file_type() {
+                Ok(ft) => ft,
+                Err(_) => continue,
+            };
+            // symlink_metadata so symlinks count their own dirent size and never
+            // drag in (or double-count via nlink>1 targets) an outside tree.
+            let meta = match std::fs::symlink_metadata(entry.path()) {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            if ft.is_dir() {
+                stack.push(entry.path());
+                continue;
+            }
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::MetadataExt;
+                if meta.nlink() > 1 && !seen_inodes.insert((meta.dev(), meta.ino())) {
+                    continue;
+                }
+            }
+            total = total.saturating_add(meta.len());
+        }
+    }
+    Ok(total)
+}
+
 async fn run_git(args: &[&str]) -> Result<(), GitError> {
     let _ = run_git_stdout(args).await?;
     Ok(())

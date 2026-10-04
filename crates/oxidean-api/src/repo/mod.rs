@@ -76,9 +76,11 @@ use oxidean_core::{
     RepoLfsDownloadRequest, RepoLfsDownloadResponse, RepoLfsEnabledResponse,
     RepoLfsGetEnabledRequest, RepoLfsListObjectsRequest, RepoLfsListObjectsResponse,
     RepoLfsObjectEntry, RepoLfsSetEnabledRequest, RepoLfsStatusResponse, RepoLfsUsageResponse,
-    RepoListByOwnerRequest, RepoListMineResponse, RepoPublic, RepoRefEntry, RepoRefsResponse,
-    RepoSetArchivedRequest, RepoSoftDeleteRequest, RepoSoftDeleteResponse, RepoTemplateOption,
-    RepoTreeEntry, RepoTreeRequest, RepoTreeResponse, RepoUpdateVisibilityRequest, RepoVisibility,
+    RepoGetQuotaRequest, RepoListByOwnerRequest, RepoListMineResponse, RepoPublic,
+    RepoQuotaPublic, RepoRefEntry, RepoRefsResponse, RepoSetArchivedRequest, RepoSetQuotaRequest,
+    RepoSoftDeleteRequest, RepoSoftDeleteResponse, RepoTemplateOption, RepoTreeEntry,
+    RepoTreeRequest, RepoTreeResponse, RepoUpdateVisibilityRequest, RepoVisibility,
+
     TemplateProvenance,
 };
 use uuid::Uuid;
@@ -1945,6 +1947,86 @@ pub async fn lfs_get_usage(
         quota_repo_bytes,
         objects,
     })
+}
+
+/// Build the `repo.quota.*` response for an already-resolved repo (GIT-25).
+///
+/// `size_bytes` is refreshed live from disk when the bare path resolves — the
+/// cached column is only a fallback when measurement fails.
+async fn quota_public(
+    ctx: &RpcCtx,
+    accessible: &AccessibleRepo,
+) -> Result<RepoQuotaPublic, AppError> {
+    let path = bare_repo_path(&ctx.repos_dir, &accessible.owner_username, &accessible.row.name)?;
+    let size_bytes = match crate::git::quota::refresh_repo_size_bytes(
+        &ctx.db,
+        &accessible.row.id,
+        &path,
+    )
+    .await
+    {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::warn!(error = %e, "measure repo size failed; using cached size_bytes");
+            accessible.row.size_bytes
+        }
+    };
+    let instance_quota_bytes = crate::git::quota::instance_repo_quota_bytes(&ctx.db)
+        .await
+        .map_err(db_err)?;
+    let effective_quota_bytes = crate::git::quota::effective_repo_quota_bytes(&ctx.db, &accessible.row)
+        .await
+        .map_err(db_err)?;
+    Ok(RepoQuotaPublic {
+        size_bytes,
+        effective_quota_bytes,
+        size_quota_bytes: accessible.row.size_quota_bytes,
+        instance_quota_bytes,
+    })
+}
+
+/// `repo.quota.get` — git object usage + effective quota for Settings (GIT-25).
+pub async fn quota_get(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<RepoQuotaPublic, AppError> {
+    let req: RepoGetQuotaRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid repo.quota.get input: {e}"),
+        )
+    })?;
+    let accessible = resolve_repo_for_read(ctx, &req.owner, &req.name).await?;
+    quota_public(ctx, &accessible).await
+}
+
+/// `repo.quota.set` — Admin per-repo git size quota override (GIT-25).
+/// `size_quota_bytes: null` clears the override (inherit instance default);
+/// `<= 0` stores an explicit unlimited override.
+pub async fn quota_set(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<RepoQuotaPublic, AppError> {
+    let req: RepoSetQuotaRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid repo.quota.set input: {e}"),
+        )
+    })?;
+    let mut accessible = resolve_repo_for_admin(ctx, &req.owner, &req.name).await?;
+    ctx.db
+        .update_repository_size_quota(&accessible.row.id, req.size_quota_bytes)
+        .await
+        .map_err(db_err)?;
+    // The resolved row predates the update — re-read so the response reflects
+    // the new override.
+    accessible.row = ctx
+        .db
+        .find_repository_by_id(&accessible.row.id)
+        .await
+        .map_err(db_err)?
+        .ok_or_else(|| AppError::new("repo.not_found", "Repository not found"))?;
+    quota_public(ctx, &accessible).await
 }
 
 /// `repo.lfs.listObjects` — in-app LFS browser listing (D-LFS-16).
