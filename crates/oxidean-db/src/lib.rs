@@ -13,6 +13,7 @@ pub mod git_settings;
 pub mod issue_labels;
 pub mod issues;
 pub mod lfs;
+pub mod mcp_settings;
 pub mod migrate;
 pub mod mirrors;
 pub mod notifications;
@@ -61,6 +62,7 @@ pub use issues::{
     CommentRevisionRow, IssueCommentRow, IssueLinkRow, IssueListFilters, IssueRevisionRow, IssueRow,
 };
 pub use lfs::LfsObjectRow;
+pub use mcp_settings::McpSettingsRow;
 pub use mirrors::{RepositoryMirrorRefResultRow, RepositoryMirrorRow};
 pub use notifications::NotificationRow;
 pub use oauth::{OAuthAppRow, OAuthCodeRow, OAuthTokenRow};
@@ -3735,6 +3737,19 @@ impl Database {
 
     pub async fn delete_lfs_object(&self, oid: &str) -> Result<(), String> {
         lfs::delete_lfs_object(self.require_pool()?, oid).await
+    }
+
+    // --- MCP endpoint settings (AGT-03) ---
+
+    pub async fn get_mcp_settings(&self) -> Result<mcp_settings::McpSettingsRow, String> {
+        mcp_settings::get_mcp_settings(self.require_pool()?).await
+    }
+
+    pub async fn update_mcp_settings(
+        &self,
+        enabled: Option<bool>,
+    ) -> Result<mcp_settings::McpSettingsRow, String> {
+        mcp_settings::update_mcp_settings(self.require_pool()?, enabled).await
     }
 
     pub async fn factory_reset_instance(&self) -> Result<(), String> {

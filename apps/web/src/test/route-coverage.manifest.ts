@@ -297,6 +297,15 @@ export const routeCoverageManifest: RouteCoverageEntry[] = [
       },
     ],
   },
+  {
+    route: "admin/mcp.tsrx",
+    coverage: [
+      {
+        kind: "happy-dom",
+        test: "apps/web/src/routes/admin/mcp.integration.test.ts",
+      },
+    ],
+  },
 
   // --- forge repo chrome + code browse (11.1-04) ---
   {

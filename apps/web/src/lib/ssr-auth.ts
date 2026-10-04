@@ -158,6 +158,12 @@ export const fetchAdminLfsUsage = createServerFn({ method: "GET" }).handler(asyn
   return client.admin.lfs.getUsage();
 });
 
+/** SSR: admin.mcp.getSettings with Cookie forward. */
+export const fetchAdminMcpSettings = createServerFn({ method: "GET" }).handler(async () => {
+  const client = createSsrClient(incomingCookie());
+  return client.admin.mcp.getSettings();
+});
+
 /** SSR: admin.users.list with Cookie forward. */
 export const fetchAdminUsersList = createServerFn({ method: "GET" })
   .validator(

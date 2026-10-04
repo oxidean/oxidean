@@ -1,4 +1,4 @@
-# MCP endpoint (AGT-01)
+# MCP endpoint (AGT-01, AGT-03)
 
 Oxidean exposes a **Model Context Protocol** server so MCP clients (agentic
 editors, CLIs, orchestrators) can browse repositories, issues, pull requests,
@@ -57,18 +57,23 @@ curl -s https://forge.example.com/api/mcp \
 
 | Credential | How | Notes |
 | --- | --- | --- |
-| Session cookie | `Cookie: oxidean_session=…` | Browser-grade access; full ACL |
+| Session cookie | `Cookie: oxidean_session=…` | Browser-grade access; full ACL — local dev needs nothing else |
 | Classic PAT | `Authorization: Bearer oxidean_pat_…` | Requires the `repo` scope for repo tools; `package:read`/`package:write` for `packages_list` |
 | Fine-grained PAT | `Authorization: Bearer oxidean_fg_…` | `contents:read`/`contents:write` + repository selection gate repo tools; `package:read`/`package:write` for packages |
+| OAuth access token | `Authorization: Bearer oxidean_oat_…` | Reserved prefix for OAuth apps (API-03). Not resolvable yet — returns `401` like any unknown credential until the OAuth provider ships |
 
 Send the token as a **Bearer** header — never as a URL parameter or RPC input.
-Mint tokens under **Settings → Developer → Personal access tokens**.
+Mint tokens under **Settings → Personal access tokens**.
 
 A request that *presents* an invalid, expired, or unknown credential fails with
 HTTP `401` and `WWW-Authenticate: Bearer` (failed attempts share the Smart HTTP
 IP rate limiter — 20 failures / 15 min). A request with **no** credential runs
 as anonymous: public data stays reachable, while tools that need a user or a
 private repository return `isError` content instead of failing the protocol.
+
+Bearer prefixes dispatch to disjoint resolvers: `oxidean_pat_…` and
+`oxidean_fg_…` resolve against the PAT tables today, while `oxidean_oat_…`
+routes to the OAuth seam that the provider work (API-03) will implement.
 
 ### Scope mapping for fine-grained tokens
 
@@ -123,6 +128,100 @@ shapes via `resources/templates/list`:
 | `oxidean://repo/{owner}/{name}/pull/{number}` | Pull request title/state/author/body as Markdown |
 
 Reads go through the same ACL + token-scope seam as the matching tools.
+
+## Instance enable/disable
+
+The endpoint is **enabled by default** — `OXIDEAN_MCP_ENABLED` is optional and
+treated as on unless set to `false`/`0`/`no`/`off`. A sys-admin can flip it at
+runtime under **Admin → MCP endpoint** (`admin.mcp.getSettings` /
+`admin.mcp.updateSettings`); a stored override wins over the env default, and
+clearing it reverts to the env value. While disabled, both `POST` and `GET`
+`/api/mcp` answer `404` with a `mcp.disabled` JSON-RPC error.
+
+## Client setup
+
+The endpoint speaks streamable-HTTP in JSON mode: one JSON-RPC 2.0 message per
+`POST`, `application/json` response, `202` for notifications — no SSE stream
+and no `Mcp-Session-Id`. Two ways to connect:
+
+- **Native HTTP transport** — clients that support it point straight at
+  `POST /api/mcp` with an `Authorization: Bearer` header.
+- **`mcp-remote` bridge** — stdio-only clients spawn `npx mcp-remote <url>`
+  which forwards stdio ↔ HTTP and can inject the Bearer header.
+
+### Claude Code
+
+```bash
+# Local dev instance (Compose `make up` serves the app on :3000)
+claude mcp add --transport http oxidean http://localhost:3000/api/mcp \
+  --header "Authorization: Bearer oxidean_pat_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+# Remote instance
+claude mcp add --transport http oxidean https://forge.example.com/api/mcp \
+  --header "Authorization: Bearer oxidean_pat_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+```
+
+Remove with `claude mcp remove oxidean`. For a PAT-less local tryout, a
+session-cookie `Cookie: oxidean_session=…` header works the same way.
+
+### Cursor
+
+`.cursor/mcp.json` (per project) or `~/.cursor/mcp.json` (global) — direct HTTP:
+
+```json
+{
+  "mcpServers": {
+    "oxidean": {
+      "url": "https://forge.example.com/api/mcp",
+      "headers": {
+        "Authorization": "Bearer oxidean_pat_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      }
+    }
+  }
+}
+```
+
+Or through `mcp-remote` when you prefer the stdio bridge:
+
+```json
+{
+  "mcpServers": {
+    "oxidean": {
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "https://forge.example.com/api/mcp",
+        "--header",
+        "Authorization: Bearer oxidean_pat_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      ]
+    }
+  }
+}
+```
+
+### Generic MCP clients
+
+Any client that supports the streamable-HTTP transport can use
+`https://forge.example.com/api/mcp` (or `http://localhost:3000/api/mcp` for a
+local dev stack) with an `Authorization: Bearer` header. For stdio-only
+clients, point `mcp-remote` at the same URL:
+
+```bash
+npx mcp-remote https://forge.example.com/api/mcp \
+  --header "Authorization: Bearer oxidean_pat_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+```
+
+### Loopback vs remote
+
+- Behavior is identical on `localhost` and remote origins — same auth, same
+  ACLs, no loopback bypass. Anonymous loopback requests still see public data
+  only.
+- "Minimal configuration" locally means: the endpoint is on by default, and a
+  signed-in browser session already carries `oxidean_session`. CLI clients
+  (Claude Code, Cursor) still need a PAT in their config — mint it once.
+- For remote/self-hosted deploys, terminate TLS in front of the instance
+  (Traefik in Compose does this when configured): a Bearer token without HTTPS
+  is a credential in the clear.
 
 ## Browser agents (WebMCP)
 

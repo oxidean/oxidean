@@ -28,6 +28,7 @@ import { Route as OwnerPackagesRouteImport } from './routes/$owner.packages'
 import { Route as OwnerSettingsRouteImport } from './routes/$owner.settings'
 import { Route as AdminAuthRouteImport } from './routes/admin/auth'
 import { Route as AdminLfsRouteImport } from './routes/admin/lfs'
+import { Route as AdminMcpRouteImport } from './routes/admin/mcp'
 import { Route as AdminPackagesRouteImport } from './routes/admin/packages'
 import { Route as AdminRunnersRouteImport } from './routes/admin/runners'
 import { Route as AdminTemplatesRouteImport } from './routes/admin/templates'
@@ -185,6 +186,11 @@ const AdminAuthRoute = AdminAuthRouteImport.update({
 const AdminLfsRoute = AdminLfsRouteImport.update({
   id: '/admin/lfs',
   path: '/admin/lfs',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminMcpRoute = AdminMcpRouteImport.update({
+  id: '/admin/mcp',
+  path: '/admin/mcp',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminPackagesRoute = AdminPackagesRouteImport.update({
@@ -524,6 +530,7 @@ export interface FileRoutesByFullPath {
   '/$owner/settings': typeof OwnerSettingsRouteWithChildren
   '/admin/auth': typeof AdminAuthRoute
   '/admin/lfs': typeof AdminLfsRoute
+  '/admin/mcp': typeof AdminMcpRoute
   '/admin/packages': typeof AdminPackagesRoute
   '/admin/runners': typeof AdminRunnersRoute
   '/admin/templates': typeof AdminTemplatesRoute
@@ -604,6 +611,7 @@ export interface FileRoutesByTo {
   '/$owner/packages': typeof OwnerPackagesRoute
   '/admin/auth': typeof AdminAuthRoute
   '/admin/lfs': typeof AdminLfsRoute
+  '/admin/mcp': typeof AdminMcpRoute
   '/admin/packages': typeof AdminPackagesRoute
   '/admin/runners': typeof AdminRunnersRoute
   '/admin/templates': typeof AdminTemplatesRoute
@@ -683,6 +691,7 @@ export interface FileRoutesById {
   '/$owner/settings': typeof OwnerSettingsRouteWithChildren
   '/admin/auth': typeof AdminAuthRoute
   '/admin/lfs': typeof AdminLfsRoute
+  '/admin/mcp': typeof AdminMcpRoute
   '/admin/packages': typeof AdminPackagesRoute
   '/admin/runners': typeof AdminRunnersRoute
   '/admin/templates': typeof AdminTemplatesRoute
@@ -769,6 +778,7 @@ export interface FileRouteTypes {
     | '/$owner/settings'
     | '/admin/auth'
     | '/admin/lfs'
+    | '/admin/mcp'
     | '/admin/packages'
     | '/admin/runners'
     | '/admin/templates'
@@ -849,6 +859,7 @@ export interface FileRouteTypes {
     | '/$owner/packages'
     | '/admin/auth'
     | '/admin/lfs'
+    | '/admin/mcp'
     | '/admin/packages'
     | '/admin/runners'
     | '/admin/templates'
@@ -927,6 +938,7 @@ export interface FileRouteTypes {
     | '/$owner/settings'
     | '/admin/auth'
     | '/admin/lfs'
+    | '/admin/mcp'
     | '/admin/packages'
     | '/admin/runners'
     | '/admin/templates'
@@ -1009,6 +1021,7 @@ export interface RootRouteChildren {
   VerifyRoute: typeof VerifyRoute
   AdminAuthRoute: typeof AdminAuthRoute
   AdminLfsRoute: typeof AdminLfsRoute
+  AdminMcpRoute: typeof AdminMcpRoute
   AdminPackagesRoute: typeof AdminPackagesRoute
   AdminRunnersRoute: typeof AdminRunnersRoute
   AdminTemplatesRoute: typeof AdminTemplatesRoute
@@ -1158,6 +1171,13 @@ declare module '@octanejs/tanstack-router' {
       path: '/admin/lfs'
       fullPath: '/admin/lfs'
       preLoaderRoute: typeof AdminLfsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/mcp': {
+      id: '/admin/mcp'
+      path: '/admin/mcp'
+      fullPath: '/admin/mcp'
+      preLoaderRoute: typeof AdminMcpRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/admin/packages': {
@@ -1828,6 +1848,7 @@ const rootRouteChildren: RootRouteChildren = {
   VerifyRoute: VerifyRoute,
   AdminAuthRoute: AdminAuthRoute,
   AdminLfsRoute: AdminLfsRoute,
+  AdminMcpRoute: AdminMcpRoute,
   AdminPackagesRoute: AdminPackagesRoute,
   AdminRunnersRoute: AdminRunnersRoute,
   AdminTemplatesRoute: AdminTemplatesRoute,

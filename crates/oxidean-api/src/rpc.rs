@@ -583,6 +583,16 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Ok(s) => RpcResponse::ok(s),
             Err(e) => RpcResponse::err(e),
         },
+        "admin.mcp.getSettings" => match auth_admin::mcp_get_settings(ctx).await {
+            Ok(s) => RpcResponse::ok(s),
+            Err(e) => RpcResponse::err(e),
+        },
+        "admin.mcp.updateSettings" => {
+            match auth_admin::mcp_update_settings(ctx, req.input).await {
+                Ok(s) => RpcResponse::ok(s),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
         "admin.templates.list" => match crate::templates::handlers::admin_list(ctx).await {
             Ok(s) => RpcResponse::ok(s),
             Err(e) => RpcResponse::err(e),
