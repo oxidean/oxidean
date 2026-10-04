@@ -231,13 +231,28 @@ async fn issue_reactions_eight_content_on_issue() {
     assert_eq!(bad["ok"], false, "unknown content — {bad}");
     assert_eq!(bad["error"]["code"], "rpc.bad_input");
 
-    let denied = rpc_json(
+    // Read collaborator participates: reactions are Read+ verified (D-ISS-20).
+    let allowed = rpc_json(
         &app,
         &reader_cookie,
         r#"{"procedure":"issue.reactions.toggle","input":{"owner":"rx-org","name":"core","number":1,"target":"issue","content":"+1"}}"#,
     )
     .await;
-    assert_eq!(denied["ok"], false, "Read-only cannot react — {denied}");
+    assert_eq!(allowed["ok"], true, "Read can react — {allowed}");
+    assert!(viewer_reacted(&allowed["data"]["reactions"], "+1"), "{allowed}");
+
+    // Verified stranger with no access to the private repo is denied.
+    let (stranger_cookie, stranger_v) =
+        signup_and_login(&app, "rxstranger@ex.com", "rxstranger").await;
+    let stranger_id = stranger_v["data"]["id"].as_str().expect("id");
+    verify_user(&db, stranger_id).await;
+    let denied = rpc_json(
+        &app,
+        &stranger_cookie,
+        r#"{"procedure":"issue.reactions.toggle","input":{"owner":"rx-org","name":"core","number":1,"target":"issue","content":"+1"}}"#,
+    )
+    .await;
+    assert_eq!(denied["ok"], false, "no-access stranger denied — {denied}");
     assert_eq!(
         denied["error"]["code"], "repo.not_found",
         "soft deny for private — {denied}"

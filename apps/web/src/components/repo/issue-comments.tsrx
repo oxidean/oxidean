@@ -20,6 +20,7 @@ export type IssueCommentsProps = {
   repoName: string;
   number: number;
   canWrite: boolean;
+  canInteract: boolean;
   currentUserId: string;
 };
 
@@ -118,6 +119,7 @@ function CommentItem(props: {
   repoName: string;
   number: number;
   canWrite: boolean;
+  canInteract: boolean;
   currentUserId: string;
   onUpdated: (comment: IssueCommentPublic) => void;
   onDeleted: (id: string) => void;
@@ -277,8 +279,7 @@ function CommentItem(props: {
           target="comment"
           commentId={comment.id}
           reactions={comment.reactions ?? []}
-          canWrite={props.canWrite}
-          onToggled={props.onChanged}
+          canInteract={props.canInteract}
         />
         <CommentHistoryDisclosure
           owner={props.owner}
@@ -391,6 +392,7 @@ export function IssueComments(props: IssueCommentsProps) @{
                 repoName={props.repoName}
                 number={props.number}
                 canWrite={props.canWrite}
+                canInteract={props.canInteract}
                 currentUserId={props.currentUserId}
                 onUpdated={(c) =>
                   patchComments((cs) => cs.map((x) => (x.id === c.id ? c : x)))
@@ -403,7 +405,7 @@ export function IssueComments(props: IssueCommentsProps) @{
       }
     }
 
-    @if (props.canWrite) {
+    @if (props.canInteract) {
       <form
         method="post"
         action="#"
@@ -438,7 +440,7 @@ export function IssueComments(props: IssueCommentsProps) @{
         </div>
       </form>;
     }
-    @if (!props.currentUserId && !props.canWrite) {
+    @if (!props.currentUserId && !props.canInteract) {
       <p className="rounded-md border border-border bg-muted/30 px-4 py-3 text-[13px] text-muted-foreground">
         <AppLink
           href="/login"
@@ -447,6 +449,11 @@ export function IssueComments(props: IssueCommentsProps) @{
           Sign in
         </AppLink>
         {" to join this conversation." as string}
+      </p>;
+    }
+    @if (props.currentUserId && !props.canInteract) {
+      <p className="rounded-md border border-border bg-muted/30 px-4 py-3 text-[13px] text-muted-foreground">
+        {"Verify your email to join this conversation." as string}
       </p>;
     }
   </section>;

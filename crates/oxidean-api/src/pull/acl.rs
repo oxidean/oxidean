@@ -26,6 +26,15 @@ pub async fn resolve_for_write(
     Ok(accessible)
 }
 
+/// PR author **or** Write+ may edit/close/reopen the pull (author participation).
+pub fn can_edit_pull(
+    user_id: &str,
+    pull: &oxidean_db::PullRow,
+    capability: Option<Capability>,
+) -> bool {
+    pull.author_id == user_id || meets(capability, Capability::Write)
+}
+
 #[allow(dead_code)]
 pub async fn resolve_for_admin(
     ctx: &RpcCtx,

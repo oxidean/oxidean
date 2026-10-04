@@ -27,7 +27,7 @@
 - **D-ISS-17:** Phase 11 filters: **author, label, assignee, + text search** (not full GitHub search grammar) — **Reversibility:** reversible
 - **D-ISS-18:** Sort **newest-updated first**; **offset pagination** (not infinite scroll) — **Reversibility:** reversible
 - **D-ISS-19:** Add **Issues** tab to repo chrome; **New issue** from list and empty state — **Reversibility:** reversible
-- **D-ISS-20:** Reuse Phase 10 `Capability::{Read,Write,Admin}`: **Read** → list/view; **Write** → create/edit/comment/close/reopen/assign/react; **Admin** → label definition CRUD + hard-delete issues. Keep web **`repo.not_found`** anti-enumeration for private repos.
+- **D-ISS-20:** Reuse Phase 10 `Capability::{Read,Write,Admin}`: **Read** → list/view; **Read + verified sign-in** → create issues, comment, react (git-forge parity — public participation does not require collaborator status); **author or Write+** → edit title/body, close/reopen, delete own comment; **Write+** → assign, label-on-issue, links, moderate-delete others' comments; **Admin** → label definition CRUD + hard-delete issues. Keep web **`repo.not_found`** anti-enumeration for private repos.
 
 ### Claude's Discretion
 - Exact reaction emoji set (match a small GitHub subset vs full)

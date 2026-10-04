@@ -13,6 +13,7 @@ export type PullConversationProps = {
   repoName: string;
   number: number;
   canWrite: boolean;
+  canInteract: boolean;
   body: string;
 };
 
@@ -161,7 +162,7 @@ export function PullConversation(props: PullConversationProps) @{
       }
     }
 
-    @if (props.canWrite) {
+    @if (props.canInteract) {
       <div className="space-y-2">
         <MarkdownWritePreview
           value={draft}

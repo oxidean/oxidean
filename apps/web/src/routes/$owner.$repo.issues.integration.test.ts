@@ -439,7 +439,7 @@ describe("/{owner}/{repo}/issues list Wave 0 (D-ISS-16 / D-ISS-19)", () => {
     );
   }, 15_000);
 
-  it("New issue hidden when !can_write (empty state still readable)", async () => {
+  it("New issue visible for verified viewer without can_write (D-ISS-20)", async () => {
     getMock.mockResolvedValue({
       ok: true,
       data: { ...readableRepo, can_write: false, can_admin: false },
@@ -450,8 +450,7 @@ describe("/{owner}/{repo}/issues list Wave 0 (D-ISS-16 / D-ISS-19)", () => {
     await waitFor(() => {
       expect(screen.getByText(/No open issues|No issues/i)).toBeInTheDocument();
     });
-    expect(screen.queryByRole("link", { name: /New issue/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /New issue/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /New issue/i })).toBeInTheDocument();
   }, 15_000);
 
   it("Admin label settings entry gated by can_admin (D-ISS-07)", async () => {

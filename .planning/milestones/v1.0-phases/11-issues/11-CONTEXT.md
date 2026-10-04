@@ -60,7 +60,7 @@ Users track work with repo-scoped issues: create/edit/close/reopen, comments, la
 - **D-ISS-19:** Add **Issues** tab to repo chrome; **New issue** from list and empty state — **Reversibility:** reversible
 
 ### ACL (carry forward — not re-litigated)
-- **D-ISS-20:** Reuse Phase 10 `Capability::{Read,Write,Admin}`: **Read** → list/view; **Write** → create/edit/comment/close/reopen/assign/react; **Admin** → label definition CRUD + hard-delete issues. Keep web **`repo.not_found`** anti-enumeration for private repos.
+- **D-ISS-20:** Reuse Phase 10 `Capability::{Read,Write,Admin}`: **Read** → list/view; **Read + verified sign-in** → create issues, comment, react (git-forge parity — public participation does not require collaborator status); **author or Write+** → edit title/body, close/reopen, delete own comment; **Write+** → assign, label-on-issue, links, moderate-delete others' comments; **Admin** → label definition CRUD + hard-delete issues. Keep web **`repo.not_found`** anti-enumeration for private repos.
 
 ### Claude's Discretion
 - Exact reaction emoji set (match a small GitHub subset vs full)

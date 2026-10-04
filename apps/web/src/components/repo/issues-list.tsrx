@@ -53,6 +53,8 @@ type IssuesListProps = {
   onPrevPage: () => void;
   onNextPage: () => void;
   pending?: boolean;
+  /** Verified signed-in viewers can file issues on repos they can read (D-ISS-20). */
+  canInteract?: boolean;
 };
 
 /** Open/Closed/All + author/label/assignee/text filters + offset pages (D-ISS-16..19). */
@@ -69,9 +71,9 @@ export function IssuesList({
   onPrevPage,
   onNextPage,
   pending = false,
+  canInteract = false,
 }: IssuesListProps) @{
   const base = `/${owner}/${repoName}`;
-  const canWrite = !!repo.can_write;
   const canAdmin = !!repo.can_admin;
   const emptyCopy =
     filters.state === "closed"
@@ -141,7 +143,7 @@ export function IssuesList({
             Labels
           </AppLink>;
         }
-        @if (canWrite) {
+        @if (canInteract) {
           <AppLink
             href={`${base}/issues/new` as string}
             className={repoListPrimaryCtaClass() as string}

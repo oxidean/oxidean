@@ -100,6 +100,8 @@ export function PullDetailPage() @{
   const pull = pullQ.data;
   const canWrite = loader.kind === "ready" && !!loader.repo.can_write;
   const isAuthor = !!pull && !!account.user && account.user.id === (pull.author_id as string);
+  // Verified signed-in users participate on any repo they can view (D-PR-29).
+  const canInteract = !!account.user?.email_verified;
 
   async function closePull() {
     setBusy(true);
@@ -185,7 +187,7 @@ export function PullDetailPage() @{
                 </span>
               </div>
             </div>
-            @if (canWrite) {
+            @if (canWrite || isAuthor) {
               <div className="flex shrink-0 gap-2">
                 @if (pull.state === "open") {
                   <Button
@@ -275,6 +277,7 @@ export function PullDetailPage() @{
                 repoName={repoName}
                 number={number}
                 canWrite={canWrite}
+                canInteract={canInteract}
                 body={(pull.body || "") as string}
               />
               <PullReviews
@@ -297,7 +300,7 @@ export function PullDetailPage() @{
               owner={owner}
               repoName={repoName}
               number={number}
-              canWrite={canWrite}
+              canInteract={canInteract}
             />;
           }
         </div>;

@@ -92,7 +92,7 @@ pub async fn comments_list(
     Ok(PullCommentsListResponse { comments })
 }
 
-/// `pull.comments.create` — Write+ general or line-anchored.
+/// `pull.comments.create` — Read+ verified general or line-anchored.
 pub async fn comments_create(
     ctx: &RpcCtx,
     input: serde_json::Value,
@@ -105,7 +105,7 @@ pub async fn comments_create(
         )
     })?;
     let body = validate_body(Some(req.body.as_str()))?;
-    let accessible = acl::resolve_for_write(ctx, &req.owner, &req.name).await?;
+    let accessible = acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
     let pull = load_pull_in_repo(ctx, &accessible.row.id, req.number).await?;
 
     let path = req

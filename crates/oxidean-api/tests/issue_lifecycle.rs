@@ -662,3 +662,127 @@ async fn issue_list_filters_and_offset_pagination() {
         "pages disjoint — page1={page1_nums:?} page2={page2_num}"
     );
 }
+
+/// Verified non-collaborator on a public repo participates (create/comment/react/close
+/// own) but cannot moderate others' issues (D-ISS-20).
+#[tokio::test]
+async fn issue_public_participation_read_only_user() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let url = format!(
+        "sqlite:{}",
+        dir.path().join("issue_public_participation.db").display()
+    );
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos).await;
+
+    let (owner_cookie, owner_v) = signup_and_login(&app, "pubown@ex.com", "pubown").await;
+    let owner_id = owner_v["data"]["id"].as_str().expect("id");
+    verify_user(&db, owner_id).await;
+    create_repo(&app, &owner_cookie, "town", "public").await;
+    let owner_issue = rpc_json(
+        &app,
+        &owner_cookie,
+        r#"{"procedure":"issue.create","input":{"owner":"pubown","name":"town","title":"owner issue"}}"#,
+    )
+    .await;
+    assert_eq!(owner_issue["ok"], true, "{owner_issue}");
+
+    // Stranger: verified, no collaborator row at all.
+    let (stranger_cookie, stranger_v) =
+        signup_and_login(&app, "pubstranger@ex.com", "pubstranger").await;
+    let stranger_id = stranger_v["data"]["id"].as_str().expect("id");
+    verify_user(&db, stranger_id).await;
+
+    // Can file an issue.
+    let filed = rpc_json(
+        &app,
+        &stranger_cookie,
+        r#"{"procedure":"issue.create","input":{"owner":"pubown","name":"town","title":"from the community","body":"found a bug"}}"#,
+    )
+    .await;
+    assert_eq!(filed["ok"], true, "stranger files issue — {filed}");
+    assert_eq!(filed["data"]["number"], 2);
+
+    // Can comment on someone else's issue.
+    let comment = rpc_json(
+        &app,
+        &stranger_cookie,
+        r#"{"procedure":"issue.comments.create","input":{"owner":"pubown","name":"town","number":1,"body":"same here"}}"#,
+    )
+    .await;
+    assert_eq!(comment["ok"], true, "stranger comments — {comment}");
+
+    // Can react.
+    let react = rpc_json(
+        &app,
+        &stranger_cookie,
+        r#"{"procedure":"issue.reactions.toggle","input":{"owner":"pubown","name":"town","number":1,"target":"issue","content":"+1"}}"#,
+    )
+    .await;
+    assert_eq!(react["ok"], true, "stranger reacts — {react}");
+
+    // Can edit + close own issue.
+    let own_edit = rpc_json(
+        &app,
+        &stranger_cookie,
+        r#"{"procedure":"issue.update","input":{"owner":"pubown","name":"town","number":2,"title":"renamed"}}"#,
+    )
+    .await;
+    assert_eq!(own_edit["ok"], true, "author edits own — {own_edit}");
+    let own_close = rpc_json(
+        &app,
+        &stranger_cookie,
+        r#"{"procedure":"issue.close","input":{"owner":"pubown","name":"town","number":2}}"#,
+    )
+    .await;
+    assert_eq!(own_close["ok"], true, "author closes own — {own_close}");
+    let own_reopen = rpc_json(
+        &app,
+        &stranger_cookie,
+        r#"{"procedure":"issue.reopen","input":{"owner":"pubown","name":"town","number":2}}"#,
+    )
+    .await;
+    assert_eq!(own_reopen["ok"], true, "author reopens own — {own_reopen}");
+
+    // Cannot close someone else's issue.
+    let close_denied = rpc_json(
+        &app,
+        &stranger_cookie,
+        r#"{"procedure":"issue.close","input":{"owner":"pubown","name":"town","number":1}}"#,
+    )
+    .await;
+    assert_eq!(close_denied["ok"], false, "cannot close others' — {close_denied}");
+    assert_eq!(close_denied["error"]["code"], "repo.not_found");
+
+    // Cannot moderate: labels/assignees stay Write+.
+    let labels_denied = rpc_json(
+        &app,
+        &stranger_cookie,
+        r#"{"procedure":"issue.labels.set","input":{"owner":"pubown","name":"town","number":1,"labelIds":[]}}"#,
+    )
+    .await;
+    assert_eq!(labels_denied["ok"], false, "labels stay Write+ — {labels_denied}");
+    let assign_denied = rpc_json(
+        &app,
+        &stranger_cookie,
+        r#"{"procedure":"issue.assignees.set","input":{"owner":"pubown","name":"town","number":1,"userIds":[]}}"#,
+    )
+    .await;
+    assert_eq!(assign_denied["ok"], false, "assignees stay Write+ — {assign_denied}");
+
+    // Anonymous cannot participate.
+    let anon = app
+        .clone()
+        .oneshot(rpc_req(
+            r#"{"procedure":"issue.comments.create","input":{"owner":"pubown","name":"town","number":1,"body":"anon"}}"#,
+        ))
+        .await
+        .unwrap();
+    let anon_b = anon.into_body().collect().await.unwrap().to_bytes();
+    let anon_v: serde_json::Value = serde_json::from_slice(&anon_b).unwrap();
+    assert_eq!(anon_v["ok"], false, "anonymous denied — {anon_v}");
+    assert_eq!(anon_v["error"]["code"], "auth.unauthenticated");
+}

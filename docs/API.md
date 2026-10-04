@@ -132,18 +132,18 @@ SSO start routes redirect to the IdP when configured. If WorkOS/OIDC ENV is miss
 | `admin.auth.get_settings` | Auth/email settings including `allow_signup` (no secrets) | Admin session |
 | `admin.auth.update_settings` | Update provider/email/`allow_signup`; rebuild email sender | Admin session |
 | `admin.instance.factory_reset` | Wipe users, orgs, repos + issue domain (DB); optional disk wipe via `scope` | Sys-admin |
-| `issue.create` / `get` / `list` / `update` / `close` / `reopen` / `history` / `delete` | Per-repo issues (`#N`); Capability ACL | Session (+ capability) |
+| `issue.create` / `get` / `list` / `update` / `close` / `reopen` / `history` / `delete` | Per-repo issues (`#N`); create/comment/react = verified + Read; edit/close/reopen = author or Write+ | Session (+ capability) |
 | `issue.comments.*` | Comment CRUD + history; author or Write+ moderate-delete | Session (+ capability) |
 | `issue.labels.set` / `assignees.set` / `assigneeCandidates` | Assign labels / assignees (Write+; assignees must have Read+) | Session (+ capability) |
-| `issue.reactions.toggle` | Toggle emoji reaction on issue or comment | Session (+ Write+) |
+| `issue.reactions.toggle` | Toggle emoji reaction on issue or comment | Session + verified (+ Read) |
 | `issue.links.list` / `add` / `remove` | Linked issues/PRs (`pr` preferred; legacy `pr_stub` kept) | Session (+ capability) |
 | `notification.list` | Own notifications; filter `unread` (default) \| `all`; offset pagination | Session |
 | `notification.unreadCount` | Unread badge count for session user | Session |
 | `notification.markRead` | Mark own notification ids read (foreign ids no-op) | Session |
 | `notification.markAllRead` | Mark all own unread notifications read | Session |
-| `pull.create` / `get` / `list` / `update` / `close` / `reopen` | Pull requests; shared `#N` with issues | Session (+ capability) |
+| `pull.create` / `get` / `list` / `update` / `close` / `reopen` | Pull requests; shared `#N` with issues; create = Read+ on base + Write+ on head (fork heads OK); update/close/reopen = author or Write+ | Session (+ capability) |
 | `pull.files` / `pull.commits` | Diff + commit list for a PR | Session (+ Read+) |
-| `pull.comments.list` / `create` / `resolve` | General + line comments; resolve threads | Session (+ capability) |
+| `pull.comments.list` / `create` / `resolve` | General + line comments; create = verified + Read, resolve = Write+ | Session (+ capability) |
 | `pull.reviews.list` / `submit` / `dismiss` | Approve / request changes / comment; dismiss | Session (+ Write+) |
 | `pull.reviewRequests.list` / `add` / `remove` | Optional requested reviewers (UX only) | Session (+ capability) |
 | `pull.merge` | Merge / squash / rebase; optional delete head; closing keywords on default branch | Session (+ Write+) |

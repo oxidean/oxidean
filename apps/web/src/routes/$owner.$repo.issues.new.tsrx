@@ -12,13 +12,13 @@ import { Label } from "@/components/ui/label";
 import { apiClient } from "@/lib/api-client";
 import type { RepoLayoutLoaderData } from "@/lib/repo-store";
 import { fetchRepoGet } from "@/lib/ssr-repo";
+import { useChromeAccountState } from "@/lib/use-chrome-account";
 import { AppLink } from "@/components/ui/app-link";
 
 export type IssuesNewLoaderData =
   | { kind: "not_found" }
   | { kind: "error"; message: string }
-  | { kind: "ready"; repo: RepoPublic }
-  | { kind: "forbidden"; repo: RepoPublic };
+  | { kind: "ready"; repo: RepoPublic };
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
 
@@ -30,9 +30,6 @@ async function loadNewIssuePage(owner: string, repoName: string): Promise<Issues
       kind: "error",
       message: got.error.message || "Could not load repository.",
     };
-  }
-  if (!got.data.can_write) {
-    return { kind: "forbidden", repo: got.data };
   }
   return { kind: "ready", repo: got.data };
 }
@@ -66,6 +63,7 @@ export function IssuesNewPage() @{
   const owner = params.owner ?? "";
   const repoName = params.repo ?? "";
   const navigate = useNavigate();
+  const account = useChromeAccountState();
   const layout = useLoaderData({ from: "/$owner/$repo" }) as RepoLayoutLoaderData | undefined;
   const routeLoader = useLoaderData({ from: "/$owner/$repo/issues/new" }) as
     | IssuesNewLoaderData
@@ -122,7 +120,7 @@ export function IssuesNewPage() @{
     },
     enabled: !!owner && !!repoName,
     initialData:
-      routeLoader?.kind === "ready" || routeLoader?.kind === "forbidden"
+      routeLoader?.kind === "ready"
         ? routeLoader.repo
         : layout?.status === "ok"
           ? (layout.repo ?? undefined)
@@ -135,9 +133,16 @@ export function IssuesNewPage() @{
     <RepoNotFound />;
   } @else if (!repo) {
     <p className="text-[16px] text-muted-foreground">Loading…</p>;
-  } @else if (!repo.can_write) {
-    <p role="alert" className="text-[16px] text-destructive">
-      You need write access to create issues.
+  } @else if (!account.user) {
+    <p className="rounded-md border border-border bg-muted/30 px-4 py-3 text-[13px] text-muted-foreground">
+      <AppLink href="/login" className="font-medium text-primary no-underline hover:underline">
+        Sign in
+      </AppLink>
+      {" to create an issue." as string}
+    </p>;
+  } @else if (!account.user.email_verified) {
+    <p className="rounded-md border border-border bg-muted/30 px-4 py-3 text-[13px] text-muted-foreground">
+      {"Verify your email to create issues." as string}
     </p>;
   } @else {
     <>

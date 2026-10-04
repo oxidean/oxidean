@@ -146,8 +146,10 @@ export function IssueDetailPage() @{
   const canEdit = !!issue && (!!repo?.can_write || (!!userId && issue.author_id === userId));
   const canWrite = !!repo?.can_write;
   const canAdmin = !!repo?.can_admin;
-  const showClose = canWrite && issue?.state === "open";
-  const showReopen = canWrite && issue?.state === "closed";
+  // Verified signed-in users participate on any repo they can view (D-ISS-20).
+  const canInteract = !!account.user?.email_verified;
+  const showClose = canEdit && issue?.state === "open";
+  const showReopen = canEdit && issue?.state === "closed";
   const notFound =
     layout?.status === "not_found" ||
     routeLoader?.kind === "not_found" ||
@@ -437,7 +439,7 @@ export function IssueDetailPage() @{
               number={number}
               target="issue"
               reactions={issue?.reactions ?? []}
-              canWrite={canWrite}
+              canInteract={canInteract}
             />
 
             <IssueHistoryPanel owner={owner} repoName={repoName} number={number} />
@@ -447,6 +449,7 @@ export function IssueDetailPage() @{
               repoName={repoName}
               number={number}
               canWrite={canWrite}
+              canInteract={canInteract}
               currentUserId={userId}
             />
           </div>
