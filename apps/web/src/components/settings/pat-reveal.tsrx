@@ -2,6 +2,7 @@ import { useState } from "octane";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { AppLink } from "@/components/ui/app-link";
 
 type PatRevealProps = {
   token: string;
@@ -55,7 +56,7 @@ export function PatReveal({ token }: PatRevealProps) @{
         Couldn’t copy. Select the token and copy manually.
       </p>;
     }
-    <a
+    <AppLink
       href="/settings/tokens"
       className={cn(
         buttonVariants({ variant: "default" }),
@@ -63,6 +64,6 @@ export function PatReveal({ token }: PatRevealProps) @{
       )}
     >
       Back to tokens
-    </a>
+    </AppLink>
   </div>;
 }

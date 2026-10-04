@@ -7,6 +7,7 @@ pub mod auth_settings;
 pub mod branch_protection;
 pub mod dialect;
 pub mod email_tokens;
+pub mod follows;
 pub mod issue_labels;
 pub mod issues;
 pub mod lfs;
@@ -24,11 +25,13 @@ pub mod pool;
 pub mod probe;
 pub mod pulls;
 pub mod redirects;
+pub mod repo_access;
 pub mod releases;
 pub mod webhooks;
 pub mod repo_activity;
 pub mod repo_collaborators;
 pub mod repositories;
+pub mod search;
 pub mod sessions;
 pub mod ssh_keys;
 pub mod gpg_keys;
@@ -68,7 +71,12 @@ pub use repo_activity::RepoActivityRow;
 pub use repo_collaborators::{
     RepoCollaboratorGrantRow, RepoCollaboratorListRow, RepoCollaboratorRow,
 };
+pub use search::{
+    GlobalIssueHitRow, GlobalOrgHitRow, GlobalPullHitRow, GlobalRepoHitRow, GlobalUserHitRow,
+    ScanRepoRow,
+};
 pub use stars::{ForkListSort, RepoForkListRow, RepoStargazerListRow};
+pub use follows::UserFollowListRow;
 pub use watches::RepoWatcherListRow;
 pub use repositories::{RepoDiskRef, RepositoryRow};
 pub use ssh_keys::SshKeyRow;
@@ -629,12 +637,44 @@ impl Database {
         stars::has_starred(self.require_pool()?, user_id, repository_id).await
     }
 
+    /// Upsert the viewer's subscription row at `level` (`all` | `participating`
+    /// | `ignore`); `watch_count` counts only non-ignore rows (DEBT-06).
     pub async fn watch_repository(
         &self,
         user_id: &str,
         repository_id: &str,
+        level: &str,
     ) -> Result<i64, String> {
-        watches::watch_repository(self.require_pool()?, user_id, repository_id).await
+        watches::watch_repository(self.require_pool()?, user_id, repository_id, level).await
+    }
+
+    /// Viewer's subscription level for a repo, `None` when no row exists (DEBT-06).
+    pub async fn get_repo_watch_level(
+        &self,
+        user_id: &str,
+        repository_id: &str,
+    ) -> Result<Option<String>, String> {
+        watches::get_watch_level(self.require_pool()?, user_id, repository_id).await
+    }
+
+    /// `(user_id, level)` for every subscription row on a repo — the fan-out
+    /// matrix input (DEBT-06).
+    pub async fn list_repo_watch_levels(
+        &self,
+        repository_id: &str,
+    ) -> Result<Vec<(String, String)>, String> {
+        watches::list_repo_watch_levels(self.require_pool()?, repository_id).await
+    }
+
+    /// Repo ids with a subscription row at any level, newest first — the
+    /// settings notification matrix (DEBT-06).
+    pub async fn list_watched_repo_ids(
+        &self,
+        user_id: &str,
+        offset: i64,
+        limit: i64,
+    ) -> Result<Vec<String>, String> {
+        watches::list_watched_repo_ids(self.require_pool()?, user_id, offset, limit).await
     }
 
     pub async fn unwatch_repository(
@@ -683,6 +723,72 @@ impl Database {
         q: Option<&str>,
     ) -> Result<i64, String> {
         watches::count_repo_watchers(self.require_pool()?, repository_id, q).await
+    }
+
+    // --- user follows (DEBT-06) -------------------------------------------
+
+    /// Idempotent follow edge. Returns `true` when a new edge was created.
+    pub async fn follow_user(&self, follower_id: &str, followed_id: &str) -> Result<bool, String> {
+        follows::follow_user(self.require_pool()?, follower_id, followed_id).await
+    }
+
+    /// Idempotent unfollow. Returns `true` when an edge was removed.
+    pub async fn unfollow_user(
+        &self,
+        follower_id: &str,
+        followed_id: &str,
+    ) -> Result<bool, String> {
+        follows::unfollow_user(self.require_pool()?, follower_id, followed_id).await
+    }
+
+    pub async fn is_following_user(
+        &self,
+        follower_id: &str,
+        followed_id: &str,
+    ) -> Result<bool, String> {
+        follows::is_following(self.require_pool()?, follower_id, followed_id).await
+    }
+
+    /// Accounts following `user_id`.
+    pub async fn user_follower_count(&self, user_id: &str) -> Result<i64, String> {
+        follows::follower_count(self.require_pool()?, user_id).await
+    }
+
+    /// Accounts `user_id` follows.
+    pub async fn user_following_count(&self, user_id: &str) -> Result<i64, String> {
+        follows::following_count(self.require_pool()?, user_id).await
+    }
+
+    /// Followers of `user_id`, newest first; `q` filters username/display_name.
+    pub async fn list_user_followers(
+        &self,
+        user_id: &str,
+        q: Option<&str>,
+        offset: i64,
+        limit: i64,
+    ) -> Result<Vec<UserFollowListRow>, String> {
+        follows::list_followers(self.require_pool()?, user_id, q, offset, limit).await
+    }
+
+    /// Accounts `user_id` follows, newest first; `q` filters username/display_name.
+    pub async fn list_user_following(
+        &self,
+        user_id: &str,
+        q: Option<&str>,
+        offset: i64,
+        limit: i64,
+    ) -> Result<Vec<UserFollowListRow>, String> {
+        follows::list_following(self.require_pool()?, user_id, q, offset, limit).await
+    }
+
+    /// Follower count matching the `q` filter used by `list_user_followers`.
+    pub async fn count_user_followers(&self, user_id: &str, q: Option<&str>) -> Result<i64, String> {
+        follows::count_followers(self.require_pool()?, user_id, q).await
+    }
+
+    /// Following count matching the `q` filter used by `list_user_following`.
+    pub async fn count_user_following(&self, user_id: &str, q: Option<&str>) -> Result<i64, String> {
+        follows::count_following(self.require_pool()?, user_id, q).await
     }
 
     pub async fn list_repo_stargazers(
@@ -812,6 +918,92 @@ impl Database {
         limit: i64,
     ) -> Result<Vec<RepositoryRow>, String> {
         stars::list_explore(self.require_pool()?, q, offset, limit).await
+    }
+
+    // ── Sitewide search (`search.global`, DEBT-03) ─────────────────────────
+    //
+    // All repo-scoped queries apply the viewer-visibility predicate (public +
+    // owned/collaborator/org-readable) inside `search.rs` — same policy as
+    // `repo::acl::effective_capability` Read.
+
+    pub async fn search_global_repositories(
+        &self,
+        viewer_user_id: Option<&str>,
+        q: &str,
+        offset: i64,
+        limit: i64,
+    ) -> Result<(Vec<GlobalRepoHitRow>, i64), String> {
+        search::search_repositories(self.require_pool()?, viewer_user_id, q, offset, limit).await
+    }
+
+    pub async fn search_global_issues(
+        &self,
+        viewer_user_id: Option<&str>,
+        q: Option<&str>,
+        state: Option<&str>,
+        author_id: Option<&str>,
+        offset: i64,
+        limit: i64,
+    ) -> Result<(Vec<GlobalIssueHitRow>, i64), String> {
+        search::search_issues(
+            self.require_pool()?,
+            viewer_user_id,
+            q,
+            state,
+            author_id,
+            offset,
+            limit,
+        )
+        .await
+    }
+
+    pub async fn search_global_pulls(
+        &self,
+        viewer_user_id: Option<&str>,
+        q: Option<&str>,
+        state: Option<&str>,
+        author_id: Option<&str>,
+        offset: i64,
+        limit: i64,
+    ) -> Result<(Vec<GlobalPullHitRow>, i64), String> {
+        search::search_pulls(
+            self.require_pool()?,
+            viewer_user_id,
+            q,
+            state,
+            author_id,
+            offset,
+            limit,
+        )
+        .await
+    }
+
+    /// Caller must gate on a verified session (anti-enumeration).
+    pub async fn search_global_users(
+        &self,
+        q: &str,
+        offset: i64,
+        limit: i64,
+    ) -> Result<(Vec<GlobalUserHitRow>, i64), String> {
+        search::search_users(self.require_pool()?, q, offset, limit).await
+    }
+
+    pub async fn search_global_orgs(
+        &self,
+        q: &str,
+        offset: i64,
+        limit: i64,
+    ) -> Result<(Vec<GlobalOrgHitRow>, i64), String> {
+        search::search_orgs(self.require_pool()?, q, offset, limit).await
+    }
+
+    /// Bounded candidate set for the cross-repo commits/code git scans.
+    pub async fn list_global_scan_repos(
+        &self,
+        viewer_user_id: Option<&str>,
+        limit: i64,
+    ) -> Result<Vec<ScanRepoRow>, String> {
+        search::list_scan_repos(self.require_pool()?, viewer_user_id, limit).await
     }
 
     pub async fn find_repository_by_owner_name(
@@ -1439,6 +1631,7 @@ impl Database {
         issues::insert_issue_comment(self.require_pool()?, id, issue_id, author_id, body).await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn insert_notification(
         &self,
         id: &str,
@@ -1449,6 +1642,7 @@ impl Database {
         subject_repo_id: &str,
         subject_number: i64,
         subject_title: &str,
+        subject_ref: Option<&str>,
     ) -> Result<NotificationRow, String> {
         notifications::insert_notification(
             self.require_pool()?,
@@ -1460,6 +1654,7 @@ impl Database {
             subject_repo_id,
             subject_number,
             subject_title,
+            subject_ref,
         )
         .await
     }
@@ -1469,6 +1664,68 @@ impl Database {
         id: &str,
     ) -> Result<Option<NotificationRow>, String> {
         notifications::find_notification_by_id(self.require_pool()?, id).await
+    }
+
+    /// Access-loss pruning (DEBT-06): drop a recipient's notification rows for
+    /// one repository once read access is gone.
+    pub async fn delete_notifications_for_repo_recipient(
+        &self,
+        recipient_id: &str,
+        subject_repo_id: &str,
+    ) -> Result<i64, String> {
+        notifications::delete_notifications_for_repo_recipient(
+            self.require_pool()?,
+            recipient_id,
+            subject_repo_id,
+        )
+        .await
+    }
+
+    /// Distinct repositories a recipient holds notifications for (read-time
+    /// access re-check sweep set, DEBT-06).
+    pub async fn list_notification_repo_ids_for_recipient(
+        &self,
+        recipient_id: &str,
+    ) -> Result<Vec<String>, String> {
+        notifications::list_notification_repo_ids_for_recipient(
+            self.require_pool()?,
+            recipient_id,
+        )
+        .await
+    }
+
+    /// Distinct recipients holding notifications for one repository (affected
+    /// set on repo-wide ACL changes, DEBT-06).
+    pub async fn list_notification_recipient_ids_for_repo(
+        &self,
+        subject_repo_id: &str,
+    ) -> Result<Vec<String>, String> {
+        notifications::list_notification_recipient_ids_for_repo(
+            self.require_pool()?,
+            subject_repo_id,
+        )
+        .await
+    }
+
+    /// Bulk read-ACL check (DEBT-06): which of `repo_ids` `user_id` can still
+    /// read — one `IN (...)` round trip for access-loss pruning.
+    pub async fn readable_repo_ids(
+        &self,
+        user_id: &str,
+        repo_ids: &[String],
+    ) -> Result<std::collections::HashSet<String>, String> {
+        repo_access::readable_repo_ids(self.require_pool()?, user_id, repo_ids).await
+    }
+
+    /// Bulk read-ACL check (DEBT-06): which of `user_ids` can still read
+    /// `repo_id` — one round trip for repo-wide access sweeps. Caller must
+    /// shortcut non-private repos (everyone) and missing/deleted (nobody).
+    pub async fn readers_of_repo(
+        &self,
+        repo_id: &str,
+        user_ids: &[String],
+    ) -> Result<std::collections::HashSet<String>, String> {
+        repo_access::readers_of_repo(self.require_pool()?, repo_id, user_ids).await
     }
 
     pub async fn list_notifications(
@@ -2601,8 +2858,15 @@ impl Database {
         actions::requeue_run(self.require_pool()?, run_id).await
     }
 
-    pub async fn cancel_action_run(&self, run_id: &str) -> Result<(), String> {
+    /// `false` when the run had already finished — nothing was clobbered.
+    pub async fn cancel_action_run(&self, run_id: &str) -> Result<bool, String> {
         actions::cancel_run(self.require_pool()?, run_id).await
+    }
+
+    /// Atomically claim emitting the "run completed" in-app notification once
+    /// per finished run (DEBT-06).
+    pub async fn claim_run_completion_notice(&self, run_id: &str) -> Result<bool, String> {
+        actions::claim_run_completion_notice(self.require_pool()?, run_id).await
     }
 
     pub async fn list_action_jobs_for_run(

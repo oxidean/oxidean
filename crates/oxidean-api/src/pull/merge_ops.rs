@@ -457,8 +457,8 @@ pub async fn merge(ctx: &RpcCtx, input: serde_json::Value) -> Result<MergePullRe
     )
     .await;
     let subject = notify::subject_for_pull(&updated);
-    let recipients = notify::pull_participant_ids(ctx, &updated.id, &updated.author_id).await;
-    notify::fanout(ctx, &user.id, recipients, "pr_merged", &subject).await;
+    let recipients = notify::pull_participant_ids(&ctx.db, &updated.id, &updated.author_id).await;
+    notify::fanout_activity(&ctx.db, &user.id, recipients, "pr_merged", &subject).await;
     let pull = to_public(ctx, &updated).await?;
     Ok(MergePullResponse {
         pull,

@@ -7,6 +7,7 @@ import { RepoNotFound } from "@/components/repo/repo-not-found";
 import { commitHref, parseRefAndPath, shortRefName } from "@/lib/repo-browse";
 import { formatRelativeUpdated } from "@/lib/relative-time";
 import { fetchRepoBlame, fetchRepoGet, fetchRepoRefs } from "@/lib/ssr-repo";
+import { AppLink } from "@/components/ui/app-link";
 
 export type BlameLoaderData =
   | { kind: "not_found" }
@@ -150,13 +151,13 @@ export function RepoBlamePage() @{
             @for (const line of phase.blame.lines; key line.line_number) {
               <tr className="border-b border-border/60 align-top">
                 <td className="whitespace-nowrap bg-muted/30 px-2 py-0.5 font-mono text-[12px] text-muted-foreground">
-                  <a
+                  <AppLink
                     href={commitHref(owner, repoName, line.sha) as string}
                     className="text-primary no-underline hover:underline"
                     title={line.sha as string}
                   >
                     {shortSha(line.sha) as string}
-                  </a>
+                  </AppLink>
                   <span className="ml-2 inline-flex items-center font-[family-name:var(--font-sans)] text-muted-foreground">
                     <CommitAuthorLink
                       name={line.author_name}

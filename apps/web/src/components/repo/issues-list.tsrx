@@ -17,6 +17,7 @@ import {
   repoListTabClass,
   repoListTablistClass,
 } from "@/components/repo/repo-list-toolbar";
+import { AppLink } from "@/components/ui/app-link";
 
 export type IssueListStateFilter = "open" | "closed" | "all";
 
@@ -133,20 +134,20 @@ export function IssuesList({
       </div>
       <div className="flex flex-wrap items-center gap-3">
         @if (canAdmin) {
-          <a
+          <AppLink
             href={`${base}/issues/labels` as string}
             className="text-sm font-medium text-primary no-underline hover:underline"
           >
             Labels
-          </a>;
+          </AppLink>;
         }
         @if (canWrite) {
-          <a
+          <AppLink
             href={`${base}/issues/new` as string}
             className={repoListPrimaryCtaClass() as string}
           >
             New issue
-          </a>;
+          </AppLink>;
         }
       </div>
     </div>
@@ -273,12 +274,12 @@ export function IssuesList({
                 }
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <a
+                    <AppLink
                       href={`${base}/issues/${issue.number}` as string}
                       className="text-[15px] font-semibold text-foreground no-underline hover:text-primary"
                     >
                       {issue.title as string}
-                    </a>
+                    </AppLink>
                     @for (const lab of issue.labels ?? []; key lab.id) {
                       <LabelChip label={lab} />;
                     }
@@ -305,7 +306,7 @@ export function IssuesList({
                   </p>
                 </div>
                 @if ((issue.comment_count ?? 0) > 0) {
-                  <a
+                  <AppLink
                     href={`${base}/issues/${issue.number}` as string}
                     className="mt-0.5 flex shrink-0 items-center gap-1 text-[12px] text-muted-foreground no-underline hover:text-primary"
                     aria-label={
@@ -314,7 +315,7 @@ export function IssuesList({
                   >
                     <MessageSquare aria-hidden size={14} />
                     {issue.comment_count as number}
-                  </a>;
+                  </AppLink>;
                 }
               </ListRow>;
             }

@@ -2,11 +2,14 @@
 
 use crate::pool::DbPool;
 
-/// Idempotent watch: insert membership and bump counter when newly inserted.
+/// Upsert the subscription row at `level` (`all` | `participating` | `ignore`).
+/// `watch_count` counts only active (non-ignore) subscriptions, so the counter
+/// bump is the delta between the prior and new active state (issue #23 / DEBT-06).
 pub async fn watch_repository(
     pool: &DbPool,
     user_id: &str,
     repository_id: &str,
+    level: &str,
 ) -> Result<i64, String> {
     match pool {
         DbPool::Postgres(p) => {
@@ -14,21 +17,33 @@ pub async fn watch_repository(
                 .begin()
                 .await
                 .map_err(|e| format!("watch begin: {e}"))?;
-            let inserted = sqlx::query(
-                "INSERT INTO repository_watches (user_id, repository_id)
-                 VALUES ($1, $2) ON CONFLICT DO NOTHING",
+            let prev: Option<String> = sqlx::query_scalar(
+                "SELECT level FROM repository_watches
+                 WHERE user_id = $1 AND repository_id = $2",
             )
             .bind(user_id)
             .bind(repository_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|e| format!("watch lookup: {e}"))?;
+            sqlx::query(
+                "INSERT INTO repository_watches (user_id, repository_id, level)
+                 VALUES ($1, $2, $3)
+                 ON CONFLICT (user_id, repository_id) DO UPDATE SET level = EXCLUDED.level",
+            )
+            .bind(user_id)
+            .bind(repository_id)
+            .bind(level)
             .execute(&mut *tx)
             .await
-            .map_err(|e| format!("watch insert: {e}"))?
-            .rows_affected();
-            if inserted > 0 {
+            .map_err(|e| format!("watch upsert: {e}"))?;
+            let delta = watch_delta(prev.as_deref(), level);
+            if delta != 0 {
                 sqlx::query(
-                    "UPDATE repositories SET watch_count = watch_count + 1, updated_at = now()
-                     WHERE id = $1 AND deleted_at IS NULL",
+                    "UPDATE repositories SET watch_count = GREATEST(watch_count + $1, 0), updated_at = now()
+                     WHERE id = $2 AND deleted_at IS NULL",
                 )
+                .bind(delta)
                 .bind(repository_id)
                 .execute(&mut *tx)
                 .await
@@ -51,20 +66,32 @@ pub async fn watch_repository(
                 .begin()
                 .await
                 .map_err(|e| format!("watch begin: {e}"))?;
-            let inserted = sqlx::query(
-                "INSERT IGNORE INTO repository_watches (user_id, repository_id) VALUES (?, ?)",
+            let prev: Option<String> = sqlx::query_scalar(
+                "SELECT level FROM repository_watches WHERE user_id = ? AND repository_id = ?",
             )
             .bind(user_id)
             .bind(repository_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|e| format!("watch lookup: {e}"))?;
+            sqlx::query(
+                "INSERT INTO repository_watches (user_id, repository_id, level)
+                 VALUES (?, ?, ?)
+                 ON DUPLICATE KEY UPDATE level = VALUES(level)",
+            )
+            .bind(user_id)
+            .bind(repository_id)
+            .bind(level)
             .execute(&mut *tx)
             .await
-            .map_err(|e| format!("watch insert: {e}"))?
-            .rows_affected();
-            if inserted > 0 {
+            .map_err(|e| format!("watch upsert: {e}"))?;
+            let delta = watch_delta(prev.as_deref(), level);
+            if delta != 0 {
                 sqlx::query(
-                    "UPDATE repositories SET watch_count = watch_count + 1, updated_at = NOW()
+                    "UPDATE repositories SET watch_count = GREATEST(watch_count + ?, 0), updated_at = NOW()
                      WHERE id = ? AND deleted_at IS NULL",
                 )
+                .bind(delta)
                 .bind(repository_id)
                 .execute(&mut *tx)
                 .await
@@ -86,22 +113,34 @@ pub async fn watch_repository(
                 .begin()
                 .await
                 .map_err(|e| format!("watch begin: {e}"))?;
-            let inserted = sqlx::query(
-                "INSERT OR IGNORE INTO repository_watches (user_id, repository_id)
-                 VALUES (?1, ?2)",
+            let prev: Option<String> = sqlx::query_scalar(
+                "SELECT level FROM repository_watches
+                 WHERE user_id = ?1 AND repository_id = ?2",
             )
             .bind(user_id)
             .bind(repository_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|e| format!("watch lookup: {e}"))?;
+            sqlx::query(
+                "INSERT INTO repository_watches (user_id, repository_id, level)
+                 VALUES (?1, ?2, ?3)
+                 ON CONFLICT (user_id, repository_id) DO UPDATE SET level = excluded.level",
+            )
+            .bind(user_id)
+            .bind(repository_id)
+            .bind(level)
             .execute(&mut *tx)
             .await
-            .map_err(|e| format!("watch insert: {e}"))?
-            .rows_affected();
-            if inserted > 0 {
+            .map_err(|e| format!("watch upsert: {e}"))?;
+            let delta = watch_delta(prev.as_deref(), level);
+            if delta != 0 {
                 sqlx::query(
-                    "UPDATE repositories SET watch_count = watch_count + 1,
+                    "UPDATE repositories SET watch_count = MAX(watch_count + ?1, 0),
                      updated_at = strftime('%Y-%m-%d %H:%M:%S','now')
-                     WHERE id = ?1 AND deleted_at IS NULL",
+                     WHERE id = ?2 AND deleted_at IS NULL",
                 )
+                .bind(delta)
                 .bind(repository_id)
                 .execute(&mut *tx)
                 .await
@@ -122,6 +161,12 @@ pub async fn watch_repository(
     }
 }
 
+/// Active-state delta between a prior and new watch level. Only non-`ignore`
+/// levels count toward `watch_count` / `viewer_is_watching`.
+fn watch_delta(prev: Option<&str>, next: &str) -> i64 {
+    i64::from(next != "ignore") - i64::from(prev.is_some_and(|l| l != "ignore"))
+}
+
 /// Idempotent unwatch: delete membership and decrement counter when a row was removed.
 pub async fn unwatch_repository(
     pool: &DbPool,
@@ -134,16 +179,27 @@ pub async fn unwatch_repository(
                 .begin()
                 .await
                 .map_err(|e| format!("unwatch begin: {e}"))?;
-            let deleted = sqlx::query(
-                "DELETE FROM repository_watches WHERE user_id = $1 AND repository_id = $2",
+            let prev: Option<String> = sqlx::query_scalar(
+                "SELECT level FROM repository_watches
+                 WHERE user_id = $1 AND repository_id = $2",
             )
             .bind(user_id)
             .bind(repository_id)
-            .execute(&mut *tx)
+            .fetch_optional(&mut *tx)
             .await
-            .map_err(|e| format!("unwatch delete: {e}"))?
-            .rows_affected();
-            if deleted > 0 {
+            .map_err(|e| format!("unwatch lookup: {e}"))?;
+            if prev.is_some() {
+                sqlx::query(
+                    "DELETE FROM repository_watches WHERE user_id = $1 AND repository_id = $2",
+                )
+                .bind(user_id)
+                .bind(repository_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| format!("unwatch delete: {e}"))?;
+            }
+            // Only previously-active (non-ignore) rows count toward watch_count.
+            if prev.as_deref().is_some_and(|l| l != "ignore") {
                 sqlx::query(
                     "UPDATE repositories SET watch_count = GREATEST(watch_count - 1, 0),
                      updated_at = now() WHERE id = $1 AND deleted_at IS NULL",
@@ -170,16 +226,25 @@ pub async fn unwatch_repository(
                 .begin()
                 .await
                 .map_err(|e| format!("unwatch begin: {e}"))?;
-            let deleted = sqlx::query(
-                "DELETE FROM repository_watches WHERE user_id = ? AND repository_id = ?",
+            let prev: Option<String> = sqlx::query_scalar(
+                "SELECT level FROM repository_watches WHERE user_id = ? AND repository_id = ?",
             )
             .bind(user_id)
             .bind(repository_id)
-            .execute(&mut *tx)
+            .fetch_optional(&mut *tx)
             .await
-            .map_err(|e| format!("unwatch delete: {e}"))?
-            .rows_affected();
-            if deleted > 0 {
+            .map_err(|e| format!("unwatch lookup: {e}"))?;
+            if prev.is_some() {
+                sqlx::query(
+                    "DELETE FROM repository_watches WHERE user_id = ? AND repository_id = ?",
+                )
+                .bind(user_id)
+                .bind(repository_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| format!("unwatch delete: {e}"))?;
+            }
+            if prev.as_deref().is_some_and(|l| l != "ignore") {
                 sqlx::query(
                     "UPDATE repositories SET watch_count = GREATEST(watch_count - 1, 0),
                      updated_at = NOW() WHERE id = ? AND deleted_at IS NULL",
@@ -205,16 +270,26 @@ pub async fn unwatch_repository(
                 .begin()
                 .await
                 .map_err(|e| format!("unwatch begin: {e}"))?;
-            let deleted = sqlx::query(
-                "DELETE FROM repository_watches WHERE user_id = ?1 AND repository_id = ?2",
+            let prev: Option<String> = sqlx::query_scalar(
+                "SELECT level FROM repository_watches
+                 WHERE user_id = ?1 AND repository_id = ?2",
             )
             .bind(user_id)
             .bind(repository_id)
-            .execute(&mut *tx)
+            .fetch_optional(&mut *tx)
             .await
-            .map_err(|e| format!("unwatch delete: {e}"))?
-            .rows_affected();
-            if deleted > 0 {
+            .map_err(|e| format!("unwatch lookup: {e}"))?;
+            if prev.is_some() {
+                sqlx::query(
+                    "DELETE FROM repository_watches WHERE user_id = ?1 AND repository_id = ?2",
+                )
+                .bind(user_id)
+                .bind(repository_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| format!("unwatch delete: {e}"))?;
+            }
+            if prev.as_deref().is_some_and(|l| l != "ignore") {
                 sqlx::query(
                     "UPDATE repositories SET watch_count = MAX(watch_count - 1, 0),
                      updated_at = strftime('%Y-%m-%d %H:%M:%S','now')
@@ -276,7 +351,7 @@ pub async fn has_watched(
 ) -> Result<bool, String> {
     let count: i64 = match pool {
         DbPool::Postgres(p) => sqlx::query_scalar(
-            "SELECT COUNT(*) FROM repository_watches WHERE user_id = $1 AND repository_id = $2",
+            "SELECT COUNT(*) FROM repository_watches WHERE user_id = $1 AND repository_id = $2 AND level <> 'ignore'",
         )
         .bind(user_id)
         .bind(repository_id)
@@ -284,7 +359,7 @@ pub async fn has_watched(
         .await
         .map_err(|e| format!("has_watched: {e}"))?,
         DbPool::MySql(p) => sqlx::query_scalar(
-            "SELECT COUNT(*) FROM repository_watches WHERE user_id = ? AND repository_id = ?",
+            "SELECT COUNT(*) FROM repository_watches WHERE user_id = ? AND repository_id = ? AND level <> 'ignore'",
         )
         .bind(user_id)
         .bind(repository_id)
@@ -292,7 +367,7 @@ pub async fn has_watched(
         .await
         .map_err(|e| format!("has_watched: {e}"))?,
         DbPool::Sqlite(p) => sqlx::query_scalar(
-            "SELECT COUNT(*) FROM repository_watches WHERE user_id = ?1 AND repository_id = ?2",
+            "SELECT COUNT(*) FROM repository_watches WHERE user_id = ?1 AND repository_id = ?2 AND level <> 'ignore'",
         )
         .bind(user_id)
         .bind(repository_id)
@@ -355,7 +430,7 @@ pub async fn list_repo_watchers(
                             to_char(w.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS watched_at
                      FROM repository_watches w
                      JOIN users u ON u.id = w.user_id
-                     WHERE w.repository_id = $1
+                     WHERE w.repository_id = $1 AND w.level <> 'ignore'
                        AND (u.username ILIKE $2 ESCAPE '\\' OR COALESCE(u.display_name, '') ILIKE $2 ESCAPE '\\')
                      ORDER BY w.created_at DESC
                      LIMIT $3 OFFSET $4",
@@ -372,7 +447,7 @@ pub async fn list_repo_watchers(
                             to_char(w.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS watched_at
                      FROM repository_watches w
                      JOIN users u ON u.id = w.user_id
-                     WHERE w.repository_id = $1
+                     WHERE w.repository_id = $1 AND w.level <> 'ignore'
                      ORDER BY w.created_at DESC
                      LIMIT $2 OFFSET $3",
                 )
@@ -392,7 +467,7 @@ pub async fn list_repo_watchers(
                             DATE_FORMAT(w.created_at, '%Y-%m-%dT%H:%i:%sZ') AS watched_at
                      FROM repository_watches w
                      JOIN users u ON u.id = w.user_id
-                     WHERE w.repository_id = ?
+                     WHERE w.repository_id = ? AND w.level <> 'ignore'
                        AND (u.username LIKE ? ESCAPE '\\\\' OR COALESCE(u.display_name, '') LIKE ? ESCAPE '\\\\')
                      ORDER BY w.created_at DESC
                      LIMIT ? OFFSET ?",
@@ -410,7 +485,7 @@ pub async fn list_repo_watchers(
                             DATE_FORMAT(w.created_at, '%Y-%m-%dT%H:%i:%sZ') AS watched_at
                      FROM repository_watches w
                      JOIN users u ON u.id = w.user_id
-                     WHERE w.repository_id = ?
+                     WHERE w.repository_id = ? AND w.level <> 'ignore'
                      ORDER BY w.created_at DESC
                      LIMIT ? OFFSET ?",
                 )
@@ -430,7 +505,7 @@ pub async fn list_repo_watchers(
                             strftime('%Y-%m-%dT%H:%M:%SZ', w.created_at) AS watched_at
                      FROM repository_watches w
                      JOIN users u ON u.id = w.user_id
-                     WHERE w.repository_id = ?1
+                     WHERE w.repository_id = ?1 AND w.level <> 'ignore'
                        AND (u.username LIKE ?2 ESCAPE '\\' OR COALESCE(u.display_name, '') LIKE ?2 ESCAPE '\\')
                      ORDER BY w.created_at DESC
                      LIMIT ?3 OFFSET ?4",
@@ -447,7 +522,7 @@ pub async fn list_repo_watchers(
                             strftime('%Y-%m-%dT%H:%M:%SZ', w.created_at) AS watched_at
                      FROM repository_watches w
                      JOIN users u ON u.id = w.user_id
-                     WHERE w.repository_id = ?1
+                     WHERE w.repository_id = ?1 AND w.level <> 'ignore'
                      ORDER BY w.created_at DESC
                      LIMIT ?2 OFFSET ?3",
                 )
@@ -476,7 +551,7 @@ pub async fn count_repo_watchers(
                 sqlx::query_scalar(
                     "SELECT COUNT(*) FROM repository_watches w
                      JOIN users u ON u.id = w.user_id
-                     WHERE w.repository_id = $1
+                     WHERE w.repository_id = $1 AND w.level <> 'ignore'
                        AND (u.username ILIKE $2 ESCAPE '\\' OR COALESCE(u.display_name, '') ILIKE $2 ESCAPE '\\')",
                 )
                 .bind(repository_id)
@@ -485,7 +560,7 @@ pub async fn count_repo_watchers(
                 .await
             } else {
                 sqlx::query_scalar(
-                    "SELECT COUNT(*) FROM repository_watches WHERE repository_id = $1",
+                    "SELECT COUNT(*) FROM repository_watches WHERE repository_id = $1 AND level <> 'ignore'",
                 )
                 .bind(repository_id)
                 .fetch_one(p)
@@ -498,7 +573,7 @@ pub async fn count_repo_watchers(
                 sqlx::query_scalar(
                     "SELECT COUNT(*) FROM repository_watches w
                      JOIN users u ON u.id = w.user_id
-                     WHERE w.repository_id = ?
+                     WHERE w.repository_id = ? AND w.level <> 'ignore'
                        AND (u.username LIKE ? ESCAPE '\\\\' OR COALESCE(u.display_name, '') LIKE ? ESCAPE '\\\\')",
                 )
                 .bind(repository_id)
@@ -508,7 +583,7 @@ pub async fn count_repo_watchers(
                 .await
             } else {
                 sqlx::query_scalar(
-                    "SELECT COUNT(*) FROM repository_watches WHERE repository_id = ?",
+                    "SELECT COUNT(*) FROM repository_watches WHERE repository_id = ? AND level <> 'ignore'",
                 )
                 .bind(repository_id)
                 .fetch_one(p)
@@ -521,7 +596,7 @@ pub async fn count_repo_watchers(
                 sqlx::query_scalar(
                     "SELECT COUNT(*) FROM repository_watches w
                      JOIN users u ON u.id = w.user_id
-                     WHERE w.repository_id = ?1
+                     WHERE w.repository_id = ?1 AND w.level <> 'ignore'
                        AND (u.username LIKE ?2 ESCAPE '\\' OR COALESCE(u.display_name, '') LIKE ?2 ESCAPE '\\')",
                 )
                 .bind(repository_id)
@@ -530,7 +605,7 @@ pub async fn count_repo_watchers(
                 .await
             } else {
                 sqlx::query_scalar(
-                    "SELECT COUNT(*) FROM repository_watches WHERE repository_id = ?1",
+                    "SELECT COUNT(*) FROM repository_watches WHERE repository_id = ?1 AND level <> 'ignore'",
                 )
                 .bind(repository_id)
                 .fetch_one(p)
@@ -538,5 +613,120 @@ pub async fn count_repo_watchers(
             }
             .map_err(|e| format!("count watchers: {e}"))
         }
+    }
+}
+
+/// Viewer's subscription level for a repo — `all` | `participating` | `ignore`;
+/// `None` when no row exists (DEBT-06).
+pub async fn get_watch_level(
+    pool: &DbPool,
+    user_id: &str,
+    repository_id: &str,
+) -> Result<Option<String>, String> {
+    match pool {
+        DbPool::Postgres(p) => sqlx::query_scalar(
+            "SELECT level FROM repository_watches WHERE user_id = $1 AND repository_id = $2",
+        )
+        .bind(user_id)
+        .bind(repository_id)
+        .fetch_optional(p)
+        .await
+        .map_err(|e| format!("get_watch_level: {e}")),
+        DbPool::MySql(p) => sqlx::query_scalar(
+            "SELECT level FROM repository_watches WHERE user_id = ? AND repository_id = ?",
+        )
+        .bind(user_id)
+        .bind(repository_id)
+        .fetch_optional(p)
+        .await
+        .map_err(|e| format!("get_watch_level: {e}")),
+        DbPool::Sqlite(p) => sqlx::query_scalar(
+            "SELECT level FROM repository_watches WHERE user_id = ?1 AND repository_id = ?2",
+        )
+        .bind(user_id)
+        .bind(repository_id)
+        .fetch_optional(p)
+        .await
+        .map_err(|e| format!("get_watch_level: {e}")),
+    }
+}
+
+/// `(user_id, level)` for every subscription row on a repo — one indexed read
+/// for the notification fan-out matrix (DEBT-06).
+pub async fn list_repo_watch_levels(
+    pool: &DbPool,
+    repository_id: &str,
+) -> Result<Vec<(String, String)>, String> {
+    match pool {
+        DbPool::Postgres(p) => sqlx::query_as(
+            "SELECT user_id, level FROM repository_watches WHERE repository_id = $1",
+        )
+        .bind(repository_id)
+        .fetch_all(p)
+        .await
+        .map_err(|e| format!("list watch levels: {e}")),
+        DbPool::MySql(p) => sqlx::query_as(
+            "SELECT user_id, level FROM repository_watches WHERE repository_id = ?",
+        )
+        .bind(repository_id)
+        .fetch_all(p)
+        .await
+        .map_err(|e| format!("list watch levels: {e}")),
+        DbPool::Sqlite(p) => sqlx::query_as(
+            "SELECT user_id, level FROM repository_watches WHERE repository_id = ?1",
+        )
+        .bind(repository_id)
+        .fetch_all(p)
+        .await
+        .map_err(|e| format!("list watch levels: {e}")),
+    }
+}
+
+/// Repo ids with a subscription row at any level, newest first — powers the
+/// settings notification matrix (`ignore` rows included so they stay
+/// manageable) (DEBT-06).
+pub async fn list_watched_repo_ids(
+    pool: &DbPool,
+    user_id: &str,
+    offset: i64,
+    limit: i64,
+) -> Result<Vec<String>, String> {
+    match pool {
+        DbPool::Postgres(p) => sqlx::query_scalar(
+            "SELECT repository_id FROM repository_watches
+             WHERE user_id = $1
+             ORDER BY created_at DESC
+             LIMIT $2 OFFSET $3",
+        )
+        .bind(user_id)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(p)
+        .await
+        .map_err(|e| format!("list watched: {e}")),
+        DbPool::MySql(p) => sqlx::query_scalar(
+            "SELECT repository_id FROM repository_watches
+             WHERE user_id = ?
+             ORDER BY created_at DESC
+             LIMIT ? OFFSET ?",
+        )
+        .bind(user_id)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(p)
+        .await
+        .map_err(|e| format!("list watched: {e}")),
+        DbPool::Sqlite(p) => sqlx::query_scalar(
+            "SELECT repository_id FROM repository_watches
+             WHERE user_id = ?1
+             ORDER BY created_at DESC
+             LIMIT ?2 OFFSET ?3",
+        )
+        .bind(user_id)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(p)
+        .await
+        .map_err(|e| format!("list watched: {e}")),
     }
 }

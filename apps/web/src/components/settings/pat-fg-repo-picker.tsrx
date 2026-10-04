@@ -4,6 +4,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
+import { AppLink } from "@/components/ui/app-link";
 
 function repoFullName(repo: RepoPublic): string {
   return `${repo.owner_username}/${repo.name}`;
@@ -78,12 +79,12 @@ export function PatFgRepoPicker({
             <p className="text-[16px] text-muted-foreground">
               You don’t have any repositories yet.
             </p>
-            <a
+            <AppLink
               href="/new"
               className="text-[14px] font-semibold text-primary no-underline hover:underline"
             >
               New repository
-            </a>
+            </AppLink>
           </>;
         } @else {
           @if (filteredRepos.length === 0) {

@@ -9,12 +9,15 @@ import { useState } from "octane";
 import { BookMarked, Star } from "@octanejs/lucide";
 import { ReadmePanel } from "@/components/repo/readme-panel";
 import { Badge } from "@/components/ui/badge";
-import { buttonVariants } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { List, ListRow } from "@/components/ui/list";
+import { apiClient } from "@/lib/api-client";
 import { fetchOrgOverview, type OrgOverviewPayload } from "@/lib/ssr-org";
 import { fetchUserProfile, type UserProfilePayload } from "@/lib/ssr-user-profile";
+import { useChromeAccountState } from "@/lib/use-chrome-account";
 import { cn } from "@/lib/utils";
+import { AppLink } from "@/components/ui/app-link";
 
 export type OwnerIndexLoaderData =
   | { kind: "org"; org: OrgOverviewPayload }
@@ -88,24 +91,24 @@ export function OrgOverviewPage() @{
         </div>
         @if (canAdmin) {
           <div className="flex flex-wrap gap-2">
-            <a
+            <AppLink
               href={`/${slug}/settings`}
               className={cn(buttonVariants({ variant: "secondary" }), "h-11")}
             >
               Settings
-            </a>
-            <a
+            </AppLink>
+            <AppLink
               href={`/${slug}/settings/members`}
               className={cn(buttonVariants({ variant: "outline" }), "h-11")}
             >
               Members
-            </a>
-            <a
+            </AppLink>
+            <AppLink
               href={`/${slug}/settings/labels`}
               className={cn(buttonVariants({ variant: "outline" }), "h-11")}
             >
               Labels
-            </a>
+            </AppLink>
           </div>;
         }
       </div>
@@ -178,9 +181,47 @@ export function UserProfilePage() @{
   const isSelf = payload?.isSelf === true;
   const profileReadme = payload?.profileReadme ?? null;
   const [tab, setTab] = useState<"repos" | "stars">("repos");
+  const account = useChromeAccountState();
+  const signedIn = !!account.user;
+  const [followBusy, setFollowBusy] = useState(false);
+  const [followOverride, setFollowOverride] = useState<{
+    following: boolean;
+    followerCount: number;
+  } | null>(null);
 
   const display = profile?.display_name?.trim() || profile?.username || "";
   const username = profile?.username ?? "";
+  const followingNow = followOverride?.following ?? !!profile?.viewer_is_following;
+  const followerCount = followOverride?.followerCount ?? profile?.follower_count ?? 0;
+  const followingCount = profile?.following_count ?? 0;
+
+  /** Follow/unfollow the profile owner — optimistic (DEBT-06). */
+  async function toggleFollow() {
+    if (!signedIn || followBusy || !username || isSelf) return;
+    setFollowBusy(true);
+    const prev = { following: followingNow, followerCount };
+    setFollowOverride({
+      following: !prev.following,
+      followerCount: Math.max(0, prev.followerCount + (prev.following ? -1 : 1)),
+    });
+    try {
+      const res = prev.following
+        ? await apiClient.user.unfollow({ username })
+        : await apiClient.user.follow({ username });
+      if (res.ok && res.data) {
+        setFollowOverride({
+          following: !!res.data.viewer_is_following,
+          followerCount: res.data.follower_count ?? 0,
+        });
+      } else {
+        setFollowOverride(prev);
+      }
+    } catch {
+      setFollowOverride(prev);
+    } finally {
+      setFollowBusy(false);
+    }
+  }
 
   @if (!profile) {
     <div className="mx-auto max-w-6xl px-4 py-16">
@@ -206,7 +247,28 @@ export function UserProfilePage() @{
               {profile.bio as string}
             </p>;
           }
+          <p className="mt-3 text-[14px] text-muted-foreground" data-testid="profile-follow-counts">
+            <span className="font-semibold text-foreground">{String(followerCount)}</span>
+            {(followerCount === 1 ? " follower · " : " followers · ") as string}
+            <span className="font-semibold text-foreground">{String(followingCount)}</span>
+            {" following" as string}
+          </p>
         </div>
+        @if (signedIn && !isSelf) {
+          <div className="ml-auto">
+            <Button
+              type="button"
+              variant="secondary"
+              className="h-9 px-4 text-[14px]"
+              disabled={followBusy}
+              aria-pressed={followingNow}
+              data-testid="profile-follow-button"
+              onClick={() => void toggleFollow()}
+            >
+              {(followingNow ? "Following" : "Follow") as string}
+            </Button>
+          </div>;
+        }
       </div>
 
       @if (profileReadme) {
@@ -258,14 +320,14 @@ export function UserProfilePage() @{
                     className="mt-0.5 shrink-0 text-muted-foreground"
                   />
                   <div className="min-w-0 flex-1">
-                    <a
+                    <AppLink
                       href={
                         ("/" + repo.owner_username + "/" + repo.name) as string
                       }
                       className="text-[16px] font-semibold text-primary no-underline hover:underline"
                     >
                       {(repo.owner_username + "/" + repo.name) as string}
-                    </a>
+                    </AppLink>
                     @if (
                       repo.description?.trim()
                     ) {
@@ -292,12 +354,12 @@ export function UserProfilePage() @{
               }
               action={
                 isSelf ? (
-                  <a
+                  <AppLink
                     href="/new"
                     className={cn(buttonVariants({ variant: "default", size: "sm" }))}
                   >
                     New repository
-                  </a>
+                  </AppLink>
                 ) : undefined
               }
             />;

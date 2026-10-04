@@ -3,15 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithQueryClient } from "@/test/render-with-query";
 
 const searchMock = vi.fn();
-const getMock = vi.fn();
 
-vi.mock("@/lib/api-client", () => ({
-  apiClient: {
-    repo: {
-      get: (...args: unknown[]) => getMock(...args),
-      search: (...args: unknown[]) => searchMock(...args),
-    },
-  },
+vi.mock("@/lib/ssr-repo", () => ({
+  fetchRepoSearch: (opts: { data: unknown }) => searchMock(opts.data),
 }));
 
 const navigateMock = vi.fn();
@@ -32,7 +26,6 @@ import { RepoSearchPage } from "./$owner.$repo.search";
 afterEach(() => {
   cleanup();
   searchMock.mockReset();
-  getMock.mockReset();
   navigateMock.mockReset();
   searchState = { q: "UNIQUE_HIT", type: "code" };
 });
@@ -52,9 +45,11 @@ beforeEach(() => {
           path: "src/needle.txt",
           line: 2,
           content: "UNIQUE_HIT line",
+          html: '<pre class="shiki" data-language="text"><code><span style="color:#cf222e">UNIQUE_HIT line</span></code></pre>',
         },
       ],
     },
+    highlightTheme: "oxidean-light",
   });
 });
 
@@ -104,10 +99,38 @@ describe("repo search route (GIT-18 / D-SRCH-02 / D-SRCH-15)", () => {
         limit: 30,
         hits: [],
       },
+      highlightTheme: "oxidean-light",
     });
     cleanup();
     renderWithQueryClient(RepoSearchPage);
     expect(await screen.findByTestId("search-empty")).toBeTruthy();
+  });
+
+  it("renders language browse hits as file links without line/content", async () => {
+    searchState = { q: "language:Rust", type: "code" };
+    searchMock.mockResolvedValueOnce({
+      ok: true,
+      data: {
+        type: "code",
+        q: "language:Rust",
+        truncated: false,
+        offset: 0,
+        limit: 30,
+        hits: [
+          { kind: "code", path: "src/main.rs", line: 0, content: "" },
+          { kind: "code", path: "crates/lib.rs", line: 0, content: "" },
+        ],
+      },
+      highlightTheme: "oxidean-light",
+    });
+    renderWithQueryClient(RepoSearchPage);
+    const link = await screen.findByText("src/main.rs");
+    expect(link.closest("a")?.getAttribute("href")).toBe("/ada/hello/blob/src/main.rs");
+    expect(screen.queryByText(":0")).toBeNull();
+    expect(screen.getByText("crates/lib.rs")).toBeTruthy();
+    // No <pre> body for browse hits (empty content).
+    const li = link.closest("li");
+    expect(li?.querySelector("pre")).toBeNull();
   });
 
   it("repo chrome search entry navigates to /search (D-SRCH-03)", async () => {

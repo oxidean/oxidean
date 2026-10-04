@@ -30,6 +30,45 @@ impl RepoVisibility {
     }
 }
 
+/// Per-user repository watch level — the notification matrix (DEBT-06).
+/// Serialized snake_case: `all` | `participating` | `ignore`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum WatchLevel {
+    /// Notified on all repo activity (default for `repo.watch`).
+    #[default]
+    All,
+    /// Notified only when participating or @-mentioned (stored default).
+    Participating,
+    /// Never notified for this repo — suppresses participation + mention rows.
+    Ignore,
+}
+
+impl WatchLevel {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::Participating => "participating",
+            Self::Ignore => "ignore",
+        }
+    }
+
+    /// True when the level counts as an active watch subscription
+    /// (`watch_count`, `viewer_is_watching`, watchers list membership).
+    pub const fn is_active(self) -> bool {
+        !matches!(self, Self::Ignore)
+    }
+
+    pub fn parse(s: &str) -> Result<Self, String> {
+        match s.trim() {
+            "all" => Ok(Self::All),
+            "participating" => Ok(Self::Participating),
+            "ignore" => Ok(Self::Ignore),
+            other => Err(format!("invalid watch level: {other}")),
+        }
+    }
+}
+
 /// Provenance for `/new` template picker cards (issue #18).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -168,9 +207,14 @@ pub struct RepoPublic {
     /// Watch / subscribe counter (issue #23).
     #[serde(default)]
     pub watch_count: i64,
-    /// Whether the authenticated viewer is watching this repo.
+    /// Whether the authenticated viewer is watching this repo
+    /// (subscription row at a non-`ignore` level).
     #[serde(default)]
     pub viewer_is_watching: bool,
+    /// Authenticated viewer's watch level — `all` | `participating` | `ignore`;
+    /// absent when the viewer has no subscription row (DEBT-06).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub viewer_watch_level: Option<WatchLevel>,
     /// Fork network root id (own id for roots) — D-SOC-14 / D-PR-01.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fork_network_id: Option<String>,
@@ -217,11 +261,14 @@ pub struct RepoStargazersListResponse {
     pub total: i64,
 }
 
-/// `repo.watch` / `repo.unwatch` input (same shape as star).
+/// `repo.watch` / `repo.unwatch` input. `level` applies to `repo.watch` only
+/// (`unwatch` removes the row regardless); omitted → `all` (DEBT-06).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RepoWatchRequest {
     pub owner: String,
     pub name: String,
+    #[serde(default)]
+    pub level: Option<WatchLevel>,
 }
 
 /// Public watcher row for `repo.watchers.list` (no email).
@@ -513,6 +560,16 @@ pub struct RepoExploreRequest {
     pub limit: Option<i64>,
 }
 
+/// `user.listWatched` — caller's repo subscriptions at any watch level
+/// (`all` | `participating` | `ignore`), newest first (DEBT-06).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ListWatchedRequest {
+    #[serde(default)]
+    pub offset: Option<i64>,
+    #[serde(default)]
+    pub limit: Option<i64>,
+}
+
 /// `user.getPublicProfile` — public profile by username (D-SOC-06 / D-SOC-08).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GetPublicProfileRequest {
@@ -526,6 +583,54 @@ pub struct PublicUserProfile {
     pub display_name: String,
     pub bio: String,
     pub avatar_url: Option<String>,
+    /// Accounts following this user (DEBT-06).
+    #[serde(default)]
+    pub follower_count: i64,
+    /// Accounts this user follows (DEBT-06).
+    #[serde(default)]
+    pub following_count: i64,
+    /// Whether the authenticated viewer follows this user (DEBT-06).
+    #[serde(default)]
+    pub viewer_is_following: bool,
+}
+
+/// `user.follow` / `user.unfollow` input (DEBT-06).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserFollowRequest {
+    pub username: String,
+}
+
+/// `user.followers.list` / `user.following.list` input — paginated, optional
+/// username/display_name filter (DEBT-06).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserFollowListRequest {
+    pub username: String,
+    #[serde(default)]
+    pub q: Option<String>,
+    #[serde(default)]
+    pub offset: Option<i64>,
+    #[serde(default)]
+    pub limit: Option<i64>,
+}
+
+/// Public follower/following row — no email (DEBT-06).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserFollowPublic {
+    pub user_id: String,
+    pub username: String,
+    pub display_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_url: Option<String>,
+    /// When the follow edge was created (ISO-8601).
+    pub followed_at: String,
+}
+
+/// Shared page shape for `user.followers.list` and `user.following.list`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserFollowListResponse {
+    pub users: Vec<UserFollowPublic>,
+    /// Total matching rows (after `q` filter).
+    pub total: i64,
 }
 
 /// `repo.listMine` — caller's non-deleted repos, recently updated first (GIT-01 / D-13).

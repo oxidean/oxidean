@@ -1,4 +1,5 @@
 import { treeHref, pathBreadcrumbCrumbs } from "@/lib/repo-browse";
+import { AppLink } from "@/components/ui/app-link";
 
 type PathBreadcrumbProps = {
   owner: string;
@@ -17,13 +18,13 @@ export function PathBreadcrumb({ owner, repo, refName, path }: PathBreadcrumbPro
     aria-label="Path"
     className="flex min-w-0 max-w-full flex-wrap items-center gap-1 text-[14px]"
   >
-    <a
+    <AppLink
       href={homeHref as string}
       className="min-w-0 max-w-[min(100%,12rem)] truncate font-semibold text-primary no-underline hover:underline"
       title={repo as string}
     >
       {repo as string}
-    </a>
+    </AppLink>
     @for (const c of crumbs; key `${c.prefix}`) {
       const href = treeHref(owner, repo, refName, c.prefix);
       <span className="inline-flex min-w-0 items-center gap-1">
@@ -38,13 +39,13 @@ export function PathBreadcrumb({ owner, repo, refName, path }: PathBreadcrumbPro
             {c.seg as string}
           </span>;
         } @else {
-          <a
+          <AppLink
             href={href as string}
             className="min-w-0 max-w-[min(100%,12rem)] truncate font-normal text-primary no-underline hover:underline"
             title={c.seg as string}
           >
             {c.seg as string}
-          </a>;
+          </AppLink>;
         }
       </span>;
     }

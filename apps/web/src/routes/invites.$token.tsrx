@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiClient } from "@/lib/api-client";
+import { AppLink } from "@/components/ui/app-link";
 
 export const Route = createFileRoute("/invites/$token")({
   component: InviteAcceptPage,
@@ -273,9 +274,9 @@ export function InviteAcceptPage() @{
             </form>
             <p className="text-sm text-muted-foreground">
               Wrong account?{" "}
-              <a className="underline underline-offset-2" href={loginHref}>
+              <AppLink className="underline underline-offset-2" href={loginHref}>
                 Sign in with a different account
-              </a>
+              </AppLink>
               .
             </p>
           </AuthShell>;
@@ -290,17 +291,17 @@ export function InviteAcceptPage() @{
             @if (boundEmail) {
               <p className="text-sm text-muted-foreground">
                 {`Create an account for ${boundEmail}, or ` as string}
-                <a className="underline underline-offset-2" href={loginHref}>
+                <AppLink className="underline underline-offset-2" href={loginHref}>
                   sign in
-                </a>{" "}
+                </AppLink>{" "}
                 if you already have one.
               </p>;
             } @else {
               <p className="text-sm text-muted-foreground">
                 Create an account, or{" "}
-                <a className="underline underline-offset-2" href={loginHref}>
+                <AppLink className="underline underline-offset-2" href={loginHref}>
                   sign in
-                </a>{" "}
+                </AppLink>{" "}
                 if you already have one.
               </p>;
             }

@@ -1,6 +1,6 @@
-import { createServerFn } from "@octanejs/tanstack-start";
+import { createServerFn, createServerOnlyFn } from "@octanejs/tanstack-start";
 import { getRequestHeader } from "@octanejs/tanstack-start/server";
-import { createClient, type OxideanClient } from "@oxidean/api-client";
+import { createClient, type OxideanClient, type RepoPublic } from "@oxidean/api-client";
 import {
   resolveThemeForSsr,
   themePreferenceFromCookieHeader,
@@ -72,6 +72,24 @@ export const fetchRepoListMine = createServerFn({ method: "GET" }).handler(async
 export const fetchUserGetProfile = createServerFn({ method: "GET" }).handler(async () => {
   const client = createSsrClient(incomingCookie());
   return client.user.getProfile();
+});
+
+/** SSR: user.listWatched with Cookie forward (settings notifications matrix, DEBT-06).
+ * Pages through all watched repos — capped at 500; `truncated` flags the cut. */
+export const fetchWatchedRepos = createServerFn({ method: "GET" }).handler(async () => {
+  const client = createSsrClient(incomingCookie());
+  const repos: RepoPublic[] = [];
+  for (let offset = 0; offset < 500; offset += 50) {
+    const res = await client.user.listWatched({ offset, limit: 50 });
+    if (!res.ok) {
+      return res;
+    }
+    repos.push(...res.data.repos);
+    if (res.data.repos.length < 50) {
+      return { ok: true as const, data: { repos, truncated: false } };
+    }
+  }
+  return { ok: true as const, data: { repos, truncated: true } };
 });
 
 /** SSR: pat.list with Cookie forward. */
@@ -146,17 +164,39 @@ export const fetchSystemHealth = createServerFn({ method: "GET" }).handler(async
   return client.system.health();
 });
 
+/**
+ * Resolved Shiki theme for the current request (cookie + resolved scheme +
+ * Client Hints). Server-only — for use inside other server fn handlers, so
+ * callers never pay an extra RPC hop for theme resolution.
+ */
+export const ssrHighlightTheme = createServerOnlyFn((): "oxidean-light" | "oxidean-dark" => {
+  const cookie = incomingCookie();
+  const pref = themePreferenceFromCookieHeader(cookie);
+  const resolvedBoot = resolvedColorSchemeFromCookieHeader(cookie);
+  const ch = getRequestHeader("sec-ch-prefers-color-scheme");
+  const resolved = resolveThemeForSsr(pref, ch, resolvedBoot);
+  return resolved === "dark" ? "oxidean-dark" : "oxidean-light";
+});
+
 /** SSR: resolved Shiki theme (cookie + resolved scheme + Client Hints). */
 export const resolveSsrHighlightTheme = createServerFn({ method: "GET" }).handler(
-  async (): Promise<"github-light" | "github-dark"> => {
-    const cookie = incomingCookie();
-    const pref = themePreferenceFromCookieHeader(cookie);
-    const resolvedBoot = resolvedColorSchemeFromCookieHeader(cookie);
-    const ch = getRequestHeader("sec-ch-prefers-color-scheme");
-    const resolved = resolveThemeForSsr(pref, ch, resolvedBoot);
-    return resolved === "dark" ? "github-dark" : "github-light";
-  },
+  async (): Promise<"oxidean-light" | "oxidean-dark"> => ssrHighlightTheme(),
 );
+
+/**
+ * Resolved app theme for the document root — same cookie + resolved scheme +
+ * Client Hints chain as {@link ssrHighlightTheme}. Server-only (reads request
+ * headers); loaders must guard the call site because getRequestHeader cannot
+ * be imported into the client bundle (start import-protection).
+ */
+export const ssrResolvedTheme = createServerOnlyFn((): "light" | "dark" => {
+  const cookie = incomingCookie();
+  return resolveThemeForSsr(
+    themePreferenceFromCookieHeader(cookie),
+    getRequestHeader("sec-ch-prefers-color-scheme"),
+    resolvedColorSchemeFromCookieHeader(cookie),
+  );
+});
 
 export type AppAccessRedirectInput = {
   pathname: string;

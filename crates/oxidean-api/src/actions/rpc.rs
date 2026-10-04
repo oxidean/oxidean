@@ -519,7 +519,7 @@ pub async fn rerun_run(
     ctx: &RpcCtx,
     input: serde_json::Value,
 ) -> Result<ActionRunMutationResponse, AppError> {
-    let (req, accessible) = run_mutation_target(ctx, input, "rerunRun").await?;
+    let (req, accessible, _run) = run_mutation_target(ctx, input, "rerunRun").await?;
     ctx.db.requeue_action_run(&req.run_id).await.map_err(db_err)?;
     run_mutation_response(ctx, &accessible.row.id, &req.run_id).await
 }
@@ -529,8 +529,36 @@ pub async fn cancel_run(
     ctx: &RpcCtx,
     input: serde_json::Value,
 ) -> Result<ActionRunMutationResponse, AppError> {
-    let (req, accessible) = run_mutation_target(ctx, input, "cancelRun").await?;
-    ctx.db.cancel_action_run(&req.run_id).await.map_err(db_err)?;
+    let (req, accessible, run) = run_mutation_target(ctx, input, "cancelRun").await?;
+    if run.finished_at.is_some() {
+        return Err(AppError::new(
+            "repo.actions.run_finished",
+            "workflow run already finished",
+        ));
+    }
+    let cancelled = ctx
+        .db
+        .cancel_action_run(&req.run_id)
+        .await
+        .map_err(db_err)?;
+    if !cancelled {
+        // Lost the race with a concurrent finish — surface the same error.
+        return Err(AppError::new(
+            "repo.actions.run_finished",
+            "workflow run already finished",
+        ));
+    }
+    // DEBT-06: cancelled runs complete — claim + emit through the watch matrix.
+    if ctx
+        .db
+        .claim_run_completion_notice(&req.run_id)
+        .await
+        .unwrap_or(false)
+    {
+        if let Ok(Some(run)) = ctx.db.find_action_run_by_id(&req.run_id).await {
+            crate::notify::fanout_workflow_completed(&ctx.db, &run).await;
+        }
+    }
     run_mutation_response(ctx, &accessible.row.id, &req.run_id).await
 }
 
@@ -538,7 +566,7 @@ async fn run_mutation_target(
     ctx: &RpcCtx,
     input: serde_json::Value,
     proc: &str,
-) -> Result<(ActionRunMutationRequest, crate::repo::AccessibleRepo), AppError> {
+) -> Result<(ActionRunMutationRequest, crate::repo::AccessibleRepo, ActionRunRow), AppError> {
     let _ = require_verified(ctx).await?;
     let req: ActionRunMutationRequest = serde_json::from_value(input).map_err(|e| {
         AppError::new(
@@ -559,7 +587,7 @@ async fn run_mutation_target(
     if run.repository_id != accessible.row.id {
         return Err(not_found());
     }
-    Ok((req, accessible))
+    Ok((req, accessible, run))
 }
 
 async fn run_mutation_response(

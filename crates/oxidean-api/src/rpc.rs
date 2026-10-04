@@ -29,6 +29,7 @@ use crate::ssh_keys;
 use crate::gpg_keys;
 use crate::emails;
 use crate::repo;
+use crate::search;
 use crate::user;
 use crate::user::rate_limit::LookupLimiter;
 use crate::webhook;
@@ -275,6 +276,26 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Err(e) => RpcResponse::err(e),
         },
         "user.listStarred" => match user::list_starred(ctx, req.input).await {
+            Ok(list) => RpcResponse::ok(list),
+            Err(e) => RpcResponse::err(e),
+        },
+        "user.listWatched" => match user::list_watched(ctx, req.input).await {
+            Ok(list) => RpcResponse::ok(list),
+            Err(e) => RpcResponse::err(e),
+        },
+        "user.follow" => match user::follow(ctx, req.input).await {
+            Ok(profile) => RpcResponse::ok(profile),
+            Err(e) => RpcResponse::err(e),
+        },
+        "user.unfollow" => match user::unfollow(ctx, req.input).await {
+            Ok(profile) => RpcResponse::ok(profile),
+            Err(e) => RpcResponse::err(e),
+        },
+        "user.followers.list" => match user::followers_list(ctx, req.input).await {
+            Ok(list) => RpcResponse::ok(list),
+            Err(e) => RpcResponse::err(e),
+        },
+        "user.following.list" => match user::following_list(ctx, req.input).await {
             Ok(list) => RpcResponse::ok(list),
             Err(e) => RpcResponse::err(e),
         },
@@ -553,6 +574,10 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Err(e) => RpcResponse::err(e),
         },
         "repo.search" => match repo::search(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "search.global" => match search::global(ctx, req.input).await {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },

@@ -18,9 +18,9 @@ use uuid::Uuid;
 
 use crate::auth::gate::require_verified;
 use crate::notify;
-use crate::webhook::dispatch;
 use crate::repo::not_found;
 use crate::rpc::RpcCtx;
+use crate::webhook::dispatch;
 
 /// Title soft cap (~1k chars).
 const TITLE_MAX_CHARS: usize = 1_024;
@@ -249,9 +249,9 @@ pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssuePubli
     if accessible.row.owner_type == "user" && accessible.row.owner_id != user.id {
         opened_recipients.push(accessible.row.owner_id.clone());
     }
-    notify::fanout(ctx, &user.id, opened_recipients, "issue_opened", &subject).await;
-    let mentions = notify::resolve_mention_user_ids(ctx, &body).await;
-    notify::fanout(ctx, &user.id, mentions, "issue_mention", &subject).await;
+    notify::fanout_activity(&ctx.db, &user.id, opened_recipients, "issue_opened", &subject).await;
+    let mentions = notify::resolve_mention_user_ids(&ctx.db, &body).await;
+    notify::fanout_suppress_ignored(&ctx.db, &user.id, mentions, "issue_mention", &subject).await;
     let payload = dispatch::issues_payload(
         "opened",
         row.number,
@@ -433,8 +433,8 @@ pub async fn close(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssuePublic
         .await
         .map_err(db_err)?;
     let subject = notify::subject_for_issue(&updated);
-    let recipients = notify::issue_participant_ids(ctx, &updated.id, &updated.author_id).await;
-    notify::fanout(ctx, &user.id, recipients, "issue_closed", &subject).await;
+    let recipients = notify::issue_participant_ids(&ctx.db, &updated.id, &updated.author_id).await;
+    notify::fanout_activity(&ctx.db, &user.id, recipients, "issue_closed", &subject).await;
     let payload = dispatch::issues_payload(
         "closed",
         updated.number,
@@ -467,8 +467,8 @@ pub async fn reopen(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssuePubli
     }
     let updated = ctx.db.reopen_issue(&row.id).await.map_err(db_err)?;
     let subject = notify::subject_for_issue(&updated);
-    let recipients = notify::issue_participant_ids(ctx, &updated.id, &updated.author_id).await;
-    notify::fanout(ctx, &_user.id, recipients, "issue_reopened", &subject).await;
+    let recipients = notify::issue_participant_ids(&ctx.db, &updated.id, &updated.author_id).await;
+    notify::fanout_activity(&ctx.db, &_user.id, recipients, "issue_reopened", &subject).await;
     let payload = dispatch::issues_payload(
         "reopened",
         updated.number,
@@ -702,15 +702,42 @@ pub async fn comments_create(
         .await
         .map_err(db_err)?;
     let subject = notify::subject_for_issue(&issue);
-    let participants = notify::issue_participant_ids(ctx, &issue.id, &issue.author_id).await;
-    let mentions = notify::resolve_mention_user_ids(ctx, &body).await;
-    notify::fanout(ctx, &user.id, participants.clone(), "issue_comment", &subject).await;
+    let participants = notify::issue_participant_ids(&ctx.db, &issue.id, &issue.author_id).await;
+    let mentions = notify::resolve_mention_user_ids(&ctx.db, &body).await;
+    notify::fanout_activity(&ctx.db, &user.id, participants.clone(), "issue_comment", &subject).await;
     let participant_set: std::collections::HashSet<_> = participants.into_iter().collect();
     let mention_only: Vec<_> = mentions
         .into_iter()
         .filter(|m| !participant_set.contains(m))
         .collect();
-    notify::fanout(ctx, &user.id, mention_only, "issue_mention", &subject).await;
+    notify::fanout_suppress_ignored(&ctx.db, &user.id, mention_only, "issue_mention", &subject).await;
+    let payload = dispatch::issue_comment_payload(
+        "created",
+        issue.number,
+        &issue.title,
+        &issue.body,
+        &issue.state,
+        false,
+        &row.id,
+        &row.body,
+        None,
+        &user.username,
+        &user.id,
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.id,
+        &user.username,
+        &user.id,
+    );
+    dispatch::emit(
+        &ctx.db,
+        &accessible.row.id,
+        "issue_comment",
+        "created",
+        payload,
+        &ctx.env_name,
+    )
+    .await;
     comment_to_public(ctx, &row).await
 }
 
@@ -746,6 +773,33 @@ pub async fn comments_update(
         .update_issue_comment_body(&row.id, &new_body)
         .await
         .map_err(db_err)?;
+    let payload = dispatch::issue_comment_payload(
+        "edited",
+        issue.number,
+        &issue.title,
+        &issue.body,
+        &issue.state,
+        false,
+        &updated.id,
+        &updated.body,
+        Some(row.body.as_str()),
+        &user.username,
+        &user.id,
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.id,
+        &user.username,
+        &user.id,
+    );
+    dispatch::emit(
+        &ctx.db,
+        &accessible.row.id,
+        "issue_comment",
+        "edited",
+        payload,
+        &ctx.env_name,
+    )
+    .await;
     comment_to_public(ctx, &updated).await
 }
 
@@ -771,6 +825,41 @@ pub async fn comments_delete(
         .delete_issue_comment(&row.id)
         .await
         .map_err(db_err)?;
+    let author_login = match ctx.db.find_user_by_id(&row.author_id).await {
+        Ok(Some(u)) => u.username,
+        Ok(None) => String::new(),
+        Err(e) => {
+            tracing::warn!(error = %e, "issue_comment delete: author lookup failed");
+            String::new()
+        }
+    };
+    let payload = dispatch::issue_comment_payload(
+        "deleted",
+        issue.number,
+        &issue.title,
+        &issue.body,
+        &issue.state,
+        false,
+        &row.id,
+        &row.body,
+        None,
+        &author_login,
+        &row.author_id,
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.id,
+        &user.username,
+        &user.id,
+    );
+    dispatch::emit(
+        &ctx.db,
+        &accessible.row.id,
+        "issue_comment",
+        "deleted",
+        payload,
+        &ctx.env_name,
+    )
+    .await;
     Ok(DeleteIssueCommentResponse { ok: true })
 }
 
@@ -941,8 +1030,8 @@ pub async fn assignees_set(
     let newly_assigned: Vec<_> = after.difference(&before).cloned().collect();
     let newly_unassigned: Vec<_> = before.difference(&after).cloned().collect();
     let subject = notify::subject_for_issue(&issue);
-    notify::fanout(ctx, &user.id, newly_assigned, "issue_assigned", &subject).await;
-    notify::fanout(ctx, &user.id, newly_unassigned, "issue_unassigned", &subject).await;
+    notify::fanout_suppress_ignored(&ctx.db, &user.id, newly_assigned, "issue_assigned", &subject).await;
+    notify::fanout_suppress_ignored(&ctx.db, &user.id, newly_unassigned, "issue_unassigned", &subject).await;
 
     let refreshed = ctx
         .db

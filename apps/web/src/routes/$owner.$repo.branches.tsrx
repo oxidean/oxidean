@@ -33,6 +33,7 @@ import { apiClient } from "@/lib/api-client";
 import { isBranchRef, shortOid, shortRefName, treeHref } from "@/lib/repo-browse";
 import { formatRelative } from "@/lib/relative-time";
 import { fetchRepoGet, fetchRepoRefs } from "@/lib/ssr-repo";
+import { AppLink } from "@/components/ui/app-link";
 
 export type BranchesLoaderData =
   | { kind: "not_found" }
@@ -475,13 +476,13 @@ function BranchRow({
     <GitBranch aria-hidden size={16} className="shrink-0 text-muted-foreground" />
     <div className="min-w-0 flex-1">
       <div className="flex flex-wrap items-center gap-2">
-        <a
+        <AppLink
           href={href as string}
           className="truncate text-[15px] font-semibold text-primary no-underline hover:underline"
           title={name as string}
         >
           {name as string}
-        </a>
+        </AppLink>
         @if (isDefault) {
           <Badge variant="primary">default</Badge>;
         }
@@ -502,12 +503,12 @@ function BranchRow({
     </div>
     <div className="flex flex-wrap items-center gap-2">
       @if (canWrite && !isDefault) {
-        <a
+        <AppLink
           href={`/${owner}/${repo}/pulls/new?head=${encodeURIComponent(name)}` as string}
           className="inline-flex h-8 items-center justify-center rounded-md border border-border bg-transparent px-3 text-[13px] font-medium text-foreground no-underline hover:bg-muted"
         >
           New pull request
-        </a>;
+        </AppLink>;
       }
       @if (canWrite) {
         <Button

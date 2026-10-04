@@ -15,6 +15,7 @@ import { Label } from "@/components/ui/label";
 import { apiClient } from "@/lib/api-client";
 import { readReturnToFromLocation, safeReturnTo } from "@/lib/return-to";
 import { fetchProviderConfig, fetchSessionMe } from "@/lib/ssr-auth";
+import { AppLink } from "@/components/ui/app-link";
 
 export type SignupLoaderData = {
   mode: ProviderMode;
@@ -248,12 +249,12 @@ export function SignupPage() @{
 
     <p className="text-[14px] text-muted-foreground">
       Already have an account?{" "}
-      <a
+      <AppLink
         href={loginHref as string}
         className="font-normal text-foreground underline-offset-4 hover:underline"
       >
         Sign in
-      </a>
+      </AppLink>
     </p>
   </AuthShell>;
 }

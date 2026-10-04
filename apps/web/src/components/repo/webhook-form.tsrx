@@ -14,6 +14,7 @@ const EVENT_OPTIONS = [
   { id: "push", label: "push" },
   { id: "pull_request", label: "pull_request" },
   { id: "issues", label: "issues" },
+  { id: "issue_comment", label: "issue_comment" },
 ] as const;
 
 type EventId = (typeof EVENT_OPTIONS)[number]["id"];
@@ -91,11 +92,12 @@ export function WebhookForm(props: {
   const [description, setDescription] = useState(initial?.name ?? "");
   const [active, setActive] = useState(initial?.active ?? true);
   const [events, setEvents] = useState<Record<EventId, boolean>>(() => {
-    const set = new Set(initial?.events ?? ["push", "pull_request", "issues"]);
+    const set = new Set(initial?.events ?? ["push", "pull_request", "issues", "issue_comment"]);
     return {
       push: set.has("push"),
       pull_request: set.has("pull_request"),
       issues: set.has("issues"),
+      issue_comment: set.has("issue_comment"),
     };
   });
   const [pending, setPending] = useState(false);

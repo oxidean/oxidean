@@ -10,6 +10,7 @@ import {
 import { parseViteAllowedHosts } from "./vite-plugins/vite-allowed-hosts.ts";
 import { webHealthPlugin } from "./vite-plugins/web-health.ts";
 import { swBuildIdPlugin } from "./vite-plugins/sw-build-id.ts";
+import { appStylesHrefPlugin } from "./vite-plugins/app-styles-href.ts";
 
 // NOTE (03-05): vite-plugin-pwa was evaluated here but does not emit a service
 // worker under this Vite 8 / @octanejs/tanstack-start multi-environment build
@@ -51,6 +52,8 @@ export default defineConfig(() => {
       webHealthPlugin(),
       // Per-deploy CACHE_NAME + VITE_OXIDEAN_SW_BUILD for SW update busting.
       swBuildIdPlugin(),
+      // SSR-side stylesheet href must be the file the client build emitted.
+      appStylesHrefPlugin(),
       fixTypeOnlyImports(RECHARTS_TYPE_ONLY_IMPORT_FIX),
       tanstackStart({
         // Keep colocated *.integration.test.* / *.unit.test.* out of the route tree
