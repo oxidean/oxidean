@@ -1236,7 +1236,8 @@ pub async fn list_fork_network(
     WHERE r.fork_network_id = $1
       AND r.deleted_at IS NULL
       AND (lower(r.visibility) = 'public' OR r.id = $2)
-    ORDER BY r.created_at ASC, r.id ASC
+    ORDER BY CASE WHEN r.forked_from_repo_id IS NULL THEN 0 ELSE 1 END,
+             r.created_at ASC, r.id ASC
     LIMIT $3";
             let rows = sqlx::query(&sql)
                 .bind(fork_network_id)
@@ -1255,7 +1256,8 @@ pub async fn list_fork_network(
     WHERE r.fork_network_id = ?
       AND r.deleted_at IS NULL
       AND (lower(r.visibility) = 'public' OR r.id = ?)
-    ORDER BY r.created_at ASC, r.id ASC
+    ORDER BY CASE WHEN r.forked_from_repo_id IS NULL THEN 0 ELSE 1 END,
+             r.created_at ASC, r.id ASC
     LIMIT ?";
             let rows = sqlx::query(&sql)
                 .bind(fork_network_id)
@@ -1274,7 +1276,8 @@ pub async fn list_fork_network(
     WHERE r.fork_network_id = ?1
       AND r.deleted_at IS NULL
       AND (lower(r.visibility) = 'public' OR r.id = ?2)
-    ORDER BY r.created_at ASC, r.id ASC
+    ORDER BY CASE WHEN r.forked_from_repo_id IS NULL THEN 0 ELSE 1 END,
+             r.created_at ASC, r.id ASC
     LIMIT ?3";
             let rows = sqlx::query(&sql)
                 .bind(fork_network_id)

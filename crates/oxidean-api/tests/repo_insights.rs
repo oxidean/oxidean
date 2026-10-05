@@ -447,15 +447,25 @@ async fn repo_insights_fork_network_members_and_visibility() {
     assert_eq!(anon["data"]["total"].as_i64().unwrap(), 2);
     assert_eq!(anon["data"]["truncated"].as_bool().unwrap(), false);
 
-    let root = &nodes[0];
+    // Root is ordered first (network-root before forks) for one-pass tree builds.
+    let root = nodes
+        .iter()
+        .find(|n| n["is_root"].as_bool() == Some(true))
+        .expect("network root node");
     assert_eq!(root["owner"].as_str(), Some("netsrc"));
     assert_eq!(root["name"].as_str(), Some("upstream"));
-    assert_eq!(root["is_root"].as_bool(), Some(true));
     assert_eq!(root["is_current"].as_bool(), Some(true));
     assert!(root["parent_owner"].is_null());
+    assert_eq!(
+        nodes[0]["is_root"].as_bool(),
+        Some(true),
+        "root must be first in fork-network list: {nodes:?}"
+    );
 
-    let fork_node = &nodes[1];
-    assert_eq!(fork_node["owner"].as_str(), Some("netfork"));
+    let fork_node = nodes
+        .iter()
+        .find(|n| n["owner"].as_str() == Some("netfork"))
+        .expect("public fork node");
     assert_eq!(fork_node["is_root"].as_bool(), Some(false));
     assert_eq!(fork_node["is_current"].as_bool(), Some(false));
     assert_eq!(fork_node["parent_owner"].as_str(), Some("netsrc"));
