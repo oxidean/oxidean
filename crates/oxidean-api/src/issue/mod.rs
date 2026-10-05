@@ -235,7 +235,9 @@ pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssuePubli
     })?;
     let title = validate_title(&req.title)?.to_string();
     let body = validate_body(req.body.as_deref())?;
+    // Read+ (public contributors) with GIT-20 archive gate — not Write+ ACL.
     let accessible = acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
+    crate::repo::ensure_not_archived(&accessible)?;
 
     let id = Uuid::new_v4().to_string();
     let row = ctx
@@ -703,7 +705,9 @@ pub async fn comments_create(
         )
     })?;
     let body = validate_body(Some(req.body.as_str()))?;
+    // Read+ commenters with GIT-20 archive gate.
     let accessible = acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
+    crate::repo::ensure_not_archived(&accessible)?;
     let issue = load_issue_in_repo(ctx, &accessible.row.id, req.number).await?;
     let id = Uuid::new_v4().to_string();
     let row = ctx

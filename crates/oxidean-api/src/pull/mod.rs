@@ -672,6 +672,8 @@ pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullPublic
     let draft = req.draft.unwrap_or(false);
 
     let accessible = acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
+    // GIT-20: archived base repos reject new PRs (read-only).
+    crate::repo::ensure_not_archived(&accessible)?;
 
     let head_owner = req
         .head_owner
