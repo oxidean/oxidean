@@ -290,14 +290,14 @@ export function RepoActionsRunPage() @{
                         type="button"
                         data-testid={`actions-job-${job.id}`}
                         className={cn(
-                          "flex min-w-0 flex-1 items-center justify-between gap-2 px-3 py-2 text-left text-[14px] outline-none transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+                          "flex min-w-0 flex-1 items-center gap-2 px-3 py-2 text-left text-[14px] outline-none transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
                           job.id === selectedJobId
                             ? "bg-muted/60 font-medium text-foreground"
                             : "text-foreground",
                         )}
                         onClick={() => selectJob(job.id)}
                       >
-                        <span className="min-w-0">
+                        <span className="min-w-0 flex-1">
                           <span className="block truncate">{job.name as string}</span>
                           @if (
                             spanDuration(job.started_at, job.finished_at)
@@ -312,7 +312,10 @@ export function RepoActionsRunPage() @{
                             </span>;
                           }
                         </span>
-                        <Badge variant={runStatusVariant(job.status)}>
+                        <Badge
+                          className="shrink-0"
+                          variant={runStatusVariant(job.status)}
+                        >
                           {job.status as string}
                         </Badge>
                       </button>
