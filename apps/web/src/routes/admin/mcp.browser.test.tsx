@@ -3,6 +3,7 @@
  * reset must not throw Octane DOM reconciliation errors.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createElement } from "octane";
 import {
   cleanupBrowserMount,
   clickTestId,
@@ -57,6 +58,10 @@ vi.mock("@/lib/ssr-auth", () => ({
 vi.mock("@octanejs/tanstack-router", () => ({
   createFileRoute: () => (opts: unknown) => opts,
   useLoaderData: () => loaderState.get(),
+  // No RouterProvider — AppLink must see "no router" and render its <a> fallback.
+  useRouter: () => undefined,
+  Link: (props: { href?: string; children?: unknown }) =>
+    createElement("a", { href: props.href }, props.children as never),
 }));
 
 import { AdminMcpPage } from "./mcp";

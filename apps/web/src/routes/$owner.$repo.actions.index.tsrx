@@ -449,14 +449,14 @@ export function RepoActionsPage() @{
                       <ListRow className="gap-3">
                         <RunStatusIcon status={run.status} />
                         <div className="min-w-0 flex-1">
-                          <a
+                          <AppLink
                             href={
                               `/${owner}/${repoName}/actions/${run.id}` as string
                             }
                             className="block truncate font-medium text-foreground no-underline hover:text-primary hover:underline"
                           >
                             {run.title as string}
-                          </a>
+                          </AppLink>
                           <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[12px] text-muted-foreground">
                             <span>
                               {
@@ -470,14 +470,14 @@ export function RepoActionsPage() @{
                             <span aria-hidden>·</span>
                             <span>{shortRef(run.head_ref) as string}</span>
                             <span aria-hidden>·</span>
-                            <a
+                            <AppLink
                               href={
                                 `/${owner}/${repoName}/commit/${run.head_sha}` as string
                               }
                               className="font-mono text-muted-foreground no-underline hover:text-primary hover:underline"
                             >
                               {run.head_sha.slice(0, 7) as string}
-                            </a>
+                            </AppLink>
                           </p>
                         </div>
                         <div className="flex shrink-0 flex-col items-end gap-1">

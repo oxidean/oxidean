@@ -38,6 +38,9 @@ export const Route = createFileRoute("/oauth/consent")({
     scope: typeof search.scope === "string" ? search.scope : undefined,
     state: typeof search.state === "string" ? search.state : undefined,
   }),
+  // Loader consumes OAuth query params — loaderDeps keeps the match id
+  // search-aware so client_id/redirect_uri changes get fresh loaderData.
+  loaderDeps: ({ search }) => search,
   head: () => ({ meta: [{ title: "Authorize application · Oxidean" }] }),
   loader: async ({ location }): Promise<ConsentLoaderData> => {
     const search = location.search as ConsentSearch;

@@ -2,6 +2,7 @@ import { useForm } from "@octanejs/tanstack-form";
 import type { RepoFileCommitPolicyResponse } from "@oxidean/api-client";
 import { useEffect } from "octane";
 import { Button } from "@/components/ui/button";
+import { AppLink } from "@/components/ui/app-link";
 import { Input } from "@/components/ui/input";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { cn } from "@/lib/utils";
@@ -220,9 +221,9 @@ export function FileCommitForm({
       <Button type="submit" disabled={disabled} data-testid="file-commit-submit">
         {(pending ? "Committing…" : submitLabel) as string}
       </Button>
-      <a href={cancelHref as string} className="text-[14px] text-muted-foreground underline">
+      <AppLink href={cancelHref as string} className="text-[14px] text-muted-foreground underline">
         Cancel
-      </a>
+      </AppLink>
       @if (policyPending) {
         <span className="text-[13px] text-muted-foreground">
           Checking branch protection…

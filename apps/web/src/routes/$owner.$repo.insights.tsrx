@@ -9,6 +9,7 @@ import type {
   RepoPublic,
 } from "@oxidean/api-client";
 import { RepoNotFound } from "@/components/repo/repo-not-found";
+import { AppLink } from "@/components/ui/app-link";
 import { EmptyState } from "@/components/ui/empty-state";
 import { List, ListRow } from "@/components/ui/list";
 import { PageHeader } from "@/components/ui/page-header";
@@ -308,12 +309,12 @@ export function RepoInsightsPage() @{
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-[14px] font-medium text-foreground">
                     @if (c.username) {
-                      <a
+                      <AppLink
                         href={("/" + c.username) as string}
                         className="text-foreground no-underline hover:underline"
                       >
                         {c.name as string}
-                      </a>;
+                      </AppLink>;
                       <span className="text-muted-foreground">
                         {(" " + `@${c.username}`) as string}
                       </span>;
@@ -323,14 +324,14 @@ export function RepoInsightsPage() @{
                   </p>
                   <p className="truncate text-[12px] text-muted-foreground">
                     @if (c.last_commit_sha) {
-                      <a
+                      <AppLink
                         href={
                           commitHref(owner, repoName, c.last_commit_sha) as string
                         }
                         className="text-muted-foreground no-underline hover:underline"
                       >
                         {("Last commit " + unixRel(c.last_commit_unix)) as string}
-                      </a>;
+                      </AppLink>;
                     } @else {
                       <span>
                         {("Last commit " + unixRel(c.last_commit_unix)) as string}
@@ -393,12 +394,12 @@ export function RepoInsightsPage() @{
                 />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-[14px] font-medium text-foreground">
-                    <a
+                    <AppLink
                       href={("/" + row.node.owner + "/" + row.node.name) as string}
                       className="text-foreground no-underline hover:underline"
                     >
                       {(row.node.owner + "/" + row.node.name) as string}
-                    </a>
+                    </AppLink>
                     @if (row.node.is_root) {
                       <span className="ml-2 rounded-md border border-border bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
                         {"root" as string}

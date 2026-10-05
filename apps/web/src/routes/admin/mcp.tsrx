@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@octanejs/tanstack-query";
 import type { AdminMcpSettingsPublic, UserPublic } from "@oxidean/api-client";
 import { useEffect, useState } from "octane";
 import { AdminSettingsLayout, SettingsShell } from "@/components/settings/settings-shell";
+import { AppLink } from "@/components/ui/app-link";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -175,12 +176,12 @@ export function AdminMcpPage() @{
           <p className="text-[16px] text-muted-foreground">
             Sign in as a system administrator to manage MCP settings.
           </p>
-          <a
+          <AppLink
             href="/login?returnTo=/admin/mcp"
             className="mt-4 inline-block text-primary underline-offset-2 hover:underline"
           >
             Sign in
-          </a>
+          </AppLink>
         </div>
       </SettingsShell>;
     } @else {
