@@ -1940,8 +1940,14 @@ export type ActionWorkflowPublic = {
   supports_dispatch: boolean;
 };
 
+export type ActionWorkflowFileError = {
+  path: string;
+  message: string;
+};
+
 export type ActionWorkflowsListResponse = {
   workflows: ActionWorkflowPublic[];
+  errors: ActionWorkflowFileError[];
   git_ref: string;
 };
 

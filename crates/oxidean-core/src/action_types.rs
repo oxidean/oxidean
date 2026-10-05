@@ -139,9 +139,19 @@ pub struct ActionWorkflowPublic {
     pub supports_dispatch: bool,
 }
 
+/// A workflow file that failed discovery validation and was skipped.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActionWorkflowFileError {
+    pub path: String,
+    pub message: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ActionWorkflowsListResponse {
     pub workflows: Vec<ActionWorkflowPublic>,
+    /// Workflow files skipped during discovery (invalid YAML, too large, bad path).
+    #[serde(default)]
+    pub errors: Vec<ActionWorkflowFileError>,
     /// Resolved ref the discovery ran against.
     pub git_ref: String,
 }

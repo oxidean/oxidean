@@ -15,6 +15,23 @@ pub struct DiscoveredWorkflow {
     pub document: WorkflowDocument,
 }
 
+/// A workflow file that was skipped during discovery (bad YAML, too large,
+/// or a disallowed path) — recorded so callers can surface it.
+#[derive(Debug, Clone)]
+pub struct DiscoveryFileError {
+    pub path: String,
+    pub message: String,
+}
+
+/// Discovery outcome: usable workflows plus per-file errors for skipped
+/// files. Only git-level failures produce `Err` — a broken workflow file
+/// must not take the repo's remaining workflows down with it.
+#[derive(Debug, Default)]
+pub struct WorkflowDiscovery {
+    pub workflows: Vec<DiscoveredWorkflow>,
+    pub errors: Vec<DiscoveryFileError>,
+}
+
 #[derive(Debug)]
 pub enum DiscoverError {
     Git(GitError),
@@ -83,9 +100,9 @@ pub async fn discover_workflows(
     git: &dyn GitBackend,
     repo: &Path,
     treeish: &str,
-) -> Result<Vec<DiscoveredWorkflow>, DiscoverError> {
+) -> Result<WorkflowDiscovery, DiscoverError> {
     let entries = git.ls_tree(repo, treeish, ".github/workflows").await?;
-    let mut out = Vec::new();
+    let mut out = WorkflowDiscovery::default();
     for entry in entries {
         if entry.kind != TreeEntryKind::Blob {
             continue;
@@ -94,22 +111,39 @@ pub async fn discover_workflows(
             continue;
         }
         let path = format!(".github/workflows/{}", entry.name);
-        let path = confine_workflow_path(&path)?;
+        let path = match confine_workflow_path(&path) {
+            Ok(p) => p,
+            Err(e) => {
+                out.errors.push(DiscoveryFileError {
+                    path,
+                    message: e.to_string(),
+                });
+                continue;
+            }
+        };
         let bytes = git.cat_blob(repo, treeish, &path).await?;
         if bytes.len() > MAX_WORKFLOW_BYTES {
-            return Err(DiscoverError::TooLarge {
-                path: path.clone(),
-                size: bytes.len(),
+            out.errors.push(DiscoveryFileError {
+                path,
+                message: format!(
+                    "workflow exceeds {MAX_WORKFLOW_BYTES} bytes ({})",
+                    bytes.len()
+                ),
             });
+            continue;
         }
         match parse_workflow_yaml(&bytes) {
-            Ok(document) => out.push(DiscoveredWorkflow { path, document }),
+            Ok(document) => out.workflows.push(DiscoveredWorkflow { path, document }),
             Err(error) => {
-                return Err(DiscoverError::Parse { path, error });
+                out.errors.push(DiscoveryFileError {
+                    path,
+                    message: error.to_string(),
+                });
             }
         }
     }
-    out.sort_by(|a, b| a.path.cmp(&b.path));
+    out.workflows.sort_by(|a, b| a.path.cmp(&b.path));
+    out.errors.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(out)
 }
 

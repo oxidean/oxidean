@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use oxidean_api::actions::{discover_workflows, parse_workflow_yaml, DiscoverError};
+use oxidean_api::actions::{discover_workflows, parse_workflow_yaml};
 use oxidean_git::{CliGitBackend, GitBackend};
 
 #[tokio::test]
@@ -35,10 +35,11 @@ jobs:
     let found = discover_workflows(&git as &dyn GitBackend, &bare, "main")
         .await
         .expect("discover");
-    assert_eq!(found.len(), 1);
-    assert_eq!(found[0].path, ".github/workflows/ci.yml");
-    assert_eq!(found[0].document.name, "CI");
-    assert!(found[0].document.triggers.push);
+    assert_eq!(found.workflows.len(), 1);
+    assert!(found.errors.is_empty());
+    assert_eq!(found.workflows[0].path, ".github/workflows/ci.yml");
+    assert_eq!(found.workflows[0].document.name, "CI");
+    assert!(found.workflows[0].document.triggers.push);
 }
 
 #[tokio::test]
@@ -78,7 +79,7 @@ jobs:
 }
 
 #[tokio::test]
-async fn actions_workflow_parse_unsupported_fails_clearly() {
+async fn actions_workflow_parse_unsupported_files_are_skipped() {
     let dir = tempfile::tempdir().unwrap();
     let bare = dir.path().join("bad.git");
     let git = CliGitBackend::new();
@@ -95,20 +96,18 @@ async fn actions_workflow_parse_unsupported_fails_clearly() {
     .await
     .expect("seed");
 
-    let err = discover_workflows(&git as &dyn GitBackend, &bare, "main")
+    let found = discover_workflows(&git as &dyn GitBackend, &bare, "main")
         .await
-        .expect_err("must fail");
-    match err {
-        DiscoverError::Parse { path, error } => {
-            assert_eq!(path, ".github/workflows/broken.yml");
-            assert!(
-                error.message.contains("invalid workflow YAML"),
-                "{}",
-                error.message
-            );
-        }
-        other => panic!("expected Parse, got {other}"),
-    }
+        .expect("discover");
+    assert!(found.workflows.is_empty());
+    assert_eq!(found.errors.len(), 1);
+    let fe = &found.errors[0];
+    assert_eq!(fe.path, ".github/workflows/broken.yml");
+    assert!(
+        fe.message.contains("invalid workflow YAML"),
+        "{}",
+        fe.message
+    );
 
     // Missing runs-on → clear parse error (not silent execute).
     let missing = parse_workflow_yaml(
@@ -127,6 +126,48 @@ jobs:
         "{}",
         missing.message
     );
+}
+
+#[tokio::test]
+async fn actions_workflow_parse_bad_file_does_not_block_good_workflows() {
+    let dir = tempfile::tempdir().unwrap();
+    let bare = dir.path().join("mixed.git");
+    let git = CliGitBackend::new();
+    git.init_bare(&bare, "main").await.expect("init");
+    git.seed_commit(
+        &bare,
+        "main",
+        "good + bad",
+        &[
+            (
+                ".github/workflows/ci.yml".into(),
+                br#"
+name: CI
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ok
+"#
+                .to_vec(),
+            ),
+            (
+                ".github/workflows/broken.yml".into(),
+                b"name: [\n  - broken\n".to_vec(),
+            ),
+        ],
+    )
+    .await
+    .expect("seed");
+
+    let found = discover_workflows(&git as &dyn GitBackend, &bare, "main")
+        .await
+        .expect("discover");
+    assert_eq!(found.workflows.len(), 1);
+    assert_eq!(found.workflows[0].document.name, "CI");
+    assert_eq!(found.errors.len(), 1);
+    assert_eq!(found.errors[0].path, ".github/workflows/broken.yml");
 }
 
 #[tokio::test]

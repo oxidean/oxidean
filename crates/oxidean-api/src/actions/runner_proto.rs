@@ -267,6 +267,7 @@ async fn job_steps_at_head(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let wf = discovered
+        .workflows
         .into_iter()
         .find(|w| w.path == run.workflow_path)
         .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;

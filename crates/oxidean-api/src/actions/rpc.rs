@@ -11,8 +11,8 @@ use oxidean_core::{
     ActionRunMutationRequest, ActionRunMutationResponse, ActionRunPublic, ActionRunnerPublic,
     ActionRunsListRequest, ActionRunsListResponse, ActionSecretDeleteRequest,
     ActionSecretMetaPublic, ActionSecretPutRequest, ActionSecretsListRequest,
-    ActionSecretsListResponse, ActionSetEnabledRequest, ActionWorkflowPublic,
-    ActionWorkflowsListRequest, ActionWorkflowsListResponse, AppError,
+    ActionSecretsListResponse, ActionSetEnabledRequest, ActionWorkflowFileError,
+    ActionWorkflowPublic, ActionWorkflowsListRequest, ActionWorkflowsListResponse, AppError,
 };
 use oxidean_db::{ActionJobRow, ActionRunFilter, ActionRunRow, ActionRunnerRow};
 
@@ -496,11 +496,20 @@ pub async fn list_workflows(
         })?;
     Ok(ActionWorkflowsListResponse {
         workflows: discovered
+            .workflows
             .iter()
             .map(|w| ActionWorkflowPublic {
                 path: w.path.clone(),
                 name: w.document.name.clone(),
                 supports_dispatch: w.document.triggers.workflow_dispatch,
+            })
+            .collect(),
+        errors: discovered
+            .errors
+            .iter()
+            .map(|e| ActionWorkflowFileError {
+                path: e.path.clone(),
+                message: e.message.clone(),
             })
             .collect(),
         git_ref: req.git_ref.unwrap_or_else(|| accessible.row.default_branch.clone()),
@@ -556,9 +565,26 @@ pub async fn dispatch_workflow(
         })?;
     let wanted = req.workflow_id.trim();
     let wf = discovered
+        .workflows
         .iter()
-        .find(|w| w.path == wanted || w.document.name == wanted)
-        .ok_or_else(|| AppError::new("repo.actions.workflow_not_found", "workflow not found"))?;
+        .find(|w| w.path == wanted || w.document.name == wanted);
+    let wf = match wf {
+        Some(w) => w,
+        None => {
+            if let Some(fe) = discovered.errors.iter().find(|e| {
+                e.path == wanted || e.path.rsplit('/').next() == Some(wanted)
+            }) {
+                return Err(AppError::new(
+                    "repo.actions.workflow_invalid",
+                    format!("workflow is invalid: {}", fe.message),
+                ));
+            }
+            return Err(AppError::new(
+                "repo.actions.workflow_not_found",
+                "workflow not found",
+            ));
+        }
+    };
     if !wf.document.triggers.workflow_dispatch {
         return Err(AppError::new(
             "repo.actions.dispatch_unsupported",
