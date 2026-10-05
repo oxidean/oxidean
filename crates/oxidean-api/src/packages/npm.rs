@@ -6,8 +6,11 @@ use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, put};
 use axum::{Json, Router};
+use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use sha1::{Digest as _, Sha1};
+use sha2::{Digest as _, Sha512};
 use uuid::Uuid;
 
 use oxidean_db::{Database, PackageRow};
@@ -78,9 +81,22 @@ fn b64_decode(input: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
-fn hex_sha256(bytes: &[u8]) -> String {
-    let digest = store::digest_of_bytes(bytes);
-    digest.strip_prefix("sha256:").unwrap_or(&digest).to_string()
+fn hex_sha1(bytes: &[u8]) -> String {
+    let digest = Sha1::digest(bytes);
+    let mut out = String::with_capacity(digest.len() * 2);
+    for &b in digest.iter() {
+        out.push(char::from_digit((b >> 4) as u32, 16).unwrap_or('0'));
+        out.push(char::from_digit((b & 0xf) as u32, 16).unwrap_or('0'));
+    }
+    out
+}
+
+fn sri_sha512(bytes: &[u8]) -> String {
+    let digest = Sha512::digest(bytes);
+    format!(
+        "sha512-{}",
+        base64::engine::general_purpose::STANDARD.encode(digest)
+    )
 }
 
 fn tarball_filename(pkg: &str, version: &str) -> String {
@@ -180,6 +196,8 @@ struct NpmVersionMeta {
     #[serde(default)]
     shasum: String,
     #[serde(default)]
+    integrity: String,
+    #[serde(default)]
     deprecated: Option<String>,
     #[serde(default)]
     manifest: Value,
@@ -269,13 +287,14 @@ async fn get_packument(
             json!({"name": pkg_name, "version": v.version})
         };
         if let Some(obj) = man.as_object_mut() {
-            obj.insert(
-                "dist".into(),
-                json!({
-                    "tarball": tarball_url(&owner, &pkg_name, &v.version),
-                    "shasum": vm.shasum,
-                }),
-            );
+            let mut dist = json!({
+                "tarball": tarball_url(&owner, &pkg_name, &v.version),
+                "shasum": vm.shasum,
+            });
+            if !vm.integrity.is_empty() {
+                dist["integrity"] = json!(vm.integrity);
+            }
+            obj.insert("dist".into(), dist);
             if let Some(dep) = &vm.deprecated {
                 obj.insert("deprecated".into(), json!(dep));
             }
@@ -504,10 +523,12 @@ async fn put_publish(
         }
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
-    let shasum = hex_sha256(&tarball);
+    let shasum = hex_sha1(&tarball);
+    let integrity = sri_sha512(&tarball);
     let vm = NpmVersionMeta {
         digest: digest.clone(),
         shasum,
+        integrity,
         deprecated: None,
         manifest,
     };

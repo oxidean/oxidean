@@ -78,6 +78,8 @@ russh = { version = "0.63", features = ["aws-lc-rs"] }
 serde_yaml = "0.9"
 prost = "0.13"
 zip = { version = "2.2", default-features = false, features = ["deflate"] }
+sha1 = "0.10.6"
+base64 = "0.22"
 
 [dev-dependencies]
 http-body-util = "0.1"
