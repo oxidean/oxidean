@@ -109,7 +109,7 @@ export function OAuthAppItem({ app }: OAuthAppItemProps) @{
           {"Client ID: " + app.client_id}
         </p>
         <p className="mt-1 font-mono text-[12px] text-muted-foreground">
-          {"Client secret: " + app.client_secret_prefix + "…"}
+          {"Client secret: " + app.client_secret_prefix + "***"}
         </p>
         <p className="mt-1 text-[13px] text-muted-foreground">
           {"Callback URLs: " + app.redirect_uris.join(", ")}

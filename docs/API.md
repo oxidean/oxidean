@@ -544,7 +544,9 @@ authenticate users — "sign in with Oxidean" — and act on their behalf.
 The create (and `oauthApp.regenerateSecret`) response includes a one-time
 plaintext `client_secret` (`oxidean_osec_…`) plus the `app` row — `client_id`
 (`oxidean_oc_…`), name, `client_secret_prefix`, `redirect_uris`, timestamps.
-Only the SHA-256 hash of the secret is stored. `oauthApp.list` /
+Only the SHA-256 hash of the secret is stored. `client_secret_prefix` is the
+constant marker `oxidean_osec_` — the secret is write-once and never
+re-exposed; rotation is the only way to change it. `oauthApp.list` /
 `oauthApp.update` / `oauthApp.delete` manage apps you own; update accepts
 `{ "id", "name"?, "redirect_uris"? }`. Redirect URIs must be absolute `https`
 (`http` only for `localhost` / `127.*` / `::1`), no fragments or userinfo,

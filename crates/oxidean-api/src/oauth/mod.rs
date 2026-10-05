@@ -171,7 +171,9 @@ fn app_to_public(row: &OAuthAppRow) -> Result<OAuthAppPublic, AppError> {
         id: row.id.clone(),
         name: row.name.clone(),
         client_id: row.client_id.clone(),
-        client_secret_prefix: row.client_secret_prefix.clone(),
+        // Secrets are write-once: the stored prefix carries secret material
+        // (first 8 hex), so the public payload only echoes the marker.
+        client_secret_prefix: OAUTH_CLIENT_SECRET_PREFIX.to_string(),
         redirect_uris,
         created_at: row.created_at.clone(),
         updated_at: row.updated_at.clone(),

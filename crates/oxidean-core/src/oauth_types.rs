@@ -114,7 +114,7 @@ pub struct OAuthAppPublic {
     pub id: String,
     pub name: String,
     pub client_id: String,
-    /// Display fingerprint: secret prefix + first 8 hex — never the secret.
+    /// Masked marker only (`oxidean_osec_`) — no secret material is exposed.
     pub client_secret_prefix: String,
     pub redirect_uris: Vec<String>,
     pub created_at: String,
