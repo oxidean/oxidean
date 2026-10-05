@@ -178,6 +178,33 @@ export const routeCoverageManifest: RouteCoverageEntry[] = [
     ],
   },
   {
+    route: "settings/applications.tsrx",
+    coverage: [
+      {
+        kind: "happy-dom",
+        test: "apps/web/src/routes/settings/applications.integration.test.ts",
+      },
+    ],
+  },
+  {
+    route: "settings/cli.tsrx",
+    coverage: [
+      {
+        kind: "happy-dom",
+        test: "apps/web/src/routes/settings/cli.integration.test.ts",
+      },
+    ],
+  },
+  {
+    route: "oauth.consent.tsrx",
+    coverage: [
+      {
+        kind: "happy-dom",
+        test: "apps/web/src/routes/oauth.consent.integration.test.ts",
+      },
+    ],
+  },
+  {
     route: "settings/tokens.new.fine-grained.tsrx",
     coverage: [
       {
@@ -279,6 +306,15 @@ export const routeCoverageManifest: RouteCoverageEntry[] = [
       },
     ],
   },
+  {
+    route: "admin/mcp.tsrx",
+    coverage: [
+      {
+        kind: "happy-dom",
+        test: "apps/web/src/routes/admin/mcp.integration.test.ts",
+      },
+    ],
+  },
 
   // --- forge repo chrome + code browse (11.1-04) ---
   {
@@ -345,6 +381,51 @@ export const routeCoverageManifest: RouteCoverageEntry[] = [
       {
         kind: "happy-dom",
         test: "apps/web/src/routes/$owner.$repo.integration.test.ts",
+      },
+    ],
+  },
+  {
+    route: "$owner.$repo.delete.$.tsrx",
+    coverage: [
+      {
+        kind: "happy-dom",
+        test: "apps/web/src/routes/$owner.$repo.file-editing.integration.test.ts",
+      },
+    ],
+  },
+  {
+    route: "$owner.$repo.edit.$.tsrx",
+    coverage: [
+      {
+        kind: "happy-dom",
+        test: "apps/web/src/routes/$owner.$repo.file-editing.integration.test.ts",
+      },
+    ],
+  },
+  {
+    route: "$owner.$repo.mkdir.$.tsrx",
+    coverage: [
+      {
+        kind: "happy-dom",
+        test: "apps/web/src/routes/$owner.$repo.file-editing.integration.test.ts",
+      },
+    ],
+  },
+  {
+    route: "$owner.$repo.new.$.tsrx",
+    coverage: [
+      {
+        kind: "happy-dom",
+        test: "apps/web/src/routes/$owner.$repo.file-editing.integration.test.ts",
+      },
+    ],
+  },
+  {
+    route: "$owner.$repo.upload.$.tsrx",
+    coverage: [
+      {
+        kind: "happy-dom",
+        test: "apps/web/src/routes/$owner.$repo.file-editing.integration.test.ts",
       },
     ],
   },
@@ -471,6 +552,15 @@ export const routeCoverageManifest: RouteCoverageEntry[] = [
       {
         kind: "happy-dom",
         test: "apps/web/src/routes/$owner.$repo.social-lists.integration.test.ts",
+      },
+    ],
+  },
+  {
+    route: "$owner.$repo.insights.tsrx",
+    coverage: [
+      {
+        kind: "happy-dom",
+        test: "apps/web/src/routes/$owner.$repo.insights.integration.test.ts",
       },
     ],
   },

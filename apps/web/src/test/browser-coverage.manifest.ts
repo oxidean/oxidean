@@ -49,6 +49,9 @@ const UI_BROWSER = "apps/web/src/components/ui/ui-controls.browser.test.tsx";
 const SSH_BROWSER = "apps/web/src/components/settings/ssh-key-add-form.browser.test.tsx";
 const MIRROR_BROWSER = "apps/web/src/components/repo/mirror-settings-panel.browser.test.tsx";
 const WEBHOOK_FORM_BROWSER = "apps/web/src/components/repo/webhook-form.browser.test.tsx";
+const ACTIONS_RERUN_BROWSER = "apps/web/src/components/repo/actions-rerun-menu.browser.test.tsx";
+const ACTIONS_FILTERS_BROWSER = "apps/web/src/components/repo/actions-filters.browser.test.tsx";
+const FEATURES_BROWSER = "apps/web/src/components/repo/repo-features-panel.browser.test.tsx";
 
 const AUTH_UI = "apps/web/e2e/stack-browser/auth-ui.stack.browser.test.tsx";
 const FORGE_ADMIN = "apps/web/e2e/stack-browser/forge-admin.stack.browser.test.tsx";
@@ -150,6 +153,10 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
     ],
   },
   {
+    surface: "components/repo/repo-features-panel.tsrx",
+    coverage: [{ kind: "browser", test: FEATURES_BROWSER, subject: "repo-features-panel" }],
+  },
+  {
     surface: "components/repo/mirror-settings-panel.tsrx",
     coverage: [
       { kind: "browser", test: MIRROR_BROWSER, subject: "mirror-settings-panel" },
@@ -173,6 +180,16 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
         kind: "browser",
         test: WEBHOOK_FORM_BROWSER,
         subject: "webhooks-panel",
+      },
+    ],
+  },
+  {
+    surface: "components/repo/deploy-keys-panel.tsrx",
+    coverage: [
+      {
+        kind: "browser",
+        test: "apps/web/src/components/repo/deploy-keys-panel.browser.test.tsx",
+        subject: "deploy-keys-panel",
       },
     ],
   },
@@ -235,6 +252,26 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
     ],
   },
   {
+    surface: "components/repo/actions-rerun-menu.tsrx",
+    coverage: [
+      {
+        kind: "browser",
+        test: ACTIONS_RERUN_BROWSER,
+        subject: "actions-rerun-menu",
+      },
+    ],
+  },
+  {
+    surface: "components/repo/actions-filters.tsrx",
+    coverage: [
+      {
+        kind: "browser",
+        test: ACTIONS_FILTERS_BROWSER,
+        subject: "actions-filters",
+      },
+    ],
+  },
+  {
     surface: "components/admin/byte-quota-field.tsrx",
     coverage: [
       {
@@ -247,6 +284,27 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
   {
     surface: "components/chrome.tsrx",
     coverage: [{ kind: "stack-browser", test: CHROME_MENUS, subject: "chrome" }],
+  },
+
+  {
+    surface: "components/repo/file-commit-form.tsrx",
+    coverage: [
+      {
+        kind: "browser",
+        test: "apps/web/src/components/repo/file-commit-form.browser.test.tsx",
+        subject: "file-commit-form",
+      },
+    ],
+  },
+  {
+    surface: "components/repo/repo-browse-toolbar.tsrx",
+    coverage: [
+      {
+        kind: "browser",
+        test: "apps/web/src/components/repo/file-commit-form.browser.test.tsx",
+        subject: "repo-browse-toolbar",
+      },
+    ],
   },
 
   // --- routes ---
@@ -313,6 +371,16 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
         kind: "skip",
         rationale:
           "Admin templates Switch/Select; forge-admin does not open /admin/templates yet. Add browser or stack-browser on next templates edit.",
+      },
+    ],
+  },
+  {
+    surface: "routes/admin/mcp.tsrx",
+    coverage: [
+      {
+        kind: "browser",
+        test: "apps/web/src/routes/admin/mcp.browser.test.tsx",
+        subject: "admin-mcp-page",
       },
     ],
   },

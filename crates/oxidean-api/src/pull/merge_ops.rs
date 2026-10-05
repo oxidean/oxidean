@@ -13,6 +13,7 @@ use crate::protection::{
 };
 use crate::pull::acl;
 use crate::rpc::RpcCtx;
+use crate::webhook::dispatch;
 
 use super::{db_err, load_pull_in_repo, to_public};
 
@@ -423,6 +424,20 @@ pub async fn merge(ctx: &RpcCtx, input: serde_json::Value) -> Result<MergePullRe
         .await
         .map_err(db_err)?;
 
+    // API-06: refs/pull/{N}/merge resolves to the recorded merge commit — the
+    // merge object was pushed into the base repo by the worktree merge above.
+    // (`/head` keeps tracking pull.head_sha; GitHub's /merge is a test-merge
+    // which we do not compute, so it exists only after a real merge.)
+    super::refs::sync_merge_ref(
+        ctx.git.as_ref(),
+        &ctx.repos_dir,
+        &accessible.owner_username,
+        &accessible.row.name,
+        row.number,
+        &sha,
+    )
+    .await;
+
     let merge_subject = full_message.lines().next().unwrap_or("").trim();
     crate::repo::record_pr_merge(
         &ctx.db,
@@ -446,6 +461,13 @@ pub async fn merge(ctx: &RpcCtx, input: serde_json::Value) -> Result<MergePullRe
         accessible.row.id.clone(),
     );
 
+    // GIT-25: refresh cached size_bytes after merge objects landed.
+    if let Err(e) =
+        crate::git::quota::refresh_repo_size_bytes(&ctx.db, &accessible.row.id, &path).await
+    {
+        tracing::warn!(error = %e, "refresh repo size_bytes failed");
+    }
+
     if row.base_ref == accessible.row.default_branch {
         let mut nums = parse_closing_issue_numbers(&row.body);
         nums.extend(parse_closing_issue_numbers(&full_message));
@@ -461,7 +483,23 @@ pub async fn merge(ctx: &RpcCtx, input: serde_json::Value) -> Result<MergePullRe
     }
 
     if req.delete_branch.unwrap_or(false) && row.head_repo_id == row.repo_id {
-        let _ = ctx.git.branch_delete(&path, &row.head_ref).await;
+        if ctx.git.branch_delete(&path, &row.head_ref).await.is_ok() {
+            // API-04: deleting the head branch on merge fires `delete`.
+            let payload = dispatch::ref_event_payload(
+                "delete",
+                &row.head_ref,
+                "branch",
+                &accessible.row.default_branch,
+                &accessible.row.description,
+                &accessible.owner_username,
+                &accessible.row.name,
+                &accessible.row.id,
+                &user.username,
+                &user.id,
+            );
+            dispatch::emit(&ctx.db, &accessible.row.id, "delete", "", payload, &ctx.env_name)
+                .await;
+        }
     }
 
     let updated = load_pull_in_repo(ctx, &accessible.row.id, req.number).await?;
@@ -485,17 +523,16 @@ pub async fn merge(ctx: &RpcCtx, input: serde_json::Value) -> Result<MergePullRe
     })
 }
 
+/// `repo.mergeSettings.get` — repo Read+; NOT gated on the pulls unit so the
+/// merge-settings panel in repository settings stays usable while pulls are
+/// disabled (COL-13).
 pub async fn merge_settings_get(
     ctx: &RpcCtx,
     input: serde_json::Value,
 ) -> Result<RepoMergeSettings, AppError> {
-    let req: RepoGetRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new(
-            "rpc.bad_input",
-            format!("invalid merge settings get: {e}"),
-        )
-    })?;
-    let accessible = acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
+    let req: RepoGetRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid merge settings get: {e}")))?;
+    let accessible = crate::repo::resolve_repo_for_read(ctx, &req.owner, &req.name).await?;
     let s = ctx
         .db
         .get_repo_merge_settings(&accessible.row.id)

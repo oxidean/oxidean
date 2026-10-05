@@ -47,12 +47,18 @@ import { buildSwRegisterScript } from "@/lib/sw-register";
 // can point at a filename that was never deployed. The plugin hands the SSR
 // bundle the emitted filename and leaves client/dev on `?url`.
 import appStylesHref from "virtual:oxidean-app-styles-href";
+import { buildWebMcpRegisterScript, WEBMCP_WELL_KNOWN_PATH } from "@/lib/webmcp";
 
 // Build id is Vite-defined at compile time (commit SHA / local stamp). Script
 // body stays free of user input (T-03-19).
 const SW_REGISTER_SCRIPT = buildSwRegisterScript(
   (import.meta.env.VITE_OXIDEAN_SW_BUILD as string | undefined) ?? "dev",
 );
+
+// AGT-02: advertise the instance MCP endpoint to browser-side agents (WebMCP).
+// Static script — feature-detects document/navigator.modelContext, then
+// registers the instance tools/list catalog bridging tools/call to /api/mcp.
+const WEBMCP_REGISTER_SCRIPT = buildWebMcpRegisterScript();
 
 const PROVIDER_CONFIG_LOCKED: ProviderConfigPublic = {
   mode: "local",
@@ -186,6 +192,7 @@ function RootShell({ children }: { children?: unknown }) @{
       <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png" />
       <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
       <link rel="manifest" href="/manifest.webmanifest" />
+      <link rel="webmcp" type="application/json" href={WEBMCP_WELL_KNOWN_PATH} />
       <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
       <meta name="theme-color" content="#121212" media="(prefers-color-scheme: dark)" />
       <meta name="apple-mobile-web-app-title" content="Oxidean" />
@@ -195,6 +202,7 @@ function RootShell({ children }: { children?: unknown }) @{
       {children}
       <Scripts />
       <script dangerouslySetInnerHTML={{ __html: SW_REGISTER_SCRIPT }} />
+      <script dangerouslySetInnerHTML={{ __html: WEBMCP_REGISTER_SCRIPT }} />
     </Body>
   </Html>;
 }

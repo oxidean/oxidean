@@ -1,12 +1,14 @@
 import { createElement } from "octane";
-import { cleanup, screen, waitFor } from "@octanejs/testing-library";
+import { cleanup, fireEvent, screen, waitFor } from "@octanejs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithQueryClient } from "@/test/render-with-query";
 import type { RepoLayoutLoaderData } from "@/lib/repo-store";
 
 const collaboratorsListMock = vi.fn();
+const deployKeyListMock = vi.fn();
 const lfsGetUsageMock = vi.fn();
 const lfsListObjectsMock = vi.fn();
+const setArchivedMock = vi.fn();
 
 vi.mock("@/lib/api-client", () => ({
   apiClient: {
@@ -14,10 +16,16 @@ vi.mock("@/lib/api-client", () => ({
       collaborators: {
         list: (...args: unknown[]) => collaboratorsListMock(...args),
       },
+      deployKey: {
+        list: (...args: unknown[]) => deployKeyListMock(...args),
+        create: vi.fn(),
+        delete: vi.fn(),
+      },
       lfs: {
         getUsage: (...args: unknown[]) => lfsGetUsageMock(...args),
         listObjects: (...args: unknown[]) => lfsListObjectsMock(...args),
       },
+      setArchived: (...args: unknown[]) => setArchivedMock(...args),
     },
   },
 }));
@@ -74,11 +82,16 @@ afterEach(cleanup);
 describe("/$owner/$repo/settings render mount (G-11.1-15)", () => {
   beforeEach(() => {
     collaboratorsListMock.mockReset();
+    deployKeyListMock.mockReset();
     lfsGetUsageMock.mockReset();
     lfsListObjectsMock.mockReset();
     collaboratorsListMock.mockResolvedValue({
       ok: true,
       data: { collaborators: [] },
+    });
+    deployKeyListMock.mockResolvedValue({
+      ok: true,
+      data: { keys: [] },
     });
     lfsGetUsageMock.mockResolvedValue({
       ok: true,
@@ -109,5 +122,65 @@ describe("/$owner/$repo/settings render mount (G-11.1-15)", () => {
       },
       { timeout: 10_000 },
     );
+  });
+
+  it("shows the archive toggle in the danger zone for admins (GIT-20)", async () => {
+    layoutData.repo = { ...adminRepo };
+    renderWithQueryClient(RepoSettingsPage);
+
+    await waitFor(
+      () => {
+        expect(screen.getByText("Danger zone")).toBeTruthy();
+        expect(screen.getByRole("button", { name: "Archive repository" })).toBeTruthy();
+      },
+      { timeout: 10_000 },
+    );
+  });
+
+  it("archives after typed confirm and calls repo.setArchived (GIT-20)", async () => {
+    layoutData.repo = { ...adminRepo };
+    setArchivedMock.mockReset();
+    setArchivedMock.mockResolvedValue({
+      ok: true,
+      data: { ...adminRepo, archived: true },
+    });
+    renderWithQueryClient(RepoSettingsPage);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Archive repository" }));
+    const dialog = await screen.findByTestId("repo-archive-confirm");
+    const confirmInput = document.getElementById("archive-confirm");
+    expect(confirmInput).toBeTruthy();
+    expect(dialog).toBeTruthy();
+
+    // Confirm button stays disabled until the typed name matches.
+    fireEvent.input(confirmInput!, { target: { value: "hello" } });
+    await waitFor(() => {
+      const btn = dialog.querySelector("button:last-child") as HTMLButtonElement;
+      expect(btn.disabled).toBe(false);
+    });
+    fireEvent.click(dialog.querySelector("button:last-child") as HTMLButtonElement);
+
+    await waitFor(() => {
+      expect(setArchivedMock).toHaveBeenCalledWith({
+        owner: "ada",
+        name: "hello",
+        archived: true,
+      });
+    });
+  });
+
+  it("offers Unarchive for an archived repository (GIT-20)", async () => {
+    layoutData.repo = { ...adminRepo, archived: true };
+    renderWithQueryClient(RepoSettingsPage);
+
+    await waitFor(
+      () => {
+        expect(
+          screen.getAllByRole("button", { name: "Unarchive repository" }).length,
+        ).toBeGreaterThan(0);
+      },
+      { timeout: 10_000 },
+    );
+    layoutData.repo = { ...adminRepo };
   });
 });

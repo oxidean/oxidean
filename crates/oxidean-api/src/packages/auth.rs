@@ -3,6 +3,7 @@
 use axum::http::HeaderMap;
 use oxidean_core::{
     ClassicPatScope, PackagesPerm, CLASSIC_PAT_PREFIX, FINE_GRAINED_PAT_PREFIX,
+    OAUTH_ACCESS_TOKEN_PREFIX,
 };
 use oxidean_db::{Database, PatRow};
 use sha2::{Digest, Sha256};
@@ -89,12 +90,23 @@ pub async fn authenticate_registry(
         return Ok(None);
     };
 
-    if !(token.starts_with(CLASSIC_PAT_PREFIX) || token.starts_with(FINE_GRAINED_PAT_PREFIX)) {
-        return Ok(None);
-    }
-    let hash = sha256_hex(token.as_bytes());
-    let Some(pat) = db.find_pat_by_token_hash(&hash).await? else {
-        return Ok(None);
+    // API-03: `oxidean_oat_` access tokens authenticate like classic PATs —
+    // scopes (`package:read` / `package:write`) flow through the same
+    // `scopes_json` shape via `OAuthTokenIdentity::synthetic_pat`.
+    let pat = if token.starts_with(OAUTH_ACCESS_TOKEN_PREFIX) {
+        match crate::oauth::authenticate_oauth_token(db, &token).await? {
+            Some(ident) => ident.synthetic_pat(),
+            None => return Ok(None),
+        }
+    } else {
+        if !(token.starts_with(CLASSIC_PAT_PREFIX) || token.starts_with(FINE_GRAINED_PAT_PREFIX)) {
+            return Ok(None);
+        }
+        let hash = sha256_hex(token.as_bytes());
+        let Some(pat) = db.find_pat_by_token_hash(&hash).await? else {
+            return Ok(None);
+        };
+        pat
     };
     if pat.revoked_at.is_some() {
         return Ok(None);

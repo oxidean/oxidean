@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 
 /// `sshKey.add` input — title/note required; public key is the OpenSSH one-line form.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AddSshKeyRequest {
     /// Required title/note (D-SSH-05).
     pub title: String,
@@ -25,7 +25,7 @@ fn default_true() -> bool {
 }
 
 /// List / metadata item — public key optional; no one-time secret field (D-SSH-05).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SshKeyListItem {
     pub id: String,
     pub title: String,

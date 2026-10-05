@@ -235,7 +235,9 @@ pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssuePubli
     })?;
     let title = validate_title(&req.title)?.to_string();
     let body = validate_body(req.body.as_deref())?;
+    // Read+ (public contributors) with GIT-20 archive gate — not Write+ ACL.
     let accessible = acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
+    crate::repo::ensure_not_archived(&accessible)?;
 
     let id = Uuid::new_v4().to_string();
     let row = ctx
@@ -374,6 +376,7 @@ pub async fn update(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssuePubli
         ));
     }
     let accessible = acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
+    crate::repo::ensure_not_archived(&accessible)?;
     let row = load_issue_in_repo(ctx, &accessible.row.id, req.number).await?;
     if !acl::can_edit_issue(&user.id, &row, accessible.capability) {
         return Err(not_found());
@@ -551,6 +554,7 @@ pub async fn delete(ctx: &RpcCtx, input: serde_json::Value) -> Result<DeleteIssu
         )
     })?;
     let accessible = acl::resolve_for_admin(ctx, &req.owner, &req.name).await?;
+    crate::repo::ensure_not_archived(&accessible)?;
     let row = load_issue_in_repo(ctx, &accessible.row.id, req.number).await?;
     if req.confirm_number != row.number {
         return Err(AppError::new(
@@ -701,7 +705,9 @@ pub async fn comments_create(
         )
     })?;
     let body = validate_body(Some(req.body.as_str()))?;
+    // Read+ commenters with GIT-20 archive gate.
     let accessible = acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
+    crate::repo::ensure_not_archived(&accessible)?;
     let issue = load_issue_in_repo(ctx, &accessible.row.id, req.number).await?;
     let id = Uuid::new_v4().to_string();
     let row = ctx
@@ -765,6 +771,7 @@ pub async fn comments_update(
     })?;
     let new_body = validate_body(Some(req.body.as_str()))?;
     let accessible = acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
+    crate::repo::ensure_not_archived(&accessible)?;
     let issue = load_issue_in_repo(ctx, &accessible.row.id, req.number).await?;
     let row = load_comment_in_issue(ctx, &issue.id, &req.comment_id).await?;
     if !acl::can_edit_comment(&user.id, &row.author_id) {
@@ -826,6 +833,7 @@ pub async fn comments_delete(
         )
     })?;
     let accessible = acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
+    crate::repo::ensure_not_archived(&accessible)?;
     let issue = load_issue_in_repo(ctx, &accessible.row.id, req.number).await?;
     let row = load_comment_in_issue(ctx, &issue.id, &req.comment_id).await?;
     if !acl::can_delete_comment(&user.id, &row.author_id, accessible.capability) {

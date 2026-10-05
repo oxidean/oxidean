@@ -94,13 +94,107 @@ jobs:
     .await
     .expect("dispatch");
     assert_eq!(n, 1);
-    let runs = db.list_action_runs_for_repo(&repo_id, 100, 0).await.unwrap();
+    let runs = db.list_action_runs_for_repo(&repo_id, &Default::default(), 100, 0).await.unwrap();
     assert_eq!(runs.len(), 1);
     assert_eq!(runs[0].event, "push");
     assert_eq!(runs[0].status, "queued");
     let jobs = db.list_action_jobs_for_run(&runs[0].id).await.unwrap();
     assert_eq!(jobs.len(), 1);
     assert_eq!(jobs[0].status, "queued");
+}
+
+#[tokio::test]
+async fn actions_triggers_push_skips_broken_workflow_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("t.db");
+    let db = Database::connect(&format!("sqlite:{}", db_path.display()))
+        .await
+        .unwrap();
+    db.migrate().await.unwrap();
+    let bare = dir.path().join("acttrig").join("trig-demo.git");
+    std::fs::create_dir_all(bare.parent().unwrap()).unwrap();
+    let owner = db
+        .create_user(
+            "u-act-trig",
+            "acttrig@example.com",
+            "acttrig",
+            Some("hash"),
+            "Act Trig",
+            "",
+            None,
+            Role::User,
+        )
+        .await
+        .expect("user");
+    let repo = db
+        .insert_repository(
+            "r-act-trig-bad",
+            &owner.id,
+            "user",
+            "trig-demo",
+            "private",
+            "",
+            "main",
+        )
+        .await
+        .expect("repo");
+    let git = CliGitBackend::new();
+    git.init_bare(&bare, "main").await.expect("init");
+    git.seed_commit(
+        &bare,
+        "main",
+        "good + broken workflows",
+        &[
+            (
+                ".github/workflows/ci.yml".into(),
+                br#"
+name: CI
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+"#
+                .to_vec(),
+            ),
+            (
+                ".github/workflows/broken.yml".into(),
+                b"name: [\n  - broken\n".to_vec(),
+            ),
+        ],
+    )
+    .await
+    .expect("seed");
+    let tip = git
+        .list_refs(&bare)
+        .await
+        .expect("refs")
+        .into_iter()
+        .find(|r| r.name.ends_with("main"))
+        .map(|r| r.oid)
+        .expect("main tip");
+    let (uid, repo_id) = (owner.id, repo.id);
+
+    let n = dispatch_push_for_sha(
+        &db,
+        &git as &dyn GitBackend,
+        &bare,
+        &repo_id,
+        &tip,
+        "refs/heads/main",
+        Some(&uid),
+        true,
+    )
+    .await
+    .expect("dispatch");
+    assert_eq!(n, 1, "good workflow must still enqueue despite broken sibling");
+    let runs = db
+        .list_action_runs_for_repo(&repo_id, &Default::default(), 100, 0)
+        .await
+        .unwrap();
+    assert_eq!(runs.len(), 1);
+    assert_eq!(runs[0].workflow_path, ".github/workflows/ci.yml");
 }
 
 #[tokio::test]
@@ -148,7 +242,7 @@ jobs:
         assert_eq!(n, 1, "{action:?}");
     }
 
-    let runs = db.list_action_runs_for_repo(&repo_id, 100, 0).await.unwrap();
+    let runs = db.list_action_runs_for_repo(&repo_id, &Default::default(), 100, 0).await.unwrap();
     assert_eq!(runs.len(), 3);
     assert!(runs.iter().all(|r| r.event == "pull_request"));
 

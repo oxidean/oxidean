@@ -93,9 +93,12 @@ async fn dispatch_pull_request_inner(
     let discovered = discover_workflows(git, &event.bare_repo, &event.head_sha)
         .await
         .map_err(|e| e.to_string())?;
+    for fe in &discovered.errors {
+        tracing::warn!(path = %fe.path, error = %fe.message, "skipping invalid workflow file");
+    }
 
     let mut n = 0;
-    for wf in discovered {
+    for wf in &discovered.workflows {
         if !wf.document.triggers.pull_request {
             continue;
         }

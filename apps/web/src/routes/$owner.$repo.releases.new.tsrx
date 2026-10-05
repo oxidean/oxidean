@@ -169,6 +169,10 @@ export function RepoReleaseNewPage() @{
     <RepoNotFound />;
   } @else if (!repo) {
     <p className="text-[16px] text-muted-foreground">Loading…</p>;
+  } @else if (repo.archived) {
+    <p role="alert" className="text-[16px] text-muted-foreground">
+      This repository is archived and read-only. Releases can't be created.
+    </p>;
   } @else if (!repo.can_write) {
     <p role="alert" className="text-[16px] text-destructive">
       You need write access to create releases.

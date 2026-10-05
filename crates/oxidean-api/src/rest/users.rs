@@ -3,23 +3,143 @@
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::Response;
-use axum::routing::get;
-use axum::{Json, Router};
+use axum::routing::{get, post};
+use axum::Json;
+use oxidean_core::{
+    CreateRepoRequest, ListStarredRequest, OrgListMineResponse, PublicUserProfile,
+    RepoListMineResponse, RepoPublic, UserPublic,
+};
+use schemars::SchemaGenerator;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::call;
+use super::spec::{BodySpec, RespSpec, RouteDef};
 use crate::app::AppState;
 
-pub fn router() -> Router<AppState> {
-    Router::new()
-        .route("/user", get(current_user))
-        .route("/user/repos", get(list_my_repos).post(create_my_repo))
-        .route("/user/orgs", get(list_my_orgs))
-        .route("/user/starred", get(list_starred))
-        .route("/users/{username}", get(get_user))
-        .route("/users/{username}/repos", get(list_user_repos))
-}
+pub const ROUTES: &[RouteDef] = &[
+    RouteDef {
+        method: "GET",
+        path: "/user",
+        tags: &["users"],
+        operation_id: "getAuthenticatedUser",
+        summary: "Authenticated user (`auth.me`)",
+        procedure: "auth.me",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &[],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<UserPublic>,
+        )),
+        mount: || get(current_user),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/user/repos",
+        tags: &["users", "repos"],
+        operation_id: "listMyRepos",
+        summary: "List repos owned by the caller (`repo.listMine`)",
+        procedure: "repo.listMine",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &[],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<RepoListMineResponse>,
+        )),
+        mount: || get(list_my_repos),
+    },
+    RouteDef {
+        method: "POST",
+        path: "/user/repos",
+        tags: &["users", "repos"],
+        operation_id: "createMyRepo",
+        summary: "Create a repo owned by the caller (`repo.create`)",
+        procedure: "repo.create",
+        ok: StatusCode::CREATED,
+        anonymous: false,
+        path_fields: &[],
+        query: None,
+        body: Some(BodySpec::Rpc(
+            SchemaGenerator::into_root_schema_for::<CreateRepoRequest>,
+        )),
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<RepoPublic>,
+        )),
+        mount: || post(create_my_repo),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/user/orgs",
+        tags: &["users", "orgs"],
+        operation_id: "listMyOrgs",
+        summary: "Orgs the caller belongs to (`org.listMine`)",
+        procedure: "org.listMine",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &[],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<OrgListMineResponse>,
+        )),
+        mount: || get(list_my_orgs),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/user/starred",
+        tags: &["users", "repos"],
+        operation_id: "listStarred",
+        summary: "Repos starred by the caller (`user.listStarred`)",
+        procedure: "user.listStarred",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &[],
+        query: Some(SchemaGenerator::into_root_schema_for::<ListStarredRequest>),
+        body: None,
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<RepoListMineResponse>,
+        )),
+        mount: || get(list_starred),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/users/{username}",
+        tags: &["users"],
+        operation_id: "getUser",
+        summary: "Public profile (`user.getPublicProfile`)",
+        procedure: "user.getPublicProfile",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["username"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<PublicUserProfile>,
+        )),
+        mount: || get(get_user),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/users/{username}/repos",
+        tags: &["users", "repos"],
+        operation_id: "listUserRepos",
+        summary: "Repos under a user (`repo.listByOwner`)",
+        procedure: "repo.listByOwner",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["username"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<RepoListMineResponse>,
+        )),
+        mount: || get(list_user_repos),
+    },
+];
 
 /// `GET /api/v1/user` (`auth.me`) — the authenticated account.
 async fn current_user(State(state): State<AppState>, headers: HeaderMap) -> Response {

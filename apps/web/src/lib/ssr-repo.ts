@@ -85,6 +85,14 @@ export const fetchRepoRefs = createServerFn({ method: "GET" })
     return client.repo.refs({ owner: data.owner, name: data.name });
   });
 
+/** SSR: `repo.templates.list` — issue/PR file templates from the git tree (COL-02). */
+export const fetchRepoFileTemplates = createServerFn({ method: "GET" })
+  .validator(ownerNameValidator)
+  .handler(async ({ data }) => {
+    const client = createSsrClient(incomingCookie());
+    return client.repo.templates.list({ owner: data.owner, name: data.name });
+  });
+
 /** SSR: `repo.blob` with Cookie forward. */
 export const fetchRepoBlob = createServerFn({ method: "GET" })
   .validator((data: OwnerName & { ref: string; path: string }) => ({
@@ -218,6 +226,54 @@ export const fetchRepoActivity = createServerFn({ method: "GET" })
     });
   });
 
+/** SSR: `repo.insights.contributors` — Insights tab committer table (GIT-26). */
+export const fetchRepoInsightsContributors = createServerFn({ method: "GET" })
+  .validator((data: OwnerName & { limit?: number }) => ({
+    owner: String(data?.owner ?? ""),
+    name: String(data?.name ?? ""),
+    limit: typeof data?.limit === "number" ? data.limit : 30,
+  }))
+  .handler(async ({ data }) => {
+    const client = createSsrClient(incomingCookie());
+    return client.repo.insightsContributors({
+      owner: data.owner,
+      name: data.name,
+      limit: data.limit,
+    });
+  });
+
+/** SSR: `repo.insights.commitActivity` — weekly buckets (GIT-26). */
+export const fetchRepoInsightsCommitActivity = createServerFn({ method: "GET" })
+  .validator((data: OwnerName & { weeks?: number }) => ({
+    owner: String(data?.owner ?? ""),
+    name: String(data?.name ?? ""),
+    weeks: typeof data?.weeks === "number" ? data.weeks : 52,
+  }))
+  .handler(async ({ data }) => {
+    const client = createSsrClient(incomingCookie());
+    return client.repo.insightsCommitActivity({
+      owner: data.owner,
+      name: data.name,
+      weeks: data.weeks,
+    });
+  });
+
+/** SSR: `repo.insights.forkNetwork` — fork-network member rows (GIT-26). */
+export const fetchRepoInsightsForkNetwork = createServerFn({ method: "GET" })
+  .validator((data: OwnerName & { limit?: number }) => ({
+    owner: String(data?.owner ?? ""),
+    name: String(data?.name ?? ""),
+    limit: typeof data?.limit === "number" ? data.limit : 100,
+  }))
+  .handler(async ({ data }) => {
+    const client = createSsrClient(incomingCookie());
+    return client.repo.insightsForkNetwork({
+      owner: data.owner,
+      name: data.name,
+      limit: data.limit,
+    });
+  });
+
 /** SSR: `packages.list` filtered by repository_id (issue #23 About). */
 export const fetchPackagesForRepo = createServerFn({ method: "GET" })
   .validator((data: { repository_id: string }) => ({
@@ -244,12 +300,31 @@ export const fetchPackagesList = createServerFn({ method: "GET" })
 
 /** SSR: `repo.actions.listRuns` with Cookie forward (anonymous reads on public repos). */
 export const fetchActionsListRuns = createServerFn({ method: "GET" })
-  .validator((data: OwnerName & { page?: number; per_page?: number }) => ({
-    owner: String(data?.owner ?? ""),
-    name: String(data?.name ?? ""),
-    page: typeof data?.page === "number" ? data.page : 1,
-    per_page: typeof data?.per_page === "number" ? data.per_page : 25,
-  }))
+  .validator(
+    (
+      data: OwnerName & {
+        page?: number;
+        per_page?: number;
+        status?: string;
+        event?: string;
+        branch?: string;
+        workflow?: string;
+        actor?: string;
+        query?: string;
+      },
+    ) => ({
+      owner: String(data?.owner ?? ""),
+      name: String(data?.name ?? ""),
+      page: typeof data?.page === "number" ? data.page : 1,
+      per_page: typeof data?.per_page === "number" ? data.per_page : 25,
+      status: data?.status ? String(data.status) : undefined,
+      event: data?.event ? String(data.event) : undefined,
+      branch: data?.branch ? String(data.branch) : undefined,
+      workflow: data?.workflow ? String(data.workflow) : undefined,
+      actor: data?.actor ? String(data.actor) : undefined,
+      query: data?.query ? String(data.query) : undefined,
+    }),
+  )
   .handler(async ({ data }) => {
     const client = createSsrClient(incomingCookie());
     return client.repo.actions.listRuns({
@@ -257,6 +332,12 @@ export const fetchActionsListRuns = createServerFn({ method: "GET" })
       name: data.name,
       page: data.page,
       per_page: data.per_page,
+      status: data.status,
+      event: data.event,
+      branch: data.branch,
+      workflow: data.workflow,
+      actor: data.actor,
+      query: data.query,
     });
   });
 

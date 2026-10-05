@@ -12,7 +12,7 @@ pub const CLASSIC_PAT_PREFIX: &str = "oxidean_pat_";
 pub const FINE_GRAINED_PAT_PREFIX: &str = "oxidean_fg_";
 
 /// Token kind. Serialized as `classic` | `fine_grained`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum PatKind {
     Classic,
@@ -44,7 +44,7 @@ impl PatKind {
 }
 
 /// Classic scope catalog: `repo` (git) + `package:read` / `package:write` (D-PKG-04).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub enum ClassicPatScope {
     #[serde(rename = "repo")]
     Repo,
@@ -74,7 +74,7 @@ impl ClassicPatScope {
 }
 
 /// Fine-grained Packages permission (D-PKG-04).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum PackagesPerm {
     Read,
@@ -99,7 +99,7 @@ impl PackagesPerm {
 }
 
 /// Fine-grained repository access (D-06).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum FgRepoAccess {
     Selected,
@@ -124,7 +124,7 @@ impl FgRepoAccess {
 }
 
 /// Fine-grained Contents permission — `read` = upload-pack; `write` = receive-pack + read.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum ContentsPerm {
     Read,
@@ -149,7 +149,7 @@ impl ContentsPerm {
 }
 
 /// `pat.createClassic` input (RPC wired in 08-04+).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CreateClassicPatRequest {
     /// Required note/name (D-16).
     pub name: String,
@@ -161,7 +161,7 @@ pub struct CreateClassicPatRequest {
 }
 
 /// `pat.createFineGrained` input (RPC wired in 08-04+).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CreateFineGrainedPatRequest {
     /// Required note/name (D-16).
     pub name: String,
@@ -178,7 +178,7 @@ pub struct CreateFineGrainedPatRequest {
 }
 
 /// List / metadata item — **no** plaintext token field (D-15, T-08-01).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PatListItem {
     pub id: String,
     pub kind: PatKind,
@@ -204,7 +204,7 @@ pub struct PatListItem {
 }
 
 /// One-time create response — plaintext `token` only here (D-15).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CreatePatResponse {
     pub token: String,
     pub item: PatListItem,

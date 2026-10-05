@@ -17,6 +17,7 @@ use crate::lfs::batch::{
 };
 use crate::lfs::quota;
 use crate::lfs::store;
+use crate::public_origin::resolve_public_origin;
 use crate::repo::{resolve_owner_slug, OwnerRef};
 
 const LFS_JSON: &str = "application/vnd.git-lfs+json";
@@ -80,12 +81,12 @@ async fn resolve_repo(
     })
 }
 
-fn object_href(owner: &str, repo_git: &str, oid: &str) -> String {
-    format!("/{owner}/{repo_git}/info/lfs/objects/{oid}")
+fn object_href(origin: &str, owner: &str, repo_git: &str, oid: &str) -> String {
+    format!("{origin}/{owner}/{repo_git}/info/lfs/objects/{oid}")
 }
 
-fn verify_href(owner: &str, repo_git: &str) -> String {
-    format!("/{owner}/{repo_git}/info/lfs/objects/verify")
+fn verify_href(origin: &str, owner: &str, repo_git: &str) -> String {
+    format!("{origin}/{owner}/{repo_git}/info/lfs/objects/verify")
 }
 
 async fn require_lfs_enabled(state: &AppState, repo_id: &str) -> Result<(), Response> {
@@ -157,6 +158,7 @@ pub async fn batch(
             .into_response();
     };
 
+    let origin = resolve_public_origin();
     let mut objects = Vec::with_capacity(req.objects.len());
     for obj in req.objects {
         if store::validate_oid(&obj.oid).is_err() {
@@ -259,7 +261,7 @@ pub async fn batch(
                     });
                     continue;
                 }
-                let href = object_href(&owner, &repo_git, &obj.oid);
+                let href = object_href(&origin, &owner, &repo_git, &obj.oid);
                 objects.push(BatchObjectOut {
                     oid: obj.oid,
                     size: obj.size,
@@ -272,7 +274,7 @@ pub async fn batch(
                         download: None,
                         // Optional verify after PUT (D-LFS-07 resumable-within-basic).
                         verify: Some(BatchAction {
-                            href: verify_href(&owner, &repo_git),
+                            href: verify_href(&origin, &owner, &repo_git),
                             header: None,
                             expires_in: Some(3600),
                         }),
@@ -282,7 +284,7 @@ pub async fn batch(
             }
         } else if on_disk && linked {
             // Require per-repo link — global OID store must not cross-leak (D-LFS).
-            let href = object_href(&owner, &repo_git, &obj.oid);
+            let href = object_href(&origin, &owner, &repo_git, &obj.oid);
             objects.push(BatchObjectOut {
                 oid: obj.oid,
                 size: obj.size,

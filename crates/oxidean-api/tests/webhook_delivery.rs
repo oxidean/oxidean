@@ -923,3 +923,776 @@ async fn webhook_pull_request_lifecycle() {
     assert!(actions.contains("closed"), "{actions:?}");
     assert!(actions.contains("reopened"), "{actions:?}");
 }
+
+// ---------------------------------------------------------------------------
+// API-04: broader event catalog — release / star / fork / create / delete /
+// workflow_run / registry_package.
+// ---------------------------------------------------------------------------
+
+/// `webhook.create` accepts every new API-04 event name.
+#[tokio::test]
+async fn webhook_create_accepts_api04_events() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("api04.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos).await;
+    let cookie = verified_owner(&app, &db, "api04@ex.com", "api04own").await;
+    let _ = rpc_json(
+        &app,
+        r#"{"procedure":"repo.create","input":{"name":"demo","visibility":"public","description":""}}"#,
+        &cookie,
+    )
+    .await;
+    let created = rpc_json(
+        &app,
+        r#"{"procedure":"webhook.create","input":{"owner":"api04own","name":"demo","url":"https://example.com/hook","secret":"s","events":["release","star","fork","create","delete","workflow_run","registry_package"]}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(created["ok"], true, "{created}");
+    let events: Vec<&str> = created["data"]["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e.as_str().unwrap())
+        .collect();
+    for want in [
+        "release",
+        "star",
+        "fork",
+        "create",
+        "delete",
+        "workflow_run",
+        "registry_package",
+    ] {
+        assert!(events.contains(&want), "{events:?}");
+    }
+}
+
+/// `release` fires `published` on create, `edited` on update, `deleted` on delete.
+#[tokio::test]
+async fn webhook_release_lifecycle() {
+    let sink = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/rel"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&sink)
+        .await;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("rel.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos.clone()).await;
+    let cookie = verified_owner(&app, &db, "rel@ex.com", "relown").await;
+    let created_repo = rpc_json(
+        &app,
+        r#"{"procedure":"repo.create","input":{"name":"demo","visibility":"public","description":"","stack_id":"rust","license_id":"MIT","gitignore_id":"Rust"}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(created_repo["ok"], true, "{created_repo}");
+
+    // release.create requires the tag to exist on the bare repo.
+    let bare = repos.join("relown").join("demo.git");
+    let status = std::process::Command::new("git")
+        .args([
+            "-C",
+            bare.to_str().unwrap(),
+            "tag",
+            "v1.0.0",
+            "refs/heads/main",
+        ])
+        .status()
+        .unwrap();
+    assert!(status.success(), "git tag");
+
+    let hook_url = format!("{}/rel", sink.uri());
+    let created = rpc_json(
+        &app,
+        &format!(
+            r#"{{"procedure":"webhook.create","input":{{"owner":"relown","name":"demo","url":"{hook_url}","secret":"s","events":["release"]}}}}"#
+        ),
+        &cookie,
+    )
+    .await;
+    assert_eq!(created["ok"], true, "{created}");
+    let hook_id = created["data"]["id"].as_str().unwrap().to_string();
+
+    let rel = rpc_json(
+        &app,
+        r#"{"procedure":"release.create","input":{"owner":"relown","name":"demo","tag_name":"v1.0.0","title":"First","body":"notes"}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(rel["ok"], true, "{rel}");
+    let upd = rpc_json(
+        &app,
+        r#"{"procedure":"release.update","input":{"owner":"relown","name":"demo","tag_name":"v1.0.0","title":"First (edited)"}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(upd["ok"], true, "{upd}");
+    let del = rpc_json(
+        &app,
+        r#"{"procedure":"release.delete","input":{"owner":"relown","name":"demo","tag_name":"v1.0.0"}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(del["ok"], true, "{del}");
+
+    let mut actions = std::collections::HashSet::new();
+    for _ in 0..50 {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let deliveries = db.list_webhook_deliveries(&hook_id, 50).await.expect("list");
+        for d in deliveries.iter().filter(|d| d.event == "release") {
+            actions.insert(d.action.clone());
+        }
+        if actions.contains("published") && actions.contains("edited") && actions.contains("deleted")
+        {
+            break;
+        }
+    }
+    assert!(actions.contains("published"), "{actions:?}");
+    assert!(actions.contains("edited"), "{actions:?}");
+    assert!(actions.contains("deleted"), "{actions:?}");
+
+    let mut requests = Vec::new();
+    for _ in 0..50 {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        requests = sink.received_requests().await.expect("received requests");
+        if requests.len() >= 3 {
+            break;
+        }
+    }
+    assert!(!requests.is_empty());
+    for req in &requests {
+        assert_eq!(
+            req.headers.get("x-github-event").map(|v| v.to_str().unwrap()),
+            Some("release")
+        );
+    }
+    let bodies: Vec<String> = requests
+        .iter()
+        .map(|r| String::from_utf8_lossy(&r.body).into_owned())
+        .collect();
+    assert!(
+        bodies.iter().any(|b| b.contains("\"action\":\"published\"")
+            && b.contains("\"tag_name\":\"v1.0.0\"")
+            && b.contains("\"login\":\"relown\"")),
+        "{bodies:?}"
+    );
+    assert!(
+        bodies.iter().any(|b| b.contains("\"action\":\"deleted\"")),
+        "{bodies:?}"
+    );
+}
+
+/// `star` fires `created` on star and `deleted` on unstar; the idempotent
+/// second `repo.star` does not re-emit.
+#[tokio::test]
+async fn webhook_star_created_deleted() {
+    let sink = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/star"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&sink)
+        .await;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("star.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos).await;
+    let cookie = verified_owner(&app, &db, "star@ex.com", "starown").await;
+    let _ = rpc_json(
+        &app,
+        r#"{"procedure":"repo.create","input":{"name":"demo","visibility":"public","description":""}}"#,
+        &cookie,
+    )
+    .await;
+    let hook_url = format!("{}/star", sink.uri());
+    let created = rpc_json(
+        &app,
+        &format!(
+            r#"{{"procedure":"webhook.create","input":{{"owner":"starown","name":"demo","url":"{hook_url}","secret":"s","events":["star"]}}}}"#
+        ),
+        &cookie,
+    )
+    .await;
+    assert_eq!(created["ok"], true, "{created}");
+    let hook_id = created["data"]["id"].as_str().unwrap().to_string();
+
+    for _ in 0..2 {
+        let st = rpc_json(
+            &app,
+            r#"{"procedure":"repo.star","input":{"owner":"starown","name":"demo"}}"#,
+            &cookie,
+        )
+        .await;
+        assert_eq!(st["ok"], true, "{st}");
+    }
+    let un = rpc_json(
+        &app,
+        r#"{"procedure":"repo.unstar","input":{"owner":"starown","name":"demo"}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(un["ok"], true, "{un}");
+
+    let mut actions = Vec::new();
+    for _ in 0..50 {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let deliveries = db.list_webhook_deliveries(&hook_id, 50).await.expect("list");
+        actions = deliveries
+            .iter()
+            .filter(|d| d.event == "star")
+            .map(|d| d.action.clone())
+            .collect();
+        if actions.contains(&"deleted".to_string()) {
+            break;
+        }
+    }
+    // Exactly one `created` (idempotent re-star is suppressed) + one `deleted`.
+    assert_eq!(
+        actions.iter().filter(|a| a.as_str() == "created").count(),
+        1,
+        "{actions:?}"
+    );
+    assert_eq!(
+        actions.iter().filter(|a| a.as_str() == "deleted").count(),
+        1,
+        "{actions:?}"
+    );
+
+    let mut bodies: Vec<String> = Vec::new();
+    for _ in 0..50 {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let requests = sink.received_requests().await.expect("received requests");
+        bodies = requests
+            .iter()
+            .map(|r| String::from_utf8_lossy(&r.body).into_owned())
+            .collect();
+        if bodies.len() >= 2 {
+            break;
+        }
+    }
+    assert!(
+        bodies.iter().any(|b| b.contains("\"action\":\"created\"")
+            && b.contains("\"full_name\":\"starown/demo\"")),
+        "{bodies:?}"
+    );
+}
+
+/// `fork` fires on the source repository when another user forks it; the
+/// payload's `forkee` identifies the new repo.
+#[tokio::test]
+async fn webhook_fork_created() {
+    let sink = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/fork"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&sink)
+        .await;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("fork.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos).await;
+
+    let src_cookie = verified_owner(&app, &db, "forksrc@ex.com", "forksrc").await;
+    let create = rpc_json(
+        &app,
+        r#"{"procedure":"repo.create","input":{"name":"upstream","visibility":"public","description":"","stack_id":"rust","license_id":"MIT","gitignore_id":"Rust"}}"#,
+        &src_cookie,
+    )
+    .await;
+    assert_eq!(create["ok"], true, "{create}");
+
+    let hook_url = format!("{}/fork", sink.uri());
+    let created = rpc_json(
+        &app,
+        &format!(
+            r#"{{"procedure":"webhook.create","input":{{"owner":"forksrc","name":"upstream","url":"{hook_url}","secret":"s","events":["fork"]}}}}"#
+        ),
+        &src_cookie,
+    )
+    .await;
+    assert_eq!(created["ok"], true, "{created}");
+    let hook_id = created["data"]["id"].as_str().unwrap().to_string();
+
+    let fork_cookie = verified_owner(&app, &db, "forker@ex.com", "forker").await;
+    let forked = rpc_json(
+        &app,
+        r#"{"procedure":"repo.fork","input":{"owner":"forksrc","name":"upstream"}}"#,
+        &fork_cookie,
+    )
+    .await;
+    assert_eq!(forked["ok"], true, "{forked}");
+
+    let mut deliveries = Vec::new();
+    for _ in 0..50 {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        deliveries = db
+            .list_webhook_deliveries(&hook_id, 50)
+            .await
+            .expect("list")
+            .into_iter()
+            .filter(|d| d.event == "fork")
+            .collect();
+        if !deliveries.is_empty() {
+            break;
+        }
+    }
+    assert_eq!(deliveries.len(), 1, "{deliveries:?}");
+    let payload = &deliveries[0].payload_json;
+    assert!(payload.contains("\"forkee\""), "{payload}");
+    assert!(payload.contains("forker/upstream"), "{payload}");
+    assert!(payload.contains("\"login\":\"forker\""), "{payload}");
+
+    let mut requests = Vec::new();
+    for _ in 0..50 {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        requests = sink.received_requests().await.expect("received requests");
+        if !requests.is_empty() {
+            break;
+        }
+    }
+    assert!(!requests.is_empty());
+    assert_eq!(
+        requests[0]
+            .headers
+            .get("x-github-event")
+            .and_then(|v| v.to_str().ok()),
+        Some("fork")
+    );
+}
+
+/// `create` / `delete` fire for `repo.branchCreate` / `repo.branchDelete`.
+#[tokio::test]
+async fn webhook_create_delete_branch_rpc() {
+    let sink = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/refs"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&sink)
+        .await;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("refs.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos).await;
+    let cookie = verified_owner(&app, &db, "refs@ex.com", "refsown").await;
+    let create = rpc_json(
+        &app,
+        r#"{"procedure":"repo.create","input":{"name":"demo","visibility":"public","description":"","stack_id":"rust","license_id":"MIT","gitignore_id":"Rust"}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(create["ok"], true, "{create}");
+
+    let hook_url = format!("{}/refs", sink.uri());
+    let created = rpc_json(
+        &app,
+        &format!(
+            r#"{{"procedure":"webhook.create","input":{{"owner":"refsown","name":"demo","url":"{hook_url}","secret":"s","events":["create","delete"]}}}}"#
+        ),
+        &cookie,
+    )
+    .await;
+    assert_eq!(created["ok"], true, "{created}");
+    let hook_id = created["data"]["id"].as_str().unwrap().to_string();
+
+    let br = rpc_json(
+        &app,
+        r#"{"procedure":"repo.branchCreate","input":{"owner":"refsown","name":"demo","branch":"topic","start":"main"}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(br["ok"], true, "{br}");
+    let bd = rpc_json(
+        &app,
+        r#"{"procedure":"repo.branchDelete","input":{"owner":"refsown","name":"demo","branch":"topic"}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(bd["ok"], true, "{bd}");
+
+    let mut events = std::collections::HashSet::new();
+    for _ in 0..50 {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let deliveries = db.list_webhook_deliveries(&hook_id, 50).await.expect("list");
+        for d in deliveries {
+            events.insert(d.event);
+        }
+        if events.contains("create") && events.contains("delete") {
+            break;
+        }
+    }
+    assert!(events.contains("create"), "{events:?}");
+    assert!(events.contains("delete"), "{events:?}");
+
+    let mut bodies: Vec<String> = Vec::new();
+    for _ in 0..50 {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let requests = sink.received_requests().await.expect("received requests");
+        bodies = requests
+            .iter()
+            .map(|r| String::from_utf8_lossy(&r.body).into_owned())
+            .collect();
+        if bodies.len() >= 2 {
+            break;
+        }
+    }
+    assert!(
+        bodies.iter().any(|b| b.contains("\"ref\":\"topic\"")
+            && b.contains("\"ref_type\":\"branch\"")),
+        "{bodies:?}"
+    );
+}
+
+/// The receive-pack notify path emits `create` / `delete` for branch and tag
+/// refs beside `push` (covers the smart-HTTP / SSH update triples).
+#[tokio::test]
+async fn webhook_ref_events_receive_pack() {
+    use oxidean_api::webhook::dispatch;
+
+    let sink = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/refevents"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&sink)
+        .await;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("refevents.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos).await;
+    let cookie = verified_owner(&app, &db, "rp@ex.com", "rpown").await;
+    let _ = rpc_json(
+        &app,
+        r#"{"procedure":"repo.create","input":{"name":"demo","visibility":"public","description":""}}"#,
+        &cookie,
+    )
+    .await;
+    let hook_url = format!("{}/refevents", sink.uri());
+    let created = rpc_json(
+        &app,
+        &format!(
+            r#"{{"procedure":"webhook.create","input":{{"owner":"rpown","name":"demo","url":"{hook_url}","secret":"s","events":["create","delete"]}}}}"#
+        ),
+        &cookie,
+    )
+    .await;
+    let hook_id = created["data"]["id"].as_str().unwrap().to_string();
+    let repo_id = created["data"]["repo_id"].as_str().unwrap().to_string();
+
+    let zero = "0".repeat(40);
+    let one = "1".repeat(40);
+    let two = "2".repeat(40);
+    let three = "3".repeat(40);
+    // Same triple shape both receive-pack notify sites consume.
+    let updates = vec![
+        (zero.clone(), one.clone(), "refs/heads/feature".to_string()), // branch create
+        (zero.clone(), two.clone(), "refs/tags/v2.0.0".to_string()),   // tag create
+        (three.clone(), zero.clone(), "refs/heads/old".to_string()),   // branch delete
+        (one.clone(), two.clone(), "refs/heads/main".to_string()),     // push-only update
+    ];
+    dispatch::notify_ref_events(
+        &db,
+        &repo_id,
+        "rpown",
+        "demo",
+        "rpown",
+        "uid",
+        &updates,
+        "development",
+    )
+    .await;
+
+    let mut deliveries = Vec::new();
+    for _ in 0..50 {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        deliveries = db.list_webhook_deliveries(&hook_id, 50).await.expect("list");
+        if deliveries.len() >= 3 {
+            break;
+        }
+    }
+    assert_eq!(deliveries.len(), 3, "{deliveries:?}");
+    let creates: Vec<_> = deliveries.iter().filter(|d| d.event == "create").collect();
+    let deletes: Vec<_> = deliveries.iter().filter(|d| d.event == "delete").collect();
+    assert_eq!(creates.len(), 2, "{deliveries:?}");
+    assert_eq!(deletes.len(), 1, "{deliveries:?}");
+    assert!(
+        creates
+            .iter()
+            .any(|d| d.payload_json.contains("\"ref\":\"feature\"")
+                && d.payload_json.contains("\"ref_type\":\"branch\"")),
+        "{creates:?}"
+    );
+    assert!(
+        creates
+            .iter()
+            .any(|d| d.payload_json.contains("\"ref\":\"v2.0.0\"")
+                && d.payload_json.contains("\"ref_type\":\"tag\"")),
+        "{creates:?}"
+    );
+    assert!(deletes[0].payload_json.contains("\"ref\":\"old\""));
+    // `create`/`delete` carry no action (GitHub parity — the event is the action).
+    assert!(deliveries.iter().all(|d| d.action.is_empty()), "{deliveries:?}");
+}
+
+/// `workflow_run` fires `requested` when a run is enqueued and `completed`
+/// (conclusion `cancelled`) via `repo.actions.cancelRun`.
+#[tokio::test]
+async fn webhook_workflow_run_requested_and_completed() {
+    use oxidean_api::actions::{enqueue_run, parse_workflow_yaml};
+
+    let sink = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/wf"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&sink)
+        .await;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("wf.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos).await;
+    let cookie = verified_owner(&app, &db, "wf@ex.com", "wfown").await;
+    let created_repo = rpc_json(
+        &app,
+        r#"{"procedure":"repo.create","input":{"name":"demo","visibility":"public","description":""}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(created_repo["ok"], true, "{created_repo}");
+    let repo_id = created_repo["data"]["id"].as_str().unwrap().to_string();
+
+    let hook_url = format!("{}/wf", sink.uri());
+    let created = rpc_json(
+        &app,
+        &format!(
+            r#"{{"procedure":"webhook.create","input":{{"owner":"wfown","name":"demo","url":"{hook_url}","secret":"s","events":["workflow_run"]}}}}"#
+        ),
+        &cookie,
+    )
+    .await;
+    assert_eq!(created["ok"], true, "{created}");
+    let hook_id = created["data"]["id"].as_str().unwrap().to_string();
+
+    let doc = parse_workflow_yaml(
+        br#"
+name: CI
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+"#,
+    )
+    .unwrap();
+    let (run_id, _jobs) = enqueue_run(
+        &db,
+        &repo_id,
+        ".github/workflows/ci.yml",
+        &doc,
+        "push",
+        "abc1234deadbeef",
+        "refs/heads/main",
+        None,
+    )
+    .await
+    .unwrap();
+
+    let cancel = rpc_json(
+        &app,
+        &format!(
+            r#"{{"procedure":"repo.actions.cancelRun","input":{{"owner":"wfown","name":"demo","run_id":"{run_id}"}}}}"#
+        ),
+        &cookie,
+    )
+    .await;
+    assert_eq!(cancel["ok"], true, "{cancel}");
+
+    let mut actions = std::collections::HashSet::new();
+    let mut completed_payload = String::new();
+    for _ in 0..50 {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let deliveries = db.list_webhook_deliveries(&hook_id, 50).await.expect("list");
+        for d in deliveries.iter().filter(|d| d.event == "workflow_run") {
+            actions.insert(d.action.clone());
+            if d.action == "completed" {
+                completed_payload = d.payload_json.clone();
+            }
+        }
+        if actions.contains("requested") && actions.contains("completed") {
+            break;
+        }
+    }
+    assert!(actions.contains("requested"), "{actions:?}");
+    assert!(actions.contains("completed"), "{actions:?}");
+    assert!(completed_payload.contains("\"conclusion\":\"cancelled\""), "{completed_payload}");
+    assert!(completed_payload.contains("\"status\":\"completed\""), "{completed_payload}");
+    assert!(completed_payload.contains("\"name\":\"CI\""), "{completed_payload}");
+}
+
+/// `registry_package` fires for generic-registry publishes on repo-linked
+/// packages (`published` for a new version, `updated` when a file is added to
+/// an existing version).
+#[tokio::test]
+async fn webhook_registry_package_generic_publish() {
+    let sink = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/pkg"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&sink)
+        .await;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let packages = dir.path().join("packages");
+    let url = format!("sqlite:{}", dir.path().join("pkg.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let state = AppState::new(db.clone(), Arc::new(LogSink) as Arc<dyn EmailSender>, "development")
+        .with_repos_dir(repos)
+        .with_packages_dir(packages)
+        .with_git(Arc::new(CliGitBackend::new()));
+    let cors = build_cors("development", None).expect("cors");
+    let app = router_with_state(state, cors);
+
+    let cookie = verified_owner(&app, &db, "pkg@ex.com", "pkgown").await;
+    let created_repo = rpc_json(
+        &app,
+        r#"{"procedure":"repo.create","input":{"name":"demo","visibility":"public","description":""}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(created_repo["ok"], true, "{created_repo}");
+    let repo_id = created_repo["data"]["id"].as_str().unwrap().to_string();
+
+    let hook_url = format!("{}/pkg", sink.uri());
+    let created = rpc_json(
+        &app,
+        &format!(
+            r#"{{"procedure":"webhook.create","input":{{"owner":"pkgown","name":"demo","url":"{hook_url}","secret":"s","events":["registry_package"]}}}}"#
+        ),
+        &cookie,
+    )
+    .await;
+    assert_eq!(created["ok"], true, "{created}");
+    let hook_id = created["data"]["id"].as_str().unwrap().to_string();
+
+    // packages:write PAT authenticates the registry PUT (Basic user:token).
+    let pat_res = app
+        .clone()
+        .oneshot(rpc_req_with_cookie(
+            r#"{"procedure":"pat.createFineGrained","input":{"name":"pkg-write","repo_access":"all","contents":"read","packages":"write"}}"#,
+            &cookie,
+        ))
+        .await
+        .unwrap();
+    let pat_bytes = pat_res.into_body().collect().await.unwrap().to_bytes();
+    let pat_v: serde_json::Value = serde_json::from_slice(&pat_bytes).unwrap();
+    let token = pat_v["data"]["token"].as_str().expect("token").to_string();
+
+    for (file, bytes) in [("a.bin", &b"one"[..]), ("b.bin", &b"two"[..])] {
+        let put = Request::builder()
+            .method("PUT")
+            .uri(format!(
+                "/generic/pkgown/tool/1.0.0/{file}?repository_id={repo_id}"
+            ))
+            .header(
+                axum::http::header::AUTHORIZATION,
+                basic_auth("pkgown", &token),
+            )
+            .body(Body::from(bytes))
+            .unwrap();
+        let res = app.clone().oneshot(put).await.unwrap();
+        assert_eq!(res.status(), StatusCode::CREATED, "PUT {file}");
+    }
+
+    let mut actions = std::collections::HashSet::new();
+    for _ in 0..50 {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let deliveries = db.list_webhook_deliveries(&hook_id, 50).await.expect("list");
+        for d in deliveries.iter().filter(|d| d.event == "registry_package") {
+            actions.insert(d.action.clone());
+        }
+        if actions.contains("published") && actions.contains("updated") {
+            break;
+        }
+    }
+    assert!(actions.contains("published"), "{actions:?}");
+    assert!(actions.contains("updated"), "{actions:?}");
+
+    let mut bodies: Vec<String> = Vec::new();
+    for _ in 0..50 {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let requests = sink.received_requests().await.expect("received requests");
+        bodies = requests
+            .iter()
+            .map(|r| String::from_utf8_lossy(&r.body).into_owned())
+            .collect();
+        if bodies.len() >= 2 {
+            break;
+        }
+    }
+    assert!(
+        bodies.iter().any(|b| b.contains("\"name\":\"tool\"")
+            && b.contains("\"package_type\":\"generic\"")
+            && b.contains("\"version\":\"1.0.0\"")),
+        "{bodies:?}"
+    );
+}
+
+fn basic_auth(user: &str, password: &str) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let raw = format!("{user}:{password}");
+    let input = raw.as_bytes();
+    let mut out = String::new();
+    for chunk in input.chunks(3) {
+        let mut n = (chunk[0] as u32) << 16;
+        if chunk.len() > 1 {
+            n |= (chunk[1] as u32) << 8;
+        }
+        if chunk.len() > 2 {
+            n |= chunk[2] as u32;
+        }
+        out.push(T[((n >> 18) & 63) as usize] as char);
+        out.push(T[((n >> 12) & 63) as usize] as char);
+        out.push(if chunk.len() > 1 {
+            T[((n >> 6) & 63) as usize] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            T[(n & 63) as usize] as char
+        } else {
+            '='
+        });
+    }
+    format!("Basic {out}")
+}

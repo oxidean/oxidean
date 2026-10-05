@@ -200,6 +200,7 @@ export function RepoBlobPage() @{
         owner={owner}
         repo={repoName}
         blob={phase.blob}
+        canWrite={!!phase.repo.can_write}
         highlightedHtml={phase.highlightedHtml}
         highlightTheme={phase.highlightTheme}
         markdownHtml={phase.markdownHtml}

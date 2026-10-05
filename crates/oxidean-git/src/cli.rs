@@ -7,8 +7,9 @@ use tokio::process::Command;
 
 use crate::backend::{
     validate_remote_url, ArchiveFormat, BlameFile, BlameLine, CommitDetail, CommitSummary,
-    ContributorSummary, DiffFile, DiffResult, GitBackend, GitError, GitRef, GrepHit, GrepResult,
-    RemoteAuthKind, RemoteCredentials, SizedBlobEntry, TreeEntry, TreeEntryKind, ARCHIVE_TIMEOUT,
+    CommitTimesResult, ContributorScan, ContributorStat, ContributorSummary, DiffFile, DiffResult,
+    FileChange, FilesCommit, GitBackend, GitError, GitRef, GrepHit, GrepResult, RemoteAuthKind,
+    RemoteCredentials, SizedBlobEntry, TreeEntry, TreeEntryKind, ARCHIVE_TIMEOUT,
     BLAME_SOFT_MAX_LINES, DIFF_SOFT_MAX_BYTES, FORGE_NOREPLY_EMAIL,
 };
 
@@ -22,8 +23,8 @@ impl CliGitBackend {
     }
 }
 
-/// Install bare-repo `hooks/update` for branch protection (Phase 13 / D-19).
-/// Idempotent — overwrites with the known-good script.
+/// Install bare-repo `hooks/update` for ref protection — branches (Phase 13 /
+/// D-19) and tags (GIT-21). Idempotent — overwrites with the known-good script.
 pub async fn install_protection_hooks(bare: &Path) -> Result<(), GitError> {
     let hooks = bare.join("hooks");
     tokio::fs::create_dir_all(&hooks).await?;
@@ -31,7 +32,7 @@ pub async fn install_protection_hooks(bare: &Path) -> Result<(), GitError> {
     // D-PKG-02: fail-closed when helper missing in production|cloud
     // (mirrors webhook deliver.rs env signal); fail-open for compose/dev.
     let script = r#"#!/bin/sh
-# Oxidean branch protection update hook (Phase 13 / D-19; D-PKG-02)
+# Oxidean ref protection update hook (Phase 13 / D-19; D-PKG-02; GIT-21)
 refname="$1"
 oldrev="$2"
 newrev="$3"
@@ -70,6 +71,155 @@ pub async fn reconcile_protection_hooks(bare: &Path) -> Result<(), GitError> {
     install_protection_hooks(bare).await
 }
 
+/// One commit a push introduces, with identity + signature verdict (GIT-22).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PushedCommit {
+    pub sha: String,
+    pub committer_email: String,
+    pub author_email: String,
+    /// `none` | `valid` | `invalid` | `unknown` (from `%G?` + optional keyring).
+    pub signature_status: String,
+    /// `ssh` | `gpg` | empty when unsigned / unknown.
+    pub signature_kind: String,
+}
+
+/// `git log <new_sha> --not <exclude>` — commits the push introduces.
+///
+/// `exclude` selection (GIT-22):
+/// - updates / force-pushes (`old_sha` non-zero): `old..new` — commits newly
+///   reachable on *this* branch, even if they already exist on another ref;
+/// - creates (`old_sha` zero/empty): `--all` — commits no existing ref reaches,
+///   so branching off already-present history does not re-check it.
+///
+/// `allowed_signers` / `gpg_home` feed `%G?` verification exactly like
+/// [`CliGitBackend::log`] (allowedSignersFile + `GNUPGHOME` /
+/// `gpg.trustModel=always`). Pass `None` for a no-keyring probe (emails +
+/// unsigned detection only).
+///
+/// Runs inside `hooks/update` too — quarantine `GIT_OBJECT_DIRECTORY` env is
+/// inherited by the spawned `git` process.
+pub async fn pushed_commits(
+    repo: &Path,
+    old_sha: &str,
+    new_sha: &str,
+    allowed_signers: Option<&Path>,
+    gpg_home: Option<&Path>,
+) -> Result<Vec<PushedCommit>, GitError> {
+    let new_sha = validate_treeish(new_sha)?;
+    let repo_s = repo_str(repo)?;
+
+    let mut args: Vec<String> = vec!["-C".into(), repo_s.into()];
+    let mut extra_env: Vec<(String, String)> = Vec::new();
+    push_signature_verify_config(&mut args, &mut extra_env, allowed_signers, gpg_home)?;
+    args.push("log".into());
+    args.push("--format=%H%x00%ce%x00%ae%x00%G?".into());
+    args.push(new_sha.to_string());
+    args.push("--not".into());
+    let old_sha = old_sha.trim();
+    if old_sha.is_empty() || old_sha.bytes().all(|b| b == b'0') {
+        args.push("--all".into());
+    } else {
+        args.push(validate_treeish(old_sha)?.to_string());
+    }
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    let env_refs: Vec<(&str, &str)> = extra_env
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect();
+    let stdout = run_git_stdout_env(&arg_refs, &env_refs).await?;
+    let text = String::from_utf8_lossy(&stdout);
+
+    let mut out = Vec::new();
+    for record in text.split('\n') {
+        let record = record.trim_end_matches('\r');
+        if record.is_empty() {
+            continue;
+        }
+        let parts: Vec<&str> = record.split('\0').collect();
+        if parts.len() < 4 {
+            continue;
+        }
+        let sha = parts[0].trim();
+        if sha.is_empty() {
+            continue;
+        }
+        let signature_status = map_signature_status(parts[3]);
+        let mut signature_kind = String::new();
+        if signature_status != "none" {
+            // Best-effort kind from the raw commit object (same as `log`).
+            if let Ok(raw) = run_git_stdout(&["-C", repo_s, "cat-file", "-p", sha]).await {
+                signature_kind = signature_kind_from_commit(&String::from_utf8_lossy(&raw));
+            }
+        }
+        out.push(PushedCommit {
+            sha: sha.to_string(),
+            committer_email: parts[1].trim().to_string(),
+            author_email: parts[2].trim().to_string(),
+            signature_status,
+            signature_kind,
+        });
+    }
+    Ok(out)
+}
+
+/// Disk usage of a repository directory in bytes — `du`-equivalent without
+/// shelling out (GIT-25). Sums apparent file sizes (`Metadata::len`), counts a
+/// hardlinked inode once per walk on unix, and never follows symlinks. Runs
+/// inside `spawn_blocking` so callers stay on the async scheduler.
+///
+/// Called from `hooks/update` while receive-pack quarantine objects still live
+/// under `GIT_DIR`, so the result includes the incoming pack — callers can
+/// treat it as the projected post-push size.
+pub async fn repo_disk_usage(dir: &Path) -> Result<u64, GitError> {
+    let dir = dir.to_path_buf();
+    tokio::task::spawn_blocking(move || dir_disk_usage_sync(&dir))
+        .await
+        .map_err(|e| GitError::Process(format!("disk usage task join: {e}")))?
+}
+
+fn dir_disk_usage_sync(dir: &Path) -> Result<u64, GitError> {
+    let mut total = 0u64;
+    let mut stack = vec![dir.to_path_buf()];
+    // (dev, ino) dedup so hardlinked objects (local clones / alternates) count once.
+    #[cfg(unix)]
+    let mut seen_inodes = std::collections::HashSet::new();
+    while let Some(path) = stack.pop() {
+        let entries = match std::fs::read_dir(&path) {
+            Ok(e) => e,
+            Err(e) if path == *dir => return Err(GitError::Io(e)),
+            // Unreadable subdir (race / permissions): skip, do not fail the walk.
+            Err(_) => continue,
+        };
+        for entry in entries.flatten() {
+            // file_type does not traverse symlinks: links are counted (their own
+            // dirent size via metadata below) but never followed.
+            let ft = match entry.file_type() {
+                Ok(ft) => ft,
+                Err(_) => continue,
+            };
+            // symlink_metadata so symlinks count their own dirent size and never
+            // drag in (or double-count via nlink>1 targets) an outside tree.
+            let meta = match std::fs::symlink_metadata(entry.path()) {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            if ft.is_dir() {
+                stack.push(entry.path());
+                continue;
+            }
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::MetadataExt;
+                if meta.nlink() > 1 && !seen_inodes.insert((meta.dev(), meta.ino())) {
+                    continue;
+                }
+            }
+            total = total.saturating_add(meta.len());
+        }
+    }
+    Ok(total)
+}
+
 async fn run_git(args: &[&str]) -> Result<(), GitError> {
     let _ = run_git_stdout(args).await?;
     Ok(())
@@ -84,10 +234,13 @@ async fn run_git_with_env(args: &[&str], extra_env: &[(&str, &str)]) -> Result<(
 /// protection helper (D-PKG-01/02). Prefer `OXIDEAN_PROTECTION_HELPER`; else a
 /// sibling `oxidean-protection-hook` next to the current executable (API image).
 ///
-/// Sets `OXIDEAN_ACTOR_CAPABILITY=admin` for system ref updates (mirror FF /
-/// internal sync) that already passed API-layer policy — without this, production
-/// fail-closed hooks deny with default capability `read`.
-fn protection_hook_push_env() -> Vec<(String, String)> {
+/// `actor_capability` lands in `OXIDEAN_ACTOR_CAPABILITY` for the hook.
+/// System ref updates (mirror FF / internal sync) pass `"admin"` — they already
+/// passed API-layer policy, and production fail-closed hooks would otherwise
+/// deny with default capability `read`. User-attributed commits (GIT-19
+/// `commit_files`) pass the actor's real capability so a protection rule
+/// created between the API-side check and the push still bites.
+fn protection_hook_push_env(actor_capability: &str) -> Vec<(String, String)> {
     let mut out = Vec::with_capacity(2);
     let helper = std::env::var("OXIDEAN_PROTECTION_HELPER")
         .ok()
@@ -101,7 +254,10 @@ fn protection_hook_push_env() -> Vec<(String, String)> {
     if let Some(h) = helper {
         out.push(("OXIDEAN_PROTECTION_HELPER".into(), h));
     }
-    out.push(("OXIDEAN_ACTOR_CAPABILITY".into(), "admin".into()));
+    out.push((
+        "OXIDEAN_ACTOR_CAPABILITY".into(),
+        actor_capability.to_string(),
+    ));
     out
 }
 
@@ -142,6 +298,59 @@ async fn run_git_stdout_env(args: &[&str], extra_env: &[(&str, &str)]) -> Result
             "OpenSSH client is not installed on this Oxidean API host (install openssh-client / ensure `ssh` is on PATH)".into(),
         ));
     }
+    Err(GitError::Process(format!(
+        "git {} failed (status {:?}): {}{}",
+        args.join(" "),
+        output.status.code(),
+        stderr.trim(),
+        if stdout.trim().is_empty() {
+            String::new()
+        } else {
+            format!(" | {}", stdout.trim())
+        }
+    )))
+}
+
+/// `run_git_stdout_env` variant that pipes `stdin_bytes` to the child —
+/// for `hash-object -w --stdin` and `update-index --index-info`, where the
+/// payload may contain NULs and cannot ride on argv (GIT-19).
+async fn run_git_stdout_env_stdin(
+    args: &[&str],
+    extra_env: &[(&str, &str)],
+    stdin_bytes: &[u8],
+) -> Result<Vec<u8>, GitError> {
+    use tokio::io::AsyncWriteExt;
+    let mut cmd = Command::new("git");
+    cmd.args(args)
+        .env("GIT_AUTHOR_NAME", "Oxidean")
+        .env("GIT_AUTHOR_EMAIL", FORGE_NOREPLY_EMAIL)
+        .env("GIT_COMMITTER_NAME", "Oxidean")
+        .env("GIT_COMMITTER_EMAIL", FORGE_NOREPLY_EMAIL)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    for (k, v) in extra_env {
+        cmd.env(k, v);
+    }
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| GitError::Process(format!("failed to spawn git: {e}")))?;
+    let mut stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| GitError::Process("failed to open git stdin".into()))?;
+    stdin.write_all(stdin_bytes).await.map_err(GitError::Io)?;
+    drop(stdin);
+    let output = child
+        .wait_with_output()
+        .await
+        .map_err(|e| GitError::Process(format!("failed to wait on git: {e}")))?;
+    if output.status.success() {
+        return Ok(output.stdout);
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
     Err(GitError::Process(format!(
         "git {} failed (status {:?}): {}{}",
         args.join(" "),
@@ -317,6 +526,139 @@ async fn run_git_remote(
     run_git_stdout_env(args, &pairs).await
 }
 
+/// Parse `git shortlog -sn -e` output into [`ContributorSummary`] rows
+/// (count, name, email), capped at `limit` authors.
+fn parse_shortlog_stdout(stdout: &[u8], limit: u32) -> Vec<ContributorSummary> {
+    let text = String::from_utf8_lossy(stdout);
+    let mut out = Vec::new();
+    for line in text.split('\n') {
+        if out.len() as u32 >= limit {
+            break;
+        }
+        let line = line.trim_end_matches('\r').trim();
+        if line.is_empty() {
+            continue;
+        }
+        // "    42\tName <email@x>" or spaces then count then name <email>
+        let rest = line.trim_start();
+        let (count_s, after) = rest
+            .split_once(|c: char| c.is_whitespace())
+            .unwrap_or((rest, ""));
+        let count: i64 = count_s.trim().parse().unwrap_or(0);
+        if count <= 0 {
+            continue;
+        }
+        let after = after.trim();
+        let (name, email) = if let Some((n, e)) = after.rsplit_once(" <") {
+            let email = e.trim().trim_end_matches('>').trim().to_string();
+            (n.trim().to_string(), email)
+        } else {
+            (after.to_string(), String::new())
+        };
+        if name.is_empty() {
+            continue;
+        }
+        out.push(ContributorSummary {
+            name,
+            email,
+            commit_count: count,
+        });
+    }
+    out
+}
+
+/// Aggregate `git log --format=%aN%x00%aE%x00%ct%x00%H` output (one line per
+/// commit, newest first) into per-author [`ContributorStat`] rows.
+///
+/// Authors are keyed by lowercased email, falling back to lowercased name when
+/// the email is empty. `name`/`email`/`last_commit_*` come from the author's
+/// newest scanned commit (first line seen); `first_commit_*` from the oldest
+/// (last line seen). Sorted by commit count desc, then newest commit, then
+/// name; capped at `limit` authors.
+fn aggregate_author_log(stdout: &[u8], limit: u32) -> Vec<ContributorStat> {
+    struct Acc {
+        name: String,
+        email: String,
+        commit_count: i64,
+        first_sha: String,
+        first_unix: i64,
+        last_sha: String,
+        last_unix: i64,
+    }
+    let text = String::from_utf8_lossy(stdout);
+    let mut by_author: std::collections::HashMap<String, Acc> =
+        std::collections::HashMap::new();
+    let mut order: Vec<String> = Vec::new();
+    for line in text.split('\n') {
+        let line = line.trim_end_matches('\r');
+        if line.is_empty() {
+            continue;
+        }
+        let mut parts = line.split('\x00');
+        let (Some(name), Some(email), Some(ct), Some(sha)) =
+            (parts.next(), parts.next(), parts.next(), parts.next())
+        else {
+            continue;
+        };
+        let name = name.trim().to_string();
+        let email = email.trim().to_string();
+        let unix = ct.trim().parse::<i64>().unwrap_or(0);
+        let sha = sha.trim().to_string();
+        if name.is_empty() && email.is_empty() {
+            continue;
+        }
+        let key = if email.is_empty() {
+            name.to_ascii_lowercase()
+        } else {
+            email.to_ascii_lowercase()
+        };
+        match by_author.get_mut(&key) {
+            Some(acc) => {
+                acc.commit_count += 1;
+                // Walking newest-first: every later line is an older commit.
+                acc.first_sha = sha;
+                acc.first_unix = unix;
+            }
+            None => {
+                order.push(key.clone());
+                by_author.insert(
+                    key,
+                    Acc {
+                        name,
+                        email,
+                        commit_count: 1,
+                        first_sha: sha.clone(),
+                        first_unix: unix,
+                        last_sha: sha,
+                        last_unix: unix,
+                    },
+                );
+            }
+        }
+    }
+    let mut out: Vec<ContributorStat> = order
+        .into_iter()
+        .filter_map(|k| by_author.remove(&k))
+        .map(|a| ContributorStat {
+            name: a.name,
+            email: a.email,
+            commit_count: a.commit_count,
+            first_commit_sha: a.first_sha,
+            first_commit_unix: a.first_unix,
+            last_commit_sha: a.last_sha,
+            last_commit_unix: a.last_unix,
+        })
+        .collect();
+    out.sort_by(|a, b| {
+        b.commit_count
+            .cmp(&a.commit_count)
+            .then_with(|| b.last_commit_unix.cmp(&a.last_commit_unix))
+            .then_with(|| a.name.cmp(&b.name))
+    });
+    out.truncate(limit as usize);
+    out
+}
+
 /// Reject NUL / `..` / leading `-` / absolute-looking refs (T-07-15 / T-07-17 / CR-02).
 fn validate_treeish(treeish: &str) -> Result<&str, GitError> {
     let t = treeish.trim();
@@ -356,6 +698,32 @@ fn validate_repo_rel_path(path: &str) -> Result<String, GitError> {
         return Err(GitError::InvalidArg(format!("path escapes repo: {path}")));
     }
     Ok(rel.to_string())
+}
+
+/// Stricter repo-relative path validation for file *writes* (GIT-19):
+/// [`validate_repo_rel_path`] traversal/NUL/absolute checks plus non-empty,
+/// no empty segments (`a//b`, trailing `/`), no `.` segments, and no `.git`
+/// component (reserved by git checkout).
+fn validate_edit_path(path: &str) -> Result<String, GitError> {
+    // Writes reject absolute paths outright — the read-path helper tolerates a
+    // leading `/` for URL-derived inputs, but a file mutation must name an
+    // unambiguous repo-relative path.
+    if path.trim().starts_with('/') {
+        return Err(GitError::InvalidArg(format!(
+            "absolute paths are not allowed: {path}"
+        )));
+    }
+    let rel = validate_repo_rel_path(path)?;
+    if rel.is_empty() {
+        return Err(GitError::InvalidArg("path is required".into()));
+    }
+    if rel
+        .split('/')
+        .any(|seg| seg.is_empty() || seg == "." || seg == ".git")
+    {
+        return Err(GitError::InvalidArg(format!("invalid repo path: {path}")));
+    }
+    Ok(rel)
 }
 
 fn parse_ls_tree_line(line: &str) -> Option<TreeEntry> {
@@ -1052,14 +1420,7 @@ impl GitBackend for CliGitBackend {
         }
 
         // Committer is always the forge web-flow identity; author is the acting user.
-        run_git(&[
-            "-C",
-            work_str,
-            "config",
-            "user.email",
-            FORGE_NOREPLY_EMAIL,
-        ])
-        .await?;
+        run_git(&["-C", work_str, "config", "user.email", FORGE_NOREPLY_EMAIL]).await?;
         run_git(&["-C", work_str, "config", "user.name", "Oxidean"]).await?;
         run_git(&["-C", work_str, "add", "-A"]).await?;
 
@@ -1104,6 +1465,315 @@ impl GitBackend for CliGitBackend {
         let refspec = format!("HEAD:refs/heads/{branch}");
         run_git(&["-C", work_str, "push", "origin", &refspec]).await?;
         Ok(())
+    }
+
+    async fn commit_files(
+        &self,
+        bare_path: &Path,
+        branch: &str,
+        base: &str,
+        message: &str,
+        changes: &[FileChange],
+        author_name: &str,
+        author_email: &str,
+        signing_key_path: Option<&Path>,
+        actor_capability: &str,
+    ) -> Result<FilesCommit, GitError> {
+        let branch = validate_treeish(branch)?;
+        let base = validate_treeish(base)?;
+        if changes.is_empty() {
+            return Err(GitError::InvalidArg("no file changes to commit".into()));
+        }
+        if message.trim().is_empty() || message.contains('\0') {
+            return Err(GitError::InvalidArg("commit message is required".into()));
+        }
+        let author_name = author_name.trim();
+        let author_email = author_email.trim();
+        if author_name.is_empty() || author_email.is_empty() {
+            return Err(GitError::InvalidArg(
+                "author name and email are required".into(),
+            ));
+        }
+        // Normalize every path up front so a bad entry fails before any
+        // object writes.
+        let normalized: Vec<FileChange> = changes
+            .iter()
+            .map(|c| match c {
+                FileChange::Upsert { path, content } => Ok(FileChange::Upsert {
+                    path: validate_edit_path(path)?,
+                    content: content.clone(),
+                }),
+                FileChange::UpsertOid { path, oid } => {
+                    let oid = oid.trim();
+                    if oid.len() != 40 || !oid.bytes().all(|b| b.is_ascii_hexdigit()) {
+                        return Err(GitError::InvalidArg(format!("invalid blob oid: {oid}")));
+                    }
+                    Ok(FileChange::UpsertOid {
+                        path: validate_edit_path(path)?,
+                        oid: oid.to_string(),
+                    })
+                }
+                FileChange::Delete { path } => Ok(FileChange::Delete {
+                    path: validate_edit_path(path)?,
+                }),
+            })
+            .collect::<Result<_, GitError>>()?;
+
+        let bare_abs = absolute_path(bare_path)?;
+        let bare_str = bare_abs.to_str().ok_or_else(|| {
+            GitError::InvalidArg(format!("non-utf8 bare path: {}", bare_abs.display()))
+        })?;
+
+        // New-branch commits must not silently land on an existing head.
+        if branch != base {
+            let existing = run_git_stdout(&[
+                "-C",
+                bare_str,
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                &format!("refs/heads/{branch}"),
+            ])
+            .await;
+            if let Ok(out) = existing {
+                if !out.is_empty() {
+                    return Err(GitError::Conflict(format!(
+                        "branch already exists: {branch}"
+                    )));
+                }
+            }
+        }
+
+        // Scratch repo — all work happens on index plumbing (no checkout), and
+        // the commit ships back through `push` so bare `hooks/update` runs.
+        let tmp = tempfile::tempdir().map_err(GitError::Io)?;
+        let work = tmp.path();
+        let work_str = work
+            .to_str()
+            .ok_or_else(|| GitError::InvalidArg("non-utf8 temp worktree path".into()))?;
+        run_git(&["init", work_str]).await?;
+
+        // Pull the base tip (shallow, single ref) so its tree/blob objects are
+        // local for read-tree / hash-object / commit-tree. Absent base → the
+        // changeset builds a root commit (empty repository).
+        let base_ref = format!("refs/heads/{base}");
+        let base_tip = run_git_stdout(&[
+            "-C",
+            bare_str,
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &base_ref,
+        ])
+        .await
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o).trim().to_string())
+        .filter(|s| !s.is_empty());
+        let base_sha: Option<String> = if base_tip.is_some() {
+            run_git(&["-C", work_str, "fetch", "--depth=1", bare_str, &base_ref]).await?;
+            let out = run_git_stdout(&["-C", work_str, "rev-parse", "FETCH_HEAD"]).await?;
+            Some(String::from_utf8_lossy(&out).trim().to_string())
+        } else {
+            None
+        };
+
+        // Scratch index file — real repo index is never touched.
+        let index = work.join("oxidean-index");
+        let index_s = index
+            .to_str()
+            .ok_or_else(|| GitError::InvalidArg("non-utf8 index path".into()))?;
+        let idx_env: Vec<(&str, &str)> = vec![("GIT_INDEX_FILE", index_s)];
+        match &base_sha {
+            Some(sha) => run_git_with_env(&["-C", work_str, "read-tree", sha], &idx_env).await?,
+            None => run_git_with_env(&["-C", work_str, "read-tree", "--empty"], &idx_env).await?,
+        }
+
+        // Stage the changeset via `update-index --index-info`: deletions are
+        // emitted first (mode 0 records) so a delete+upsert of the same path
+        // resolves to the upsert.
+        let mut batch: Vec<u8> = Vec::new();
+        for change in &normalized {
+            match change {
+                FileChange::Delete { path } => {
+                    // `:(literal)` — literal pathspec; `path` matches the file
+                    // itself and every blob under `path/` (directory delete).
+                    let spec = format!(":(literal){path}");
+                    let matched = run_git_stdout_env(
+                        &["-C", work_str, "ls-files", "-z", "--", &spec],
+                        &idx_env,
+                    )
+                    .await?;
+                    if matched.is_empty() {
+                        return Err(GitError::NotFound(format!("path not found: {path}")));
+                    }
+                    for entry in matched.split(|b| *b == 0) {
+                        if entry.is_empty() {
+                            continue;
+                        }
+                        batch.extend_from_slice(b"0 0000000000000000000000000000000000000000\t");
+                        batch.extend_from_slice(entry);
+                        batch.push(0);
+                    }
+                }
+                FileChange::Upsert { path, content } => {
+                    let oid = run_git_stdout_env_stdin(
+                        &["-C", work_str, "hash-object", "-w", "--stdin"],
+                        &idx_env,
+                        content,
+                    )
+                    .await?;
+                    let oid = String::from_utf8_lossy(&oid).trim().to_string();
+                    batch.extend_from_slice(format!("100644 {oid}\t").as_bytes());
+                    batch.extend_from_slice(path.as_bytes());
+                    batch.push(0);
+                }
+                FileChange::UpsertOid { path, oid } => {
+                    run_git(&["-C", work_str, "cat-file", "-e", oid])
+                        .await
+                        .map_err(|_| GitError::NotFound(format!("unknown blob oid: {oid}")))?;
+                    batch.extend_from_slice(format!("100644 {oid}\t").as_bytes());
+                    batch.extend_from_slice(path.as_bytes());
+                    batch.push(0);
+                }
+            }
+        }
+        run_git_stdout_env_stdin(
+            &["-C", work_str, "update-index", "-z", "--index-info"],
+            &idx_env,
+            &batch,
+        )
+        .await?;
+
+        let new_tree = {
+            let out = run_git_stdout_env(&["-C", work_str, "write-tree"], &idx_env).await?;
+            String::from_utf8_lossy(&out).trim().to_string()
+        };
+        if let Some(base) = &base_sha {
+            let base_tree = {
+                let out = run_git_stdout(&[
+                    "-C",
+                    work_str,
+                    "rev-parse",
+                    "--verify",
+                    &format!("{base}^{{tree}}"),
+                ])
+                .await?;
+                String::from_utf8_lossy(&out).trim().to_string()
+            };
+            if base_tree == new_tree {
+                return Err(GitError::InvalidArg("changeset produces no changes".into()));
+            }
+        }
+
+        // commit-tree in the scratch repo; committer = forge identity, author
+        // = acting user, optional web-flow SSH signature (D-signing parity
+        // with seed_commit_authored).
+        let mut commit_args: Vec<String> = vec!["-C".into(), work_str.into()];
+        if let Some(key) = signing_key_path {
+            let key_abs = absolute_path(key)?;
+            let key_s = key_abs.to_str().ok_or_else(|| {
+                GitError::InvalidArg(format!("non-utf8 signing key path: {}", key_abs.display()))
+            })?;
+            commit_args.push("-c".into());
+            commit_args.push("gpg.format=ssh".into());
+            commit_args.push("-c".into());
+            commit_args.push(format!("user.signingkey={key_s}"));
+            commit_args.push("commit-tree".into());
+            commit_args.push("-S".into());
+        } else {
+            commit_args.push("-c".into());
+            commit_args.push("commit.gpgsign=false".into());
+            commit_args.push("commit-tree".into());
+        }
+        commit_args.push("-m".into());
+        commit_args.push(message.to_string());
+        commit_args.push(new_tree);
+        if let Some(base) = &base_sha {
+            commit_args.push("-p".into());
+            commit_args.push(base.clone());
+        }
+        let commit_refs: Vec<&str> = commit_args.iter().map(String::as_str).collect();
+        let commit_env: Vec<(&str, String)> = vec![
+            ("GIT_AUTHOR_NAME", author_name.to_string()),
+            ("GIT_AUTHOR_EMAIL", author_email.to_string()),
+            ("GIT_COMMITTER_NAME", "Oxidean".into()),
+            ("GIT_COMMITTER_EMAIL", FORGE_NOREPLY_EMAIL.into()),
+        ];
+        let env_pairs: Vec<(&str, &str)> =
+            commit_env.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        let sha = {
+            let out = run_git_stdout_env(&commit_refs, &env_pairs).await?;
+            String::from_utf8_lossy(&out).trim().to_string()
+        };
+
+        // Publish through a real push: hooks/update runs (D-19) and
+        // receive-pack enforces fast-forward — a moved tip surfaces as
+        // Conflict, a protection-hook decline as Denied.
+        let hook_env = protection_hook_push_env(actor_capability);
+        let hook_pairs: Vec<(&str, &str)> = hook_env
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+        let refspec = format!("{sha}:refs/heads/{branch}");
+        match run_git_with_env(&["-C", work_str, "push", bare_str, &refspec], &hook_pairs).await {
+            Ok(()) => Ok(FilesCommit {
+                sha,
+                base_sha,
+                branch: branch.to_string(),
+            }),
+            Err(GitError::Process(msg)) => {
+                if msg.contains("non-fast-forward")
+                    || msg.contains("fetch first")
+                    || msg.contains("stale info")
+                {
+                    Err(GitError::Conflict(
+                        "branch tip moved while committing — retry the change".into(),
+                    ))
+                } else if msg.contains("hook declined") || msg.contains("protected") {
+                    Err(GitError::Denied(msg))
+                } else {
+                    Err(GitError::Process(msg))
+                }
+            }
+            Err(other) => Err(other),
+        }
+    }
+
+    async fn ls_tree_entry(
+        &self,
+        repo: &Path,
+        treeish: &str,
+        path: &str,
+    ) -> Result<Option<TreeEntry>, GitError> {
+        let treeish = validate_treeish(treeish)?;
+        let path = validate_edit_path(path)?;
+        let repo_str = repo.to_str().ok_or_else(|| {
+            GitError::InvalidArg(format!("non-utf8 repo path: {}", repo.display()))
+        })?;
+        match run_git_stdout(&["-C", repo_str, "ls-tree", "-z", treeish, "--", &path]).await {
+            Ok(bytes) => {
+                for chunk in bytes.split(|b| *b == 0) {
+                    if chunk.is_empty() {
+                        continue;
+                    }
+                    let line = String::from_utf8_lossy(chunk);
+                    if let Some(entry) = parse_ls_tree_line(&line) {
+                        if entry.name == path {
+                            return Ok(Some(entry));
+                        }
+                    }
+                }
+                Ok(None)
+            }
+            Err(GitError::Process(msg))
+                if msg.contains("Not a valid object name")
+                    || msg.contains("does not exist")
+                    || msg.contains("not exist") =>
+            {
+                Ok(None)
+            }
+            Err(e) => Err(e),
+        }
     }
 
     async fn ls_tree(
@@ -2261,42 +2931,130 @@ impl GitBackend for CliGitBackend {
         }
 
         let stdout = run_git_stdout(&["-C", repo_s, "shortlog", "-sn", "-e", refname]).await?;
-        let text = String::from_utf8_lossy(&stdout);
-        let mut out = Vec::new();
-        for line in text.split('\n') {
-            if out.len() as u32 >= limit {
-                break;
-            }
-            let line = line.trim_end_matches('\r').trim();
-            if line.is_empty() {
-                continue;
-            }
-            // "    42\tName <email@x>" or spaces then count then name <email>
-            let rest = line.trim_start();
-            let (count_s, after) = rest
-                .split_once(|c: char| c.is_whitespace())
-                .unwrap_or((rest, ""));
-            let count: i64 = count_s.trim().parse().unwrap_or(0);
-            if count <= 0 {
-                continue;
-            }
-            let after = after.trim();
-            let (name, email) = if let Some((n, e)) = after.rsplit_once(" <") {
-                let email = e.trim().trim_end_matches('>').trim().to_string();
-                (n.trim().to_string(), email)
-            } else {
-                (after.to_string(), String::new())
-            };
-            if name.is_empty() {
-                continue;
-            }
-            out.push(ContributorSummary {
-                name,
-                email,
-                commit_count: count,
+        Ok(parse_shortlog_stdout(&stdout, limit))
+    }
+
+    async fn contributor_scan(
+        &self,
+        repo: &Path,
+        refname: &str,
+        limit: u32,
+        max_commits: u64,
+    ) -> Result<ContributorScan, GitError> {
+        let refname = validate_treeish(refname)?;
+        let repo_s = repo_str(repo)?;
+        let limit = limit.clamp(1, 100);
+        let max_commits = max_commits.clamp(1, 1_000_000);
+
+        let rev = Command::new("git")
+            .args([
+                "-C",
+                repo_s,
+                "rev-parse",
+                "--verify",
+                &format!("{refname}^{{commit}}"),
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .await
+            .map_err(|e| GitError::Process(format!("failed to spawn git: {e}")))?;
+        if !rev.status.success() {
+            return Ok(ContributorScan {
+                contributors: Vec::new(),
+                scanned_commits: 0,
+                truncated: false,
             });
         }
-        Ok(out)
+
+        // A `max + 1` rev-list count detects a clipped walk without counting
+        // the full history on huge repositories.
+        let cap_probe = max_commits.saturating_add(1);
+        let counted = run_git_stdout(&[
+            "-C",
+            repo_s,
+            "rev-list",
+            "--count",
+            &format!("--max-count={cap_probe}"),
+            refname,
+        ])
+        .await?;
+        let walked = String::from_utf8_lossy(&counted)
+            .trim()
+            .parse::<u64>()
+            .unwrap_or(0);
+        let truncated = walked > max_commits;
+        let scanned_commits = walked.min(max_commits);
+
+        // One bounded `git log` pass yields count + first/last commit per
+        // author — `git shortlog` cannot emit per-author timestamps.
+        let stdout = run_git_stdout(&[
+            "-C",
+            repo_s,
+            "log",
+            "--format=%aN%x00%aE%x00%ct%x00%H",
+            &format!("--max-count={max_commits}"),
+            refname,
+        ])
+        .await?;
+        Ok(ContributorScan {
+            contributors: aggregate_author_log(&stdout, limit),
+            scanned_commits,
+            truncated,
+        })
+    }
+
+    async fn commit_times(
+        &self,
+        repo: &Path,
+        refname: &str,
+        since_unix: Option<i64>,
+        max_commits: u64,
+    ) -> Result<CommitTimesResult, GitError> {
+        let refname = validate_treeish(refname)?;
+        let repo_s = repo_str(repo)?;
+        let max_commits = max_commits.clamp(1, 1_000_000);
+
+        let rev = Command::new("git")
+            .args([
+                "-C",
+                repo_s,
+                "rev-parse",
+                "--verify",
+                &format!("{refname}^{{commit}}"),
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .await
+            .map_err(|e| GitError::Process(format!("failed to spawn git: {e}")))?;
+        if !rev.status.success() {
+            return Ok(CommitTimesResult {
+                times: Vec::new(),
+                truncated: false,
+            });
+        }
+
+        // `@<epoch>` only parses for plausible dates (`@0` is not a real
+        // cutoff), so a non-positive bound simply skips the filter.
+        let since_arg =
+            since_unix.and_then(|s| (s > 0).then(|| format!("--since=@{s}")));
+        let max_count_arg = format!("--max-count={}", max_commits.saturating_add(1));
+        let mut args = vec!["-C", repo_s, "log", "--format=%ct", &max_count_arg];
+        if let Some(arg) = &since_arg {
+            args.push(arg);
+        }
+        args.push(refname);
+        let stdout = run_git_stdout(&args).await?;
+        let mut times: Vec<i64> = String::from_utf8_lossy(&stdout)
+            .split('\n')
+            .filter_map(|line| line.trim().parse::<i64>().ok())
+            .collect();
+        let truncated = times.len() as u64 > max_commits;
+        times.truncate(max_commits as usize);
+        Ok(CommitTimesResult { times, truncated })
     }
 
     async fn ls_tree_sized_blobs(
@@ -2512,7 +3270,7 @@ impl GitBackend for CliGitBackend {
         run_git(&["clone", bare_s, work_s]).await?;
         run_git(&["-C", work_s, "checkout", "--detach", target_sha]).await?;
 
-        let hook_env = protection_hook_push_env();
+        let hook_env = protection_hook_push_env("admin");
         let hook_env_refs: Vec<(&str, &str)> = hook_env
             .iter()
             .map(|(k, v)| (k.as_str(), v.as_str()))
@@ -2608,6 +3366,35 @@ impl GitBackend for CliGitBackend {
         }
     }
 
+    async fn ahead_behind(
+        &self,
+        repo: &Path,
+        head: &str,
+        base: &str,
+    ) -> Result<(u64, u64), GitError> {
+        let head = validate_treeish(head)?;
+        let base = validate_treeish(base)?;
+        let repo_s = repo_str(repo)?;
+        let range = format!("{head}...{base}");
+        let stdout =
+            run_git_stdout(&["-C", repo_s, "rev-list", "--left-right", "--count", &range]).await?;
+        let text = String::from_utf8_lossy(&stdout);
+        let mut parts = text.split_whitespace();
+        let ahead = parts
+            .next()
+            .and_then(|s| s.parse::<u64>().ok())
+            .ok_or_else(|| {
+                GitError::Process(format!("unexpected rev-list output: {}", text.trim()))
+            })?;
+        let behind = parts
+            .next()
+            .and_then(|s| s.parse::<u64>().ok())
+            .ok_or_else(|| {
+                GitError::Process(format!("unexpected rev-list output: {}", text.trim()))
+            })?;
+        Ok((ahead, behind))
+    }
+
     async fn fast_forward_ref(
         &self,
         repo: &Path,
@@ -2632,13 +3419,11 @@ impl GitBackend for CliGitBackend {
             .to_str()
             .ok_or_else(|| GitError::InvalidArg("non-utf8 temp worktree".into()))?;
         run_git(&["clone", bare_s, work_s]).await?;
-        let branch = refname
-            .strip_prefix("refs/heads/")
-            .unwrap_or(refname);
+        let branch = refname.strip_prefix("refs/heads/").unwrap_or(refname);
         // Detached checkout of target, then push to branch (FF only — no +).
         run_git(&["-C", work_s, "checkout", "--detach", target_sha]).await?;
         let refspec = format!("HEAD:refs/heads/{branch}");
-        let hook_env = protection_hook_push_env();
+        let hook_env = protection_hook_push_env("admin");
         let hook_env_refs: Vec<(&str, &str)> = hook_env
             .iter()
             .map(|(k, v)| (k.as_str(), v.as_str()))
@@ -2652,6 +3437,23 @@ impl GitBackend for CliGitBackend {
         let repo_s = repo_str(repo)?;
         let stdout = run_git_stdout(&["-C", repo_s, "rev-parse", rev]).await?;
         Ok(String::from_utf8_lossy(&stdout).trim().to_string())
+    }
+
+    async fn update_ref(&self, repo: &Path, refname: &str, sha: &str) -> Result<(), GitError> {
+        let refname = validate_treeish(refname)?;
+        if !refname.starts_with("refs/") {
+            return Err(GitError::InvalidArg(format!(
+                "update_ref requires a fully-qualified refs/* name: {refname}"
+            )));
+        }
+        let sha = validate_treeish(sha)?;
+        if !(7..=64).contains(&sha.len()) || !sha.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(GitError::InvalidArg(format!(
+                "update_ref target must be a sha: {sha}"
+            )));
+        }
+        let repo_s = repo_str(repo)?;
+        run_git(&["-C", repo_s, "update-ref", refname, sha]).await
     }
 }
 
@@ -2798,21 +3600,14 @@ async fn merge_via_worktree(
                 return Err(e);
             }
             run_git(&["-C", work_s, "checkout", base_ref]).await?;
-            run_git(&[
-                "-C",
-                work_s,
-                "merge",
-                "--ff-only",
-                "oxidean-rebase-head",
-            ])
-            .await?;
+            run_git(&["-C", work_s, "merge", "--ff-only", "oxidean-rebase-head"]).await?;
         }
     }
 
     let sha_bytes = run_git_stdout(&["-C", work_s, "rev-parse", "HEAD"]).await?;
     let sha = String::from_utf8_lossy(&sha_bytes).trim().to_string();
     let refspec = format!("HEAD:refs/heads/{base_ref}");
-    let hook_env = protection_hook_push_env();
+    let hook_env = protection_hook_push_env("admin");
     let hook_env_refs: Vec<(&str, &str)> = hook_env
         .iter()
         .map(|(k, v)| (k.as_str(), v.as_str()))
@@ -3555,6 +4350,42 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn ahead_behind_counts_between_refs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bare = tmp.path().join("ab.git");
+        let git = CliGitBackend::new();
+        git.init_bare(&bare, "main").await.unwrap();
+        git.seed_commit(
+            &bare,
+            "main",
+            "seed",
+            &[("a.txt".into(), b"base\n".to_vec())],
+        )
+        .await
+        .unwrap();
+        push_branch_with_file(&bare, "feature", "main", "b.txt", b"feat\n", "feat").await;
+        // feature ahead by 1, not behind.
+        let (ahead, behind) = git
+            .ahead_behind(&bare, "refs/heads/feature", "refs/heads/main")
+            .await
+            .expect("ahead_behind");
+        assert_eq!((ahead, behind), (1, 0));
+        // Reverse: main is behind feature by 1.
+        let (ahead, behind) = git
+            .ahead_behind(&bare, "refs/heads/main", "refs/heads/feature")
+            .await
+            .expect("ahead_behind reverse");
+        assert_eq!((ahead, behind), (0, 1));
+        // Advance main once: now diverged 1 / 1.
+        push_branch_with_file(&bare, "main", "main", "c.txt", b"mainline\n", "main").await;
+        let (ahead, behind) = git
+            .ahead_behind(&bare, "refs/heads/feature", "refs/heads/main")
+            .await
+            .expect("ahead_behind diverged");
+        assert_eq!((ahead, behind), (1, 1));
+    }
+
     /// D-FORK-02/03: clone_bare must install hooks/update (same as init_bare).
     #[tokio::test]
     async fn clone_bare_installs_protection_hooks() {
@@ -3603,7 +4434,7 @@ mod tests {
             "OXIDEAN_PROTECTION_HELPER",
             "/usr/local/bin/oxidean-protection-hook",
         );
-        let env = protection_hook_push_env();
+        let env = protection_hook_push_env("admin");
         match prev {
             Some(v) => std::env::set_var("OXIDEAN_PROTECTION_HELPER", v),
             None => std::env::remove_var("OXIDEAN_PROTECTION_HELPER"),
@@ -3920,10 +4751,23 @@ mod tests {
         let key_path = key_dir.join("web-flow");
         let key_s = key_path.to_str().unwrap();
         let gen = std::process::Command::new("ssh-keygen")
-            .args(["-t", "ed25519", "-N", "", "-f", key_s, "-C", "oxidean-web-flow"])
+            .args([
+                "-t",
+                "ed25519",
+                "-N",
+                "",
+                "-f",
+                key_s,
+                "-C",
+                "oxidean-web-flow",
+            ])
             .output()
             .expect("ssh-keygen");
-        assert!(gen.status.success(), "ssh-keygen failed: {}", String::from_utf8_lossy(&gen.stderr));
+        assert!(
+            gen.status.success(),
+            "ssh-keygen failed: {}",
+            String::from_utf8_lossy(&gen.stderr)
+        );
 
         let pub_line = std::fs::read_to_string(key_dir.join("web-flow.pub")).unwrap();
         let mut parts = pub_line.split_whitespace();
@@ -4685,5 +5529,472 @@ mod tests {
             ssh.signature_status
         );
         assert_eq!(ssh.signature_kind, "ssh");
+    }
+
+    /// GIT-19 helpers — temp bare repo seeded with two files on `main`.
+    async fn seeded_bare() -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let bare = dir.path().join("r.git");
+        let git = CliGitBackend::new();
+        git.init_bare(&bare, "main").await.unwrap();
+        git.seed_commit(
+            &bare,
+            "main",
+            "seed",
+            &[
+                ("README.md".into(), b"hi\n".to_vec()),
+                ("docs/a.md".into(), b"doc\n".to_vec()),
+            ],
+        )
+        .await
+        .unwrap();
+        (dir, bare)
+    }
+
+    async fn show_file(bare: &Path, path: &str) -> String {
+        let out = Command::new("git")
+            .args([
+                "-C",
+                bare.to_str().unwrap(),
+                "show",
+                &format!("main:{path}"),
+            ])
+            .output()
+            .await
+            .unwrap();
+        assert!(out.status.success(), "show {path} failed");
+        String::from_utf8(out.stdout).unwrap()
+    }
+
+    #[tokio::test]
+    async fn commit_files_creates_updates_and_deletes() {
+        let (_d, bare) = seeded_bare().await;
+        let git = CliGitBackend::new();
+        let res = git
+            .commit_files(
+                &bare,
+                "main",
+                "main",
+                "web edit",
+                &[
+                    FileChange::Upsert {
+                        path: "src/new.txt".into(),
+                        content: b"hello".to_vec(),
+                    },
+                    FileChange::Upsert {
+                        path: "README.md".into(),
+                        content: b"updated".to_vec(),
+                    },
+                    FileChange::Delete {
+                        path: "docs".into(), // directory delete
+                    },
+                ],
+                "Web User",
+                "web@example.com",
+                None,
+                "admin",
+            )
+            .await
+            .expect("commit_files");
+        assert_eq!(res.branch, "main");
+        assert!(res.base_sha.is_some());
+        assert_eq!(show_file(&bare, "src/new.txt").await, "hello");
+        assert_eq!(show_file(&bare, "README.md").await, "updated");
+        // Directory delete removed its child; the dir itself is gone.
+        assert_eq!(
+            git.ls_tree_entry(&bare, "main", "docs").await.expect("ls"),
+            None
+        );
+        // Commit author/committer metadata.
+        let log = git.log(&bare, "main", 0, 1, None, None).await.unwrap();
+        assert_eq!(log[0].author_name, "Web User");
+        assert_eq!(log[0].author_email, "web@example.com");
+        assert_eq!(log[0].committer_email, FORGE_NOREPLY_EMAIL);
+    }
+
+    #[tokio::test]
+    async fn commit_files_empty_file_and_unborn_repo() {
+        let dir = tempfile::tempdir().unwrap();
+        let bare = dir.path().join("empty.git");
+        let git = CliGitBackend::new();
+        git.init_bare(&bare, "main").await.unwrap();
+        // Root commit on unborn base — empty file included.
+        git.commit_files(
+            &bare,
+            "main",
+            "main",
+            "first",
+            &[
+                FileChange::Upsert {
+                    path: "blank.txt".into(),
+                    content: Vec::new(),
+                },
+                FileChange::Upsert {
+                    path: "dir/.gitkeep".into(),
+                    content: Vec::new(),
+                },
+            ],
+            "Oxidean",
+            FORGE_NOREPLY_EMAIL,
+            None,
+            "admin",
+        )
+        .await
+        .expect("root commit");
+        assert_eq!(show_file(&bare, "blank.txt").await, "");
+        assert_eq!(show_file(&bare, "dir/.gitkeep").await, "");
+    }
+
+    #[tokio::test]
+    async fn commit_files_rename_via_oid_and_traversal_rejects() {
+        let (_d, bare) = seeded_bare().await;
+        let git = CliGitBackend::new();
+        let entry = git
+            .ls_tree_entry(&bare, "main", "README.md")
+            .await
+            .unwrap()
+            .expect("entry");
+        assert_eq!(entry.kind, TreeEntryKind::Blob);
+        git.commit_files(
+            &bare,
+            "main",
+            "main",
+            "mv",
+            &[
+                FileChange::Delete {
+                    path: "README.md".into(),
+                },
+                FileChange::UpsertOid {
+                    path: "docs/README-moved.md".into(),
+                    oid: entry.oid.clone(),
+                },
+            ],
+            "Oxidean",
+            FORGE_NOREPLY_EMAIL,
+            None,
+            "admin",
+        )
+        .await
+        .unwrap();
+        assert_eq!(show_file(&bare, "docs/README-moved.md").await, "hi\n");
+        // blob object id preserved across the rename
+        let moved = git
+            .ls_tree_entry(&bare, "main", "docs/README-moved.md")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(moved.oid, entry.oid);
+
+        // Write paths reject leading `/` outright (unlike the read-path
+        // helper, which normalizes URL-derived inputs).
+        assert!(validate_edit_path("/abs/path").is_err());
+        for bad in [
+            "../etc",
+            "a/../../b",
+            "a/../b",
+            ".git/hook",
+            "a//b",
+            "x/./y",
+            "trailing/",
+            "/abs/path",
+            "",
+        ] {
+            let err = git
+                .commit_files(
+                    &bare,
+                    "main",
+                    "main",
+                    "bad",
+                    &[FileChange::Upsert {
+                        path: bad.into(),
+                        content: b"x".to_vec(),
+                    }],
+                    "Oxidean",
+                    FORGE_NOREPLY_EMAIL,
+                    None,
+                    "admin",
+                )
+                .await
+                .expect_err("traversal must reject");
+            assert!(matches!(err, GitError::InvalidArg(_)), "{bad} → {err:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn commit_files_new_branch_and_noop_and_race() {
+        let (_d, bare) = seeded_bare().await;
+        let git = CliGitBackend::new();
+        // new branch off main
+        let res = git
+            .commit_files(
+                &bare,
+                "feat/x",
+                "main",
+                "branch commit",
+                &[FileChange::Upsert {
+                    path: "feat.txt".into(),
+                    content: b"f".to_vec(),
+                }],
+                "Oxidean",
+                FORGE_NOREPLY_EMAIL,
+                None,
+                "admin",
+            )
+            .await
+            .unwrap();
+        assert!(res.base_sha.is_some());
+        assert_eq!(res.branch, "feat/x");
+        // branch exists now
+        let e = git
+            .commit_files(
+                &bare,
+                "feat/x",
+                "main",
+                "again",
+                &[FileChange::Upsert {
+                    path: "z.txt".into(),
+                    content: b"z".to_vec(),
+                }],
+                "Oxidean",
+                FORGE_NOREPLY_EMAIL,
+                None,
+                "admin",
+            )
+            .await
+            .expect_err("existing branch as new must fail");
+        assert!(matches!(e, GitError::Conflict(_)), "{e:?}");
+
+        // no-op changeset (same content) → error, no commit
+        let err = git
+            .commit_files(
+                &bare,
+                "main",
+                "main",
+                "noop",
+                &[FileChange::Upsert {
+                    path: "README.md".into(),
+                    content: b"hi\n".to_vec(),
+                }],
+                "Oxidean",
+                FORGE_NOREPLY_EMAIL,
+                None,
+                "admin",
+            )
+            .await
+            .expect_err("no-op must error");
+        assert!(matches!(err, GitError::InvalidArg(_)), "{err:?}");
+
+        // delete of missing path → NotFound
+        let err = git
+            .commit_files(
+                &bare,
+                "main",
+                "main",
+                "rm missing",
+                &[FileChange::Delete {
+                    path: "nope.txt".into(),
+                }],
+                "Oxidean",
+                FORGE_NOREPLY_EMAIL,
+                None,
+                "admin",
+            )
+            .await
+            .expect_err("missing delete must fail");
+        assert!(matches!(err, GitError::NotFound(_)), "{err:?}");
+    }
+
+    #[tokio::test]
+    async fn commit_files_hook_decline_maps_denied() {
+        let (_d, bare) = seeded_bare().await;
+        let git = CliGitBackend::new();
+        // Install a deny-all update hook on the bare repo.
+        let hook = bare.join("hooks/update");
+        std::fs::write(&hook, "#!/bin/sh\necho denied >&2\nexit 1\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut p = std::fs::metadata(&hook).unwrap().permissions();
+            p.set_mode(0o755);
+            std::fs::set_permissions(&hook, p).unwrap();
+        }
+        let err = git
+            .commit_files(
+                &bare,
+                "main",
+                "main",
+                "blocked",
+                &[FileChange::Upsert {
+                    path: "x.txt".into(),
+                    content: b"x".to_vec(),
+                }],
+                "Oxidean",
+                FORGE_NOREPLY_EMAIL,
+                None,
+                "admin",
+            )
+            .await
+            .expect_err("hook decline must surface");
+        assert!(matches!(err, GitError::Denied(_)), "{err:?}");
+    }
+
+    /// Commit `(message, author_name, author_email, committer_unix_date)` rows
+    /// onto `branch` in `bare`, in order, via a scratch clone (seed_commit
+    /// creates root commits only, so a real history needs a shared worktree).
+    /// An empty committer date uses the wall clock.
+    async fn seed_history(bare: &Path, branch: &str, commits: &[(&str, &str, &str, &str)]) {
+        let wt = tempfile::tempdir().unwrap();
+        let wt_s = wt.path().to_str().unwrap().to_string();
+        let bare_s = bare.to_str().unwrap().to_string();
+        run_git(&["clone", &bare_s, &wt_s]).await.unwrap();
+        run_git(&["-C", &wt_s, "checkout", "-B", branch])
+            .await
+            .unwrap();
+        for (i, &(msg, name, email, date)) in commits.iter().enumerate() {
+            let file = wt.path().join(format!("f{i}.txt"));
+            std::fs::write(&file, format!("{i}\n")).unwrap();
+            run_git(&["-C", &wt_s, "add", "-A"]).await.unwrap();
+            let mut env: Vec<(&str, &str)> = vec![
+                ("GIT_AUTHOR_NAME", name),
+                ("GIT_AUTHOR_EMAIL", email),
+                ("GIT_COMMITTER_NAME", "Oxidean"),
+                ("GIT_COMMITTER_EMAIL", FORGE_NOREPLY_EMAIL),
+            ];
+            if !date.is_empty() {
+                env.push(("GIT_AUTHOR_DATE", date));
+                env.push(("GIT_COMMITTER_DATE", date));
+            }
+            run_git_stdout_env(&["-C", &wt_s, "commit", "-m", msg], &env)
+                .await
+                .unwrap();
+        }
+        run_git(&["-C", &wt_s, "push", "origin", &format!("HEAD:{branch}")])
+            .await
+            .unwrap();
+    }
+
+    fn now_ts() -> i64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64
+    }
+
+    #[tokio::test]
+    async fn contributor_scan_aggregates_and_reports_truncation() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bare = tmp.path().join("scan.git");
+        let git = CliGitBackend::new();
+        git.init_bare(&bare, "main").await.unwrap();
+        seed_history(
+            &bare,
+            "main",
+            &[
+                ("a1", "Alice", "alice@ex.com", ""),
+                ("a2", "Alice", "alice@ex.com", ""),
+                ("a3", "Alice", "alice@ex.com", ""),
+                ("b1", "Bob", "bob@ex.com", ""),
+            ],
+        )
+        .await;
+
+        let full = git
+            .contributor_scan(&bare, "main", 10, 100)
+            .await
+            .expect("full scan");
+        assert_eq!(full.scanned_commits, 4);
+        assert!(!full.truncated);
+        let alice = full
+            .contributors
+            .iter()
+            .find(|c| c.email == "alice@ex.com")
+            .expect("alice row");
+        assert_eq!(alice.name, "Alice");
+        assert_eq!(alice.commit_count, 3);
+        // Three Alice commits: first/last differ and timestamps are ordered.
+        assert_ne!(alice.first_commit_sha, alice.last_commit_sha);
+        assert!(alice.first_commit_unix <= alice.last_commit_unix);
+        assert!(alice.first_commit_unix > 0);
+        let bob = full
+            .contributors
+            .iter()
+            .find(|c| c.email == "bob@ex.com")
+            .expect("bob row");
+        assert_eq!(bob.commit_count, 1);
+        // Single-commit author: first == last.
+        assert_eq!(bob.first_commit_sha, bob.last_commit_sha);
+        assert_eq!(bob.first_commit_unix, bob.last_commit_unix);
+
+        // Only the two newest commits are walked when the cap clips history.
+        let clipped = git
+            .contributor_scan(&bare, "main", 10, 2)
+            .await
+            .expect("clipped scan");
+        assert_eq!(clipped.scanned_commits, 2);
+        assert!(clipped.truncated);
+        let scanned: i64 = clipped.contributors.iter().map(|c| c.commit_count).sum();
+        assert_eq!(scanned, 2);
+
+        // Unborn / missing ref -> empty scan.
+        let empty = git
+            .contributor_scan(&bare, "refs/heads/nope", 10, 100)
+            .await
+            .expect("missing ref");
+        assert!(empty.contributors.is_empty());
+        assert_eq!(empty.scanned_commits, 0);
+        assert!(!empty.truncated);
+    }
+
+    #[tokio::test]
+    async fn commit_times_returns_bounded_newest_first_timestamps() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bare = tmp.path().join("times.git");
+        let git = CliGitBackend::new();
+        git.init_bare(&bare, "main").await.unwrap();
+        seed_history(
+            &bare,
+            "main",
+            &[
+                ("c1", "Alice", "alice@ex.com", "@1700000000"),
+                ("c2", "Alice", "alice@ex.com", ""),
+                ("c3", "Alice", "alice@ex.com", ""),
+            ],
+        )
+        .await;
+
+        let res = git
+            .commit_times(&bare, "main", Some(0), 100)
+            .await
+            .expect("commit_times");
+        assert_eq!(res.times.len(), 3);
+        assert!(!res.truncated);
+        assert!(res.times.iter().all(|t| *t > 0));
+        // Newest-first order.
+        assert!(res.times.windows(2).all(|w| w[0] >= w[1]));
+
+        // `--since` between commits excludes the older history. (git still
+        // emits the boundary tip when `since` exceeds it — the API layer
+        // buckets times itself, so a leaked tip is harmless.)
+        let windowed = git
+            .commit_times(&bare, "main", Some(now_ts() - 60), 100)
+            .await
+            .expect("windowed since");
+        assert_eq!(windowed.times.len(), 2, "{:?}", windowed.times);
+
+        // Cap clips the oldest commits out and marks truncation.
+        let capped = git
+            .commit_times(&bare, "main", Some(0), 2)
+            .await
+            .expect("capped");
+        assert_eq!(capped.times.len(), 2);
+        assert!(capped.truncated);
+
+        // Missing ref -> empty, not an error.
+        let missing = git
+            .commit_times(&bare, "refs/heads/nope", None, 100)
+            .await
+            .expect("missing ref");
+        assert!(missing.times.is_empty());
+        assert!(!missing.truncated);
     }
 }

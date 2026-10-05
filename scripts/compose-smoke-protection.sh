@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# Compose ORG-06 protected-push smoke (D-PKG-01 / D-PKG-03).
+# Compose ORG-06 protected-push smoke (D-PKG-01 / D-PKG-03) + GIT-21 protected tags.
 # Brings up a fresh Compose stack (wipes project volumes), asserts the protection
 # helper binary is executable, creates a reviews-required rule with
 # enforce_admins, and expects an HTTPS push to the protected ref to fail.
+# Also creates a protected tag ruleset (v*, deny all, enforce_admins) and expects
+# an HTTPS tag push to fail while a non-matching tag push succeeds.
 # When SSH TCP 2222 is reachable and SMOKE_SKIP_LS_REMOTE is unset, also
 # expects an SSH push to the same protected ref to fail (D-PKG-03 SSH half).
 #
@@ -161,6 +163,28 @@ fi
 echo "==> HTTPS push denied as expected (rc=$push_rc)"
 echo "$push_out" | head -20 || true
 
+echo "==> GIT-21: create protected tag ruleset v* (deny all, enforce_admins)"
+rpc "$(python3 -c 'import json; print(json.dumps({"procedure":"repo.tagProtection.create","input":{"owner":"'"$OWNER"'","name":"'"$REPO"'","pattern":"v*","enforce_admins":True}}))')"
+
+echo "==> GIT-21: non-matching tag push allowed (control)"
+git -C "$WORK/repo" tag smoke-unprotected
+git -C "$WORK/repo" push -q origin refs/tags/smoke-unprotected
+echo "==> unprotected tag pushed OK"
+
+echo "==> GIT-21: push protected tag refs/tags/vsmoke-protected (expect denial)"
+git -C "$WORK/repo" tag vsmoke-protected
+set +e
+tag_push_out="$(GIT_TERMINAL_PROMPT=0 git -C "$WORK/repo" push origin refs/tags/vsmoke-protected 2>&1)"
+tag_push_rc=$?
+set -e
+if [[ "$tag_push_rc" -eq 0 ]]; then
+  echo "FAIL: HTTPS push of protected tag succeeded (expected denial)" >&2
+  echo "$tag_push_out" >&2
+  exit 1
+fi
+echo "==> HTTPS protected tag push denied as expected (rc=$tag_push_rc)"
+echo "$tag_push_out" | head -20 || true
+
 # --- D-PKG-03 SSH half: optional when TCP published and not skip-flagged ---
 ssh_skip_reason=""
 if [[ "${SMOKE_SKIP_LS_REMOTE:-0}" == "1" ]]; then
@@ -208,10 +232,22 @@ else
   fi
   echo "==> SSH push denied as expected (rc=$ssh_push_rc)"
   echo "$ssh_push_out" | head -20 || true
+
+  set +e
+  ssh_tag_out="$(GIT_TERMINAL_PROMPT=0 git -C "$WORK/repo" push "${GIT_SSH_URL}" refs/tags/vsmoke-protected 2>&1)"
+  ssh_tag_rc=$?
+  set -e
+  if [[ "$ssh_tag_rc" -eq 0 ]]; then
+    echo "FAIL: SSH push of protected tag succeeded (expected denial)" >&2
+    echo "$ssh_tag_out" >&2
+    exit 1
+  fi
+  echo "==> SSH protected tag push denied as expected (rc=$ssh_tag_rc)"
+  echo "$ssh_tag_out" | head -20 || true
 fi
 
 if [[ -n "$ssh_skip_reason" ]]; then
-  echo "==> compose-smoke-protection OK (helper present + HTTPS protected push denied; SSH skipped: ${ssh_skip_reason})"
+  echo "==> compose-smoke-protection OK (helper present + HTTPS protected branch/tag push denied; SSH skipped: ${ssh_skip_reason})"
 else
-  echo "==> compose-smoke-protection OK (helper present + HTTPS and SSH protected push denied)"
+  echo "==> compose-smoke-protection OK (helper present + HTTPS and SSH protected branch/tag push denied)"
 fi

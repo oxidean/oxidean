@@ -363,7 +363,7 @@ pub async fn mark_read(
     for id in ids {
         let n = match pool {
             DbPool::Postgres(p) => sqlx::query(
-                "UPDATE notifications SET read_at = $1
+                "UPDATE notifications SET read_at = $1::timestamptz
  WHERE id = $2 AND recipient_id = $3 AND read_at IS NULL",
             )
             .bind(read_at)
@@ -409,7 +409,7 @@ pub async fn mark_all_read(
 ) -> Result<i64, String> {
     let n = match pool {
         DbPool::Postgres(p) => sqlx::query(
-            "UPDATE notifications SET read_at = $1
+            "UPDATE notifications SET read_at = $1::timestamptz
  WHERE recipient_id = $2 AND read_at IS NULL",
         )
         .bind(read_at)

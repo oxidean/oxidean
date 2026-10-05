@@ -3,14 +3,17 @@ import type { OwnerType, RepoVisibility } from "@oxidean/api-client";
 import { useState } from "octane";
 import { CollaboratorsPanel } from "@/components/repo/collaborators-panel";
 import { BranchProtectionPanel } from "@/components/repo/branch-protection-panel";
+import { DeployKeysPanel } from "@/components/repo/deploy-keys-panel";
 import { LfsBrowser } from "@/components/repo/lfs-browser";
 import { ActionsSettingsPanel } from "@/components/repo/actions-settings-panel";
+import { GitQuotaSettingsPanel } from "@/components/repo/git-quota-settings-panel";
 import { LfsSettingsPanel } from "@/components/repo/lfs-settings-panel";
 import { TemplateRepoSettingsPanel } from "@/components/repo/template-repo-settings-panel";
 import { MergeSettingsPanel } from "@/components/repo/merge-settings-panel";
 import { OwnerLookup } from "@/components/repo/owner-lookup";
 import { TopicChipsInput } from "@/components/repo/topics-input";
 import { RepoNotFound } from "@/components/repo/repo-not-found";
+import { RepoFeaturesPanel } from "@/components/repo/repo-features-panel";
 import { WebhooksPanel } from "@/components/repo/webhooks-panel";
 import { MirrorSettingsPanel } from "@/components/repo/mirror-settings-panel";
 import { TypeToConfirmDialog } from "@/components/repo/type-to-confirm-dialog";
@@ -39,6 +42,10 @@ const SOFT_DELETE_BODY =
   "Removes this repository from Oxidean. Files may be purged from disk later. Type the repository name to confirm.";
 const TRANSFER_BODY =
   "Transfers this repository to another user or organization. Type the repository name to confirm.";
+const ARCHIVE_BODY =
+  "Marks this repository read-only. Code stays browsable and clonable; pushes, issues, pull requests, and releases are disabled until it is unarchived. Type the repository name to confirm.";
+const UNARCHIVE_BODY =
+  "Restores write access. Pushes, issues, pull requests, and releases become editable again. Type the repository name to confirm.";
 
 /** Admin settings — visibility, collaborators, rename/transfer, soft-delete (D-ORG-04 / GIT-16/17). */
 export function RepoSettingsPage() @{
@@ -79,6 +86,12 @@ export function RepoSettingsPage() @{
   const [transferConfirm, setTransferConfirm] = useState("");
   const [transferPending, setTransferPending] = useState(false);
   const [transferError, setTransferError] = useState("");
+
+  const [archived, setArchived] = useState(() => !!repo?.archived);
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const [archiveConfirm, setArchiveConfirm] = useState("");
+  const [archivePending, setArchivePending] = useState(false);
+  const [archiveError, setArchiveError] = useState("");
 
   async function saveVisibility() {
     if (!repo) return;
@@ -189,6 +202,30 @@ export function RepoSettingsPage() @{
     } catch {
       setTransferError(NETWORK_ERROR);
       setTransferPending(false);
+    }
+  }
+
+  async function submitArchive() {
+    if (!repo) return;
+    const next = !archived;
+    setArchiveError("");
+    setArchivePending(true);
+    try {
+      const res = await apiClient.repo.setArchived({ owner, name: repoName, archived: next });
+      if (!res.ok) {
+        setArchiveError(res.error.message || "Could not update archive state.");
+        setArchivePending(false);
+        return;
+      }
+      setArchivePending(false);
+      setArchiveOpen(false);
+      setArchiveConfirm("");
+      setArchived(res.data.archived ?? next);
+      setRepo(res.data);
+      toastSuccess(next ? "Repository archived." : "Repository unarchived.");
+    } catch {
+      setArchiveError(NETWORK_ERROR);
+      setArchivePending(false);
     }
   }
 
@@ -327,8 +364,13 @@ export function RepoSettingsPage() @{
 
         <BranchProtectionPanel owner={owner} name={repoName} can_admin={canAdmin} />
 
+        <DeployKeysPanel owner={owner} name={repoName} can_admin={canAdmin} />
+
+        <GitQuotaSettingsPanel owner={owner} name={repoName} can_admin={canAdmin} />
+
         <LfsSettingsPanel owner={owner} name={repoName} can_admin={canAdmin} />
         <TemplateRepoSettingsPanel owner={owner} name={repoName} can_admin={canAdmin} />
+        <RepoFeaturesPanel owner={owner} name={repoName} can_admin={canAdmin} repo={repo} />
         <ActionsSettingsPanel owner={owner} name={repoName} can_admin={canAdmin} />
 
         <MergeSettingsPanel owner={owner} name={repoName} can_admin={canAdmin} />
@@ -435,6 +477,32 @@ export function RepoSettingsPage() @{
             </Button>
           </div>
 
+          <div className="flex flex-col gap-3" aria-labelledby="archive-heading">
+            <h3 id="archive-heading" className="text-[16px] font-semibold text-foreground">
+              {(archived ? "Unarchive repository" : "Archive repository") as string}
+            </h3>
+            <p className="text-[14px] leading-[1.4] text-muted-foreground">
+              {
+                (archived
+                  ? "Restore writes — pushes, issues, pull requests, and releases become editable again."
+                  : "Make this repository read-only. Code stays browsable and clonable; pushes, issues, pull requests, and releases are disabled until unarchived.") as string
+              }
+            </p>
+            <Button
+              type="button"
+              variant={archived ? "secondary" : "destructive"}
+              className="w-full sm:w-auto"
+              disabled={archivePending}
+              onClick={() => {
+                setArchiveError("");
+                setArchiveConfirm("");
+                setArchiveOpen(true);
+              }}
+            >
+              {(archived ? "Unarchive repository" : "Archive repository") as string}
+            </Button>
+          </div>
+
           <div className="flex flex-col gap-3">
             <p className="text-[14px] leading-[1.4] text-muted-foreground">
               Soft-delete removes this repository from Oxidean. Disk cleanup may run later.
@@ -478,6 +546,31 @@ export function RepoSettingsPage() @{
           }
         }}
         onConfirm={() => void submitTransfer()}
+      />
+
+      <TypeToConfirmDialog
+        open={archiveOpen}
+        title={(archived ? "Unarchive repository?" : "Archive repository?") as string}
+        description={(archived ? UNARCHIVE_BODY : ARCHIVE_BODY) as string}
+        confirmLabel="Repository name"
+        confirmValue={archiveConfirm}
+        expectedName={repo.name}
+        onConfirmValueChange={setArchiveConfirm}
+        pending={archivePending}
+        error={archiveError}
+        confirmButtonLabel={(archived ? "Unarchive repository" : "Archive repository") as string}
+        pendingButtonLabel={(archived ? "Unarchiving…" : "Archiving…") as string}
+        inputId="archive-confirm"
+        testId="repo-archive-confirm"
+        onOpenChange={(open) => {
+          if (archivePending) return;
+          setArchiveOpen(open);
+          if (!open) {
+            setArchiveConfirm("");
+            setArchiveError("");
+          }
+        }}
+        onConfirm={() => void submitArchive()}
       />
 
       <TypeToConfirmDialog

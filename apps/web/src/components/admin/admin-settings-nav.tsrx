@@ -6,6 +6,7 @@ export type AdminSettingsNavActive =
   | "users"
   | "lfs"
   | "packages"
+  | "mcp"
   | "runners"
   | "templates";
 
@@ -22,6 +23,7 @@ const LINKS: {
   { id: "users", href: "/admin/users", label: "Users" },
   { id: "lfs", href: "/admin/lfs", label: "LFS quotas" },
   { id: "packages", href: "/admin/packages", label: "Package storage" },
+  { id: "mcp", href: "/admin/mcp", label: "MCP endpoint" },
   { id: "templates", href: "/admin/templates", label: "Templates" },
   { id: "runners", href: "/admin/runners", label: "Actions runners" },
 ];
@@ -35,7 +37,7 @@ function linkClass(isActive: boolean): string {
   );
 }
 
-/** Instance admin settings sidebar: Auth | LFS | Packages | Actions runners. */
+/** Instance admin settings sidebar: Auth | Users | LFS | Packages | MCP | Templates | Actions runners. */
 export function AdminSettingsNav({ active }: AdminSettingsNavProps) @{
   <nav className="flex flex-col gap-1" aria-label="Admin settings">
     <p className="mb-2 px-3 text-[12px] font-semibold uppercase tracking-wide text-muted-foreground">

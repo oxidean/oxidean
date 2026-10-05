@@ -4,9 +4,12 @@ mod acl;
 mod activity;
 pub(crate) mod author_resolve;
 mod branch_protection;
-mod commit_status;
 mod collaborators;
+mod commit_status;
+mod file_templates;
+mod files;
 mod fork_network;
+mod insights;
 mod invites;
 mod language_stats;
 mod rename_transfer;
@@ -14,28 +17,44 @@ mod search;
 pub(crate) mod search_query;
 pub(crate) mod signatures;
 mod social_lists;
+mod sync_fork;
+mod tag_protection;
 mod templates;
+pub(crate) mod units;
 
 pub use acl::{
-    can_read_as_owner, coalesce, effective_capability, fg_all_covers_repo, is_private_visibility,
-    login_slug_taken, lookup_repo_row_or_redirect, meets, not_found, owner_ref_for_repo,
-    resolve_owner_slug, resolve_repo_for_read, AccessibleRepo, Capability, MemberBasePermission,
-    OrgRole, OwnerRef,
+    archived_error, can_read_as_owner, coalesce, effective_capability, ensure_not_archived,
+    fg_all_covers_repo, is_private_visibility, login_slug_taken, lookup_repo_row_or_redirect,
+    meets, not_found, owner_ref_for_repo, resolve_owner_slug, resolve_repo_for_read,
+    AccessibleRepo, Capability, MemberBasePermission, OrgRole, OwnerRef,
 };
 pub use branch_protection::{
     create as branch_protection_create, delete as branch_protection_delete,
     list as branch_protection_list, update as branch_protection_update,
 };
-pub use commit_status::{create as commit_status_create, list as commit_status_list};
 pub use collaborators::{
     add as collaborators_add, list as collaborators_list, remove as collaborators_remove,
     resolve_repo_for_admin, update as collaborators_update,
+};
+pub use commit_status::{create as commit_status_create, list as commit_status_list};
+pub use files::{
+    commit_policy as file_commit_policy, create as file_create, delete as file_delete,
+    mkdir as file_mkdir, rename as file_rename, update as file_update, upload as file_upload,
+};
+pub use tag_protection::{
+    create as tag_protection_create, delete as tag_protection_delete,
+    list as tag_protection_list, update as tag_protection_update,
 };
 pub use invites::{
     create as invites_create, create_link as invites_create_link, list as invites_list,
     revoke as invites_revoke,
 };
+pub use file_templates::file_templates;
 pub use fork_network::head_valid_for_base;
+pub use insights::{
+    commit_activity as insights_commit_activity, contributors as insights_contributors,
+    fork_network as insights_fork_network,
+};
 pub use rename_transfer::{
     redirect_retention_days, rename, resolve_repo_or_redirect, supersede_redirect_on_create,
     transfer, DEFAULT_REPO_REDIRECT_RETENTION_DAYS,
@@ -47,6 +66,8 @@ pub use activity::{
 pub use search::search;
 pub(crate) use search::code_search_pathspecs;
 pub use social_lists::{forks_list, stargazers_list, watchers_list};
+pub use sync_fork::{fork_status, sync_fork};
+pub use units::{issues_get_enabled, issues_set_enabled, pulls_get_enabled, pulls_set_enabled};
 
 /// Soft size limit for blob preview / raw soft-cap (D-20 / T-07-16).
 /// 1 MiB keeps preview responses cheap without clipping most source files.
@@ -64,9 +85,11 @@ use oxidean_core::{
     RepoLfsDownloadRequest, RepoLfsDownloadResponse, RepoLfsEnabledResponse,
     RepoLfsGetEnabledRequest, RepoLfsListObjectsRequest, RepoLfsListObjectsResponse,
     RepoLfsObjectEntry, RepoLfsSetEnabledRequest, RepoLfsStatusResponse, RepoLfsUsageResponse,
-    RepoListByOwnerRequest, RepoListMineResponse, RepoPublic, RepoRefEntry, RepoRefsResponse,
+    RepoGetQuotaRequest, RepoListByOwnerRequest, RepoListMineResponse, RepoPublic,
+    RepoQuotaPublic, RepoRefEntry, RepoRefsResponse, RepoSetArchivedRequest, RepoSetQuotaRequest,
     RepoSoftDeleteRequest, RepoSoftDeleteResponse, RepoTemplateOption, RepoTreeEntry,
     RepoTreeRequest, RepoTreeResponse, RepoUpdateVisibilityRequest, RepoVisibility,
+
     TemplateProvenance,
 };
 use uuid::Uuid;
@@ -74,6 +97,7 @@ use uuid::Uuid;
 use crate::auth::gate::require_verified;
 use crate::git::bare_repo_path;
 use crate::rpc::RpcCtx;
+use crate::webhook::dispatch;
 
 fn db_err(e: String) -> AppError {
     if e == "database not configured" {
@@ -326,12 +350,17 @@ pub(crate) fn to_public(repo: &AccessibleRepo) -> RepoPublic {
         viewer_has_starred: false,
         is_fork: false,
         is_template: false,
+        archived: repo.row.archived,
         homepage: String::new(),
         topics: Vec::new(),
         fork_count: 0,
         watch_count: 0,
         viewer_is_watching: false,
         viewer_watch_level: None,
+        // Unit flags default enabled here; `enrich_social` fills real values
+        // on single-repo responses (COL-13).
+        issues_enabled: true,
+        pulls_enabled: true,
         fork_network_id: None,
         forked_from: None,
     }
@@ -441,6 +470,14 @@ pub async fn enrich_social(
         .get_repo_is_template(&public.id)
         .await
         .map_err(db_err)?;
+    // Per-repo unit toggles (COL-13) drive Issues/Pulls tab visibility.
+    let unit_flags = ctx
+        .db
+        .get_repo_unit_flags(&public.id)
+        .await
+        .map_err(db_err)?;
+    public.issues_enabled = unit_flags.issues_enabled;
+    public.pulls_enabled = unit_flags.pulls_enabled;
     Ok(public)
 }
 
@@ -451,11 +488,29 @@ pub async fn star(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoPublic, 
         AppError::new("rpc.bad_input", format!("invalid repo.star input: {e}"))
     })?;
     let accessible = resolve_repo_for_read(ctx, &req.owner, &req.name).await?;
+    let was_starred = ctx
+        .db
+        .has_starred_repo(&user.id, &accessible.row.id)
+        .await
+        .unwrap_or(false);
     let _count = ctx
         .db
         .star_repository(&user.id, &accessible.row.id)
         .await
         .map_err(db_err)?;
+    // `star` webhooks fire only on an actual state transition (API-04).
+    if !was_starred {
+        let payload = dispatch::star_payload(
+            "created",
+            &accessible.owner_username,
+            &accessible.row.name,
+            &accessible.row.id,
+            &user.username,
+            &user.id,
+        );
+        dispatch::emit(&ctx.db, &accessible.row.id, "star", "created", payload, &ctx.env_name)
+            .await;
+    }
     enrich_social(ctx, to_public(&accessible), Some(&user.id)).await
 }
 
@@ -466,11 +521,28 @@ pub async fn unstar(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoPublic
         AppError::new("rpc.bad_input", format!("invalid repo.unstar input: {e}"))
     })?;
     let accessible = resolve_repo_for_read(ctx, &req.owner, &req.name).await?;
+    let was_starred = ctx
+        .db
+        .has_starred_repo(&user.id, &accessible.row.id)
+        .await
+        .unwrap_or(false);
     let _count = ctx
         .db
         .unstar_repository(&user.id, &accessible.row.id)
         .await
         .map_err(db_err)?;
+    if was_starred {
+        let payload = dispatch::star_payload(
+            "deleted",
+            &accessible.owner_username,
+            &accessible.row.name,
+            &accessible.row.id,
+            &user.username,
+            &user.id,
+        );
+        dispatch::emit(&ctx.db, &accessible.row.id, "star", "deleted", payload, &ctx.env_name)
+            .await;
+    }
     enrich_social(ctx, to_public(&accessible), Some(&user.id)).await
 }
 
@@ -721,12 +793,15 @@ pub async fn list_mine(ctx: &RpcCtx) -> Result<RepoListMineResponse, AppError> {
                 viewer_has_starred: false,
                 is_fork: false,
                 is_template: false,
+                archived: row.archived,
                 homepage: String::new(),
                 topics: Vec::new(),
                 fork_count: 0,
                 watch_count: 0,
                 viewer_is_watching: false,
                 viewer_watch_level: None,
+                issues_enabled: true,
+                pulls_enabled: true,
                 fork_network_id: None,
                 forked_from: None,
             }
@@ -1443,6 +1518,8 @@ async fn resolve_repo_for_owner_mutate(
     if !meets(accessible.capability, Capability::Write) {
         return Err(acl::not_found());
     }
+    // GIT-20: archived repos freeze branch create/rename/delete (D-27/D-28 surface).
+    acl::ensure_not_archived(&accessible)?;
     Ok(accessible)
 }
 
@@ -1516,6 +1593,23 @@ pub async fn branch_create(
         &after_oid,
     )
     .await;
+    let sender_login = match ctx.db.find_user_by_id(&actor_id).await {
+        Ok(Some(u)) => u.username,
+        _ => String::new(),
+    };
+    let payload = dispatch::ref_event_payload(
+        "create",
+        branch,
+        "branch",
+        &accessible.row.default_branch,
+        &accessible.row.description,
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.id,
+        &sender_login,
+        &actor_id,
+    );
+    dispatch::emit(&ctx.db, &accessible.row.id, "create", "", payload, &ctx.env_name).await;
     crate::mirror::notify_mirror_after_local_mutation(
         ctx.db.clone(),
         ctx.git.clone(),
@@ -1665,6 +1759,23 @@ pub async fn branch_delete(
         &before_oid,
     )
     .await;
+    let sender_login = match ctx.db.find_user_by_id(&actor_id).await {
+        Ok(Some(u)) => u.username,
+        _ => String::new(),
+    };
+    let payload = dispatch::ref_event_payload(
+        "delete",
+        branch,
+        "branch",
+        &accessible.row.default_branch,
+        &accessible.row.description,
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.id,
+        &sender_login,
+        &actor_id,
+    );
+    dispatch::emit(&ctx.db, &accessible.row.id, "delete", "", payload, &ctx.env_name).await;
     crate::mirror::notify_mirror_after_local_mutation(
         ctx.db.clone(),
         ctx.git.clone(),
@@ -1699,6 +1810,28 @@ pub async fn update_visibility(
     if is_private_visibility(&row.visibility) {
         crate::notify::sweep_repo_access(&ctx.db, &row.id).await;
     }
+    Ok(to_public(&AccessibleRepo {
+        row,
+        owner_username: accessible.owner_username,
+        capability: Some(Capability::Admin),
+    }))
+}
+
+/// `repo.setArchived` — Admin-only read-only archive toggle (GIT-20).
+/// Stays reachable while archived so owners can unarchive.
+pub async fn set_archived(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoPublic, AppError> {
+    let req: RepoSetArchivedRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid repo.setArchived input: {e}"),
+        )
+    })?;
+    let accessible = resolve_repo_for_admin(ctx, &req.owner, &req.name).await?;
+    let row = ctx
+        .db
+        .set_repository_archived(&accessible.row.id, req.archived)
+        .await
+        .map_err(db_err)?;
     Ok(to_public(&AccessibleRepo {
         row,
         owner_username: accessible.owner_username,
@@ -1837,6 +1970,86 @@ pub async fn lfs_get_usage(
         quota_repo_bytes,
         objects,
     })
+}
+
+/// Build the `repo.quota.*` response for an already-resolved repo (GIT-25).
+///
+/// `size_bytes` is refreshed live from disk when the bare path resolves — the
+/// cached column is only a fallback when measurement fails.
+async fn quota_public(
+    ctx: &RpcCtx,
+    accessible: &AccessibleRepo,
+) -> Result<RepoQuotaPublic, AppError> {
+    let path = bare_repo_path(&ctx.repos_dir, &accessible.owner_username, &accessible.row.name)?;
+    let size_bytes = match crate::git::quota::refresh_repo_size_bytes(
+        &ctx.db,
+        &accessible.row.id,
+        &path,
+    )
+    .await
+    {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::warn!(error = %e, "measure repo size failed; using cached size_bytes");
+            accessible.row.size_bytes
+        }
+    };
+    let instance_quota_bytes = crate::git::quota::instance_repo_quota_bytes(&ctx.db)
+        .await
+        .map_err(db_err)?;
+    let effective_quota_bytes = crate::git::quota::effective_repo_quota_bytes(&ctx.db, &accessible.row)
+        .await
+        .map_err(db_err)?;
+    Ok(RepoQuotaPublic {
+        size_bytes,
+        effective_quota_bytes,
+        size_quota_bytes: accessible.row.size_quota_bytes,
+        instance_quota_bytes,
+    })
+}
+
+/// `repo.quota.get` — git object usage + effective quota for Settings (GIT-25).
+pub async fn quota_get(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<RepoQuotaPublic, AppError> {
+    let req: RepoGetQuotaRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid repo.quota.get input: {e}"),
+        )
+    })?;
+    let accessible = resolve_repo_for_read(ctx, &req.owner, &req.name).await?;
+    quota_public(ctx, &accessible).await
+}
+
+/// `repo.quota.set` — Admin per-repo git size quota override (GIT-25).
+/// `size_quota_bytes: null` clears the override (inherit instance default);
+/// `<= 0` stores an explicit unlimited override.
+pub async fn quota_set(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<RepoQuotaPublic, AppError> {
+    let req: RepoSetQuotaRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid repo.quota.set input: {e}"),
+        )
+    })?;
+    let mut accessible = resolve_repo_for_admin(ctx, &req.owner, &req.name).await?;
+    ctx.db
+        .update_repository_size_quota(&accessible.row.id, req.size_quota_bytes)
+        .await
+        .map_err(db_err)?;
+    // The resolved row predates the update — re-read so the response reflects
+    // the new override.
+    accessible.row = ctx
+        .db
+        .find_repository_by_id(&accessible.row.id)
+        .await
+        .map_err(db_err)?
+        .ok_or_else(|| AppError::new("repo.not_found", "Repository not found"))?;
+    quota_public(ctx, &accessible).await
 }
 
 /// `repo.lfs.listObjects` — in-app LFS browser listing (D-LFS-16).
@@ -2217,12 +2430,15 @@ pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoPublic
                 viewer_has_starred: false,
                 is_fork: false,
                 is_template: false,
+                archived: row.archived,
                 homepage: String::new(),
                 topics: Vec::new(),
                 fork_count: 0,
                 watch_count: 0,
                 viewer_is_watching: false,
                 viewer_watch_level: None,
+                issues_enabled: true,
+                pulls_enabled: true,
                 fork_network_id: None,
                 forked_from: None,
     })
@@ -2337,6 +2553,19 @@ pub async fn fork(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoPublic, 
             "failed to copy repository storage",
         ));
     }
+
+    // API-04: `fork` fires on the source repo's hooks; `forkee` is the new repo.
+    let payload = dispatch::fork_payload(
+        &source.owner_username,
+        &source.row.name,
+        &source.row.id,
+        &user.username,
+        &into_name,
+        &row.id,
+        &user.username,
+        &user.id,
+    );
+    dispatch::emit(&ctx.db, &source.row.id, "fork", "created", payload, &ctx.env_name).await;
 
     let accessible = AccessibleRepo {
         row,

@@ -146,6 +146,49 @@ async fn rest_health_ok_anonymous() {
     assert_eq!(v["status"], "ok");
 }
 
+/// `GET /api/v1/openapi.json` serves the generated spec; `/api/v1/docs`
+/// serves the vendored Swagger UI — both anonymous.
+#[tokio::test]
+async fn rest_openapi_json_and_swagger_ui() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!("sqlite:{}", dir.path().join("rest_openapi.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    let app = test_app(db, dir.path().join("repos")).await;
+
+    let (status, v) = json(&app, req("GET", "/api/v1/openapi.json", None)).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["openapi"], "3.0.3");
+    let paths = v["paths"].as_object().expect("paths object");
+    assert!(
+        paths.len() > 40,
+        "expected ~44 documented paths, got {}",
+        paths.len()
+    );
+    assert!(paths.contains_key("/repos/{owner}/{repo}/issues/{number}"));
+
+    // Swagger UI: `/docs` redirects to `/docs/`, which serves the index page.
+    let res = app
+        .clone()
+        .oneshot(req("GET", "/api/v1/docs", None))
+        .await
+        .expect("docs redirect");
+    assert!(
+        res.status().is_redirection(),
+        "docs redirect status: {}",
+        res.status()
+    );
+    let res = app
+        .clone()
+        .oneshot(req("GET", "/api/v1/docs/", None))
+        .await
+        .expect("docs index");
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = res.into_body().collect().await.expect("body").to_bytes();
+    let html = String::from_utf8_lossy(&body);
+    assert!(html.contains("swagger-ui"), "index html: {}", &html[..200]);
+}
+
 /// Cookie session: create repo → get → update metadata → list issues.
 #[tokio::test]
 async fn rest_repo_flow_with_cookie() {

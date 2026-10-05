@@ -54,6 +54,14 @@ export const Route = createFileRoute("/$owner/$repo/releases/")({
         title: `Releases · ${(params as { owner: string }).owner}/${(params as { repo: string }).repo} · Oxidean`,
       },
     ],
+    links: [
+      {
+        rel: "alternate",
+        type: "application/atom+xml",
+        title: `Releases feed · ${(params as { owner: string }).owner}/${(params as { repo: string }).repo}`,
+        href: `/api/repos/${(params as { owner: string }).owner}/${(params as { repo: string }).repo}/releases.atom`,
+      },
+    ],
   }),
   loader: async ({ params }): Promise<ReleasesLoaderData> => {
     const owner = String((params as { owner?: string }).owner ?? "");
@@ -137,7 +145,7 @@ export function RepoReleasesPage() @{
         icon={<Rocket aria-hidden size={22} />}
         title="Releases"
         actions={
-          repo.can_write ? (
+          repo.can_write && !repo.archived ? (
             <AppLink href={newHref as string} className="no-underline">
               <Button type="button">Draft a new release</Button>
             </AppLink>

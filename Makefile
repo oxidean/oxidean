@@ -1,7 +1,7 @@
 # One target per .PHONY line group — checkmake does not parse backslash-continued
 # .PHONY lists, so keep each declaration on a single physical line.
 .PHONY: help makefile-lint
-.PHONY: dev rpc-gen rpc-sync-check check-stack-presets sync-stack-presets
+.PHONY: dev rpc-gen openapi-gen openapi-sync-check rpc-sync-check check-stack-presets sync-stack-presets
 .PHONY: up down logs test smoke smoke-git-https smoke-git-ssh
 .PHONY: smoke-git-lfs
 .PHONY: smoke-packages
@@ -25,6 +25,7 @@ help:
 	@echo "  make makefile-lint  - parse Makefile + checkmake (CI early gate)"
 	@echo "  make dev            - local API + web (Vite proxy; D-10)"
 	@echo "  make rpc-gen        - regenerate packages/api-client from Rust"
+	@echo "  make openapi-gen    - regenerate docs/openapi.yaml from the REST route table"
 	@echo "  make rpc-sync-check - fail if generated client is out of sync"
 	@echo "  make check-stack-presets - validate stack-presets catalog + size budget"
 	@echo "  make sync-stack-presets - stamp/refresh stack-presets metadata"
@@ -79,6 +80,12 @@ dev:
 
 rpc-gen:
 	cargo run -q -p oxidean-api --bin rpc-gen
+
+openapi-gen:
+	cargo run -q -p oxidean-api --bin openapi-gen
+
+openapi-sync-check:
+	cargo run -q -p oxidean-api --bin openapi-gen -- --check
 
 rpc-sync-check:
 	@./scripts/check-rpc-sync.sh

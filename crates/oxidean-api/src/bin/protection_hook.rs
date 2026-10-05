@@ -1,4 +1,4 @@
-//! Branch-protection update-hook helper (Phase 13 / D-19).
+//! Ref-protection update-hook helper (Phase 13 / D-19; GIT-21 tags).
 //!
 //! Invoked from bare-repo `hooks/update` with:
 //! `oxidean-protection-hook update <ref> <oldsha> <newsha>`

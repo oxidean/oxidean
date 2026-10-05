@@ -9,6 +9,7 @@ import {
 } from "./vite-plugins/fix-type-only-imports.ts";
 import { parseViteAllowedHosts } from "./vite-plugins/vite-allowed-hosts.ts";
 import { webHealthPlugin } from "./vite-plugins/web-health.ts";
+import { webmcpWellKnownPlugin } from "./vite-plugins/webmcp-well-known.ts";
 import { swBuildIdPlugin } from "./vite-plugins/sw-build-id.ts";
 import { appStylesHrefPlugin } from "./vite-plugins/app-styles-href.ts";
 
@@ -54,6 +55,8 @@ export default defineConfig(() => {
       swBuildIdPlugin(),
       // SSR-side stylesheet href must be the file the client build emitted.
       appStylesHrefPlugin(),
+      // AGT-02: /.well-known/{webmcp,mcp} discovery documents (dev + preview).
+      webmcpWellKnownPlugin(),
       fixTypeOnlyImports(RECHARTS_TYPE_ONLY_IMPORT_FIX),
       tanstackStart({
         // Keep colocated *.integration.test.* / *.unit.test.* out of the route tree
@@ -79,6 +82,8 @@ export default defineConfig(() => {
       proxy: {
         "/api/rpc/ws": { target: apiProxyTarget.replace(/^http/, "ws"), ws: true },
         "/api/rpc": { target: apiProxyTarget, changeOrigin: true },
+        // AGT-02: in-page WebMCP tools call the instance MCP endpoint same-origin.
+        "/api/mcp": { target: apiProxyTarget, changeOrigin: true },
         "/api/auth": { target: apiProxyTarget, changeOrigin: true },
         "/api/user": { target: apiProxyTarget, changeOrigin: true },
         "/api/repos": { target: apiProxyTarget, changeOrigin: true },
@@ -91,6 +96,13 @@ export default defineConfig(() => {
         "/v2": { target: apiProxyTarget, changeOrigin: true },
         "/npm": { target: apiProxyTarget, changeOrigin: true },
         "/generic": { target: apiProxyTarget, changeOrigin: true },
+        // API-03 OAuth2 endpoints are API-owned; `/oauth/consent` stays a SPA
+        // route so the consent screen renders in the web app.
+        // CLI distribution (install.sh + ox binaries) is API-owned.
+        "/cli": { target: apiProxyTarget, changeOrigin: true },
+        "/oauth/authorize": { target: apiProxyTarget, changeOrigin: true },
+        "/oauth/token": { target: apiProxyTarget, changeOrigin: true },
+        "/oauth/userinfo": { target: apiProxyTarget, changeOrigin: true },
       },
     },
     preview: {

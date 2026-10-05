@@ -63,6 +63,29 @@ struct RawWorkflow {
     on: Option<RawOn>,
     jobs: Option<serde_yaml::Mapping>,
     env: Option<serde_yaml::Value>,
+    defaults: Option<RawDefaults>,
+}
+
+/// `defaults:` — currently only `run.shell` / `run.working-directory`
+/// are honoured (workflow-level fallback for every step).
+#[derive(Debug, Deserialize, Clone)]
+struct RawDefaults {
+    run: Option<RawRunDefaults>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct RawRunDefaults {
+    shell: Option<String>,
+    #[serde(rename = "working-directory")]
+    working_directory: Option<String>,
+}
+
+fn run_defaults(d: Option<&RawDefaults>) -> (Option<String>, Option<String>) {
+    let run = d.and_then(|d| d.run.as_ref());
+    (
+        run.and_then(|r| r.shell.clone()),
+        run.and_then(|r| r.working_directory.clone()),
+    )
 }
 
 #[derive(Debug, Deserialize)]
@@ -80,6 +103,7 @@ struct RawJob {
     runs_on: Option<RawRunsOn>,
     steps: Option<Vec<RawStep>>,
     env: Option<serde_yaml::Value>,
+    defaults: Option<RawDefaults>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -187,6 +211,7 @@ pub fn parse_workflow_yaml(bytes: &[u8]) -> Result<WorkflowDocument, ParseError>
         });
     }
 
+    let (wf_shell, wf_workdir) = run_defaults(raw.defaults.as_ref());
     let mut jobs = Vec::new();
     for (key, value) in jobs_map {
         let id = match key {
@@ -206,6 +231,7 @@ pub fn parse_workflow_yaml(bytes: &[u8]) -> Result<WorkflowDocument, ParseError>
             message: format!("invalid job '{id}': {e}"),
         })?;
         let runs_on = parse_runs_on(job.runs_on)?;
+        let (job_shell, job_workdir) = run_defaults(job.defaults.as_ref());
         let mut steps = Vec::new();
         for (i, step) in job.steps.unwrap_or_default().into_iter().enumerate() {
             if step.uses.is_none() && step.run.is_none() {
@@ -213,12 +239,21 @@ pub fn parse_workflow_yaml(bytes: &[u8]) -> Result<WorkflowDocument, ParseError>
                     message: format!("job '{id}' step {i} needs uses or run"),
                 });
             }
+            // Precedence: step > job defaults > workflow defaults.
+            let shell = step
+                .shell
+                .or_else(|| job_shell.clone())
+                .or_else(|| wf_shell.clone());
+            let working_directory = step
+                .working_directory
+                .or_else(|| job_workdir.clone())
+                .or_else(|| wf_workdir.clone());
             steps.push(StepSpec {
                 name: step.name,
                 uses: step.uses,
                 run: step.run,
-                shell: step.shell,
-                working_directory: step.working_directory,
+                shell,
+                working_directory,
                 with: step.with.map(yaml_to_json).transpose()?,
                 env: step.env.map(yaml_to_json).transpose()?,
                 if_expr: step.if_expr,

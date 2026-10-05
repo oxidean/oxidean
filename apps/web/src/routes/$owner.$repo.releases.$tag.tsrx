@@ -204,7 +204,7 @@ export function RepoReleaseDetailPage() @{
         } @else {
           <p className="mb-4 text-[14px] text-muted-foreground">No assets attached.</p>;
         }
-        @if (repo.can_write) {
+        @if (repo.can_write && !repo.archived) {
           <form
             method="post"
             action="#"

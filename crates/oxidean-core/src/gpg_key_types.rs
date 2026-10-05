@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 /// `gpgKey.add` input — armored public key only (never a private key).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AddGpgKeyRequest {
     /// Required title/note.
     pub title: String,
@@ -12,7 +12,7 @@ pub struct AddGpgKeyRequest {
 }
 
 /// List / metadata item for a registered GPG public key.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GpgKeyListItem {
     pub id: String,
     pub title: String,
@@ -26,7 +26,7 @@ pub struct GpgKeyListItem {
 }
 
 /// `gpgKey.revoke` input.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RevokeGpgKeyRequest {
     pub id: String,
 }

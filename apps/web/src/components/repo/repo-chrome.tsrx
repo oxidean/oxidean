@@ -1,4 +1,4 @@
-import { Check, Eye, Lock, Star } from "@octanejs/lucide";
+import { Archive, Check, Eye, Lock, Star } from "@octanejs/lucide";
 import { useState } from "octane";
 import type { RepoPublic, WatchLevel } from "@oxidean/api-client";
 import { Badge } from "@/components/ui/badge";
@@ -10,6 +10,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { RepoSearchEntry } from "@/components/repo/repo-search-entry";
+import { SyncForkPanel } from "@/components/repo/sync-fork-panel";
 import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api-client";
 import type { RepoChromeActive } from "@/lib/repo-chrome-active";
@@ -44,6 +45,10 @@ export function RepoChrome({ repo, active, showSettings = false }: RepoChromePro
   const subscribed = watchLevel != null;
   const watching = !!live.viewer_is_watching;
   const forkCount = live.fork_count ?? 0;
+  // COL-13: repo admin unit toggles hide the Issues / Pulls tabs (list
+  // endpoints may omit the flags → default enabled).
+  const issuesEnabled = live.issues_enabled !== false;
+  const pullsEnabled = live.pulls_enabled !== false;
 
   const owner = live.owner_username;
   const name = live.name;
@@ -57,6 +62,7 @@ export function RepoChrome({ repo, active, showSettings = false }: RepoChromePro
   const releasesHref = `${base}/releases`;
   const packagesHref = `${base}/packages`;
   const actionsHref = `${base}/actions`;
+  const insightsHref = `${base}/insights`;
   const settingsHref = `${base}/settings`;
   const forkHref = `${base}/fork`;
   const signedIn = !!account.user;
@@ -167,6 +173,14 @@ export function RepoChrome({ repo, active, showSettings = false }: RepoChromePro
         }
         {(live.visibility === "private" ? "Private" : "Public") as string}
       </Badge>
+      @if (live.archived) {
+        <span data-testid="repo-archived-badge">
+          <Badge variant="secondary">
+            <Archive aria-hidden size={12} />
+            Archived
+          </Badge>
+        </span>;
+      }
       <div className="ml-auto flex flex-wrap items-center gap-2">
         <RepoSearchEntry owner={owner as string} repo={name as string} />
         @if (signedIn) {
@@ -307,6 +321,19 @@ export function RepoChrome({ repo, active, showSettings = false }: RepoChromePro
         }
       </div>
     </div>
+    @if (live.archived) {
+      <div
+        data-testid="repo-archived-banner"
+        role="status"
+        className="mb-4 flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[14px] text-amber-800 dark:text-amber-300"
+      >
+        <Archive aria-hidden size={16} className="mt-0.5 shrink-0" />
+        <span>
+          This repository is archived and read-only. Browsing and cloning still work; pushes,
+          issues, pull requests, and releases are disabled until it is unarchived.
+        </span>
+      </div>;
+    }
     @if (live.forked_from) {
       <p className="mt-2 text-[14px] text-muted-foreground">
         Forked from{" "}
@@ -317,6 +344,7 @@ export function RepoChrome({ repo, active, showSettings = false }: RepoChromePro
           {(live.forked_from.owner + "/" + live.forked_from.name) as string}
         </AppLink>
       </p>;
+      <SyncForkPanel owner={owner} repoName={name} canWrite={!!live.can_write} />;
     }
 
     <nav className="mt-6 flex flex-wrap gap-4 border-b border-border pb-0" aria-label="Repository">
@@ -348,30 +376,36 @@ export function RepoChrome({ repo, active, showSettings = false }: RepoChromePro
       >
         Tags
       </AppLink>
-      <AppLink
-        href={issuesHref as string}
-        className={navClass(active === "issues") as string}
-        aria-current={active === "issues" ? "page" : undefined}
-      >
-        Issues
-        @if ((live.open_issue_count ?? 0) > 0) {
-          <span className="ml-1 inline-flex min-w-5 items-center justify-center rounded-full bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
-            {String(live.open_issue_count)}
-          </span>;
-        }
-      </AppLink>
-      <AppLink
-        href={pullsHref as string}
-        className={navClass(active === "pulls") as string}
-        aria-current={active === "pulls" ? "page" : undefined}
-      >
-        Pulls
-        @if ((live.open_pull_count ?? 0) > 0) {
-          <span className="ml-1 inline-flex min-w-5 items-center justify-center rounded-full bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
-            {String(live.open_pull_count)}
-          </span>;
-        }
-      </AppLink>
+      @if (issuesEnabled) {
+        <AppLink
+          href={issuesHref as string}
+          className={navClass(active === "issues") as string}
+          aria-current={active === "issues" ? "page" : undefined}
+          data-testid="repo-chrome-issues"
+        >
+          Issues
+          @if ((live.open_issue_count ?? 0) > 0) {
+            <span className="ml-1 inline-flex min-w-5 items-center justify-center rounded-full bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
+              {String(live.open_issue_count)}
+            </span>;
+          }
+        </AppLink>;
+      }
+      @if (pullsEnabled) {
+        <AppLink
+          href={pullsHref as string}
+          className={navClass(active === "pulls") as string}
+          aria-current={active === "pulls" ? "page" : undefined}
+          data-testid="repo-chrome-pulls"
+        >
+          Pulls
+          @if ((live.open_pull_count ?? 0) > 0) {
+            <span className="ml-1 inline-flex min-w-5 items-center justify-center rounded-full bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
+              {String(live.open_pull_count)}
+            </span>;
+          }
+        </AppLink>;
+      }
       <AppLink
         href={releasesHref as string}
         className={navClass(active === "releases") as string}
@@ -393,6 +427,14 @@ export function RepoChrome({ repo, active, showSettings = false }: RepoChromePro
         data-testid="repo-chrome-actions"
       >
         Actions
+      </AppLink>
+      <AppLink
+        href={insightsHref as string}
+        className={navClass(active === "insights") as string}
+        aria-current={active === "insights" ? "page" : undefined}
+        data-testid="repo-chrome-insights"
+      >
+        Insights
       </AppLink>
       @if (settingsVisible) {
         <AppLink

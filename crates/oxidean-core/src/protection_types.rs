@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Commit status state (D-12).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum CommitStatusState {
     Pending,
@@ -43,7 +43,7 @@ impl CommitStatusState {
 }
 
 /// Public branch protection rule (ORG-05).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct BranchProtectionRulePublic {
     pub id: String,
     pub repo_id: String,
@@ -60,18 +60,20 @@ pub struct BranchProtectionRulePublic {
     pub enforce_admins: bool,
     pub required_linear_history: bool,
     pub lock_branch: bool,
+    /// GIT-22: pushes introducing unsigned commits are denied by the update hook.
+    pub require_signed_commits: bool,
     pub created_at: String,
     pub updated_at: String,
 }
 
 /// `repo.branchProtection.list` response.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct BranchProtectionListResponse {
     pub rules: Vec<BranchProtectionRulePublic>,
 }
 
 /// Shared fields for create/update (D-05..18).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct BranchProtectionRuleInput {
     pub owner: String,
     pub name: String,
@@ -100,6 +102,9 @@ pub struct BranchProtectionRuleInput {
     pub required_linear_history: bool,
     #[serde(default)]
     pub lock_branch: bool,
+    /// GIT-22: deny pushes introducing commits without a forge-verified signature.
+    #[serde(default)]
+    pub require_signed_commits: bool,
 }
 
 fn default_review_count() -> i32 {
@@ -107,7 +112,7 @@ fn default_review_count() -> i32 {
 }
 
 /// `repo.branchProtection.update` / delete — includes rule id.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct BranchProtectionUpdateRequest {
     pub owner: String,
     pub name: String,
@@ -137,18 +142,83 @@ pub struct BranchProtectionUpdateRequest {
     pub required_linear_history: bool,
     #[serde(default)]
     pub lock_branch: bool,
+    /// GIT-22: deny pushes introducing commits without a forge-verified signature.
+    #[serde(default)]
+    pub require_signed_commits: bool,
 }
 
 /// `repo.branchProtection.delete`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct BranchProtectionDeleteRequest {
     pub owner: String,
     pub name: String,
     pub id: String,
 }
 
+/// Public tag protection rule (GIT-21) — restricts create/update/delete on
+/// matching `refs/tags/*` for non-bypass actors.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct TagProtectionRulePublic {
+    pub id: String,
+    pub repo_id: String,
+    pub pattern: String,
+    pub allow_create: bool,
+    pub allow_update: bool,
+    pub allow_delete: bool,
+    pub enforce_admins: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// `repo.tagProtection.list` response.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct TagProtectionListResponse {
+    pub rules: Vec<TagProtectionRulePublic>,
+}
+
+/// Shared fields for tag rule create/update.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct TagProtectionRuleInput {
+    pub owner: String,
+    pub name: String,
+    pub pattern: String,
+    #[serde(default)]
+    pub allow_create: bool,
+    #[serde(default)]
+    pub allow_update: bool,
+    #[serde(default)]
+    pub allow_delete: bool,
+    #[serde(default)]
+    pub enforce_admins: bool,
+}
+
+/// `repo.tagProtection.update` — includes rule id.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct TagProtectionUpdateRequest {
+    pub owner: String,
+    pub name: String,
+    pub id: String,
+    pub pattern: String,
+    #[serde(default)]
+    pub allow_create: bool,
+    #[serde(default)]
+    pub allow_update: bool,
+    #[serde(default)]
+    pub allow_delete: bool,
+    #[serde(default)]
+    pub enforce_admins: bool,
+}
+
+/// `repo.tagProtection.delete`.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct TagProtectionDeleteRequest {
+    pub owner: String,
+    pub name: String,
+    pub id: String,
+}
+
 /// Public commit status (D-11).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CommitStatusPublic {
     pub id: String,
     pub repo_id: String,
@@ -165,7 +235,7 @@ pub struct CommitStatusPublic {
 }
 
 /// `repo.commitStatus.create`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CommitStatusCreateRequest {
     pub owner: String,
     pub name: String,
@@ -179,7 +249,7 @@ pub struct CommitStatusCreateRequest {
 }
 
 /// `repo.commitStatus.list`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CommitStatusListRequest {
     pub owner: String,
     pub name: String,
@@ -187,13 +257,13 @@ pub struct CommitStatusListRequest {
 }
 
 /// `repo.commitStatus.list` response.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CommitStatusListResponse {
     pub statuses: Vec<CommitStatusPublic>,
 }
 
 /// Structured merge-block reasons (D-22 / D-24).
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
 pub struct ProtectionBlockReasons {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub reasons: Vec<String>,
@@ -203,4 +273,7 @@ pub struct ProtectionBlockReasons {
     pub approving_review_count: Option<i32>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub missing_status_contexts: Vec<String>,
+    /// GIT-22: commits newly introduced by the push lacking a verified signature.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unsigned_commits: Vec<String>,
 }

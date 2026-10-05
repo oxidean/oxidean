@@ -98,8 +98,11 @@ async fn dispatch_push_inner(
     let discovered = discover_workflows(git, &bare, treeish)
         .await
         .map_err(|e| e.to_string())?;
+    for fe in &discovered.errors {
+        tracing::warn!(path = %fe.path, error = %fe.message, "skipping invalid workflow file");
+    }
 
-    for wf in discovered {
+    for wf in &discovered.workflows {
         if !wf.document.triggers.push {
             continue;
         }
@@ -184,6 +187,11 @@ pub async fn enqueue_run(
     {
         tracing::warn!(error = %e, run_id = %run_id, "failed to publish queued commit statuses");
     }
+    // API-04: `workflow_run` `requested`. `enqueue_run` is shared by push / PR /
+    // workflow_dispatch callers that do not all thread `AppState::env_name`, so
+    // resolve the same `OXIDEAN_ENV` source the app state was built from.
+    let env_name = std::env::var("OXIDEAN_ENV").unwrap_or_else(|_| "development".into());
+    crate::webhook::dispatch::notify_workflow_run(db, &run_id, "requested", &env_name).await;
     Ok((run_id, job_ids))
 }
 
@@ -207,8 +215,11 @@ pub async fn dispatch_push_for_sha(
     let discovered = discover_workflows(git, bare, head_sha)
         .await
         .map_err(|e| e.to_string())?;
+    for fe in &discovered.errors {
+        tracing::warn!(path = %fe.path, error = %fe.message, "skipping invalid workflow file");
+    }
     let mut n = 0;
-    for wf in discovered {
+    for wf in &discovered.workflows {
         if !wf.document.triggers.push {
             continue;
         }

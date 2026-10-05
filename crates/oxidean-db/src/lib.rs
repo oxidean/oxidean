@@ -8,12 +8,16 @@ pub mod branch_protection;
 pub mod dialect;
 pub mod email_tokens;
 pub mod follows;
+pub mod git_settings;
+
 pub mod issue_labels;
 pub mod issues;
 pub mod lfs;
+pub mod mcp_settings;
 pub mod migrate;
 pub mod mirrors;
 pub mod notifications;
+pub mod oauth;
 pub mod instance_invites;
 pub mod org_invites;
 pub mod org_members;
@@ -32,29 +36,37 @@ pub mod repo_activity;
 pub mod repo_collaborators;
 pub mod repositories;
 pub mod search;
+pub mod repo_units;
 pub mod sessions;
 pub mod ssh_keys;
+pub mod deploy_keys;
 pub mod gpg_keys;
 pub mod user_emails;
 pub mod stars;
+pub mod tag_protection;
 pub mod templates;
 pub mod topics;
 pub mod users;
 pub mod watches;
 
 pub use actions::{
-    ActionJobRow, ActionRunRow, ActionRunnerRow, ActionSecretCipherRow, ActionSecretMetaRow,
+    ActionJobRow, ActionRunFilter, ActionRunRow, ActionRunnerRow, ActionSecretCipherRow,
+    ActionSecretMetaRow,
 };
 pub use audit_events::AuditEventRow;
 pub use branch_protection::{BranchProtectionRuleRow, CommitStatusRow};
+pub use tag_protection::TagProtectionRuleRow;
 pub use dialect::{redact_url, resolve_dialect, resolve_dialect_from_env, Dialect};
+pub use git_settings::GitSettingsRow;
 pub use issue_labels::{IssueAssigneeRow, LabelRow};
 pub use issues::{
     CommentRevisionRow, IssueCommentRow, IssueLinkRow, IssueListFilters, IssueRevisionRow, IssueRow,
 };
 pub use lfs::LfsObjectRow;
+pub use mcp_settings::McpSettingsRow;
 pub use mirrors::{RepositoryMirrorRefResultRow, RepositoryMirrorRow};
 pub use notifications::NotificationRow;
+pub use oauth::{OAuthAppRow, OAuthCodeRow, OAuthTokenRow};
 pub use oxidean_core::DbProbeResponse;
 pub use pool::DbPool;
 pub use instance_invites::InstanceInviteRow;
@@ -75,11 +87,13 @@ pub use search::{
     GlobalIssueHitRow, GlobalOrgHitRow, GlobalPullHitRow, GlobalRepoHitRow, GlobalUserHitRow,
     ScanRepoRow,
 };
-pub use stars::{ForkListSort, RepoForkListRow, RepoStargazerListRow};
+pub use stars::{ForkListSort, ForkNetworkRow, RepoForkListRow, RepoStargazerListRow};
 pub use follows::UserFollowListRow;
 pub use watches::RepoWatcherListRow;
 pub use repositories::{RepoDiskRef, RepositoryRow};
+pub use repo_units::RepoUnitFlags;
 pub use ssh_keys::SshKeyRow;
+pub use deploy_keys::DeployKeyRow;
 pub use gpg_keys::GpgKeyRow;
 pub use user_emails::UserEmailRow;
 pub use templates::{InstanceTemplatePackRow, TemplateRepoListRow};
@@ -829,6 +843,28 @@ impl Database {
         stars::count_network_forks(self.require_pool()?, fork_network_id, q).await
     }
 
+    /// Fork-network members for `repo.insights.forkNetwork` (GIT-26): public
+    /// network repos (root included) plus `current_repo_id` itself.
+    pub async fn list_fork_network(
+        &self,
+        fork_network_id: &str,
+        current_repo_id: &str,
+        limit: i64,
+    ) -> Result<Vec<stars::ForkNetworkRow>, String> {
+        stars::list_fork_network(self.require_pool()?, fork_network_id, current_repo_id, limit)
+            .await
+    }
+
+    /// Total rows [`Database::list_fork_network`] can return (same filter).
+    pub async fn count_fork_network_members(
+        &self,
+        fork_network_id: &str,
+        current_repo_id: &str,
+    ) -> Result<i64, String> {
+        stars::count_fork_network_members(self.require_pool()?, fork_network_id, current_repo_id)
+            .await
+    }
+
     pub async fn get_repo_homepage(&self, repository_id: &str) -> Result<String, String> {
         repositories::get_homepage(self.require_pool()?, repository_id).await
     }
@@ -1056,6 +1092,45 @@ impl Database {
         owner_type: &str,
     ) -> Result<RepositoryRow, String> {
         repositories::update_owner(self.require_pool()?, id, owner_id, owner_type).await
+    }
+
+    /// Read-only archive toggle (GIT-20) — returns the updated row.
+    pub async fn set_repository_archived(
+        &self,
+        id: &str,
+        archived: bool,
+    ) -> Result<RepositoryRow, String> {
+        repositories::set_archived(self.require_pool()?, id, archived).await
+    }
+
+    /// Persist the measured on-disk size of the bare repo (GIT-25 bookkeeping).
+    pub async fn update_repository_size_bytes(
+        &self,
+        id: &str,
+        size_bytes: i64,
+    ) -> Result<(), String> {
+        repositories::update_size_bytes(self.require_pool()?, id, size_bytes).await
+    }
+
+    /// Set/clear the per-repo git object size quota override (GIT-25).
+    pub async fn update_repository_size_quota(
+        &self,
+        id: &str,
+        size_quota_bytes: Option<i64>,
+    ) -> Result<RepositoryRow, String> {
+        repositories::update_size_quota_bytes(self.require_pool()?, id, size_quota_bytes).await
+    }
+
+    /// Instance git settings singleton (`instance_git_settings`, GIT-25).
+    pub async fn get_git_settings(&self) -> Result<git_settings::GitSettingsRow, String> {
+        git_settings::get_git_settings(self.require_pool()?).await
+    }
+
+    pub async fn update_git_settings(
+        &self,
+        repo_quota_bytes: Option<i64>,
+    ) -> Result<git_settings::GitSettingsRow, String> {
+        git_settings::update_git_settings(self.require_pool()?, repo_quota_bytes).await
     }
 
     pub async fn soft_delete_repository(&self, id: &str) -> Result<(), String> {
@@ -1438,6 +1513,7 @@ impl Database {
         enforce_admins: bool,
         required_linear_history: bool,
         lock_branch: bool,
+        require_signed_commits: bool,
     ) -> Result<BranchProtectionRuleRow, String> {
         branch_protection::insert_rule(
             self.require_pool()?,
@@ -1456,6 +1532,7 @@ impl Database {
             enforce_admins,
             required_linear_history,
             lock_branch,
+            require_signed_commits,
         )
         .await
     }
@@ -1478,6 +1555,7 @@ impl Database {
         enforce_admins: bool,
         required_linear_history: bool,
         lock_branch: bool,
+        require_signed_commits: bool,
     ) -> Result<BranchProtectionRuleRow, String> {
         branch_protection::update_rule(
             self.require_pool()?,
@@ -1496,6 +1574,7 @@ impl Database {
             enforce_admins,
             required_linear_history,
             lock_branch,
+            require_signed_commits,
         )
         .await
     }
@@ -1506,6 +1585,77 @@ impl Database {
         rule_id: &str,
     ) -> Result<(), String> {
         branch_protection::delete_rule(self.require_pool()?, repo_id, rule_id).await
+    }
+
+    // --- tag protection rulesets (GIT-21) ---
+
+    pub async fn list_tag_protection_rules(
+        &self,
+        repo_id: &str,
+    ) -> Result<Vec<TagProtectionRuleRow>, String> {
+        tag_protection::list_rules(self.require_pool()?, repo_id).await
+    }
+
+    pub async fn find_tag_protection_rule(
+        &self,
+        repo_id: &str,
+        rule_id: &str,
+    ) -> Result<Option<TagProtectionRuleRow>, String> {
+        tag_protection::find_rule(self.require_pool()?, repo_id, rule_id).await
+    }
+
+    pub async fn insert_tag_protection_rule(
+        &self,
+        id: &str,
+        repo_id: &str,
+        pattern: &str,
+        allow_create: bool,
+        allow_update: bool,
+        allow_delete: bool,
+        enforce_admins: bool,
+    ) -> Result<TagProtectionRuleRow, String> {
+        tag_protection::insert_rule(
+            self.require_pool()?,
+            id,
+            repo_id,
+            pattern,
+            allow_create,
+            allow_update,
+            allow_delete,
+            enforce_admins,
+        )
+        .await
+    }
+
+    pub async fn update_tag_protection_rule(
+        &self,
+        repo_id: &str,
+        rule_id: &str,
+        pattern: &str,
+        allow_create: bool,
+        allow_update: bool,
+        allow_delete: bool,
+        enforce_admins: bool,
+    ) -> Result<TagProtectionRuleRow, String> {
+        tag_protection::update_rule(
+            self.require_pool()?,
+            repo_id,
+            rule_id,
+            pattern,
+            allow_create,
+            allow_update,
+            allow_delete,
+            enforce_admins,
+        )
+        .await
+    }
+
+    pub async fn delete_tag_protection_rule(
+        &self,
+        repo_id: &str,
+        rule_id: &str,
+    ) -> Result<(), String> {
+        tag_protection::delete_rule(self.require_pool()?, repo_id, rule_id).await
     }
 
     pub async fn list_commit_statuses(
@@ -2564,6 +2714,183 @@ impl Database {
         pats::touch_last_used(self.require_pool()?, id, last_used_at, last_used_ip).await
     }
 
+    // --- oauth applications / codes / tokens (API-03) ---
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn insert_oauth_app(
+        &self,
+        id: &str,
+        owner_id: &str,
+        name: &str,
+        client_id: &str,
+        client_secret_hash: &str,
+        client_secret_prefix: &str,
+        redirect_uris_json: &str,
+    ) -> Result<(), String> {
+        oauth::insert_app(
+            self.require_pool()?,
+            id,
+            owner_id,
+            name,
+            client_id,
+            client_secret_hash,
+            client_secret_prefix,
+            redirect_uris_json,
+        )
+        .await
+    }
+
+    pub async fn find_oauth_app_by_id(
+        &self,
+        id: &str,
+    ) -> Result<Option<oauth::OAuthAppRow>, String> {
+        oauth::find_app_by_id(self.require_pool()?, id).await
+    }
+
+    pub async fn find_oauth_app_by_client_id(
+        &self,
+        client_id: &str,
+    ) -> Result<Option<oauth::OAuthAppRow>, String> {
+        oauth::find_app_by_client_id(self.require_pool()?, client_id).await
+    }
+
+    pub async fn list_oauth_apps_for_owner(
+        &self,
+        owner_id: &str,
+    ) -> Result<Vec<oauth::OAuthAppRow>, String> {
+        oauth::list_apps_for_owner(self.require_pool()?, owner_id).await
+    }
+
+    pub async fn update_oauth_app(
+        &self,
+        id: &str,
+        name: &str,
+        redirect_uris_json: &str,
+        updated_at: &str,
+    ) -> Result<(), String> {
+        oauth::update_app(
+            self.require_pool()?,
+            id,
+            name,
+            redirect_uris_json,
+            updated_at,
+        )
+        .await
+    }
+
+    pub async fn update_oauth_app_secret(
+        &self,
+        id: &str,
+        client_secret_hash: &str,
+        client_secret_prefix: &str,
+        updated_at: &str,
+    ) -> Result<(), String> {
+        oauth::update_app_secret(
+            self.require_pool()?,
+            id,
+            client_secret_hash,
+            client_secret_prefix,
+            updated_at,
+        )
+        .await
+    }
+
+    pub async fn delete_oauth_app(&self, id: &str) -> Result<(), String> {
+        oauth::delete_app(self.require_pool()?, id).await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn insert_oauth_code(
+        &self,
+        id: &str,
+        code_hash: &str,
+        application_id: &str,
+        user_id: &str,
+        redirect_uri: &str,
+        scopes: &str,
+        expires_at: &str,
+    ) -> Result<(), String> {
+        oauth::insert_code(
+            self.require_pool()?,
+            id,
+            code_hash,
+            application_id,
+            user_id,
+            redirect_uri,
+            scopes,
+            expires_at,
+        )
+        .await
+    }
+
+    /// Atomically mark a code used; `None` when unknown or already consumed.
+    pub async fn consume_oauth_code(
+        &self,
+        code_hash: &str,
+        used_at: &str,
+    ) -> Result<Option<oauth::OAuthCodeRow>, String> {
+        oauth::consume_code(self.require_pool()?, code_hash, used_at).await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn insert_oauth_token(
+        &self,
+        id: &str,
+        application_id: &str,
+        user_id: &str,
+        token_prefix: &str,
+        token_hash: &str,
+        scopes: &str,
+        expires_at: &str,
+    ) -> Result<(), String> {
+        oauth::insert_token(
+            self.require_pool()?,
+            id,
+            application_id,
+            user_id,
+            token_prefix,
+            token_hash,
+            scopes,
+            expires_at,
+        )
+        .await
+    }
+
+    /// Lookup by SHA-256 hex — `None` when missing or revoked.
+    pub async fn find_oauth_token_by_hash(
+        &self,
+        token_hash: &str,
+    ) -> Result<Option<oauth::OAuthTokenRow>, String> {
+        oauth::find_token_by_hash(self.require_pool()?, token_hash).await
+    }
+
+    pub async fn list_active_oauth_tokens_for_user(
+        &self,
+        user_id: &str,
+    ) -> Result<Vec<oauth::OAuthTokenRow>, String> {
+        oauth::list_active_tokens_for_user(self.require_pool()?, user_id).await
+    }
+
+    /// Revoke all of a user's tokens for one application; returns count revoked.
+    pub async fn revoke_oauth_tokens_for_user_app(
+        &self,
+        user_id: &str,
+        application_id: &str,
+        revoked_at: &str,
+    ) -> Result<u64, String> {
+        oauth::revoke_tokens_for_user_app(self.require_pool()?, user_id, application_id, revoked_at)
+            .await
+    }
+
+    pub async fn touch_oauth_token_last_used(
+        &self,
+        id: &str,
+        last_used_at: &str,
+        last_used_ip: Option<&str>,
+    ) -> Result<(), String> {
+        oauth::touch_token_last_used(self.require_pool()?, id, last_used_at, last_used_ip).await
+    }
+
     // --- packages registry ---
 
     pub async fn upsert_package_blob(&self, digest: &str, size_bytes: i64) -> Result<(), String> {
@@ -2873,6 +3200,19 @@ impl Database {
         actions::set_actions_enabled(self.require_pool()?, repo_id, enabled).await
     }
 
+    /// Per-repo unit enable flags (COL-13): issues / pulls, future wiki/boards.
+    pub async fn get_repo_unit_flags(&self, repo_id: &str) -> Result<RepoUnitFlags, String> {
+        repo_units::get_unit_flags(self.require_pool()?, repo_id).await
+    }
+
+    pub async fn set_repo_issues_enabled(&self, repo_id: &str, enabled: bool) -> Result<(), String> {
+        repo_units::set_issues_enabled(self.require_pool()?, repo_id, enabled).await
+    }
+
+    pub async fn set_repo_pulls_enabled(&self, repo_id: &str, enabled: bool) -> Result<(), String> {
+        repo_units::set_pulls_enabled(self.require_pool()?, repo_id, enabled).await
+    }
+
     pub async fn consume_action_runner_registration_token(
         &self,
         token_hash: &str,
@@ -2898,18 +3238,30 @@ impl Database {
     pub async fn list_action_runs_for_repo(
         &self,
         repository_id: &str,
+        filter: &actions::ActionRunFilter,
         limit: i64,
         offset: i64,
     ) -> Result<Vec<actions::ActionRunRow>, String> {
-        actions::list_runs_for_repo(self.require_pool()?, repository_id, limit, offset).await
+        actions::list_runs_for_repo(self.require_pool()?, repository_id, filter, limit, offset).await
     }
 
-    pub async fn count_action_runs_for_repo(&self, repository_id: &str) -> Result<i64, String> {
-        actions::count_runs_for_repo(self.require_pool()?, repository_id).await
+    pub async fn count_action_runs_for_repo(
+        &self,
+        repository_id: &str,
+        filter: &actions::ActionRunFilter,
+    ) -> Result<i64, String> {
+        actions::count_runs_for_repo(self.require_pool()?, repository_id, filter).await
     }
 
-    pub async fn requeue_action_run(&self, run_id: &str) -> Result<(), String> {
-        actions::requeue_run(self.require_pool()?, run_id).await
+    /// `failed_only` requeues just failed/cancelled jobs; `job_id` requeues a
+    /// single job; both unset requeues all jobs.
+    pub async fn requeue_action_run(
+        &self,
+        run_id: &str,
+        failed_only: bool,
+        job_id: Option<&str>,
+    ) -> Result<(), String> {
+        actions::requeue_run(self.require_pool()?, run_id, failed_only, job_id).await
     }
 
     /// `false` when the run had already finished — nothing was clobbered.
@@ -3049,6 +3401,73 @@ impl Database {
         last_used_ip: Option<&str>,
     ) -> Result<(), String> {
         ssh_keys::touch_last_used(self.require_pool()?, id, last_used_at, last_used_ip).await
+    }
+
+    // --- deploy keys (GIT-23) ---
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn create_deploy_key(
+        &self,
+        id: &str,
+        repo_id: &str,
+        title: &str,
+        public_key: &str,
+        fingerprint: &str,
+        key_type: &str,
+        can_write: bool,
+        created_by: &str,
+    ) -> Result<(), String> {
+        deploy_keys::create(
+            self.require_pool()?,
+            id,
+            repo_id,
+            title,
+            public_key,
+            fingerprint,
+            key_type,
+            can_write,
+            created_by,
+        )
+        .await
+    }
+
+    /// Any deploy key row with this fingerprint (SSH auth-time lookup; the
+    /// repo binding is re-checked per pack exec via `find_deploy_key_for_repo`).
+    pub async fn find_deploy_key_by_fingerprint(
+        &self,
+        fingerprint: &str,
+    ) -> Result<Option<deploy_keys::DeployKeyRow>, String> {
+        deploy_keys::find_by_fingerprint(self.require_pool()?, fingerprint).await
+    }
+
+    /// The deploy key attached to `repo_id` carrying this fingerprint.
+    pub async fn find_deploy_key_for_repo(
+        &self,
+        repo_id: &str,
+        fingerprint: &str,
+    ) -> Result<Option<deploy_keys::DeployKeyRow>, String> {
+        deploy_keys::find_for_repo(self.require_pool()?, repo_id, fingerprint).await
+    }
+
+    pub async fn list_deploy_keys_for_repo(
+        &self,
+        repo_id: &str,
+    ) -> Result<Vec<deploy_keys::DeployKeyRow>, String> {
+        deploy_keys::list_for_repo(self.require_pool()?, repo_id).await
+    }
+
+    /// Hard-delete a deploy key scoped to its repo; returns true when removed.
+    pub async fn revoke_deploy_key(&self, repo_id: &str, id: &str) -> Result<bool, String> {
+        deploy_keys::revoke(self.require_pool()?, repo_id, id).await
+    }
+
+    pub async fn touch_deploy_key_last_used(
+        &self,
+        id: &str,
+        last_used_at: &str,
+        last_used_ip: Option<&str>,
+    ) -> Result<(), String> {
+        deploy_keys::touch_last_used(self.require_pool()?, id, last_used_at, last_used_ip).await
     }
 
     // --- gpg public keys ---
@@ -3333,6 +3752,19 @@ impl Database {
 
     pub async fn delete_lfs_object(&self, oid: &str) -> Result<(), String> {
         lfs::delete_lfs_object(self.require_pool()?, oid).await
+    }
+
+    // --- MCP endpoint settings (AGT-03) ---
+
+    pub async fn get_mcp_settings(&self) -> Result<mcp_settings::McpSettingsRow, String> {
+        mcp_settings::get_mcp_settings(self.require_pool()?).await
+    }
+
+    pub async fn update_mcp_settings(
+        &self,
+        enabled: Option<bool>,
+    ) -> Result<mcp_settings::McpSettingsRow, String> {
+        mcp_settings::update_mcp_settings(self.require_pool()?, enabled).await
     }
 
     pub async fn factory_reset_instance(&self) -> Result<(), String> {
@@ -3730,6 +4162,15 @@ impl Database {
         limit: i64,
     ) -> Result<Vec<RepoActivityRow>, String> {
         repo_activity::list_by_actor(self.require_pool()?, actor_id, limit).await
+    }
+
+    /// Public-repo-only actor activity for Atom feeds (API-05) — private repos excluded.
+    pub async fn list_repo_activity_by_actor_public(
+        &self,
+        actor_id: &str,
+        limit: i64,
+    ) -> Result<Vec<RepoActivityRow>, String> {
+        repo_activity::list_by_actor_public(self.require_pool()?, actor_id, limit).await
     }
 
     // --- audit events ---

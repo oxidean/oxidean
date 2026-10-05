@@ -1,10 +1,10 @@
-//! Shared branch-protection evaluator (D-02, D-14..22) — used by hooks and `pull.merge`.
+//! Shared branch/tag protection evaluator (D-02, D-14..22, GIT-21/22) — used by hooks and `pull.merge`.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use oxidean_core::{AppError, CommitStatusState, ProtectionBlockReasons};
-use oxidean_db::{BranchProtectionRuleRow, Database};
+use oxidean_db::{BranchProtectionRuleRow, Database, TagProtectionRuleRow};
 
 use crate::repo::Capability;
 
@@ -37,6 +37,8 @@ pub struct EffectiveProtection {
     pub enforce_admins: bool,
     pub required_linear_history: bool,
     pub lock_branch: bool,
+    /// GIT-22: every commit newly introduced by a push must verify as signed.
+    pub require_signed_commits: bool,
 }
 
 /// Inputs for merge evaluation beyond push.
@@ -172,6 +174,9 @@ pub fn union_rules(rules: &[BranchProtectionRuleRow], branch: &str) -> Effective
         if rule.lock_branch {
             eff.lock_branch = true;
         }
+        if rule.require_signed_commits {
+            eff.require_signed_commits = true;
+        }
     }
     if !any {
         return EffectiveProtection::default();
@@ -240,6 +245,119 @@ pub fn evaluate_push(
         "Branch protection rules block this update",
     )
     .with_data(serde_json::to_value(ProtectionBlockReasons { reasons, ..Default::default() }).unwrap_or_default()))
+}
+
+/// What the actor is attempting on a tag ref (GIT-21).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TagProtectionIntent {
+    /// Create `refs/tags/*` (old rev is zero).
+    Create,
+    /// Move/re-target an existing tag (old and new non-zero).
+    Update,
+    /// Delete `refs/tags/*` (new rev is zero).
+    Delete,
+}
+
+/// Effective union of matching tag protection rules (GIT-21).
+#[derive(Debug, Clone, Default)]
+pub struct EffectiveTagProtection {
+    pub matched: bool,
+    pub allow_create: bool,
+    pub allow_update: bool,
+    pub allow_delete: bool,
+    pub enforce_admins: bool,
+}
+
+/// Union matching rules for a tag name — most restrictive wins (same rule as
+/// branch `allow_*`: any matching rule with an action disallowed denies it).
+pub fn union_tag_rules(rules: &[TagProtectionRuleRow], tag: &str) -> EffectiveTagProtection {
+    let mut eff = EffectiveTagProtection {
+        allow_create: true,
+        allow_update: true,
+        allow_delete: true,
+        ..Default::default()
+    };
+    let mut any = false;
+    for rule in rules {
+        if !pattern_matches(&rule.pattern, tag) {
+            continue;
+        }
+        any = true;
+        if !rule.allow_create {
+            eff.allow_create = false;
+        }
+        if !rule.allow_update {
+            eff.allow_update = false;
+        }
+        if !rule.allow_delete {
+            eff.allow_delete = false;
+        }
+        if rule.enforce_admins {
+            eff.enforce_admins = true;
+        }
+    }
+    if !any {
+        return EffectiveTagProtection::default();
+    }
+    eff.matched = true;
+    eff
+}
+
+fn tag_actor_bypasses(eff: &EffectiveTagProtection, capability: Option<Capability>) -> bool {
+    !eff.enforce_admins && matches!(capability, Some(Capability::Admin))
+}
+
+/// Evaluate tag create/update/delete intents (GIT-21).
+pub fn evaluate_tag_push(
+    eff: &EffectiveTagProtection,
+    intent: TagProtectionIntent,
+    capability: Option<Capability>,
+) -> Result<(), AppError> {
+    if !eff.matched {
+        return Ok(());
+    }
+    if tag_actor_bypasses(eff, capability) {
+        return Ok(());
+    }
+    let (allowed, reason) = match intent {
+        TagProtectionIntent::Create => (eff.allow_create, "create"),
+        TagProtectionIntent::Update => (eff.allow_update, "update"),
+        TagProtectionIntent::Delete => (eff.allow_delete, "delete"),
+    };
+    if allowed {
+        return Ok(());
+    }
+    Err(AppError::new(
+        "repo.tag_protection",
+        "Tag protection rules block this update",
+    )
+    .with_data(
+        serde_json::to_value(ProtectionBlockReasons {
+            reasons: vec![reason.to_string()],
+            ..Default::default()
+        })
+        .unwrap_or_default(),
+    ))
+}
+
+/// Load rules and return effective protection for a tag.
+pub async fn effective_for_tag(
+    db: &Database,
+    repo_id: &str,
+    tag: &str,
+) -> Result<EffectiveTagProtection, AppError> {
+    let rules = db.list_tag_protection_rules(repo_id).await.map_err(|e| {
+        tracing::error!(error = %e, "list tag_protection_rules");
+        AppError::new("repo.internal", "repository operation failed")
+    })?;
+    Ok(union_tag_rules(&rules, tag))
+}
+
+/// Strip `refs/tags/` prefix.
+pub fn tag_from_ref(git_ref: &str) -> Option<&str> {
+    git_ref
+        .strip_prefix("refs/tags/")
+        .filter(|t| !t.is_empty() && !t.contains('\0'))
 }
 
 /// Evaluate merge intent (PR-08 / D-22).
@@ -326,6 +444,7 @@ pub fn evaluate_merge(
                 .then_some(eff.required_approving_review_count),
             approving_review_count: Some(input.approving_review_count),
             missing_status_contexts: missing_statuses,
+            unsigned_commits: Vec::new(),
         })
         .unwrap_or_default(),
     ))
@@ -638,6 +757,13 @@ pub fn capability_from_env(raw: &str) -> Capability {
 pub const ZERO_SHA: &str = "0000000000000000000000000000000000000000";
 
 /// Hook/update check: load rules for repo resolved from GIT_DIR and evaluate intent.
+///
+/// GIT-25: before any branch/tag-protection evaluation, deny non-delete updates
+/// (any ref namespace, not just heads) when the repo — including the still-
+/// quarantined incoming pack — is over its git object size quota.
+///
+/// Covers `refs/heads/*` (classic branch protection, D-14) and `refs/tags/*`
+/// (tag rulesets, GIT-21). Other namespaces are not ref-protected (after quota).
 pub async fn check_ref_update(
     db: &Database,
     repos_dir: &Path,
@@ -647,12 +773,17 @@ pub async fn check_ref_update(
     new_sha: &str,
     capability: Capability,
 ) -> Result<(), AppError> {
-    let Some(branch) = branch_from_ref(git_ref) else {
-        // Non-branch refs are not subject to classic branch protection.
-        return Ok(());
-    };
+    // API-06: refs/pull/* is a synthesized read-only namespace written by the
+    // forge itself (git update-ref, hook-free). No push — regardless of
+    // capability or protection rules — may create/update/delete it.
+    if git_ref.starts_with("refs/pull/") {
+        return Err(AppError::new(
+            "repo.pull_refs_read_only",
+            "pushes to refs/pull/* are denied: pull refs are synthesized read-only",
+        ));
+    }
     let (owner, name) = owner_name_from_git_dir(repos_dir, git_dir)
-        .map_err(|e| AppError::new("repo.branch_protection", e))?;
+        .map_err(|e| AppError::new("repo.ref_protection", e))?;
     let owner_id = if let Some(u) = db
         .find_user_by_username(&owner)
         .await
@@ -676,23 +807,156 @@ pub async fn check_ref_update(
             AppError::new("repo.internal", "repository operation failed")
         })?
         .ok_or_else(|| AppError::new("repo.not_found", "Repository not found"))?;
-    let eff = effective_for_branch(db, &repo.id, branch).await?;
-    let intent = if new_sha == ZERO_SHA {
-        ProtectionIntent::Delete
-    } else if old_sha == ZERO_SHA {
-        ProtectionIntent::Push
+
+    // Deletes (new_sha = 0) carry no objects — keep them allowed so an
+    // over-quota repo can still clean up refs (GIT-25).
+    if new_sha != ZERO_SHA {
+        crate::git::quota::enforce_push_quota(db, &repo, git_dir).await?;
+    }
+
+    enum RefTarget<'a> {
+        Branch(&'a str),
+        Tag(&'a str),
+    }
+    let target = if let Some(branch) = branch_from_ref(git_ref) {
+        RefTarget::Branch(branch)
+    } else if let Some(tag) = tag_from_ref(git_ref) {
+        RefTarget::Tag(tag)
     } else {
-        // Detect force-push: not a fast-forward.
-        let is_ff = git_is_fast_forward(git_dir, old_sha, new_sha)
-            .await
-            .unwrap_or(true);
-        if is_ff {
-            ProtectionIntent::Push
-        } else {
-            ProtectionIntent::ForcePush
-        }
+        // Non-branch/non-tag refs are not subject to ref protection.
+        return Ok(());
     };
-    evaluate_push(&eff, intent, Some(capability))
+
+    match target {
+        RefTarget::Branch(branch) => {
+            let eff = effective_for_branch(db, &repo.id, branch).await?;
+            let intent = if new_sha == ZERO_SHA {
+                ProtectionIntent::Delete
+            } else if old_sha == ZERO_SHA {
+                ProtectionIntent::Push
+            } else {
+                // Detect force-push: not a fast-forward.
+                let is_ff = git_is_fast_forward(git_dir, old_sha, new_sha)
+                    .await
+                    .unwrap_or(true);
+                if is_ff {
+                    ProtectionIntent::Push
+                } else {
+                    ProtectionIntent::ForcePush
+                }
+            };
+            evaluate_push(&eff, intent, Some(capability))?;
+            // GIT-22: signed-commits enforcement runs after the pure rule
+            // evaluation — it shells out to git (rev-list + %G? verify), so
+            // skip it when the push is already denied or the actor bypasses.
+            if eff.require_signed_commits
+                && matches!(intent, ProtectionIntent::Push | ProtectionIntent::ForcePush)
+                && !actor_bypasses(&eff, Some(capability))
+            {
+                enforce_signed_commits(db, git_dir, old_sha, new_sha).await?;
+            }
+            Ok(())
+        }
+        RefTarget::Tag(tag) => {
+            let eff = effective_for_tag(db, &repo.id, tag).await?;
+            let intent = if new_sha == ZERO_SHA {
+                TagProtectionIntent::Delete
+            } else if old_sha == ZERO_SHA {
+                TagProtectionIntent::Create
+            } else {
+                // Any retarget of an existing tag is an update (tags do not
+                // fast-forward as refs).
+                TagProtectionIntent::Update
+            };
+            evaluate_tag_push(&eff, intent, Some(capability))
+        }
+    }
+}
+
+/// GIT-22: every commit a push introduces must carry a forge-verified
+/// signature — the same verdict that drives the "Verified" badge
+/// (crypto `%G?` + [`crate::repo::signatures::apply_verified_policy`]).
+///
+/// "Newly introduced" = the `old..new` rev-list for updates (the old tip is
+/// still refed when the update hook runs, so force-push only re-checks genuinely
+/// new objects) and `<new_sha> --not --all` for creates.
+async fn enforce_signed_commits(
+    db: &Database,
+    git_dir: &Path,
+    old_sha: &str,
+    new_sha: &str,
+) -> Result<(), AppError> {
+    let probe = oxidean_git::pushed_commits(git_dir, old_sha, new_sha, None, None)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "signed-commits rev-list failed");
+            AppError::new("repo.internal", "repository operation failed")
+        })?;
+    if probe.is_empty() {
+        return Ok(());
+    }
+
+    // Same two-pass keyring as `repo.commits`: probe emails first, then build
+    // allowedSignersFile + GNUPGHOME for the users behind them (plus the
+    // instance web-flow key).
+    let mut emails: Vec<String> = Vec::with_capacity(probe.len() * 2);
+    for c in &probe {
+        if !c.committer_email.trim().is_empty() {
+            emails.push(c.committer_email.clone());
+        }
+        if !c.author_email.trim().is_empty() {
+            emails.push(c.author_email.clone());
+        }
+    }
+    let keyring = crate::repo::signatures::keyring_for_emails(db, &emails).await;
+    let commits = if keyring.has_any() {
+        oxidean_git::pushed_commits(
+            git_dir,
+            old_sha,
+            new_sha,
+            keyring.allowed_signers.as_deref(),
+            keyring.gpg_home.as_deref(),
+        )
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "signed-commits verify failed");
+            AppError::new("repo.internal", "repository operation failed")
+        })?
+    } else {
+        probe
+    };
+
+    let mut unsigned: Vec<String> = Vec::new();
+    for c in &commits {
+        let status = crate::repo::signatures::apply_verified_policy(
+            db,
+            &c.committer_email,
+            &c.author_email,
+            &c.signature_status,
+            &c.signature_kind,
+        )
+        .await;
+        if status != "valid" {
+            unsigned.push(c.sha.chars().take(7).collect());
+        }
+    }
+    if unsigned.is_empty() {
+        return Ok(());
+    }
+    unsigned.sort();
+    unsigned.dedup();
+    Err(AppError::new(
+        "repo.branch_protection",
+        "Branch protection requires signed commits",
+    )
+    .with_data(
+        serde_json::to_value(ProtectionBlockReasons {
+            reasons: vec!["signed_commits".to_string()],
+            unsigned_commits: unsigned,
+            ..Default::default()
+        })
+        .unwrap_or_default(),
+    ))
 }
 
 async fn git_is_fast_forward(git_dir: &Path, old_sha: &str, new_sha: &str) -> Result<bool, String> {
@@ -759,6 +1023,62 @@ mod tests {
     }
 
     #[test]
+    fn tag_from_ref_strips_prefix() {
+        assert_eq!(tag_from_ref("refs/tags/v1.0.0"), Some("v1.0.0"));
+        assert_eq!(tag_from_ref("refs/tags/release/v2"), Some("release/v2"));
+        assert_eq!(tag_from_ref("refs/tags/"), None);
+        assert_eq!(tag_from_ref("refs/heads/main"), None);
+        assert_eq!(tag_from_ref("HEAD"), None);
+    }
+
+    #[test]
+    fn tag_union_and_evaluate() {
+        let rule = TagProtectionRuleRow {
+            id: "1".into(),
+            repo_id: "r".into(),
+            pattern: "v*".into(),
+            allow_create: false,
+            allow_update: false,
+            allow_delete: false,
+            enforce_admins: true,
+            created_at: String::new(),
+            updated_at: String::new(),
+        };
+        let eff = union_tag_rules(&[rule], "v1");
+        assert!(eff.matched);
+        for intent in [
+            TagProtectionIntent::Create,
+            TagProtectionIntent::Update,
+            TagProtectionIntent::Delete,
+        ] {
+            let err = evaluate_tag_push(&eff, intent, Some(Capability::Admin))
+                .expect_err("enforce_admins must block admin too");
+            assert_eq!(err.code, "repo.tag_protection");
+        }
+        // Write bypass is never allowed on a matching all-deny rule.
+        assert!(
+            evaluate_tag_push(&eff, TagProtectionIntent::Create, Some(Capability::Write)).is_err()
+        );
+        // Non-matching tag stays free.
+        let miss = union_tag_rules(
+            &[TagProtectionRuleRow {
+                id: "2".into(),
+                repo_id: "r".into(),
+                pattern: "release-*".into(),
+                allow_create: false,
+                allow_update: false,
+                allow_delete: false,
+                enforce_admins: false,
+                created_at: String::new(),
+                updated_at: String::new(),
+            }],
+            "v2",
+        );
+        assert!(!miss.matched);
+        assert!(evaluate_tag_push(&miss, TagProtectionIntent::Delete, Some(Capability::Read)).is_ok());
+    }
+
+    #[test]
     fn union_takes_max_reviews_and_restrictive_allows() {
         let r1 = BranchProtectionRuleRow {
             id: "1".into(),
@@ -776,6 +1096,7 @@ mod tests {
             enforce_admins: false,
             required_linear_history: false,
             lock_branch: false,
+            require_signed_commits: false,
             created_at: String::new(),
             updated_at: String::new(),
         };
@@ -783,9 +1104,12 @@ mod tests {
         r2.id = "2".into();
         r2.required_approving_review_count = 2;
         r2.allow_force_pushes = false;
+        r2.require_signed_commits = true;
         let eff = union_rules(&[r1, r2], "main");
         assert!(eff.matched);
         assert_eq!(eff.required_approving_review_count, 2);
         assert!(!eff.allow_force_pushes);
+        // GIT-22: signed-commits unions OR across matching rules.
+        assert!(eff.require_signed_commits);
     }
 }

@@ -1,10 +1,46 @@
-import { describe, expect, it } from "vitest";
+import { cleanup, fireEvent, screen, waitFor } from "@octanejs/testing-library";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { renderWithQueryClient } from "@/test/render-with-query";
 
 /**
  * Phase 12 Pulls UI — tracer greened chrome/list/new/detail; later plans green the rest.
  */
+
+const pullCreateMock = vi.fn();
+const userLookupMock = vi.fn();
+
+vi.mock("@/lib/api-client", () => ({
+  apiClient: {
+    pull: { create: (...args: unknown[]) => pullCreateMock(...args) },
+    user: { lookup: (...args: unknown[]) => userLookupMock(...args) },
+  },
+}));
+
+let pullsNewLoaderData: unknown = undefined;
+let pullsSearchState: Record<string, unknown> = {};
+
+vi.mock("@octanejs/tanstack-router", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@octanejs/tanstack-router")>();
+  return {
+    ...actual,
+    useParams: () => ({ owner: "ada", repo: "hello" }),
+    useLoaderData: () => pullsNewLoaderData,
+    useSearch: () => pullsSearchState,
+    useNavigate: () => vi.fn(),
+  };
+});
+
+beforeEach(() => {
+  pullsNewLoaderData = undefined;
+  pullsSearchState = {};
+  pullCreateMock.mockReset();
+  userLookupMock.mockReset();
+  userLookupMock.mockResolvedValue({ ok: true, data: { users: [] } });
+});
+
+afterEach(cleanup);
 
 const chromeActive = readFileSync(join(process.cwd(), "src/lib/repo-chrome-active.ts"), "utf8");
 const repoChrome = readFileSync(
@@ -133,4 +169,76 @@ describe("Phase 12 Pulls UI", () => {
     expect(conversation).toMatch(/MarkdownWritePreview/);
     expect(conversation).toMatch(/Outdated/);
   });
+});
+
+describe("pulls/new template chooser (COL-02)", () => {
+  const loaderWithTemplates = {
+    kind: "ready",
+    repo: { default_branch: "main", can_write: true },
+    refs: [{ name: "refs/heads/main" }],
+    templates: {
+      issues: [],
+      pulls: [
+        {
+          name: "Standard PR",
+          description: "Default change checklist",
+          body: "## Checklist\n\n- [ ] tests\n",
+          filename: ".github/PULL_REQUEST_TEMPLATE/standard.md",
+        },
+        {
+          name: "Hotfix",
+          description: "Urgent fix",
+          body: "## Hotfix\n\nWhat broke?\n",
+          filename: ".github/PULL_REQUEST_TEMPLATE/hotfix.md",
+        },
+      ],
+    },
+  };
+
+  it("multi-template repos show a chooser; picking prefills the body", async () => {
+    pullsNewLoaderData = loaderWithTemplates;
+    const mod = (await import(/* @vite-ignore */ "./$owner.$repo.pulls.new")) as Record<
+      string,
+      unknown
+    >;
+    const page = (mod.NewPullPage ?? mod.default) as never;
+    expect(page, "NewPullPage must be exported").toBeTruthy();
+    renderWithQueryClient(page);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("pull-template-chooser")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Standard PR")).toBeInTheDocument();
+    expect(screen.getByText("Default change checklist")).toBeInTheDocument();
+    expect(screen.getByText("Hotfix")).toBeInTheDocument();
+    // Branch selectors stay available while choosing.
+    expect(screen.getByText(/^Base$/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Hotfix"));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("pull-template-chooser")).not.toBeInTheDocument();
+    });
+    const textarea = document.querySelector("textarea");
+    expect(textarea?.value).toContain("## Hotfix");
+  }, 15_000);
+
+  it("template-less repos render the plain form (no chooser)", async () => {
+    pullsNewLoaderData = {
+      kind: "ready",
+      repo: { default_branch: "main", can_write: true },
+      refs: [{ name: "refs/heads/main" }],
+      templates: { issues: [], pulls: [] },
+    };
+    const mod = (await import(/* @vite-ignore */ "./$owner.$repo.pulls.new")) as Record<
+      string,
+      unknown
+    >;
+    renderWithQueryClient((mod.NewPullPage ?? mod.default) as never);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Create pull request/i })).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("pull-template-chooser")).not.toBeInTheDocument();
+  }, 15_000);
 });

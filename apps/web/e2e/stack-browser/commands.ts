@@ -2292,6 +2292,19 @@ export const expectActionsPipelineFlow: BrowserCommand<[]> = async (ctx) => {
     await runList.waitFor({ state: "visible", timeout: 30_000 });
     await runList.locator("text=success").waitFor({ state: "visible", timeout: 30_000 });
 
+    // Parity surface: workflow sidebar lists the pushed workflow, and the run
+    // row carries its per-workflow run number (#1 — first run in this repo).
+    const workflowsNav = page.getByTestId("actions-workflows");
+    await workflowsNav.waitFor({ state: "visible", timeout: 30_000 });
+    const navText = (await workflowsNav.innerText?.()) ?? "";
+    if (!navText.includes("ci")) {
+      throw new Error(`workflows sidebar missing 'ci': ${navText.slice(0, 300)}`);
+    }
+    const listText = (await runList.innerText?.()) ?? "";
+    if (!listText.includes("#1")) {
+      throw new Error(`run list missing run number '#1': ${listText.slice(0, 400)}`);
+    }
+
     await page.goto(`${webOrigin()}/${seed.owner}/${seed.repo}/actions/${run.id}`, {
       waitUntil: "domcontentloaded",
       timeout: 60_000,
@@ -2307,6 +2320,14 @@ export const expectActionsPipelineFlow: BrowserCommand<[]> = async (ctx) => {
     const logText = (await log.innerText?.()) ?? "";
     if (!logText.includes(marker)) {
       throw new Error(`job log missing marker ${marker}: ${logText.slice(0, 500)}`);
+    }
+
+    // Step-aware viewer: the steps rail lists the workflow's steps.
+    const stepsNav = page.getByTestId("actions-log-steps");
+    await stepsNav.waitFor({ state: "visible", timeout: 30_000 });
+    const stepsText = (await stepsNav.innerText?.()) ?? "";
+    if (!stepsText.includes("marker")) {
+      throw new Error(`steps rail missing 'marker' step: ${stepsText.slice(0, 300)}`);
     }
     assertNoOctaneOverlay(await page.content(), "actions run detail");
     return true;

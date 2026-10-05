@@ -30,39 +30,39 @@ The forge is only as useful as what third-party tools can drive. PATs authentica
 
 - [x] **API-01** Public REST API with OpenAPI spec covering the core surface: repos, issues, PRs, comments, releases, orgs, users, admin. Companion to the RPC layer, not a replacement. ([#80](https://github.com/oxidean/oxidean/pull/80))
 - [x] **API-02** Token-authenticated API access: extend PAT scopes (or issue OAuth bearer tokens) so non-browser clients can call the API. Includes deciding whether `/api/rpc` accepts tokens or the REST surface is the only programmatic path. ([#77](https://github.com/oxidean/oxidean/pull/77))
-- [ ] **API-03** OAuth apps: instance acts as an OAuth2/OIDC provider so external tools authenticate users ("sign in with Oxidean") and act on their behalf. Tracked as PLAT-V2-02 alongside fine-grained PAT depth.
-- [ ] **API-04** Broader webhook events beyond `push`, `pull_request`, `issues`, `ping`, `*`: `issue_comment` (DEBT-04), `release`, `star`, `fork`, `create`/`delete` refs, workflow run status, package publish.
-- [ ] **API-05** Atom/RSS feeds for repo activity, releases, and user activity.
-- [ ] **API-06** GitHub-compatible subset for common tooling (commit statuses API shape, PR refs `refs/pull/N/head`, known webhook payload conventions) so existing CI/deploy bots work unchanged where practical.
+- [x] **API-03** OAuth apps: instance acts as an OAuth2/OIDC provider so external tools authenticate users ("sign in with Oxidean") and act on their behalf. Tracked as PLAT-V2-02 alongside fine-grained PAT depth. (#85)
+- [x] **API-04** Broader webhook events beyond `push`, `pull_request`, `issues`, `ping`, `*`: `issue_comment` (DEBT-04), `release`, `star`, `fork`, `create`/`delete` refs, workflow run status, package publish. (#87)
+- [x] **API-05** Atom/RSS feeds for repo activity, releases, and user activity. (#83)
+- [x] **API-06** GitHub-compatible subset for common tooling (commit statuses API shape, PR refs `refs/pull/N/head`, known webhook payload conventions) so existing CI/deploy bots work unchanged where practical. ([#94](https://github.com/oxidean/oxidean/pull/94))
 
 ## Agents, MCP, and CLI
 
 Machine-facing surfaces beyond raw git/HTTP. These depend on API-02 (token auth) and benefit from API-03 (OAuth apps).
 
-- [ ] **AGT-01** Instance MCP server: a streamable-HTTP MCP endpoint on the instance exposing repos, issues, PRs, action runs, packages, and search as tools and resources — functionality comparable to github-mcp-server and Forgejo's MCP support.
-- [ ] **AGT-02** WebMCP surface in the web app: the app advertises MCP capabilities to browser-side agents (WebMCP, as surfaced by Chrome DevTools) backed by the instance MCP endpoint.
-- [ ] **AGT-03** MCP auth and setup model: local development (localhost or stdio) works with minimal configuration; remote third-party tools authenticate via PAT or OAuth with documented scopes, configured from settings.
-- [ ] **CLI-01** Companion CLI (`ox`, gh-class): login, repo/issue/PR/actions/packages operations, scriptable JSON output, works against any instance URL.
-- [ ] **CLI-02** Server-driven compatibility contract: the CLI reads a versioned capability/procedure manifest from the connected instance (new `system.manifest`-style RPC) and feature-gates its commands, so API changes on the server never hard-break installed clients.
+- [x] **AGT-01** Instance MCP server: a streamable-HTTP MCP endpoint on the instance exposing repos, issues, PRs, action runs, packages, and search as tools and resources — functionality comparable to github-mcp-server and Forgejo's MCP support. (#93)
+- [x] **AGT-02** WebMCP surface in the web app: the app advertises MCP capabilities to browser-side agents (WebMCP, as surfaced by Chrome DevTools) backed by the instance MCP endpoint. (#95)
+- [x] **AGT-03** MCP auth and setup model: local development (localhost or stdio) works with minimal configuration; remote third-party tools authenticate via PAT or OAuth with documented scopes, configured from settings. (#98)
+- [x] **CLI-01** Companion CLI (`ox`, gh-class): login, repo/issue/PR/actions/packages operations, scriptable JSON output, works against any instance URL. ([#92](https://github.com/oxidean/oxidean/pull/92))
+- [x] **CLI-02** Server-driven compatibility contract: the CLI reads a versioned capability/procedure manifest from the connected instance (new `system.manifest`-style RPC) and feature-gates its commands, so API changes on the server never hard-break installed clients. ([#96](https://github.com/oxidean/oxidean/pull/96))
 
 ## Git and code surface
 
-- [ ] **GIT-19** Web file editing: create, edit, rename, delete, and upload files with a commit from the browser, signed by the existing web-flow key. Includes new-branch-with-PR flow.
-- [ ] **GIT-20** Repository archive flag: read-only mode that blocks push, issues, and PRs while keeping everything browsable and clonable.
-- [ ] **GIT-21** Protected tags and tag rulesets (branch protection covers branches only today).
-- [ ] **GIT-22** "Require signed commits" protection option. SSH/GPG signature verification is displayed on commits; enforcement is not a protection knob yet.
-- [ ] **GIT-23** Deploy keys: per-repo SSH keys with read or read/write scope, distinct from account keys.
-- [ ] **GIT-24** Sync fork and update-PR-branch: bring a fork or PR head up to date with the base branch from the UI/API.
-- [ ] **GIT-25** Repository size quotas for git objects. LFS and package quotas exist; the bare repo itself is unbounded.
-- [ ] **GIT-26** Repo insights: contributors, commit activity, and fork-network views on top of the existing repo activity feed.
-- [ ] **GIT-27** Git protocol surface audit: confirm protocol v2, partial clone/filter, and shallow clone behavior on both transports, then document or fix.
+- [x] **GIT-19** Web file editing: create, edit, rename, delete, and upload files with a commit from the browser, signed by the existing web-flow key. Includes new-branch-with-PR flow. (#88)
+- [x] **GIT-20** Repository archive flag: read-only mode that blocks push, issues, and PRs while keeping everything browsable and clonable. (#82)
+- [x] **GIT-21** Protected tags and tag rulesets (branch protection covers branches only today). (#81)
+- [x] **GIT-22** "Require signed commits" protection option. SSH/GPG signature verification is displayed on commits; enforcement is not a protection knob yet. (#86)
+- [x] **GIT-23** Deploy keys: per-repo SSH keys with read or read/write scope, distinct from account keys. (#84)
+- [x] **GIT-24** Sync fork and update-PR-branch: bring a fork or PR head up to date with the base branch from the UI/API. `repo.forkStatus`/`repo.syncFork` + `pull.branchStatus`/`pull.updateBranch`, fork + PR page controls. (#89)
+- [x] **GIT-25** Repository size quotas for git objects. LFS and package quotas exist; the bare repo itself is unbounded. (Enforced in `hooks/update` via `check_ref_update`; `repo.quota.get`/`repo.quota.set` + `admin.git.*Settings` RPCs; `OXIDEAN_GIT_REPO_QUOTA_BYTES`. See docs/CONFIGURATION.md. #90)
+- [x] **GIT-26** Repo insights: contributors, commit activity, and fork-network views on top of the existing repo activity feed. (#91)
+- [x] **GIT-27** Git protocol surface audit: confirm protocol v2, partial clone/filter, and shallow clone behavior on both transports, then document or fix. (#97)
 
 ## Issues, PRs, and collaboration
 
 The v1 loop (open, comment, review, merge, close) works. Parity is about the planning and review depth around it.
 
 - [ ] **COL-01** Milestones: group issues/PRs by release goal with progress and due dates.
-- [ ] **COL-02** Issue and PR templates from `ISSUE_TEMPLATE/` and `PULL_REQUEST_TEMPLATE` in-repo files, including multi-template chooser.
+- [x] **COL-02** Issue and PR templates from `ISSUE_TEMPLATE/` and `PULL_REQUEST_TEMPLATE` in-repo files, including multi-template chooser. (#99)
 - [ ] **COL-03** Comment attachments: image and file uploads in issue/PR/release discussions.
 - [ ] **COL-04** Pinned issues/PRs per repo and pinned repos on user/org profiles.
 - [ ] **COL-05** Org teams: named groups with their own repo access lists. Orgs are flat `owner`/`admin`/`member` today.
@@ -73,7 +73,7 @@ The v1 loop (open, comment, review, merge, close) works. Parity is about the pla
 - [ ] **COL-10** Project boards / kanban scoped to repo or org (COLLAB-V2-01).
 - [ ] **COL-11** Wiki per repository (COLLAB-V2-02).
 - [ ] **COL-12** Contribution graph / profile activity and profile README support.
-- [ ] **COL-13** Per-repo unit toggles: enable/disable issues and PRs per repository (and future wiki/boards). Only Actions has an enable flag today (`repo.actions.setEnabled`).
+- [x] **COL-13** Per-repo unit toggles: enable/disable issues and PRs per repository (`repo.issues.*`/`repo.pulls.*` `getEnabled`/`setEnabled`, `issue.*`/`pull.*` reject `repo.<unit>.disabled` while off, Settings → Features). Wiki/boards remain future units following the same pattern. (#100)
 
 ## Actions (CI)
 

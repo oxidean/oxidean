@@ -3,44 +3,397 @@
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
-use axum::{Json, Router};
+use axum::routing::{delete, get, patch, post};
+use axum::Json;
+use oxidean_core::{
+    CreateWebhookRequest, LabelsListResponse, ListLabelsForRepoRequest, RepoCommitResponse,
+    RepoCommitsResponse, RepoCompareResponse, RepoExploreRequest, RepoLanguagesResponse,
+    RepoListMineResponse, RepoPublic, RepoRefEntry, RepoSoftDeleteResponse,
+    RepoStargazersListRequest, RepoStargazersListResponse, RepoTreeResponse,
+    RepoUpdateMetadataRequest, UpdateWebhookRequest, WebhookListResponse, WebhookPublic,
+};
+use oxidean_core::{DeleteWebhookResponse, RepoBlobResponse};
+use schemars::SchemaGenerator;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
+use super::spec::{BodySpec, RespSpec, RouteDef};
 use super::{call, call_map, merge_fields, repo_ref, RepoPath};
 use crate::app::AppState;
 
-pub fn router() -> Router<AppState> {
-    Router::new()
-        .route("/repos", get(list_repositories))
-        .route(
-            "/repos/{owner}/{repo}",
-            get(get_repo).patch(update_repo).delete(delete_repo),
-        )
-        .route("/repos/{owner}/{repo}/branches", get(list_branches))
-        .route("/repos/{owner}/{repo}/tags", get(list_tags))
-        .route("/repos/{owner}/{repo}/commits", get(list_commits))
-        .route("/repos/{owner}/{repo}/commits/{sha}", get(get_commit))
-        .route(
-            "/repos/{owner}/{repo}/compare/{basehead}",
-            get(compare_refs),
-        )
-        .route("/repos/{owner}/{repo}/tree", get(get_tree_root))
-        .route("/repos/{owner}/{repo}/tree/{*path}", get(get_tree))
-        .route("/repos/{owner}/{repo}/contents/{*path}", get(get_contents))
-        .route("/repos/{owner}/{repo}/languages", get(get_languages))
-        .route("/repos/{owner}/{repo}/labels", get(list_labels))
-        .route("/repos/{owner}/{repo}/stargazers", get(list_stargazers))
-        .route(
-            "/repos/{owner}/{repo}/hooks",
-            get(list_hooks).post(create_hook),
-        )
-        .route(
-            "/repos/{owner}/{repo}/hooks/{id}",
-            get(get_hook).patch(update_hook).delete(delete_hook),
-        )
+/// `repo.refs` entries filtered to `refs/heads/*` and renamed to short
+/// names — `{branches: [...]}`.
+fn branches_schema(gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "required": ["branches"],
+        "properties": {
+            "branches": {
+                "type": "array",
+                "items": gen.subschema_for::<RepoRefEntry>(),
+            },
+        },
+    })
 }
+
+/// Same for `refs/tags/*` — `{tags: [...]}`.
+fn tags_schema(gen: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "required": ["tags"],
+        "properties": {
+            "tags": {
+                "type": "array",
+                "items": gen.subschema_for::<RepoRefEntry>(),
+            },
+        },
+    })
+}
+
+pub const ROUTES: &[RouteDef] = &[
+    RouteDef {
+        method: "GET",
+        path: "/repos",
+        tags: &["repos"],
+        operation_id: "exploreRepos",
+        summary: "Explore public repositories (`repo.explore`)",
+        procedure: "repo.explore",
+        ok: StatusCode::OK,
+        anonymous: true,
+        path_fields: &[],
+        query: Some(SchemaGenerator::into_root_schema_for::<RepoExploreRequest>),
+        body: None,
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<RepoListMineResponse>,
+        )),
+        mount: || get(list_repositories),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}",
+        tags: &["repos"],
+        operation_id: "getRepo",
+        summary: "Get a repository (`repo.get`) — anonymous OK for public",
+        procedure: "repo.get",
+        ok: StatusCode::OK,
+        anonymous: true,
+        path_fields: &["owner", "name"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<RepoPublic>,
+        )),
+        mount: || get(get_repo),
+    },
+    RouteDef {
+        method: "PATCH",
+        path: "/repos/{owner}/{repo}",
+        tags: &["repos"],
+        operation_id: "updateRepo",
+        summary: "Update repo metadata (`repo.updateMetadata`)",
+        procedure: "repo.updateMetadata",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: None,
+        body: Some(BodySpec::Rpc(
+            SchemaGenerator::into_root_schema_for::<RepoUpdateMetadataRequest>,
+        )),
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<RepoPublic>,
+        )),
+        mount: || patch(update_repo),
+    },
+    RouteDef {
+        method: "DELETE",
+        path: "/repos/{owner}/{repo}",
+        tags: &["repos"],
+        operation_id: "deleteRepo",
+        summary: "Soft-delete a repository (`repo.softDelete`; the URL is the typed confirmation)",
+        procedure: "repo.softDelete",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<RepoSoftDeleteResponse>,
+        )),
+        mount: || delete(delete_repo),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/branches",
+        tags: &["repos"],
+        operation_id: "listBranches",
+        summary: "List branches (`repo.refs` filtered to `refs/heads/*`)",
+        procedure: "repo.refs",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(branches_schema)),
+        mount: || get(list_branches),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/tags",
+        tags: &["repos"],
+        operation_id: "listTags",
+        summary: "List tags (`repo.refs` filtered to `refs/tags/*`)",
+        procedure: "repo.refs",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(tags_schema)),
+        mount: || get(list_tags),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/commits",
+        tags: &["repos"],
+        operation_id: "listCommits",
+        summary: "Commit log (`repo.commits`)",
+        procedure: "repo.commits",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: Some(SchemaGenerator::into_root_schema_for::<CommitsQuery>),
+        body: None,
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<RepoCommitsResponse>,
+        )),
+        mount: || get(list_commits),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/commits/{sha}",
+        tags: &["repos"],
+        operation_id: "getCommit",
+        summary: "Single commit with diff (`repo.commit`)",
+        procedure: "repo.commit",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name", "sha"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<RepoCommitResponse>,
+        )),
+        mount: || get(get_commit),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/compare/{basehead}",
+        tags: &["repos"],
+        operation_id: "compareRefs",
+        summary: "Compare two refs (`repo.compare`); `{basehead}` = `base...head` (`..` accepted)",
+        procedure: "repo.compare",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name", "base", "head"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<RepoCompareResponse>,
+        )),
+        mount: || get(compare_refs),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/tree",
+        tags: &["repos"],
+        operation_id: "getTreeRoot",
+        summary: "Root tree listing (`repo.tree`)",
+        procedure: "repo.tree",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: Some(SchemaGenerator::into_root_schema_for::<TreeQuery>),
+        body: None,
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<RepoTreeResponse>,
+        )),
+        mount: || get(get_tree_root),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/tree/{*path}",
+        tags: &["repos"],
+        operation_id: "getTree",
+        summary: "Directory listing (`repo.tree`); `{path}` may contain slashes",
+        procedure: "repo.tree",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name", "path"],
+        query: Some(SchemaGenerator::into_root_schema_for::<TreeQuery>),
+        body: None,
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<RepoTreeResponse>,
+        )),
+        mount: || get(get_tree),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/contents/{*path}",
+        tags: &["repos"],
+        operation_id: "getContents",
+        summary: "File content + metadata (`repo.blob`); `{path}` may contain slashes",
+        procedure: "repo.blob",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name", "path"],
+        query: Some(SchemaGenerator::into_root_schema_for::<TreeQuery>),
+        body: None,
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<RepoBlobResponse>,
+        )),
+        mount: || get(get_contents),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/languages",
+        tags: &["repos"],
+        operation_id: "getLanguages",
+        summary: "Language breakdown (`repo.languages`)",
+        procedure: "repo.languages",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<RepoLanguagesResponse>,
+        )),
+        mount: || get(get_languages),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/labels",
+        tags: &["repos"],
+        operation_id: "listLabels",
+        summary: "Effective labels (`label.listForRepo`, includes org labels)",
+        procedure: "label.listForRepo",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: Some(SchemaGenerator::into_root_schema_for::<ListLabelsForRepoRequest>),
+        body: None,
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<LabelsListResponse>,
+        )),
+        mount: || get(list_labels),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/stargazers",
+        tags: &["repos"],
+        operation_id: "listStargazers",
+        summary: "Stargazers (`repo.stargazers.list`; Write+ only)",
+        procedure: "repo.stargazers.list",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: Some(SchemaGenerator::into_root_schema_for::<RepoStargazersListRequest>),
+        body: None,
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<RepoStargazersListResponse>,
+        )),
+        mount: || get(list_stargazers),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/hooks",
+        tags: &["repos"],
+        operation_id: "listHooks",
+        summary: "List webhooks (`webhook.list`; repo Admin)",
+        procedure: "webhook.list",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<WebhookListResponse>,
+        )),
+        mount: || get(list_hooks),
+    },
+    RouteDef {
+        method: "POST",
+        path: "/repos/{owner}/{repo}/hooks",
+        tags: &["repos"],
+        operation_id: "createHook",
+        summary: "Create webhook (`webhook.create`) — returns one-time `secret`",
+        procedure: "webhook.create",
+        ok: StatusCode::CREATED,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: None,
+        body: Some(BodySpec::Rpc(
+            SchemaGenerator::into_root_schema_for::<CreateWebhookRequest>,
+        )),
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<WebhookPublic>,
+        )),
+        mount: || post(create_hook),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/hooks/{id}",
+        tags: &["repos"],
+        operation_id: "getHook",
+        summary: "Get webhook (`webhook.get`)",
+        procedure: "webhook.get",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name", "id"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<WebhookPublic>,
+        )),
+        mount: || get(get_hook),
+    },
+    RouteDef {
+        method: "PATCH",
+        path: "/repos/{owner}/{repo}/hooks/{id}",
+        tags: &["repos"],
+        operation_id: "updateHook",
+        summary: "Update webhook (`webhook.update`)",
+        procedure: "webhook.update",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name", "id"],
+        query: None,
+        body: Some(BodySpec::Rpc(
+            SchemaGenerator::into_root_schema_for::<UpdateWebhookRequest>,
+        )),
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<WebhookPublic>,
+        )),
+        mount: || patch(update_hook),
+    },
+    RouteDef {
+        method: "DELETE",
+        path: "/repos/{owner}/{repo}/hooks/{id}",
+        tags: &["repos"],
+        operation_id: "deleteHook",
+        summary: "Delete webhook (`webhook.delete`)",
+        procedure: "webhook.delete",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name", "id"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<DeleteWebhookResponse>,
+        )),
+        mount: || delete(delete_hook),
+    },
+];
 
 #[derive(serde::Serialize, Deserialize)]
 pub struct ExploreQuery {
@@ -162,7 +515,7 @@ async fn list_tags(
     .await
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 pub struct CommitsQuery {
     /// Branch, tag, or SHA to start listing from (default: default branch).
     /// `sha` mirrors GitHub's parameter name; `ref` is accepted as an alias.
@@ -193,9 +546,9 @@ async fn list_commits(
 
 #[derive(Deserialize)]
 pub struct ShaPath {
-    owner: String,
-    repo: String,
-    sha: String,
+    pub owner: String,
+    pub repo: String,
+    pub sha: String,
 }
 
 /// `GET /api/v1/repos/{owner}/{repo}/commits/{sha}` (`repo.commit`).
@@ -243,7 +596,7 @@ async fn compare_refs(
     call(&state, &headers, "repo.compare", input, StatusCode::OK).await
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, schemars::JsonSchema)]
 pub struct TreeQuery {
     #[serde(default, rename = "ref")]
     ref_name: Option<String>,

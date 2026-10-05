@@ -17,6 +17,10 @@ name = "rpc-gen"
 path = "src/bin/rpc_gen.rs"
 
 [[bin]]
+name = "openapi-gen"
+path = "src/bin/openapi_gen.rs"
+
+[[bin]]
 name = "oxidean-protection-hook"
 path = "src/bin/protection_hook.rs"
 
@@ -78,6 +82,10 @@ russh = { version = "0.63", features = ["aws-lc-rs"] }
 serde_yaml = "0.9"
 prost = "0.13"
 zip = { version = "2.2", default-features = false, features = ["deflate"] }
+sha1 = "0.10.6"
+base64 = "0.22"
+schemars = { workspace = true }
+utoipa-swagger-ui = { version = "10", features = ["axum", "vendored"] }
 
 [dev-dependencies]
 http-body-util = "0.1"

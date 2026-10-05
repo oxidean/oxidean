@@ -25,4 +25,7 @@ pub use parse::{
 };
 pub use statuses::{job_status_to_commit_state, publish_from_job_update, status_context};
 pub use tokens::mint_registration_token;
-pub use workflow::{discover_workflows, DiscoverError, DiscoveredWorkflow, MAX_WORKFLOW_BYTES};
+pub use workflow::{
+    discover_workflows, DiscoverError, DiscoveredWorkflow, DiscoveryFileError,
+    WorkflowDiscovery, MAX_WORKFLOW_BYTES,
+};

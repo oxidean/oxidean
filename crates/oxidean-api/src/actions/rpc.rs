@@ -11,10 +11,10 @@ use oxidean_core::{
     ActionRunMutationRequest, ActionRunMutationResponse, ActionRunPublic, ActionRunnerPublic,
     ActionRunsListRequest, ActionRunsListResponse, ActionSecretDeleteRequest,
     ActionSecretMetaPublic, ActionSecretPutRequest, ActionSecretsListRequest,
-    ActionSecretsListResponse, ActionSetEnabledRequest, ActionWorkflowPublic,
-    ActionWorkflowsListRequest, ActionWorkflowsListResponse, AppError,
+    ActionSecretsListResponse, ActionSetEnabledRequest, ActionWorkflowFileError,
+    ActionWorkflowPublic, ActionWorkflowsListRequest, ActionWorkflowsListResponse, AppError,
 };
-use oxidean_db::{ActionJobRow, ActionRunRow, ActionRunnerRow};
+use oxidean_db::{ActionJobRow, ActionRunFilter, ActionRunRow, ActionRunnerRow};
 
 use crate::actions::dispatch::{bare_repo_path, enqueue_run};
 use crate::actions::logs::read_job_log;
@@ -43,7 +43,8 @@ fn db_err(e: String) -> AppError {
     }
 }
 
-fn run_public(r: &ActionRunRow, actors: &HashMap<String, String>) -> ActionRunPublic {
+fn run_public(r: &ActionRunRow, actors: &HashMap<String, RunActor>) -> ActionRunPublic {
+    let actor = r.triggered_by.as_ref().and_then(|id| actors.get(id));
     ActionRunPublic {
         id: r.id.clone(),
         repository_id: r.repository_id.clone(),
@@ -54,21 +55,26 @@ fn run_public(r: &ActionRunRow, actors: &HashMap<String, String>) -> ActionRunPu
         head_ref: r.head_ref.clone(),
         status: r.status.clone(),
         title: r.title.clone(),
-        actor: r
-            .triggered_by
-            .as_ref()
-            .and_then(|id| actors.get(id).cloned()),
+        run_number: r.run_number,
+        actor: actor.map(|a| a.username.clone()),
+        actor_avatar_url: actor.and_then(|a| a.avatar_url.clone()),
         created_at: r.created_at.clone(),
         updated_at: r.updated_at.clone(),
         finished_at: r.finished_at.clone(),
     }
 }
 
-/// Batch-resolve `triggered_by` user ids to usernames for run serialization.
+/// Resolved triggering actor for run serialization (username + avatar).
+struct RunActor {
+    username: String,
+    avatar_url: Option<String>,
+}
+
+/// Batch-resolve `triggered_by` user ids to actors for run serialization.
 async fn actors_for_runs(
     ctx: &RpcCtx,
     runs: &[ActionRunRow],
-) -> Result<HashMap<String, String>, AppError> {
+) -> Result<HashMap<String, RunActor>, AppError> {
     let ids: Vec<String> = runs
         .iter()
         .filter_map(|r| r.triggered_by.clone())
@@ -86,7 +92,17 @@ async fn actors_for_runs(
         .await
         .map_err(db_err)?
     {
-        out.insert(u.id, u.username);
+        let avatar_url = u
+            .avatar_path
+            .as_ref()
+            .map(|_| format!("/uploads/avatars/{}.webp", u.id));
+        out.insert(
+            u.id,
+            RunActor {
+                username: u.username,
+                avatar_url,
+            },
+        );
     }
     Ok(out)
 }
@@ -139,13 +155,60 @@ pub async fn list_runs(
         .unwrap_or(RUNS_DEFAULT_PER_PAGE)
         .clamp(1, RUNS_MAX_PER_PAGE);
     let offset = i64::from((page - 1) * per_page);
+
+    // Optional GitHub-style filters (status/event/branch/workflow/actor/query).
+    let nonempty = |v: Option<String>| {
+        v.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+    };
+    let branch = nonempty(req.branch).map(|b| {
+        b.strip_prefix("refs/heads/")
+            .map(str::to_string)
+            .unwrap_or(b)
+    });
+    let mut triggered_by = None;
+    if let Some(actor) = nonempty(req.actor) {
+        match ctx
+            .db
+            .find_user_by_username(&actor)
+            .await
+            .map_err(db_err)?
+        {
+            Some(u) => triggered_by = Some(u.id),
+            // Unknown actor — no runs can match; skip the list query entirely.
+            None => {
+                return Ok(ActionRunsListResponse {
+                    runs: vec![],
+                    total_count: 0,
+                    page,
+                    per_page,
+                });
+            }
+        }
+    }
+    let filter = ActionRunFilter {
+        status: nonempty(req.status),
+        event: nonempty(req.event),
+        branch,
+        workflow_path: nonempty(req.workflow),
+        triggered_by,
+        title_like: nonempty(req.query).map(|q| format!("%{q}%")),
+    };
     let (rows, total_count) = tokio::try_join!(
         async {
             ctx.db
-                .list_action_runs_for_repo(&accessible.row.id, i64::from(per_page), offset)
+                .list_action_runs_for_repo(
+                    &accessible.row.id,
+                    &filter,
+                    i64::from(per_page),
+                    offset,
+                )
                 .await
         },
-        async { ctx.db.count_action_runs_for_repo(&accessible.row.id).await },
+        async {
+            ctx.db
+                .count_action_runs_for_repo(&accessible.row.id, &filter)
+                .await
+        },
     )
     .map_err(db_err)?;
     let actors = actors_for_runs(ctx, &rows).await?;
@@ -226,11 +289,18 @@ pub async fn get_job_log(
     if job.run_id != run.id {
         return Err(not_found());
     }
-    let bytes = read_job_log(&ctx.actions_log_dir, &req.run_id, &req.job_id)
-        .await
-        .unwrap_or_default();
+    let (bytes, size) = read_job_log(
+        &ctx.actions_log_dir,
+        &req.run_id,
+        &req.job_id,
+        req.offset.unwrap_or(0),
+    )
+    .await
+    .unwrap_or_default();
     Ok(ActionJobLogResponse {
         content: String::from_utf8_lossy(&bytes).into_owned(),
+        next_offset: size,
+        size,
     })
 }
 
@@ -426,11 +496,20 @@ pub async fn list_workflows(
         })?;
     Ok(ActionWorkflowsListResponse {
         workflows: discovered
+            .workflows
             .iter()
             .map(|w| ActionWorkflowPublic {
                 path: w.path.clone(),
                 name: w.document.name.clone(),
                 supports_dispatch: w.document.triggers.workflow_dispatch,
+            })
+            .collect(),
+        errors: discovered
+            .errors
+            .iter()
+            .map(|e| ActionWorkflowFileError {
+                path: e.path.clone(),
+                message: e.message.clone(),
             })
             .collect(),
         git_ref: req.git_ref.unwrap_or_else(|| accessible.row.default_branch.clone()),
@@ -486,9 +565,26 @@ pub async fn dispatch_workflow(
         })?;
     let wanted = req.workflow_id.trim();
     let wf = discovered
+        .workflows
         .iter()
-        .find(|w| w.path == wanted || w.document.name == wanted)
-        .ok_or_else(|| AppError::new("repo.actions.workflow_not_found", "workflow not found"))?;
+        .find(|w| w.path == wanted || w.document.name == wanted);
+    let wf = match wf {
+        Some(w) => w,
+        None => {
+            if let Some(fe) = discovered.errors.iter().find(|e| {
+                e.path == wanted || e.path.rsplit('/').next() == Some(wanted)
+            }) {
+                return Err(AppError::new(
+                    "repo.actions.workflow_invalid",
+                    format!("workflow is invalid: {}", fe.message),
+                ));
+            }
+            return Err(AppError::new(
+                "repo.actions.workflow_not_found",
+                "workflow not found",
+            ));
+        }
+    };
     if !wf.document.triggers.workflow_dispatch {
         return Err(AppError::new(
             "repo.actions.dispatch_unsupported",
@@ -520,7 +616,35 @@ pub async fn rerun_run(
     input: serde_json::Value,
 ) -> Result<ActionRunMutationResponse, AppError> {
     let (req, accessible, _run) = run_mutation_target(ctx, input, "rerunRun").await?;
-    ctx.db.requeue_action_run(&req.run_id).await.map_err(db_err)?;
+    // Optional targeting: `job_id` requeues a single job ("Re-run this job"),
+    // `failed_only` requeues just failed/cancelled jobs ("Re-run failed jobs").
+    if let Some(job_id) = req.job_id.as_deref() {
+        let job = ctx
+            .db
+            .find_action_job_by_id(job_id)
+            .await
+            .map_err(db_err)?
+            .ok_or_else(not_found)?;
+        if job.run_id != req.run_id {
+            return Err(not_found());
+        }
+    }
+    ctx.db
+        .requeue_action_run(
+            &req.run_id,
+            req.failed_only.unwrap_or(false),
+            req.job_id.as_deref(),
+        )
+        .await
+        .map_err(db_err)?;
+    // API-04: a requeued run is a new `workflow_run` `requested` delivery.
+    crate::webhook::dispatch::notify_workflow_run(
+        &ctx.db,
+        &req.run_id,
+        "requested",
+        &ctx.env_name,
+    )
+    .await;
     run_mutation_response(ctx, &accessible.row.id, &req.run_id).await
 }
 
@@ -559,6 +683,14 @@ pub async fn cancel_run(
             crate::notify::fanout_workflow_completed(&ctx.db, &run).await;
         }
     }
+    // API-04: cancellation completes the run with conclusion `cancelled`.
+    crate::webhook::dispatch::notify_workflow_run(
+        &ctx.db,
+        &req.run_id,
+        "completed",
+        &ctx.env_name,
+    )
+    .await;
     run_mutation_response(ctx, &accessible.row.id, &req.run_id).await
 }
 

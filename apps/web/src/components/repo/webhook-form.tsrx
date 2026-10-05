@@ -15,6 +15,13 @@ const EVENT_OPTIONS = [
   { id: "pull_request", label: "pull_request" },
   { id: "issues", label: "issues" },
   { id: "issue_comment", label: "issue_comment" },
+  { id: "release", label: "release" },
+  { id: "star", label: "star" },
+  { id: "fork", label: "fork" },
+  { id: "create", label: "create" },
+  { id: "delete", label: "delete" },
+  { id: "workflow_run", label: "workflow_run" },
+  { id: "registry_package", label: "registry_package" },
 ] as const;
 
 type EventId = (typeof EVENT_OPTIONS)[number]["id"];
@@ -56,7 +63,7 @@ function SecretReveal(props: { secret: string; onDone: () => void }) @{
       <Button
         type="button"
         variant="secondary"
-        className="h-11 shrink-0"
+        className="shrink-0"
         onClick={() => void copySecret()}
       >
         {(copyState === "copied" ? "Copied" : "Copy secret") as string}
@@ -98,6 +105,13 @@ export function WebhookForm(props: {
       pull_request: set.has("pull_request"),
       issues: set.has("issues"),
       issue_comment: set.has("issue_comment"),
+      release: set.has("release"),
+      star: set.has("star"),
+      fork: set.has("fork"),
+      create: set.has("create"),
+      delete: set.has("delete"),
+      workflow_run: set.has("workflow_run"),
+      registry_package: set.has("registry_package"),
     };
   });
   const [pending, setPending] = useState(false);

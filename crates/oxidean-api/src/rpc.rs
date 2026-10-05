@@ -3,8 +3,8 @@ use std::sync::{Arc, Mutex, RwLock};
 
 use cookie::Cookie;
 use oxidean_core::{
-    AppError, EchoRequest, EchoResponse, HealthResponse, RpcRequest, RpcResponse, ECHO_MAX_BYTES,
-    RPC_PROTOCOL_VERSION,
+    AppError, EchoRequest, EchoResponse, HealthResponse, ManifestCapabilities, ManifestResponse,
+    RpcRequest, RpcResponse, ECHO_MAX_BYTES, RPC_PROTOCOL_VERSION,
 };
 use oxidean_db::Database;
 use oxidean_git::GitBackend;
@@ -21,6 +21,7 @@ use crate::invites;
 use crate::issue;
 use crate::label;
 use crate::notification;
+use crate::oauth;
 use crate::org;
 use crate::pat;
 use crate::pull;
@@ -115,6 +116,307 @@ pub fn check_version_header(value: Option<&str>) -> Result<(), AppError> {
     }
 }
 
+/// Oldest `ox` CLI version this server guarantees to stay wire-compatible
+/// with (CLI-02). Bump when a breaking change makes older clients unsafe.
+pub const MIN_CLI_VERSION: &str = "0.1.0";
+
+/// Every procedure name the dispatch match below handles — single source of
+/// truth for `system.manifest`'s `procedures` map so clients can feature-gate
+/// without a hand-maintained second list. The `procedures_list_matches_dispatch`
+/// test scans this file's match arms and asserts the two stay in sync.
+pub const PROCEDURES: &[&str] = &[
+    "system.health",
+    "system.echo",
+    "system.db_probe",
+    "system.manifest",
+    "auth.signup",
+    "auth.login",
+    "auth.logout",
+    "auth.logout_all",
+    "auth.me",
+    "auth.provider_config",
+    "auth.bootstrap_status",
+    "auth.bootstrap_setup",
+    "auth.confirm_admin_credentials",
+    "auth.verify",
+    "auth.request_verify",
+    "auth.resend_verify",
+    "auth.request_password_reset",
+    "auth.reset_password",
+    "auth.dev.privileged_ping",
+    "user.get_profile",
+    "user.getPublicProfile",
+    "user.update_profile",
+    "user.lookup",
+    "user.listStarred",
+    "user.listWatched",
+    "user.follow",
+    "user.unfollow",
+    "user.followers.list",
+    "user.following.list",
+    "admin.auth.get_settings",
+    "admin.auth.update_settings",
+    "admin.lfs.getSettings",
+    "admin.lfs.updateSettings",
+    "admin.lfs.getUsage",
+    "admin.git.getSettings",
+    "admin.git.updateSettings",
+    "admin.mcp.getSettings",
+    "admin.mcp.updateSettings",
+    "admin.templates.list",
+    "admin.templates.update",
+    "admin.templates.setEnabled",
+    "admin.templates.delete",
+    "admin.instance.factory_reset",
+    "admin.repos.gc",
+    "admin.users.list",
+    "admin.users.updateRole",
+    "admin.users.revokeSessions",
+    "admin.users.ban",
+    "admin.users.unban",
+    "admin.users.delete",
+    "admin.users.getAccess",
+    "admin.users.listSessions",
+    "admin.users.getActivity",
+    "admin.invites.create",
+    "admin.invites.createLink",
+    "admin.invites.list",
+    "admin.invites.revoke",
+    "org.create",
+    "org.get",
+    "org.listMine",
+    "org.updateSettings",
+    "org.members.list",
+    "org.members.add",
+    "org.members.updateRole",
+    "org.members.remove",
+    "org.invites.create",
+    "org.invites.list",
+    "org.invites.revoke",
+    "org.invites.accept",
+    "org.invites.createLink",
+    "invites.accept",
+    "invites.get",
+    "repo.listMine",
+    "repo.listByOwner",
+    "repo.createDefaults",
+    "repo.create",
+    "repo.fork",
+    "repo.star",
+    "repo.unstar",
+    "repo.watch",
+    "repo.unwatch",
+    "repo.stargazers.list",
+    "repo.watchers.list",
+    "repo.forks.list",
+    "repo.forkStatus",
+    "repo.syncFork",
+    "repo.updateMetadata",
+    "repo.topicsSuggest",
+    "repo.explore",
+    "repo.get",
+    "repo.tree",
+    "repo.blob",
+    "repo.refs",
+    "repo.commits",
+    "repo.pathLastCommits",
+    "repo.commitCount",
+    "repo.contributors.list",
+    "repo.languages",
+    "repo.activity.list",
+    "repo.insights.contributors",
+    "repo.insights.commitActivity",
+    "repo.insights.forkNetwork",
+    "repo.commit",
+    "repo.compare",
+    "repo.blame",
+    "repo.search",
+    "search.global",
+    "repo.branchCreate",
+    "repo.branchRename",
+    "repo.branchDelete",
+    "repo.file.create",
+    "repo.file.update",
+    "repo.file.delete",
+    "repo.file.rename",
+    "repo.file.upload",
+    "repo.file.mkdir",
+    "repo.file.commitPolicy",
+    "repo.updateVisibility",
+    "repo.setArchived",
+    "repo.lfs.setEnabled",
+    "repo.lfs.getEnabled",
+    "repo.mirror.get",
+    "repo.mirror.upsert",
+    "repo.mirror.delete",
+    "repo.mirror.syncNow",
+    "repo.mirror.generateSshKey",
+    "repo.mirror.rotateWebhookSecret",
+    "repo.mirror.fetchHostKey",
+    "repo.templates.list",
+    "repo.templates.getEnabled",
+    "repo.templates.setEnabled",
+    "repo.lfs.getStatus",
+    "repo.lfs.getUsage",
+    "repo.quota.get",
+    "repo.quota.set",
+    "repo.lfs.listObjects",
+    "repo.lfs.download",
+    "repo.softDelete",
+    "repo.rename",
+    "repo.transfer",
+    "repo.collaborators.list",
+    "repo.collaborators.add",
+    "repo.collaborators.update",
+    "repo.collaborators.remove",
+    "repo.invites.create",
+    "repo.invites.createLink",
+    "repo.invites.list",
+    "repo.invites.revoke",
+    "repo.branchProtection.list",
+    "repo.branchProtection.create",
+    "repo.branchProtection.update",
+    "repo.branchProtection.delete",
+    "repo.tagProtection.list",
+    "repo.tagProtection.create",
+    "repo.tagProtection.update",
+    "repo.tagProtection.delete",
+    "repo.deployKey.list",
+    "repo.deployKey.create",
+    "repo.deployKey.delete",
+    "repo.commitStatus.create",
+    "repo.commitStatus.list",
+    "repo.actions.listRuns",
+    "repo.actions.getRun",
+    "repo.actions.getJobLog",
+    "repo.actions.listWorkflows",
+    "repo.actions.dispatchWorkflow",
+    "repo.actions.rerunRun",
+    "repo.actions.cancelRun",
+    "repo.actions.secrets.list",
+    "repo.actions.secrets.put",
+    "repo.actions.secrets.delete",
+    "repo.actions.getEnabled",
+    "repo.actions.setEnabled",
+    "repo.issues.getEnabled",
+    "repo.issues.setEnabled",
+    "repo.pulls.getEnabled",
+    "repo.pulls.setEnabled",
+    "admin.actions.createRegistrationToken",
+    "admin.actions.listRunners",
+    "issue.create",
+    "issue.get",
+    "issue.list",
+    "issue.update",
+    "issue.close",
+    "issue.reopen",
+    "issue.history",
+    "issue.delete",
+    "issue.comments.list",
+    "issue.comments.create",
+    "notification.list",
+    "notification.unreadCount",
+    "notification.markRead",
+    "notification.markAllRead",
+    "issue.comments.update",
+    "issue.comments.delete",
+    "issue.comments.history",
+    "issue.labels.set",
+    "issue.assignees.set",
+    "issue.assigneeCandidates",
+    "issue.reactions.toggle",
+    "issue.links.list",
+    "issue.links.add",
+    "issue.links.remove",
+    "pull.create",
+    "pull.get",
+    "pull.list",
+    "pull.update",
+    "pull.close",
+    "pull.reopen",
+    "pull.files",
+    "pull.commits",
+    "pull.comments.list",
+    "pull.comments.create",
+    "pull.comments.resolve",
+    "pull.reviews.list",
+    "pull.reviews.submit",
+    "pull.reviews.dismiss",
+    "pull.reviewRequests.list",
+    "pull.reviewRequests.add",
+    "pull.reviewRequests.remove",
+    "pull.merge",
+    "pull.branchStatus",
+    "pull.updateBranch",
+    "repo.mergeSettings.get",
+    "repo.mergeSettings.update",
+    "release.create",
+    "release.list",
+    "release.get",
+    "release.update",
+    "release.delete",
+    "release.deleteAsset",
+    "webhook.create",
+    "webhook.list",
+    "webhook.get",
+    "webhook.update",
+    "webhook.delete",
+    "webhook.deliveries.list",
+    "webhook.deliveries.get",
+    "webhook.ping",
+    "webhook.redeliver",
+    "label.listForRepo",
+    "label.listForOrg",
+    "label.create",
+    "label.update",
+    "label.delete",
+    "packages.list",
+    "packages.deleteVersion",
+    "packages.adminUsage",
+    "packages.adminSetQuota",
+    "pat.createClassic",
+    "pat.createFineGrained",
+    "pat.list",
+    "pat.revoke",
+    "oauthApp.create",
+    "oauthApp.list",
+    "oauthApp.update",
+    "oauthApp.delete",
+    "oauthApp.regenerateSecret",
+    "oauthApp.listGrants",
+    "oauthApp.revoke",
+    "oauthApp.authorizeInfo",
+    "oauthApp.authorize",
+    "sshKey.add",
+    "sshKey.list",
+    "sshKey.revoke",
+    "gpgKey.add",
+    "gpgKey.list",
+    "gpgKey.revoke",
+    "email.list",
+    "email.add",
+    "email.remove",
+    "email.setPrimary",
+    "email.resendVerify",
+];
+
+/// `system.manifest` payload — the versioned capability contract (CLI-02).
+pub fn manifest_response() -> ManifestResponse {
+    ManifestResponse {
+        protocol_version: RPC_PROTOCOL_VERSION,
+        server_version: env!("CARGO_PKG_VERSION").into(),
+        procedures: PROCEDURES.iter().map(|p| ((*p).to_string(), true)).collect(),
+        capabilities: ManifestCapabilities {
+            // No MCP endpoint (AGT-01), typed REST surface, or
+            // instance-as-OAuth-provider (API-03) yet.
+            mcp: false,
+            rest: false,
+            oauth: false,
+        },
+        min_cli_version: MIN_CLI_VERSION.into(),
+    }
+}
+
 pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
     // D-11 / T-06-06: empty-instance lock — bootstrap_* + health/db_probe diagnostics
     // until setup completes. confirm_admin_credentials stays off the list (ENV path
@@ -128,6 +430,7 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
                     | "auth.bootstrap_setup"
                     | "system.health"
                     | "system.db_probe"
+                    | "system.manifest"
             );
             if !allowed {
                 return RpcResponse::err(AppError::new(
@@ -186,6 +489,7 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
                 RpcResponse::err(AppError::new("db.probe_failed", "database probe failed"))
             }
         },
+        "system.manifest" => RpcResponse::ok(manifest_response()),
         "auth.signup" => match local::signup(ctx, req.input).await {
             Ok(user) => RpcResponse::ok(user),
             Err(e) => RpcResponse::err(e),
@@ -319,6 +623,24 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Ok(s) => RpcResponse::ok(s),
             Err(e) => RpcResponse::err(e),
         },
+        "admin.git.getSettings" => match auth_admin::git_get_settings(ctx).await {
+            Ok(s) => RpcResponse::ok(s),
+            Err(e) => RpcResponse::err(e),
+        },
+        "admin.git.updateSettings" => match auth_admin::git_update_settings(ctx, req.input).await {
+            Ok(s) => RpcResponse::ok(s),
+            Err(e) => RpcResponse::err(e),
+        },
+        "admin.mcp.getSettings" => match auth_admin::mcp_get_settings(ctx).await {
+            Ok(s) => RpcResponse::ok(s),
+            Err(e) => RpcResponse::err(e),
+        },
+        "admin.mcp.updateSettings" => {
+            match auth_admin::mcp_update_settings(ctx, req.input).await {
+                Ok(s) => RpcResponse::ok(s),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
         "admin.templates.list" => match crate::templates::handlers::admin_list(ctx).await {
             Ok(s) => RpcResponse::ok(s),
             Err(e) => RpcResponse::err(e),
@@ -509,6 +831,14 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },
+        "repo.forkStatus" => match repo::fork_status(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "repo.syncFork" => match repo::sync_fork(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
         "repo.updateMetadata" => match repo::update_metadata(ctx, req.input).await {
             Ok(repo) => RpcResponse::ok(repo),
             Err(e) => RpcResponse::err(e),
@@ -561,6 +891,24 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },
+        "repo.insights.contributors" => {
+            match repo::insights_contributors(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
+        "repo.insights.commitActivity" => {
+            match repo::insights_commit_activity(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
+        "repo.insights.forkNetwork" => {
+            match repo::insights_fork_network(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
         "repo.commit" => match repo::commit(ctx, req.input).await {
             Ok(commit) => RpcResponse::ok(commit),
             Err(e) => RpcResponse::err(e),
@@ -593,7 +941,39 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },
+        "repo.file.create" => match repo::file_create(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "repo.file.update" => match repo::file_update(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "repo.file.delete" => match repo::file_delete(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "repo.file.rename" => match repo::file_rename(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "repo.file.upload" => match repo::file_upload(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "repo.file.mkdir" => match repo::file_mkdir(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "repo.file.commitPolicy" => match repo::file_commit_policy(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
         "repo.updateVisibility" => match repo::update_visibility(ctx, req.input).await {
+            Ok(repo) => RpcResponse::ok(repo),
+            Err(e) => RpcResponse::err(e),
+        },
+        "repo.setArchived" => match repo::set_archived(ctx, req.input).await {
             Ok(repo) => RpcResponse::ok(repo),
             Err(e) => RpcResponse::err(e),
         },
@@ -637,6 +1017,10 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },
+        "repo.templates.list" => match repo::file_templates(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
         "repo.templates.getEnabled" => {
             match crate::templates::handlers::repo_get_enabled(ctx, req.input).await {
                 Ok(v) => RpcResponse::ok(v),
@@ -654,6 +1038,14 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Err(e) => RpcResponse::err(e),
         },
         "repo.lfs.getUsage" => match repo::lfs_get_usage(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "repo.quota.get" => match repo::quota_get(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "repo.quota.set" => match repo::quota_set(ctx, req.input).await {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },
@@ -731,6 +1123,40 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
                 Err(e) => RpcResponse::err(e),
             }
         }
+        "repo.tagProtection.list" => match repo::tag_protection_list(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "repo.tagProtection.create" => {
+            match repo::tag_protection_create(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
+        "repo.tagProtection.update" => {
+            match repo::tag_protection_update(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
+        "repo.tagProtection.delete" => {
+            match repo::tag_protection_delete(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
+        "repo.deployKey.list" => match crate::deploy_keys::list(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "repo.deployKey.create" => match crate::deploy_keys::create(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "repo.deployKey.delete" => match crate::deploy_keys::delete(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
         "repo.commitStatus.create" => match repo::commit_status_create(ctx, req.input).await {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
@@ -792,6 +1218,22 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Err(e) => RpcResponse::err(e),
         },
         "repo.actions.setEnabled" => match crate::actions::rpc::set_enabled(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "repo.issues.getEnabled" => match repo::issues_get_enabled(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "repo.issues.setEnabled" => match repo::issues_set_enabled(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "repo.pulls.getEnabled" => match repo::pulls_get_enabled(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "repo.pulls.setEnabled" => match repo::pulls_set_enabled(ctx, req.input).await {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },
@@ -975,6 +1417,14 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },
+        "pull.branchStatus" => match pull::branch_status(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "pull.updateBranch" => match pull::update_branch(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
         "repo.mergeSettings.get" => match pull::merge_settings_get(ctx, req.input).await {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
@@ -1095,6 +1545,42 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },
+        "oauthApp.create" => match oauth::create(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "oauthApp.list" => match oauth::list(ctx).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "oauthApp.update" => match oauth::update(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "oauthApp.delete" => match oauth::delete_app(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "oauthApp.regenerateSecret" => match oauth::regenerate_secret(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "oauthApp.listGrants" => match oauth::list_grants(ctx).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "oauthApp.revoke" => match oauth::revoke_grant(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "oauthApp.authorizeInfo" => match oauth::authorize_info(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "oauthApp.authorize" => match oauth::authorize_rpc(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
         "sshKey.add" => match ssh_keys::add(ctx, req.input).await {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
@@ -1143,5 +1629,67 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             "rpc.unknown_procedure",
             format!("unknown procedure: {other}"),
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `PROCEDURES` is the manifest's procedure map — it must exactly mirror
+    /// the `match req.procedure.as_str()` arms. Instead of trusting a hand
+    /// maintained list, scan this source file for `"name" =>` arm literals.
+    #[test]
+    fn procedures_list_matches_dispatch() {
+        let src = include_str!("rpc.rs");
+        let mut arms: Vec<&str> = Vec::new();
+        for line in src.lines() {
+            let line = line.trim_start();
+            if !line.starts_with('"') {
+                continue;
+            }
+            if let Some(end) = line[1..].find('"') {
+                let name = &line[1..1 + end];
+                let rest = line[2 + end..].trim_start();
+                if rest.starts_with("=>") {
+                    arms.push(name);
+                }
+            }
+        }
+        let listed: std::collections::BTreeSet<&str> = PROCEDURES.iter().copied().collect();
+        for arm in &arms {
+            assert!(
+                listed.contains(arm),
+                "dispatch arm `{arm}` missing from PROCEDURES — add it so the manifest stays accurate"
+            );
+        }
+        for name in &listed {
+            assert!(
+                arms.contains(name),
+                "PROCEDURES entry `{name}` has no dispatch arm — remove it"
+            );
+        }
+    }
+
+    #[test]
+    fn manifest_shape() {
+        let m = manifest_response();
+        assert_eq!(m.protocol_version, RPC_PROTOCOL_VERSION);
+        assert_eq!(m.server_version, env!("CARGO_PKG_VERSION"));
+        assert_eq!(m.min_cli_version, MIN_CLI_VERSION);
+        assert_eq!(m.procedures.len(), PROCEDURES.len());
+        assert_eq!(m.procedures.get("repo.listMine"), Some(&true));
+        assert_eq!(m.procedures.get("system.manifest"), Some(&true));
+        assert!(!m.capabilities.mcp && !m.capabilities.rest && !m.capabilities.oauth);
+        let v = serde_json::to_value(&m).unwrap();
+        for key in [
+            "protocol_version",
+            "server_version",
+            "procedures",
+            "capabilities",
+            "min_cli_version",
+        ] {
+            assert!(v.get(key).is_some(), "manifest missing `{key}`");
+        }
     }
 }

@@ -184,6 +184,15 @@ async fn npm_registry_packument_get() {
     let v: serde_json::Value =
         serde_json::from_slice(&res.into_body().collect().await.unwrap().to_bytes()).unwrap();
     assert!(v["versions"]["1.0.0"].is_object());
+    let dist = &v["versions"]["1.0.0"]["dist"];
+    assert_eq!(
+        dist["shasum"].as_str().unwrap(),
+        "9ef2570c89e65b9fe47687b0b49e122e59354bef"
+    );
+    assert_eq!(
+        dist["integrity"].as_str().unwrap(),
+        "sha512-31GJ6SyG+dFBGDyQB1x8EHrdSW/FYRyb4mHdZIaXTme9WooJgWCCmKoHe70PgTrvis7oBfnw5WLWBp8KVj59oA=="
+    );
 }
 
 #[tokio::test]

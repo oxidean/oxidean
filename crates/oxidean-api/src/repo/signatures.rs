@@ -61,6 +61,14 @@ pub async fn keyring_for_resolved(
     out
 }
 
+/// Resolve emails then build a verify keyring — used by push-protection hooks
+/// that do not already have an author map on hand.
+pub async fn keyring_for_emails(db: &Database, emails: &[String]) -> VerifyKeyring {
+    let resolved =
+        author_resolve::resolve_authors_for_emails(db, emails.iter().map(String::as_str)).await;
+    keyring_for_resolved(db, emails, &resolved).await
+}
+
 /// Backward-compatible helper used by older call sites.
 #[allow(dead_code)]
 pub async fn allowed_signers_for_emails(

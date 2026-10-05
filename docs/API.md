@@ -46,10 +46,17 @@ Missing or mismatched value → error `rpc.version_mismatch` (HTTP 400).
 | `GET` | `/health` | Liveness: `{"ok":true}` | No |
 | `POST` | `/api/rpc` | JSON RPC dispatch | Cookie or PAT Bearer when procedure needs auth |
 | `GET` | `/api/rpc/ws` | WebSocket upgrade; same procedures as HTTP | Cookie or PAT Bearer when procedure needs auth |
+| `POST` | `/api/mcp` | MCP endpoint (JSON-RPC 2.0, streamable-HTTP) — see [MCP.md](MCP.md) | Cookie or `Bearer` PAT; anonymous for public data |
+| `GET` | `/api/mcp` | SSE stream (unsupported → `405`) | — |
+| `GET` | `/.well-known/webmcp` | WebMCP discovery document (served by the web app, not this router) — see [WEBMCP.md](WEBMCP.md) | No |
+| `GET` | `/.well-known/mcp` | MCP server metadata for the instance endpoint (served by the web app) | No |
 | `GET` | `/api/auth/workos/start` | Start WorkOS AuthKit (optional `?return_to=`) | No (redirect) |
 | `GET` | `/api/auth/workos/callback` | WorkOS code exchange; sets session cookie | No (redirect) |
 | `GET` | `/api/auth/oidc/start` | Start OIDC + PKCE (optional `?return_to=`) | No (redirect) |
 | `GET` | `/api/auth/oidc/callback` | OIDC code exchange; sets session cookie | No (redirect) |
+| `GET` | `/oauth/authorize` | OAuth2 authorization endpoint → consent page / login | Session cookie (or login redirect) |
+| `POST` | `/oauth/token` | OAuth2 token endpoint (`grant_type=authorization_code`) | Client secret |
+| `GET` | `/oauth/userinfo` | OAuth2 identity surface | `oxidean_oat_` Bearer |
 | `POST` | `/api/user/avatar` | Multipart avatar upload (field `avatar`) | Yes (`oxidean_session`) |
 | `DELETE` | `/api/user/avatar` | Remove profile picture | Yes (`oxidean_session`) |
 | `GET` | `/uploads/avatars/{file}` | Public WebP avatar bytes (`{user_id}.webp`) | No |
@@ -73,6 +80,9 @@ Missing or mismatched value → error `rpc.version_mismatch` (HTTP 400).
 | `POST` | `/api/actions/update_log` | Append job log chunk | Bearer runner token |
 | `POST` | `/api/repos/{owner}/{repo}/mirror/hook` | Inbound push webhook (wake two-way mirror) | Shared secret (HMAC / token headers) |
 | `*` | `/api/v1/**` | REST facade over the core domain (API-01) — see [REST API](#rest-api-apiv1) | Cookie or PAT Bearer |
+| `GET` | `/api/repos/{owner}/{repo}/activity.atom` | Atom 1.0 feed of repo pushes / branch events (newest 30) | No (Read+ when private) |
+| `GET` | `/api/repos/{owner}/{repo}/releases.atom` | Atom 1.0 feed of releases (drafts only for Write+) | No (Read+ when private) |
+| `GET` | `/api/users/{username}/activity.atom` | Atom 1.0 feed of a user's public repo activity | No |
 
 SSO start routes redirect to the IdP when configured. If WorkOS/OIDC ENV is missing, start returns HTTP 503 with `auth.not_configured`. Failures typically redirect to `/login?error=sso`.
 
@@ -83,6 +93,7 @@ SSO start routes redirect to the IdP when configured. If WorkOS/OIDC ENV is miss
 | `system.health` | Status, API crate version, DB ping string | No |
 | `system.echo` | Echo `message` (max 8192 bytes) | No |
 | `system.db_probe` | Dialect probe / `instances` counter | No |
+| `system.manifest` | Compatibility contract: `protocol_version`, `server_version`, `procedures` map (every dispatch procedure → `true`), `capabilities` (`mcp`/`rest`/`oauth`), `min_cli_version` — clients feature-gate on this (CLI-02) | No |
 | `auth.signup` | Local signup; sets session cookie. Rejected with `auth.setup_required` while empty-instance setup is needed; rejected when instance `allow_signup` is false | No (local mode) |
 | `auth.login` | Local login; sets session cookie. ENV-seeded admins with `must_change_credentials` are redirected to `/setup/credentials` in the SPA | No (local mode) |
 | `auth.logout` | Revoke current session; clear cookie | Session |
@@ -119,11 +130,18 @@ SSO start routes redirect to the IdP when configured. If WorkOS/OIDC ENV is miss
 | `repo.explore` | Public repos sorted by `star_count` desc then `updated_at` desc; optional `q` substring | Anonymous OK |
 | `search.global` | Sitewide grouped search — `repositories`, `users`, `organizations`, `issues`, `pulls` (SQL, ACL-filtered to readable repos); `commits`/`code` via a bounded scan of the newest ~10 readable repos (`truncated` marks partial coverage). `types` limits which groups get hits; DB groups always report `total`. Users group requires a verified session. Indexed cross-repo code search is SRCH-01 | Anonymous OK |
 | `repo.fork` | Fork public readable source (bare copy); sets `forked_from_repo_id` + `fork_network_id`; one active fork per (owner, network) | Session + Read on public source |
+| `repo.forkStatus` | Fork-vs-upstream divergence for a branch (default = repo default branch): `ahead_count` / `behind_count` / `status` (`up_to_date` \| `behind` \| `diverged`) | Session/anon + Read on fork and upstream |
+| `repo.syncFork` | Bring the fork branch up to date with the same-named upstream branch — fast-forward, or a merge commit when diverged. Errors: `repo.not_fork`, `repo.upstream_branch_not_found`, `repo.sync_diverged` (merge commits disabled), `repo.sync_conflict`, `repo.branch_protection` | Session + Write on the fork |
+| `repo.insights.contributors` / `repo.insights.commitActivity` / `repo.insights.forkNetwork` | Repo insights — top committers, weekly commit buckets, fork-network tree; bounded git scans report `scanned_commits` + `truncated` | Session + Read |
 | `repo.rename` | Rename repo; moves bare dir; inserts redirect | Repo Admin |
 | `repo.transfer` | Transfer ownership (type-confirm `confirmName`); moves bare dir; redirect | Repo Admin |
 | `repo.softDelete` | Soft-delete with type-confirm | Repo Admin |
 | `repo.collaborators.list` / `add` / `update` / `remove` | Per-repo collaborator grants | Repo Admin |
+| `repo.deployKey.list` / `create` / `delete` | Per-repo deploy keys for Git-over-SSH (read or read/write scope) | Repo Admin |
 | `repo.invites.create` / `createLink` / `list` / `revoke` | Bulk collaborator email invites (`{ emails, permission }`) and shareable links (optional `expires_at`, `max_uses`) | Repo Admin |
+| `repo.branchProtection.list` / `create` / `update` / `delete` | Classic branch protection rules (glob pattern on `refs/heads/*`); enforced by the bare-repo `update` hook on HTTPS + SSH pushes. `require_signed_commits` denies pushes introducing commits without a forge-verified SSH/GPG signature | Repo Admin |
+| `repo.tagProtection.list` / `create` / `update` / `delete` | Protected tag rulesets (glob pattern on `refs/tags/*`); `allow_create`/`allow_update`/`allow_delete` carve out actions for non-admins, `enforce_admins` removes the admin bypass | Repo Admin |
+| `repo.templates.list` | Issue/PR file templates read from the default-branch tree (`.oxidean/`/`.github/`/root/`docs` `ISSUE_TEMPLATE` + `PULL_REQUEST_TEMPLATE` locations; GitHub-style YAML frontmatter parsed) → `{ issues, pulls }` | Read+ (anonymous OK on public) |
 | `release.list` / `get` / `create` / `update` / `delete` / `deleteAsset` | Tag-based releases + notes; assets via HTTP | Session (+ capability) |
 | `admin.users.list` / `updateRole` / `ban` / `unban` / `delete` / `revokeSessions` / `getAccess` | User administration (type-confirm delete; `delete_orgs` opt-in for shared orgs) | Sys-admin |
 | `admin.users.listSessions` | Per-user sessions with client metadata (`ip_address`, `user_agent`, `remember_me`, last-seen/expiry) | Sys-admin |
@@ -132,6 +150,7 @@ SSO start routes redirect to the IdP when configured. If WorkOS/OIDC ENV is miss
 | `admin.auth.get_settings` | Auth/email settings including `allow_signup` (no secrets) | Admin session |
 | `admin.auth.update_settings` | Update provider/email/`allow_signup`; rebuild email sender | Admin session |
 | `admin.instance.factory_reset` | Wipe users, orgs, repos + issue domain (DB); optional disk wipe via `scope` | Sys-admin |
+| `admin.mcp.getSettings` / `updateSettings` | Instance MCP endpoint gate — `enabled` env-default vs stored override; `clear_overrides` reverts | Sys-admin |
 | `issue.create` / `get` / `list` / `update` / `close` / `reopen` / `history` / `delete` | Per-repo issues (`#N`); create/comment/react = verified + Read; edit/close/reopen = author or Write+ | Session (+ capability) |
 | `issue.comments.*` | Comment CRUD + history; author or Write+ moderate-delete | Session (+ capability) |
 | `issue.labels.set` / `assignees.set` / `assigneeCandidates` | Assign labels / assignees (Write+; assignees must have Read+) | Session (+ capability) |
@@ -141,12 +160,16 @@ SSO start routes redirect to the IdP when configured. If WorkOS/OIDC ENV is miss
 | `notification.unreadCount` | Unread badge count for session user | Session |
 | `notification.markRead` | Mark own notification ids read (foreign ids no-op) | Session |
 | `notification.markAllRead` | Mark all own unread notifications read | Session |
+| `repo.file.create` / `update` / `delete` / `rename` / `upload` / `mkdir` | Browser file edits committed via the web-flow signing key; `new_branch` + `open_pr` for the protected-branch → PR flow | Session + Write+ |
+| `repo.file.commitPolicy` | Whether direct commits to `branch` are allowed or the PR flow is required | Session + Write+ |
 | `pull.create` / `get` / `list` / `update` / `close` / `reopen` | Pull requests; shared `#N` with issues; create = Read+ on base + Write+ on head (fork heads OK); update/close/reopen = author or Write+ | Session (+ capability) |
 | `pull.files` / `pull.commits` | Diff + commit list for a PR | Session (+ Read+) |
 | `pull.comments.list` / `create` / `resolve` | General + line comments; create = verified + Read, resolve = Write+ | Session (+ capability) |
 | `pull.reviews.list` / `submit` / `dismiss` | Approve / request changes / comment; dismiss | Session (+ Write+) |
 | `pull.reviewRequests.list` / `add` / `remove` | Optional requested reviewers (UX only) | Session (+ capability) |
 | `pull.merge` | Merge / squash / rebase; optional delete head; closing keywords on default branch | Session (+ Write+) |
+| `pull.branchStatus` | Live head-vs-base freshness for a PR: `status` (`up_to_date` \| `behind`), `ahead_count` / `behind_count`, `base_sha` / `head_sha`, `can_update` | Session/anon + Read on base repo |
+| `pull.updateBranch` | GitHub "Update branch" parity — merge the live base tip into the head branch (same-repo or fork head). Errors: `pull.invalid_state`, `pull.head_unavailable`, `pull.ref_not_found`, `pull.update_conflict`, `repo.branch_protection` | Session + Write on head **or** base repo |
 | `repo.mergeSettings.get` / `update` | Per-repo allow merge/squash/rebase (Admin for update) | Session (+ Admin for update) |
 | `label.listForRepo` / `listForOrg` / `create` / `update` / `delete` | Org/repo label definitions (Admin for defs) | Session (+ capability) |
 | `pat.createClassic` | Mint classic PAT (`oxidean_pat_…`); one-time plaintext in response. Classic scopes include optional `package:read` / `package:write` (repo scope does **not** imply packages) | Session + verified email |
@@ -164,9 +187,11 @@ SSO start routes redirect to the IdP when configured. If WorkOS/OIDC ENV is miss
 | `repo.actions.rerunRun` / `cancelRun` | Requeue or cancel a run; cancel on a finished run → `repo.actions.run_finished` | Session + Write+ |
 | `repo.actions.secrets.list` / `put` / `delete` | Repo Actions secrets (names only on list) | Session + Admin |
 | `repo.actions.getEnabled` / `setEnabled` | Per-repo Actions enable toggle | Session + Read+ / Admin |
+| `repo.issues.getEnabled` / `setEnabled` | Per-repo Issues unit toggle (COL-13) | Session + Read+ / Admin |
+| `repo.pulls.getEnabled` / `setEnabled` | Per-repo Pull-requests unit toggle (COL-13) | Session + Read+ / Admin |
 | `repo.mirror.get` / `upsert` / `delete` / `syncNow` | Two-way remote mirror config + enqueue sync | Session + Admin |
 | `repo.mirror.generateSshKey` / `rotateWebhookSecret` / `fetchHostKey` | Deploy key, inbound webhook secret, ssh-keyscan | Session + Admin |
-| `webhook.create` / `list` / `get` / `update` / `delete` / `deliveries.list` / `deliveries.get` / `ping` / `redeliver` | Outbound repo webhooks; events: `push`, `pull_request`, `issues`, `issue_comment` (incl. PR conversation comments), `ping`, `*` | Session + Admin |
+| `webhook.create` / `list` / `get` / `update` / `delete` / `deliveries.list` / `deliveries.get` / `ping` / `redeliver` | Outbound repo webhooks; events: `push`, `pull_request`, `issues`, `issue_comment` (incl. PR conversation comments), `release` (`published`/`created`/`edited`/`unpublished`/`deleted`), `star` (`created`/`deleted`), `fork`, `create`/`delete` (branch + tag refs via RPC or receive-pack; no action — the event is the action), `workflow_run` (`requested`/`in_progress`/`completed` with GitHub-style `conclusion`), `registry_package` (`published`/`updated`; repo-linked packages only), `ping`, `*` | Session + Admin |
 | `repo.commitStatus.create` / `list` | Commit statuses (Phase 13 + Actions publisher) | Session + Write+ / Read+ |
 | `admin.actions.createRegistrationToken` | Mint one-time runner registration token | Sys-admin |
 | `admin.actions.listRunners` | List registered runners (no secrets) | Sys-admin |
@@ -177,7 +202,7 @@ Unknown procedure → `rpc.unknown_procedure` (HTTP 404).
 
 API-01 adds a resource-oriented REST surface alongside the RPC procedures. Every route translates path/query/body into the matching RPC procedure's input and dispatches through the same `rpc::dispatch` path — ACLs, PAT scope gates (`authorize_rpc`), the bootstrap lock, and side effects (notifications, webhook events) are identical for both surfaces. The REST API is a companion, not a replacement: `POST /api/rpc` remains the primary client contract and covers procedures REST does not expose.
 
-- **OpenAPI spec**: [`docs/openapi.yaml`](openapi.yaml) (OpenAPI 3.0, hand-maintained — keep it in sync when adding routes).
+- **OpenAPI spec**: [`docs/openapi.yaml`](openapi.yaml) (OpenAPI 3.0, generated — regenerate with `make openapi-gen`; CI fails if it drifts). The same document is served at runtime from `GET /api/v1/openapi.json`, and a bundled Swagger UI is available at `/api/v1/docs` (no CDN dependency). Both are generated from the route table in `crates/oxidean-api/src/rest/` — adding a route definition updates the router and the spec together.
 - **Base path**: `/api/v1` (e.g. `GET /api/v1/repos/octo/hello`).
 - **Auth**: `Cookie: oxidean_session=…` or `Authorization: Bearer <pat>`; the cookie wins when both are sent (same as `/api/rpc`). Anonymous requests can reach public read endpoints. Session-only procedures (org creation, `admin.*`, credential management) return `403 auth.pat_scope` for PATs — see [PAT Bearer authentication](#pat-bearer-authentication).
 - **No version header**: unlike `/api/rpc`, REST requests do not send `Oxidean-RPC-Version`.
@@ -217,6 +242,9 @@ All paths are under `/api/v1`. The procedure column names the RPC equivalent in 
 | `GET` | `/repos/{owner}/{repo}/tags` | `repo.refs` | `refs/tags/*`, short names |
 | `GET` | `/repos/{owner}/{repo}/commits` | `repo.commits` | `sha` (alias `ref`), `skip`, `limit` |
 | `GET` | `/repos/{owner}/{repo}/commits/{sha}` | `repo.commit` | |
+| `GET`/`POST` | `/repos/{owner}/{repo}/statuses/{sha}` | `repo.commitStatus.list` / `repo.commitStatus.create` | GitHub-shaped fields — see [GitHub compatibility](#github-compatibility) |
+| `GET` | `/repos/{owner}/{repo}/commits/{sha}/statuses` | `repo.commitStatus.list` | Alias of the list above |
+| `GET` | `/repos/{owner}/{repo}/commits/{sha}/status` | `repo.commitStatus.list` | Combined rollup: `state`, `statuses`, `total_count` |
 | `GET` | `/repos/{owner}/{repo}/compare/{basehead}` | `repo.compare` | `base...head` (`..` accepted) |
 | `GET` | `/repos/{owner}/{repo}/tree` | `repo.tree` | Root listing; `?ref=` |
 | `GET` | `/repos/{owner}/{repo}/tree/{path}` | `repo.tree` | `?ref=` |
@@ -243,6 +271,20 @@ All paths are under `/api/v1`. The procedure column names the RPC equivalent in 
 | `GET` | `/admin/lfs/usage` | `admin.lfs.getUsage` | Sys-admin session only |
 
 Not yet covered by v1 (use `/api/rpc`): notifications, SSH/GPG keys, PAT management, email addresses, packages, Actions runs, branch protection, collaborators, invitations, mirrors, LFS objects, issue delete/labels/assignees/reactions/links, pull review dismissal and review requests, `org.updateSettings` and org invites, `repo.rename`/`transfer`/`fork`, `repo.watch`/`star`/`unstar`, most `admin.*` procedures. Release asset upload/download, raw files, and archives keep their dedicated binary routes (`/api/repos/{owner}/{repo}/releases/{release_id}/assets`, `/api/releases/assets/{asset_id}`, `/api/repos/{owner}/{repo}/raw/{ref}/{path}`, `…/archive/{file}`).
+
+### Per-repo unit toggles (COL-13)
+
+Repository admins can turn the **Issues** and **Pull requests** units off per
+repository (`Settings → Features` in the web UI). `repo.get` reports the flags
+additively as `issues_enabled` / `pulls_enabled` (`true` by default; list
+endpoints may omit them and clients should treat missing as enabled). While a
+unit is off, every RPC under its surface — `issue.*` including comments,
+labels, assignees, reactions, and links, or `pull.*` including files, commits,
+comments, reviews, review requests, and merge — fails with the stable error
+code `repo.issues.disabled` / `repo.pulls.disabled`. Disabling never deletes
+data; re-enabling restores the unit immediately. Shared repo surfaces
+(`repo.*`, `label.*`, `repo.mergeSettings.*`) and git clone/fetch/push are
+unaffected.
 
 ## Request/response formats
 
@@ -460,8 +502,84 @@ Accepted key types: `ssh-ed25519` and RSA ≥2048. Response is a list item with 
 
 Add requires verified email (`auth.email_unverified` otherwise). Empty title → `sshKey.title_required`. Invalid/unsupported key → `sshKey.invalid_key`. Duplicate fingerprint → `sshKey.fingerprint_taken`. More than **25** keys → `sshKey.limit_exceeded`. Unknown or non-owned revoke id → `sshKey.not_found`.
 
+### Deploy keys (`repo.deployKey.*`)
+
+Per-repo OpenSSH **public** keys for Git-over-SSH, distinct from account `sshKey.*` keys (GIT-23). A deploy key resolves a fingerprint directly to **one repository** plus a scope — never to an account identity. They are **transport-only credentials**: a deploy key authorizes `git-upload-pack` (and `git-receive-pack` when `can_write`) over SSH and nothing else — no session, no RPC, no web/API access, no capability on any other repository.
+
+`repo.deployKey.create` input:
+
+```json
+{
+  "owner": "ada",
+  "name": "hello",
+  "title": "ci-runner",
+  "public_key": "ssh-ed25519 AAAA… comment",
+  "can_write": false
+}
+```
+
+`owner` / `name` select the repository (same lookup as `repo.get`); `can_write` defaults to `false` (read-only). Accepted key types match `sshKey.add` (`ssh-ed25519`, RSA ≥2048). Response is a `DeployKeyPublic` item: `id`, `repo_id`, `title`, `fingerprint` (SHA256), `key_type`, `can_write`, `public_key`, `created_by`, `created_at`, optional `last_used_at` / `last_used_ip`. There is no secret field — nothing to copy on create.
+
+`repo.deployKey.list` input is `{ "owner", "name" }` and returns `{ "keys": [...] }`. `repo.deployKey.delete` input is `{ "owner", "name", "id" }` (hard-delete; revocation takes effect on the next pack exec — in-flight connections are not cut mid-transfer).
+
+Fingerprint rules (deliberate): one key may be attached to **multiple** repositories (one row each — a CI key can read several repos), but not twice to the same repo (`UNIQUE(repo_id, fingerprint)`). A fingerprint already registered as an **account** key is rejected on `deployKey.create`, and `sshKey.add` rejects fingerprints attached as deploy keys — a key is either an account credential or a deploy credential, never both, so a read-only deploy key cannot be silently widened by registering it as an account key. At most **50** deploy keys per repository.
+
+All three procedures require repo **Admin** (`admin.forbidden` otherwise); anonymous → `auth.unauthenticated`. Empty title → `deployKey.title_required`; invalid key → `sshKey.invalid_key` (shared validator); duplicate fingerprint on the repo → `deployKey.fingerprint_taken`; over 50 keys → `deployKey.limit_exceeded`; unknown delete id → `deployKey.not_found`.
+
+Pushes authorized by a deploy key still run the receive-pack protection env (`OXIDEAN_ACTOR_CAPABILITY=write`), so branch protection and archived-repo rules apply unchanged; post-push webhook / PR-sync / Actions attribution uses the admin who attached the key (`created_by`).
 
 **PAT ∩ ACL:** Classic `repo` push/fetch requires the PAT subject to also `meets` the needed Capability on that repository (org membership, collaborator grant, or personal owner — not `owner_id == pat.user_id` alone). Fine-grained `all` covers personal-owned plus org Owner/Admin repos; collaborators must use `selected`.
+
+### OAuth applications (`oauthApp.*`)
+
+Oxidean can act as an OAuth2 authorization server (API-03) so external tools
+authenticate users — "sign in with Oxidean" — and act on their behalf.
+
+**Registering an app** (session cookie required):
+
+```json
+{ "procedure": "oauthApp.create", "input": { "name": "my-cli", "redirect_uris": ["https://app.example/callback"] } }
+```
+
+The create (and `oauthApp.regenerateSecret`) response includes a one-time
+plaintext `client_secret` (`oxidean_osec_…`) plus the `app` row — `client_id`
+(`oxidean_oc_…`), name, `client_secret_prefix`, `redirect_uris`, timestamps.
+Only the SHA-256 hash of the secret is stored. `client_secret_prefix` is the
+constant marker `oxidean_osec_` — the secret is write-once and never
+re-exposed; rotation is the only way to change it. `oauthApp.list` /
+`oauthApp.update` / `oauthApp.delete` manage apps you own; update accepts
+`{ "id", "name"?, "redirect_uris"? }`. Redirect URIs must be absolute `https`
+(`http` only for `localhost` / `127.*` / `::1`), no fragments or userinfo,
+max 10 per app.
+
+**Authorization-code flow:**
+
+1. Send the user's browser to `GET /oauth/authorize?response_type=code&client_id=…&redirect_uri=…&scope=…&state=…`. Signed-in users land on the `/oauth/consent` SPA page; anonymous users bounce through `/login?returnTo=` first. `redirect_uri` must byte-match a registered URI or the request fails with a 400 JSON error (errors never redirect to unregistered URIs).
+2. On approve, the browser redirects to `redirect_uri?code=…&state=…`; deny yields `error=access_denied`. Codes are single-use and expire after 10 minutes.
+3. Exchange the code at `POST /oauth/token` (form-encoded, or JSON; HTTP Basic `client_id:client_secret` also accepted): `grant_type=authorization_code&code=…&redirect_uri=…&client_id=…&client_secret=…` → `{ "access_token": "oxidean_oat_…", "token_type": "bearer", "expires_in": 28800, "scope": "…" }`. Wrong secret → `invalid_client`; used/expired/mismatched code → `invalid_grant`.
+
+**Scopes** (space-delimited): `read:user` (default; identity via
+`/oauth/userinfo`), `user:email` (adds `email` to userinfo), `repo` (git smart
+HTTP), `package:read` / `package:write` (package registries).
+
+**Using the token:** `GET /oauth/userinfo` with `Authorization: Bearer
+oxidean_oat_…` returns `{ id, username, display_name, avatar_url?, email? }`.
+OAuth access tokens also authenticate anywhere a PAT does — as the HTTP Basic
+password for git clone/push, and as Basic or Bearer credentials on the OCI /
+npm / generic package registries — with the granted scopes mapped onto the
+classic-PAT scope set.
+
+**Consent + grants:** the consent screen resolves `oauthApp.authorizeInfo`
+(`{ "client_id", "redirect_uri"?, "scope"? }` → app name, owner username, parsed
+scopes) and submits `oauthApp.authorize` (`{ "client_id", "redirect_uri",
+"scope"?, "state"?, "approve" }` → `redirect_to`). Users review live grants via
+`oauthApp.listGrants` and cut access with `oauthApp.revoke` (`{ "id" }` — the
+application id from the grant row), which soft-revokes every live token for
+that app/user pair; revoked tokens fail immediately everywhere.
+
+Minting codes (`oauthApp.authorize` with `approve: true`) and registering apps
+require a verified email (`auth.email_unverified` otherwise), matching PAT
+minting posture.
 
 ### Organizations (`org.*`) & collaborators
 
@@ -500,6 +618,7 @@ Phase 12 ships pull requests (PR-01…07) on migration `0016_pull_requests`:
 | **Numbering** | Shared per-repo `#N` with issues (`issue_counters`). |
 | **ACL** | Read+ list/get/diff/comments; Write+ open/comment/review/merge/close/reopen; Admin merge-strategy settings. Author cannot Approve / Request changes on own PR. |
 | **Merge** | Methods `merge` \| `squash` \| `rebase` gated by `repo.mergeSettings.*` (defaults all enabled). Conflict → `pull.merge_conflict`. Optional `delete_branch`. |
+| **Update branch** | `pull.updateBranch` merges the base tip into the head branch (never rebases, never force-pushes); works for fork-head PRs and runs the same `synchronize` bookkeeping as a head push (stale line comments, review dismissal, webhooks, Actions). `pull.branchStatus` reports live `ahead_count`/`behind_count` + `can_update`. |
 | **Diff UX** | `pull.files` unified patch; web supports unified/split. Line comments carry path/side/line; outdated after head/base change. |
 
 Client surface: `client.pull.*` / `client.mergeSettings.*` / `client.issue.*` / `client.label.*` in `@oxidean/api-client` (regenerate with `make rpc-gen`).
@@ -517,6 +636,46 @@ Phase 17 ships in-app activity notifications (NOTF-01 / NOTF-02) on migration `0
 | **Access** | `notification.list` / `notification.unreadCount` re-check repository read access at read time; rows for repos the recipient can no longer read are pruned together with the watch row (GitHub auto-unwatch on access loss). ACL mutations — collaborator remove/update, visibility flip to private, org member remove/demote or `member_base_permission` change, transfer, soft-delete — sweep eagerly. |
 
 Client surface: `client.notification.*` in `@oxidean/api-client` (regenerate with `make rpc-gen`).
+
+### Atom feeds (API-05)
+
+Three `application/atom+xml; charset=utf-8` feeds sit under `/api` so the edge
+gateway routes them to the API service. Each returns the newest **30** entries
+with stable `urn:uuid:` entry ids, RFC 3339 `<published>` / `<updated>`
+timestamps, and HTML permalinks built from the resolved public origin
+(`OXIDEAN_PUBLIC_ORIGIN`).
+
+| Feed | Path | HTML alternate |
+| --- | --- | --- |
+| Repo activity | `GET /api/repos/{owner}/{repo}/activity.atom` | `/{owner}/{repo}/activity` |
+| Repo releases | `GET /api/repos/{owner}/{repo}/releases.atom` | `/{owner}/{repo}/releases` |
+| User activity | `GET /api/users/{username}/activity.atom` | `/{username}` |
+
+Repo feeds enforce the same Capability ACL as `repo.activity.list`: anonymous or
+unauthorized reads of private repos answer the identical `repo.not_found`
+**404** (no enumeration). Session cookie is honored, so a user with Read can
+subscribe to a private repo's feed. Draft releases appear only for Write+
+callers (same rule as `release.list`).
+
+The **user feed is public-only** — it is filtered at the SQL layer
+(`repositories.visibility = 'public'`), so private-repo pushes never leak
+titles, branch names, or links regardless of the caller's session.
+
+Feed autodiscovery: the repo page, activity page, releases page, and user
+profile emit `<link rel="alternate" type="application/atom+xml">` pointing at
+the matching feed.
+
+### Repository insights (`repo.insights.*`)
+
+Three read procedures back the repo **Insights** page (`/{owner}/{repo}/insights`). All gate on repo Read; private repos return soft `repo.not_found` for outsiders.
+
+| Procedure | Returns |
+|-----------|---------|
+| `repo.insights.contributors` | Top committers on the default branch: `name`, `email`, `commit_count`, first/last commit SHA + unix time, plus `username` / `avatar_url` when the author email matches an Oxidean account. Input `limit` clamps to 1–100. |
+| `repo.insights.commitActivity` | `weeks` Sunday-anchored buckets (`week` epoch, `days` Sun–Sat counts, `total`) ending at the current in-progress week, plus `total`. Input `weeks` defaults to 52, clamps to 1–104. |
+| `repo.insights.forkNetwork` | Fork-network members (network root + public forks + the queried repo even when private) with `parent_owner` / `parent_name` links, star/fork counts, `is_root` / `is_current` flags, oldest-first. Input `limit` defaults to 100, clamps to 1–500. |
+
+Git-backed sections walk at most 50k (contributors) / 100k (activity) commits and set `truncated` when the walk was clipped, so large repositories stay cheap.
 
 ### Git Smart HTTP
 
@@ -570,9 +729,41 @@ git add .gitattributes
 
 ### Git over SSH
 
-Clone / fetch / push over SSH use an in-process listener (Compose TCP **2222** by default — not Traefik). Remotes are **scp-style** `git@{host}:{owner}/{repo}.git` (D-SSH-02). The SSH username must be `git`; identity comes only from a registered public-key fingerprint (full account ACL — no PAT scopes). When advertised port ≠ 22, clients set `Port` in `~/.ssh/config` (or `ssh -p`); do not treat `ssh://` as the primary CloneBox URL.
+Clone / fetch / push over SSH use an in-process listener (Compose TCP **2222** by default — not Traefik). Remotes are **scp-style** `git@{host}:{owner}/{repo}.git` (D-SSH-02). The SSH username must be `git`; identity comes only from a registered public-key fingerprint (full account ACL — no PAT scopes). When the fingerprint matches no account key, the handshake falls back to repo **deploy keys** (`repo.deployKey.*` above): the key authenticates the connection, and each `git-upload-pack` / `git-receive-pack` exec re-checks that the fingerprint is attached to the target repo (`can_write` required for push). Deploy keys are transport-only — no RPC/web access — and are rate-limited like account keys. When advertised port ≠ 22, clients set `Port` in `~/.ssh/config` (or `ssh -p`); do not treat `ssh://` as the primary CloneBox URL.
 
 Failed pubkey auth is rate-limited like Smart HTTP PAT failures (IP + fingerprint buckets). See [CONFIGURATION.md](CONFIGURATION.md) for `OXIDEAN_SSH_*`.
+
+### GitHub compatibility (API-06)
+
+Oxidean speaks a GitHub-compatible subset so existing CI/deploy tooling can target it unchanged where practical. Deliberate deltas are called out rather than mimicked silently.
+
+**Pull request refs.** Every open pull request exposes synthesized refs in the base repository, advertised by `git-upload-pack` over both Smart HTTP and SSH:
+
+| Ref | Resolves to |
+| --- | --- |
+| `refs/pull/{N}/head` | The PR's current head tip (`head_sha`), refreshed on create / head-branch push / reopen. Fork heads are fetched into the base repo so the object is always fetchable. |
+| `refs/pull/{N}/merge` | The recorded merge commit, written when the PR merges. **Delta from GitHub:** no speculative test-merge commit is computed while the PR is open, so `/merge` simply does not exist until merge — `ls-remote`/`fetch` will not see it. |
+
+`refs/pull/*` is a **read-only namespace**: pushes that create, update, or delete it are denied (`git.pull_refs_read_only` over Smart HTTP; the pack bridge closes the stream over SSH; the installed `hooks/update` denies it as a backstop when the protection helper is wired). Refs persist after close/merge like GitHub's.
+
+```bash
+git fetch origin pull/123/head && git checkout FETCH_HEAD   # same as GitHub
+```
+
+**Commit statuses.** `POST /api/v1/repos/{owner}/{repo}/statuses/{sha}` accepts the GitHub body (`state`, `context`, `target_url`, `description`; `state` ∈ `pending` | `success` | `failure` | `error`, `context` defaults to `default`) and `GET` on the same path returns the GitHub-shaped list (`state`, `context`, `target_url`, `description`, `created_at`, `creator`). `GET /repos/{owner}/{repo}/commits/{sha}/status` returns the combined rollup; `…/commits/{sha}/statuses` is a list alias.
+
+**Webhook payload conventions.** Outbound deliveries use GitHub-shaped top-level keys, so handlers keyed on `action` + resource objects work unchanged:
+
+| Event | Top-level keys |
+| --- | --- |
+| Pull request (`pull_request`) | `action`, `number`, `pull_request`, `repository`, `sender` |
+| Issue (`issues`) | `action`, `issue`, `repository`, `sender` |
+| Push (`push`) | `ref`, `before`, `after`, `created`, `deleted`, `forced`, `commits`, `head_commit`, `pusher`, `sender`, `repository` |
+| Ping (`ping`) | `zen`, `hook_id`, `repository` |
+
+Conventions: `action` names the transition (`opened`, `closed`, `reopened`, `synchronize`, `edited`, …); `repository` identifies the repo (`name`, `full_name`, `owner`); `sender` is the acting user (`login`, `id`). Payloads are *GitHub-shaped but not exhaustive* — nested objects carry the fields Oxidean models; consumers that read a fixed key subset work unchanged.
+
+Deltas: `issue_comment` events are not emitted today (issue/PR comments do not fan out to webhooks), and the push payload leaves `commits`/`head_commit` empty — fetch `after`/`refs/pull/{N}/head` for commit data.
 
 ### Two-way repository mirroring
 
@@ -700,6 +891,10 @@ Common `error.code` values:
 | `sshKey.fingerprint_taken` | Fingerprint already registered |
 | `sshKey.limit_exceeded` | More than 25 SSH keys for the user |
 | `sshKey.not_found` | Revoke target missing or not owned |
+| `deployKey.title_required` | Deploy key title empty |
+| `deployKey.fingerprint_taken` | Key already attached to that repo, or registered as an account SSH key |
+| `deployKey.limit_exceeded` | More than 50 deploy keys on the repository |
+| `deployKey.not_found` | Delete target missing or not on that repo |
 | `org.slug_taken` | Org slug collides with user or org |
 | `org.forbidden` / `org.not_found` | Org ACL / missing org |
 | `org.invite_login_required` | Invite email already registered — sign in to accept |
@@ -708,6 +903,7 @@ Common `error.code` values:
 | `invite.email_mismatch` | Bound invite accepted under a different email |
 | `invite.login_required` | Link-invite email already registered — sign in to accept |
 | `repo.not_found` | Missing or unauthorized private (web/RPC soft 404) |
+| `repo.issues.disabled` / `repo.pulls.disabled` | Per-repo Issues / Pulls unit is off (COL-13); re-enable via `repo.<unit>.setEnabled` |
 | `repo.create_forbidden` | Org Member cannot create under that org |
 | `issue.not_found` / `issue.comment_not_found` / `issue.link_not_found` | Missing issue/comment/link (private soft-404 where applicable) |
 | `issue.confirm_mismatch` | Admin hard-delete confirmation number mismatch |
@@ -716,6 +912,29 @@ Common `error.code` values:
 | `avatar.*` | Multipart/type/size/store failures on avatar upload |
 
 Avatar and SSO JSON errors use the same `{ ok: false, error: { code, message } }` shape where applicable.
+
+## MCP endpoint (AGT-01, AGT-03)
+
+`POST /api/mcp` is a [Model Context Protocol](https://modelcontextprotocol.io)
+server over the streamable-HTTP transport (single JSON-RPC 2.0 message per
+request, `application/json` responses, `202` for notifications). It exposes
+repositories, issues, pull requests, Actions runs, packages, and search as MCP
+tools, plus file/issue/PR bodies as `oxidean://` resources — each call is a thin
+wrapper over the same typed RPC handlers and ACL checks as `/api/rpc`.
+
+Auth: `oxidean_session` cookie or `Authorization: Bearer` with a classic
+(`oxidean_pat_…`) / fine-grained (`oxidean_fg_…`) PAT. The `oxidean_oat_…` OAuth
+access-token prefix is dispatched to a dedicated resolver seam — it fails closed
+(`401`) until the OAuth provider (API-03) lands; the three prefixes stay
+disjoint by construction. Presented-but-invalid credentials return `401` +
+`WWW-Authenticate: Bearer`; missing credentials run as anonymous.
+
+Instance gate: enabled by default via `OXIDEAN_MCP_ENABLED`; a sys-admin
+override under **Admin → MCP endpoint** (`admin.mcp.getSettings` /
+`updateSettings`) wins at runtime — while off, `/api/mcp` answers `404` with a
+`mcp.disabled` JSON-RPC error. Full method/tool/resource list, scope mapping,
+and client setup (Claude Code, Cursor, `mcp-remote`, direct HTTP):
+[MCP.md](MCP.md).
 
 ## Rate limits
 

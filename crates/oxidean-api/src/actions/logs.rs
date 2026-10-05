@@ -40,12 +40,35 @@ pub async fn append_job_log(
     f.write_all(chunk)
         .await
         .map_err(|e| format!("write log: {e}"))?;
+    // Flush before drop so a following read_job_log in the same process
+    // cannot observe an empty file (tokio File drop alone is racy under load).
+    f.flush()
+        .await
+        .map_err(|e| format!("flush log: {e}"))?;
     Ok(())
 }
 
-pub async fn read_job_log(log_dir: &Path, run_id: &str, job_id: &str) -> Result<Vec<u8>, String> {
+/// Read the job log tail starting at `offset` bytes. Returns
+/// `(content_from_offset, total_size)` — `total_size` doubles as the caller's
+/// next offset (`next_offset`).
+///
+/// `offset` past EOF clamps to empty; a mid-UTF-8 `offset` snaps forward to the
+/// next char boundary (offsets handed out as `next_offset` are already
+/// boundaries because runner appends are whole UTF-8 strings).
+pub async fn read_job_log(
+    log_dir: &Path,
+    run_id: &str,
+    job_id: &str,
+    offset: u64,
+) -> Result<(Vec<u8>, u64), String> {
     let path = job_log_path(log_dir, run_id, job_id)?;
-    fs::read(&path)
+    let mut bytes = fs::read(&path)
         .await
-        .map_err(|e| format!("read log: {e}"))
+        .map_err(|e| format!("read log: {e}"))?;
+    let size = bytes.len() as u64;
+    let mut start = offset.min(size) as usize;
+    while start < bytes.len() && (bytes[start] & 0xC0) == 0x80 {
+        start += 1;
+    }
+    Ok((bytes.split_off(start), size))
 }

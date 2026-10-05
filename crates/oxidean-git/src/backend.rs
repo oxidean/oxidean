@@ -121,6 +121,14 @@ pub enum GitError {
     /// Object/path/ref missing (empty repo, bad path, etc.).
     #[error("not found: {0}")]
     NotFound(String),
+    /// Ref tip moved between read and update — caller should re-read and retry
+    /// (CAS / fast-forward race).
+    #[error("conflict: {0}")]
+    Conflict(String),
+    /// The update was refused by a repository hook (e.g. branch protection
+    /// `hooks/update` decline) after transport-level checks passed.
+    #[error("denied: {0}")]
+    Denied(String),
 }
 
 /// Kind of a tree entry (`git ls-tree` object type).
@@ -195,6 +203,44 @@ pub struct ContributorSummary {
     pub name: String,
     pub email: String,
     pub commit_count: i64,
+}
+
+/// Per-author aggregate from [`GitBackend::contributor_scan`] (GIT-26 insights).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContributorStat {
+    /// Author name from the newest scanned commit (`%aN`, mailmap-aware).
+    pub name: String,
+    /// Author email from the newest scanned commit (`%aE`, mailmap-aware).
+    pub email: String,
+    pub commit_count: i64,
+    /// Oldest scanned commit by this author.
+    pub first_commit_sha: String,
+    /// Oldest scanned commit committer unix timestamp (`%ct`).
+    pub first_commit_unix: i64,
+    /// Newest scanned commit by this author.
+    pub last_commit_sha: String,
+    /// Newest scanned commit committer unix timestamp (`%ct`).
+    pub last_commit_unix: i64,
+}
+
+/// Bounded contributor scan over a ref's history (GIT-26 insights).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContributorScan {
+    /// Top authors by commit count within the scanned window.
+    pub contributors: Vec<ContributorStat>,
+    /// Commits actually walked (`min(total_commits, max_commits)`).
+    pub scanned_commits: u64,
+    /// True when the ref's history exceeds `max_commits` and the scan was clipped.
+    pub truncated: bool,
+}
+
+/// Bounded committer-timestamp walk for weekly commit-activity buckets (GIT-26).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommitTimesResult {
+    /// Unix committer timestamps (`%ct`), newest first, capped at `max_commits`.
+    pub times: Vec<i64>,
+    /// True when the window held more commits than `max_commits`.
+    pub truncated: bool,
 }
 
 /// Blob path + byte size from `git ls-tree -r -l` (About language stats).
@@ -291,6 +337,37 @@ pub const ARCHIVE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(
 /// instance signs these commits with the web-flow SSH key under this principal.
 pub const FORGE_NOREPLY_EMAIL: &str = "noreply@oxidean.local";
 
+/// One file mutation inside a [`GitBackend::commit_files`] changeset (GIT-19).
+///
+/// Paths are repository-relative, normalized, and must not escape the repo
+/// (no `..`, no absolute/prefix components, no `.git` segment, no NUL).
+/// Directories are never passed explicitly — Git tracks files only; deleting
+/// `dir` removes every blob under `dir/` (see [`FileChange::Delete`]).
+#[derive(Debug, Clone)]
+pub enum FileChange {
+    /// Create or overwrite `path` with `content` bytes (mode `100644`).
+    /// An empty `content` creates an empty blob — a legitimate empty file.
+    Upsert { path: String, content: Vec<u8> },
+    /// Stage an existing blob `oid` (full hex) at `path` — renames preserve
+    /// blob identity so history/diffs stay clean.
+    UpsertOid { path: String, oid: String },
+    /// Remove `path` — the file itself, or every blob under `path/` when it
+    /// names a directory. Missing path → [`GitError::NotFound`].
+    Delete { path: String },
+}
+
+/// Result of [`GitBackend::commit_files`].
+#[derive(Debug, Clone)]
+pub struct FilesCommit {
+    /// New commit SHA.
+    pub sha: String,
+    /// Tip of `base` the commit was built on (`None` = root commit on an
+    /// unborn base — first commit of an empty repository).
+    pub base_sha: Option<String>,
+    /// Branch (short name) that received the commit.
+    pub branch: String,
+}
+
 /// Source archive format for [`GitBackend::archive`] (GIT-07 / D-29).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArchiveFormat {
@@ -351,6 +428,50 @@ pub trait GitBackend: Send + Sync {
         author_email: &str,
         signing_key_path: Option<&Path>,
     ) -> Result<(), GitError>;
+
+    /// Apply `changes` as a single commit on `branch` (GIT-19 web file editing).
+    ///
+    /// `base` is the branch whose tip seeds the starting tree and parents the
+    /// commit — for a plain in-place commit pass `base == branch`; to create
+    /// `branch` from another tip pass the source branch. A missing `base`
+    /// produces a root commit (first commit of an empty repository).
+    /// `branch` must not already exist when `branch != base`.
+    ///
+    /// Implementations apply changes via index plumbing (no worktree
+    /// checkout), then publish the commit through a push so bare
+    /// `hooks/update` (branch protection) still runs — non-fast-forward races
+    /// surface as [`GitError::Conflict`], hook declines as
+    /// [`GitError::Denied`]. Author is `author_name`/`author_email`; committer
+    /// is the forge identity; `signing_key_path` SSH-signs (`gpg.format=ssh`)
+    /// when set. A changeset that produces a tree identical to `base`'s is a
+    /// [`GitError::InvalidArg`] no-op rather than an empty commit.
+    ///
+    /// `actor_capability` is the pusher's forge capability label
+    /// (`admin`/`write`/`read`) exported to `hooks/update` as
+    /// `OXIDEAN_ACTOR_CAPABILITY` — pass the real actor (or `admin` for
+    /// system-initiated commits that already cleared API-layer policy).
+    async fn commit_files(
+        &self,
+        bare_path: &Path,
+        branch: &str,
+        base: &str,
+        message: &str,
+        changes: &[FileChange],
+        author_name: &str,
+        author_email: &str,
+        signing_key_path: Option<&Path>,
+        actor_capability: &str,
+    ) -> Result<FilesCommit, GitError>;
+
+    /// `git ls-tree <treeish> -- <path>` — the entry for `path` itself (blob /
+    /// tree / commit gitlink), not its children. `Ok(None)` when `treeish` or
+    /// `path` does not resolve (missing path, unborn ref).
+    async fn ls_tree_entry(
+        &self,
+        repo: &Path,
+        treeish: &str,
+        path: &str,
+    ) -> Result<Option<TreeEntry>, GitError>;
 
     /// List tree entries at `path` under `treeish` (branch/tag/sha). Empty repo /
     /// unborn HEAD → `Ok(vec![])` (not an error).
@@ -532,6 +653,30 @@ pub trait GitBackend: Send + Sync {
         limit: u32,
     ) -> Result<Vec<ContributorSummary>, GitError>;
 
+    /// Per-author commit stats over at most `max_commits` commits of `refname`
+    /// (`git log` author fields aggregated per author email) with truncation
+    /// metadata for the Insights page (GIT-26). Sorted by commit count desc,
+    /// then most-recent commit. Unborn/missing ref -> empty scan.
+    async fn contributor_scan(
+        &self,
+        repo: &Path,
+        refname: &str,
+        limit: u32,
+        max_commits: u64,
+    ) -> Result<ContributorScan, GitError>;
+
+    /// Committer timestamps (`git log --format=%ct`) for `refname`, newest
+    /// first, bounded by `max_commits`. A positive `since_unix` adds a
+    /// `--since` floor (commit date); `<= 0` scans the full capped history.
+    /// Unborn/missing ref -> empty result.
+    async fn commit_times(
+        &self,
+        repo: &Path,
+        refname: &str,
+        since_unix: Option<i64>,
+        max_commits: u64,
+    ) -> Result<CommitTimesResult, GitError>;
+
     /// Recursive `git ls-tree -r -l` blob paths + sizes for language stats.
     /// Empty / unborn → `Ok(vec![])`. Soft-capped by `max_entries`.
     async fn ls_tree_sized_blobs(
@@ -607,6 +752,18 @@ pub trait GitBackend: Send + Sync {
         tip: &str,
     ) -> Result<bool, GitError>;
 
+    /// `(ahead, behind)` commit counts between `head` and `base`
+    /// (`git rev-list --left-right --count head...base`): commits reachable
+    /// from `head` but not `base`, then commits reachable from `base` but
+    /// not `head`. Both revs must resolve to commits in `repo` (fetch first
+    /// for cross-repo comparisons).
+    async fn ahead_behind(
+        &self,
+        repo: &Path,
+        head: &str,
+        base: &str,
+    ) -> Result<(u64, u64), GitError>;
+
     /// Fast-forward (or create) `refname` to `target_sha` via a worktree push so
     /// bare `hooks/update` runs. Non-FF → [`GitError::Process`].
     async fn fast_forward_ref(
@@ -618,6 +775,12 @@ pub trait GitBackend: Send + Sync {
 
     /// Resolve a ref / SHA to a commit OID (`git rev-parse`).
     async fn rev_parse(&self, repo: &Path, rev: &str) -> Result<String, GitError>;
+
+    /// Point `refname` at `sha` via `git update-ref` — a direct write that does
+    /// **not** run `hooks/update`. Reserved for forge-synthesized namespaces
+    /// (e.g. `refs/pull/*` in API-06) that no push path may write; callers must
+    /// ensure `sha` resolves to an object already present in `repo`.
+    async fn update_ref(&self, repo: &Path, refname: &str, sha: &str) -> Result<(), GitError>;
 }
 
 #[cfg(test)]

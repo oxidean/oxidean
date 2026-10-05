@@ -41,6 +41,7 @@ Related docs: [database.md](database.md), [dev-auth.md](dev-auth.md).
 | `MYSQL_DATABASE_URL` | MySQL profile | `mysql://oxidean:oxidean@mysql:3306/oxidean` | Overrides API `DATABASE_URL` when using the MySQL Compose overlay. |
 | `OXIDEAN_SQLITE_HOST_DIR` | SQLite overlay | `./var` | Host path bind-mounted to `/app/var` for SQLite file storage. |
 | `OXIDEAN_REPOS_DIR` | Optional | `var/repos` | Root for bare git repositories (`{owner}/{name}.git`). Compose binds `./var/repos:/var/repos`; with API CWD `/` the default resolves to `/var/repos` without overriding the env var. |
+| `OXIDEAN_GIT_REPO_QUOTA_BYTES` | Optional | `10737418240` (10 GiB) | Default per-repo git object size quota (bare repo disk usage). `0` or negative = unlimited. `admin.git.updateSettings` overrides; repo admins can set a per-repo override in Settings (GIT-25). |
 | `OXIDEAN_LFS_DIR` | Optional | `var/lfs` | Instance-wide Git LFS object store (OID-sharded). Compose binds `./var/lfs:/var/lfs` and sets `OXIDEAN_LFS_DIR=/var/lfs`. |
 | `OXIDEAN_LFS_MAX_OBJECT_BYTES` | Optional | `2147483648` (2 GiB) | Max single LFS object size. `0` disables. Admin UI can override. |
 | `OXIDEAN_LFS_QUOTA_REPO_BYTES` | Optional | `10737418240` (10 GiB) | Default per-repo logical LFS quota. `0` disables. Admin UI can override. |
@@ -54,8 +55,10 @@ Related docs: [database.md](database.md), [dev-auth.md](dev-auth.md).
 | `OXIDEAN_PACKAGES_GC_GRACE_SECS` | Optional | `604800` (7d) | Grace before deleting refcount-0 blobs. |
 | `OXIDEAN_TEMPLATE_PACKS_DIR` | Optional | `var/template-packs` | Content-addressed instance template zip store (`sha256/{aa}/{bb}/{digest}.zip`). Compose binds `./var/template-packs:/var/template-packs` and sets `/var/template-packs`. **Must not** share packages/LFS/repos paths. |
 | `OXIDEAN_TEMPLATE_PACK_MAX_BYTES` | Optional | `10485760` (10 MiB) | Max uploaded instance template zip size. |
+| `OXIDEAN_CLI_DIST_DIR` | Optional | `/usr/local/share/oxidean-cli` | Directory of `ox-{target-triple}` binaries the API serves at `/cli/bin/*` for `curl /cli/install.sh | sh` and `ox self-update`. Release image ships the server's own platform; drop extra targets into this dir. See [CLI.md](CLI.md). |
 | `OXIDEAN_ACTIONS_LOG_DIR` | Optional | `var/actions-logs` | Root for Actions job logs (`{run_id}/{job_id}.log`). Compose binds `./var/actions-logs:/var/actions-logs` and sets `/var/actions-logs`. **Must not** share repos/LFS/packages/release-asset paths (D-ACT-13). |
 | `OXIDEAN_ACTIONS_ENABLED` | Optional | `true` | Instance-wide Actions gate. When `false`/`0`/`off`, no workflows are evaluated (D-ACT-06). Per-repo Admin toggle still applies when instance gate is on. |
+| `OXIDEAN_MCP_ENABLED` | Optional | `true` | Instance gate for the MCP endpoint (`POST /api/mcp`). Sys-admins can override at runtime under **Admin → MCP endpoint** (`admin.mcp.updateSettings`); clearing the override reverts to this env default. Disabled → `404 mcp.disabled`. See [MCP.md](MCP.md). |
 | `OXIDEAN_RUNNER_REGISTRATION_TOKEN` | Optional | — | Bootstrap registration token for official runners (Compose profile `actions`). **Reusable while set** — never leave on an internet-facing API; prefer `admin.actions.createRegistrationToken` (one-time). Unset after local runner bootstrap. Rotate on compromise (D-ACT-08). **Never commit real tokens.** |
 | `OXIDEAN_RUNNER_NAME` | Optional | `compose-runner` | Display name passed to runner register. |
 | `OXIDEAN_RUNNER_LABELS` | Optional | `ubuntu-latest:docker://node:20-bookworm,self-hosted` | Comma-separated runner labels (`label[:schema[:args]]`). |
@@ -116,6 +119,8 @@ Bare repos live under `OXIDEAN_REPOS_DIR` (default `var/repos`). Layout: `{OXIDE
 | `OXIDEAN_REPO_REDIRECT_RETENTION_DAYS` | 90 | Rename/transfer redirect TTL before purge |
 | `OXIDEAN_GIT_GC_INTERVAL_SECS` | 604800 | Scheduled `git gc --auto` on active repos |
 
+**Git object size quota (GIT-25):** The bare repo itself is metered as apparent on-disk size (all files under `{owner}/{name}.git`; hardlinked inodes counted once, symlinks not followed). Enforcement runs in the bare repo `hooks/update` via the protection helper: while a push is in flight the incoming pack still sits in the receive quarantine under `GIT_DIR`, so the check measures the *projected* post-push size and rejects the ref update when it exceeds the effective quota. This covers Smart HTTP, SSH receive-pack, and internal pushes (web merges, seeds, mirror ref writes) — all flow through `hooks/update`. Resolution order: per-repo override (`repositories.size_quota_bytes`, repo Admin in Settings) → instance Admin override (`admin.git.updateSettings` / `instance_git_settings`) → `OXIDEAN_GIT_REPO_QUOTA_BYTES` → 10 GiB built-in; `<= 0` disables. Ref *deletes* are never quota-blocked (an over-quota repo can still clean up), and Admin capability does not bypass the check. Mirror *fetches* land objects without `hooks/update`, so a repo already over quota pauses mirror syncs; one fetch can overshoot before the next sync blocks — same "block the next write once over" semantics as pushes. `repositories.size_bytes` is a cached bookkeeping column refreshed after pushes/merges/mirror syncs and by `repo.quota.get`; enforcement always measures live disk state. Environments without the protection helper (no `OXIDEAN_PROTECTION_HELPER` in dev/compose) fail open on all hook checks including quota.
+
 Factory reset (Admin → Auth danger zone) offers **Database only** (keep files) vs **Database and repositories** (wipe children under `OXIDEAN_REPOS_DIR` **and** `OXIDEAN_LFS_DIR`). Reset always wipes issue-domain rows via repository/org CASCADE (no extra env knobs).
 
 ## Git LFS
@@ -171,7 +176,7 @@ Bare `/{owner}/{repo}` (no `.git` suffix) stays on the web UI. Self-hosted rever
 
 ## Git over SSH
 
-Phase 9 adds Git **clone/fetch/push over SSH** beside Smart HTTP. Keys are registered via session RPC `sshKey.*` (Settings → SSH keys). Architecture: [ARCHITECTURE.md](ARCHITECTURE.md#git-over-ssh). API shapes: [API.md](API.md).
+Phase 9 adds Git **clone/fetch/push over SSH** beside Smart HTTP. Keys are registered via session RPC `sshKey.*` (Settings → SSH keys). Per-repo **deploy keys** (read or read/write scope, GIT-23) are managed by repo admins via `repo.deployKey.*` (repository Settings → Deploy keys); they are transport-only credentials — no session, RPC, or web access. Architecture: [ARCHITECTURE.md](ARCHITECTURE.md#git-over-ssh). API shapes: [API.md](API.md).
 
 | Env | Role |
 | --- | --- |

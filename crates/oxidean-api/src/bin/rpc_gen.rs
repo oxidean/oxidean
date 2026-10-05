@@ -39,6 +39,20 @@ export type DbProbeResponse = {
   probed_at: string;
 };
 
+export type ManifestCapabilities = {
+  mcp: boolean;
+  rest: boolean;
+  oauth: boolean;
+};
+
+export type ManifestResponse = {
+  protocol_version: number;
+  server_version: string;
+  procedures: Record<string, boolean>;
+  capabilities: ManifestCapabilities;
+  min_cli_version: string;
+};
+
 export type ProviderMode = "local" | "workos" | "oidc";
 
 export type EmailProviderKind = "log" | "smtp" | "resend";
@@ -408,12 +422,15 @@ export type RepoPublic = {
   viewer_has_starred?: boolean;
   is_fork?: boolean;
   is_template?: boolean;
+  archived?: boolean;
   homepage?: string;
   topics?: string[];
   fork_count?: number;
   watch_count?: number;
   viewer_is_watching?: boolean;
   viewer_watch_level?: WatchLevel | null;
+  issues_enabled?: boolean;
+  pulls_enabled?: boolean;
   fork_network_id?: string | null;
   forked_from?: ForkParentSummary | null;
 };
@@ -503,6 +520,41 @@ export type RepoForksListRequest = {
 export type RepoForksListResponse = {
   forks: RepoForkPublic[];
   total: number;
+};
+
+export type RepoForkStatusRequest = {
+  owner: string;
+  name: string;
+  branch?: string | null;
+};
+
+export type RepoForkStatusResponse = {
+  branch: string;
+  upstream_owner: string;
+  upstream_name: string;
+  upstream_branch: string;
+  ahead_count: number;
+  behind_count: number;
+  /** `up_to_date` | `behind` | `diverged` (fork-only `ahead` reports as `up_to_date`). */
+  status: string;
+};
+
+export type RepoSyncForkRequest = {
+  owner: string;
+  name: string;
+  branch?: string | null;
+};
+
+export type RepoSyncForkResponse = {
+  /** `up_to_date` | `fast_forwarded` | `merged`. */
+  status: string;
+  branch: string;
+  upstream_owner: string;
+  upstream_name: string;
+  upstream_branch: string;
+  before_sha: string;
+  after_sha: string;
+  merge_commit_sha?: string | null;
 };
 
 export type RepoUpdateMetadataRequest = {
@@ -769,6 +821,79 @@ export type RepoActivityListResponse = {
   limit: number;
 };
 
+export type RepoInsightsContributorsRequest = {
+  owner: string;
+  name: string;
+  limit?: number | null;
+};
+
+export type RepoInsightContributor = {
+  name: string;
+  email: string;
+  commit_count: number;
+  username?: string | null;
+  avatar_url?: string | null;
+  first_commit_sha: string;
+  first_commit_unix: number;
+  last_commit_sha: string;
+  last_commit_unix: number;
+};
+
+export type RepoInsightsContributorsResponse = {
+  contributors: RepoInsightContributor[];
+  scanned_commits: number;
+  truncated: boolean;
+};
+
+export type RepoInsightsCommitActivityRequest = {
+  owner: string;
+  name: string;
+  weeks?: number | null;
+};
+
+export type RepoCommitActivityWeek = {
+  /** Sunday 00:00:00 UTC epoch of the bucket. */
+  week: number;
+  /** Commits per weekday; index 0 = Sunday .. 6 = Saturday. */
+  days: number[];
+  total: number;
+};
+
+export type RepoInsightsCommitActivityResponse = {
+  /** Oldest-first week buckets; last bucket is the in-progress week. */
+  weeks: RepoCommitActivityWeek[];
+  total: number;
+  scanned_commits: number;
+  truncated: boolean;
+};
+
+export type RepoInsightsForkNetworkRequest = {
+  owner: string;
+  name: string;
+  limit?: number | null;
+};
+
+export type RepoForkNetworkNode = {
+  id: string;
+  owner: string;
+  name: string;
+  parent_owner?: string | null;
+  parent_name?: string | null;
+  star_count: number;
+  fork_count: number;
+  created_at: string;
+  updated_at: string;
+  owner_avatar_url?: string | null;
+  is_root: boolean;
+  is_current: boolean;
+};
+
+export type RepoInsightsForkNetworkResponse = {
+  nodes: RepoForkNetworkNode[];
+  total: number;
+  truncated: boolean;
+};
+
 export type RepoCommitRequest = {
   owner: string;
   name: string;
@@ -1000,10 +1125,110 @@ export type RepoBranchMutationResponse = {
   branch: string;
 };
 
+/** Shared commit-target fields flattened into repo.file.* requests (GIT-19). */
+export type RepoFileCommitOptions = {
+  /** Base branch (default: repository default branch). */
+  branch?: string | null;
+  /** Create this branch at the base tip and commit there. */
+  new_branch?: string | null;
+  /** Open a PR new_branch → branch (default true when new_branch is set). */
+  open_pr?: boolean | null;
+  pr_title?: string | null;
+  pr_body?: string | null;
+};
+
+export type RepoFileCreateRequest = RepoFileCommitOptions & {
+  owner: string;
+  name: string;
+  path: string;
+  /** UTF-8 text content; may be empty (empty file). */
+  content?: string | null;
+  /** Base64 bytes — binary-safe; mutually exclusive with `content`. */
+  content_base64?: string | null;
+  /** Commit message (server supplies a default when blank). */
+  message: string;
+};
+
+export type RepoFileUpdateRequest = RepoFileCommitOptions & {
+  owner: string;
+  name: string;
+  path: string;
+  content?: string | null;
+  content_base64?: string | null;
+  message: string;
+};
+
+export type RepoFileDeleteRequest = RepoFileCommitOptions & {
+  owner: string;
+  name: string;
+  /** File path, or directory path (removes every blob under it). */
+  path: string;
+  message: string;
+};
+
+export type RepoFileRenameRequest = RepoFileCommitOptions & {
+  owner: string;
+  name: string;
+  from_path: string;
+  to_path: string;
+  /** Optional new content; absent preserves the blob (pure rename). */
+  content?: string | null;
+  content_base64?: string | null;
+  message: string;
+};
+
+export type RepoFileUploadEntry = {
+  path: string;
+  content_base64: string;
+};
+
+export type RepoFileUploadRequest = RepoFileCommitOptions & {
+  owner: string;
+  name: string;
+  files: RepoFileUploadEntry[];
+  message: string;
+};
+
+export type RepoFileMkdirRequest = RepoFileCommitOptions & {
+  owner: string;
+  name: string;
+  /** Directory to create (materialized as `{path}/.gitkeep`). */
+  path: string;
+  message: string;
+};
+
+export type RepoFileCommitPolicyRequest = {
+  owner: string;
+  name: string;
+  branch?: string | null;
+};
+
+export type RepoFileCommitPolicyResponse = {
+  branch: string;
+  /** Caller may commit directly onto `branch`. */
+  direct_commit_allowed: boolean;
+  /** Protection requires the new-branch + PR flow. */
+  requires_pr: boolean;
+};
+
+export type RepoFileCommitResponse = {
+  commit_sha: string;
+  /** Branch that received the commit. */
+  branch: string;
+  created_branch: boolean;
+  pr_number?: number | null;
+};
+
 export type RepoUpdateVisibilityRequest = {
   owner: string;
   name: string;
   visibility: RepoVisibility;
+};
+
+export type RepoSetArchivedRequest = {
+  owner: string;
+  name: string;
+  archived: boolean;
 };
 
 export type RepoSoftDeleteRequest = {
@@ -1066,6 +1291,24 @@ export type RepoLfsDownloadRequest = {
   owner: string;
   name: string;
   oid: string;
+};
+
+export type RepoGetQuotaRequest = {
+  owner: string;
+  name: string;
+};
+
+export type RepoQuotaPublic = {
+  size_bytes: number;
+  effective_quota_bytes?: number | null;
+  size_quota_bytes?: number | null;
+  instance_quota_bytes: number;
+};
+
+export type RepoSetQuotaRequest = {
+  owner: string;
+  name: string;
+  size_quota_bytes?: number | null;
 };
 
 export type RepoLfsDownloadResponse = {
@@ -1233,6 +1476,48 @@ export type RepoTemplateEnabledResponse = {
   enabled: boolean;
 };
 
+/** `repo.templates.list` input (COL-02 — templates live in the git tree). */
+export type RepoTemplatesListRequest = {
+  owner: string;
+  name: string;
+};
+
+export type RepoUnitGetEnabledRequest = {
+  owner: string;
+  name: string;
+};
+
+/** One issue/PR template file from the default-branch tree. */
+export type RepoFileTemplate = {
+  /** Frontmatter `name` or filename stem. */
+  name: string;
+  /** Frontmatter `title` — subject prefill. */
+  title?: string;
+  /** Frontmatter `about` — chooser blurb. */
+  description?: string;
+  /** Frontmatter `labels` (comma string or list). */
+  labels?: string[];
+  /** Markdown body with frontmatter stripped. */
+  body: string;
+  /** Repo-relative path, e.g. `.github/ISSUE_TEMPLATE/bug.md`. */
+  filename: string;
+};
+
+export type RepoTemplatesListResponse = {
+  issues: RepoFileTemplate[];
+  pulls: RepoFileTemplate[];
+};
+
+export type RepoUnitSetEnabledRequest = {
+  owner: string;
+  name: string;
+  enabled: boolean;
+};
+
+export type RepoUnitEnabledResponse = {
+  enabled: boolean;
+};
+
 export type AdminLfsSettingsPublic = {
   max_object_bytes: number;
   quota_repo_bytes: number;
@@ -1246,6 +1531,16 @@ export type AdminLfsUpdateSettingsRequest = {
   max_object_bytes?: number | null;
   quota_repo_bytes?: number | null;
   quota_user_bytes?: number | null;
+  clear_overrides?: boolean;
+};
+
+export type AdminGitSettingsPublic = {
+  repo_quota_bytes: number;
+  repo_quota_bytes_overridden: boolean;
+};
+
+export type AdminGitUpdateSettingsRequest = {
+  repo_quota_bytes?: number | null;
   clear_overrides?: boolean;
 };
 
@@ -1270,6 +1565,20 @@ export type AdminLfsUsageResponse = {
   logical_bytes: number;
   by_repo: AdminLfsRepoUsageEntry[];
   by_owner: AdminLfsOwnerUsageEntry[];
+};
+
+export type AdminMcpSettingsPublic = {
+  /** Effective state: stored admin override, else OXIDEAN_MCP_ENABLED env default. */
+  enabled: boolean;
+  /** True when an admin override row is stored; false → env default in force. */
+  enabled_overridden: boolean;
+};
+
+export type AdminMcpUpdateSettingsRequest = {
+  /** Stores an explicit override; omit to keep the stored value. */
+  enabled?: boolean | null;
+  /** When true, clear the override so the env default applies again. */
+  clear_overrides?: boolean;
 };
 export type RepoRenameRequest = {
   owner: string;
@@ -1403,6 +1712,8 @@ export type BranchProtectionRulePublic = {
   enforce_admins: boolean;
   required_linear_history: boolean;
   lock_branch: boolean;
+  /** GIT-22: pushes introducing unsigned commits are denied by the update hook. */
+  require_signed_commits: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -1427,6 +1738,8 @@ export type BranchProtectionRuleInput = {
   enforce_admins?: boolean;
   required_linear_history?: boolean;
   lock_branch?: boolean;
+  /** GIT-22: deny pushes introducing commits without a verified signature. */
+  require_signed_commits?: boolean;
 };
 
 export type BranchProtectionUpdateRequest = BranchProtectionRuleInput & {
@@ -1438,6 +1751,83 @@ export type BranchProtectionDeleteRequest = {
   name: string;
   id: string;
 };
+
+/** Protected tag ruleset rule (GIT-21). */
+export type TagProtectionRulePublic = {
+  id: string;
+  repo_id: string;
+  pattern: string;
+  allow_create: boolean;
+  allow_update: boolean;
+  allow_delete: boolean;
+  enforce_admins: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type TagProtectionListResponse = {
+  rules: TagProtectionRulePublic[];
+};
+
+export type TagProtectionRuleInput = {
+  owner: string;
+  name: string;
+  pattern: string;
+  allow_create?: boolean;
+  allow_update?: boolean;
+  allow_delete?: boolean;
+  enforce_admins?: boolean;
+};
+
+export type TagProtectionUpdateRequest = TagProtectionRuleInput & {
+  id: string;
+};
+
+export type TagProtectionDeleteRequest = {
+  owner: string;
+  name: string;
+  id: string;
+};
+
+/**
+ * Per-repo deploy key (GIT-23). Transport-only SSH credential — never an
+ * account identity, no session/RPC/web access.
+ */
+export type DeployKeyPublic = {
+  id: string;
+  repo_id: string;
+  title: string;
+  fingerprint: string;
+  key_type: string;
+  /** false = read-only (upload-pack); true = read/write (also receive-pack). */
+  can_write: boolean;
+  public_key?: string;
+  last_used_at?: string | null;
+  last_used_ip?: string | null;
+  created_by: string;
+  created_at: string;
+};
+
+export type DeployKeyListResponse = {
+  keys: DeployKeyPublic[];
+};
+
+export type DeployKeyCreateRequest = {
+  owner: string;
+  name: string;
+  title: string;
+  /** OpenSSH authorized_keys line (`ssh-ed25519 AAAA… comment`). */
+  public_key: string;
+  /** Defaults to false (read-only). */
+  can_write?: boolean;
+};
+
+export type DeployKeyDeleteRequest = {
+  owner: string;
+  name: string;
+  id: string;
+};
+
 
 export type CommitStatusState = "pending" | "success" | "failure" | "error";
 
@@ -1484,7 +1874,9 @@ export type ActionRunPublic = {
   head_ref: string;
   status: string;
   title: string;
+  run_number: number;
   actor?: string;
+  actor_avatar_url?: string | null;
   created_at?: string;
   updated_at?: string;
   finished_at?: string;
@@ -1506,6 +1898,12 @@ export type ActionRunsListRequest = {
   name: string;
   page?: number;
   per_page?: number;
+  status?: string;
+  event?: string;
+  branch?: string;
+  workflow?: string;
+  actor?: string;
+  query?: string;
 };
 
 export type ActionRunsListResponse = {
@@ -1531,10 +1929,13 @@ export type ActionJobLogRequest = {
   name: string;
   run_id: string;
   job_id: string;
+  offset?: number;
 };
 
 export type ActionJobLogResponse = {
   content: string;
+  next_offset: number;
+  size: number;
 };
 
 export type ActionWorkflowsListRequest = {
@@ -1549,8 +1950,14 @@ export type ActionWorkflowPublic = {
   supports_dispatch: boolean;
 };
 
+export type ActionWorkflowFileError = {
+  path: string;
+  message: string;
+};
+
 export type ActionWorkflowsListResponse = {
   workflows: ActionWorkflowPublic[];
+  errors: ActionWorkflowFileError[];
   git_ref: string;
 };
 
@@ -1570,6 +1977,8 @@ export type ActionRunMutationRequest = {
   owner: string;
   name: string;
   run_id: string;
+  job_id?: string;
+  failed_only?: boolean;
 };
 
 export type ActionRunMutationResponse = {
@@ -1931,6 +2340,86 @@ export type RevokePatRequest = {
   id: string;
 };
 
+// --- OAuth2 provider (API-03) ---
+
+/** `read:user` | `user:email` | `repo` | `package:read` | `package:write` */
+export type OAuthScope =
+  | "read:user"
+  | "user:email"
+  | "repo"
+  | "package:read"
+  | "package:write";
+
+/** Registered OAuth app — never carries a plaintext `client_secret`. */
+export type OAuthAppPublic = {
+  id: string;
+  name: string;
+  client_id: string;
+  client_secret_prefix: string;
+  redirect_uris: string[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type CreateOAuthAppRequest = {
+  name: string;
+  redirect_uris: string[];
+};
+
+/** `oauthApp.create` / `oauthApp.regenerateSecret` — one-time secret reveal. */
+export type CreateOAuthAppResponse = {
+  app: OAuthAppPublic;
+  client_secret: string;
+};
+
+export type UpdateOAuthAppRequest = {
+  id: string;
+  name?: string;
+  redirect_uris?: string[];
+};
+
+export type OAuthAppIdRequest = {
+  id: string;
+};
+
+/** `oauthApp.listGrants` row — one grant per (app, user). */
+export type OAuthGrantPublic = {
+  application_id: string;
+  app_name: string;
+  client_id: string;
+  scopes: string[];
+  granted_at: string;
+  last_used_at?: string | null;
+};
+
+/** `oauthApp.authorizeInfo` input — mirrors the `/oauth/authorize` query. */
+export type OAuthAuthorizeInfoRequest = {
+  client_id: string;
+  redirect_uri?: string;
+  scope?: string;
+};
+
+export type OAuthAuthorizeInfo = {
+  app_name: string;
+  client_id: string;
+  redirect_uri: string;
+  scopes: string[];
+  owner_username: string;
+};
+
+/** `oauthApp.authorize` input — consent decision. */
+export type OAuthAuthorizeRequest = {
+  client_id: string;
+  redirect_uri: string;
+  scope?: string;
+  state?: string;
+  approve: boolean;
+};
+
+export type OAuthAuthorizeResponse = {
+  redirect_to: string;
+};
+
 /** `sshKey.add` input — OpenSSH one-line public key (not a private key). */
 export type AddSshKeyRequest = {
   title: string;
@@ -2127,6 +2616,23 @@ export type MergePullRequest = {
 export type MergePullResponse = {
   pull: PullPublic;
   merge_commit_sha: string;
+};
+
+export type PullBranchStatusResponse = {
+  /** `up_to_date` | `behind` (head lacks commits the base branch added). */
+  status: string;
+  ahead_count: number;
+  behind_count: number;
+  base_sha: string;
+  head_sha: string;
+  can_update?: boolean;
+};
+
+export type UpdatePullBranchResponse = {
+  pull: PullPublic;
+  /** `up_to_date` (no-op) | `updated` (merge commit created on the head). */
+  status: string;
+  merge_commit_sha?: string | null;
 };
 
 export type RepoMergeSettings = {
@@ -2767,6 +3273,7 @@ export function createClient(opts: CreateClientOptions) {
       health: () => rpcCall<HealthResponse>(opts, "system.health", {}),
       echo: (input: EchoRequest) => rpcCall<EchoResponse>(opts, "system.echo", input),
       dbProbe: () => rpcCall<DbProbeResponse>(opts, "system.db_probe", {}),
+      manifest: () => rpcCall<ManifestResponse>(opts, "system.manifest", {}),
     },
     auth: {
       signup: (input: SignupRequest) => rpcCall<UserPublic>(opts, "auth.signup", input),
@@ -2835,6 +3342,10 @@ export function createClient(opts: CreateClientOptions) {
         rpcCall<RepoWatchersListResponse>(opts, "repo.watchers.list", input),
       forksList: (input: RepoForksListRequest) =>
         rpcCall<RepoForksListResponse>(opts, "repo.forks.list", input),
+      forkStatus: (input: RepoForkStatusRequest) =>
+        rpcCall<RepoForkStatusResponse>(opts, "repo.forkStatus", input),
+      syncFork: (input: RepoSyncForkRequest) =>
+        rpcCall<RepoSyncForkResponse>(opts, "repo.syncFork", input),
       updateMetadata: (input: RepoUpdateMetadataRequest) =>
         rpcCall<RepoPublic>(opts, "repo.updateMetadata", input),
       topicsSuggest: (input: RepoTopicsSuggestRequest) =>
@@ -2857,6 +3368,24 @@ export function createClient(opts: CreateClientOptions) {
         rpcCall<RepoLanguagesResponse>(opts, "repo.languages", input),
       activityList: (input: RepoActivityListRequest) =>
         rpcCall<RepoActivityListResponse>(opts, "repo.activity.list", input),
+      insightsContributors: (input: RepoInsightsContributorsRequest) =>
+        rpcCall<RepoInsightsContributorsResponse>(
+          opts,
+          "repo.insights.contributors",
+          input,
+        ),
+      insightsCommitActivity: (input: RepoInsightsCommitActivityRequest) =>
+        rpcCall<RepoInsightsCommitActivityResponse>(
+          opts,
+          "repo.insights.commitActivity",
+          input,
+        ),
+      insightsForkNetwork: (input: RepoInsightsForkNetworkRequest) =>
+        rpcCall<RepoInsightsForkNetworkResponse>(
+          opts,
+          "repo.insights.forkNetwork",
+          input,
+        ),
       commit: (input: RepoCommitRequest) =>
         rpcCall<RepoCommitResponse>(opts, "repo.commit", input),
       compare: (input: RepoCompareRequest) =>
@@ -2870,8 +3399,26 @@ export function createClient(opts: CreateClientOptions) {
         rpcCall<RepoBranchMutationResponse>(opts, "repo.branchRename", input),
       branchDelete: (input: RepoBranchDeleteRequest) =>
         rpcCall<RepoBranchMutationResponse>(opts, "repo.branchDelete", input),
+      file: {
+        create: (input: RepoFileCreateRequest) =>
+          rpcCall<RepoFileCommitResponse>(opts, "repo.file.create", input),
+        update: (input: RepoFileUpdateRequest) =>
+          rpcCall<RepoFileCommitResponse>(opts, "repo.file.update", input),
+        delete: (input: RepoFileDeleteRequest) =>
+          rpcCall<RepoFileCommitResponse>(opts, "repo.file.delete", input),
+        rename: (input: RepoFileRenameRequest) =>
+          rpcCall<RepoFileCommitResponse>(opts, "repo.file.rename", input),
+        upload: (input: RepoFileUploadRequest) =>
+          rpcCall<RepoFileCommitResponse>(opts, "repo.file.upload", input),
+        mkdir: (input: RepoFileMkdirRequest) =>
+          rpcCall<RepoFileCommitResponse>(opts, "repo.file.mkdir", input),
+        commitPolicy: (input: RepoFileCommitPolicyRequest) =>
+          rpcCall<RepoFileCommitPolicyResponse>(opts, "repo.file.commitPolicy", input),
+      },
       updateVisibility: (input: RepoUpdateVisibilityRequest) =>
         rpcCall<RepoPublic>(opts, "repo.updateVisibility", input),
+      setArchived: (input: RepoSetArchivedRequest) =>
+        rpcCall<RepoPublic>(opts, "repo.setArchived", input),
       softDelete: (input: RepoSoftDeleteRequest) =>
         rpcCall<RepoSoftDeleteResponse>(opts, "repo.softDelete", input),
       lfs: {
@@ -2887,6 +3434,12 @@ export function createClient(opts: CreateClientOptions) {
           rpcCall<RepoLfsListObjectsResponse>(opts, "repo.lfs.listObjects", input),
         download: (input: RepoLfsDownloadRequest) =>
           rpcCall<RepoLfsDownloadResponse>(opts, "repo.lfs.download", input),
+      },
+      quota: {
+        get: (input: RepoGetQuotaRequest) =>
+          rpcCall<RepoQuotaPublic>(opts, "repo.quota.get", input),
+        set: (input: RepoSetQuotaRequest) =>
+          rpcCall<RepoQuotaPublic>(opts, "repo.quota.set", input),
       },
       mirror: {
         get: (input: RepoMirrorGetRequest) =>
@@ -2909,6 +3462,8 @@ export function createClient(opts: CreateClientOptions) {
           rpcCall<RepoMirrorFetchHostKeyResponse>(opts, "repo.mirror.fetchHostKey", input),
       },
       templates: {
+        list: (input: RepoTemplatesListRequest) =>
+          rpcCall<RepoTemplatesListResponse>(opts, "repo.templates.list", input),
         getEnabled: (input: RepoTemplateGetEnabledRequest) =>
           rpcCall<RepoTemplateEnabledResponse>(opts, "repo.templates.getEnabled", input),
         setEnabled: (input: RepoTemplateSetEnabledRequest) =>
@@ -2948,6 +3503,24 @@ export function createClient(opts: CreateClientOptions) {
         delete: (input: BranchProtectionDeleteRequest) =>
           rpcCall<{ ok: boolean }>(opts, "repo.branchProtection.delete", input),
       },
+      tagProtection: {
+        list: (input: RepoGetRequest) =>
+          rpcCall<TagProtectionListResponse>(opts, "repo.tagProtection.list", input),
+        create: (input: TagProtectionRuleInput) =>
+          rpcCall<TagProtectionRulePublic>(opts, "repo.tagProtection.create", input),
+        update: (input: TagProtectionUpdateRequest) =>
+          rpcCall<TagProtectionRulePublic>(opts, "repo.tagProtection.update", input),
+        delete: (input: TagProtectionDeleteRequest) =>
+          rpcCall<{ ok: boolean }>(opts, "repo.tagProtection.delete", input),
+      },
+      deployKey: {
+        list: (input: RepoGetRequest) =>
+          rpcCall<DeployKeyListResponse>(opts, "repo.deployKey.list", input),
+        create: (input: DeployKeyCreateRequest) =>
+          rpcCall<DeployKeyPublic>(opts, "repo.deployKey.create", input),
+        delete: (input: DeployKeyDeleteRequest) =>
+          rpcCall<{ ok: boolean }>(opts, "repo.deployKey.delete", input),
+      },
       commitStatus: {
         create: (input: CommitStatusCreateRequest) =>
           rpcCall<CommitStatusPublic>(opts, "repo.commitStatus.create", input),
@@ -2981,6 +3554,18 @@ export function createClient(opts: CreateClientOptions) {
           rpcCall<ActionEnabledResponse>(opts, "repo.actions.getEnabled", input),
         setEnabled: (input: ActionSetEnabledRequest) =>
           rpcCall<ActionEnabledResponse>(opts, "repo.actions.setEnabled", input),
+      },
+      issues: {
+        getEnabled: (input: RepoUnitGetEnabledRequest) =>
+          rpcCall<RepoUnitEnabledResponse>(opts, "repo.issues.getEnabled", input),
+        setEnabled: (input: RepoUnitSetEnabledRequest) =>
+          rpcCall<RepoUnitEnabledResponse>(opts, "repo.issues.setEnabled", input),
+      },
+      pulls: {
+        getEnabled: (input: RepoUnitGetEnabledRequest) =>
+          rpcCall<RepoUnitEnabledResponse>(opts, "repo.pulls.getEnabled", input),
+        setEnabled: (input: RepoUnitSetEnabledRequest) =>
+          rpcCall<RepoUnitEnabledResponse>(opts, "repo.pulls.setEnabled", input),
       },
     },
     org: {
@@ -3087,6 +3672,10 @@ export function createClient(opts: CreateClientOptions) {
         rpcCall<PullCommitsResponse>(opts, "pull.commits", input),
       merge: (input: MergePullRequest) =>
         rpcCall<MergePullResponse>(opts, "pull.merge", input),
+      branchStatus: (input: PullRefRequest) =>
+        rpcCall<PullBranchStatusResponse>(opts, "pull.branchStatus", input),
+      updateBranch: (input: PullRefRequest) =>
+        rpcCall<UpdatePullBranchResponse>(opts, "pull.updateBranch", input),
       comments: {
         list: (input: PullRefRequest) =>
           rpcCall<PullCommentsListResponse>(opts, "pull.comments.list", input),
@@ -3219,6 +3808,25 @@ export function createClient(opts: CreateClientOptions) {
       revoke: (input: RevokePatRequest) =>
         rpcCall<{ ok: boolean }>(opts, "pat.revoke", input),
     },
+    oauthApp: {
+      create: (input: CreateOAuthAppRequest) =>
+        rpcCall<CreateOAuthAppResponse>(opts, "oauthApp.create", input),
+      list: () => rpcCall<OAuthAppPublic[]>(opts, "oauthApp.list", {}),
+      update: (input: UpdateOAuthAppRequest) =>
+        rpcCall<OAuthAppPublic>(opts, "oauthApp.update", input),
+      delete: (input: OAuthAppIdRequest) =>
+        rpcCall<{ ok: boolean }>(opts, "oauthApp.delete", input),
+      regenerateSecret: (input: OAuthAppIdRequest) =>
+        rpcCall<CreateOAuthAppResponse>(opts, "oauthApp.regenerateSecret", input),
+      listGrants: () =>
+        rpcCall<OAuthGrantPublic[]>(opts, "oauthApp.listGrants", {}),
+      revoke: (input: OAuthAppIdRequest) =>
+        rpcCall<{ ok: boolean }>(opts, "oauthApp.revoke", input),
+      authorizeInfo: (input: OAuthAuthorizeInfoRequest) =>
+        rpcCall<OAuthAuthorizeInfo>(opts, "oauthApp.authorizeInfo", input),
+      authorize: (input: OAuthAuthorizeRequest) =>
+        rpcCall<OAuthAuthorizeResponse>(opts, "oauthApp.authorize", input),
+    },
     sshKey: {
       add: (input: AddSshKeyRequest) =>
         rpcCall<SshKeyListItem>(opts, "sshKey.add", input),
@@ -3267,6 +3875,18 @@ export function createClient(opts: CreateClientOptions) {
         updateSettings: (input: AdminLfsUpdateSettingsRequest) =>
           rpcCall<AdminLfsSettingsPublic>(opts, "admin.lfs.updateSettings", input),
         getUsage: () => rpcCall<AdminLfsUsageResponse>(opts, "admin.lfs.getUsage", {}),
+      },
+      git: {
+        getSettings: () =>
+          rpcCall<AdminGitSettingsPublic>(opts, "admin.git.getSettings", {}),
+        updateSettings: (input: AdminGitUpdateSettingsRequest) =>
+          rpcCall<AdminGitSettingsPublic>(opts, "admin.git.updateSettings", input),
+      },
+      mcp: {
+        getSettings: () =>
+          rpcCall<AdminMcpSettingsPublic>(opts, "admin.mcp.getSettings", {}),
+        updateSettings: (input: AdminMcpUpdateSettingsRequest) =>
+          rpcCall<AdminMcpSettingsPublic>(opts, "admin.mcp.updateSettings", input),
       },
       templates: {
         list: () => rpcCall<AdminTemplatesListResponse>(opts, "admin.templates.list", {}),
@@ -3366,6 +3986,17 @@ export function systemDbProbeQueryOptions(client: OxideanClient) {
     queryKey: ["system", "dbProbe"] as const,
     queryFn: async () => {
       const res = await client.system.dbProbe();
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
+export function systemManifestQueryOptions(client: OxideanClient) {
+  return {
+    queryKey: ["system", "manifest"] as const,
+    queryFn: async () => {
+      const res = await client.system.manifest();
       if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
       return res.data;
     },
@@ -3651,6 +4282,37 @@ export function repoCompareQueryOptions(
   };
 }
 
+export function repoForkStatusQueryOptions(
+  client: OxideanClient,
+  input: RepoForkStatusRequest,
+) {
+  return {
+    queryKey: [
+      "repo",
+      "forkStatus",
+      input.owner,
+      input.name,
+      input.branch ?? "",
+    ] as const,
+    queryFn: async () => {
+      const res = await client.repo.forkStatus(input);
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
+export function repoSyncForkMutationOptions(client: OxideanClient) {
+  return {
+    mutationKey: ["repo", "syncFork"] as const,
+    mutationFn: async (input: RepoSyncForkRequest) => {
+      const res = await client.repo.syncFork(input);
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
 export function repoBlameQueryOptions(
   client: OxideanClient,
   input: RepoBlameRequest,
@@ -3736,7 +4398,23 @@ export function actionsListRunsQueryOptions(
   input: ActionRunsListRequest,
 ) {
   return {
-    queryKey: ["repo", "actions", "listRuns", input.owner, input.name] as const,
+    // Filters are part of the cache key — different filter sets must not share
+    // a cached page.
+    queryKey: [
+      "repo",
+      "actions",
+      "listRuns",
+      input.owner,
+      input.name,
+      input.page ?? 1,
+      input.per_page ?? 0,
+      input.status ?? "",
+      input.event ?? "",
+      input.branch ?? "",
+      input.workflow ?? "",
+      input.actor ?? "",
+      input.query ?? "",
+    ] as const,
     queryFn: async () => {
       const res = await client.repo.actions.listRuns(input);
       if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
@@ -3909,6 +4587,83 @@ export function patRevokeMutationOptions(client: OxideanClient) {
     mutationKey: ["pat", "revoke"] as const,
     mutationFn: async (input: RevokePatRequest) => {
       const res = await client.pat.revoke(input);
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
+export function oauthAppListQueryOptions(client: OxideanClient) {
+  return {
+    queryKey: ["oauthApp", "list"] as const,
+    queryFn: async () => {
+      const res = await client.oauthApp.list();
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
+export function oauthAppGrantsQueryOptions(client: OxideanClient) {
+  return {
+    queryKey: ["oauthApp", "listGrants"] as const,
+    queryFn: async () => {
+      const res = await client.oauthApp.listGrants();
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
+export function oauthAppCreateMutationOptions(client: OxideanClient) {
+  return {
+    mutationKey: ["oauthApp", "create"] as const,
+    mutationFn: async (input: CreateOAuthAppRequest) => {
+      const res = await client.oauthApp.create(input);
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
+export function oauthAppUpdateMutationOptions(client: OxideanClient) {
+  return {
+    mutationKey: ["oauthApp", "update"] as const,
+    mutationFn: async (input: UpdateOAuthAppRequest) => {
+      const res = await client.oauthApp.update(input);
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
+export function oauthAppDeleteMutationOptions(client: OxideanClient) {
+  return {
+    mutationKey: ["oauthApp", "delete"] as const,
+    mutationFn: async (input: OAuthAppIdRequest) => {
+      const res = await client.oauthApp.delete(input);
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
+export function oauthAppRegenerateSecretMutationOptions(client: OxideanClient) {
+  return {
+    mutationKey: ["oauthApp", "regenerateSecret"] as const,
+    mutationFn: async (input: OAuthAppIdRequest) => {
+      const res = await client.oauthApp.regenerateSecret(input);
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
+export function oauthAppRevokeMutationOptions(client: OxideanClient) {
+  return {
+    mutationKey: ["oauthApp", "revoke"] as const,
+    mutationFn: async (input: OAuthAppIdRequest) => {
+      const res = await client.oauthApp.revoke(input);
       if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
       return res.data;
     },
@@ -4373,6 +5128,37 @@ export function labelDeleteMutationOptions(client: OxideanClient) {
   };
 }
 
+export function pullBranchStatusQueryOptions(
+  client: OxideanClient,
+  input: PullRefRequest,
+) {
+  return {
+    queryKey: [
+      "pull",
+      "branchStatus",
+      input.owner,
+      input.name,
+      input.number,
+    ] as const,
+    queryFn: async () => {
+      const res = await client.pull.branchStatus(input);
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
+export function pullUpdateBranchMutationOptions(client: OxideanClient) {
+  return {
+    mutationKey: ["pull", "updateBranch"] as const,
+    mutationFn: async (input: PullRefRequest) => {
+      const res = await client.pull.updateBranch(input);
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
 export function adminAuthGetSettingsQueryOptions(client: OxideanClient) {
   return {
     queryKey: ["admin", "auth", "getSettings"] as const,
@@ -4399,6 +5185,7 @@ export function adminAuthUpdateSettingsMutationOptions(client: OxideanClient) {
 export const queryOptions = {
   systemHealth: systemHealthQueryOptions,
   systemDbProbe: systemDbProbeQueryOptions,
+  systemManifest: systemManifestQueryOptions,
   authMe: authMeQueryOptions,
   authProviderConfig: authProviderConfigQueryOptions,
   userGetProfile: userGetProfileQueryOptions,
@@ -4410,9 +5197,13 @@ export const queryOptions = {
   repoCommits: repoCommitsQueryOptions,
   repoCommit: repoCommitQueryOptions,
   repoCompare: repoCompareQueryOptions,
+  repoForkStatus: repoForkStatusQueryOptions,
   repoBlame: repoBlameQueryOptions,
+  pullBranchStatus: pullBranchStatusQueryOptions,
   repoSearch: repoSearchQueryOptions,
   patList: patListQueryOptions,
+  oauthAppList: oauthAppListQueryOptions,
+  oauthAppGrants: oauthAppGrantsQueryOptions,
   sshKeyList: sshKeyListQueryOptions,
   gpgKeyList: gpgKeyListQueryOptions,
   emailList: emailListQueryOptions,
@@ -4426,9 +5217,16 @@ export const mutationOptions = {
   authLogoutAll: authLogoutAllMutationOptions,
   userUpdateProfile: userUpdateProfileMutationOptions,
   repoCreate: repoCreateMutationOptions,
+  repoSyncFork: repoSyncForkMutationOptions,
+  pullUpdateBranch: pullUpdateBranchMutationOptions,
   patCreateClassic: patCreateClassicMutationOptions,
   patCreateFineGrained: patCreateFineGrainedMutationOptions,
   patRevoke: patRevokeMutationOptions,
+  oauthAppCreate: oauthAppCreateMutationOptions,
+  oauthAppUpdate: oauthAppUpdateMutationOptions,
+  oauthAppDelete: oauthAppDeleteMutationOptions,
+  oauthAppRegenerateSecret: oauthAppRegenerateSecretMutationOptions,
+  oauthAppRevoke: oauthAppRevokeMutationOptions,
   sshKeyAdd: sshKeyAddMutationOptions,
   sshKeyRevoke: sshKeyRevokeMutationOptions,
   gpgKeyAdd: gpgKeyAddMutationOptions,

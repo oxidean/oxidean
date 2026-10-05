@@ -5,11 +5,13 @@
 //! HTTP CGI in [`http_backend`].
 
 pub mod http_backend;
+pub mod quota;
 pub mod web_flow;
 
 use std::path::{Path, PathBuf};
 
 use oxidean_core::AppError;
+use oxidean_git::GitBackend;
 
 /// Bare repo path: `{repos_dir}/{owner}/{name}.git` (D-30).
 ///
@@ -30,6 +32,24 @@ pub fn bare_repo_path(repos_dir: &Path, owner: &str, name: &str) -> Result<PathB
         ));
     }
     Ok(repos_dir.join(owner).join(format!("{name}.git")))
+}
+
+/// Tip OID of `refs/heads/{branch}` in a bare repo — `Ok(None)` when the branch
+/// is absent. Shared by fork-sync and update-PR-branch paths (GIT-24).
+pub async fn branch_tip(
+    git: &dyn GitBackend,
+    bare: &Path,
+    branch: &str,
+) -> Result<Option<String>, AppError> {
+    let want = format!("refs/heads/{branch}");
+    let refs = git
+        .list_refs(bare)
+        .await
+        .map_err(|e| AppError::new("repo.ref_lookup_failed", format!("could not list refs: {e}")))?;
+    Ok(refs
+        .iter()
+        .find(|r| r.name == want)
+        .map(|r| r.oid.clone()))
 }
 
 fn validate_owner_segment(owner: &str) -> Result<(), AppError> {

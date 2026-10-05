@@ -10,13 +10,16 @@ use crate::git::bare_repo_path;
 use crate::rpc::RpcCtx;
 
 use super::search_query::parse_search_query;
+use super::units::{require_unit_enabled, RepoUnit};
 use super::{language_stats, map_git_err, resolve_repo_for_read, AccessibleRepo};
 
 /// `repo.search` — permission-aware in-repo search.
-pub async fn search(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoSearchResponse, AppError> {
-    let req: RepoSearchRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid repo.search input: {e}"))
-    })?;
+pub async fn search(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<RepoSearchResponse, AppError> {
+    let req: RepoSearchRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid repo.search input: {e}")))?;
     let accessible = resolve_repo_for_read(ctx, &req.owner, &req.name).await?;
     let limit = req.limit.clamp(1, 100);
     let offset = req.offset;
@@ -24,14 +27,19 @@ pub async fn search(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoSearch
     let parsed = parse_search_query(&q);
 
     let (hits, truncated) = match req.search_type {
-        RepoSearchType::Code => {
-            search_code(ctx, &accessible, &req, &parsed, offset, limit).await?
-        }
+        RepoSearchType::Code => search_code(ctx, &accessible, &req, &parsed, offset, limit).await?,
         RepoSearchType::Commits => {
             search_commits(ctx, &accessible, &req, &parsed, offset, limit).await?
         }
-        RepoSearchType::Issues => search_issues(ctx, &accessible, &parsed, offset, limit).await?,
-        RepoSearchType::Pulls => search_pulls(ctx, &accessible, &parsed, offset, limit).await?,
+        // Unit toggles (COL-13): issues/pulls hit lists are unit surfaces.
+        RepoSearchType::Issues => {
+            require_unit_enabled(ctx, RepoUnit::Issues, &accessible.row.id).await?;
+            search_issues(ctx, &accessible, &parsed, offset, limit).await?
+        }
+        RepoSearchType::Pulls => {
+            require_unit_enabled(ctx, RepoUnit::Pulls, &accessible.row.id).await?;
+            search_pulls(ctx, &accessible, &parsed, offset, limit).await?
+        }
     };
 
     Ok(RepoSearchResponse {

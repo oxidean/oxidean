@@ -12,7 +12,7 @@ use axum::Json;
 use chrono::{DateTime, Utc};
 use oxidean_core::{
     ClassicPatScope, ContentsPerm, FgRepoAccess, PatKind, CLASSIC_PAT_PREFIX,
-    FINE_GRAINED_PAT_PREFIX,
+    FINE_GRAINED_PAT_PREFIX, OAUTH_ACCESS_TOKEN_PREFIX,
 };
 use oxidean_db::{PatRow, RepositoryRow, UserRow};
 use serde::Deserialize;
@@ -56,6 +56,15 @@ fn unauthorized_basic() -> Response {
         StatusCode::UNAUTHORIZED,
         [(header::WWW_AUTHENTICATE, WWW_AUTHENTICATE)],
         "Unauthorized",
+    )
+        .into_response()
+}
+
+fn forbidden_archived() -> Response {
+    (
+        StatusCode::FORBIDDEN,
+        [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
+        "Repository is archived (read-only)",
     )
         .into_response()
 }
@@ -124,8 +133,12 @@ fn parse_basic(headers: &HeaderMap) -> Result<Option<(String, String)>, Response
     Ok(Some((user.to_string(), pass.to_string())))
 }
 
-fn looks_like_pat(password: &str) -> bool {
-    password.starts_with(CLASSIC_PAT_PREFIX) || password.starts_with(FINE_GRAINED_PAT_PREFIX)
+/// Smart HTTP credential check: PAT prefixes, or OAuth access tokens
+/// (`oxidean_oat_` — resolved via `oauth::authenticate_oauth_token`; API-03).
+fn looks_like_token(password: &str) -> bool {
+    password.starts_with(CLASSIC_PAT_PREFIX)
+        || password.starts_with(FINE_GRAINED_PAT_PREFIX)
+        || password.starts_with(OAUTH_ACCESS_TOKEN_PREFIX)
 }
 
 /// Client IP for last-used / rate-limit — rightmost `X-Forwarded-For` hop
@@ -158,6 +171,10 @@ fn pat_expired(expires_at: &Option<String>) -> bool {
 struct AuthedPat {
     pat: PatRow,
     owner: UserRow,
+    /// True when the credential was an `oxidean_oat_` access token
+    /// (`pat` is a synthesized classic-scope row — see
+    /// `oauth::OAuthTokenIdentity::synthetic_pat`).
+    is_oauth: bool,
 }
 
 /// Record a failed Basic/PAT attempt against IP and optional username→user bucket.
@@ -206,21 +223,39 @@ async fn authenticate_pat(
         }
     }
 
-    if !looks_like_pat(&password) {
+    if !looks_like_token(&password) {
         record_failed_auth(state, headers, Some(&username)).await;
         return Err(unauthorized_pat_hint());
     }
-    let token_hash = sha256_hex(password.as_bytes());
-    let pat = match state.db.find_pat_by_token_hash(&token_hash).await {
-        Ok(Some(p)) => p,
-        Ok(None) => {
-            record_failed_auth(state, headers, Some(&username)).await;
-            return Err(unauthorized_pat_hint());
+    let (pat, is_oauth) = if password.starts_with(OAUTH_ACCESS_TOKEN_PREFIX) {
+        // API-03: OAuth access tokens authenticate like classic PATs.
+        // The synthesized row carries `repo`/`package:*` scopes so
+        // `pat_allows_operation` applies unchanged downstream.
+        match crate::oauth::authenticate_oauth_token(&state.db, &password).await {
+            Ok(Some(ident)) => (ident.synthetic_pat(), true),
+            Ok(None) => {
+                record_failed_auth(state, headers, Some(&username)).await;
+                return Err(unauthorized_pat_hint());
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "authenticate_oauth_token failed");
+                return Err(StatusCode::INTERNAL_SERVER_ERROR.into_response());
+            }
         }
-        Err(e) => {
-            tracing::error!(error = %e, "find_pat_by_token_hash failed");
-            return Err(StatusCode::INTERNAL_SERVER_ERROR.into_response());
-        }
+    } else {
+        let token_hash = sha256_hex(password.as_bytes());
+        let pat = match state.db.find_pat_by_token_hash(&token_hash).await {
+            Ok(Some(p)) => p,
+            Ok(None) => {
+                record_failed_auth(state, headers, Some(&username)).await;
+                return Err(unauthorized_pat_hint());
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "find_pat_by_token_hash failed");
+                return Err(StatusCode::INTERNAL_SERVER_ERROR.into_response());
+            }
+        };
+        (pat, false)
     };
     if pat_expired(&pat.expires_at) {
         record_failed_auth(state, headers, Some(&username)).await;
@@ -251,7 +286,11 @@ async fn authenticate_pat(
     }
     // Successful auth clears user bucket only (D-26).
     limiter_lock(state).clear_user(&owner.id);
-    Ok(Some(AuthedPat { pat, owner }))
+    Ok(Some(AuthedPat {
+        pat,
+        owner,
+        is_oauth,
+    }))
 }
 
 struct ResolvedRepo {
@@ -365,15 +404,23 @@ fn strip_git_suffix(repo_git: &str) -> Option<&str> {
     repo_git.strip_suffix(".git").filter(|n| !n.is_empty())
 }
 
-async fn touch_last_used(state: &AppState, pat_id: &str, headers: &HeaderMap) {
+async fn touch_last_used(state: &AppState, auth: &AuthedPat, headers: &HeaderMap) {
     let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
     let ip = client_ip(headers);
-    if let Err(e) = state
-        .db
-        .touch_pat_last_used(pat_id, &now, ip.as_deref())
-        .await
-    {
-        tracing::warn!(error = %e, pat_id, "touch_pat_last_used failed");
+    let pat_id = auth.pat.id.as_str();
+    let res = if auth.is_oauth {
+        state
+            .db
+            .touch_oauth_token_last_used(pat_id, &now, ip.as_deref())
+            .await
+    } else {
+        state
+            .db
+            .touch_pat_last_used(pat_id, &now, ip.as_deref())
+            .await
+    };
+    if let Err(e) = res {
+        tracing::warn!(error = %e, pat_id, "token last_used touch failed");
     }
 }
 
@@ -464,6 +511,11 @@ async fn authorize_and_cgi(
         if receive && !meets(capability, Capability::Write) {
             return unauthorized_basic();
         }
+        // GIT-20: archived repositories are read-only — receive-pack (push) is
+        // rejected after ACL so missing/unauthorized responses stay identical.
+        if receive && resolved.row.archived {
+            return forbidden_archived();
+        }
         // D-24 / Open Q2: unverified may fetch; push denied with email_unverified.
         if receive && auth.owner.email_verified_at.is_none() {
             return email_unverified_push();
@@ -474,7 +526,31 @@ async fn authorize_and_cgi(
             Ok(false) => return forbidden_insufficient_scope(),
             Err(r) => return r,
         }
-        touch_last_used(state, &auth.pat.id, headers).await;
+        touch_last_used(state, auth, headers).await;
+    }
+
+    // API-06: refs/pull/* is a synthesized read-only namespace. Reject pushes
+    // that target it at the edge (before git-receive-pack CGI) — the installed
+    // hooks/update also denies it, but only when the protection helper is
+    // wired, so this scan is the deterministic gate.
+    if receive && path_tail == "git-receive-pack" {
+        let updates = crate::webhook::payloads::parse_receive_ref_updates(body);
+        if let Some((_, _, bad)) = updates
+            .iter()
+            .find(|(_, _, r)| crate::pull::refs::is_pull_ref(r))
+        {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(serde_json::json!({
+                    "ok": false,
+                    "error": {
+                        "code": "git.pull_refs_read_only",
+                        "message": format!("pushes to {bad} are denied: refs/pull/* is a synthesized read-only namespace"),
+                    }
+                })),
+            )
+                .into_response();
+        }
     }
 
     let path_info = format!(
@@ -497,12 +573,14 @@ async fn authorize_and_cgi(
         .unwrap_or_default();
     let helper = crate::protection::resolve_protection_helper();
     let oxidean_env = std::env::var("OXIDEAN_ENV").ok();
+    let git_repo_quota = std::env::var(crate::git::quota::REPO_QUOTA_ENV).ok();
     let protection = if receive && !db_url.is_empty() {
         Some(http_backend::ProtectionCgiEnv {
             database_url: &db_url,
             actor_capability: actor_capability_label,
             helper_path: helper.as_deref(),
             oxidean_env: oxidean_env.as_deref(),
+            git_repo_quota_bytes: git_repo_quota.as_deref(),
         })
     } else {
         None
@@ -543,6 +621,14 @@ async fn authorize_and_cgi(
                             let bare = repos_dir
                                 .join(&owner_slug)
                                 .join(format!("{repo_name}.git"));
+                            // GIT-25: refresh cached size_bytes for UI/admin surfaces.
+                            if let Err(e) = crate::git::quota::refresh_repo_size_bytes(
+                                &db, &repo_id, &bare,
+                            )
+                            .await
+                            {
+                                tracing::warn!(error = %e, "refresh repo size_bytes failed");
+                            }
                             crate::repo::record_ref_updates(
                                 &db,
                                 &repo_id,
@@ -553,6 +639,18 @@ async fn authorize_and_cgi(
                             )
                             .await;
                             crate::webhook::dispatch::notify_push(
+                                &db,
+                                &repo_id,
+                                &owner_slug,
+                                &repo_name,
+                                &login,
+                                &uid,
+                                &updates_wh,
+                                &env_name,
+                            )
+                            .await;
+                            // API-04: create/delete refs fan out beside `push`.
+                            crate::webhook::dispatch::notify_ref_events(
                                 &db,
                                 &repo_id,
                                 &owner_slug,

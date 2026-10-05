@@ -27,6 +27,12 @@
 		reverse_proxy {$API_HOST:api.railway.internal}:{$API_PORT:8080}
 	}
 
+	# Priority ≈ Traefik 110 — CLI install script + binaries
+	@cli path /cli/* /cli
+	handle @cli {
+		reverse_proxy {$API_HOST:api.railway.internal}:{$API_PORT:8080}
+	}
+
 	# Priority ≈ Traefik 100 — API surface
 	@api path /api/* /uploads/* /health /api /uploads
 	handle @api {

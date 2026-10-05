@@ -228,6 +228,14 @@ export const Route = createFileRoute("/$owner/$repo/")({
         title: `${params.owner}/${params.repo} · Oxidean`,
       },
     ],
+    links: [
+      {
+        rel: "alternate",
+        type: "application/atom+xml",
+        title: `${params.owner}/${params.repo} activity feed`,
+        href: `/api/repos/${params.owner}/${params.repo}/activity.atom`,
+      },
+    ],
   }),
   loader: async ({ params }): Promise<CodeHomeLoaderData> => {
     const owner = String((params as { owner?: string }).owner ?? "");
@@ -362,6 +370,7 @@ export function RepoCodeHome() @{
                   refName={phase.refName}
                   refs={phase.refs}
                   empty={false}
+                  canWrite={!!phase.repo.can_write}
                 />
                 <div className="mt-4">
                   <RepoLastCommitBar
