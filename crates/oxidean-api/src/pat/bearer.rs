@@ -280,6 +280,7 @@ fn classify(procedure: &str) -> PatProc {
     match procedure {
         // Public / anonymous-safe.
         "system.health"
+        | "system.manifest"
         | "system.echo"
         | "system.db_probe"
         | "auth.provider_config"
@@ -702,6 +703,7 @@ mod tests {
     fn open_and_identity_classification() {
         for p in [
             "system.health",
+            "system.manifest",
             "system.echo",
             "system.db_probe",
             "auth.provider_config",
