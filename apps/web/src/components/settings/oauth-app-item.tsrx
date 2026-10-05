@@ -134,7 +134,7 @@ export function OAuthAppItem({ app }: OAuthAppItemProps) @{
           type="button"
           variant="outline"
           disabled={busy}
-          onClick={() => void rotate.mutateAsync()}
+          onClick={() => void rotate.mutateAsync({ id: app.id })}
         >
           {(rotate.isPending ? "Rotating…" : "Rotate secret") as string}
         </Button>
@@ -152,7 +152,7 @@ export function OAuthAppItem({ app }: OAuthAppItemProps) @{
             type="button"
             variant="destructive"
             disabled={busy}
-            onClick={() => void remove.mutateAsync()}
+            onClick={() => void remove.mutateAsync({ id: app.id })}
           >
             {(remove.isPending ? "Deleting…" : "Confirm delete") as string}
           </Button>;
