@@ -63,7 +63,7 @@ function SecretReveal(props: { secret: string; onDone: () => void }) @{
       <Button
         type="button"
         variant="secondary"
-        className="h-11 shrink-0"
+        className="shrink-0"
         onClick={() => void copySecret()}
       >
         {(copyState === "copied" ? "Copied" : "Copy secret") as string}

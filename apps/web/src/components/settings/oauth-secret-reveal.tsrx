@@ -45,7 +45,7 @@ export function OAuthSecretReveal({ secret }: OAuthSecretRevealProps) @{
       <Button
         type="button"
         variant="outline"
-        className="h-11 shrink-0"
+        className="shrink-0"
         aria-label="Copy client secret"
         onClick={() => void copySecret()}
       >

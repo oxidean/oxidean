@@ -655,7 +655,7 @@ export function OrgMembersPage() @{
                     <Button
                       type="button"
                       variant="secondary"
-                      className="h-11 shrink-0"
+                      className="shrink-0"
                       onClick={() => void copyInviteUrl()}
                     >
                       {(copyState === "copied" ? "Copied" : "Copy link") as string}
