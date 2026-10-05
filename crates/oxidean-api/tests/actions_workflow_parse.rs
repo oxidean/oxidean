@@ -171,6 +171,45 @@ jobs:
 }
 
 #[tokio::test]
+async fn actions_workflow_parse_defaults_run_shell_and_workdir() {
+    let doc = parse_workflow_yaml(
+        br#"
+name: Defaults
+on: [push]
+defaults:
+  run:
+    shell: sh
+    working-directory: app
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo inherits
+      - run: echo step-wins
+        shell: bash
+        working-directory: sub
+  b:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: zsh
+        working-directory: jobdir
+    steps:
+      - run: echo job-wins
+"#,
+    )
+    .expect("parse");
+    let a = &doc.jobs[0].steps;
+    assert_eq!(a[0].shell.as_deref(), Some("sh"));
+    assert_eq!(a[0].working_directory.as_deref(), Some("app"));
+    assert_eq!(a[1].shell.as_deref(), Some("bash"));
+    assert_eq!(a[1].working_directory.as_deref(), Some("sub"));
+    let b = &doc.jobs[1].steps;
+    assert_eq!(b[0].shell.as_deref(), Some("zsh"));
+    assert_eq!(b[0].working_directory.as_deref(), Some("jobdir"));
+}
+
+#[tokio::test]
 async fn actions_workflow_parse_does_not_execute_steps() {
     // Guard: discovery/parse must not spawn containers — only return documents.
     let _git: Arc<dyn GitBackend> = Arc::new(CliGitBackend::new());
