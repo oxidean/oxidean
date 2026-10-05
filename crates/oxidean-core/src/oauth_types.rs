@@ -25,7 +25,7 @@ pub const OAUTH_CODE_TTL_SECS: i64 = 600;
 pub const OAUTH_TOKEN_TTL_SECS: i64 = 8 * 3600;
 
 /// Scopes an OAuth grant may carry. Space-delimited on the wire and at rest.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub enum OAuthScope {
     /// Identity: read the user's profile via `/oauth/userinfo`.
     #[serde(rename = "read:user")]
@@ -109,7 +109,7 @@ pub fn oauth_scopes_or_default(raw: Option<&str>) -> Result<Vec<OAuthScope>, Str
 }
 
 /// Registered app as shown to its owner — `client_secret` is never included.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct OAuthAppPublic {
     pub id: String,
     pub name: String,
@@ -122,7 +122,7 @@ pub struct OAuthAppPublic {
 }
 
 /// `oauthApp.create` input.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CreateOAuthAppRequest {
     pub name: String,
     pub redirect_uris: Vec<String>,
@@ -130,14 +130,14 @@ pub struct CreateOAuthAppRequest {
 
 /// `oauthApp.create` / `oauthApp.regenerateSecret` response — the only places a
 /// plaintext `client_secret` ever appears.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CreateOAuthAppResponse {
     pub app: OAuthAppPublic,
     pub client_secret: String,
 }
 
 /// `oauthApp.update` input — omitted fields stay unchanged.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct UpdateOAuthAppRequest {
     pub id: String,
     #[serde(default)]
@@ -147,14 +147,14 @@ pub struct UpdateOAuthAppRequest {
 }
 
 /// `oauthApp.delete` / `oauthApp.regenerateSecret` / `oauthApp.revoke` input.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct OAuthAppIdRequest {
     pub id: String,
 }
 
 /// One row of `oauthApp.listGrants` — a user's grant to an application
 /// (grouped across the app's live tokens for that user).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct OAuthGrantPublic {
     /// `oauth_applications.id` — pass to `oauthApp.revoke`.
     pub application_id: String,
@@ -167,7 +167,7 @@ pub struct OAuthGrantPublic {
 }
 
 /// `oauthApp.authorizeInfo` input — mirrors the `/oauth/authorize` query.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct OAuthAuthorizeInfoRequest {
     pub client_id: String,
     #[serde(default)]
@@ -177,7 +177,7 @@ pub struct OAuthAuthorizeInfoRequest {
 }
 
 /// What the consent screen renders.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct OAuthAuthorizeInfo {
     pub app_name: String,
     pub client_id: String,
@@ -188,7 +188,7 @@ pub struct OAuthAuthorizeInfo {
 }
 
 /// `oauthApp.authorize` input — the consent decision.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct OAuthAuthorizeRequest {
     pub client_id: String,
     pub redirect_uri: String,
@@ -200,13 +200,13 @@ pub struct OAuthAuthorizeRequest {
 }
 
 /// `oauthApp.authorize` response — the browser should navigate here.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct OAuthAuthorizeResponse {
     pub redirect_to: String,
 }
 
 /// `POST /oauth/token` success body (RFC 6749 §5.1).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct OAuthTokenResponse {
     pub access_token: String,
     pub token_type: String,
@@ -215,7 +215,7 @@ pub struct OAuthTokenResponse {
 }
 
 /// `GET /oauth/userinfo` body — Bearer-gated identity surface.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct OAuthUserInfoResponse {
     pub id: String,
     pub username: String,

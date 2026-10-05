@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 /// PR lifecycle: open ↔ closed; merged is terminal for reopen-as-open of same merge.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum PullState {
     Open,
@@ -30,7 +30,7 @@ impl PullState {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum MergeMethod {
     Merge,
@@ -57,7 +57,7 @@ impl MergeMethod {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum PullReviewState {
     Approved,
@@ -87,7 +87,7 @@ impl PullReviewState {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PullPublic {
     pub id: String,
     pub repo_id: String,
@@ -125,7 +125,7 @@ pub struct PullPublic {
     pub assignees: Vec<crate::IssueAssigneePublic>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CreatePullRequest {
     pub owner: String,
     pub name: String,
@@ -143,14 +143,14 @@ pub struct CreatePullRequest {
     pub draft: Option<bool>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PullRefRequest {
     pub owner: String,
     pub name: String,
     pub number: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PullListRequest {
     pub owner: String,
     pub name: String,
@@ -175,7 +175,7 @@ pub struct PullListRequest {
     pub limit: Option<u32>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PullListResponse {
     pub pulls: Vec<PullPublic>,
     pub total: i64,
@@ -183,7 +183,7 @@ pub struct PullListResponse {
     pub limit: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct UpdatePullRequest {
     pub owner: String,
     pub name: String,
@@ -198,7 +198,7 @@ pub struct UpdatePullRequest {
     pub draft: Option<bool>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct MergePullRequest {
     pub owner: String,
     pub name: String,
@@ -212,7 +212,7 @@ pub struct MergePullRequest {
     pub delete_branch: Option<bool>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct MergePullResponse {
     pub pull: PullPublic,
     pub merge_commit_sha: String,
@@ -220,7 +220,7 @@ pub struct MergePullResponse {
 
 /// `pull.branchStatus` response — head vs live base tip freshness (GIT-24).
 /// `PullRefRequest` input.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PullBranchStatusResponse {
     /// `up_to_date` when the base tip is already reachable from the head,
     /// otherwise `behind` (the base branch has commits the head lacks).
@@ -239,7 +239,7 @@ pub struct PullBranchStatusResponse {
 }
 
 /// `pull.updateBranch` response (GIT-24). `PullRefRequest` input.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct UpdatePullBranchResponse {
     pub pull: PullPublic,
     /// `up_to_date` (no-op) | `updated` (merge commit created on the head).
@@ -249,14 +249,14 @@ pub struct UpdatePullBranchResponse {
     pub merge_commit_sha: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoMergeSettings {
     pub allow_merge_commit: bool,
     pub allow_squash_merge: bool,
     pub allow_rebase_merge: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct UpdateRepoMergeSettingsRequest {
     pub owner: String,
     pub name: String,
@@ -268,7 +268,7 @@ pub struct UpdateRepoMergeSettingsRequest {
     pub allow_rebase_merge: Option<bool>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PullCommentPublic {
     pub id: String,
     pub pull_id: String,
@@ -291,7 +291,7 @@ pub struct PullCommentPublic {
     pub updated_at: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CreatePullCommentRequest {
     pub owner: String,
     pub name: String,
@@ -309,12 +309,12 @@ pub struct CreatePullCommentRequest {
     pub commit_sha: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PullCommentsListResponse {
     pub comments: Vec<PullCommentPublic>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ResolvePullCommentRequest {
     pub owner: String,
     pub name: String,
@@ -323,7 +323,7 @@ pub struct ResolvePullCommentRequest {
     pub resolved: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PullReviewPublic {
     pub id: String,
     pub pull_id: String,
@@ -340,7 +340,7 @@ pub struct PullReviewPublic {
     pub dismiss_reason: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SubmitPullReviewRequest {
     pub owner: String,
     pub name: String,
@@ -351,7 +351,7 @@ pub struct SubmitPullReviewRequest {
     pub body: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DismissPullReviewRequest {
     pub owner: String,
     pub name: String,
@@ -361,12 +361,12 @@ pub struct DismissPullReviewRequest {
     pub reason: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PullReviewsListResponse {
     pub reviews: Vec<PullReviewPublic>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PullReviewRequestMutate {
     pub owner: String,
     pub name: String,
@@ -374,30 +374,30 @@ pub struct PullReviewRequestMutate {
     pub username: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PullReviewRequestsListResponse {
     pub usernames: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PullFilesResponse {
     pub files: Vec<PullDiffFile>,
     pub empty: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PullDiffFile {
     pub path: String,
     pub status: String,
     pub patch: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PullCommitsResponse {
     pub commits: Vec<PullCommitSummary>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PullCommitSummary {
     pub sha: String,
     pub short_sha: String,
@@ -421,7 +421,7 @@ fn default_sig_none() -> String {
     "none".into()
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ForkRepoRequest {
     pub owner: String,
     pub name: String,

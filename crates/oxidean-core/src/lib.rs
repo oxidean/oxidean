@@ -53,7 +53,7 @@ pub fn crate_name() -> &'static str {
 pub const RPC_PROTOCOL_VERSION: u32 = 1;
 pub const ECHO_MAX_BYTES: usize = 8192;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AppError {
     pub code: String,
     pub message: String,
@@ -76,7 +76,7 @@ impl AppError {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct HealthResponse {
     pub status: String,
     pub version: String,
@@ -84,19 +84,19 @@ pub struct HealthResponse {
     pub database: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DbProbeResponse {
     pub dialect: String,
     pub probe_count: i64,
     pub probed_at: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct EchoRequest {
     pub message: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct EchoResponse {
     pub message: String,
 }
@@ -104,7 +104,7 @@ pub struct EchoResponse {
 /// Optional-instance-feature flags advertised by `system.manifest` (CLI-02).
 /// All `false` today — they flip on as the corresponding surfaces land
 /// (MCP: AGT-01, a typed REST surface, instance-as-OAuth-provider: API-03).
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ManifestCapabilities {
     pub mcp: bool,
     pub rest: bool,
@@ -114,7 +114,7 @@ pub struct ManifestCapabilities {
 /// `system.manifest` response — the server-driven compatibility contract that
 /// lets clients (the `ox` CLI, third-party tools) feature-gate on the exact
 /// procedure set this instance's dispatch table knows.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ManifestResponse {
     /// RPC wire protocol version (`RPC_PROTOCOL_VERSION`).
     pub protocol_version: u32,
@@ -127,14 +127,14 @@ pub struct ManifestResponse {
     pub min_cli_version: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(untagged)]
 pub enum RpcInput {
     Empty(serde_json::Value),
     Echo(EchoRequest),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RpcRequest {
     pub procedure: String,
     #[serde(default = "default_input")]
@@ -145,7 +145,7 @@ fn default_input() -> serde_json::Value {
     serde_json::json!({})
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(untagged)]
 pub enum RpcResponse {
     Ok { ok: bool, data: serde_json::Value },

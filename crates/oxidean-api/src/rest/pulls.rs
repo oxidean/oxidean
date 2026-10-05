@@ -3,46 +3,239 @@
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
-use axum::{Json, Router};
+use axum::routing::{get, patch, post};
+use axum::Json;
+use schemars::SchemaGenerator;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
+use super::spec::{BodySpec, RespSpec, RouteDef};
 use super::{call, ctx_for, dispatch, merge_fields, repo_ref, respond, RepoNumberPath, RepoPath};
 use crate::app::AppState;
-use oxidean_core::RpcResponse;
+use oxidean_core::{
+    CreatePullCommentRequest, CreatePullRequest, MergePullRequest, MergePullResponse,
+    PullCommentPublic, PullCommentsListResponse, PullCommitsResponse, PullFilesResponse,
+    PullListRequest, PullListResponse, PullPublic, PullReviewPublic, PullReviewsListResponse,
+    RpcResponse, SubmitPullReviewRequest,
+};
 
-pub fn router() -> Router<AppState> {
-    Router::new()
-        .route(
-            "/repos/{owner}/{repo}/pulls",
-            get(list_pulls).post(create_pull),
-        )
-        .route(
-            "/repos/{owner}/{repo}/pulls/{number}",
-            get(get_pull).patch(update_pull),
-        )
-        .route(
-            "/repos/{owner}/{repo}/pulls/{number}/merge",
-            axum::routing::post(merge_pull),
-        )
-        .route(
-            "/repos/{owner}/{repo}/pulls/{number}/files",
-            get(list_pull_files),
-        )
-        .route(
-            "/repos/{owner}/{repo}/pulls/{number}/commits",
-            get(list_pull_commits),
-        )
-        .route(
-            "/repos/{owner}/{repo}/pulls/{number}/comments",
-            get(list_pull_comments).post(create_pull_comment),
-        )
-        .route(
-            "/repos/{owner}/{repo}/pulls/{number}/reviews",
-            get(list_pull_reviews).post(submit_pull_review),
-        )
+/// `PATCH /pulls/{number}` body — fields go to `pull.update`; `state` fans
+/// out to `pull.close`/`pull.reopen`.
+fn pull_patch_body(_: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "properties": {
+            "title": { "type": "string" },
+            "body": { "type": "string" },
+            "base_ref": { "type": "string" },
+            "draft": { "type": "boolean" },
+            "state": {
+                "type": "string",
+                "enum": ["open", "closed"],
+                "description": "`closed` → pull.close; `open` → pull.reopen",
+            },
+        },
+        "description": "At least one of `title`, `body`, `base_ref`, `draft`, `state` is required",
+    })
 }
+
+pub const ROUTES: &[RouteDef] = &[
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/pulls",
+        tags: &["pulls"],
+        operation_id: "listPulls",
+        summary: "List pull requests (`pull.list`)",
+        procedure: "pull.list",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: Some(SchemaGenerator::into_root_schema_for::<PullListRequest>),
+        body: None,
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<PullListResponse>,
+        )),
+        mount: || get(list_pulls),
+    },
+    RouteDef {
+        method: "POST",
+        path: "/repos/{owner}/{repo}/pulls",
+        tags: &["pulls"],
+        operation_id: "createPull",
+        summary: "Create pull request (`pull.create`)",
+        procedure: "pull.create",
+        ok: StatusCode::CREATED,
+        anonymous: false,
+        path_fields: &["owner", "name"],
+        query: None,
+        body: Some(BodySpec::Rpc(
+            SchemaGenerator::into_root_schema_for::<CreatePullRequest>,
+        )),
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<PullPublic>,
+        )),
+        mount: || post(create_pull),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/pulls/{number}",
+        tags: &["pulls"],
+        operation_id: "getPull",
+        summary: "Get pull request (`pull.get`)",
+        procedure: "pull.get",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name", "number"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<PullPublic>,
+        )),
+        mount: || get(get_pull),
+    },
+    RouteDef {
+        method: "PATCH",
+        path: "/repos/{owner}/{repo}/pulls/{number}",
+        tags: &["pulls"],
+        operation_id: "updatePull",
+        summary: "Update pull (`pull.update` + `pull.close`/`pull.reopen` when `state` is given)",
+        procedure: "pull.update",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name", "number"],
+        query: None,
+        body: Some(BodySpec::Json(pull_patch_body)),
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<PullPublic>,
+        )),
+        mount: || patch(update_pull),
+    },
+    RouteDef {
+        method: "POST",
+        path: "/repos/{owner}/{repo}/pulls/{number}/merge",
+        tags: &["pulls"],
+        operation_id: "mergePull",
+        summary: "Merge pull request (`pull.merge`)",
+        procedure: "pull.merge",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name", "number"],
+        query: None,
+        body: Some(BodySpec::Rpc(
+            SchemaGenerator::into_root_schema_for::<MergePullRequest>,
+        )),
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<MergePullResponse>,
+        )),
+        mount: || post(merge_pull),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/pulls/{number}/files",
+        tags: &["pulls"],
+        operation_id: "listPullFiles",
+        summary: "Pull diff files (`pull.files`)",
+        procedure: "pull.files",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name", "number"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<PullFilesResponse>,
+        )),
+        mount: || get(list_pull_files),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/pulls/{number}/commits",
+        tags: &["pulls"],
+        operation_id: "listPullCommits",
+        summary: "Pull commits (`pull.commits`)",
+        procedure: "pull.commits",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name", "number"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<PullCommitsResponse>,
+        )),
+        mount: || get(list_pull_commits),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/pulls/{number}/comments",
+        tags: &["pulls"],
+        operation_id: "listPullComments",
+        summary: "Pull review comments (`pull.comments.list`)",
+        procedure: "pull.comments.list",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name", "number"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<PullCommentsListResponse>,
+        )),
+        mount: || get(list_pull_comments),
+    },
+    RouteDef {
+        method: "POST",
+        path: "/repos/{owner}/{repo}/pulls/{number}/comments",
+        tags: &["pulls"],
+        operation_id: "createPullComment",
+        summary: "Add pull comment (`pull.comments.create`; diff placement optional)",
+        procedure: "pull.comments.create",
+        ok: StatusCode::CREATED,
+        anonymous: false,
+        path_fields: &["owner", "name", "number"],
+        query: None,
+        body: Some(BodySpec::Rpc(
+            SchemaGenerator::into_root_schema_for::<CreatePullCommentRequest>,
+        )),
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<PullCommentPublic>,
+        )),
+        mount: || post(create_pull_comment),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/pulls/{number}/reviews",
+        tags: &["pulls"],
+        operation_id: "listPullReviews",
+        summary: "Pull reviews (`pull.reviews.list`)",
+        procedure: "pull.reviews.list",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name", "number"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<PullReviewsListResponse>,
+        )),
+        mount: || get(list_pull_reviews),
+    },
+    RouteDef {
+        method: "POST",
+        path: "/repos/{owner}/{repo}/pulls/{number}/reviews",
+        tags: &["pulls"],
+        operation_id: "submitPullReview",
+        summary: "Submit review (`pull.reviews.submit`)",
+        procedure: "pull.reviews.submit",
+        ok: StatusCode::CREATED,
+        anonymous: false,
+        path_fields: &["owner", "name", "number"],
+        query: None,
+        body: Some(BodySpec::Rpc(
+            SchemaGenerator::into_root_schema_for::<SubmitPullReviewRequest>,
+        )),
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<PullReviewPublic>,
+        )),
+        mount: || post(submit_pull_review),
+    },
+];
 
 #[derive(serde::Serialize, Deserialize)]
 pub struct PullListQuery {

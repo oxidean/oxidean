@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// `repo.deployKey.create` input — admin-gated.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DeployKeyCreateRequest {
     pub owner: String,
     pub name: String,
@@ -22,7 +22,7 @@ pub struct DeployKeyCreateRequest {
 }
 
 /// `repo.deployKey.delete` input — admin-gated.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DeployKeyDeleteRequest {
     pub owner: String,
     pub name: String,
@@ -30,7 +30,7 @@ pub struct DeployKeyDeleteRequest {
 }
 
 /// List / detail item — public key optional; no secret fields.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DeployKeyPublic {
     pub id: String,
     pub repo_id: String,
@@ -49,7 +49,7 @@ pub struct DeployKeyPublic {
 }
 
 /// `repo.deployKey.list` response.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DeployKeyListResponse {
     pub keys: Vec<DeployKeyPublic>,
 }

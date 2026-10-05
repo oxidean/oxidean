@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Public webhook config — secret is always masked except create/rotate reveal.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WebhookPublic {
     pub id: String,
     pub repo_id: String,
@@ -21,7 +21,7 @@ pub struct WebhookPublic {
     pub secret: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CreateWebhookRequest {
     pub owner: String,
     pub name: String,
@@ -34,7 +34,7 @@ pub struct CreateWebhookRequest {
     pub description: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct UpdateWebhookRequest {
     pub owner: String,
     pub name: String,
@@ -51,30 +51,30 @@ pub struct UpdateWebhookRequest {
     pub description: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WebhookIdRequest {
     pub owner: String,
     pub name: String,
     pub id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WebhookListRequest {
     pub owner: String,
     pub name: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WebhookListResponse {
     pub webhooks: Vec<WebhookPublic>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DeleteWebhookResponse {
     pub ok: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WebhookDeliveryPublic {
     pub id: String,
     pub webhook_id: String,
@@ -91,7 +91,7 @@ pub struct WebhookDeliveryPublic {
     pub attempt_count: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WebhookDeliveriesListRequest {
     pub owner: String,
     pub name: String,
@@ -100,12 +100,12 @@ pub struct WebhookDeliveriesListRequest {
     pub limit: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WebhookDeliveriesListResponse {
     pub deliveries: Vec<WebhookDeliveryPublic>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WebhookDeliveryGetRequest {
     pub owner: String,
     pub name: String,
@@ -113,7 +113,7 @@ pub struct WebhookDeliveryGetRequest {
     pub delivery_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WebhookRedeliverRequest {
     pub owner: String,
     pub name: String,
@@ -121,7 +121,7 @@ pub struct WebhookRedeliverRequest {
     pub delivery_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct WebhookPingResponse {
     pub delivery_id: String,
     pub delivery_guid: String,

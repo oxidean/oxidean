@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 /// `admin.mcp.getSettings` — effective MCP endpoint state (no secrets).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AdminMcpSettingsPublic {
     /// Effective state: stored admin override, else the `OXIDEAN_MCP_ENABLED`
     /// environment default (true when unset).
@@ -14,7 +14,7 @@ pub struct AdminMcpSettingsPublic {
 }
 
 /// `admin.mcp.updateSettings` — set or clear the MCP enable override.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AdminMcpUpdateSettingsRequest {
     /// `Some(bool)` stores an explicit override; omitted/null keeps the stored
     /// value (mirrors `admin.lfs.updateSettings` semantics).

@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ActionRunPublic {
     pub id: String,
     pub repository_id: String,
@@ -30,7 +30,7 @@ pub struct ActionRunPublic {
     pub finished_at: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ActionJobPublic {
     pub id: String,
     pub run_id: String,
@@ -44,7 +44,7 @@ pub struct ActionJobPublic {
     pub finished_at: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ActionRunsListRequest {
     pub owner: String,
     pub name: String,
@@ -73,7 +73,7 @@ pub struct ActionRunsListRequest {
     pub query: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ActionRunsListResponse {
     pub runs: Vec<ActionRunPublic>,
     #[serde(default)]
@@ -84,20 +84,20 @@ pub struct ActionRunsListResponse {
     pub per_page: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ActionRunGetRequest {
     pub owner: String,
     pub name: String,
     pub run_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ActionRunGetResponse {
     pub run: ActionRunPublic,
     pub jobs: Vec<ActionJobPublic>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ActionJobLogRequest {
     pub owner: String,
     pub name: String,
@@ -109,7 +109,7 @@ pub struct ActionJobLogRequest {
     pub offset: Option<u64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ActionJobLogResponse {
     /// Log bytes starting at the requested `offset` (lossy UTF-8).
     pub content: String,
@@ -122,7 +122,7 @@ pub struct ActionJobLogResponse {
 }
 
 /// `repo.actions.listWorkflows` — discovered workflow files at a ref.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ActionWorkflowsListRequest {
     pub owner: String,
     pub name: String,
@@ -131,7 +131,7 @@ pub struct ActionWorkflowsListRequest {
     pub git_ref: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ActionWorkflowPublic {
     /// Repo-relative path, e.g. `.github/workflows/ci.yml`.
     pub path: String,
@@ -140,13 +140,13 @@ pub struct ActionWorkflowPublic {
 }
 
 /// A workflow file that failed discovery validation and was skipped.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ActionWorkflowFileError {
     pub path: String,
     pub message: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ActionWorkflowsListResponse {
     pub workflows: Vec<ActionWorkflowPublic>,
     /// Workflow files skipped during discovery (invalid YAML, too large, bad path).
@@ -157,7 +157,7 @@ pub struct ActionWorkflowsListResponse {
 }
 
 /// `repo.actions.dispatchWorkflow` — Write+; `workflow_dispatch` trigger.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ActionDispatchRequest {
     pub owner: String,
     pub name: String,
@@ -167,7 +167,7 @@ pub struct ActionDispatchRequest {
     pub git_ref: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ActionDispatchResponse {
     pub ok: bool,
     /// Run id when a run was enqueued.
@@ -176,7 +176,7 @@ pub struct ActionDispatchResponse {
 }
 
 /// `repo.actions.rerunRun` / `repo.actions.cancelRun` — Write+.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ActionRunMutationRequest {
     pub owner: String,
     pub name: String,
@@ -191,12 +191,12 @@ pub struct ActionRunMutationRequest {
     pub failed_only: Option<bool>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ActionRunMutationResponse {
     pub run: ActionRunPublic,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ActionSecretPublic {
     pub name: String,
     pub updated_at: String,
@@ -204,18 +204,18 @@ pub struct ActionSecretPublic {
 
 pub type ActionSecretMetaPublic = ActionSecretPublic;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ActionSecretsListRequest {
     pub owner: String,
     pub name: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ActionSecretsListResponse {
     pub secrets: Vec<ActionSecretPublic>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ActionSecretsPutRequest {
     pub owner: String,
     pub name: String,
@@ -225,7 +225,7 @@ pub struct ActionSecretsPutRequest {
 
 pub type ActionSecretPutRequest = ActionSecretsPutRequest;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ActionSecretsDeleteRequest {
     pub owner: String,
     pub name: String,
@@ -234,7 +234,7 @@ pub struct ActionSecretsDeleteRequest {
 
 pub type ActionSecretDeleteRequest = ActionSecretsDeleteRequest;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoActionsEnabledRequest {
     pub owner: String,
     pub name: String,
@@ -242,7 +242,7 @@ pub struct RepoActionsEnabledRequest {
 
 pub type ActionEnabledRequest = RepoActionsEnabledRequest;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoActionsSetEnabledRequest {
     pub owner: String,
     pub name: String,
@@ -251,25 +251,25 @@ pub struct RepoActionsSetEnabledRequest {
 
 pub type ActionSetEnabledRequest = RepoActionsSetEnabledRequest;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoActionsEnabledResponse {
     pub enabled: bool,
 }
 
 pub type ActionEnabledResponse = RepoActionsEnabledResponse;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AdminActionsCreateRegistrationTokenResponse {
     pub token: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ActionRegistrationTokenResponse {
     pub token: String,
     pub scope: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ActionRunnerPublic {
     pub id: String,
     pub name: String,
@@ -283,7 +283,7 @@ pub struct ActionRunnerPublic {
     pub created_at: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AdminActionsListRunnersResponse {
     pub runners: Vec<ActionRunnerPublic>,
 }

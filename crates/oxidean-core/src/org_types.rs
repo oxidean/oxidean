@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Org membership role (D-ORG-02a). Serialized lowercase: `owner` | `admin` | `member`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum OrgRole {
     Owner,
@@ -32,7 +32,7 @@ impl OrgRole {
 
 /// Default Member permission on org private repos (D-ORG-02b).
 /// Serialized lowercase: `none` | `read` | `write`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum MemberBasePermission {
     #[default]
@@ -62,7 +62,7 @@ impl MemberBasePermission {
 
 /// Polymorphic repository owner discriminant (D-ORG-01).
 /// Serialized lowercase: `user` | `org`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum OwnerType {
     User,
@@ -88,7 +88,7 @@ impl OwnerType {
 
 /// Per-repo collaborator permission ladder (D-ORG-02c).
 /// Serialized lowercase: `read` | `write` | `admin`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum CollaboratorPermission {
     Read,
@@ -116,7 +116,7 @@ impl CollaboratorPermission {
 }
 
 /// Public organization profile returned over RPC (ORG-01).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct OrgPublic {
     pub id: String,
     pub slug: String,
@@ -127,7 +127,7 @@ pub struct OrgPublic {
 }
 
 /// `org.create` input — slug + optional display name (plan 10-13).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CreateOrgRequest {
     pub slug: String,
     #[serde(default)]
@@ -135,13 +135,13 @@ pub struct CreateOrgRequest {
 }
 
 /// `org.get` / slug-scoped org RPCs.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct OrgSlugRequest {
     pub slug: String,
 }
 
 /// `org.updateSettings` — Admin+ (D-ORG-02b).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct OrgUpdateSettingsRequest {
     pub slug: String,
     #[serde(default)]
@@ -151,7 +151,7 @@ pub struct OrgUpdateSettingsRequest {
 }
 
 /// One org in `org.listMine` — includes caller's membership role.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct OrgMineEntry {
     pub id: String,
     pub slug: String,
@@ -163,13 +163,13 @@ pub struct OrgMineEntry {
 }
 
 /// `org.listMine` response.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct OrgListMineResponse {
     pub orgs: Vec<OrgMineEntry>,
 }
 
 /// Public membership row — no email (ORG-01).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct OrgMemberPublic {
     pub user_id: String,
     pub username: String,
@@ -178,13 +178,13 @@ pub struct OrgMemberPublic {
 }
 
 /// `org.members.list` response.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct OrgMembersListResponse {
     pub members: Vec<OrgMemberPublic>,
 }
 
 /// `org.members.add` — existing instance user by username (D-ORG-03).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct OrgMembersAddRequest {
     pub slug: String,
     pub username: String,
@@ -192,7 +192,7 @@ pub struct OrgMembersAddRequest {
 }
 
 /// `org.members.updateRole`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct OrgMembersUpdateRoleRequest {
     pub slug: String,
     pub user_id: String,
@@ -200,14 +200,14 @@ pub struct OrgMembersUpdateRoleRequest {
 }
 
 /// `org.members.remove`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct OrgMembersRemoveRequest {
     pub slug: String,
     pub user_id: String,
 }
 
 /// Public pending invite — never includes token or token_hash (ORG-01 / T-10-11).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct OrgInvitePublic {
     pub id: String,
     /// `None` = shareable link (not bound to a recipient email).
@@ -223,13 +223,13 @@ pub struct OrgInvitePublic {
 }
 
 /// `org.invites.list` response.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct OrgInvitesListResponse {
     pub invites: Vec<OrgInvitePublic>,
 }
 
 /// `org.invites.create` — bulk: one email-bound invite per address.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct OrgInvitesCreateRequest {
     pub slug: String,
     pub emails: Vec<String>,
@@ -237,7 +237,7 @@ pub struct OrgInvitesCreateRequest {
 }
 
 /// Per-recipient outcome of a bulk `org.invites.create`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct OrgInvitesCreateItemResult {
     pub email: String,
     pub ok: bool,
@@ -251,13 +251,13 @@ pub struct OrgInvitesCreateItemResult {
 }
 
 /// `org.invites.create` response — one entry per submitted email.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct OrgInvitesCreateResponse {
     pub results: Vec<OrgInvitesCreateItemResult>,
 }
 
 /// `org.invites.createLink` — shareable link, no bound email.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct OrgInvitesCreateLinkRequest {
     pub slug: String,
     pub role: OrgRole,
@@ -270,14 +270,14 @@ pub struct OrgInvitesCreateLinkRequest {
 }
 
 /// `org.invites.createLink` — invite metadata + one-time copyable URL.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct OrgInvitesCreateLinkResponse {
     pub invite: OrgInvitePublic,
     pub invite_url: String,
 }
 
 /// `org.invites.revoke`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct OrgInvitesRevokeRequest {
     pub slug: String,
     pub invite_id: String,
@@ -288,7 +288,7 @@ pub struct OrgInvitesRevokeRequest {
 pub type OrgInvitesAcceptRequest = crate::InvitesAcceptRequest;
 
 /// `org.invites.accept` response.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct OrgInvitesAcceptResponse {
     pub org: OrgPublic,
     pub member: OrgMemberPublic,

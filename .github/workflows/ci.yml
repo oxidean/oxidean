@@ -308,6 +308,11 @@ jobs:
           CARGO_INCREMENTAL: "0"
           RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
         run: make rpc-sync-check
+      - name: check-openapi-sync
+        env:
+          CARGO_INCREMENTAL: "0"
+          RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
+        run: make openapi-sync-check
 
   compose:
     name: compose

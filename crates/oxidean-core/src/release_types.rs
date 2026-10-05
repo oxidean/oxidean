@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ReleasePublic {
     pub id: String,
     pub repo_id: String,
@@ -19,7 +19,7 @@ pub struct ReleasePublic {
     pub assets: Vec<ReleaseAssetPublic>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ReleaseAssetPublic {
     pub id: String,
     pub release_id: String,
@@ -31,7 +31,7 @@ pub struct ReleaseAssetPublic {
     pub updated_at: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CreateReleaseRequest {
     pub owner: String,
     pub name: String,
@@ -46,25 +46,25 @@ pub struct CreateReleaseRequest {
     pub prerelease: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ReleaseListRequest {
     pub owner: String,
     pub name: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ReleaseListResponse {
     pub releases: Vec<ReleasePublic>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ReleaseGetRequest {
     pub owner: String,
     pub name: String,
     pub tag_name: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct UpdateReleaseRequest {
     pub owner: String,
     pub name: String,
@@ -79,26 +79,26 @@ pub struct UpdateReleaseRequest {
     pub prerelease: Option<bool>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DeleteReleaseRequest {
     pub owner: String,
     pub name: String,
     pub tag_name: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DeleteReleaseResponse {
     pub ok: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DeleteReleaseAssetRequest {
     pub owner: String,
     pub name: String,
     pub asset_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct DeleteReleaseAssetResponse {
     pub ok: bool,
 }

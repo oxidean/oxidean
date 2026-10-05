@@ -17,37 +17,54 @@
 
 mod admin;
 mod issues;
+pub mod openapi;
 mod orgs;
 mod pulls;
 mod releases;
 mod repos;
+pub mod spec;
 mod statuses;
 mod users;
 
 use axum::extract::State;
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
+use axum::routing::get;
 use axum::{Json, Router};
-use oxidean_core::{AppError, RpcRequest, RpcResponse};
+use oxidean_core::{AppError, HealthResponse, RpcRequest, RpcResponse};
+use schemars::SchemaGenerator;
 use serde_json::{Map, Value};
 
 use crate::app::{build_rpc_ctx, edge_credential, AppState};
 use crate::pat::bearer::BearerRejection;
 use crate::rpc::{self, RpcCtx};
 
-/// `/api/v1` route group. Mounted in `app::router_with_state`.
+use self::spec::{RespSpec, RouteDef};
+
+/// `/api/v1` route group — mounted in `app::router_with_state`, built from the
+/// same `RouteDef` table that generates `openapi.json` (single source).
 pub fn router() -> Router<AppState> {
-    Router::new()
-        .route("/health", axum::routing::get(health))
-        .merge(users::router())
-        .merge(orgs::router())
-        .merge(repos::router())
-        .merge(statuses::router())
-        .merge(issues::router())
-        .merge(pulls::router())
-        .merge(releases::router())
-        .merge(admin::router())
+    spec::router_from_defs().merge(openapi::router())
 }
+
+/// Meta routes owned by `rest::mod` — just health for now.
+const META_ROUTES: &[RouteDef] = &[RouteDef {
+    method: "GET",
+    path: "/health",
+    tags: &["meta"],
+    operation_id: "getHealth",
+    summary: "Instance health/version (system.health)",
+    procedure: "system.health",
+    ok: StatusCode::OK,
+    anonymous: true,
+    path_fields: &[],
+    query: None,
+    body: None,
+    response: Some(RespSpec::Schema(
+        SchemaGenerator::subschema_for::<HealthResponse>,
+    )),
+    mount: || get(health),
+}];
 
 /// Instance health/version — thin alias over `system.health`.
 async fn health(State(state): State<AppState>, headers: HeaderMap) -> Response {

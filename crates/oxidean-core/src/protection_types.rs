@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Commit status state (D-12).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum CommitStatusState {
     Pending,
@@ -43,7 +43,7 @@ impl CommitStatusState {
 }
 
 /// Public branch protection rule (ORG-05).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct BranchProtectionRulePublic {
     pub id: String,
     pub repo_id: String,
@@ -67,13 +67,13 @@ pub struct BranchProtectionRulePublic {
 }
 
 /// `repo.branchProtection.list` response.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct BranchProtectionListResponse {
     pub rules: Vec<BranchProtectionRulePublic>,
 }
 
 /// Shared fields for create/update (D-05..18).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct BranchProtectionRuleInput {
     pub owner: String,
     pub name: String,
@@ -112,7 +112,7 @@ fn default_review_count() -> i32 {
 }
 
 /// `repo.branchProtection.update` / delete — includes rule id.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct BranchProtectionUpdateRequest {
     pub owner: String,
     pub name: String,
@@ -148,7 +148,7 @@ pub struct BranchProtectionUpdateRequest {
 }
 
 /// `repo.branchProtection.delete`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct BranchProtectionDeleteRequest {
     pub owner: String,
     pub name: String,
@@ -157,7 +157,7 @@ pub struct BranchProtectionDeleteRequest {
 
 /// Public tag protection rule (GIT-21) — restricts create/update/delete on
 /// matching `refs/tags/*` for non-bypass actors.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TagProtectionRulePublic {
     pub id: String,
     pub repo_id: String,
@@ -171,13 +171,13 @@ pub struct TagProtectionRulePublic {
 }
 
 /// `repo.tagProtection.list` response.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TagProtectionListResponse {
     pub rules: Vec<TagProtectionRulePublic>,
 }
 
 /// Shared fields for tag rule create/update.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TagProtectionRuleInput {
     pub owner: String,
     pub name: String,
@@ -193,7 +193,7 @@ pub struct TagProtectionRuleInput {
 }
 
 /// `repo.tagProtection.update` — includes rule id.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TagProtectionUpdateRequest {
     pub owner: String,
     pub name: String,
@@ -210,7 +210,7 @@ pub struct TagProtectionUpdateRequest {
 }
 
 /// `repo.tagProtection.delete`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TagProtectionDeleteRequest {
     pub owner: String,
     pub name: String,
@@ -218,7 +218,7 @@ pub struct TagProtectionDeleteRequest {
 }
 
 /// Public commit status (D-11).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CommitStatusPublic {
     pub id: String,
     pub repo_id: String,
@@ -235,7 +235,7 @@ pub struct CommitStatusPublic {
 }
 
 /// `repo.commitStatus.create`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CommitStatusCreateRequest {
     pub owner: String,
     pub name: String,
@@ -249,7 +249,7 @@ pub struct CommitStatusCreateRequest {
 }
 
 /// `repo.commitStatus.list`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CommitStatusListRequest {
     pub owner: String,
     pub name: String,
@@ -257,13 +257,13 @@ pub struct CommitStatusListRequest {
 }
 
 /// `repo.commitStatus.list` response.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CommitStatusListResponse {
     pub statuses: Vec<CommitStatusPublic>,
 }
 
 /// Structured merge-block reasons (D-22 / D-24).
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, schemars::JsonSchema)]
 pub struct ProtectionBlockReasons {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub reasons: Vec<String>,

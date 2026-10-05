@@ -10,34 +10,154 @@ use std::collections::{BTreeSet, HashMap};
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
-use axum::{Json, Router};
+use axum::routing::{get, post};
+use axum::Json;
 use oxidean_core::{CommitStatusState, RpcResponse};
 use oxidean_db::Database;
+use schemars::SchemaGenerator;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::repos::ShaPath;
+use super::spec::{BodySpec, RespSpec, RouteDef};
 use super::{ctx_for, dispatch, status_for_error};
 use crate::app::AppState;
 
-pub fn router() -> Router<AppState> {
-    Router::new()
-        // GitHub-compatible status endpoints on the sha.
-        .route(
-            "/repos/{owner}/{repo}/statuses/{sha}",
-            get(list_statuses).post(create_status),
-        )
-        // Aliases for `GET /commits/{sha}/status` / `statuses` clients.
-        .route(
-            "/repos/{owner}/{repo}/commits/{sha}/statuses",
-            get(list_statuses),
-        )
-        .route(
-            "/repos/{owner}/{repo}/commits/{sha}/status",
-            get(combined_status),
-        )
+/// One GitHub-shaped status row (what [`github_status`] renders).
+fn status_obj() -> Value {
+    json!({
+        "type": "object",
+        "description": "GitHub-shaped commit status row (API-06)",
+        "properties": {
+            "id": { "type": "string" },
+            "sha": { "type": "string" },
+            "state": { "type": "string", "enum": ["pending", "success", "failure", "error"] },
+            "context": { "type": "string" },
+            "description": { "type": "string" },
+            "target_url": { "type": "string", "nullable": true },
+            "url": { "type": "string" },
+            "created_at": { "type": "string" },
+            "updated_at": { "type": "string" },
+            "creator": {
+                "type": "object",
+                "nullable": true,
+                "properties": {
+                    "login": { "type": "string" },
+                    "id": { "type": "string" },
+                },
+            },
+        },
+    })
 }
+
+fn status_list_schema(_: &mut SchemaGenerator) -> Value {
+    json!({ "type": "array", "items": status_obj() })
+}
+
+fn status_schema(_: &mut SchemaGenerator) -> Value {
+    status_obj()
+}
+
+fn combined_status_schema(_: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "description": "GitHub combined-status rollup (API-06)",
+        "properties": {
+            "state": { "type": "string", "enum": ["pending", "success", "failure"] },
+            "sha": { "type": "string" },
+            "total_count": { "type": "integer" },
+            "statuses": { "type": "array", "items": status_obj() },
+            "repository": {
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string" },
+                    "full_name": { "type": "string" },
+                },
+            },
+        },
+    })
+}
+
+/// `POST …/statuses/{sha}` body — GitHub field names (`state`, `context`,
+/// `target_url`, `description`); `context` defaults to `default`.
+fn status_create_body(_: &mut SchemaGenerator) -> Value {
+    json!({
+        "type": "object",
+        "required": ["state"],
+        "properties": {
+            "state": {
+                "type": "string",
+                "enum": ["pending", "success", "failure", "error"],
+            },
+            "context": { "type": "string", "default": "default" },
+            "target_url": { "type": "string" },
+            "description": { "type": "string" },
+        },
+    })
+}
+
+pub const ROUTES: &[RouteDef] = &[
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/statuses/{sha}",
+        tags: &["repos"],
+        operation_id: "listCommitStatuses",
+        summary: "List commit statuses (`repo.commitStatus.list`) — GitHub shape",
+        procedure: "repo.commitStatus.list",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name", "sha"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(status_list_schema)),
+        mount: || get(list_statuses),
+    },
+    RouteDef {
+        method: "POST",
+        path: "/repos/{owner}/{repo}/statuses/{sha}",
+        tags: &["repos"],
+        operation_id: "createCommitStatus",
+        summary: "Create a commit status (`repo.commitStatus.create`) — GitHub shape",
+        procedure: "repo.commitStatus.create",
+        ok: StatusCode::CREATED,
+        anonymous: false,
+        path_fields: &["owner", "name", "sha"],
+        query: None,
+        body: Some(BodySpec::Json(status_create_body)),
+        response: Some(RespSpec::Json(status_schema)),
+        mount: || post(create_status),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/commits/{sha}/statuses",
+        tags: &["repos"],
+        operation_id: "listCommitStatusesAlias",
+        summary: "List commit statuses (`repo.commitStatus.list`) — alias of `/statuses/{sha}`",
+        procedure: "repo.commitStatus.list",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name", "sha"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(status_list_schema)),
+        mount: || get(list_statuses),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/repos/{owner}/{repo}/commits/{sha}/status",
+        tags: &["repos"],
+        operation_id: "combinedCommitStatus",
+        summary: "Combined commit status rollup (`repo.commitStatus.list`)",
+        procedure: "repo.commitStatus.list",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name", "sha"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Json(combined_status_schema)),
+        mount: || get(combined_status),
+    },
+];
 
 #[derive(Debug, Deserialize)]
 pub struct StatusCreateBody {

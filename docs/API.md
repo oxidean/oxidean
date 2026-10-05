@@ -202,7 +202,7 @@ Unknown procedure → `rpc.unknown_procedure` (HTTP 404).
 
 API-01 adds a resource-oriented REST surface alongside the RPC procedures. Every route translates path/query/body into the matching RPC procedure's input and dispatches through the same `rpc::dispatch` path — ACLs, PAT scope gates (`authorize_rpc`), the bootstrap lock, and side effects (notifications, webhook events) are identical for both surfaces. The REST API is a companion, not a replacement: `POST /api/rpc` remains the primary client contract and covers procedures REST does not expose.
 
-- **OpenAPI spec**: [`docs/openapi.yaml`](openapi.yaml) (OpenAPI 3.0, hand-maintained — keep it in sync when adding routes).
+- **OpenAPI spec**: [`docs/openapi.yaml`](openapi.yaml) (OpenAPI 3.0, generated — regenerate with `make openapi-gen`; CI fails if it drifts). The same document is served at runtime from `GET /api/v1/openapi.json`, and a bundled Swagger UI is available at `/api/v1/docs` (no CDN dependency). Both are generated from the route table in `crates/oxidean-api/src/rest/` — adding a route definition updates the router and the spec together.
 - **Base path**: `/api/v1` (e.g. `GET /api/v1/repos/octo/hello`).
 - **Auth**: `Cookie: oxidean_session=…` or `Authorization: Bearer <pat>`; the cookie wins when both are sent (same as `/api/rpc`). Anonymous requests can reach public read endpoints. Session-only procedures (org creation, `admin.*`, credential management) return `403 auth.pat_scope` for PATs — see [PAT Bearer authentication](#pat-bearer-authentication).
 - **No version header**: unlike `/api/rpc`, REST requests do not send `Oxidean-RPC-Version`.

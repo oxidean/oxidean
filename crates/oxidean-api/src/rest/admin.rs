@@ -6,18 +6,51 @@ use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::Response;
 use axum::routing::get;
-use axum::Router;
+use oxidean_core::{AdminLfsUsageResponse, AdminUsersListRequest, AdminUsersListResponse};
+use schemars::SchemaGenerator;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::call;
+use super::spec::{RespSpec, RouteDef};
 use crate::app::AppState;
 
-pub fn router() -> Router<AppState> {
-    Router::new()
-        .route("/admin/users", get(list_users))
-        .route("/admin/lfs/usage", get(lfs_usage))
-}
+pub const ROUTES: &[RouteDef] = &[
+    RouteDef {
+        method: "GET",
+        path: "/admin/users",
+        tags: &["admin"],
+        operation_id: "adminListUsers",
+        summary: "List users (`admin.users.list`; sys-admin session only)",
+        procedure: "admin.users.list",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &[],
+        query: Some(SchemaGenerator::into_root_schema_for::<AdminUsersListRequest>),
+        body: None,
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<AdminUsersListResponse>,
+        )),
+        mount: || get(list_users),
+    },
+    RouteDef {
+        method: "GET",
+        path: "/admin/lfs/usage",
+        tags: &["admin"],
+        operation_id: "adminLfsUsage",
+        summary: "Instance LFS usage stats (`admin.lfs.getUsage`; sys-admin session only)",
+        procedure: "admin.lfs.getUsage",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &[],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<AdminLfsUsageResponse>,
+        )),
+        mount: || get(lfs_usage),
+    },
+];
 
 #[derive(serde::Serialize, Deserialize)]
 pub struct AdminUsersQuery {

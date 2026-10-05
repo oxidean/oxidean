@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Subject kind for deep links (D-05, DEBT-06).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum NotificationSubjectKind {
     Issue,
@@ -37,7 +37,7 @@ impl NotificationSubjectKind {
 }
 
 /// Public notification row for list UI + deep links (D-05 / D-09 / D-10).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct NotificationPublic {
     pub id: String,
     pub reason: String,
@@ -58,7 +58,7 @@ pub struct NotificationPublic {
 }
 
 /// List filter: unread only or all (D-09 / D-12).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct NotificationListRequest {
     /// `unread` | `all` — default `unread`.
     #[serde(default)]
@@ -69,28 +69,28 @@ pub struct NotificationListRequest {
     pub limit: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct NotificationListResponse {
     pub notifications: Vec<NotificationPublic>,
     pub total: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct NotificationUnreadCountResponse {
     pub count: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct NotificationMarkReadRequest {
     pub ids: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct NotificationMarkReadResponse {
     pub marked: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct NotificationMarkAllReadResponse {
     pub marked: i64,
 }

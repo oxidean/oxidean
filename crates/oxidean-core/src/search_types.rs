@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 /// One entity group selectable via `search.global` `types`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum GlobalSearchKind {
     Repositories,
@@ -36,7 +36,7 @@ impl GlobalSearchKind {
 /// `types` absent/empty → all groups populated (bounded per-group `limit`).
 /// `types` present → only those groups get `hits`; database-backed groups still
 /// report `total` so callers can render per-kind counts.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GlobalSearchRequest {
     pub q: String,
     #[serde(default)]
@@ -50,7 +50,7 @@ pub struct GlobalSearchRequest {
 }
 
 /// Repository hit — slim projection; not the full `RepoPublic` envelope.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GlobalSearchRepoHit {
     /// Owner login — username or org slug (shared `/{owner}` namespace).
     pub owner: String,
@@ -63,7 +63,7 @@ pub struct GlobalSearchRepoHit {
 }
 
 /// User hit — mirrors `user.lookup` public fields (never email).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GlobalSearchUserHit {
     pub username: String,
     pub display_name: String,
@@ -72,14 +72,14 @@ pub struct GlobalSearchUserHit {
 }
 
 /// Organization hit — public directory entry (mirrors `org.get` fields).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GlobalSearchOrgHit {
     pub slug: String,
     pub display_name: String,
 }
 
 /// Issue hit with repository context for sitewide results.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GlobalSearchIssueHit {
     pub repo_owner: String,
     pub repo_name: String,
@@ -94,7 +94,7 @@ pub struct GlobalSearchIssueHit {
 }
 
 /// Pull request hit with repository context for sitewide results.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GlobalSearchPullHit {
     pub repo_owner: String,
     pub repo_name: String,
@@ -110,7 +110,7 @@ pub struct GlobalSearchPullHit {
 }
 
 /// Commit hit from the bounded cross-repo `git log --grep` scan.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GlobalSearchCommitHit {
     pub repo_owner: String,
     pub repo_name: String,
@@ -122,7 +122,7 @@ pub struct GlobalSearchCommitHit {
 }
 
 /// Code hit from the bounded cross-repo `git grep` scan.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GlobalSearchCodeHit {
     pub repo_owner: String,
     pub repo_name: String,
@@ -139,7 +139,7 @@ pub struct GlobalSearchCodeHit {
 /// `total` is a real `COUNT(*)` for database-backed kinds; for the bounded git
 /// scans (commits/code) it is the number of hits found within the scanned repo
 /// window and `truncated` reports that coverage was partial.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GlobalSearchGroup<T> {
     pub hits: Vec<T>,
     pub total: i64,
@@ -159,7 +159,7 @@ impl<T> Default for GlobalSearchGroup<T> {
 
 /// `search.global` response — every group is always present; unrequested
 /// git-scan groups return empty hits with `total`/`truncated` zeroed.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GlobalSearchResponse {
     pub q: String,
     pub repositories: GlobalSearchGroup<GlobalSearchRepoHit>,

@@ -6,7 +6,7 @@ use crate::auth_types::is_reserved_username;
 use crate::org_types::{CollaboratorPermission, OwnerType};
 
 /// Repo visibility. Serialized lowercase: `public` | `private`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum RepoVisibility {
     Public,
@@ -32,7 +32,7 @@ impl RepoVisibility {
 
 /// Per-user repository watch level — the notification matrix (DEBT-06).
 /// Serialized snake_case: `all` | `participating` | `ignore`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum WatchLevel {
     /// Notified on all repo activity (default for `repo.watch`).
@@ -70,7 +70,7 @@ impl WatchLevel {
 }
 
 /// Provenance for `/new` template picker cards (issue #18).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum TemplateProvenance {
     #[default]
@@ -90,7 +90,7 @@ impl TemplateProvenance {
 }
 
 /// Create-repository input (RPC wired in 07-12; templates in 07-03 / issue #18).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CreateRepoRequest {
     pub name: String,
     #[serde(default)]
@@ -122,7 +122,7 @@ pub struct CreateRepoRequest {
 }
 
 /// Public create-form defaults + catalog metadata (D-02–D-04, D-08, issue #18).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoCreateDefaults {
     pub default_visibility: RepoVisibility,
     pub stacks: Vec<RepoTemplateOption>,
@@ -130,7 +130,7 @@ pub struct RepoCreateDefaults {
 }
 
 /// Catalog option for stack / gitignore / template pickers (modal cards on `/new`).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoTemplateOption {
     pub id: String,
     pub label: String,
@@ -150,7 +150,7 @@ pub struct RepoTemplateOption {
 }
 
 /// Parent summary when this repo is a fork (D-SOC-16).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ForkParentSummary {
     pub id: String,
     pub owner: String,
@@ -165,7 +165,7 @@ fn repo_unit_enabled_default() -> bool {
 }
 
 /// Public repository metadata returned over RPC.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoPublic {
     pub id: String,
     pub owner_id: String,
@@ -243,14 +243,14 @@ pub struct RepoPublic {
 }
 
 /// `repo.star` / `repo.unstar` input.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoStarRequest {
     pub owner: String,
     pub name: String,
 }
 
 /// Public stargazer row for `repo.stargazers.list` (no email). Write+ only.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoStargazerPublic {
     pub user_id: String,
     pub username: String,
@@ -262,7 +262,7 @@ pub struct RepoStargazerPublic {
 }
 
 /// `repo.stargazers.list` — paginated stargazers; Write+ gated; optional username search.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoStargazersListRequest {
     pub owner: String,
     pub name: String,
@@ -274,7 +274,7 @@ pub struct RepoStargazersListRequest {
     pub limit: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoStargazersListResponse {
     pub stargazers: Vec<RepoStargazerPublic>,
     pub total: i64,
@@ -282,7 +282,7 @@ pub struct RepoStargazersListResponse {
 
 /// `repo.watch` / `repo.unwatch` input. `level` applies to `repo.watch` only
 /// (`unwatch` removes the row regardless); omitted → `all` (DEBT-06).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoWatchRequest {
     pub owner: String,
     pub name: String,
@@ -291,7 +291,7 @@ pub struct RepoWatchRequest {
 }
 
 /// Public watcher row for `repo.watchers.list` (no email).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoWatcherPublic {
     pub user_id: String,
     pub username: String,
@@ -303,7 +303,7 @@ pub struct RepoWatcherPublic {
 }
 
 /// `repo.watchers.list` — paginated watchers; optional username/display_name search.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoWatchersListRequest {
     pub owner: String,
     pub name: String,
@@ -315,7 +315,7 @@ pub struct RepoWatchersListRequest {
     pub limit: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoWatchersListResponse {
     pub watchers: Vec<RepoWatcherPublic>,
     /// Total matching rows (after `q` filter).
@@ -323,7 +323,7 @@ pub struct RepoWatchersListResponse {
 }
 
 /// Sort keys for `repo.forks.list` (subset we can support with stored data).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RepoForksSort {
     #[default]
@@ -343,7 +343,7 @@ impl RepoForksSort {
 }
 
 /// Public fork row for `repo.forks.list`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoForkPublic {
     pub id: String,
     pub owner_username: String,
@@ -359,7 +359,7 @@ pub struct RepoForkPublic {
 }
 
 /// `repo.forks.list` — paginated forks in the network; search by owner/name.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoForksListRequest {
     pub owner: String,
     pub name: String,
@@ -374,14 +374,14 @@ pub struct RepoForksListRequest {
     pub limit: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoForksListResponse {
     pub forks: Vec<RepoForkPublic>,
     pub total: i64,
 }
 
 /// `repo.updateMetadata` — Admin updates description / homepage / topics (issue #23).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoUpdateMetadataRequest {
     pub owner: String,
     pub name: String,
@@ -395,7 +395,7 @@ pub struct RepoUpdateMetadataRequest {
 
 /// `repo.topicsSuggest` — topic autocomplete for the About/settings chips
 /// editor. Anonymous OK — topic names are public metadata.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoTopicsSuggestRequest {
     /// Prefix to match (normalized to a topic slug server-side).
     pub q: String,
@@ -403,20 +403,20 @@ pub struct RepoTopicsSuggestRequest {
     pub limit: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoTopicSuggestion {
     pub name: String,
     /// Number of repositories linked to the topic.
     pub repo_count: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoTopicsSuggestResponse {
     pub topics: Vec<RepoTopicSuggestion>,
 }
 
 /// `repo.pathLastCommits` — last commit per tree entry name (issue #23).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoPathLastCommitsRequest {
     pub owner: String,
     pub name: String,
@@ -427,7 +427,7 @@ pub struct RepoPathLastCommitsRequest {
 }
 
 /// Map of entry basename → last commit that touched that path.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoPathLastCommitsResponse {
     #[serde(rename = "ref")]
     pub ref_name: String,
@@ -436,7 +436,7 @@ pub struct RepoPathLastCommitsResponse {
 }
 
 /// `repo.commitCount` — `rev-list --count` for the commits header (issue #23).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoCommitCountRequest {
     pub owner: String,
     pub name: String,
@@ -444,7 +444,7 @@ pub struct RepoCommitCountRequest {
     pub ref_name: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoCommitCountResponse {
     #[serde(rename = "ref")]
     pub ref_name: String,
@@ -452,7 +452,7 @@ pub struct RepoCommitCountResponse {
 }
 
 /// Public contributor row for About sidebar (no email).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoContributorPublic {
     pub display_name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -463,7 +463,7 @@ pub struct RepoContributorPublic {
 }
 
 /// `repo.contributors.list` input.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoContributorsListRequest {
     pub owner: String,
     pub name: String,
@@ -471,13 +471,13 @@ pub struct RepoContributorsListRequest {
     pub limit: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoContributorsListResponse {
     pub contributors: Vec<RepoContributorPublic>,
 }
 
 /// One language in the About sidebar breakdown (linguist-lite, byte-weighted).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoLanguageStat {
     pub name: String,
     /// Raw byte total for this language on the default branch.
@@ -488,19 +488,19 @@ pub struct RepoLanguageStat {
 }
 
 /// `repo.languages` input — default-branch language stats for About.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoLanguagesRequest {
     pub owner: String,
     pub name: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoLanguagesResponse {
     pub languages: Vec<RepoLanguageStat>,
 }
 
 /// Actor on a repository activity feed item (public fields only).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoActivityActor {
     pub login: String,
     pub name: String,
@@ -511,7 +511,7 @@ pub struct RepoActivityActor {
 }
 
 /// One push / branch / merge event for `repo.activity.list`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoActivityItem {
     pub id: String,
     /// `push` | `force_push` | `pr_merge` | `branch_creation` | `branch_deletion`
@@ -531,7 +531,7 @@ pub struct RepoActivityItem {
 }
 
 /// `repo.activity.list` — repo activity feed (Read+).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoActivityListRequest {
     pub owner: String,
     pub name: String,
@@ -551,7 +551,7 @@ pub struct RepoActivityListRequest {
     pub limit: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoActivityListResponse {
     pub items: Vec<RepoActivityItem>,
     pub total: i64,
@@ -561,7 +561,7 @@ pub struct RepoActivityListResponse {
 
 /// `repo.insights.contributors` — top committers on the default branch (GIT-26).
 /// The history walk is bounded by the server's scan cap (`truncated`).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoInsightsContributorsRequest {
     pub owner: String,
     pub name: String,
@@ -571,7 +571,7 @@ pub struct RepoInsightsContributorsRequest {
 }
 
 /// One committer row in the insights contributors view.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoInsightContributor {
     /// Author name from the newest scanned commit (resolved user's display
     /// name when the email maps to an account).
@@ -594,7 +594,7 @@ pub struct RepoInsightContributor {
     pub last_commit_unix: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoInsightsContributorsResponse {
     pub contributors: Vec<RepoInsightContributor>,
     /// Default-branch commits walked (bounded by the server cap).
@@ -605,7 +605,7 @@ pub struct RepoInsightsContributorsResponse {
 
 /// `repo.insights.commitActivity` — weekly commit buckets on the default
 /// branch, GitHub `/stats/commit_activity` shape (GIT-26).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoInsightsCommitActivityRequest {
     pub owner: String,
     pub name: String,
@@ -617,14 +617,14 @@ pub struct RepoInsightsCommitActivityRequest {
 
 /// One ISO week bucket. `week` is the Sunday 00:00:00 UTC epoch; `days` is
 /// commits per weekday with index 0 = Sunday .. 6 = Saturday.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoCommitActivityWeek {
     pub week: i64,
     pub days: [i64; 7],
     pub total: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoInsightsCommitActivityResponse {
     /// Oldest-first week buckets; the last bucket is the in-progress week.
     pub weeks: Vec<RepoCommitActivityWeek>,
@@ -639,7 +639,7 @@ pub struct RepoInsightsCommitActivityResponse {
 /// `repo.insights.forkNetwork` — fork tree across the repo's network (GIT-26).
 /// Public members only (plus the queried repo itself); private forks of other
 /// users are not listed.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoInsightsForkNetworkRequest {
     pub owner: String,
     pub name: String,
@@ -649,7 +649,7 @@ pub struct RepoInsightsForkNetworkRequest {
 }
 
 /// One node of the fork-network tree.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoForkNetworkNode {
     pub id: String,
     pub owner: String,
@@ -673,7 +673,7 @@ pub struct RepoForkNetworkNode {
     pub is_current: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoInsightsForkNetworkResponse {
     /// Members oldest-first so clients can build the tree in one pass
     /// (parents precede children apart from the queried repo edge case).
@@ -685,7 +685,7 @@ pub struct RepoInsightsForkNetworkResponse {
 }
 
 /// `user.listStarred` — caller's starred repos (D-SOC-03).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ListStarredRequest {
     #[serde(default)]
     pub offset: Option<i64>,
@@ -694,7 +694,7 @@ pub struct ListStarredRequest {
 }
 
 /// `repo.explore` — public discovery listing (D-SOC-09…11).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoExploreRequest {
     #[serde(default)]
     pub q: Option<String>,
@@ -706,7 +706,7 @@ pub struct RepoExploreRequest {
 
 /// `user.listWatched` — caller's repo subscriptions at any watch level
 /// (`all` | `participating` | `ignore`), newest first (DEBT-06).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ListWatchedRequest {
     #[serde(default)]
     pub offset: Option<i64>,
@@ -715,13 +715,13 @@ pub struct ListWatchedRequest {
 }
 
 /// `user.getPublicProfile` — public profile by username (D-SOC-06 / D-SOC-08).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GetPublicProfileRequest {
     pub username: String,
 }
 
 /// Public profile DTO — never includes email (D-SOC-06).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PublicUserProfile {
     pub username: String,
     pub display_name: String,
@@ -739,14 +739,14 @@ pub struct PublicUserProfile {
 }
 
 /// `user.follow` / `user.unfollow` input (DEBT-06).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct UserFollowRequest {
     pub username: String,
 }
 
 /// `user.followers.list` / `user.following.list` input — paginated, optional
 /// username/display_name filter (DEBT-06).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct UserFollowListRequest {
     pub username: String,
     #[serde(default)]
@@ -758,7 +758,7 @@ pub struct UserFollowListRequest {
 }
 
 /// Public follower/following row — no email (DEBT-06).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct UserFollowPublic {
     pub user_id: String,
     pub username: String,
@@ -770,7 +770,7 @@ pub struct UserFollowPublic {
 }
 
 /// Shared page shape for `user.followers.list` and `user.following.list`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct UserFollowListResponse {
     pub users: Vec<UserFollowPublic>,
     /// Total matching rows (after `q` filter).
@@ -778,26 +778,26 @@ pub struct UserFollowListResponse {
 }
 
 /// `repo.listMine` — caller's non-deleted repos, recently updated first (GIT-01 / D-13).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoListMineResponse {
     pub repos: Vec<RepoPublic>,
 }
 
 /// `repo.listByOwner` — repos under a user/org slug the caller can read (D-ORG-06 overview).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoListByOwnerRequest {
     pub owner: String,
 }
 
 /// `repo.get` / `repo.refs` input — owner + name (GIT-05).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoGetRequest {
     pub owner: String,
     pub name: String,
 }
 
 /// `repo.tree` input.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoTreeRequest {
     pub owner: String,
     pub name: String,
@@ -809,7 +809,7 @@ pub struct RepoTreeRequest {
 }
 
 /// One `ls-tree` entry for RPC.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoTreeEntry {
     pub mode: String,
     pub kind: String,
@@ -818,7 +818,7 @@ pub struct RepoTreeEntry {
 }
 
 /// `repo.tree` response — empty repo sets `empty: true` without 500.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoTreeResponse {
     pub empty: bool,
     #[serde(rename = "ref")]
@@ -828,7 +828,7 @@ pub struct RepoTreeResponse {
 }
 
 /// `repo.blob` input.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoBlobRequest {
     pub owner: String,
     pub name: String,
@@ -838,7 +838,7 @@ pub struct RepoBlobRequest {
 }
 
 /// Soft-capped blob payload for UI (D-20).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoBlobResponse {
     pub path: String,
     #[serde(rename = "ref")]
@@ -853,7 +853,7 @@ pub struct RepoBlobResponse {
 }
 
 /// One ref from `repo.refs`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoRefEntry {
     pub name: String,
     pub oid: String,
@@ -866,13 +866,13 @@ pub struct RepoRefEntry {
 }
 
 /// `repo.refs` response.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoRefsResponse {
     pub refs: Vec<RepoRefEntry>,
 }
 
 /// `repo.commits` (log) input.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoCommitsRequest {
     pub owner: String,
     pub name: String,
@@ -889,7 +889,7 @@ fn default_commits_limit() -> u32 {
 }
 
 /// `repo.search` type discriminator (D-SRCH-14).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum RepoSearchType {
     Code,
@@ -914,7 +914,7 @@ fn default_search_limit() -> u32 {
 }
 
 /// `repo.search` input (GIT-18 / D-SRCH-14).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoSearchRequest {
     pub owner: String,
     pub name: String,
@@ -932,7 +932,7 @@ pub struct RepoSearchRequest {
 }
 
 /// One hit in `repo.search` results (tagged by `kind`).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum RepoSearchHit {
     Code {
@@ -960,7 +960,7 @@ pub enum RepoSearchHit {
 }
 
 /// `repo.search` response.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoSearchResponse {
     #[serde(rename = "type")]
     pub search_type: RepoSearchType,
@@ -974,7 +974,7 @@ pub struct RepoSearchResponse {
 }
 
 /// One commit row for history list.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoCommitSummary {
     pub sha: String,
     pub short_sha: String,
@@ -1001,7 +1001,7 @@ fn default_signature_none() -> String {
 }
 
 /// `repo.commits` response.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoCommitsResponse {
     #[serde(rename = "ref")]
     pub ref_name: String,
@@ -1011,7 +1011,7 @@ pub struct RepoCommitsResponse {
 }
 
 /// `repo.commit` input.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoCommitRequest {
     pub owner: String,
     pub name: String,
@@ -1019,7 +1019,7 @@ pub struct RepoCommitRequest {
 }
 
 /// One file in a commit/compare diff.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoDiffFile {
     pub path: String,
     pub status: String,
@@ -1027,7 +1027,7 @@ pub struct RepoDiffFile {
 }
 
 /// `repo.commit` response.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoCommitResponse {
     pub sha: String,
     pub short_sha: String,
@@ -1052,7 +1052,7 @@ pub struct RepoCommitResponse {
 }
 
 /// `repo.compare` input.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoCompareRequest {
     pub owner: String,
     pub name: String,
@@ -1061,7 +1061,7 @@ pub struct RepoCompareRequest {
 }
 
 /// `repo.compare` response.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoCompareResponse {
     pub base: String,
     pub head: String,
@@ -1071,7 +1071,7 @@ pub struct RepoCompareResponse {
 }
 
 /// `repo.forkStatus` input (GIT-24).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoForkStatusRequest {
     pub owner: String,
     pub name: String,
@@ -1082,7 +1082,7 @@ pub struct RepoForkStatusRequest {
 }
 
 /// `repo.forkStatus` response — fork branch vs upstream branch freshness.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoForkStatusResponse {
     /// Fork-side branch name.
     pub branch: String,
@@ -1099,7 +1099,7 @@ pub struct RepoForkStatusResponse {
 }
 
 /// `repo.syncFork` input (GIT-24).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoSyncForkRequest {
     pub owner: String,
     pub name: String,
@@ -1110,7 +1110,7 @@ pub struct RepoSyncForkRequest {
 }
 
 /// `repo.syncFork` response.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoSyncForkResponse {
     /// `up_to_date` | `fast_forwarded` | `merged`.
     pub status: String,
@@ -1128,7 +1128,7 @@ pub struct RepoSyncForkResponse {
 }
 
 /// `repo.blame` input.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoBlameRequest {
     pub owner: String,
     pub name: String,
@@ -1138,7 +1138,7 @@ pub struct RepoBlameRequest {
 }
 
 /// One blame line.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoBlameLine {
     pub sha: String,
     pub author_name: String,
@@ -1156,7 +1156,7 @@ pub struct RepoBlameLine {
 }
 
 /// `repo.blame` response.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoBlameResponse {
     pub path: String,
     #[serde(rename = "ref")]
@@ -1166,7 +1166,7 @@ pub struct RepoBlameResponse {
 }
 
 /// `repo.branchCreate` input (GIT-06).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoBranchCreateRequest {
     pub owner: String,
     pub name: String,
@@ -1177,7 +1177,7 @@ pub struct RepoBranchCreateRequest {
 }
 
 /// `repo.branchRename` input (GIT-06).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoBranchRenameRequest {
     pub owner: String,
     pub name: String,
@@ -1186,7 +1186,7 @@ pub struct RepoBranchRenameRequest {
 }
 
 /// `repo.branchDelete` input (GIT-06).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoBranchDeleteRequest {
     pub owner: String,
     pub name: String,
@@ -1194,7 +1194,7 @@ pub struct RepoBranchDeleteRequest {
 }
 
 /// Branch mutate response — name of the resulting branch (create/rename) or deleted name.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoBranchMutationResponse {
     pub branch: String,
 }
@@ -1211,7 +1211,7 @@ pub struct RepoBranchMutationResponse {
 /// When `branch` is protected and no `new_branch` is supplied, the server
 /// performs the same fallback automatically (generated `web-edit/*` branch +
 /// PR) rather than rejecting the write.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoFileCommitOptions {
     /// Base branch the change applies on top of (default branch when absent).
     #[serde(default)]
@@ -1232,7 +1232,7 @@ pub struct RepoFileCommitOptions {
 }
 
 /// `repo.file.create` input — create a file (GIT-19). `path` must not exist.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoFileCreateRequest {
     pub owner: String,
     pub name: String,
@@ -1253,7 +1253,7 @@ pub struct RepoFileCreateRequest {
 }
 
 /// `repo.file.update` input — overwrite an existing text file (GIT-19).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoFileUpdateRequest {
     pub owner: String,
     pub name: String,
@@ -1270,7 +1270,7 @@ pub struct RepoFileUpdateRequest {
 }
 
 /// `repo.file.delete` input — delete a file or a whole directory (GIT-19).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoFileDeleteRequest {
     pub owner: String,
     pub name: String,
@@ -1283,7 +1283,7 @@ pub struct RepoFileDeleteRequest {
 
 /// `repo.file.rename` input — move/rename a file (GIT-19). File-only:
 /// renaming a directory is rejected (rename its children instead).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoFileRenameRequest {
     pub owner: String,
     pub name: String,
@@ -1303,7 +1303,7 @@ pub struct RepoFileRenameRequest {
 
 /// `repo.file.upload` input — multi-file commit (GIT-19). Each path is
 /// created or overwritten; binaries go through `content_base64`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoFileUploadEntry {
     /// Repository-relative destination path.
     pub path: String,
@@ -1312,7 +1312,7 @@ pub struct RepoFileUploadEntry {
 }
 
 /// `repo.file.upload` input — commit several files atomically (GIT-19).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoFileUploadRequest {
     pub owner: String,
     pub name: String,
@@ -1325,7 +1325,7 @@ pub struct RepoFileUploadRequest {
 /// `repo.file.mkdir` input — create a directory (GIT-19). Git does not track
 /// empty directories; the commit materializes `{path}/.gitkeep` (empty file),
 /// matching the common convention. `path` must not exist.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoFileMkdirRequest {
     pub owner: String,
     pub name: String,
@@ -1337,7 +1337,7 @@ pub struct RepoFileMkdirRequest {
 }
 
 /// `repo.file.commitPolicy` input — which commit target the caller may use.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoFileCommitPolicyRequest {
     pub owner: String,
     pub name: String,
@@ -1347,7 +1347,7 @@ pub struct RepoFileCommitPolicyRequest {
 }
 
 /// `repo.file.commitPolicy` response — drives the commit-target picker.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoFileCommitPolicyResponse {
     /// Resolved base branch.
     pub branch: String,
@@ -1359,7 +1359,7 @@ pub struct RepoFileCommitPolicyResponse {
 }
 
 /// `repo.file.*` mutation response.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoFileCommitResponse {
     /// New commit SHA.
     pub commit_sha: String,
@@ -1373,7 +1373,7 @@ pub struct RepoFileCommitResponse {
 }
 
 /// `repo.updateVisibility` input (D-26).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoUpdateVisibilityRequest {
     pub owner: String,
     pub name: String,
@@ -1381,7 +1381,7 @@ pub struct RepoUpdateVisibilityRequest {
 }
 
 /// `repo.setArchived` input — Admin-only read-only archive toggle (GIT-20).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoSetArchivedRequest {
     pub owner: String,
     pub name: String,
@@ -1389,7 +1389,7 @@ pub struct RepoSetArchivedRequest {
 }
 
 /// `repo.lfs.setEnabled` input — Admin-only per-repo LFS toggle (D-LFS-10).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoLfsSetEnabledRequest {
     pub owner: String,
     pub name: String,
@@ -1397,20 +1397,20 @@ pub struct RepoLfsSetEnabledRequest {
 }
 
 /// `repo.lfs.setEnabled` / `repo.lfs.getEnabled` response.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoLfsEnabledResponse {
     pub enabled: bool,
 }
 
 /// `repo.lfs.getEnabled` input.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoLfsGetEnabledRequest {
     pub owner: String,
     pub name: String,
 }
 
 /// `repo.lfs.getStatus` — enable flag + light usage snapshot for Settings (D-LFS-16/19).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoLfsStatusResponse {
     pub enabled: bool,
     pub object_count: i64,
@@ -1418,7 +1418,7 @@ pub struct RepoLfsStatusResponse {
 }
 
 /// Top / listed LFS object row for usage + browser.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoLfsObjectEntry {
     pub oid: String,
     pub size: i64,
@@ -1426,7 +1426,7 @@ pub struct RepoLfsObjectEntry {
 }
 
 /// `repo.lfs.getUsage` — this-repo breakdown (D-LFS-19).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoLfsUsageResponse {
     pub enabled: bool,
     pub object_count: i64,
@@ -1436,7 +1436,7 @@ pub struct RepoLfsUsageResponse {
 }
 
 /// `repo.lfs.listObjects` input.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoLfsListObjectsRequest {
     pub owner: String,
     pub name: String,
@@ -1445,14 +1445,14 @@ pub struct RepoLfsListObjectsRequest {
 }
 
 /// `repo.lfs.listObjects` response — in-app LFS browser (D-LFS-16).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoLfsListObjectsResponse {
     pub enabled: bool,
     pub objects: Vec<RepoLfsObjectEntry>,
 }
 
 /// `repo.lfs.download` input — session Read path (D-LFS-18 / A2).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoLfsDownloadRequest {
     pub owner: String,
     pub name: String,
@@ -1460,7 +1460,7 @@ pub struct RepoLfsDownloadRequest {
 }
 
 /// Soft-capped base64 payload for browser Download (not git-lfs PAT path).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoLfsDownloadResponse {
     pub oid: String,
     pub size: i64,
@@ -1469,7 +1469,7 @@ pub struct RepoLfsDownloadResponse {
 }
 
 /// `repo.quota.get` / `repo.quota.set` — bare-repo disk usage + git object size quota (GIT-25).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoQuotaPublic {
     /// Measured on-disk size of the bare repository (bytes).
     pub size_bytes: i64,
@@ -1484,14 +1484,14 @@ pub struct RepoQuotaPublic {
 }
 
 /// `repo.quota.get` input (GIT-25).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoGetQuotaRequest {
     pub owner: String,
     pub name: String,
 }
 
 /// `repo.quota.set` input — repo Admin capability (GIT-25).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoSetQuotaRequest {
     pub owner: String,
     pub name: String,
@@ -1503,7 +1503,7 @@ pub struct RepoSetQuotaRequest {
 
 /// `admin.git.getSettings` / `admin.git.updateSettings` — instance git quota
 /// default (GIT-25).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AdminGitSettingsPublic {
     /// Effective instance default (admin override when set, else env/built-in).
     pub repo_quota_bytes: i64,
@@ -1512,7 +1512,7 @@ pub struct AdminGitSettingsPublic {
 }
 
 /// `admin.git.updateSettings` input — `null` keeps the current override; see `clear_overrides`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AdminGitUpdateSettingsRequest {
     #[serde(default)]
     pub repo_quota_bytes: Option<i64>,
@@ -1522,7 +1522,7 @@ pub struct AdminGitUpdateSettingsRequest {
 }
 
 /// Instance-admin template pack metadata (issue #18).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct InstanceTemplatePackPublic {
     pub id: String,
     pub slug: String,
@@ -1539,12 +1539,12 @@ pub struct InstanceTemplatePackPublic {
     pub updated_at: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AdminTemplatesListResponse {
     pub packs: Vec<InstanceTemplatePackPublic>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AdminTemplateUpdateRequest {
     pub id: String,
     #[serde(default)]
@@ -1557,39 +1557,39 @@ pub struct AdminTemplateUpdateRequest {
     pub default_gitignore: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AdminTemplateSetEnabledRequest {
     pub id: String,
     pub enabled: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AdminTemplateDeleteRequest {
     pub id: String,
 }
 
 /// `repo.templates.setEnabled` — mark repository as a create-from template.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoTemplateSetEnabledRequest {
     pub owner: String,
     pub name: String,
     pub enabled: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoTemplateGetEnabledRequest {
     pub owner: String,
     pub name: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoTemplateEnabledResponse {
     pub enabled: bool,
 }
 
 /// `repo.templates.list` input — issue/PR templates live in the repo's git tree
 /// (COL-02), so the request only needs the repo (default branch is read).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoTemplatesListRequest {
     pub owner: String,
     pub name: String,
@@ -1597,7 +1597,7 @@ pub struct RepoTemplatesListRequest {
 
 /// `repo.issues.setEnabled` / `repo.pulls.setEnabled` input — Admin-only
 /// per-repo unit toggle (COL-13).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoUnitSetEnabledRequest {
     pub owner: String,
     pub name: String,
@@ -1605,7 +1605,7 @@ pub struct RepoUnitSetEnabledRequest {
 }
 
 /// `repo.issues.getEnabled` / `repo.pulls.getEnabled` input (COL-13).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoUnitGetEnabledRequest {
     pub owner: String,
     pub name: String,
@@ -1613,7 +1613,7 @@ pub struct RepoUnitGetEnabledRequest {
 
 /// One issue/PR template file discovered in the default-branch tree
 /// (GitHub-style `---` YAML frontmatter parsed when present).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoFileTemplate {
     /// Display name — frontmatter `name`, else filename stem.
     pub name: String,
@@ -1633,20 +1633,20 @@ pub struct RepoFileTemplate {
 }
 
 /// `repo.templates.list` response — grouped by target surface.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoTemplatesListResponse {
     pub issues: Vec<RepoFileTemplate>,
     pub pulls: Vec<RepoFileTemplate>,
 }
 
 /// `repo.issues.*` / `repo.pulls.*` unit-toggle response (COL-13).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoUnitEnabledResponse {
     pub enabled: bool,
 }
 
 /// Per-repo row in admin instance usage breakdown.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AdminLfsRepoUsageEntry {
     pub repository_id: String,
     pub owner: String,
@@ -1656,7 +1656,7 @@ pub struct AdminLfsRepoUsageEntry {
 }
 
 /// Per-owner (user/org) row in admin instance usage breakdown.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AdminLfsOwnerUsageEntry {
     pub owner_id: String,
     pub owner_slug: String,
@@ -1665,7 +1665,7 @@ pub struct AdminLfsOwnerUsageEntry {
 }
 
 /// `admin.lfs.getUsage` — instance breakdown (D-LFS-19).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AdminLfsUsageResponse {
     pub physical_bytes: i64,
     pub object_count: i64,
@@ -1675,7 +1675,7 @@ pub struct AdminLfsUsageResponse {
 }
 
 /// `repo.softDelete` input — typed confirm name required (D-35 / T-07-24).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoSoftDeleteRequest {
     pub owner: String,
     pub name: String,
@@ -1684,13 +1684,13 @@ pub struct RepoSoftDeleteRequest {
 }
 
 /// Soft-delete acknowledgement (DB row marked; disk purge deferred).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoSoftDeleteResponse {
     pub name: String,
 }
 
 /// Effective instance LFS limits (Admin override or env default) — D-LFS-13.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AdminLfsSettingsPublic {
     pub max_object_bytes: i64,
     pub quota_repo_bytes: i64,
@@ -1702,7 +1702,7 @@ pub struct AdminLfsSettingsPublic {
 }
 
 /// `admin.lfs.updateSettings` — null fields clear override (revert to env).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AdminLfsUpdateSettingsRequest {
     #[serde(default)]
     pub max_object_bytes: Option<i64>,
@@ -1715,7 +1715,7 @@ pub struct AdminLfsUpdateSettingsRequest {
     pub clear_overrides: bool,
 }
 /// `repo.rename` input — Admin only; no type-confirm (D-REL-07 / GIT-16).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoRenameRequest {
     pub owner: String,
     pub name: String,
@@ -1724,13 +1724,13 @@ pub struct RepoRenameRequest {
 }
 
 /// `repo.rename` response — updated public repo metadata.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoRenameResponse {
     pub repo: RepoPublic,
 }
 
 /// `repo.transfer` input — Admin only; type-confirm required (D-REL-09 / D-REL-10 / GIT-17).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoTransferRequest {
     pub owner: String,
     pub name: String,
@@ -1743,12 +1743,12 @@ pub struct RepoTransferRequest {
 }
 
 /// `repo.transfer` response — updated public repo under the new owner.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoTransferResponse {
     pub repo: RepoPublic,
 }
 /// Public collaborator row — no email (ORG-03 / D-ORG-02c).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoCollaboratorPublic {
     pub user_id: String,
     pub username: String,
@@ -1757,13 +1757,13 @@ pub struct RepoCollaboratorPublic {
 }
 
 /// `repo.collaborators.list` response.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoCollaboratorsListResponse {
     pub collaborators: Vec<RepoCollaboratorPublic>,
 }
 
 /// `repo.collaborators.add` — existing instance user by username.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoCollaboratorsAddRequest {
     pub owner: String,
     pub name: String,
@@ -1772,7 +1772,7 @@ pub struct RepoCollaboratorsAddRequest {
 }
 
 /// `repo.collaborators.update`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoCollaboratorsUpdateRequest {
     pub owner: String,
     pub name: String,
@@ -1781,7 +1781,7 @@ pub struct RepoCollaboratorsUpdateRequest {
 }
 
 /// `repo.collaborators.remove`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoCollaboratorsRemoveRequest {
     pub owner: String,
     pub name: String,
@@ -1789,7 +1789,7 @@ pub struct RepoCollaboratorsRemoveRequest {
 }
 
 /// Public pending repo invite — never includes token or token_hash.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoInvitePublic {
     pub id: String,
     /// `None` = shareable link (not bound to a recipient email).
@@ -1805,13 +1805,13 @@ pub struct RepoInvitePublic {
 }
 
 /// `repo.invites.list` response.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoInvitesListResponse {
     pub invites: Vec<RepoInvitePublic>,
 }
 
 /// `repo.invites.create` — bulk: one email-bound invite per address.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoInvitesCreateRequest {
     pub owner: String,
     pub name: String,
@@ -1820,7 +1820,7 @@ pub struct RepoInvitesCreateRequest {
 }
 
 /// Per-recipient outcome of a bulk `repo.invites.create`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoInvitesCreateItemResult {
     pub email: String,
     pub ok: bool,
@@ -1834,13 +1834,13 @@ pub struct RepoInvitesCreateItemResult {
 }
 
 /// `repo.invites.create` response — one entry per submitted email.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoInvitesCreateResponse {
     pub results: Vec<RepoInvitesCreateItemResult>,
 }
 
 /// `repo.invites.createLink` — shareable link, no bound email.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoInvitesCreateLinkRequest {
     pub owner: String,
     pub name: String,
@@ -1854,14 +1854,14 @@ pub struct RepoInvitesCreateLinkRequest {
 }
 
 /// `repo.invites.createLink` — invite metadata + one-time copyable URL.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoInvitesCreateLinkResponse {
     pub invite: RepoInvitePublic,
     pub invite_url: String,
 }
 
 /// `repo.invites.revoke`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoInvitesRevokeRequest {
     pub owner: String,
     pub name: String,
@@ -1910,7 +1910,7 @@ pub fn validate_repo_name(raw: &str) -> Result<(), String> {
 }
 
 /// Sys-admin manual `git gc` (D-37). Omit owner+name to GC all active repos.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoGcRequest {
     #[serde(default)]
     pub owner: Option<String>,
@@ -1919,7 +1919,7 @@ pub struct RepoGcRequest {
 }
 
 /// Result of a manual or scheduled GC pass.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RepoGcResponse {
     pub ok: bool,
     pub gc_count: u32,

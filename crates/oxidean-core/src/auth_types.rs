@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Auth provider mode (D-05, D-06). Serialized as lowercase: `local` | `workos` | `oidc`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum ProviderMode {
     #[default]
@@ -13,7 +13,7 @@ pub enum ProviderMode {
 }
 
 /// Outbound email adapter kind. Serialized as lowercase: `log` | `smtp` | `resend`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum EmailProviderKind {
     Log,
@@ -22,7 +22,7 @@ pub enum EmailProviderKind {
 }
 
 /// Instance-level user role. Serialized as kebab-case: `user` | `admin` | `sys-admin`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum Role {
     #[default]
@@ -61,7 +61,7 @@ impl Role {
 }
 
 /// Public user profile returned over RPC (no password hash).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct UserPublic {
     pub id: String,
     pub email: String,
@@ -87,14 +87,14 @@ fn default_branch_main() -> String {
 }
 
 /// Empty-instance bootstrap status (AUTH-07).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct BootstrapStatus {
     /// True when `users` is empty and `OXIDEAN_ADMIN_*` ENV seed is not configured.
     pub needs_setup: bool,
 }
 
 /// One-time setup wizard input — creates the first `sys-admin` (AUTH-07).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct BootstrapSetupRequest {
     pub email: String,
     pub username: String,
@@ -114,7 +114,7 @@ pub struct BootstrapSetupRequest {
 }
 
 /// Factory reset disk/DB scope (D-34). Default keeps repository files on disk.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum FactoryResetScope {
     /// Wipe users/sessions/auth; keep bare repos under `OXIDEAN_REPOS_DIR`.
@@ -125,7 +125,7 @@ pub enum FactoryResetScope {
 }
 
 /// Sys-admin factory reset — wipe users/sessions and restore empty-instance setup.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct FactoryResetRequest {
     /// Must equal `RESET` (case-sensitive) to proceed.
     pub confirmation: String,
@@ -135,14 +135,14 @@ pub struct FactoryResetRequest {
 }
 
 /// Result of a successful factory reset.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct FactoryResetResponse {
     pub ok: bool,
     pub needs_setup: bool,
 }
 
 /// Forced credential confirm for ENV-seeded admins (AUTH-06, D-16/D-17).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ConfirmAdminCredentialsRequest {
     pub username: String,
     /// Optional; omit or empty keeps the current (ENV) email.
@@ -157,7 +157,7 @@ pub struct ConfirmAdminCredentialsRequest {
 }
 
 /// Local signup input (D-01).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SignupRequest {
     pub email: String,
     pub username: String,
@@ -165,7 +165,7 @@ pub struct SignupRequest {
 }
 
 /// Local login input (D-02). `identifier` is email or username.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct LoginRequest {
     pub identifier: String,
     pub password: String,
@@ -173,7 +173,7 @@ pub struct LoginRequest {
 }
 
 /// Public provider config for `auth.provider_config`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ProviderConfigPublic {
     pub mode: ProviderMode,
     /// When false, local signup is closed (D-05/D-06); fail closed if unset at read.
@@ -181,7 +181,7 @@ pub struct ProviderConfigPublic {
 }
 
 /// Profile update fields (D-18). Bio max length enforced in API (160).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct UpdateProfileRequest {
     pub display_name: String,
     pub username: String,
@@ -192,7 +192,7 @@ pub struct UpdateProfileRequest {
 }
 
 /// `user.lookup` autocomplete input (ORG-01 / D-ORG-03). Prefix is matched on username only.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct UserLookupRequest {
     pub prefix: String,
     /// Optional scope for exclude/rank (PR-B contextual autocomplete).
@@ -201,7 +201,7 @@ pub struct UserLookupRequest {
 }
 
 /// Scope for contextual `user.lookup` ranking / exclusion.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum UserLookupContext {
     Instance,
@@ -210,7 +210,7 @@ pub enum UserLookupContext {
 }
 
 /// Public autocomplete hit — never includes email (T-10-03).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct UserLookupHit {
     pub username: String,
     pub display_name: String,
@@ -218,13 +218,13 @@ pub struct UserLookupHit {
 }
 
 /// `user.lookup` response — at most 10 hits.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct UserLookupResponse {
     pub users: Vec<UserLookupHit>,
 }
 
 /// Admin user row for `admin.users.list` (includes email + ban state).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AdminUserPublic {
     pub id: String,
     pub email: String,
@@ -237,7 +237,7 @@ pub struct AdminUserPublic {
 }
 
 /// `admin.users.list` input.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AdminUsersListRequest {
     #[serde(default)]
     pub query: Option<String>,
@@ -248,27 +248,27 @@ pub struct AdminUsersListRequest {
 }
 
 /// `admin.users.list` response.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AdminUsersListResponse {
     pub users: Vec<AdminUserPublic>,
     pub total: i64,
 }
 
 /// `admin.users.updateRole` — only `user` ↔ `sys-admin`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AdminUsersUpdateRoleRequest {
     pub user_id: String,
     pub role: Role,
 }
 
 /// Shared `{ user_id }` for ban / unban / revokeSessions.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AdminUsersUserIdRequest {
     pub user_id: String,
 }
 
 /// `admin.users.delete` — confirmation must equal the target username.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AdminUsersDeleteRequest {
     pub user_id: String,
     pub confirmation: String,
@@ -279,7 +279,7 @@ pub struct AdminUsersDeleteRequest {
 }
 
 /// `admin.users.delete` summary for the confirmation UI.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AdminUsersDeleteResponse {
     pub ok: bool,
     pub deleted_repos: i64,
@@ -287,7 +287,7 @@ pub struct AdminUsersDeleteResponse {
 }
 
 /// Public pending instance invite — never includes token or token_hash.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct InstanceInvitePublic {
     pub id: String,
     /// `None` = shareable link (not bound to a recipient email).
@@ -302,13 +302,13 @@ pub struct InstanceInvitePublic {
 }
 
 /// `admin.invites.create` — bulk: one email-bound invite per address.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AdminInvitesCreateRequest {
     pub emails: Vec<String>,
 }
 
 /// Per-recipient outcome of a bulk invite create.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AdminInvitesCreateItemResult {
     pub email: String,
     pub ok: bool,
@@ -322,13 +322,13 @@ pub struct AdminInvitesCreateItemResult {
 }
 
 /// `admin.invites.create` response — one entry per submitted email.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AdminInvitesCreateResponse {
     pub results: Vec<AdminInvitesCreateItemResult>,
 }
 
 /// `admin.invites.createLink` — shareable link, no bound email.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AdminInvitesCreateLinkRequest {
     /// ISO-8601 UTC; `None`/absent = never expires.
     #[serde(default)]
@@ -339,32 +339,32 @@ pub struct AdminInvitesCreateLinkRequest {
 }
 
 /// `admin.invites.createLink` — invite metadata + one-time copyable URL.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AdminInvitesCreateLinkResponse {
     pub invite: InstanceInvitePublic,
     pub invite_url: String,
 }
 
 /// `admin.invites.list` response.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AdminInvitesListResponse {
     pub invites: Vec<InstanceInvitePublic>,
 }
 
 /// `admin.invites.revoke`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AdminInvitesRevokeRequest {
     pub invite_id: String,
 }
 
 /// `invites.get` — anonymous-safe invite preview (accept page).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct InvitesGetRequest {
     pub token: String,
 }
 
 /// Invite preview — scope + constraints; never token internals.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct InvitesGetResponse {
     /// `"instance" | "org" | "repo"`.
     pub kind: String,
@@ -395,7 +395,7 @@ pub struct InvitesGetResponse {
 }
 
 /// Unified `invites.accept` / `org.invites.accept` input.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct InvitesAcceptRequest {
     pub token: String,
     /// Account email — required for anonymous accept of unbound link invites.
@@ -408,7 +408,7 @@ pub struct InvitesAcceptRequest {
 }
 
 /// Unified `invites.accept` response — instance signup, org membership, or repo collaborator.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum InvitesAcceptResponse {
     Instance,
@@ -424,7 +424,7 @@ pub enum InvitesAcceptResponse {
 }
 
 /// Org membership summary for `admin.users.getAccess`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AdminUserAccessOrg {
     pub slug: String,
     pub display_name: String,
@@ -432,7 +432,7 @@ pub struct AdminUserAccessOrg {
 }
 
 /// Repo collaborator grant summary for `admin.users.getAccess`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AdminUserAccessRepo {
     pub owner: String,
     pub name: String,
@@ -440,14 +440,14 @@ pub struct AdminUserAccessRepo {
 }
 
 /// `admin.users.getAccess` response — read-only memberships / grants.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AdminUsersGetAccessResponse {
     pub orgs: Vec<AdminUserAccessOrg>,
     pub repos: Vec<AdminUserAccessRepo>,
 }
 
 /// Session row for the admin user view — never includes token or token_hash.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AdminSessionPublic {
     pub id: String,
     pub created_at: String,
@@ -459,13 +459,13 @@ pub struct AdminSessionPublic {
 }
 
 /// `admin.users.listSessions` response (input is the shared `{ user_id }` shape).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AdminUsersListSessionsResponse {
     pub sessions: Vec<AdminSessionPublic>,
 }
 
 /// `admin.users.getActivity` input.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AdminUsersGetActivityRequest {
     pub user_id: String,
     /// Source filter: `"audit"`, `"repository"`, or absent for both.
@@ -479,7 +479,7 @@ pub struct AdminUsersGetActivityRequest {
 }
 
 /// One row in the merged user activity feed (audit events + repo activity).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AdminUserActivityItem {
     pub id: String,
     /// `"audit"` or `"repository"`.
@@ -514,7 +514,7 @@ pub struct AdminUserActivityItem {
 }
 
 /// `admin.users.getActivity` response.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AdminUsersGetActivityResponse {
     pub items: Vec<AdminUserActivityItem>,
     /// Distinct event types seen for this user (filter UI).
@@ -522,7 +522,7 @@ pub struct AdminUsersGetActivityResponse {
 }
 
 /// Instance auth settings for admin UI — secrets never returned; ENV badges only (D-09, T-04-22).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AuthSettingsPublic {
     pub provider_mode: ProviderMode,
     pub email_provider: EmailProviderKind,
@@ -546,7 +546,7 @@ fn default_visibility_public() -> crate::RepoVisibility {
 }
 
 /// Admin update payload — non-secret fields only.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct UpdateAuthSettingsRequest {
     pub provider_mode: ProviderMode,
     pub email_provider: EmailProviderKind,
