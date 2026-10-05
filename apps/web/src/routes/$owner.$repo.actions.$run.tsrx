@@ -285,7 +285,7 @@ export function RepoActionsRunPage() @{
               <List data-testid="repo-actions-jobs" className="self-start">
                 @for (const job of jobs; key job.id) {
                   <ListRow className="p-0">
-                    <div className="group flex items-center">
+                    <div className="group flex min-w-0 flex-1 items-center">
                       <button
                         type="button"
                         data-testid={`actions-job-${job.id}`}
