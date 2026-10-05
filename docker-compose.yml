@@ -124,7 +124,7 @@ services:
       - traefik.http.routers.api-git.priority=110
       - traefik.http.routers.api-git.service=api
       # Packages registry (D-PKG-01): /v2|/npm|/generic → API before SPA (priority 110).
-      - traefik.http.routers.api-packages.rule=Host(`localhost`) && (PathPrefix(`/v2`) || PathPrefix(`/npm`) || PathPrefix(`/generic`))
+      - traefik.http.routers.api-packages.rule=Host(`localhost`) && (PathPrefix(`/v2`) || PathPrefix(`/npm`) || PathPrefix(`/generic`) || PathPrefix(`/cli`))
       - traefik.http.routers.api-packages.entrypoints=web
       - traefik.http.routers.api-packages.priority=110
       - traefik.http.routers.api-packages.service=api

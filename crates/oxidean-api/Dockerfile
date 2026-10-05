@@ -21,11 +21,17 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 ENV RUSTFLAGS="-C link-arg=-fuse-ld=mold"
 COPY --from=planner /app/recipe.json recipe.json
-RUN cargo chef cook --release --recipe-path recipe.json -p oxidean-api
+RUN cargo chef cook --release --recipe-path recipe.json -p oxidean-api -p oxidean-cli
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 RUN cargo build --release -p oxidean-api --bin oxidean-api --bin oxidean-protection-hook \
   && cp /app/target/release/oxidean-api /app/target/release/oxidean-protection-hook /usr/local/bin/
+# CLI distribution (D-CLI-DIST): the api serves /cli/bin/ox-{target} — stage the
+# companion `ox` build under the server's own target triple.
+RUN cargo build --release -p oxidean-cli --bin ox \
+  && mkdir -p /usr/local/share/oxidean-cli \
+  && target=$(rustc -vV | awk '/^host:/ {print $2}') \
+  && cp /app/target/release/ox "/usr/local/share/oxidean-cli/ox-$target"
 
 FROM debian:bookworm-slim
 # git: forge ops + D-33 boot gate (GIT-09); ca-certificates/curl: TLS + healthcheck;
@@ -35,6 +41,7 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /usr/local/bin/oxidean-api /usr/local/bin/oxidean-api
 COPY --from=builder /usr/local/bin/oxidean-protection-hook /usr/local/bin/oxidean-protection-hook
+COPY --from=builder /usr/local/share/oxidean-cli /usr/local/share/oxidean-cli
 ENV API_BIND=0.0.0.0:8080
 EXPOSE 8080
 HEALTHCHECK --interval=5s --timeout=5s --retries=12 \

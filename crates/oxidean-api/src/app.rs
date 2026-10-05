@@ -24,7 +24,7 @@ use crate::auth::session::{
 use crate::email::{self, EmailSender};
 use crate::pat::bearer::{self, BearerRejection};
 use crate::pat::rate_limit::FailedAuthLimiter;
-use crate::routes::{auth_callbacks, avatar, feeds, git_lfs, git_smart_http, release_assets, repo_raw, template_packs};
+use crate::routes::{auth_callbacks, avatar, cli_dist, feeds, git_lfs, git_smart_http, release_assets, repo_raw, template_packs};
 use crate::rpc::{self, CookieChange, RpcCtx, VERSION_HEADER};
 use crate::user::rate_limit::LookupLimiter;
 
@@ -361,6 +361,11 @@ pub fn router_with_state(state: AppState, cors: CorsLayer) -> Router {
                 .put(git_lfs::put_object)
                 .layer(DefaultBodyLimit::max(2 * 1024 * 1024 * 1024)),
         )
+        // CLI distribution — install script + ox binaries; must route to the
+        // API at the edge (unauthenticated; ox self-update consumes it).
+        .route("/cli/install.sh", get(cli_dist::install_script))
+        .route("/cli/latest", get(cli_dist::latest))
+        .route("/cli/bin/{*file}", get(cli_dist::binary))
         // Package registry (D-PKG-01) — path prefixes must outrank SPA at the edge.
         .route("/v2", get(crate::packages::oci::discovery))
         .route("/v2/", get(crate::packages::oci::discovery))

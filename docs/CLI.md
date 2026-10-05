@@ -8,13 +8,58 @@ envelope.
 
 The binary lives at `crates/oxidean-cli` in the Cargo workspace.
 
-## Install from source
+## Install
+
+Any Oxidean instance that ships the CLI distribution serves an install script
+at `/cli/install.sh` — also linked under **Settings → Command line**:
+
+```bash
+curl -fsSL https://forge.example.com/cli/install.sh | sh
+```
+
+The script detects your platform (`uname`), downloads
+`/cli/bin/ox-{target}` plus its published `.sha256`, verifies the checksum, and
+installs to `~/.local/bin/ox` (override with `OXIDEAN_INSTALL_DIR`).
+
+If the instance has no prebuilt binary for your platform, install from source:
 
 ```bash
 cargo build --release -p oxidean-cli
 # binary lands at target/release/ox
 cargo install --path crates/oxidean-cli   # optional: installs `ox`
 ```
+
+## Updating
+
+`ox` can replace itself with the binary the configured instance serves — the
+CLI version tracks the server version, so updating keeps them in lockstep:
+
+```bash
+ox self-update
+```
+
+The command fetches `{instance}/cli/latest`, compares the advertised version
+to the running build, downloads `ox-{your-target}` and its `.sha256`, verifies
+the checksum, and swaps the executable in place. When the instance has no
+artifact for your platform it says so and points at the installer instead.
+
+### For operators: serving binaries
+
+The API serves every `ox-{rust-target-triple}` file found in
+`OXIDEAN_CLI_DIST_DIR` (default `/usr/local/share/oxidean-cli`). The release
+image stages the server's own platform; to offer more (e.g. macOS/ARM builds
+for your users), drop additional binaries into that directory:
+
+```text
+/usr/local/share/oxidean-cli/
+  ox-x86_64-unknown-linux-gnu
+  ox-aarch64-apple-darwin
+  ox-x86_64-pc-windows-msvc
+```
+
+`GET /cli/latest` reports the version (the API package version) and the
+sha256/size of every target found; `/cli/bin/{file}` serves artifacts and
+digests unauthenticated so installs work before `ox auth login` exists.
 
 ## Authentication
 

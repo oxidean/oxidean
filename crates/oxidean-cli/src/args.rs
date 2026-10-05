@@ -39,6 +39,10 @@ ACTIONS
 PACKAGES
   ox pkg list [--owner <user|org>]
 
+MAINTENANCE
+  ox self-update     download the latest ox binary served by the instance and
+                     replace this executable in place
+
 ESCAPE HATCH
   ox api <procedure> [-f field=value]... [-F field=<json>]...
      -f sends the value as a string; -F parses it as JSON.
@@ -141,6 +145,7 @@ pub enum Command {
     PkgList {
         owner: Option<String>,
     },
+    SelfUpdate,
     Api {
         procedure: String,
         input: Value,
@@ -525,6 +530,11 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
                 owner: f.values.get("--owner").cloned(),
             }
         }
+        ("self-update", "") => {
+            let f = scan(tail, &[], &[], &[])?;
+            expect_no_positionals(&f, "self-update")?;
+            Command::SelfUpdate
+        }
         ("api", proc) if !proc.is_empty() => {
             let f = scan(tail, &[], &[], &["-f", "-F"])?;
             expect_no_positionals(&f, "api")?;
@@ -560,6 +570,14 @@ mod tests {
 
     fn argv(parts: &[&str]) -> Vec<String> {
         parts.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn self_update_parses() {
+        let inv = parse(&argv(&["self-update"])).unwrap();
+        assert_eq!(inv.command, Command::SelfUpdate);
+        let err = parse(&argv(&["self-update", "extra"])).unwrap_err();
+        assert!(err.0.contains("unknown command"), "{err}");
     }
 
     #[test]

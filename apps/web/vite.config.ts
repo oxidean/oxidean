@@ -98,6 +98,8 @@ export default defineConfig(() => {
         "/generic": { target: apiProxyTarget, changeOrigin: true },
         // API-03 OAuth2 endpoints are API-owned; `/oauth/consent` stays a SPA
         // route so the consent screen renders in the web app.
+        // CLI distribution (install.sh + ox binaries) is API-owned.
+        "/cli": { target: apiProxyTarget, changeOrigin: true },
         "/oauth/authorize": { target: apiProxyTarget, changeOrigin: true },
         "/oauth/token": { target: apiProxyTarget, changeOrigin: true },
         "/oauth/userinfo": { target: apiProxyTarget, changeOrigin: true },

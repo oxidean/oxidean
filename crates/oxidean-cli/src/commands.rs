@@ -99,7 +99,7 @@ pub enum Out {
     },
 }
 
-fn resolve_instance(global: &Global, cfg: &Config) -> Result<String, CliError> {
+pub(crate) fn resolve_instance(global: &Global, cfg: &Config) -> Result<String, CliError> {
     config::resolve_instance(
         global.instance.as_deref(),
         config::env_instance().as_deref(),
@@ -344,7 +344,8 @@ fn required_procedures(command: &Command) -> Vec<String> {
         Command::RunView { .. } => vec!["repo.actions.getRun".into()],
         Command::PkgList { .. } => vec!["packages.list".into()],
         Command::Api { procedure, .. } => vec![procedure.clone()],
-        Command::Help | Command::Version => vec![],
+        // self-update talks to /cli/* HTTP, not /api/rpc — no manifest gate.
+        Command::SelfUpdate | Command::Help | Command::Version => vec![],
     }
 }
 
@@ -491,6 +492,7 @@ pub async fn dispatch(inv: &Invocation, rt: &Runtime) -> Result<Out, CliError> {
             };
             invoke(g, rt, "packages.list", input, output::pkg_list).await
         }
+        Command::SelfUpdate => crate::self_update::run(g, rt).await,
         Command::Api { procedure, input } => {
             invoke(g, rt, procedure, input.clone(), |data| {
                 serde_json::to_string_pretty(data).unwrap_or_else(|_| "{}".to_string())
