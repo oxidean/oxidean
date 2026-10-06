@@ -2680,6 +2680,25 @@ export type ResolvePullCommentRequest = {
   resolved: boolean;
 };
 
+export type PullCommentRefRequest = {
+  owner: string;
+  name: string;
+  number: number;
+  commentId: string;
+};
+
+export type UpdatePullCommentRequest = {
+  owner: string;
+  name: string;
+  number: number;
+  commentId: string;
+  body: string;
+};
+
+export type DeletePullCommentResponse = {
+  ok: boolean;
+};
+
 export type PullDiffFile = {
   path: string;
   status: string;
@@ -3671,6 +3690,12 @@ export function createClient(opts: CreateClientOptions) {
           rpcCall<PullCommentsListResponse>(opts, "pull.comments.list", input),
         create: (input: CreatePullCommentRequest) =>
           rpcCall<PullCommentPublic>(opts, "pull.comments.create", input),
+        update: (input: UpdatePullCommentRequest) =>
+          rpcCall<PullCommentPublic>(opts, "pull.comments.update", input),
+        delete: (input: PullCommentRefRequest) =>
+          rpcCall<DeletePullCommentResponse>(opts, "pull.comments.delete", input),
+        history: (input: PullCommentRefRequest) =>
+          rpcCall<CommentHistoryResponse>(opts, "pull.comments.history", input),
         resolve: (input: ResolvePullCommentRequest) =>
           rpcCall<PullCommentPublic>(opts, "pull.comments.resolve", input),
       },

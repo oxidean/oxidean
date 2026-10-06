@@ -323,6 +323,32 @@ pub struct ResolvePullCommentRequest {
     pub resolved: bool,
 }
 
+/// Update / delete / history for a comment on a pull request.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PullCommentRefRequest {
+    pub owner: String,
+    pub name: String,
+    pub number: i64,
+    #[serde(rename = "commentId", alias = "comment_id")]
+    pub comment_id: String,
+}
+
+/// Update comment body (author only; mirrors `issue.comments.update`).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct UpdatePullCommentRequest {
+    pub owner: String,
+    pub name: String,
+    pub number: i64,
+    #[serde(rename = "commentId", alias = "comment_id")]
+    pub comment_id: String,
+    pub body: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct DeletePullCommentResponse {
+    pub ok: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PullReviewPublic {
     pub id: String,

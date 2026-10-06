@@ -15,6 +15,7 @@ const EVENT_OPTIONS = [
   { id: "pull_request", label: "pull_request" },
   { id: "issues", label: "issues" },
   { id: "issue_comment", label: "issue_comment" },
+  { id: "pull_request_review_comment", label: "pull_request_review_comment" },
   { id: "release", label: "release" },
   { id: "star", label: "star" },
   { id: "fork", label: "fork" },
@@ -99,12 +100,21 @@ export function WebhookForm(props: {
   const [description, setDescription] = useState(initial?.name ?? "");
   const [active, setActive] = useState(initial?.active ?? true);
   const [events, setEvents] = useState<Record<EventId, boolean>>(() => {
-    const set = new Set(initial?.events ?? ["push", "pull_request", "issues", "issue_comment"]);
+    const set = new Set(
+      initial?.events ?? [
+        "push",
+        "pull_request",
+        "issues",
+        "issue_comment",
+        "pull_request_review_comment",
+      ],
+    );
     return {
       push: set.has("push"),
       pull_request: set.has("pull_request"),
       issues: set.has("issues"),
       issue_comment: set.has("issue_comment"),
+      pull_request_review_comment: set.has("pull_request_review_comment"),
       release: set.has("release"),
       star: set.has("star"),
       fork: set.has("fork"),

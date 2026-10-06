@@ -301,6 +301,7 @@ export function PullDetailPage() @{
                 number={number}
                 canWrite={canWrite}
                 canInteract={canInteract}
+                currentUserId={account.user?.id ?? ""}
                 body={(pull.body || "") as string}
               />
               <PullReviews

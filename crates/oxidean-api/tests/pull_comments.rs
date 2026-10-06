@@ -239,3 +239,222 @@ async fn pull_comments_general_line_resolve_outdated() {
     let gen_c = comments.iter().find(|c| c["path"].is_null()).unwrap();
     assert_eq!(gen_c["outdated"], false, "general comments stay current");
 }
+
+/// Repo + branch + one-commit head + PR; returns pull number.
+async fn setup_pull(
+    app: &axum::Router,
+    repos: &std::path::Path,
+    cookie: &str,
+    owner: &str,
+    repo: &str,
+) -> i64 {
+    let create = rpc_json(
+        app,
+        cookie,
+        &format!(
+            r#"{{"procedure":"repo.create","input":{{"name":"{repo}","visibility":"public","description":"","stack_id":"rust","license_id":"MIT","gitignore_id":"Rust"}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(create["ok"], true, "{create}");
+    let br = rpc_json(
+        app,
+        cookie,
+        &format!(
+            r#"{{"procedure":"repo.branchCreate","input":{{"owner":"{owner}","name":"{repo}","branch":"feature","start":"main"}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(br["ok"], true, "{br}");
+    let bare = repos.join(owner).join(format!("{repo}.git"));
+    commit_on_branch(&bare, "feature", "note", &[("NOTE.md", "line1\n")]).await;
+    let pr = rpc_json(
+        app,
+        cookie,
+        &format!(
+            r#"{{"procedure":"pull.create","input":{{"owner":"{owner}","name":"{repo}","title":"PR","base_ref":"main","head_ref":"feature"}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(pr["ok"], true, "{pr}");
+    pr["data"]["number"].as_i64().unwrap()
+}
+
+/// Author edit stores prior bodies in `pull.comments.history` oldest-first
+/// (#113 / D-ISS-09 / D-ISS-12 parity).
+#[tokio::test]
+async fn pull_comments_author_edit_history() {
+    let dir = tempfile::tempdir().unwrap();
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("pull_edit.db").display());
+    let db = Database::connect(&url).await.unwrap();
+    db.migrate().await.unwrap();
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos.clone()).await;
+
+    let (cookie, login_v) = signup_and_login(&app, "pe@ex.com", "peown").await;
+    verify_user(&db, login_v["data"]["id"].as_str().unwrap()).await;
+    let n = setup_pull(&app, &repos, &cookie, "peown", "core").await;
+
+    let created = rpc_json(
+        &app,
+        &cookie,
+        &format!(
+            r#"{{"procedure":"pull.comments.create","input":{{"owner":"peown","name":"core","number":{n},"body":"v1","path":"NOTE.md","side":"RIGHT","line":1}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(created["ok"], true, "{created}");
+    let comment_id = created["data"]["id"].as_str().unwrap();
+
+    let upd = rpc_json(
+        &app,
+        &cookie,
+        &format!(
+            r#"{{"procedure":"pull.comments.update","input":{{"owner":"peown","name":"core","number":{n},"commentId":"{comment_id}","body":"v2"}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(upd["ok"], true, "{upd}");
+    assert_eq!(upd["data"]["body"], "v2");
+
+    let upd2 = rpc_json(
+        &app,
+        &cookie,
+        &format!(
+            r#"{{"procedure":"pull.comments.update","input":{{"owner":"peown","name":"core","number":{n},"commentId":"{comment_id}","body":"v3"}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(upd2["ok"], true, "{upd2}");
+
+    let hist = rpc_json(
+        &app,
+        &cookie,
+        &format!(
+            r#"{{"procedure":"pull.comments.history","input":{{"owner":"peown","name":"core","number":{n},"commentId":"{comment_id}"}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(hist["ok"], true, "{hist}");
+    let revs = hist["data"]["revisions"].as_array().unwrap();
+    assert_eq!(revs.len(), 2, "{hist}");
+    assert_eq!(revs[0]["body"], "v1", "oldest revision first");
+    assert_eq!(revs[1]["body"], "v2");
+    assert_eq!(revs[0]["editor_username"], "peown");
+}
+
+/// Edit is author-only; delete is author or Write+ moderation (#113 /
+/// D-ISS-09 parity — denied calls soft-fail as `repo.not_found`).
+#[tokio::test]
+async fn pull_comments_update_delete_acl() {
+    let dir = tempfile::tempdir().unwrap();
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("pull_acl.db").display());
+    let db = Database::connect(&url).await.unwrap();
+    db.migrate().await.unwrap();
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos.clone()).await;
+
+    let (owner_cookie, owner_v) = signup_and_login(&app, "pa@ex.com", "paown").await;
+    verify_user(&db, owner_v["data"]["id"].as_str().unwrap()).await;
+    let n = setup_pull(&app, &repos, &owner_cookie, "paown", "core").await;
+
+    let (writer_cookie, writer_v) = signup_and_login(&app, "pw@ex.com", "pwrite").await;
+    verify_user(&db, writer_v["data"]["id"].as_str().unwrap()).await;
+    let add_w = rpc_json(
+        &app,
+        &owner_cookie,
+        r#"{"procedure":"repo.collaborators.add","input":{"owner":"paown","name":"core","username":"pwrite","permission":"write"}}"#,
+    )
+    .await;
+    assert_eq!(add_w["ok"], true, "{add_w}");
+
+    let (reader_cookie, reader_v) = signup_and_login(&app, "pr@ex.com", "pread").await;
+    verify_user(&db, reader_v["data"]["id"].as_str().unwrap()).await;
+    let add_r = rpc_json(
+        &app,
+        &owner_cookie,
+        r#"{"procedure":"repo.collaborators.add","input":{"owner":"paown","name":"core","username":"pread","permission":"read"}}"#,
+    )
+    .await;
+    assert_eq!(add_r["ok"], true, "{add_r}");
+
+    // Comment authored by the writer collaborator.
+    let created = rpc_json(
+        &app,
+        &writer_cookie,
+        &format!(
+            r#"{{"procedure":"pull.comments.create","input":{{"owner":"paown","name":"core","number":{n},"body":"mine"}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(created["ok"], true, "{created}");
+    let comment_id = created["data"]["id"].as_str().unwrap();
+
+    // Non-author (repo owner, Write+) cannot edit.
+    let denied_edit = rpc_json(
+        &app,
+        &owner_cookie,
+        &format!(
+            r#"{{"procedure":"pull.comments.update","input":{{"owner":"paown","name":"core","number":{n},"commentId":"{comment_id}","body":"hijack"}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(denied_edit["ok"], false, "{denied_edit}");
+    assert_eq!(denied_edit["error"]["code"], "repo.not_found", "{denied_edit}");
+
+    // Read collaborator cannot delete.
+    let denied_del = rpc_json(
+        &app,
+        &reader_cookie,
+        &format!(
+            r#"{{"procedure":"pull.comments.delete","input":{{"owner":"paown","name":"core","number":{n},"commentId":"{comment_id}"}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(denied_del["ok"], false, "{denied_del}");
+    assert_eq!(denied_del["error"]["code"], "repo.not_found", "{denied_del}");
+
+    // Write+ moderator (owner) can delete another user's comment.
+    let moderated = rpc_json(
+        &app,
+        &owner_cookie,
+        &format!(
+            r#"{{"procedure":"pull.comments.delete","input":{{"owner":"paown","name":"core","number":{n},"commentId":"{comment_id}"}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(moderated["ok"], true, "{moderated}");
+
+    // Author can delete their own comment.
+    let own = rpc_json(
+        &app,
+        &writer_cookie,
+        &format!(
+            r#"{{"procedure":"pull.comments.create","input":{{"owner":"paown","name":"core","number":{n},"body":"mine again"}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(own["ok"], true, "{own}");
+    let own_id = own["data"]["id"].as_str().unwrap();
+    let own_del = rpc_json(
+        &app,
+        &writer_cookie,
+        &format!(
+            r#"{{"procedure":"pull.comments.delete","input":{{"owner":"paown","name":"core","number":{n},"commentId":"{own_id}"}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(own_del["ok"], true, "{own_del}");
+
+    let list = rpc_json(
+        &app,
+        &owner_cookie,
+        &format!(
+            r#"{{"procedure":"pull.comments.list","input":{{"owner":"paown","name":"core","number":{n}}}}}"#
+        ),
+    )
+    .await;
+    assert_eq!(list["data"]["comments"].as_array().unwrap().len(), 0);
+}
