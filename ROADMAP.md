@@ -1,12 +1,12 @@
 # Roadmap
 
-Remaining work between the shipped v1.0 and functional parity with established code forges: the GitHub-shaped hosting surface plus the Forgejo/Gitea-class features self-host operators expect. This file is the product-level backlog; executable milestone and phase planning lives in [`.planning/`](.planning/) and follows the GSD workflow (`STATE.md`, `/gsd-new-milestone`). Items promote into phases from here.
+Remaining work between the shipped v1.0 and functional parity with established code forges: the GitHub-shaped hosting surface plus the Forgejo/Gitea-class features self-host operators expect. This file is the product-level backlog; executable planning runs through AI-DLC (`/aidlc`; workspace under `aidlc/`). The v1.0 milestone history produced under GSD is archived read-only at [`docs/archive/planning/`](docs/archive/planning/). Items promote into AI-DLC intents from here.
 
 Markers: `[ ]` not started · `[~]` in progress · `[x]` shipped on `main`. IDs (e.g. `API-03`) are stable references for issues, plans, and PRs.
 
 ## Where we are
 
-v1.0 shipped 2026-09-19: 24 phases, 220 plans, 87/87 requirements. Git over HTTPS and SSH, code browse/blame/compare, pull requests with reviews and three merge strategies, branch protection with packaged direct-push denial, orgs and collaborator ACL, issues with labels/assignees/reactions/history, LFS, releases and repo transfer, in-repo search, in-app notifications, webhooks, Actions-compatible self-hosted runners, OCI/npm/generic packages, explore/stars/forks/watchers, topics, mirroring, admin console with setup wizard and factory reset, Compose deployment plus Railway IaC, Postgres/MySQL/SQLite. Full list: [README — What's included](README.md#whats-included); audit detail: [v1.0 milestone archive](.planning/milestones/v1.0-MILESTONE-AUDIT.md).
+v1.0 shipped 2026-09-19: 24 phases, 220 plans, 87/87 requirements. Git over HTTPS and SSH, code browse/blame/compare, pull requests with reviews and three merge strategies, branch protection with packaged direct-push denial, orgs and collaborator ACL, issues with labels/assignees/reactions/history, LFS, releases and repo transfer, in-repo search, in-app notifications, webhooks, Actions-compatible self-hosted runners, OCI/npm/generic packages, explore/stars/forks/watchers, topics, mirroring, admin console with setup wizard and factory reset, Compose deployment plus Railway IaC, Postgres/MySQL/SQLite. Full list: [README — What's included](README.md#whats-included); audit detail: [v1.0 milestone archive](docs/archive/planning/milestones/v1.0-MILESTONE-AUDIT.md).
 
 ## Carry-overs from v1.0
 
@@ -147,7 +147,7 @@ Deliberately parked. Revisit after the sections above land.
 
 ## Non-goals
 
-Carried from [.planning/PROJECT.md](.planning/PROJECT.md) so this roadmap stays honest about what parity does not mean:
+Carried from [docs/archive/planning/PROJECT.md](docs/archive/planning/PROJECT.md) so this roadmap stays honest about what parity does not mean:
 
 - Replacing git with a custom VCS; real git clients must keep working.
 - Forking Gitea/Forgejo as the product identity.

@@ -1,47 +1,36 @@
 {
+  "version": 1,
   "hooks": {
     "sessionStart": [
-      {
-        "type": "command",
-        "command": "\"$(for n in \"/home/jesse/.volta/bin/node\" \"$(command -v node)\" /usr/local/bin/node /usr/bin/node; do [ -x \"$n\" ] && { [ \"${n#/}\" != \"$n\" ] || [ \"${n#?:}\" != \"$n\" ]; } && printf '%s' \"$n\" && break; done)\" \"/home/jesse/wsl-projects/personal/typescript/oxidean/.cursor/hooks/gsd-cursor-session-start.js\"",
-        "gsd-managed": true
-      }
+      { "command": "aidlc engine adapter cursor session-start" }
     ],
-    "postToolUse": [
-      {
-        "type": "command",
-        "command": "\"$(for n in \"/home/jesse/.volta/bin/node\" \"$(command -v node)\" /usr/local/bin/node /usr/bin/node; do [ -x \"$n\" ] && { [ \"${n#/}\" != \"$n\" ] || [ \"${n#?:}\" != \"$n\" ]; } && printf '%s' \"$n\" && break; done)\" \"/home/jesse/wsl-projects/personal/typescript/oxidean/.cursor/hooks/gsd-cursor-post-tool.js\"",
-        "gsd-managed": true
-      }
+    "sessionEnd": [
+      { "command": "aidlc engine adapter cursor session-end" }
+    ],
+    "beforeSubmitPrompt": [
+      { "command": "aidlc engine adapter cursor mint" }
     ],
     "preToolUse": [
       {
-        "type": "command",
-        "command": "\"$(for n in \"/home/jesse/.volta/bin/node\" \"$(command -v node)\" /usr/local/bin/node /usr/bin/node; do [ -x \"$n\" ] && { [ \"${n#/}\" != \"$n\" ] || [ \"${n#?:}\" != \"$n\" ]; } && printf '%s' \"$n\" && break; done)\" \"/home/jesse/wsl-projects/personal/typescript/oxidean/.cursor/hooks/gsd-cursor-pre-tool.js\"",
-        "gsd-managed": true
+        "command": "aidlc engine adapter cursor guards",
+        "failClosed": true
       }
+    ],
+    "postToolUse": [
+      { "command": "aidlc engine adapter cursor audit-and-sensors" },
+      { "command": "aidlc engine adapter cursor runtime-compile" }
+    ],
+    "postToolUseFailure": [
+      { "command": "aidlc engine adapter cursor task-failure" }
+    ],
+    "preCompact": [
+      { "command": "aidlc engine adapter cursor validate-state" }
     ],
     "stop": [
       {
-        "type": "command",
-        "command": "\"$(for n in \"/home/jesse/.volta/bin/node\" \"$(command -v node)\" /usr/local/bin/node /usr/bin/node; do [ -x \"$n\" ] && { [ \"${n#/}\" != \"$n\" ] || [ \"${n#?:}\" != \"$n\" ]; } && printf '%s' \"$n\" && break; done)\" \"/home/jesse/wsl-projects/personal/typescript/oxidean/.cursor/hooks/gsd-cursor-stop.js\"",
-        "gsd-managed": true
-      }
-    ],
-    "subagentStart": [
-      {
-        "type": "command",
-        "command": "\"$(for n in \"/home/jesse/.volta/bin/node\" \"$(command -v node)\" /usr/local/bin/node /usr/bin/node; do [ -x \"$n\" ] && { [ \"${n#/}\" != \"$n\" ] || [ \"${n#?:}\" != \"$n\" ]; } && printf '%s' \"$n\" && break; done)\" \"/home/jesse/wsl-projects/personal/typescript/oxidean/.cursor/hooks/gsd-cursor-subagent-start.js\"",
-        "gsd-managed": true
-      }
-    ],
-    "subagentStop": [
-      {
-        "type": "command",
-        "command": "\"$(for n in \"/home/jesse/.volta/bin/node\" \"$(command -v node)\" /usr/local/bin/node /usr/bin/node; do [ -x \"$n\" ] && { [ \"${n#/}\" != \"$n\" ] || [ \"${n#?:}\" != \"$n\" ]; } && printf '%s' \"$n\" && break; done)\" \"/home/jesse/wsl-projects/personal/typescript/oxidean/.cursor/hooks/gsd-cursor-subagent-stop.js\"",
-        "gsd-managed": true
+        "command": "aidlc engine adapter cursor stop",
+        "loop_limit": 10
       }
     ]
-  },
-  "version": 1
+  }
 }

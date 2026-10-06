@@ -123,4 +123,4 @@ Then:
 | `OXIDEAN_WORKOS_BASE_URL` | Points WorkOS SDK at a stub (unset in prod) |
 | `OXIDEAN_OIDC_ALLOW_INSECURE` | Allows http/loopback issuers only when `OXIDEAN_ENV` is development/dev/compose |
 
-Live WorkOS / Resend / SMTP credentials remain documented in [`.planning/phases/04-auth-sessions-email/04-USER-SETUP.md`](../.planning/phases/04-auth-sessions-email/04-USER-SETUP.md).
+Live WorkOS / Resend / SMTP credentials remain documented in [`docs/archive/planning/milestones/v1.0-phases/04-auth-sessions-email/04-USER-SETUP.md`](archive/planning/milestones/v1.0-phases/04-auth-sessions-email/04-USER-SETUP.md).

@@ -1,4 +1,3 @@
-<!-- generated-by: gsd-doc-writer -->
 # Testing
 
 ## Test framework and setup
@@ -275,7 +274,7 @@ Default `web-octane` stays fast (no Docker auth stubs). True auth/email path cov
 | `make smoke-mysql` | MySQL overlay bring-up + dialect assert | Profile `mysql` |
 | `make smoke-compose-ci` | Fail-closed CI entry (`DIALECT=…`) | Same as `./scripts/ci-compose-smoke.sh` |
 
-Oxidean Cloud (Railway IaC + Caddy gateway) is **not** exercised in PR CI — see [DEPLOYMENT.md](DEPLOYMENT.md) and [`.planning/phases/22-compose-ci-deploy/22-VALIDATION.md`](../.planning/phases/22-compose-ci-deploy/22-VALIDATION.md). Local preview: `make cloud-plan` (requires linked Railway CLI).
+Oxidean Cloud (Railway IaC + Caddy gateway) is **not** exercised in PR CI — see [DEPLOYMENT.md](DEPLOYMENT.md) and [`docs/archive/planning/milestones/v1.0-phases/22-compose-ci-deploy/22-VALIDATION.md`](archive/planning/milestones/v1.0-phases/22-compose-ci-deploy/22-VALIDATION.md). Local preview: `make cloud-plan` (requires linked Railway CLI).
 
 ### Protocol smokes (local + CI)
 

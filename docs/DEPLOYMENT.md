@@ -1,4 +1,3 @@
-<!-- generated-by: gsd-doc-writer -->
 # Deployment
 
 Oxidean deploys as Docker images behind Traefik on a single HTTP origin. The supported path in-repo is Docker Compose (default Postgres, optional MySQL/SQLite overlays). Cloud hosting is intended to reuse the same images.

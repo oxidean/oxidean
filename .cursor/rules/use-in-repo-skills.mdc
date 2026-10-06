@@ -27,7 +27,7 @@ Before implementing, debugging, deploying, or writing substantial prose, **load 
 | User-facing prose finalize | [clean-user-facing-text](../../.agents/skills/clean-user-facing-text/SKILL.md) (also [`.cursor/rules/clean-user-facing-text.mdc`](clean-user-facing-text.mdc)) |
 | AI watermark / provenance strip | [remove-ai-marks](../../.agents/skills/remove-ai-marks/SKILL.md) |
 
-GSD / planning skills under [`.cursor/skills/`](../skills/) apply when the user invokes those workflows.
+AI-DLC workflow skills (`aidlc-*`, the `/aidlc` orchestrator) live under `.cursor/skills/` and `.claude/skills/` — use them when the user invokes an AI-DLC workflow.
 
 ## Do not
 
