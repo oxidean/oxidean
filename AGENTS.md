@@ -88,7 +88,7 @@ See [docs/TESTING.md](docs/TESTING.md) and [docs/DEVELOPMENT.md](docs/DEVELOPMEN
 
 ## Planning / AI-DLC
 
-Structured work runs through **AI-DLC**: invoke `/aidlc` (or `aidlc-*` skills) in the configured harnesses — Cursor and Claude Code. Shared workflow state, intents, and the audit trail live under `aidlc/` (commit it). The shipped v1.0 GSD-era milestone history is archived read-only at [`docs/archive/planning/`](docs/archive/planning/). Post-Phase-06 polish (Query session cache, setup auth stack, factory reset) is recorded in `docs/archive/planning/milestones/v1.0-phases/06-self-host-admin-bootstrap/deferred-items.md`.
+Structured work runs through **AI-DLC**: invoke `/aidlc` (or `aidlc-*` skills) in the configured harnesses — Cursor and Claude Code. Devin-class agents discover the same skills via `.agents/skills/` (symlinks into `.cursor/skills/`). Shared workflow state, intents, and the audit trail live under `aidlc/` (commit it). The shipped v1.0 GSD-era milestone history is archived read-only at [`docs/archive/planning/`](docs/archive/planning/). Post-Phase-06 polish (Query session cache, setup auth stack, factory reset) is recorded in `docs/archive/planning/milestones/v1.0-phases/06-self-host-admin-bootstrap/deferred-items.md`.
 
 
 ## Scratch files (`tmp/`)
