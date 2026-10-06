@@ -37,6 +37,7 @@ import { Route as InvitesTokenRouteImport } from './routes/invites.$token'
 import { Route as OauthConsentRouteImport } from './routes/oauth.consent'
 import { Route as OrgsNewRouteImport } from './routes/orgs.new'
 import { Route as SettingsApplicationsRouteImport } from './routes/settings/applications'
+import { Route as SettingsCliRouteImport } from './routes/settings/cli'
 import { Route as SettingsEmailsRouteImport } from './routes/settings/emails'
 import { Route as SettingsGeneralRouteImport } from './routes/settings/general'
 import { Route as SettingsNotificationsRouteImport } from './routes/settings/notifications'
@@ -231,6 +232,11 @@ const OrgsNewRoute = OrgsNewRouteImport.update({
 const SettingsApplicationsRoute = SettingsApplicationsRouteImport.update({
   id: '/settings/applications',
   path: '/settings/applications',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsCliRoute = SettingsCliRouteImport.update({
+  id: '/settings/cli',
+  path: '/settings/cli',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SettingsEmailsRoute = SettingsEmailsRouteImport.update({
@@ -539,6 +545,7 @@ export interface FileRoutesByFullPath {
   '/oauth/consent': typeof OauthConsentRoute
   '/orgs/new': typeof OrgsNewRoute
   '/settings/applications': typeof SettingsApplicationsRoute
+  '/settings/cli': typeof SettingsCliRoute
   '/settings/emails': typeof SettingsEmailsRoute
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/notifications': typeof SettingsNotificationsRoute
@@ -620,6 +627,7 @@ export interface FileRoutesByTo {
   '/oauth/consent': typeof OauthConsentRoute
   '/orgs/new': typeof OrgsNewRoute
   '/settings/applications': typeof SettingsApplicationsRoute
+  '/settings/cli': typeof SettingsCliRoute
   '/settings/emails': typeof SettingsEmailsRoute
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/notifications': typeof SettingsNotificationsRoute
@@ -700,6 +708,7 @@ export interface FileRoutesById {
   '/oauth/consent': typeof OauthConsentRoute
   '/orgs/new': typeof OrgsNewRoute
   '/settings/applications': typeof SettingsApplicationsRoute
+  '/settings/cli': typeof SettingsCliRoute
   '/settings/emails': typeof SettingsEmailsRoute
   '/settings/general': typeof SettingsGeneralRoute
   '/settings/notifications': typeof SettingsNotificationsRoute
@@ -787,6 +796,7 @@ export interface FileRouteTypes {
     | '/oauth/consent'
     | '/orgs/new'
     | '/settings/applications'
+    | '/settings/cli'
     | '/settings/emails'
     | '/settings/general'
     | '/settings/notifications'
@@ -868,6 +878,7 @@ export interface FileRouteTypes {
     | '/oauth/consent'
     | '/orgs/new'
     | '/settings/applications'
+    | '/settings/cli'
     | '/settings/emails'
     | '/settings/general'
     | '/settings/notifications'
@@ -947,6 +958,7 @@ export interface FileRouteTypes {
     | '/oauth/consent'
     | '/orgs/new'
     | '/settings/applications'
+    | '/settings/cli'
     | '/settings/emails'
     | '/settings/general'
     | '/settings/notifications'
@@ -1030,6 +1042,7 @@ export interface RootRouteChildren {
   OauthConsentRoute: typeof OauthConsentRoute
   OrgsNewRoute: typeof OrgsNewRoute
   SettingsApplicationsRoute: typeof SettingsApplicationsRoute
+  SettingsCliRoute: typeof SettingsCliRoute
   SettingsEmailsRoute: typeof SettingsEmailsRoute
   SettingsGeneralRoute: typeof SettingsGeneralRoute
   SettingsNotificationsRoute: typeof SettingsNotificationsRoute
@@ -1234,6 +1247,13 @@ declare module '@octanejs/tanstack-router' {
       path: '/settings/applications'
       fullPath: '/settings/applications'
       preLoaderRoute: typeof SettingsApplicationsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings/cli': {
+      id: '/settings/cli'
+      path: '/settings/cli'
+      fullPath: '/settings/cli'
+      preLoaderRoute: typeof SettingsCliRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/settings/emails': {
@@ -1857,6 +1877,7 @@ const rootRouteChildren: RootRouteChildren = {
   OauthConsentRoute: OauthConsentRoute,
   OrgsNewRoute: OrgsNewRoute,
   SettingsApplicationsRoute: SettingsApplicationsRoute,
+  SettingsCliRoute: SettingsCliRoute,
   SettingsEmailsRoute: SettingsEmailsRoute,
   SettingsGeneralRoute: SettingsGeneralRoute,
   SettingsNotificationsRoute: SettingsNotificationsRoute,

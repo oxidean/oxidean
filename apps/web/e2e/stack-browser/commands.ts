@@ -94,7 +94,10 @@ type PlaywrightPage = {
     count?: () => Promise<number>;
     first?: () => {
       click: (opts?: object) => Promise<unknown>;
+      tap?: (opts?: object) => Promise<unknown>;
+      getAttribute?: (name: string) => Promise<string | null>;
     };
+    tap?: (opts?: object) => Promise<unknown>;
     check?: () => Promise<unknown>;
     setInputFiles?: (
       files:
@@ -121,6 +124,11 @@ type PlaywrightPage = {
     up: (opts?: object) => Promise<unknown>;
   };
   evaluate?: <R, A = unknown>(fn: (arg: A) => R | Promise<R>, arg?: A) => Promise<R>;
+  waitForFunction?: (
+    fn: () => unknown,
+    arg?: unknown,
+    opts?: { timeout?: number },
+  ) => Promise<unknown>;
   waitForURL: (url: string | RegExp | ((url: URL) => boolean), opts?: object) => Promise<unknown>;
   content: () => Promise<string>;
   url: () => string;
@@ -2333,5 +2341,200 @@ export const expectActionsPipelineFlow: BrowserCommand<[]> = async (ctx) => {
     return true;
   } finally {
     await pageGuard.close("stack-browser");
+  }
+};
+
+/**
+ * Mobile touch navigation regression for issue #111 — a touch-capable
+ * (hasTouch/isMobile) context taps repo chrome tabs and a file-tree row with
+ * page.tap(). Before the early-nav bridge, taps that landed before Octane
+ * hydration bound each anchor's `$$click` slot fell through to a native
+ * reload (or died entirely when a reload was in flight). The tap-time
+ * signature is recorded per click: `defaultPrevented` must be true (the
+ * bridge or the hydrated router handler owns the tap — the bug was neither).
+ * For the first tap, module requests are stalled so the tap lands inside the
+ * pre-hydration window deterministically; `$$click === undefined` proves the
+ * preventDefault came from the bridge.
+ */
+export const expectMobileNavTapFlow: BrowserCommand<[]> = async (ctx) => {
+  const { context } = asPlaywright(ctx);
+  const browserHost = context as unknown as {
+    browser?: () => {
+      newContext: (opts: Record<string, unknown>) => Promise<{
+        addCookies: (cookies: Array<{ name: string; value: string; url: string }>) => Promise<void>;
+        addInitScript: (fn: () => void) => Promise<void>;
+        route: (
+          re: RegExp,
+          handler: (route: { continue: () => Promise<unknown> }) => Promise<void>,
+        ) => Promise<void>;
+        unroute: (re: RegExp) => Promise<void>;
+        newPage: () => Promise<PlaywrightPage>;
+        close: () => Promise<void>;
+      }>;
+    };
+  };
+  const browser = browserHost.browser?.();
+  if (!browser) {
+    throw new Error("mobile tap flow requires a BrowserContext with .browser()");
+  }
+
+  const seed = await seedForgeRepo();
+  const mobile = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    hasTouch: true,
+    isMobile: true,
+    userAgent:
+      "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 " +
+      "(KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+  });
+  try {
+    await mobile.addCookies([
+      {
+        name: "oxidean_session",
+        value: seed.cookie.split("=")[1] ?? seed.cookie,
+        url: webOrigin(),
+      },
+    ]);
+    // Record each click's final defaultPrevented over console — survives the
+    // document reloads the bug used to cause, so a pre-fix run shows false.
+    await mobile.addInitScript(() => {
+      document.addEventListener(
+        "click",
+        (e) => {
+          // eslint-disable-next-line no-console
+          console.log(`EARLYNAV_CLICK defPrev=${e.defaultPrevented}`);
+        },
+        false,
+      );
+    });
+    const defPrevs: boolean[] = [];
+    const pageGuard = await newGuardedPage({
+      newPage: () => mobile.newPage(),
+    });
+    const page = pageGuard.page as PlaywrightPage;
+    page.on("console", ((m: { text: () => string }) => {
+      const t = m.text();
+      if (t.startsWith("EARLYNAV_CLICK")) defPrevs.push(t.endsWith("true"));
+    }) as (...args: never[]) => void);
+    const repoUrl = `${webOrigin()}/${seed.owner}/${seed.repo}`;
+    const issuesSel = '[data-testid="repo-chrome-issues"]';
+
+    // Stall JS module requests so the first tap lands inside the
+    // pre-hydration window (the race the bug lived in).
+    const jsRe = /\.(js|mjs|ts|tsx)(\?|$)/;
+    await mobile.route(jsRe, async (route: { continue: () => Promise<unknown> }) => {
+      await new Promise((r) => setTimeout(r, 150));
+      try {
+        await route.continue();
+      } catch {
+        // unroute() can land mid-delay — the request was already resolved.
+      }
+    });
+
+    // --- Tap 1: chrome Issues tab inside the (stalled) hydration window. ---
+    await page.goto(repoUrl, { waitUntil: "domcontentloaded", timeout: 60_000 });
+    await page.locator(issuesSel).waitFor({ state: "visible", timeout: 30_000 });
+    const pre1 = (await page.evaluate!(() => {
+      const a = document.querySelector('[data-testid="repo-chrome-issues"]') as
+        | (HTMLAnchorElement & { $$click?: unknown })
+        | null;
+      return {
+        bridgeReady: typeof (window as { __oxideanEarlyNavReady?: unknown }).__oxideanEarlyNavReady,
+        hydrated: typeof a?.$$click,
+      };
+    })) as { bridgeReady: string; hydrated: string };
+    if (pre1.bridgeReady !== "function") {
+      throw new Error("early-nav boot listener missing at first paint");
+    }
+    const marker1 = await page.evaluate!(() => {
+      (window as { __navMarker: number }).__navMarker = Math.random();
+      return (window as { __navMarker: number }).__navMarker;
+    });
+    await page.locator(issuesSel).tap!({ timeout: 15_000 });
+    // Resume module loading so hydration can finish and flush the queued tap.
+    await mobile.unroute(jsRe);
+    await page.waitForURL(/\/issues$/, { timeout: 30_000 });
+    const click1 = defPrevs.at(-1);
+    if (click1 !== true) {
+      throw new Error(
+        `issues tab tap was not intercepted (defPrev=${click1}) — the #111 dead-tap regression`,
+      );
+    }
+    const survived1 = await page.evaluate!(
+      (m) => (window as { __navMarker: number }).__navMarker === m,
+      marker1,
+    );
+    const mode1 = pre1.hydrated === "undefined" ? "bridge" : "hydrated";
+
+    // --- Tap 2: hydrated chrome Pulls tab must be an SPA nav (marker kept). ---
+    await page
+      .locator('[data-testid="repo-chrome-pulls"]')
+      .waitFor({ state: "visible", timeout: 30_000 });
+    await page.waitForFunction!(
+      () =>
+        typeof (
+          document.querySelector('[data-testid="repo-chrome-pulls"]') as
+            | (HTMLAnchorElement & { $$click?: unknown })
+            | null
+        )?.$$click === "function",
+      undefined,
+      { timeout: 60_000 },
+    );
+    const marker2 = await page.evaluate!(() => {
+      (window as { __navMarker: number }).__navMarker = Math.random();
+      return (window as { __navMarker: number }).__navMarker;
+    });
+    await page.locator('[data-testid="repo-chrome-pulls"]').tap!({ timeout: 15_000 });
+    await page.waitForURL(/\/pulls$/, { timeout: 30_000 });
+    const survived2 = await page.evaluate!(
+      (m) => (window as { __navMarker: number }).__navMarker === m,
+      marker2,
+    );
+    if (!survived2) {
+      throw new Error("hydrated pulls tab tap caused a full document reload");
+    }
+
+    // --- Tap 3: hydrated file-tree row must SPA-navigate too. ---
+    await page.goto(repoUrl, { waitUntil: "domcontentloaded", timeout: 60_000 });
+    await page
+      .locator('[data-testid="repo-file-tree"]')
+      .waitFor({ state: "visible", timeout: 30_000 });
+    await page.waitForFunction!(
+      () =>
+        typeof (
+          document.querySelector('[data-testid="repo-file-tree"] a') as
+            | (HTMLAnchorElement & { $$click?: unknown })
+            | null
+        )?.$$click === "function",
+      undefined,
+      { timeout: 60_000 },
+    );
+    const row = page.locator('[data-testid="repo-file-tree"] a').first!();
+    const rowHref = await row.getAttribute?.("href");
+    if (!rowHref) throw new Error("file-tree row anchor missing href");
+    const marker3 = await page.evaluate!(() => {
+      (window as { __navMarker: number }).__navMarker = Math.random();
+      return (window as { __navMarker: number }).__navMarker;
+    });
+    await row.tap!({ timeout: 15_000 });
+    await page.waitForURL(`**${rowHref}`, { timeout: 30_000 });
+    const survived3 = await page.evaluate!(
+      (m) => (window as { __navMarker: number }).__navMarker === m,
+      marker3,
+    );
+    if (!survived3) {
+      throw new Error("hydrated file-tree tap caused a full document reload");
+    }
+
+    // eslint-disable-next-line no-console
+    console.log(
+      `mobile-nav: tap1 mode=${mode1} spa=${survived1 ? "yes" : "fallback-reload"} ` +
+        `tap2 spa=yes tap3 spa=yes`,
+    );
+    pageGuard.assertNoPageErrors("mobile nav tap flow");
+    await pageGuard.close("stack-browser");
+    return true;
+  } finally {
+    await mobile.close();
   }
 };

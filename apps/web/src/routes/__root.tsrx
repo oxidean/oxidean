@@ -40,6 +40,7 @@ import {
   resolvedColorSchemeFromCookieHeader,
 } from "@/lib/theme";
 import { buildSwRegisterScript } from "@/lib/sw-register";
+import { EARLY_NAV_BOOT_SCRIPT } from "@/lib/early-nav";
 // The stylesheet href must be the file the client build actually emitted:
 // a bare side-effect import goes through the positionally-keyed managed
 // head-asset pipeline (removed/re-inserted per route, flashing unstyled
@@ -170,6 +171,10 @@ function RootShell({ children }: { children?: unknown }) @{
           assets were (that churn flashed unstyled content on navigation). */}
       <link rel="stylesheet" href={appStylesHref} precedence="app" />
       <script dangerouslySetInnerHTML={{ __html: THEME_BOOT_SCRIPT }} />
+      {/* Issue #111: capture-phase nav bridge for taps that land before
+          Octane hydration wires anchor `$$click` slots — routes them through
+          router.navigate instead of a full-document reload. */}
+      <script dangerouslySetInnerHTML={{ __html: EARLY_NAV_BOOT_SCRIPT }} />
       <script dangerouslySetInnerHTML={{ __html: FONT_WARM_SCRIPT }} />
       <meta charSet="utf-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1" />

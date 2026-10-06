@@ -64,6 +64,7 @@ make help
 make rpc-gen                 # regenerate @oxidean/api-client
 make test                    # Rust nextest + Vitest
 make test-e2e-stack          # full auth stack e2e
+make up-with-dev-auth        # preferred local stack: Compose + Mailpit/OIDC/stubs attached
 make up / make smoke         # Compose + health
 make rpc-sync-check          # CI gate for client drift
 make web-lint                # oxlint type-aware (apps/web; @tsrx/oxc) + octane DOM-race heuristic

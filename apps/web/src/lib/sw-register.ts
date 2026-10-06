@@ -4,7 +4,11 @@
  *
  * Registers with `?v=<buildId>` so each deploy is a distinct script URL, calls
  * `registration.update()`, activates waiting workers, and reloads once when
- * the new controller takes over.
+ * the new controller takes over — but only when a controller already existed.
+ * On a fresh install `clients.claim()` hands the just-loaded page to the new
+ * worker transparently: the document was fetched from the same build, so a
+ * reload buys nothing — and it kills any tap that lands while the document
+ * tears down (issue #111's intermittent dead mobile taps).
  */
 export function buildSwRegisterScript(buildId: string): string {
   const id = buildId.replace(/[^a-zA-Z0-9._-]/g, "").slice(0, 32) || "unknown";
@@ -28,9 +32,11 @@ export function buildSwRegisterScript(buildId: string): string {
     "});" +
     "return reg.update();" +
     "}).catch(function(){});" +
-    "var refreshing=false;" +
+    "var refreshing=false,hadController=!!navigator.serviceWorker.controller;" +
     'navigator.serviceWorker.addEventListener("controllerchange",function(){' +
-    "if(refreshing)return;refreshing=true;" +
+    "if(refreshing)return;" +
+    "if(!hadController){hadController=true;return;}" +
+    "refreshing=true;" +
     'try{var k="oxidean-sw-"+BUILD;if(sessionStorage.getItem(k))return;sessionStorage.setItem(k,"1");}catch(e){}' +
     "window.location.reload();" +
     "});" +
