@@ -2539,6 +2539,98 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /repos/{owner}/{repo}/pulls/{number}/comments/{comment_id}:
+    patch:
+      tags:
+      - pulls
+      summary: Edit pull comment (`pull.comments.update`; author only)
+      operationId: updatePullComment
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: number
+        in: path
+        required: true
+        schema:
+          type: integer
+      - name: comment_id
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              required:
+              - body
+              title: UpdatePullCommentRequest
+              description: Update comment body (author only; mirrors `issue.comments.update`).
+              type: object
+              properties:
+                body:
+                  type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PullCommentPublic'
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags:
+      - pulls
+      summary: Delete pull comment (`pull.comments.delete`)
+      operationId: deletePullComment
+      parameters:
+      - name: owner
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: number
+        in: path
+        required: true
+        schema:
+          type: integer
+      - name: comment_id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeletePullCommentResponse'
+        default:
+          description: Error — `{ code, message, data? }` with a mapped HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /repos/{owner}/{repo}/pulls/{number}/reviews:
     get:
       tags:
@@ -4163,6 +4255,13 @@ components:
       - resolved
       - created_at
       - updated_at
+    DeletePullCommentResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+      required:
+      - ok
     PullReviewsListResponse:
       type: object
       properties:

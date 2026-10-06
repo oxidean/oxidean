@@ -7,7 +7,10 @@ pub(crate) mod refs;
 mod reviews;
 mod update_branch;
 
-pub use comments::{comments_create, comments_list, comments_resolve};
+pub use comments::{
+    comments_create, comments_delete, comments_history, comments_list, comments_resolve,
+    comments_update,
+};
 pub use merge_ops::{
     commits, files, merge, merge_settings_get, merge_settings_update,
 };

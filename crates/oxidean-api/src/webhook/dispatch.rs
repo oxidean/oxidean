@@ -168,6 +168,76 @@ pub fn issue_comment_payload(
     payload
 }
 
+/// Build a GitHub-compatible `pull_request_review_comment` payload — emitted
+/// for diff-anchored PR comments (the `row.path.is_some()` branch; PR
+/// conversation comments stay on `issue_comment` per DEBT-04). Actions:
+/// `created` / `edited` / `deleted`; `edited` passes the pre-edit body as
+/// `changes_from` → `changes.body.from`. `commit_id` is the SHA the comment
+/// anchored to (`commit_sha` column).
+#[expect(clippy::too_many_arguments)]
+pub fn pull_request_review_comment_payload(
+    action: &str,
+    pull_number: i64,
+    pull_title: &str,
+    pull_state: &str,
+    comment_id: &str,
+    comment_body: &str,
+    comment_path: &str,
+    comment_side: Option<&str>,
+    comment_line: Option<i64>,
+    comment_start_line: Option<i64>,
+    commit_id: Option<&str>,
+    comment_created_at: &str,
+    comment_updated_at: &str,
+    changes_from: Option<&str>,
+    author_login: &str,
+    author_id: &str,
+    owner: &str,
+    repo_name: &str,
+    repo_id: &str,
+    sender_login: &str,
+    sender_id: &str,
+) -> serde_json::Value {
+    let pull_url = format!("/{owner}/{repo_name}/pulls/{pull_number}");
+    let comment = json!({
+        "id": comment_id,
+        "body": comment_body,
+        "path": comment_path,
+        "line": comment_line,
+        "start_line": comment_start_line,
+        "side": comment_side,
+        "commit_id": commit_id,
+        "html_url": format!("{pull_url}#discussion_r{comment_id}"),
+        "user": { "login": author_login, "id": author_id },
+        "created_at": comment_created_at,
+        "updated_at": comment_updated_at,
+    });
+    let mut payload = json!({
+        "action": action,
+        "comment": comment,
+        "pull_request": {
+            "number": pull_number,
+            "title": pull_title,
+            "state": pull_state,
+            "html_url": pull_url,
+        },
+        "repository": {
+            "id": repo_id,
+            "name": repo_name,
+            "full_name": format!("{owner}/{repo_name}"),
+            "owner": { "login": owner },
+        },
+        "sender": {
+            "login": sender_login,
+            "id": sender_id,
+        }
+    });
+    if let Some(from) = changes_from {
+        payload["changes"] = json!({ "body": { "from": from } });
+    }
+    payload
+}
+
 /// Synthetic ping payload (D-HOOK-05 / D-HOOK-21).
 pub fn ping_payload(hook_id: &str, owner: &str, repo_name: &str) -> serde_json::Value {
     json!({

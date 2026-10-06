@@ -2,8 +2,9 @@
  * Chromium gate for the webhook event Checkboxes — happy-dom cannot catch
  * Octane insertBefore races on the events fieldset. Covers DEBT-04's added
  * `issue_comment` option, the API-04 event breadth (`release`, `star`,
- * `fork`, `create`, `delete`, `workflow_run`, `registry_package`), and the
- * hosting panel (webhooks-panel.tsrx).
+ * `fork`, `create`, `delete`, `workflow_run`, `registry_package`), the
+ * `pull_request_review_comment` option, and the hosting panel
+ * (webhooks-panel.tsrx).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebhooksPanel } from "@/components/repo/webhooks-panel";
@@ -72,6 +73,7 @@ describe("WebhooksPanel + WebhookForm browser DOM races", () => {
         "pull_request",
         "issues",
         "issue_comment",
+        "pull_request_review_comment",
         "release",
         "star",
         "fork",
@@ -87,6 +89,7 @@ describe("WebhooksPanel + WebhookForm browser DOM races", () => {
       // events map re-renders the Checkbox state without an Octane DOM race.
       await clickAriaLabel("issue_comment");
       await clickAriaLabel("issue_comment");
+      await clickAriaLabel("pull_request_review_comment");
       await clickAriaLabel("workflow_run");
       await clickAriaLabel("push");
 

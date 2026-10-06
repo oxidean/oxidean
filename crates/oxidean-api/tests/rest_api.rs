@@ -501,3 +501,145 @@ async fn rest_org_create_get() {
     assert_eq!(status, StatusCode::FORBIDDEN, "{v}");
     assert_eq!(v["code"], "auth.pat_scope");
 }
+
+/// Commit files onto a branch of a seeded repo (RPC-created repos keep bare
+/// git dirs under `<repos>/<owner>/<name>.git`).
+async fn commit_on_branch(
+    bare: &std::path::Path,
+    branch: &str,
+    message: &str,
+    files: &[(&str, &str)],
+) {
+    let wt = tempfile::tempdir().unwrap();
+    let bare_s = bare.to_str().unwrap();
+    let wt_s = wt.path().to_str().unwrap();
+    let status = std::process::Command::new("git")
+        .args(["clone", "--branch", branch, bare_s, wt_s])
+        .status()
+        .unwrap();
+    assert!(status.success(), "clone");
+    for (path, content) in files {
+        let dest = wt.path().join(path);
+        if let Some(parent) = dest.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        std::fs::write(&dest, content.as_bytes()).unwrap();
+    }
+    for args in [
+        vec!["-C", wt_s, "config", "user.email", "t@ex.com"],
+        vec!["-C", wt_s, "config", "user.name", "Test"],
+        vec!["-C", wt_s, "add", "-A"],
+        vec!["-C", wt_s, "commit", "-m", message],
+        vec!["-C", wt_s, "push", "origin", "HEAD"],
+    ] {
+        let status = std::process::Command::new("git").args(&args).status().unwrap();
+        assert!(status.success(), "git {args:?}");
+    }
+}
+
+async fn rpc_call(app: &axum::Router, cookie: &str, body: &str) -> serde_json::Value {
+    let res = app.clone().oneshot(rpc_req(body, cookie)).await.unwrap();
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    serde_json::from_slice(&bytes).unwrap()
+}
+
+/// PATCH/DELETE `/pulls/{n}/comments/{id}` dispatch to `pull.comments.update`
+/// / `pull.comments.delete` (issue-113 REST parity).
+#[tokio::test]
+async fn rest_pull_comment_update_delete() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("rest_pullc.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos.clone()).await;
+
+    let (cookie, _uid) = signup_verified(&app, &db, "pc@ex.com", "pcora").await;
+
+    // Seed repo (stack/gitignore produce an initial main commit) + branch.
+    let v = rpc_call(
+        &app,
+        &cookie,
+        r#"{"procedure":"repo.create","input":{"name":"code","visibility":"public","description":"","stack_id":"rust","license_id":"MIT","gitignore_id":"Rust"}}"#,
+    )
+    .await;
+    assert_eq!(v["ok"], true, "{v}");
+    let v = rpc_call(
+        &app,
+        &cookie,
+        r#"{"procedure":"repo.branchCreate","input":{"owner":"pcora","name":"code","branch":"feature","start":"main"}}"#,
+    )
+    .await;
+    assert_eq!(v["ok"], true, "{v}");
+    commit_on_branch(
+        &repos.join("pcora").join("code.git"),
+        "feature",
+        "note",
+        &[("NOTE.md", "line1\n")],
+    )
+    .await;
+    let v = rpc_call(
+        &app,
+        &cookie,
+        r#"{"procedure":"pull.create","input":{"owner":"pcora","name":"code","title":"PR","base_ref":"main","head_ref":"feature"}}"#,
+    )
+    .await;
+    assert_eq!(v["ok"], true, "{v}");
+    let n = v["data"]["number"].as_i64().unwrap();
+
+    // Create a line-anchored comment over REST.
+    let (status, v) = json(
+        &app,
+        req_cookie(
+            "POST",
+            &format!("/api/v1/repos/pcora/code/pulls/{n}/comments"),
+            Some(r#"{"body":"nit","path":"NOTE.md","side":"RIGHT","line":1}"#),
+            &cookie,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{v}");
+    let comment_id = v["id"].as_str().expect("comment id").to_string();
+    assert_eq!(v["path"], "NOTE.md");
+
+    // Edit over REST → pull.comments.update.
+    let (status, v) = json(
+        &app,
+        req_cookie(
+            "PATCH",
+            &format!("/api/v1/repos/pcora/code/pulls/{n}/comments/{comment_id}"),
+            Some(r#"{"body":"nit revised"}"#),
+            &cookie,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["body"], "nit revised");
+
+    // Delete over REST → pull.comments.delete.
+    let (status, v) = json(
+        &app,
+        req_cookie(
+            "DELETE",
+            &format!("/api/v1/repos/pcora/code/pulls/{n}/comments/{comment_id}"),
+            None,
+            &cookie,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["ok"], true);
+
+    let (status, v) = json(
+        &app,
+        req(
+            "GET",
+            &format!("/api/v1/repos/pcora/code/pulls/{n}/comments"),
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["comments"].as_array().unwrap().len(), 0);
+}
