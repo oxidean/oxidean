@@ -1,4 +1,3 @@
-<!-- generated-by: gsd-doc-writer -->
 # Getting started
 
 Get Oxidean running locally: install prerequisites, clone the monorepo, then bring up the stack with Docker Compose (`make up`) or run the API and web app on the host (`make dev`).

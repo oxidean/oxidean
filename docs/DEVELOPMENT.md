@@ -1,4 +1,3 @@
-<!-- generated-by: gsd-doc-writer -->
 # Development
 
 Guide for working on Oxidean locally: Bun + Turborepo for the web app and packages, Cargo for the API and database crates, and Make targets for RPC codegen, Compose overlays, and tests.

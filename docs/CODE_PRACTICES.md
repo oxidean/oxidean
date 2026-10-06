@@ -71,7 +71,7 @@ Details: [TESTING.md](TESTING.md).
 - Update the nearest package README when a package’s purpose or public commands change.
 - Prefer linking to `docs/*` over duplicating long guides.
 - Comments explain **why** (threat model, dialect quirk, Octane pitfall), not what the next line does.
-- Do not commit planning chatter into product docs unless asked; GSD lives under `.planning/`.
+- Do not commit planning chatter into product docs unless asked; AI-DLC workflow state lives under `aidlc/` and archived GSD-era planning history under `docs/archive/planning/`.
 
 ## Security & privacy
 

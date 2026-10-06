@@ -1,4 +1,3 @@
-<!-- generated-by: gsd-doc-writer -->
 # API
 
 Oxidean exposes a versioned JSON RPC over HTTP and WebSocket, plus a small set of browser-oriented auth and avatar routes. The Rust Axum router lives in `crates/oxidean-api`; shared envelopes and DTOs live in `crates/oxidean-core`. Clients should prefer the generated TypeScript package `@oxidean/api-client`.

@@ -1,4 +1,3 @@
-<!-- generated-by: gsd-doc-writer -->
 # Configuration
 
 Oxidean is configured primarily through environment variables. Canonical templates live in [`.env.example`](../.env.example) (Compose / local API) and [`docs/dev-auth.env.example`](dev-auth.env.example) (local auth/email stubs). Copy templates into untracked files such as `.env` or `.env.dev-auth` — never commit secrets.
