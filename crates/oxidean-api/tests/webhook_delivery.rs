@@ -522,6 +522,169 @@ async fn webhook_issue_comment_pull_conversation() {
     assert!(ic[0].payload_json.contains("\"pull_request\""));
 }
 
+/// Issue #102 / GitHub parity: diff-anchored PR comments emit
+/// `pull_request_review_comment` (`created` / `edited` / `deleted`) while
+/// conversation comments stay on `issue_comment`.
+#[tokio::test]
+async fn webhook_pull_request_review_comment_lifecycle() {
+    let sink = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/prc"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&sink)
+        .await;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("prc.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos.clone()).await;
+    let cookie = verified_owner(&app, &db, "prc@ex.com", "prcown").await;
+    let create = rpc_json(
+        &app,
+        r#"{"procedure":"repo.create","input":{"name":"demo","visibility":"public","description":"","stack_id":"rust","license_id":"MIT","gitignore_id":"Rust"}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(create["ok"], true, "{create}");
+    let br = rpc_json(
+        &app,
+        r#"{"procedure":"repo.branchCreate","input":{"owner":"prcown","name":"demo","branch":"feature","start":"main"}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(br["ok"], true, "{br}");
+
+    let bare = repos.join("prcown").join("demo.git");
+    commit_on_branch(&bare, "feature", "note", &[("NOTE.md", "line1\n")]).await;
+
+    let pr = rpc_json(
+        &app,
+        r#"{"procedure":"pull.create","input":{"owner":"prcown","name":"demo","title":"PR","base_ref":"main","head_ref":"feature"}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(pr["ok"], true, "{pr}");
+    let n = pr["data"]["number"].as_i64().unwrap();
+
+    let hook_url = format!("{}/prc", sink.uri());
+    let created = rpc_json(
+        &app,
+        &format!(
+            r#"{{"procedure":"webhook.create","input":{{"owner":"prcown","name":"demo","url":"{hook_url}","secret":"s","events":["pull_request_review_comment"]}}}}"#
+        ),
+        &cookie,
+    )
+    .await;
+    assert_eq!(created["ok"], true, "{created}");
+    let hook_id = created["data"]["id"].as_str().unwrap().to_string();
+
+    // Conversation comments must not emit `pull_request_review_comment` —
+    // delivery rows are inserted synchronously before the RPC returns.
+    let general = rpc_json(
+        &app,
+        &format!(
+            r#"{{"procedure":"pull.comments.create","input":{{"owner":"prcown","name":"demo","number":{n},"body":"conversation note"}}}}"#
+        ),
+        &cookie,
+    )
+    .await;
+    assert_eq!(general["ok"], true, "{general}");
+    assert!(
+        db.list_webhook_deliveries(&hook_id, 50)
+            .await
+            .expect("list")
+            .is_empty(),
+        "conversation comment must not emit pull_request_review_comment"
+    );
+
+    let line = rpc_json(
+        &app,
+        &format!(
+            r#"{{"procedure":"pull.comments.create","input":{{"owner":"prcown","name":"demo","number":{n},"body":"nit","path":"NOTE.md","side":"RIGHT","line":1}}}}"#
+        ),
+        &cookie,
+    )
+    .await;
+    assert_eq!(line["ok"], true, "{line}");
+    let comment_id = line["data"]["id"].as_str().unwrap().to_string();
+
+    let deliveries = db.list_webhook_deliveries(&hook_id, 50).await.expect("list");
+    assert_eq!(deliveries.len(), 1, "{deliveries:?}");
+    let created_row = &deliveries[0];
+    assert_eq!(created_row.event, "pull_request_review_comment");
+    assert_eq!(created_row.action, "created");
+    assert!(created_row.payload_json.contains("\"path\":\"NOTE.md\""));
+    assert!(created_row.payload_json.contains("\"line\":1"));
+    assert!(created_row.payload_json.contains("\"commit_id\""));
+    assert!(created_row.payload_json.contains("\"created_at\""));
+    assert!(created_row.payload_json.contains("\"pull_request\""));
+    assert!(created_row.payload_json.contains("\"sender\""));
+
+    let edit = rpc_json(
+        &app,
+        &format!(
+            r#"{{"procedure":"pull.comments.update","input":{{"owner":"prcown","name":"demo","number":{n},"commentId":"{comment_id}","body":"nit revised"}}}}"#
+        ),
+        &cookie,
+    )
+    .await;
+    assert_eq!(edit["ok"], true, "{edit}");
+
+    let del = rpc_json(
+        &app,
+        &format!(
+            r#"{{"procedure":"pull.comments.delete","input":{{"owner":"prcown","name":"demo","number":{n},"commentId":"{comment_id}"}}}}"#
+        ),
+        &cookie,
+    )
+    .await;
+    assert_eq!(del["ok"], true, "{del}");
+
+    let deliveries = db.list_webhook_deliveries(&hook_id, 50).await.expect("list");
+    let prc: Vec<_> = deliveries
+        .iter()
+        .filter(|d| d.event == "pull_request_review_comment")
+        .collect();
+    assert_eq!(prc.len(), 3, "{deliveries:?}");
+    let edited = prc
+        .iter()
+        .find(|d| d.action == "edited")
+        .expect("edited delivery");
+    assert!(edited.payload_json.contains("nit revised"));
+    assert!(edited.payload_json.contains("\"changes\""));
+    assert!(
+        edited.payload_json.contains("\"from\":\"nit\""),
+        "{}",
+        edited.payload_json
+    );
+    let deleted = prc
+        .iter()
+        .find(|d| d.action == "deleted")
+        .expect("deleted delivery");
+    assert!(deleted.payload_json.contains("\"comment\""));
+    assert!(deleted.payload_json.contains("\"path\":\"NOTE.md\""));
+
+    // Wait for the async HTTP posts and check the GitHub event header.
+    let mut requests = Vec::new();
+    for _ in 0..50 {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        requests = sink.received_requests().await.expect("received requests");
+        if requests.len() >= 3 {
+            break;
+        }
+    }
+    assert_eq!(requests.len(), 3, "{requests:?}");
+    for req in &requests {
+        assert_eq!(
+            req.headers.get("x-github-event").map(|v| v.to_str().unwrap()),
+            Some("pull_request_review_comment")
+        );
+    }
+}
+
 async fn commit_on_branch(
     bare: &std::path::Path,
     branch: &str,

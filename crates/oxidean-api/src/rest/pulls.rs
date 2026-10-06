@@ -3,20 +3,22 @@
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, patch, post};
+use axum::routing::{delete, get, patch, post};
 use axum::Json;
 use schemars::SchemaGenerator;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::spec::{BodySpec, RespSpec, RouteDef};
-use super::{call, ctx_for, dispatch, merge_fields, repo_ref, respond, RepoNumberPath, RepoPath};
+use super::{
+    call, ctx_for, dispatch, merge_fields, repo_ref, respond, CommentPath, RepoNumberPath, RepoPath,
+};
 use crate::app::AppState;
 use oxidean_core::{
-    CreatePullCommentRequest, CreatePullRequest, MergePullRequest, MergePullResponse,
-    PullCommentPublic, PullCommentsListResponse, PullCommitsResponse, PullFilesResponse,
-    PullListRequest, PullListResponse, PullPublic, PullReviewPublic, PullReviewsListResponse,
-    RpcResponse, SubmitPullReviewRequest,
+    CreatePullCommentRequest, CreatePullRequest, DeletePullCommentResponse, MergePullRequest,
+    MergePullResponse, PullCommentPublic, PullCommentsListResponse, PullCommitsResponse,
+    PullFilesResponse, PullListRequest, PullListResponse, PullPublic, PullReviewPublic,
+    PullReviewsListResponse, RpcResponse, SubmitPullReviewRequest, UpdatePullCommentRequest,
 };
 
 /// `PATCH /pulls/{number}` body — fields go to `pull.update`; `state` fans
@@ -198,6 +200,42 @@ pub const ROUTES: &[RouteDef] = &[
             SchemaGenerator::subschema_for::<PullCommentPublic>,
         )),
         mount: || post(create_pull_comment),
+    },
+    RouteDef {
+        method: "PATCH",
+        path: "/repos/{owner}/{repo}/pulls/{number}/comments/{comment_id}",
+        tags: &["pulls"],
+        operation_id: "updatePullComment",
+        summary: "Edit pull comment (`pull.comments.update`; author only)",
+        procedure: "pull.comments.update",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name", "number", "commentId"],
+        query: None,
+        body: Some(BodySpec::Rpc(
+            SchemaGenerator::into_root_schema_for::<UpdatePullCommentRequest>,
+        )),
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<PullCommentPublic>,
+        )),
+        mount: || patch(update_pull_comment),
+    },
+    RouteDef {
+        method: "DELETE",
+        path: "/repos/{owner}/{repo}/pulls/{number}/comments/{comment_id}",
+        tags: &["pulls"],
+        operation_id: "deletePullComment",
+        summary: "Delete pull comment (`pull.comments.delete`)",
+        procedure: "pull.comments.delete",
+        ok: StatusCode::OK,
+        anonymous: false,
+        path_fields: &["owner", "name", "number", "commentId"],
+        query: None,
+        body: None,
+        response: Some(RespSpec::Schema(
+            SchemaGenerator::subschema_for::<DeletePullCommentResponse>,
+        )),
+        mount: || delete(delete_pull_comment),
     },
     RouteDef {
         method: "GET",
@@ -434,6 +472,54 @@ async fn create_pull_comment(
         "pull.comments.create",
         input,
         StatusCode::CREATED,
+    )
+    .await
+}
+
+/// `PATCH /api/v1/repos/{owner}/{repo}/pulls/{number}/comments/{comment_id}`
+/// (`pull.comments.update`) — body: `body` (required).
+async fn update_pull_comment(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<CommentPath>,
+    Json(body): Json<Value>,
+) -> Response {
+    let fields = json!({
+        "owner": p.owner,
+        "name": p.repo,
+        "number": p.number,
+        "commentId": p.comment_id,
+    });
+    let input = merge_fields(fields, body);
+    call(
+        &state,
+        &headers,
+        "pull.comments.update",
+        input,
+        StatusCode::OK,
+    )
+    .await
+}
+
+/// `DELETE /api/v1/repos/{owner}/{repo}/pulls/{number}/comments/{comment_id}`
+/// (`pull.comments.delete`).
+async fn delete_pull_comment(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(p): Path<CommentPath>,
+) -> Response {
+    let input = json!({
+        "owner": p.owner,
+        "name": p.repo,
+        "number": p.number,
+        "commentId": p.comment_id,
+    });
+    call(
+        &state,
+        &headers,
+        "pull.comments.delete",
+        input,
+        StatusCode::OK,
     )
     .await
 }

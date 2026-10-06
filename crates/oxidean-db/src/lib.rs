@@ -1357,6 +1357,43 @@ impl Database {
         pulls::set_pull_comment_resolved(self.require_pool()?, id, resolved).await
     }
 
+    pub async fn update_pull_comment_body(
+        &self,
+        id: &str,
+        body: &str,
+    ) -> Result<PullCommentRow, String> {
+        pulls::update_pull_comment_body(self.require_pool()?, id, body).await
+    }
+
+    /// Deleting a pull comment cascades its `pull_comment_revisions` rows.
+    pub async fn delete_pull_comment(&self, id: &str) -> Result<(), String> {
+        pulls::delete_pull_comment(self.require_pool()?, id).await
+    }
+
+    pub async fn insert_pull_comment_revision(
+        &self,
+        id: &str,
+        comment_id: &str,
+        editor_id: &str,
+        body: &str,
+    ) -> Result<CommentRevisionRow, String> {
+        pulls::insert_pull_comment_revision(
+            self.require_pool()?,
+            id,
+            comment_id,
+            editor_id,
+            body,
+        )
+        .await
+    }
+
+    pub async fn list_pull_comment_revisions(
+        &self,
+        comment_id: &str,
+    ) -> Result<Vec<CommentRevisionRow>, String> {
+        pulls::list_pull_comment_revisions(self.require_pool()?, comment_id).await
+    }
+
     pub async fn mark_pull_line_comments_outdated(&self, pull_id: &str) -> Result<(), String> {
         pulls::mark_pull_line_comments_outdated(self.require_pool()?, pull_id).await
     }

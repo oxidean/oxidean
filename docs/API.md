@@ -164,7 +164,7 @@ SSO start routes redirect to the IdP when configured. If WorkOS/OIDC ENV is miss
 | `repo.file.commitPolicy` | Whether direct commits to `branch` are allowed or the PR flow is required | Session + Write+ |
 | `pull.create` / `get` / `list` / `update` / `close` / `reopen` | Pull requests; shared `#N` with issues; create = Read+ on base + Write+ on head (fork heads OK); update/close/reopen = author or Write+ | Session (+ capability) |
 | `pull.files` / `pull.commits` | Diff + commit list for a PR | Session (+ Read+) |
-| `pull.comments.list` / `create` / `resolve` | General + line comments; create = verified + Read, resolve = Write+ | Session (+ capability) |
+| `pull.comments.list` / `create` / `update` / `delete` / `history` / `resolve` | General + line comments; create = verified + Read, update = author, delete = author or Write+, history = Read+, resolve = Write+ | Session (+ capability) |
 | `pull.reviews.list` / `submit` / `dismiss` | Approve / request changes / comment; dismiss | Session (+ Write+) |
 | `pull.reviewRequests.list` / `add` / `remove` | Optional requested reviewers (UX only) | Session (+ capability) |
 | `pull.merge` | Merge / squash / rebase; optional delete head; closing keywords on default branch | Session (+ Write+) |
@@ -191,7 +191,7 @@ SSO start routes redirect to the IdP when configured. If WorkOS/OIDC ENV is miss
 | `repo.pulls.getEnabled` / `setEnabled` | Per-repo Pull-requests unit toggle (COL-13) | Session + Read+ / Admin |
 | `repo.mirror.get` / `upsert` / `delete` / `syncNow` | Two-way remote mirror config + enqueue sync | Session + Admin |
 | `repo.mirror.generateSshKey` / `rotateWebhookSecret` / `fetchHostKey` | Deploy key, inbound webhook secret, ssh-keyscan | Session + Admin |
-| `webhook.create` / `list` / `get` / `update` / `delete` / `deliveries.list` / `deliveries.get` / `ping` / `redeliver` | Outbound repo webhooks; events: `push`, `pull_request`, `issues`, `issue_comment` (incl. PR conversation comments), `release` (`published`/`created`/`edited`/`unpublished`/`deleted`), `star` (`created`/`deleted`), `fork`, `create`/`delete` (branch + tag refs via RPC or receive-pack; no action — the event is the action), `workflow_run` (`requested`/`in_progress`/`completed` with GitHub-style `conclusion`), `registry_package` (`published`/`updated`; repo-linked packages only), `ping`, `*` | Session + Admin |
+| `webhook.create` / `list` / `get` / `update` / `delete` / `deliveries.list` / `deliveries.get` / `ping` / `redeliver` | Outbound repo webhooks; events: `push`, `pull_request`, `issues`, `issue_comment` (incl. PR conversation comments; `created`/`edited`/`deleted`), `pull_request_review_comment` (diff-anchored PR line comments; `created`/`edited`/`deleted`), `release` (`published`/`created`/`edited`/`unpublished`/`deleted`), `star` (`created`/`deleted`), `fork`, `create`/`delete` (branch + tag refs via RPC or receive-pack; no action — the event is the action), `workflow_run` (`requested`/`in_progress`/`completed` with GitHub-style `conclusion`), `registry_package` (`published`/`updated`; repo-linked packages only), `ping`, `*` | Session + Admin |
 | `repo.commitStatus.create` / `list` | Commit statuses (Phase 13 + Actions publisher) | Session + Write+ / Read+ |
 | `admin.actions.createRegistrationToken` | Mint one-time runner registration token | Sys-admin |
 | `admin.actions.listRunners` | List registered runners (no secrets) | Sys-admin |
@@ -264,6 +264,7 @@ All paths are under `/api/v1`. The procedure column names the RPC equivalent in 
 | `GET` | `/repos/{owner}/{repo}/pulls/{number}/files` | `pull.files` | |
 | `GET` | `/repos/{owner}/{repo}/pulls/{number}/commits` | `pull.commits` | |
 | `GET`/`POST` | `/repos/{owner}/{repo}/pulls/{number}/comments` | `pull.comments.list` / `pull.comments.create` | Optional diff placement fields |
+| `PATCH`/`DELETE` | `/repos/{owner}/{repo}/pulls/{number}/comments/{comment_id}` | `pull.comments.update` / `pull.comments.delete` | Path carries `number` (RPC input requires it) — differs from GitHub's `/pulls/comments/{id}` |
 | `GET`/`POST` | `/repos/{owner}/{repo}/pulls/{number}/reviews` | `pull.reviews.list` / `pull.reviews.submit` | `state`: `approved`\|`changes_requested`\|`commented` |
 | `GET`/`POST` | `/repos/{owner}/{repo}/releases` | `release.list` / `release.create` | Tag must already exist |
 | `GET`/`PATCH`/`DELETE` | `/repos/{owner}/{repo}/releases/tags/{tag}` | `release.get` / `release.update` / `release.delete` | Slashed tags %-encoded |
@@ -757,13 +758,14 @@ git fetch origin pull/123/head && git checkout FETCH_HEAD   # same as GitHub
 | Event | Top-level keys |
 | --- | --- |
 | Pull request (`pull_request`) | `action`, `number`, `pull_request`, `repository`, `sender` |
+| Pull request review comment (`pull_request_review_comment`) | `action`, `comment` (`id`, `body`, `path`, `line`, `start_line`, `side`, `commit_id`, `html_url`, `user`, `created_at`, `updated_at`), `pull_request`, `repository`, `sender`, `changes` on `edited` |
 | Issue (`issues`) | `action`, `issue`, `repository`, `sender` |
 | Push (`push`) | `ref`, `before`, `after`, `created`, `deleted`, `forced`, `commits`, `head_commit`, `pusher`, `sender`, `repository` |
 | Ping (`ping`) | `zen`, `hook_id`, `repository` |
 
 Conventions: `action` names the transition (`opened`, `closed`, `reopened`, `synchronize`, `edited`, …); `repository` identifies the repo (`name`, `full_name`, `owner`); `sender` is the acting user (`login`, `id`). Payloads are *GitHub-shaped but not exhaustive* — nested objects carry the fields Oxidean models; consumers that read a fixed key subset work unchanged.
 
-Deltas: `issue_comment` events are not emitted today (issue/PR comments do not fan out to webhooks), and the push payload leaves `commits`/`head_commit` empty — fetch `after`/`refs/pull/{N}/head` for commit data.
+Deltas: comment events fan out as `issue_comment` (issue + PR conversation comments, `issue.pull_request` marker on the latter) and `pull_request_review_comment` (diff-anchored line comments), each with `created`/`edited`/`deleted` actions. The push payload leaves `commits`/`head_commit` empty — fetch `after`/`refs/pull/{N}/head` for commit data.
 
 ### Two-way repository mirroring
 

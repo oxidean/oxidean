@@ -2,6 +2,7 @@
 
 use sqlx::Row;
 
+use crate::issues::CommentRevisionRow;
 use crate::pool::DbPool;
 
 #[derive(Debug, Clone)]
@@ -1277,6 +1278,217 @@ pub async fn set_pull_comment_resolved(
     find_pull_comment_by_id(pool, id)
         .await?
         .ok_or_else(|| "resolve pull comment failed: row missing".into())
+}
+
+pub async fn update_pull_comment_body(
+    pool: &DbPool,
+    id: &str,
+    body: &str,
+) -> Result<PullCommentRow, String> {
+    match pool {
+        DbPool::Postgres(p) => {
+            sqlx::query("UPDATE pull_comments SET body = $2, updated_at = NOW() WHERE id = $1")
+                .bind(id)
+                .bind(body)
+                .execute(p)
+                .await
+                .map_err(|e| format!("update pull comment failed: {e}"))?;
+        }
+        DbPool::MySql(p) => {
+            sqlx::query(
+                "UPDATE pull_comments SET body = ?, updated_at = UTC_TIMESTAMP() WHERE id = ?",
+            )
+            .bind(body)
+            .bind(id)
+            .execute(p)
+            .await
+            .map_err(|e| format!("update pull comment failed: {e}"))?;
+        }
+        DbPool::Sqlite(p) => {
+            sqlx::query(
+                "UPDATE pull_comments SET body = ?2,
+ updated_at = strftime('%Y-%m-%d %H:%M:%S','now') WHERE id = ?1",
+            )
+            .bind(id)
+            .bind(body)
+            .execute(p)
+            .await
+            .map_err(|e| format!("update pull comment failed: {e}"))?;
+        }
+    }
+    find_pull_comment_by_id(pool, id)
+        .await?
+        .ok_or_else(|| "update pull comment failed: row missing".into())
+}
+
+/// Deleting a pull comment cascades its `pull_comment_revisions` rows.
+pub async fn delete_pull_comment(pool: &DbPool, id: &str) -> Result<(), String> {
+    match pool {
+        DbPool::Postgres(p) => {
+            sqlx::query("DELETE FROM pull_comments WHERE id = $1")
+                .bind(id)
+                .execute(p)
+                .await
+                .map_err(|e| format!("delete pull comment failed: {e}"))?;
+        }
+        DbPool::MySql(p) => {
+            sqlx::query("DELETE FROM pull_comments WHERE id = ?")
+                .bind(id)
+                .execute(p)
+                .await
+                .map_err(|e| format!("delete pull comment failed: {e}"))?;
+        }
+        DbPool::Sqlite(p) => {
+            sqlx::query("DELETE FROM pull_comments WHERE id = ?1")
+                .bind(id)
+                .execute(p)
+                .await
+                .map_err(|e| format!("delete pull comment failed: {e}"))?;
+        }
+    }
+    Ok(())
+}
+
+macro_rules! map_pull_comment_revision {
+    ($row:expr) => {{
+        let row = $row;
+        CommentRevisionRow {
+            id: row.try_get("id").map_err(|e| format!("pull comment revision row: {e}"))?,
+            comment_id: row
+                .try_get("comment_id")
+                .map_err(|e| format!("pull comment revision row: {e}"))?,
+            editor_id: row
+                .try_get("editor_id")
+                .map_err(|e| format!("pull comment revision row: {e}"))?,
+            body: row
+                .try_get("body")
+                .map_err(|e| format!("pull comment revision row: {e}"))?,
+            created_at: row
+                .try_get("created_at")
+                .map_err(|e| format!("pull comment revision row: {e}"))?,
+        }
+    }};
+}
+
+const PULL_COMMENT_REV_SELECT_PG: &str = "SELECT id, comment_id, editor_id, body,
+       to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS created_at
+FROM pull_comment_revisions";
+
+const PULL_COMMENT_REV_SELECT_MYSQL: &str = "SELECT id, comment_id, editor_id, body,
+       DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at
+FROM pull_comment_revisions";
+
+const PULL_COMMENT_REV_SELECT_SQLITE: &str = "SELECT id, comment_id, editor_id, body,
+       strftime('%Y-%m-%dT%H:%M:%SZ', created_at) AS created_at
+FROM pull_comment_revisions";
+
+pub async fn insert_pull_comment_revision(
+    pool: &DbPool,
+    id: &str,
+    comment_id: &str,
+    editor_id: &str,
+    body: &str,
+) -> Result<CommentRevisionRow, String> {
+    match pool {
+        DbPool::Postgres(p) => {
+            sqlx::query(
+                "INSERT INTO pull_comment_revisions (id, comment_id, editor_id, body, created_at)
+VALUES ($1, $2, $3, $4, NOW())",
+            )
+            .bind(id)
+            .bind(comment_id)
+            .bind(editor_id)
+            .bind(body)
+            .execute(p)
+            .await
+            .map_err(|e| format!("insert pull comment revision failed: {e}"))?;
+        }
+        DbPool::MySql(p) => {
+            sqlx::query(
+                "INSERT INTO pull_comment_revisions (id, comment_id, editor_id, body, created_at)
+VALUES (?, ?, ?, ?, UTC_TIMESTAMP(6))",
+            )
+            .bind(id)
+            .bind(comment_id)
+            .bind(editor_id)
+            .bind(body)
+            .execute(p)
+            .await
+            .map_err(|e| format!("insert pull comment revision failed: {e}"))?;
+        }
+        DbPool::Sqlite(p) => {
+            // Fractional seconds so rapid edits stay oldest-first under ORDER BY created_at.
+            sqlx::query(
+                "INSERT INTO pull_comment_revisions (id, comment_id, editor_id, body, created_at)
+VALUES (?1, ?2, ?3, ?4, strftime('%Y-%m-%d %H:%M:%f','now'))",
+            )
+            .bind(id)
+            .bind(comment_id)
+            .bind(editor_id)
+            .bind(body)
+            .execute(p)
+            .await
+            .map_err(|e| format!("insert pull comment revision failed: {e}"))?;
+        }
+    }
+    list_pull_comment_revisions(pool, comment_id)
+        .await?
+        .into_iter()
+        .find(|r| r.id == id)
+        .ok_or_else(|| "insert pull comment revision failed: row missing after insert".into())
+}
+
+pub async fn list_pull_comment_revisions(
+    pool: &DbPool,
+    comment_id: &str,
+) -> Result<Vec<CommentRevisionRow>, String> {
+    match pool {
+        DbPool::Postgres(p) => {
+            let q = format!(
+                "{PULL_COMMENT_REV_SELECT_PG} WHERE comment_id = $1 ORDER BY created_at ASC, id ASC"
+            );
+            let rows = sqlx::query(&q)
+                .bind(comment_id)
+                .fetch_all(p)
+                .await
+                .map_err(|e| format!("list pull comment revisions failed: {e}"))?;
+            let mut out = Vec::with_capacity(rows.len());
+            for r in rows {
+                out.push(map_pull_comment_revision!(&r));
+            }
+            Ok(out)
+        }
+        DbPool::MySql(p) => {
+            let q = format!(
+                "{PULL_COMMENT_REV_SELECT_MYSQL} WHERE comment_id = ? ORDER BY created_at ASC, id ASC"
+            );
+            let rows = sqlx::query(&q)
+                .bind(comment_id)
+                .fetch_all(p)
+                .await
+                .map_err(|e| format!("list pull comment revisions failed: {e}"))?;
+            let mut out = Vec::with_capacity(rows.len());
+            for r in rows {
+                out.push(map_pull_comment_revision!(&r));
+            }
+            Ok(out)
+        }
+        DbPool::Sqlite(p) => {
+            let q = format!(
+                "{PULL_COMMENT_REV_SELECT_SQLITE} WHERE comment_id = ?1 ORDER BY created_at ASC, rowid ASC"
+            );
+            let rows = sqlx::query(&q)
+                .bind(comment_id)
+                .fetch_all(p)
+                .await
+                .map_err(|e| format!("list pull comment revisions failed: {e}"))?;
+            let mut out = Vec::with_capacity(rows.len());
+            for r in rows {
+                out.push(map_pull_comment_revision!(&r));
+            }
+            Ok(out)
+        }
+    }
 }
 
 pub async fn mark_pull_line_comments_outdated(

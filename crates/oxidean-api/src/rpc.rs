@@ -338,6 +338,9 @@ pub const PROCEDURES: &[&str] = &[
     "pull.commits",
     "pull.comments.list",
     "pull.comments.create",
+    "pull.comments.update",
+    "pull.comments.delete",
+    "pull.comments.history",
     "pull.comments.resolve",
     "pull.reviews.list",
     "pull.reviews.submit",
@@ -1382,6 +1385,18 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Err(e) => RpcResponse::err(e),
         },
         "pull.comments.create" => match pull::comments_create(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "pull.comments.update" => match pull::comments_update(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "pull.comments.delete" => match pull::comments_delete(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "pull.comments.history" => match pull::comments_history(ctx, req.input).await {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },
