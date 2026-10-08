@@ -2,6 +2,7 @@ import { afterEach, beforeEach } from "vitest";
 import { cleanupBrowserMount } from "./browser-mount";
 import { consumeDomRaceAllowlist, trackDomErrors, type DomErrorTracker } from "./dom-errors";
 import { getQueryClient } from "@/lib/query-client";
+import "../styles.css";
 
 /**
  * Chromium browser-mode suite: fail on Octane insertBefore / hierarchy races.

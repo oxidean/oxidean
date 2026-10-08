@@ -1,5 +1,33 @@
-import { describe, expect, it } from "vitest";
+import { cleanup, render } from "@octanejs/testing-library";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { getQueryClient } from "@/lib/query-client";
+
+const meMock = vi.fn();
+const providerConfigMock = vi.fn();
+
+vi.mock("@/lib/api-client", () => ({
+  apiClient: {
+    auth: {
+      me: (...args: unknown[]) => meMock(...args),
+      providerConfig: (...args: unknown[]) => providerConfigMock(...args),
+    },
+    repo: {
+      listMine: vi.fn(async () => ({ ok: true, data: [] })),
+    },
+  },
+}));
+
 import { HomePage, selectHomeTree } from "./index";
+
+function deferred<T>() {
+  let resolve!: (v: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
+const ANON = { ok: false, error: { code: "auth.unauthenticated", message: "" } };
 
 /**
  * Home SSR/tree gate priority (D-18/D-20).
@@ -34,5 +62,55 @@ describe("index/home SSR tree gate (D-18/D-20)", () => {
       /redirectIfNeedsSetup/.test(src),
       "index must not reintroduce client redirectIfNeedsSetup as the boundary",
     ).toBe(false);
+  });
+});
+
+/**
+ * Pending dual-render: while `auth.me` is unsettled the page emits both the
+ * anonymous landing and the signed-in skeleton so the `data-oxidean-session`
+ * stamp on <html> can pick via CSS. Resolution must swap to a single tree and
+ * drop the wrappers — the scroll-reveal observer watches live nodes only if
+ * the effect re-runs on the swap (covered by index.browser.test.tsx).
+ */
+describe("index pending dual-render", () => {
+  beforeEach(() => {
+    meMock.mockReset();
+    providerConfigMock.mockReset();
+    providerConfigMock.mockResolvedValue({
+      ok: true,
+      data: { mode: "local", allow_signup: true },
+    });
+    getQueryClient().clear();
+  });
+
+  afterEach(() => {
+    getQueryClient().clear();
+    cleanup();
+  });
+
+  it("pending renders [data-anon-landing] + [data-home-skeleton]", async () => {
+    const me = deferred<unknown>();
+    meMock.mockReturnValue(me.promise);
+
+    render(HomePage, {});
+
+    expect(document.querySelector("[data-anon-landing]")).toBeTruthy();
+    expect(document.querySelector("[data-home-skeleton]")).toBeTruthy();
+    // Landing content is present inside its candidate wrapper.
+    expect(document.querySelector("[data-anon-landing] .oct-reveal")).toBeTruthy();
+  });
+
+  it("anonymous resolution swaps to the bare landing tree (wrappers dropped)", async () => {
+    const me = deferred<unknown>();
+    meMock.mockReturnValue(me.promise);
+
+    render(HomePage, {});
+    me.resolve(ANON);
+
+    await vi.waitFor(() => {
+      expect(document.querySelector("#explore")).toBeTruthy();
+      expect(document.querySelector("[data-anon-landing]")).toBeNull();
+      expect(document.querySelector("[data-home-skeleton]")).toBeNull();
+    });
   });
 });
