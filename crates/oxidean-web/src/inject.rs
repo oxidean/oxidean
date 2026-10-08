@@ -81,10 +81,25 @@ pub fn inject(
 
     let mut out = html.to_string();
 
-    // <html lang="en"> → <html lang="en" class="dark"> (+ data attr the boot
-    // script keys on to skip its own class toggle).
+    // <html lang="en"> → <html lang="en" class="dark" data-oxidean-session="1">:
+    // the theme class the FOUC boot script keys on, plus a signed-in stamp so
+    // pending islands can pre-select their skeleton instead of flashing the
+    // anonymous landing before hydration resolves `auth.me`.
+    let mut html_attrs = String::new();
     if theme == "dark" {
-        out = out.replacen("<html lang=\"en\"", "<html lang=\"en\" class=\"dark\"", 1);
+        html_attrs.push_str(" class=\"dark\"");
+    }
+    if signed_in(cookie) {
+        html_attrs.push_str(" data-oxidean-session=\"1\"");
+    }
+    if !html_attrs.is_empty() {
+        out = out.replacen(
+            "<html lang=\"en\"",
+            &format!("<html lang=\"en\"{html_attrs}"),
+            1,
+        );
+    }
+    if theme == "dark" {
         out = out.replacen(
             "<meta name=\"color-scheme\" content=\"light\"",
             "<meta name=\"color-scheme\" content=\"dark\"",
@@ -174,5 +189,17 @@ mod tests {
         assert!(out.contains("content=\"dark\""));
         assert!(out.contains("<title>Issues · a/b · Oxidean</title>"));
         assert!(out.contains("oxidean:ssh-host\" content=\"git.example.com\""));
+    }
+
+    #[test]
+    fn session_stamp() {
+        let html = r#"<html lang="en"><head><title>Oxidean</title></head>"#;
+        let mut h = HeaderMap::new();
+        h.insert("cookie", HeaderValue::from_static("oxidean_session=abc"));
+        let out = inject(html, &h, None, &AdvertiseMeta { ssh_host: None, ssh_port: None });
+        assert!(out.contains("data-oxidean-session=\"1\""));
+
+        let out = inject(html, &HeaderMap::new(), None, &AdvertiseMeta { ssh_host: None, ssh_port: None });
+        assert!(!out.contains("data-oxidean-session"));
     }
 }

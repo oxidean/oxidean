@@ -1,6 +1,7 @@
 import { Toast } from "@octanejs/base-ui/toast";
 import { X } from "@octanejs/lucide";
 import { cva, type VariantProps } from "class-variance-authority";
+import { portalRoot } from "@/lib/portal-root";
 import { appToastManager, type ToastVariant } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 
@@ -55,7 +56,8 @@ function ToastList() @{
 
   // octane-dom-race-ok: app-root singleton — mounts once at boot and never
   // unmounts; toast items inside change but the portal node itself is stable.
-  <Toast.Portal>
+  // container: persisted host, so view-transition swaps don't detach it.
+  <Toast.Portal container={portalRoot()}>
     <Toast.Viewport
       className={cn(
         "oct-toast-viewport fixed right-4 bottom-4 z-[100] flex w-[min(100%-2rem,22rem)] flex-col-reverse gap-2 outline-none",

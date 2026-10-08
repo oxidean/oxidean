@@ -1,5 +1,6 @@
 import { Menu as MenuPrimitive } from "@octanejs/base-ui/menu";
 import type { ComponentProps } from "octane";
+import { portalRoot } from "@/lib/portal-root";
 import { cn } from "@/lib/utils";
 
 export function DropdownMenu(props: ComponentProps<typeof MenuPrimitive.Root>) @{
@@ -22,7 +23,7 @@ export function DropdownMenuContent({
     ComponentProps<typeof MenuPrimitive.Positioner>,
     "align" | "alignOffset" | "side" | "sideOffset"
   >) @{
-  <MenuPrimitive.Portal keepMounted>
+  <MenuPrimitive.Portal keepMounted container={portalRoot()}>
     <MenuPrimitive.Positioner
       className="isolate z-50 outline-none"
       align={align}

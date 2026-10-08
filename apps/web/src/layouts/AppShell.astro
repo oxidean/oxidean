@@ -58,6 +58,10 @@ const webmcpRegisterScript = buildWebMcpRegisterScript();
       <slot />
       <ChromeBottom client:load transition:persist />
     </div>
+    {/* Persisted host for all floating portals: swaps carry it (and every
+        portal subtree inside it) across navigations, so overlays owned by
+        persisted islands never lose their mount node. */}
+    <div id="oxidean-portal-root" data-astro-transition-persist="oxidean-portal-root"></div>
     <script is:inline set:html={swRegisterScript} />
     <script is:inline set:html={webmcpRegisterScript} />
   </body>

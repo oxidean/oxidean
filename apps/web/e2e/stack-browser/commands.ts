@@ -1596,6 +1596,24 @@ export const expectChromeCreateAndAccountMenusFlow: BrowserCommand<[]> = async (
       timeout: 15_000,
     });
     assertNoOctaneOverlay(await page.content(), "signed-in chrome menus");
+
+    // Regression: portal containers live in the persisted host, so overlays
+    // owned by the persisted chrome island must survive ClientRouter swaps.
+    // Pre-fix, an SPA nav dropped the body-mounted portal nodes and every
+    // chrome menu/dialog rendered into detached DOM afterwards.
+    await page.getByRole("button", { name: /account menu/i }).click();
+    await page.getByRole("menu").waitFor({ state: "visible", timeout: 15_000 });
+    await page.keyboard.press("Escape");
+    await page.getByRole("link", { name: "Notifications", exact: true }).first().click();
+    await page.waitForURL("**/notifications", { timeout: 30_000 });
+    await page.getByRole("button", { name: /account menu/i }).click();
+    await page.getByRole("menu").waitFor({ state: "visible", timeout: 15_000 });
+    const postNavMenuBox = await page.getByRole("menu").boundingBox();
+    if (!postNavMenuBox || postNavMenuBox.width < 50 || postNavMenuBox.height < 50) {
+      throw new Error(
+        `account menu portal did not survive SPA navigation: ${JSON.stringify(postNavMenuBox)}`,
+      );
+    }
     return true;
   } finally {
     await pageGuard.close("stack-browser");

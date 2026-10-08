@@ -274,7 +274,8 @@ function AccountActions({
         className={cn("flex h-9 shrink-0 items-center justify-end gap-1", className)}
       >
         <Skeleton className="size-9" />
-        <Skeleton className="h-9 w-24" />
+        <Skeleton className="size-9" />
+        <Skeleton className="h-9 w-28" />
       </div>
     );
   }

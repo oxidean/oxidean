@@ -1,31 +1,34 @@
 import { Skeleton } from "@/components/ui/skeleton";
 import { SETTINGS_SHELL_MAX } from "@/components/settings/settings-shell";
 
-/** Signed-in home at `/` — mirrors {@link SignedInHome} three-column geometry. */
+/** Signed-in home at `/` — mirrors {@link SignedInHome} two-column geometry. */
 export function SignedInHomeSkeleton() @{
   <div
-    className="mx-auto max-w-7xl px-4 py-8 sm:px-6"
+    className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:py-10"
     role="status"
     aria-busy="true"
     aria-label="Loading"
   >
-    <div className="grid gap-8 lg:grid-cols-[16rem_minmax(0,1fr)_14rem] lg:gap-10">
-      <div className="flex flex-col gap-3">
-        <div className="flex justify-between gap-2">
+    <div className="grid gap-8 lg:grid-cols-[17.5rem_minmax(0,1fr)] lg:gap-12">
+      <div className="flex min-w-0 flex-col">
+        <div className="mb-3 flex items-center justify-between gap-2">
           <Skeleton className="h-5 w-32" />
-          <Skeleton className="h-8 w-14" />
+          <Skeleton className="h-6 w-10" />
         </div>
-        <Skeleton className="h-9 w-full" />
-        <Skeleton className="h-8 w-full" />
-        <Skeleton className="h-8 w-full" />
-        <Skeleton className="h-8 w-3/4" />
+        <Skeleton className="mb-3 h-9 w-full" />
+        <div className="flex flex-col gap-0.5">
+          <Skeleton className="h-8 w-full" />
+          <Skeleton className="h-8 w-full" />
+          <Skeleton className="h-8 w-full" />
+          <Skeleton className="h-8 w-3/4" />
+        </div>
       </div>
-      <div className="flex flex-col gap-4">
-        <Skeleton className="h-8 w-24" />
-        <Skeleton className="h-40 w-full" />
-      </div>
-      <div>
-        <Skeleton className="h-32 w-full" />
+      <div className="min-w-0">
+        <div className="mb-5 border-b border-border pb-3">
+          <Skeleton className="h-8 w-24" />
+          <Skeleton className="mt-1 h-5 w-72 max-w-full" />
+        </div>
+        <Skeleton className="h-40 w-full rounded-lg" />
       </div>
     </div>
   </div>;

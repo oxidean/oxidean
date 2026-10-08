@@ -1,6 +1,7 @@
 import { AlertDialog as AlertDialogPrimitive } from "@octanejs/base-ui/alert-dialog";
 import type { ComponentProps } from "octane";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { portalRoot } from "@/lib/portal-root";
 import { cn } from "@/lib/utils";
 
 export function AlertDialog(props: ComponentProps<typeof AlertDialogPrimitive.Root>) @{
@@ -18,7 +19,11 @@ export function AlertDialogPortal(
 ) @{
   // octane-dom-race-ok: definition site — keepMounted flows through props;
   // AlertDialogContent sets it so every consumer stays mounted.
-  <AlertDialogPrimitive.Portal data-slot="alert-dialog-portal" {...props} />;
+  <AlertDialogPrimitive.Portal
+    data-slot="alert-dialog-portal"
+    container={portalRoot()}
+    {...props}
+  />;
 }
 
 export function AlertDialogOverlay({

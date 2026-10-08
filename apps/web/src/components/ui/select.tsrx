@@ -1,10 +1,16 @@
 import { Select } from "@octanejs/base-ui/select";
 import type { ComponentProps } from "octane";
+import { portalRoot } from "@/lib/portal-root";
 import { cn } from "@/lib/utils";
 
 export const SelectRoot = Select.Root;
 export const SelectValue = Select.Value;
-export const SelectPortal = Select.Portal;
+
+export function SelectPortal(props: ComponentProps<typeof Select.Portal>) @{
+  // octane-dom-race-ok: definition site — Select.Portal has no keepMounted
+  // escape hatch; container pins portals to the persisted host.
+  <Select.Portal container={portalRoot()} {...props} />;
+}
 export const SelectList = Select.List;
 export const SelectItemText = Select.ItemText;
 export const SelectIcon = Select.Icon;

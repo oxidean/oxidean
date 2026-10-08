@@ -2,6 +2,7 @@ import { Dialog as DialogPrimitive } from "@octanejs/base-ui/dialog";
 import { X } from "@octanejs/lucide";
 import type { ComponentProps } from "octane";
 import { Button } from "@/components/ui/button";
+import { portalRoot } from "@/lib/portal-root";
 import { cn } from "@/lib/utils";
 
 export function Dialog(props: ComponentProps<typeof DialogPrimitive.Root>) @{
@@ -15,7 +16,7 @@ export function DialogTrigger(props: ComponentProps<typeof DialogPrimitive.Trigg
 export function DialogPortal(props: ComponentProps<typeof DialogPrimitive.Portal>) @{
   // octane-dom-race-ok: definition site — keepMounted flows through props;
   // DialogContent sets it so every consumer stays mounted.
-  <DialogPrimitive.Portal data-slot="dialog-portal" {...props} />;
+  <DialogPrimitive.Portal data-slot="dialog-portal" container={portalRoot()} {...props} />;
 }
 
 export function DialogClose(props: ComponentProps<typeof DialogPrimitive.Close>) @{

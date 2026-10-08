@@ -1,6 +1,6 @@
 import { useQuery } from "@octanejs/tanstack-query";
 import type { RepoPublic, UserPublic } from "@oxidean/api-client";
-import { useEffect, useState } from "octane";
+import { useEffect } from "octane";
 import { AppPage } from "@/components/app-page";
 import { AppLink } from "@/components/ui/app-link";
 import { buttonVariants } from "@/components/ui/button";
@@ -87,13 +87,6 @@ function HomeContent() {
   const reposQ = useQuery({ ...repoListMineQueryOptions(), enabled: signedIn });
   const cfgQ = useQuery(authProviderConfigQueryOptions());
 
-  // Cookie is only readable after mount — reading during render mismatches SSR.
-  const [presenceHint, setPresenceHint] = useState(false);
-
-  useEffect(() => {
-    setPresenceHint(hasSessionPresenceHint());
-  }, []);
-
   const tree: HomeTree | null = meQ.isPending ? null : signedIn ? "signed-in" : "marketing";
   const user = meQ.data ?? null;
 
@@ -101,11 +94,25 @@ function HomeContent() {
     if (tree != null) syncSessionPresenceHint(tree === "signed-in");
   }, [tree]);
 
-  useScrollReveal(tree === "marketing" || (tree == null && !presenceHint));
+  // Cookie is only readable after mount — reading it for reveal gating feeds an
+  // effect arg, not SSR markup, so it's safe client-side.
+  const sessionHint = typeof document !== "undefined" ? hasSessionPresenceHint() : false;
+  useScrollReveal(tree === "marketing" || (tree == null && !sessionHint));
 
-  // Rare PE: presence cookie says signed-in before the session query resolves.
-  if (tree == null && presenceHint) {
-    return <SignedInHomeSkeleton />;
+  // Pending: SSR cannot see the session, so emit both candidates — the
+  // `data-oxidean-session` stamp on <html> (set per-request by the web tier)
+  // selects via CSS which one paints before `auth.me` resolves.
+  if (tree == null) {
+    return (
+      <>
+        <div data-anon-landing>
+          <AnonLanding allowSignup={cfgQ.data?.allow_signup === true} />
+        </div>
+        <div data-home-skeleton>
+          <SignedInHomeSkeleton />
+        </div>
+      </>
+    );
   }
 
   if (tree === "signed-in" && user) {

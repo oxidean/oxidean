@@ -273,6 +273,19 @@
     view-transition-name: oxidean-main;
   }
 
+  /* Pending home `/` dual-render: the web tier stamps `data-oxidean-session`
+     on <html> when a session cookie is present, so signed-in visitors see the
+     content-sized skeleton instead of the anonymous landing before hydration. */
+  [data-home-skeleton] {
+    display: none;
+  }
+  html[data-oxidean-session] [data-anon-landing] {
+    display: none;
+  }
+  html[data-oxidean-session] [data-home-skeleton] {
+    display: block;
+  }
+
   /* Marketing landing reveal (home `/`). */
   .oct-rise {
     animation: octRise 320ms ease-out both;
