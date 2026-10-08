@@ -99,7 +99,9 @@ jobs:
       - name: bun install
         run: bun install --frozen-lockfile
       - name: Playwright Chromium
-        run: bunx playwright install --with-deps chromium
+        # Run inside apps/web so bunx resolves the declared playwright dep
+        # (root bunx would fetch latest → browser-build skew vs playwright-core).
+        run: cd apps/web && bunx playwright install --with-deps chromium
       - name: vitest browser (Chromium component DOM races)
         run: make test-web-browser
 
@@ -246,7 +248,8 @@ jobs:
       - name: bun install
         run: bun install --frozen-lockfile
       - name: Playwright Chromium (stack browser e2e)
-        run: bunx playwright install --with-deps chromium
+        # See web-browser job: run inside apps/web to use the locked version.
+        run: cd apps/web && bunx playwright install --with-deps chromium
       - name: stack e2e (API + Mailpit/OIDC/stubs + web)
         env:
           CARGO_INCREMENTAL: "0"
