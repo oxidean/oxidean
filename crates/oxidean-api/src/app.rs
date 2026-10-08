@@ -281,6 +281,10 @@ pub fn router_with_state(state: AppState, cors: CorsLayer) -> Router {
             "/api/auth/oidc/callback",
             get(auth_callbacks::oidc_callback),
         )
+        // Web-tier session probe (`oxidean-web` stamps `data-oxidean-session`
+        // and gates protected shells on the result): read-only, one SELECT,
+        // no session touch on the document path.
+        .route("/api/auth/session-check", get(session_check))
         // OAuth2 provider surface (API-03). The consent screen itself is the
         // SPA route /oauth/consent; these three paths are API-owned and must be
         // routed to the API at the edge (Caddyfile / Traefik / vite proxy).
@@ -379,6 +383,23 @@ pub fn router_with_state(state: AppState, cors: CorsLayer) -> Router {
 
 async fn health() -> Json<serde_json::Value> {
     Json(serde_json::json!({ "ok": true }))
+}
+
+/// `GET /api/auth/session-check` — reports whether the presented
+/// `oxidean_session` cookie maps to a live session. Store failures surface as
+/// 500 (never `valid:false`) so the web tier can tell "definitively signed
+/// out" from "couldn't ask" and keep its presence fallback on errors.
+async fn session_check(State(state): State<AppState>, headers: HeaderMap) -> impl IntoResponse {
+    let Some(token) = session_token_from_headers(&headers) else {
+        return Json(serde_json::json!({ "valid": false })).into_response();
+    };
+    match state.sessions.peek(&state.db, &token).await {
+        Ok(valid) => Json(serde_json::json!({ "valid": valid })).into_response(),
+        Err(e) => {
+            tracing::warn!(error = %e, "session-check probe failed");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
 }
 
 pub(crate) fn session_token_from_headers(headers: &HeaderMap) -> Option<String> {

@@ -179,6 +179,28 @@ impl SessionService {
         }))
     }
 
+    /// Read-only validity probe for the web tier's per-request session stamp:
+    /// the same expiry / orphaned-user / soft-ban gates as [`resolve`](Self::resolve)
+    /// minus the `touch` — one indexed SELECT, no `last_seen`/slide write on the
+    /// document path (the client's own `auth.me` still owns those on hydrate).
+    pub async fn peek(&self, db: &Database, raw_token: &str) -> Result<bool, AuthError> {
+        if raw_token.is_empty() {
+            return Ok(false);
+        }
+        let token_hash = sha256_hex(raw_token.as_bytes());
+        let Some(row) = db
+            .find_session_by_token_hash(&token_hash)
+            .await
+            .map_err(AuthError::from_db)?
+        else {
+            return Ok(false);
+        };
+        let expires_at = parse_rfc3339(&row.expires_at).map_err(AuthError::Store)?;
+        Ok(expires_at > Utc::now()
+            && row.joined_user_id.is_some()
+            && row.user_banned_at.is_none())
+    }
+
     /// Revoke a single session (this device / logout).
     pub async fn revoke(&self, db: &Database, session_id: &str) -> Result<(), AuthError> {
         db.delete_session(session_id)
@@ -350,6 +372,53 @@ mod tests {
             .await
             .expect("resolve after revoke");
         assert!(gone.is_none());
+    }
+
+    #[tokio::test]
+    async fn peek_valid_invalid_and_read_only() {
+        let db = test_db().await;
+        let user_id = seed_user(&db).await;
+        let svc = SessionService::new("development");
+
+        let (token, _) = svc
+            .create(&db, &user_id, false, None, None)
+            .await
+            .expect("create");
+        assert!(svc.peek(&db, &token).await.expect("peek live"));
+        assert!(!svc.peek(&db, "deadbeef").await.expect("peek unknown token"));
+        assert!(!svc.peek(&db, "").await.expect("peek empty"));
+
+        let session = svc
+            .resolve(&db, &token, None, None)
+            .await
+            .expect("resolve")
+            .expect("present");
+        svc.revoke(&db, &session.session_id).await.expect("revoke");
+        assert!(!svc.peek(&db, &token).await.expect("peek revoked"));
+
+        // Expired rows read as invalid but the probe must not delete them —
+        // read-only contract (cleanup stays with `resolve`).
+        let raw = "expired-token";
+        let hash = sha256_hex(raw.as_bytes());
+        db.create_session(
+            "s-expired",
+            &user_id,
+            &hash,
+            "2000-01-01T00:00:00Z",
+            false,
+            None,
+            None,
+        )
+        .await
+        .expect("seed expired session");
+        assert!(!svc.peek(&db, raw).await.expect("peek expired"));
+        assert!(
+            db.find_session_by_token_hash(&hash)
+                .await
+                .expect("row lookup")
+                .is_some(),
+            "peek must not delete expired rows"
+        );
     }
 
     #[tokio::test]

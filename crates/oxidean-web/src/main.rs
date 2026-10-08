@@ -7,6 +7,7 @@
 
 mod inject;
 mod proxy;
+mod session;
 mod shells;
 mod wellknown;
 
@@ -33,6 +34,7 @@ struct Shared {
     dist: PathBuf,
     meta: inject::AdvertiseMeta,
     proxy: Option<proxy::ApiProxy>,
+    sessions: Option<session::SessionValidator>,
 }
 
 #[tokio::main]
@@ -53,15 +55,23 @@ async fn main() {
         .or_else(|| std::env::var("OXIDEAN_E2E_API_ORIGIN").ok())
         .map(|s| s.trim_end_matches('/').to_string());
 
+    if api_origin.is_none() {
+        tracing::warn!(
+            "OXIDEAN_API_ORIGIN unset — session stamp/gate fall back to cookie presence"
+        );
+    }
     let state = Arc::new(Shared {
         meta: inject::AdvertiseMeta {
             ssh_host: std::env::var("OXIDEAN_SSH_HOST").ok().filter(|s| !s.is_empty()),
             ssh_port: std::env::var("OXIDEAN_SSH_PORT").ok().and_then(|p| p.parse().ok()),
         },
-        proxy: api_origin.map(|o| {
+        proxy: api_origin.as_deref().map(|o| {
             tracing::info!("proxying API prefixes to {o}");
-            proxy::ApiProxy::new(&o)
+            proxy::ApiProxy::new(o)
         }),
+        sessions: api_origin
+            .as_deref()
+            .map(session::SessionValidator::new),
         dist: {
             let canon = dist.canonicalize().unwrap_or(dist);
             tracing::info!("serving SPA shells from {}", canon.display());
@@ -135,7 +145,16 @@ async fn spa(State(st): State<Arc<Shared>>, headers: HeaderMap, uri: Uri, req: a
             }
             return not_found(&st.dist).await;
         }
-        if m.protected && !inject::signed_in(cookie_header(&headers)) {
+        // Resolve the session signal once for both the protected gate and the
+        // `data-oxidean-session` stamp. Validated upstream when a validator is
+        // configured; Unknown degrades to the presence heuristic.
+        let signal = resolve_signal(&st, cookie_header(&headers)).await;
+        let passes_gate = match signal {
+            session::SessionSignal::Valid => true,
+            session::SessionSignal::Absent | session::SessionSignal::Invalid => false,
+            session::SessionSignal::Unknown => inject::signed_in(cookie_header(&headers)),
+        };
+        if m.protected && !passes_gate {
             let target = format!("/login?returnTo={}", urlencoding(path));
             return (
                 StatusCode::FOUND,
@@ -145,7 +164,7 @@ async fn spa(State(st): State<Arc<Shared>>, headers: HeaderMap, uri: Uri, req: a
         }
         match tokio::fs::read_to_string(st.dist.join(m.file)).await {
             Ok(html) => {
-                let out = inject::inject(&html, &headers, m.title.as_deref(), &st.meta);
+                let out = inject::inject(&html, &headers, m.title.as_deref(), &st.meta, signal);
                 return (
                     StatusCode::OK,
                     [
@@ -174,6 +193,23 @@ fn cookie_header(headers: &HeaderMap) -> Option<&str> {
     headers
         .get(header::COOKIE)
         .and_then(|v| v.to_str().ok())
+}
+
+/// Map the request's cookies to a session signal: `Absent` without an
+/// `oxidean_session` cookie (a bare `oxidean_signed_in` hint is not a
+/// credential), upstream verdict when the validator is configured, `Unknown`
+/// otherwise — the failure mode that keeps presence-fallback behavior alive.
+async fn resolve_signal(st: &Shared, cookie: Option<&str>) -> session::SessionSignal {
+    let Some(c) = cookie else {
+        return session::SessionSignal::Absent;
+    };
+    if inject::find_cookie(c, "oxidean_session").is_none_or(|v| v.is_empty()) {
+        return session::SessionSignal::Absent;
+    }
+    match &st.sessions {
+        Some(v) => v.check(c).await,
+        None => session::SessionSignal::Unknown,
+    }
 }
 
 /// Try `dist{path}` and `dist{path}/index.html`; rejects traversal.

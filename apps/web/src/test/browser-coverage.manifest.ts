@@ -283,7 +283,14 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
   },
   {
     surface: "components/chrome.tsrx",
-    coverage: [{ kind: "stack-browser", test: CHROME_MENUS, subject: "chrome" }],
+    coverage: [
+      { kind: "stack-browser", test: CHROME_MENUS, subject: "chrome" },
+      {
+        kind: "browser",
+        test: "apps/web/src/components/chrome.browser.test.tsx",
+        subject: "SiteHeader",
+      },
+    ],
   },
 
   {

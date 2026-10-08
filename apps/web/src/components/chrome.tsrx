@@ -256,6 +256,88 @@ function NotificationsBell({ onNavigated }: { onNavigated?: () => void }) @{
   </AppLink>;
 }
 
+/** Resolved signed-in cluster — `gap-1`; mirrors `AccountClusterPending`'s authed candidate. */
+function AccountClusterSignedIn({
+  user,
+  onNavigated,
+  className,
+}: {
+  user: UserPublic;
+  onNavigated?: () => void;
+  className?: string;
+}) @{
+  <div
+    role="group"
+    aria-label="Account"
+    className={cn("flex h-9 shrink-0 items-center justify-end gap-1", className)}
+  >
+    <CreateMenu onNavigated={onNavigated} />
+    <NotificationsBell onNavigated={onNavigated} />
+    <AccountMenu user={user} onNavigated={onNavigated} />
+  </div>;
+}
+
+/** Resolved signed-out cluster — `gap-2`; mirrors `AccountClusterPending`'s anon candidate. */
+function AccountClusterAnon({
+  allowSignup,
+  onNavigated,
+  className,
+}: {
+  allowSignup: boolean;
+  onNavigated?: () => void;
+  className?: string;
+}) @{
+  <div
+    role="group"
+    aria-label="Account"
+    className={cn("flex h-9 shrink-0 items-center justify-end gap-2", className)}
+  >
+    <AppLink
+      href="/login"
+      className={cn(buttonVariants({ variant: "ghost" }), "h-9 px-3")}
+      onClick={onNavigated}
+    >
+      Sign in
+    </AppLink>
+    @if (allowSignup) {
+      <AppLink
+        href="/signup"
+        className={cn(buttonVariants({ variant: "secondary" }), "h-9 px-3")}
+        onClick={onNavigated}
+      >
+        Sign up
+      </AppLink>;
+    }
+  </div>;
+}
+
+/**
+ * Pending cluster — the island is SSR'd before `auth.me` resolves, so emit
+ * both candidates and let CSS pick by the `data-oxidean-session` stamp the
+ * web tier validated on `<html>` (same dual-render contract as the `/` body):
+ * anon button shapes paint by default, the signed-in cluster only when the
+ * stamp says a live session is present. Each candidate mirrors its resolved
+ * cluster's geometry so hydration swaps shape, not layout.
+ */
+function AccountClusterPending({ className }: { className?: string }) @{
+  <div
+    role="group"
+    aria-label="Account"
+    aria-busy="true"
+    className={cn("flex h-9 shrink-0 items-center justify-end", className)}
+  >
+    <div data-header-skeleton-anon className="flex items-center gap-2">
+      <Skeleton className="h-9 w-[4.25rem]" />
+      <Skeleton className="h-9 w-[4.5rem]" />
+    </div>
+    <div data-header-skeleton-authed className="flex items-center gap-1">
+      <Skeleton className="size-9" />
+      <Skeleton className="size-9" />
+      <Skeleton className="h-9 w-28" />
+    </div>
+  </div>;
+}
+
 function AccountActions({
   className,
   onNavigated,
@@ -266,18 +348,7 @@ function AccountActions({
   const { pending, user, needsSetup, allowSignup } = useChromeAccountState();
 
   if (pending || user === undefined || needsSetup === null) {
-    return (
-      <div
-        role="group"
-        aria-label="Account"
-        aria-busy="true"
-        className={cn("flex h-9 shrink-0 items-center justify-end gap-1", className)}
-      >
-        <Skeleton className="size-9" />
-        <Skeleton className="size-9" />
-        <Skeleton className="h-9 w-28" />
-      </div>
-    );
+    return <AccountClusterPending className={className} />;
   }
 
   // UI-SPEC: while needs_setup, omit Sign in / Sign up (mark + theme OK).
@@ -292,42 +363,11 @@ function AccountActions({
   }
 
   if (user) {
-    return (
-      <div
-        role="group"
-        aria-label="Account"
-        className={cn("flex h-9 shrink-0 items-center justify-end gap-1", className)}
-      >
-        <CreateMenu onNavigated={onNavigated} />
-        <NotificationsBell onNavigated={onNavigated} />
-        <AccountMenu user={user} onNavigated={onNavigated} />
-      </div>
-    );
+    return <AccountClusterSignedIn user={user} onNavigated={onNavigated} className={className} />;
   }
 
   return (
-    <div
-      role="group"
-      aria-label="Account"
-      className={cn("flex h-9 shrink-0 items-center justify-end gap-2", className)}
-    >
-      <AppLink
-        href="/login"
-        className={cn(buttonVariants({ variant: "ghost" }), "h-9 px-3")}
-        onClick={onNavigated}
-      >
-        Sign in
-      </AppLink>
-      @if (allowSignup) {
-        <AppLink
-          href="/signup"
-          className={cn(buttonVariants({ variant: "secondary" }), "h-9 px-3")}
-          onClick={onNavigated}
-        >
-          Sign up
-        </AppLink>;
-      }
-    </div>
+    <AccountClusterAnon allowSignup={allowSignup} onNavigated={onNavigated} className={className} />
   );
 }
 

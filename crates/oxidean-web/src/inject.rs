@@ -5,6 +5,8 @@
 
 use axum::http::HeaderMap;
 
+use crate::session::SessionSignal;
+
 /// `"light"`/`"dark"` after applying the same chain the FOUC boot script +
 /// `resolveThemeForSsr` use: explicit `oxidean-theme` cookie → resolved
 /// `oxidean-color-scheme` cookie → `Sec-CH-Prefers-Color-Site` header → light.
@@ -32,7 +34,7 @@ pub fn resolve_theme(cookie: Option<&str>, sec_ch: Option<&str>) -> &'static str
 
 /// `name=value` lookup inside a Cookie header (no decoding — our cookies are
 /// all ASCII flag values).
-fn find_cookie<'a>(header: &'a str, name: &str) -> Option<&'a str> {
+pub(crate) fn find_cookie<'a>(header: &'a str, name: &str) -> Option<&'a str> {
     for pair in header.split(';') {
         let pair = pair.trim();
         if let Some((k, v)) = pair.split_once('=') {
@@ -65,11 +67,16 @@ pub struct AdvertiseMeta {
 }
 
 /// Apply the per-request stamps to a shell's HTML.
+///
+/// `signal` is the resolved session state (`session::resolve_signal`): `Valid`
+/// stamps unconditionally, `Invalid`/`Absent` never stamp, and `Unknown` falls
+/// back to cookie presence so an API outage degrades to yesterday's behavior.
 pub fn inject(
     html: &str,
     headers: &HeaderMap,
     title: Option<&str>,
     meta: &AdvertiseMeta,
+    signal: SessionSignal,
 ) -> String {
     let cookie = headers
         .get(axum::http::header::COOKIE)
@@ -89,7 +96,12 @@ pub fn inject(
     if theme == "dark" {
         html_attrs.push_str(" class=\"dark\"");
     }
-    if signed_in(cookie) {
+    let stamped = match signal {
+        SessionSignal::Valid => true,
+        SessionSignal::Unknown => signed_in(cookie),
+        SessionSignal::Absent | SessionSignal::Invalid => false,
+    };
+    if stamped {
         html_attrs.push_str(" data-oxidean-session=\"1\"");
     }
     if !html_attrs.is_empty() {
@@ -184,6 +196,7 @@ mod tests {
             &h,
             Some("Issues · a/b · Oxidean"),
             &AdvertiseMeta { ssh_host: Some("git.example.com".into()), ssh_port: Some(2222) },
+            SessionSignal::Absent,
         );
         assert!(out.contains("<html lang=\"en\" class=\"dark\""));
         assert!(out.contains("content=\"dark\""));
@@ -194,12 +207,26 @@ mod tests {
     #[test]
     fn session_stamp() {
         let html = r#"<html lang="en"><head><title>Oxidean</title></head>"#;
+        let meta = AdvertiseMeta { ssh_host: None, ssh_port: None };
         let mut h = HeaderMap::new();
         h.insert("cookie", HeaderValue::from_static("oxidean_session=abc"));
-        let out = inject(html, &h, None, &AdvertiseMeta { ssh_host: None, ssh_port: None });
+
+        // Upstream-validated → stamp regardless of what presence thinks.
+        let out = inject(html, &h, None, &meta, SessionSignal::Valid);
         assert!(out.contains("data-oxidean-session=\"1\""));
 
-        let out = inject(html, &HeaderMap::new(), None, &AdvertiseMeta { ssh_host: None, ssh_port: None });
+        // Definitively invalid or absent → never stamp (hint included).
+        let out = inject(html, &h, None, &meta, SessionSignal::Invalid);
+        assert!(!out.contains("data-oxidean-session"));
+        let mut hint_only = HeaderMap::new();
+        hint_only.insert("cookie", HeaderValue::from_static("oxidean_signed_in=1"));
+        let out = inject(html, &hint_only, None, &meta, SessionSignal::Absent);
+        assert!(!out.contains("data-oxidean-session"));
+
+        // Unknown (API unreachable/unconfigured) → presence fallback.
+        let out = inject(html, &h, None, &meta, SessionSignal::Unknown);
+        assert!(out.contains("data-oxidean-session=\"1\""));
+        let out = inject(html, &HeaderMap::new(), None, &meta, SessionSignal::Unknown);
         assert!(!out.contains("data-oxidean-session"));
     }
 }

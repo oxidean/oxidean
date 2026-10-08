@@ -286,6 +286,19 @@
     display: block;
   }
 
+  /* Header account cluster pending dual-render — same stamp: the button-
+     shaped anon skeleton paints by default, the icon cluster only when the
+     web tier validated a session cookie. */
+  [data-header-skeleton-authed] {
+    display: none;
+  }
+  html[data-oxidean-session] [data-header-skeleton-anon] {
+    display: none;
+  }
+  html[data-oxidean-session] [data-header-skeleton-authed] {
+    display: flex;
+  }
+
   /* Marketing landing reveal (home `/`). */
   .oct-rise {
     animation: octRise 320ms ease-out both;
