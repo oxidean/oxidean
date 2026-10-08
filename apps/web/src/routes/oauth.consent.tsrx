@@ -1,9 +1,11 @@
-import { createFileRoute, useLoaderData, useSearch } from "@octanejs/tanstack-router";
+import { queryOptions, useQuery } from "@octanejs/tanstack-query";
 import type { OAuthAuthorizeInfo, UserPublic } from "@oxidean/api-client";
 import { useEffect, useState } from "octane";
+import { AppPage } from "@/components/app-page";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api-client";
+import { useSearchString } from "@/lib/pathname.tsrx";
 import { fetchOAuthAuthorizeInfo, fetchSessionMe } from "@/lib/ssr-auth";
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
@@ -29,51 +31,63 @@ const SCOPE_LABELS: Record<string, string> = {
   "package:write": "Publish and delete packages as you",
 };
 
-export const Route = createFileRoute("/oauth/consent")({
-  component: OAuthConsentPage,
-  validateSearch: (search: Record<string, unknown>): ConsentSearch => ({
-    client_id: typeof search.client_id === "string" ? search.client_id : undefined,
-    redirect_uri: typeof search.redirect_uri === "string" ? search.redirect_uri : undefined,
-    response_type: typeof search.response_type === "string" ? search.response_type : undefined,
-    scope: typeof search.scope === "string" ? search.scope : undefined,
-    state: typeof search.state === "string" ? search.state : undefined,
-  }),
-  // Loader consumes OAuth query params — loaderDeps keeps the match id
-  // search-aware so client_id/redirect_uri changes get fresh loaderData.
-  loaderDeps: ({ search }) => search,
-  head: () => ({ meta: [{ title: "Authorize application · Oxidean" }] }),
-  loader: async ({ location }): Promise<ConsentLoaderData> => {
-    const search = location.search as ConsentSearch;
-    const returnTo = `/oauth/authorize${location.searchStr ?? ""}`;
-    try {
-      const me = await fetchSessionMe();
-      if (!me.ok) {
-        if (me.error.code === "auth.unauthenticated") {
-          return { kind: "unauthenticated", returnTo };
+function parseConsentSearch(params: URLSearchParams): ConsentSearch {
+  const s = (k: string) => params.get(k) ?? undefined;
+  return {
+    client_id: s("client_id"),
+    redirect_uri: s("redirect_uri"),
+    response_type: s("response_type"),
+    scope: s("scope"),
+    state: s("state"),
+  };
+}
+
+function consentQueryOptions(search: ConsentSearch, searchStr: string) {
+  return queryOptions({
+    queryKey: ["oauth", "consent", searchStr],
+    queryFn: async (): Promise<ConsentLoaderData> => {
+      const returnTo = `/oauth/authorize${searchStr}`;
+      try {
+        const me = await fetchSessionMe();
+        if (!me.ok) {
+          if (me.error.code === "auth.unauthenticated") {
+            return { kind: "unauthenticated", returnTo };
+          }
+          return { kind: "error", message: me.error.message || "Could not load session." };
         }
-        return { kind: "error", message: me.error.message || "Could not load session." };
-      }
-      const info = await fetchOAuthAuthorizeInfo({
-        data: {
+        const info = await fetchOAuthAuthorizeInfo({
           client_id: search.client_id ?? "",
           redirect_uri: search.redirect_uri,
           scope: search.scope,
-        },
-      });
-      if (!info.ok) {
-        return { kind: "error", message: info.error.message || "Invalid authorization request." };
+        });
+        if (!info.ok) {
+          return {
+            kind: "error",
+            message: info.error.message || "Invalid authorization request.",
+          };
+        }
+        return { kind: "ready", user: me.data, info: info.data };
+      } catch {
+        return { kind: "error", message: NETWORK_ERROR };
       }
-      return { kind: "ready", user: me.data, info: info.data };
-    } catch {
-      return { kind: "error", message: NETWORK_ERROR };
-    }
-  },
-});
+    },
+    retry: false,
+    staleTime: 0,
+  });
+}
 
-/** Consent screen for `GET /oauth/authorize` (API-03): approve or deny a grant. */
+/** `/oauth/consent` — approve/deny a grant for `GET /oauth/authorize` (API-03). */
 export function OAuthConsentPage() @{
-  const loaderData = useLoaderData({ from: "/oauth/consent" }) as ConsentLoaderData | undefined;
-  const search = useSearch({ strict: false }) as ConsentSearch;
+  <AppPage>
+    <OAuthConsentContent />
+  </AppPage>;
+}
+
+function OAuthConsentContent() @{
+  const searchStr = useSearchString();
+  const search = parseConsentSearch(new URLSearchParams(searchStr));
+  const consentQ = useQuery(consentQueryOptions(search, searchStr));
+  const loaderData = consentQ.data;
   const [pending, setPending] = useState<"approve" | "deny" | null>(null);
   const [error, setError] = useState("");
 
@@ -108,11 +122,11 @@ export function OAuthConsentPage() @{
   }
 
   @if (loaderData?.kind === "unauthenticated") {
-    <main className="mx-auto flex min-h-[60vh] w-full max-w-xl flex-col justify-center px-4 py-10">
+    <div className="mx-auto flex min-h-[60vh] w-full max-w-xl flex-col justify-center px-4 py-10">
       <p className="text-[14px] text-muted-foreground">Redirecting to sign in…</p>
-    </main>;
+    </div>;
   } @else {
-    <main className="mx-auto flex min-h-[60vh] w-full max-w-xl flex-col justify-center px-4 py-10">
+    <div className="mx-auto flex min-h-[60vh] w-full max-w-xl flex-col justify-center px-4 py-10">
       @if (loaderData?.kind === "error") {
         <p role="alert" className="text-[16px] text-destructive">
           {loaderData.message as string}
@@ -176,6 +190,6 @@ export function OAuthConsentPage() @{
           </div>;
         }
       }
-    </main>;
+    </div>;
   }
 }

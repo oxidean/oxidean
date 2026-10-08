@@ -1,0 +1,14 @@
+---
+import AppShell from "@/layouts/AppShell.astro";
+import { RepoIssueLabelsPage } from "@/routes/$owner.$repo.issues.labels.tsrx";
+
+// Placeholder shell — the middleware maps every real path for this route
+// onto this page; params resolve client-side from `location.pathname`.
+export function getStaticPaths() {
+	return [{ params: { owner: "_", repo: "_" } }];
+}
+---
+
+<AppShell title="Oxidean">
+	<RepoIssueLabelsPage client:load />
+</AppShell>

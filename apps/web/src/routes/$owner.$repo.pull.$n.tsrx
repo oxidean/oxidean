@@ -1,5 +1,9 @@
-import { createFileRoute, useParams } from "@octanejs/tanstack-router";
-import { useQuery, useQueryClient } from "@octanejs/tanstack-query";
+import { queryOptions, useQuery, useQueryClient } from "@octanejs/tanstack-query";
+
+import { matchPath } from "@/lib/route-params";
+import { usePathname, useSearchString } from "@/lib/pathname.tsrx";
+import { RepoLayout } from "@/routes/$owner.$repo.tsrx";
+import { AppPage } from "@/components/app-page";
 import type { PullPublic, RepoPublic } from "@oxidean/api-client";
 import { useState } from "octane";
 import {
@@ -37,7 +41,7 @@ async function loadPullDetail(
   repoName: string,
   number: number,
 ): Promise<PullDetailLoaderData> {
-  const got = await fetchRepoGet({ data: { owner, name: repoName } });
+  const got = await fetchRepoGet({ owner, name: repoName });
   if (!got.ok) {
     if (got.error.code === "repo.not_found") return { kind: "not_found" };
     return { kind: "error", message: got.error.message || NETWORK_ERROR };
@@ -46,7 +50,7 @@ async function loadPullDetail(
   if (got.data.pulls_enabled === false) {
     return { kind: "disabled", repo: got.data };
   }
-  const pull = await fetchPullGet({ data: { owner, name: repoName, number } });
+  const pull = await fetchPullGet({ owner, name: repoName, number });
   if (!pull.ok) {
     if (pull.error.code === "repo.pulls.disabled") {
       return { kind: "disabled", repo: got.data };
@@ -59,29 +63,40 @@ async function loadPullDetail(
   return { kind: "ready", repo: got.data, pull: pull.data };
 }
 
-export const Route = createFileRoute("/$owner/$repo/pull/$n")({
-  component: PullDetailPage,
-  head: ({ params }) => ({
-    meta: [
-      {
-        title: `Pull #${(params as { n: string }).n} · ${(params as { owner: string }).owner}/${(params as { repo: string }).repo} · Oxidean`,
-      },
+function repoPullNQueryOptions(params: Record<string, string | undefined>, searchStr = "") {
+  return queryOptions({
+    queryKey: [
+      "repo-page",
+      "/$owner/$repo/pull/$n",
+      params.owner ?? "",
+      params.repo ?? "",
+      params._splat ?? "",
+      params.n ?? "",
+      params.sha ?? "",
+      params.tag ?? "",
+      params.run ?? "",
+      searchStr,
     ],
-  }),
-  loader: async ({ params }): Promise<PullDetailLoaderData> => {
-    const owner = String((params as { owner?: string }).owner ?? "");
-    const repoName = String((params as { repo?: string }).repo ?? "");
-    const n = Number((params as { n?: string }).n ?? 0);
-    try {
-      return await loadPullDetail(owner, repoName, n);
-    } catch {
-      return { kind: "error", message: NETWORK_ERROR };
-    }
-  },
-});
+    queryFn: async (): Promise<PullDetailLoaderData> => {
+      const owner = String((params as { owner?: string }).owner ?? "");
+      const repoName = String((params as { repo?: string }).repo ?? "");
+      const n = Number((params as { n?: string }).n ?? 0);
+      try {
+        return await loadPullDetail(owner, repoName, n);
+      } catch {
+        return { kind: "error", message: NETWORK_ERROR };
+      }
+    },
+    enabled: Boolean(params.owner && params.repo),
+    retry: false,
+    staleTime: 30_000,
+  });
+}
 
-export function PullDetailPage() @{
-  const params = useParams({ strict: false }) as {
+function PullDetailPageContent() @{
+  const pathname = usePathname();
+  const searchStr = useSearchString();
+  const params = (matchPath("/$owner/$repo/pull/$n", pathname) ?? {}) as {
     owner?: string;
     repo?: string;
     n?: string;
@@ -94,7 +109,7 @@ export function PullDetailPage() @{
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const loader = Route.useLoaderData() as PullDetailLoaderData;
+  const loader = useQuery(repoPullNQueryOptions(params, searchStr)).data;
 
   const pullQ = useQuery({
     queryKey: ["pull", "get", owner, repoName, number] as const,
@@ -331,4 +346,13 @@ export function PullDetailPage() @{
       }
     }
   }
+}
+
+/** Page root — RepoLayout (chrome + repo store) around the leaf content. */
+export function PullDetailPage() @{
+  <AppPage>
+    <RepoLayout>
+      <PullDetailPageContent />
+    </RepoLayout>
+  </AppPage>;
 }

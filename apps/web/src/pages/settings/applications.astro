@@ -1,0 +1,8 @@
+---
+import AppShell from "@/layouts/AppShell.astro";
+import { ApplicationsPage } from "@/routes/settings/applications.tsrx";
+---
+
+<AppShell title="OAuth applications · Oxidean">
+	<ApplicationsPage client:load />
+</AppShell>

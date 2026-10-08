@@ -1,0 +1,11 @@
+---
+// Legacy path — Actions settings live at /{owner}/{repo}/settings#actions.
+export function getStaticPaths() {
+	return [{ params: { owner: "_", repo: "_" } }];
+}
+---
+
+<script>
+	const to = window.location.pathname.replace(/\/settings\/actions\/?$/, "/settings");
+	window.location.replace(to + "#actions");
+</script>

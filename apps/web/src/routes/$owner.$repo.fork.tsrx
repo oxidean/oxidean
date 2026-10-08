@@ -1,69 +1,72 @@
-import { createFileRoute, redirect, useLoaderData, useParams } from "@octanejs/tanstack-router";
 import { useState } from "octane";
+import { queryOptions, useQuery } from "@octanejs/tanstack-query";
+
+import { matchPath } from "@/lib/route-params";
+import { usePathname, useSearchString } from "@/lib/pathname.tsrx";
+import { RepoLayout } from "@/routes/$owner.$repo.tsrx";
+import { AppPage } from "@/components/app-page";
 import type { RepoPublic, UserPublic } from "@oxidean/api-client";
 import { AuthErrorBanner, AuthShell } from "@/components/auth-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiClient } from "@/lib/api-client";
+import { usePageRedirect } from "@/lib/nav.tsrx";
 import { fetchSessionMe } from "@/lib/ssr-auth";
 import { fetchRepoGet } from "@/lib/ssr-repo";
 
-export type ForkLoaderData = {
-  user: UserPublic;
-  source: RepoPublic;
-};
+export type ForkLoaderData =
+  | { kind: "ok"; user: UserPublic; source: RepoPublic }
+  | { kind: "redirect"; href: string };
 
-export const Route = createFileRoute("/$owner/$repo/fork")({
-  component: ForkConfirmPage,
-  head: ({ params }) => {
-    const owner = String((params as { owner?: string }).owner ?? "");
-    const repo = String((params as { repo?: string }).repo ?? "");
-    return { meta: [{ title: `Fork ${owner}/${repo} · Oxidean` }] };
-  },
-  beforeLoad: async ({ params }) => {
-    const owner = String((params as { owner?: string }).owner ?? "");
-    const repo = String((params as { repo?: string }).repo ?? "");
-    const returnTo = `/${owner}/${repo}/fork`;
-    try {
+function repoForkQueryOptions(params: Record<string, string | undefined>, searchStr = "") {
+  return queryOptions({
+    queryKey: [
+      "repo-page",
+      "/$owner/$repo/fork",
+      params.owner ?? "",
+      params.repo ?? "",
+      params._splat ?? "",
+      params.n ?? "",
+      params.sha ?? "",
+      params.tag ?? "",
+      params.run ?? "",
+      searchStr,
+    ],
+    queryFn: async (): Promise<ForkLoaderData> => {
+      const owner = String((params as { owner?: string }).owner ?? "");
+      const repoName = String((params as { repo?: string }).repo ?? "");
       const me = await fetchSessionMe();
       if (!me.ok) {
-        throw redirect({ href: `/login?returnTo=${encodeURIComponent(returnTo)}` });
+        return {
+          kind: "redirect",
+          href: `/login?returnTo=${encodeURIComponent(`/${owner}/${repoName}/fork`)}`,
+        };
       }
-    } catch (e) {
-      if (e && typeof e === "object" && "href" in e) throw e;
-      throw redirect({ href: `/login?returnTo=${encodeURIComponent(returnTo)}` });
-    }
-  },
-  loader: async ({ params }): Promise<ForkLoaderData> => {
-    const owner = String((params as { owner?: string }).owner ?? "");
-    const repoName = String((params as { repo?: string }).repo ?? "");
-    const me = await fetchSessionMe();
-    if (!me.ok) {
-      throw redirect({
-        href: `/login?returnTo=${encodeURIComponent(`/${owner}/${repoName}/fork`)}`,
-      });
-    }
-    // Cookie-forward SSR — never browser apiClient (same NETWORK_ERROR trap as PRs).
-    const got = await fetchRepoGet({ data: { owner, name: repoName } });
-    if (!got.ok || !got.data) {
-      throw redirect({ href: `/${owner}/${repoName}` });
-    }
-    if (got.data.visibility === "private") {
-      throw redirect({ href: `/${owner}/${repoName}` });
-    }
-    return { user: me.data, source: got.data };
-  },
-});
+      // Cookie-forward SSR — never browser apiClient (same NETWORK_ERROR trap as PRs).
+      const got = await fetchRepoGet({ owner, name: repoName });
+      if (!got.ok || !got.data || got.data.visibility === "private") {
+        return { kind: "redirect", href: `/${owner}/${repoName}` };
+      }
+      return { kind: "ok", user: me.data, source: got.data };
+    },
+    enabled: Boolean(params.owner && params.repo),
+    retry: false,
+    staleTime: 30_000,
+  });
+}
 
-export function ForkConfirmPage() @{
-  const params = useParams({ from: "/$owner/$repo/fork" }) as {
+function ForkConfirmPageContent() @{
+  const pathname = usePathname();
+  const searchStr = useSearchString();
+  const params = (matchPath("/$owner/$repo/fork", pathname) ?? {}) as {
     owner?: string;
     repo?: string;
   };
-  const data = useLoaderData({ from: "/$owner/$repo/fork" }) as ForkLoaderData | undefined;
-  const source = data?.source;
-  const user = data?.user;
+  const data = useQuery(repoForkQueryOptions(params, searchStr)).data;
+  usePageRedirect(data?.kind === "redirect" ? data.href : null);
+  const source = data?.kind === "ok" ? data.source : undefined;
+  const user = data?.kind === "ok" ? data.user : undefined;
   const [name, setName] = useState(source?.name ?? params.repo ?? "");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -123,4 +126,13 @@ export function ForkConfirmPage() @{
       </Button>
     </div>
   </AuthShell>;
+}
+
+/** Page root — RepoLayout (chrome + repo store) around the leaf content. */
+export function ForkConfirmPage() @{
+  <AppPage>
+    <RepoLayout>
+      <ForkConfirmPageContent />
+    </RepoLayout>
+  </AppPage>;
 }

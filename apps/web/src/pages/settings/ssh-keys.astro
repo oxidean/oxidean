@@ -1,0 +1,8 @@
+---
+import AppShell from "@/layouts/AppShell.astro";
+import { SshKeysPage } from "@/routes/settings/ssh-keys.tsrx";
+---
+
+<AppShell title="SSH and GPG keys · Oxidean">
+	<SshKeysPage client:load />
+</AppShell>

@@ -1,4 +1,3 @@
-import { Link } from "@octanejs/tanstack-router";
 import { Lock, Plus } from "@octanejs/lucide";
 import { useState } from "octane";
 import type { RepoPublic, UserPublic } from "@oxidean/api-client";
@@ -60,9 +59,8 @@ export function SignedInHome({ user, repos, reposError = null }: SignedInHomePro
             Top repositories
           </h2>
           @if (user.email_verified) {
-            <Link
-              to="/new"
-              preload="intent"
+            <AppLink
+              href="/new"
               className={cn(
                 buttonVariants({ variant: "default" }),
                 "h-8 shrink-0 gap-1 px-2.5 text-[13px]",
@@ -70,7 +68,7 @@ export function SignedInHome({ user, repos, reposError = null }: SignedInHomePro
             >
               <Plus aria-hidden size={14} />
               New
-            </Link>;
+            </AppLink>;
           } @else {
             <button
               type="button"
@@ -110,16 +108,15 @@ export function SignedInHome({ user, repos, reposError = null }: SignedInHomePro
           <div className="rounded-md border border-dashed border-border bg-card/40 px-3 py-8 text-center">
             <p className="text-[14px] text-muted-foreground">No repositories yet.</p>
             @if (user.email_verified) {
-              <Link
-                to="/new"
-                preload="intent"
+              <AppLink
+                href="/new"
                 className={cn(
                   buttonVariants({ variant: "secondary" }),
                   "mt-4 h-9 px-3",
                 )}
               >
                 New repository
-              </Link>;
+              </AppLink>;
             }
           </div>;
         } @else if (filtered.length === 0) {
@@ -187,13 +184,12 @@ export function SignedInHome({ user, repos, reposError = null }: SignedInHomePro
               </p>
               <div className="mt-7 flex justify-center">
                 @if (user.email_verified) {
-                  <Link
-                    to="/new"
-                    preload="intent"
+                  <AppLink
+                    href="/new"
                     className={cn(buttonVariants({ variant: "default" }), "h-11 px-5")}
                   >
                     New repository
-                  </Link>;
+                  </AppLink>;
                 } @else {
                   <button
                     type="button"

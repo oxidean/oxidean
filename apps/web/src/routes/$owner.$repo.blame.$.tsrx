@@ -1,5 +1,10 @@
-import { createFileRoute, useLoaderData, useParams } from "@octanejs/tanstack-router";
 import type { RepoBlameResponse, RepoPublic } from "@oxidean/api-client";
+import { queryOptions, useQuery } from "@octanejs/tanstack-query";
+
+import { matchPath } from "@/lib/route-params";
+import { usePathname, useSearchString } from "@/lib/pathname.tsrx";
+import { RepoLayout } from "@/routes/$owner.$repo.tsrx";
+import { AppPage } from "@/components/app-page";
 import { useEffect, useState } from "octane";
 import { CommitAuthorLink } from "@/components/repo/commit-author-link";
 import { PathBreadcrumb } from "@/components/repo/path-breadcrumb";
@@ -29,7 +34,7 @@ async function loadBlamePage(
   repoName: string,
   splat: string | undefined,
 ): Promise<BlameLoaderData> {
-  const got = await fetchRepoGet({ data: { owner, name: repoName } });
+  const got = await fetchRepoGet({ owner, name: repoName });
   if (!got.ok) {
     if (got.error.code === "repo.not_found") return { kind: "not_found" };
     return {
@@ -38,16 +43,14 @@ async function loadBlamePage(
     };
   }
   const repo = got.data;
-  const refsRes = await fetchRepoRefs({ data: { owner, name: repoName } });
+  const refsRes = await fetchRepoRefs({ owner, name: repoName });
   const knownRefs = refsRes.ok ? refsRes.data.refs.map((r) => shortRefName(r.name)) : [];
   const parsed = parseRefAndPath(splat, knownRefs);
   const refName = parsed.ref || repo.default_branch || "main";
   if (!parsed.path) {
     return { kind: "not_found" };
   }
-  const blameRes = await fetchRepoBlame({
-    data: { owner, name: repoName, ref: refName, path: parsed.path },
-  });
+  const blameRes = await fetchRepoBlame({ owner, name: repoName, ref: refName, path: parsed.path });
   if (!blameRes.ok) {
     if (blameRes.error.code === "repo.not_found" || blameRes.error.code === "repo.path_not_found") {
       return { kind: "not_found" };
@@ -66,27 +69,35 @@ async function loadBlamePage(
   };
 }
 
-export const Route = createFileRoute("/$owner/$repo/blame/$")({
-  component: RepoBlamePage,
-  head: ({ params }) => {
-    const { path } = parseRefAndPath((params as { _splat?: string })._splat);
-    const base = path.split("/").pop() || path || "file";
-    const trunc = base.length > 40 ? `…${base.slice(-36)}` : base;
-    return {
-      meta: [{ title: `Blame · ${trunc} · Oxidean` }],
-    };
-  },
-  loader: async ({ params }): Promise<BlameLoaderData> => {
-    const owner = String((params as { owner?: string }).owner ?? "");
-    const repoName = String((params as { repo?: string }).repo ?? "");
-    const splat = (params as { _splat?: string })._splat;
-    try {
-      return await loadBlamePage(owner, repoName, splat);
-    } catch {
-      return { kind: "error", message: NETWORK_ERROR };
-    }
-  },
-});
+function repoBlameQueryOptions(params: Record<string, string | undefined>, searchStr = "") {
+  return queryOptions({
+    queryKey: [
+      "repo-page",
+      "/$owner/$repo/blame/$",
+      params.owner ?? "",
+      params.repo ?? "",
+      params._splat ?? "",
+      params.n ?? "",
+      params.sha ?? "",
+      params.tag ?? "",
+      params.run ?? "",
+      searchStr,
+    ],
+    queryFn: async (): Promise<BlameLoaderData> => {
+      const owner = String((params as { owner?: string }).owner ?? "");
+      const repoName = String((params as { repo?: string }).repo ?? "");
+      const splat = (params as { _splat?: string })._splat;
+      try {
+        return await loadBlamePage(owner, repoName, splat);
+      } catch {
+        return { kind: "error", message: NETWORK_ERROR };
+      }
+    },
+    enabled: Boolean(params.owner && params.repo),
+    retry: false,
+    staleTime: 30_000,
+  });
+}
 
 function shortSha(sha: string): string {
   return sha.slice(0, 7);
@@ -96,8 +107,10 @@ function relativeCommitTime(iso: string): string {
   return formatRelativeUpdated(iso).replace(/^Updated\s+/i, "");
 }
 
-export function RepoBlamePage() @{
-  const params = useParams({ from: "/$owner/$repo/blame/$" }) as {
+function RepoBlamePageContent() @{
+  const pathname = usePathname();
+  const searchStr = useSearchString();
+  const params = (matchPath("/$owner/$repo/blame/$", pathname) ?? {}) as {
     owner: string;
     repo: string;
     _splat?: string;
@@ -105,9 +118,7 @@ export function RepoBlamePage() @{
   const owner = params.owner ?? "";
   const repoName = params.repo ?? "";
   const splat = params._splat;
-  const loaderData = useLoaderData({ from: "/$owner/$repo/blame/$" }) as
-    | BlameLoaderData
-    | undefined;
+  const loaderData = useQuery(repoBlameQueryOptions(params, searchStr)).data;
 
   const [phase, setPhase] = useState<Phase>(() => loaderData ?? { kind: "loading" });
 
@@ -187,4 +198,13 @@ export function RepoBlamePage() @{
       </div>
     </>;
   }
+}
+
+/** Page root — RepoLayout (chrome + repo store) around the leaf content. */
+export function RepoBlamePage() @{
+  <AppPage>
+    <RepoLayout>
+      <RepoBlamePageContent />
+    </RepoLayout>
+  </AppPage>;
 }

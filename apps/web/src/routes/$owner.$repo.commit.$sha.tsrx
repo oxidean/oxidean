@@ -1,5 +1,10 @@
-import { createFileRoute, useLoaderData, useParams } from "@octanejs/tanstack-router";
 import type { RepoCommitResponse, RepoPublic } from "@oxidean/api-client";
+import { queryOptions, useQuery } from "@octanejs/tanstack-query";
+
+import { matchPath } from "@/lib/route-params";
+import { usePathname, useSearchString } from "@/lib/pathname.tsrx";
+import { RepoLayout } from "@/routes/$owner.$repo.tsrx";
+import { AppPage } from "@/components/app-page";
 import { useEffect, useState } from "octane";
 import { FileDiff } from "@octanejs/lucide";
 import { CommitAuthorLink } from "@/components/repo/commit-author-link";
@@ -35,7 +40,7 @@ async function loadCommitPage(
   repoName: string,
   sha: string,
 ): Promise<CommitLoaderData> {
-  const got = await fetchRepoGet({ data: { owner, name: repoName } });
+  const got = await fetchRepoGet({ owner, name: repoName });
   if (!got.ok) {
     if (got.error.code === "repo.not_found") return { kind: "not_found" };
     return {
@@ -43,9 +48,7 @@ async function loadCommitPage(
       message: got.error.message || "Could not load repository.",
     };
   }
-  const detail = await fetchRepoCommit({
-    data: { owner, name: repoName, sha },
-  });
+  const detail = await fetchRepoCommit({ owner, name: repoName, sha });
   if (!detail.ok) {
     if (detail.error.code === "repo.not_found" || detail.error.code === "repo.path_not_found") {
       return { kind: "not_found" };
@@ -65,37 +68,44 @@ async function loadCommitPage(
   };
 }
 
-export const Route = createFileRoute("/$owner/$repo/commit/$sha")({
-  component: RepoCommitPage,
-  head: ({ params }) => {
-    const sha = (params as { sha: string }).sha ?? "";
-    const short = sha.slice(0, 7) || "commit";
-    return {
-      meta: [
-        {
-          title: `${short} · ${(params as { owner: string }).owner}/${(params as { repo: string }).repo} · Oxidean`,
-        },
-      ],
-    };
-  },
-  loader: async ({ params }): Promise<CommitLoaderData> => {
-    const owner = String((params as { owner?: string }).owner ?? "");
-    const repoName = String((params as { repo?: string }).repo ?? "");
-    const sha = String((params as { sha?: string }).sha ?? "");
-    try {
-      return await loadCommitPage(owner, repoName, sha);
-    } catch {
-      return { kind: "error", message: NETWORK_ERROR };
-    }
-  },
-});
+function repoCommitShaQueryOptions(params: Record<string, string | undefined>, searchStr = "") {
+  return queryOptions({
+    queryKey: [
+      "repo-page",
+      "/$owner/$repo/commit/$sha",
+      params.owner ?? "",
+      params.repo ?? "",
+      params._splat ?? "",
+      params.n ?? "",
+      params.sha ?? "",
+      params.tag ?? "",
+      params.run ?? "",
+      searchStr,
+    ],
+    queryFn: async (): Promise<CommitLoaderData> => {
+      const owner = String((params as { owner?: string }).owner ?? "");
+      const repoName = String((params as { repo?: string }).repo ?? "");
+      const sha = String((params as { sha?: string }).sha ?? "");
+      try {
+        return await loadCommitPage(owner, repoName, sha);
+      } catch {
+        return { kind: "error", message: NETWORK_ERROR };
+      }
+    },
+    enabled: Boolean(params.owner && params.repo),
+    retry: false,
+    staleTime: 30_000,
+  });
+}
 
 function relativeCommitTime(iso: string): string {
   return formatRelativeUpdated(iso).replace(/^Updated\s+/i, "");
 }
 
-export function RepoCommitPage() @{
-  const params = useParams({ from: "/$owner/$repo/commit/$sha" }) as {
+function RepoCommitPageContent() @{
+  const pathname = usePathname();
+  const searchStr = useSearchString();
+  const params = (matchPath("/$owner/$repo/commit/$sha", pathname) ?? {}) as {
     owner: string;
     repo: string;
     sha: string;
@@ -103,9 +113,7 @@ export function RepoCommitPage() @{
   const owner = params.owner ?? "";
   const repoName = params.repo ?? "";
   const sha = params.sha ?? "";
-  const loaderData = useLoaderData({ from: "/$owner/$repo/commit/$sha" }) as
-    | CommitLoaderData
-    | undefined;
+  const loaderData = useQuery(repoCommitShaQueryOptions(params, searchStr)).data;
 
   const [phase, setPhase] = useState<Phase>(() => loaderData ?? { kind: "loading" });
 
@@ -196,4 +204,13 @@ export function RepoCommitPage() @{
       }
     </>;
   }
+}
+
+/** Page root — RepoLayout (chrome + repo store) around the leaf content. */
+export function RepoCommitPage() @{
+  <AppPage>
+    <RepoLayout>
+      <RepoCommitPageContent />
+    </RepoLayout>
+  </AppPage>;
 }

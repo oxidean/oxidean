@@ -1,5 +1,5 @@
-import { createFileRoute, useLoaderData } from "@octanejs/tanstack-router";
-import { useQuery, useQueryClient } from "@octanejs/tanstack-query";
+import { queryOptions, useQuery, useQueryClient } from "@octanejs/tanstack-query";
+import { AppPage } from "@/components/app-page";
 import type {
   AdminInvitesCreateItemResult,
   AdminSessionPublic,
@@ -394,62 +394,71 @@ function formatShortDate(iso: string): string {
   });
 }
 
-export const Route = createFileRoute("/admin/users")({
-  component: AdminUsersPage,
-  head: () => ({ meta: [{ title: "Users · Oxidean" }] }),
-  loader: async (): Promise<AdminUsersLoaderData> => {
-    try {
-      const meRes = await fetchSessionMe();
-      if (!meRes.ok) {
-        if (meRes.error.code === "auth.unauthenticated") {
-          return { kind: "unauthenticated" };
+function adminUsersQueryOptions() {
+  return queryOptions({
+    queryKey: ["admin", "adminUsers"],
+    queryFn: async (): Promise<AdminUsersLoaderData> => {
+      try {
+        const meRes = await fetchSessionMe();
+        if (!meRes.ok) {
+          if (meRes.error.code === "auth.unauthenticated") {
+            return { kind: "unauthenticated" };
+          }
+          return {
+            kind: "error",
+            message: meRes.error.message || "Could not load session.",
+          };
         }
-        return {
-          kind: "error",
-          message: meRes.error.message || "Could not load session.",
-        };
-      }
-      if (meRes.data.role !== "sys-admin") {
-        return { kind: "forbidden" };
-      }
-      const [usersRes, invitesRes] = await Promise.all([
-        fetchAdminUsersList({ data: { query: null, limit: PAGE_SIZE, offset: 0 } }),
-        fetchAdminInvitesList(),
-      ]);
-      if (!usersRes.ok) {
-        if (usersRes.error.code === "admin.forbidden") {
+        if (meRes.data.role !== "sys-admin") {
           return { kind: "forbidden" };
         }
-        return {
-          kind: "error",
-          message: usersRes.error.message || FORBIDDEN,
-        };
-      }
-      if (!invitesRes.ok) {
-        if (invitesRes.error.code === "admin.forbidden") {
-          return { kind: "forbidden" };
+        const [usersRes, invitesRes] = await Promise.all([
+          fetchAdminUsersList({ query: null, limit: PAGE_SIZE, offset: 0 }),
+          fetchAdminInvitesList(),
+        ]);
+        if (!usersRes.ok) {
+          if (usersRes.error.code === "admin.forbidden") {
+            return { kind: "forbidden" };
+          }
+          return {
+            kind: "error",
+            message: usersRes.error.message || FORBIDDEN,
+          };
+        }
+        if (!invitesRes.ok) {
+          if (invitesRes.error.code === "admin.forbidden") {
+            return { kind: "forbidden" };
+          }
+          return {
+            kind: "error",
+            message: invitesRes.error.message || "Could not load invites.",
+          };
         }
         return {
-          kind: "error",
-          message: invitesRes.error.message || "Could not load invites.",
+          kind: "ready",
+          me: meRes.data,
+          users: usersRes.data,
+          invites: invitesRes.data.invites,
         };
+      } catch {
+        return { kind: "error", message: NETWORK_ERROR };
       }
-      return {
-        kind: "ready",
-        me: meRes.data,
-        users: usersRes.data,
-        invites: invitesRes.data.invites,
-      };
-    } catch {
-      return { kind: "error", message: NETWORK_ERROR };
-    }
-  },
-});
+    },
+    retry: false,
+    staleTime: 30_000,
+  });
+}
 
 /** Exported for admin/users integration tests. */
 export function AdminUsersPage() @{
+  <AppPage>
+    <AdminUsersContent />
+  </AppPage>;
+}
+
+export function AdminUsersContent() @{
   const queryClient = useQueryClient();
-  const loaderData = useLoaderData({ from: "/admin/users" }) as AdminUsersLoaderData | undefined;
+  const loaderData = useQuery(adminUsersQueryOptions()).data;
 
   const [searchDraft, setSearchDraft] = useState("");
   const [query, setQuery] = useState("");

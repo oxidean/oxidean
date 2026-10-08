@@ -442,10 +442,18 @@ async function injectSessionCookie(
   const eq = cookieHeader.indexOf("=");
   const name = eq >= 0 ? cookieHeader.slice(0, eq) : "oxidean_session";
   const value = eq >= 0 ? cookieHeader.slice(eq + 1) : cookieHeader;
+  // Login mints both cookies: the HttpOnly session credential plus the
+  // JS-readable `oxidean_signed_in` presence flag the web middleware's
+  // anonymous gate reads. Inject both so fixtures match a real browser.
   await context.addCookies([
     {
       name,
       value,
+      url: webOrigin(),
+    },
+    {
+      name: "oxidean_signed_in",
+      value: "1",
       url: webOrigin(),
     },
   ]);
@@ -1394,7 +1402,11 @@ export const expectAdminLfsQuotasFlow: BrowserCommand<[]> = async (ctx) => {
       if (url.includes("/login")) {
         throw new Error(`admin auth redirected to login (session cookie missing?). url=${url}`);
       }
-      const body = await page.content();
+      const body = await page.content().catch(() => "");
+      if (!body) {
+        await new Promise((r) => setTimeout(r, 500));
+        continue;
+      }
       assertNoOctaneOverlay(body, "admin auth");
       if (
         body.includes("Auth settings") &&
@@ -2319,7 +2331,15 @@ export const expectActionsPipelineFlow: BrowserCommand<[]> = async (ctx) => {
     });
     const runDetail = page.locator('[data-testid="repo-actions-run"]');
     await runDetail.waitFor({ state: "visible", timeout: 30_000 });
-    const detailText = (await runDetail.innerText?.()) ?? "";
+    // The wrapper is visible before its detail query settles — poll the text
+    // until the success badge is painted (multiple badges render, so a
+    // locator text match would hit strict-mode violations).
+    let detailText = "";
+    for (let i = 0; i < 30; i++) {
+      detailText = (await runDetail.innerText?.()) ?? "";
+      if (detailText.includes("success")) break;
+      await new Promise((r) => setTimeout(r, 1000));
+    }
     if (!detailText.includes("success")) {
       throw new Error(`run detail missing success badge: ${detailText.slice(0, 400)}`);
     }
@@ -2466,17 +2486,18 @@ export const expectMobileNavTapFlow: BrowserCommand<[]> = async (ctx) => {
     );
     const mode1 = pre1.hydrated === "undefined" ? "bridge" : "hydrated";
 
-    // --- Tap 2: hydrated chrome Pulls tab must be an SPA nav (marker kept). ---
+    // --- Tap 2: post-hydration chrome Pulls tab must be an SPA nav (marker kept). ---
+    // "Hydrated" under Astro means the island bridge registered
+    // (`installEarlyNavBridge` ran → module JS + ClientRouter are up) — plain
+    // anchors never gain a per-element `$$click` slot anymore, so the old
+    // delegation probe is not a readiness signal.
     await page
       .locator('[data-testid="repo-chrome-pulls"]')
       .waitFor({ state: "visible", timeout: 30_000 });
     await page.waitForFunction!(
       () =>
-        typeof (
-          document.querySelector('[data-testid="repo-chrome-pulls"]') as
-            | (HTMLAnchorElement & { $$click?: unknown })
-            | null
-        )?.$$click === "function",
+        typeof (window as { __oxideanEarlyNav?: unknown }).__oxideanEarlyNav === "function" &&
+        document.querySelector("astro-island:not([ssr])") !== null,
       undefined,
       { timeout: 60_000 },
     );
@@ -2501,11 +2522,8 @@ export const expectMobileNavTapFlow: BrowserCommand<[]> = async (ctx) => {
       .waitFor({ state: "visible", timeout: 30_000 });
     await page.waitForFunction!(
       () =>
-        typeof (
-          document.querySelector('[data-testid="repo-file-tree"] a') as
-            | (HTMLAnchorElement & { $$click?: unknown })
-            | null
-        )?.$$click === "function",
+        typeof (window as { __oxideanEarlyNav?: unknown }).__oxideanEarlyNav === "function" &&
+        document.querySelector("astro-island:not([ssr])") !== null,
       undefined,
       { timeout: 60_000 },
     );

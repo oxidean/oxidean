@@ -27,7 +27,7 @@ Octane is Inferno’s successor with a React-*shaped* programming model (hooks, 
 | Forms: `method="post" action="#"` + `type="button"` where needed | Rely on GET navigations from submit |
 | Anonymous auth pages: SSR loaders, no form skeletons | Skeleton-first anonymous login/signup |
 
-Shared session helpers: `apps/web/src/lib/session-queries.ts`, `use-chrome-account.ts`, `query-client.ts`. Test with `apps/web/src/test/render-with-query.ts`.
+Shared session helpers: `apps/web/src/lib/session-queries.ts`, `use-chrome-account.tsrx`, `query-client.ts`. Test with `apps/web/src/test/render-with-query.ts`.
 
 Before committing web UI changes: `make web-lint` and `make web-format-check` (`@tsrx/oxc` — type-aware oxlint + oxfmt). See [AGENTS.md](../../../AGENTS.md).
 
@@ -54,6 +54,7 @@ export function Example(props: { title: string }) {
 - `@{ … }` is the template return shorthand — **one** output node (element or `<>…</>`).
 - Dynamic text often needs `{expr as string}` when not provably a string.
 - Hooks may be conditional (compiler call-site slots). Do **not** put a hook in a plain JS `for` loop — use `@for` or a child component.
+- **Hook-calling helpers must live in `.tsrx`/`.tsx` files.** Slots are compiler-injected per call site — a helper in plain `.ts` (e.g. `useX() { const a = useQuery(...); const b = useQuery(...); }`) gives every hook call the same slot → shared observer/state → options rotation → refetch/remount loop. Renaming `foo.ts` → `foo.tsrx` is the fix; extensionless imports don't change.
 - `useState` / `useReducer` expose a stable third tuple member `[state, set, getState]` when observed — prefer that over a ref for latest async state.
 - Omit dependency arrays on `useEffect` / `useMemo` / `useCallback` when the compiler can infer them; explicit arrays keep React semantics; `null` means every render.
 - Refs are props (`ref={…}`); no `forwardRef`.
@@ -73,6 +74,8 @@ Template directives only inside `@{ }` / directive bodies:
 - `@for (const x of xs; key x.id) { } @empty { }`
 - `@switch (v) { @case (a) { } @default { } }`
 - `@try { } @pending { } @catch (e) { }`
+- **Each directive arm renders a single node** — `@if`/`@else`/`@for` bodies emitting multiple sibling elements must wrap them in `<>…</>` (octane ≥0.10 rejects multi-node arms that older compilers tolerated).
+- **No `/*` in element text** — inside template text `/*` opens a block comment and swallows the closing tag to EOF ("Unclosed tag '<x>'"). Write such strings as expressions instead: `{"/api/actions/*" as string}`.
 
 Plain JS control flow belongs in setup (above `@{`), not mixed as React ternary soup inside broken `return (` templates.
 

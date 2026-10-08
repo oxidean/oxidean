@@ -1,89 +1,89 @@
 /**
- * Regression: `/$owner` is a layout for repos/packages; org overview is index-only.
- * Parent must not notFound() for user accounts or `/{user}/{repo}` never renders.
+ * Regression: `/{owner}` resolves orgs to the overview page and users to the
+ * profile page — no eager notFound, or `/{user}/{repo}` never renders.
+ * Under Astro there is no `/$owner` layout module; the index page owns the
+ * org-vs-user branch via `ownerIndexQueryOptions`.
  */
-import { createElement } from "octane";
 import { cleanup, screen, waitFor } from "@octanejs/testing-library";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithQueryClient } from "@/test/render-with-query";
-import type { OwnerIndexLoaderData } from "./$owner.index";
 
-vi.mock("@octanejs/tanstack-router", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@octanejs/tanstack-router")>();
-  const loaderData: OwnerIndexLoaderData = {
-    kind: "org",
-    org: {
-      org: {
-        id: "o1",
-        slug: "acme",
-        display_name: "Acme Corp",
-        member_base_permission: "read",
-        created_at: "2026-01-01T00:00:00Z",
-        updated_at: "2026-01-01T00:00:00Z",
-      },
-      memberCount: 3,
-      repos: [
-        {
-          id: "r1",
-          owner_id: "o1",
-          owner_type: "org",
-          owner_username: "acme",
-          name: "demo",
-          description: "Demo repo",
-          visibility: "public",
-          default_branch: "main",
-          updated_at: "2026-09-14T00:00:00Z",
-          can_admin: true,
-          can_write: true,
-        },
-      ],
-      canAdmin: true,
-      profileReadme: null,
-    },
-  };
+const orgOverviewMock = vi.fn();
+const userProfileMock = vi.fn();
+
+vi.mock("@/lib/ssr-org", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/ssr-org")>();
   return {
     ...actual,
-    useParams: () => ({ owner: "acme" }),
-    useLoaderData: () => loaderData,
-    Link: (props: {
-      to?: string;
-      params?: Record<string, string>;
-      children?: unknown;
-      className?: string;
-    }) => {
-      const owner = props.params?.owner ?? "acme";
-      const repo = props.params?.repo ?? "";
-      const href = props.to?.includes("$repo") ? `/${owner}/${repo}` : (props.to ?? "#");
-      return createElement(
-        "a",
-        { href, className: props.className } as never,
-        props.children as never,
-      );
-    },
+    fetchOrgOverview: (...args: unknown[]) => orgOverviewMock(...args),
+  };
+});
+
+vi.mock("@/lib/ssr-user-profile", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/ssr-user-profile")>();
+  return {
+    ...actual,
+    fetchUserProfile: (...args: unknown[]) => userProfileMock(...args),
   };
 });
 
 import { OrgOverviewPage } from "./$owner.index";
 
+const ORG_PAYLOAD = {
+  org: {
+    id: "o1",
+    slug: "acme",
+    display_name: "Acme Corp",
+    member_base_permission: "read",
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+  },
+  memberCount: 3,
+  repos: [
+    {
+      id: "r1",
+      owner_id: "o1",
+      owner_type: "org",
+      owner_username: "acme",
+      name: "demo",
+      description: "Demo repo",
+      visibility: "public",
+      default_branch: "main",
+      updated_at: "2026-09-14T00:00:00Z",
+      can_admin: true,
+      can_write: true,
+    },
+  ],
+  canAdmin: true,
+  profileReadme: null,
+};
+
+beforeEach(() => {
+  orgOverviewMock.mockReset();
+  userProfileMock.mockReset();
+  orgOverviewMock.mockResolvedValue(ORG_PAYLOAD);
+  userProfileMock.mockResolvedValue(null);
+  window.history.pushState({}, "", "/acme");
+});
+
 afterEach(cleanup);
 
-describe("/$owner layout vs org index", () => {
-  it("layout has no org notFound loader; index owns org overview", async () => {
-    const layout = await import("./$owner.tsrx?raw").then((m) =>
-      String((m as { default: string }).default),
-    );
+describe("/$owner index resolution", () => {
+  it("index owns the org overview — no separate layout gate", async () => {
     const index = await import("./$owner.index.tsrx?raw").then((m) =>
       String((m as { default: string }).default),
     );
-    expect(layout).toMatch(/Outlet/);
-    expect(layout).not.toMatch(/notFound\(/);
-    expect(layout).not.toMatch(/fetchOrgOverview/);
     expect(index).toMatch(/fetchOrgOverview/);
-    expect(index).toMatch(/notFound\(/);
+    expect(index).toMatch(/fetchUserProfile/);
     expect(index).toMatch(/OrgOverviewPage/);
-  }, 30_000);
+    // No unconditional notFound in the owner resolution — data === null is a
+    // render branch, not a loader throw. Comments are stripped first: the
+    // doc block mentions the old `throw notFound()` behavior by name.
+    const code = index.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, "");
+    expect(code).not.toMatch(/notFound\(/);
+  });
 
-  it("renders org overview shell for loader data (G-11.1-15)", async () => {
+  it("renders org overview shell for org payload (G-11.1-15)", async () => {
     renderWithQueryClient(OrgOverviewPage);
 
     await waitFor(

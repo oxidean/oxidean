@@ -1,0 +1,8 @@
+---
+import AppShell from "@/layouts/AppShell.astro";
+import { OAuthConsentPage } from "@/routes/oauth.consent.tsrx";
+---
+
+<AppShell title="Authorize application · Oxidean">
+	<OAuthConsentPage client:load />
+</AppShell>

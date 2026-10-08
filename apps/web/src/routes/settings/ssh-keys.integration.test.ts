@@ -1,4 +1,3 @@
-import { createElement } from "octane";
 import { cleanup, screen, waitFor } from "@octanejs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithQueryClient } from "@/test/render-with-query";
@@ -55,30 +54,23 @@ type LoaderShape =
       gpgKeys?: unknown[];
     };
 
-let loaderData: LoaderShape;
-
-vi.mock("@octanejs/tanstack-router", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@octanejs/tanstack-router")>();
-  return {
-    ...actual,
-    useLoaderData: () => loaderData,
-    Link: (props: {
-      to?: string;
-      children?: unknown;
-      className?: string;
-      "aria-current"?: string;
-    }) =>
-      createElement(
-        "a",
-        {
-          href: props.to ?? "#",
-          className: props.className,
-          "aria-current": props["aria-current"],
-        },
-        props.children as never,
-      ),
-  };
-});
+function applyLoader(d: LoaderShape | undefined) {
+  if (d === undefined) {
+    meMock.mockReturnValue(new Promise(() => {}));
+    return;
+  }
+  if (d.kind === "unauthenticated") {
+    meMock.mockResolvedValue({ ok: false, error: { code: "auth.unauthenticated", message: "n" } });
+    return;
+  }
+  if (d.kind === "error") {
+    meMock.mockResolvedValue({ ok: false, error: { code: "x", message: d.message } });
+    return;
+  }
+  meMock.mockResolvedValue({ ok: true, data: d.user });
+  listMock.mockResolvedValue({ ok: true, data: d.keys });
+  gpgListMock.mockResolvedValue({ ok: true, data: d.gpgKeys });
+}
 
 const verifiedUser = {
   id: "u1",
@@ -99,13 +91,17 @@ beforeEach(() => {
   revokeMock.mockReset();
   addMock.mockReset();
   meMock.mockReset();
-  loaderData = { kind: "ready", user: verifiedUser, keys: [], gpgKeys: [] };
+  applyLoader({ kind: "ready", user: verifiedUser, keys: [], gpgKeys: [] });
   listMock.mockResolvedValue({ ok: true, data: [] });
   gpgListMock.mockResolvedValue({ ok: true, data: [] });
   meMock.mockResolvedValue({ ok: true, data: verifiedUser });
 });
 
 afterEach(cleanup);
+
+beforeEach(() => {
+  window.history.pushState({}, "", "/settings/ssh-keys");
+});
 
 /** Load ssh-keys page; @vite-ignore keeps the suite collectable before ./ssh-keys exists. */
 async function loadSshKeysModule(): Promise<Record<string, unknown>> {
@@ -142,12 +138,12 @@ describe("/settings/ssh-keys (GIT-04 / D-SSH-06 list)", () => {
   }, 30_000);
 
   it("unverified: list visible with Add disabled + Verify your email to add keys.", async () => {
-    loaderData = {
+    applyLoader({
       kind: "ready",
       user: { ...verifiedUser, email_verified: false },
       keys: [],
       gpgKeys: [],
-    };
+    });
     meMock.mockResolvedValue({
       ok: true,
       data: { ...verifiedUser, email_verified: false },

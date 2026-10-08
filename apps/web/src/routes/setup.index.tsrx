@@ -1,56 +1,27 @@
-import { createFileRoute, redirect, useLoaderData } from "@octanejs/tanstack-router";
-import { useForm } from "@octanejs/tanstack-form";
+import { queryOptions, useQuery } from "@octanejs/tanstack-query";
+import { useForm, useStore } from "@octanejs/tanstack-form";
 import type { ProviderMode } from "@oxidean/api-client";
 import { useState } from "octane";
+import { AppPage } from "@/components/app-page";
 import { AuthErrorBanner, AuthShell } from "@/components/auth-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { apiClient } from "@/lib/api-client";
+import { usePageRedirect } from "@/lib/nav.tsrx";
 import { networkErrorMessage, rpcErrorMessage } from "@/lib/rpc-error-message";
 import { syncSessionPresenceHint } from "@/lib/session-hint";
 import { fetchBootstrapStatus } from "@/lib/ssr-auth";
 
-export type SetupLoaderData = {
-  loadError: string;
-};
-
-export const Route = createFileRoute("/setup/")({
-  component: SetupPage,
-  head: () => ({ meta: [{ title: "Set up · Oxidean" }] }),
-  beforeLoad: async () => {
-    let needsSetup: boolean | null = null;
-    try {
-      const status = await fetchBootstrapStatus();
-      if (status.ok) needsSetup = status.data.needs_setup;
-    } catch {
-      /* API unreachable — loader still renders form */
-    }
-    if (needsSetup === false) {
-      throw redirect({ href: "/" });
-    }
-  },
-  loader: async (): Promise<SetupLoaderData> => {
-    try {
-      const status = await fetchBootstrapStatus();
-      if (!status.ok) {
-        return {
-          loadError: rpcErrorMessage(status.error),
-        };
-      }
-      if (!status.data.needs_setup) {
-        throw redirect({ href: "/" });
-      }
-      return { loadError: "" };
-    } catch (e) {
-      if (e && typeof e === "object" && "href" in e) throw e;
-      return {
-        loadError: networkErrorMessage(),
-      };
-    }
-  },
-});
+function setupBootstrapQueryOptions() {
+  return queryOptions({
+    queryKey: ["setup", "bootstrapStatus"],
+    queryFn: () => fetchBootstrapStatus(),
+    retry: false,
+    staleTime: 0,
+  });
+}
 
 const NETWORK_ERROR = networkErrorMessage();
 const UNAVAILABLE_ERROR = "Setup is no longer available. Sign in or create an account instead.";
@@ -61,10 +32,28 @@ const PROVIDER_OPTIONS: { value: ProviderMode; label: string }[] = [
   { value: "oidc", label: "OIDC / SSO" },
 ];
 
-/** Exported for AUTH-07 integration tests (wizard Switch + CTA). */
+/** `/setup` — first-run wizard (title/meta via shell). */
 export function SetupPage() @{
-  const data = useLoaderData({ from: "/setup/" }) as SetupLoaderData | undefined;
-  const [error, setError] = useState(data?.loadError ?? "");
+  <AppPage>
+    <SetupContent />
+  </AppPage>;
+}
+
+/** Exported for AUTH-07 integration tests (wizard Switch + CTA). */
+export function SetupContent() @{
+  const statusQ = useQuery(setupBootstrapQueryOptions());
+  const status = statusQ.data;
+  const loadError = status
+    ? status.ok
+      ? ""
+      : rpcErrorMessage(status.error)
+    : statusQ.isError
+      ? NETWORK_ERROR
+      : "";
+  // Needs-setup gate (formerly beforeLoad): finished setup → leave wizard.
+  usePageRedirect(status?.ok === true && !status.data.needs_setup ? "/" : null);
+  const [error, setError] = useState(loadError);
+  const shownError = error || loadError;
 
   const form = useForm({
     defaultValues: {
@@ -121,12 +110,17 @@ export function SetupPage() @{
     },
   });
 
+  // Read at component scope — form.Field nested inside a form.Subscribe
+  // render-prop crashes under octane 0.10 (children resolver invokes function
+  // children eagerly).
+  const providerMode = useStore(form.store, (s) => s.values.providerMode);
+
   <AuthShell
     title="Set up this instance"
     support="Create the system admin account and choose how people will sign in."
   >
-    @if (error) {
-      <AuthErrorBanner message={error} />;
+    @if (shownError) {
+      <AuthErrorBanner message={shownError} />;
     }
 
     <form
@@ -235,67 +229,61 @@ export function SetupPage() @{
 
       {/* octane-dom-race-ok: setup provider panels — reviewed; keepMounted radios
           already used; panel swap restructure deferred from PAT mint work. */}
-      <form.Subscribe selector={(s) => s.values.providerMode}>
-        {(providerMode) => (
-          <>
-            @if (providerMode === "workos") {
-              <form.Field name="workosClientId">
-                {(field) => (
-                  <div className="flex flex-col gap-2">
-                    <Label htmlFor="setup-workos-client-id">WorkOS client ID</Label>
-                    <Input
-                      id="setup-workos-client-id"
-                      value={field.state.value}
-                      onBlur={field.handleBlur}
-                      onInput={(ev) =>
-                        field.handleChange((ev.currentTarget as HTMLInputElement).value)
-                      }
-                      autoComplete="off"
-                    />
-                  </div>
-                )}
-              </form.Field>;
-            }
+      @if (providerMode === "workos") {
+        <form.Field name="workosClientId">
+          {(field) => (
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="setup-workos-client-id">WorkOS client ID</Label>
+              <Input
+                id="setup-workos-client-id"
+                value={field.state.value}
+                onBlur={field.handleBlur}
+                onInput={(ev) =>
+                  field.handleChange((ev.currentTarget as HTMLInputElement).value)
+                }
+                autoComplete="off"
+              />
+            </div>
+          )}
+        </form.Field>;
+      }
 
-            @if (providerMode === "oidc") {
-              <div className="flex flex-col gap-4">
-                <form.Field name="oidcIssuer">
-                  {(field) => (
-                    <div className="flex flex-col gap-2">
-                      <Label htmlFor="setup-oidc-issuer">OIDC issuer</Label>
-                      <Input
-                        id="setup-oidc-issuer"
-                        value={field.state.value}
-                        onBlur={field.handleBlur}
-                        onInput={(ev) =>
-                          field.handleChange((ev.currentTarget as HTMLInputElement).value)
-                        }
-                        autoComplete="off"
-                      />
-                    </div>
-                  )}
-                </form.Field>
-                <form.Field name="oidcClientId">
-                  {(field) => (
-                    <div className="flex flex-col gap-2">
-                      <Label htmlFor="setup-oidc-client-id">OIDC client ID</Label>
-                      <Input
-                        id="setup-oidc-client-id"
-                        value={field.state.value}
-                        onBlur={field.handleBlur}
-                        onInput={(ev) =>
-                          field.handleChange((ev.currentTarget as HTMLInputElement).value)
-                        }
-                        autoComplete="off"
-                      />
-                    </div>
-                  )}
-                </form.Field>
-              </div>;
-            }
-          </>
-        )}
-      </form.Subscribe>
+      @if (providerMode === "oidc") {
+        <div className="flex flex-col gap-4">
+          <form.Field name="oidcIssuer">
+            {(field) => (
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="setup-oidc-issuer">OIDC issuer</Label>
+                <Input
+                  id="setup-oidc-issuer"
+                  value={field.state.value}
+                  onBlur={field.handleBlur}
+                  onInput={(ev) =>
+                    field.handleChange((ev.currentTarget as HTMLInputElement).value)
+                  }
+                  autoComplete="off"
+                />
+              </div>
+            )}
+          </form.Field>
+          <form.Field name="oidcClientId">
+            {(field) => (
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="setup-oidc-client-id">OIDC client ID</Label>
+                <Input
+                  id="setup-oidc-client-id"
+                  value={field.state.value}
+                  onBlur={field.handleBlur}
+                  onInput={(ev) =>
+                    field.handleChange((ev.currentTarget as HTMLInputElement).value)
+                  }
+                  autoComplete="off"
+                />
+              </div>
+            )}
+          </form.Field>
+        </div>;
+      }
 
       <form.Field name="allowSignup">
         {(field) => (

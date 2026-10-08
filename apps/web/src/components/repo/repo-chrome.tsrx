@@ -335,16 +335,18 @@ export function RepoChrome({ repo, active, showSettings = false }: RepoChromePro
       </div>;
     }
     @if (live.forked_from) {
-      <p className="mt-2 text-[14px] text-muted-foreground">
-        Forked from{" "}
-        <AppLink
-          href={("/" + live.forked_from.owner + "/" + live.forked_from.name) as string}
-          className="text-primary no-underline hover:underline"
-        >
-          {(live.forked_from.owner + "/" + live.forked_from.name) as string}
-        </AppLink>
-      </p>;
-      <SyncForkPanel owner={owner} repoName={name} canWrite={!!live.can_write} />;
+      <>
+        <p className="mt-2 text-[14px] text-muted-foreground">
+          Forked from{" "}
+          <AppLink
+            href={("/" + live.forked_from.owner + "/" + live.forked_from.name) as string}
+            className="text-primary no-underline hover:underline"
+          >
+            {(live.forked_from.owner + "/" + live.forked_from.name) as string}
+          </AppLink>
+        </p>
+        <SyncForkPanel owner={owner} repoName={name} canWrite={!!live.can_write} />
+      </>;
     }
 
     <nav className="mt-6 flex flex-wrap gap-4 border-b border-border pb-0" aria-label="Repository">

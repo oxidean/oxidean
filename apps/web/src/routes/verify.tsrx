@@ -1,8 +1,8 @@
-import { createFileRoute } from "@octanejs/tanstack-router";
 import { useForm } from "@octanejs/tanstack-form";
 import type { UserPublic } from "@oxidean/api-client";
 import { useEffect, useRef, useState } from "octane";
 import { AuthErrorBanner, AuthShell } from "@/components/auth-shell";
+import { AppPage } from "@/components/app-page";
 import { AuthFormSkeleton } from "@/components/page-skeletons";
 import { Button } from "@/components/ui/button";
 import { InputOtp } from "@/components/ui/input-otp";
@@ -10,13 +10,6 @@ import { Label } from "@/components/ui/label";
 import { apiClient } from "@/lib/api-client";
 import { safeReturnTo } from "@/lib/return-to";
 import { AppLink } from "@/components/ui/app-link";
-
-export const Route = createFileRoute("/verify")({
-  component: VerifyPage,
-  head: () => ({
-    meta: [{ title: "Verify email · Oxidean" }, { name: "referrer", content: "no-referrer" }],
-  }),
-});
 
 const SUPPORT_DEFAULT =
   "We sent a link and an 8-digit code to your email. Enter the code below, or open the link from the same device after signing in. Codes also work for additional addresses on your account.";
@@ -69,8 +62,15 @@ type Phase =
       primaryAlreadyVerified: boolean;
     };
 
-/** Exported for verify.integration.test.ts (RESEARCH P1 / D-QH-03). */
+/** `/verify` — email-code redemption page (title + referrer meta via shell). */
 export function VerifyPage() @{
+  <AppPage>
+    <VerifyContent />
+  </AppPage>;
+}
+
+/** Exported for verify.integration.test.ts (RESEARCH P1 / D-QH-03). */
+export function VerifyContent() @{
   const [phase, setPhase] = useState<Phase>({ kind: "loading" });
   const [error, setError] = useState("");
   const [tokenPending, setTokenPending] = useState(false);

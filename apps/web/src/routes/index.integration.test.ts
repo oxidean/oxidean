@@ -1,19 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { Route, selectHomeTree } from "./index";
+import { HomePage, selectHomeTree } from "./index";
 
 /**
  * Home SSR/tree gate priority (D-18/D-20).
- * Shared root owns needs_setup redirect; selectHomeTree documents D-20 priority
- * and index loader picks SignedInHome vs marketing after the root gate clears.
+ * needs_setup redirects are owned by AppAccessGate; the index picks
+ * SignedInHome vs marketing via the session query after that gate clears.
  */
 describe("index/home SSR tree gate (D-18/D-20)", () => {
-  it("registers beforeLoad/loader for needs_setup → /setup vs session → SignedInHome vs marketing", () => {
-    const hasGate =
-      typeof Route.options.beforeLoad === "function" || typeof Route.options.loader === "function";
+  it("gates trees via the session query (needs_setup | SignedInHome | marketing)", async () => {
+    const src = await import("./index.tsrx?raw").then((m) => String(m.default));
     expect(
-      hasGate,
-      "index route must gate trees via beforeLoad/loader (needs_setup | SignedInHome | marketing)",
+      /authSessionQueryOptions|useQuery/.test(src),
+      "index must select trees via the session query (signed-in | marketing)",
     ).toBe(true);
+    expect(HomePage, "index page component must exist for tree selection").toBeTruthy();
   });
 
   it("needs_setup priority selects /setup over marketing and SignedInHome", () => {
@@ -25,18 +25,14 @@ describe("index/home SSR tree gate (D-18/D-20)", () => {
   it("SignedInHome module exists for the session tree (D-20)", async () => {
     const signedIn = await import("@/components/signed-in-home");
     expect(signedIn).toHaveProperty("SignedInHome");
-    expect(
-      Route.options.component,
-      "index route component must exist for tree selection",
-    ).toBeTruthy();
+    expect(HomePage, "index route component must exist for tree selection").toBeTruthy();
   });
 
-  it("loader uses fetchSessionMe tree selection without client setup lock as boundary", () => {
-    expect(typeof Route.options.loader).toBe("function");
-    const src = Route.options.loader?.toString() ?? "";
+  it("session read is the boundary — no client redirectIfNeedsSetup reintroduced", async () => {
+    const src = await import("./index.tsrx?raw").then((m) => String(m.default));
     expect(
       /redirectIfNeedsSetup/.test(src),
-      "index loader must not reintroduce client redirectIfNeedsSetup as the boundary",
+      "index must not reintroduce client redirectIfNeedsSetup as the boundary",
     ).toBe(false);
   });
 });

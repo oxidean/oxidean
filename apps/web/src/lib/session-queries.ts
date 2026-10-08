@@ -4,6 +4,7 @@ import type {
   BootstrapStatus,
   OrgMineEntry,
   ProviderConfigPublic,
+  RepoPublic,
   UserPublic,
 } from "@oxidean/api-client";
 import { apiClient } from "@/lib/api-client";
@@ -103,6 +104,27 @@ export function orgListMineQueryOptions() {
         throw new Error(`${res.error.code}: ${res.error.message}`);
       }
       return res.data.orgs;
+    },
+    retry: false,
+    staleTime: 30_000,
+  });
+}
+
+export const repoListMineQueryKey = ["repo", "listMine"] as const;
+
+/** Signed-in home repo list — empty on auth failures (matches orgListMine). */
+export function repoListMineQueryOptions() {
+  return queryOptions({
+    queryKey: repoListMineQueryKey,
+    queryFn: async (): Promise<RepoPublic[]> => {
+      const res = await apiClient.repo.listMine();
+      if (!res.ok) {
+        if (res.error.code === "auth.unauthenticated" || res.error.code === "auth.setup_required") {
+          return [];
+        }
+        throw new Error(`${res.error.code}: ${res.error.message}`);
+      }
+      return res.data.repos;
     },
     retry: false,
     staleTime: 30_000,

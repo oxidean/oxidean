@@ -1,6 +1,6 @@
-import { createFileRoute, useLoaderData } from "@octanejs/tanstack-router";
+import { AppPage } from "@/components/app-page";
 import { useForm } from "@octanejs/tanstack-form";
-import { useQueryClient } from "@octanejs/tanstack-query";
+import { queryOptions, useQuery, useQueryClient } from "@octanejs/tanstack-query";
 import type { EmailListItem, UserPublic } from "@oxidean/api-client";
 import { useEffect, useState } from "octane";
 import { AccountEmailsSection } from "@/components/settings/account-emails-section";
@@ -23,34 +23,37 @@ export type ProfileLoaderData =
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
 const BIO_MAX = 160;
 
-export const Route = createFileRoute("/settings/profile")({
-  component: ProfilePage,
-  head: () => ({ meta: [{ title: "Account · Oxidean" }] }),
-  loader: async (): Promise<ProfileLoaderData> => {
-    try {
-      const res = await fetchUserGetProfile();
-      if (!res.ok) {
-        if (res.error.code === "auth.unauthenticated") {
-          return { kind: "unauthenticated" };
+function settingsProfileQueryOptions() {
+  return queryOptions({
+    queryKey: ["settings", "settingsProfile"],
+    queryFn: async (): Promise<ProfileLoaderData> => {
+      try {
+        const res = await fetchUserGetProfile();
+        if (!res.ok) {
+          if (res.error.code === "auth.unauthenticated") {
+            return { kind: "unauthenticated" };
+          }
+          return {
+            kind: "error",
+            message: res.error.message || "Could not load profile.",
+          };
         }
-        return {
-          kind: "error",
-          message: res.error.message || "Could not load profile.",
-        };
+        const listRes = await fetchEmailList();
+        if (!listRes.ok) {
+          return {
+            kind: "error",
+            message: listRes.error.message || "Could not load email addresses.",
+          };
+        }
+        return { kind: "ready", user: res.data, emails: listRes.data };
+      } catch {
+        return { kind: "error", message: NETWORK_ERROR };
       }
-      const listRes = await fetchEmailList();
-      if (!listRes.ok) {
-        return {
-          kind: "error",
-          message: listRes.error.message || "Could not load email addresses.",
-        };
-      }
-      return { kind: "ready", user: res.data, emails: listRes.data };
-    } catch {
-      return { kind: "error", message: NETWORK_ERROR };
-    }
-  },
-});
+    },
+    retry: false,
+    staleTime: 30_000,
+  });
+}
 
 type Phase =
   | { kind: "loading" }
@@ -59,8 +62,14 @@ type Phase =
 
 /** Exported for profile.integration.test.ts (RESEARCH P1 / D-QH-03). */
 export function ProfilePage() @{
+  <AppPage>
+    <ProfileContent />
+  </AppPage>;
+}
+
+export function ProfileContent() @{
   const queryClient = useQueryClient();
-  const loaderData = useLoaderData({ from: "/settings/profile" }) as ProfileLoaderData | undefined;
+  const loaderData = useQuery(settingsProfileQueryOptions()).data;
 
   useEffect(() => {
     if (loaderData?.kind === "unauthenticated") {

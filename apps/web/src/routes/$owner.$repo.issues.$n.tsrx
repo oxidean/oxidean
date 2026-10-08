@@ -1,5 +1,10 @@
-import { createFileRoute, useLoaderData, useNavigate, useParams } from "@octanejs/tanstack-router";
-import { useQuery, useQueryClient } from "@octanejs/tanstack-query";
+import { queryOptions, useQuery, useQueryClient } from "@octanejs/tanstack-query";
+import { navigate as astroNavigate } from "astro:transitions/client";
+import { useRepoLayoutData } from "@/lib/repo-store.tsrx";
+import { matchPath, routeHref } from "@/lib/route-params";
+import { usePathname, useSearchString } from "@/lib/pathname.tsrx";
+import { RepoLayout } from "@/routes/$owner.$repo.tsrx";
+import { AppPage } from "@/components/app-page";
 import type { IssuePublic, RepoPublic } from "@oxidean/api-client";
 import { useEffect, useState } from "octane";
 import { CircleCheck, CircleDot } from "@octanejs/lucide";
@@ -22,7 +27,7 @@ import { Label } from "@/components/ui/label";
 import { apiClient } from "@/lib/api-client";
 import { renderGfm } from "@/lib/markdown";
 import { formatRelative } from "@/lib/relative-time";
-import type { RepoLayoutLoaderData } from "@/lib/repo-store";
+
 import { useChromeAccountState } from "@/lib/use-chrome-account";
 import { fetchIssueGet, fetchRepoGet } from "@/lib/ssr-repo";
 
@@ -40,7 +45,7 @@ async function loadIssueDetail(
   repoName: string,
   number: number,
 ): Promise<IssueDetailLoaderData> {
-  const got = await fetchRepoGet({ data: { owner, name: repoName } });
+  const got = await fetchRepoGet({ owner, name: repoName });
   if (!got.ok) {
     if (got.error.code === "repo.not_found") return { kind: "not_found" };
     return {
@@ -52,9 +57,7 @@ async function loadIssueDetail(
   if (got.data.issues_enabled === false) {
     return { kind: "disabled", repo: got.data };
   }
-  const issueRes = await fetchIssueGet({
-    data: { owner, name: repoName, number },
-  });
+  const issueRes = await fetchIssueGet({ owner, name: repoName, number });
   if (!issueRes.ok) {
     if (issueRes.error.code === "repo.issues.disabled") {
       return { kind: "disabled", repo: got.data };
@@ -70,30 +73,41 @@ async function loadIssueDetail(
   return { kind: "ready", repo: got.data, issue: issueRes.data };
 }
 
-export const Route = createFileRoute("/$owner/$repo/issues/$n")({
-  component: IssueDetailPage,
-  head: ({ params }) => ({
-    meta: [
-      {
-        title: `Issue #${(params as { n: string }).n} · ${(params as { owner: string }).owner}/${(params as { repo: string }).repo} · Oxidean`,
-      },
+function repoIssuesNQueryOptions(params: Record<string, string | undefined>, searchStr = "") {
+  return queryOptions({
+    queryKey: [
+      "repo-page",
+      "/$owner/$repo/issues/$n",
+      params.owner ?? "",
+      params.repo ?? "",
+      params._splat ?? "",
+      params.n ?? "",
+      params.sha ?? "",
+      params.tag ?? "",
+      params.run ?? "",
+      searchStr,
     ],
-  }),
-  loader: async ({ params }): Promise<IssueDetailLoaderData> => {
-    const owner = String((params as { owner?: string }).owner ?? "");
-    const repoName = String((params as { repo?: string }).repo ?? "");
-    const n = Number((params as { n?: string }).n ?? "0");
-    try {
-      return await loadIssueDetail(owner, repoName, n);
-    } catch {
-      return { kind: "error", message: NETWORK_ERROR };
-    }
-  },
-});
+    queryFn: async (): Promise<IssueDetailLoaderData> => {
+      const owner = String((params as { owner?: string }).owner ?? "");
+      const repoName = String((params as { repo?: string }).repo ?? "");
+      const n = Number((params as { n?: string }).n ?? "0");
+      try {
+        return await loadIssueDetail(owner, repoName, n);
+      } catch {
+        return { kind: "error", message: NETWORK_ERROR };
+      }
+    },
+    enabled: Boolean(params.owner && params.repo),
+    retry: false,
+    staleTime: 30_000,
+  });
+}
 
 /** Issue detail — edit/close/reopen/history/Admin delete (ISS-01 / D-ISS-02..04). */
-export function IssueDetailPage() @{
-  const params = useParams({ strict: false }) as {
+function IssueDetailPageContent() @{
+  const pathname = usePathname();
+  const searchStr = useSearchString();
+  const params = (matchPath("/$owner/$repo/issues/$n", pathname) ?? {}) as {
     owner?: string;
     repo?: string;
     n?: string;
@@ -101,13 +115,11 @@ export function IssueDetailPage() @{
   const owner = params.owner ?? "";
   const repoName = params.repo ?? "";
   const number = Number(params.n ?? "0");
-  const navigate = useNavigate();
+  const navigate = astroNavigate;
   const queryClient = useQueryClient();
   const account = useChromeAccountState();
-  const layout = useLoaderData({ from: "/$owner/$repo" }) as RepoLayoutLoaderData | undefined;
-  const routeLoader = useLoaderData({ from: "/$owner/$repo/issues/$n" }) as
-    | IssueDetailLoaderData
-    | undefined;
+  const layout = useRepoLayoutData();
+  const routeLoader = useQuery(repoIssuesNQueryOptions(params, searchStr)).data;
 
   const [editing, setEditing] = useState(false);
   const [editTitle, setEditTitle] = useState("");
@@ -312,10 +324,7 @@ export function IssueDetailPage() @{
       });
       setDeleteOpen(false);
       setDeletePending(false);
-      await navigate({
-        to: "/$owner/$repo/issues",
-        params: { owner, repo: repoName },
-      });
+      await navigate(routeHref("/$owner/$repo/issues", { owner, repo: repoName }));
     } catch {
       setDeleteError(NETWORK_ERROR);
       setDeletePending(false);
@@ -516,3 +525,12 @@ export function IssueDetailPage() @{
 }
 
 export default IssueDetailPage;
+
+/** Page root — RepoLayout (chrome + repo store) around the leaf content. */
+export function IssueDetailPage() @{
+  <AppPage>
+    <RepoLayout>
+      <IssueDetailPageContent />
+    </RepoLayout>
+  </AppPage>;
+}

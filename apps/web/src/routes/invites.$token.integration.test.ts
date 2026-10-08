@@ -19,14 +19,6 @@ vi.mock("@/lib/api-client", () => ({
   },
 }));
 
-vi.mock("@octanejs/tanstack-router", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@octanejs/tanstack-router")>();
-  return {
-    ...actual,
-    useParams: () => ({ token: "invite-token-abc" }),
-  };
-});
-
 import { InviteAcceptPage } from "./invites.$token";
 
 const boundInstanceInvite = {
@@ -59,7 +51,10 @@ const signedInUser = {
   default_branch: "main",
 };
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 describe("/invites/$token (G-11.1-15)", () => {
   beforeEach(() => {
@@ -67,11 +62,9 @@ describe("/invites/$token (G-11.1-15)", () => {
     getMock.mockReset();
     acceptMock.mockReset();
     assignMock.mockReset();
+    window.history.pushState({}, "", "/invites/invite-token-abc");
+    vi.spyOn(window.location, "assign").mockImplementation(assignMock);
     getMock.mockResolvedValue({ ok: true, data: boundInstanceInvite });
-    Object.defineProperty(window, "location", {
-      configurable: true,
-      value: { assign: assignMock, href: "http://localhost/invites/invite-token-abc" },
-    });
   });
 
   it("renders anon signup form when not signed in", async () => {

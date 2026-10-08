@@ -36,6 +36,64 @@ export type FileCommitFormProps = {
   onSubmit: (values: FileCommitValues) => void | Promise<void>;
 };
 
+// The branch panel lives in its own component scope — a form.Field nested
+// inside another Field's render-prop children crashes under octane 0.10
+// (function children get invoked eagerly by the children resolver).
+// Rendering stays identical: the panel remains always-mounted with `hidden`
+// toggling visibility (DOM-race rule).
+function FileCommitBranchPanel(props: {
+  form: { Field: (props: { name: string; children?: unknown }) => unknown };
+  pending: boolean;
+  branchSelected: boolean;
+}) @{
+  <div
+    className={cn(
+      "mt-3 ml-8 flex flex-col gap-3 border-l border-border pl-4",
+      !props.branchSelected && "hidden",
+    )}
+    data-testid="file-commit-branch-panel"
+  >
+    <props.form.Field name="new_branch">
+      {(branchField) => (
+        <div className="flex flex-col gap-2">
+          <label for="file-commit-new-branch" className="text-[13px] font-medium text-foreground">
+            Branch name
+          </label>
+          <Input
+            id="file-commit-new-branch"
+            name="new_branch"
+            value={branchField.state.value}
+            onBlur={branchField.handleBlur}
+            onInput={(e) => branchField.handleChange((e.target as HTMLInputElement).value)}
+            placeholder="Leave blank to auto-generate"
+            disabled={props.pending}
+            data-testid="file-commit-new-branch"
+          />
+        </div>
+      )}
+    </props.form.Field>
+    <props.form.Field name="pr_title">
+      {(titleField) => (
+        <div className="flex flex-col gap-2">
+          <label for="file-commit-pr-title" className="text-[13px] font-medium text-foreground">
+            Pull request title
+          </label>
+          <Input
+            id="file-commit-pr-title"
+            name="pr_title"
+            value={titleField.state.value}
+            onBlur={titleField.handleBlur}
+            onInput={(e) => titleField.handleChange((e.target as HTMLInputElement).value)}
+            placeholder="Defaults to the commit message"
+            disabled={props.pending}
+            data-testid="file-commit-pr-title"
+          />
+        </div>
+      )}
+    </props.form.Field>
+  </div>;
+}
+
 /**
  * Shared commit block for every `repo.file.*` flow (GIT-19): message +
  * "commit directly" vs "new branch + pull request" radio driven by
@@ -161,58 +219,11 @@ export function FileCommitForm({
           </RadioGroup>
           {/* Always mounted — `hidden` toggles visibility so RadioGroup sibling
               reconciliation never mounts/unmounts this panel (DOM-race rule). */}
-          <div
-            className={cn(
-              "mt-3 ml-8 flex flex-col gap-3 border-l border-border pl-4",
-              field.state.value !== "branch" && "hidden",
-            )}
-            data-testid="file-commit-branch-panel"
-          >
-            <form.Field name="new_branch">
-              {(branchField) => (
-                <div className="flex flex-col gap-2">
-                  <label
-                    for="file-commit-new-branch"
-                    className="text-[13px] font-medium text-foreground"
-                  >
-                    Branch name
-                  </label>
-                  <Input
-                    id="file-commit-new-branch"
-                    name="new_branch"
-                    value={branchField.state.value}
-                    onBlur={branchField.handleBlur}
-                    onInput={(e) => branchField.handleChange((e.target as HTMLInputElement).value)}
-                    placeholder="Leave blank to auto-generate"
-                    disabled={pending}
-                    data-testid="file-commit-new-branch"
-                  />
-                </div>
-              )}
-            </form.Field>
-            <form.Field name="pr_title">
-              {(titleField) => (
-                <div className="flex flex-col gap-2">
-                  <label
-                    for="file-commit-pr-title"
-                    className="text-[13px] font-medium text-foreground"
-                  >
-                    Pull request title
-                  </label>
-                  <Input
-                    id="file-commit-pr-title"
-                    name="pr_title"
-                    value={titleField.state.value}
-                    onBlur={titleField.handleBlur}
-                    onInput={(e) => titleField.handleChange((e.target as HTMLInputElement).value)}
-                    placeholder="Defaults to the commit message"
-                    disabled={pending}
-                    data-testid="file-commit-pr-title"
-                  />
-                </div>
-              )}
-            </form.Field>
-          </div>
+          <FileCommitBranchPanel
+            form={form}
+            pending={pending}
+            branchSelected={field.state.value === "branch"}
+          />
         </>
       )}
     </form.Field>

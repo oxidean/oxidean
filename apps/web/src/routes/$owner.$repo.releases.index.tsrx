@@ -1,5 +1,9 @@
-import { createFileRoute, useLoaderData, useParams } from "@octanejs/tanstack-router";
-import { useQuery } from "@octanejs/tanstack-query";
+import { queryOptions, useQuery } from "@octanejs/tanstack-query";
+import { useRepoLayoutData } from "@/lib/repo-store.tsrx";
+import { matchPath } from "@/lib/route-params";
+import { usePathname, useSearchString } from "@/lib/pathname.tsrx";
+import { RepoLayout } from "@/routes/$owner.$repo.tsrx";
+import { AppPage } from "@/components/app-page";
 import type { ReleasePublic, RepoPublic } from "@oxidean/api-client";
 import { Rocket, Tag } from "@octanejs/lucide";
 import { Badge } from "@/components/ui/badge";
@@ -11,7 +15,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { RepoNotFound } from "@/components/repo/repo-not-found";
 import { apiClient } from "@/lib/api-client";
 import { formatRelative } from "@/lib/relative-time";
-import type { RepoLayoutLoaderData } from "@/lib/repo-store";
+
 import { fetchReleaseList, fetchRepoGet } from "@/lib/ssr-repo";
 import { AppLink } from "@/components/ui/app-link";
 
@@ -23,7 +27,7 @@ export type ReleasesLoaderData =
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
 
 async function loadReleasesPage(owner: string, repoName: string): Promise<ReleasesLoaderData> {
-  const got = await fetchRepoGet({ data: { owner, name: repoName } });
+  const got = await fetchRepoGet({ owner, name: repoName });
   if (!got.ok) {
     if (got.error.code === "repo.not_found") return { kind: "not_found" };
     return {
@@ -31,7 +35,7 @@ async function loadReleasesPage(owner: string, repoName: string): Promise<Releas
       message: got.error.message || "Could not load repository.",
     };
   }
-  const listRes = await fetchReleaseList({ data: { owner, name: repoName } });
+  const listRes = await fetchReleaseList({ owner, name: repoName });
   if (!listRes.ok) {
     if (listRes.error.code === "repo.not_found") return { kind: "not_found" };
     return {
@@ -46,46 +50,47 @@ async function loadReleasesPage(owner: string, repoName: string): Promise<Releas
   };
 }
 
-export const Route = createFileRoute("/$owner/$repo/releases/")({
-  component: RepoReleasesPage,
-  head: ({ params }) => ({
-    meta: [
-      {
-        title: `Releases · ${(params as { owner: string }).owner}/${(params as { repo: string }).repo} · Oxidean`,
-      },
+function repoReleasesIndexQueryOptions(params: Record<string, string | undefined>, searchStr = "") {
+  return queryOptions({
+    queryKey: [
+      "repo-page",
+      "/$owner/$repo/releases/",
+      params.owner ?? "",
+      params.repo ?? "",
+      params._splat ?? "",
+      params.n ?? "",
+      params.sha ?? "",
+      params.tag ?? "",
+      params.run ?? "",
+      searchStr,
     ],
-    links: [
-      {
-        rel: "alternate",
-        type: "application/atom+xml",
-        title: `Releases feed · ${(params as { owner: string }).owner}/${(params as { repo: string }).repo}`,
-        href: `/api/repos/${(params as { owner: string }).owner}/${(params as { repo: string }).repo}/releases.atom`,
-      },
-    ],
-  }),
-  loader: async ({ params }): Promise<ReleasesLoaderData> => {
-    const owner = String((params as { owner?: string }).owner ?? "");
-    const repoName = String((params as { repo?: string }).repo ?? "");
-    try {
-      return await loadReleasesPage(owner, repoName);
-    } catch {
-      return { kind: "error", message: NETWORK_ERROR };
-    }
-  },
-});
+    queryFn: async (): Promise<ReleasesLoaderData> => {
+      const owner = String((params as { owner?: string }).owner ?? "");
+      const repoName = String((params as { repo?: string }).repo ?? "");
+      try {
+        return await loadReleasesPage(owner, repoName);
+      } catch {
+        return { kind: "error", message: NETWORK_ERROR };
+      }
+    },
+    enabled: Boolean(params.owner && params.repo),
+    retry: false,
+    staleTime: 30_000,
+  });
+}
 
 /** Releases list — notes-only (assets in 15-02). */
-export function RepoReleasesPage() @{
-  const params = useParams({ strict: false }) as {
+function RepoReleasesPageContent() @{
+  const pathname = usePathname();
+  const searchStr = useSearchString();
+  const params = (matchPath("/$owner/$repo/releases/", pathname) ?? {}) as {
     owner?: string;
     repo?: string;
   };
   const owner = params.owner ?? "";
   const repoName = params.repo ?? "";
-  const layout = useLoaderData({ from: "/$owner/$repo" }) as RepoLayoutLoaderData | undefined;
-  const routeLoader = useLoaderData({ from: "/$owner/$repo/releases/" }) as
-    | ReleasesLoaderData
-    | undefined;
+  const layout = useRepoLayoutData();
+  const routeLoader = useQuery(repoReleasesIndexQueryOptions(params, searchStr)).data;
 
   const repoQ = useQuery({
     queryKey: ["repo", "get", owner, repoName] as const,
@@ -207,4 +212,13 @@ export function RepoReleasesPage() @{
       }
     </>;
   }
+}
+
+/** Page root — RepoLayout (chrome + repo store) around the leaf content. */
+export function RepoReleasesPage() @{
+  <AppPage>
+    <RepoLayout>
+      <RepoReleasesPageContent />
+    </RepoLayout>
+  </AppPage>;
 }

@@ -1,0 +1,8 @@
+---
+import AppShell from "@/layouts/AppShell.astro";
+import { AdminMcpPage } from "@/routes/admin/mcp.tsrx";
+---
+
+<AppShell title="MCP endpoint · Oxidean">
+	<AdminMcpPage client:load />
+</AppShell>

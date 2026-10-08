@@ -1,31 +1,13 @@
-import { createFileRoute, useLoaderData } from "@octanejs/tanstack-router";
-import { useEffect, useState } from "octane";
+import { useQuery } from "@octanejs/tanstack-query";
+import { useState } from "octane";
+import { AppPage } from "@/components/app-page";
 import { AccountSettingsLayout } from "@/components/settings/settings-shell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
+import { usePageRedirect } from "@/lib/nav.tsrx";
 import { resolvePublicOriginClient } from "@/lib/public-origin";
-import { fetchSessionMe } from "@/lib/ssr-auth";
-import { fetchPublicOrigin } from "@/lib/ssr-repo";
-
-export type CliLoaderData = { kind: "unauthenticated" } | { kind: "ready"; origin: string };
-
-export const Route = createFileRoute("/settings/cli")({
-  component: CliSettingsPage,
-  head: () => ({ meta: [{ title: "Command line · Oxidean" }] }),
-  loader: async (): Promise<CliLoaderData> => {
-    try {
-      const res = await fetchSessionMe();
-      if (!res.ok) {
-        return { kind: "unauthenticated" };
-      }
-      const origin = (await fetchPublicOrigin()) ?? "";
-      return { kind: "ready", origin };
-    } catch {
-      return { kind: "unauthenticated" };
-    }
-  },
-});
+import { authSessionQueryOptions } from "@/lib/session-queries";
 
 function CopyCommand(props: { command: string; ariaLabel: string }) @{
   const [copied, setCopied] = useState(false);
@@ -62,19 +44,19 @@ function CopyCommand(props: { command: string; ariaLabel: string }) @{
   </div>;
 }
 
+/** `/settings/cli` — ox CLI install + sign-in (title/meta via shell). */
 export function CliSettingsPage() @{
-  const loaderData = useLoaderData({ from: "/settings/cli" }) as CliLoaderData | undefined;
+  <AppPage>
+    <CliSettingsContent />
+  </AppPage>;
+}
 
-  useEffect(() => {
-    if (loaderData?.kind === "unauthenticated") {
-      window.location.assign("/login?returnTo=/settings/cli");
-    }
-  }, [loaderData]);
+export function CliSettingsContent() @{
+  const meQ = useQuery(authSessionQueryOptions());
+  // Auth gate (formerly loader): anonymous → login.
+  usePageRedirect(meQ.data === null || meQ.isError ? "/login?returnTo=/settings/cli" : null);
 
-  const origin =
-    loaderData?.kind === "ready" && loaderData.origin
-      ? loaderData.origin
-      : resolvePublicOriginClient();
+  const origin = resolvePublicOriginClient();
   const installCmd = `curl -fsSL ${origin}/cli/install.sh | sh`;
   const loginCmd = `ox auth login --instance ${origin} --token <pat>`;
 

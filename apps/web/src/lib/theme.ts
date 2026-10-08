@@ -22,6 +22,20 @@ export function resolveTheme(pref: ThemePreference): "light" | "dark" {
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
+/**
+ * Resolved app theme in-document — client-side replacement for the retired
+ * `ssrResolvedTheme` server fn (same localStorage + media-query chain; the
+ * middleware now stamps `<html class>` from cookies).
+ */
+export function resolveDocumentTheme(): "light" | "dark" {
+  return resolveTheme(readThemePreference());
+}
+
+/** Shiki theme matching the document theme (was `resolveSsrHighlightTheme`). */
+export function resolveDocumentHighlightTheme(): "oxidean-light" | "oxidean-dark" {
+  return resolveDocumentTheme() === "dark" ? "oxidean-dark" : "oxidean-light";
+}
+
 /** Parse `oxidean-theme` from a Cookie header (SSR). */
 export function themePreferenceFromCookieHeader(
   cookieHeader: string | undefined | null,

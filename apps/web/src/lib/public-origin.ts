@@ -136,3 +136,37 @@ export function resolveSshPort(envPort = process.env.OXIDEAN_SSH_PORT): number {
   }
   return 2222;
 }
+
+/**
+ * Meta tag content injected by the serving middleware (the tier that can read
+ * OXIDEAN_SSH_* env). Empty string when absent.
+ */
+function advertiseMeta(name: string): string {
+  if (typeof document === "undefined") return "";
+  return document.querySelector(`meta[name="${name}"]`)?.getAttribute("content")?.trim() ?? "";
+}
+
+/**
+ * Advertised SSH hostname from `<meta name="oxidean:ssh-host">` (middleware
+ * injected); falls back to the public origin's hostname.
+ */
+export function resolveSshAdvertiseHost(publicOrigin?: string): string {
+  const fromMeta = advertiseMeta("oxidean:ssh-host");
+  if (fromMeta) {
+    return fromMeta;
+  }
+  const origin = (publicOrigin || "").trim() || resolvePublicOriginClient();
+  try {
+    const u = new URL(origin.includes("://") ? origin : `http://${origin}`);
+    return u.hostname || "localhost";
+  } catch {
+    return "localhost";
+  }
+}
+
+/** Advertised SSH port from `<meta name="oxidean:ssh-port">`; default 2222. */
+export function resolveSshAdvertisePort(): number {
+  const n = Number.parseInt(advertiseMeta("oxidean:ssh-port"), 10);
+  if (Number.isFinite(n) && n > 0) return n;
+  return 2222;
+}

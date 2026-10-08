@@ -3,7 +3,6 @@
  * reset must not throw Octane DOM reconciliation errors.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createElement } from "octane";
 import {
   cleanupBrowserMount,
   clickTestId,
@@ -17,16 +16,6 @@ import { act } from "octane";
 const meMock = vi.fn();
 const getSettingsMock = vi.fn();
 const updateSettingsMock = vi.fn();
-
-const loaderState = vi.hoisted(() => {
-  let data: unknown;
-  return {
-    get: () => data,
-    set: (next: unknown) => {
-      data = next;
-    },
-  };
-});
 
 vi.mock("@/lib/api-client", () => ({
   apiClient: {
@@ -42,27 +31,29 @@ vi.mock("@/lib/api-client", () => ({
   },
 }));
 
-vi.mock("@/lib/toast", () => ({
-  toastSuccess: vi.fn(),
-  toastError: vi.fn(),
-  toastWarning: vi.fn(),
-}));
+vi.mock("@/lib/toast", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/toast")>();
+  return {
+    ...actual,
+    toastSuccess: vi.fn(),
+    toastError: vi.fn(),
+    toastWarning: vi.fn(),
+  };
+});
 
 // Route module imports ssr-auth → tanstack-start; stub so Chromium Vite never loads Start.
-vi.mock("@/lib/ssr-auth", () => ({
-  fetchSessionMe: vi.fn(),
-  fetchAdminMcpSettings: vi.fn(),
-}));
+const fetchSessionMeMock = vi.hoisted(() => vi.fn());
+const fetchAdminMcpSettingsMock = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/ssr-auth", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/ssr-auth")>();
+  return {
+    ...actual,
+    fetchSessionMe: fetchSessionMeMock,
+    fetchAdminMcpSettings: fetchAdminMcpSettingsMock,
+  };
+});
 
 // Avoid importing Start/router entry points in the Chromium iframe.
-vi.mock("@octanejs/tanstack-router", () => ({
-  createFileRoute: () => (opts: unknown) => opts,
-  useLoaderData: () => loaderState.get(),
-  // No RouterProvider — AppLink must see "no router" and render its <a> fallback.
-  useRouter: () => undefined,
-  Link: (props: { href?: string; children?: unknown }) =>
-    createElement("a", { href: props.href }, props.children as never),
-}));
 
 import { AdminMcpPage } from "./mcp";
 
@@ -90,13 +81,11 @@ beforeEach(() => {
 
   meMock.mockResolvedValue({ ok: true, data: sysAdmin });
   getSettingsMock.mockResolvedValue({ ok: true, data: enabledSettings });
+  fetchSessionMeMock.mockReset();
+  fetchSessionMeMock.mockImplementation(() => meMock());
+  fetchAdminMcpSettingsMock.mockReset();
+  fetchAdminMcpSettingsMock.mockImplementation(() => getSettingsMock());
   updateSettingsMock.mockResolvedValue({ ok: true, data: disabledSettings });
-
-  loaderState.set({
-    kind: "ready",
-    me: sysAdmin,
-    settings: enabledSettings,
-  });
 });
 
 afterEach(async () => {

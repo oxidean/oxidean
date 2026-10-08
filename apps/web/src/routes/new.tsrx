@@ -1,11 +1,6 @@
-import { createFileRoute, redirect, useLoaderData } from "@octanejs/tanstack-router";
-import { useForm } from "@octanejs/tanstack-form";
-import type {
-  OrgMineEntry,
-  RepoCreateDefaults,
-  RepoVisibility,
-  UserPublic,
-} from "@oxidean/api-client";
+import { queryOptions, useQuery } from "@octanejs/tanstack-query";
+import { useForm, useStore } from "@octanejs/tanstack-form";
+import type { OrgMineEntry, RepoCreateDefaults, RepoVisibility } from "@oxidean/api-client";
 import { Check, ChevronDown } from "@octanejs/lucide";
 import { useState } from "octane";
 import { AuthErrorBanner, AuthShell } from "@/components/auth-shell";
@@ -28,57 +23,47 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { apiClient } from "@/lib/api-client";
+import { usePageRedirect } from "@/lib/nav.tsrx";
+import { authSessionQueryOptions } from "@/lib/session-queries";
 import { listLicensePickerOptions } from "@/lib/spdx-licenses";
-import { fetchRepoCreateDefaults, fetchSessionMe } from "@/lib/ssr-auth";
+import { fetchRepoCreateDefaults } from "@/lib/ssr-auth";
 import { fetchOrgListMine } from "@/lib/ssr-org";
 import { cn } from "@/lib/utils";
+import { AppPage } from "@/components/app-page";
 import { AppLink } from "@/components/ui/app-link";
-
-export type NewLoaderData = {
-  user: UserPublic;
-  defaults: RepoCreateDefaults | null;
-  /** Owner/Admin orgs eligible for /new owner picker (D-ORG-06). */
-  ownerOrgs: OrgMineEntry[];
-};
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
 const NAME_HELPER = "Letters, digits, hyphen, underscore, and period. Reserved names are rejected.";
 const DUPLICATE_NAME_ERROR = "A repository with this name already exists. Choose a different name.";
 
-export const Route = createFileRoute("/new")({
-  component: NewPage,
-  head: () => ({ meta: [{ title: "New repository · Oxidean" }] }),
-  beforeLoad: async () => {
-    try {
-      const me = await fetchSessionMe();
-      if (!me.ok) {
-        throw redirect({ href: "/login?returnTo=/new" });
-      }
-    } catch (e) {
-      if (e && typeof e === "object" && "href" in e) throw e;
-      throw redirect({ href: "/login?returnTo=/new" });
-    }
-  },
-  loader: async (): Promise<NewLoaderData> => {
-    const me = await fetchSessionMe();
-    if (!me.ok) {
-      throw redirect({ href: "/login?returnTo=/new" });
-    }
-    let defaults: RepoCreateDefaults | null = null;
-    let ownerOrgs: OrgMineEntry[] = [];
-    if (me.data.email_verified) {
+/** Repo-create defaults — soft (null on failure), verified users only. */
+function repoCreateDefaultsQueryOptions(enabled: boolean) {
+  return queryOptions({
+    queryKey: ["repo", "createDefaults"],
+    queryFn: async (): Promise<RepoCreateDefaults | null> => {
       const res = await fetchRepoCreateDefaults();
-      if (res.ok) {
-        defaults = res.data;
-      }
-      const mine = await fetchOrgListMine();
-      if (mine.ok) {
-        ownerOrgs = mine.data.orgs.filter((o) => o.role === "owner" || o.role === "admin");
-      }
-    }
-    return { user: me.data, defaults, ownerOrgs };
-  },
-});
+      return res.ok ? res.data : null;
+    },
+    enabled,
+    retry: false,
+    staleTime: 60_000,
+  });
+}
+
+/** Owner/Admin orgs for the /new owner picker (D-ORG-06) — soft, verified only. */
+function newOwnerOrgsQueryOptions(enabled: boolean) {
+  return queryOptions({
+    queryKey: ["org", "listMine", "adminable"],
+    queryFn: async (): Promise<OrgMineEntry[]> => {
+      const res = await fetchOrgListMine();
+      if (!res.ok) return [];
+      return res.data.orgs.filter((o) => o.role === "owner" || o.role === "admin");
+    },
+    enabled,
+    retry: false,
+    staleTime: 60_000,
+  });
+}
 
 function ownerOptionLabel(slug: string, selfUsername: string, orgs: OrgMineEntry[]): string {
   if (slug === selfUsername) return `@${selfUsername}`;
@@ -90,19 +75,31 @@ function ownerOptionLabel(slug: string, selfUsername: string, orgs: OrgMineEntry
   return slug;
 }
 
-/** Exported for /new Wave 0 integration tests (D-11 verify wall). */
+/** `/new` — create repository (title/meta via shell). */
 export function NewPage() @{
-  const data = useLoaderData({ from: "/new" }) as NewLoaderData | undefined;
-  const user = data?.user;
-  const showWall = !user || !user.email_verified;
-  const ownerOrgs = data?.ownerOrgs ?? [];
+  <AppPage>
+    <NewContent />
+  </AppPage>;
+}
 
-  const stacks = data?.defaults?.stacks ?? [];
-  const gitignores = data?.defaults?.gitignores ?? [];
+/** Exported for /new Wave 0 integration tests (D-11 verify wall). */
+export function NewContent() @{
+  const meQ = useQuery(authSessionQueryOptions());
+  const user = meQ.data ?? undefined;
+  // Auth gate (formerly beforeLoad): anonymous → login.
+  usePageRedirect(meQ.data === null || meQ.isError ? "/login?returnTo=/new" : null);
+  const verified = user?.email_verified === true;
+  const defaultsQ = useQuery(repoCreateDefaultsQueryOptions(verified));
+  const orgsQ = useQuery(newOwnerOrgsQueryOptions(verified));
+  const showWall = !user || !verified;
+  const ownerOrgs = orgsQ.data ?? [];
+
+  const stacks = defaultsQ.data?.stacks ?? [];
+  const gitignores = defaultsQ.data?.gitignores ?? [];
   const licenseOptions = listLicensePickerOptions();
 
   const initialVisibility: RepoVisibility =
-    data?.defaults?.default_visibility === "private" ? "private" : "public";
+    defaultsQ.data?.default_visibility === "private" ? "private" : "public";
 
   const [nameError, setNameError] = useState("");
   const [formError, setFormError] = useState("");
@@ -162,6 +159,13 @@ export function NewPage() @{
     },
   });
 
+  // Read at component scope — form.Field nested inside a form.Subscribe
+  // render-prop crashes under octane 0.10 (children resolver invokes function
+  // children eagerly).
+  const values = useStore(form.store, (s) => s.values);
+  const selectedOwner = values.ownerSlug || selfUsername;
+  const ownerDisplay = ownerOptionLabel(selectedOwner, selfUsername, ownerOrgs);
+
   @if (showWall) {
     <AuthShell title="Verify your email" support="Verify your email before creating a repository.">
       <AppLink href="/verify" className={cn(buttonVariants({ variant: "default" }))}>
@@ -171,215 +175,206 @@ export function NewPage() @{
   } @else {
     {
       /* octane-dom-race-ok: /new create form — reviewed; Select list @for + error
-        banner @if inside Subscribe; restructure deferred from PAT mint work. */
+        banner @if; restructure deferred from PAT mint work. */
     }
-    <form.Subscribe selector={(s) => s.values} /* octane-dom-race-ok */>
-      {(values) => {
-        const selectedOwner = values.ownerSlug || selfUsername;
-        const ownerDisplay = ownerOptionLabel(selectedOwner, selfUsername, ownerOrgs);
+    <div className="mx-auto max-w-2xl px-4 py-16">
+      <h1 className="font-[family-name:var(--font-display)] text-[24px] font-semibold leading-[1.2] text-foreground">
+        Create a new repository
+      </h1>
+      <p className="mt-2 text-[16px] text-muted-foreground">
+        Choose a personal account or an organization you administer.
+      </p>
 
-        return (
-          <div className="mx-auto max-w-2xl px-4 py-16">
-            <h1 className="font-[family-name:var(--font-display)] text-[24px] font-semibold leading-[1.2] text-foreground">
-              Create a new repository
-            </h1>
-            <p className="mt-2 text-[16px] text-muted-foreground">
-              Choose a personal account or an organization you administer.
-            </p>
+      <form
+        className="mt-8 flex flex-col gap-6"
+        method="post"
+        action="#"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void form.handleSubmit();
+        }}
+      >
+        @if (formError) {
+          <AuthErrorBanner message={formError} />;
+        }
 
-            <form
-              className="mt-8 flex flex-col gap-6"
-              method="post"
-              action="#"
-              onSubmit={(e) => {
-                e.preventDefault();
-                void form.handleSubmit();
-              }}
-            >
-              @if (formError) {
-                <AuthErrorBanner message={formError} />;
-              }
-
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="repo-owner">Owner</Label>
-                <SelectRoot
-                  value={selectedOwner}
-                  onValueChange={(next) => {
-                    if (typeof next === "string") form.setFieldValue("ownerSlug", next);
-                  }}
-                >
-                  <SelectTrigger id="repo-owner" className="w-full max-w-sm" aria-label="Owner">
-                    <SelectValue>{ownerDisplay as string}</SelectValue>
-                    <SelectIcon>
-                      <ChevronDown aria-hidden size={16} />
-                    </SelectIcon>
-                  </SelectTrigger>
-                  {/* octane-dom-race-ok: Base UI SelectPortal has no keepMounted
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="repo-owner">Owner</Label>
+          <SelectRoot
+            value={selectedOwner}
+            onValueChange={(next) => {
+              if (typeof next === "string") form.setFieldValue("ownerSlug", next);
+            }}
+          >
+            <SelectTrigger id="repo-owner" className="w-full max-w-sm" aria-label="Owner">
+              <SelectValue>{ownerDisplay as string}</SelectValue>
+              <SelectIcon>
+                <ChevronDown aria-hidden size={16} />
+              </SelectIcon>
+            </SelectTrigger>
+            {/* octane-dom-race-ok: Base UI SelectPortal has no keepMounted
                       escape hatch; popup is anchor-scoped under the Select root. */}
-                  <SelectPortal>
-                    <SelectPositioner sideOffset={4}>
-                      <SelectPopup className="min-w-[12rem]">
-                        <SelectList>
-                          <SelectItem value={selfUsername}>
-                            <SelectItemIndicator>
-                              <Check aria-hidden size={16} className="text-primary" />
-                            </SelectItemIndicator>
-                            <SelectItemText>{("@" + selfUsername) as string}</SelectItemText>
-                          </SelectItem>
-                          @for (const org of ownerOrgs; key org.slug) {
-                            <SelectItem value={org.slug}>
-                              <SelectItemIndicator>
-                                <Check aria-hidden size={16} className="text-primary" />
-                              </SelectItemIndicator>
-                              <SelectItemText>
-                                {
-                                  (org.display_name?.trim()
-                                    ? `${org.display_name.trim()} (${org.slug})`
-                                    : org.slug) as string
-                                }
-                              </SelectItemText>
-                            </SelectItem>;
+            <SelectPortal>
+              <SelectPositioner sideOffset={4}>
+                <SelectPopup className="min-w-[12rem]">
+                  <SelectList>
+                    <SelectItem value={selfUsername}>
+                      <SelectItemIndicator>
+                        <Check aria-hidden size={16} className="text-primary" />
+                      </SelectItemIndicator>
+                      <SelectItemText>{("@" + selfUsername) as string}</SelectItemText>
+                    </SelectItem>
+                    @for (const org of ownerOrgs; key org.slug) {
+                      <SelectItem value={org.slug}>
+                        <SelectItemIndicator>
+                          <Check aria-hidden size={16} className="text-primary" />
+                        </SelectItemIndicator>
+                        <SelectItemText>
+                          {
+                            (org.display_name?.trim()
+                              ? `${org.display_name.trim()} (${org.slug})`
+                              : org.slug) as string
                           }
-                        </SelectList>
-                      </SelectPopup>
-                    </SelectPositioner>
-                  </SelectPortal>
-                </SelectRoot>
-              </div>
-
-              <form.Field name="name">
-                {(field) => (
-                  <div className="flex flex-col gap-2">
-                    <Label htmlFor="repo-name">Repository name</Label>
-                    <Input
-                      id="repo-name"
-                      name="name"
-                      autoComplete="off"
-                      value={field.state.value}
-                      aria-invalid={nameError ? true : undefined}
-                      onBlur={field.handleBlur}
-                      onInput={(ev) => {
-                        field.handleChange((ev.currentTarget as HTMLInputElement).value);
-                        if (nameError) setNameError("");
-                      }}
-                      required
-                    />
-                    <p className="text-[14px] font-normal leading-[1.4] text-muted-foreground">
-                      {NAME_HELPER}
-                    </p>
-                    @if (nameError) {
-                      <p role="alert" className="text-[14px] text-destructive">
-                        {nameError as string}
-                      </p>;
+                        </SelectItemText>
+                      </SelectItem>;
                     }
-                  </div>
-                )}
-              </form.Field>
+                  </SelectList>
+                </SelectPopup>
+              </SelectPositioner>
+            </SelectPortal>
+          </SelectRoot>
+        </div>
 
-              <form.Field name="description">
-                {(field) => (
-                  <div className="flex flex-col gap-2">
-                    <Label htmlFor="repo-description">Description (optional)</Label>
-                    <Textarea
-                      id="repo-description"
-                      name="description"
-                      rows={3}
-                      className="max-w-full break-words [overflow-wrap:anywhere]"
-                      value={field.state.value}
-                      onBlur={field.handleBlur}
-                      onInput={(ev) =>
-                        field.handleChange((ev.currentTarget as HTMLTextAreaElement).value)
-                      }
-                    />
-                  </div>
-                )}
-              </form.Field>
+        <form.Field name="name">
+          {(field) => (
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="repo-name">Repository name</Label>
+              <Input
+                id="repo-name"
+                name="name"
+                autoComplete="off"
+                value={field.state.value}
+                aria-invalid={nameError ? true : undefined}
+                onBlur={field.handleBlur}
+                onInput={(ev) => {
+                  field.handleChange((ev.currentTarget as HTMLInputElement).value);
+                  if (nameError) setNameError("");
+                }}
+                required
+              />
+              <p className="text-[14px] font-normal leading-[1.4] text-muted-foreground">
+                {NAME_HELPER}
+              </p>
+              @if (nameError) {
+                <p role="alert" className="text-[14px] text-destructive">
+                  {nameError as string}
+                </p>;
+              }
+            </div>
+          )}
+        </form.Field>
 
-              <fieldset className="flex flex-col gap-2">
-                <legend className="text-[14px] font-normal leading-[1.4] text-foreground">
-                  Visibility
-                </legend>
-                <div className="flex flex-wrap gap-2" role="group" aria-label="Visibility">
-                  <Button
-                    type="button"
-                    variant={values.visibility === "public" ? "default" : "secondary"}
-                    aria-pressed={values.visibility === "public"}
-                    onClick={() => form.setFieldValue("visibility", "public")}
-                  >
-                    Public
-                  </Button>
-                  <Button
-                    type="button"
-                    variant={values.visibility === "private" ? "default" : "secondary"}
-                    aria-pressed={values.visibility === "private"}
-                    onClick={() => form.setFieldValue("visibility", "private")}
-                  >
-                    Private
-                  </Button>
-                </div>
-              </fieldset>
-
-              <div className="flex flex-col gap-5">
-                <div>
-                  <p className="text-[14px] font-semibold text-foreground">Templates (optional)</p>
-                  <p className="mt-1 text-[13px] text-muted-foreground">
-                    Seed an initial commit from an official-style stack starter, an instance pack,
-                    or a user template repository — or leave as None for an empty Quick setup repo.
-                  </p>
-                </div>
-                <TemplatePicker
-                  id="repo-stack"
-                  label="Stack / template"
-                  description="Official starters, instance packs, and published template repos. Provenance is shown on each card."
-                  value={values.stackId}
-                  options={stacks}
-                  noneLabel="None"
-                  noneDescription="No template files — empty repo with Quick setup."
-                  onChange={(id) => {
-                    form.setFieldValue("stackId", id);
-                    if (id === "none") {
-                      form.setFieldValue("gitignoreId", "none");
-                      return;
-                    }
-                    const pack = stacks.find((s) => s.id === id);
-                    form.setFieldValue("gitignoreId", pack?.default_gitignore ?? "none");
-                  }}
-                />
-                <TemplatePicker
-                  id="repo-license"
-                  label="License"
-                  description="LICENSE file for the initial commit. Browse popular licenses or search the full SPDX catalog."
-                  value={values.licenseId}
-                  options={licenseOptions}
-                  noneLabel="None"
-                  noneDescription="No LICENSE in the initial commit."
-                  browseGroups={["Popular"]}
-                  searchPlaceholder="Search SPDX licenses…"
-                  onChange={(id) => form.setFieldValue("licenseId", id)}
-                />
-                <TemplatePicker
-                  id="repo-gitignore"
-                  label=".gitignore"
-                  description="Language and tooling ignore rules. Auto-filled from the stack; set to None to skip."
-                  value={values.gitignoreId}
-                  options={gitignores}
-                  noneLabel="None"
-                  noneDescription="No .gitignore in the initial commit."
-                  onChange={(id) => form.setFieldValue("gitignoreId", id)}
-                />
-              </div>
-
-              <Button type="submit" disabled={pending}>
-                @if (pending) {
-                  <>Creating…</>;
-                } @else {
-                  <>Create repository</>;
+        <form.Field name="description">
+          {(field) => (
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="repo-description">Description (optional)</Label>
+              <Textarea
+                id="repo-description"
+                name="description"
+                rows={3}
+                className="max-w-full break-words [overflow-wrap:anywhere]"
+                value={field.state.value}
+                onBlur={field.handleBlur}
+                onInput={(ev) =>
+                  field.handleChange((ev.currentTarget as HTMLTextAreaElement).value)
                 }
-              </Button>
-            </form>
+              />
+            </div>
+          )}
+        </form.Field>
+
+        <fieldset className="flex flex-col gap-2">
+          <legend className="text-[14px] font-normal leading-[1.4] text-foreground">
+            Visibility
+          </legend>
+          <div className="flex flex-wrap gap-2" role="group" aria-label="Visibility">
+            <Button
+              type="button"
+              variant={values.visibility === "public" ? "default" : "secondary"}
+              aria-pressed={values.visibility === "public"}
+              onClick={() => form.setFieldValue("visibility", "public")}
+            >
+              Public
+            </Button>
+            <Button
+              type="button"
+              variant={values.visibility === "private" ? "default" : "secondary"}
+              aria-pressed={values.visibility === "private"}
+              onClick={() => form.setFieldValue("visibility", "private")}
+            >
+              Private
+            </Button>
           </div>
-        );
-      }}
-    </form.Subscribe>;
+        </fieldset>
+
+        <div className="flex flex-col gap-5">
+          <div>
+            <p className="text-[14px] font-semibold text-foreground">Templates (optional)</p>
+            <p className="mt-1 text-[13px] text-muted-foreground">
+              Seed an initial commit from an official-style stack starter, an instance pack, or a
+              user template repository — or leave as None for an empty Quick setup repo.
+            </p>
+          </div>
+          <TemplatePicker
+            id="repo-stack"
+            label="Stack / template"
+            description="Official starters, instance packs, and published template repos. Provenance is shown on each card."
+            value={values.stackId}
+            options={stacks}
+            noneLabel="None"
+            noneDescription="No template files — empty repo with Quick setup."
+            onChange={(id) => {
+              form.setFieldValue("stackId", id);
+              if (id === "none") {
+                form.setFieldValue("gitignoreId", "none");
+                return;
+              }
+              const pack = stacks.find((s) => s.id === id);
+              form.setFieldValue("gitignoreId", pack?.default_gitignore ?? "none");
+            }}
+          />
+          <TemplatePicker
+            id="repo-license"
+            label="License"
+            description="LICENSE file for the initial commit. Browse popular licenses or search the full SPDX catalog."
+            value={values.licenseId}
+            options={licenseOptions}
+            noneLabel="None"
+            noneDescription="No LICENSE in the initial commit."
+            browseGroups={["Popular"]}
+            searchPlaceholder="Search SPDX licenses…"
+            onChange={(id) => form.setFieldValue("licenseId", id)}
+          />
+          <TemplatePicker
+            id="repo-gitignore"
+            label=".gitignore"
+            description="Language and tooling ignore rules. Auto-filled from the stack; set to None to skip."
+            value={values.gitignoreId}
+            options={gitignores}
+            noneLabel="None"
+            noneDescription="No .gitignore in the initial commit."
+            onChange={(id) => form.setFieldValue("gitignoreId", id)}
+          />
+        </div>
+
+        <Button type="submit" disabled={pending}>
+          @if (pending) {
+            <>Creating…</>;
+          } @else {
+            <>Create repository</>;
+          }
+        </Button>
+      </form>
+    </div>;
   }
 }

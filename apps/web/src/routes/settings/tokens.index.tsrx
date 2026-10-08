@@ -1,4 +1,5 @@
-import { createFileRoute, useLoaderData } from "@octanejs/tanstack-router";
+import { queryOptions, useQuery } from "@octanejs/tanstack-query";
+import { AppPage } from "@/components/app-page";
 import type { PatListItem, UserPublic } from "@oxidean/api-client";
 import { useEffect, useState } from "octane";
 import { ChevronDown } from "@octanejs/lucide";
@@ -22,34 +23,37 @@ export type TokensLoaderData =
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
 
-export const Route = createFileRoute("/settings/tokens/")({
-  component: TokensPage,
-  head: () => ({ meta: [{ title: "Personal access tokens · Oxidean" }] }),
-  loader: async (): Promise<TokensLoaderData> => {
-    try {
-      const res = await fetchSessionMe();
-      if (!res.ok) {
-        if (res.error.code === "auth.unauthenticated") {
-          return { kind: "unauthenticated" };
+function settingsTokensQueryOptions() {
+  return queryOptions({
+    queryKey: ["settings", "settingsTokens"],
+    queryFn: async (): Promise<TokensLoaderData> => {
+      try {
+        const res = await fetchSessionMe();
+        if (!res.ok) {
+          if (res.error.code === "auth.unauthenticated") {
+            return { kind: "unauthenticated" };
+          }
+          return {
+            kind: "error",
+            message: res.error.message || "Could not load session.",
+          };
         }
-        return {
-          kind: "error",
-          message: res.error.message || "Could not load session.",
-        };
+        const listRes = await fetchPatList();
+        if (!listRes.ok) {
+          return {
+            kind: "error",
+            message: listRes.error.message || "Could not load tokens.",
+          };
+        }
+        return { kind: "ready", user: res.data, tokens: listRes.data };
+      } catch {
+        return { kind: "error", message: NETWORK_ERROR };
       }
-      const listRes = await fetchPatList();
-      if (!listRes.ok) {
-        return {
-          kind: "error",
-          message: listRes.error.message || "Could not load tokens.",
-        };
-      }
-      return { kind: "ready", user: res.data, tokens: listRes.data };
-    } catch {
-      return { kind: "error", message: NETWORK_ERROR };
-    }
-  },
-});
+    },
+    retry: false,
+    staleTime: 30_000,
+  });
+}
 
 type Phase =
   | { kind: "loading" }
@@ -58,7 +62,13 @@ type Phase =
 
 /** Exported for tokens.integration.test.ts (GIT-11 / D-14). */
 export function TokensPage() @{
-  const loaderData = useLoaderData({ from: "/settings/tokens/" }) as TokensLoaderData | undefined;
+  <AppPage>
+    <TokensContent />
+  </AppPage>;
+}
+
+export function TokensContent() @{
+  const loaderData = useQuery(settingsTokensQueryOptions()).data;
 
   useEffect(() => {
     if (loaderData?.kind === "unauthenticated") {

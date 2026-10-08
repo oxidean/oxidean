@@ -1,7 +1,6 @@
-import type { FileRouteTypes } from "@/routeTree.gen";
-
-/** Union of typed `Link` / `navigate({ to })` destinations from the route tree. */
-export type AppTo = FileRouteTypes["to"];
-
-/** Union of full pathnames generated for this app. */
-export type AppPath = FileRouteTypes["fullPaths"];
+/**
+ * Route-typing shims — the TanStack route tree is gone; destinations are
+ * plain strings now (Astro pages + ClientRouter).
+ */
+export type AppTo = string;
+export type AppPath = string;

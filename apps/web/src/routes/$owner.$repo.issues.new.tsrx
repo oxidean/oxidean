@@ -1,12 +1,11 @@
-import {
-  createFileRoute,
-  useLoaderData,
-  useNavigate,
-  useParams,
-  useSearch,
-} from "@octanejs/tanstack-router";
 import { useForm } from "@octanejs/tanstack-form";
-import { useQuery } from "@octanejs/tanstack-query";
+import { queryOptions, useQuery } from "@octanejs/tanstack-query";
+import { navigate as astroNavigate } from "astro:transitions/client";
+import { useRepoLayoutData } from "@/lib/repo-store.tsrx";
+import { matchPath, routeHref, searchRecord } from "@/lib/route-params";
+import { usePathname, useSearchString } from "@/lib/pathname.tsrx";
+import { RepoLayout } from "@/routes/$owner.$repo.tsrx";
+import { AppPage } from "@/components/app-page";
 import type { RepoFileTemplate, RepoPublic, RepoTemplatesListResponse } from "@oxidean/api-client";
 import { useEffect, useState } from "octane";
 import { AuthErrorBanner } from "@/components/auth-shell";
@@ -19,7 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiClient } from "@/lib/api-client";
-import type { RepoLayoutLoaderData } from "@/lib/repo-store";
+
 import { fetchRepoFileTemplates, fetchRepoGet } from "@/lib/ssr-repo";
 import { useChromeAccountState } from "@/lib/use-chrome-account";
 
@@ -35,7 +34,7 @@ export type IssuesNewLoaderData =
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
 
 async function loadNewIssuePage(owner: string, repoName: string): Promise<IssuesNewLoaderData> {
-  const got = await fetchRepoGet({ data: { owner, name: repoName } });
+  const got = await fetchRepoGet({ owner, name: repoName });
   if (!got.ok) {
     if (got.error.code === "repo.not_found") return { kind: "not_found" };
     return {
@@ -48,7 +47,7 @@ async function loadNewIssuePage(owner: string, repoName: string): Promise<Issues
     return { kind: "disabled", repo: got.data };
   }
   // COL-02: template listing failure must not block the create form.
-  const tpl = await fetchRepoFileTemplates({ data: { owner, name: repoName } }).catch(() => null);
+  const tpl = await fetchRepoFileTemplates({ owner, name: repoName }).catch(() => null);
   return { kind: "ready", repo: got.data, templates: tpl?.ok ? tpl.data : EMPTY_TEMPLATES };
 }
 
@@ -66,44 +65,54 @@ function matchTemplate(
   );
 }
 
-export const Route = createFileRoute("/$owner/$repo/issues/new")({
-  component: IssuesNewPage,
-  validateSearch: (search: Record<string, unknown>) => ({
-    template: typeof search.template === "string" ? search.template : undefined,
-  }),
-  head: ({ params }) => ({
-    meta: [
-      {
-        title: `New issue · ${(params as { owner: string }).owner}/${(params as { repo: string }).repo} · Oxidean`,
-      },
+function validateSearch(search: Record<string, unknown>) {
+  return { template: typeof search.template === "string" ? search.template : undefined };
+}
+
+function repoIssuesNewQueryOptions(params: Record<string, string | undefined>, searchStr = "") {
+  return queryOptions({
+    queryKey: [
+      "repo-page",
+      "/$owner/$repo/issues/new",
+      params.owner ?? "",
+      params.repo ?? "",
+      params._splat ?? "",
+      params.n ?? "",
+      params.sha ?? "",
+      params.tag ?? "",
+      params.run ?? "",
+      searchStr,
     ],
-  }),
-  loader: async ({ params }): Promise<IssuesNewLoaderData> => {
-    const owner = String((params as { owner?: string }).owner ?? "");
-    const repoName = String((params as { repo?: string }).repo ?? "");
-    try {
-      return await loadNewIssuePage(owner, repoName);
-    } catch {
-      return { kind: "error", message: NETWORK_ERROR };
-    }
-  },
-});
+    queryFn: async (): Promise<IssuesNewLoaderData> => {
+      const owner = String((params as { owner?: string }).owner ?? "");
+      const repoName = String((params as { repo?: string }).repo ?? "");
+      try {
+        return await loadNewIssuePage(owner, repoName);
+      } catch {
+        return { kind: "error", message: NETWORK_ERROR };
+      }
+    },
+    enabled: Boolean(params.owner && params.repo),
+    retry: false,
+    staleTime: 30_000,
+  });
+}
 
 /** Create issue form with Write | Preview (D-ISS-10 / D-ISS-19) + COL-02 template chooser. */
-export function IssuesNewPage() @{
-  const params = useParams({ strict: false }) as {
+function IssuesNewPageContent() @{
+  const pathname = usePathname();
+  const searchStr = useSearchString();
+  const params = (matchPath("/$owner/$repo/issues/new", pathname) ?? {}) as {
     owner?: string;
     repo?: string;
   };
-  const search = useSearch({ strict: false }) as { template?: string };
+  const search = validateSearch(searchRecord(searchStr)) as { template?: string };
   const owner = params.owner ?? "";
   const repoName = params.repo ?? "";
-  const navigate = useNavigate();
+  const navigate = astroNavigate;
   const account = useChromeAccountState();
-  const layout = useLoaderData({ from: "/$owner/$repo" }) as RepoLayoutLoaderData | undefined;
-  const routeLoader = useLoaderData({ from: "/$owner/$repo/issues/new" }) as
-    | IssuesNewLoaderData
-    | undefined;
+  const layout = useRepoLayoutData();
+  const routeLoader = useQuery(repoIssuesNewQueryOptions(params, searchStr)).data;
 
   const issueTemplates = routeLoader?.kind === "ready" ? (routeLoader.templates?.issues ?? []) : [];
   const requestedTemplate = matchTemplate(issueTemplates, search.template);
@@ -113,10 +122,9 @@ export function IssuesNewPage() @{
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   // Chooser resolves when a template (or blank) is picked — or `?template=` /
-  // a single template already picked one. Repos with no templates never see it.
-  const [templateChosen, setTemplateChosen] = useState(
-    initialTemplate !== null || issueTemplates.length <= 1,
-  );
+  // a single template auto-picks via the effect below. Seeding must not read
+  // `issueTemplates`: the list is empty while the page query is still pending.
+  const [templateChosen, setTemplateChosen] = useState(initialTemplate !== null);
   const [appliedTemplate, setAppliedTemplate] = useState<RepoFileTemplate | null>(initialTemplate);
 
   const form = useForm({
@@ -143,14 +151,13 @@ export function IssuesNewPage() @{
           setPending(false);
           return;
         }
-        await navigate({
-          to: "/$owner/$repo/issues/$n",
-          params: {
+        await navigate(
+          routeHref("/$owner/$repo/issues/$n", {
             owner,
             repo: repoName,
             n: String(res.data.number),
-          },
-        });
+          }),
+        );
       } catch {
         setError(NETWORK_ERROR);
         setPending(false);
@@ -309,3 +316,12 @@ export function IssuesNewPage() @{
 }
 
 export default IssuesNewPage;
+
+/** Page root — RepoLayout (chrome + repo store) around the leaf content. */
+export function IssuesNewPage() @{
+  <AppPage>
+    <RepoLayout>
+      <IssuesNewPageContent />
+    </RepoLayout>
+  </AppPage>;
+}

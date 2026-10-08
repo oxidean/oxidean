@@ -1,5 +1,11 @@
-import { createFileRoute, useLoaderData, useNavigate, useParams } from "@octanejs/tanstack-router";
 import type { OwnerType, RepoVisibility } from "@oxidean/api-client";
+
+import { navigate as astroNavigate } from "astro:transitions/client";
+import { useRepoLayoutData } from "@/lib/repo-store.tsrx";
+import { matchPath, routeHref } from "@/lib/route-params";
+import { usePathname } from "@/lib/pathname.tsrx";
+import { RepoLayout } from "@/routes/$owner.$repo.tsrx";
+import { AppPage } from "@/components/app-page";
 import { useState } from "octane";
 import { CollaboratorsPanel } from "@/components/repo/collaborators-panel";
 import { BranchProtectionPanel } from "@/components/repo/branch-protection-panel";
@@ -22,19 +28,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { apiClient } from "@/lib/api-client";
-import { type RepoLayoutLoaderData, useRepoStore } from "@/lib/repo-store";
+import { useRepoStore } from "@/lib/repo-store";
 import { toastError, toastSuccess } from "@/lib/toast";
-
-export const Route = createFileRoute("/$owner/$repo/settings")({
-  component: RepoSettingsPage,
-  head: ({ params }) => ({
-    meta: [
-      {
-        title: `Settings · ${(params as { owner: string }).owner}/${(params as { repo: string }).repo} · Oxidean`,
-      },
-    ],
-  }),
-});
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
 const PRIVATE_HELPER = "Only people with access can see this private repository.";
@@ -48,15 +43,16 @@ const UNARCHIVE_BODY =
   "Restores write access. Pushes, issues, pull requests, and releases become editable again. Type the repository name to confirm.";
 
 /** Admin settings — visibility, collaborators, rename/transfer, soft-delete (D-ORG-04 / GIT-16/17). */
-export function RepoSettingsPage() @{
-  const params = useParams({ from: "/$owner/$repo/settings" }) as {
+function RepoSettingsPageContent() @{
+  const pathname = usePathname();
+  const params = (matchPath("/$owner/$repo/settings/", pathname) ?? {}) as {
     owner: string;
     repo: string;
   };
   const owner = params.owner ?? "";
   const repoName = params.repo ?? "";
-  const navigate = useNavigate();
-  const layout = useLoaderData({ from: "/$owner/$repo" }) as RepoLayoutLoaderData | undefined;
+  const navigate = astroNavigate;
+  const layout = useRepoLayoutData();
   const setRepo = useRepoStore((s) => s.setRepo);
 
   const repo = layout?.repo ?? null;
@@ -163,13 +159,12 @@ export function RepoSettingsPage() @{
       }
       setRepo(res.data.repo);
       toastSuccess("Repository renamed.");
-      await navigate({
-        to: "/$owner/$repo/settings",
-        params: {
+      await navigate(
+        routeHref("/$owner/$repo/settings", {
           owner: res.data.repo.owner_username,
           repo: res.data.repo.name,
-        },
-      });
+        }),
+      );
     } catch {
       toastError(NETWORK_ERROR);
       setRenamePending(false);
@@ -599,4 +594,13 @@ export function RepoSettingsPage() @{
       />
     </>;
   }
+}
+
+/** Page root — RepoLayout (chrome + repo store) around the leaf content. */
+export function RepoSettingsPage() @{
+  <AppPage>
+    <RepoLayout>
+      <RepoSettingsPageContent />
+    </RepoLayout>
+  </AppPage>;
 }

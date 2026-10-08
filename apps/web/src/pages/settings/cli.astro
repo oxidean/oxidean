@@ -1,0 +1,8 @@
+---
+import AppShell from "@/layouts/AppShell.astro";
+import { CliSettingsPage } from "@/routes/settings/cli.tsrx";
+---
+
+<AppShell title="Command line · Oxidean">
+	<CliSettingsPage client:load />
+</AppShell>

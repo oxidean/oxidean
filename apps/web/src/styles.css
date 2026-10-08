@@ -215,12 +215,8 @@
     scroll-behavior: auto;
   }
 
-  body,
-  #__app {
-    min-height: 100%;
-  }
-
   body {
+    min-height: 100%;
     margin: 0;
     font-family: var(--font-sans);
     font-size: 16px;
@@ -264,6 +260,12 @@
   /* Keep form toasts above the fixed verify callout (same bottom-right corner). */
   body:has(.oct-verify-callout) .oct-toast-viewport {
     bottom: calc(1rem + 11rem);
+  }
+
+  /* Astro islands are custom elements (inline by default) — let their children
+     participate in the parent's flex/grid layout. */
+  astro-island {
+    display: contents;
   }
 
   /* Named region for TanStack Router / View Transitions — header & footer stay put. */

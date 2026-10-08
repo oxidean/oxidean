@@ -1,8 +1,6 @@
 import { cleanup, screen, waitFor } from "@octanejs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithQueryClient } from "@/test/render-with-query";
-import type { RepoLayoutLoaderData } from "@/lib/repo-store";
-import type { ReleasesLoaderData } from "./$owner.$repo.releases.index";
 
 const getMock = vi.fn();
 const listMock = vi.fn();
@@ -31,37 +29,6 @@ const readableRepo = {
   can_admin: true,
   can_write: true,
 };
-
-const layoutData: RepoLayoutLoaderData = {
-  owner: "ada",
-  repoName: "hello",
-  status: "ok",
-  repo: readableRepo,
-  me: null,
-  message: "",
-  publicOrigin: "http://127.0.0.1:8080",
-  sshHost: "127.0.0.1",
-  sshPort: 2222,
-};
-
-const routeLoaderData: ReleasesLoaderData = {
-  kind: "ready",
-  repo: readableRepo,
-  releases: [],
-};
-
-vi.mock("@octanejs/tanstack-router", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@octanejs/tanstack-router")>();
-  return {
-    ...actual,
-    useParams: () => ({ owner: "ada", repo: "hello" }),
-    useLoaderData: (opts?: { from?: string }) => {
-      if (opts?.from === "/$owner/$repo/releases/") return routeLoaderData;
-      if (opts?.from === "/$owner/$repo") return layoutData;
-      return undefined;
-    },
-  };
-});
 
 import { RepoReleasesPage } from "./$owner.$repo.releases.index";
 
@@ -118,6 +85,7 @@ describe("repo Releases tab (GIT-14/15 / D-REL-13)", () => {
 
 describe("/$owner/$repo/releases/ render mount (G-11.1-15)", () => {
   beforeEach(() => {
+    window.history.pushState({}, "", "/ada/hello/releases");
     getMock.mockReset();
     listMock.mockReset();
     getMock.mockResolvedValue({ ok: true, data: readableRepo });

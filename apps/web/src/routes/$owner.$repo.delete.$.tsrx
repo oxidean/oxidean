@@ -1,5 +1,9 @@
-import { createFileRoute, useLoaderData, useParams } from "@octanejs/tanstack-router";
-import { useQuery } from "@octanejs/tanstack-query";
+import { queryOptions, useQuery } from "@octanejs/tanstack-query";
+
+import { matchPath } from "@/lib/route-params";
+import { usePathname, useSearchString } from "@/lib/pathname.tsrx";
+import { RepoLayout } from "@/routes/$owner.$repo.tsrx";
+import { AppPage } from "@/components/app-page";
 import type { RepoBlobResponse, RepoPublic, RepoRefEntry } from "@oxidean/api-client";
 import { useEffect, useState } from "octane";
 import { FileCommitForm, type FileCommitValues } from "@/components/repo/file-commit-form";
@@ -38,7 +42,7 @@ async function loadDeletePage(
   repoName: string,
   splat: string | undefined,
 ): Promise<DeleteLoaderData> {
-  const got = await fetchRepoGet({ data: { owner, name: repoName } });
+  const got = await fetchRepoGet({ owner, name: repoName });
   if (!got.ok) {
     if (got.error.code === "repo.not_found") return { kind: "not_found" };
     return {
@@ -47,22 +51,18 @@ async function loadDeletePage(
     };
   }
   const repo = got.data;
-  const refsRes = await fetchRepoRefs({ data: { owner, name: repoName } });
+  const refsRes = await fetchRepoRefs({ owner, name: repoName });
   const refs: RepoRefEntry[] = refsRes.ok ? refsRes.data.refs : [];
   const knownRefs = refs.map((r) => shortRefName(r.name));
   const parsed = parseRefAndPath(splat, knownRefs);
   const refName = parsed.ref || repo.default_branch || "main";
   if (!parsed.path) return { kind: "not_found" };
 
-  const blobRes = await fetchRepoBlob({
-    data: { owner, name: repoName, ref: refName, path: parsed.path },
-  });
+  const blobRes = await fetchRepoBlob({ owner, name: repoName, ref: refName, path: parsed.path });
   if (!blobRes.ok) {
     // A directory path resolves as a tree, not a blob — probe the tree.
     const { fetchRepoTree } = await import("@/lib/ssr-repo");
-    const treeRes = await fetchRepoTree({
-      data: { owner, name: repoName, ref: refName, path: parsed.path },
-    });
+    const treeRes = await fetchRepoTree({ owner, name: repoName, ref: refName, path: parsed.path });
     if (treeRes.ok) {
       return {
         kind: "ready",
@@ -92,32 +92,41 @@ async function loadDeletePage(
   };
 }
 
-export const Route = createFileRoute("/$owner/$repo/delete/$")({
-  component: RepoFileDeletePage,
-  head: ({ params }) => {
-    const { path } = parseRefAndPath((params as { _splat?: string })._splat);
-    const owner = (params as { owner: string }).owner;
-    const repo = (params as { repo: string }).repo;
-    const base = path.split("/").pop() || path || "path";
-    return {
-      meta: [{ title: `Delete ${base} · ${owner}/${repo} · Oxidean` }],
-    };
-  },
-  loader: async ({ params }): Promise<DeleteLoaderData> => {
-    const owner = String((params as { owner?: string }).owner ?? "");
-    const repoName = String((params as { repo?: string }).repo ?? "");
-    const splat = (params as { _splat?: string })._splat;
-    try {
-      return await loadDeletePage(owner, repoName, splat);
-    } catch {
-      return { kind: "error", message: NETWORK_ERROR };
-    }
-  },
-});
+function repoDeleteQueryOptions(params: Record<string, string | undefined>, searchStr = "") {
+  return queryOptions({
+    queryKey: [
+      "repo-page",
+      "/$owner/$repo/delete/$",
+      params.owner ?? "",
+      params.repo ?? "",
+      params._splat ?? "",
+      params.n ?? "",
+      params.sha ?? "",
+      params.tag ?? "",
+      params.run ?? "",
+      searchStr,
+    ],
+    queryFn: async (): Promise<DeleteLoaderData> => {
+      const owner = String((params as { owner?: string }).owner ?? "");
+      const repoName = String((params as { repo?: string }).repo ?? "");
+      const splat = (params as { _splat?: string })._splat;
+      try {
+        return await loadDeletePage(owner, repoName, splat);
+      } catch {
+        return { kind: "error", message: NETWORK_ERROR };
+      }
+    },
+    enabled: Boolean(params.owner && params.repo),
+    retry: false,
+    staleTime: 30_000,
+  });
+}
 
 /** Delete a file or directory with a signed web commit — GIT-19. */
-export function RepoFileDeletePage() @{
-  const params = useParams({ from: "/$owner/$repo/delete/$" }) as {
+function RepoFileDeletePageContent() @{
+  const pathname = usePathname();
+  const searchStr = useSearchString();
+  const params = (matchPath("/$owner/$repo/delete/$", pathname) ?? {}) as {
     owner: string;
     repo: string;
     _splat?: string;
@@ -125,9 +134,7 @@ export function RepoFileDeletePage() @{
   const owner = params.owner ?? "";
   const repoName = params.repo ?? "";
   const splat = params._splat;
-  const loaderData = useLoaderData({ from: "/$owner/$repo/delete/$" }) as
-    | DeleteLoaderData
-    | undefined;
+  const loaderData = useQuery(repoDeleteQueryOptions(params, searchStr)).data;
 
   const [phase, setPhase] = useState<Phase>(() => loaderData ?? { kind: "loading" });
   const [pending, setPending] = useState(false);
@@ -256,4 +263,13 @@ export function RepoFileDeletePage() @{
       />
     </>;
   }
+}
+
+/** Page root — RepoLayout (chrome + repo store) around the leaf content. */
+export function RepoFileDeletePage() @{
+  <AppPage>
+    <RepoLayout>
+      <RepoFileDeletePageContent />
+    </RepoLayout>
+  </AppPage>;
 }

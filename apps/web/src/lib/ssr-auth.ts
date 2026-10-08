@@ -1,86 +1,49 @@
-import { createServerFn, createServerOnlyFn } from "@octanejs/tanstack-start";
-import { getRequestHeader } from "@octanejs/tanstack-start/server";
-import { createClient, type OxideanClient, type RepoPublic } from "@oxidean/api-client";
+import { type RepoPublic } from "@oxidean/api-client";
+import { apiClient } from "@/lib/api-client";
 import {
   resolveThemeForSsr,
   themePreferenceFromCookieHeader,
   resolvedColorSchemeFromCookieHeader,
 } from "@/lib/theme";
 
-/** API origin for SSR Cookie-forward RPCs — never the browser origin during SSR. */
-function ssrApiOrigin(): string {
-  return (
-    process.env.OXIDEAN_API_ORIGIN?.replace(/\/$/, "") ||
-    process.env.OXIDEAN_E2E_API_ORIGIN?.replace(/\/$/, "") ||
-    "http://127.0.0.1:8080"
-  );
+/** auth.bootstrap_status. */
+export async function fetchBootstrapStatus() {
+  return apiClient.auth.bootstrapStatus();
+}
+
+/** auth.me — browser session cookie. */
+export async function fetchSessionMe() {
+  return apiClient.auth.me();
+}
+
+/** repo.createDefaults for /new visibility + catalogs (D-02, D-08). */
+export async function fetchRepoCreateDefaults() {
+  return apiClient.repo.createDefaults();
+}
+
+/** auth.provider_config (allow_signup). */
+export async function fetchProviderConfig() {
+  return apiClient.auth.providerConfig();
+}
+
+/** repo.listMine (signed-in home). */
+export async function fetchRepoListMine() {
+  return apiClient.repo.listMine();
+}
+
+/** user.get_profile. */
+export async function fetchUserGetProfile() {
+  return apiClient.user.getProfile();
 }
 
 /**
- * Cookie-forward Oxidean RPC client for server fns / SSR loaders.
- * Forwards the incoming request Cookie only — never logs cookie values (T-06-11).
+ * user.listWatched (settings notifications matrix, DEBT-06).
+ * Pages through all watched repos — capped at 500; `truncated` flags the cut.
  */
-function createSsrClient(cookie: string): OxideanClient {
-  return createClient({
-    baseUrl: ssrApiOrigin(),
-    credentials: "include",
-    fetch: (input, init) => {
-      const headers = new Headers(init?.headers);
-      if (cookie) {
-        headers.set("cookie", cookie);
-      }
-      return fetch(input, { ...init, headers });
-    },
-  });
-}
-
-function incomingCookie(): string {
-  return getRequestHeader("cookie") ?? "";
-}
-
-/** SSR: auth.bootstrap_status with Cookie forward. */
-export const fetchBootstrapStatus = createServerFn({ method: "GET" }).handler(async () => {
-  const client = createSsrClient(incomingCookie());
-  return client.auth.bootstrapStatus();
-});
-
-/** SSR: auth.me with Cookie forward. */
-export const fetchSessionMe = createServerFn({ method: "GET" }).handler(async () => {
-  const client = createSsrClient(incomingCookie());
-  return client.auth.me();
-});
-
-/** SSR: repo.createDefaults for /new visibility + catalogs (D-02, D-08). */
-export const fetchRepoCreateDefaults = createServerFn({ method: "GET" }).handler(async () => {
-  const client = createSsrClient(incomingCookie());
-  return client.repo.createDefaults();
-});
-
-/** SSR: auth.provider_config (allow_signup) with Cookie forward. */
-export const fetchProviderConfig = createServerFn({ method: "GET" }).handler(async () => {
-  const client = createSsrClient(incomingCookie());
-  return client.auth.providerConfig();
-});
-
-/** SSR: repo.listMine with Cookie forward (signed-in home). */
-export const fetchRepoListMine = createServerFn({ method: "GET" }).handler(async () => {
-  const client = createSsrClient(incomingCookie());
-  return client.repo.listMine();
-});
-
-/** SSR: user.get_profile with Cookie forward. */
-export const fetchUserGetProfile = createServerFn({ method: "GET" }).handler(async () => {
-  const client = createSsrClient(incomingCookie());
-  return client.user.getProfile();
-});
-
-/** SSR: user.listWatched with Cookie forward (settings notifications matrix, DEBT-06).
- * Pages through all watched repos — capped at 500; `truncated` flags the cut. */
-export const fetchWatchedRepos = createServerFn({ method: "GET" }).handler(async () => {
-  const client = createSsrClient(incomingCookie());
+export async function fetchWatchedRepos() {
   const repos: RepoPublic[] = [];
   for (let offset = 0; offset < 500; offset += 50) {
-    const res = await client.user.listWatched({ offset, limit: 50 });
+    const res = await apiClient.user.listWatched({ offset, limit: 50 });
     if (!res.ok) {
       return res;
     }
@@ -90,143 +53,111 @@ export const fetchWatchedRepos = createServerFn({ method: "GET" }).handler(async
     }
   }
   return { ok: true as const, data: { repos, truncated: true } };
-});
+}
 
-/** SSR: pat.list with Cookie forward. */
-export const fetchPatList = createServerFn({ method: "GET" }).handler(async () => {
-  const client = createSsrClient(incomingCookie());
-  return client.pat.list();
-});
+/** pat.list. */
+export async function fetchPatList() {
+  return apiClient.pat.list();
+}
 
-/** SSR: sshKey.list with Cookie forward. */
-export const fetchSshKeyList = createServerFn({ method: "GET" }).handler(async () => {
-  const client = createSsrClient(incomingCookie());
-  return client.sshKey.list();
-});
+/** sshKey.list. */
+export async function fetchSshKeyList() {
+  return apiClient.sshKey.list();
+}
 
-/** SSR: oauthApp.list with Cookie forward (developer apps). */
-export const fetchOAuthAppList = createServerFn({ method: "GET" }).handler(async () => {
-  const client = createSsrClient(incomingCookie());
-  return client.oauthApp.list();
-});
+/** oauthApp.list (developer apps). */
+export async function fetchOAuthAppList() {
+  return apiClient.oauthApp.list();
+}
 
-/** SSR: oauthApp.listGrants with Cookie forward (authorized apps). */
-export const fetchOAuthGrantList = createServerFn({ method: "GET" }).handler(async () => {
-  const client = createSsrClient(incomingCookie());
-  return client.oauthApp.listGrants();
-});
+/** oauthApp.listGrants (authorized apps). */
+export async function fetchOAuthGrantList() {
+  return apiClient.oauthApp.listGrants();
+}
 
-/** SSR: oauthApp.authorizeInfo with Cookie forward (consent screen payload). */
-export const fetchOAuthAuthorizeInfo = createServerFn({ method: "GET" })
-  .validator((data: { client_id?: string; redirect_uri?: string; scope?: string } = {}) => ({
+/** oauthApp.authorizeInfo (consent screen payload). */
+export async function fetchOAuthAuthorizeInfo(data: {
+  client_id?: string;
+  redirect_uri?: string;
+  scope?: string;
+}) {
+  return apiClient.oauthApp.authorizeInfo({
     client_id: data.client_id ?? "",
     redirect_uri: data.redirect_uri,
     scope: data.scope,
-  }))
-  .handler(async ({ data }) => {
-    const client = createSsrClient(incomingCookie());
-    return client.oauthApp.authorizeInfo(data);
   });
+}
 
-/** SSR: gpgKey.list with Cookie forward. */
-export const fetchGpgKeyList = createServerFn({ method: "GET" }).handler(async () => {
-  const client = createSsrClient(incomingCookie());
-  return client.gpgKey.list();
-});
+/** gpgKey.list. */
+export async function fetchGpgKeyList() {
+  return apiClient.gpgKey.list();
+}
 
-/** SSR: email.list with Cookie forward. */
-export const fetchEmailList = createServerFn({ method: "GET" }).handler(async () => {
-  const client = createSsrClient(incomingCookie());
-  return client.email.list();
-});
+/** email.list. */
+export async function fetchEmailList() {
+  return apiClient.email.list();
+}
 
-/** SSR: admin.auth.getSettings with Cookie forward. */
-export const fetchAdminAuthSettings = createServerFn({ method: "GET" }).handler(async () => {
-  const client = createSsrClient(incomingCookie());
-  return client.admin.auth.getSettings();
-});
+/** admin.auth.getSettings. */
+export async function fetchAdminAuthSettings() {
+  return apiClient.admin.auth.getSettings();
+}
 
-/** SSR: admin.lfs.getSettings with Cookie forward. */
-export const fetchAdminLfsSettings = createServerFn({ method: "GET" }).handler(async () => {
-  const client = createSsrClient(incomingCookie());
-  return client.admin.lfs.getSettings();
-});
+/** admin.lfs.getSettings. */
+export async function fetchAdminLfsSettings() {
+  return apiClient.admin.lfs.getSettings();
+}
 
-/** SSR: admin.lfs.getUsage with Cookie forward. */
-export const fetchAdminLfsUsage = createServerFn({ method: "GET" }).handler(async () => {
-  const client = createSsrClient(incomingCookie());
-  return client.admin.lfs.getUsage();
-});
+/** admin.lfs.getUsage. */
+export async function fetchAdminLfsUsage() {
+  return apiClient.admin.lfs.getUsage();
+}
 
-/** SSR: admin.mcp.getSettings with Cookie forward. */
-export const fetchAdminMcpSettings = createServerFn({ method: "GET" }).handler(async () => {
-  const client = createSsrClient(incomingCookie());
-  return client.admin.mcp.getSettings();
-});
+/** admin.mcp.getSettings. */
+export async function fetchAdminMcpSettings() {
+  return apiClient.admin.mcp.getSettings();
+}
 
-/** SSR: admin.users.list with Cookie forward. */
-export const fetchAdminUsersList = createServerFn({ method: "GET" })
-  .validator(
-    (data: { query?: string | null; limit?: number | null; offset?: number | null } = {}) => ({
-      query: data?.query ?? null,
-      limit: typeof data?.limit === "number" ? data.limit : 50,
-      offset: typeof data?.offset === "number" ? data.offset : 0,
-    }),
-  )
-  .handler(async ({ data }) => {
-    const client = createSsrClient(incomingCookie());
-    return client.admin.users.list({
-      query: data.query,
-      limit: data.limit,
-      offset: data.offset,
-    });
+/** admin.users.list. */
+export async function fetchAdminUsersList(data: {
+  query?: string | null;
+  limit?: number | null;
+  offset?: number | null;
+}) {
+  return apiClient.admin.users.list({
+    query: data.query ?? null,
+    limit: typeof data.limit === "number" ? data.limit : 50,
+    offset: typeof data.offset === "number" ? data.offset : 0,
   });
+}
 
-/** SSR: admin.invites.list with Cookie forward. */
-export const fetchAdminInvitesList = createServerFn({ method: "GET" }).handler(async () => {
-  const client = createSsrClient(incomingCookie());
-  return client.admin.invites.list();
-});
+/** admin.invites.list. */
+export async function fetchAdminInvitesList() {
+  return apiClient.admin.invites.list();
+}
 
-/** SSR: system.health (status page). */
-export const fetchSystemHealth = createServerFn({ method: "GET" }).handler(async () => {
-  const client = createSsrClient(incomingCookie());
-  return client.system.health();
-});
+/** system.health (status page). */
+export async function fetchSystemHealth() {
+  return apiClient.system.health();
+}
+
+function documentCookie(): string {
+  return typeof document !== "undefined" ? document.cookie : "";
+}
 
 /**
- * Resolved Shiki theme for the current request (cookie + resolved scheme +
- * Client Hints). Server-only — for use inside other server fn handlers, so
- * callers never pay an extra RPC hop for theme resolution.
+ * Resolved Shiki theme from theme cookies — mirrors the cookie/resolved-scheme
+ * chain the serving middleware applies to `<html>`.
  */
-export const ssrHighlightTheme = createServerOnlyFn((): "oxidean-light" | "oxidean-dark" => {
-  const cookie = incomingCookie();
-  const pref = themePreferenceFromCookieHeader(cookie);
-  const resolvedBoot = resolvedColorSchemeFromCookieHeader(cookie);
-  const ch = getRequestHeader("sec-ch-prefers-color-scheme");
-  const resolved = resolveThemeForSsr(pref, ch, resolvedBoot);
-  return resolved === "dark" ? "oxidean-dark" : "oxidean-light";
-});
-
-/** SSR: resolved Shiki theme (cookie + resolved scheme + Client Hints). */
-export const resolveSsrHighlightTheme = createServerFn({ method: "GET" }).handler(
-  async (): Promise<"oxidean-light" | "oxidean-dark"> => ssrHighlightTheme(),
-);
-
-/**
- * Resolved app theme for the document root — same cookie + resolved scheme +
- * Client Hints chain as {@link ssrHighlightTheme}. Server-only (reads request
- * headers); loaders must guard the call site because getRequestHeader cannot
- * be imported into the client bundle (start import-protection).
- */
-export const ssrResolvedTheme = createServerOnlyFn((): "light" | "dark" => {
-  const cookie = incomingCookie();
-  return resolveThemeForSsr(
+export function clientHighlightTheme(): "oxidean-light" | "oxidean-dark" {
+  const cookie = documentCookie();
+  const resolved = resolveThemeForSsr(
     themePreferenceFromCookieHeader(cookie),
-    getRequestHeader("sec-ch-prefers-color-scheme"),
+    null,
     resolvedColorSchemeFromCookieHeader(cookie),
   );
-});
+  return resolved === "dark" ? "oxidean-dark" : "oxidean-light";
+}
 
 export type AppAccessRedirectInput = {
   pathname: string;

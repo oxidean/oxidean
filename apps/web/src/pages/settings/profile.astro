@@ -1,0 +1,8 @@
+---
+import AppShell from "@/layouts/AppShell.astro";
+import { ProfilePage } from "@/routes/settings/profile.tsrx";
+---
+
+<AppShell title="Account · Oxidean">
+	<ProfilePage client:load />
+</AppShell>

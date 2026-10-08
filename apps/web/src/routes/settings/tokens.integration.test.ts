@@ -1,4 +1,3 @@
-import { createElement } from "octane";
 import { cleanup, fireEvent, screen, waitFor } from "@octanejs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithQueryClient } from "@/test/render-with-query";
@@ -54,30 +53,22 @@ type LoaderShape =
       tokens?: unknown[];
     };
 
-let loaderData: LoaderShape;
-
-vi.mock("@octanejs/tanstack-router", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@octanejs/tanstack-router")>();
-  return {
-    ...actual,
-    useLoaderData: () => loaderData,
-    Link: (props: {
-      to?: string;
-      children?: unknown;
-      className?: string;
-      "aria-current"?: string;
-    }) =>
-      createElement(
-        "a",
-        {
-          href: props.to ?? "#",
-          className: props.className,
-          "aria-current": props["aria-current"],
-        },
-        props.children as never,
-      ),
-  };
-});
+function applyLoader(d: LoaderShape | undefined) {
+  if (d === undefined) {
+    meMock.mockReturnValue(new Promise(() => {}));
+    return;
+  }
+  if (d.kind === "unauthenticated") {
+    meMock.mockResolvedValue({ ok: false, error: { code: "auth.unauthenticated", message: "n" } });
+    return;
+  }
+  if (d.kind === "error") {
+    meMock.mockResolvedValue({ ok: false, error: { code: "x", message: d.message } });
+    return;
+  }
+  meMock.mockResolvedValue({ ok: true, data: d.user });
+  listMock.mockResolvedValue({ ok: true, data: d.tokens });
+}
 
 const verifiedUser = {
   id: "u1",
@@ -99,7 +90,7 @@ beforeEach(() => {
   createFineGrainedMock.mockReset();
   listMineMock.mockReset();
   meMock.mockReset();
-  loaderData = { kind: "ready", user: verifiedUser, tokens: [] };
+  applyLoader({ kind: "ready", user: verifiedUser, tokens: [] });
   listMock.mockResolvedValue({ ok: true, data: [] });
   listMineMock.mockResolvedValue({
     ok: true,
@@ -123,6 +114,10 @@ beforeEach(() => {
 });
 
 afterEach(cleanup);
+
+beforeEach(() => {
+  window.history.pushState({}, "", "/settings/tokens");
+});
 
 /** Load tokens page; @vite-ignore keeps the suite collectable before ./tokens exists. */
 async function loadTokensModule(): Promise<Record<string, unknown>> {
@@ -169,11 +164,11 @@ describe("/settings/tokens (GIT-11 / D-14 list)", () => {
   }, 15_000);
 
   it("unverified: list visible with Generate disabled + Verify your email to create a token.", async () => {
-    loaderData = {
+    applyLoader({
       kind: "ready",
       user: { ...verifiedUser, email_verified: false },
       tokens: [],
-    };
+    });
     meMock.mockResolvedValue({
       ok: true,
       data: { ...verifiedUser, email_verified: false },
@@ -374,10 +369,10 @@ describe("/settings/tokens/new (GIT-11 / D-05 classic create)", () => {
   }, 15_000);
 
   it("unverified shows Verify your email AuthShell — not the create form", async () => {
-    loaderData = {
+    applyLoader({
       kind: "ready",
       user: { ...verifiedUser, email_verified: false },
-    };
+    });
     meMock.mockResolvedValue({
       ok: true,
       data: { ...verifiedUser, email_verified: false },
@@ -533,10 +528,10 @@ describe("/settings/tokens/new/fine-grained (GIT-11 / D-05 / D-06 FG create)", (
   }, 15_000);
 
   it("unverified shows Verify your email AuthShell — not the FG create form", async () => {
-    loaderData = {
+    applyLoader({
       kind: "ready",
       user: { ...verifiedUser, email_verified: false },
-    };
+    });
     meMock.mockResolvedValue({
       ok: true,
       data: { ...verifiedUser, email_verified: false },

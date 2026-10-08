@@ -1,5 +1,10 @@
-import { createFileRoute, useLoaderData, useParams } from "@octanejs/tanstack-router";
 import type { RepoBlobResponse, RepoPublic, RepoRefEntry } from "@oxidean/api-client";
+import { queryOptions, useQuery } from "@octanejs/tanstack-query";
+
+import { matchPath } from "@/lib/route-params";
+import { usePathname, useSearchString } from "@/lib/pathname.tsrx";
+import { RepoLayout } from "@/routes/$owner.$repo.tsrx";
+import { AppPage } from "@/components/app-page";
 import { useEffect, useState } from "octane";
 import { BlobViewer } from "@/components/repo/blob-viewer";
 import { PathBreadcrumb } from "@/components/repo/path-breadcrumb";
@@ -8,7 +13,7 @@ import { RepoNotFound } from "@/components/repo/repo-not-found";
 import { highlightCode, languageIdForPath, type HighlightTheme } from "@/lib/highlight";
 import { isMarkdownPath, renderGfm } from "@/lib/markdown";
 import { parseRefAndPath, shortRefName } from "@/lib/repo-browse";
-import { resolveSsrHighlightTheme } from "@/lib/ssr-auth";
+import { resolveDocumentHighlightTheme } from "@/lib/theme";
 import { fetchRepoBlob, fetchRepoGet, fetchRepoRefs } from "@/lib/ssr-repo";
 
 export type BlobLoaderData =
@@ -36,7 +41,7 @@ async function highlightBlob(
   path: string,
   content: string,
 ): Promise<{ html: string; theme: HighlightTheme }> {
-  const theme = await resolveSsrHighlightTheme();
+  const theme = resolveDocumentHighlightTheme();
   const html = await highlightCode(content, {
     lang: languageIdForPath(path),
     theme,
@@ -49,7 +54,7 @@ async function loadBlobPage(
   repoName: string,
   splat: string | undefined,
 ): Promise<BlobLoaderData> {
-  const got = await fetchRepoGet({ data: { owner, name: repoName } });
+  const got = await fetchRepoGet({ owner, name: repoName });
   if (!got.ok) {
     if (got.error.code === "repo.not_found") return { kind: "not_found" };
     return {
@@ -58,7 +63,7 @@ async function loadBlobPage(
     };
   }
   const repo = got.data;
-  const refsRes = await fetchRepoRefs({ data: { owner, name: repoName } });
+  const refsRes = await fetchRepoRefs({ owner, name: repoName });
   const refs = refsRes.ok ? refsRes.data.refs : [];
   const knownRefs = refs.map((r) => shortRefName(r.name));
   const parsed = parseRefAndPath(splat, knownRefs);
@@ -66,9 +71,7 @@ async function loadBlobPage(
   if (!parsed.path) {
     return { kind: "not_found" };
   }
-  const blobRes = await fetchRepoBlob({
-    data: { owner, name: repoName, ref: refName, path: parsed.path },
-  });
+  const blobRes = await fetchRepoBlob({ owner, name: repoName, ref: refName, path: parsed.path });
   if (!blobRes.ok) {
     if (blobRes.error.code === "repo.not_found" || blobRes.error.code === "git.not_found") {
       return { kind: "not_found" };
@@ -118,32 +121,40 @@ async function loadBlobPage(
   };
 }
 
-export const Route = createFileRoute("/$owner/$repo/blob/$")({
-  component: RepoBlobPage,
-  head: ({ params }) => {
-    const { path } = parseRefAndPath((params as { _splat?: string })._splat);
-    const owner = (params as { owner: string }).owner;
-    const repo = (params as { repo: string }).repo;
-    const base = path.split("/").pop() || path || "file";
-    const trunc = base.length > 40 ? `…${base.slice(-36)}` : base;
-    return {
-      meta: [{ title: `${trunc} · ${owner}/${repo} · Oxidean` }],
-    };
-  },
-  loader: async ({ params }): Promise<BlobLoaderData> => {
-    const owner = String((params as { owner?: string }).owner ?? "");
-    const repoName = String((params as { repo?: string }).repo ?? "");
-    const splat = (params as { _splat?: string })._splat;
-    try {
-      return await loadBlobPage(owner, repoName, splat);
-    } catch {
-      return { kind: "error", message: NETWORK_ERROR };
-    }
-  },
-});
+function repoBlobQueryOptions(params: Record<string, string | undefined>, searchStr = "") {
+  return queryOptions({
+    queryKey: [
+      "repo-page",
+      "/$owner/$repo/blob/$",
+      params.owner ?? "",
+      params.repo ?? "",
+      params._splat ?? "",
+      params.n ?? "",
+      params.sha ?? "",
+      params.tag ?? "",
+      params.run ?? "",
+      searchStr,
+    ],
+    queryFn: async (): Promise<BlobLoaderData> => {
+      const owner = String((params as { owner?: string }).owner ?? "");
+      const repoName = String((params as { repo?: string }).repo ?? "");
+      const splat = (params as { _splat?: string })._splat;
+      try {
+        return await loadBlobPage(owner, repoName, splat);
+      } catch {
+        return { kind: "error", message: NETWORK_ERROR };
+      }
+    },
+    enabled: Boolean(params.owner && params.repo),
+    retry: false,
+    staleTime: 30_000,
+  });
+}
 
-export function RepoBlobPage() @{
-  const params = useParams({ from: "/$owner/$repo/blob/$" }) as {
+function RepoBlobPageContent() @{
+  const pathname = usePathname();
+  const searchStr = useSearchString();
+  const params = (matchPath("/$owner/$repo/blob/$", pathname) ?? {}) as {
     owner: string;
     repo: string;
     _splat?: string;
@@ -151,7 +162,7 @@ export function RepoBlobPage() @{
   const owner = params.owner ?? "";
   const repoName = params.repo ?? "";
   const splat = params._splat;
-  const loaderData = useLoaderData({ from: "/$owner/$repo/blob/$" }) as BlobLoaderData | undefined;
+  const loaderData = useQuery(repoBlobQueryOptions(params, searchStr)).data;
 
   const [phase, setPhase] = useState<Phase>(() => loaderData ?? { kind: "loading" });
 
@@ -207,4 +218,13 @@ export function RepoBlobPage() @{
       />
     </>;
   }
+}
+
+/** Page root — RepoLayout (chrome + repo store) around the leaf content. */
+export function RepoBlobPage() @{
+  <AppPage>
+    <RepoLayout>
+      <RepoBlobPageContent />
+    </RepoLayout>
+  </AppPage>;
 }

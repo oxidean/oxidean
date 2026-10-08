@@ -1,0 +1,8 @@
+---
+import AppShell from "@/layouts/AppShell.astro";
+import { HomePage } from "@/routes/index.tsrx";
+---
+
+<AppShell title="Oxidean">
+  <HomePage client:load />
+</AppShell>

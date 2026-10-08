@@ -1,0 +1,12 @@
+---
+import AppShell from "@/layouts/AppShell.astro";
+import { OwnerIndexPage } from "@/routes/$owner.index.tsrx";
+
+export function getStaticPaths() {
+	return [{ params: { owner: "_" } }];
+}
+---
+
+<AppShell title="Oxidean">
+	<OwnerIndexPage client:load />
+</AppShell>

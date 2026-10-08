@@ -1,11 +1,11 @@
-import {
-  createFileRoute,
-  useLoaderData,
-  useNavigate,
-  useParams,
-  useSearch,
-} from "@octanejs/tanstack-router";
 import type { RepoFileTemplate, RepoTemplatesListResponse } from "@oxidean/api-client";
+import { queryOptions, useQuery } from "@octanejs/tanstack-query";
+import { navigate as astroNavigate } from "astro:transitions/client";
+
+import { matchPath, routeHref, searchRecord } from "@/lib/route-params";
+import { usePathname, useSearchString } from "@/lib/pathname.tsrx";
+import { RepoLayout } from "@/routes/$owner.$repo.tsrx";
+import { AppPage } from "@/components/app-page";
 import { useEffect, useState } from "octane";
 import { MemberLookup } from "@/components/org/member-lookup";
 import { FileTemplateChooser } from "@/components/repo/file-template-chooser";
@@ -52,54 +52,71 @@ function matchTemplate(
   );
 }
 
-export const Route = createFileRoute("/$owner/$repo/pulls/new")({
-  component: NewPullPage,
-  validateSearch: (search: Record<string, unknown>) => ({
+function validateSearch(search: Record<string, unknown>) {
+  return {
     base: typeof search.base === "string" ? search.base : undefined,
     head: typeof search.head === "string" ? search.head : undefined,
     head_owner: typeof search.head_owner === "string" ? search.head_owner : undefined,
     template: typeof search.template === "string" ? search.template : undefined,
-  }),
-  head: ({ params }) => ({
-    meta: [
-      {
-        title: `New pull request · ${(params as { owner: string }).owner}/${(params as { repo: string }).repo} · Oxidean`,
-      },
+  };
+}
+
+function repoPullsNewQueryOptions(params: Record<string, string | undefined>, searchStr = "") {
+  return queryOptions({
+    queryKey: [
+      "repo-page",
+      "/$owner/$repo/pulls/new",
+      params.owner ?? "",
+      params.repo ?? "",
+      params._splat ?? "",
+      params.n ?? "",
+      params.sha ?? "",
+      params.tag ?? "",
+      params.run ?? "",
+      searchStr,
     ],
-  }),
-  loader: async ({ params }) => {
-    const owner = String((params as { owner?: string }).owner ?? "");
-    const repoName = String((params as { repo?: string }).repo ?? "");
-    const got = await fetchRepoGet({ data: { owner, name: repoName } });
-    if (!got.ok) {
-      if (got.error.code === "repo.not_found") return { kind: "not_found" as const };
-      return { kind: "error" as const, message: got.error.message || NETWORK_ERROR };
-    }
-    // Unit toggle (COL-13): Pulls off → disabled view, skip ref enumeration.
-    if (got.data.pulls_enabled === false) {
-      return { kind: "disabled" as const, repo: got.data };
-    }
-    const [refs, tpl] = await Promise.all([
-      fetchRepoRefs({ data: { owner, name: repoName } }),
-      // COL-02: template listing failure must not block the create form.
-      fetchRepoFileTemplates({ data: { owner, name: repoName } }).catch(() => null),
-    ]);
-    return {
-      kind: "ready" as const,
-      repo: got.data,
-      refs: refs.ok ? refs.data.refs : [],
-      templates: tpl?.ok ? tpl.data : EMPTY_TEMPLATES,
-    };
-  },
-});
+    queryFn: async (): Promise<PullsNewLoaderData> => {
+      const owner = String((params as { owner?: string }).owner ?? "");
+      const repoName = String((params as { repo?: string }).repo ?? "");
+      const got = await fetchRepoGet({ owner, name: repoName });
+      if (!got.ok) {
+        if (got.error.code === "repo.not_found") return { kind: "not_found" as const };
+        return { kind: "error" as const, message: got.error.message || NETWORK_ERROR };
+      }
+      // Unit toggle (COL-13): Pulls off → disabled view, skip ref enumeration.
+      if (got.data.pulls_enabled === false) {
+        return { kind: "disabled" as const, repo: got.data };
+      }
+      const [refs, tpl] = await Promise.all([
+        fetchRepoRefs({ owner, name: repoName }),
+        // COL-02: template listing failure must not block the create form.
+        fetchRepoFileTemplates({ owner, name: repoName }).catch(() => null),
+      ]);
+      return {
+        kind: "ready" as const,
+        repo: got.data,
+        refs: refs.ok ? refs.data.refs : [],
+        templates: tpl?.ok ? tpl.data : EMPTY_TEMPLATES,
+      };
+    },
+    enabled: Boolean(params.owner && params.repo),
+    retry: false,
+    staleTime: 30_000,
+  });
+}
 
 /**
  * Create pull request (Phase 12): pick base + head refs, title, body (Markdown
  * Write/Preview), plus the COL-02 file-template chooser.
  */
-export function NewPullPage() @{
-  const params = useParams({ strict: false }) as { owner?: string; repo?: string };
-  const search = useSearch({ strict: false }) as {
+function NewPullPageContent() @{
+  const pathname = usePathname();
+  const searchStr = useSearchString();
+  const params = (matchPath("/$owner/$repo/pulls/new", pathname) ?? {}) as {
+    owner?: string;
+    repo?: string;
+  };
+  const search = validateSearch(searchRecord(searchStr)) as {
     base?: string;
     head?: string;
     head_owner?: string;
@@ -107,10 +124,8 @@ export function NewPullPage() @{
   };
   const owner = params.owner ?? "";
   const repoName = params.repo ?? "";
-  const navigate = useNavigate();
-  const loader = useLoaderData({ from: "/$owner/$repo/pulls/new" }) as
-    | PullsNewLoaderData
-    | undefined;
+  const navigate = astroNavigate;
+  const loader = useQuery(repoPullsNewQueryOptions(params, searchStr)).data;
 
   const pullTemplates = loader?.kind === "ready" ? (loader.templates?.pulls ?? []) : [];
   const requestedTemplate = matchTemplate(pullTemplates, search.template);
@@ -126,10 +141,10 @@ export function NewPullPage() @{
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   // Chooser resolves when a template (or blank) is picked — or `?template=` /
-  // a single template already picked one.
-  const [templateChosen, setTemplateChosen] = useState(
-    initialTemplate !== null || pullTemplates.length <= 1,
-  );
+  // a single template already picked one. Seeding `false` is safe: the
+  // chooser only renders when >1 template exists, and the effect below
+  // auto-picks `?template=`/single-template cases once the query resolves.
+  const [templateChosen, setTemplateChosen] = useState(initialTemplate !== null);
   const [appliedTemplate, setAppliedTemplate] = useState<RepoFileTemplate | null>(initialTemplate);
 
   const branches =
@@ -176,10 +191,9 @@ export function NewPullPage() @{
         setBusy(false);
         return;
       }
-      await navigate({
-        to: "/$owner/$repo/pull/$n",
-        params: { owner, repo: repoName, n: String(res.data.number) },
-      });
+      await navigate(
+        routeHref("/$owner/$repo/pull/$n", { owner, repo: repoName, n: String(res.data.number) }),
+      );
     } catch {
       setError(NETWORK_ERROR);
       setBusy(false);
@@ -301,4 +315,13 @@ export function NewPullPage() @{
       }
     </div>;
   }
+}
+
+/** Page root — RepoLayout (chrome + repo store) around the leaf content. */
+export function NewPullPage() @{
+  <AppPage>
+    <RepoLayout>
+      <NewPullPageContent />
+    </RepoLayout>
+  </AppPage>;
 }

@@ -1,5 +1,9 @@
-import { createFileRoute, useLoaderData, useParams } from "@octanejs/tanstack-router";
-import { useQuery } from "@octanejs/tanstack-query";
+import { queryOptions, useQuery } from "@octanejs/tanstack-query";
+
+import { matchPath } from "@/lib/route-params";
+import { usePathname, useSearchString } from "@/lib/pathname.tsrx";
+import { RepoLayout } from "@/routes/$owner.$repo.tsrx";
+import { AppPage } from "@/components/app-page";
 import type { RepoPublic, RepoRefEntry } from "@oxidean/api-client";
 import { useEffect, useState } from "octane";
 import { FileCommitForm, type FileCommitValues } from "@/components/repo/file-commit-form";
@@ -30,7 +34,7 @@ async function loadMkdirPage(
   repoName: string,
   splat: string | undefined,
 ): Promise<MkdirLoaderData> {
-  const got = await fetchRepoGet({ data: { owner, name: repoName } });
+  const got = await fetchRepoGet({ owner, name: repoName });
   if (!got.ok) {
     if (got.error.code === "repo.not_found") return { kind: "not_found" };
     return {
@@ -39,7 +43,7 @@ async function loadMkdirPage(
     };
   }
   const repo = got.data;
-  const refsRes = await fetchRepoRefs({ data: { owner, name: repoName } });
+  const refsRes = await fetchRepoRefs({ owner, name: repoName });
   const refs: RepoRefEntry[] = refsRes.ok ? refsRes.data.refs : [];
   const knownRefs = refs.map((r) => shortRefName(r.name));
   const parsed = parseRefAndPath(splat, knownRefs);
@@ -47,33 +51,44 @@ async function loadMkdirPage(
   return { kind: "ready", repo, refName, dir: parsed.path };
 }
 
-export const Route = createFileRoute("/$owner/$repo/mkdir/$")({
-  component: RepoFileMkdirPage,
-  head: ({ params }) => {
-    const owner = (params as { owner: string }).owner;
-    const repo = (params as { repo: string }).repo;
-    return {
-      meta: [{ title: `New directory · ${owner}/${repo} · Oxidean` }],
-    };
-  },
-  loader: async ({ params }): Promise<MkdirLoaderData> => {
-    const owner = String((params as { owner?: string }).owner ?? "");
-    const repoName = String((params as { repo?: string }).repo ?? "");
-    const splat = (params as { _splat?: string })._splat;
-    try {
-      return await loadMkdirPage(owner, repoName, splat);
-    } catch {
-      return { kind: "error", message: NETWORK_ERROR };
-    }
-  },
-});
+function repoMkdirQueryOptions(params: Record<string, string | undefined>, searchStr = "") {
+  return queryOptions({
+    queryKey: [
+      "repo-page",
+      "/$owner/$repo/mkdir/$",
+      params.owner ?? "",
+      params.repo ?? "",
+      params._splat ?? "",
+      params.n ?? "",
+      params.sha ?? "",
+      params.tag ?? "",
+      params.run ?? "",
+      searchStr,
+    ],
+    queryFn: async (): Promise<MkdirLoaderData> => {
+      const owner = String((params as { owner?: string }).owner ?? "");
+      const repoName = String((params as { repo?: string }).repo ?? "");
+      const splat = (params as { _splat?: string })._splat;
+      try {
+        return await loadMkdirPage(owner, repoName, splat);
+      } catch {
+        return { kind: "error", message: NETWORK_ERROR };
+      }
+    },
+    enabled: Boolean(params.owner && params.repo),
+    retry: false,
+    staleTime: 30_000,
+  });
+}
 
 /**
  * Create a directory — GIT-19. Git does not track empty directories, so the
  * commit materializes `{dir}/.gitkeep` (the usual convention).
  */
-export function RepoFileMkdirPage() @{
-  const params = useParams({ from: "/$owner/$repo/mkdir/$" }) as {
+function RepoFileMkdirPageContent() @{
+  const pathname = usePathname();
+  const searchStr = useSearchString();
+  const params = (matchPath("/$owner/$repo/mkdir/$", pathname) ?? {}) as {
     owner: string;
     repo: string;
     _splat?: string;
@@ -81,9 +96,7 @@ export function RepoFileMkdirPage() @{
   const owner = params.owner ?? "";
   const repoName = params.repo ?? "";
   const splat = params._splat;
-  const loaderData = useLoaderData({ from: "/$owner/$repo/mkdir/$" }) as
-    | MkdirLoaderData
-    | undefined;
+  const loaderData = useQuery(repoMkdirQueryOptions(params, searchStr)).data;
 
   const [phase, setPhase] = useState<Phase>(() => loaderData ?? { kind: "loading" });
   const [name, setName] = useState("");
@@ -212,4 +225,13 @@ export function RepoFileMkdirPage() @{
       />
     </>;
   }
+}
+
+/** Page root — RepoLayout (chrome + repo store) around the leaf content. */
+export function RepoFileMkdirPage() @{
+  <AppPage>
+    <RepoLayout>
+      <RepoFileMkdirPageContent />
+    </RepoLayout>
+  </AppPage>;
 }

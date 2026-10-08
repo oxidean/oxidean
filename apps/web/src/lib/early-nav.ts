@@ -20,18 +20,20 @@
  *    - once Octane binds the anchor's `$$click` slot, the tap is replayed as
  *      a synthetic `click()` on the real element — identical to a post-
  *      hydration tap, routing through the router's own `handleClick`;
- *    - once the app root has hydrated (`#__app` gained its delegation
- *      `onclick` marker) but the anchor never wired, the tap is SPA-
- *      navigated via `window.__oxideanEarlyNav` (registered by
- *      `installEarlyNavBridge`) — hydration is finished at that point, so
- *      `router.navigate` can no longer race the initial mount;
- *    - if hydration never runs, a bounded timer falls back to the native
+ *    - once the app registers its navigate handler (`window.__oxideanEarlyNav`
+ *      set by `installEarlyNavBridge` — under Astro that runs inside an
+ *      island effect, which means module JS is up and the ClientRouter swap
+ *      path is safe), the tap goes through `astro:transitions` navigate;
+ *    - if neither ever arrives, a bounded timer falls back to the native
  *      href navigation the anchor would have performed anyway.
  *
- *    The pending tap is never resolved by calling `router.navigate` while
- *    hydration could still be in progress — committing a route change mid-
- *    hydration corrupts the render (Octane "Something went wrong" boundary).
- * 2. `installEarlyNavBridge` — called when the client router is created;
+ *    The script also swallows the ClientRouter's benign transition aborts:
+ *    Astro attaches `.finally()` (not `.catch()`) to `viewTransition.ready` /
+ *    `.finished`, so a transition aborted by `skipTransition()` or a viewport
+ *    resize (mobile URL-bar collapse) surfaces as an unhandled rejection even
+ *    though the DOM swap already committed. The filter matches only that
+ *    DOMException — genuine render errors still reject loudly.
+ * 2. `installEarlyNavBridge` — called from the persistent chrome island;
  *    registers the SPA navigate handler the boot ticker uses for
  *    hydrated-but-never-wired anchors. In a non-SSR mount (component tests)
  *    where the boot script never ran, it attaches the same capture listener
@@ -44,9 +46,6 @@
 /** Octane delegated-event slot keys — presence means hydration wired the element. */
 const CLICK_SLOT = "$$click";
 const CAPTURE_CLICK_SLOT = "$$capture:click";
-
-/** Id of the SSR mount container (`<div id="__app">` in the app shell). */
-const ROOT_CONTAINER_ID = "__app";
 
 /** Upper bound on holding a pre-hydration tap before falling back to native nav. */
 const PENDING_MAX_MS = 4_000;
@@ -97,21 +96,27 @@ export function earlyNavHrefForTarget(target: EventTarget | null): string | unde
 }
 
 /**
- * Parse-time boot listener, serialized into `RootShell`'s `<Head>` (same
+ * Parse-time boot listener, serialized into `AppShell`'s `<head>` (same
  * channel as THEME_BOOT_SCRIPT). The predicate is embedded from
  * `earlyNavAnchorForTarget`'s own source so the two halves can't drift.
+ *
+ * Ready check: `window.__oxideanEarlyNav` set by `installEarlyNavBridge` —
+ * it runs in an island effect, so its presence means module JS is up and
+ * `navigate` is safe. `appHydrated()` from the Octane-root era is gone:
+ * the `#__app` container no longer exists.
  */
-export const EARLY_NAV_BOOT_SCRIPT = `(function(){var CLICK_SLOT=${JSON.stringify(CLICK_SLOT)},CAPTURE_CLICK_SLOT=${JSON.stringify(CAPTURE_CLICK_SLOT)},ROOT_ID=${JSON.stringify(ROOT_CONTAINER_ID)},PENDING_MAX=${PENDING_MAX_MS},TICK=${RESOLVE_TICK_MS};var earlyNavAnchorForTarget=${earlyNavAnchorForTarget.toString()};var pending=null,timer=0;window.__oxideanEarlyNav=null;window.__oxideanEarlyNavReady=function(nav){window.__oxideanEarlyNav=nav;};function wired(el){return el[CLICK_SLOT]!=null||el[CAPTURE_CLICK_SLOT]!=null;}function appHydrated(){var root=document.getElementById(ROOT_ID);return root!=null&&root.onclick!=null;}function fallback(href){try{window.location.assign(href);}catch(e){}}function resolve(){if(!pending)return;var el=pending.el,href=pending.href;if(!el.isConnected){pending=null;fallback(href);return;}if(wired(el)){pending=null;try{el.click();}catch(e){fallback(href);}return;}if(appHydrated()){pending=null;var nav=window.__oxideanEarlyNav;if(nav){try{nav(href);return;}catch(e){}}fallback(href);return;}if(Date.now()-pending.ts>=PENDING_MAX){pending=null;fallback(href);}}document.addEventListener("click",function(event){if(event.defaultPrevented||event.button!==0||event.metaKey||event.altKey||event.ctrlKey||event.shiftKey)return;var anchor=earlyNavAnchorForTarget(event.target);if(anchor===null)return;event.preventDefault();pending={el:anchor,href:anchor.getAttribute("href"),ts:Date.now()};resolve();if(pending&&!timer){timer=setInterval(function(){resolve();if(!pending&&timer){clearInterval(timer);timer=0;}},TICK);}},true);})();`;
+export const EARLY_NAV_BOOT_SCRIPT = `(function(){var CLICK_SLOT=${JSON.stringify(CLICK_SLOT)},CAPTURE_CLICK_SLOT=${JSON.stringify(CAPTURE_CLICK_SLOT)},PENDING_MAX=${PENDING_MAX_MS},TICK=${RESOLVE_TICK_MS};var earlyNavAnchorForTarget=${earlyNavAnchorForTarget.toString()};var pending=null,timer=0;window.__oxideanEarlyNav=null;window.__oxideanEarlyNavReady=function(nav){window.__oxideanEarlyNav=nav;};function wired(el){return el[CLICK_SLOT]!=null||el[CAPTURE_CLICK_SLOT]!=null;}function fallback(href){try{window.location.assign(href);}catch(e){}}function resolve(){if(!pending)return;var el=pending.el,href=pending.href;if(!el.isConnected){pending=null;fallback(href);return;}if(wired(el)){pending=null;try{el.click();}catch(e){fallback(href);}return;}var nav=window.__oxideanEarlyNav;if(nav){pending=null;try{nav(href);return;}catch(e){fallback(href);return;}}if(Date.now()-pending.ts>=PENDING_MAX){pending=null;fallback(href);}}document.addEventListener("click",function(event){if(event.defaultPrevented||event.button!==0||event.metaKey||event.altKey||event.ctrlKey||event.shiftKey)return;var anchor=earlyNavAnchorForTarget(event.target);if(anchor===null)return;event.preventDefault();pending={el:anchor,href:anchor.getAttribute("href"),ts:Date.now()};resolve();if(pending&&!timer){timer=setInterval(function(){resolve();if(!pending&&timer){clearInterval(timer);timer=0;}},TICK);}},true);window.addEventListener("unhandledrejection",function(event){var reason=event&&event.reason;if(reason&&reason.name==="InvalidStateError"&&/Transition was aborted/.test(String(reason.message||reason))){event.preventDefault();}});})();`;
 
 /**
- * Wire the router's navigate into the bridge (called once the client router
- * exists). `navigate` receives `{ href }` — the same shape router.navigate
- * takes. Returns a detach function.
+ * Wire the SPA navigate into the bridge (called from the persistent chrome
+ * island's effect, so `__oxideanEarlyNav` being set implies module JS — and
+ * the ClientRouter — is up). `navigate` receives `{ href }`; returns a
+ * detach function.
  *
  * The registered handler only fires for taps on anchors that stayed unwired
- * *after* hydration completed — the boot ticker never calls it while
- * hydration can still be in progress, because committing a route change
- * mid-hydration corrupts the render.
+ * after the bridge registered — the boot ticker never calls it before that,
+ * because committing a route change while module JS is still loading can
+ * corrupt the render.
  */
 export function installEarlyNavBridge(navigate: EarlyNavHandler): () => void {
   if (typeof document === "undefined") return () => {};

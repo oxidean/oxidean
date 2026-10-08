@@ -1,4 +1,3 @@
-import { createFileRoute, redirect } from "@octanejs/tanstack-router";
 import { useQuery, useQueryClient } from "@octanejs/tanstack-query";
 import type { NotificationPublic } from "@oxidean/api-client";
 import { useState } from "octane";
@@ -17,27 +16,21 @@ import {
   subjectHref,
   subjectTail,
 } from "@/lib/notification-queries";
-import { fetchSessionMe } from "@/lib/ssr-auth";
+import { AppPage } from "@/components/app-page";
+import { usePageRedirect } from "@/lib/nav.tsrx";
+import { authSessionQueryOptions } from "@/lib/session-queries";
 import { cn } from "@/lib/utils";
 
-export const Route = createFileRoute("/notifications")({
-  component: NotificationsPage,
-  head: () => ({ meta: [{ title: "Notifications · Oxidean" }] }),
-  beforeLoad: async () => {
-    try {
-      const me = await fetchSessionMe();
-      if (!me.ok) {
-        throw redirect({ href: "/login?returnTo=/notifications" });
-      }
-    } catch (e) {
-      if (e && typeof e === "object" && "href" in e) throw e;
-      throw redirect({ href: "/login?returnTo=/notifications" });
-    }
-  },
-});
-
-/** Exported for integration tests (NOTF-02 / D-09 / D-12). */
+/** `/notifications` — signed-in only; anonymous hits bounce to /login. */
 export function NotificationsPage() @{
+  <AppPage>
+    <NotificationsContent />
+  </AppPage>;
+}
+
+function NotificationsContent() @{
+  const meQ = useQuery(authSessionQueryOptions());
+  usePageRedirect(meQ.data === null || meQ.isError ? "/login?returnTo=/notifications" : null);
   const qc = useQueryClient();
   const [filter, setFilter] = useState<"unread" | "all">("unread");
   const [offset, setOffset] = useState(0);

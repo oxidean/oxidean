@@ -10,34 +10,49 @@ import { renderWithQueryClient } from "@/test/render-with-query";
 
 const pullCreateMock = vi.fn();
 const userLookupMock = vi.fn();
+const repoGetMock = vi.fn();
+const repoRefsMock = vi.fn();
+const repoTemplatesMock = vi.fn();
+const meMock = vi.fn();
 
 vi.mock("@/lib/api-client", () => ({
   apiClient: {
+    auth: { me: (...args: unknown[]) => meMock(...args) },
     pull: { create: (...args: unknown[]) => pullCreateMock(...args) },
     user: { lookup: (...args: unknown[]) => userLookupMock(...args) },
+    repo: {
+      get: (...args: unknown[]) => repoGetMock(...args),
+      refs: (...args: unknown[]) => repoRefsMock(...args),
+      templates: { list: (...args: unknown[]) => repoTemplatesMock(...args) },
+    },
   },
 }));
 
-let pullsNewLoaderData: unknown = undefined;
-let pullsSearchState: Record<string, unknown> = {};
-
-vi.mock("@octanejs/tanstack-router", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@octanejs/tanstack-router")>();
-  return {
-    ...actual,
-    useParams: () => ({ owner: "ada", repo: "hello" }),
-    useLoaderData: () => pullsNewLoaderData,
-    useSearch: () => pullsSearchState,
-    useNavigate: () => vi.fn(),
-  };
-});
-
 beforeEach(() => {
-  pullsNewLoaderData = undefined;
-  pullsSearchState = {};
+  window.history.pushState({}, "", "/ada/hello/pulls/new");
   pullCreateMock.mockReset();
   userLookupMock.mockReset();
+  repoGetMock.mockReset();
+  repoRefsMock.mockReset();
+  repoTemplatesMock.mockReset();
+  meMock.mockReset();
   userLookupMock.mockResolvedValue({ ok: true, data: { users: [] } });
+  meMock.mockResolvedValue({
+    ok: true,
+    data: { user: { id: "u1", username: "ada", email_verified: true } },
+  });
+  repoGetMock.mockResolvedValue({
+    ok: true,
+    data: { default_branch: "main", can_write: true, pulls_enabled: true },
+  });
+  repoRefsMock.mockResolvedValue({
+    ok: true,
+    data: { refs: [{ name: "refs/heads/main" }] },
+  });
+  repoTemplatesMock.mockResolvedValue({
+    ok: true,
+    data: { issues: [], pulls: [] },
+  });
 });
 
 afterEach(cleanup);
@@ -172,31 +187,26 @@ describe("Phase 12 Pulls UI", () => {
 });
 
 describe("pulls/new template chooser (COL-02)", () => {
-  const loaderWithTemplates = {
-    kind: "ready",
-    repo: { default_branch: "main", can_write: true },
-    refs: [{ name: "refs/heads/main" }],
-    templates: {
-      issues: [],
-      pulls: [
-        {
-          name: "Standard PR",
-          description: "Default change checklist",
-          body: "## Checklist\n\n- [ ] tests\n",
-          filename: ".github/PULL_REQUEST_TEMPLATE/standard.md",
-        },
-        {
-          name: "Hotfix",
-          description: "Urgent fix",
-          body: "## Hotfix\n\nWhat broke?\n",
-          filename: ".github/PULL_REQUEST_TEMPLATE/hotfix.md",
-        },
-      ],
-    },
+  const pullTemplates = {
+    issues: [],
+    pulls: [
+      {
+        name: "Standard PR",
+        description: "Default change checklist",
+        body: "## Checklist\n\n- [ ] tests\n",
+        filename: ".github/PULL_REQUEST_TEMPLATE/standard.md",
+      },
+      {
+        name: "Hotfix",
+        description: "Urgent fix",
+        body: "## Hotfix\n\nWhat broke?\n",
+        filename: ".github/PULL_REQUEST_TEMPLATE/hotfix.md",
+      },
+    ],
   };
 
   it("multi-template repos show a chooser; picking prefills the body", async () => {
-    pullsNewLoaderData = loaderWithTemplates;
+    repoTemplatesMock.mockResolvedValue({ ok: true, data: pullTemplates });
     const mod = (await import(/* @vite-ignore */ "./$owner.$repo.pulls.new")) as Record<
       string,
       unknown
@@ -224,12 +234,6 @@ describe("pulls/new template chooser (COL-02)", () => {
   }, 15_000);
 
   it("template-less repos render the plain form (no chooser)", async () => {
-    pullsNewLoaderData = {
-      kind: "ready",
-      repo: { default_branch: "main", can_write: true },
-      refs: [{ name: "refs/heads/main" }],
-      templates: { issues: [], pulls: [] },
-    };
     const mod = (await import(/* @vite-ignore */ "./$owner.$repo.pulls.new")) as Record<
       string,
       unknown

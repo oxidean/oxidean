@@ -1,5 +1,4 @@
 import { Bell, Menu, Plus, X } from "@octanejs/lucide";
-import { Link, useNavigate, useParams } from "@octanejs/tanstack-router";
 import { useQuery, useQueryClient } from "@octanejs/tanstack-query";
 import type { UserPublic } from "@oxidean/api-client";
 import { useEffect, useEffectEvent, useState } from "octane";
@@ -18,6 +17,7 @@ import { apiClient } from "@/lib/api-client";
 import { notificationUnreadCountQueryOptions } from "@/lib/notification-queries";
 import { clearSessionQueries, orgListMineQueryOptions } from "@/lib/session-queries";
 import { syncSessionPresenceHint } from "@/lib/session-hint";
+import { repoParamsFromPathname } from "@/lib/route-params";
 import { useChromeAccountState } from "@/lib/use-chrome-account";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -65,14 +65,7 @@ function AccountAvatar({ user, size = "sm" }: { user: UserPublic; size?: "sm" | 
 }
 
 function useRepoContext(): { owner: string; repo: string } | null {
-  const params = useParams({ strict: false }) as {
-    owner?: string;
-    repo?: string;
-  };
-  if (params.owner && params.repo) {
-    return { owner: params.owner, repo: params.repo };
-  }
-  return null;
+  return repoParamsFromPathname();
 }
 
 function CreateMenu({ onNavigated }: { onNavigated?: () => void }) @{
@@ -242,9 +235,8 @@ function NotificationsBell({ onNavigated }: { onNavigated?: () => void }) @{
       : ("Notifications" as string);
   const badgeText = (count > 99 ? "99+" : String(count)) as string;
 
-  <Link
-    to="/notifications"
-    preload="intent"
+  <AppLink
+    href="/notifications"
     aria-label={label}
     className={cn(
       "relative inline-flex size-9 items-center justify-center rounded-md text-foreground outline-none",
@@ -261,7 +253,7 @@ function NotificationsBell({ onNavigated }: { onNavigated?: () => void }) @{
         {badgeText}
       </span>;
     }
-  </Link>;
+  </AppLink>;
 }
 
 function AccountActions({
@@ -318,23 +310,21 @@ function AccountActions({
       aria-label="Account"
       className={cn("flex h-9 shrink-0 items-center justify-end gap-2", className)}
     >
-      <Link
-        to="/login"
-        preload="intent"
+      <AppLink
+        href="/login"
         className={cn(buttonVariants({ variant: "ghost" }), "h-9 px-3")}
         onClick={onNavigated}
       >
         Sign in
-      </Link>
+      </AppLink>
       @if (allowSignup) {
-        <Link
-          to="/signup"
-          preload="intent"
+        <AppLink
+          href="/signup"
           className={cn(buttonVariants({ variant: "secondary" }), "h-9 px-3")}
           onClick={onNavigated}
         >
           Sign up
-        </Link>;
+        </AppLink>;
       }
     </div>
   );
@@ -344,7 +334,6 @@ const mobileNavItemClass =
   "flex h-11 w-full items-center rounded-md px-3 text-[14px] font-medium text-foreground no-underline outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring";
 
 function MobileNavSheet({ onClose }: { onClose: () => void }) @{
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { pending, user, needsSetup, allowSignup } = useChromeAccountState();
   const repo = useRepoContext();
@@ -412,35 +401,22 @@ function MobileNavSheet({ onClose }: { onClose: () => void }) @{
               </div>
             </AppLink>
             <div className="flex flex-col gap-0.5" role="list">
-              <button
-                type="button"
+              <AppLink
+                href="/"
                 className={cn(mobileNavItemClass, "text-left")}
-                onClick={() => {
-                  onClose();
-                  void navigate({ to: "/" });
-                }}
+                onClick={onClose}
               >
                 Home
-              </button>
+              </AppLink>
               <p className="px-3 pt-2 pb-1 text-[12px] font-medium text-muted-foreground">
                 Create
               </p>
-              <Link
-                to="/new"
-                preload="intent"
-                className={mobileNavItemClass}
-                onClick={onClose}
-              >
+              <AppLink href="/new" className={mobileNavItemClass} onClick={onClose}>
                 New repository
-              </Link>
-              <Link
-                to="/orgs/new"
-                preload="intent"
-                className={mobileNavItemClass}
-                onClick={onClose}
-              >
+              </AppLink>
+              <AppLink href="/orgs/new" className={mobileNavItemClass} onClick={onClose}>
                 New organization
-              </Link>
+              </AppLink>
               @if (repo) {
                 <>
                   <AppLink
@@ -462,34 +438,27 @@ function MobileNavSheet({ onClose }: { onClose: () => void }) @{
               <p className="px-3 pt-2 pb-1 text-[12px] font-medium text-muted-foreground">
                 Account
               </p>
-              <Link
-                to="/notifications"
-                preload="intent"
-                className={mobileNavItemClass}
-                onClick={onClose}
-              >
+              <AppLink href="/notifications" className={mobileNavItemClass} onClick={onClose}>
                 Notifications
-              </Link>
-              <Link to="/" preload="intent" className={mobileNavItemClass} onClick={onClose}>
+              </AppLink>
+              <AppLink href="/" className={mobileNavItemClass} onClick={onClose}>
                 Your repositories
-              </Link>
-              <Link
-                to="/settings/general"
-                preload="intent"
+              </AppLink>
+              <AppLink
+                href="/settings/general"
                 className={mobileNavItemClass}
                 onClick={onClose}
               >
                 Settings
-              </Link>
+              </AppLink>
               @if (user.role === "sys-admin") {
-                <Link
-                  to="/admin/auth"
-                  preload="intent"
+                <AppLink
+                  href="/admin/auth"
                   className={mobileNavItemClass}
                   onClick={onClose}
                 >
                   Admin
-                </Link>;
+                </AppLink>;
               }
               @if (orgs.length > 0) {
                 <>
@@ -507,9 +476,8 @@ function MobileNavSheet({ onClose }: { onClose: () => void }) @{
                   }
                 </>;
               }
-              <Link
-                to="/status"
-                preload="intent"
+              <AppLink
+                href="/status"
                 className={mobileNavItemClass}
                 activeProps={{
                   className: cn(mobileNavItemClass, "text-primary"),
@@ -517,7 +485,7 @@ function MobileNavSheet({ onClose }: { onClose: () => void }) @{
                 onClick={onClose}
               >
                 Status
-              </Link>
+              </AppLink>
               <div className="my-1 h-px bg-border" role="separator" />
               <button
                 type="button"
@@ -535,9 +503,8 @@ function MobileNavSheet({ onClose }: { onClose: () => void }) @{
           </div>;
         } @else {
           <div className="flex flex-col gap-2">
-            <Link
-              to="/status"
-              preload="intent"
+            <AppLink
+              href="/status"
               className={mobileNavItemClass}
               activeProps={{
                 className: cn(mobileNavItemClass, "text-primary"),
@@ -545,7 +512,7 @@ function MobileNavSheet({ onClose }: { onClose: () => void }) @{
               onClick={onClose}
             >
               Status
-            </Link>
+            </AppLink>
             @if (!needsSetup) {
               <div
                 className={cn(
@@ -553,9 +520,8 @@ function MobileNavSheet({ onClose }: { onClose: () => void }) @{
                   allowSignup ? "grid-cols-2" : "grid-cols-1",
                 )}
               >
-                <Link
-                  to="/login"
-                  preload="intent"
+                <AppLink
+                  href="/login"
                   className={cn(
                     buttonVariants({ variant: "ghost" }),
                     "h-11 w-full justify-center",
@@ -563,11 +529,10 @@ function MobileNavSheet({ onClose }: { onClose: () => void }) @{
                   onClick={onClose}
                 >
                   Sign in
-                </Link>
+                </AppLink>
                 @if (allowSignup) {
-                  <Link
-                    to="/signup"
-                    preload="intent"
+                  <AppLink
+                    href="/signup"
                     className={cn(
                       buttonVariants({ variant: "secondary" }),
                       "h-11 w-full justify-center",
@@ -575,7 +540,7 @@ function MobileNavSheet({ onClose }: { onClose: () => void }) @{
                     onClick={onClose}
                   >
                     Sign up
-                  </Link>;
+                  </AppLink>;
                 }
               </div>;
             }
@@ -632,9 +597,8 @@ export function SiteHeader() @{
     className="sticky top-0 z-50 border-b border-border bg-header/95 backdrop-blur-md supports-backdrop-filter:bg-header/85"
   >
     <div className="mx-auto grid h-14 max-w-6xl grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 px-3 sm:gap-x-3 sm:px-4 md:h-[3.75rem] md:gap-x-4">
-      <Link
-        to="/"
-        preload="intent"
+      <AppLink
+        href="/"
         className="col-start-1 row-start-1 flex shrink-0 items-center gap-2.5 no-underline"
         onClick={closeMenu}
       >
@@ -642,7 +606,7 @@ export function SiteHeader() @{
         <span className="hidden font-[family-name:var(--font-display)] text-[22px] font-semibold tracking-tight text-foreground md:inline">
           Oxidean
         </span>
-      </Link>
+      </AppLink>
 
       <GlobalSearch className="col-start-2 row-start-1" />
 
@@ -689,16 +653,15 @@ export function SiteFooter() @{
       <span className="font-[family-name:var(--font-display)] text-[13px] font-medium tracking-tight text-foreground/80">
         © Oxidean
       </span>
-      <Link
-        to="/status"
-        preload="intent"
+      <AppLink
+        href="/status"
         className="font-medium text-foreground underline-offset-4 hover:text-primary hover:underline"
         activeProps={{
           className: "font-medium text-primary underline underline-offset-4",
         }}
       >
         Status
-      </Link>
+      </AppLink>
     </div>
   </footer>;
 }

@@ -18,7 +18,7 @@ vi.mock("@/lib/api-client", () => ({
   },
 }));
 
-import { Route, VerifyPage } from "./verify";
+import { VerifyPage } from "./verify";
 
 afterEach(() => {
   cleanup();
@@ -36,8 +36,7 @@ beforeEach(() => {
 });
 
 describe("/verify Wave 0 contracts (RESEARCH P1)", () => {
-  it("exports Route and VerifyPage", () => {
-    expect(Route).toBeTruthy();
+  it("exports VerifyPage", () => {
     expect(typeof VerifyPage).toBe("function");
   });
 

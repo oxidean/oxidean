@@ -10,7 +10,7 @@ import {
   mountWithQueryClient,
 } from "@/test/browser-mount";
 import { trackDomErrors } from "@/test/dom-errors";
-import { act, createElement } from "octane";
+import { act } from "octane";
 
 const meMock = vi.fn();
 const listUsersMock = vi.fn();
@@ -21,16 +21,6 @@ const deleteUserMock = vi.fn();
 const getAccessMock = vi.fn();
 const listSessionsMock = vi.fn();
 const getActivityMock = vi.fn();
-
-const loaderState = vi.hoisted(() => {
-  let data: unknown;
-  return {
-    get: () => data,
-    set: (next: unknown) => {
-      data = next;
-    },
-  };
-});
 
 vi.mock("@/lib/api-client", () => ({
   apiClient: {
@@ -60,27 +50,34 @@ vi.mock("@/lib/api-client", () => ({
 }));
 
 vi.mock("@/lib/toast", () => ({
+  // Toaster mounts appToastManager — a bare-object stub keeps it inert.
+  appToastManager: {
+    add: vi.fn(),
+    remove: vi.fn(),
+    update: vi.fn(),
+    close: vi.fn(),
+    promise: vi.fn(),
+  },
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
   toastWarning: vi.fn(),
 }));
 
 // Route module imports ssr-auth → tanstack-start; stub so Chromium Vite never loads Start.
-vi.mock("@/lib/ssr-auth", () => ({
-  fetchSessionMe: vi.fn(),
-  fetchAdminUsersList: vi.fn(),
-  fetchAdminInvitesList: vi.fn(),
-}));
+const fetchSessionMeMock = vi.hoisted(() => vi.fn());
+const fetchAdminUsersListMock = vi.hoisted(() => vi.fn());
+const fetchAdminInvitesListMock = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/ssr-auth", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/ssr-auth")>();
+  return {
+    ...actual,
+    fetchSessionMe: fetchSessionMeMock,
+    fetchAdminUsersList: fetchAdminUsersListMock,
+    fetchAdminInvitesList: fetchAdminInvitesListMock,
+  };
+});
 
 // Avoid importing Start/router entry points in the Chromium iframe.
-vi.mock("@octanejs/tanstack-router", () => ({
-  createFileRoute: () => (opts: unknown) => opts,
-  useLoaderData: () => loaderState.get(),
-  // No RouterProvider — AppLink must see "no router" and render its <a> fallback.
-  useRouter: () => undefined,
-  Link: (props: { href?: string; children?: unknown }) =>
-    createElement("a", { href: props.href }, props.children as never),
-}));
 
 import { AdminUsersPage } from "./users";
 
@@ -119,6 +116,12 @@ beforeEach(() => {
   getAccessMock.mockReset();
 
   meMock.mockResolvedValue({ ok: true, data: sysAdmin });
+  fetchSessionMeMock.mockReset();
+  fetchSessionMeMock.mockImplementation(() => meMock());
+  fetchAdminUsersListMock.mockReset();
+  fetchAdminUsersListMock.mockImplementation(() => listUsersMock());
+  fetchAdminInvitesListMock.mockReset();
+  fetchAdminInvitesListMock.mockImplementation(() => listInvitesMock());
   listUsersMock.mockResolvedValue({
     ok: true,
     data: {
@@ -156,28 +159,6 @@ beforeEach(() => {
   });
   listSessionsMock.mockResolvedValue({ ok: true, data: { sessions: [] } });
   getActivityMock.mockResolvedValue({ ok: true, data: { items: [], event_types: [] } });
-
-  loaderState.set({
-    kind: "ready",
-    me: sysAdmin,
-    users: {
-      users: [
-        {
-          id: sysAdmin.id,
-          email: sysAdmin.email,
-          username: sysAdmin.username,
-          display_name: sysAdmin.display_name,
-          role: "sys-admin" as const,
-          email_verified: true,
-          banned_at: null,
-          created_at: "2026-01-01T00:00:00Z",
-        },
-        listedUser,
-      ],
-      total: 2,
-    },
-    invites: [],
-  });
 });
 
 afterEach(async () => {
@@ -390,27 +371,6 @@ describe("AdminUsersPage browser DOM races", () => {
           { email: "bad", ok: false, error: "invalid email", invite: null, invite_url: null },
         ],
       },
-    });
-    loaderState.set({
-      kind: "ready",
-      me: sysAdmin,
-      users: {
-        users: [
-          {
-            id: sysAdmin.id,
-            email: sysAdmin.email,
-            username: sysAdmin.username,
-            display_name: sysAdmin.display_name,
-            role: "sys-admin" as const,
-            email_verified: true,
-            banned_at: null,
-            created_at: "2026-01-01T00:00:00Z",
-          },
-          listedUser,
-        ],
-        total: 2,
-      },
-      invites: [linkInvite],
     });
 
     const tracker = trackDomErrors();

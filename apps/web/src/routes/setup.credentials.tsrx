@@ -1,6 +1,6 @@
-import { createFileRoute, redirect } from "@octanejs/tanstack-router";
-import { useForm } from "@octanejs/tanstack-form";
+import { useForm, useStore } from "@octanejs/tanstack-form";
 import { useEffect, useState } from "octane";
+import { AppPage } from "@/components/app-page";
 import { AuthErrorBanner, AuthShell } from "@/components/auth-shell";
 import { AuthFormSkeleton } from "@/components/page-skeletons";
 import { Button } from "@/components/ui/button";
@@ -10,32 +10,23 @@ import { Switch } from "@/components/ui/switch";
 import { apiClient } from "@/lib/api-client";
 import { networkErrorMessage, rpcErrorMessage } from "@/lib/rpc-error-message";
 import { readReturnToFromLocation, safeReturnTo } from "@/lib/return-to";
-import { fetchSessionMe } from "@/lib/ssr-auth";
 
 const DEFAULT_USERNAME = "system-administrator";
 const NETWORK_ERROR = networkErrorMessage();
 const DEFAULT_USERNAME_ERROR = "Choose a username other than the default system-administrator.";
 
-export const Route = createFileRoute("/setup/credentials")({
-  component: CredentialsPage,
-  head: () => ({ meta: [{ title: "Confirm admin · Oxidean" }] }),
-  beforeLoad: async () => {
-    let mustChange: boolean | null = null;
-    try {
-      const me = await fetchSessionMe();
-      if (me.ok) mustChange = me.data.must_change_credentials;
-      else mustChange = false;
-    } catch {
-      /* unreachable — client effect still gates */
-    }
-    if (mustChange === false) {
-      throw redirect({ href: "/" });
-    }
-  },
-});
+/**
+ * `/setup/credentials` — forced default-credential change (title/meta via
+ * shell). The client effect below performs the must-change gate.
+ */
+export function CredentialsPage() @{
+  <AppPage>
+    <CredentialsContent />
+  </AppPage>;
+}
 
 /** Exported for AUTH-06 integration tests (Keep password Switch + default username). */
-export function CredentialsPage() @{
+export function CredentialsContent() @{
   const [ready, setReady] = useState(false);
   const [error, setError] = useState("");
 
@@ -131,6 +122,11 @@ export function CredentialsPage() @{
     };
   }, []);
 
+  // Read at component scope — form.Field nested inside a form.Subscribe
+  // render-prop crashes under octane 0.10 (children resolver invokes function
+  // children eagerly).
+  const keepPassword = useStore(form.store, (s) => s.values.keepPassword);
+
   <AuthShell
     title="Confirm admin account"
     support="Review your admin email and username. Change any still-default values before continuing."
@@ -207,52 +203,48 @@ export function CredentialsPage() @{
             </div>
           )}
         </form.Field>
-        <form.Subscribe selector={(s) => s.values.keepPassword}>
-          {(keepPassword) =>
-            !keepPassword ? (
-              <div className="flex flex-col gap-4">
-                <form.Field name="password">
-                  {(field) => (
-                    <div className="flex flex-col gap-2">
-                      <Label htmlFor="credentials-password">New password</Label>
-                      <Input
-                        id="credentials-password"
-                        name="password"
-                        type="password"
-                        autoComplete="new-password"
-                        value={field.state.value}
-                        onBlur={field.handleBlur}
-                        onInput={(ev) =>
-                          field.handleChange((ev.currentTarget as HTMLInputElement).value)
-                        }
-                        required
-                      />
-                    </div>
-                  )}
-                </form.Field>
-                <form.Field name="confirm">
-                  {(field) => (
-                    <div className="flex flex-col gap-2">
-                      <Label htmlFor="credentials-confirm">Confirm password</Label>
-                      <Input
-                        id="credentials-confirm"
-                        name="confirm"
-                        type="password"
-                        autoComplete="new-password"
-                        value={field.state.value}
-                        onBlur={field.handleBlur}
-                        onInput={(ev) =>
-                          field.handleChange((ev.currentTarget as HTMLInputElement).value)
-                        }
-                        required
-                      />
-                    </div>
-                  )}
-                </form.Field>
-              </div>
-            ) : null
-          }
-        </form.Subscribe>
+        @if (!keepPassword) {
+          <div className="flex flex-col gap-4">
+            <form.Field name="password">
+              {(field) => (
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="credentials-password">New password</Label>
+                  <Input
+                    id="credentials-password"
+                    name="password"
+                    type="password"
+                    autoComplete="new-password"
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onInput={(ev) =>
+                      field.handleChange((ev.currentTarget as HTMLInputElement).value)
+                    }
+                    required
+                  />
+                </div>
+              )}
+            </form.Field>
+            <form.Field name="confirm">
+              {(field) => (
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="credentials-confirm">Confirm password</Label>
+                  <Input
+                    id="credentials-confirm"
+                    name="confirm"
+                    type="password"
+                    autoComplete="new-password"
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onInput={(ev) =>
+                      field.handleChange((ev.currentTarget as HTMLInputElement).value)
+                    }
+                    required
+                  />
+                </div>
+              )}
+            </form.Field>
+          </div>;
+        }
         <form.Subscribe selector={(s) => s.isSubmitting}>
           {(isSubmitting) => (
             <Button type="submit" className="w-full" disabled={isSubmitting}>

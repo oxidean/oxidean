@@ -1,0 +1,14 @@
+---
+import AppShell from "@/layouts/AppShell.astro";
+import { RepoComparePage } from "@/routes/$owner.$repo.compare.$.tsrx";
+
+// Placeholder shell — the middleware maps every real path for this route
+// onto this page; params resolve client-side from `location.pathname`.
+export function getStaticPaths() {
+	return [{ params: { owner: "_", repo: "_", range: "_" } }];
+}
+---
+
+<AppShell title="Oxidean">
+	<RepoComparePage client:load />
+</AppShell>

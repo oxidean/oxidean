@@ -1,0 +1,12 @@
+---
+import AppShell from "@/layouts/AppShell.astro";
+import { OrgLabelsPage } from "@/routes/$owner.settings.labels.tsrx";
+
+export function getStaticPaths() {
+	return [{ params: { owner: "_" } }];
+}
+---
+
+<AppShell title="Labels · Oxidean">
+	<OrgLabelsPage client:load />
+</AppShell>

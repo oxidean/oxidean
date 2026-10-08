@@ -1,3 +1,3 @@
 {
-  "ignorePatterns": ["**/routeTree.gen.ts", "dist/**", "coverage/**"]
+  "ignorePatterns": ["**/routeTree.gen.ts", "dist/**", "coverage/**", ".astro/**"]
 }

@@ -1,4 +1,3 @@
-import { createFileRoute, useLoaderData } from "@octanejs/tanstack-router";
 import {
   gpgKeyListQueryOptions,
   sshKeyListQueryOptions,
@@ -6,7 +5,8 @@ import {
   type SshKeyListItem,
   type UserPublic,
 } from "@oxidean/api-client";
-import { useQuery } from "@octanejs/tanstack-query";
+import { queryOptions, useQuery } from "@octanejs/tanstack-query";
+import { AppPage } from "@/components/app-page";
 import { useEffect, useState } from "octane";
 import { GpgKeyAddForm } from "@/components/settings/gpg-key-add-form";
 import { GpgKeyList } from "@/components/settings/gpg-key-list";
@@ -29,46 +29,49 @@ export type SshKeysLoaderData =
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
 
-export const Route = createFileRoute("/settings/ssh-keys")({
-  component: SshKeysPage,
-  head: () => ({ meta: [{ title: "SSH and GPG keys · Oxidean" }] }),
-  loader: async (): Promise<SshKeysLoaderData> => {
-    try {
-      const res = await fetchSessionMe();
-      if (!res.ok) {
-        if (res.error.code === "auth.unauthenticated") {
-          return { kind: "unauthenticated" };
+function settingsSshKeysQueryOptions() {
+  return queryOptions({
+    queryKey: ["settings", "settingsSshKeys"],
+    queryFn: async (): Promise<SshKeysLoaderData> => {
+      try {
+        const res = await fetchSessionMe();
+        if (!res.ok) {
+          if (res.error.code === "auth.unauthenticated") {
+            return { kind: "unauthenticated" };
+          }
+          return {
+            kind: "error",
+            message: res.error.message || "Could not load session.",
+          };
+        }
+        const listRes = await fetchSshKeyList();
+        if (!listRes.ok) {
+          return {
+            kind: "error",
+            message: listRes.error.message || "Could not load SSH keys.",
+          };
+        }
+        const gpgRes = await fetchGpgKeyList();
+        if (!gpgRes.ok) {
+          return {
+            kind: "error",
+            message: gpgRes.error.message || "Could not load GPG keys.",
+          };
         }
         return {
-          kind: "error",
-          message: res.error.message || "Could not load session.",
+          kind: "ready",
+          user: res.data,
+          keys: listRes.data,
+          gpgKeys: gpgRes.data,
         };
+      } catch {
+        return { kind: "error", message: NETWORK_ERROR };
       }
-      const listRes = await fetchSshKeyList();
-      if (!listRes.ok) {
-        return {
-          kind: "error",
-          message: listRes.error.message || "Could not load SSH keys.",
-        };
-      }
-      const gpgRes = await fetchGpgKeyList();
-      if (!gpgRes.ok) {
-        return {
-          kind: "error",
-          message: gpgRes.error.message || "Could not load GPG keys.",
-        };
-      }
-      return {
-        kind: "ready",
-        user: res.data,
-        keys: listRes.data,
-        gpgKeys: gpgRes.data,
-      };
-    } catch {
-      return { kind: "error", message: NETWORK_ERROR };
-    }
-  },
-});
+    },
+    retry: false,
+    staleTime: 30_000,
+  });
+}
 
 type Phase =
   | { kind: "loading" }
@@ -77,7 +80,13 @@ type Phase =
 
 /** Exported for ssh-keys.integration.test.ts (GIT-04 / D-SSH-06). */
 export function SshKeysPage() @{
-  const loaderData = useLoaderData({ from: "/settings/ssh-keys" }) as SshKeysLoaderData | undefined;
+  <AppPage>
+    <SshKeysContent />
+  </AppPage>;
+}
+
+export function SshKeysContent() @{
+  const loaderData = useQuery(settingsSshKeysQueryOptions()).data;
 
   useEffect(() => {
     if (loaderData?.kind === "unauthenticated") {

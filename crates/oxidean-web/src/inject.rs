@@ -1,0 +1,178 @@
+//! Per-request HTML rewriting on shell bytes — the Rust replacement for the
+//! bits `__root.tsrx` stamped during SSR: `<html>` theme class, `color-scheme`
+//! meta, route `<title>`, and the `oxidean:ssh-*` advertise metas the client
+//! reads for clone URLs.
+
+use axum::http::HeaderMap;
+
+/// `"light"`/`"dark"` after applying the same chain the FOUC boot script +
+/// `resolveThemeForSsr` use: explicit `oxidean-theme` cookie → resolved
+/// `oxidean-color-scheme` cookie → `Sec-CH-Prefers-Color-Site` header → light.
+pub fn resolve_theme(cookie: Option<&str>, sec_ch: Option<&str>) -> &'static str {
+    if let Some(c) = cookie {
+        if let Some(m) = find_cookie(c, "oxidean-theme") {
+            if m == "light" || m == "dark" {
+                return if m == "dark" { "dark" } else { "light" };
+            }
+        }
+        if let Some(m) = find_cookie(c, "oxidean-color-scheme") {
+            if m == "light" || m == "dark" {
+                return if m == "dark" { "dark" } else { "light" };
+            }
+        }
+    }
+    if let Some(ch) = sec_ch {
+        let ch = ch.trim().to_ascii_lowercase();
+        if ch == "dark" || ch == "light" {
+            return if ch == "dark" { "dark" } else { "light" };
+        }
+    }
+    "light"
+}
+
+/// `name=value` lookup inside a Cookie header (no decoding — our cookies are
+/// all ASCII flag values).
+fn find_cookie<'a>(header: &'a str, name: &str) -> Option<&'a str> {
+    for pair in header.split(';') {
+        let pair = pair.trim();
+        if let Some((k, v)) = pair.split_once('=') {
+            if k == name {
+                return Some(v.trim_matches('"'));
+            }
+        }
+    }
+    None
+}
+
+/// Anonymous-gate input: the `oxidean_signed_in=1` presence flag OR a real
+/// `oxidean_session` cookie. The hint is client-set and can be absent on
+/// sessions minted before it existed (see `syncSessionPresenceHint`) — the
+/// HttpOnly session cookie is the stronger signal and visible to the server.
+/// Neither is authoritative for ACL — that stays in the API + client shell.
+pub fn signed_in(cookie: Option<&str>) -> bool {
+    let Some(c) = cookie else { return false };
+    if find_cookie(c, "oxidean_signed_in").is_some_and(|v| v == "1") {
+        return true;
+    }
+    find_cookie(c, "oxidean_session").is_some_and(|v| !v.is_empty())
+}
+
+/// Extra `<head>` meta the serving tier knows and the client cannot derive:
+/// advertised SSH clone host/port.
+pub struct AdvertiseMeta {
+    pub ssh_host: Option<String>,
+    pub ssh_port: Option<u16>,
+}
+
+/// Apply the per-request stamps to a shell's HTML.
+pub fn inject(
+    html: &str,
+    headers: &HeaderMap,
+    title: Option<&str>,
+    meta: &AdvertiseMeta,
+) -> String {
+    let cookie = headers
+        .get(axum::http::header::COOKIE)
+        .and_then(|v| v.to_str().ok());
+    let sec_ch = headers
+        .get("sec-ch-prefers-color-scheme")
+        .and_then(|v| v.to_str().ok());
+    let theme = resolve_theme(cookie, sec_ch);
+
+    let mut out = html.to_string();
+
+    // <html lang="en"> → <html lang="en" class="dark"> (+ data attr the boot
+    // script keys on to skip its own class toggle).
+    if theme == "dark" {
+        out = out.replacen("<html lang=\"en\"", "<html lang=\"en\" class=\"dark\"", 1);
+        out = out.replacen(
+            "<meta name=\"color-scheme\" content=\"light\"",
+            "<meta name=\"color-scheme\" content=\"dark\"",
+            1,
+        );
+    }
+
+    // Route <title> — shells ship a generic "Oxidean" title for dynamic pages.
+    if let Some(t) = title {
+        if let (Some(a), Some(b)) = (out.find("<title>"), out.find("</title>")) {
+            out = format!("{}<title>{}</title>{}", &out[..a], t, &out[b + "</title>".len()..]);
+        }
+    }
+
+    // SSH advertise metas — read by `resolveSshAdvertiseHost/Port` in the SPA.
+    let mut extra = String::new();
+    if let Some(h) = &meta.ssh_host {
+        extra.push_str(&format!(
+            "<meta name=\"oxidean:ssh-host\" content=\"{}\">",
+            escape_attr(h)
+        ));
+    }
+    if let Some(p) = meta.ssh_port {
+        extra.push_str(&format!("<meta name=\"oxidean:ssh-port\" content=\"{p}\">"));
+    }
+    if !extra.is_empty() {
+        if let Some(pos) = out.rfind("</head>") {
+            out.insert_str(pos, &extra);
+        }
+    }
+    out
+}
+
+fn escape_attr(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('"', "&quot;")
+        .replace('<', "&lt;")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::HeaderValue;
+
+    #[test]
+    fn theme_chain() {
+        assert_eq!(resolve_theme(None, None), "light");
+        assert_eq!(
+            resolve_theme(Some("oxidean-theme=dark"), None),
+            "dark"
+        );
+        // resolved cookie beats CH header
+        assert_eq!(
+            resolve_theme(Some("oxidean-color-scheme=light"), Some("dark")),
+            "light"
+        );
+        assert_eq!(resolve_theme(None, Some("dark")), "dark");
+        assert_eq!(
+            resolve_theme(Some("oxidean-theme=system; oxidean-color-scheme=dark"), None),
+            "dark"
+        );
+    }
+
+    #[test]
+    fn presence() {
+        assert!(signed_in(Some("a=b; oxidean_signed_in=1; c=d")));
+        // Authoritative session cookie alone also passes the gate — the hint
+        // is a client-set companion, not the credential.
+        assert!(signed_in(Some("oxidean_session=abc123")));
+        assert!(!signed_in(Some("oxidean_signed_in=0")));
+        assert!(!signed_in(Some("oxidean_session=")));
+        assert!(!signed_in(None));
+    }
+
+    #[test]
+    fn stamps() {
+        let html = r#"<html lang="en"><head><meta name="color-scheme" content="light"><title>Oxidean</title></head>"#;
+        let mut h = HeaderMap::new();
+        h.insert("cookie", HeaderValue::from_static("oxidean-theme=dark"));
+        let out = inject(
+            html,
+            &h,
+            Some("Issues · a/b · Oxidean"),
+            &AdvertiseMeta { ssh_host: Some("git.example.com".into()), ssh_port: Some(2222) },
+        );
+        assert!(out.contains("<html lang=\"en\" class=\"dark\""));
+        assert!(out.contains("content=\"dark\""));
+        assert!(out.contains("<title>Issues · a/b · Oxidean</title>"));
+        assert!(out.contains("oxidean:ssh-host\" content=\"git.example.com\""));
+    }
+}

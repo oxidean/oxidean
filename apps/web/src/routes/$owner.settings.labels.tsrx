@@ -1,10 +1,3 @@
-import {
-  createFileRoute,
-  notFound,
-  redirect,
-  useLoaderData,
-  useParams,
-} from "@octanejs/tanstack-router";
 import { useForm } from "@octanejs/tanstack-form";
 import { useQuery, useQueryClient } from "@octanejs/tanstack-query";
 import type { LabelPublic, OrgPublic } from "@oxidean/api-client";
@@ -18,8 +11,13 @@ import { Label } from "@/components/ui/label";
 import { List, ListRow } from "@/components/ui/list";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiClient } from "@/lib/api-client";
-import { fetchOrgGet, fetchOrgListMine } from "@/lib/ssr-org";
-import { fetchSessionMe } from "@/lib/ssr-auth";
+import { AppPage } from "@/components/app-page";
+import {
+  OrgSettingsShell,
+  orgSettingsAccessQueryOptions,
+  orgSettingsOwner,
+} from "@/components/org/org-settings-shell.tsrx";
+import { usePathname } from "@/lib/pathname.tsrx";
 
 export type OrgLabelsLoaderData = {
   org: OrgPublic;
@@ -38,56 +36,23 @@ function swatchStyle(color: string): { backgroundColor: string } {
   return { backgroundColor: hex };
 }
 
-export const Route = createFileRoute("/$owner/settings/labels")({
-  component: OrgLabelsPage,
-  head: ({ loaderData, params }) => {
-    const data = loaderData as OrgLabelsLoaderData | undefined;
-    const owner = String((params as { owner?: string }).owner ?? "");
-    const name = data?.org?.display_name || data?.org?.slug || owner;
-    return { meta: [{ title: `Labels · ${name}` }] };
-  },
-  beforeLoad: async ({ params }) => {
-    const owner = String((params as { owner?: string }).owner ?? "");
-    try {
-      const me = await fetchSessionMe();
-      if (!me.ok) {
-        throw redirect({
-          href: `/login?returnTo=/${owner}/settings/labels`,
-        });
-      }
-    } catch (e) {
-      if (e && typeof e === "object" && "href" in e) throw e;
-      throw redirect({
-        href: `/login?returnTo=/${owner}/settings/labels`,
-      });
-    }
-  },
-  loader: async ({ params }): Promise<OrgLabelsLoaderData> => {
-    const owner = String((params as { owner?: string }).owner ?? "");
-    const got = await fetchOrgGet({ data: { slug: owner } });
-    if (!got.ok) throw notFound();
-
-    let canAdmin = false;
-    const mine = await fetchOrgListMine();
-    if (mine.ok) {
-      const entry = mine.data.orgs.find((o) => o.slug === got.data.slug);
-      canAdmin = entry?.role === "owner" || entry?.role === "admin";
-    }
-    if (!canAdmin) {
-      throw redirect({ href: `/${got.data.slug}` });
-    }
-    return { org: got.data, canAdmin };
-  },
-});
+/** Org default label catalog — Admin only (D-ISS-05 / D-ISS-07). */
+/** `/{owner}/settings/labels` — org label catalog (title via shell). */
+export function OrgLabelsPage() @{
+  <AppPage>
+    <OrgSettingsShell active="labels">
+      <OrgLabelsContent />
+    </OrgSettingsShell>
+  </AppPage>;
+}
 
 /** Org default label catalog — Admin only (D-ISS-05 / D-ISS-07). */
-export function OrgLabelsPage() @{
-  const params = useParams({ strict: false }) as { owner?: string };
-  const data = useLoaderData({ from: "/$owner/settings/labels" }) as
-    | OrgLabelsLoaderData
-    | undefined;
-  const org = data?.org;
-  const slug = org?.slug ?? params.owner ?? "";
+export function OrgLabelsContent() @{
+  const pathname = usePathname();
+  const owner = orgSettingsOwner(pathname);
+  const data = useQuery(orgSettingsAccessQueryOptions(owner)).data;
+  const org = data?.kind === "ready" ? data.org : null;
+  const slug = org?.slug ?? owner;
   const queryClient = useQueryClient();
 
   const labelsQ = useQuery({

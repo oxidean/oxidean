@@ -7,6 +7,7 @@ members = [
   "crates/oxidean-db",
   "crates/oxidean-git",
   "crates/oxidean-runner",
+  "crates/oxidean-web",
 ]
 
 [workspace.package]

@@ -1,11 +1,10 @@
-import {
-  createFileRoute,
-  useLoaderData,
-  useNavigate,
-  useParams,
-  useSearch,
-} from "@octanejs/tanstack-router";
-import { useMutation, useQuery, useQueryClient } from "@octanejs/tanstack-query";
+import { queryOptions, useMutation, useQuery, useQueryClient } from "@octanejs/tanstack-query";
+import { navigate as astroNavigate } from "astro:transitions/client";
+
+import { matchPath, routeHref, searchRecord } from "@/lib/route-params";
+import { usePathname, useSearchString } from "@/lib/pathname.tsrx";
+import { RepoLayout } from "@/routes/$owner.$repo.tsrx";
+import { AppPage } from "@/components/app-page";
 import type { ActionJobLogResponse, ActionRunGetResponse } from "@oxidean/api-client";
 import { ArrowLeft, Ban, RotateCcw, Workflow } from "@octanejs/lucide";
 import { Badge } from "@/components/ui/badge";
@@ -72,9 +71,7 @@ async function loadActionsRunPage(
   repoName: string,
   runId: string,
 ): Promise<ActionsRunLoaderData> {
-  const got = await fetchActionsGetRun({
-    data: { owner, name: repoName, run_id: runId },
-  });
+  const got = await fetchActionsGetRun({ owner, name: repoName, run_id: runId });
   if (!got.ok) {
     if (got.error.code === "repo.not_found") return { kind: "not_found" };
     return {
@@ -86,43 +83,55 @@ async function loadActionsRunPage(
   let firstJobLog: ActionJobLogResponse | null = null;
   if (firstJob) {
     const log = await fetchActionsGetJobLog({
-      data: { owner, name: repoName, run_id: runId, job_id: firstJob.id },
+      owner,
+      name: repoName,
+      run_id: runId,
+      job_id: firstJob.id,
     });
     firstJobLog = log.ok ? log.data : { content: "", next_offset: 0, size: 0 };
   }
   return { kind: "ready", detail: got.data, firstJobLog };
 }
 
-export const Route = createFileRoute("/$owner/$repo/actions/$run")({
-  validateSearch: (search: Record<string, unknown>): ActionsRunSearch => ({
-    job: typeof search.job === "string" ? search.job : undefined,
-  }),
-  component: RepoActionsRunPage,
-  head: ({ params }) => {
-    const p = params as { owner?: string; repo?: string; run?: string };
-    return {
-      meta: [
-        {
-          title: `Run ${String(p.run ?? "")} · ${String(p.owner ?? "")}/${String(p.repo ?? "")} · Oxidean`,
-        },
-      ],
-    };
-  },
-  loader: async ({ params }): Promise<ActionsRunLoaderData> => {
-    const owner = String((params as { owner?: string }).owner ?? "");
-    const repoName = String((params as { repo?: string }).repo ?? "");
-    const runId = String((params as { run?: string }).run ?? "");
-    try {
-      return await loadActionsRunPage(owner, repoName, runId);
-    } catch {
-      return { kind: "error", message: NETWORK_ERROR };
-    }
-  },
-});
+function validateSearch(search: Record<string, unknown>): ActionsRunSearch {
+  return { job: typeof search.job === "string" ? search.job : undefined };
+}
+
+function repoActionsRunQueryOptions(params: Record<string, string | undefined>, searchStr = "") {
+  return queryOptions({
+    queryKey: [
+      "repo-page",
+      "/$owner/$repo/actions/$run",
+      params.owner ?? "",
+      params.repo ?? "",
+      params._splat ?? "",
+      params.n ?? "",
+      params.sha ?? "",
+      params.tag ?? "",
+      params.run ?? "",
+      searchStr,
+    ],
+    queryFn: async (): Promise<ActionsRunLoaderData> => {
+      const owner = String((params as { owner?: string }).owner ?? "");
+      const repoName = String((params as { repo?: string }).repo ?? "");
+      const runId = String((params as { run?: string }).run ?? "");
+      try {
+        return await loadActionsRunPage(owner, repoName, runId);
+      } catch {
+        return { kind: "error", message: NETWORK_ERROR };
+      }
+    },
+    enabled: Boolean(params.owner && params.repo),
+    retry: false,
+    staleTime: 30_000,
+  });
+}
 
 /** Run detail + job logs (ACT-03 / D-ACT-13). Inherits layout chrome (D-QH-01). */
-export function RepoActionsRunPage() @{
-  const params = useParams({ from: "/$owner/$repo/actions/$run" }) as {
+function RepoActionsRunPageContent() @{
+  const pathname = usePathname();
+  const searchStr = useSearchString();
+  const params = (matchPath("/$owner/$repo/actions/$run", pathname) ?? {}) as {
     owner?: string;
     repo?: string;
     run?: string;
@@ -130,11 +139,9 @@ export function RepoActionsRunPage() @{
   const owner = String(params.owner ?? "");
   const repoName = String(params.repo ?? "");
   const runId = String(params.run ?? "");
-  const search = useSearch({ strict: false }) as ActionsRunSearch;
-  const navigate = useNavigate();
-  const routeLoader = useLoaderData({ from: "/$owner/$repo/actions/$run" }) as
-    | ActionsRunLoaderData
-    | undefined;
+  const search = validateSearch(searchRecord(searchStr)) as ActionsRunSearch;
+  const navigate = astroNavigate;
+  const routeLoader = useQuery(repoActionsRunQueryOptions(params, searchStr)).data;
   const repo = useRepoStore((s) => s.repo);
   const canWrite = !!repo?.can_write;
 
@@ -187,11 +194,9 @@ export function RepoActionsRunPage() @{
   const runActive = run ? isActiveStatus(run.status) : false;
 
   function selectJob(id: string) {
-    void navigate({
-      to: "/$owner/$repo/actions/$run",
-      params: { owner, repo: repoName, run: runId },
-      search: { job: id },
-    });
+    void navigate(
+      routeHref("/$owner/$repo/actions/$run", { owner, repo: repoName, run: runId }, { job: id }),
+    );
   }
 
   function rerun(target: { job_id?: string; failed_only?: boolean }) {
@@ -355,4 +360,13 @@ export function RepoActionsRunPage() @{
       }
     </div>;
     };
+}
+
+/** Page root — RepoLayout (chrome + repo store) around the leaf content. */
+export function RepoActionsRunPage() @{
+  <AppPage>
+    <RepoLayout>
+      <RepoActionsRunPageContent />
+    </RepoLayout>
+  </AppPage>;
 }

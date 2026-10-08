@@ -13,61 +13,29 @@ vi.mock("@/lib/spdx-licenses", () => ({
   listSpdxLicenseOptions: () => [{ id: "none", label: "None" }],
 }));
 
+const meMock = vi.fn();
+const createDefaultsMock = vi.fn();
+
 vi.mock("@/lib/api-client", () => ({
   apiClient: {
     auth: {
-      me: vi.fn(),
+      me: (...args: unknown[]) => meMock(...args),
     },
     org: {
       listMine: (...args: unknown[]) => listMineMock(...args),
     },
     repo: {
       create: (...args: unknown[]) => createMock(...args),
-      createDefaults: vi.fn(),
+      createDefaults: (...args: unknown[]) => createDefaultsMock(...args),
     },
   },
 }));
 
-type LoaderShape = {
-  user: {
-    id: string;
-    email: string;
-    username: string;
-    display_name: string;
-    bio: string;
-    avatar_url: null;
-    role: string;
-    profile_incomplete: boolean;
-    email_verified: boolean;
-  };
-  defaults: {
-    default_visibility: "public" | "private";
-    stacks: never[];
-    gitignores: never[];
-  } | null;
-  ownerOrgs: {
-    id: string;
-    slug: string;
-    display_name: string;
-    member_base_permission: "none" | "read" | "write";
-    role: "owner" | "admin" | "member";
-    created_at: string;
-    updated_at: string;
-  }[];
-};
-
-let loaderData: LoaderShape;
-
-vi.mock("@octanejs/tanstack-router", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@octanejs/tanstack-router")>();
-  return {
-    ...actual,
-    useLoaderData: () => loaderData,
-  };
-});
-
 beforeEach(() => {
+  window.history.pushState({}, "", "/new");
   createMock.mockReset();
+  meMock.mockReset();
+  createDefaultsMock.mockReset();
   listMineMock.mockReset();
   listMineMock.mockResolvedValue({
     ok: true,
@@ -79,7 +47,7 @@ beforeEach(() => {
       ],
     },
   });
-  loaderData = {
+  const __ld = {
     user: {
       id: "u1",
       email: "ada@example.com",
@@ -118,6 +86,13 @@ beforeEach(() => {
       },
     ],
   };
+  meMock.mockResolvedValue({ ok: true, data: __ld.user });
+  createDefaultsMock.mockResolvedValue(
+    __ld.defaults
+      ? { ok: true, data: __ld.defaults }
+      : { ok: false, error: { code: "x", message: "x" } },
+  );
+  listMineMock.mockResolvedValue({ ok: true, data: { orgs: __ld.ownerOrgs ?? [] } });
 });
 
 afterEach(() => {
@@ -125,29 +100,17 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
-async function loadNewModule(): Promise<Record<string, unknown>> {
-  const rel = "./new";
-  try {
-    return (await import(/* @vite-ignore */ rel)) as Record<string, unknown>;
-  } catch (err) {
-    throw new Error(
-      `Wave 0: /new route missing — owner picker needs NewPage (D-ORG-06). ${(err as Error).message}`,
-    );
-  }
-}
+import { NewPage } from "./new";
 
-function ownerTrigger(): HTMLElement {
-  return screen.getByLabelText(/^Owner$/i);
+function ownerTrigger(): Promise<HTMLElement> {
+  return screen.findByLabelText(/^Owner$/i, {}, { timeout: 10_000 });
 }
 
 describe("/new owner picker (D-ORG-06)", () => {
   it("lists @self + Owner/Admin orgs — not Member-only orgs", async () => {
-    const mod = await loadNewModule();
-    const NewPage = (mod.NewPage ?? mod.default) as unknown;
-    expect(NewPage, "NewPage must export for owner picker").toBeTruthy();
     render(NewPage as never);
 
-    const ownerControl = ownerTrigger();
+    const ownerControl = await ownerTrigger();
     expect(
       ownerControl,
       "Owner Select/combobox listing self + Owner/Admin orgs (D-ORG-06)",
@@ -163,8 +126,6 @@ describe("/new owner picker (D-ORG-06)", () => {
   }, 20_000);
 
   it("removes Organizations come in a later phase copy", async () => {
-    const mod = await loadNewModule();
-    const NewPage = (mod.NewPage ?? mod.default) as unknown;
     render(NewPage as never);
 
     expect(screen.queryByText(/Organizations come in a later phase/i)).not.toBeInTheDocument();
@@ -188,12 +149,10 @@ describe("/new owner picker (D-ORG-06)", () => {
       },
     });
 
-    const mod = await loadNewModule();
-    const NewPage = (mod.NewPage ?? mod.default) as unknown;
     render(NewPage as never);
 
     // Default selection is self; owner slug must still be posted (D-ORG-06).
-    expect(ownerTrigger()).toHaveTextContent("@ada");
+    expect(await ownerTrigger()).toHaveTextContent("@ada");
 
     fireEvent.input(screen.getByLabelText(/repository name/i), {
       target: { value: "demo" },
