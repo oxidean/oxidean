@@ -275,9 +275,9 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
     surface: "components/admin/byte-quota-field.tsrx",
     coverage: [
       {
-        kind: "skip",
-        rationale:
-          "Admin quota Select; forge-admin opens /admin/packages chrome. Add browser Select pick when quota field is next edited.",
+        kind: "stack-browser",
+        test: FORGE_ADMIN,
+        subject: "expectAdminLfsQuotasFlow",
       },
     ],
   },
@@ -340,9 +340,9 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
     surface: "routes/setup.credentials.tsrx",
     coverage: [
       {
-        kind: "skip",
-        rationale:
-          "Credentials step covered by happy-dom setup.credentials.integration; promote on next edit.",
+        kind: "browser",
+        test: "apps/web/src/routes/setup.credentials.browser.test.tsx",
+        subject: "CredentialsPage",
       },
     ],
   },
@@ -368,9 +368,9 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
     surface: "routes/admin/templates.tsrx",
     coverage: [
       {
-        kind: "skip",
-        rationale:
-          "Admin templates Switch/Select; forge-admin does not open /admin/templates yet. Add browser or stack-browser on next templates edit.",
+        kind: "browser",
+        test: "apps/web/src/routes/admin/templates.browser.test.tsx",
+        subject: "AdminTemplatesPage",
       },
     ],
   },

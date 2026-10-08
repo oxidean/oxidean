@@ -52,6 +52,7 @@
         "happy-dom": "^20.14.3",
         "oxlint-tsgolint": "7.0.2002",
         "pixelmatch": "7.1.0",
+        "playwright": "^1.63.0",
         "pngjs": "7.0.0",
         "tailwindcss": "^4.3.3",
         "typescript": "^7.0.2",
