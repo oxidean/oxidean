@@ -48,7 +48,7 @@ function revealExploreTarget() {
   });
 }
 
-function useScrollReveal(enabled: boolean) {
+function useScrollReveal(enabled: boolean, epoch: unknown) {
   useEffect(() => {
     if (!enabled) return;
     const nodes = Array.from(document.querySelectorAll<HTMLElement>(".oct-reveal"));
@@ -71,7 +71,10 @@ function useScrollReveal(enabled: boolean) {
     );
     nodes.forEach((n) => io.observe(n));
     return () => io.disconnect();
-  }, [enabled]);
+    // epoch re-runs the query when the rendered tree shape changes: pending →
+    // marketing replaces the .oct-reveal nodes (wrapped → bare AnonLanding),
+    // and an observer holding the detached nodes would reveal nothing.
+  }, [enabled, epoch]);
 }
 
 export function HomePage() @{
@@ -97,7 +100,7 @@ function HomeContent() {
   // Cookie is only readable after mount — reading it for reveal gating feeds an
   // effect arg, not SSR markup, so it's safe client-side.
   const sessionHint = typeof document !== "undefined" ? hasSessionPresenceHint() : false;
-  useScrollReveal(tree === "marketing" || (tree == null && !sessionHint));
+  useScrollReveal(tree === "marketing" || (tree == null && !sessionHint), tree);
 
   // Pending: SSR cannot see the session, so emit both candidates — the
   // `data-oxidean-session` stamp on <html> (set per-request by the web tier)
