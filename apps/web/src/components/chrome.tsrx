@@ -343,7 +343,9 @@ function AccountClusterPending({ className }: { className?: string }) @{
   >
     <div data-header-skeleton-anon className="items-center gap-2">
       <Skeleton className="h-9 w-[4.25rem]" />
-      <Skeleton className="h-9 w-[4.5rem]" />
+      {/* The Sign-up-shaped bar paints only when the web tier's
+          `data-oxidean-signup` stamp says registration is open. */}
+      <Skeleton className="h-9 w-[4.5rem]" data-header-skeleton-signup />
     </div>
     <div data-header-skeleton-authed className="items-center gap-1">
       <Skeleton className="size-9" />

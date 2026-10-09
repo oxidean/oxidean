@@ -104,6 +104,12 @@ pub fn inject(
     if stamped {
         html_attrs.push_str(" data-oxidean-session=\"1\"");
     }
+    // Readable companion written by the client once `auth.provider_config`
+    // resolves — lets the anon header skeleton match the resolved cluster's
+    // one- vs two-button geometry on the next shell. Absent/`0` = closed.
+    if cookie.is_some_and(|c| find_cookie(c, "oxidean_allow_signup") == Some("1")) {
+        html_attrs.push_str(" data-oxidean-signup=\"1\"");
+    }
     if !html_attrs.is_empty() {
         out = out.replacen(
             "<html lang=\"en\"",
@@ -228,5 +234,31 @@ mod tests {
         assert!(out.contains("data-oxidean-session=\"1\""));
         let out = inject(html, &HeaderMap::new(), None, &meta, SessionSignal::Unknown);
         assert!(!out.contains("data-oxidean-session"));
+    }
+
+    #[test]
+    fn signup_stamp() {
+        let html = r#"<html lang="en"><head><title>Oxidean</title></head>"#;
+        let meta = AdvertiseMeta { ssh_host: None, ssh_port: None };
+
+        // Open registration per the companion cookie → stamped.
+        let mut open = HeaderMap::new();
+        open.insert(
+            "cookie",
+            HeaderValue::from_static("oxidean_allow_signup=1"),
+        );
+        let out = inject(html, &open, None, &meta, SessionSignal::Absent);
+        assert!(out.contains("data-oxidean-signup=\"1\""));
+
+        // Closed (`=0`) or never-resolved (absent) → no stamp.
+        let mut closed = HeaderMap::new();
+        closed.insert(
+            "cookie",
+            HeaderValue::from_static("oxidean_allow_signup=0"),
+        );
+        let out = inject(html, &closed, None, &meta, SessionSignal::Absent);
+        assert!(!out.contains("data-oxidean-signup"));
+        let out = inject(html, &HeaderMap::new(), None, &meta, SessionSignal::Absent);
+        assert!(!out.contains("data-oxidean-signup"));
     }
 }

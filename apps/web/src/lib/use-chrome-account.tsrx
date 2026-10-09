@@ -1,5 +1,7 @@
 import { useQuery } from "@octanejs/tanstack-query";
 import type { UserPublic } from "@oxidean/api-client";
+import { useEffect } from "octane";
+import { syncAllowSignupHint } from "@/lib/session-hint";
 import {
   authBootstrapQueryOptions,
   authProviderConfigQueryOptions,
@@ -45,6 +47,12 @@ export function useChromeAccountState(): {
     ? null
     : boot.isSuccess && boot.data.needs_setup === true;
   const allowSignup = resolveAllowSignup(cfg.data);
+
+  // Heal the readable signup hint so the next static shell's anon skeleton
+  // matches the resolved cluster's geometry (web tier stamps it on <html>).
+  useEffect(() => {
+    if (cfg.isSuccess) syncAllowSignupHint(allowSignup);
+  }, [cfg.isSuccess, allowSignup]);
 
   return { pending, user, needsSetup, allowSignup };
 }

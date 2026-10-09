@@ -10,6 +10,7 @@ export function Skeleton({
 }: {
   className?: string;
   style?: Record<string, string | number>;
+  [dataAttr: `data-${string}`]: string | boolean | undefined;
 }) @{
   <div
     aria-hidden

@@ -1,6 +1,11 @@
 /** Readable companion to HttpOnly `oxidean_session` — value is always `1`. */
 const SESSION_PRESENCE_COOKIE = "oxidean_signed_in";
-/** Readable companion to HttpOnly `oxidean_session` — value is always `1`. */
+/**
+ * Readable companion carrying `allow_signup` (`1`/`0`) — the web tier stamps
+ * `data-oxidean-signup` from it so the anon header skeleton can pre-select
+ * the one- vs two-button shape before `auth.provider_config` resolves.
+ */
+const ALLOW_SIGNUP_COOKIE = "oxidean_allow_signup";
 
 /** Sync hint for choosing signed-in home skeleton before `auth.me` resolves. */
 export function hasSessionPresenceHint(): boolean {
@@ -16,4 +21,12 @@ export function syncSessionPresenceHint(signedIn: boolean): void {
   } else {
     document.cookie = `${SESSION_PRESENCE_COOKIE}=; Path=/; SameSite=Lax; Max-Age=0`;
   }
+}
+
+/** Persist `allow_signup` (`0` rather than cleared, so "closed" differs from "never resolved"). */
+export function syncAllowSignupHint(allowed: boolean): void {
+  if (typeof document === "undefined") return;
+  const next = allowed ? "1" : "0";
+  if (new RegExp(`(?:^|;\\s*)${ALLOW_SIGNUP_COOKIE}=${next}(?:;|$)`).test(document.cookie)) return;
+  document.cookie = `${ALLOW_SIGNUP_COOKIE}=${next}; Path=/; SameSite=Lax; Max-Age=${30 * 24 * 3600}`;
 }

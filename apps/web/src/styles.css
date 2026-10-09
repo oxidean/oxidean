@@ -303,6 +303,12 @@
   html[data-oxidean-session] [data-header-skeleton-authed] {
     display: flex;
   }
+  /* Sign-up-shaped bar only paints when the web tier's `data-oxidean-signup`
+     stamp (from the `oxidean_allow_signup` companion cookie) says registration
+     is open — unstamped means closed or unknown, matching the schema default. */
+  html:not([data-oxidean-signup]) [data-header-skeleton-signup] {
+    display: none;
+  }
 
   /* Marketing landing reveal (home `/`). */
   .oct-rise {

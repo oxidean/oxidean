@@ -75,6 +75,11 @@ describe("chrome pending account cluster", () => {
     await waitFor(() => {
       expect(document.querySelector("[data-header-skeleton-anon]")).toBeTruthy();
       expect(document.querySelector("[data-header-skeleton-authed]")).toBeTruthy();
+      // Sign-up bar carries its own marker so the web tier's
+      // `data-oxidean-signup` stamp can hide it on closed-registration shells.
+      expect(
+        document.querySelector("[data-header-skeleton-anon] [data-header-skeleton-signup]"),
+      ).toBeTruthy();
     });
     expect(document.querySelector('[role="group"][aria-busy="true"]')).toBeTruthy();
 

@@ -52,10 +52,12 @@ beforeEach(() => {
   orgListMock.mockResolvedValue({ ok: true, data: { orgs: [] } });
   window.history.replaceState({}, "", "/");
   document.documentElement.removeAttribute("data-oxidean-session");
+  document.documentElement.removeAttribute("data-oxidean-signup");
 });
 
 afterEach(async () => {
   document.documentElement.removeAttribute("data-oxidean-session");
+  document.documentElement.removeAttribute("data-oxidean-signup");
   await cleanupBrowserMount();
 });
 
@@ -104,6 +106,30 @@ describe("header pending account cluster", () => {
       tracker.expectNoDomRaces();
       expectNoOctaneOverlayInDocument();
     } finally {
+      me.resolve(anonymous);
+      tracker.dispose();
+    }
+  });
+
+  it("signup stamp selects the two-button anon skeleton candidate", async () => {
+    const me = deferred<unknown>();
+    meMock.mockReturnValue(me.promise);
+
+    const tracker = trackDomErrors();
+    try {
+      await mountWithQueryClient(SiteHeader, {});
+
+      const signupBar = await waitForSelector("[data-header-skeleton-signup]");
+      // No stamp → closed/unknown registration → single Sign-in bar only.
+      expect(getComputedStyle(signupBar).display).toBe("none");
+
+      document.documentElement.setAttribute("data-oxidean-signup", "1");
+      expect(getComputedStyle(signupBar).display).not.toBe("none");
+
+      tracker.expectNoDomRaces();
+      expectNoOctaneOverlayInDocument();
+    } finally {
+      document.documentElement.removeAttribute("data-oxidean-signup");
       me.resolve(anonymous);
       tracker.dispose();
     }
