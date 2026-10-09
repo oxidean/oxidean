@@ -208,9 +208,9 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
     surface: "components/repo/ref-select.tsrx",
     coverage: [
       {
-        kind: "skip",
-        rationale:
-          "Branch/tag Select used across forge chrome; covered indirectly by forge-repo/branches flows. Dedicated browser Select pick when next edited.",
+        kind: "browser",
+        test: "apps/web/src/components/repo/ref-select.browser.test.tsx",
+        subject: "ref-select",
       },
     ],
   },
