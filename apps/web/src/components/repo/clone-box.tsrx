@@ -5,6 +5,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLinkItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -239,20 +240,13 @@ export function CloneBox({
         </>;
       } @else {
         <>
-          <DropdownMenuItem
-            onClick={() => {
-              window.location.assign(zipHref);
-            }}
-          >
+          {/* data-astro-reload: archive endpoints return attachments — full nav, not morph. */}
+          <DropdownMenuLinkItem href={zipHref} data-astro-reload>
             Download ZIP
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            onClick={() => {
-              window.location.assign(tarHref);
-            }}
-          >
+          </DropdownMenuLinkItem>
+          <DropdownMenuLinkItem href={tarHref} data-astro-reload>
             Download tar.gz
-          </DropdownMenuItem>
+          </DropdownMenuLinkItem>
         </>;
       }
     </DropdownMenuContent>

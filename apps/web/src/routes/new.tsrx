@@ -1,3 +1,4 @@
+import { navigate } from "astro:transitions/client";
 import { queryOptions, useQuery } from "@octanejs/tanstack-query";
 import { useForm, useStore } from "@octanejs/tanstack-form";
 import type { OrgMineEntry, RepoCreateDefaults, RepoVisibility } from "@oxidean/api-client";
@@ -151,7 +152,7 @@ function NewContent() @{
           setPending(false);
           return;
         }
-        window.location.assign(`/${res.data.owner_username}/${res.data.name}`);
+        void navigate(`/${res.data.owner_username}/${res.data.name}`);
       } catch {
         setFormError(NETWORK_ERROR);
         setPending(false);

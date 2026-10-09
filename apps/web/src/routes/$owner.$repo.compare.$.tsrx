@@ -1,3 +1,4 @@
+import { navigate } from "astro:transitions/client";
 import type { RepoCompareResponse, RepoPublic, RepoRefEntry } from "@oxidean/api-client";
 import { queryOptions, useQuery } from "@octanejs/tanstack-query";
 
@@ -198,9 +199,7 @@ function RepoComparePageContent() @{
   function goCompare() {
     const b = baseDraft.trim() || "main";
     const h = headDraft.trim() || "main";
-    if (typeof window !== "undefined") {
-      window.location.href = compareHref(owner, repoName, b, h);
-    }
+    void navigate(compareHref(owner, repoName, b, h));
   }
 
   @if (phase.kind === "not_found") {

@@ -68,7 +68,7 @@ describe("/orgs/new (ORG-01 / D-ORG-01 / D-ORG-06)", () => {
         updated_at: "2026-01-01T00:00:00Z",
       },
     });
-    const assign = vi.spyOn(window.location, "assign").mockImplementation(() => {});
+    const pushState = vi.spyOn(window.history, "pushState");
 
     fireEvent.input(screen.getByLabelText("Slug"), {
       target: { value: "acme" },
@@ -85,9 +85,9 @@ describe("/orgs/new (ORG-01 / D-ORG-01 / D-ORG-06)", () => {
       });
     });
     await waitFor(() => {
-      expect(assign).toHaveBeenCalledWith("/acme");
+      expect(pushState).toHaveBeenCalledWith({}, "", "/acme");
     });
-    assign.mockRestore();
+    pushState.mockRestore();
   });
 
   it("unverified: Verify your email wall — not the create form", async () => {

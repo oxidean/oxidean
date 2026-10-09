@@ -46,7 +46,7 @@ describe("/verify Wave 0 contracts (RESEARCH P1)", () => {
     await waitFor(() => {
       expect(screen.getByText(/Sign in to finish verifying this email/i)).toBeInTheDocument();
     });
-    expect(screen.getByRole("button", { name: "Sign in" })).toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: "Sign in" }).length).toBeGreaterThan(0);
   });
 
   it("redeems magic token when primary already verified", async () => {
@@ -81,19 +81,7 @@ describe("/verify Wave 0 contracts (RESEARCH P1)", () => {
         must_change_credentials: false,
       },
     });
-    const assign = vi.fn();
-    const originalLocation = window.location;
-    Object.defineProperty(window, "location", {
-      configurable: true,
-      value: {
-        href: "http://localhost/verify?token=secondary-magic",
-        search: "?token=secondary-magic",
-        pathname: "/verify",
-        assign,
-        replace: vi.fn(),
-        reload: vi.fn(),
-      },
-    });
+    const pushState = vi.spyOn(window.history, "pushState");
 
     render(VerifyPage);
 
@@ -102,13 +90,9 @@ describe("/verify Wave 0 contracts (RESEARCH P1)", () => {
     });
     expect(screen.queryByText(/Your email is already verified/i)).not.toBeInTheDocument();
     await waitFor(() => {
-      expect(assign).toHaveBeenCalledWith("/settings/profile");
+      expect(pushState).toHaveBeenCalledWith({}, "", "/settings/profile");
     });
-
-    Object.defineProperty(window, "location", {
-      configurable: true,
-      value: originalLocation,
-    });
+    pushState.mockRestore();
   });
 
   it("shows already verified when primary verified and no token", async () => {

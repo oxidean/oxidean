@@ -194,7 +194,7 @@ function RepoSettingsPageContent() @{
       setTransferPending(false);
       setTransferOpen(false);
       toastSuccess("Repository transferred.");
-      window.location.assign(`/${nextOwner}/${nextName}/settings`);
+      void astroNavigate(`/${nextOwner}/${nextName}/settings`);
     } catch {
       setTransferError(NETWORK_ERROR);
       setTransferPending(false);
@@ -242,7 +242,7 @@ function RepoSettingsPageContent() @{
       }
       setDeletePending(false);
       setDeleteOpen(false);
-      window.location.assign("/");
+      void astroNavigate("/");
     } catch {
       setDeleteError(NETWORK_ERROR);
       setDeletePending(false);

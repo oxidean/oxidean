@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from "@octanejs/tanstack-query";
 import type { NotificationPublic } from "@oxidean/api-client";
 import { useState } from "octane";
 import { BellRing, CheckCheck } from "@octanejs/lucide";
+import { AppLink } from "@/components/ui/app-link";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { List, ListRow } from "@/components/ui/list";
@@ -50,12 +51,13 @@ function NotificationsContent() @{
     }
   }
 
-  async function activateRow(n: NotificationPublic) {
-    if (!n.read_at) {
-      await apiClient.notification.markRead({ ids: [n.id] });
-      invalidateNotificationQueries(qc);
-    }
-    window.location.assign(subjectHref(n));
+  function markReadOnActivate(n: NotificationPublic) {
+    // Fire-and-forget — the anchor navigates (ClientRouter morph) while the
+    // RPC is in flight; module JS stays alive across morphs so it completes.
+    if (n.read_at) return;
+    void apiClient.notification
+      .markRead({ ids: [n.id] })
+      .then(() => invalidateNotificationQueries(qc));
   }
 
   <div className="mx-auto max-w-3xl px-4 py-10">
@@ -143,14 +145,14 @@ function NotificationsContent() @{
             <List>
               @for (const n of rows; key n.id) {
                 <ListRow className="p-0">
-                  <button
-                    type="button"
+                  <AppLink
+                    href={subjectHref(n)}
                     className={cn(
-                      "flex w-full items-start gap-3 px-4 py-3 text-left outline-none",
+                      "flex w-full items-start gap-3 px-4 py-3 text-left text-current no-underline outline-none",
                       "transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
                     )}
                     aria-label={`${n.actor_username} ${reasonLabel(n.reason)} ${n.owner}/${n.repo} ${subjectTail(n)}`}
-                    onClick={() => void activateRow(n)}
+                    onClick={() => markReadOnActivate(n)}
                   >
                     <span
                       aria-hidden
@@ -183,7 +185,7 @@ function NotificationsContent() @{
                         {formatRelative(n.created_at) as string}
                       </span>
                     </span>
-                  </button>
+                  </AppLink>
                 </ListRow>;
               }
             </List>

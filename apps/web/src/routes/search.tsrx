@@ -1,3 +1,4 @@
+import { navigate } from "astro:transitions/client";
 import { queryOptions, useQuery } from "@octanejs/tanstack-query";
 import { useEffect, useState } from "octane";
 import type {
@@ -505,7 +506,7 @@ export function SearchContent() @{
       className="mt-6 flex max-w-xl gap-2"
       onSubmit={(e) => {
         e.preventDefault();
-        window.location.assign(tabHref(q, type));
+        void navigate(tabHref(q, type));
       }}
     >
       <div className="relative flex-1">

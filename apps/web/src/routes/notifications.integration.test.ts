@@ -79,26 +79,24 @@ describe("/notifications page (D-09 / D-12 / NOTF-02)", () => {
     });
     await waitFor(() => {
       expect(
-        screen.getByRole("button", { name: /bob commented on ada\/hello #1/i }),
+        screen.getByRole("link", { name: /bob commented on ada\/hello #1/i }),
       ).toBeInTheDocument();
     });
   });
 
-  it("activating a row marks read and navigates to subject", async () => {
-    const assign = vi.fn();
-    vi.stubGlobal("location", { assign });
-
+  it("activating a row marks read and links to the subject", async () => {
     renderWithQueryClient(NotificationsPage);
 
     const row = await waitFor(() =>
-      screen.getByRole("button", { name: /bob commented on ada\/hello #1/i }),
+      screen.getByRole("link", { name: /bob commented on ada\/hello #1/i }),
     );
+    // Real anchor — the href is the navigation; mark-read is fire-and-forget.
+    expect(row).toHaveAttribute("href", "/ada/hello/issues/1");
     row.click();
 
     await waitFor(() => {
       expect(apiClient.notification.markRead).toHaveBeenCalledWith({ ids: ["n1"] });
     });
-    expect(assign).toHaveBeenCalledWith("/ada/hello/issues/1");
   });
 
   it("renders release and workflow_run subjects with ref deep links (DEBT-06)", async () => {
@@ -144,18 +142,13 @@ describe("/notifications page (D-09 / D-12 / NOTF-02)", () => {
     renderWithQueryClient(NotificationsPage);
 
     const release = await waitFor(() =>
-      screen.getByRole("button", { name: /bob published a release on ada\/hello v1\.0\.0/i }),
+      screen.getByRole("link", { name: /bob published a release on ada\/hello v1\.0\.0/i }),
     );
     expect(
-      screen.getByRole("button", { name: /bob workflow run failed on ada\/hello/i }),
+      screen.getByRole("link", { name: /bob workflow run failed on ada\/hello/i }),
     ).toBeInTheDocument();
 
-    const assign = vi.fn();
-    vi.stubGlobal("location", { assign });
-    release.click();
-    await waitFor(() => {
-      expect(assign).toHaveBeenCalledWith("/ada/hello/releases/v1.0.0");
-    });
+    expect(release).toHaveAttribute("href", "/ada/hello/releases/v1.0.0");
   });
 
   it("falls back to the index route when subject_ref is null (DEBT-06 review)", async () => {
@@ -186,14 +179,9 @@ describe("/notifications page (D-09 / D-12 / NOTF-02)", () => {
     renderWithQueryClient(NotificationsPage);
 
     const row = await waitFor(() =>
-      screen.getByRole("button", { name: /bob deleted a release on ada\/hello/i }),
+      screen.getByRole("link", { name: /bob deleted a release on ada\/hello/i }),
     );
 
-    const assign = vi.fn();
-    vi.stubGlobal("location", { assign });
-    row.click();
-    await waitFor(() => {
-      expect(assign).toHaveBeenCalledWith("/ada/hello/releases");
-    });
+    expect(row).toHaveAttribute("href", "/ada/hello/releases");
   });
 });

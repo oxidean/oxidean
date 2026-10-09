@@ -1,3 +1,4 @@
+import { navigate } from "astro:transitions/client";
 import { GitFork, Search, Star } from "@octanejs/lucide";
 import { queryOptions, useQuery } from "@octanejs/tanstack-query";
 import { useRepoLayoutData } from "@/lib/repo-store.tsrx";
@@ -206,7 +207,7 @@ function RepoForksPageContent() @{
                   onChange={(e) => {
                     const next = parseForksSort((e.currentTarget as HTMLSelectElement).value);
                     setSort(next);
-                    window.location.assign(socialListHref(base, { q, sort: next }));
+                    void navigate(socialListHref(base, { q, sort: next }));
                   }}
                 >
                   <option value="stars">{forksSortLabel("stars") as string}</option>
@@ -220,7 +221,7 @@ function RepoForksPageContent() @{
                 className="flex flex-1 gap-2"
                 onSubmit={(e) => {
                   e.preventDefault();
-                  window.location.assign(socialListHref(base, { q, sort }));
+                  void navigate(socialListHref(base, { q, sort }));
                 }}
               >
                 <input type="hidden" name="sort" value={sort as string} />

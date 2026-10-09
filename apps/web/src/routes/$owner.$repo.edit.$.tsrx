@@ -1,3 +1,4 @@
+import { navigate } from "astro:transitions/client";
 import { queryOptions, useQuery } from "@octanejs/tanstack-query";
 
 import { matchPath } from "@/lib/route-params";
@@ -221,9 +222,9 @@ function RepoFileEditPageContent() @{
         return;
       }
       if (res.data.pr_number) {
-        window.location.assign(`/${owner}/${repoName}/pull/${res.data.pr_number}`);
+        void navigate(`/${owner}/${repoName}/pull/${res.data.pr_number}`);
       } else {
-        window.location.assign(blobHref(owner, repoName, res.data.branch, nextPath));
+        void navigate(blobHref(owner, repoName, res.data.branch, nextPath));
       }
     } catch {
       setError(NETWORK_ERROR);

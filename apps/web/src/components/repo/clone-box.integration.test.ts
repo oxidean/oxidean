@@ -90,16 +90,7 @@ describe("CloneBox (E12 / D-22 / D-29)", () => {
     expect(tar).toHaveAttribute("aria-disabled", "true");
   });
 
-  it("assigns archive URL for the current ref when Download ZIP is chosen", async () => {
-    const assign = vi.fn();
-    Object.defineProperty(window, "location", {
-      configurable: true,
-      value: {
-        origin: "http://127.0.0.1:3000",
-        assign,
-      },
-    });
-
+  it("archive downloads are real anchors for the current ref", async () => {
     render(CloneBox, {
       props: {
         owner: "ada",
@@ -111,8 +102,14 @@ describe("CloneBox (E12 / D-22 / D-29)", () => {
     });
 
     await openCloneMenu();
-    fireEvent.click(screen.getByRole("menuitem", { name: "Download ZIP" }));
 
-    expect(assign).toHaveBeenCalledWith("/api/repos/ada/hello/archive/feature%2Fx.zip");
+    // LinkItem anchors carry the archive URL on href — no onClick navigation.
+    const zip = screen.getByRole("menuitem", { name: "Download ZIP" });
+    const tar = screen.getByRole("menuitem", { name: "Download tar.gz" });
+    expect(zip.tagName).toBe("A");
+    expect(zip).toHaveAttribute("href", "/api/repos/ada/hello/archive/feature%2Fx.zip");
+    expect(zip).toHaveAttribute("data-astro-reload");
+    expect(tar).toHaveAttribute("href", "/api/repos/ada/hello/archive/feature%2Fx.tar.gz");
+    expect(tar).toHaveAttribute("data-astro-reload");
   });
 });

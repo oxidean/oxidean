@@ -29,7 +29,7 @@ function AppAccessGate() @{
       needsSetup: Boolean(bootQ.data?.needs_setup),
       mustChangeCredentials: Boolean(meQ.data?.must_change_credentials),
     });
-    if (target) window.location.assign(target);
+    if (target) void navigate(target);
   });
 
   // Register SPA navigate for taps held by the early-nav boot listener (the

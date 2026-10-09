@@ -135,6 +135,56 @@ describe("header pending account cluster", () => {
     }
   });
 
+  it("account menu renders navigation items as real anchors", async () => {
+    const me = deferred<unknown>();
+    meMock.mockReturnValue(me.promise);
+
+    const tracker = trackDomErrors();
+    try {
+      await mountWithQueryClient(SiteHeader, {});
+      me.resolve({
+        ok: true,
+        data: {
+          id: "u1",
+          username: "jessedev",
+          email: "admin@oxidean.local",
+          display_name: "Jesse",
+          bio: "",
+          avatar_url: null,
+          role: "sys-admin",
+          profile_incomplete: false,
+          email_verified: true,
+          must_change_credentials: false,
+          default_branch: "main",
+        },
+      });
+
+      await waitForSelector("[aria-label='Account menu']");
+      await clickAriaLabel("Account menu");
+
+      // Menu navigation items are LinkItem anchors — role stays menuitem, but
+      // the element carries a real href (ClientRouter morph + middle-click).
+      const settings = await waitForSelector("a[href='/settings/general']");
+      expect(settings.getAttribute("role")).toBe("menuitem");
+      const admin = await waitForSelector("a[href='/admin/auth']");
+      expect(admin.tagName).toBe("A");
+      const repos = await waitForSelector("[role='menuitem'][href='/']");
+      expect(repos.tagName).toBe("A");
+      // Sign out stays a non-anchor item (session teardown, not navigation).
+      const signOut = Array.from(document.querySelectorAll("[role='menuitem']")).find(
+        (el) => el.textContent?.trim() === "Sign out",
+      );
+      expect(signOut).toBeTruthy();
+      expect(signOut!.tagName).not.toBe("A");
+
+      tracker.expectNoDomRaces();
+      expectNoOctaneOverlayInDocument();
+    } finally {
+      me.resolve(anonymous);
+      tracker.dispose();
+    }
+  });
+
   it("session stamp selects the authed skeleton candidate pre-resolution", async () => {
     document.documentElement.setAttribute("data-oxidean-session", "1");
     const me = deferred<unknown>();

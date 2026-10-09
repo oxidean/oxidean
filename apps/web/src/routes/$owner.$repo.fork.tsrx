@@ -1,3 +1,4 @@
+import { navigate } from "astro:transitions/client";
 import { useState } from "octane";
 import { queryOptions, useQuery } from "@octanejs/tanstack-query";
 
@@ -97,7 +98,7 @@ function ForkConfirmPageContent() @{
         return;
       }
       const dest = res.data;
-      window.location.assign(`/${dest.owner_username}/${dest.name}`);
+      void navigate(`/${dest.owner_username}/${dest.name}`);
     } catch {
       setError("Can't reach Oxidean. Check your connection and try again.");
     } finally {

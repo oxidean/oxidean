@@ -1,3 +1,4 @@
+import { navigate } from "astro:transitions/client";
 import { Eye, Search } from "@octanejs/lucide";
 import { queryOptions, useQuery } from "@octanejs/tanstack-query";
 import { useRepoLayoutData } from "@/lib/repo-store.tsrx";
@@ -185,7 +186,7 @@ function RepoWatchersPageContent() @{
               className="flex w-full gap-2 sm:w-auto"
               onSubmit={(e) => {
                 e.preventDefault();
-                window.location.assign(socialListHref(base, { q }));
+                void navigate(socialListHref(base, { q }));
               }}
             >
               <div className="relative flex-1 sm:w-72">

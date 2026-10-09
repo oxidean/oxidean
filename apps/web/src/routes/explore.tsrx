@@ -1,3 +1,4 @@
+import { navigate } from "astro:transitions/client";
 import { queryOptions, useQuery } from "@octanejs/tanstack-query";
 import { useState } from "octane";
 import { BookMarked, Compass, Search, Star } from "@octanejs/lucide";
@@ -63,7 +64,7 @@ function ExploreContent() @{
             onSubmit={(e) => {
               e.preventDefault();
               const next = q.trim();
-              window.location.assign(next ? `/explore?q=${encodeURIComponent(next)}` : "/explore");
+              void navigate(next ? `/explore?q=${encodeURIComponent(next)}` : "/explore");
             }}
           >
             <div className="relative flex-1 sm:w-72">

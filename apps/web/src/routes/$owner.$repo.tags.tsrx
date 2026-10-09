@@ -8,7 +8,7 @@ import { AppPage } from "@/components/app-page";
 import { useEffect, useState } from "octane";
 import { FileArchive, Tag } from "@octanejs/lucide";
 import { RepoNotFound } from "@/components/repo/repo-not-found";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { List, ListRow } from "@/components/ui/list";
 import { PageHeader } from "@/components/ui/page-header";
@@ -220,28 +220,24 @@ function TagRow({
       }
     </div>
     <div className="flex flex-wrap gap-2">
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        onClick={() => {
-          window.location.assign(zipHref);
-        }}
+      {/* data-astro-reload: archive endpoints return attachments — full nav,
+          not a ClientRouter morph. */}
+      <AppLink
+        href={zipHref}
+        data-astro-reload
+        className={buttonVariants({ variant: "outline", size: "sm" })}
       >
         <FileArchive aria-hidden size={14} />
         ZIP
-      </Button>
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        onClick={() => {
-          window.location.assign(tarHref);
-        }}
+      </AppLink>
+      <AppLink
+        href={tarHref}
+        data-astro-reload
+        className={buttonVariants({ variant: "outline", size: "sm" })}
       >
         <FileArchive aria-hidden size={14} />
         tar.gz
-      </Button>
+      </AppLink>
     </div>
   </ListRow>;
 }

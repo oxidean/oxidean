@@ -1,15 +1,17 @@
 import { useForm } from "@octanejs/tanstack-form";
 import type { UserPublic } from "@oxidean/api-client";
+import { navigate } from "astro:transitions/client";
 import { useEffect, useRef, useState } from "octane";
 import { AuthErrorBanner, AuthShell } from "@/components/auth-shell";
 import { AppPage } from "@/components/app-page";
 import { AuthFormSkeleton } from "@/components/page-skeletons";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { InputOtp } from "@/components/ui/input-otp";
 import { Label } from "@/components/ui/label";
 import { apiClient } from "@/lib/api-client";
 import { safeReturnTo } from "@/lib/return-to";
 import { AppLink } from "@/components/ui/app-link";
+import { cn } from "@/lib/utils";
 
 const SUPPORT_DEFAULT =
   "We sent a link and an 8-digit code to your email. Enter the code below, or open the link from the same device after signing in. Codes also work for additional addresses on your account.";
@@ -101,7 +103,7 @@ function VerifyContent() @{
           submitLock.current = false;
           return;
         }
-        window.location.assign(verifySuccessHref(primaryAlreadyVerified));
+        void navigate(verifySuccessHref(primaryAlreadyVerified));
       } catch {
         setError(NETWORK_ERROR);
         submitLock.current = false;
@@ -169,7 +171,7 @@ function VerifyContent() @{
           setTokenPending(false);
           return;
         }
-        window.location.assign(verifySuccessHref(primaryAlreadyVerified));
+        void navigate(verifySuccessHref(primaryAlreadyVerified));
       } catch {
         if (cancelled) return;
         setError(NETWORK_ERROR);
@@ -253,15 +255,12 @@ function VerifyContent() @{
         @if (error) {
           <AuthErrorBanner message={error} />;
         }
-        <Button
-          type="button"
-          className="w-full"
-          onClick={() => {
-            window.location.assign(loginHrefWithToken(phase.token));
-          }}
+        <AppLink
+          href={loginHrefWithToken(phase.token) as string}
+          className={cn(buttonVariants(), "w-full")}
         >
           Sign in
-        </Button>
+        </AppLink>
         <p className="text-[14px] text-muted-foreground">
           Need a different account?{" "}
           <AppLink
@@ -275,15 +274,9 @@ function VerifyContent() @{
     } @else {
       @if (phase.kind === "already-verified") {
         <AuthShell title="Verify your email" support={ALREADY_VERIFIED}>
-          <Button
-            type="button"
-            className="w-full"
-            onClick={() => {
-              window.location.assign("/");
-            }}
-          >
+          <AppLink href="/" className={cn(buttonVariants(), "w-full")}>
             Go to home
-          </Button>
+          </AppLink>
         </AuthShell>;
       } @else {
         <AuthShell title="Verify your email" support={SUPPORT_DEFAULT}>

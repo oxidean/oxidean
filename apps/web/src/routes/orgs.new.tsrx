@@ -1,3 +1,4 @@
+import { navigate } from "astro:transitions/client";
 import { useQuery } from "@octanejs/tanstack-query";
 import { useForm } from "@octanejs/tanstack-form";
 import { useState } from "octane";
@@ -71,7 +72,7 @@ function OrgsNewContent() @{
           setPending(false);
           return;
         }
-        window.location.assign(`/${res.data.slug}`);
+        void navigate(`/${res.data.slug}`);
       } catch {
         setFormError(NETWORK_ERROR);
         setPending(false);

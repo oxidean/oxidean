@@ -9,7 +9,7 @@ import { buttonVariants } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
+  DropdownMenuLinkItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { apiClient } from "@/lib/api-client";
@@ -173,20 +173,10 @@ function TokensContent() @{
               <ChevronDown aria-hidden size={16} />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="min-w-48">
-              <DropdownMenuItem
-                onClick={() => {
-                  window.location.assign("/settings/tokens/new");
-                }}
-              >
-                Classic token
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => {
-                  window.location.assign("/settings/tokens/new/fine-grained");
-                }}
-              >
+              <DropdownMenuLinkItem href="/settings/tokens/new">Classic token</DropdownMenuLinkItem>
+              <DropdownMenuLinkItem href="/settings/tokens/new/fine-grained">
                 Fine-grained token
-              </DropdownMenuItem>
+              </DropdownMenuLinkItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>

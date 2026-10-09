@@ -1,3 +1,4 @@
+import { navigate as astroNavigate } from "astro:transitions/client";
 import { Check, ChevronDown } from "@octanejs/lucide";
 import type { RepoRefEntry } from "@oxidean/api-client";
 import {
@@ -60,13 +61,13 @@ export function RefSelect({
   const current =
     unique.find((o) => o.value === value) ?? ({ value, label: value, isTag: false } as const);
 
-  function navigate(next: string) {
+  function goToRef(next: string) {
     if (mode === "home" || !pathUnderRef) {
-      window.location.assign(treeHref(owner, repo, next, ""));
+      void astroNavigate(treeHref(owner, repo, next, ""));
       return;
     }
     if (mode === "blob") {
-      window.location.assign(
+      void astroNavigate(
         `/${owner}/${repo}/blob/${encodeURIComponent(next)}/${pathUnderRef
           .split("/")
           .map(encodeURIComponent)
@@ -74,13 +75,13 @@ export function RefSelect({
       );
       return;
     }
-    window.location.assign(treeHref(owner, repo, next, pathUnderRef));
+    void astroNavigate(treeHref(owner, repo, next, pathUnderRef));
   }
 
   <SelectRoot
     value={value}
     onValueChange={(next) => {
-      if (typeof next === "string" && next !== value) navigate(next);
+      if (typeof next === "string" && next !== value) goToRef(next);
     }}
   >
     <SelectTrigger className="min-w-[10rem]" aria-label="Switch branch or tag">
