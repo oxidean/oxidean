@@ -340,7 +340,7 @@ function RepoActionsRunPageContent() @{
                           aria-label={`Re-run ${job.name}`}
                           title="Re-run job"
                           disabled={rerunM.isPending}
-                          className="mr-1 shrink-0 rounded p-1.5 text-muted-foreground opacity-0 outline-none transition-opacity hover:bg-muted hover:text-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100"
+                          className="mr-1 hidden shrink-0 rounded p-1.5 text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring group-hover:inline-flex group-focus-within:inline-flex"
                           onClick={() => rerun({ job_id: job.id })}
                         >
                           <RotateCcw aria-hidden size={13} />
