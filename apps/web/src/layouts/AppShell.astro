@@ -7,7 +7,7 @@
  * drives view-transition navigations. The middleware rewrites this output per
  * request for theme class + route meta before serving.
  */
-import { ClientRouter } from "astro:transitions";
+import { ClientRouter, fade } from "astro:transitions";
 import { ChromeTop, ChromeBottom } from "@/components/app-page";
 import { THEME_BOOT_SCRIPT, FONT_WARM_SCRIPT } from "@/lib/theme";
 import { EARLY_NAV_BOOT_SCRIPT } from "@/lib/early-nav";
@@ -28,7 +28,9 @@ const webmcpRegisterScript = buildWebMcpRegisterScript();
 ---
 
 <!doctype html>
-<html lang="en">
+{/* Fade-only page transition — the default `slide` shifts the whole page
+    horizontally, which reads as layout jump on every navigation. */}
+<html lang="en" transition:animate={fade({ duration: "0.15s" })}>
   <head>
     <script is:inline set:html={THEME_BOOT_SCRIPT} />
     <script is:inline set:html={FONT_WARM_SCRIPT} />
