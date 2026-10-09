@@ -757,7 +757,9 @@ describe("/{owner}/{repo}/issues/{n} detail Wave 0 (ISS-01..04 / D-ISS-13)", () 
         screen.getAllByRole("toolbar", { name: /^Reactions$/i }).length,
       ).toBeGreaterThanOrEqual(2);
     });
-    expect(document.body.textContent).toMatch(/\+1|👍|react/i);
+    // Glyphs render as vendored /emoji/*.svg imgs; the native char lives in alt.
+    expect(document.querySelectorAll('img[src^="/emoji/"]').length).toBeGreaterThan(0);
+    expect(document.querySelector('img[alt="👍"]')).toBeTruthy();
 
     const plusOne = await screen.findAllByRole("button", {
       name: /React \+1/i,

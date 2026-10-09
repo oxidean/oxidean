@@ -6,7 +6,7 @@ import { usePathname, useSearchString } from "@/lib/pathname.tsrx";
 import { RepoLayout } from "@/routes/$owner.$repo.tsrx";
 import { AppPage } from "@/components/app-page";
 import type { RepoActivityItem, RepoPublic } from "@oxidean/api-client";
-import { useState } from "octane";
+import { useEffect, useState } from "octane";
 import { RepoActivityRow } from "@/components/repo/repo-activity-row";
 import { RepoNotFound } from "@/components/repo/repo-not-found";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -186,6 +186,16 @@ function RepoActivityPageContent() @{
         : loaderData
       : { kind: "loading" },
   );
+
+  useEffect(() => {
+    setPhase(
+      loaderData
+        ? loaderData.kind === "ready"
+          ? toReadyPhase(loaderData)
+          : loaderData
+        : { kind: "loading" },
+    );
+  }, [owner, repoName, searchStr, loaderData]);
 
   const readyDesc =
     phase.kind === "ready"

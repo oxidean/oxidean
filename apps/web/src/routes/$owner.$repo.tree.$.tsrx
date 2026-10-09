@@ -103,6 +103,21 @@ async function loadTreePage(
   const knownRefs = refs.map((r) => shortRefName(r.name));
   const parsed = parseRefAndPath(splat, knownRefs);
   const refName = parsed.ref || repo.default_branch || "main";
+  // A splat whose leading segment isn't a real ref means the ref itself is bogus
+  // (parseRefAndPath falls back to treating segment 0 as the ref). Show the
+  // not-found state rather than an empty tree for a branch that doesn't exist.
+  // SHA-looking refs pass through — commits are valid tree-ish even though they
+  // never appear in the branch/tag list; git resolves or 404s them.
+  const looksLikeSha = /^[0-9a-f]{7,40}$/i.test(refName);
+  if (
+    splat &&
+    parsed.ref &&
+    knownRefs.length > 0 &&
+    !knownRefs.includes(refName) &&
+    !looksLikeSha
+  ) {
+    return { kind: "not_found" };
+  }
   const path = parsed.path || "";
   const treeRes = await fetchTree({
     owner,
@@ -111,7 +126,13 @@ async function loadTreePage(
     path,
   });
   if (!treeRes.ok) {
-    if (treeRes.error.code === "repo.not_found") return { kind: "not_found" };
+    if (
+      treeRes.error.code === "repo.not_found" ||
+      treeRes.error.code === "repo.git_failed" ||
+      treeRes.error.code === "git.not_found"
+    ) {
+      return { kind: "not_found" };
+    }
     return {
       kind: "error",
       message: treeRes.error.message || "Could not load tree.",

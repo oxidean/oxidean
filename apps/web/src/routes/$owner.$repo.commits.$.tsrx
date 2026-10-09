@@ -71,7 +71,9 @@ async function loadCommitsPage(
   const refName = refFromUrl || repo.default_branch || "main";
   const list = await fetchRepoCommits({ owner, name: repoName, ref: refName, skip: 0, limit: 30 });
   if (!list.ok) {
-    if (list.error.code === "repo.not_found") return { kind: "not_found" };
+    if (list.error.code === "repo.not_found" || list.error.code === "repo.git_failed") {
+      return { kind: "not_found" };
+    }
     return {
       kind: "error",
       message: list.error.message || "Could not load commits.",

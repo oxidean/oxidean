@@ -4,7 +4,6 @@ import type { ProviderConfigPublic } from "@oxidean/api-client";
 import { useState } from "octane";
 import { AuthErrorBanner, AuthShell } from "@/components/auth-shell";
 import { AppPage } from "@/components/app-page";
-import { RepoNotFound } from "@/components/repo/repo-not-found";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -64,7 +63,9 @@ function SignupContent() @{
           const code = res.error.code;
           if (code === "auth.taken") setError(TAKEN_ERROR);
           else if (code === "auth.reserved_username") setError(RESERVED_ERROR);
-          else if (code === "auth.setup_required") {
+          else if (code === "auth.signup_closed") {
+            setError("Registration is closed on this instance. Contact an admin for an invite.");
+          } else if (code === "auth.setup_required") {
             setError(SETUP_ERROR);
             window.location.assign("/setup");
             return;
@@ -97,7 +98,20 @@ function SignupContent() @{
       : "Email, username, and password — handles are letters, digits, and hyphens.";
 
   @if (signupClosed) {
-    <RepoNotFound />;
+    <AuthShell
+      title="Registration is closed"
+      support="This instance isn't accepting new accounts. Ask an admin for an invite."
+    >
+      <p className="text-[14px] text-muted-foreground">
+        Already have an account?{" "}
+        <AppLink
+          href={loginHref as string}
+          className="font-normal text-foreground underline-offset-4 hover:underline"
+        >
+          Sign in
+        </AppLink>
+      </p>
+    </AuthShell>;
   } @else {
     <AuthShell title="Create your account" support={support}>
       @if (loadError) {

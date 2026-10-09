@@ -11,6 +11,7 @@ import { CommitAuthorLink } from "@/components/repo/commit-author-link";
 import { CommitVerifiedBadge } from "@/components/repo/commit-verified-badge";
 import { DiffPatch } from "@/components/repo/diff-patch";
 import { RepoNotFound } from "@/components/repo/repo-not-found";
+import { AppLink } from "@/components/ui/app-link";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { HighlightTheme } from "@/lib/highlight";
@@ -102,6 +103,39 @@ function relativeCommitTime(iso: string): string {
   return formatRelativeUpdated(iso).replace(/^Updated\s+/i, "");
 }
 
+/**
+ * `+`/`-` line counts from unified-diff patch text. Hunk-header budgets
+ * (`@@ -a,b +c,d @@`) decide the `---`/`+++` header-vs-content ambiguity:
+ * a `--- ` line inside a hunk's remaining old-line budget is a real deletion
+ * (e.g. markdown `---` hr), while a header after the budget is exhausted is
+ * the next file's `--- a/path`.
+ */
+function patchStatCounts(patch: string): [number, number] {
+  let adds = 0;
+  let dels = 0;
+  let oldLeft = 0;
+  let newLeft = 0;
+  for (const line of patch.split("\n")) {
+    const hunk = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(line);
+    if (hunk) {
+      oldLeft = Number(hunk[2] ?? "1");
+      newLeft = Number(hunk[4] ?? "1");
+      continue;
+    }
+    if (line.startsWith("+") && newLeft > 0) {
+      adds++;
+      newLeft--;
+    } else if (line.startsWith("-") && oldLeft > 0) {
+      dels++;
+      oldLeft--;
+    } else if ((line.startsWith(" ") || line === "") && oldLeft > 0 && newLeft > 0) {
+      oldLeft--;
+      newLeft--;
+    }
+  }
+  return [adds, dels];
+}
+
 function RepoCommitPageContent() @{
   const pathname = usePathname();
   const searchStr = useSearchString();
@@ -136,6 +170,16 @@ function RepoCommitPageContent() @{
       cancelled = true;
     };
   }, [owner, repoName, sha, loaderData]);
+
+  let commitAdds = 0;
+  let commitDels = 0;
+  if (phase.kind === "ready") {
+    for (const f of phase.commit.files) {
+      const [a, d] = patchStatCounts(f.patch);
+      commitAdds += a;
+      commitDels += d;
+    }
+  }
 
   @if (phase.kind === "not_found") {
     <RepoNotFound />;
@@ -178,6 +222,36 @@ function RepoCommitPageContent() @{
           </time>
           <span aria-hidden="true">·</span>
           <code className="font-mono text-[13px]">{phase.commit.short_sha as string}</code>
+        </p>
+        <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-muted-foreground">
+          <span>
+            {
+              `${phase.commit.files.length} file${phase.commit.files.length === 1 ? "" : "s"} changed` as string
+            }
+          </span>
+          @if (commitAdds + commitDels > 0) {
+            <span className="tabular-nums">
+              <span className="text-success">{`+${commitAdds}` as string}</span>{" "}
+              <span className="text-destructive">{`−${commitDels}` as string}</span>
+            </span>;
+          }
+          @if (phase.commit.parents.length > 0) {
+            <span>
+              {"parent " as string}
+              <AppLink
+                href={`/${owner}/${repoName}/commit/${phase.commit.parents[0]}` as string}
+                className="font-mono text-primary no-underline hover:underline"
+              >
+                {phase.commit.parents[0]!.slice(0, 7) as string}
+              </AppLink>
+            </span>;
+          }
+          <AppLink
+            href={`/${owner}/${repoName}/tree/${phase.commit.sha}` as string}
+            className="text-primary no-underline hover:underline"
+          >
+            Browse files
+          </AppLink>
         </p>
         @if (phase.commit.truncated) {
           <p className="mt-2 text-[14px] text-muted-foreground">Diff truncated for size.</p>;

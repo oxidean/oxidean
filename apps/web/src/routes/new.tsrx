@@ -1,7 +1,7 @@
 import { queryOptions, useQuery } from "@octanejs/tanstack-query";
 import { useForm, useStore } from "@octanejs/tanstack-form";
 import type { OrgMineEntry, RepoCreateDefaults, RepoVisibility } from "@oxidean/api-client";
-import { Check, ChevronDown } from "@octanejs/lucide";
+import { Check, ChevronDown, Globe, Lock } from "@octanejs/lucide";
 import { useState } from "octane";
 import { AuthErrorBanner, AuthShell } from "@/components/auth-shell";
 import { TemplatePicker } from "@/components/repo/template-picker";
@@ -304,6 +304,7 @@ function NewContent() @{
               aria-pressed={values.visibility === "public"}
               onClick={() => form.setFieldValue("visibility", "public")}
             >
+              <Globe aria-hidden size={16} />
               Public
             </Button>
             <Button
@@ -312,9 +313,17 @@ function NewContent() @{
               aria-pressed={values.visibility === "private"}
               onClick={() => form.setFieldValue("visibility", "private")}
             >
+              <Lock aria-hidden size={16} />
               Private
             </Button>
           </div>
+          <p className="text-[13px] text-muted-foreground">
+            {
+              (values.visibility === "public"
+                ? "Anyone on this instance can see this repository."
+                : "Only you and collaborators can see this repository.") as string
+            }
+          </p>
         </fieldset>
 
         <div className="flex flex-col gap-5">

@@ -6,7 +6,7 @@ import { usePathname, useSearchString } from "@/lib/pathname.tsrx";
 import { RepoLayout } from "@/routes/$owner.$repo.tsrx";
 import { AppPage } from "@/components/app-page";
 import { useEffect, useState } from "octane";
-import { GitCompareArrows } from "@octanejs/lucide";
+import { ArrowLeftRight, GitCompareArrows } from "@octanejs/lucide";
 import { DiffPatch } from "@/components/repo/diff-patch";
 import { RepoNotFound } from "@/components/repo/repo-not-found";
 import { Button } from "@/components/ui/button";
@@ -90,7 +90,11 @@ async function loadComparePage(
 
   const cmp = await fetchRepoCompare({ owner, name: repoName, base, head });
   if (!cmp.ok) {
-    if (cmp.error.code === "repo.not_found" || cmp.error.code === "repo.path_not_found") {
+    if (
+      cmp.error.code === "repo.not_found" ||
+      cmp.error.code === "repo.path_not_found" ||
+      cmp.error.code === "repo.git_failed"
+    ) {
       return { kind: "not_found" };
     }
     return {
@@ -241,6 +245,18 @@ function RepoComparePageContent() @{
             }}
           />
         </label>
+        <button
+          type="button"
+          className="mb-0.5 inline-flex h-9 items-center gap-1 rounded-md border border-border px-2 text-muted-foreground hover:bg-muted hover:text-foreground"
+          aria-label="Swap base and head"
+          title="Swap base and head"
+          onClick={() => {
+            setBaseDraft(headDraft);
+            setHeadDraft(baseDraft);
+          }}
+        >
+          <ArrowLeftRight aria-hidden size={14} />
+        </button>
         <datalist id="oxidean-compare-refs">
           @for (const r of phase.refs; key r.name) {
             <option value={shortRefName(r.name) as string} />;

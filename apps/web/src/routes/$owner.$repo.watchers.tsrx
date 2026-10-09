@@ -6,7 +6,7 @@ import { usePathname, useSearchString } from "@/lib/pathname.tsrx";
 import { RepoLayout } from "@/routes/$owner.$repo.tsrx";
 import { AppPage } from "@/components/app-page";
 import type { RepoPublic, RepoWatcherPublic } from "@oxidean/api-client";
-import { useState } from "octane";
+import { useEffect, useState } from "octane";
 import { RepoNotFound } from "@/components/repo/repo-not-found";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
@@ -123,6 +123,14 @@ function RepoWatchersPageContent() @{
   const [offset, setOffset] = useState(ready?.offset ?? 0);
   const [total, setTotal] = useState(ready?.total ?? 0);
   const [loadingMore, setLoadingMore] = useState(false);
+
+  useEffect(() => {
+    if (!ready) return;
+    setQ(ready.q);
+    setWatchers(ready.watchers);
+    setOffset(ready.offset);
+    setTotal(ready.total);
+  }, [ready]);
   const limit = ready?.limit ?? PAGE_LIMIT;
   const base = `/${owner}/${repoName}/watchers`;
   const activeQ = ready?.q ?? "";

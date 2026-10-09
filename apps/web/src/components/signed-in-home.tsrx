@@ -53,7 +53,11 @@ export function SignedInHome({ user, repos, reposError = null }: SignedInHomePro
     }
 
     <div className="grid gap-8 lg:grid-cols-[17.5rem_minmax(0,1fr)] lg:gap-12">
-      <aside aria-label="Top repositories" className="min-w-0" data-testid="home-top-repos">
+      <aside
+        aria-label="Top repositories"
+        className="hidden min-w-0 lg:block"
+        data-testid="home-top-repos"
+      >
         <div className="mb-3 flex items-center justify-between gap-2">
           <h2 className="text-[13px] font-semibold tracking-tight text-foreground">
             Top repositories

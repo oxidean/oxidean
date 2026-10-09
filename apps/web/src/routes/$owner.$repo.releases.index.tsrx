@@ -126,6 +126,8 @@ function RepoReleasesPageContent() @{
     (repoQ.isError && String(repoQ.error?.message ?? "").includes("not found"));
   const newHref = `/${owner}/${repoName}/releases/new`;
   const releases = listQ.data ?? [];
+  // GitHub semantics: the newest non-draft, non-prerelease wears "Latest".
+  const latestId = releases.find((r) => !r.draft && !r.prerelease)?.id;
 
   @if (notFound || (!repoQ.isPending && !repo)) {
     <RepoNotFound />;
@@ -187,6 +189,14 @@ function RepoReleasesPageContent() @{
                   >
                     {(rel.title.trim() || rel.tag_name) as string}
                   </AppLink>
+                  @if (rel.id === latestId) {
+                    <Badge
+                      variant="outline"
+                      className="border-primary/50 text-primary"
+                    >
+                      Latest
+                    </Badge>;
+                  }
                   @if (rel.draft) {
                     <Badge variant="draft">Draft</Badge>;
                   }

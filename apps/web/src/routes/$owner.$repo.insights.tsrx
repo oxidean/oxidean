@@ -258,7 +258,7 @@ function RepoInsightsPageContent() @{
               }
             </p>
             <div
-              className="mt-4 flex h-32 items-end gap-px"
+              className="mt-4 flex h-32 items-end gap-px border-b border-border"
               role="img"
               aria-label="Weekly commit activity"
               data-testid="repo-insights-activity-chart"

@@ -76,6 +76,8 @@ export function subjectTail(n: NotificationPublic): string {
   if (n.subject_kind === "issue" || n.subject_kind === "pull_request") {
     return `#${n.subject_number}`;
   }
+  // Workflow-run refs carry the run UUID purely for deep links — never display it.
+  if (n.subject_kind === "workflow_run") return "";
   return n.subject_ref ?? "";
 }
 

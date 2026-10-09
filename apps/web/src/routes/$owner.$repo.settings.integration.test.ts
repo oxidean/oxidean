@@ -113,7 +113,8 @@ describe("/$owner/$repo/settings render mount (G-11.1-15)", () => {
         expect(screen.getByText("Choose who can see this repository.")).toBeTruthy();
         expect(screen.getByRole("button", { name: "Public" })).toBeTruthy();
         expect(screen.getByRole("button", { name: "Private" })).toBeTruthy();
-        expect(screen.getByText("Collaborators")).toBeTruthy();
+        // Section nav repeats the label — target the panel heading.
+        expect(screen.getByRole("heading", { name: "Collaborators" })).toBeTruthy();
       },
       { timeout: 10_000 },
     );
@@ -124,7 +125,8 @@ describe("/$owner/$repo/settings render mount (G-11.1-15)", () => {
 
     await waitFor(
       () => {
-        expect(screen.getByText("Danger zone")).toBeTruthy();
+        // Section nav repeats the label — target the panel heading.
+        expect(screen.getByRole("heading", { name: "Danger zone" })).toBeTruthy();
         expect(screen.getByRole("button", { name: "Archive repository" })).toBeTruthy();
       },
       { timeout: 10_000 },

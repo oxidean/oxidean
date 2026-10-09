@@ -6,10 +6,17 @@ import { matchPath, routeHref, searchRecord } from "@/lib/route-params";
 import { usePathname, useSearchString } from "@/lib/pathname.tsrx";
 import { RepoLayout } from "@/routes/$owner.$repo.tsrx";
 import { AppPage } from "@/components/app-page";
-import type { RepoFileTemplate, RepoPublic, RepoTemplatesListResponse } from "@oxidean/api-client";
+import type {
+  IssueAssigneePublic,
+  LabelPublic,
+  RepoFileTemplate,
+  RepoPublic,
+  RepoTemplatesListResponse,
+} from "@oxidean/api-client";
 import { useEffect, useState } from "octane";
 import { AuthErrorBanner } from "@/components/auth-shell";
 import { FileTemplateChooser } from "@/components/repo/file-template-chooser";
+import { LabelChip } from "@/components/repo/label-chip";
 import { MarkdownWritePreview } from "@/components/repo/markdown-write-preview";
 import { RepoNotFound } from "@/components/repo/repo-not-found";
 import { RepoUnitDisabled } from "@/components/repo/repo-unit-disabled";
@@ -19,7 +26,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiClient } from "@/lib/api-client";
 
-import { fetchRepoFileTemplates, fetchRepoGet } from "@/lib/ssr-repo";
+import { fetchLabelListForRepo, fetchRepoFileTemplates, fetchRepoGet } from "@/lib/ssr-repo";
 import { useChromeAccountState } from "@/lib/use-chrome-account";
 
 const EMPTY_TEMPLATES: RepoTemplatesListResponse = { issues: [], pulls: [] };
@@ -29,7 +36,12 @@ export type IssuesNewLoaderData =
   | { kind: "error"; message: string }
   // Issues unit disabled for this repo (COL-13).
   | { kind: "disabled"; repo: RepoPublic }
-  | { kind: "ready"; repo: RepoPublic; templates: RepoTemplatesListResponse };
+  | {
+      kind: "ready";
+      repo: RepoPublic;
+      templates: RepoTemplatesListResponse;
+      labels: LabelPublic[];
+    };
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
 
@@ -46,9 +58,17 @@ async function loadNewIssuePage(owner: string, repoName: string): Promise<Issues
   if (got.data.issues_enabled === false) {
     return { kind: "disabled", repo: got.data };
   }
-  // COL-02: template listing failure must not block the create form.
-  const tpl = await fetchRepoFileTemplates({ owner, name: repoName }).catch(() => null);
-  return { kind: "ready", repo: got.data, templates: tpl?.ok ? tpl.data : EMPTY_TEMPLATES };
+  // COL-02: template + label listing failures must not block the create form.
+  const [tpl, labelsRes] = await Promise.all([
+    fetchRepoFileTemplates({ owner, name: repoName }).catch(() => null),
+    fetchLabelListForRepo({ owner, name: repoName }).catch(() => null),
+  ]);
+  return {
+    kind: "ready",
+    repo: got.data,
+    templates: tpl?.ok ? tpl.data : EMPTY_TEMPLATES,
+    labels: labelsRes?.ok ? labelsRes.data.labels : [],
+  };
 }
 
 /** `?template=` selects by repo-relative filename or basename (GitHub deep-link). */
@@ -121,6 +141,10 @@ function IssuesNewPageContent() @{
 
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
+  // Sidebar picks (GitHub's right rail) applied via labels.set/assignees.set
+  // right after create — create itself takes title+body only.
+  const [selLabelIds, setSelLabelIds] = useState<string[]>([]);
+  const [selAssigneeIds, setSelAssigneeIds] = useState<string[]>([]);
   // Chooser resolves when a template (or blank) is picked — or `?template=` /
   // a single template auto-picks via the effect below. Seeding must not read
   // `issueTemplates`: the list is empty while the page query is still pending.
@@ -151,6 +175,25 @@ function IssuesNewPageContent() @{
           setPending(false);
           return;
         }
+        // Sidebar picks are post-create — best-effort, never block navigation.
+        const number = res.data.number;
+        const sideEffects: Promise<unknown>[] = [];
+        if (selLabelIds.length > 0) {
+          sideEffects.push(
+            apiClient.issue.labels.set({ owner, name: repoName, number, labelIds: selLabelIds }),
+          );
+        }
+        if (selAssigneeIds.length > 0) {
+          sideEffects.push(
+            apiClient.issue.assignees.set({
+              owner,
+              name: repoName,
+              number,
+              userIds: selAssigneeIds,
+            }),
+          );
+        }
+        if (sideEffects.length > 0) await Promise.allSettled(sideEffects);
         await navigate(
           routeHref("/$owner/$repo/issues/$n", {
             owner,
@@ -201,6 +244,33 @@ function IssuesNewPageContent() @{
 
   const repo = repoQ.data ?? null;
   const unitDisabled = routeLoader?.kind === "disabled" || repo?.issues_enabled === false;
+
+  const labelsQ = useQuery({
+    queryKey: ["label", "listForRepo", owner, repoName] as const,
+    queryFn: async () => {
+      const res = await apiClient.label.listForRepo({ owner, name: repoName });
+      if (!res.ok) throw new Error(res.error.message || NETWORK_ERROR);
+      return res.data.labels;
+    },
+    enabled: !!owner && !!repoName,
+    initialData: routeLoader?.kind === "ready" ? routeLoader.labels : undefined,
+  });
+  const repoLabels = labelsQ.data ?? [];
+
+  const candidatesQ = useQuery({
+    queryKey: ["issue", "assigneeCandidates", owner, repoName] as const,
+    queryFn: async () => {
+      const res = await apiClient.issue.assigneeCandidates({ owner, name: repoName });
+      if (!res.ok) throw new Error(res.error.message || NETWORK_ERROR);
+      return res.data.users;
+    },
+    enabled: !!owner && !!repoName && !!account.user?.email_verified,
+  });
+  const assigneeCandidates: IssueAssigneePublic[] = candidatesQ.data ?? [];
+
+  function toggleId(list: string[], id: string): string[] {
+    return list.includes(id) ? list.filter((x) => x !== id) : [...list, id];
+  }
 
   @if (layout?.status === "not_found" || (!repoQ.isPending && !repo)) {
     <RepoNotFound />;
@@ -253,62 +323,150 @@ function IssuesNewPageContent() @{
               </button>
             </p>;
           }
-          <form
-            method="post"
-            action="#"
-            className="flex max-w-2xl flex-col gap-4"
-            onSubmit={(e) => {
-              e.preventDefault();
-              void form.handleSubmit();
-            }}
-          >
-            @if (error) {
-              <AuthErrorBanner message={error} />;
-            }
-            <form.Field name="title">
-              {(field) => (
-                <div className="flex flex-col gap-2">
-                  <Label htmlFor="issue-title">Title</Label>
-                  <Input
-                    id="issue-title"
-                    name="title"
-                    value={field.state.value}
-                    onBlur={field.handleBlur}
-                    onInput={(e) => field.handleChange((e.target as HTMLInputElement).value)}
-                    placeholder="Issue title"
-                    required
-                  />
-                </div>
-              )}
-            </form.Field>
-            <form.Field name="body">
-              {(field) => (
-                <div className="flex flex-col gap-2">
-                  <MarkdownWritePreview
-                    id="issue-body"
-                    value={field.state.value}
-                    onValueChange={field.handleChange}
-                    rows={12}
-                    disabled={pending}
-                    placeholder="Describe the issue (markdown supported)"
-                    owner={owner}
-                    repo={repoName}
-                  />
-                </div>
-              )}
-            </form.Field>
-            <div className="flex gap-3">
-              <Button type="submit" disabled={pending}>
-                {(pending ? "Creating…" : "Submit new issue") as string}
-              </Button>
-              <AppLink
-                href={`/${owner}/${repoName}/issues` as string}
-                className="inline-flex h-11 items-center text-[14px] text-muted-foreground no-underline hover:text-foreground"
-              >
-                Cancel
-              </AppLink>
-            </div>
-          </form>
+          <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_16rem] lg:gap-8">
+            <form
+              method="post"
+              action="#"
+              className="flex max-w-2xl flex-col gap-4"
+              onSubmit={(e) => {
+                e.preventDefault();
+                void form.handleSubmit();
+              }}
+            >
+              @if (error) {
+                <AuthErrorBanner message={error} />;
+              }
+              <form.Field name="title">
+                {(field) => (
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="issue-title">Title</Label>
+                    <Input
+                      id="issue-title"
+                      name="title"
+                      value={field.state.value}
+                      onBlur={field.handleBlur}
+                      onInput={(e) =>
+                        field.handleChange((e.target as HTMLInputElement).value)
+                      }
+                      placeholder="Issue title"
+                      required
+                    />
+                  </div>
+                )}
+              </form.Field>
+              <form.Field name="body">
+                {(field) => (
+                  <div className="flex flex-col gap-2">
+                    <MarkdownWritePreview
+                      id="issue-body"
+                      value={field.state.value}
+                      onValueChange={field.handleChange}
+                      rows={12}
+                      disabled={pending}
+                      placeholder="Describe the issue (markdown supported)"
+                      owner={owner}
+                      repo={repoName}
+                    />
+                  </div>
+                )}
+              </form.Field>
+              <div className="flex gap-3">
+                <Button type="submit" disabled={pending}>
+                  {(pending ? "Creating…" : "Submit new issue") as string}
+                </Button>
+                <AppLink
+                  href={`/${owner}/${repoName}/issues` as string}
+                  className="inline-flex h-11 items-center text-[14px] text-muted-foreground no-underline hover:text-foreground"
+                >
+                  Cancel
+                </AppLink>
+              </div>
+            </form>
+            <aside className="flex flex-col gap-6 border-t border-border pt-4 lg:border-t-0 lg:pt-0">
+              <section aria-labelledby="new-issue-assignees-heading">
+                <h3
+                  id="new-issue-assignees-heading"
+                  className="text-[13px] font-semibold text-foreground"
+                >
+                  Assignees
+                </h3>
+                @if (candidatesQ.isPending) {
+                  <p className="mt-2 text-[13px] text-muted-foreground">
+                    Loading assignees…
+                  </p>;
+                } @else {
+                  @if (assigneeCandidates.length === 0) {
+                    <p className="mt-2 text-[13px] text-muted-foreground">
+                      No eligible assignees for this repository.
+                    </p>;
+                  } @else {
+                    <ul className="mt-2 flex max-h-48 flex-col gap-1.5 overflow-y-auto">
+                      @for (const user of assigneeCandidates; key user.user_id) {
+                        <li>
+                          <label className="flex cursor-pointer items-center gap-2 text-[13px] text-foreground">
+                            <input
+                              type="checkbox"
+                              checked={selAssigneeIds.includes(user.user_id)}
+                              disabled={pending}
+                              onChange={() =>
+                                setSelAssigneeIds(
+                                  toggleId(selAssigneeIds, user.user_id),
+                                )
+                              }
+                            />
+                            <span>{user.username as string}</span>
+                            @if (
+                              user.display_name &&
+                              user.display_name !== user.username
+                            ) {
+                              <span className="text-muted-foreground">
+                                ({user.display_name as string})
+                              </span>;
+                            }
+                          </label>
+                        </li>;
+                      }
+                    </ul>;
+                  }
+                }
+              </section>
+              <section aria-labelledby="new-issue-labels-heading">
+                <h3
+                  id="new-issue-labels-heading"
+                  className="text-[13px] font-semibold text-foreground"
+                >
+                  Labels
+                </h3>
+                @if (labelsQ.isPending) {
+                  <p className="mt-2 text-[13px] text-muted-foreground">
+                    Loading labels…
+                  </p>;
+                } @else {
+                  @if (repoLabels.length === 0) {
+                    <p className="mt-2 text-[13px] text-muted-foreground">None yet</p>;
+                  } @else {
+                    <ul className="mt-2 flex max-h-48 flex-col gap-1.5 overflow-y-auto">
+                      @for (const lab of repoLabels; key lab.id) {
+                        <li>
+                          <label className="flex cursor-pointer items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={selLabelIds.includes(lab.id)}
+                              disabled={pending}
+                              onChange={() =>
+                                setSelLabelIds(toggleId(selLabelIds, lab.id))
+                              }
+                            />
+                            <LabelChip label={lab} />
+                          </label>
+                        </li>;
+                      }
+                    </ul>;
+                  }
+                }
+              </section>
+            </aside>
+          </div>
         </>;
       }
     </>;

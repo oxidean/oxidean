@@ -2,6 +2,7 @@ import { queryOptions, useQuery } from "@octanejs/tanstack-query";
 import { useEffect, useState } from "octane";
 import { BookMarked, Star } from "@octanejs/lucide";
 import { ReadmePanel } from "@/components/repo/readme-panel";
+import { AvatarPreview } from "@/components/avatar-preview";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -268,18 +269,16 @@ export function UserProfilePage() @{
   } @else {
     <div className="mx-auto max-w-6xl px-4 py-12">
       <div className="flex flex-wrap items-start gap-4">
-        @if (profile.avatar_url) {
-          <img
-            src={profile.avatar_url as string}
-            alt=""
-            className="size-20 rounded-full object-cover"
-          />;
-        }
+        <AvatarPreview user={profile} size={80} />
         <div>
           <h1 className="font-[family-name:var(--font-display)] text-[28px] font-semibold leading-[1.2] text-foreground">
             {display as string}
           </h1>
-          <p className="mt-1 text-[16px] text-muted-foreground">{"@" + (username as string)}</p>
+          @if (display !== username) {
+            <p className="mt-1 text-[16px] text-muted-foreground">
+              {"@" + (username as string)}
+            </p>;
+          }
           @if (profile.bio?.trim()) {
             <p className="mt-3 max-w-xl text-[16px] text-muted-foreground">
               {profile.bio as string}

@@ -33,9 +33,13 @@ describe("DiffPatch", { timeout: 60_000 }, () => {
     const add = document.querySelector('[data-diff-kind="add"]');
     const del = document.querySelector('[data-diff-kind="del"]');
     const hunk = document.querySelector('[data-diff-kind="hunk"]');
-    expect(add?.textContent).toBe("+new");
-    expect(del?.textContent).toBe("-old");
-    expect(hunk?.textContent).toBe("@@ -1,2 +1,2 @@");
+    // Rows carry old/new gutter numbers before the prefix + content; the
+    // " keep" ctx line consumes line 1 of both files, so del/add land on 2.
+    expect(add?.textContent).toContain("+new");
+    expect(del?.textContent).toContain("-old");
+    expect(hunk?.textContent).toContain("@@ -1,2 +1,2 @@");
+    expect(del?.textContent?.startsWith("2")).toBe(true);
+    expect(add?.textContent?.startsWith("2")).toBe(true);
     expect(add?.className).toMatch(/diff-add/);
     expect(del?.className).toMatch(/diff-del/);
     expect(hunk?.className).toMatch(/diff-hunk/);

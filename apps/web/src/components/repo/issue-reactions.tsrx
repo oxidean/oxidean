@@ -5,20 +5,23 @@ import { apiClient } from "@/lib/api-client";
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
 
-/** The eight reaction contents (D-ISS-11). */
+/** The eight reaction contents (D-ISS-11). Glyphs are vendored Noto emoji
+ * SVGs (`public/emoji/<codepoint>.svg`) so they render identically on every
+ * platform — the native char stays in `alt` for screen readers/copy. */
 const REACTION_CONTENTS: {
   content: ReactionContent;
   emoji: string;
+  asset: string;
   label: string;
 }[] = [
-  { content: "+1", emoji: "👍", label: "+1" },
-  { content: "-1", emoji: "👎", label: "-1" },
-  { content: "laugh", emoji: "😄", label: "laugh" },
-  { content: "confused", emoji: "😕", label: "confused" },
-  { content: "heart", emoji: "❤️", label: "heart" },
-  { content: "hooray", emoji: "🎉", label: "hooray" },
-  { content: "rocket", emoji: "🚀", label: "rocket" },
-  { content: "eyes", emoji: "👀", label: "eyes" },
+  { content: "+1", emoji: "👍", asset: "1f44d", label: "+1" },
+  { content: "-1", emoji: "👎", asset: "1f44e", label: "-1" },
+  { content: "laugh", emoji: "😄", asset: "1f604", label: "laugh" },
+  { content: "confused", emoji: "😕", asset: "1f615", label: "confused" },
+  { content: "heart", emoji: "❤️", asset: "2764", label: "heart" },
+  { content: "hooray", emoji: "🎉", asset: "1f389", label: "hooray" },
+  { content: "rocket", emoji: "🚀", asset: "1f680", label: "rocket" },
+  { content: "eyes", emoji: "👀", asset: "1f440", label: "eyes" },
 ];
 
 type IssueReactionsBarProps = {
@@ -40,9 +43,21 @@ function groupFor(
   return reactions.find((r) => r.content === content);
 }
 
+function ReactionGlyph(props: { asset: string; emoji: string }) @{
+  <img
+    src={`/emoji/${props.asset}.svg`}
+    alt={props.emoji as string}
+    width={16}
+    height={16}
+    draggable={false}
+    className="inline-block size-4 select-none"
+  />;
+}
+
 function ReactionChip(props: {
   content: ReactionContent;
   emoji: string;
+  asset: string;
   label: string;
   count: number;
   mine: boolean;
@@ -66,7 +81,7 @@ function ReactionChip(props: {
       disabled={props.disabled}
       onClick={() => props.onToggle(props.content)}
     >
-      <span aria-hidden="true">{props.emoji as string}</span>
+      <ReactionGlyph asset={props.asset} emoji={props.emoji} />
       @if (props.count > 0) {
         <span className="tabular-nums">{String(props.count)}</span>;
       }
@@ -77,7 +92,7 @@ function ReactionChip(props: {
       title={title}
       aria-label={props.label}
     >
-      <span aria-hidden="true">{props.emoji as string}</span>
+      <ReactionGlyph asset={props.asset} emoji={props.emoji} />
       @if (props.count > 0) {
         <span className="tabular-nums">{String(props.count)}</span>;
       }
@@ -142,6 +157,7 @@ export function IssueReactionsBar(props: IssueReactionsBarProps) @{
         <ReactionChip
           content={item.content}
           emoji={item.emoji}
+          asset={item.asset}
           label={item.label}
           count={groupFor(local, item.content)?.count ?? 0}
           mine={!!groupFor(local, item.content)?.viewerHasReacted}

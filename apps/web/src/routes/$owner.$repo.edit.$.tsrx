@@ -55,7 +55,11 @@ async function loadEditPage(
 
   const blobRes = await fetchRepoBlob({ owner, name: repoName, ref: refName, path: parsed.path });
   if (!blobRes.ok) {
-    if (blobRes.error.code === "repo.not_found" || blobRes.error.code === "git.not_found") {
+    if (
+      blobRes.error.code === "repo.not_found" ||
+      blobRes.error.code === "git.not_found" ||
+      blobRes.error.code === "repo.git_failed"
+    ) {
       return { kind: "not_found" };
     }
     return {

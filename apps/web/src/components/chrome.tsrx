@@ -1,4 +1,19 @@
-import { Bell, Menu, Plus, X } from "@octanejs/lucide";
+import {
+  Activity,
+  Bell,
+  BookMarked,
+  Building2,
+  CircleDot,
+  Home,
+  LogOut,
+  Menu,
+  Plus,
+  Settings,
+  ShieldCheck,
+  Tag,
+  Users,
+  X,
+} from "@octanejs/lucide";
 import { useQuery, useQueryClient } from "@octanejs/tanstack-query";
 import type { UserPublic } from "@oxidean/api-client";
 import { useEffect, useEffectEvent, useState } from "octane";
@@ -372,7 +387,7 @@ function AccountActions({
 }
 
 const mobileNavItemClass =
-  "flex h-11 w-full items-center rounded-md px-3 text-[14px] font-medium text-foreground no-underline outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring";
+  "flex h-11 w-full items-center gap-3 rounded-md px-3 text-[14px] font-medium text-foreground no-underline outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring";
 
 function MobileNavSheet({ onClose }: { onClose: () => void }) @{
   const queryClient = useQueryClient();
@@ -447,15 +462,18 @@ function MobileNavSheet({ onClose }: { onClose: () => void }) @{
                 className={cn(mobileNavItemClass, "text-left")}
                 onClick={onClose}
               >
+                <Home aria-hidden size={16} className="text-muted-foreground" />
                 Home
               </AppLink>
               <p className="px-3 pt-2 pb-1 text-[12px] font-medium text-muted-foreground">
                 Create
               </p>
               <AppLink href="/new" className={mobileNavItemClass} onClick={onClose}>
+                <BookMarked aria-hidden size={16} className="text-muted-foreground" />
                 New repository
               </AppLink>
               <AppLink href="/orgs/new" className={mobileNavItemClass} onClick={onClose}>
+                <Building2 aria-hidden size={16} className="text-muted-foreground" />
                 New organization
               </AppLink>
               @if (repo) {
@@ -465,6 +483,11 @@ function MobileNavSheet({ onClose }: { onClose: () => void }) @{
                     className={mobileNavItemClass}
                     onClick={onClose}
                   >
+                    <CircleDot
+                      aria-hidden
+                      size={16}
+                      className="text-muted-foreground"
+                    />
                     New issue
                   </AppLink>
                   <AppLink
@@ -472,6 +495,7 @@ function MobileNavSheet({ onClose }: { onClose: () => void }) @{
                     className={mobileNavItemClass}
                     onClick={onClose}
                   >
+                    <Tag aria-hidden size={16} className="text-muted-foreground" />
                     New release
                   </AppLink>
                 </>;
@@ -480,9 +504,11 @@ function MobileNavSheet({ onClose }: { onClose: () => void }) @{
                 Account
               </p>
               <AppLink href="/notifications" className={mobileNavItemClass} onClick={onClose}>
+                <Bell aria-hidden size={16} className="text-muted-foreground" />
                 Notifications
               </AppLink>
               <AppLink href="/" className={mobileNavItemClass} onClick={onClose}>
+                <BookMarked aria-hidden size={16} className="text-muted-foreground" />
                 Your repositories
               </AppLink>
               <AppLink
@@ -490,6 +516,7 @@ function MobileNavSheet({ onClose }: { onClose: () => void }) @{
                 className={mobileNavItemClass}
                 onClick={onClose}
               >
+                <Settings aria-hidden size={16} className="text-muted-foreground" />
                 Settings
               </AppLink>
               @if (user.role === "sys-admin") {
@@ -498,6 +525,11 @@ function MobileNavSheet({ onClose }: { onClose: () => void }) @{
                   className={mobileNavItemClass}
                   onClick={onClose}
                 >
+                  <ShieldCheck
+                    aria-hidden
+                    size={16}
+                    className="text-muted-foreground"
+                  />
                   Admin
                 </AppLink>;
               }
@@ -512,6 +544,11 @@ function MobileNavSheet({ onClose }: { onClose: () => void }) @{
                       className={mobileNavItemClass}
                       onClick={onClose}
                     >
+                      <Users
+                        aria-hidden
+                        size={16}
+                        className="text-muted-foreground"
+                      />
                       {(org.display_name?.trim() || org.slug) as string}
                     </AppLink>;
                   }
@@ -525,6 +562,7 @@ function MobileNavSheet({ onClose }: { onClose: () => void }) @{
                 }}
                 onClick={onClose}
               >
+                <Activity aria-hidden size={16} className="text-muted-foreground" />
                 Status
               </AppLink>
               <div className="my-1 h-px bg-border" role="separator" />
@@ -538,6 +576,7 @@ function MobileNavSheet({ onClose }: { onClose: () => void }) @{
                   void logout();
                 }}
               >
+                <LogOut aria-hidden size={16} />
                 Sign out
               </button>
             </div>

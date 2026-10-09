@@ -71,9 +71,26 @@ async function loadBlobPage(
   if (!parsed.path) {
     return { kind: "not_found" };
   }
+  // Bogus leading ref segment or a path that doesn't resolve → friendly 404,
+  // not a bare "git operation failed" message. SHA-looking refs pass through —
+  // commits are valid blob tree-ish; git resolves or 404s them.
+  const looksLikeSha = /^[0-9a-f]{7,40}$/i.test(refName);
+  if (
+    splat &&
+    parsed.ref &&
+    knownRefs.length > 0 &&
+    !knownRefs.includes(refName) &&
+    !looksLikeSha
+  ) {
+    return { kind: "not_found" };
+  }
   const blobRes = await fetchRepoBlob({ owner, name: repoName, ref: refName, path: parsed.path });
   if (!blobRes.ok) {
-    if (blobRes.error.code === "repo.not_found" || blobRes.error.code === "git.not_found") {
+    if (
+      blobRes.error.code === "repo.not_found" ||
+      blobRes.error.code === "git.not_found" ||
+      blobRes.error.code === "repo.git_failed"
+    ) {
       return { kind: "not_found" };
     }
     return {

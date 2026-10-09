@@ -217,6 +217,31 @@ function RepoReleaseDetailPageContent() @{
         } @else {
           <p className="mb-4 text-[14px] text-muted-foreground">No assets attached.</p>;
         }
+        {/* Auto source archives — same endpoints the Code clone box uses. */}
+        <ul className="mb-4 flex flex-col gap-2 border-t border-border pt-3">
+          <li>
+            {/* raw-anchor-ok — /api download endpoint, not a router route */}
+            <a
+              href={
+                `/api/repos/${owner}/${repoName}/archive/${encodeURIComponent(release.tag_name)}.zip` as string
+              }
+              className="text-[14px] text-primary underline"
+            >
+              Source code (zip)
+            </a>
+          </li>
+          <li>
+            {/* raw-anchor-ok — /api download endpoint, not a router route */}
+            <a
+              href={
+                `/api/repos/${owner}/${repoName}/archive/${encodeURIComponent(release.tag_name)}.tar.gz` as string
+              }
+              className="text-[14px] text-primary underline"
+            >
+              Source code (tar.gz)
+            </a>
+          </li>
+        </ul>
         @if (repo.can_write && !repo.archived) {
           <form
             method="post"
@@ -229,7 +254,6 @@ function RepoReleaseDetailPageContent() @{
             <Label htmlFor="release-asset-file">Upload asset</Label>
             <FileDropzone
               id="release-asset-file"
-              hint="Drop a release asset here, or click to browse"
               onFiles={(files) => {
                 const file = files[0];
                 if (!file || !release) return;

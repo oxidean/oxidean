@@ -154,8 +154,8 @@ export function RepoChrome({ repo, active, showSettings = false }: RepoChromePro
 
   function navClass(isActive: boolean): string {
     return isActive
-      ? "border-b-2 border-primary pb-2 text-[14px] font-semibold text-foreground no-underline"
-      : "pb-2 text-[14px] font-normal text-muted-foreground no-underline hover:text-foreground";
+      ? "shrink-0 border-b-2 border-primary pb-2 text-[14px] font-semibold text-foreground no-underline"
+      : "shrink-0 pb-2 text-[14px] font-normal text-muted-foreground no-underline hover:text-foreground";
   }
 
   <div className="mb-8">
@@ -349,7 +349,10 @@ export function RepoChrome({ repo, active, showSettings = false }: RepoChromePro
       </>;
     }
 
-    <nav className="mt-6 flex flex-wrap gap-4 border-b border-border pb-0" aria-label="Repository">
+    <nav
+      className="mt-6 flex gap-4 overflow-x-auto border-b border-border pb-0 whitespace-nowrap [scrollbar-width:thin]"
+      aria-label="Repository"
+    >
       <AppLink
         href={codeHref as string}
         className={navClass(active === "code") as string}

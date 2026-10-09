@@ -231,7 +231,7 @@ function NewPullPageContent() @{
         <MemberLookup
           id="pull-new-head-owner"
           name="head_owner"
-          label="Head owner"
+          label="Head repo owner"
           compact
           placeholder={owner as string}
           value={headOwner as string}
@@ -251,7 +251,8 @@ function NewPullPageContent() @{
         </label>
       </div>
       <p className="text-sm text-muted-foreground">
-        For a fork head, set head owner to the fork owner (branch name must exist on that fork).
+        To compare across forks, set Head repo owner to the fork's owner — the compare branch must
+        exist there.
       </p>
       @if (pullTemplates.length > 1 && !templateChosen) {
         <FileTemplateChooser

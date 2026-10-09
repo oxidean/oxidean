@@ -39,7 +39,7 @@ beforeEach(() => {
 });
 
 describe("/signup closed-signup gate (D-06)", () => {
-  it("renders not-found instead of the form when allow_signup is false", async () => {
+  it("renders a closed-registration state instead of the form when allow_signup is false", async () => {
     providerConfigMock.mockResolvedValue({
       ok: true,
       data: { mode: "local", allow_signup: false },
@@ -47,7 +47,7 @@ describe("/signup closed-signup gate (D-06)", () => {
     render(SignupPage);
     await waitFor(() => {
       expect(screen.queryByLabelText("Email")).not.toBeInTheDocument();
-      expect(document.body.textContent).toMatch(/not found|404/i);
+      expect(document.body.textContent).toMatch(/closed/i);
     });
   });
 

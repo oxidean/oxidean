@@ -18,7 +18,15 @@ beforeEach(() => {
 async function openCloneMenu() {
   fireEvent.click(screen.getByRole("button", { name: "Clone or download" }));
   await waitFor(() => {
-    expect(screen.getByText("Clone with HTTPS")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "HTTPS" })).toBeInTheDocument();
+    expect(screen.getByLabelText("HTTPS clone URL")).toBeInTheDocument();
+  });
+}
+
+async function selectSshTab() {
+  fireEvent.click(screen.getByRole("tab", { name: "SSH" }));
+  await waitFor(() => {
+    expect(screen.getByLabelText(/SSH clone URL/i)).toBeInTheDocument();
   });
 }
 
@@ -46,7 +54,9 @@ describe("CloneBox (E12 / D-22 / D-29)", () => {
     expect(copyBtn).toBeInTheDocument();
     expect(copyBtn.querySelector("svg")).not.toBeNull();
 
-    expect(screen.getByText("Clone with SSH")).toBeInTheDocument();
+    // SSH section lives behind the SSH tab.
+    await selectSshTab();
+    expect(screen.getByLabelText(/SSH clone URL/i)).toBeInTheDocument();
 
     const zip = screen.getByRole("menuitem", { name: "Download ZIP" });
     const tar = screen.getByRole("menuitem", { name: "Download tar.gz" });
@@ -72,7 +82,7 @@ describe("CloneBox (E12 / D-22 / D-29)", () => {
     expect(screen.getByRole("textbox", { name: "HTTPS clone URL" })).toHaveValue(
       "http://127.0.0.1:3000/ada/empty.git",
     );
-    expect(screen.getByText("Clone with SSH")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "SSH" })).toBeInTheDocument();
 
     const zip = screen.getByRole("menuitem", { name: "Download ZIP" });
     const tar = screen.getByRole("menuitem", { name: "Download tar.gz" });

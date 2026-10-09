@@ -8,6 +8,7 @@ import { List, ListRow } from "@/components/ui/list";
 import { PageHeader } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiClient } from "@/lib/api-client";
+import { formatRelative } from "@/lib/relative-time";
 import {
   invalidateNotificationQueries,
   notificationListQueryOptions,
@@ -179,7 +180,7 @@ function NotificationsContent() @{
                       <span className="truncate text-[13px] text-muted-foreground">
                         {n.subject_title as string}
                         {" · "}
-                        {n.created_at as string}
+                        {formatRelative(n.created_at) as string}
                       </span>
                     </span>
                   </button>

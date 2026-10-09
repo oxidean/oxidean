@@ -219,6 +219,27 @@ pub fn dispatch(path: &str) -> Option<Match> {
     })
 }
 
+/// Detect Astro's static redirect stub: `Astro.redirect()` in a prerendered
+/// page emits `<meta http-equiv="refresh" content="N;url=/target">` HTML since
+/// static hosts can't send 302s. We can — return the target so the server
+/// answers with a real `Location` redirect instead of a visible "Redirecting"
+/// interstitial.
+pub(crate) fn redirect_stub_target(html: &str) -> Option<&str> {
+    // Stubs are single-line stubs a few hundred bytes long; real shells are
+    // far larger and contain scripts/markup.
+    if html.len() > 2048 || !html.contains("http-equiv=\"refresh\"") {
+        return None;
+    }
+    let start = html.find("http-equiv=\"refresh\"")?;
+    // Parse the `content` attribute of the refresh tag itself — other meta
+    // tags on the stub (robots, canonical) also carry `content=` values.
+    let tag = html[start..].split('>').next()?;
+    let content = tag.split("content=\"").nth(1)?.split('"').next()?;
+    let url = content.split("url=").nth(1)?.trim();
+    // Same-origin paths only — never redirect to a scheme or protocol-relative URL.
+    (url.starts_with('/') && !url.starts_with("//")).then_some(url)
+}
+
 /// Minimal escaping for values interpolated into `<title>`/meta text.
 fn html_escape(s: &str) -> String {
     s.replace('&', "&amp;")
@@ -289,6 +310,21 @@ mod tests {
     #[test]
     fn unmatched() {
         assert!(dispatch("/no/such/route/shape/here/xyz/123/456").is_none());
+    }
+
+    #[test]
+    fn redirect_stubs() {
+        let stub = r#"<html><head><title>Redirecting</title><meta http-equiv="refresh" content="2;url=/settings/profile"><meta name="robots" content="noindex"></head><body><a href="/settings/profile">Redirecting</a></body></html>"#;
+        assert_eq!(redirect_stub_target(stub), Some("/settings/profile"));
+        // Real shells are not stubs (too large / no refresh marker).
+        assert_eq!(redirect_stub_target("<html><body>app</body></html>"), None);
+        let big = format!("<html>{}</html>", "x".repeat(3000));
+        assert_eq!(redirect_stub_target(&big), None);
+        // Protocol-relative / external targets are refused.
+        let evil = r#"<html><meta http-equiv="refresh" content="0;url=//evil.test/x"></html>"#;
+        assert_eq!(redirect_stub_target(evil), None);
+        let ext = r#"<html><meta http-equiv="refresh" content="0;url=https://evil.test"></html>"#;
+        assert_eq!(redirect_stub_target(ext), None);
     }
 
     #[test]

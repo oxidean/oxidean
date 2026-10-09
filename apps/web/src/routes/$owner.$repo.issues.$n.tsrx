@@ -390,7 +390,7 @@ function IssueDetailPageContent() @{
                   </p>
                 </div>
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex w-full flex-wrap gap-2 lg:w-auto">
                 @if (canEdit && !editing) {
                   <Button type="button" variant="outline" onClick={startEdit}>
                     Edit

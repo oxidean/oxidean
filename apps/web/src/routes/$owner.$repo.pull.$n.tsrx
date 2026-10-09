@@ -118,16 +118,16 @@ function PullDetailPageContent() @{
       if (!res.ok) throw new Error(res.error.message || NETWORK_ERROR);
       return res.data;
     },
-    enabled: !!owner && !!repoName && number > 0 && loader.kind !== "disabled",
-    initialData: loader.kind === "ready" ? loader.pull : undefined,
+    enabled: !!owner && !!repoName && number > 0 && loader?.kind !== "disabled",
+    initialData: loader?.kind === "ready" ? loader.pull : undefined,
   });
 
   const account = useChromeAccountState();
   const pull = pullQ.data;
   // GIT-20: archived repos hide all pull write affordances (merge/comment/review).
-  const canWrite = loader.kind === "ready" && !!loader.repo.can_write && !loader.repo.archived;
+  const canWrite = loader?.kind === "ready" && !!loader.repo.can_write && !loader.repo.archived;
   const canAdmin =
-    loader.kind !== "not_found" && loader.kind !== "error" && !!loader.repo.can_admin;
+    !!loader && loader.kind !== "not_found" && loader.kind !== "error" && !!loader.repo.can_admin;
   const isAuthor = !!pull && !!account.user && account.user.id === (pull.author_id as string);
   // Verified signed-in users participate on any repo they can view (D-PR-29).
   const canInteract = !!account.user?.email_verified;
@@ -160,12 +160,12 @@ function PullDetailPageContent() @{
     });
   }
 
-  @if (loader.kind === "not_found") {
+  @if (loader?.kind === "not_found") {
     <RepoNotFound />;
   } @else {
-    @if (loader.kind === "disabled") {
+    @if (loader?.kind === "disabled") {
       <RepoUnitDisabled unit="pulls" canAdmin={canAdmin} />;
-    } @else if (loader.kind === "error") {
+    } @else if (loader?.kind === "error") {
       <p className="text-destructive">{loader.message as string}</p>;
     } @else {
       @if (!pull) {

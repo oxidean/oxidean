@@ -1,5 +1,6 @@
 import { useForm } from "@octanejs/tanstack-form";
-import { CircleCheck, CircleDot, MessageSquare } from "@octanejs/lucide";
+import { useState } from "octane";
+import { CircleCheck, CircleDot, MessageSquare, SlidersHorizontal } from "@octanejs/lucide";
 import type { IssuePublic, LabelPublic, RepoPublic } from "@oxidean/api-client";
 import { MemberLookup } from "@/components/org/member-lookup";
 import { LabelChip } from "@/components/repo/label-chip";
@@ -87,6 +88,12 @@ export function IssuesList({
   const to = Math.min(filters.offset + issues.length, total);
   const canPrev = filters.offset > 0;
   const canNext = filters.offset + filters.limit < total;
+  // Filters collapse behind a disclosure on mobile — the 4-field row is ~200px
+  // of vertical space that buries the list. Desktop keeps the always-open row.
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const activeFilterCount = [filters.author, filters.label, filters.assignee, filters.q].filter(
+    (v) => v.trim() !== "",
+  ).length;
 
   const filterForm = useForm({
     defaultValues: {
@@ -156,11 +163,28 @@ export function IssuesList({
       </div>
     </div>
 
+    <button
+      type="button"
+      className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-[13px] font-medium text-foreground md:hidden"
+      aria-expanded={filtersOpen}
+      aria-controls="issue-filter-form"
+      onClick={() => setFiltersOpen((v) => !v)}
+    >
+      <SlidersHorizontal aria-hidden size={14} />
+      Filters
+      @if (activeFilterCount > 0) {
+        <span className="rounded-full bg-primary/15 px-1.5 text-[12px] tabular-nums text-primary">
+          {String(activeFilterCount)}
+        </span>;
+      }
+    </button>
+
     <form
       method="post"
       action="#"
+      id="issue-filter-form"
       aria-label="Issue filters"
-      className={repoListFilterFormClass() as string}
+      className={`${repoListFilterFormClass()}${filtersOpen ? "" : " max-md:hidden"}` as string}
       onSubmit={(e) => {
         e.preventDefault();
         void filterForm.handleSubmit();

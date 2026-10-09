@@ -208,6 +208,11 @@ function RepoActionsRunPageContent() @{
     .map((j) => j.started_at)
     .filter((t): t is string => !!t)
     .sort()[0];
+  const totalSpan = run ? spanDuration(run.created_at, run.finished_at) : "";
+  const createdRel =
+    run?.created_at && Number.isFinite(Date.parse(run.created_at))
+      ? formatRelative(run.created_at)
+      : "";
   const runDescription = run
     ? [
         `${run.workflow_name} #${run.run_number}`,
@@ -220,8 +225,8 @@ function RepoActionsRunPageContent() @{
           : runActive
             ? "queued"
             : "",
-        `total ${spanDuration(run.created_at, run.finished_at)}`,
-        formatRelative(run.created_at),
+        totalSpan ? `total ${totalSpan}` : "",
+        createdRel,
       ]
         .filter(Boolean)
         .join(" · ")

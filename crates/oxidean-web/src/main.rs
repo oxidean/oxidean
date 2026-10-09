@@ -220,6 +220,15 @@ async fn spa(
         }
         match tokio::fs::read_to_string(st.dist.join(m.file)).await {
             Ok(html) => {
+                // Static redirect stubs (Astro.redirect) become real 302s —
+                // no visible "Redirecting…" interstitial.
+                if let Some(target) = shells::redirect_stub_target(&html) {
+                    return (
+                        StatusCode::FOUND,
+                        [(header::LOCATION, target.to_string())],
+                    )
+                        .into_response();
+                }
                 let out = inject::inject(&html, &headers, m.title.as_deref(), &st.meta, signal);
                 return (
                     StatusCode::OK,
@@ -437,6 +446,73 @@ mod tests {
             resp.headers().get(header::CONTENT_RANGE).unwrap(),
             "bytes 2-4/10"
         );
+    }
+
+    fn shared(dist: PathBuf) -> Arc<Shared> {
+        Arc::new(Shared {
+            dist,
+            meta: inject::AdvertiseMeta {
+                ssh_host: None,
+                ssh_port: None,
+            },
+            proxy: None,
+            sessions: None,
+        })
+    }
+
+    async fn get(st: &Arc<Shared>, path: &str, cookie: Option<&str>) -> Response {
+        let mut b = axum::extract::Request::builder().uri(path);
+        if let Some(c) = cookie {
+            b = b.header(header::COOKIE, c);
+        }
+        let req = b.body(Body::empty()).unwrap();
+        let headers = req.headers().clone();
+        let uri = req.uri().clone();
+        spa(
+            State(st.clone()),
+            ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 0))),
+            headers,
+            uri,
+            req,
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn redirect_stub_shell_gets_real_redirect() {
+        // Astro's `Astro.redirect` stub shape, e.g. settings/emails → profile.
+        let stub = "<html><meta http-equiv=\"refresh\" content=\"2;url=/settings/profile\"></html>";
+        let dist = dist_with(
+            "redirect-stub",
+            &[
+                ("settings/emails/index.html", stub),
+                ("index.html", "<html>app shell</html>"),
+            ],
+        )
+        .await;
+        let st = shared(dist);
+
+        // Signed-in: the stub becomes a real redirect — no interstitial page.
+        let resp = get(&st, "/settings/emails", Some("oxidean_session=x")).await;
+        assert_eq!(resp.status(), StatusCode::FOUND);
+        assert_eq!(
+            resp.headers().get(header::LOCATION).unwrap(),
+            "/settings/profile"
+        );
+
+        // Anonymous: the protected gate still wins — login first, and the
+        // post-login return lands on /settings/emails which then chains to
+        // /settings/profile.
+        let resp = get(&st, "/settings/emails", None).await;
+        assert_eq!(resp.status(), StatusCode::FOUND);
+        assert_eq!(
+            resp.headers().get(header::LOCATION).unwrap(),
+            "/login?returnTo=/settings/emails"
+        );
+
+        // A normal shell is unaffected by stub detection.
+        let resp = get(&st, "/", None).await;
+        assert_eq!(resp.status(), StatusCode::OK);
     }
 
     /// End-to-end websocket passthrough: raw TCP client → this tier's real

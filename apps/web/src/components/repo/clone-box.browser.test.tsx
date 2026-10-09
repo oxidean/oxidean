@@ -49,13 +49,28 @@ describe("CloneBox browser", () => {
         "input[aria-label='HTTPS clone URL']",
       )) as HTMLInputElement;
       expect(https.value).toBe("https://forge.example/oxidean/oxidean.git");
+
+      // SSH content lives behind the SSH tab — select it like a user.
+      await waitForSelector("[role='tab']");
+      const tabs = Array.from(document.querySelectorAll("[role='tab']"));
+      const sshTabEl = tabs.find((t) => t.textContent?.trim() === "SSH") as
+        | HTMLButtonElement
+        | undefined;
+      expect(sshTabEl).toBeTruthy();
+      sshTabEl!.click();
       const ssh = (await waitForSelector("input[aria-label='SSH clone URL']")) as HTMLInputElement;
       expect(ssh.value).toBe("git@ssh.example.com:oxidean/oxidean.git");
       // Non-standard SSH port paints the ~/.ssh/config hint.
       expect(document.body.textContent).toContain("Port 2222");
 
-      // Copy path: headless Chromium has no clipboard — the error affordance
-      // must render without a DOM race.
+      // Back to HTTPS for the copy path: headless Chromium has no
+      // clipboard — the error affordance must render without a DOM race.
+      // Re-query: the tab switch re-rendered the menu, detaching old nodes.
+      const httpsTabEl = Array.from(document.querySelectorAll("[role='tab']")).find(
+        (t) => t.textContent?.trim() === "HTTPS",
+      ) as HTMLButtonElement | undefined;
+      httpsTabEl!.click();
+      await waitForSelector("input[aria-label='HTTPS clone URL']");
       await clickAriaLabel("Copy HTTPS URL");
       await waitForSelector("[role='alert']");
 
