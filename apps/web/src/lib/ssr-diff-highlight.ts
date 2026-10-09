@@ -5,7 +5,7 @@ import {
   type HighlightedDiffLine,
 } from "@/lib/highlight-diff";
 import { parseUnifiedDiffLines } from "@/lib/parse-unified-diff";
-import { clientHighlightTheme } from "@/lib/ssr-auth";
+import { resolveClientHighlightTheme } from "@/lib/ssr-auth";
 
 export type SsrDiffHighlightResult = {
   theme: HighlightTheme | null;
@@ -27,7 +27,7 @@ export async function ssrHighlightDiffFiles(
 
   let theme: HighlightTheme;
   try {
-    theme = clientHighlightTheme();
+    theme = resolveClientHighlightTheme();
   } catch {
     return { theme: null, byPath: {} };
   }

@@ -12,7 +12,7 @@ async fn count_table(db_path: &std::path::Path, table: &str) -> i64 {
         .await
         .expect("reconnect for count");
     let sql = format!("SELECT COUNT(*) FROM {table}");
-    sqlx::query_scalar::<_, i64>(&sql)
+    sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(&*sql))
         .fetch_one(&pool)
         .await
         .unwrap_or_else(|e| panic!("count {table}: {e}"))
@@ -83,14 +83,7 @@ async fn factory_reset_pulls_wipes_pull_domain() {
         .await
         .expect("comment");
     let _ = db
-        .insert_pull_review(
-            "prv-fr-1",
-            "pull-fr-1",
-            &author.id,
-            "commented",
-            "ok",
-            None,
-        )
+        .insert_pull_review("prv-fr-1", "pull-fr-1", &author.id, "commented", "ok", None)
         .await
         .expect("review");
 

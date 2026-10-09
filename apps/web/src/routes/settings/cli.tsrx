@@ -51,7 +51,7 @@ export function CliSettingsPage() @{
   </AppPage>;
 }
 
-export function CliSettingsContent() @{
+function CliSettingsContent() @{
   const meQ = useQuery(authSessionQueryOptions());
   // Auth gate (formerly loader): anonymous → login.
   usePageRedirect(meQ.data === null || meQ.isError ? "/login?returnTo=/settings/cli" : null);

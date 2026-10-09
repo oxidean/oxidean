@@ -153,9 +153,12 @@ RUNNER_PID=$!
 # Astro dist — no JS runtime in the serving path. Build once per e2e run.
 # Rebuild when any web source/config is newer than the marker: a cached dist
 # silently tests stale islands (the file check alone misses edits entirely).
+# `public/` ships verbatim (sw.js etc.) and bun.lock pins dependency versions —
+# changes to either must invalidate the cache too.
 DIST_MARKER="$ROOT/apps/web/dist/index.html"
 if [[ ! -f "$DIST_MARKER" ]] || \
-   find "$ROOT/apps/web/src" "$ROOT/apps/web/astro.config.mjs" "$ROOT/apps/web/package.json" \
+   find "$ROOT/apps/web/src" "$ROOT/apps/web/public" "$ROOT/apps/web/astro.config.mjs" \
+        "$ROOT/apps/web/package.json" "$ROOT/bun.lock" \
         -newer "$DIST_MARKER" -print -quit 2>/dev/null | grep -q .; then
   echo "==> building apps/web dist (astro)"
   (cd apps/web && bun run build) || {

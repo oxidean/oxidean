@@ -115,7 +115,7 @@ export function FileTree({
               {last.subject as string}
             </AppLink>
             <time
-              dateTime={last.authored_at as string}
+              datetime={last.authored_at as string}
               className="text-[12px] text-muted-foreground md:text-right"
             >
               {relativeCommitTime(last.authored_at) as string}

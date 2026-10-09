@@ -25,7 +25,7 @@ import { fetchPullList, fetchRepoGet } from "@/lib/ssr-repo";
 import { useChromeAccountState } from "@/lib/use-chrome-account";
 import { AppLink } from "@/components/ui/app-link";
 
-export type PullsLoaderData =
+type PullsLoaderData =
   | { kind: "not_found" }
   | { kind: "error"; message: string }
   // Pulls unit disabled for this repo (COL-13).

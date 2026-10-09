@@ -21,7 +21,7 @@ import {
 } from "@/components/settings/pat-expiry";
 import { cn } from "@/lib/utils";
 
-export type PatExpiryFieldProps = {
+type PatExpiryFieldProps = {
   preset: PatExpiryPreset;
   customDate: string;
   disabled?: boolean;
@@ -84,7 +84,7 @@ function PatExpiryDateInner(props: {
 }
 
 /** Expiration preset Select + always-mounted custom date (toggled via `hidden`). */
-export function PatExpiryField({
+function PatExpiryField({
   preset,
   customDate,
   disabled,

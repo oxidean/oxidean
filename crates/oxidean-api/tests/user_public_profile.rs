@@ -98,7 +98,11 @@ async fn create_repo(app: &axum::Router, cookie: &str, name: &str, visibility: &
 
 async fn rpc_json(app: &axum::Router, cookie: Option<&str>, body: &str) -> serde_json::Value {
     let res = match cookie {
-        Some(c) => app.clone().oneshot(rpc_req_with_cookie(body, c)).await.unwrap(),
+        Some(c) => app
+            .clone()
+            .oneshot(rpc_req_with_cookie(body, c))
+            .await
+            .unwrap(),
         None => app.clone().oneshot(rpc_req(body)).await.unwrap(),
     };
     let bytes = res.into_body().collect().await.unwrap().to_bytes();

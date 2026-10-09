@@ -6,7 +6,7 @@ export const appToastManager = createToastManager();
 /** Matches {@link toastVariants} in `components/ui/toaster`. */
 export type ToastVariant = "success" | "info" | "warning" | "error";
 
-export type ToastOptions = {
+type ToastOptions = {
   title: string;
   description?: string;
   variant?: ToastVariant;
@@ -21,7 +21,7 @@ const TIMEOUTS: Record<ToastVariant, number> = {
 };
 
 /** Enqueue a toast. Prefer {@link toastSuccess} / {@link toastError} / etc. for call sites. */
-export function toast(options: ToastOptions): string {
+function toast(options: ToastOptions): string {
   const variant = options.variant ?? "info";
   return appToastManager.add({
     title: options.title,
@@ -34,10 +34,6 @@ export function toast(options: ToastOptions): string {
 
 export function toastSuccess(title: string, description?: string): string {
   return toast({ title, description, variant: "success" });
-}
-
-export function toastInfo(title: string, description?: string): string {
-  return toast({ title, description, variant: "info" });
 }
 
 export function toastWarning(title: string, description?: string): string {

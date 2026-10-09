@@ -26,7 +26,7 @@ export function CredentialsPage() @{
 }
 
 /** Exported for AUTH-06 integration tests (Keep password Switch + default username). */
-export function CredentialsContent() @{
+function CredentialsContent() @{
   const [ready, setReady] = useState(false);
   const [error, setError] = useState("");
 

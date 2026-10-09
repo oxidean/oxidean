@@ -113,10 +113,7 @@ async fn verify_user(db: &Database, user_id: &str) {
 async fn collab_crud_on_personal_repo() {
     let dir = tempfile::tempdir().expect("tempdir");
     let repos = dir.path().join("repos");
-    let url = format!(
-        "sqlite:{}",
-        dir.path().join("collab_personal.db").display()
-    );
+    let url = format!("sqlite:{}", dir.path().join("collab_personal.db").display());
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
@@ -130,7 +127,8 @@ async fn collab_crud_on_personal_repo() {
     let collab_id = collab_v["data"]["id"].as_str().expect("id").to_string();
     verify_user(&db, &collab_id).await;
 
-    let (stranger_cookie, stranger_v) = signup_and_login(&app, "stranger@ex.com", "stranger1").await;
+    let (stranger_cookie, stranger_v) =
+        signup_and_login(&app, "stranger@ex.com", "stranger1").await;
     let stranger_id = stranger_v["data"]["id"].as_str().expect("id").to_string();
     verify_user(&db, &stranger_id).await;
 
@@ -314,10 +312,7 @@ async fn collab_crud_on_org_repo() {
 async fn collab_permission_read_write_admin() {
     let dir = tempfile::tempdir().expect("tempdir");
     let repos = dir.path().join("repos");
-    let url = format!(
-        "sqlite:{}",
-        dir.path().join("collab_perms.db").display()
-    );
+    let url = format!("sqlite:{}", dir.path().join("collab_perms.db").display());
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
@@ -409,10 +404,7 @@ async fn collab_unauthorized_private_soft_not_found_web() {
 async fn collab_raises_member_base_none_on_private_org_repo() {
     let dir = tempfile::tempdir().expect("tempdir");
     let repos = dir.path().join("repos");
-    let url = format!(
-        "sqlite:{}",
-        dir.path().join("collab_raise.db").display()
-    );
+    let url = format!("sqlite:{}", dir.path().join("collab_raise.db").display());
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
@@ -483,10 +475,7 @@ async fn collab_raises_member_base_none_on_private_org_repo() {
 async fn collab_visibility_change_requires_admin() {
     let dir = tempfile::tempdir().expect("tempdir");
     let repos = dir.path().join("repos");
-    let url = format!(
-        "sqlite:{}",
-        dir.path().join("collab_vis.db").display()
-    );
+    let url = format!("sqlite:{}", dir.path().join("collab_vis.db").display());
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;

@@ -129,7 +129,10 @@ async fn rpc_json_anon(app: &axum::Router, body: &str) -> serde_json::Value {
 async fn notification_list_empty_when_signed_in() {
     let dir = tempfile::tempdir().expect("tempdir");
     let repos = dir.path().join("repos");
-    let url = format!("sqlite:{}", dir.path().join("notif_list_empty.db").display());
+    let url = format!(
+        "sqlite:{}",
+        dir.path().join("notif_list_empty.db").display()
+    );
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
@@ -292,9 +295,7 @@ async fn notification_mark_read_and_mark_all_read() {
     let marked = rpc_json(
         &app,
         &author_cookie,
-        &format!(
-            r#"{{"procedure":"notification.markRead","input":{{"ids":["{first_id}"]}}}}"#
-        ),
+        &format!(r#"{{"procedure":"notification.markRead","input":{{"ids":["{first_id}"]}}}}"#),
     )
     .await;
     assert_eq!(marked["ok"], true, "{marked}");
@@ -399,9 +400,7 @@ async fn notification_cannot_mark_another_users_notification() {
     let steal = rpc_json(
         &app,
         &writer_cookie,
-        &format!(
-            r#"{{"procedure":"notification.markRead","input":{{"ids":["{notif_id}"]}}}}"#
-        ),
+        &format!(r#"{{"procedure":"notification.markRead","input":{{"ids":["{notif_id}"]}}}}"#),
     )
     .await;
     assert_eq!(steal["ok"], true, "{steal}");
@@ -426,11 +425,7 @@ async fn notification_unauthenticated_fails_closed() {
     support::unlock_signup(&db).await;
     let app = test_app(db, repos).await;
 
-    let list = rpc_json_anon(
-        &app,
-        r#"{"procedure":"notification.list","input":{}}"#,
-    )
-    .await;
+    let list = rpc_json_anon(&app, r#"{"procedure":"notification.list","input":{}}"#).await;
     assert_eq!(list["ok"], false, "{list}");
     assert_eq!(list["error"]["code"], "auth.unauthenticated");
 
@@ -806,8 +801,9 @@ async fn notification_pr_comment_and_review_request() {
     assert_eq!(author_list["ok"], true, "{author_list}");
     let arows = author_list["data"]["notifications"].as_array().unwrap();
     assert!(
-        arows.iter().any(|r| r["reason"] == "pr_comment"
-            && r["subject_kind"] == "pull_request"),
+        arows
+            .iter()
+            .any(|r| r["reason"] == "pr_comment" && r["subject_kind"] == "pull_request"),
         "expected pr_comment — {author_list}"
     );
 }
@@ -865,8 +861,8 @@ async fn notification_pr_close_notifies_author() {
     assert_eq!(listed["ok"], true, "{listed}");
     let rows = listed["data"]["notifications"].as_array().unwrap();
     assert!(
-        rows.iter().any(|r| r["reason"] == "pr_closed"
-            && r["subject_kind"] == "pull_request"),
+        rows.iter()
+            .any(|r| r["reason"] == "pr_closed" && r["subject_kind"] == "pull_request"),
         "expected pr_closed — {listed}"
     );
 }

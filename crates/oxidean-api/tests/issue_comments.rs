@@ -111,11 +111,7 @@ async fn create_issue(app: &axum::Router, cookie: &str, owner: &str, name: &str)
     assert_eq!(v["ok"], true, "issue.create — {v}");
 }
 
-async fn rpc_json(
-    app: &axum::Router,
-    cookie: &str,
-    body: &str,
-) -> serde_json::Value {
+async fn rpc_json(app: &axum::Router, cookie: &str, body: &str) -> serde_json::Value {
     let res = app
         .clone()
         .oneshot(rpc_req_with_cookie(body, cookie))
@@ -187,8 +183,7 @@ async fn issue_comments_author_edit() {
     create_repo(&app, &owner_cookie, "edits", "public").await;
     create_issue(&app, &owner_cookie, "edcmt", "edits").await;
 
-    let (writer_cookie, writer_v) =
-        signup_and_login(&app, "edwriter@ex.com", "edwriter").await;
+    let (writer_cookie, writer_v) = signup_and_login(&app, "edwriter@ex.com", "edwriter").await;
     let writer_id = writer_v["data"]["id"].as_str().expect("id");
     verify_user(&db, writer_id).await;
     let add = rpc_json(
@@ -304,8 +299,7 @@ async fn issue_comments_write_moderate_delete() {
     create_repo(&app, &owner_cookie, "mod", "public").await;
     create_issue(&app, &owner_cookie, "modown", "mod").await;
 
-    let (writer_cookie, writer_v) =
-        signup_and_login(&app, "modwrite@ex.com", "modwrite").await;
+    let (writer_cookie, writer_v) = signup_and_login(&app, "modwrite@ex.com", "modwrite").await;
     let writer_id = writer_v["data"]["id"].as_str().expect("id");
     verify_user(&db, writer_id).await;
     let add_w = rpc_json(
@@ -316,8 +310,7 @@ async fn issue_comments_write_moderate_delete() {
     .await;
     assert_eq!(add_w["ok"], true, "{add_w}");
 
-    let (reader_cookie, reader_v) =
-        signup_and_login(&app, "modread@ex.com", "modread").await;
+    let (reader_cookie, reader_v) = signup_and_login(&app, "modread@ex.com", "modread").await;
     let reader_id = reader_v["data"]["id"].as_str().expect("id");
     verify_user(&db, reader_id).await;
     let add_r = rpc_json(
@@ -346,7 +339,10 @@ async fn issue_comments_write_moderate_delete() {
         ),
     )
     .await;
-    assert_eq!(read_denied["ok"], false, "read cannot delete — {read_denied}");
+    assert_eq!(
+        read_denied["ok"], false,
+        "read cannot delete — {read_denied}"
+    );
     assert_eq!(
         read_denied["error"]["code"], "repo.not_found",
         "soft deny — {read_denied}"
@@ -361,7 +357,10 @@ async fn issue_comments_write_moderate_delete() {
         ),
     )
     .await;
-    assert_eq!(moderated["ok"], true, "Write+ moderate delete — {moderated}");
+    assert_eq!(
+        moderated["ok"], true,
+        "Write+ moderate delete — {moderated}"
+    );
 
     let listed = rpc_json(
         &app,

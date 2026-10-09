@@ -1,32 +1,10 @@
 import { AlertDialog as AlertDialogPrimitive } from "@octanejs/base-ui/alert-dialog";
 import type { ComponentProps } from "octane";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 import { portalRoot } from "@/lib/portal-root";
 import { cn } from "@/lib/utils";
 
-export function AlertDialog(props: ComponentProps<typeof AlertDialogPrimitive.Root>) @{
-  <AlertDialogPrimitive.Root data-slot="alert-dialog" {...props} />;
-}
-
-export function AlertDialogTrigger(
-  props: ComponentProps<typeof AlertDialogPrimitive.Trigger>,
-) @{
-  <AlertDialogPrimitive.Trigger data-slot="alert-dialog-trigger" {...props} />;
-}
-
-export function AlertDialogPortal(
-  props: ComponentProps<typeof AlertDialogPrimitive.Portal>,
-) @{
-  // octane-dom-race-ok: definition site — keepMounted flows through props;
-  // AlertDialogContent sets it so every consumer stays mounted.
-  <AlertDialogPrimitive.Portal
-    data-slot="alert-dialog-portal"
-    container={portalRoot()}
-    {...props}
-  />;
-}
-
-export function AlertDialogOverlay({
+function AlertDialogOverlay({
   className,
   ...props
 }: ComponentProps<typeof AlertDialogPrimitive.Backdrop>) @{
@@ -38,6 +16,18 @@ export function AlertDialogOverlay({
     )}
     {...props}
   />;
+}
+function AlertDialogPortal(props: ComponentProps<typeof AlertDialogPrimitive.Portal>) @{
+  // octane-dom-race-ok: definition site — keepMounted flows through props;
+  // AlertDialogContent sets it so every consumer stays mounted.
+  <AlertDialogPrimitive.Portal
+    data-slot="alert-dialog-portal"
+    container={portalRoot()}
+    {...props}
+  />;
+}
+export function AlertDialog(props: ComponentProps<typeof AlertDialogPrimitive.Root>) @{
+  <AlertDialogPrimitive.Root data-slot="alert-dialog" {...props} />;
 }
 
 export function AlertDialogContent({
@@ -99,25 +89,6 @@ export function AlertDialogDescription({
   <AlertDialogPrimitive.Description
     data-slot="alert-dialog-description"
     className={cn("text-[14px] text-muted-foreground", className)}
-    {...props}
-  />;
-}
-
-export function AlertDialogAction({
-  className,
-  variant = "default",
-  size = "default",
-  ...props
-}: ComponentProps<"button"> & {
-  variant?: "default" | "secondary" | "ghost" | "destructive";
-  size?: "default" | "icon";
-}) @{
-  <Button
-    data-slot="alert-dialog-action"
-    className={cn(className)}
-    variant={variant}
-    size={size}
-    type="button"
     {...props}
   />;
 }

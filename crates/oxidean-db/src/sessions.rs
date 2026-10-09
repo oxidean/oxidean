@@ -169,33 +169,39 @@ pub async fn find_by_token_hash(
 ) -> Result<Option<SessionRow>, String> {
     match pool {
         DbPool::Postgres(p) => {
-            let row = sqlx::query(&format!("{SESSION_SELECT_PG} WHERE s.token_hash = $1"))
-                .bind(token_hash)
-                .fetch_optional(p)
-                .await
-                .map_err(|e| format!("find session failed: {e}"))?;
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{SESSION_SELECT_PG} WHERE s.token_hash = $1"
+            )))
+            .bind(token_hash)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("find session failed: {e}"))?;
             Ok(match row {
                 Some(r) => Some(map_session!(&r)),
                 None => None,
             })
         }
         DbPool::MySql(p) => {
-            let row = sqlx::query(&format!("{SESSION_SELECT_MYSQL} WHERE s.token_hash = ?"))
-                .bind(token_hash)
-                .fetch_optional(p)
-                .await
-                .map_err(|e| format!("find session failed: {e}"))?;
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{SESSION_SELECT_MYSQL} WHERE s.token_hash = ?"
+            )))
+            .bind(token_hash)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("find session failed: {e}"))?;
             Ok(match row {
                 Some(r) => Some(map_session!(&r)),
                 None => None,
             })
         }
         DbPool::Sqlite(p) => {
-            let row = sqlx::query(&format!("{SESSION_SELECT_SQLITE} WHERE s.token_hash = ?1"))
-                .bind(token_hash)
-                .fetch_optional(p)
-                .await
-                .map_err(|e| format!("find session failed: {e}"))?;
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{SESSION_SELECT_SQLITE} WHERE s.token_hash = ?1"
+            )))
+            .bind(token_hash)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("find session failed: {e}"))?;
             Ok(match row {
                 Some(r) => Some(map_session!(&r)),
                 None => None,
@@ -269,9 +275,9 @@ WHERE id = ?1",
 pub async fn list_for_user(pool: &DbPool, user_id: &str) -> Result<Vec<SessionRow>, String> {
     match pool {
         DbPool::Postgres(p) => {
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{SESSION_SELECT_PG} WHERE s.user_id = $1 ORDER BY s.last_seen_at DESC"
-            ))
+            )))
             .bind(user_id)
             .fetch_all(p)
             .await
@@ -279,9 +285,9 @@ pub async fn list_for_user(pool: &DbPool, user_id: &str) -> Result<Vec<SessionRo
             rows.iter().map(|r| Ok(map_session!(r))).collect()
         }
         DbPool::MySql(p) => {
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{SESSION_SELECT_MYSQL} WHERE s.user_id = ? ORDER BY s.last_seen_at DESC"
-            ))
+            )))
             .bind(user_id)
             .fetch_all(p)
             .await
@@ -289,9 +295,9 @@ pub async fn list_for_user(pool: &DbPool, user_id: &str) -> Result<Vec<SessionRo
             rows.iter().map(|r| Ok(map_session!(r))).collect()
         }
         DbPool::Sqlite(p) => {
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{SESSION_SELECT_SQLITE} WHERE s.user_id = ?1 ORDER BY s.last_seen_at DESC"
-            ))
+            )))
             .bind(user_id)
             .fetch_all(p)
             .await

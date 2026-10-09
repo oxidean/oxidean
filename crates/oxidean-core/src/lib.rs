@@ -2,6 +2,9 @@
 
 pub mod action_types;
 pub mod auth_types;
+pub mod deploy_key_types;
+pub mod email_types;
+pub mod gpg_key_types;
 pub mod issue_types;
 pub mod languages;
 pub mod mcp_types;
@@ -16,14 +19,14 @@ pub mod pull_types;
 pub mod release_types;
 pub mod repo_types;
 pub mod search_types;
-pub mod deploy_key_types;
 pub mod ssh_key_types;
-pub mod gpg_key_types;
-pub mod email_types;
 pub mod webhook_types;
 
 pub use action_types::*;
 pub use auth_types::*;
+pub use deploy_key_types::*;
+pub use email_types::*;
+pub use gpg_key_types::*;
 pub use issue_types::*;
 pub use languages::*;
 pub use mcp_types::*;
@@ -38,10 +41,7 @@ pub use pull_types::*;
 pub use release_types::*;
 pub use repo_types::*;
 pub use search_types::*;
-pub use deploy_key_types::*;
 pub use ssh_key_types::*;
-pub use gpg_key_types::*;
-pub use email_types::*;
 pub use webhook_types::*;
 
 use serde::{Deserialize, Serialize};

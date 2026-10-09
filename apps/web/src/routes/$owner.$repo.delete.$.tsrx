@@ -20,7 +20,7 @@ import {
 } from "@/lib/repo-browse";
 import { fetchRepoBlob, fetchRepoGet, fetchRepoRefs } from "@/lib/ssr-repo";
 
-export type DeleteLoaderData =
+type DeleteLoaderData =
   | { kind: "not_found" }
   | { kind: "error"; message: string }
   | {

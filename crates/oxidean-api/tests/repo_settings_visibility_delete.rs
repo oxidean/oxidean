@@ -115,10 +115,7 @@ async fn seed_owner_repo(
 async fn repo_settings_owner_toggles_visibility() {
     let dir = tempfile::tempdir().expect("tempdir");
     let repos = dir.path().join("repos");
-    let url = format!(
-        "sqlite:{}",
-        dir.path().join("repo_vis_toggle.db").display()
-    );
+    let url = format!("sqlite:{}", dir.path().join("repo_vis_toggle.db").display());
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
@@ -174,15 +171,7 @@ async fn repo_settings_non_owner_update_visibility_not_found() {
     support::unlock_signup(&db).await;
     let app = test_app(db.clone(), repos).await;
 
-    let _owner = seed_owner_repo(
-        &app,
-        &db,
-        "own@ex.com",
-        "repoown",
-        "shared-pub",
-        "public",
-    )
-    .await;
+    let _owner = seed_owner_repo(&app, &db, "own@ex.com", "repoown", "shared-pub", "public").await;
 
     let (stranger_cookie, stranger_v) =
         signup_and_login(&app, "stranger@ex.com", "stranger1").await;
@@ -219,8 +208,7 @@ async fn repo_settings_soft_delete_hides_row_keeps_disk() {
     support::unlock_signup(&db).await;
     let app = test_app(db.clone(), repos.clone()).await;
 
-    let cookie =
-        seed_owner_repo(&app, &db, "del@ex.com", "delowner", "goner", "public").await;
+    let cookie = seed_owner_repo(&app, &db, "del@ex.com", "delowner", "goner", "public").await;
 
     let bare = repos.join("delowner").join("goner.git");
     assert!(

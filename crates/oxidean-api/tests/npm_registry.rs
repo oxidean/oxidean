@@ -144,7 +144,13 @@ fn publish_body(name: &str, version: &str, tarball: &[u8]) -> String {
     .to_string()
 }
 
-async fn publish(app: &axum::Router, token: &str, name: &str, version: &str, tar: &[u8]) -> StatusCode {
+async fn publish(
+    app: &axum::Router,
+    token: &str,
+    name: &str,
+    version: &str,
+    tar: &[u8],
+) -> StatusCode {
     let req = Request::builder()
         .method("PUT")
         .uri(format!("/npm/npmowner/{name}"))
@@ -222,7 +228,11 @@ async fn npm_registry_tarball_get_public_origin() {
     let get = app
         .oneshot(
             Request::builder()
-                .uri(tarball.strip_prefix("https://packages.example.com").unwrap())
+                .uri(
+                    tarball
+                        .strip_prefix("https://packages.example.com")
+                        .unwrap(),
+                )
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -261,7 +271,10 @@ async fn npm_registry_dist_tags() {
         .header(header::AUTHORIZATION, basic(&token))
         .body(Body::from("\"1.0.0\""))
         .unwrap();
-    assert_eq!(app.clone().oneshot(put).await.unwrap().status(), StatusCode::OK);
+    assert_eq!(
+        app.clone().oneshot(put).await.unwrap().status(),
+        StatusCode::OK
+    );
     let get = app
         .oneshot(
             Request::builder()
@@ -298,7 +311,10 @@ async fn npm_registry_deprecate() {
         .header(header::CONTENT_TYPE, "application/json")
         .body(Body::from(body))
         .unwrap();
-    assert_eq!(app.clone().oneshot(req).await.unwrap().status(), StatusCode::OK);
+    assert_eq!(
+        app.clone().oneshot(req).await.unwrap().status(),
+        StatusCode::OK
+    );
     let pack = app
         .oneshot(
             Request::builder()

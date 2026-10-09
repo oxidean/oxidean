@@ -18,7 +18,7 @@ import { apiClient } from "@/lib/api-client";
 import { fetchRepoActivity, fetchRepoGet } from "@/lib/ssr-repo";
 import { AppLink } from "@/components/ui/app-link";
 
-export type ActivityLoaderData =
+type ActivityLoaderData =
   | { kind: "not_found" }
   | { kind: "error"; message: string }
   | {

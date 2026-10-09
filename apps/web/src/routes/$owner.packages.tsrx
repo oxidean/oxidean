@@ -29,7 +29,7 @@ export function OwnerPackagesPage() @{
 }
 
 /** Owner packages list (D-PKG-11) — formats oci/npm/generic. */
-export function OwnerPackagesContent() @{
+function OwnerPackagesContent() @{
   const pathname = usePathname();
   const owner = matchPath("/$owner/packages", pathname)?.owner ?? "";
   const qc = useQueryClient();

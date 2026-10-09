@@ -16,7 +16,7 @@ import { parseRefAndPath, shortRefName } from "@/lib/repo-browse";
 import { resolveDocumentHighlightTheme } from "@/lib/theme";
 import { fetchRepoBlob, fetchRepoGet, fetchRepoRefs } from "@/lib/ssr-repo";
 
-export type BlobLoaderData =
+type BlobLoaderData =
   | { kind: "not_found" }
   | { kind: "error"; message: string }
   | {

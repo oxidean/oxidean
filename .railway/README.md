@@ -91,7 +91,7 @@ Apply the same topology to `preview`, `staging`, and `production` — relink and
 ### After apply — dashboard steps IaC cannot do
 
 1. **Deploy triggers:** `config apply` connects GitHub and may create `deploymentTriggers`. Per the [environments table](#environments): `staging` keeps `main` autodeploy + Wait for CI; `preview` and `production` get autodeploy **off** (service → Settings → GitHub → Disable). Verify with `make cloud-production-autodeploy-check`.
-2. **Per-environment `preserve()` secrets:** set in the dashboard on `api` / `web` / `runner` — see the secrets paragraph below (runner token pair, web-flow key, `OXIDEAN_VITE_ALLOWED_HOSTS`).
+2. **Per-environment `preserve()` secrets:** set in the dashboard on `api` / `web` / `runner` — see the secrets paragraph below (runner token pair, web-flow key, SSO/email keys).
 3. **Domain:** attach a Railway or custom domain to `gateway` — the advertise vars reference `${{gateway.RAILWAY_PUBLIC_DOMAIN}}`.
 
 ### Verify and rollback
@@ -106,7 +106,7 @@ Config apply mutates configuration, not running deployments — the next deploy 
 
 There is no IaC undo. To revert config: check out the prior git revision of `.railway/railway.ts`, re-plan, review, re-apply. Destructive diffs (resource removal) require the CLI's `--confirm-destructive` — treat them as data-loss operations. To roll back a bad **deploy**, use the Production deploy action below — not a config re-apply.
 
-Secrets (`OXIDEAN_ENV`, `OXIDEAN_VITE_ALLOWED_HOSTS`, `OXIDEAN_ACTIONS_SECRETS_KEY`, SSO/email keys, etc.) stay in the Railway dashboard or `preserve()` — not in git. Set a unique `OXIDEAN_ACTIONS_SECRETS_KEY` on each environment’s **api** service (`openssl rand -base64 32`); without it, mirror credentials and Actions secrets cannot be saved. `OXIDEAN_WEB_FLOW_PRIVATE_KEY` (optional, **api**) pins the web-flow commit-signing key — required on `production`/`cloud` where auto-generation fails closed; preview/staging/PR Environments auto-generate on first use when unset.
+Secrets (`OXIDEAN_ENV`, `OXIDEAN_ACTIONS_SECRETS_KEY`, SSO/email keys, etc.) stay in the Railway dashboard or `preserve()` — not in git. Set a unique `OXIDEAN_ACTIONS_SECRETS_KEY` on each environment’s **api** service (`openssl rand -base64 32`); without it, mirror credentials and Actions secrets cannot be saved. `OXIDEAN_WEB_FLOW_PRIVATE_KEY` (optional, **api**) pins the web-flow commit-signing key — required on `production`/`cloud` where auto-generation fails closed; preview/staging/PR Environments auto-generate on first use when unset.
 
 IaC sets public browser/SSH advertise vars from the **gateway** domain (not `preserve()`):
 
@@ -115,12 +115,13 @@ IaC sets public browser/SSH advertise vars from the **gateway** domain (not `pre
 | `OXIDEAN_PUBLIC_ORIGIN` / `OXIDEAN_CORS_ORIGINS` (api + web origin) | `https://${{gateway.RAILWAY_PUBLIC_DOMAIN}}` |
 | `OXIDEAN_SSH_HOST` | `${{gateway.RAILWAY_PUBLIC_DOMAIN}}` |
 | `OXIDEAN_API_ORIGIN` (web) | `http://${{api.RAILWAY_PRIVATE_DOMAIN}}:8080` |
+| `OXIDEAN_WEB_BEHIND_PROXY` (web) | `1` — the gateway sanitizes `X-Forwarded-*`, so `oxidean-web` trusts the edge's chain |
 | `OXIDEAN_AUTO_MIGRATE` | `true` on all environments (including production) |
 | `OXIDEAN_PROTECTION_HELPER` | `/usr/local/bin/oxidean-protection-hook` (API image) |
 
 PR Environments inherit from `preview`; dynamic gateway refs and auto-migrate on every environment (including production) keep schema current and avoid stale preview origins. The API/web also replace a stale `*.up.railway.app` origin with `RAILWAY_SERVICE_GATEWAY_URL` / `RAILWAY_PUBLIC_DOMAIN` (custom domains are left alone).
 
-On **`web`**, set `OXIDEAN_VITE_ALLOWED_HOSTS` so `vite preview` accepts the gateway Host header (e.g. `.up.railway.app,app.oxidean.dev`). Details: [docs/CONFIGURATION.md](../docs/CONFIGURATION.md).
+The **`web`** service is `oxidean-web` (Rust) — there is no JS runtime or Host allowlist to configure; the gateway owns Host routing. Details: [docs/CONFIGURATION.md](../docs/CONFIGURATION.md).
 
 ### Promote / rollback production
 

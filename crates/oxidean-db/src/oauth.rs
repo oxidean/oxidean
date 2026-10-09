@@ -303,33 +303,39 @@ VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
 pub async fn find_app_by_id(pool: &DbPool, id: &str) -> Result<Option<OAuthAppRow>, String> {
     match pool {
         DbPool::Postgres(p) => {
-            let row = sqlx::query(&format!("{APP_SELECT_PG} WHERE id = $1"))
-                .bind(id)
-                .fetch_optional(p)
-                .await
-                .map_err(|e| format!("find oauth app failed: {e}"))?;
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{APP_SELECT_PG} WHERE id = $1"
+            )))
+            .bind(id)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("find oauth app failed: {e}"))?;
             match row {
                 Some(r) => Ok(Some(map_app!(&r))),
                 None => Ok(None),
             }
         }
         DbPool::MySql(p) => {
-            let row = sqlx::query(&format!("{APP_SELECT_MYSQL} WHERE id = ?"))
-                .bind(id)
-                .fetch_optional(p)
-                .await
-                .map_err(|e| format!("find oauth app failed: {e}"))?;
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{APP_SELECT_MYSQL} WHERE id = ?"
+            )))
+            .bind(id)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("find oauth app failed: {e}"))?;
             match row {
                 Some(r) => Ok(Some(map_app!(&r))),
                 None => Ok(None),
             }
         }
         DbPool::Sqlite(p) => {
-            let row = sqlx::query(&format!("{APP_SELECT_SQLITE} WHERE id = ?1"))
-                .bind(id)
-                .fetch_optional(p)
-                .await
-                .map_err(|e| format!("find oauth app failed: {e}"))?;
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{APP_SELECT_SQLITE} WHERE id = ?1"
+            )))
+            .bind(id)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("find oauth app failed: {e}"))?;
             match row {
                 Some(r) => Ok(Some(map_app!(&r))),
                 None => Ok(None),
@@ -344,33 +350,39 @@ pub async fn find_app_by_client_id(
 ) -> Result<Option<OAuthAppRow>, String> {
     match pool {
         DbPool::Postgres(p) => {
-            let row = sqlx::query(&format!("{APP_SELECT_PG} WHERE client_id = $1"))
-                .bind(client_id)
-                .fetch_optional(p)
-                .await
-                .map_err(|e| format!("find oauth app failed: {e}"))?;
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{APP_SELECT_PG} WHERE client_id = $1"
+            )))
+            .bind(client_id)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("find oauth app failed: {e}"))?;
             match row {
                 Some(r) => Ok(Some(map_app!(&r))),
                 None => Ok(None),
             }
         }
         DbPool::MySql(p) => {
-            let row = sqlx::query(&format!("{APP_SELECT_MYSQL} WHERE client_id = ?"))
-                .bind(client_id)
-                .fetch_optional(p)
-                .await
-                .map_err(|e| format!("find oauth app failed: {e}"))?;
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{APP_SELECT_MYSQL} WHERE client_id = ?"
+            )))
+            .bind(client_id)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("find oauth app failed: {e}"))?;
             match row {
                 Some(r) => Ok(Some(map_app!(&r))),
                 None => Ok(None),
             }
         }
         DbPool::Sqlite(p) => {
-            let row = sqlx::query(&format!("{APP_SELECT_SQLITE} WHERE client_id = ?1"))
-                .bind(client_id)
-                .fetch_optional(p)
-                .await
-                .map_err(|e| format!("find oauth app failed: {e}"))?;
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{APP_SELECT_SQLITE} WHERE client_id = ?1"
+            )))
+            .bind(client_id)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("find oauth app failed: {e}"))?;
             match row {
                 Some(r) => Ok(Some(map_app!(&r))),
                 None => Ok(None),
@@ -386,9 +398,9 @@ pub async fn list_apps_for_owner(
 ) -> Result<Vec<OAuthAppRow>, String> {
     match pool {
         DbPool::Postgres(p) => {
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{APP_SELECT_PG} WHERE owner_id = $1 ORDER BY created_at DESC, id DESC"
-            ))
+            )))
             .bind(owner_id)
             .fetch_all(p)
             .await
@@ -400,9 +412,9 @@ pub async fn list_apps_for_owner(
             Ok(out)
         }
         DbPool::MySql(p) => {
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{APP_SELECT_MYSQL} WHERE owner_id = ? ORDER BY created_at DESC, id DESC"
-            ))
+            )))
             .bind(owner_id)
             .fetch_all(p)
             .await
@@ -414,9 +426,9 @@ pub async fn list_apps_for_owner(
             Ok(out)
         }
         DbPool::Sqlite(p) => {
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{APP_SELECT_SQLITE} WHERE owner_id = ?1 ORDER BY created_at DESC, id DESC"
-            ))
+            )))
             .bind(owner_id)
             .fetch_all(p)
             .await
@@ -682,33 +694,39 @@ WHERE code_hash = ?1 AND used_at IS NULL",
     }
     match pool {
         DbPool::Postgres(p) => {
-            let row = sqlx::query(&format!("{CODE_SELECT_PG} WHERE code_hash = $1"))
-                .bind(code_hash)
-                .fetch_optional(p)
-                .await
-                .map_err(|e| format!("fetch oauth code failed: {e}"))?;
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{CODE_SELECT_PG} WHERE code_hash = $1"
+            )))
+            .bind(code_hash)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("fetch oauth code failed: {e}"))?;
             match row {
                 Some(r) => Ok(Some(map_code!(&r))),
                 None => Ok(None),
             }
         }
         DbPool::MySql(p) => {
-            let row = sqlx::query(&format!("{CODE_SELECT_MYSQL} WHERE code_hash = ?"))
-                .bind(code_hash)
-                .fetch_optional(p)
-                .await
-                .map_err(|e| format!("fetch oauth code failed: {e}"))?;
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{CODE_SELECT_MYSQL} WHERE code_hash = ?"
+            )))
+            .bind(code_hash)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("fetch oauth code failed: {e}"))?;
             match row {
                 Some(r) => Ok(Some(map_code!(&r))),
                 None => Ok(None),
             }
         }
         DbPool::Sqlite(p) => {
-            let row = sqlx::query(&format!("{CODE_SELECT_SQLITE} WHERE code_hash = ?1"))
-                .bind(code_hash)
-                .fetch_optional(p)
-                .await
-                .map_err(|e| format!("fetch oauth code failed: {e}"))?;
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{CODE_SELECT_SQLITE} WHERE code_hash = ?1"
+            )))
+            .bind(code_hash)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("fetch oauth code failed: {e}"))?;
             match row {
                 Some(r) => Ok(Some(map_code!(&r))),
                 None => Ok(None),
@@ -794,9 +812,9 @@ pub async fn find_token_by_hash(
 ) -> Result<Option<OAuthTokenRow>, String> {
     match pool {
         DbPool::Postgres(p) => {
-            let row = sqlx::query(&format!(
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{TOKEN_SELECT_PG} WHERE token_hash = $1 AND revoked_at IS NULL"
-            ))
+            )))
             .bind(token_hash)
             .fetch_optional(p)
             .await
@@ -807,9 +825,9 @@ pub async fn find_token_by_hash(
             }
         }
         DbPool::MySql(p) => {
-            let row = sqlx::query(&format!(
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{TOKEN_SELECT_MYSQL} WHERE token_hash = ? AND revoked_at IS NULL"
-            ))
+            )))
             .bind(token_hash)
             .fetch_optional(p)
             .await
@@ -820,9 +838,9 @@ pub async fn find_token_by_hash(
             }
         }
         DbPool::Sqlite(p) => {
-            let row = sqlx::query(&format!(
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{TOKEN_SELECT_SQLITE} WHERE token_hash = ?1 AND revoked_at IS NULL"
-            ))
+            )))
             .bind(token_hash)
             .fetch_optional(p)
             .await
@@ -842,10 +860,10 @@ pub async fn list_active_tokens_for_user(
 ) -> Result<Vec<OAuthTokenRow>, String> {
     match pool {
         DbPool::Postgres(p) => {
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{TOKEN_SELECT_PG} WHERE user_id = $1 AND revoked_at IS NULL
 ORDER BY created_at DESC, id DESC"
-            ))
+            )))
             .bind(user_id)
             .fetch_all(p)
             .await
@@ -857,10 +875,10 @@ ORDER BY created_at DESC, id DESC"
             Ok(out)
         }
         DbPool::MySql(p) => {
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{TOKEN_SELECT_MYSQL} WHERE user_id = ? AND revoked_at IS NULL
 ORDER BY created_at DESC, id DESC"
-            ))
+            )))
             .bind(user_id)
             .fetch_all(p)
             .await
@@ -872,10 +890,10 @@ ORDER BY created_at DESC, id DESC"
             Ok(out)
         }
         DbPool::Sqlite(p) => {
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{TOKEN_SELECT_SQLITE} WHERE user_id = ?1 AND revoked_at IS NULL
 ORDER BY created_at DESC, id DESC"
-            ))
+            )))
             .bind(user_id)
             .fetch_all(p)
             .await

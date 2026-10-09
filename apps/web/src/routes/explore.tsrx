@@ -12,7 +12,7 @@ import { AppLink } from "@/components/ui/app-link";
 import { apiClient } from "@/lib/api-client";
 import { useSearchString } from "@/lib/pathname.tsrx";
 
-export type ExploreLoaderData = { repos: RepoPublic[]; q: string };
+type ExploreLoaderData = { repos: RepoPublic[]; q: string };
 
 function exploreQueryOptions(q: string) {
   return queryOptions({

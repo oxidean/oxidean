@@ -4,7 +4,7 @@ import type { RepoPublic, UserPublic } from "@oxidean/api-client";
 
 export type RepoLayoutStatus = "ok" | "not_found" | "error";
 
-export type RepoLayoutLoaderData = {
+type RepoLayoutLoaderData = {
   owner: string;
   repoName: string;
   status: RepoLayoutStatus;
@@ -19,7 +19,7 @@ export type RepoLayoutLoaderData = {
   sshPort: number;
 };
 
-export type RepoStoreState = {
+type RepoStoreState = {
   owner: string;
   repoName: string;
   status: RepoLayoutStatus;
@@ -33,7 +33,7 @@ export type RepoStoreState = {
   setMe: (me: UserPublic | null) => void;
 };
 
-export type RepoStoreApi = ReturnType<typeof createRepoStore>;
+type RepoStoreApi = ReturnType<typeof createRepoStore>;
 
 export function createRepoStore(init: {
   owner: string;
@@ -97,12 +97,4 @@ export function useRepoLayoutData(): RepoLayoutLoaderData | undefined {
   const sshPort = useRepoStore((s) => s.sshPort);
   if (!owner || !repoName) return undefined;
   return { owner, repoName, status, repo, me, message, publicOrigin, sshHost, sshPort };
-}
-
-export function useRepoStoreApi(): RepoStoreApi {
-  const store = useContext(RepoStoreContext);
-  if (!store) {
-    throw new Error("useRepoStoreApi must be used within RepoStoreProvider");
-  }
-  return store;
 }

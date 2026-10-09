@@ -4,7 +4,7 @@ import { AppPage } from "@/components/app-page";
 import { StatusPageSkeleton } from "@/components/page-skeletons";
 import { fetchSystemHealth } from "@/lib/ssr-auth";
 
-export type StatusPhase =
+type StatusPhase =
   | { kind: "healthy"; version: string; database: string }
   | { kind: "unhealthy"; message: string }
   | { kind: "unreachable"; message: string };

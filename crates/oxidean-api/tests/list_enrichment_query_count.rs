@@ -60,11 +60,7 @@ fn install_sql_capture() {
 }
 
 fn sql_count() -> usize {
-    SQL_BUF
-        .lock()
-        .unwrap()
-        .matches("sqlx::query")
-        .count()
+    SQL_BUF.lock().unwrap().matches("sqlx::query").count()
 }
 
 fn clear_sql() {
@@ -92,11 +88,7 @@ fn rpc_req(body: &str, cookie: &str) -> Request<Body> {
 }
 
 async fn rpc_json(app: &axum::Router, cookie: &str, body: &str) -> serde_json::Value {
-    let res = app
-        .clone()
-        .oneshot(rpc_req(body, cookie))
-        .await
-        .unwrap();
+    let res = app.clone().oneshot(rpc_req(body, cookie)).await.unwrap();
     let bytes = res.into_body().collect().await.unwrap().to_bytes();
     serde_json::from_slice(&bytes).unwrap()
 }
@@ -241,7 +233,11 @@ async fn issue_list_query_count_does_not_grow_with_rows() {
         )
         .await;
         assert_eq!(list["ok"], true, "issue.list {repo_name} — {list}");
-        counts.push((repo_name, sql_count(), list["data"]["issues"].as_array().unwrap().len()));
+        counts.push((
+            repo_name,
+            sql_count(),
+            list["data"]["issues"].as_array().unwrap().len(),
+        ));
     }
 
     let [(solo_repo, solo_q, solo_rows), (crowd_repo, crowd_q, crowd_rows)] =
@@ -318,9 +314,16 @@ async fn pull_list_query_count_does_not_grow_with_rows() {
             )
             .await
             .expect("pull");
-        db.insert_pull_review(&format!("pqc-r{i}"), &pull.id, &owner.id, "approved", "ok", None)
-            .await
-            .expect("review");
+        db.insert_pull_review(
+            &format!("pqc-r{i}"),
+            &pull.id,
+            &owner.id,
+            "approved",
+            "ok",
+            None,
+        )
+        .await
+        .expect("review");
     }
 
     // Full page (6 rows) vs a 1-row slice of the same list — enrichment query

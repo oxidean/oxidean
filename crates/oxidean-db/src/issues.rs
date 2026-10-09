@@ -134,20 +134,17 @@ pub async fn allocate_next_number(pool: &DbPool, repo_id: &str) -> Result<i64, S
             .execute(&mut *tx)
             .await
             .map_err(|e| format!("ensure issue_counters failed: {e}"))?;
-            sqlx::query(
-                "UPDATE issue_counters SET max_number = max_number + 1 WHERE repo_id = ?",
-            )
-            .bind(repo_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| format!("allocate issue number failed: {e}"))?;
-            let number: i64 = sqlx::query_scalar(
-                "SELECT max_number FROM issue_counters WHERE repo_id = ?",
-            )
-            .bind(repo_id)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|e| format!("read allocated issue number failed: {e}"))?;
+            sqlx::query("UPDATE issue_counters SET max_number = max_number + 1 WHERE repo_id = ?")
+                .bind(repo_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| format!("allocate issue number failed: {e}"))?;
+            let number: i64 =
+                sqlx::query_scalar("SELECT max_number FROM issue_counters WHERE repo_id = ?")
+                    .bind(repo_id)
+                    .fetch_one(&mut *tx)
+                    .await
+                    .map_err(|e| format!("read allocated issue number failed: {e}"))?;
             tx.commit()
                 .await
                 .map_err(|e| format!("commit allocate issue number tx failed: {e}"))?;
@@ -243,20 +240,17 @@ VALUES ($1, $2, $3, $4, $5, 'open', $6)",
             .execute(&mut *tx)
             .await
             .map_err(|e| format!("ensure issue_counters failed: {e}"))?;
-            sqlx::query(
-                "UPDATE issue_counters SET max_number = max_number + 1 WHERE repo_id = ?",
-            )
-            .bind(repo_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| format!("allocate issue number failed: {e}"))?;
-            let number: i64 = sqlx::query_scalar(
-                "SELECT max_number FROM issue_counters WHERE repo_id = ?",
-            )
-            .bind(repo_id)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|e| format!("read allocated issue number failed: {e}"))?;
+            sqlx::query("UPDATE issue_counters SET max_number = max_number + 1 WHERE repo_id = ?")
+                .bind(repo_id)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| format!("allocate issue number failed: {e}"))?;
+            let number: i64 =
+                sqlx::query_scalar("SELECT max_number FROM issue_counters WHERE repo_id = ?")
+                    .bind(repo_id)
+                    .fetch_one(&mut *tx)
+                    .await
+                    .map_err(|e| format!("read allocated issue number failed: {e}"))?;
             sqlx::query(
                 "INSERT INTO issues (id, repo_id, number, title, body, state, author_id)
 VALUES (?, ?, ?, ?, ?, 'open', ?)",
@@ -321,33 +315,39 @@ VALUES (?1, ?2, ?3, ?4, ?5, 'open', ?6)",
 pub async fn find_by_id(pool: &DbPool, id: &str) -> Result<Option<IssueRow>, String> {
     match pool {
         DbPool::Postgres(p) => {
-            let row = sqlx::query(&format!("{ISSUE_SELECT_PG} WHERE id = $1"))
-                .bind(id)
-                .fetch_optional(p)
-                .await
-                .map_err(|e| format!("find issue by id failed: {e}"))?;
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{ISSUE_SELECT_PG} WHERE id = $1"
+            )))
+            .bind(id)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("find issue by id failed: {e}"))?;
             Ok(match row {
                 Some(r) => Some(map_issue!(&r)),
                 None => None,
             })
         }
         DbPool::MySql(p) => {
-            let row = sqlx::query(&format!("{ISSUE_SELECT_MYSQL} WHERE id = ?"))
-                .bind(id)
-                .fetch_optional(p)
-                .await
-                .map_err(|e| format!("find issue by id failed: {e}"))?;
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{ISSUE_SELECT_MYSQL} WHERE id = ?"
+            )))
+            .bind(id)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("find issue by id failed: {e}"))?;
             Ok(match row {
                 Some(r) => Some(map_issue!(&r)),
                 None => None,
             })
         }
         DbPool::Sqlite(p) => {
-            let row = sqlx::query(&format!("{ISSUE_SELECT_SQLITE} WHERE id = ?1"))
-                .bind(id)
-                .fetch_optional(p)
-                .await
-                .map_err(|e| format!("find issue by id failed: {e}"))?;
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{ISSUE_SELECT_SQLITE} WHERE id = ?1"
+            )))
+            .bind(id)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("find issue by id failed: {e}"))?;
             Ok(match row {
                 Some(r) => Some(map_issue!(&r)),
                 None => None,
@@ -364,9 +364,9 @@ pub async fn find_by_repo_number(
 ) -> Result<Option<IssueRow>, String> {
     match pool {
         DbPool::Postgres(p) => {
-            let row = sqlx::query(&format!(
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{ISSUE_SELECT_PG} WHERE repo_id = $1 AND number = $2"
-            ))
+            )))
             .bind(repo_id)
             .bind(number)
             .fetch_optional(p)
@@ -378,9 +378,9 @@ pub async fn find_by_repo_number(
             })
         }
         DbPool::MySql(p) => {
-            let row = sqlx::query(&format!(
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{ISSUE_SELECT_MYSQL} WHERE repo_id = ? AND number = ?"
-            ))
+            )))
             .bind(repo_id)
             .bind(number)
             .fetch_optional(p)
@@ -392,9 +392,9 @@ pub async fn find_by_repo_number(
             })
         }
         DbPool::Sqlite(p) => {
-            let row = sqlx::query(&format!(
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{ISSUE_SELECT_SQLITE} WHERE repo_id = ?1 AND number = ?2"
-            ))
+            )))
             .bind(repo_id)
             .bind(number)
             .fetch_optional(p)
@@ -496,7 +496,7 @@ WHERE repo_id = $1
 ORDER BY updated_at DESC
 OFFSET $7 LIMIT $8"#
             );
-            let rows = sqlx::query(&sql)
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*sql))
                 .bind(repo_id)
                 .bind(state)
                 .bind(author_id)
@@ -555,7 +555,7 @@ WHERE repo_id = ?
 ORDER BY updated_at DESC
 LIMIT ? OFFSET ?"#
             );
-            let rows = sqlx::query(&sql)
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*sql))
                 .bind(repo_id)
                 .bind(state)
                 .bind(state)
@@ -614,7 +614,7 @@ WHERE repo_id = ?1
 ORDER BY updated_at DESC
 LIMIT ?7 OFFSET ?8"#
             );
-            let rows = sqlx::query(&sql)
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*sql))
                 .bind(repo_id)
                 .bind(state)
                 .bind(author_id)
@@ -645,20 +645,20 @@ pub async fn count_open_issues_for_repo(pool: &DbPool, repo_id: &str) -> Result<
         .fetch_one(p)
         .await
         .map_err(|e| format!("count open issues failed: {e}")),
-        DbPool::MySql(p) => sqlx::query_scalar(
-            "SELECT COUNT(*) FROM issues WHERE repo_id = ? AND state = 'open'",
-        )
-        .bind(repo_id)
-        .fetch_one(p)
-        .await
-        .map_err(|e| format!("count open issues failed: {e}")),
-        DbPool::Sqlite(p) => sqlx::query_scalar(
-            "SELECT COUNT(*) FROM issues WHERE repo_id = ?1 AND state = 'open'",
-        )
-        .bind(repo_id)
-        .fetch_one(p)
-        .await
-        .map_err(|e| format!("count open issues failed: {e}")),
+        DbPool::MySql(p) => {
+            sqlx::query_scalar("SELECT COUNT(*) FROM issues WHERE repo_id = ? AND state = 'open'")
+                .bind(repo_id)
+                .fetch_one(p)
+                .await
+                .map_err(|e| format!("count open issues failed: {e}"))
+        }
+        DbPool::Sqlite(p) => {
+            sqlx::query_scalar("SELECT COUNT(*) FROM issues WHERE repo_id = ?1 AND state = 'open'")
+                .bind(repo_id)
+                .fetch_one(p)
+                .await
+                .map_err(|e| format!("count open issues failed: {e}"))
+        }
     }
 }
 
@@ -704,7 +704,9 @@ macro_rules! map_revision {
     ($row:expr) => {{
         let row = $row;
         IssueRevisionRow {
-            id: row.try_get("id").map_err(|e| format!("revision row: {e}"))?,
+            id: row
+                .try_get("id")
+                .map_err(|e| format!("revision row: {e}"))?,
             issue_id: row
                 .try_get("issue_id")
                 .map_err(|e| format!("revision row: {e}"))?,
@@ -714,7 +716,9 @@ macro_rules! map_revision {
             title: row
                 .try_get("title")
                 .map_err(|e| format!("revision row: {e}"))?,
-            body: row.try_get("body").map_err(|e| format!("revision row: {e}"))?,
+            body: row
+                .try_get("body")
+                .map_err(|e| format!("revision row: {e}"))?,
             created_at: row
                 .try_get("created_at")
                 .map_err(|e| format!("revision row: {e}"))?,
@@ -801,9 +805,9 @@ pub async fn list_issue_revisions(
 ) -> Result<Vec<IssueRevisionRow>, String> {
     match pool {
         DbPool::Postgres(p) => {
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{REV_SELECT_PG} WHERE issue_id = $1 ORDER BY created_at ASC, id ASC"
-            ))
+            )))
             .bind(issue_id)
             .fetch_all(p)
             .await
@@ -815,9 +819,9 @@ pub async fn list_issue_revisions(
             Ok(out)
         }
         DbPool::MySql(p) => {
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{REV_SELECT_MYSQL} WHERE issue_id = ? ORDER BY created_at ASC, id ASC"
-            ))
+            )))
             .bind(issue_id)
             .fetch_all(p)
             .await
@@ -829,9 +833,9 @@ pub async fn list_issue_revisions(
             Ok(out)
         }
         DbPool::Sqlite(p) => {
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{REV_SELECT_SQLITE} WHERE issue_id = ?1 ORDER BY created_at ASC, rowid ASC"
-            ))
+            )))
             .bind(issue_id)
             .fetch_all(p)
             .await
@@ -894,11 +898,7 @@ pub async fn update_issue_content(
 }
 
 /// Close an open issue.
-pub async fn close_issue(
-    pool: &DbPool,
-    id: &str,
-    closed_by: &str,
-) -> Result<IssueRow, String> {
+pub async fn close_issue(pool: &DbPool, id: &str, closed_by: &str) -> Result<IssueRow, String> {
     match pool {
         DbPool::Postgres(p) => {
             sqlx::query(
@@ -1002,7 +1002,9 @@ macro_rules! map_comment {
             author_id: row
                 .try_get("author_id")
                 .map_err(|e| format!("comment row: {e}"))?,
-            body: row.try_get("body").map_err(|e| format!("comment row: {e}"))?,
+            body: row
+                .try_get("body")
+                .map_err(|e| format!("comment row: {e}"))?,
             created_at: row
                 .try_get("created_at")
                 .map_err(|e| format!("comment row: {e}"))?,
@@ -1088,7 +1090,7 @@ pub async fn find_issue_comment_by_id(
     match pool {
         DbPool::Postgres(p) => {
             let q = format!("{COMMENT_SELECT_PG} WHERE id = $1");
-            let row = sqlx::query(&q)
+            let row = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(id)
                 .fetch_optional(p)
                 .await
@@ -1100,7 +1102,7 @@ pub async fn find_issue_comment_by_id(
         }
         DbPool::MySql(p) => {
             let q = format!("{COMMENT_SELECT_MYSQL} WHERE id = ?");
-            let row = sqlx::query(&q)
+            let row = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(id)
                 .fetch_optional(p)
                 .await
@@ -1112,7 +1114,7 @@ pub async fn find_issue_comment_by_id(
         }
         DbPool::Sqlite(p) => {
             let q = format!("{COMMENT_SELECT_SQLITE} WHERE id = ?1");
-            let row = sqlx::query(&q)
+            let row = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(id)
                 .fetch_optional(p)
                 .await
@@ -1131,8 +1133,9 @@ pub async fn list_issue_comments(
 ) -> Result<Vec<IssueCommentRow>, String> {
     match pool {
         DbPool::Postgres(p) => {
-            let q = format!("{COMMENT_SELECT_PG} WHERE issue_id = $1 ORDER BY created_at ASC, id ASC");
-            let rows = sqlx::query(&q)
+            let q =
+                format!("{COMMENT_SELECT_PG} WHERE issue_id = $1 ORDER BY created_at ASC, id ASC");
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(issue_id)
                 .fetch_all(p)
                 .await
@@ -1144,8 +1147,10 @@ pub async fn list_issue_comments(
             Ok(out)
         }
         DbPool::MySql(p) => {
-            let q = format!("{COMMENT_SELECT_MYSQL} WHERE issue_id = ? ORDER BY created_at ASC, id ASC");
-            let rows = sqlx::query(&q)
+            let q = format!(
+                "{COMMENT_SELECT_MYSQL} WHERE issue_id = ? ORDER BY created_at ASC, id ASC"
+            );
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(issue_id)
                 .fetch_all(p)
                 .await
@@ -1160,7 +1165,7 @@ pub async fn list_issue_comments(
             let q = format!(
                 "{COMMENT_SELECT_SQLITE} WHERE issue_id = ?1 ORDER BY created_at ASC, id ASC"
             );
-            let rows = sqlx::query(&q)
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(issue_id)
                 .fetch_all(p)
                 .await
@@ -1181,33 +1186,27 @@ pub async fn list_issue_comment_author_ids(
     issue_id: &str,
 ) -> Result<Vec<String>, String> {
     match pool {
-        DbPool::Postgres(p) => {
-            sqlx::query_scalar::<_, String>(
-                "SELECT DISTINCT author_id FROM issue_comments WHERE issue_id = $1",
-            )
-            .bind(issue_id)
-            .fetch_all(p)
-            .await
-            .map_err(|e| format!("list issue comment author ids failed: {e}"))
-        }
-        DbPool::MySql(p) => {
-            sqlx::query_scalar::<_, String>(
-                "SELECT DISTINCT author_id FROM issue_comments WHERE issue_id = ?",
-            )
-            .bind(issue_id)
-            .fetch_all(p)
-            .await
-            .map_err(|e| format!("list issue comment author ids failed: {e}"))
-        }
-        DbPool::Sqlite(p) => {
-            sqlx::query_scalar::<_, String>(
-                "SELECT DISTINCT author_id FROM issue_comments WHERE issue_id = ?1",
-            )
-            .bind(issue_id)
-            .fetch_all(p)
-            .await
-            .map_err(|e| format!("list issue comment author ids failed: {e}"))
-        }
+        DbPool::Postgres(p) => sqlx::query_scalar::<_, String>(
+            "SELECT DISTINCT author_id FROM issue_comments WHERE issue_id = $1",
+        )
+        .bind(issue_id)
+        .fetch_all(p)
+        .await
+        .map_err(|e| format!("list issue comment author ids failed: {e}")),
+        DbPool::MySql(p) => sqlx::query_scalar::<_, String>(
+            "SELECT DISTINCT author_id FROM issue_comments WHERE issue_id = ?",
+        )
+        .bind(issue_id)
+        .fetch_all(p)
+        .await
+        .map_err(|e| format!("list issue comment author ids failed: {e}")),
+        DbPool::Sqlite(p) => sqlx::query_scalar::<_, String>(
+            "SELECT DISTINCT author_id FROM issue_comments WHERE issue_id = ?1",
+        )
+        .bind(issue_id)
+        .fetch_all(p)
+        .await
+        .map_err(|e| format!("list issue comment author ids failed: {e}")),
     }
 }
 
@@ -1218,14 +1217,12 @@ pub async fn update_issue_comment_body(
 ) -> Result<IssueCommentRow, String> {
     match pool {
         DbPool::Postgres(p) => {
-            sqlx::query(
-                "UPDATE issue_comments SET body = $2, updated_at = NOW() WHERE id = $1",
-            )
-            .bind(id)
-            .bind(body)
-            .execute(p)
-            .await
-            .map_err(|e| format!("update issue comment failed: {e}"))?;
+            sqlx::query("UPDATE issue_comments SET body = $2, updated_at = NOW() WHERE id = $1")
+                .bind(id)
+                .bind(body)
+                .execute(p)
+                .await
+                .map_err(|e| format!("update issue comment failed: {e}"))?;
         }
         DbPool::MySql(p) => {
             sqlx::query(
@@ -1294,7 +1291,9 @@ macro_rules! map_comment_revision {
     ($row:expr) => {{
         let row = $row;
         CommentRevisionRow {
-            id: row.try_get("id").map_err(|e| format!("comment revision row: {e}"))?,
+            id: row
+                .try_get("id")
+                .map_err(|e| format!("comment revision row: {e}"))?,
             comment_id: row
                 .try_get("comment_id")
                 .map_err(|e| format!("comment revision row: {e}"))?,
@@ -1389,7 +1388,7 @@ pub async fn list_comment_revisions(
             let q = format!(
                 "{COMMENT_REV_SELECT_PG} WHERE comment_id = $1 ORDER BY created_at ASC, id ASC"
             );
-            let rows = sqlx::query(&q)
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(comment_id)
                 .fetch_all(p)
                 .await
@@ -1404,7 +1403,7 @@ pub async fn list_comment_revisions(
             let q = format!(
                 "{COMMENT_REV_SELECT_MYSQL} WHERE comment_id = ? ORDER BY created_at ASC, id ASC"
             );
-            let rows = sqlx::query(&q)
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(comment_id)
                 .fetch_all(p)
                 .await
@@ -1419,7 +1418,7 @@ pub async fn list_comment_revisions(
             let q = format!(
                 "{COMMENT_REV_SELECT_SQLITE} WHERE comment_id = ?1 ORDER BY created_at ASC, rowid ASC"
             );
-            let rows = sqlx::query(&q)
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(comment_id)
                 .fetch_all(p)
                 .await
@@ -1451,20 +1450,14 @@ macro_rules! map_reaction_group_any {
             count: {
                 let c: i64 = row
                     .try_get("count")
-                    .or_else(|_| {
-                        row.try_get::<i32, _>("count")
-                            .map(|v| i64::from(v))
-                    })
+                    .or_else(|_| row.try_get::<i32, _>("count").map(|v| i64::from(v)))
                     .map_err(|e| format!("reaction group: {e}"))?;
                 c
             },
             viewer_has_reacted: {
                 let hit: i64 = row
                     .try_get("viewer_hit")
-                    .or_else(|_| {
-                        row.try_get::<i32, _>("viewer_hit")
-                            .map(|v| i64::from(v))
-                    })
+                    .or_else(|_| row.try_get::<i32, _>("viewer_hit").map(|v| i64::from(v)))
                     .or_else(|_| {
                         row.try_get::<bool, _>("viewer_hit")
                             .map(|v| if v { 1 } else { 0 })
@@ -1604,7 +1597,7 @@ pub async fn list_issue_reaction_groups_for_issues(
                    GROUP BY issue_id, content
                    ORDER BY issue_id, content ASC"#
             );
-            let q = sqlx::query(&q_str);
+            let q = sqlx::query(sqlx::AssertSqlSafe(&*q_str));
             let q = q.bind(viewer);
             let q = issue_ids.iter().fold(q, |q, id| q.bind(id));
             let rows = q
@@ -1628,7 +1621,7 @@ pub async fn list_issue_reaction_groups_for_issues(
                    GROUP BY issue_id, content
                    ORDER BY issue_id, content ASC"#
             );
-            let q = sqlx::query(&q_str);
+            let q = sqlx::query(sqlx::AssertSqlSafe(&*q_str));
             let q = q.bind(viewer);
             let q = issue_ids.iter().fold(q, |q, id| q.bind(id));
             let rows = q
@@ -1771,7 +1764,7 @@ pub async fn list_comment_reaction_groups_for_comments(
                    GROUP BY comment_id, content
                    ORDER BY comment_id, content ASC"#
             );
-            let q = sqlx::query(&q_str);
+            let q = sqlx::query(sqlx::AssertSqlSafe(&*q_str));
             let q = q.bind(viewer);
             let q = comment_ids.iter().fold(q, |q, id| q.bind(id));
             let rows = q
@@ -1795,7 +1788,7 @@ pub async fn list_comment_reaction_groups_for_comments(
                    GROUP BY comment_id, content
                    ORDER BY comment_id, content ASC"#
             );
-            let q = sqlx::query(&q_str);
+            let q = sqlx::query(sqlx::AssertSqlSafe(&*q_str));
             let q = q.bind(viewer);
             let q = comment_ids.iter().fold(q, |q, id| q.bind(id));
             let rows = q
@@ -2055,7 +2048,9 @@ macro_rules! map_issue_link {
             issue_id: row
                 .try_get("issue_id")
                 .map_err(|e| format!("issue link: {e}"))?,
-            kind: row.try_get("kind").map_err(|e| format!("issue link: {e}"))?,
+            kind: row
+                .try_get("kind")
+                .map_err(|e| format!("issue link: {e}"))?,
             target_repo_id: row
                 .try_get("target_repo_id")
                 .map_err(|e| format!("issue link: {e}"))?,
@@ -2177,7 +2172,7 @@ pub async fn find_issue_link_by_id(
     match pool {
         DbPool::Postgres(p) => {
             let q = format!("{LINK_SELECT_PG} WHERE id = $1");
-            let row = sqlx::query(&q)
+            let row = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(id)
                 .fetch_optional(p)
                 .await
@@ -2189,7 +2184,7 @@ pub async fn find_issue_link_by_id(
         }
         DbPool::MySql(p) => {
             let q = format!("{LINK_SELECT_MYSQL} WHERE id = ?");
-            let row = sqlx::query(&q)
+            let row = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(id)
                 .fetch_optional(p)
                 .await
@@ -2201,7 +2196,7 @@ pub async fn find_issue_link_by_id(
         }
         DbPool::Sqlite(p) => {
             let q = format!("{LINK_SELECT_SQLITE} WHERE id = ?1");
-            let row = sqlx::query(&q)
+            let row = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(id)
                 .fetch_optional(p)
                 .await
@@ -2214,14 +2209,11 @@ pub async fn find_issue_link_by_id(
     }
 }
 
-pub async fn list_issue_links(
-    pool: &DbPool,
-    issue_id: &str,
-) -> Result<Vec<IssueLinkRow>, String> {
+pub async fn list_issue_links(pool: &DbPool, issue_id: &str) -> Result<Vec<IssueLinkRow>, String> {
     match pool {
         DbPool::Postgres(p) => {
             let q = format!("{LINK_SELECT_PG} WHERE issue_id = $1 ORDER BY created_at ASC, id ASC");
-            let rows = sqlx::query(&q)
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(issue_id)
                 .fetch_all(p)
                 .await
@@ -2233,8 +2225,9 @@ pub async fn list_issue_links(
             Ok(out)
         }
         DbPool::MySql(p) => {
-            let q = format!("{LINK_SELECT_MYSQL} WHERE issue_id = ? ORDER BY created_at ASC, id ASC");
-            let rows = sqlx::query(&q)
+            let q =
+                format!("{LINK_SELECT_MYSQL} WHERE issue_id = ? ORDER BY created_at ASC, id ASC");
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(issue_id)
                 .fetch_all(p)
                 .await
@@ -2246,10 +2239,9 @@ pub async fn list_issue_links(
             Ok(out)
         }
         DbPool::Sqlite(p) => {
-            let q = format!(
-                "{LINK_SELECT_SQLITE} WHERE issue_id = ?1 ORDER BY created_at ASC, id ASC"
-            );
-            let rows = sqlx::query(&q)
+            let q =
+                format!("{LINK_SELECT_SQLITE} WHERE issue_id = ?1 ORDER BY created_at ASC, id ASC");
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(issue_id)
                 .fetch_all(p)
                 .await

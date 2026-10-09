@@ -117,7 +117,10 @@ async fn repo_commits_reports_seed_commit_signature_valid() {
     let bytes = commits.into_body().collect().await.unwrap().to_bytes();
     let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     let commit = &v["data"]["commits"][0];
-    assert_eq!(commit["signature_kind"], "ssh", "seed commit must be ssh-signed — {v}");
+    assert_eq!(
+        commit["signature_kind"], "ssh",
+        "seed commit must be ssh-signed — {v}"
+    );
     assert_eq!(
         commit["signature_status"], "valid",
         "forge-signed seed commit must verify — {v}"

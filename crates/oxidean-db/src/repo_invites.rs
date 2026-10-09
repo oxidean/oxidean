@@ -35,7 +35,9 @@ macro_rules! map_invite {
     ($row:expr) => {{
         let row = $row;
         RepoInviteRow {
-            id: row.try_get("id").map_err(|e| format!("repo invite row: {e}"))?,
+            id: row
+                .try_get("id")
+                .map_err(|e| format!("repo invite row: {e}"))?,
             repository_id: row
                 .try_get("repository_id")
                 .map_err(|e| format!("repo invite row: {e}"))?,
@@ -80,7 +82,8 @@ const INVITE_SELECT_PG: &str = "SELECT id, repository_id, email, permission, tok
          to_char(revoked_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') END AS revoked_at
 FROM repository_invites";
 
-const INVITE_SELECT_MYSQL: &str = "SELECT id, repository_id, email, permission, token_hash, invited_by, max_uses, use_count,
+const INVITE_SELECT_MYSQL: &str =
+    "SELECT id, repository_id, email, permission, token_hash, invited_by, max_uses, use_count,
        CASE WHEN expires_at IS NULL THEN NULL ELSE
          DATE_FORMAT(expires_at, '%Y-%m-%dT%H:%i:%sZ') END AS expires_at,
        DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at,
@@ -90,7 +93,8 @@ const INVITE_SELECT_MYSQL: &str = "SELECT id, repository_id, email, permission, 
          DATE_FORMAT(revoked_at, '%Y-%m-%dT%H:%i:%sZ') END AS revoked_at
 FROM repository_invites";
 
-const INVITE_SELECT_SQLITE: &str = "SELECT id, repository_id, email, permission, token_hash, invited_by, max_uses, use_count,
+const INVITE_SELECT_SQLITE: &str =
+    "SELECT id, repository_id, email, permission, token_hash, invited_by, max_uses, use_count,
        CASE WHEN expires_at IS NULL THEN NULL ELSE
          strftime('%Y-%m-%dT%H:%M:%SZ', expires_at) END AS expires_at,
        strftime('%Y-%m-%dT%H:%M:%SZ', created_at) AS created_at,
@@ -178,7 +182,10 @@ pub async fn find_by_id(pool: &DbPool, id: &str) -> Result<Option<RepoInviteRow>
     match pool {
         DbPool::Postgres(p) => {
             let q = format!("{INVITE_SELECT_PG} WHERE id = $1");
-            let row = sqlx::query(&q).bind(id).fetch_optional(p).await;
+            let row = sqlx::query(sqlx::AssertSqlSafe(&*q))
+                .bind(id)
+                .fetch_optional(p)
+                .await;
             match row {
                 Ok(Some(r)) => Ok(Some(map_invite!(r))),
                 Ok(None) => Ok(None),
@@ -187,7 +194,10 @@ pub async fn find_by_id(pool: &DbPool, id: &str) -> Result<Option<RepoInviteRow>
         }
         DbPool::MySql(p) => {
             let q = format!("{INVITE_SELECT_MYSQL} WHERE id = ?");
-            let row = sqlx::query(&q).bind(id).fetch_optional(p).await;
+            let row = sqlx::query(sqlx::AssertSqlSafe(&*q))
+                .bind(id)
+                .fetch_optional(p)
+                .await;
             match row {
                 Ok(Some(r)) => Ok(Some(map_invite!(r))),
                 Ok(None) => Ok(None),
@@ -196,7 +206,10 @@ pub async fn find_by_id(pool: &DbPool, id: &str) -> Result<Option<RepoInviteRow>
         }
         DbPool::Sqlite(p) => {
             let q = format!("{INVITE_SELECT_SQLITE} WHERE id = ?1");
-            let row = sqlx::query(&q).bind(id).fetch_optional(p).await;
+            let row = sqlx::query(sqlx::AssertSqlSafe(&*q))
+                .bind(id)
+                .fetch_optional(p)
+                .await;
             match row {
                 Ok(Some(r)) => Ok(Some(map_invite!(r))),
                 Ok(None) => Ok(None),
@@ -213,7 +226,10 @@ pub async fn find_by_token_hash(
     match pool {
         DbPool::Postgres(p) => {
             let q = format!("{INVITE_SELECT_PG} WHERE token_hash = $1");
-            let row = sqlx::query(&q).bind(token_hash).fetch_optional(p).await;
+            let row = sqlx::query(sqlx::AssertSqlSafe(&*q))
+                .bind(token_hash)
+                .fetch_optional(p)
+                .await;
             match row {
                 Ok(Some(r)) => Ok(Some(map_invite!(r))),
                 Ok(None) => Ok(None),
@@ -222,7 +238,10 @@ pub async fn find_by_token_hash(
         }
         DbPool::MySql(p) => {
             let q = format!("{INVITE_SELECT_MYSQL} WHERE token_hash = ?");
-            let row = sqlx::query(&q).bind(token_hash).fetch_optional(p).await;
+            let row = sqlx::query(sqlx::AssertSqlSafe(&*q))
+                .bind(token_hash)
+                .fetch_optional(p)
+                .await;
             match row {
                 Ok(Some(r)) => Ok(Some(map_invite!(r))),
                 Ok(None) => Ok(None),
@@ -231,7 +250,10 @@ pub async fn find_by_token_hash(
         }
         DbPool::Sqlite(p) => {
             let q = format!("{INVITE_SELECT_SQLITE} WHERE token_hash = ?1");
-            let row = sqlx::query(&q).bind(token_hash).fetch_optional(p).await;
+            let row = sqlx::query(sqlx::AssertSqlSafe(&*q))
+                .bind(token_hash)
+                .fetch_optional(p)
+                .await;
             match row {
                 Ok(Some(r)) => Ok(Some(map_invite!(r))),
                 Ok(None) => Ok(None),
@@ -256,7 +278,7 @@ WHERE repository_id = $1 AND lower(email) = lower($2)
 ORDER BY created_at DESC
 LIMIT 1"
             );
-            let row = sqlx::query(&q)
+            let row = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(repository_id)
                 .bind(email)
                 .fetch_optional(p)
@@ -275,7 +297,7 @@ WHERE repository_id = ? AND lower(email) = lower(?)
 ORDER BY created_at DESC
 LIMIT 1"
             );
-            let row = sqlx::query(&q)
+            let row = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(repository_id)
                 .bind(email)
                 .fetch_optional(p)
@@ -294,7 +316,7 @@ WHERE repository_id = ?1 AND lower(email) = lower(?2)
 ORDER BY created_at DESC
 LIMIT 1"
             );
-            let row = sqlx::query(&q)
+            let row = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(repository_id)
                 .bind(email)
                 .fetch_optional(p)
@@ -309,7 +331,10 @@ LIMIT 1"
 }
 
 /// Pending invites for a repo (list UI — no token).
-pub async fn list_pending(pool: &DbPool, repository_id: &str) -> Result<Vec<RepoInviteRow>, String> {
+pub async fn list_pending(
+    pool: &DbPool,
+    repository_id: &str,
+) -> Result<Vec<RepoInviteRow>, String> {
     match pool {
         DbPool::Postgres(p) => {
             let q = format!(
@@ -317,7 +342,7 @@ pub async fn list_pending(pool: &DbPool, repository_id: &str) -> Result<Vec<Repo
 WHERE repository_id = $1 AND accepted_at IS NULL AND revoked_at IS NULL
 ORDER BY created_at DESC"
             );
-            let rows = sqlx::query(&q)
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(repository_id)
                 .fetch_all(p)
                 .await
@@ -330,7 +355,7 @@ ORDER BY created_at DESC"
 WHERE repository_id = ? AND accepted_at IS NULL AND revoked_at IS NULL
 ORDER BY created_at DESC"
             );
-            let rows = sqlx::query(&q)
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(repository_id)
                 .fetch_all(p)
                 .await
@@ -343,7 +368,7 @@ ORDER BY created_at DESC"
 WHERE repository_id = ?1 AND accepted_at IS NULL AND revoked_at IS NULL
 ORDER BY created_at DESC"
             );
-            let rows = sqlx::query(&q)
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(repository_id)
                 .fetch_all(p)
                 .await
@@ -527,14 +552,12 @@ WHERE invited_by = ?1 AND created_at >= ?2",
 pub async fn set_expires_at(pool: &DbPool, id: &str, expires_at: &str) -> Result<(), String> {
     match pool {
         DbPool::Postgres(p) => {
-            sqlx::query(
-                "UPDATE repository_invites SET expires_at = $2::timestamptz WHERE id = $1",
-            )
-            .bind(id)
-            .bind(expires_at)
-            .execute(p)
-            .await
-            .map_err(|e| format!("set repo invite expires_at failed: {e}"))?;
+            sqlx::query("UPDATE repository_invites SET expires_at = $2::timestamptz WHERE id = $1")
+                .bind(id)
+                .bind(expires_at)
+                .execute(p)
+                .await
+                .map_err(|e| format!("set repo invite expires_at failed: {e}"))?;
         }
         DbPool::MySql(p) => {
             sqlx::query("UPDATE repository_invites SET expires_at = ? WHERE id = ?")

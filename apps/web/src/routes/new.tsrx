@@ -83,7 +83,7 @@ export function NewPage() @{
 }
 
 /** Exported for /new Wave 0 integration tests (D-11 verify wall). */
-export function NewContent() @{
+function NewContent() @{
   const meQ = useQuery(authSessionQueryOptions());
   const user = meQ.data ?? undefined;
   // Auth gate (formerly beforeLoad): anonymous → login.

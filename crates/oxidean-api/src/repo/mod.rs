@@ -28,6 +28,10 @@ pub use acl::{
     meets, not_found, owner_ref_for_repo, resolve_owner_slug, resolve_repo_for_read,
     AccessibleRepo, Capability, MemberBasePermission, OrgRole, OwnerRef,
 };
+pub use activity::{
+    list as activity_list, record_branch_creation, record_branch_deletion, record_branch_rename,
+    record_pr_merge, record_ref_updates,
+};
 pub use branch_protection::{
     create as branch_protection_create, delete as branch_protection_delete,
     list as branch_protection_list, update as branch_protection_update,
@@ -37,36 +41,32 @@ pub use collaborators::{
     resolve_repo_for_admin, update as collaborators_update,
 };
 pub use commit_status::{create as commit_status_create, list as commit_status_list};
+pub use file_templates::file_templates;
 pub use files::{
     commit_policy as file_commit_policy, create as file_create, delete as file_delete,
     mkdir as file_mkdir, rename as file_rename, update as file_update, upload as file_upload,
 };
-pub use tag_protection::{
-    create as tag_protection_create, delete as tag_protection_delete,
-    list as tag_protection_list, update as tag_protection_update,
-};
-pub use invites::{
-    create as invites_create, create_link as invites_create_link, list as invites_list,
-    revoke as invites_revoke,
-};
-pub use file_templates::file_templates;
 pub use fork_network::head_valid_for_base;
 pub use insights::{
     commit_activity as insights_commit_activity, contributors as insights_contributors,
     fork_network as insights_fork_network,
 };
+pub use invites::{
+    create as invites_create, create_link as invites_create_link, list as invites_list,
+    revoke as invites_revoke,
+};
 pub use rename_transfer::{
     redirect_retention_days, rename, resolve_repo_or_redirect, supersede_redirect_on_create,
     transfer, DEFAULT_REPO_REDIRECT_RETENTION_DAYS,
 };
-pub use activity::{
-    list as activity_list, record_branch_creation, record_branch_deletion, record_branch_rename,
-    record_pr_merge, record_ref_updates,
-};
-pub use search::search;
 pub(crate) use search::code_search_pathspecs;
+pub use search::search;
 pub use social_lists::{forks_list, stargazers_list, watchers_list};
 pub use sync_fork::{fork_status, sync_fork};
+pub use tag_protection::{
+    create as tag_protection_create, delete as tag_protection_delete, list as tag_protection_list,
+    update as tag_protection_update,
+};
 pub use units::{issues_get_enabled, issues_set_enabled, pulls_get_enabled, pulls_set_enabled};
 
 /// Soft size limit for blob preview / raw soft-cap (D-20 / T-07-16).
@@ -78,18 +78,17 @@ pub const DIFF_SOFT_MAX_BYTES: usize = oxidean_git::DIFF_SOFT_MAX_BYTES;
 
 use oxidean_core::{
     validate_repo_name, AppError, CreateRepoRequest, OwnerType, RepoBlameLine, RepoBlameRequest,
-    RepoBlameResponse, RepoBranchCreateRequest, RepoBranchDeleteRequest, RepoBranchMutationResponse,
-    RepoBranchRenameRequest, RepoCommitRequest, RepoCommitResponse, RepoCommitSummary,
-    RepoCommitsRequest, RepoCommitsResponse, RepoCompareRequest, RepoCompareResponse,
-    RepoCreateDefaults, RepoDiffFile, RepoBlobRequest, RepoBlobResponse, RepoGetRequest,
-    RepoLfsDownloadRequest, RepoLfsDownloadResponse, RepoLfsEnabledResponse,
-    RepoLfsGetEnabledRequest, RepoLfsListObjectsRequest, RepoLfsListObjectsResponse,
-    RepoLfsObjectEntry, RepoLfsSetEnabledRequest, RepoLfsStatusResponse, RepoLfsUsageResponse,
-    RepoGetQuotaRequest, RepoListByOwnerRequest, RepoListMineResponse, RepoPublic,
-    RepoQuotaPublic, RepoRefEntry, RepoRefsResponse, RepoSetArchivedRequest, RepoSetQuotaRequest,
-    RepoSoftDeleteRequest, RepoSoftDeleteResponse, RepoTemplateOption, RepoTreeEntry,
-    RepoTreeRequest, RepoTreeResponse, RepoUpdateVisibilityRequest, RepoVisibility,
-
+    RepoBlameResponse, RepoBlobRequest, RepoBlobResponse, RepoBranchCreateRequest,
+    RepoBranchDeleteRequest, RepoBranchMutationResponse, RepoBranchRenameRequest,
+    RepoCommitRequest, RepoCommitResponse, RepoCommitSummary, RepoCommitsRequest,
+    RepoCommitsResponse, RepoCompareRequest, RepoCompareResponse, RepoCreateDefaults, RepoDiffFile,
+    RepoGetQuotaRequest, RepoGetRequest, RepoLfsDownloadRequest, RepoLfsDownloadResponse,
+    RepoLfsEnabledResponse, RepoLfsGetEnabledRequest, RepoLfsListObjectsRequest,
+    RepoLfsListObjectsResponse, RepoLfsObjectEntry, RepoLfsSetEnabledRequest,
+    RepoLfsStatusResponse, RepoLfsUsageResponse, RepoListByOwnerRequest, RepoListMineResponse,
+    RepoPublic, RepoQuotaPublic, RepoRefEntry, RepoRefsResponse, RepoSetArchivedRequest,
+    RepoSetQuotaRequest, RepoSoftDeleteRequest, RepoSoftDeleteResponse, RepoTemplateOption,
+    RepoTreeEntry, RepoTreeRequest, RepoTreeResponse, RepoUpdateVisibilityRequest, RepoVisibility,
     TemplateProvenance,
 };
 use uuid::Uuid;
@@ -226,8 +225,7 @@ async fn resolve_create_seed_files(
         let files = collect_template_tree(ctx, &bare, &source.default_branch).await?;
         let mut map: std::collections::BTreeMap<String, Vec<u8>> = files.into_iter().collect();
         // License / gitignore overlays still apply.
-        let overlay =
-            templates::assemble_seed_files(&None, license_id, gitignore_id)?;
+        let overlay = templates::assemble_seed_files(&None, license_id, gitignore_id)?;
         for (p, b) in overlay {
             map.insert(p, b);
         }
@@ -241,20 +239,23 @@ async fn resolve_create_seed_files(
             .get_instance_template_pack(pid)
             .await
             .map_err(db_err)?
-            .ok_or_else(|| AppError::new("repo.invalid_template", "Instance template not found."))?;
+            .ok_or_else(|| {
+                AppError::new("repo.invalid_template", "Instance template not found.")
+            })?;
         if !pack.enabled {
             return Err(AppError::new(
                 "repo.invalid_template",
                 "Instance template is disabled.",
             ));
         }
-        let bytes = crate::templates::store::read_pack(&ctx.template_packs_dir, &pack.content_digest)
-            .map_err(|e| {
-                AppError::new(
-                    "repo.invalid_template",
-                    format!("Could not read instance template: {e}"),
-                )
-            })?;
+        let bytes =
+            crate::templates::store::read_pack(&ctx.template_packs_dir, &pack.content_digest)
+                .map_err(|e| {
+                    AppError::new(
+                        "repo.invalid_template",
+                        format!("Could not read instance template: {e}"),
+                    )
+                })?;
         let mut map = crate::templates::store::unzip_to_map(&bytes).map_err(|e| {
             AppError::new(
                 "repo.invalid_template",
@@ -413,16 +414,8 @@ pub async fn enrich_social(
         .get_repo_fork_count(&public.id)
         .await
         .map_err(db_err)?;
-    public.homepage = ctx
-        .db
-        .get_repo_homepage(&public.id)
-        .await
-        .map_err(db_err)?;
-    public.topics = ctx
-        .db
-        .list_repo_topics(&public.id)
-        .await
-        .map_err(db_err)?;
+    public.homepage = ctx.db.get_repo_homepage(&public.id).await.map_err(db_err)?;
+    public.topics = ctx.db.list_repo_topics(&public.id).await.map_err(db_err)?;
     public.fork_network_id = ctx
         .db
         .get_repo_fork_network_id(&public.id)
@@ -435,12 +428,7 @@ pub async fn enrich_social(
         .map_err(db_err)?;
     if let Some(pid) = parent_id {
         public.is_fork = true;
-        if let Some(parent) = ctx
-            .db
-            .find_repository_by_id(&pid)
-            .await
-            .map_err(db_err)?
-        {
+        if let Some(parent) = ctx.db.find_repository_by_id(&pid).await.map_err(db_err)? {
             let parent_slug = if parent.owner_type == "org" {
                 ctx.db
                     .find_organization_by_id(&parent.owner_id)
@@ -484,9 +472,8 @@ pub async fn enrich_social(
 /// `repo.star` — idempotent star (D-SOC-01…03, D-SOC-19).
 pub async fn star(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoPublic, AppError> {
     let user = require_verified(ctx).await?;
-    let req: oxidean_core::RepoStarRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid repo.star input: {e}"))
-    })?;
+    let req: oxidean_core::RepoStarRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid repo.star input: {e}")))?;
     let accessible = resolve_repo_for_read(ctx, &req.owner, &req.name).await?;
     let was_starred = ctx
         .db
@@ -508,8 +495,15 @@ pub async fn star(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoPublic, 
             &user.username,
             &user.id,
         );
-        dispatch::emit(&ctx.db, &accessible.row.id, "star", "created", payload, &ctx.env_name)
-            .await;
+        dispatch::emit(
+            &ctx.db,
+            &accessible.row.id,
+            "star",
+            "created",
+            payload,
+            &ctx.env_name,
+        )
+        .await;
     }
     enrich_social(ctx, to_public(&accessible), Some(&user.id)).await
 }
@@ -517,9 +511,8 @@ pub async fn star(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoPublic, 
 /// `repo.unstar` — idempotent unstar.
 pub async fn unstar(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoPublic, AppError> {
     let user = require_verified(ctx).await?;
-    let req: oxidean_core::RepoStarRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid repo.unstar input: {e}"))
-    })?;
+    let req: oxidean_core::RepoStarRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid repo.unstar input: {e}")))?;
     let accessible = resolve_repo_for_read(ctx, &req.owner, &req.name).await?;
     let was_starred = ctx
         .db
@@ -540,8 +533,15 @@ pub async fn unstar(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoPublic
             &user.username,
             &user.id,
         );
-        dispatch::emit(&ctx.db, &accessible.row.id, "star", "deleted", payload, &ctx.env_name)
-            .await;
+        dispatch::emit(
+            &ctx.db,
+            &accessible.row.id,
+            "star",
+            "deleted",
+            payload,
+            &ctx.env_name,
+        )
+        .await;
     }
     enrich_social(ctx, to_public(&accessible), Some(&user.id)).await
 }
@@ -550,9 +550,8 @@ pub async fn unstar(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoPublic
 /// (`all` | `participating` | `ignore`, default `all`) (issue #23, DEBT-06).
 pub async fn watch(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoPublic, AppError> {
     let user = require_verified(ctx).await?;
-    let req: oxidean_core::RepoWatchRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid repo.watch input: {e}"))
-    })?;
+    let req: oxidean_core::RepoWatchRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid repo.watch input: {e}")))?;
     let accessible = resolve_repo_for_read(ctx, &req.owner, &req.name).await?;
     let level = req.level.unwrap_or_default();
     let _count = ctx
@@ -566,9 +565,8 @@ pub async fn watch(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoPublic,
 /// `repo.unwatch` — idempotent unwatch.
 pub async fn unwatch(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoPublic, AppError> {
     let user = require_verified(ctx).await?;
-    let req: oxidean_core::RepoWatchRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid repo.unwatch input: {e}"))
-    })?;
+    let req: oxidean_core::RepoWatchRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid repo.unwatch input: {e}")))?;
     let accessible = resolve_repo_for_read(ctx, &req.owner, &req.name).await?;
     let _count = ctx
         .db
@@ -640,8 +638,8 @@ pub async fn topics_suggest(
     ctx: &RpcCtx,
     input: serde_json::Value,
 ) -> Result<oxidean_core::RepoTopicsSuggestResponse, AppError> {
-    let req: oxidean_core::RepoTopicsSuggestRequest = serde_json::from_value(input)
-        .unwrap_or(oxidean_core::RepoTopicsSuggestRequest {
+    let req: oxidean_core::RepoTopicsSuggestRequest =
+        serde_json::from_value(input).unwrap_or(oxidean_core::RepoTopicsSuggestRequest {
             q: String::new(),
             limit: None,
         });
@@ -667,8 +665,10 @@ async fn resolve_visibility(
     }
     // D-08: instance default_visibility; unset column default is public.
     match ctx.db.get_auth_settings().await {
-        Ok(settings) => Ok(RepoVisibility::parse(&settings.default_visibility)
-            .unwrap_or(RepoVisibility::Public)),
+        Ok(settings) => {
+            Ok(RepoVisibility::parse(&settings.default_visibility)
+                .unwrap_or(RepoVisibility::Public))
+        }
         Err(e) => {
             tracing::warn!(error = %e, "default_visibility lookup failed; using public");
             Ok(RepoVisibility::Public)
@@ -676,12 +676,10 @@ async fn resolve_visibility(
     }
 }
 
-fn require_session_user(
-    ctx: &RpcCtx,
-) -> Result<&crate::auth::session::ResolvedSession, AppError> {
-    ctx.session.as_ref().ok_or_else(|| {
-        AppError::new("auth.unauthenticated", "not authenticated")
-    })
+fn require_session_user(ctx: &RpcCtx) -> Result<&crate::auth::session::ResolvedSession, AppError> {
+    ctx.session
+        .as_ref()
+        .ok_or_else(|| AppError::new("auth.unauthenticated", "not authenticated"))
 }
 
 fn map_git_err(e: oxidean_git::GitError) -> AppError {
@@ -773,7 +771,8 @@ pub async fn list_mine(ctx: &RpcCtx) -> Result<RepoListMineResponse, AppError> {
     let repos = rows
         .into_iter()
         .map(|row| {
-            let visibility = RepoVisibility::parse(&row.visibility).unwrap_or(RepoVisibility::Public);
+            let visibility =
+                RepoVisibility::parse(&row.visibility).unwrap_or(RepoVisibility::Public);
             let owner_type = OwnerType::parse(&row.owner_type).unwrap_or(OwnerType::User);
             RepoPublic {
                 id: row.id,
@@ -833,7 +832,10 @@ pub async fn list_by_owner(
         Ok(None) => return Ok(RepoListMineResponse { repos: vec![] }),
         Err(e) => {
             tracing::error!(error = %e, "resolve_owner_slug failed");
-            return Err(AppError::new("repo.internal", "repository operation failed"));
+            return Err(AppError::new(
+                "repo.internal",
+                "repository operation failed",
+            ));
         }
     };
 
@@ -850,7 +852,10 @@ pub async fn list_by_owner(
             Ok(c) => c,
             Err(e) => {
                 tracing::error!(error = %e, "effective_capability failed");
-                return Err(AppError::new("repo.internal", "repository operation failed"));
+                return Err(AppError::new(
+                    "repo.internal",
+                    "repository operation failed",
+                ));
             }
         };
         if !meets(capability, Capability::Read) {
@@ -928,9 +933,8 @@ pub async fn create_defaults(ctx: &RpcCtx) -> Result<RepoCreateDefaults, AppErro
 /// `repo.get` — ACL-safe metadata (D-23–D-25). Anonymous OK for public.
 /// Honors unexpired repository redirects (D-REL-08).
 pub async fn get(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoPublic, AppError> {
-    let req: RepoGetRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid repo.get input: {e}"))
-    })?;
+    let req: RepoGetRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid repo.get input: {e}")))?;
     let accessible = resolve_repo_for_read(ctx, &req.owner, &req.name).await?;
     let viewer = ctx.session.as_ref().map(|s| s.user_id.as_str());
     enrich_social(ctx, to_public(&accessible), viewer).await
@@ -938,11 +942,14 @@ pub async fn get(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoPublic, A
 
 /// `repo.tree` — `ls_tree` behind ACL; empty repo → `{ empty: true, entries: [] }`.
 pub async fn tree(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoTreeResponse, AppError> {
-    let req: RepoTreeRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid repo.tree input: {e}"))
-    })?;
+    let req: RepoTreeRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid repo.tree input: {e}")))?;
     let accessible = resolve_repo_for_read(ctx, &req.owner, &req.name).await?;
-    let path = bare_repo_path(&ctx.repos_dir, &accessible.owner_username, &accessible.row.name)?;
+    let path = bare_repo_path(
+        &ctx.repos_dir,
+        &accessible.owner_username,
+        &accessible.row.name,
+    )?;
     let ref_name = if req.ref_name.trim().is_empty() {
         accessible.row.default_branch.clone()
     } else {
@@ -976,11 +983,14 @@ pub async fn tree(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoTreeResp
 
 /// `repo.blob` — blob metadata + soft-capped content (D-20).
 pub async fn blob(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoBlobResponse, AppError> {
-    let req: RepoBlobRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid repo.blob input: {e}"))
-    })?;
+    let req: RepoBlobRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid repo.blob input: {e}")))?;
     let accessible = resolve_repo_for_read(ctx, &req.owner, &req.name).await?;
-    let path = bare_repo_path(&ctx.repos_dir, &accessible.owner_username, &accessible.row.name)?;
+    let path = bare_repo_path(
+        &ctx.repos_dir,
+        &accessible.owner_username,
+        &accessible.row.name,
+    )?;
     let ref_name = if req.ref_name.trim().is_empty() {
         accessible.row.default_branch.clone()
     } else {
@@ -1025,11 +1035,14 @@ pub async fn blob(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoBlobResp
 
 /// `repo.refs` — branches + tags (ACL-safe).
 pub async fn refs(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoRefsResponse, AppError> {
-    let req: RepoGetRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid repo.refs input: {e}"))
-    })?;
+    let req: RepoGetRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid repo.refs input: {e}")))?;
     let accessible = resolve_repo_for_read(ctx, &req.owner, &req.name).await?;
-    let path = bare_repo_path(&ctx.repos_dir, &accessible.owner_username, &accessible.row.name)?;
+    let path = bare_repo_path(
+        &ctx.repos_dir,
+        &accessible.owner_username,
+        &accessible.row.name,
+    )?;
     let list = ctx.git.list_refs(&path).await.map_err(map_git_err)?;
     Ok(RepoRefsResponse {
         refs: list
@@ -1049,17 +1062,24 @@ pub async fn commits(
     ctx: &RpcCtx,
     input: serde_json::Value,
 ) -> Result<RepoCommitsResponse, AppError> {
-    let req: RepoCommitsRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid repo.commits input: {e}"))
-    })?;
+    let req: RepoCommitsRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid repo.commits input: {e}")))?;
     let accessible = resolve_repo_for_read(ctx, &req.owner, &req.name).await?;
-    let path = bare_repo_path(&ctx.repos_dir, &accessible.owner_username, &accessible.row.name)?;
+    let path = bare_repo_path(
+        &ctx.repos_dir,
+        &accessible.owner_username,
+        &accessible.row.name,
+    )?;
     let ref_name = if req.ref_name.trim().is_empty() {
         accessible.row.default_branch.clone()
     } else {
         req.ref_name.trim().to_string()
     };
-    let limit = if req.limit == 0 { 30 } else { req.limit.min(100) };
+    let limit = if req.limit == 0 {
+        30
+    } else {
+        req.limit.min(100)
+    };
     let emails_probe = ctx
         .git
         .log(&path, &ref_name, req.skip, limit, None, None)
@@ -1322,9 +1342,8 @@ pub async fn languages(
         .ls_tree_sized_blobs(&path, &ref_name, language_stats::MAX_BLOBS)
         .await
         .map_err(map_git_err)?;
-    let languages = language_stats::aggregate_language_stats(
-        blobs.iter().map(|b| (b.path.as_str(), b.size)),
-    );
+    let languages =
+        language_stats::aggregate_language_stats(blobs.iter().map(|b| (b.path.as_str(), b.size)));
     Ok(oxidean_core::RepoLanguagesResponse { languages })
 }
 
@@ -1333,11 +1352,14 @@ pub async fn commit(
     ctx: &RpcCtx,
     input: serde_json::Value,
 ) -> Result<RepoCommitResponse, AppError> {
-    let req: RepoCommitRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid repo.commit input: {e}"))
-    })?;
+    let req: RepoCommitRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid repo.commit input: {e}")))?;
     let accessible = resolve_repo_for_read(ctx, &req.owner, &req.name).await?;
-    let path = bare_repo_path(&ctx.repos_dir, &accessible.owner_username, &accessible.row.name)?;
+    let path = bare_repo_path(
+        &ctx.repos_dir,
+        &accessible.owner_username,
+        &accessible.row.name,
+    )?;
     let detail = ctx
         .git
         .show_commit(&path, req.sha.trim(), None, None)
@@ -1420,11 +1442,14 @@ pub async fn compare(
     ctx: &RpcCtx,
     input: serde_json::Value,
 ) -> Result<RepoCompareResponse, AppError> {
-    let req: RepoCompareRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid repo.compare input: {e}"))
-    })?;
+    let req: RepoCompareRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid repo.compare input: {e}")))?;
     let accessible = resolve_repo_for_read(ctx, &req.owner, &req.name).await?;
-    let path = bare_repo_path(&ctx.repos_dir, &accessible.owner_username, &accessible.row.name)?;
+    let path = bare_repo_path(
+        &ctx.repos_dir,
+        &accessible.owner_username,
+        &accessible.row.name,
+    )?;
     let result = ctx
         .git
         .diff(&path, req.base.trim(), req.head.trim())
@@ -1448,15 +1473,15 @@ pub async fn compare(
 }
 
 /// `repo.blame` — per-line blame for a text path.
-pub async fn blame(
-    ctx: &RpcCtx,
-    input: serde_json::Value,
-) -> Result<RepoBlameResponse, AppError> {
-    let req: RepoBlameRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid repo.blame input: {e}"))
-    })?;
+pub async fn blame(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoBlameResponse, AppError> {
+    let req: RepoBlameRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid repo.blame input: {e}")))?;
     let accessible = resolve_repo_for_read(ctx, &req.owner, &req.name).await?;
-    let path = bare_repo_path(&ctx.repos_dir, &accessible.owner_username, &accessible.row.name)?;
+    let path = bare_repo_path(
+        &ctx.repos_dir,
+        &accessible.owner_username,
+        &accessible.row.name,
+    )?;
     let ref_name = if req.ref_name.trim().is_empty() {
         accessible.row.default_branch.clone()
     } else {
@@ -1580,19 +1605,11 @@ pub async fn branch_create(
         .ok()
         .and_then(|refs| {
             let want = format!("refs/heads/{branch}");
-            refs.into_iter()
-                .find(|r| r.name == want)
-                .map(|r| r.oid)
+            refs.into_iter().find(|r| r.name == want).map(|r| r.oid)
         })
         .unwrap_or_default();
-    crate::repo::record_branch_creation(
-        &ctx.db,
-        &accessible.row.id,
-        &actor_id,
-        branch,
-        &after_oid,
-    )
-    .await;
+    crate::repo::record_branch_creation(&ctx.db, &accessible.row.id, &actor_id, branch, &after_oid)
+        .await;
     let sender_login = match ctx.db.find_user_by_id(&actor_id).await {
         Ok(Some(u)) => u.username,
         _ => String::new(),
@@ -1609,7 +1626,15 @@ pub async fn branch_create(
         &sender_login,
         &actor_id,
     );
-    dispatch::emit(&ctx.db, &accessible.row.id, "create", "", payload, &ctx.env_name).await;
+    dispatch::emit(
+        &ctx.db,
+        &accessible.row.id,
+        "create",
+        "",
+        payload,
+        &ctx.env_name,
+    )
+    .await;
     crate::mirror::notify_mirror_after_local_mutation(
         ctx.db.clone(),
         ctx.git.clone(),
@@ -1661,24 +1686,15 @@ pub async fn branch_rename(
         .ok()
         .and_then(|refs| {
             let want = format!("refs/heads/{from}");
-            refs.into_iter()
-                .find(|r| r.name == want)
-                .map(|r| r.oid)
+            refs.into_iter().find(|r| r.name == want).map(|r| r.oid)
         })
         .unwrap_or_default();
     ctx.git
         .branch_rename(&path, from, to)
         .await
         .map_err(map_git_err)?;
-    crate::repo::record_branch_rename(
-        &ctx.db,
-        &accessible.row.id,
-        &actor_id,
-        from,
-        to,
-        &tip_oid,
-    )
-    .await;
+    crate::repo::record_branch_rename(&ctx.db, &accessible.row.id, &actor_id, from, to, &tip_oid)
+        .await;
     crate::mirror::notify_mirror_after_local_mutation(
         ctx.db.clone(),
         ctx.git.clone(),
@@ -1716,12 +1732,8 @@ pub async fn branch_delete(
     }
     // Phase 13 / D-20: honor allow_deletions on matching protection rules.
     {
-        let eff = crate::protection::effective_for_branch(
-            &ctx.db,
-            &accessible.row.id,
-            branch,
-        )
-        .await?;
+        let eff =
+            crate::protection::effective_for_branch(&ctx.db, &accessible.row.id, branch).await?;
         if let Err(e) = crate::protection::evaluate_push(
             &eff,
             crate::protection::ProtectionIntent::Delete,
@@ -1742,9 +1754,7 @@ pub async fn branch_delete(
         .ok()
         .and_then(|refs| {
             let want = format!("refs/heads/{branch}");
-            refs.into_iter()
-                .find(|r| r.name == want)
-                .map(|r| r.oid)
+            refs.into_iter().find(|r| r.name == want).map(|r| r.oid)
         })
         .unwrap_or_default();
     ctx.git
@@ -1775,7 +1785,15 @@ pub async fn branch_delete(
         &sender_login,
         &actor_id,
     );
-    dispatch::emit(&ctx.db, &accessible.row.id, "delete", "", payload, &ctx.env_name).await;
+    dispatch::emit(
+        &ctx.db,
+        &accessible.row.id,
+        "delete",
+        "",
+        payload,
+        &ctx.env_name,
+    )
+    .await;
     crate::mirror::notify_mirror_after_local_mutation(
         ctx.db.clone(),
         ctx.git.clone(),
@@ -1980,7 +1998,11 @@ async fn quota_public(
     ctx: &RpcCtx,
     accessible: &AccessibleRepo,
 ) -> Result<RepoQuotaPublic, AppError> {
-    let path = bare_repo_path(&ctx.repos_dir, &accessible.owner_username, &accessible.row.name)?;
+    let path = bare_repo_path(
+        &ctx.repos_dir,
+        &accessible.owner_username,
+        &accessible.row.name,
+    )?;
     let size_bytes = match crate::git::quota::refresh_repo_size_bytes(
         &ctx.db,
         &accessible.row.id,
@@ -1997,9 +2019,10 @@ async fn quota_public(
     let instance_quota_bytes = crate::git::quota::instance_repo_quota_bytes(&ctx.db)
         .await
         .map_err(db_err)?;
-    let effective_quota_bytes = crate::git::quota::effective_repo_quota_bytes(&ctx.db, &accessible.row)
-        .await
-        .map_err(db_err)?;
+    let effective_quota_bytes =
+        crate::git::quota::effective_repo_quota_bytes(&ctx.db, &accessible.row)
+            .await
+            .map_err(db_err)?;
     Ok(RepoQuotaPublic {
         size_bytes,
         effective_quota_bytes,
@@ -2097,9 +2120,7 @@ pub async fn lfs_download(
         )
     })?;
     let accessible = resolve_repo_for_read(ctx, &req.owner, &req.name).await?;
-    crate::lfs::store::validate_oid(&req.oid).map_err(|e| {
-        AppError::new("rpc.bad_input", e)
-    })?;
+    crate::lfs::store::validate_oid(&req.oid).map_err(|e| AppError::new("rpc.bad_input", e))?;
     let linked = ctx
         .db
         .has_lfs_link(&accessible.row.id, &req.oid)
@@ -2209,7 +2230,10 @@ async fn resolve_create_owner(
         Ok(None) => return Err(create_forbidden()),
         Err(e) => {
             tracing::error!(error = %e, "resolve_owner_slug for create failed");
-            return Err(AppError::new("repo.internal", "repository operation failed"));
+            return Err(AppError::new(
+                "repo.internal",
+                "repository operation failed",
+            ));
         }
     };
 
@@ -2226,7 +2250,10 @@ async fn resolve_create_owner(
                 Ok(m) => m,
                 Err(e) => {
                     tracing::error!(error = %e, "find_org_member for create failed");
-                    return Err(AppError::new("repo.internal", "repository operation failed"));
+                    return Err(AppError::new(
+                        "repo.internal",
+                        "repository operation failed",
+                    ));
                 }
             };
             let allowed = member
@@ -2245,19 +2272,13 @@ async fn resolve_create_owner(
 pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoPublic, AppError> {
     let user = require_verified(ctx).await?;
 
-    let req: CreateRepoRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid repo.create input: {e}"))
-    })?;
+    let req: CreateRepoRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid repo.create input: {e}")))?;
 
     validate_repo_name(&req.name).map_err(|msg| AppError::new("repo.invalid_name", msg))?;
 
     let name = req.name.trim().to_string();
-    let description = req
-        .description
-        .as_deref()
-        .unwrap_or("")
-        .trim()
-        .to_string();
+    let description = req.description.as_deref().unwrap_or("").trim().to_string();
     let visibility = resolve_visibility(ctx, req.visibility).await?;
     let default_branch = if user.default_branch.trim().is_empty() {
         "main".to_string()
@@ -2265,13 +2286,8 @@ pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoPublic
         user.default_branch.clone()
     };
 
-    let (owner_id, owner_type, owner_slug) = resolve_create_owner(
-        ctx,
-        &user.id,
-        &user.username,
-        req.owner.as_deref(),
-    )
-    .await?;
+    let (owner_id, owner_type, owner_slug) =
+        resolve_create_owner(ctx, &user.id, &user.username, req.owner.as_deref()).await?;
 
     let source_count = [
         none_like_opt(&req.stack_id),
@@ -2424,32 +2440,31 @@ pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoPublic
         updated_at: row.updated_at,
         can_admin: true,
         can_write: true,
-                star_count: 0,
-                open_issue_count: 0,
-                open_pull_count: 0,
-                viewer_has_starred: false,
-                is_fork: false,
-                is_template: false,
-                archived: row.archived,
-                homepage: String::new(),
-                topics: Vec::new(),
-                fork_count: 0,
-                watch_count: 0,
-                viewer_is_watching: false,
-                viewer_watch_level: None,
-                issues_enabled: true,
-                pulls_enabled: true,
-                fork_network_id: None,
-                forked_from: None,
+        star_count: 0,
+        open_issue_count: 0,
+        open_pull_count: 0,
+        viewer_has_starred: false,
+        is_fork: false,
+        is_template: false,
+        archived: row.archived,
+        homepage: String::new(),
+        topics: Vec::new(),
+        fork_count: 0,
+        watch_count: 0,
+        viewer_is_watching: false,
+        viewer_watch_level: None,
+        issues_enabled: true,
+        pulls_enabled: true,
+        fork_network_id: None,
+        forked_from: None,
     })
 }
 
 /// `repo.fork` — Read+ on **public** source; bare copy + fork network (D-SOC-12…18, extends Phase 12).
 pub async fn fork(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoPublic, AppError> {
     let user = require_verified(ctx).await?;
-    let req: oxidean_core::ForkRepoRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid repo.fork input: {e}"))
-    })?;
+    let req: oxidean_core::ForkRepoRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid repo.fork input: {e}")))?;
     let source = resolve_repo_for_read(ctx, &req.owner, &req.name).await?;
     // SOC-04: public sources only (private → same not_found anti-enumeration when no Read;
     // with Read on private still deny for this phase).
@@ -2539,11 +2554,7 @@ pub async fn fork(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoPublic, 
         .await
         .map_err(db_err)?;
 
-    let source_path = bare_repo_path(
-        &ctx.repos_dir,
-        &source.owner_username,
-        &source.row.name,
-    )?;
+    let source_path = bare_repo_path(&ctx.repos_dir, &source.owner_username, &source.row.name)?;
     let dest_path = bare_repo_path(&ctx.repos_dir, &user.username, &into_name)?;
     if let Err(e) = ctx.git.clone_bare(&source_path, &dest_path).await {
         tracing::error!(error = %e, "clone_bare failed after fork insert");
@@ -2565,7 +2576,15 @@ pub async fn fork(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoPublic, 
         &user.username,
         &user.id,
     );
-    dispatch::emit(&ctx.db, &source.row.id, "fork", "created", payload, &ctx.env_name).await;
+    dispatch::emit(
+        &ctx.db,
+        &source.row.id,
+        "fork",
+        "created",
+        payload,
+        &ctx.env_name,
+    )
+    .await;
 
     let accessible = AccessibleRepo {
         row,
@@ -2576,7 +2595,10 @@ pub async fn fork(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoPublic, 
 }
 
 /// `repo.explore` — public discovery listing (D-SOC-09…11). Anonymous OK.
-pub async fn explore(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoListMineResponse, AppError> {
+pub async fn explore(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<RepoListMineResponse, AppError> {
     let req: oxidean_core::RepoExploreRequest =
         serde_json::from_value(input).unwrap_or(oxidean_core::RepoExploreRequest {
             q: None,

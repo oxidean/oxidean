@@ -12,8 +12,8 @@ import { PatHowTo } from "@/components/repo/pat-how-to";
 import { SshHowTo } from "@/components/repo/ssh-how-to";
 import {
   httpsCloneUrl,
-  resolveSshHost,
-  resolveSshPort,
+  resolveSshAdvertiseHost,
+  resolveSshAdvertisePort,
   sshCloneUrl,
   sshNeedsPortHint,
 } from "@/lib/public-origin";
@@ -49,8 +49,11 @@ export function CloneBox({
   const storeSshPort = useRepoStore((s) => s.sshPort);
   const origin = publicOriginProp || storeOrigin;
   const httpsUrl = httpsCloneUrl(origin, owner, repo);
-  const sshHost = sshHostProp ?? (storeSshHost || resolveSshHost(origin));
-  const sshPort = sshPortProp ?? (storeSshPort > 0 ? storeSshPort : resolveSshPort());
+  // Meta-injected advertise values — browser code must never read
+  // `process.env` (the bundle has no `process`), so the page head meta tags
+  // written by `oxidean-web` are the fallback.
+  const sshHost = sshHostProp ?? (storeSshHost || resolveSshAdvertiseHost(origin));
+  const sshPort = sshPortProp ?? (storeSshPort > 0 ? storeSshPort : resolveSshAdvertisePort());
   const sshUrl = sshCloneUrl(sshHost, sshPort, owner, repo);
   const showPortHint = sshNeedsPortHint(sshPort);
   const zipHref = `/api/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/archive/${encodeURIComponent(refName)}.zip`;

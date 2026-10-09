@@ -45,7 +45,7 @@ import {
   fetchRepoTree,
 } from "@/lib/ssr-repo";
 
-export type TreeLoaderData =
+type TreeLoaderData =
   | { kind: "not_found" }
   | { kind: "error"; message: string }
   | {

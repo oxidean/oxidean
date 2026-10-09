@@ -164,7 +164,10 @@ pub async fn find_by_id(pool: &DbPool, id: &str) -> Result<Option<InstanceInvite
     match pool {
         DbPool::Postgres(p) => {
             let q = format!("{INVITE_SELECT_PG} WHERE id = $1");
-            let row = sqlx::query(&q).bind(id).fetch_optional(p).await;
+            let row = sqlx::query(sqlx::AssertSqlSafe(&*q))
+                .bind(id)
+                .fetch_optional(p)
+                .await;
             match row {
                 Ok(Some(r)) => Ok(Some(map_invite!(r))),
                 Ok(None) => Ok(None),
@@ -173,7 +176,10 @@ pub async fn find_by_id(pool: &DbPool, id: &str) -> Result<Option<InstanceInvite
         }
         DbPool::MySql(p) => {
             let q = format!("{INVITE_SELECT_MYSQL} WHERE id = ?");
-            let row = sqlx::query(&q).bind(id).fetch_optional(p).await;
+            let row = sqlx::query(sqlx::AssertSqlSafe(&*q))
+                .bind(id)
+                .fetch_optional(p)
+                .await;
             match row {
                 Ok(Some(r)) => Ok(Some(map_invite!(r))),
                 Ok(None) => Ok(None),
@@ -182,7 +188,10 @@ pub async fn find_by_id(pool: &DbPool, id: &str) -> Result<Option<InstanceInvite
         }
         DbPool::Sqlite(p) => {
             let q = format!("{INVITE_SELECT_SQLITE} WHERE id = ?1");
-            let row = sqlx::query(&q).bind(id).fetch_optional(p).await;
+            let row = sqlx::query(sqlx::AssertSqlSafe(&*q))
+                .bind(id)
+                .fetch_optional(p)
+                .await;
             match row {
                 Ok(Some(r)) => Ok(Some(map_invite!(r))),
                 Ok(None) => Ok(None),
@@ -199,7 +208,10 @@ pub async fn find_by_token_hash(
     match pool {
         DbPool::Postgres(p) => {
             let q = format!("{INVITE_SELECT_PG} WHERE token_hash = $1");
-            let row = sqlx::query(&q).bind(token_hash).fetch_optional(p).await;
+            let row = sqlx::query(sqlx::AssertSqlSafe(&*q))
+                .bind(token_hash)
+                .fetch_optional(p)
+                .await;
             match row {
                 Ok(Some(r)) => Ok(Some(map_invite!(r))),
                 Ok(None) => Ok(None),
@@ -208,7 +220,10 @@ pub async fn find_by_token_hash(
         }
         DbPool::MySql(p) => {
             let q = format!("{INVITE_SELECT_MYSQL} WHERE token_hash = ?");
-            let row = sqlx::query(&q).bind(token_hash).fetch_optional(p).await;
+            let row = sqlx::query(sqlx::AssertSqlSafe(&*q))
+                .bind(token_hash)
+                .fetch_optional(p)
+                .await;
             match row {
                 Ok(Some(r)) => Ok(Some(map_invite!(r))),
                 Ok(None) => Ok(None),
@@ -217,7 +232,10 @@ pub async fn find_by_token_hash(
         }
         DbPool::Sqlite(p) => {
             let q = format!("{INVITE_SELECT_SQLITE} WHERE token_hash = ?1");
-            let row = sqlx::query(&q).bind(token_hash).fetch_optional(p).await;
+            let row = sqlx::query(sqlx::AssertSqlSafe(&*q))
+                .bind(token_hash)
+                .fetch_optional(p)
+                .await;
             match row {
                 Ok(Some(r)) => Ok(Some(map_invite!(r))),
                 Ok(None) => Ok(None),
@@ -241,7 +259,10 @@ WHERE lower(email) = lower($1)
 ORDER BY created_at DESC
 LIMIT 1"
             );
-            let row = sqlx::query(&q).bind(email).fetch_optional(p).await;
+            let row = sqlx::query(sqlx::AssertSqlSafe(&*q))
+                .bind(email)
+                .fetch_optional(p)
+                .await;
             match row {
                 Ok(Some(r)) => Ok(Some(map_invite!(r))),
                 Ok(None) => Ok(None),
@@ -256,7 +277,10 @@ WHERE lower(email) = lower(?)
 ORDER BY created_at DESC
 LIMIT 1"
             );
-            let row = sqlx::query(&q).bind(email).fetch_optional(p).await;
+            let row = sqlx::query(sqlx::AssertSqlSafe(&*q))
+                .bind(email)
+                .fetch_optional(p)
+                .await;
             match row {
                 Ok(Some(r)) => Ok(Some(map_invite!(r))),
                 Ok(None) => Ok(None),
@@ -271,7 +295,10 @@ WHERE lower(email) = lower(?1)
 ORDER BY created_at DESC
 LIMIT 1"
             );
-            let row = sqlx::query(&q).bind(email).fetch_optional(p).await;
+            let row = sqlx::query(sqlx::AssertSqlSafe(&*q))
+                .bind(email)
+                .fetch_optional(p)
+                .await;
             match row {
                 Ok(Some(r)) => Ok(Some(map_invite!(r))),
                 Ok(None) => Ok(None),
@@ -290,7 +317,7 @@ pub async fn list_pending(pool: &DbPool) -> Result<Vec<InstanceInviteRow>, Strin
 WHERE accepted_at IS NULL AND revoked_at IS NULL
 ORDER BY created_at DESC"
             );
-            let rows = sqlx::query(&q)
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .fetch_all(p)
                 .await
                 .map_err(|e| format!("list instance invites failed: {e}"))?;
@@ -302,7 +329,7 @@ ORDER BY created_at DESC"
 WHERE accepted_at IS NULL AND revoked_at IS NULL
 ORDER BY created_at DESC"
             );
-            let rows = sqlx::query(&q)
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .fetch_all(p)
                 .await
                 .map_err(|e| format!("list instance invites failed: {e}"))?;
@@ -314,7 +341,7 @@ ORDER BY created_at DESC"
 WHERE accepted_at IS NULL AND revoked_at IS NULL
 ORDER BY created_at DESC"
             );
-            let rows = sqlx::query(&q)
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .fetch_all(p)
                 .await
                 .map_err(|e| format!("list instance invites failed: {e}"))?;
@@ -497,14 +524,12 @@ WHERE invited_by = ?1 AND created_at >= ?2",
 pub async fn set_expires_at(pool: &DbPool, id: &str, expires_at: &str) -> Result<(), String> {
     match pool {
         DbPool::Postgres(p) => {
-            sqlx::query(
-                "UPDATE instance_invites SET expires_at = $2::timestamptz WHERE id = $1",
-            )
-            .bind(id)
-            .bind(expires_at)
-            .execute(p)
-            .await
-            .map_err(|e| format!("set instance invite expires_at failed: {e}"))?;
+            sqlx::query("UPDATE instance_invites SET expires_at = $2::timestamptz WHERE id = $1")
+                .bind(id)
+                .bind(expires_at)
+                .execute(p)
+                .await
+                .map_err(|e| format!("set instance invite expires_at failed: {e}"))?;
         }
         DbPool::MySql(p) => {
             sqlx::query("UPDATE instance_invites SET expires_at = ? WHERE id = ?")

@@ -261,7 +261,15 @@ async fn factory_reset_wipes_org_acl_and_repository_rows() {
     .await
     .expect("invite");
     let org_repo = db
-        .insert_repository("r-org-wipe", &org.id, "org", "teamrepo", "private", "", "main")
+        .insert_repository(
+            "r-org-wipe",
+            &org.id,
+            "org",
+            "teamrepo",
+            "private",
+            "",
+            "main",
+        )
         .await
         .expect("org repo");
     let user_repo = db
@@ -295,7 +303,11 @@ async fn factory_reset_wipes_org_acl_and_repository_rows() {
 
     assert_eq!(db.count_users().await.unwrap(), 0);
     assert!(db.find_organization_by_id(&org.id).await.unwrap().is_none());
-    assert!(db.find_org_invite_by_id("inv-wipe").await.unwrap().is_none());
+    assert!(db
+        .find_org_invite_by_id("inv-wipe")
+        .await
+        .unwrap()
+        .is_none());
     assert!(db
         .find_repository_by_id(&org_repo.id)
         .await
@@ -332,13 +344,7 @@ async fn factory_reset_wipes_issue_domain_rows() {
         .await
         .expect("repo");
     let issue = db
-        .insert_issue(
-            "i-rpc-wipe",
-            &repo.id,
-            &admin_id,
-            "RPC wipe",
-            "body",
-        )
+        .insert_issue("i-rpc-wipe", &repo.id, &admin_id, "RPC wipe", "body")
         .await
         .expect("issue");
     let comment = db
@@ -346,14 +352,7 @@ async fn factory_reset_wipes_issue_domain_rows() {
         .await
         .expect("comment");
     let label = db
-        .insert_label(
-            "lab-rpc-wipe",
-            "bug",
-            "#abcdef",
-            "",
-            None,
-            Some(&repo.id),
-        )
+        .insert_label("lab-rpc-wipe", "bug", "#abcdef", "", None, Some(&repo.id))
         .await
         .expect("label");
     db.set_issue_labels(&issue.id, &[label.id.clone()])
@@ -439,8 +438,5 @@ async fn factory_reset_database_and_repositories_wipes_lfs_dir_children() {
     assert_eq!(v["ok"], true, "{v}");
     assert!(lfs.is_dir(), "root kept");
     let mut entries = std::fs::read_dir(&lfs).unwrap();
-    assert!(
-        entries.next().is_none(),
-        "lfs children wiped"
-    );
+    assert!(entries.next().is_none(), "lfs children wiped");
 }

@@ -62,9 +62,9 @@ pub async fn find_collaborator(
 ) -> Result<Option<RepoCollaboratorRow>, String> {
     match pool {
         DbPool::Postgres(p) => {
-            let row = sqlx::query(&format!(
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{COLLAB_SELECT_PG} WHERE repo_id = $1 AND user_id = $2"
-            ))
+            )))
             .bind(repo_id)
             .bind(user_id)
             .fetch_optional(p)
@@ -76,9 +76,9 @@ pub async fn find_collaborator(
             })
         }
         DbPool::MySql(p) => {
-            let row = sqlx::query(&format!(
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{COLLAB_SELECT_MYSQL} WHERE repo_id = ? AND user_id = ?"
-            ))
+            )))
             .bind(repo_id)
             .bind(user_id)
             .fetch_optional(p)
@@ -90,9 +90,9 @@ pub async fn find_collaborator(
             })
         }
         DbPool::Sqlite(p) => {
-            let row = sqlx::query(&format!(
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{COLLAB_SELECT_SQLITE} WHERE repo_id = ?1 AND user_id = ?2"
-            ))
+            )))
             .bind(repo_id)
             .bind(user_id)
             .fetch_optional(p)
@@ -225,33 +225,33 @@ pub async fn remove_collaborator(
     user_id: &str,
 ) -> Result<(), String> {
     let n = match pool {
-        DbPool::Postgres(p) => sqlx::query(
-            "DELETE FROM repository_collaborators WHERE repo_id = $1 AND user_id = $2",
-        )
-        .bind(repo_id)
-        .bind(user_id)
-        .execute(p)
-        .await
-        .map_err(|e| format!("remove repo collaborator failed: {e}"))?
-        .rows_affected(),
-        DbPool::MySql(p) => sqlx::query(
-            "DELETE FROM repository_collaborators WHERE repo_id = ? AND user_id = ?",
-        )
-        .bind(repo_id)
-        .bind(user_id)
-        .execute(p)
-        .await
-        .map_err(|e| format!("remove repo collaborator failed: {e}"))?
-        .rows_affected(),
-        DbPool::Sqlite(p) => sqlx::query(
-            "DELETE FROM repository_collaborators WHERE repo_id = ?1 AND user_id = ?2",
-        )
-        .bind(repo_id)
-        .bind(user_id)
-        .execute(p)
-        .await
-        .map_err(|e| format!("remove repo collaborator failed: {e}"))?
-        .rows_affected(),
+        DbPool::Postgres(p) => {
+            sqlx::query("DELETE FROM repository_collaborators WHERE repo_id = $1 AND user_id = $2")
+                .bind(repo_id)
+                .bind(user_id)
+                .execute(p)
+                .await
+                .map_err(|e| format!("remove repo collaborator failed: {e}"))?
+                .rows_affected()
+        }
+        DbPool::MySql(p) => {
+            sqlx::query("DELETE FROM repository_collaborators WHERE repo_id = ? AND user_id = ?")
+                .bind(repo_id)
+                .bind(user_id)
+                .execute(p)
+                .await
+                .map_err(|e| format!("remove repo collaborator failed: {e}"))?
+                .rows_affected()
+        }
+        DbPool::Sqlite(p) => {
+            sqlx::query("DELETE FROM repository_collaborators WHERE repo_id = ?1 AND user_id = ?2")
+                .bind(repo_id)
+                .bind(user_id)
+                .execute(p)
+                .await
+                .map_err(|e| format!("remove repo collaborator failed: {e}"))?
+                .rows_affected()
+        }
     };
     if n == 0 {
         return Err("repo collaborator not found".into());
@@ -414,7 +414,9 @@ ORDER BY owner_slug ASC, r.name ASC",
                         owner_slug: row
                             .try_get("owner_slug")
                             .map_err(|e| format!("collab grant: {e}"))?,
-                        name: row.try_get("name").map_err(|e| format!("collab grant: {e}"))?,
+                        name: row
+                            .try_get("name")
+                            .map_err(|e| format!("collab grant: {e}"))?,
                         permission: row
                             .try_get("permission")
                             .map_err(|e| format!("collab grant: {e}"))?,
@@ -450,7 +452,9 @@ ORDER BY owner_slug ASC, r.name ASC",
                         owner_slug: row
                             .try_get("owner_slug")
                             .map_err(|e| format!("collab grant: {e}"))?,
-                        name: row.try_get("name").map_err(|e| format!("collab grant: {e}"))?,
+                        name: row
+                            .try_get("name")
+                            .map_err(|e| format!("collab grant: {e}"))?,
                         permission: row
                             .try_get("permission")
                             .map_err(|e| format!("collab grant: {e}"))?,
@@ -486,7 +490,9 @@ ORDER BY owner_slug ASC, r.name ASC",
                         owner_slug: row
                             .try_get("owner_slug")
                             .map_err(|e| format!("collab grant: {e}"))?,
-                        name: row.try_get("name").map_err(|e| format!("collab grant: {e}"))?,
+                        name: row
+                            .try_get("name")
+                            .map_err(|e| format!("collab grant: {e}"))?,
                         permission: row
                             .try_get("permission")
                             .map_err(|e| format!("collab grant: {e}"))?,

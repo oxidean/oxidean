@@ -17,12 +17,8 @@ use tower::ServiceExt;
 
 async fn test_app(db: Database) -> axum::Router {
     std::env::set_var("OXIDEAN_ACTIONS_SECRETS_KEY", "integration-test-key");
-    let state = AppState::new(
-        db,
-        Arc::new(LogSink) as Arc<dyn EmailSender>,
-        "development",
-    )
-    .with_actions_enabled(true);
+    let state = AppState::new(db, Arc::new(LogSink) as Arc<dyn EmailSender>, "development")
+        .with_actions_enabled(true);
     router_with_state(state, build_cors("development", None).unwrap())
 }
 
@@ -105,12 +101,9 @@ fn actions_secrets_encrypt_never_stores_plaintext_blob() {
 #[tokio::test]
 async fn actions_secrets_list_names_only_never_echoes_value() {
     let dir = tempfile::tempdir().unwrap();
-    let db = Database::connect(&format!(
-        "sqlite:{}",
-        dir.path().join("sec.db").display()
-    ))
-    .await
-    .unwrap();
+    let db = Database::connect(&format!("sqlite:{}", dir.path().join("sec.db").display()))
+        .await
+        .unwrap();
     db.migrate().await.unwrap();
     support::unlock_signup(&db).await;
     let app = test_app(db.clone()).await;
@@ -168,18 +161,18 @@ async fn actions_secrets_list_names_only_never_echoes_value() {
     let cts = db.list_action_secret_ciphertexts(&repo.id).await.unwrap();
     assert_eq!(cts.len(), 1);
     assert!(!cts[0].ciphertext.contains("super-secret-value"));
-    assert_eq!(decrypt_secret(&cts[0].ciphertext).unwrap(), "super-secret-value");
+    assert_eq!(
+        decrypt_secret(&cts[0].ciphertext).unwrap(),
+        "super-secret-value"
+    );
 }
 
 #[tokio::test]
 async fn actions_secrets_enable_toggle_persists() {
     let dir = tempfile::tempdir().unwrap();
-    let db = Database::connect(&format!(
-        "sqlite:{}",
-        dir.path().join("en.db").display()
-    ))
-    .await
-    .unwrap();
+    let db = Database::connect(&format!("sqlite:{}", dir.path().join("en.db").display()))
+        .await
+        .unwrap();
     db.migrate().await.unwrap();
     support::unlock_signup(&db).await;
     let app = test_app(db.clone()).await;
@@ -232,12 +225,9 @@ async fn actions_secrets_enable_toggle_persists() {
 async fn actions_secrets_injected_into_fetch_task() {
     std::env::set_var("OXIDEAN_ACTIONS_SECRETS_KEY", "integration-test-key");
     let dir = tempfile::tempdir().unwrap();
-    let db = Database::connect(&format!(
-        "sqlite:{}",
-        dir.path().join("ft.db").display()
-    ))
-    .await
-    .unwrap();
+    let db = Database::connect(&format!("sqlite:{}", dir.path().join("ft.db").display()))
+        .await
+        .unwrap();
     db.migrate().await.unwrap();
     let owner = db
         .create_user(
@@ -273,15 +263,9 @@ async fn actions_secrets_injected_into_fetch_task() {
     )
     .await
     .unwrap();
-    db.insert_action_job(
-        "job-ft",
-        "run-ft",
-        "build",
-        "build",
-        r#"["ubuntu-latest"]"#,
-    )
-    .await
-    .unwrap();
+    db.insert_action_job("job-ft", "run-ft", "build", "build", r#"["ubuntu-latest"]"#)
+        .await
+        .unwrap();
 
     let app = test_app(db.clone()).await;
     let reg = mint_registration_token(&db).await.unwrap();
@@ -330,12 +314,9 @@ async fn actions_secrets_injected_into_fetch_task() {
 #[tokio::test]
 async fn actions_secrets_admin_create_registration_token() {
     let dir = tempfile::tempdir().unwrap();
-    let db = Database::connect(&format!(
-        "sqlite:{}",
-        dir.path().join("tok.db").display()
-    ))
-    .await
-    .unwrap();
+    let db = Database::connect(&format!("sqlite:{}", dir.path().join("tok.db").display()))
+        .await
+        .unwrap();
     db.migrate().await.unwrap();
     support::unlock_signup(&db).await;
     let hash = oxidean_api::auth::hash_password_str("password1").unwrap();

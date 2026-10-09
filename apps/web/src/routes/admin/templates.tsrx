@@ -74,7 +74,7 @@ export function AdminTemplatesPage() @{
   </AppPage>;
 }
 
-export function AdminTemplatesContent() @{
+function AdminTemplatesContent() @{
   const qc = useQueryClient();
   const loaderData = useQuery(adminTemplatesQueryOptions()).data;
   const [slug, setSlug] = useState("");

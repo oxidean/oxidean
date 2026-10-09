@@ -58,8 +58,12 @@ macro_rules! map_pull {
         let row = $row;
         PullRow {
             id: row.try_get("id").map_err(|e| format!("pull row: {e}"))?,
-            repo_id: row.try_get("repo_id").map_err(|e| format!("pull row: {e}"))?,
-            number: row.try_get("number").map_err(|e| format!("pull row: {e}"))?,
+            repo_id: row
+                .try_get("repo_id")
+                .map_err(|e| format!("pull row: {e}"))?,
+            number: row
+                .try_get("number")
+                .map_err(|e| format!("pull row: {e}"))?,
             title: row.try_get("title").map_err(|e| format!("pull row: {e}"))?,
             body: row.try_get("body").map_err(|e| format!("pull row: {e}"))?,
             state: row.try_get("state").map_err(|e| format!("pull row: {e}"))?,
@@ -67,23 +71,39 @@ macro_rules! map_pull {
             author_id: row
                 .try_get("author_id")
                 .map_err(|e| format!("pull row: {e}"))?,
-            base_ref: row.try_get("base_ref").map_err(|e| format!("pull row: {e}"))?,
-            base_sha: row.try_get("base_sha").map_err(|e| format!("pull row: {e}"))?,
+            base_ref: row
+                .try_get("base_ref")
+                .map_err(|e| format!("pull row: {e}"))?,
+            base_sha: row
+                .try_get("base_sha")
+                .map_err(|e| format!("pull row: {e}"))?,
             head_repo_id: row
                 .try_get("head_repo_id")
                 .map_err(|e| format!("pull row: {e}"))?,
-            head_ref: row.try_get("head_ref").map_err(|e| format!("pull row: {e}"))?,
-            head_sha: row.try_get("head_sha").map_err(|e| format!("pull row: {e}"))?,
-            merged_at: row.try_get("merged_at").map_err(|e| format!("pull row: {e}"))?,
-            merged_by: row.try_get("merged_by").map_err(|e| format!("pull row: {e}"))?,
+            head_ref: row
+                .try_get("head_ref")
+                .map_err(|e| format!("pull row: {e}"))?,
+            head_sha: row
+                .try_get("head_sha")
+                .map_err(|e| format!("pull row: {e}"))?,
+            merged_at: row
+                .try_get("merged_at")
+                .map_err(|e| format!("pull row: {e}"))?,
+            merged_by: row
+                .try_get("merged_by")
+                .map_err(|e| format!("pull row: {e}"))?,
             merge_commit_sha: row
                 .try_get("merge_commit_sha")
                 .map_err(|e| format!("pull row: {e}"))?,
             merge_method: row
                 .try_get("merge_method")
                 .map_err(|e| format!("pull row: {e}"))?,
-            closed_at: row.try_get("closed_at").map_err(|e| format!("pull row: {e}"))?,
-            closed_by: row.try_get("closed_by").map_err(|e| format!("pull row: {e}"))?,
+            closed_at: row
+                .try_get("closed_at")
+                .map_err(|e| format!("pull row: {e}"))?,
+            closed_by: row
+                .try_get("closed_by")
+                .map_err(|e| format!("pull row: {e}"))?,
             created_at: row
                 .try_get("created_at")
                 .map_err(|e| format!("pull row: {e}"))?,
@@ -217,10 +237,11 @@ pub async fn find_by_repo_and_number(
     repo_id: &str,
     number: i64,
 ) -> Result<Option<PullRow>, String> {
-    let sql = format!("SELECT {PULL_COLS_PG} FROM pull_requests WHERE repo_id = $1 AND number = $2");
+    let sql =
+        format!("SELECT {PULL_COLS_PG} FROM pull_requests WHERE repo_id = $1 AND number = $2");
     match pool {
         DbPool::Postgres(p) => {
-            let row = sqlx::query(&sql)
+            let row = sqlx::query(sqlx::AssertSqlSafe(&*sql))
                 .bind(repo_id)
                 .bind(number)
                 .fetch_optional(p)
@@ -232,9 +253,9 @@ pub async fn find_by_repo_and_number(
             })
         }
         DbPool::MySql(p) => {
-            let row = sqlx::query(&format!(
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "SELECT {PULL_COLS} FROM pull_requests WHERE repo_id = ? AND number = ?"
-            ))
+            )))
             .bind(repo_id)
             .bind(number)
             .fetch_optional(p)
@@ -246,9 +267,9 @@ pub async fn find_by_repo_and_number(
             })
         }
         DbPool::Sqlite(p) => {
-            let row = sqlx::query(&format!(
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "SELECT {PULL_COLS} FROM pull_requests WHERE repo_id = ?1 AND number = ?2"
-            ))
+            )))
             .bind(repo_id)
             .bind(number)
             .fetch_optional(p)
@@ -281,10 +302,10 @@ pub async fn list_by_repo(
                 .fetch_one(p)
                 .await
                 .map_err(|e| format!("count pulls failed: {e}"))?;
-                let rows = sqlx::query(&format!(
+                let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                     "SELECT {PULL_COLS} FROM pull_requests WHERE repo_id = ?1 AND state = ?2
                      ORDER BY updated_at DESC LIMIT ?3 OFFSET ?4"
-                ))
+                )))
                 .bind(repo_id)
                 .bind(st)
                 .bind(limit as i64)
@@ -300,10 +321,10 @@ pub async fn list_by_repo(
                         .fetch_one(p)
                         .await
                         .map_err(|e| format!("count pulls failed: {e}"))?;
-                let rows = sqlx::query(&format!(
+                let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                     "SELECT {PULL_COLS} FROM pull_requests WHERE repo_id = ?1
                      ORDER BY updated_at DESC LIMIT ?2 OFFSET ?3"
-                ))
+                )))
                 .bind(repo_id)
                 .bind(limit as i64)
                 .bind(offset as i64)
@@ -328,10 +349,10 @@ pub async fn list_by_repo(
                 .fetch_one(p)
                 .await
                 .map_err(|e| format!("count pulls failed: {e}"))?;
-                let rows = sqlx::query(&format!(
+                let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                     "SELECT {PULL_COLS_PG} FROM pull_requests WHERE repo_id = $1 AND state = $2
                      ORDER BY updated_at DESC LIMIT $3 OFFSET $4"
-                ))
+                )))
                 .bind(repo_id)
                 .bind(st)
                 .bind(limit as i64)
@@ -347,10 +368,10 @@ pub async fn list_by_repo(
                         .fetch_one(p)
                         .await
                         .map_err(|e| format!("count pulls failed: {e}"))?;
-                let rows = sqlx::query(&format!(
+                let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                     "SELECT {PULL_COLS_PG} FROM pull_requests WHERE repo_id = $1
                      ORDER BY updated_at DESC LIMIT $2 OFFSET $3"
-                ))
+                )))
                 .bind(repo_id)
                 .bind(limit as i64)
                 .bind(offset as i64)
@@ -375,10 +396,10 @@ pub async fn list_by_repo(
                 .fetch_one(p)
                 .await
                 .map_err(|e| format!("count pulls failed: {e}"))?;
-                let rows = sqlx::query(&format!(
+                let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                     "SELECT {PULL_COLS} FROM pull_requests WHERE repo_id = ? AND state = ?
                      ORDER BY updated_at DESC LIMIT ? OFFSET ?"
-                ))
+                )))
                 .bind(repo_id)
                 .bind(st)
                 .bind(limit)
@@ -394,10 +415,10 @@ pub async fn list_by_repo(
                         .fetch_one(p)
                         .await
                         .map_err(|e| format!("count pulls failed: {e}"))?;
-                let rows = sqlx::query(&format!(
+                let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                     "SELECT {PULL_COLS} FROM pull_requests WHERE repo_id = ?
                      ORDER BY updated_at DESC LIMIT ? OFFSET ?"
-                ))
+                )))
                 .bind(repo_id)
                 .bind(limit)
                 .bind(offset)
@@ -498,14 +519,14 @@ WHERE repo_id = ?1
             .fetch_one(p)
             .await
             .map_err(|e| format!("count pull search failed: {e}"))?;
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 r#"SELECT {PULL_COLS} FROM pull_requests
 WHERE repo_id = ?1
   AND (?2 IS NULL OR state = ?2)
   AND (?3 IS NULL OR author_id = ?3)
   AND (?4 IS NULL OR title LIKE ?4 COLLATE NOCASE OR body LIKE ?4 COLLATE NOCASE)
 ORDER BY updated_at DESC LIMIT ?5 OFFSET ?6"#
-            ))
+            )))
             .bind(repo_id)
             .bind(state)
             .bind(author_id)
@@ -536,14 +557,14 @@ WHERE repo_id = $1
             .fetch_one(p)
             .await
             .map_err(|e| format!("count pull search failed: {e}"))?;
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 r#"SELECT {PULL_COLS_PG} FROM pull_requests
 WHERE repo_id = $1
   AND ($2::text IS NULL OR state = $2)
   AND ($3::text IS NULL OR author_id = $3)
   AND ($4::text IS NULL OR title ILIKE $4 OR body ILIKE $4)
 ORDER BY updated_at DESC LIMIT $5 OFFSET $6"#
-            ))
+            )))
             .bind(repo_id)
             .bind(state)
             .bind(author_id)
@@ -578,14 +599,14 @@ WHERE repo_id = ?
             .fetch_one(p)
             .await
             .map_err(|e| format!("count pull search failed: {e}"))?;
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 r#"SELECT {PULL_COLS} FROM pull_requests
 WHERE repo_id = ?
   AND (? IS NULL OR state = ?)
   AND (? IS NULL OR author_id = ?)
   AND (? IS NULL OR title LIKE ? OR body LIKE ?)
 ORDER BY updated_at DESC LIMIT ? OFFSET ?"#
-            ))
+            )))
             .bind(repo_id)
             .bind(state)
             .bind(state)
@@ -808,20 +829,20 @@ pub async fn set_forked_from(
 
 pub async fn get_forked_from(pool: &DbPool, repo_id: &str) -> Result<Option<String>, String> {
     match pool {
-        DbPool::Sqlite(p) => sqlx::query_scalar(
-            "SELECT forked_from_repo_id FROM repositories WHERE id = ?1",
-        )
-        .bind(repo_id)
-        .fetch_one(p)
-        .await
-        .map_err(|e| format!("get forked_from failed: {e}")),
-        DbPool::Postgres(p) => sqlx::query_scalar(
-            "SELECT forked_from_repo_id FROM repositories WHERE id = $1",
-        )
-        .bind(repo_id)
-        .fetch_one(p)
-        .await
-        .map_err(|e| format!("get forked_from failed: {e}")),
+        DbPool::Sqlite(p) => {
+            sqlx::query_scalar("SELECT forked_from_repo_id FROM repositories WHERE id = ?1")
+                .bind(repo_id)
+                .fetch_one(p)
+                .await
+                .map_err(|e| format!("get forked_from failed: {e}"))
+        }
+        DbPool::Postgres(p) => {
+            sqlx::query_scalar("SELECT forked_from_repo_id FROM repositories WHERE id = $1")
+                .bind(repo_id)
+                .fetch_one(p)
+                .await
+                .map_err(|e| format!("get forked_from failed: {e}"))
+        }
         DbPool::MySql(p) => {
             sqlx::query_scalar("SELECT forked_from_repo_id FROM repositories WHERE id = ?")
                 .bind(repo_id)
@@ -974,7 +995,9 @@ macro_rules! map_pull_comment {
     ($row:expr) => {{
         let row = $row;
         PullCommentRow {
-            id: row.try_get("id").map_err(|e| format!("pull comment: {e}"))?,
+            id: row
+                .try_get("id")
+                .map_err(|e| format!("pull comment: {e}"))?,
             pull_id: row
                 .try_get("pull_id")
                 .map_err(|e| format!("pull comment: {e}"))?,
@@ -1014,19 +1037,22 @@ macro_rules! map_pull_comment {
     }};
 }
 
-const PC_SELECT_PG: &str = "SELECT id, pull_id, author_id, body, path, side, line, start_line, commit_sha,
+const PC_SELECT_PG: &str =
+    "SELECT id, pull_id, author_id, body, path, side, line, start_line, commit_sha,
        outdated, resolved, review_id,
        to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS created_at,
        to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS updated_at
 FROM pull_comments";
 
-const PC_SELECT_MYSQL: &str = "SELECT id, pull_id, author_id, body, path, side, line, start_line, commit_sha,
+const PC_SELECT_MYSQL: &str =
+    "SELECT id, pull_id, author_id, body, path, side, line, start_line, commit_sha,
        outdated, resolved, review_id,
        DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at,
        DATE_FORMAT(updated_at, '%Y-%m-%dT%H:%i:%sZ') AS updated_at
 FROM pull_comments";
 
-const PC_SELECT_SQLITE: &str = "SELECT id, pull_id, author_id, body, path, side, line, start_line, commit_sha,
+const PC_SELECT_SQLITE: &str =
+    "SELECT id, pull_id, author_id, body, path, side, line, start_line, commit_sha,
        outdated, resolved, review_id,
        strftime('%Y-%m-%dT%H:%M:%SZ', created_at) AS created_at,
        strftime('%Y-%m-%dT%H:%M:%SZ', updated_at) AS updated_at
@@ -1115,7 +1141,7 @@ pub async fn find_pull_comment_by_id(
     match pool {
         DbPool::Postgres(p) => {
             let q = format!("{PC_SELECT_PG} WHERE id = $1");
-            let row = sqlx::query(&q)
+            let row = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(id)
                 .fetch_optional(p)
                 .await
@@ -1127,7 +1153,7 @@ pub async fn find_pull_comment_by_id(
         }
         DbPool::MySql(p) => {
             let q = format!("{PC_SELECT_MYSQL} WHERE id = ?");
-            let row = sqlx::query(&q)
+            let row = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(id)
                 .fetch_optional(p)
                 .await
@@ -1139,7 +1165,7 @@ pub async fn find_pull_comment_by_id(
         }
         DbPool::Sqlite(p) => {
             let q = format!("{PC_SELECT_SQLITE} WHERE id = ?1");
-            let row = sqlx::query(&q)
+            let row = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(id)
                 .fetch_optional(p)
                 .await
@@ -1159,7 +1185,7 @@ pub async fn list_pull_comments(
     match pool {
         DbPool::Postgres(p) => {
             let q = format!("{PC_SELECT_PG} WHERE pull_id = $1 ORDER BY created_at ASC, id ASC");
-            let rows = sqlx::query(&q)
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(pull_id)
                 .fetch_all(p)
                 .await
@@ -1172,7 +1198,7 @@ pub async fn list_pull_comments(
         }
         DbPool::MySql(p) => {
             let q = format!("{PC_SELECT_MYSQL} WHERE pull_id = ? ORDER BY created_at ASC, id ASC");
-            let rows = sqlx::query(&q)
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(pull_id)
                 .fetch_all(p)
                 .await
@@ -1184,10 +1210,9 @@ pub async fn list_pull_comments(
             Ok(out)
         }
         DbPool::Sqlite(p) => {
-            let q = format!(
-                "{PC_SELECT_SQLITE} WHERE pull_id = ?1 ORDER BY created_at ASC, id ASC"
-            );
-            let rows = sqlx::query(&q)
+            let q =
+                format!("{PC_SELECT_SQLITE} WHERE pull_id = ?1 ORDER BY created_at ASC, id ASC");
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(pull_id)
                 .fetch_all(p)
                 .await
@@ -1208,33 +1233,27 @@ pub async fn list_pull_comment_author_ids(
     pull_id: &str,
 ) -> Result<Vec<String>, String> {
     match pool {
-        DbPool::Postgres(p) => {
-            sqlx::query_scalar::<_, String>(
-                "SELECT DISTINCT author_id FROM pull_comments WHERE pull_id = $1",
-            )
-            .bind(pull_id)
-            .fetch_all(p)
-            .await
-            .map_err(|e| format!("list pull comment author ids failed: {e}"))
-        }
-        DbPool::MySql(p) => {
-            sqlx::query_scalar::<_, String>(
-                "SELECT DISTINCT author_id FROM pull_comments WHERE pull_id = ?",
-            )
-            .bind(pull_id)
-            .fetch_all(p)
-            .await
-            .map_err(|e| format!("list pull comment author ids failed: {e}"))
-        }
-        DbPool::Sqlite(p) => {
-            sqlx::query_scalar::<_, String>(
-                "SELECT DISTINCT author_id FROM pull_comments WHERE pull_id = ?1",
-            )
-            .bind(pull_id)
-            .fetch_all(p)
-            .await
-            .map_err(|e| format!("list pull comment author ids failed: {e}"))
-        }
+        DbPool::Postgres(p) => sqlx::query_scalar::<_, String>(
+            "SELECT DISTINCT author_id FROM pull_comments WHERE pull_id = $1",
+        )
+        .bind(pull_id)
+        .fetch_all(p)
+        .await
+        .map_err(|e| format!("list pull comment author ids failed: {e}")),
+        DbPool::MySql(p) => sqlx::query_scalar::<_, String>(
+            "SELECT DISTINCT author_id FROM pull_comments WHERE pull_id = ?",
+        )
+        .bind(pull_id)
+        .fetch_all(p)
+        .await
+        .map_err(|e| format!("list pull comment author ids failed: {e}")),
+        DbPool::Sqlite(p) => sqlx::query_scalar::<_, String>(
+            "SELECT DISTINCT author_id FROM pull_comments WHERE pull_id = ?1",
+        )
+        .bind(pull_id)
+        .fetch_all(p)
+        .await
+        .map_err(|e| format!("list pull comment author ids failed: {e}")),
     }
 }
 
@@ -1353,7 +1372,9 @@ macro_rules! map_pull_comment_revision {
     ($row:expr) => {{
         let row = $row;
         CommentRevisionRow {
-            id: row.try_get("id").map_err(|e| format!("pull comment revision row: {e}"))?,
+            id: row
+                .try_get("id")
+                .map_err(|e| format!("pull comment revision row: {e}"))?,
             comment_id: row
                 .try_get("comment_id")
                 .map_err(|e| format!("pull comment revision row: {e}"))?,
@@ -1447,7 +1468,7 @@ pub async fn list_pull_comment_revisions(
             let q = format!(
                 "{PULL_COMMENT_REV_SELECT_PG} WHERE comment_id = $1 ORDER BY created_at ASC, id ASC"
             );
-            let rows = sqlx::query(&q)
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(comment_id)
                 .fetch_all(p)
                 .await
@@ -1462,7 +1483,7 @@ pub async fn list_pull_comment_revisions(
             let q = format!(
                 "{PULL_COMMENT_REV_SELECT_MYSQL} WHERE comment_id = ? ORDER BY created_at ASC, id ASC"
             );
-            let rows = sqlx::query(&q)
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(comment_id)
                 .fetch_all(p)
                 .await
@@ -1477,7 +1498,7 @@ pub async fn list_pull_comment_revisions(
             let q = format!(
                 "{PULL_COMMENT_REV_SELECT_SQLITE} WHERE comment_id = ?1 ORDER BY created_at ASC, rowid ASC"
             );
-            let rows = sqlx::query(&q)
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(comment_id)
                 .fetch_all(p)
                 .await
@@ -1491,10 +1512,7 @@ pub async fn list_pull_comment_revisions(
     }
 }
 
-pub async fn mark_pull_line_comments_outdated(
-    pool: &DbPool,
-    pull_id: &str,
-) -> Result<(), String> {
+pub async fn mark_pull_line_comments_outdated(pool: &DbPool, pull_id: &str) -> Result<(), String> {
     match pool {
         DbPool::Postgres(p) => {
             sqlx::query(
@@ -1531,21 +1549,15 @@ pub async fn mark_pull_line_comments_outdated(
     Ok(())
 }
 
-pub async fn update_pull_head_sha(
-    pool: &DbPool,
-    id: &str,
-    head_sha: &str,
-) -> Result<(), String> {
+pub async fn update_pull_head_sha(pool: &DbPool, id: &str, head_sha: &str) -> Result<(), String> {
     match pool {
         DbPool::Postgres(p) => {
-            sqlx::query(
-                "UPDATE pull_requests SET head_sha = $2, updated_at = NOW() WHERE id = $1",
-            )
-            .bind(id)
-            .bind(head_sha)
-            .execute(p)
-            .await
-            .map_err(|e| format!("update head_sha failed: {e}"))?;
+            sqlx::query("UPDATE pull_requests SET head_sha = $2, updated_at = NOW() WHERE id = $1")
+                .bind(id)
+                .bind(head_sha)
+                .execute(p)
+                .await
+                .map_err(|e| format!("update head_sha failed: {e}"))?;
         }
         DbPool::MySql(p) => {
             sqlx::query(
@@ -1704,7 +1716,7 @@ pub async fn find_pull_review_by_id(
     match pool {
         DbPool::Postgres(p) => {
             let q = format!("{PRV_SELECT_PG} WHERE id = $1");
-            let row = sqlx::query(&q)
+            let row = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(id)
                 .fetch_optional(p)
                 .await
@@ -1716,7 +1728,7 @@ pub async fn find_pull_review_by_id(
         }
         DbPool::MySql(p) => {
             let q = format!("{PRV_SELECT_MYSQL} WHERE id = ?");
-            let row = sqlx::query(&q)
+            let row = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(id)
                 .fetch_optional(p)
                 .await
@@ -1728,7 +1740,7 @@ pub async fn find_pull_review_by_id(
         }
         DbPool::Sqlite(p) => {
             let q = format!("{PRV_SELECT_SQLITE} WHERE id = ?1");
-            let row = sqlx::query(&q)
+            let row = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(id)
                 .fetch_optional(p)
                 .await
@@ -1741,16 +1753,11 @@ pub async fn find_pull_review_by_id(
     }
 }
 
-pub async fn list_pull_reviews(
-    pool: &DbPool,
-    pull_id: &str,
-) -> Result<Vec<PullReviewRow>, String> {
+pub async fn list_pull_reviews(pool: &DbPool, pull_id: &str) -> Result<Vec<PullReviewRow>, String> {
     match pool {
         DbPool::Postgres(p) => {
-            let q = format!(
-                "{PRV_SELECT_PG} WHERE pull_id = $1 ORDER BY submitted_at ASC, id ASC"
-            );
-            let rows = sqlx::query(&q)
+            let q = format!("{PRV_SELECT_PG} WHERE pull_id = $1 ORDER BY submitted_at ASC, id ASC");
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(pull_id)
                 .fetch_all(p)
                 .await
@@ -1762,10 +1769,9 @@ pub async fn list_pull_reviews(
             Ok(out)
         }
         DbPool::MySql(p) => {
-            let q = format!(
-                "{PRV_SELECT_MYSQL} WHERE pull_id = ? ORDER BY submitted_at ASC, id ASC"
-            );
-            let rows = sqlx::query(&q)
+            let q =
+                format!("{PRV_SELECT_MYSQL} WHERE pull_id = ? ORDER BY submitted_at ASC, id ASC");
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(pull_id)
                 .fetch_all(p)
                 .await
@@ -1777,10 +1783,9 @@ pub async fn list_pull_reviews(
             Ok(out)
         }
         DbPool::Sqlite(p) => {
-            let q = format!(
-                "{PRV_SELECT_SQLITE} WHERE pull_id = ?1 ORDER BY submitted_at ASC, id ASC"
-            );
-            let rows = sqlx::query(&q)
+            let q =
+                format!("{PRV_SELECT_SQLITE} WHERE pull_id = ?1 ORDER BY submitted_at ASC, id ASC");
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(pull_id)
                 .fetch_all(p)
                 .await
@@ -1801,33 +1806,27 @@ pub async fn list_pull_review_author_ids(
     pull_id: &str,
 ) -> Result<Vec<String>, String> {
     match pool {
-        DbPool::Postgres(p) => {
-            sqlx::query_scalar::<_, String>(
-                "SELECT DISTINCT author_id FROM pull_reviews WHERE pull_id = $1",
-            )
-            .bind(pull_id)
-            .fetch_all(p)
-            .await
-            .map_err(|e| format!("list pull review author ids failed: {e}"))
-        }
-        DbPool::MySql(p) => {
-            sqlx::query_scalar::<_, String>(
-                "SELECT DISTINCT author_id FROM pull_reviews WHERE pull_id = ?",
-            )
-            .bind(pull_id)
-            .fetch_all(p)
-            .await
-            .map_err(|e| format!("list pull review author ids failed: {e}"))
-        }
-        DbPool::Sqlite(p) => {
-            sqlx::query_scalar::<_, String>(
-                "SELECT DISTINCT author_id FROM pull_reviews WHERE pull_id = ?1",
-            )
-            .bind(pull_id)
-            .fetch_all(p)
-            .await
-            .map_err(|e| format!("list pull review author ids failed: {e}"))
-        }
+        DbPool::Postgres(p) => sqlx::query_scalar::<_, String>(
+            "SELECT DISTINCT author_id FROM pull_reviews WHERE pull_id = $1",
+        )
+        .bind(pull_id)
+        .fetch_all(p)
+        .await
+        .map_err(|e| format!("list pull review author ids failed: {e}")),
+        DbPool::MySql(p) => sqlx::query_scalar::<_, String>(
+            "SELECT DISTINCT author_id FROM pull_reviews WHERE pull_id = ?",
+        )
+        .bind(pull_id)
+        .fetch_all(p)
+        .await
+        .map_err(|e| format!("list pull review author ids failed: {e}")),
+        DbPool::Sqlite(p) => sqlx::query_scalar::<_, String>(
+            "SELECT DISTINCT author_id FROM pull_reviews WHERE pull_id = ?1",
+        )
+        .bind(pull_id)
+        .fetch_all(p)
+        .await
+        .map_err(|e| format!("list pull review author ids failed: {e}")),
     }
 }
 
@@ -1853,7 +1852,7 @@ pub async fn list_reviews_for_pulls(
             let q = format!(
                 "{PRV_SELECT_PG} WHERE pull_id = ANY($1) ORDER BY submitted_at ASC, id ASC"
             );
-            let rows = sqlx::query(&q)
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(pull_ids)
                 .fetch_all(p)
                 .await
@@ -1866,7 +1865,7 @@ pub async fn list_reviews_for_pulls(
             let q_str = format!(
                 "{PRV_SELECT_MYSQL} WHERE pull_id IN ({in_list}) ORDER BY submitted_at ASC, id ASC"
             );
-            let q = sqlx::query(&q_str);
+            let q = sqlx::query(sqlx::AssertSqlSafe(&*q_str));
             let q = pull_ids.iter().fold(q, |q, id| q.bind(id));
             let rows = q
                 .fetch_all(p)
@@ -1880,7 +1879,7 @@ pub async fn list_reviews_for_pulls(
             let q_str = format!(
                 "{PRV_SELECT_SQLITE} WHERE pull_id IN ({in_list}) ORDER BY submitted_at ASC, id ASC"
             );
-            let q = sqlx::query(&q_str);
+            let q = sqlx::query(sqlx::AssertSqlSafe(&*q_str));
             let q = pull_ids.iter().fold(q, |q, id| q.bind(id));
             let rows = q
                 .fetch_all(p)
@@ -2031,7 +2030,10 @@ pub async fn list_review_request_user_ids(
                 .map_err(|e| format!("list review requests failed: {e}"))?;
             let mut out = Vec::new();
             for r in rows {
-                out.push(r.try_get("user_id").map_err(|e| format!("review request: {e}"))?);
+                out.push(
+                    r.try_get("user_id")
+                        .map_err(|e| format!("review request: {e}"))?,
+                );
             }
             Ok(out)
         }
@@ -2043,7 +2045,10 @@ pub async fn list_review_request_user_ids(
                 .map_err(|e| format!("list review requests failed: {e}"))?;
             let mut out = Vec::new();
             for r in rows {
-                out.push(r.try_get("user_id").map_err(|e| format!("review request: {e}"))?);
+                out.push(
+                    r.try_get("user_id")
+                        .map_err(|e| format!("review request: {e}"))?,
+                );
             }
             Ok(out)
         }
@@ -2055,7 +2060,10 @@ pub async fn list_review_request_user_ids(
                 .map_err(|e| format!("list review requests failed: {e}"))?;
             let mut out = Vec::new();
             for r in rows {
-                out.push(r.try_get("user_id").map_err(|e| format!("review request: {e}"))?);
+                out.push(
+                    r.try_get("user_id")
+                        .map_err(|e| format!("review request: {e}"))?,
+                );
             }
             Ok(out)
         }
@@ -2140,7 +2148,7 @@ WHERE pl.pull_id = ANY($1) AND (pl.label_id = $2 OR lower(l.name) = lower($2))"#
 JOIN labels l ON l.id = pl.label_id
 WHERE pl.pull_id IN ({in_list}) AND (pl.label_id = ? OR LOWER(l.name) = LOWER(?))"#
             );
-            let q = sqlx::query_scalar::<_, String>(&q_str);
+            let q = sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(&*q_str));
             let q = pull_ids.iter().fold(q, |q, id| q.bind(id));
             let rows = q
                 .bind(label)
@@ -2159,7 +2167,7 @@ WHERE pl.pull_id IN ({in_list}) AND (pl.label_id = ? OR LOWER(l.name) = LOWER(?)
 JOIN labels l ON l.id = pl.label_id
 WHERE pl.pull_id IN ({in_list}) AND (pl.label_id = ?{label_pos} OR lower(l.name) = lower(?{label_pos}))"#
             );
-            let q = sqlx::query_scalar::<_, String>(&q_str);
+            let q = sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(&*q_str));
             let q = pull_ids.iter().fold(q, |q, id| q.bind(id));
             let rows = q
                 .bind(label)
@@ -2172,7 +2180,11 @@ WHERE pl.pull_id IN ({in_list}) AND (pl.label_id = ?{label_pos} OR lower(l.name)
 }
 
 /// Whether `user_id` is assigned to the pull.
-pub async fn pull_has_assignee(pool: &DbPool, pull_id: &str, user_id: &str) -> Result<bool, String> {
+pub async fn pull_has_assignee(
+    pool: &DbPool,
+    pull_id: &str,
+    user_id: &str,
+) -> Result<bool, String> {
     match pool {
         DbPool::Postgres(p) => {
             let n: i64 = sqlx::query_scalar(
@@ -2275,7 +2287,7 @@ JOIN users u ON u.id = a.user_id
 WHERE a.pull_id IN ({in_list})
 ORDER BY LOWER(u.username)"
             );
-            let q = sqlx::query(&q_str);
+            let q = sqlx::query(sqlx::AssertSqlSafe(&*q_str));
             let q = pull_ids.iter().fold(q, |q, id| q.bind(id));
             let rows = q
                 .fetch_all(p)
@@ -2293,7 +2305,7 @@ JOIN users u ON u.id = a.user_id
 WHERE a.pull_id IN ({in_list})
 ORDER BY lower(u.username)"
             );
-            let q = sqlx::query(&q_str);
+            let q = sqlx::query(sqlx::AssertSqlSafe(&*q_str));
             let q = pull_ids.iter().fold(q, |q, id| q.bind(id));
             let rows = q
                 .fetch_all(p)

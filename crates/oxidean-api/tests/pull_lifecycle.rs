@@ -309,6 +309,9 @@ async fn pull_lifecycle_fork_head_pr() {
         r#"{"procedure":"pull.create","input":{"owner":"srcown","name":"upstream","title":"nope","base_ref":"main","head_ref":"feature"}}"#,
     )
     .await;
-    assert_eq!(same_repo_denied["ok"], false, "same-repo head needs Write — {same_repo_denied}");
+    assert_eq!(
+        same_repo_denied["ok"], false,
+        "same-repo head needs Write — {same_repo_denied}"
+    );
     assert_eq!(same_repo_denied["error"]["code"], "repo.not_found");
 }

@@ -16,7 +16,7 @@ import { apiClient } from "@/lib/api-client";
 import { fetchPatList, fetchSessionMe } from "@/lib/ssr-auth";
 import { cn } from "@/lib/utils";
 
-export type TokensLoaderData =
+type TokensLoaderData =
   | { kind: "unauthenticated" }
   | { kind: "error"; message: string }
   | { kind: "ready"; user: UserPublic; tokens: PatListItem[] };
@@ -67,7 +67,7 @@ export function TokensPage() @{
   </AppPage>;
 }
 
-export function TokensContent() @{
+function TokensContent() @{
   const loaderData = useQuery(settingsTokensQueryOptions()).data;
 
   useEffect(() => {

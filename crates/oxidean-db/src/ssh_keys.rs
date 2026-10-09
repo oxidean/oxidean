@@ -181,33 +181,39 @@ pub async fn find_by_fingerprint(
 ) -> Result<Option<SshKeyRow>, String> {
     match pool {
         DbPool::Postgres(p) => {
-            let row = sqlx::query(&format!("{SSH_SELECT_PG} WHERE fingerprint = $1"))
-                .bind(fingerprint)
-                .fetch_optional(p)
-                .await
-                .map_err(|e| format!("find ssh key failed: {e}"))?;
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{SSH_SELECT_PG} WHERE fingerprint = $1"
+            )))
+            .bind(fingerprint)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("find ssh key failed: {e}"))?;
             match row {
                 Some(r) => Ok(Some(map_ssh_key!(&r))),
                 None => Ok(None),
             }
         }
         DbPool::MySql(p) => {
-            let row = sqlx::query(&format!("{SSH_SELECT_MYSQL} WHERE fingerprint = ?"))
-                .bind(fingerprint)
-                .fetch_optional(p)
-                .await
-                .map_err(|e| format!("find ssh key failed: {e}"))?;
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{SSH_SELECT_MYSQL} WHERE fingerprint = ?"
+            )))
+            .bind(fingerprint)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("find ssh key failed: {e}"))?;
             match row {
                 Some(r) => Ok(Some(map_ssh_key!(&r))),
                 None => Ok(None),
             }
         }
         DbPool::Sqlite(p) => {
-            let row = sqlx::query(&format!("{SSH_SELECT_SQLITE} WHERE fingerprint = ?1"))
-                .bind(fingerprint)
-                .fetch_optional(p)
-                .await
-                .map_err(|e| format!("find ssh key failed: {e}"))?;
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{SSH_SELECT_SQLITE} WHERE fingerprint = ?1"
+            )))
+            .bind(fingerprint)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("find ssh key failed: {e}"))?;
             match row {
                 Some(r) => Ok(Some(map_ssh_key!(&r))),
                 None => Ok(None),
@@ -220,9 +226,9 @@ pub async fn find_by_fingerprint(
 pub async fn list_for_user(pool: &DbPool, user_id: &str) -> Result<Vec<SshKeyRow>, String> {
     match pool {
         DbPool::Postgres(p) => {
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{SSH_SELECT_PG} WHERE user_id = $1 ORDER BY created_at DESC, id DESC"
-            ))
+            )))
             .bind(user_id)
             .fetch_all(p)
             .await
@@ -234,9 +240,9 @@ pub async fn list_for_user(pool: &DbPool, user_id: &str) -> Result<Vec<SshKeyRow
             Ok(mapped)
         }
         DbPool::MySql(p) => {
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{SSH_SELECT_MYSQL} WHERE user_id = ? ORDER BY created_at DESC, id DESC"
-            ))
+            )))
             .bind(user_id)
             .fetch_all(p)
             .await
@@ -248,9 +254,9 @@ pub async fn list_for_user(pool: &DbPool, user_id: &str) -> Result<Vec<SshKeyRow
             Ok(mapped)
         }
         DbPool::Sqlite(p) => {
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{SSH_SELECT_SQLITE} WHERE user_id = ?1 ORDER BY created_at DESC, id DESC"
-            ))
+            )))
             .bind(user_id)
             .fetch_all(p)
             .await
@@ -272,9 +278,9 @@ pub async fn list_for_users(pool: &DbPool, user_ids: &[String]) -> Result<Vec<Ss
     }
     match pool {
         DbPool::Postgres(p) => {
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{SSH_SELECT_PG} WHERE user_id = ANY($1) ORDER BY created_at DESC, id DESC"
-            ))
+            )))
             .bind(user_ids)
             .fetch_all(p)
             .await
@@ -291,7 +297,11 @@ pub async fn list_for_users(pool: &DbPool, user_ids: &[String]) -> Result<Vec<Ss
             let q_str = format!(
                 "{SSH_SELECT_MYSQL} WHERE user_id IN ({in_list}) ORDER BY created_at DESC, id DESC"
             );
-            let q = user_ids.iter().fold(sqlx::query(&q_str), |q, id| q.bind(id));
+            let q = user_ids
+                .iter()
+                .fold(sqlx::query(sqlx::AssertSqlSafe(&*q_str)), |q, id| {
+                    q.bind(id)
+                });
             let rows = q
                 .fetch_all(p)
                 .await
@@ -308,7 +318,11 @@ pub async fn list_for_users(pool: &DbPool, user_ids: &[String]) -> Result<Vec<Ss
             let q_str = format!(
                 "{SSH_SELECT_SQLITE} WHERE user_id IN ({in_list}) ORDER BY created_at DESC, id DESC"
             );
-            let q = user_ids.iter().fold(sqlx::query(&q_str), |q, id| q.bind(id));
+            let q = user_ids
+                .iter()
+                .fold(sqlx::query(sqlx::AssertSqlSafe(&*q_str)), |q, id| {
+                    q.bind(id)
+                });
             let rows = q
                 .fetch_all(p)
                 .await

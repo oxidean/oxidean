@@ -100,12 +100,8 @@ async fn email_add_set_primary_remove_roundtrip() {
         .await
         .expect("verify primary");
 
-    let (status, list_v) = rpc_json(
-        &app,
-        r#"{"procedure":"email.list","input":{}}"#,
-        &cookie,
-    )
-    .await;
+    let (status, list_v) =
+        rpc_json(&app, r#"{"procedure":"email.list","input":{}}"#, &cookie).await;
     assert_eq!(status, StatusCode::OK, "{list_v}");
     assert_eq!(list_v["data"].as_array().unwrap().len(), 1);
     assert_eq!(list_v["data"][0]["email"], "primary@ex.com");
@@ -146,12 +142,8 @@ async fn email_add_set_primary_remove_roundtrip() {
     assert!(user.email_verified_at.is_some());
 
     // Remove old primary (now secondary).
-    let (status, list_v) = rpc_json(
-        &app,
-        r#"{"procedure":"email.list","input":{}}"#,
-        &cookie,
-    )
-    .await;
+    let (status, list_v) =
+        rpc_json(&app, r#"{"procedure":"email.list","input":{}}"#, &cookie).await;
     assert_eq!(status, StatusCode::OK, "{list_v}");
     let old = list_v["data"]
         .as_array()
@@ -205,15 +197,9 @@ async fn email_add_rejects_taken_and_max() {
 
     for i in 0..9 {
         let email = format!("extra{i}@ex.com");
-        db.create_user_email(
-            &format!("extra-{i}"),
-            &user_id,
-            &email,
-            false,
-            None,
-        )
-        .await
-        .unwrap();
+        db.create_user_email(&format!("extra-{i}"), &user_id, &email, false, None)
+            .await
+            .unwrap();
     }
     let add = serde_json::json!({
         "procedure": "email.add",
@@ -230,7 +216,10 @@ async fn secondary_email_verify_otp_marks_row_verified() {
     use oxidean_api::auth::verify_reset;
 
     let dir = tempfile::tempdir().expect("tempdir");
-    let url = format!("sqlite:{}", dir.path().join("emails_verify_sec.db").display());
+    let url = format!(
+        "sqlite:{}",
+        dir.path().join("emails_verify_sec.db").display()
+    );
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
@@ -266,12 +255,8 @@ async fn secondary_email_verify_otp_marks_row_verified() {
     // Primary was already verified — me.email_verified stays true.
     assert_eq!(verify_v["data"]["email_verified"], true);
 
-    let (status, list_v) = rpc_json(
-        &app,
-        r#"{"procedure":"email.list","input":{}}"#,
-        &cookie,
-    )
-    .await;
+    let (status, list_v) =
+        rpc_json(&app, r#"{"procedure":"email.list","input":{}}"#, &cookie).await;
     assert_eq!(status, StatusCode::OK, "{list_v}");
     let second = list_v["data"]
         .as_array()
@@ -311,7 +296,9 @@ async fn email_list_heals_missing_primary_flag() {
     assert_eq!(emails.len(), 1);
     let primary_id = emails[0].id.clone();
     // Simulate interrupted setPrimary: no row marked primary.
-    db.delete_user_email(&primary_id).await.expect("delete primary");
+    db.delete_user_email(&primary_id)
+        .await
+        .expect("delete primary");
     db.create_user_email(&primary_id, &user_id, "heal@ex.com", false, Some(&now))
         .await
         .expect("reinsert without primary");
@@ -321,19 +308,15 @@ async fn email_list_heals_missing_primary_flag() {
     let broken = db.list_user_emails(&user_id).await.expect("broken list");
     assert!(broken.iter().all(|e| !e.is_primary));
 
-    let (status, list_v) = rpc_json(
-        &app,
-        r#"{"procedure":"email.list","input":{}}"#,
-        &cookie,
-    )
-    .await;
+    let (status, list_v) =
+        rpc_json(&app, r#"{"procedure":"email.list","input":{}}"#, &cookie).await;
     assert_eq!(status, StatusCode::OK, "{list_v}");
     let rows = list_v["data"].as_array().unwrap();
     assert_eq!(rows.len(), 2);
-    let primary = rows.iter().find(|e| e["is_primary"] == true).expect("healed primary");
+    let primary = rows
+        .iter()
+        .find(|e| e["is_primary"] == true)
+        .expect("healed primary");
     assert_eq!(primary["email"], "heal@ex.com");
-    assert_eq!(
-        rows.iter().filter(|e| e["is_primary"] == true).count(),
-        1
-    );
+    assert_eq!(rows.iter().filter(|e| e["is_primary"] == true).count(), 1);
 }

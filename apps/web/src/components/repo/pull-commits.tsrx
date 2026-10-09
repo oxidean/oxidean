@@ -10,7 +10,7 @@ import { apiClient } from "@/lib/api-client";
 import { commitHref } from "@/lib/repo-browse";
 import { AppLink } from "@/components/ui/app-link";
 
-export type PullCommitsProps = {
+type PullCommitsProps = {
   owner: string;
   repoName: string;
   number: number;

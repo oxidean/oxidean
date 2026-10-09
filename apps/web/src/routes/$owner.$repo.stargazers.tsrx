@@ -19,7 +19,7 @@ import { socialListHref } from "@/lib/repo-social-lists";
 import { fetchRepoGet, fetchRepoStargazers } from "@/lib/ssr-repo";
 import { AppLink } from "@/components/ui/app-link";
 
-export type StargazersLoaderData =
+type StargazersLoaderData =
   | { kind: "not_found" }
   | { kind: "error"; message: string }
   | {

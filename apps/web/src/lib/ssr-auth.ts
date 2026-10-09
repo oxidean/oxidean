@@ -22,14 +22,8 @@ export async function fetchRepoCreateDefaults() {
 }
 
 /** auth.provider_config (allow_signup). */
-export async function fetchProviderConfig() {
-  return apiClient.auth.providerConfig();
-}
 
 /** repo.listMine (signed-in home). */
-export async function fetchRepoListMine() {
-  return apiClient.repo.listMine();
-}
 
 /** user.get_profile. */
 export async function fetchUserGetProfile() {
@@ -149,7 +143,7 @@ function documentCookie(): string {
  * Resolved Shiki theme from theme cookies — mirrors the cookie/resolved-scheme
  * chain the serving middleware applies to `<html>`.
  */
-export function clientHighlightTheme(): "oxidean-light" | "oxidean-dark" {
+export function resolveClientHighlightTheme(): "oxidean-light" | "oxidean-dark" {
   const cookie = documentCookie();
   const resolved = resolveThemeForSsr(
     themePreferenceFromCookieHeader(cookie),

@@ -21,7 +21,7 @@ jobs:
     name: makefile-lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: makefile lint (GNU Make parse + checkmake)
         run: make makefile-lint
 
@@ -36,7 +36,7 @@ jobs:
       matrix:
         shard: ["1", "2", "3"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: free disk for Rust link
         # ubuntu-latest fills quickly linking many debug integration binaries.
         run: |
@@ -71,14 +71,14 @@ jobs:
     needs: [makefile-lint]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.4.0"
       - name: bun install
         run: bun install --frozen-lockfile
-      - name: web lint (oxlint type-aware)
-        run: bun run --filter @oxidean/web lint
+      - name: web lint (oxlint type-aware + octane checks + route sync)
+        run: make web-lint
       - name: web format check (oxfmt)
         run: bun run --filter @oxidean/web format:check
       - name: vitest (api-client + web unit/integration)
@@ -86,13 +86,45 @@ jobs:
       - name: web build
         run: bunx turbo run build --filter=@oxidean/web
 
+  # Dead code must not ship: knip covers the TS/.tsrx/.astro graph (custom
+  # compilers in knip.ts), cargo-machete covers unused Cargo deps, and rustc's
+  # dead_code lint (denied only here) covers unused Rust items.
+  dead-code:
+    name: dead-code
+    needs: [makefile-lint]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.0"
+      - name: bun install
+        run: bun install --frozen-lockfile
+      - name: knip (TS/.tsrx/.astro dead code)
+        run: bunx knip
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "rust-debug"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-machete
+      - name: install protoc
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq protobuf-compiler
+      - name: rust dead code + unused deps
+        run: |
+          cargo machete
+          cargo clippy --workspace --all-targets -- -D dead_code
+
   # Chromium component tests for Octane insertBefore races (happy-dom cannot catch).
   web-browser:
     name: web-browser
     needs: [makefile-lint]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.4.0"
@@ -113,7 +145,7 @@ jobs:
     needs: [makefile-lint]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - uses: oven-sh/setup-bun@v2
@@ -140,7 +172,7 @@ jobs:
     needs: [makefile-lint]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - uses: oven-sh/setup-bun@v2
@@ -167,7 +199,7 @@ jobs:
     needs: [makefile-lint]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: free disk for Rust coverage build
         # Instrumented workspace build has the same disk pressure as api-rust.
         run: |
@@ -215,14 +247,14 @@ jobs:
             --e2e-checklist | tee var/coverage/weighted.txt
       - name: upload rust coverage artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-rust
           path: var/coverage/rust-*
           if-no-files-found: ignore
       - name: upload coverage artifacts on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-weighted-logs
           path: |
@@ -235,7 +267,7 @@ jobs:
     needs: [makefile-lint]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -257,7 +289,7 @@ jobs:
         run: make test-e2e-stack
       - name: upload e2e logs on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-stack-logs
           path: |
@@ -272,7 +304,7 @@ jobs:
     needs: [makefile-lint]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: free disk for Rust link
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
@@ -294,7 +326,7 @@ jobs:
     needs: [makefile-lint]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -322,7 +354,7 @@ jobs:
     needs: [makefile-lint]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: docker compose config
         run: docker compose -f docker-compose.yml config
       - name: docker compose mysql overlay config
@@ -339,17 +371,17 @@ jobs:
     needs: [makefile-lint]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: free disk for compose image builds
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
             /usr/local/share/boost /usr/share/swift || true
           df -h /
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
       # cargo-chef dep layer exports via type=gha (mode=max keeps intermediate
       # stages), so the Rust deps only rebuild when Cargo.lock moves.
       - name: build api image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: crates/oxidean-api/Dockerfile
@@ -358,7 +390,7 @@ jobs:
           cache-from: type=gha,scope=oxidean-api
           cache-to: type=gha,mode=max,scope=oxidean-api
       - name: build runner image (compile gate)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: docker/oxidean-runner/Dockerfile
@@ -366,7 +398,7 @@ jobs:
           cache-from: type=gha,scope=oxidean-runner
           cache-to: type=gha,mode=max,scope=oxidean-runner
       - name: build web image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: apps/web/Dockerfile
@@ -379,7 +411,7 @@ jobs:
           docker save oxidean-api:ci oxidean-web:ci | gzip -1 > /tmp/oxidean-ci-images.tgz
           ls -lh /tmp/oxidean-ci-images.tgz
       - name: upload compose images (same-run only)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: oxidean-ci-images
           path: /tmp/oxidean-ci-images.tgz
@@ -399,7 +431,7 @@ jobs:
       matrix:
         dialect: [postgres, sqlite, mysql]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: free disk for compose image load
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
@@ -420,7 +452,7 @@ jobs:
         run: ./scripts/ci-compose-smoke.sh ${{ matrix.dialect }}
       - name: upload compose smoke logs on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: compose-smoke-${{ matrix.dialect }}-logs
           path: |
@@ -439,7 +471,7 @@ jobs:
     needs: [docker-ci-images]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: free disk for compose image load
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
@@ -461,7 +493,7 @@ jobs:
         run: make smoke-protocol-ci # smoke-git-https smoke-git-ssh smoke-git-lfs smoke-packages smoke-protection
       - name: upload compose logs on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: smoke-protocol-logs
           path: |
@@ -505,7 +537,7 @@ jobs:
         options: >-
           --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -poxidean" --health-interval=5s --health-timeout=5s --health-retries=20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -528,7 +560,7 @@ jobs:
     needs: [makefile-lint]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: gate to Rust-affecting changes
@@ -592,7 +624,7 @@ jobs:
           ls -lh target/release/oxidean-api target/release/oxidean-protection-hook
       - name: upload cargo timings
         if: steps.gate.outputs.run == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cargo-timings
           path: target/cargo-timings/

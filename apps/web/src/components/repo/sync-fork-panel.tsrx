@@ -4,7 +4,7 @@ import { repoForkStatusQueryOptions, repoSyncForkMutationOptions } from "@oxidea
 import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api-client";
 
-export type SyncForkPanelProps = {
+type SyncForkPanelProps = {
   owner: string;
   repoName: string;
   /** Write+ on the fork — the sync button only shows for writers. */

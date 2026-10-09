@@ -3,7 +3,6 @@ import type {
   OrgInvitePublic,
   OrgInvitesCreateItemResult,
   OrgMemberPublic,
-  OrgPublic,
   OrgRole,
 } from "@oxidean/api-client";
 import { Check, ChevronDown, Link2 } from "@octanejs/lucide";
@@ -45,11 +44,6 @@ import {
   orgSettingsOwner,
 } from "@/components/org/org-settings-shell.tsrx";
 import { usePathname } from "@/lib/pathname.tsrx";
-
-export type OrgMembersLoaderData = {
-  org: OrgPublic;
-  canAdmin: boolean;
-};
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
 const LAST_OWNER_ERROR = "Cannot demote or remove the last organization owner.";
@@ -138,7 +132,7 @@ export function OrgMembersPage() @{
 }
 
 /** Exported for members Wave 0 tests (ORG-01 / D-ORG-03). */
-export function OrgMembersContent() @{
+function OrgMembersContent() @{
   const pathname = usePathname();
   const owner = orgSettingsOwner(pathname);
   const data = useQuery(orgSettingsAccessQueryOptions(owner)).data;
@@ -867,4 +861,3 @@ export function OrgMembersContent() @{
 }
 
 /** Alias for Wave 0 import flexibility. */
-export const MembersPage = OrgMembersPage;

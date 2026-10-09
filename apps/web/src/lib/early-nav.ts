@@ -1,4 +1,32 @@
 /**
+ * Resolve the `<a href>` this click should be bridged through, or `null` when
+ * the click must keep native semantics:
+ *
+ * - target isn't inside an `<a href>`;
+ * - the anchor already owns a delegated click slot (hydrated router link or
+ *   any component `onClick`);
+ * - `target` other than `_self`, `download`, or explicit opt-out
+ *   (`data-no-early-nav`);
+ * - non-route paths: external/protocol-relative URLs and same-origin `/api/*`
+ *   endpoints (asset downloads, RPC) that are not router routes.
+ */
+function earlyNavAnchorForTarget(target: EventTarget | null): HTMLAnchorElement | null {
+  if (!(target instanceof Element)) return null;
+  const anchor = target.closest("a[href]");
+  if (!(anchor instanceof HTMLAnchorElement)) return null;
+  const bound = anchor as unknown as Record<string, unknown>;
+  if (bound[CLICK_SLOT] != null || bound[CAPTURE_CLICK_SLOT] != null) return null;
+  const href = anchor.getAttribute("href");
+  if (!href || !href.startsWith("/") || href.startsWith("//")) return null;
+  if (href === "/api" || href.startsWith("/api/")) return null;
+  const targetAttr = anchor.getAttribute("target");
+  if (targetAttr != null && targetAttr !== "_self") return null;
+  if (anchor.hasAttribute("download") || anchor.hasAttribute("data-no-early-nav")) {
+    return null;
+  }
+  return anchor;
+}
+/**
  * Early-navigation bridge (issue #111).
  *
  * Octane wires component `onClick` handlers lazily: each element gets its
@@ -73,22 +101,6 @@ export type EarlyNavHandler = (opts: { href: string }) => unknown;
  * - non-route paths: external/protocol-relative URLs and same-origin `/api/*`
  *   endpoints (asset downloads, RPC) that are not router routes.
  */
-export function earlyNavAnchorForTarget(target: EventTarget | null): HTMLAnchorElement | null {
-  if (!(target instanceof Element)) return null;
-  const anchor = target.closest("a[href]");
-  if (!(anchor instanceof HTMLAnchorElement)) return null;
-  const bound = anchor as unknown as Record<string, unknown>;
-  if (bound[CLICK_SLOT] != null || bound[CAPTURE_CLICK_SLOT] != null) return null;
-  const href = anchor.getAttribute("href");
-  if (!href || !href.startsWith("/") || href.startsWith("//")) return null;
-  if (href === "/api" || href.startsWith("/api/")) return null;
-  const targetAttr = anchor.getAttribute("target");
-  if (targetAttr != null && targetAttr !== "_self") return null;
-  if (anchor.hasAttribute("download") || anchor.hasAttribute("data-no-early-nav")) {
-    return null;
-  }
-  return anchor;
-}
 
 /** Same predicate as {@link earlyNavAnchorForTarget}, returning the href. */
 export function earlyNavHrefForTarget(target: EventTarget | null): string | undefined {

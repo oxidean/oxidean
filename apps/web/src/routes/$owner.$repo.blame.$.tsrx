@@ -178,7 +178,7 @@ function RepoBlamePageContent() @{
                   </span>
                   <time
                     className="ml-2 text-muted-foreground"
-                    dateTime={line.authored_at as string}
+                    datetime={line.authored_at as string}
                   >
                     {relativeCommitTime(line.authored_at) as string}
                   </time>

@@ -68,7 +68,9 @@ async fn signup_sets_cookie_and_sends_welcome() {
         set_cookie.contains("oxidean_session="),
         "cookie: {set_cookie}"
     );
-    assert!(set_cookie.contains("HttpOnly") || set_cookie.to_ascii_lowercase().contains("httponly"));
+    assert!(
+        set_cookie.contains("HttpOnly") || set_cookie.to_ascii_lowercase().contains("httponly")
+    );
 
     let bytes = res.into_body().collect().await.unwrap().to_bytes();
     let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
@@ -365,7 +367,10 @@ async fn signup_succeeds_when_allow_signup_true() {
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
     let settings = db.get_auth_settings().await.expect("settings");
-    assert!(settings.allow_signup, "unlock_signup must open registration");
+    assert!(
+        settings.allow_signup,
+        "unlock_signup must open registration"
+    );
 
     let (app, recorder) = app_with_recorder(db).await;
     let res = app
@@ -433,7 +438,9 @@ async fn provider_config_includes_allow_signup() {
 
     let (app, _) = app_with_recorder(db.clone()).await;
     let res = app
-        .oneshot(rpc_req(r#"{"procedure":"auth.provider_config","input":{}}"#))
+        .oneshot(rpc_req(
+            r#"{"procedure":"auth.provider_config","input":{}}"#,
+        ))
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
@@ -450,7 +457,9 @@ async fn provider_config_includes_allow_signup() {
     support::unlock_signup(&db).await;
     let (app2, _) = app_with_recorder(db).await;
     let res2 = app2
-        .oneshot(rpc_req(r#"{"procedure":"auth.provider_config","input":{}}"#))
+        .oneshot(rpc_req(
+            r#"{"procedure":"auth.provider_config","input":{}}"#,
+        ))
         .await
         .unwrap();
     let bytes2 = res2.into_body().collect().await.unwrap().to_bytes();

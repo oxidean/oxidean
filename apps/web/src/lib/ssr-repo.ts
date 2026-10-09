@@ -5,7 +5,7 @@ import {
 } from "@oxidean/api-client";
 import { apiClient } from "@/lib/api-client";
 import { highlightCode, languageIdForPath, type HighlightTheme } from "@/lib/highlight";
-import { clientHighlightTheme } from "@/lib/ssr-auth";
+import { resolveClientHighlightTheme } from "@/lib/ssr-auth";
 import {
   resolvePublicOriginClient,
   resolveSshAdvertiseHost,
@@ -314,7 +314,7 @@ export async function fetchRepoSearch(
     return { ok: false, error: res.error };
   }
   try {
-    const theme = clientHighlightTheme();
+    const theme = resolveClientHighlightTheme();
     const hits = await Promise.all(
       res.data.hits.map(async (hit): Promise<SsrRepoSearchHit> => {
         if (hit.kind !== "code" || !hit.content) return { ...hit };

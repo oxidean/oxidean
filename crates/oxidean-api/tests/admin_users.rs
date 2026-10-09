@@ -37,11 +37,7 @@ async fn test_app_with_recorder_repos(
     repos_dir: Option<PathBuf>,
 ) -> (axum::Router, Arc<RecordingSender>) {
     let recorder = Arc::new(RecordingSender::default());
-    let mut state = AppState::new(
-        db,
-        recorder.clone() as Arc<dyn EmailSender>,
-        "development",
-    );
+    let mut state = AppState::new(db, recorder.clone() as Arc<dyn EmailSender>, "development");
     if let Some(dir) = repos_dir {
         state = state.with_repos_dir(dir);
     }
@@ -182,11 +178,7 @@ async fn bootstrap_sysadmin(db: &Database) -> (String, String) {
     (admin.id, admin.username)
 }
 
-async fn login_as(
-    _app: &axum::Router,
-    db: &Database,
-    user_id: &str,
-) -> String {
+async fn login_as(_app: &axum::Router, db: &Database, user_id: &str) -> String {
     // Mint a session directly so we don't need the ENV admin password.
     let sessions = oxidean_api::auth::SessionService::new("development");
     let (raw, _cookie) = sessions
@@ -276,10 +268,7 @@ async fn admin_users_list_requires_sys_admin() {
 #[tokio::test]
 async fn admin_invites_create_list_revoke_and_accept_closed_signup() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let url = format!(
-        "sqlite:{}",
-        dir.path().join("admin_invites.db").display()
-    );
+    let url = format!("sqlite:{}", dir.path().join("admin_invites.db").display());
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
@@ -302,8 +291,7 @@ async fn admin_invites_create_list_revoke_and_accept_closed_signup() {
     let invite_url = first["invite_url"].as_str().expect("invite_url");
     assert!(invite_url.contains("/invites/"), "{create_v}");
     assert!(
-        first["invite"].get("token").is_none()
-            && first["invite"].get("token_hash").is_none(),
+        first["invite"].get("token").is_none() && first["invite"].get("token_hash").is_none(),
         "must not return token: {create_v}"
     );
 
@@ -392,7 +380,9 @@ async fn admin_invites_create_list_revoke_and_accept_closed_signup() {
     .await;
     let pending = list2["data"]["invites"].as_array().expect("invites");
     assert!(
-        pending.iter().all(|i| i["id"] != invite_id && i["id"] != invite2_id),
+        pending
+            .iter()
+            .all(|i| i["id"] != invite_id && i["id"] != invite2_id),
         "accepted/revoked must leave pending list: {list2}"
     );
 }
@@ -400,10 +390,7 @@ async fn admin_invites_create_list_revoke_and_accept_closed_signup() {
 #[tokio::test]
 async fn admin_users_role_ban_unban_and_guards() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let url = format!(
-        "sqlite:{}",
-        dir.path().join("admin_users_ban.db").display()
-    );
+    let url = format!("sqlite:{}", dir.path().join("admin_users_ban.db").display());
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
@@ -737,13 +724,11 @@ async fn admin_users_sessions_and_activity() {
     let admin_cookie = login_as(&app, &db, &admin_id).await;
 
     // Signup + login a user with client metadata headers.
-    let signup_body =
-        r#"{"procedure":"auth.signup","input":{"email":"target@ex.com","username":"target1","password":"password1"}}"#;
+    let signup_body = r#"{"procedure":"auth.signup","input":{"email":"target@ex.com","username":"target1","password":"password1"}}"#;
     let signup = app.clone().oneshot(rpc_req(signup_body)).await.unwrap();
     assert_eq!(signup.status(), StatusCode::OK);
     let _ = signup.into_body().collect().await;
-    let login_body =
-        r#"{"procedure":"auth.login","input":{"identifier":"target@ex.com","password":"password1","remember_me":true}}"#;
+    let login_body = r#"{"procedure":"auth.login","input":{"identifier":"target@ex.com","password":"password1","remember_me":true}}"#;
     let login_req = Request::builder()
         .method("POST")
         .uri("/api/rpc")
@@ -1008,7 +993,10 @@ async fn admin_users_ban_blocks_classic_pat() {
     )
     .await;
     assert_eq!(create_pat["ok"], true, "{create_pat}");
-    let token = create_pat["data"]["token"].as_str().expect("token").to_string();
+    let token = create_pat["data"]["token"]
+        .as_str()
+        .expect("token")
+        .to_string();
 
     let ok_req = Request::builder()
         .method("GET")
@@ -1095,7 +1083,10 @@ async fn admin_users_delete_removes_personal_repos_and_sole_owner_org() {
     )
     .await;
     assert_eq!(personal["ok"], true, "{personal}");
-    let personal_repo_id = personal["data"]["id"].as_str().expect("repo id").to_string();
+    let personal_repo_id = personal["data"]["id"]
+        .as_str()
+        .expect("repo id")
+        .to_string();
 
     let (_, create_org) = rpc_json(
         &app,
@@ -1104,7 +1095,10 @@ async fn admin_users_delete_removes_personal_repos_and_sole_owner_org() {
     )
     .await;
     assert_eq!(create_org["ok"], true, "{create_org}");
-    let org_id = create_org["data"]["id"].as_str().expect("org id").to_string();
+    let org_id = create_org["data"]["id"]
+        .as_str()
+        .expect("org id")
+        .to_string();
 
     let (_, org_repo) = rpc_json(
         &app,
@@ -1113,7 +1107,10 @@ async fn admin_users_delete_removes_personal_repos_and_sole_owner_org() {
     )
     .await;
     assert_eq!(org_repo["ok"], true, "{org_repo}");
-    let org_repo_id = org_repo["data"]["id"].as_str().expect("org repo id").to_string();
+    let org_repo_id = org_repo["data"]["id"]
+        .as_str()
+        .expect("org repo id")
+        .to_string();
 
     assert!(repos.join("wipeuser").join("personal-app.git").exists());
     assert!(repos.join("wipe-org").join("org-app.git").exists());
@@ -1137,27 +1134,29 @@ async fn admin_users_delete_removes_personal_repos_and_sole_owner_org() {
         "expected sole-owner org deleted — {delete_v}"
     );
 
-    assert!(db.find_user_by_id(&user_id).await.expect("find user").is_none());
+    assert!(db
+        .find_user_by_id(&user_id)
+        .await
+        .expect("find user")
+        .is_none());
+    assert!(db
+        .find_organization_by_id(&org_id)
+        .await
+        .expect("find org")
+        .is_none());
+    assert!(db
+        .find_repository_by_id(&personal_repo_id)
+        .await
+        .expect("find personal repo")
+        .is_none());
+    assert!(db
+        .find_repository_by_id(&org_repo_id)
+        .await
+        .expect("find org repo")
+        .is_none());
     assert!(
-        db.find_organization_by_id(&org_id)
-            .await
-            .expect("find org")
-            .is_none()
-    );
-    assert!(
-        db.find_repository_by_id(&personal_repo_id)
-            .await
-            .expect("find personal repo")
-            .is_none()
-    );
-    assert!(
-        db.find_repository_by_id(&org_repo_id)
-            .await
-            .expect("find org repo")
-            .is_none()
-    );
-    assert!(
-        !repos.join("wipeuser").exists() || !repos.join("wipeuser").join("personal-app.git").exists(),
+        !repos.join("wipeuser").exists()
+            || !repos.join("wipeuser").join("personal-app.git").exists(),
         "personal repo disk path should be wiped"
     );
     assert!(
@@ -1194,7 +1193,10 @@ async fn admin_users_delete_succeeds_when_disk_wipe_fails() {
     )
     .await;
     assert_eq!(personal["ok"], true, "{personal}");
-    let personal_repo_id = personal["data"]["id"].as_str().expect("repo id").to_string();
+    let personal_repo_id = personal["data"]["id"]
+        .as_str()
+        .expect("repo id")
+        .to_string();
     assert!(repos.join("wipefail1").join("stuck-app.git").exists());
 
     // Make a nested dir non-writable so remove_dir_all fails during wipe.
@@ -1220,7 +1222,10 @@ async fn admin_users_delete_succeeds_when_disk_wipe_fails() {
     assert_eq!(delete_v["data"]["ok"], true);
 
     assert!(
-        db.find_user_by_id(&user_id).await.expect("find user").is_none(),
+        db.find_user_by_id(&user_id)
+            .await
+            .expect("find user")
+            .is_none(),
         "user row must be deleted even if wipe fails"
     );
     assert!(
@@ -1298,9 +1303,7 @@ async fn admin_users_get_access_lists_orgs_and_repos() {
 
     let (forbidden_status, forbidden_v) = rpc_json(
         &app,
-        &format!(
-            r#"{{"procedure":"admin.users.getAccess","input":{{"user_id":"{target_id}"}}}}"#
-        ),
+        &format!(r#"{{"procedure":"admin.users.getAccess","input":{{"user_id":"{target_id}"}}}}"#),
         Some(&target_cookie),
     )
     .await;
@@ -1309,9 +1312,7 @@ async fn admin_users_get_access_lists_orgs_and_repos() {
 
     let (status, access_v) = rpc_json(
         &app,
-        &format!(
-            r#"{{"procedure":"admin.users.getAccess","input":{{"user_id":"{target_id}"}}}}"#
-        ),
+        &format!(r#"{{"procedure":"admin.users.getAccess","input":{{"user_id":"{target_id}"}}}}"#),
         Some(&admin_cookie),
     )
     .await;
@@ -1320,18 +1321,15 @@ async fn admin_users_get_access_lists_orgs_and_repos() {
 
     let orgs = access_v["data"]["orgs"].as_array().expect("orgs");
     assert!(
-        orgs.iter().any(|o| {
-            o["slug"] == "access-org" && o["role"] == "member"
-        }),
+        orgs.iter()
+            .any(|o| { o["slug"] == "access-org" && o["role"] == "member" }),
         "expected access-org membership — {access_v}"
     );
 
     let repos_list = access_v["data"]["repos"].as_array().expect("repos");
     assert!(
         repos_list.iter().any(|r| {
-            r["owner"] == "accessowner"
-                && r["name"] == "shared"
-                && r["permission"] == "write"
+            r["owner"] == "accessowner" && r["name"] == "shared" && r["permission"] == "write"
         }),
         "expected shared collaborator grant — {access_v}"
     );
@@ -1354,13 +1352,11 @@ async fn admin_users_delete_requires_delete_orgs_for_shared_org() {
     let (admin_id, _) = bootstrap_sysadmin(&db).await;
     let admin_cookie = login_as(&app, &db, &admin_id).await;
 
-    let (owner_cookie, owner_v) =
-        signup_and_login(&app, "sharedowner@ex.com", "sharedowner").await;
+    let (owner_cookie, owner_v) = signup_and_login(&app, "sharedowner@ex.com", "sharedowner").await;
     let owner_id = owner_v["data"]["id"].as_str().expect("id").to_string();
     verify_user(&db, &owner_id).await;
 
-    let (_member_cookie, member_v) =
-        signup_and_login(&app, "orgmember@ex.com", "orgmember1").await;
+    let (_member_cookie, member_v) = signup_and_login(&app, "orgmember@ex.com", "orgmember1").await;
     let member_id = member_v["data"]["id"].as_str().expect("id").to_string();
     verify_user(&db, &member_id).await;
 
@@ -1371,7 +1367,10 @@ async fn admin_users_delete_requires_delete_orgs_for_shared_org() {
     )
     .await;
     assert_eq!(create_org["ok"], true, "{create_org}");
-    let org_id = create_org["data"]["id"].as_str().expect("org id").to_string();
+    let org_id = create_org["data"]["id"]
+        .as_str()
+        .expect("org id")
+        .to_string();
 
     let (_, add_member) = rpc_json(
         &app,
@@ -1425,23 +1424,20 @@ async fn admin_users_delete_requires_delete_orgs_for_shared_org() {
     .await;
     assert_eq!(deleted["ok"], true, "{deleted}");
     assert_eq!(deleted["data"]["deleted_orgs"].as_i64().unwrap_or(0), 1);
-    assert!(
-        db.find_user_by_id(&owner_id)
-            .await
-            .expect("find user")
-            .is_none()
-    );
-    assert!(
-        db.find_organization_by_id(&org_id)
-            .await
-            .expect("find org")
-            .is_none()
-    );
+    assert!(db
+        .find_user_by_id(&owner_id)
+        .await
+        .expect("find user")
+        .is_none());
+    assert!(db
+        .find_organization_by_id(&org_id)
+        .await
+        .expect("find org")
+        .is_none());
     // The other member's account survives the org deletion.
-    assert!(
-        db.find_user_by_id(&member_id)
-            .await
-            .expect("find member")
-            .is_some()
-    );
+    assert!(db
+        .find_user_by_id(&member_id)
+        .await
+        .expect("find member")
+        .is_some());
 }

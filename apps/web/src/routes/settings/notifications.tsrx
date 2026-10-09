@@ -9,7 +9,7 @@ import { List, ListRow } from "@/components/ui/list";
 import { apiClient } from "@/lib/api-client";
 import { fetchSessionMe, fetchWatchedRepos } from "@/lib/ssr-auth";
 
-export type NotificationsSettingsLoaderData =
+type NotificationsSettingsLoaderData =
   | { kind: "unauthenticated" }
   | { kind: "error"; message: string }
   | {
@@ -81,7 +81,7 @@ export function NotificationsSettingsPage() @{
   </AppPage>;
 }
 
-export function NotificationsSettingsContent() @{
+function NotificationsSettingsContent() @{
   const loaderData = useQuery(settingsNotificationsQueryOptions()).data;
 
   useEffect(() => {

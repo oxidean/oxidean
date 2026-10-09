@@ -1,6 +1,5 @@
 //! AUTH-04 / AUTH-12: verify + password-reset issue/consume.
 
-
 mod support;
 use std::sync::{Arc, Mutex};
 
@@ -34,11 +33,7 @@ async fn test_app(db: Database) -> axum::Router {
 
 async fn test_app_with_recorder(db: Database) -> (axum::Router, Arc<RecordingSender>) {
     let recorder = Arc::new(RecordingSender::default());
-    let state = AppState::new(
-        db,
-        recorder.clone() as Arc<dyn EmailSender>,
-        "development",
-    );
+    let state = AppState::new(db, recorder.clone() as Arc<dyn EmailSender>, "development");
     let cors = build_cors("development", None).expect("cors");
     (router_with_state(state, cors), recorder)
 }
@@ -82,11 +77,7 @@ async fn signup_user(
     let body = format!(
         r#"{{"procedure":"auth.signup","input":{{"email":"{email}","username":"{username}","password":"password1"}}}}"#
     );
-    let signup = app
-        .clone()
-        .oneshot(rpc_req(&body))
-        .await
-        .unwrap();
+    let signup = app.clone().oneshot(rpc_req(&body)).await.unwrap();
     assert_eq!(signup.status(), StatusCode::OK);
     let cookie = session_cookie_from_response(&signup);
     let bytes = signup.into_body().collect().await.unwrap().to_bytes();
@@ -217,7 +208,9 @@ async fn request_verify_sends_magic_and_otp_email() {
     assert_eq!(sent.len(), 1);
     assert_eq!(sent[0].subject, "Verify your Oxidean email");
     assert!(
-        sent[0].text.contains("https://app.example.com/verify?token="),
+        sent[0]
+            .text
+            .contains("https://app.example.com/verify?token="),
         "body: {}",
         sent[0].text
     );

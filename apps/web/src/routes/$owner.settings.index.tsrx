@@ -54,7 +54,7 @@ export function OrgSettingsPage() @{
 }
 
 /** Exported for org settings tests (D-ORG-02b). */
-export function OrgSettingsContent() @{
+function OrgSettingsContent() @{
   const pathname = usePathname();
   const owner = orgSettingsOwner(pathname);
   const accessQ = useQuery(orgSettingsAccessQueryOptions(owner));

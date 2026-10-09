@@ -1,6 +1,6 @@
 import { useForm } from "@octanejs/tanstack-form";
 import { useQuery, useQueryClient } from "@octanejs/tanstack-query";
-import type { LabelPublic, OrgPublic } from "@oxidean/api-client";
+import type { LabelPublic } from "@oxidean/api-client";
 import { useState } from "octane";
 import { Tags } from "@octanejs/lucide";
 import { AuthErrorBanner } from "@/components/auth-shell";
@@ -18,11 +18,6 @@ import {
   orgSettingsOwner,
 } from "@/components/org/org-settings-shell.tsrx";
 import { usePathname } from "@/lib/pathname.tsrx";
-
-export type OrgLabelsLoaderData = {
-  org: OrgPublic;
-  canAdmin: boolean;
-};
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
 const FORBIDDEN = "You need organization admin access to manage labels.";
@@ -47,7 +42,7 @@ export function OrgLabelsPage() @{
 }
 
 /** Org default label catalog — Admin only (D-ISS-05 / D-ISS-07). */
-export function OrgLabelsContent() @{
+function OrgLabelsContent() @{
   const pathname = usePathname();
   const owner = orgSettingsOwner(pathname);
   const data = useQuery(orgSettingsAccessQueryOptions(owner)).data;

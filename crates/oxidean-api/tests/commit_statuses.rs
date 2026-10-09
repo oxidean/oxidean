@@ -20,12 +20,9 @@ use tower::ServiceExt;
 
 async fn seed_db() -> (Database, tempfile::TempDir, String, String) {
     let dir = tempfile::tempdir().unwrap();
-    let db = Database::connect(&format!(
-        "sqlite:{}",
-        dir.path().join("cs.db").display()
-    ))
-    .await
-    .unwrap();
+    let db = Database::connect(&format!("sqlite:{}", dir.path().join("cs.db").display()))
+        .await
+        .unwrap();
     db.migrate().await.unwrap();
     support::unlock_signup(&db).await;
     let owner = db

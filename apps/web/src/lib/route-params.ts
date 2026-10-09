@@ -6,6 +6,15 @@
  * one path segment and a bare `$` binds the rest (splat). Segments are
  * percent-decoded.
  */
+/** Malformed percent sequences (e.g. `/o/r/100%.html`) decode to themselves. */
+function safeDecode(seg: string): string {
+  try {
+    return decodeURIComponent(seg);
+  } catch {
+    return seg;
+  }
+}
+
 export function matchPath(pattern: string, pathname: string): Record<string, string> | null {
   const patternSegs = pattern.split("/").filter(Boolean);
   const pathSegs = pathname.split("/").filter(Boolean);
@@ -15,11 +24,11 @@ export function matchPath(pattern: string, pathname: string): Record<string, str
   for (; i < patternSegs.length; i++) {
     const pseg = patternSegs[i]!;
     if (pseg === "$") {
-      params._splat = decodeURIComponent(pathSegs.slice(i).join("/"));
+      params._splat = safeDecode(pathSegs.slice(i).join("/"));
       return params;
     }
     if (i >= pathSegs.length) return null;
-    const seg = decodeURIComponent(pathSegs[i]!);
+    const seg = safeDecode(pathSegs[i]!);
     if (pseg.startsWith("$")) params[pseg.slice(1)] = seg;
     else if (pseg !== seg) return null;
   }
@@ -27,9 +36,6 @@ export function matchPath(pattern: string, pathname: string): Record<string, str
 }
 
 /** Current URL search params — the post-router `useSearch` replacement. */
-export function readSearchParams(): URLSearchParams {
-  return new URLSearchParams(window.location.search);
-}
 
 /** Search string → `Record` for former `validateSearch` functions. */
 export function searchRecord(searchStr: string): Record<string, unknown> {

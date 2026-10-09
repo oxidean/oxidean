@@ -7,7 +7,10 @@ pub use invites::{
     accept as invites_accept, create as invites_create, create_link as invites_create_link,
     list as invites_list, revoke as invites_revoke,
 };
-pub use members::{add as members_add, list as members_list, remove as members_remove, update_role as members_update_role};
+pub use members::{
+    add as members_add, list as members_list, remove as members_remove,
+    update_role as members_update_role,
+};
 
 use oxidean_core::{
     is_reserved_username, validate_username, AppError, CreateOrgRequest, MemberBasePermission,
@@ -50,8 +53,8 @@ fn map_slug_err(msg: String) -> AppError {
 }
 
 pub(crate) fn to_public(row: &OrganizationRow) -> Result<OrgPublic, AppError> {
-    let member_base_permission = MemberBasePermission::parse(&row.member_base_permission)
-        .map_err(|e| {
+    let member_base_permission =
+        MemberBasePermission::parse(&row.member_base_permission).map_err(|e| {
             tracing::error!(error = %e, "invalid member_base_permission in org row");
             AppError::new("org.internal", "organization operation failed")
         })?;
@@ -114,9 +117,8 @@ pub(crate) async fn require_org_role(
 pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<OrgPublic, AppError> {
     let user = require_verified(ctx).await?;
 
-    let req: CreateOrgRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid org.create input: {e}"))
-    })?;
+    let req: CreateOrgRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid org.create input: {e}")))?;
 
     validate_username(&req.slug).map_err(map_slug_err)?;
     let slug = req.slug.trim().to_string();

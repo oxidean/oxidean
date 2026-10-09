@@ -17,7 +17,7 @@ import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api-client";
 import { fetchGpgKeyList, fetchSessionMe, fetchSshKeyList } from "@/lib/ssr-auth";
 
-export type SshKeysLoaderData =
+type SshKeysLoaderData =
   | { kind: "unauthenticated" }
   | { kind: "error"; message: string }
   | {
@@ -85,7 +85,7 @@ export function SshKeysPage() @{
   </AppPage>;
 }
 
-export function SshKeysContent() @{
+function SshKeysContent() @{
   const loaderData = useQuery(settingsSshKeysQueryOptions()).data;
 
   useEffect(() => {

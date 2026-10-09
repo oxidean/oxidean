@@ -9,6 +9,12 @@ members = [
   "crates/oxidean-runner",
   "crates/oxidean-web",
 ]
+# Embedded project-template manifests served as assets — not workspace crates.
+exclude = [
+  "crates/oxidean-api/assets/stack-presets/rust",
+  "crates/oxidean-api/assets/stack-presets/tauri/src-tauri",
+  "crates/oxidean-api/assets/stack-presets/wasm",
+]
 
 [workspace.package]
 edition = "2021"

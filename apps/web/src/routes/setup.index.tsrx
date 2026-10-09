@@ -40,7 +40,7 @@ export function SetupPage() @{
 }
 
 /** Exported for AUTH-07 integration tests (wizard Switch + CTA). */
-export function SetupContent() @{
+function SetupContent() @{
   const statusQ = useQuery(setupBootstrapQueryOptions());
   const status = statusQ.data;
   const loadError = status

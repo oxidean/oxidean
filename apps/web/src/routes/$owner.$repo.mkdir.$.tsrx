@@ -14,7 +14,7 @@ import { apiClient } from "@/lib/api-client";
 import { joinRepoPath, parseRefAndPath, shortRefName, treeHref } from "@/lib/repo-browse";
 import { fetchRepoGet, fetchRepoRefs } from "@/lib/ssr-repo";
 
-export type MkdirLoaderData =
+type MkdirLoaderData =
   | { kind: "not_found" }
   | { kind: "error"; message: string }
   | {

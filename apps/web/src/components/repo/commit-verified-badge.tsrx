@@ -1,6 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 
-export type CommitVerifiedBadgeProps = {
+type CommitVerifiedBadgeProps = {
   status?: string | null;
   kind?: string | null;
   className?: string;

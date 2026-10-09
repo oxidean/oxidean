@@ -14,11 +14,6 @@ import { readReturnToFromLocation, safeReturnTo } from "@/lib/return-to";
 import { authProviderConfigQueryOptions, authSessionQueryOptions } from "@/lib/session-queries";
 import { AppLink } from "@/components/ui/app-link";
 
-export type SignupLoaderData = {
-  mode: ProviderConfigPublic["mode"];
-  loadError: string;
-};
-
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
 const TAKEN_ERROR = "That email or username is already taken. Try another or sign in.";
 const RESERVED_ERROR = "That username is reserved. Choose a different username.";
@@ -32,7 +27,7 @@ export function SignupPage() @{
 }
 
 /** Exported for AUTH-05 integration tests (no invite UI). */
-export function SignupContent() @{
+function SignupContent() @{
   const meQ = useQuery(authSessionQueryOptions());
   const cfgQ = useQuery(authProviderConfigQueryOptions());
   // D-06 / UI-SPEC: signed-in → home (was beforeLoad redirect).

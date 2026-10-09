@@ -26,7 +26,7 @@ export function OrgsNewPage() @{
 }
 
 /** Exported for /orgs/new Wave 0 integration tests (ORG-01 / D-ORG-01 / D-ORG-06). */
-export function OrgsNewContent() @{
+function OrgsNewContent() @{
   const meQ = useQuery(authSessionQueryOptions());
   usePageRedirect(meQ.data === null || meQ.isError ? "/login?returnTo=/orgs/new" : null);
   const user = meQ.data ?? undefined;

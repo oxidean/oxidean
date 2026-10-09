@@ -54,7 +54,7 @@ make test
 1. `cargo nextest run --workspace` if `cargo-nextest` is on `PATH`, else `cargo test --workspace`.
 2. `bun run test` → Turbo → Vitest for `@oxidean/web` (unit / integration) and `@oxidean/api-client`.
 
-Does **not** start Docker stubs or the live API/Vite stack.
+Does **not** start Docker stubs or the live API/web stack.
 
 ### JS-only / filtered Vitest
 
@@ -87,7 +87,7 @@ make test-e2e-stack
 `scripts/dev-auth/run-stack-e2e.sh`:
 
 1. Brings up `docker-compose.dev-auth.yml` (`--profile dev-auth`): Mailpit, OIDC mock, Resend/WorkOS stubs.
-2. Builds and runs `oxidean-api` on SQLite (default `:18080`), Vite on `:13000`.
+2. Builds and runs `oxidean-api` on SQLite (default `:18080`) and `oxidean-web` on `:13000` (built `apps/web/dist` + `/api` proxy).
 3. Sets `E2E_STACK=1` and runs `bun run --filter @oxidean/web test:e2e:stack` (`e2e-stack` + `e2e-stack-browser`).
 4. Tears down stubs on exit (unless `OXIDEAN_E2E_KEEP_STUBS=1`).
 

@@ -19,7 +19,7 @@ import { formatRelativeUpdated } from "@/lib/relative-time";
 import { ssrHighlightDiffFiles } from "@/lib/ssr-diff-highlight";
 import { fetchRepoCommit, fetchRepoGet } from "@/lib/ssr-repo";
 
-export type CommitLoaderData =
+type CommitLoaderData =
   | { kind: "not_found" }
   | { kind: "error"; message: string }
   | {
@@ -173,7 +173,7 @@ function RepoCommitPageContent() @{
             kind={phase.commit.signature_kind}
           />
           <span aria-hidden="true">·</span>
-          <time dateTime={phase.commit.authored_at as string}>
+          <time datetime={phase.commit.authored_at as string}>
             {relativeCommitTime(phase.commit.authored_at) as string}
           </time>
           <span aria-hidden="true">·</span>

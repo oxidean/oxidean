@@ -1,3 +1,11 @@
+/**
+ * Resolved app theme in-document — client-side replacement for the retired
+ * `ssrResolvedTheme` server fn (same localStorage + media-query chain; the
+ * middleware now stamps `<html class>` from cookies).
+ */
+function resolveDocumentTheme(): "light" | "dark" {
+  return resolveTheme(readThemePreference());
+}
 export type ThemePreference = "system" | "light" | "dark";
 
 export const THEME_STORAGE_KEY = "oxidean-theme";
@@ -27,9 +35,6 @@ export function resolveTheme(pref: ThemePreference): "light" | "dark" {
  * `ssrResolvedTheme` server fn (same localStorage + media-query chain; the
  * middleware now stamps `<html class>` from cookies).
  */
-export function resolveDocumentTheme(): "light" | "dark" {
-  return resolveTheme(readThemePreference());
-}
 
 /** Shiki theme matching the document theme (was `resolveSsrHighlightTheme`). */
 export function resolveDocumentHighlightTheme(): "oxidean-light" | "oxidean-dark" {

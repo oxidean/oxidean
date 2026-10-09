@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { cn } from "@/lib/utils";
 
-export type FileCommitValues = {
+type FileCommitValues = {
   /** Commit message (blank → server default per operation). */
   message: string;
   /** `direct` commits onto `branch`; `branch` creates a new branch + PR. */
@@ -18,7 +18,7 @@ export type FileCommitValues = {
   pr_title: string;
 };
 
-export type FileCommitFormProps = {
+type FileCommitFormProps = {
   /** Resolved commit policy for the base branch (null while loading). */
   policy: RepoFileCommitPolicyResponse | null;
   /** Policy query still in flight — submit stays disabled until resolved. */

@@ -255,7 +255,7 @@ function RepoCommitsPageContent() @{
                 />
                 <time
                   className="text-[13px] text-muted-foreground"
-                  dateTime={c.authored_at as string}
+                  datetime={c.authored_at as string}
                 >
                   {relativeCommitTime(c.authored_at) as string}
                 </time>

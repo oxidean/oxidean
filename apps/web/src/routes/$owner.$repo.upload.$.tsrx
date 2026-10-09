@@ -20,7 +20,7 @@ import {
 } from "@/lib/repo-browse";
 import { fetchRepoGet, fetchRepoRefs } from "@/lib/ssr-repo";
 
-export type UploadLoaderData =
+type UploadLoaderData =
   | { kind: "not_found" }
   | { kind: "error"; message: string }
   | {

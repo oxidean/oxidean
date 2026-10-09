@@ -6,12 +6,10 @@ import type {
 } from "@oxidean/api-client";
 import { apiClient } from "@/lib/api-client";
 
-export const notificationUnreadCountQueryKey = ["notification", "unreadCount"] as const;
-
-export function notificationListQueryKey(filter: "unread" | "all", offset = 0) {
+const notificationUnreadCountQueryKey = ["notification", "unreadCount"] as const;
+function notificationListQueryKey(filter: "unread" | "all", offset = 0) {
   return ["notification", "list", filter, offset] as const;
 }
-
 /** Soft unread badge — unauthenticated → 0 (chrome must not throw). */
 export function notificationUnreadCountQueryOptions() {
   return queryOptions({

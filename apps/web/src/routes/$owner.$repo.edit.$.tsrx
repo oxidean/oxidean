@@ -15,7 +15,7 @@ import { apiClient } from "@/lib/api-client";
 import { blobHref, parseRefAndPath, shortRefName } from "@/lib/repo-browse";
 import { fetchRepoBlob, fetchRepoGet, fetchRepoRefs } from "@/lib/ssr-repo";
 
-export type EditLoaderData =
+type EditLoaderData =
   | { kind: "not_found" }
   | { kind: "error"; message: string }
   | {

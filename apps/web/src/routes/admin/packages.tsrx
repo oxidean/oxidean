@@ -84,7 +84,7 @@ export function AdminPackagesPage() @{
   </AppPage>;
 }
 
-export function AdminPackagesContent() @{
+function AdminPackagesContent() @{
   const [activeOwner, setActiveOwner] = useState("");
   const [pending, setPending] = useState(false);
   const [draft, setDraft] = useState<QuotaDraft>({ amount: "", unit: "GiB" });

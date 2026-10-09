@@ -7,7 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { apiClient } from "@/lib/api-client";
 import { formatRelative } from "@/lib/relative-time";
 
-export type IssueHistoryPanelProps = {
+type IssueHistoryPanelProps = {
   owner: string;
   repoName: string;
   number: number;

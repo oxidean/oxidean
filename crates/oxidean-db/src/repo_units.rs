@@ -91,9 +91,9 @@ async fn set_unit_flag(
     let v = if enabled { 1i64 } else { 0 };
     match pool {
         DbPool::Sqlite(p) => {
-            sqlx::query(&format!(
+            sqlx::query(sqlx::AssertSqlSafe(format!(
                 "UPDATE repositories SET {column} = ? WHERE id = ?"
-            ))
+            )))
             .bind(v)
             .bind(repo_id)
             .execute(p)
@@ -101,9 +101,9 @@ async fn set_unit_flag(
             .map_err(|e| e.to_string())?;
         }
         DbPool::Postgres(p) => {
-            sqlx::query(&format!(
+            sqlx::query(sqlx::AssertSqlSafe(format!(
                 "UPDATE repositories SET {column} = $1 WHERE id = $2"
-            ))
+            )))
             .bind(enabled)
             .bind(repo_id)
             .execute(p)
@@ -111,9 +111,9 @@ async fn set_unit_flag(
             .map_err(|e| e.to_string())?;
         }
         DbPool::MySql(p) => {
-            sqlx::query(&format!(
+            sqlx::query(sqlx::AssertSqlSafe(format!(
                 "UPDATE repositories SET {column} = ? WHERE id = ?"
-            ))
+            )))
             .bind(v as i8)
             .bind(repo_id)
             .execute(p)

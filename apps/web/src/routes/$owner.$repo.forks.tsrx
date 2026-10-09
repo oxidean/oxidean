@@ -25,7 +25,7 @@ import { formatRelativeUpdated } from "@/lib/relative-time";
 import { fetchRepoForks, fetchRepoGet } from "@/lib/ssr-repo";
 import { AppLink } from "@/components/ui/app-link";
 
-export type ForksLoaderData =
+type ForksLoaderData =
   | { kind: "not_found" }
   | { kind: "error"; message: string }
   | {

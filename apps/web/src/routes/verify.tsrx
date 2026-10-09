@@ -70,7 +70,7 @@ export function VerifyPage() @{
 }
 
 /** Exported for verify.integration.test.ts (RESEARCH P1 / D-QH-03). */
-export function VerifyContent() @{
+function VerifyContent() @{
   const [phase, setPhase] = useState<Phase>({ kind: "loading" });
   const [error, setError] = useState("");
   const [tokenPending, setTokenPending] = useState(false);

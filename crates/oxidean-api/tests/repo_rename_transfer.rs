@@ -87,11 +87,7 @@ async fn rpc_json(app: &axum::Router, body: &str, cookie: &str) -> serde_json::V
     serde_json::from_slice(&bytes).expect("rpc json body")
 }
 
-async fn setup_empty_repo(
-    app: &axum::Router,
-    cookie: &str,
-    repo: &str,
-) -> serde_json::Value {
+async fn setup_empty_repo(app: &axum::Router, cookie: &str, repo: &str) -> serde_json::Value {
     let create = rpc_json(
         app,
         &format!(
@@ -117,7 +113,9 @@ async fn repo_rename_admin_moves_disk_and_inserts_redirect() {
     let (cookie, login_v) = signup_and_login(&app, "ren@ex.com", "renowner").await;
     let user_id = login_v["data"]["id"].as_str().unwrap().to_string();
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    db.set_email_verified_at(&user_id, &now).await.expect("verify");
+    db.set_email_verified_at(&user_id, &now)
+        .await
+        .expect("verify");
 
     setup_empty_repo(&app, &cookie, "oldname").await;
     let old_bare = repos.join("renowner").join("oldname.git");
@@ -141,7 +139,10 @@ async fn repo_rename_admin_moves_disk_and_inserts_redirect() {
         .await
         .expect("find redirect")
         .expect("redirect row");
-    assert_eq!(redir.repo_id, renamed["data"]["repo"]["id"].as_str().unwrap());
+    assert_eq!(
+        redir.repo_id,
+        renamed["data"]["repo"]["id"].as_str().unwrap()
+    );
 }
 
 /// D-REL-07: non-admin rename → soft repo.not_found.
@@ -157,7 +158,9 @@ async fn repo_rename_non_admin_soft_not_found() {
     let (cookie, login_v) = signup_and_login(&app, "own@ex.com", "ownadmin").await;
     let user_id = login_v["data"]["id"].as_str().unwrap().to_string();
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    db.set_email_verified_at(&user_id, &now).await.expect("verify");
+    db.set_email_verified_at(&user_id, &now)
+        .await
+        .expect("verify");
     setup_empty_repo(&app, &cookie, "hello").await;
 
     let (writer_cookie, writer_v) = signup_and_login(&app, "w@ex.com", "writer1").await;
@@ -196,7 +199,9 @@ async fn redirect_resolve_old_path_within_retention() {
     let (cookie, login_v) = signup_and_login(&app, "r2@ex.com", "rediruser").await;
     let user_id = login_v["data"]["id"].as_str().unwrap().to_string();
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    db.set_email_verified_at(&user_id, &now).await.expect("verify");
+    db.set_email_verified_at(&user_id, &now)
+        .await
+        .expect("verify");
     setup_empty_repo(&app, &cookie, "alpha").await;
 
     let renamed = rpc_json(
@@ -234,7 +239,9 @@ async fn redirect_supersede_when_new_repo_occupies_old_path() {
     let (cookie, login_v) = signup_and_login(&app, "s@ex.com", "supuser").await;
     let user_id = login_v["data"]["id"].as_str().unwrap().to_string();
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    db.set_email_verified_at(&user_id, &now).await.expect("verify");
+    db.set_email_verified_at(&user_id, &now)
+        .await
+        .expect("verify");
     setup_empty_repo(&app, &cookie, "gamma").await;
 
     let renamed = rpc_json(
@@ -287,15 +294,23 @@ async fn redirect_purge_expired_rows() {
     let (cookie, login_v) = signup_and_login(&app, "p@ex.com", "purgeuser").await;
     let user_id = login_v["data"]["id"].as_str().unwrap().to_string();
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    db.set_email_verified_at(&user_id, &now).await.expect("verify");
+    db.set_email_verified_at(&user_id, &now)
+        .await
+        .expect("verify");
     let created = setup_empty_repo(&app, &cookie, "eps").await;
     let repo_id = created["data"]["id"].as_str().unwrap();
 
     let past = (chrono::Utc::now() - chrono::Duration::days(1))
         .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    db.insert_repository_redirect(&Uuid::new_v4().to_string(), "purgeuser", "old-eps", repo_id, &past)
-        .await
-        .expect("insert expired redirect");
+    db.insert_repository_redirect(
+        &Uuid::new_v4().to_string(),
+        "purgeuser",
+        "old-eps",
+        repo_id,
+        &past,
+    )
+    .await
+    .expect("insert expired redirect");
     assert!(db
         .find_repository_redirect("purgeuser", "old-eps")
         .await
@@ -324,12 +339,16 @@ async fn repo_transfer_admin_to_user_or_org_with_confirm() {
     let (cookie, login_v) = signup_and_login(&app, "t1@ex.com", "fromuser").await;
     let user_id = login_v["data"]["id"].as_str().unwrap().to_string();
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    db.set_email_verified_at(&user_id, &now).await.expect("verify");
+    db.set_email_verified_at(&user_id, &now)
+        .await
+        .expect("verify");
     setup_empty_repo(&app, &cookie, "ship").await;
 
     let (dest_cookie, dest_v) = signup_and_login(&app, "t2@ex.com", "touser").await;
     let dest_id = dest_v["data"]["id"].as_str().unwrap().to_string();
-    db.set_email_verified_at(&dest_id, &now).await.expect("verify dest");
+    db.set_email_verified_at(&dest_id, &now)
+        .await
+        .expect("verify dest");
     let _ = dest_cookie;
 
     let xfer = rpc_json(
@@ -368,11 +387,15 @@ async fn repo_transfer_confirm_mismatch() {
     let (cookie, login_v) = signup_and_login(&app, "m1@ex.com", "mmfrom").await;
     let user_id = login_v["data"]["id"].as_str().unwrap().to_string();
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    db.set_email_verified_at(&user_id, &now).await.expect("verify");
+    db.set_email_verified_at(&user_id, &now)
+        .await
+        .expect("verify");
     setup_empty_repo(&app, &cookie, "boat").await;
     let (dest_c, dest_v) = signup_and_login(&app, "m2@ex.com", "mmto").await;
     let dest_id = dest_v["data"]["id"].as_str().unwrap().to_string();
-    db.set_email_verified_at(&dest_id, &now).await.expect("verify");
+    db.set_email_verified_at(&dest_id, &now)
+        .await
+        .expect("verify");
     let _ = dest_c;
 
     let bad = rpc_json(
@@ -398,7 +421,9 @@ async fn repo_transfer_cascade_issues_lfs_by_repo_id() {
     let (cookie, login_v) = signup_and_login(&app, "c1@ex.com", "casfrom").await;
     let user_id = login_v["data"]["id"].as_str().unwrap().to_string();
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    db.set_email_verified_at(&user_id, &now).await.expect("verify");
+    db.set_email_verified_at(&user_id, &now)
+        .await
+        .expect("verify");
     let created = setup_empty_repo(&app, &cookie, "cargo").await;
     let repo_id = created["data"]["id"].as_str().unwrap().to_string();
 
@@ -418,7 +443,9 @@ async fn repo_transfer_cascade_issues_lfs_by_repo_id() {
 
     let (dest_c, dest_v) = signup_and_login(&app, "c2@ex.com", "casto").await;
     let dest_id = dest_v["data"]["id"].as_str().unwrap().to_string();
-    db.set_email_verified_at(&dest_id, &now).await.expect("verify");
+    db.set_email_verified_at(&dest_id, &now)
+        .await
+        .expect("verify");
     let _ = dest_c;
 
     let xfer = rpc_json(

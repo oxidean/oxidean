@@ -58,7 +58,7 @@ export function InviteAcceptPage() @{
   </AppPage>;
 }
 
-export function InviteAcceptContent() @{
+function InviteAcceptContent() @{
   const pathname = usePathname();
   const token = String(matchPath("/invites/$token", pathname)?.token ?? "").trim();
 

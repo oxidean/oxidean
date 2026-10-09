@@ -50,7 +50,7 @@ export function ResetPasswordPage() @{
 }
 
 /** Exported for integration tests (AUTH-12 anti-enumeration + redeem UX). */
-export function ResetPasswordContent() @{
+function ResetPasswordContent() @{
   const [view, setView] = useState<View>({ kind: "loading" });
   const [error, setError] = useState("");
   const [mismatchFields, setMismatchFields] = useState(false);

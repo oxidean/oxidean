@@ -12,7 +12,7 @@ import { fetchSessionMe } from "@/lib/ssr-auth";
 import { cn } from "@/lib/utils";
 import { AppLink } from "@/components/ui/app-link";
 
-export type TokensNewLoaderData =
+type TokensNewLoaderData =
   | { kind: "unauthenticated" }
   | { kind: "error"; message: string }
   | { kind: "ready"; user: UserPublic };
@@ -56,7 +56,7 @@ export function TokensNewPage() @{
   </AppPage>;
 }
 
-export function TokensNewContent() @{
+function TokensNewContent() @{
   const loaderData = useQuery(settingsTokensNewQueryOptions()).data;
 
   useEffect(() => {

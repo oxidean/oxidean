@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 
 const VIEWPORT = 280;
 
-export type AvatarCropDialogProps = {
+type AvatarCropDialogProps = {
   open: boolean;
   imageUrl: string | null;
   pending?: boolean;

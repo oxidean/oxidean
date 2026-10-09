@@ -42,7 +42,9 @@ macro_rules! map_activity {
             })
             .unwrap_or(None);
         RepoActivityRow {
-            id: row.try_get("id").map_err(|e| format!("activity row: {e}"))?,
+            id: row
+                .try_get("id")
+                .map_err(|e| format!("activity row: {e}"))?,
             repository_id: row
                 .try_get("repository_id")
                 .map_err(|e| format!("activity row: {e}"))?,
@@ -127,7 +129,8 @@ INNER JOIN repositories r ON r.id = a.repository_id
 LEFT JOIN users ru ON r.owner_type = 'user' AND ru.id = r.owner_id
 LEFT JOIN organizations ro ON r.owner_type = 'org' AND ro.id = r.owner_id";
 
-const ACTOR_SELECT_MYSQL: &str = "SELECT a.id, a.repository_id, a.actor_id, a.push_type, a.ref_name,
+const ACTOR_SELECT_MYSQL: &str =
+    "SELECT a.id, a.repository_id, a.actor_id, a.push_type, a.ref_name,
        a.before_oid, a.after_oid, a.commits_count, a.commit_message, a.pr_number,
        DATE_FORMAT(a.created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at,
        u.username AS actor_username, u.display_name AS actor_display_name,
@@ -140,7 +143,8 @@ INNER JOIN repositories r ON r.id = a.repository_id
 LEFT JOIN users ru ON r.owner_type = 'user' AND ru.id = r.owner_id
 LEFT JOIN organizations ro ON r.owner_type = 'org' AND ro.id = r.owner_id";
 
-const ACTOR_SELECT_SQLITE: &str = "SELECT a.id, a.repository_id, a.actor_id, a.push_type, a.ref_name,
+const ACTOR_SELECT_SQLITE: &str =
+    "SELECT a.id, a.repository_id, a.actor_id, a.push_type, a.ref_name,
        a.before_oid, a.after_oid, a.commits_count, a.commit_message, a.pr_number,
        strftime('%Y-%m-%dT%H:%M:%SZ', a.created_at) AS created_at,
        u.username AS actor_username, u.display_name AS actor_display_name,
@@ -186,12 +190,12 @@ async fn list_by_actor_impl(
     };
     match pool {
         DbPool::Postgres(p) => {
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{ACTOR_SELECT_PG}
  WHERE a.actor_id = $1{vis}
  ORDER BY a.created_at DESC, a.id DESC
  LIMIT $2"
-            ))
+            )))
             .bind(actor_id)
             .bind(limit)
             .fetch_all(p)
@@ -200,12 +204,12 @@ async fn list_by_actor_impl(
             rows.iter().map(|r| Ok(map_activity!(r))).collect()
         }
         DbPool::MySql(p) => {
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{ACTOR_SELECT_MYSQL}
  WHERE a.actor_id = ?{vis}
  ORDER BY a.created_at DESC, a.id DESC
  LIMIT ?"
-            ))
+            )))
             .bind(actor_id)
             .bind(limit)
             .fetch_all(p)
@@ -214,12 +218,12 @@ async fn list_by_actor_impl(
             rows.iter().map(|r| Ok(map_activity!(r))).collect()
         }
         DbPool::Sqlite(p) => {
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{ACTOR_SELECT_SQLITE}
  WHERE a.actor_id = ?1{vis}
  ORDER BY a.created_at DESC, a.id DESC
  LIMIT ?2"
-            ))
+            )))
             .bind(actor_id)
             .bind(limit)
             .fetch_all(p)
@@ -326,37 +330,45 @@ pub async fn list_activity(
     match pool {
         DbPool::Postgres(p) => {
             let total: i64 = match (push_type, since) {
-                (Some(pt), Some(s)) => sqlx::query_scalar(
-                    "SELECT COUNT(*) FROM repository_activity
+                (Some(pt), Some(s)) => {
+                    sqlx::query_scalar(
+                        "SELECT COUNT(*) FROM repository_activity
                      WHERE repository_id = $1 AND push_type = $2 AND created_at >= $3::timestamptz",
-                )
-                .bind(repository_id)
-                .bind(pt)
-                .bind(s)
-                .fetch_one(p)
-                .await,
-                (Some(pt), None) => sqlx::query_scalar(
-                    "SELECT COUNT(*) FROM repository_activity
+                    )
+                    .bind(repository_id)
+                    .bind(pt)
+                    .bind(s)
+                    .fetch_one(p)
+                    .await
+                }
+                (Some(pt), None) => {
+                    sqlx::query_scalar(
+                        "SELECT COUNT(*) FROM repository_activity
                      WHERE repository_id = $1 AND push_type = $2",
-                )
-                .bind(repository_id)
-                .bind(pt)
-                .fetch_one(p)
-                .await,
-                (None, Some(s)) => sqlx::query_scalar(
-                    "SELECT COUNT(*) FROM repository_activity
+                    )
+                    .bind(repository_id)
+                    .bind(pt)
+                    .fetch_one(p)
+                    .await
+                }
+                (None, Some(s)) => {
+                    sqlx::query_scalar(
+                        "SELECT COUNT(*) FROM repository_activity
                      WHERE repository_id = $1 AND created_at >= $2::timestamptz",
-                )
-                .bind(repository_id)
-                .bind(s)
-                .fetch_one(p)
-                .await,
-                (None, None) => sqlx::query_scalar(
-                    "SELECT COUNT(*) FROM repository_activity WHERE repository_id = $1",
-                )
-                .bind(repository_id)
-                .fetch_one(p)
-                .await,
+                    )
+                    .bind(repository_id)
+                    .bind(s)
+                    .fetch_one(p)
+                    .await
+                }
+                (None, None) => {
+                    sqlx::query_scalar(
+                        "SELECT COUNT(*) FROM repository_activity WHERE repository_id = $1",
+                    )
+                    .bind(repository_id)
+                    .fetch_one(p)
+                    .await
+                }
             }
             .map_err(|e| format!("count repository_activity failed: {e}"))?;
 
@@ -386,7 +398,7 @@ pub async fn list_activity(
  LIMIT $2 OFFSET $3"
                 ),
             };
-            let mut query = sqlx::query(&q).bind(repository_id);
+            let mut query = sqlx::query(sqlx::AssertSqlSafe(&*q)).bind(repository_id);
             if let Some(pt) = push_type {
                 query = query.bind(pt);
             }
@@ -406,37 +418,45 @@ pub async fn list_activity(
         }
         DbPool::MySql(p) => {
             let total: i64 = match (push_type, since) {
-                (Some(pt), Some(s)) => sqlx::query_scalar(
-                    "SELECT COUNT(*) FROM repository_activity
+                (Some(pt), Some(s)) => {
+                    sqlx::query_scalar(
+                        "SELECT COUNT(*) FROM repository_activity
                      WHERE repository_id = ? AND push_type = ? AND created_at >= ?",
-                )
-                .bind(repository_id)
-                .bind(pt)
-                .bind(s)
-                .fetch_one(p)
-                .await,
-                (Some(pt), None) => sqlx::query_scalar(
-                    "SELECT COUNT(*) FROM repository_activity
+                    )
+                    .bind(repository_id)
+                    .bind(pt)
+                    .bind(s)
+                    .fetch_one(p)
+                    .await
+                }
+                (Some(pt), None) => {
+                    sqlx::query_scalar(
+                        "SELECT COUNT(*) FROM repository_activity
                      WHERE repository_id = ? AND push_type = ?",
-                )
-                .bind(repository_id)
-                .bind(pt)
-                .fetch_one(p)
-                .await,
-                (None, Some(s)) => sqlx::query_scalar(
-                    "SELECT COUNT(*) FROM repository_activity
+                    )
+                    .bind(repository_id)
+                    .bind(pt)
+                    .fetch_one(p)
+                    .await
+                }
+                (None, Some(s)) => {
+                    sqlx::query_scalar(
+                        "SELECT COUNT(*) FROM repository_activity
                      WHERE repository_id = ? AND created_at >= ?",
-                )
-                .bind(repository_id)
-                .bind(s)
-                .fetch_one(p)
-                .await,
-                (None, None) => sqlx::query_scalar(
-                    "SELECT COUNT(*) FROM repository_activity WHERE repository_id = ?",
-                )
-                .bind(repository_id)
-                .fetch_one(p)
-                .await,
+                    )
+                    .bind(repository_id)
+                    .bind(s)
+                    .fetch_one(p)
+                    .await
+                }
+                (None, None) => {
+                    sqlx::query_scalar(
+                        "SELECT COUNT(*) FROM repository_activity WHERE repository_id = ?",
+                    )
+                    .bind(repository_id)
+                    .fetch_one(p)
+                    .await
+                }
             }
             .map_err(|e| format!("count repository_activity failed: {e}"))?;
 
@@ -466,7 +486,7 @@ pub async fn list_activity(
  LIMIT ? OFFSET ?"
                 ),
             };
-            let mut query = sqlx::query(&q).bind(repository_id);
+            let mut query = sqlx::query(sqlx::AssertSqlSafe(&*q)).bind(repository_id);
             if let Some(pt) = push_type {
                 query = query.bind(pt);
             }
@@ -486,37 +506,45 @@ pub async fn list_activity(
         }
         DbPool::Sqlite(p) => {
             let total: i64 = match (push_type, since) {
-                (Some(pt), Some(s)) => sqlx::query_scalar(
-                    "SELECT COUNT(*) FROM repository_activity
+                (Some(pt), Some(s)) => {
+                    sqlx::query_scalar(
+                        "SELECT COUNT(*) FROM repository_activity
                      WHERE repository_id = ?1 AND push_type = ?2 AND created_at >= ?3",
-                )
-                .bind(repository_id)
-                .bind(pt)
-                .bind(s)
-                .fetch_one(p)
-                .await,
-                (Some(pt), None) => sqlx::query_scalar(
-                    "SELECT COUNT(*) FROM repository_activity
+                    )
+                    .bind(repository_id)
+                    .bind(pt)
+                    .bind(s)
+                    .fetch_one(p)
+                    .await
+                }
+                (Some(pt), None) => {
+                    sqlx::query_scalar(
+                        "SELECT COUNT(*) FROM repository_activity
                      WHERE repository_id = ?1 AND push_type = ?2",
-                )
-                .bind(repository_id)
-                .bind(pt)
-                .fetch_one(p)
-                .await,
-                (None, Some(s)) => sqlx::query_scalar(
-                    "SELECT COUNT(*) FROM repository_activity
+                    )
+                    .bind(repository_id)
+                    .bind(pt)
+                    .fetch_one(p)
+                    .await
+                }
+                (None, Some(s)) => {
+                    sqlx::query_scalar(
+                        "SELECT COUNT(*) FROM repository_activity
                      WHERE repository_id = ?1 AND created_at >= ?2",
-                )
-                .bind(repository_id)
-                .bind(s)
-                .fetch_one(p)
-                .await,
-                (None, None) => sqlx::query_scalar(
-                    "SELECT COUNT(*) FROM repository_activity WHERE repository_id = ?1",
-                )
-                .bind(repository_id)
-                .fetch_one(p)
-                .await,
+                    )
+                    .bind(repository_id)
+                    .bind(s)
+                    .fetch_one(p)
+                    .await
+                }
+                (None, None) => {
+                    sqlx::query_scalar(
+                        "SELECT COUNT(*) FROM repository_activity WHERE repository_id = ?1",
+                    )
+                    .bind(repository_id)
+                    .fetch_one(p)
+                    .await
+                }
             }
             .map_err(|e| format!("count repository_activity failed: {e}"))?;
 
@@ -546,7 +574,7 @@ pub async fn list_activity(
  LIMIT ?2 OFFSET ?3"
                 ),
             };
-            let mut query = sqlx::query(&q).bind(repository_id);
+            let mut query = sqlx::query(sqlx::AssertSqlSafe(&*q)).bind(repository_id);
             if let Some(pt) = push_type {
                 query = query.bind(pt);
             }

@@ -35,12 +35,16 @@ macro_rules! map_invite {
     ($row:expr) => {{
         let row = $row;
         OrgInviteRow {
-            id: row.try_get("id").map_err(|e| format!("org invite row: {e}"))?,
+            id: row
+                .try_get("id")
+                .map_err(|e| format!("org invite row: {e}"))?,
             org_id: row
                 .try_get("org_id")
                 .map_err(|e| format!("org invite row: {e}"))?,
             email: map_opt_str!(row, "email"),
-            role: row.try_get("role").map_err(|e| format!("org invite row: {e}"))?,
+            role: row
+                .try_get("role")
+                .map_err(|e| format!("org invite row: {e}"))?,
             token_hash: row
                 .try_get("token_hash")
                 .map_err(|e| format!("org invite row: {e}"))?,
@@ -78,7 +82,8 @@ const INVITE_SELECT_PG: &str = "SELECT id, org_id, email, role, token_hash, invi
          to_char(revoked_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') END AS revoked_at
 FROM organization_invites";
 
-const INVITE_SELECT_MYSQL: &str = "SELECT id, org_id, email, role, token_hash, invited_by, max_uses, use_count,
+const INVITE_SELECT_MYSQL: &str =
+    "SELECT id, org_id, email, role, token_hash, invited_by, max_uses, use_count,
        CASE WHEN expires_at IS NULL THEN NULL ELSE
          DATE_FORMAT(expires_at, '%Y-%m-%dT%H:%i:%sZ') END AS expires_at,
        DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at,
@@ -88,7 +93,8 @@ const INVITE_SELECT_MYSQL: &str = "SELECT id, org_id, email, role, token_hash, i
          DATE_FORMAT(revoked_at, '%Y-%m-%dT%H:%i:%sZ') END AS revoked_at
 FROM organization_invites";
 
-const INVITE_SELECT_SQLITE: &str = "SELECT id, org_id, email, role, token_hash, invited_by, max_uses, use_count,
+const INVITE_SELECT_SQLITE: &str =
+    "SELECT id, org_id, email, role, token_hash, invited_by, max_uses, use_count,
        CASE WHEN expires_at IS NULL THEN NULL ELSE
          strftime('%Y-%m-%dT%H:%M:%SZ', expires_at) END AS expires_at,
        strftime('%Y-%m-%dT%H:%M:%SZ', created_at) AS created_at,
@@ -176,7 +182,10 @@ pub async fn find_by_id(pool: &DbPool, id: &str) -> Result<Option<OrgInviteRow>,
     match pool {
         DbPool::Postgres(p) => {
             let q = format!("{INVITE_SELECT_PG} WHERE id = $1");
-            let row = sqlx::query(&q).bind(id).fetch_optional(p).await;
+            let row = sqlx::query(sqlx::AssertSqlSafe(&*q))
+                .bind(id)
+                .fetch_optional(p)
+                .await;
             match row {
                 Ok(Some(r)) => Ok(Some(map_invite!(r))),
                 Ok(None) => Ok(None),
@@ -185,7 +194,10 @@ pub async fn find_by_id(pool: &DbPool, id: &str) -> Result<Option<OrgInviteRow>,
         }
         DbPool::MySql(p) => {
             let q = format!("{INVITE_SELECT_MYSQL} WHERE id = ?");
-            let row = sqlx::query(&q).bind(id).fetch_optional(p).await;
+            let row = sqlx::query(sqlx::AssertSqlSafe(&*q))
+                .bind(id)
+                .fetch_optional(p)
+                .await;
             match row {
                 Ok(Some(r)) => Ok(Some(map_invite!(r))),
                 Ok(None) => Ok(None),
@@ -194,7 +206,10 @@ pub async fn find_by_id(pool: &DbPool, id: &str) -> Result<Option<OrgInviteRow>,
         }
         DbPool::Sqlite(p) => {
             let q = format!("{INVITE_SELECT_SQLITE} WHERE id = ?1");
-            let row = sqlx::query(&q).bind(id).fetch_optional(p).await;
+            let row = sqlx::query(sqlx::AssertSqlSafe(&*q))
+                .bind(id)
+                .fetch_optional(p)
+                .await;
             match row {
                 Ok(Some(r)) => Ok(Some(map_invite!(r))),
                 Ok(None) => Ok(None),
@@ -211,7 +226,10 @@ pub async fn find_by_token_hash(
     match pool {
         DbPool::Postgres(p) => {
             let q = format!("{INVITE_SELECT_PG} WHERE token_hash = $1");
-            let row = sqlx::query(&q).bind(token_hash).fetch_optional(p).await;
+            let row = sqlx::query(sqlx::AssertSqlSafe(&*q))
+                .bind(token_hash)
+                .fetch_optional(p)
+                .await;
             match row {
                 Ok(Some(r)) => Ok(Some(map_invite!(r))),
                 Ok(None) => Ok(None),
@@ -220,7 +238,10 @@ pub async fn find_by_token_hash(
         }
         DbPool::MySql(p) => {
             let q = format!("{INVITE_SELECT_MYSQL} WHERE token_hash = ?");
-            let row = sqlx::query(&q).bind(token_hash).fetch_optional(p).await;
+            let row = sqlx::query(sqlx::AssertSqlSafe(&*q))
+                .bind(token_hash)
+                .fetch_optional(p)
+                .await;
             match row {
                 Ok(Some(r)) => Ok(Some(map_invite!(r))),
                 Ok(None) => Ok(None),
@@ -229,7 +250,10 @@ pub async fn find_by_token_hash(
         }
         DbPool::Sqlite(p) => {
             let q = format!("{INVITE_SELECT_SQLITE} WHERE token_hash = ?1");
-            let row = sqlx::query(&q).bind(token_hash).fetch_optional(p).await;
+            let row = sqlx::query(sqlx::AssertSqlSafe(&*q))
+                .bind(token_hash)
+                .fetch_optional(p)
+                .await;
             match row {
                 Ok(Some(r)) => Ok(Some(map_invite!(r))),
                 Ok(None) => Ok(None),
@@ -254,7 +278,7 @@ WHERE org_id = $1 AND lower(email) = lower($2)
 ORDER BY created_at DESC
 LIMIT 1"
             );
-            let row = sqlx::query(&q)
+            let row = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(org_id)
                 .bind(email)
                 .fetch_optional(p)
@@ -273,7 +297,7 @@ WHERE org_id = ? AND lower(email) = lower(?)
 ORDER BY created_at DESC
 LIMIT 1"
             );
-            let row = sqlx::query(&q)
+            let row = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(org_id)
                 .bind(email)
                 .fetch_optional(p)
@@ -292,7 +316,7 @@ WHERE org_id = ?1 AND lower(email) = lower(?2)
 ORDER BY created_at DESC
 LIMIT 1"
             );
-            let row = sqlx::query(&q)
+            let row = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(org_id)
                 .bind(email)
                 .fetch_optional(p)
@@ -315,7 +339,7 @@ pub async fn list_pending(pool: &DbPool, org_id: &str) -> Result<Vec<OrgInviteRo
 WHERE org_id = $1 AND accepted_at IS NULL AND revoked_at IS NULL
 ORDER BY created_at DESC"
             );
-            let rows = sqlx::query(&q)
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(org_id)
                 .fetch_all(p)
                 .await
@@ -328,7 +352,7 @@ ORDER BY created_at DESC"
 WHERE org_id = ? AND accepted_at IS NULL AND revoked_at IS NULL
 ORDER BY created_at DESC"
             );
-            let rows = sqlx::query(&q)
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(org_id)
                 .fetch_all(p)
                 .await
@@ -341,7 +365,7 @@ ORDER BY created_at DESC"
 WHERE org_id = ?1 AND accepted_at IS NULL AND revoked_at IS NULL
 ORDER BY created_at DESC"
             );
-            let rows = sqlx::query(&q)
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(org_id)
                 .fetch_all(p)
                 .await

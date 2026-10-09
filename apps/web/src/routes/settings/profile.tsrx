@@ -15,7 +15,7 @@ import { setAuthMeCache } from "@/lib/session-queries";
 import { fetchEmailList, fetchUserGetProfile } from "@/lib/ssr-auth";
 import { toastError, toastSuccess, toastWarning } from "@/lib/toast";
 
-export type ProfileLoaderData =
+type ProfileLoaderData =
   | { kind: "unauthenticated" }
   | { kind: "error"; message: string }
   | { kind: "ready"; user: UserPublic; emails: EmailListItem[] };
@@ -67,7 +67,7 @@ export function ProfilePage() @{
   </AppPage>;
 }
 
-export function ProfileContent() @{
+function ProfileContent() @{
   const queryClient = useQueryClient();
   const loaderData = useQuery(settingsProfileQueryOptions()).data;
 

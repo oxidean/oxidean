@@ -208,19 +208,19 @@ pub async fn search_repositories(
             );
             let total_q_sql =
                 format!("SELECT COUNT(*)::bigint FROM repositories r {OWNER_JOINS} WHERE {cond}");
-            let total_q = sqlx::query_scalar::<_, i64>(&total_q_sql);
+            let total_q = sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(&*total_q_sql));
             let total: i64 = bind_opt(total_q, viewer_user_id)
                 .bind(&pat)
                 .fetch_one(p)
                 .await
                 .map_err(|e| format!("global repo search count: {e}"))?;
             let rows = bind_opt(
-                sqlx::query_as::<_, GlobalRepoHitRow>(&format!(
+                sqlx::query_as::<_, GlobalRepoHitRow>(sqlx::AssertSqlSafe(format!(
                     "SELECT {REPO_HIT_COLS_PG} FROM repositories r {OWNER_JOINS} WHERE {cond} \
                      ORDER BY r.star_count DESC, r.updated_at DESC LIMIT {l} OFFSET {o}",
                     l = ph(3),
                     o = ph(4)
-                )),
+                ))),
                 viewer_user_id,
             )
             .bind(&pat)
@@ -241,7 +241,7 @@ pub async fn search_repositories(
             );
             let count_q_sql =
                 format!("SELECT COUNT(*) FROM repositories r {OWNER_JOINS} WHERE {cond}");
-            let count_q = sqlx::query_scalar::<_, i64>(&count_q_sql);
+            let count_q = sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(&*count_q_sql));
             let count_q = bind_viewer_qm(count_q, viewer_user_id)
                 .bind(&pat)
                 .bind(&pat)
@@ -254,7 +254,7 @@ pub async fn search_repositories(
                 "SELECT {REPO_HIT_COLS_MYSQL} FROM repositories r {OWNER_JOINS} WHERE {cond} \
                  ORDER BY r.star_count DESC, r.updated_at DESC LIMIT ? OFFSET ?"
             );
-            let rows_q = sqlx::query_as::<_, GlobalRepoHitRow>(&rows_q_sql);
+            let rows_q = sqlx::query_as::<_, GlobalRepoHitRow>(sqlx::AssertSqlSafe(&*rows_q_sql));
             let rows = bind_viewer_qm(rows_q, viewer_user_id)
                 .bind(&pat)
                 .bind(&pat)
@@ -279,19 +279,19 @@ pub async fn search_repositories(
             );
             let count_q_sql =
                 format!("SELECT COUNT(*) FROM repositories r {OWNER_JOINS} WHERE {cond}");
-            let count_q = sqlx::query_scalar::<_, i64>(&count_q_sql);
+            let count_q = sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(&*count_q_sql));
             let total = bind_opt(count_q, viewer_user_id)
                 .bind(&pat)
                 .fetch_one(p)
                 .await
                 .map_err(|e| format!("global repo search count: {e}"))?;
             let rows = bind_opt(
-                sqlx::query_as::<_, GlobalRepoHitRow>(&format!(
+                sqlx::query_as::<_, GlobalRepoHitRow>(sqlx::AssertSqlSafe(format!(
                     "SELECT {REPO_HIT_COLS_SQLITE} FROM repositories r {OWNER_JOINS} WHERE {cond} \
                      ORDER BY r.star_count DESC, r.updated_at DESC LIMIT {l} OFFSET {o}",
                     l = ph(3),
                     o = ph(4)
-                )),
+                ))),
                 viewer_user_id,
             )
             .bind(&pat)
@@ -333,11 +333,11 @@ pub async fn search_issues(
                 c = ph(4)
             );
             let total: i64 = bind_opt(
-                sqlx::query_scalar(&format!(
+                sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
                     "SELECT COUNT(*)::bigint FROM issues i \
                      JOIN repositories r ON r.id = i.repo_id AND r.deleted_at IS NULL \
                      {OWNER_JOINS} WHERE {cond}"
-                )),
+                ))),
                 viewer_user_id,
             )
             .bind(state)
@@ -347,7 +347,7 @@ pub async fn search_issues(
             .await
             .map_err(|e| format!("global issue search count: {e}"))?;
             let rows = bind_opt(
-                sqlx::query_as::<_, GlobalIssueHitRow>(&format!(
+                sqlx::query_as::<_, GlobalIssueHitRow>(sqlx::AssertSqlSafe(format!(
                     "SELECT COALESCE(u.username, o.slug, '') AS repo_owner, r.name AS repo_name, \
                      i.number, i.title, i.state, au.username AS author_username, \
                      (SELECT COUNT(*)::bigint FROM issue_comments c WHERE c.issue_id = i.id) AS comment_count, \
@@ -359,7 +359,7 @@ pub async fn search_issues(
                      WHERE {cond} ORDER BY i.updated_at DESC LIMIT {l} OFFSET {o}",
                     l = ph(5),
                     o = ph(6)
-                )),
+                ))),
                 viewer_user_id,
             )
             .bind(state)
@@ -384,7 +384,7 @@ pub async fn search_issues(
             let from = "FROM issues i \
                      JOIN repositories r ON r.id = i.repo_id AND r.deleted_at IS NULL";
             let count_q_sql = format!("SELECT COUNT(*) {from} {OWNER_JOINS} WHERE {cond}");
-            let count_q = sqlx::query_scalar::<_, i64>(&count_q_sql);
+            let count_q = sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(&*count_q_sql));
             let count_q = bind_viewer_qm(count_q, viewer_user_id)
                 .bind(state)
                 .bind(state)
@@ -406,7 +406,7 @@ pub async fn search_issues(
                  LEFT JOIN users au ON au.id = i.author_id \
                  WHERE {cond} ORDER BY i.updated_at DESC LIMIT ? OFFSET ?"
             );
-            let rows_q = sqlx::query_as::<_, GlobalIssueHitRow>(&rows_q_sql);
+            let rows_q = sqlx::query_as::<_, GlobalIssueHitRow>(sqlx::AssertSqlSafe(&*rows_q_sql));
             let rows = bind_viewer_qm(rows_q, viewer_user_id)
                 .bind(state)
                 .bind(state)
@@ -437,11 +437,11 @@ pub async fn search_issues(
                 c = ph(4)
             );
             let total: i64 = bind_opt(
-                sqlx::query_scalar(&format!(
+                sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
                     "SELECT COUNT(*) FROM issues i \
                      JOIN repositories r ON r.id = i.repo_id AND r.deleted_at IS NULL \
                      {OWNER_JOINS} WHERE {cond}"
-                )),
+                ))),
                 viewer_user_id,
             )
             .bind(state)
@@ -451,7 +451,7 @@ pub async fn search_issues(
             .await
             .map_err(|e| format!("global issue search count: {e}"))?;
             let rows = bind_opt(
-                sqlx::query_as::<_, GlobalIssueHitRow>(&format!(
+                sqlx::query_as::<_, GlobalIssueHitRow>(sqlx::AssertSqlSafe(format!(
                     "SELECT COALESCE(u.username, o.slug, '') AS repo_owner, r.name AS repo_name, \
                      i.number, i.title, i.state, au.username AS author_username, \
                      (SELECT COUNT(*) FROM issue_comments c WHERE c.issue_id = i.id) AS comment_count, \
@@ -463,7 +463,7 @@ pub async fn search_issues(
                      WHERE {cond} ORDER BY i.updated_at DESC LIMIT {l} OFFSET {o}",
                     l = ph(5),
                     o = ph(6)
-                )),
+                ))),
                 viewer_user_id,
             )
             .bind(state)
@@ -507,11 +507,11 @@ pub async fn search_pulls(
                 c = ph(4)
             );
             let total: i64 = bind_opt(
-                sqlx::query_scalar(&format!(
+                sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
                     "SELECT COUNT(*)::bigint FROM pull_requests i \
                      JOIN repositories r ON r.id = i.repo_id AND r.deleted_at IS NULL \
                      {OWNER_JOINS} WHERE {cond}"
-                )),
+                ))),
                 viewer_user_id,
             )
             .bind(state)
@@ -521,7 +521,7 @@ pub async fn search_pulls(
             .await
             .map_err(|e| format!("global pull search count: {e}"))?;
             let rows = bind_opt(
-                sqlx::query_as::<_, GlobalPullHitRow>(&format!(
+                sqlx::query_as::<_, GlobalPullHitRow>(sqlx::AssertSqlSafe(format!(
                     "SELECT COALESCE(u.username, o.slug, '') AS repo_owner, r.name AS repo_name, \
                      i.number, i.title, i.state, i.draft, au.username AS author_username, \
                      (SELECT COUNT(*)::bigint FROM pull_comments c WHERE c.pull_id = i.id) AS comment_count, \
@@ -533,7 +533,7 @@ pub async fn search_pulls(
                      WHERE {cond} ORDER BY i.updated_at DESC LIMIT {l} OFFSET {o}",
                     l = ph(5),
                     o = ph(6)
-                )),
+                ))),
                 viewer_user_id,
             )
             .bind(state)
@@ -558,7 +558,7 @@ pub async fn search_pulls(
             let from = "FROM pull_requests i \
                      JOIN repositories r ON r.id = i.repo_id AND r.deleted_at IS NULL";
             let count_q_sql = format!("SELECT COUNT(*) {from} {OWNER_JOINS} WHERE {cond}");
-            let count_q = sqlx::query_scalar::<_, i64>(&count_q_sql);
+            let count_q = sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(&*count_q_sql));
             let count_q = bind_viewer_qm(count_q, viewer_user_id)
                 .bind(state)
                 .bind(state)
@@ -580,7 +580,7 @@ pub async fn search_pulls(
                  LEFT JOIN users au ON au.id = i.author_id \
                  WHERE {cond} ORDER BY i.updated_at DESC LIMIT ? OFFSET ?"
             );
-            let rows_q = sqlx::query_as::<_, GlobalPullHitRow>(&rows_q_sql);
+            let rows_q = sqlx::query_as::<_, GlobalPullHitRow>(sqlx::AssertSqlSafe(&*rows_q_sql));
             let rows = bind_viewer_qm(rows_q, viewer_user_id)
                 .bind(state)
                 .bind(state)
@@ -611,11 +611,11 @@ pub async fn search_pulls(
                 c = ph(4)
             );
             let total: i64 = bind_opt(
-                sqlx::query_scalar(&format!(
+                sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
                     "SELECT COUNT(*) FROM pull_requests i \
                      JOIN repositories r ON r.id = i.repo_id AND r.deleted_at IS NULL \
                      {OWNER_JOINS} WHERE {cond}"
-                )),
+                ))),
                 viewer_user_id,
             )
             .bind(state)
@@ -625,7 +625,7 @@ pub async fn search_pulls(
             .await
             .map_err(|e| format!("global pull search count: {e}"))?;
             let rows = bind_opt(
-                sqlx::query_as::<_, GlobalPullHitRow>(&format!(
+                sqlx::query_as::<_, GlobalPullHitRow>(sqlx::AssertSqlSafe(format!(
                     "SELECT COALESCE(u.username, o.slug, '') AS repo_owner, r.name AS repo_name, \
                      i.number, i.title, i.state, i.draft, au.username AS author_username, \
                      (SELECT COUNT(*) FROM pull_comments c WHERE c.pull_id = i.id) AS comment_count, \
@@ -637,7 +637,7 @@ pub async fn search_pulls(
                      WHERE {cond} ORDER BY i.updated_at DESC LIMIT {l} OFFSET {o}",
                     l = ph(5),
                     o = ph(6)
-                )),
+                ))),
                 viewer_user_id,
             )
             .bind(state)
@@ -666,16 +666,17 @@ pub async fn search_users(
         DbPool::Postgres(p) => {
             let cond = "banned_at IS NULL AND (username ILIKE $1 ESCAPE '\\' \
                         OR display_name ILIKE $1 ESCAPE '\\')";
-            let total: i64 =
-                sqlx::query_scalar(&format!("SELECT COUNT(*)::bigint FROM users WHERE {cond}"))
-                    .bind(&pat)
-                    .fetch_one(p)
-                    .await
-                    .map_err(|e| format!("global user search count: {e}"))?;
-            let rows = sqlx::query_as::<_, GlobalUserHitRow>(&format!(
+            let total: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+                "SELECT COUNT(*)::bigint FROM users WHERE {cond}"
+            )))
+            .bind(&pat)
+            .fetch_one(p)
+            .await
+            .map_err(|e| format!("global user search count: {e}"))?;
+            let rows = sqlx::query_as::<_, GlobalUserHitRow>(sqlx::AssertSqlSafe(format!(
                 "SELECT username, display_name, avatar_path FROM users WHERE {cond} \
                  ORDER BY username LIMIT $2 OFFSET $3"
-            ))
+            )))
             .bind(&pat)
             .bind(limit)
             .bind(offset)
@@ -687,17 +688,18 @@ pub async fn search_users(
         DbPool::MySql(p) => {
             let cond = "banned_at IS NULL AND (LOWER(username) LIKE LOWER(?) ESCAPE '\\\\' \
                         OR LOWER(display_name) LIKE LOWER(?) ESCAPE '\\\\')";
-            let total: i64 =
-                sqlx::query_scalar(&format!("SELECT COUNT(*) FROM users WHERE {cond}"))
-                    .bind(&pat)
-                    .bind(&pat)
-                    .fetch_one(p)
-                    .await
-                    .map_err(|e| format!("global user search count: {e}"))?;
-            let rows = sqlx::query_as::<_, GlobalUserHitRow>(&format!(
+            let total: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+                "SELECT COUNT(*) FROM users WHERE {cond}"
+            )))
+            .bind(&pat)
+            .bind(&pat)
+            .fetch_one(p)
+            .await
+            .map_err(|e| format!("global user search count: {e}"))?;
+            let rows = sqlx::query_as::<_, GlobalUserHitRow>(sqlx::AssertSqlSafe(format!(
                 "SELECT username, display_name, avatar_path FROM users WHERE {cond} \
                  ORDER BY username LIMIT ? OFFSET ?"
-            ))
+            )))
             .bind(&pat)
             .bind(&pat)
             .bind(limit)
@@ -710,16 +712,17 @@ pub async fn search_users(
         DbPool::Sqlite(p) => {
             let cond = "banned_at IS NULL AND (LOWER(username) LIKE LOWER(?1) ESCAPE '\\' \
                         OR LOWER(display_name) LIKE LOWER(?1) ESCAPE '\\')";
-            let total: i64 =
-                sqlx::query_scalar(&format!("SELECT COUNT(*) FROM users WHERE {cond}"))
-                    .bind(&pat)
-                    .fetch_one(p)
-                    .await
-                    .map_err(|e| format!("global user search count: {e}"))?;
-            let rows = sqlx::query_as::<_, GlobalUserHitRow>(&format!(
+            let total: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+                "SELECT COUNT(*) FROM users WHERE {cond}"
+            )))
+            .bind(&pat)
+            .fetch_one(p)
+            .await
+            .map_err(|e| format!("global user search count: {e}"))?;
+            let rows = sqlx::query_as::<_, GlobalUserHitRow>(sqlx::AssertSqlSafe(format!(
                 "SELECT username, display_name, avatar_path FROM users WHERE {cond} \
                  ORDER BY username LIMIT ?2 OFFSET ?3"
-            ))
+            )))
             .bind(&pat)
             .bind(limit)
             .bind(offset)
@@ -743,17 +746,17 @@ pub async fn search_orgs(
     match pool {
         DbPool::Postgres(p) => {
             let cond = "slug ILIKE $1 ESCAPE '\\' OR display_name ILIKE $1 ESCAPE '\\'";
-            let total: i64 = sqlx::query_scalar(&format!(
+            let total: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
                 "SELECT COUNT(*)::bigint FROM organizations WHERE {cond}"
-            ))
+            )))
             .bind(&pat)
             .fetch_one(p)
             .await
             .map_err(|e| format!("global org search count: {e}"))?;
-            let rows = sqlx::query_as::<_, GlobalOrgHitRow>(&format!(
+            let rows = sqlx::query_as::<_, GlobalOrgHitRow>(sqlx::AssertSqlSafe(format!(
                 "SELECT slug, display_name FROM organizations WHERE {cond} \
                  ORDER BY slug LIMIT $2 OFFSET $3"
-            ))
+            )))
             .bind(&pat)
             .bind(limit)
             .bind(offset)
@@ -765,17 +768,18 @@ pub async fn search_orgs(
         DbPool::MySql(p) => {
             let cond = "LOWER(slug) LIKE LOWER(?) ESCAPE '\\\\' \
                         OR LOWER(display_name) LIKE LOWER(?) ESCAPE '\\\\'";
-            let total: i64 =
-                sqlx::query_scalar(&format!("SELECT COUNT(*) FROM organizations WHERE {cond}"))
-                    .bind(&pat)
-                    .bind(&pat)
-                    .fetch_one(p)
-                    .await
-                    .map_err(|e| format!("global org search count: {e}"))?;
-            let rows = sqlx::query_as::<_, GlobalOrgHitRow>(&format!(
+            let total: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+                "SELECT COUNT(*) FROM organizations WHERE {cond}"
+            )))
+            .bind(&pat)
+            .bind(&pat)
+            .fetch_one(p)
+            .await
+            .map_err(|e| format!("global org search count: {e}"))?;
+            let rows = sqlx::query_as::<_, GlobalOrgHitRow>(sqlx::AssertSqlSafe(format!(
                 "SELECT slug, display_name FROM organizations WHERE {cond} \
                  ORDER BY slug LIMIT ? OFFSET ?"
-            ))
+            )))
             .bind(&pat)
             .bind(&pat)
             .bind(limit)
@@ -788,16 +792,17 @@ pub async fn search_orgs(
         DbPool::Sqlite(p) => {
             let cond = "LOWER(slug) LIKE LOWER(?1) ESCAPE '\\' \
                         OR LOWER(display_name) LIKE LOWER(?1) ESCAPE '\\'";
-            let total: i64 =
-                sqlx::query_scalar(&format!("SELECT COUNT(*) FROM organizations WHERE {cond}"))
-                    .bind(&pat)
-                    .fetch_one(p)
-                    .await
-                    .map_err(|e| format!("global org search count: {e}"))?;
-            let rows = sqlx::query_as::<_, GlobalOrgHitRow>(&format!(
+            let total: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+                "SELECT COUNT(*) FROM organizations WHERE {cond}"
+            )))
+            .bind(&pat)
+            .fetch_one(p)
+            .await
+            .map_err(|e| format!("global org search count: {e}"))?;
+            let rows = sqlx::query_as::<_, GlobalOrgHitRow>(sqlx::AssertSqlSafe(format!(
                 "SELECT slug, display_name FROM organizations WHERE {cond} \
                  ORDER BY slug LIMIT ?2 OFFSET ?3"
-            ))
+            )))
             .bind(&pat)
             .bind(limit)
             .bind(offset)
@@ -822,12 +827,12 @@ pub async fn list_scan_repos(
             let vis = pred_pg(viewer_user_id);
             let lp = if viewer_user_id.is_some() { "$2" } else { "$1" };
             let rows = bind_opt(
-                sqlx::query_as::<_, ScanRepoRow>(&format!(
+                sqlx::query_as::<_, ScanRepoRow>(sqlx::AssertSqlSafe(format!(
                     "SELECT COALESCE(u.username, o.slug, '') AS owner_slug, r.name, r.default_branch \
                      FROM repositories r {OWNER_JOINS} \
                      WHERE r.deleted_at IS NULL AND {vis} \
                      ORDER BY r.updated_at DESC LIMIT {lp}"
-                )),
+                ))),
                 viewer_user_id,
             )
             .bind(limit)
@@ -839,12 +844,12 @@ pub async fn list_scan_repos(
         DbPool::MySql(p) => {
             let vis = pred_mysql(viewer_user_id);
             let rows = bind_viewer_qm(
-                sqlx::query_as::<_, ScanRepoRow>(&format!(
+                sqlx::query_as::<_, ScanRepoRow>(sqlx::AssertSqlSafe(format!(
                     "SELECT COALESCE(u.username, o.slug, '') AS owner_slug, r.name, r.default_branch \
                      FROM repositories r {OWNER_JOINS} \
                      WHERE r.deleted_at IS NULL AND {vis} \
                      ORDER BY r.updated_at DESC LIMIT ?"
-                )),
+                ))),
                 viewer_user_id,
             )
             .bind(limit)
@@ -857,12 +862,12 @@ pub async fn list_scan_repos(
             let vis = pred_sqlite(viewer_user_id);
             let lp = if viewer_user_id.is_some() { "?2" } else { "?1" };
             let rows = bind_opt(
-                sqlx::query_as::<_, ScanRepoRow>(&format!(
+                sqlx::query_as::<_, ScanRepoRow>(sqlx::AssertSqlSafe(format!(
                     "SELECT COALESCE(u.username, o.slug, '') AS owner_slug, r.name, r.default_branch \
                      FROM repositories r {OWNER_JOINS} \
                      WHERE r.deleted_at IS NULL AND {vis} \
                      ORDER BY r.updated_at DESC LIMIT {lp}"
-                )),
+                ))),
                 viewer_user_id,
             )
             .bind(limit)
@@ -902,7 +907,17 @@ trait Bindable<'q> {
     fn bind_val(self, v: &'q str) -> Self;
 }
 
-impl<'q, DB> Bindable<'q> for sqlx::query::Query<'q, DB, <DB as sqlx::Database>::Arguments<'q>>
+impl<'q, DB> Bindable<'q> for sqlx::query::Query<'q, DB, <DB as sqlx::Database>::Arguments>
+where
+    DB: sqlx::Database,
+    &'q str: sqlx::Encode<'q, DB> + sqlx::Type<DB>,
+{
+    fn bind_val(self, v: &'q str) -> Self {
+        self.bind(v)
+    }
+}
+
+impl<'q, DB, T> Bindable<'q> for sqlx::query::QueryAs<'q, DB, T, <DB as sqlx::Database>::Arguments>
 where
     DB: sqlx::Database,
     &'q str: sqlx::Encode<'q, DB> + sqlx::Type<DB>,
@@ -913,18 +928,7 @@ where
 }
 
 impl<'q, DB, T> Bindable<'q>
-    for sqlx::query::QueryAs<'q, DB, T, <DB as sqlx::Database>::Arguments<'q>>
-where
-    DB: sqlx::Database,
-    &'q str: sqlx::Encode<'q, DB> + sqlx::Type<DB>,
-{
-    fn bind_val(self, v: &'q str) -> Self {
-        self.bind(v)
-    }
-}
-
-impl<'q, DB, T> Bindable<'q>
-    for sqlx::query::QueryScalar<'q, DB, T, <DB as sqlx::Database>::Arguments<'q>>
+    for sqlx::query::QueryScalar<'q, DB, T, <DB as sqlx::Database>::Arguments>
 where
     DB: sqlx::Database,
     &'q str: sqlx::Encode<'q, DB> + sqlx::Type<DB>,

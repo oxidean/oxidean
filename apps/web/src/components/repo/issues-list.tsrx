@@ -31,7 +31,7 @@ export type IssueListFilters = {
   limit: number;
 };
 
-export type IssueFilterDraft = {
+type IssueFilterDraft = {
   author: string;
   label: string;
   assignee: string;

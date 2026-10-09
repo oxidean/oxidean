@@ -15,7 +15,7 @@ import { usePageRedirect } from "@/lib/nav.tsrx";
 import { fetchSessionMe } from "@/lib/ssr-auth";
 import { fetchRepoGet } from "@/lib/ssr-repo";
 
-export type ForkLoaderData =
+type ForkLoaderData =
   | { kind: "ok"; user: UserPublic; source: RepoPublic }
   | { kind: "redirect"; href: string };
 

@@ -1,5 +1,6 @@
 /** Readable companion to HttpOnly `oxidean_session` — value is always `1`. */
-export const SESSION_PRESENCE_COOKIE = "oxidean_signed_in";
+const SESSION_PRESENCE_COOKIE = "oxidean_signed_in";
+/** Readable companion to HttpOnly `oxidean_session` — value is always `1`. */
 
 /** Sync hint for choosing signed-in home skeleton before `auth.me` resolves. */
 export function hasSessionPresenceHint(): boolean {

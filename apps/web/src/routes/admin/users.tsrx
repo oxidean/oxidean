@@ -67,7 +67,7 @@ import { toastSuccess, toastWarning } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { AppLink } from "@/components/ui/app-link";
 
-export type AdminUsersLoaderData =
+type AdminUsersLoaderData =
   | { kind: "unauthenticated" }
   | { kind: "forbidden" }
   | { kind: "error"; message: string }
@@ -456,7 +456,7 @@ export function AdminUsersPage() @{
   </AppPage>;
 }
 
-export function AdminUsersContent() @{
+function AdminUsersContent() @{
   const queryClient = useQueryClient();
   const loaderData = useQuery(adminUsersQueryOptions()).data;
 

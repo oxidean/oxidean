@@ -7,7 +7,7 @@ import {
 } from "@/lib/session-queries";
 
 /** Fail-closed: only `true` shows Sign up (D-06 / UI Considerations). */
-export function resolveAllowSignup(
+function resolveAllowSignup(
   cfg:
     | {
         allow_signup?: boolean;

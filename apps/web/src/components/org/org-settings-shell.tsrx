@@ -15,7 +15,7 @@ import { fetchOrgGet, fetchOrgListMine } from "@/lib/ssr-org";
  * Formerly the `$owner.settings` layout loader; one queryKey shared by the
  * shell and leaf pages.
  */
-export type OrgSettingsAccess =
+type OrgSettingsAccess =
   | { kind: "unauthenticated" }
   | { kind: "not-found" }
   | { kind: "forbidden"; org: OrgPublic }

@@ -179,9 +179,9 @@ pub async fn find_by_owner_and_name(
 ) -> Result<Option<RepositoryRow>, String> {
     match pool {
         DbPool::Postgres(p) => {
-            let row = sqlx::query(&format!(
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{REPO_SELECT_PG} WHERE owner_id = $1 AND lower(name) = lower($2) AND deleted_at IS NULL"
-            ))
+            )))
             .bind(owner_id)
             .bind(name)
             .fetch_optional(p)
@@ -193,9 +193,9 @@ pub async fn find_by_owner_and_name(
             })
         }
         DbPool::MySql(p) => {
-            let row = sqlx::query(&format!(
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{REPO_SELECT_MYSQL} WHERE owner_id = ? AND LOWER(name) = LOWER(?) AND deleted_at IS NULL"
-            ))
+            )))
             .bind(owner_id)
             .bind(name)
             .fetch_optional(p)
@@ -207,9 +207,9 @@ pub async fn find_by_owner_and_name(
             })
         }
         DbPool::Sqlite(p) => {
-            let row = sqlx::query(&format!(
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{REPO_SELECT_SQLITE} WHERE owner_id = ?1 AND lower(name) = lower(?2) AND deleted_at IS NULL"
-            ))
+            )))
             .bind(owner_id)
             .bind(name)
             .fetch_optional(p)
@@ -224,15 +224,12 @@ pub async fn find_by_owner_and_name(
 }
 
 /// List non-deleted repos for an owner, most recently updated first (GIT-01 / D-13).
-pub async fn list_by_owner(
-    pool: &DbPool,
-    owner_id: &str,
-) -> Result<Vec<RepositoryRow>, String> {
+pub async fn list_by_owner(pool: &DbPool, owner_id: &str) -> Result<Vec<RepositoryRow>, String> {
     match pool {
         DbPool::Postgres(p) => {
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{REPO_SELECT_PG} WHERE owner_id = $1 AND deleted_at IS NULL ORDER BY updated_at DESC"
-            ))
+            )))
             .bind(owner_id)
             .fetch_all(p)
             .await
@@ -240,9 +237,9 @@ pub async fn list_by_owner(
             rows.iter().map(|r| Ok(map_repo!(r))).collect()
         }
         DbPool::MySql(p) => {
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{REPO_SELECT_MYSQL} WHERE owner_id = ? AND deleted_at IS NULL ORDER BY updated_at DESC"
-            ))
+            )))
             .bind(owner_id)
             .fetch_all(p)
             .await
@@ -250,9 +247,9 @@ pub async fn list_by_owner(
             rows.iter().map(|r| Ok(map_repo!(r))).collect()
         }
         DbPool::Sqlite(p) => {
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{REPO_SELECT_SQLITE} WHERE owner_id = ?1 AND deleted_at IS NULL ORDER BY updated_at DESC"
-            ))
+            )))
             .bind(owner_id)
             .fetch_all(p)
             .await
@@ -694,11 +691,15 @@ pub async fn list_repo_disk_refs(pool: &DbPool) -> Result<Vec<RepoDiskRef>, Stri
             rows.into_iter()
                 .map(|row| {
                     Ok(RepoDiskRef {
-                        id: row.try_get("id").map_err(|e| format!("repo disk ref: {e}"))?,
+                        id: row
+                            .try_get("id")
+                            .map_err(|e| format!("repo disk ref: {e}"))?,
                         owner_username: row
                             .try_get("owner_username")
                             .map_err(|e| format!("repo disk ref: {e}"))?,
-                        name: row.try_get("name").map_err(|e| format!("repo disk ref: {e}"))?,
+                        name: row
+                            .try_get("name")
+                            .map_err(|e| format!("repo disk ref: {e}"))?,
                         deleted_at: row
                             .try_get("deleted_at")
                             .map_err(|e| format!("repo disk ref: {e}"))?,
@@ -714,11 +715,15 @@ pub async fn list_repo_disk_refs(pool: &DbPool) -> Result<Vec<RepoDiskRef>, Stri
             rows.into_iter()
                 .map(|row| {
                     Ok(RepoDiskRef {
-                        id: row.try_get("id").map_err(|e| format!("repo disk ref: {e}"))?,
+                        id: row
+                            .try_get("id")
+                            .map_err(|e| format!("repo disk ref: {e}"))?,
                         owner_username: row
                             .try_get("owner_username")
                             .map_err(|e| format!("repo disk ref: {e}"))?,
-                        name: row.try_get("name").map_err(|e| format!("repo disk ref: {e}"))?,
+                        name: row
+                            .try_get("name")
+                            .map_err(|e| format!("repo disk ref: {e}"))?,
                         deleted_at: row
                             .try_get("deleted_at")
                             .map_err(|e| format!("repo disk ref: {e}"))?,
@@ -734,11 +739,15 @@ pub async fn list_repo_disk_refs(pool: &DbPool) -> Result<Vec<RepoDiskRef>, Stri
             rows.into_iter()
                 .map(|row| {
                     Ok(RepoDiskRef {
-                        id: row.try_get("id").map_err(|e| format!("repo disk ref: {e}"))?,
+                        id: row
+                            .try_get("id")
+                            .map_err(|e| format!("repo disk ref: {e}"))?,
                         owner_username: row
                             .try_get("owner_username")
                             .map_err(|e| format!("repo disk ref: {e}"))?,
-                        name: row.try_get("name").map_err(|e| format!("repo disk ref: {e}"))?,
+                        name: row
+                            .try_get("name")
+                            .map_err(|e| format!("repo disk ref: {e}"))?,
                         deleted_at: row
                             .try_get("deleted_at")
                             .map_err(|e| format!("repo disk ref: {e}"))?,
@@ -784,33 +793,33 @@ pub async fn hard_delete_by_owner(
     owner_type: &str,
 ) -> Result<u64, String> {
     let n = match pool {
-        DbPool::Postgres(p) => sqlx::query(
-            "DELETE FROM repositories WHERE owner_id = $1 AND owner_type = $2",
-        )
-        .bind(owner_id)
-        .bind(owner_type)
-        .execute(p)
-        .await
-        .map_err(|e| format!("hard-delete repositories by owner failed: {e}"))?
-        .rows_affected(),
-        DbPool::MySql(p) => sqlx::query(
-            "DELETE FROM repositories WHERE owner_id = ? AND owner_type = ?",
-        )
-        .bind(owner_id)
-        .bind(owner_type)
-        .execute(p)
-        .await
-        .map_err(|e| format!("hard-delete repositories by owner failed: {e}"))?
-        .rows_affected(),
-        DbPool::Sqlite(p) => sqlx::query(
-            "DELETE FROM repositories WHERE owner_id = ?1 AND owner_type = ?2",
-        )
-        .bind(owner_id)
-        .bind(owner_type)
-        .execute(p)
-        .await
-        .map_err(|e| format!("hard-delete repositories by owner failed: {e}"))?
-        .rows_affected(),
+        DbPool::Postgres(p) => {
+            sqlx::query("DELETE FROM repositories WHERE owner_id = $1 AND owner_type = $2")
+                .bind(owner_id)
+                .bind(owner_type)
+                .execute(p)
+                .await
+                .map_err(|e| format!("hard-delete repositories by owner failed: {e}"))?
+                .rows_affected()
+        }
+        DbPool::MySql(p) => {
+            sqlx::query("DELETE FROM repositories WHERE owner_id = ? AND owner_type = ?")
+                .bind(owner_id)
+                .bind(owner_type)
+                .execute(p)
+                .await
+                .map_err(|e| format!("hard-delete repositories by owner failed: {e}"))?
+                .rows_affected()
+        }
+        DbPool::Sqlite(p) => {
+            sqlx::query("DELETE FROM repositories WHERE owner_id = ?1 AND owner_type = ?2")
+                .bind(owner_id)
+                .bind(owner_type)
+                .execute(p)
+                .await
+                .map_err(|e| format!("hard-delete repositories by owner failed: {e}"))?
+                .rows_affected()
+        }
     };
     Ok(n)
 }
@@ -818,9 +827,9 @@ pub async fn hard_delete_by_owner(
 pub async fn find_by_id(pool: &DbPool, id: &str) -> Result<Option<RepositoryRow>, String> {
     match pool {
         DbPool::Postgres(p) => {
-            let row = sqlx::query(&format!(
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{REPO_SELECT_PG} WHERE id = $1 AND deleted_at IS NULL"
-            ))
+            )))
             .bind(id)
             .fetch_optional(p)
             .await
@@ -831,9 +840,9 @@ pub async fn find_by_id(pool: &DbPool, id: &str) -> Result<Option<RepositoryRow>
             })
         }
         DbPool::MySql(p) => {
-            let row = sqlx::query(&format!(
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{REPO_SELECT_MYSQL} WHERE id = ? AND deleted_at IS NULL"
-            ))
+            )))
             .bind(id)
             .fetch_optional(p)
             .await
@@ -844,9 +853,9 @@ pub async fn find_by_id(pool: &DbPool, id: &str) -> Result<Option<RepositoryRow>
             })
         }
         DbPool::Sqlite(p) => {
-            let row = sqlx::query(&format!(
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{REPO_SELECT_SQLITE} WHERE id = ?1 AND deleted_at IS NULL"
-            ))
+            )))
             .bind(id)
             .fetch_optional(p)
             .await
@@ -866,9 +875,9 @@ pub async fn find_many_by_id(pool: &DbPool, ids: &[String]) -> Result<Vec<Reposi
     }
     match pool {
         DbPool::Postgres(p) => {
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{REPO_SELECT_PG} WHERE id = ANY($1) AND deleted_at IS NULL"
-            ))
+            )))
             .bind(ids)
             .fetch_all(p)
             .await
@@ -880,7 +889,7 @@ pub async fn find_many_by_id(pool: &DbPool, ids: &[String]) -> Result<Vec<Reposi
                 crate::dialect::in_placeholders(crate::dialect::Dialect::MySql, 1, ids.len());
             let q_str =
                 format!("{REPO_SELECT_MYSQL} WHERE id IN ({in_list}) AND deleted_at IS NULL");
-            let q = sqlx::query(&q_str);
+            let q = sqlx::query(sqlx::AssertSqlSafe(&*q_str));
             let q = ids.iter().fold(q, |q, id| q.bind(id));
             let rows = q
                 .fetch_all(p)
@@ -893,7 +902,7 @@ pub async fn find_many_by_id(pool: &DbPool, ids: &[String]) -> Result<Vec<Reposi
                 crate::dialect::in_placeholders(crate::dialect::Dialect::Sqlite, 1, ids.len());
             let q_str =
                 format!("{REPO_SELECT_SQLITE} WHERE id IN ({in_list}) AND deleted_at IS NULL");
-            let q = sqlx::query(&q_str);
+            let q = sqlx::query(sqlx::AssertSqlSafe(&*q_str));
             let q = ids.iter().fold(q, |q, id| q.bind(id));
             let rows = q
                 .fetch_all(p)
@@ -907,30 +916,30 @@ pub async fn find_many_by_id(pool: &DbPool, ids: &[String]) -> Result<Vec<Reposi
 /// Homepage URL / text (issue #23) — separate get to avoid rewriting REPO_SELECT.
 pub async fn get_homepage(pool: &DbPool, id: &str) -> Result<String, String> {
     match pool {
-        DbPool::Postgres(p) => sqlx::query_scalar(
-            "SELECT COALESCE(homepage, '') FROM repositories WHERE id = $1",
-        )
-        .bind(id)
-        .fetch_optional(p)
-        .await
-        .map_err(|e| format!("get_homepage: {e}"))
-        .map(|o| o.unwrap_or_default()),
-        DbPool::MySql(p) => sqlx::query_scalar(
-            "SELECT COALESCE(homepage, '') FROM repositories WHERE id = ?",
-        )
-        .bind(id)
-        .fetch_optional(p)
-        .await
-        .map_err(|e| format!("get_homepage: {e}"))
-        .map(|o| o.unwrap_or_default()),
-        DbPool::Sqlite(p) => sqlx::query_scalar(
-            "SELECT COALESCE(homepage, '') FROM repositories WHERE id = ?1",
-        )
-        .bind(id)
-        .fetch_optional(p)
-        .await
-        .map_err(|e| format!("get_homepage: {e}"))
-        .map(|o| o.unwrap_or_default()),
+        DbPool::Postgres(p) => {
+            sqlx::query_scalar("SELECT COALESCE(homepage, '') FROM repositories WHERE id = $1")
+                .bind(id)
+                .fetch_optional(p)
+                .await
+                .map_err(|e| format!("get_homepage: {e}"))
+                .map(|o| o.unwrap_or_default())
+        }
+        DbPool::MySql(p) => {
+            sqlx::query_scalar("SELECT COALESCE(homepage, '') FROM repositories WHERE id = ?")
+                .bind(id)
+                .fetch_optional(p)
+                .await
+                .map_err(|e| format!("get_homepage: {e}"))
+                .map(|o| o.unwrap_or_default())
+        }
+        DbPool::Sqlite(p) => {
+            sqlx::query_scalar("SELECT COALESCE(homepage, '') FROM repositories WHERE id = ?1")
+                .bind(id)
+                .fetch_optional(p)
+                .await
+                .map_err(|e| format!("get_homepage: {e}"))
+                .map(|o| o.unwrap_or_default())
+        }
     }
 }
 
@@ -999,45 +1008,42 @@ WHERE id = ?1 AND deleted_at IS NULL",
 
 pub async fn get_fork_count(pool: &DbPool, id: &str) -> Result<i64, String> {
     match pool {
-        DbPool::Postgres(p) => sqlx::query_scalar(
-            "SELECT COALESCE(fork_count, 0) FROM repositories WHERE id = $1",
-        )
-        .bind(id)
-        .fetch_optional(p)
-        .await
-        .map_err(|e| format!("get_fork_count: {e}"))
-        .map(|o| o.unwrap_or(0)),
-        DbPool::MySql(p) => sqlx::query_scalar(
-            "SELECT COALESCE(fork_count, 0) FROM repositories WHERE id = ?",
-        )
-        .bind(id)
-        .fetch_optional(p)
-        .await
-        .map_err(|e| format!("get_fork_count: {e}"))
-        .map(|o| o.unwrap_or(0)),
-        DbPool::Sqlite(p) => sqlx::query_scalar(
-            "SELECT COALESCE(fork_count, 0) FROM repositories WHERE id = ?1",
-        )
-        .bind(id)
-        .fetch_optional(p)
-        .await
-        .map_err(|e| format!("get_fork_count: {e}"))
-        .map(|o| o.unwrap_or(0)),
+        DbPool::Postgres(p) => {
+            sqlx::query_scalar("SELECT COALESCE(fork_count, 0) FROM repositories WHERE id = $1")
+                .bind(id)
+                .fetch_optional(p)
+                .await
+                .map_err(|e| format!("get_fork_count: {e}"))
+                .map(|o| o.unwrap_or(0))
+        }
+        DbPool::MySql(p) => {
+            sqlx::query_scalar("SELECT COALESCE(fork_count, 0) FROM repositories WHERE id = ?")
+                .bind(id)
+                .fetch_optional(p)
+                .await
+                .map_err(|e| format!("get_fork_count: {e}"))
+                .map(|o| o.unwrap_or(0))
+        }
+        DbPool::Sqlite(p) => {
+            sqlx::query_scalar("SELECT COALESCE(fork_count, 0) FROM repositories WHERE id = ?1")
+                .bind(id)
+                .fetch_optional(p)
+                .await
+                .map_err(|e| format!("get_fork_count: {e}"))
+                .map(|o| o.unwrap_or(0))
+        }
     }
 }
 
-async fn get_fork_network_id_for_repo(
-    pool: &DbPool,
-    id: &str,
-) -> Result<Option<String>, String> {
+async fn get_fork_network_id_for_repo(pool: &DbPool, id: &str) -> Result<Option<String>, String> {
     let nested: Option<Option<String>> = match pool {
-        DbPool::Postgres(p) => sqlx::query_scalar(
-            "SELECT fork_network_id FROM repositories WHERE id = $1",
-        )
-        .bind(id)
-        .fetch_optional(p)
-        .await
-        .map_err(|e| format!("get fork_network_id: {e}"))?,
+        DbPool::Postgres(p) => {
+            sqlx::query_scalar("SELECT fork_network_id FROM repositories WHERE id = $1")
+                .bind(id)
+                .fetch_optional(p)
+                .await
+                .map_err(|e| format!("get fork_network_id: {e}"))?
+        }
         DbPool::MySql(p) => {
             sqlx::query_scalar("SELECT fork_network_id FROM repositories WHERE id = ?")
                 .bind(id)
@@ -1045,26 +1051,26 @@ async fn get_fork_network_id_for_repo(
                 .await
                 .map_err(|e| format!("get fork_network_id: {e}"))?
         }
-        DbPool::Sqlite(p) => sqlx::query_scalar(
-            "SELECT fork_network_id FROM repositories WHERE id = ?1",
-        )
-        .bind(id)
-        .fetch_optional(p)
-        .await
-        .map_err(|e| format!("get fork_network_id: {e}"))?,
+        DbPool::Sqlite(p) => {
+            sqlx::query_scalar("SELECT fork_network_id FROM repositories WHERE id = ?1")
+                .bind(id)
+                .fetch_optional(p)
+                .await
+                .map_err(|e| format!("get fork_network_id: {e}"))?
+        }
     };
     Ok(nested.flatten())
 }
 
 async fn get_forked_from_repo_id(pool: &DbPool, id: &str) -> Result<Option<String>, String> {
     let nested: Option<Option<String>> = match pool {
-        DbPool::Postgres(p) => sqlx::query_scalar(
-            "SELECT forked_from_repo_id FROM repositories WHERE id = $1",
-        )
-        .bind(id)
-        .fetch_optional(p)
-        .await
-        .map_err(|e| format!("get forked_from: {e}"))?,
+        DbPool::Postgres(p) => {
+            sqlx::query_scalar("SELECT forked_from_repo_id FROM repositories WHERE id = $1")
+                .bind(id)
+                .fetch_optional(p)
+                .await
+                .map_err(|e| format!("get forked_from: {e}"))?
+        }
         DbPool::MySql(p) => {
             sqlx::query_scalar("SELECT forked_from_repo_id FROM repositories WHERE id = ?")
                 .bind(id)
@@ -1072,13 +1078,13 @@ async fn get_forked_from_repo_id(pool: &DbPool, id: &str) -> Result<Option<Strin
                 .await
                 .map_err(|e| format!("get forked_from: {e}"))?
         }
-        DbPool::Sqlite(p) => sqlx::query_scalar(
-            "SELECT forked_from_repo_id FROM repositories WHERE id = ?1",
-        )
-        .bind(id)
-        .fetch_optional(p)
-        .await
-        .map_err(|e| format!("get forked_from: {e}"))?,
+        DbPool::Sqlite(p) => {
+            sqlx::query_scalar("SELECT forked_from_repo_id FROM repositories WHERE id = ?1")
+                .bind(id)
+                .fetch_optional(p)
+                .await
+                .map_err(|e| format!("get forked_from: {e}"))?
+        }
     };
     Ok(nested.flatten())
 }
@@ -1123,14 +1129,12 @@ pub async fn recount_fork_count_for_network(
 
     match pool {
         DbPool::Postgres(p) => {
-            sqlx::query(
-                "UPDATE repositories SET fork_count = $2 WHERE fork_network_id = $1",
-            )
-            .bind(network_id)
-            .bind(count)
-            .execute(p)
-            .await
-            .map_err(|e| format!("set fork_count: {e}"))?;
+            sqlx::query("UPDATE repositories SET fork_count = $2 WHERE fork_network_id = $1")
+                .bind(network_id)
+                .bind(count)
+                .execute(p)
+                .await
+                .map_err(|e| format!("set fork_count: {e}"))?;
         }
         DbPool::MySql(p) => {
             sqlx::query("UPDATE repositories SET fork_count = ? WHERE fork_network_id = ?")

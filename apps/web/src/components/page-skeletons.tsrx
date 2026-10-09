@@ -1,5 +1,4 @@
 import { Skeleton } from "@/components/ui/skeleton";
-import { SETTINGS_SHELL_MAX } from "@/components/settings/settings-shell";
 
 /** Signed-in home at `/` — mirrors {@link SignedInHome} two-column geometry. */
 export function SignedInHomeSkeleton() @{
@@ -30,61 +29,6 @@ export function SignedInHomeSkeleton() @{
         </div>
         <Skeleton className="h-40 w-full rounded-lg" />
       </div>
-    </div>
-  </div>;
-}
-
-export function ProfilePageSkeleton() @{
-  <div
-    className={`mx-auto w-full px-4 py-10 sm:px-6 ${SETTINGS_SHELL_MAX}`}
-    role="status"
-    aria-busy="true"
-    aria-label="Loading profile"
-  >
-    <Skeleton className="h-8 w-40" />
-    <Skeleton className="mt-2 h-5 w-64" />
-    <div className="mt-8 flex items-center gap-4">
-      <Skeleton className="size-16 rounded-full" />
-      <Skeleton className="h-11 w-36" />
-    </div>
-    <div className="mt-8 flex flex-col gap-4">
-      <div className="flex flex-col gap-2">
-        <Skeleton className="h-4 w-24" />
-        <Skeleton className="h-11 w-full" />
-      </div>
-      <div className="flex flex-col gap-2">
-        <Skeleton className="h-4 w-20" />
-        <Skeleton className="h-11 w-full" />
-      </div>
-      <div className="flex flex-col gap-2">
-        <Skeleton className="h-4 w-12" />
-        <Skeleton className="h-24 w-full" />
-      </div>
-      <Skeleton className="h-11 w-28" />
-    </div>
-  </div>;
-}
-
-export function AdminAuthSkeleton() @{
-  <div
-    className={`mx-auto w-full px-4 py-10 sm:px-6 ${SETTINGS_SHELL_MAX}`}
-    role="status"
-    aria-busy="true"
-    aria-label="Loading auth settings"
-  >
-    <Skeleton className="h-8 w-48" />
-    <Skeleton className="mt-2 h-5 w-full max-w-lg" />
-    <div className="mt-8 flex flex-col gap-6">
-      <div className="flex flex-col gap-2">
-        <Skeleton className="h-4 w-28" />
-        <Skeleton className="h-11 w-full" />
-      </div>
-      <div className="flex flex-col gap-2">
-        <Skeleton className="h-4 w-32" />
-        <Skeleton className="h-11 w-full" />
-      </div>
-      <Skeleton className="h-24 w-full" />
-      <Skeleton className="h-11 w-36" />
     </div>
   </div>;
 }

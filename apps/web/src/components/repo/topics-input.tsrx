@@ -5,9 +5,9 @@ import { useEffect, useState } from "octane";
 import { apiClient } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 
-export const MAX_REPO_TOPICS = 20;
+const MAX_REPO_TOPICS = 20;
 
-export type TopicChipsInputProps = {
+type TopicChipsInputProps = {
   id?: string;
   /** Controlled chip list (normalized topic slugs). */
   topics: string[];

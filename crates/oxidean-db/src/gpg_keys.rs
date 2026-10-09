@@ -57,7 +57,8 @@ const GPG_SELECT_MYSQL: &str = "SELECT id, user_id, title, armored_public_key, f
        DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at
 FROM gpg_public_keys";
 
-const GPG_SELECT_SQLITE: &str = "SELECT id, user_id, title, armored_public_key, fingerprint, key_id,
+const GPG_SELECT_SQLITE: &str =
+    "SELECT id, user_id, title, armored_public_key, fingerprint, key_id,
        uid_emails,
        strftime('%Y-%m-%dT%H:%M:%SZ', created_at) AS created_at
 FROM gpg_public_keys";
@@ -137,33 +138,39 @@ pub async fn find_by_fingerprint(
 ) -> Result<Option<GpgKeyRow>, String> {
     match pool {
         DbPool::Postgres(p) => {
-            let row = sqlx::query(&format!("{GPG_SELECT_PG} WHERE fingerprint = $1"))
-                .bind(fingerprint)
-                .fetch_optional(p)
-                .await
-                .map_err(|e| format!("find gpg key failed: {e}"))?;
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{GPG_SELECT_PG} WHERE fingerprint = $1"
+            )))
+            .bind(fingerprint)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("find gpg key failed: {e}"))?;
             match row {
                 Some(r) => Ok(Some(map_gpg_key!(&r))),
                 None => Ok(None),
             }
         }
         DbPool::MySql(p) => {
-            let row = sqlx::query(&format!("{GPG_SELECT_MYSQL} WHERE fingerprint = ?"))
-                .bind(fingerprint)
-                .fetch_optional(p)
-                .await
-                .map_err(|e| format!("find gpg key failed: {e}"))?;
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{GPG_SELECT_MYSQL} WHERE fingerprint = ?"
+            )))
+            .bind(fingerprint)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("find gpg key failed: {e}"))?;
             match row {
                 Some(r) => Ok(Some(map_gpg_key!(&r))),
                 None => Ok(None),
             }
         }
         DbPool::Sqlite(p) => {
-            let row = sqlx::query(&format!("{GPG_SELECT_SQLITE} WHERE fingerprint = ?1"))
-                .bind(fingerprint)
-                .fetch_optional(p)
-                .await
-                .map_err(|e| format!("find gpg key failed: {e}"))?;
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{GPG_SELECT_SQLITE} WHERE fingerprint = ?1"
+            )))
+            .bind(fingerprint)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("find gpg key failed: {e}"))?;
             match row {
                 Some(r) => Ok(Some(map_gpg_key!(&r))),
                 None => Ok(None),
@@ -176,9 +183,9 @@ pub async fn find_by_fingerprint(
 pub async fn list_for_user(pool: &DbPool, user_id: &str) -> Result<Vec<GpgKeyRow>, String> {
     match pool {
         DbPool::Postgres(p) => {
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{GPG_SELECT_PG} WHERE user_id = $1 ORDER BY created_at DESC, id DESC"
-            ))
+            )))
             .bind(user_id)
             .fetch_all(p)
             .await
@@ -190,9 +197,9 @@ pub async fn list_for_user(pool: &DbPool, user_id: &str) -> Result<Vec<GpgKeyRow
             Ok(mapped)
         }
         DbPool::MySql(p) => {
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{GPG_SELECT_MYSQL} WHERE user_id = ? ORDER BY created_at DESC, id DESC"
-            ))
+            )))
             .bind(user_id)
             .fetch_all(p)
             .await
@@ -204,9 +211,9 @@ pub async fn list_for_user(pool: &DbPool, user_id: &str) -> Result<Vec<GpgKeyRow
             Ok(mapped)
         }
         DbPool::Sqlite(p) => {
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{GPG_SELECT_SQLITE} WHERE user_id = ?1 ORDER BY created_at DESC, id DESC"
-            ))
+            )))
             .bind(user_id)
             .fetch_all(p)
             .await
@@ -228,9 +235,9 @@ pub async fn list_for_users(pool: &DbPool, user_ids: &[String]) -> Result<Vec<Gp
     }
     match pool {
         DbPool::Postgres(p) => {
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{GPG_SELECT_PG} WHERE user_id = ANY($1) ORDER BY created_at DESC, id DESC"
-            ))
+            )))
             .bind(user_ids)
             .fetch_all(p)
             .await
@@ -247,7 +254,11 @@ pub async fn list_for_users(pool: &DbPool, user_ids: &[String]) -> Result<Vec<Gp
             let q_str = format!(
                 "{GPG_SELECT_MYSQL} WHERE user_id IN ({in_list}) ORDER BY created_at DESC, id DESC"
             );
-            let q = user_ids.iter().fold(sqlx::query(&q_str), |q, id| q.bind(id));
+            let q = user_ids
+                .iter()
+                .fold(sqlx::query(sqlx::AssertSqlSafe(&*q_str)), |q, id| {
+                    q.bind(id)
+                });
             let rows = q
                 .fetch_all(p)
                 .await
@@ -264,7 +275,11 @@ pub async fn list_for_users(pool: &DbPool, user_ids: &[String]) -> Result<Vec<Gp
             let q_str = format!(
                 "{GPG_SELECT_SQLITE} WHERE user_id IN ({in_list}) ORDER BY created_at DESC, id DESC"
             );
-            let q = user_ids.iter().fold(sqlx::query(&q_str), |q, id| q.bind(id));
+            let q = user_ids
+                .iter()
+                .fold(sqlx::query(sqlx::AssertSqlSafe(&*q_str)), |q, id| {
+                    q.bind(id)
+                });
             let rows = q
                 .fetch_all(p)
                 .await

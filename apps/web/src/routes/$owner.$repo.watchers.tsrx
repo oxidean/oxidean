@@ -19,7 +19,7 @@ import { socialListHref } from "@/lib/repo-social-lists";
 import { fetchRepoGet, fetchRepoWatchers } from "@/lib/ssr-repo";
 import { AppLink } from "@/components/ui/app-link";
 
-export type WatchersLoaderData =
+type WatchersLoaderData =
   | { kind: "not_found" }
   | { kind: "error"; message: string }
   | {

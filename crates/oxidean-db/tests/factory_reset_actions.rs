@@ -12,7 +12,7 @@ async fn count_table(db_path: &std::path::Path, table: &str) -> i64 {
         .await
         .expect("reconnect for count");
     let sql = format!("SELECT COUNT(*) FROM {table}");
-    sqlx::query_scalar::<_, i64>(&sql)
+    sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(&*sql))
         .fetch_one(&pool)
         .await
         .unwrap_or_else(|e| panic!("count {table}: {e}"))
@@ -41,13 +41,7 @@ async fn factory_reset_actions_wipes_runners_runs_jobs_secrets() {
         .expect("user");
     let repo = db
         .insert_repository(
-            "r-fr-act",
-            &owner.id,
-            "user",
-            "fr-act",
-            "private",
-            "",
-            "main",
+            "r-fr-act", &owner.id, "user", "fr-act", "private", "", "main",
         )
         .await
         .expect("repo");

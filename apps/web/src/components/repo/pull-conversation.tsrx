@@ -14,7 +14,7 @@ import { apiClient } from "@/lib/api-client";
 import { formatRelative } from "@/lib/relative-time";
 import { AppLink } from "@/components/ui/app-link";
 
-export type PullConversationProps = {
+type PullConversationProps = {
   owner: string;
   repoName: string;
   number: number;

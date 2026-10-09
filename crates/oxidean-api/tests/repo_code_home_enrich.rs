@@ -97,7 +97,11 @@ async fn create_repo(app: &axum::Router, cookie: &str, name: &str, visibility: &
 
 async fn rpc_json(app: &axum::Router, cookie: Option<&str>, body: &str) -> serde_json::Value {
     let res = match cookie {
-        Some(c) => app.clone().oneshot(rpc_req_with_cookie(body, c)).await.unwrap(),
+        Some(c) => app
+            .clone()
+            .oneshot(rpc_req_with_cookie(body, c))
+            .await
+            .unwrap(),
         None => app.clone().oneshot(rpc_req(body)).await.unwrap(),
     };
     let bytes = res.into_body().collect().await.unwrap().to_bytes();
@@ -147,7 +151,10 @@ async fn path_last_commits_and_count_and_contributors() {
     .await;
     assert_eq!(last["ok"], true, "{last}");
     let commits = last["data"]["commits"].as_object().unwrap();
-    assert!(!commits.is_empty(), "expected last-commit map entries: {commits:?}");
+    assert!(
+        !commits.is_empty(),
+        "expected last-commit map entries: {commits:?}"
+    );
 
     let contrib = rpc_json(
         &app,

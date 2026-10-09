@@ -5,17 +5,6 @@ import { cleanup, screen, waitFor } from "@octanejs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithQueryClient } from "@/test/render-with-query";
 
-const navigateMock = vi.fn();
-
-vi.mock("@octanejs/tanstack-router", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@octanejs/tanstack-router")>();
-  return {
-    ...actual,
-    useNavigate: () => navigateMock,
-    createFileRoute: () => (opts: { component?: unknown }) => opts,
-  };
-});
-
 vi.mock("@/lib/api-client", () => ({
   apiClient: {
     notification: {
@@ -40,7 +29,6 @@ import { NotificationsPage } from "./notifications";
 afterEach(cleanup);
 
 beforeEach(() => {
-  navigateMock.mockReset();
   vi.mocked(apiClient.notification.unreadCount).mockResolvedValue({
     ok: true,
     data: { count: 1 },
