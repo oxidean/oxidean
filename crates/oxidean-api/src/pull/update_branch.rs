@@ -4,9 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
-use oxidean_core::{
-    AppError, PullBranchStatusResponse, PullRefRequest, UpdatePullBranchResponse,
-};
+use oxidean_core::{AppError, PullBranchStatusResponse, PullRefRequest, UpdatePullBranchResponse};
 use oxidean_db::{PullRow, RepositoryRow};
 
 use crate::auth::gate::require_verified;
@@ -35,15 +33,11 @@ async fn resolve_head(
         .await
         .map_err(db_err)?
         .filter(|r| r.deleted_at.is_none())
-        .ok_or_else(|| {
-            AppError::new("pull.head_unavailable", "head repository is unavailable")
-        })?;
+        .ok_or_else(|| AppError::new("pull.head_unavailable", "head repository is unavailable"))?;
     let owner = owner_ref_for_repo(&ctx.db, &head)
         .await
         .map_err(db_err)?
-        .ok_or_else(|| {
-            AppError::new("pull.head_unavailable", "head repository is unavailable")
-        })?;
+        .ok_or_else(|| AppError::new("pull.head_unavailable", "head repository is unavailable"))?;
     let caller = ctx.session.as_ref().map(|s| s.user_id.as_str());
     let cap = effective_capability(&ctx.db, caller, &head, &owner)
         .await

@@ -8,7 +8,8 @@
 mod support;
 
 use std::io::Write;
-use std::sync::Mutex;
+use std::sync::Mutex as StdMutex;
+use tokio::sync::Mutex;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
@@ -20,8 +21,8 @@ use tower::ServiceExt;
 use tracing_subscriber::fmt::MakeWriter;
 
 /// Serializes tests in this binary — the statement buffer is process-global.
-static SERIAL: Mutex<()> = Mutex::new(());
-static SQL_BUF: Mutex<String> = Mutex::new(String::new());
+static SERIAL: Mutex<()> = Mutex::const_new(());
+static SQL_BUF: StdMutex<String> = StdMutex::new(String::new());
 
 struct SqlWriter;
 
@@ -147,7 +148,7 @@ async fn signup_verified_owner(
 /// statements — labels/assignees/reactions/comments enrich in batch.
 #[tokio::test]
 async fn issue_list_query_count_does_not_grow_with_rows() {
-    let _serial = SERIAL.lock().unwrap();
+    let _serial = SERIAL.lock().await;
     install_sql_capture();
 
     let dir = tempfile::tempdir().expect("tempdir");
@@ -241,7 +242,7 @@ async fn issue_list_query_count_does_not_grow_with_rows() {
     }
 
     let [(solo_repo, solo_q, solo_rows), (crowd_repo, crowd_q, crowd_rows)] =
-        [counts[0].clone(), counts[1].clone()];
+        [counts[0], counts[1]];
     assert_eq!(solo_rows, 1);
     assert_eq!(crowd_rows, 6);
     assert!(
@@ -258,7 +259,7 @@ async fn issue_list_query_count_does_not_grow_with_rows() {
 /// head owners, and assignees all enrich in batch.
 #[tokio::test]
 async fn pull_list_query_count_does_not_grow_with_rows() {
-    let _serial = SERIAL.lock().unwrap();
+    let _serial = SERIAL.lock().await;
     install_sql_capture();
 
     let dir = tempfile::tempdir().expect("tempdir");

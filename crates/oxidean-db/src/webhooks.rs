@@ -157,6 +157,7 @@ const ATT_SEL_PG: &str = "SELECT id, delivery_id, attempt_number, to_char(attemp
 const ATT_SEL_MY: &str = "SELECT id, delivery_id, attempt_number, DATE_FORMAT(attempted_at, '%Y-%m-%dT%H:%i:%sZ') AS attempted_at, http_status, error_message, duration_ms, response_snippet FROM webhook_delivery_attempts";
 const ATT_SEL_SQ: &str = "SELECT id, delivery_id, attempt_number, strftime('%Y-%m-%dT%H:%M:%SZ', attempted_at) AS attempted_at, http_status, error_message, duration_ms, response_snippet FROM webhook_delivery_attempts";
 
+#[allow(clippy::too_many_arguments)]
 pub async fn insert_webhook(
     pool: &DbPool,
     id: &str,
@@ -541,6 +542,7 @@ pub async fn list_deliveries_for_webhook(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn insert_delivery_attempt(
     pool: &DbPool,
     id: &str,

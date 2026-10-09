@@ -155,11 +155,9 @@ fn strip_path_fields(schema: &mut Value, fields: &[&str]) {
 /// Move a generated schema's inline `$defs` into `components` and return the
 /// root schema (or the `$ref` it already is).
 fn hoist_defs(schema: &mut Value, components: &mut Map<String, Value>) {
-    if let Some(defs) = schema.as_object_mut().and_then(|o| o.remove("$defs")) {
-        if let Value::Object(defs) = defs {
-            for (k, v) in defs {
-                components.insert(k, v);
-            }
+    if let Some(Value::Object(defs)) = schema.as_object_mut().and_then(|o| o.remove("$defs")) {
+        for (k, v) in defs {
+            components.insert(k, v);
         }
     }
 }

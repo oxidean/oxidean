@@ -51,7 +51,7 @@ async fn package_gc_keeps_shared_blob_and_removes_unref() {
     std::env::set_var("OXIDEAN_PACKAGES_GC_GRACE_SECS", "0");
     let removed = gc_unref_blobs(&db, &pkg_dir).await.unwrap();
     assert_eq!(removed, 0, "shared blob must not GC");
-    assert!(pkg_dir.join(&digest.replace(':', "/")).exists() || store_exists(&pkg_dir, &digest));
+    assert!(pkg_dir.join(digest.replace(':', "/")).exists() || store_exists(&pkg_dir, &digest));
 
     // Drop remaining ref — now GC can remove.
     let digests = db.list_package_version_blob_digests(&v2).await.unwrap();

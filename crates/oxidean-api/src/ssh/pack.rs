@@ -51,10 +51,9 @@ pub fn parse_pack_exec(data: &[u8]) -> Option<PackCommand> {
     let s = std::str::from_utf8(data).ok()?.trim();
     let (kind, rest) = if let Some(r) = s.strip_prefix("git-upload-pack") {
         ("upload", r.trim())
-    } else if let Some(r) = s.strip_prefix("git-receive-pack") {
-        ("receive", r.trim())
     } else {
-        return None;
+        let r = s.strip_prefix("git-receive-pack")?;
+        ("receive", r.trim())
     };
 
     let path = strip_quotes(rest)?;
@@ -114,8 +113,12 @@ pub async fn authorize_pack(
     }
 
     let (owner, name, action) = match cmd {
-        PackCommand::UploadPack { owner, name } => (owner.as_str(), name.as_str(), PackAction::Fetch),
-        PackCommand::ReceivePack { owner, name } => (owner.as_str(), name.as_str(), PackAction::Push),
+        PackCommand::UploadPack { owner, name } => {
+            (owner.as_str(), name.as_str(), PackAction::Fetch)
+        }
+        PackCommand::ReceivePack { owner, name } => {
+            (owner.as_str(), name.as_str(), PackAction::Push)
+        }
     };
 
     let pair = match lookup_repo_row_or_redirect(db, owner, name).await {
@@ -235,8 +238,12 @@ pub async fn authorize_deploy_key_pack(
     client_ip: &str,
 ) -> AuthzDecision {
     let (owner, name, action) = match cmd {
-        PackCommand::UploadPack { owner, name } => (owner.as_str(), name.as_str(), PackAction::Fetch),
-        PackCommand::ReceivePack { owner, name } => (owner.as_str(), name.as_str(), PackAction::Push),
+        PackCommand::UploadPack { owner, name } => {
+            (owner.as_str(), name.as_str(), PackAction::Fetch)
+        }
+        PackCommand::ReceivePack { owner, name } => {
+            (owner.as_str(), name.as_str(), PackAction::Push)
+        }
     };
 
     let pair = match lookup_repo_row_or_redirect(db, owner, name).await {
@@ -486,12 +493,13 @@ impl<R> PullRefGate<R> {
             let parts: Vec<&str> = line.split_whitespace().collect();
             // Command lines are `<old-sha> <new-sha> <refname>`; other lines
             // (push-options, commands we don't recognize) are skipped.
-            if parts.len() >= 3 && parts[2].starts_with("refs/") {
-                if crate::pull::refs::is_pull_ref(parts[2]) {
-                    self.forbidden = Some(parts[2].to_string());
-                    self.state = PullRefScan::Forbidden;
-                    return;
-                }
+            if parts.len() >= 3
+                && parts[2].starts_with("refs/")
+                && crate::pull::refs::is_pull_ref(parts[2])
+            {
+                self.forbidden = Some(parts[2].to_string());
+                self.state = PullRefScan::Forbidden;
+                return;
             }
         }
         if self.scan.len() > PULL_REF_SCAN_MAX {
@@ -639,10 +647,7 @@ mod tests {
             Some("/usr/local/bin/oxidean-protection-hook"),
             Some("compose"),
         );
-        let map: HashMap<&str, &str> = vars
-            .iter()
-            .map(|(k, v)| (k.as_str(), v.as_str()))
-            .collect();
+        let map: HashMap<&str, &str> = vars.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
         assert_eq!(
             map.get("OXIDEAN_PROTECTION_HELPER").copied(),
             Some("/usr/local/bin/oxidean-protection-hook"),
@@ -672,10 +677,7 @@ mod tests {
             None,
             Some("production"),
         );
-        let map: HashMap<&str, &str> = vars
-            .iter()
-            .map(|(k, v)| (k.as_str(), v.as_str()))
-            .collect();
+        let map: HashMap<&str, &str> = vars.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
         assert!(
             !map.contains_key("OXIDEAN_PROTECTION_HELPER"),
             "helper key omitted when unresolved (mirror Smart HTTP)"
@@ -814,8 +816,7 @@ mod tests {
     #[test]
     fn upload_pack_config_env_enables_filter() {
         let vars = upload_pack_config_env();
-        let map: HashMap<&str, &str> =
-            vars.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+        let map: HashMap<&str, &str> = vars.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
         assert_eq!(map.get("GIT_CONFIG_COUNT").copied(), Some("1"));
         assert_eq!(
             map.get("GIT_CONFIG_KEY_0").copied(),

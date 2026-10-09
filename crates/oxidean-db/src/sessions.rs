@@ -98,6 +98,7 @@ const SESSION_SELECT_SQLITE: &str = "SELECT s.id, s.user_id, s.token_hash, s.rem
 FROM sessions s
 LEFT JOIN users u ON u.id = s.user_id";
 
+#[allow(clippy::too_many_arguments)]
 /// Create a session row. `id` is the session PK; `token_hash` is SHA-256 hex of the cookie value.
 /// `ip_address`/`user_agent` capture the client that minted the session.
 pub async fn create(

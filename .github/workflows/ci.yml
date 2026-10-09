@@ -116,7 +116,7 @@ jobs:
       - name: rust dead code + unused deps
         run: |
           cargo machete
-          cargo clippy --workspace --all-targets -- -D dead_code
+          cargo clippy --workspace --all-targets -- -D warnings
 
   # Chromium component tests for Octane insertBefore races (happy-dom cannot catch).
   web-browser:

@@ -503,6 +503,7 @@ pub(crate) fn edge_credential(headers: &HeaderMap) -> RpcCredential {
     RpcCredential::Anonymous
 }
 
+#[allow(clippy::result_large_err)]
 pub(crate) async fn build_rpc_ctx(
     state: &AppState,
     credential: RpcCredential,

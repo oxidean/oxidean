@@ -545,7 +545,7 @@ async fn sweep_protection_hooks_skips_non_bare() {
 /// alone.
 #[tokio::test]
 async fn branch_protect_push_requires_signed_commits() {
-    let _env_guard = support::lock_admin_env();
+    let _env_guard = support::lock_admin_env().await;
     let dir = tempfile::tempdir().unwrap();
     // The web-flow keypair lands here: repo.create seeds a forge-signed commit
     // and the verify keyring binds noreply@oxidean.local to that public key.

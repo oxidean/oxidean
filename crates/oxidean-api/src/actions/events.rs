@@ -14,8 +14,8 @@ use oxidean_db::Database;
 use oxidean_git::GitBackend;
 use serde::{Deserialize, Serialize};
 
-use crate::actions::dispatch::enqueue_run;
 use crate::actions::discover_workflows;
+use crate::actions::dispatch::enqueue_run;
 
 /// PR lifecycle activity types that enqueue workflows in v1 (D-ACT-04).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -118,6 +118,7 @@ async fn dispatch_pull_request_inner(
     Ok(n)
 }
 
+#[allow(clippy::too_many_arguments)]
 /// Convenience for tests / harnesses with an owned bare path.
 pub async fn dispatch_pull_request_for_sha(
     db: &Database,

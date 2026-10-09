@@ -59,10 +59,7 @@ fn generate_magic() -> String {
 }
 
 fn rate_limited() -> AppError {
-    AppError::new(
-        "auth.rate_limited",
-        "too many emails; try again later",
-    )
+    AppError::new("auth.rate_limited", "too many emails; try again later")
 }
 
 fn invite_url(magic: &str) -> String {

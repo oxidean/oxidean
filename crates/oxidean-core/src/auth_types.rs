@@ -618,7 +618,7 @@ const RESERVED_USERNAMES: &[&str] = &[
 /// Returns true if `u` matches a reserved username (case-insensitive).
 pub fn is_reserved_username(u: &str) -> bool {
     let lower = u.to_ascii_lowercase();
-    RESERVED_USERNAMES.iter().any(|r| *r == lower.as_str())
+    RESERVED_USERNAMES.contains(&lower.as_str())
 }
 
 /// Username rules (D-03): 1–39 chars, ascii alphanumeric + hyphen,

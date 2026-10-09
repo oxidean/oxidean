@@ -2092,6 +2092,7 @@ const LINK_SELECT_SQLITE: &str = r#"SELECT id, issue_id, kind, target_repo_id, t
        strftime('%Y-%m-%dT%H:%M:%SZ', created_at) AS created_at
 FROM issue_links"#;
 
+#[allow(clippy::too_many_arguments)]
 /// Insert a stub or issue link row; returns the stored row.
 pub async fn insert_issue_link(
     pool: &DbPool,

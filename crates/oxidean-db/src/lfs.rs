@@ -176,11 +176,7 @@ pub async fn upsert_lfs_object(pool: &DbPool, oid: &str, size: i64) -> Result<()
     Ok(())
 }
 
-pub async fn link_lfs_object(
-    pool: &DbPool,
-    repository_id: &str,
-    oid: &str,
-) -> Result<(), String> {
+pub async fn link_lfs_object(pool: &DbPool, repository_id: &str, oid: &str) -> Result<(), String> {
     link_lfs_object_as(pool, repository_id, oid, None).await
 }
 
@@ -231,11 +227,7 @@ pub async fn link_lfs_object_as(
     Ok(())
 }
 
-pub async fn has_lfs_link(
-    pool: &DbPool,
-    repository_id: &str,
-    oid: &str,
-) -> Result<bool, String> {
+pub async fn has_lfs_link(pool: &DbPool, repository_id: &str, oid: &str) -> Result<bool, String> {
     match pool {
         DbPool::Sqlite(p) => {
             let row = sqlx::query(

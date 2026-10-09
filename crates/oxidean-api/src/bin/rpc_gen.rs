@@ -5324,8 +5324,8 @@ fn languages_ts() -> String {
     for l in oxidean_core::languages::LANGUAGES {
         writeln!(
             s,
-            "  {{ name: {}, group: {}, shiki: {}, extensions: {}, filenames: {}, aliases: {}, color: {}, stats: {} }},",
-            format!("{:?}", l.name),
+            "  {{ name: {:?}, group: {}, shiki: {}, extensions: {}, filenames: {}, aliases: {}, color: {}, stats: {} }},",
+            l.name,
             opt(l.group),
             opt(l.shiki),
             list(l.extensions),

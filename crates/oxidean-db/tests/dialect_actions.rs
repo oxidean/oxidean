@@ -161,8 +161,4 @@ async fn dialect_actions_schema_presence() {
 #[tokio::test]
 async fn dialect_actions_factory_reset_scope() {
     // Covered by factory_reset_actions.rs — keep discoverable name for Wave 0 filter.
-    assert!(
-        true,
-        "factory reset wipe covered in factory_reset_actions"
-    );
 }

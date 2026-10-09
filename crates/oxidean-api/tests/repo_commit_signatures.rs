@@ -77,7 +77,7 @@ async fn signup_and_login(
 
 #[tokio::test]
 async fn repo_commits_reports_seed_commit_signature_valid() {
-    let _env_guard = support::lock_admin_env();
+    let _env_guard = support::lock_admin_env().await;
     let dir = tempfile::tempdir().expect("tempdir");
     std::env::set_var("OXIDEAN_SSH_HOST_KEY_DIR", dir.path().join("ssh"));
     let repos = dir.path().join("repos");

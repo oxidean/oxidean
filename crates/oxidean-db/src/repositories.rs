@@ -106,6 +106,7 @@ const REPO_SELECT_SQLITE: &str = "SELECT id, owner_id, owner_type, name, visibil
        strftime('%Y-%m-%dT%H:%M:%SZ', updated_at) AS updated_at
 FROM repositories";
 
+#[allow(clippy::too_many_arguments)]
 pub async fn insert_repository(
     pool: &DbPool,
     id: &str,

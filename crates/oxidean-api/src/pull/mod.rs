@@ -51,6 +51,7 @@ fn db_err(e: String) -> AppError {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 /// Soft-fail PR → Actions enqueue (CR-02 / D-ACT-05). Never fails the PR mutation.
 async fn notify_actions_for_pull(
     db: &Database,
@@ -103,6 +104,7 @@ pub(crate) async fn emit_pull_event(
     .await;
 }
 
+#[allow(clippy::too_many_arguments)]
 /// Emit a `pull_request` webhook from git push paths (no [`RpcCtx`]).
 pub(crate) async fn emit_pull_event_db(
     db: &Database,
@@ -181,6 +183,7 @@ async fn resolve_ref_sha_at(
         .map(|r| r.oid.clone())
 }
 
+#[allow(clippy::too_many_arguments)]
 /// After a successful push: update open same-repo PR heads, dismiss stale approvals, emit synchronize.
 pub async fn synchronize_after_push(
     db: &Database,
@@ -259,6 +262,7 @@ pub async fn synchronize_after_push(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn sync_open_pulls_for_branch(
     db: &Database,
     repos_dir: &Path,
@@ -303,6 +307,7 @@ async fn sync_open_pulls_for_branch(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 /// After a pull's head moved to `new_head_sha` — either via a same-repo push
 /// (`sync_open_pulls_for_branch`) or via `pull.updateBranch` / `repo.syncFork`
 /// on the head repo — run the synchronize bookkeeping: refresh stored base SHA,
@@ -907,9 +912,7 @@ pub async fn list(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullListResp
         // Author/q via DB when possible; closed/label/assignee/review post-filtered (D-PR-26).
         let fetch_limit = if needs_post_filter { 500 } else { limit };
         let fetch_offset = if needs_post_filter { 0 } else { offset };
-        let search_state = if state == "closed" || state == "merged" {
-            "all"
-        } else if state == "all" {
+        let search_state = if matches!(state, "closed" | "merged" | "all") {
             "all"
         } else {
             state
@@ -1224,7 +1227,6 @@ pub async fn update(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullPublic
     };
     let head_changed = new_head_sha != row.head_sha;
     let base_changed = base_ref != row.base_ref || base_sha != row.base_sha;
-    let content_changed = title != row.title || body != row.body || draft != row.draft;
 
     ctx.db
         .update_pull_fields(&row.id, &title, &body, draft, &base_ref, &base_sha)
@@ -1259,8 +1261,6 @@ pub async fn update(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullPublic
     let updated = load_pull_in_repo(ctx, &accessible.row.id, req.number).await?;
     let action = if head_changed {
         "synchronize"
-    } else if content_changed || base_changed {
-        "edited"
     } else {
         "edited"
     };

@@ -84,6 +84,7 @@ const NOTIF_SELECT_SQLITE: &str =
        strftime('%Y-%m-%dT%H:%M:%SZ', created_at) AS created_at
 FROM notifications";
 
+#[allow(clippy::too_many_arguments)]
 pub async fn insert_notification(
     pool: &DbPool,
     id: &str,

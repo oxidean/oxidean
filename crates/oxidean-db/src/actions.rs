@@ -248,6 +248,7 @@ pub async fn find_runner_by_id(pool: &DbPool, id: &str) -> Result<Option<ActionR
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn insert_run(
     pool: &DbPool,
     id: &str,
@@ -1410,6 +1411,7 @@ pub async fn update_job_status(pool: &DbPool, job_id: &str, status: &str) -> Res
 /// - all jobs terminal → `failure` if any job failed, else `cancelled` if
 ///   any job cancelled, else `success`
 /// - otherwise → keep current status (jobs still queued/claimed)
+///
 /// `finished_at` is set exactly when the run first reaches a terminal status.
 pub async fn recompute_run_status(pool: &DbPool, run_id: &str) -> Result<(), String> {
     const ROLLUP: &str = "UPDATE action_runs SET \

@@ -724,11 +724,11 @@ async fn issue_private_unauthorized_soft_not_found() {
 #[tokio::test]
 #[ignore = "Wave 0 stub — greened with pull.list soft not_found"]
 async fn repo_private_404_pull_list_unauthorized() {
-    assert!(false, "Wave 0: private pull.list soft not_found");
+    panic!("Wave 0: private pull.list soft not_found");
 }
 
 #[tokio::test]
 #[ignore = "Wave 0 stub — greened with pull.get soft not_found"]
 async fn repo_private_404_pull_get_unauthorized() {
-    assert!(false, "Wave 0: private pull.get soft not_found");
+    panic!("Wave 0: private pull.get soft not_found");
 }

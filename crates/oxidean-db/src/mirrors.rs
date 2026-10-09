@@ -475,22 +475,18 @@ pub async fn delete_mirror_by_repo(pool: &DbPool, repository_id: &str) -> Result
                 .map_err(|e| e.to_string())?
                 .rows_affected()
         }
-        DbPool::MySql(p) => {
-            sqlx::query("DELETE FROM repository_mirrors WHERE repository_id = ?")
-                .bind(repository_id)
-                .execute(p)
-                .await
-                .map_err(|e| e.to_string())?
-                .rows_affected()
-        }
-        DbPool::Sqlite(p) => {
-            sqlx::query("DELETE FROM repository_mirrors WHERE repository_id = ?")
-                .bind(repository_id)
-                .execute(p)
-                .await
-                .map_err(|e| e.to_string())?
-                .rows_affected()
-        }
+        DbPool::MySql(p) => sqlx::query("DELETE FROM repository_mirrors WHERE repository_id = ?")
+            .bind(repository_id)
+            .execute(p)
+            .await
+            .map_err(|e| e.to_string())?
+            .rows_affected(),
+        DbPool::Sqlite(p) => sqlx::query("DELETE FROM repository_mirrors WHERE repository_id = ?")
+            .bind(repository_id)
+            .execute(p)
+            .await
+            .map_err(|e| e.to_string())?
+            .rows_affected(),
     };
     Ok(n > 0)
 }
@@ -670,6 +666,7 @@ pub async fn update_mirror_ref_snapshot(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn upsert_ref_result(
     pool: &DbPool,
     id: &str,

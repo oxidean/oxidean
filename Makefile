@@ -48,7 +48,7 @@ help:
 	@echo "  make coverage-contract - aggregator contract self-test"
 	@echo "  make route-coverage-check / browser-coverage-check - page + high-risk UI coverage gates"
 	@echo "  make web-lint / web-format-check / test-web-browser - oxlint, oxfmt, Chromium DOM races"
-	@echo "  make dead-code-check - knip (TS/.tsrx/.astro) + cargo machete + clippy dead_code"
+	@echo "  make dead-code-check - knip (TS/.tsrx/.astro) + cargo machete + clippy -D warnings"
 	@echo "  make smoke-actions  - Actions/runner Compose smoke (ACT-04/05; skip-ok without Docker)"
 	@echo "  make smoke          - compose bring-up smoke (PLAT-01)"
 	@echo "  make smoke-protection - ORG-06 helper + HTTPS/SSH protected-push denial (D-PKG-03)"
@@ -332,13 +332,13 @@ web-format-check:
 	bun run --filter @oxidean/web format:check
 
 # Dead-code gate: knip covers TS/Astro/.tsrx (files, exports, deps via custom
-# compilers in knip.ts); cargo-machete covers unused Cargo deps; rustc's
-# dead_code lint (denied here only) covers unused Rust items. Clippy's other
-# lints stay warnings — the codebase carries pre-existing style debt.
+# compilers in knip.ts); cargo-machete covers unused Cargo deps; clippy -D
+# warnings covers unused Rust items plus the rest of the default lint set —
+# the workspace is warning-clean, keep it that way.
 dead-code-check:
 	bunx knip
 	cargo machete
-	cargo clippy --workspace --all-targets -- -D dead_code
+	cargo clippy --workspace --all-targets -- -D warnings
 
 test-web-browser:
 	bun run --filter @oxidean/web test:browser

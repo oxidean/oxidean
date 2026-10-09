@@ -105,6 +105,7 @@ const USER_SELECT_SQLITE: &str = "SELECT id, email, username, password_hash, dis
        strftime('%Y-%m-%dT%H:%M:%SZ', updated_at) AS updated_at
 FROM users";
 
+#[allow(clippy::too_many_arguments)]
 pub async fn insert_user(
     pool: &DbPool,
     id: &str,

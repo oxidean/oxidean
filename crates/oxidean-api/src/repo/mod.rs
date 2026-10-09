@@ -1734,13 +1734,11 @@ pub async fn branch_delete(
     {
         let eff =
             crate::protection::effective_for_branch(&ctx.db, &accessible.row.id, branch).await?;
-        if let Err(e) = crate::protection::evaluate_push(
+        crate::protection::evaluate_push(
             &eff,
             crate::protection::ProtectionIntent::Delete,
             accessible.capability,
-        ) {
-            return Err(e);
-        }
+        )?;
     }
     let path = bare_repo_path(
         &ctx.repos_dir,

@@ -1873,9 +1873,7 @@ const ALLOWED_DOT_REPO_NAMES: &[&str] = &[".oxidean", ".github"];
 
 fn is_allowed_dot_repo_name(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
-    ALLOWED_DOT_REPO_NAMES
-        .iter()
-        .any(|allowed| *allowed == lower.as_str())
+    ALLOWED_DOT_REPO_NAMES.contains(&lower.as_str())
 }
 
 /// Repo name rules (D-06): 1–100 chars, ascii letters/digits/hyphen/underscore/period;

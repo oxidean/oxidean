@@ -119,7 +119,7 @@ async fn seed_issue_domain(db: &Database) -> (String, String, String, String) {
     db.set_issue_labels(&issue.id, &[repo_label.id.clone(), org_label.id.clone()])
         .await
         .expect("issue labels");
-    db.set_issue_assignees(&issue.id, &[assignee.id.clone()])
+    db.set_issue_assignees(&issue.id, std::slice::from_ref(&assignee.id))
         .await
         .expect("assignees");
 

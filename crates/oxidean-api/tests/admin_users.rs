@@ -300,10 +300,11 @@ async fn admin_invites_create_list_revoke_and_accept_closed_signup() {
         .next()
         .expect("token segment")
         .to_string();
-    let sent = recorder.sent.lock().expect("lock");
-    let email_token = extract_invite_token(&invite_email(&sent).text);
-    assert_eq!(email_token, token_from_url);
-    drop(sent);
+    {
+        let sent = recorder.sent.lock().expect("lock");
+        let email_token = extract_invite_token(&invite_email(&sent).text);
+        assert_eq!(email_token, token_from_url);
+    }
 
     let (_, list_v) = rpc_json(
         &app,

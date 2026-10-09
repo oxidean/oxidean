@@ -138,13 +138,15 @@ async fn parse_armored_public_key(armor: &str) -> Result<ParsedGpgKey, AppError>
                     parsed.fingerprint = fields[9].to_uppercase();
                 }
             }
-            "uid" => {
-                if fields.len() > 9 {
-                    let uid = fields[9];
-                    if let Some(email) = extract_email_from_uid(uid) {
-                        if !parsed.uid_emails.iter().any(|e| e.eq_ignore_ascii_case(&email)) {
-                            parsed.uid_emails.push(email);
-                        }
+            "uid" if fields.len() > 9 => {
+                let uid = fields[9];
+                if let Some(email) = extract_email_from_uid(uid) {
+                    if !parsed
+                        .uid_emails
+                        .iter()
+                        .any(|e| e.eq_ignore_ascii_case(&email))
+                    {
+                        parsed.uid_emails.push(email);
                     }
                 }
             }
@@ -182,12 +184,8 @@ fn extract_email_from_uid(uid: &str) -> Option<String> {
 /// Register a GPG public key for the verified session user.
 pub async fn add(ctx: &RpcCtx, input: serde_json::Value) -> Result<GpgKeyListItem, AppError> {
     let user = require_verified(ctx).await?;
-    let req: AddGpgKeyRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new(
-            "rpc.bad_input",
-            format!("invalid gpgKey.add input: {e}"),
-        )
-    })?;
+    let req: AddGpgKeyRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid gpgKey.add input: {e}")))?;
 
     if req.title.trim().is_empty() {
         return Err(AppError::new(
@@ -265,12 +263,8 @@ pub async fn list(ctx: &RpcCtx) -> Result<Vec<GpgKeyListItem>, AppError> {
 /// Hard-delete a GPG key owned by the signed-in user.
 pub async fn revoke(ctx: &RpcCtx, input: serde_json::Value) -> Result<serde_json::Value, AppError> {
     let user_id = require_session_user_id(ctx)?;
-    let req: RevokeGpgKeyRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new(
-            "rpc.bad_input",
-            format!("invalid gpgKey.revoke input: {e}"),
-        )
-    })?;
+    let req: RevokeGpgKeyRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid gpgKey.revoke input: {e}")))?;
     let id = req.id.trim();
     if id.is_empty() {
         return Err(AppError::new("gpgKey.not_found", "GPG key not found"));

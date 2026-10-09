@@ -179,6 +179,7 @@ pub async fn find_rule(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn insert_rule(
     pool: &DbPool,
     id: &str,
@@ -247,6 +248,7 @@ pub async fn insert_rule(
         .ok_or_else(|| "tag protection rule missing after insert".into())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn update_rule(
     pool: &DbPool,
     repo_id: &str,

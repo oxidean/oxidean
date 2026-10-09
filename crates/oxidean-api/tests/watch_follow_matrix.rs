@@ -1101,7 +1101,7 @@ jobs:
         .find(|n| n["reason"] == "workflow_run_success")
         .expect("workflow notification row");
     assert_eq!(n["subject_kind"], "workflow_run");
-    assert_eq!(n["subject_ref"].as_str().unwrap().len() > 8, true);
+    assert!(n["subject_ref"].as_str().unwrap().len() > 8);
 }
 
 /// DEBT-06 review coverage: a failed run emits `workflow_run_failure` through

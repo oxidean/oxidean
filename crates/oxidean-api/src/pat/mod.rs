@@ -139,7 +139,7 @@ pub async fn create_classic(
             "A note (name) is required for personal access tokens",
         ));
     }
-    if !req.scopes.iter().any(|s| *s == ClassicPatScope::Repo) {
+    if !req.scopes.contains(&ClassicPatScope::Repo) {
         return Err(AppError::new(
             "pat.invalid_scope",
             "classic tokens must include the repo scope",

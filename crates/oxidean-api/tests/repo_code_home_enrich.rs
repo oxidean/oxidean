@@ -130,7 +130,7 @@ async fn path_last_commits_and_count_and_contributors() {
     .await;
     assert_eq!(tip["ok"], true, "{tip}");
     assert!(
-        tip["data"]["commits"].as_array().unwrap().len() >= 1,
+        !tip["data"]["commits"].as_array().unwrap().is_empty(),
         "expected at least one commit from stack seed"
     );
 

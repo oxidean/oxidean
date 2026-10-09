@@ -355,10 +355,10 @@ async fn factory_reset_wipes_issue_domain_rows() {
         .insert_label("lab-rpc-wipe", "bug", "#abcdef", "", None, Some(&repo.id))
         .await
         .expect("label");
-    db.set_issue_labels(&issue.id, &[label.id.clone()])
+    db.set_issue_labels(&issue.id, std::slice::from_ref(&label.id))
         .await
         .expect("labels");
-    db.set_issue_assignees(&issue.id, &[admin_id.clone()])
+    db.set_issue_assignees(&issue.id, std::slice::from_ref(&admin_id))
         .await
         .expect("assignees");
     assert!(db

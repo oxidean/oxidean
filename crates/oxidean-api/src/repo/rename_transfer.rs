@@ -8,9 +8,7 @@ use oxidean_core::{
 use oxidean_db::Database;
 use uuid::Uuid;
 
-use super::acl::{
-    lookup_repo_row_or_redirect, meets, AccessibleRepo, Capability,
-};
+use super::acl::{lookup_repo_row_or_redirect, meets, AccessibleRepo, Capability};
 use super::collaborators::resolve_repo_for_admin;
 use crate::auth::gate::require_verified;
 use crate::git::bare_repo_path;
@@ -90,14 +88,17 @@ pub async fn resolve_repo_or_redirect(
     name: &str,
     need: Capability,
 ) -> Result<AccessibleRepo, AppError> {
-    use super::acl::not_found;
     use super::acl::effective_capability;
+    use super::acl::not_found;
 
     let pair = match lookup_repo_row_or_redirect(&ctx.db, owner, name).await {
         Ok(v) => v,
         Err(e) => {
             tracing::error!(error = %e, "lookup_repo_row_or_redirect failed");
-            return Err(AppError::new("repo.internal", "repository operation failed"));
+            return Err(AppError::new(
+                "repo.internal",
+                "repository operation failed",
+            ));
         }
     };
     let Some((row, owner_ref)) = pair else {
@@ -144,10 +145,12 @@ async fn insert_rename_redirect(
 }
 
 /// `repo.rename` — Admin moves bare dir + DB name and inserts retention redirect (GIT-16).
-pub async fn rename(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoRenameResponse, AppError> {
-    let req: RepoRenameRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid repo.rename input: {e}"))
-    })?;
+pub async fn rename(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<RepoRenameResponse, AppError> {
+    let req: RepoRenameRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid repo.rename input: {e}")))?;
 
     let accessible = resolve_repo_for_admin(ctx, &req.owner, &req.name).await?;
     validate_repo_name(&req.new_name).map_err(|msg| AppError::new("repo.invalid_name", msg))?;
@@ -294,9 +297,8 @@ pub async fn transfer(
     input: serde_json::Value,
 ) -> Result<RepoTransferResponse, AppError> {
     let caller = require_verified(ctx).await?;
-    let req: RepoTransferRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid repo.transfer input: {e}"))
-    })?;
+    let req: RepoTransferRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid repo.transfer input: {e}")))?;
 
     let accessible = resolve_repo_for_admin(ctx, &req.owner, &req.name).await?;
     let confirm = req.confirm_name.trim();

@@ -407,6 +407,7 @@ async fn cleanup_mirror_helper_branches(git: &dyn GitBackend, bare: &Path) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn exact_sync_one_ref(
     db: &Database,
     git: &dyn GitBackend,
@@ -502,6 +503,7 @@ async fn exact_sync_one_ref(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn exact_force_local(
     db: &Database,
     git: &dyn GitBackend,
@@ -693,6 +695,7 @@ struct RefOutcome {
     detail: String,
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn sync_branch(
     db: &Database,
     git: &dyn GitBackend,
@@ -960,6 +963,7 @@ async fn push_tag_local(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn apply_local_ff(
     db: &Database,
     git: &dyn GitBackend,

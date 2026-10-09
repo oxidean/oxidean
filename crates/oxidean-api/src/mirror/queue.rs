@@ -114,7 +114,7 @@ pub async fn enqueue_mirror_for_repo(
         });
     }
 
-    let _ = wake().notify_one();
+    wake().notify_one();
     Ok(())
 }
 

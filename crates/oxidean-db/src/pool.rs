@@ -70,8 +70,12 @@ pub fn ensure_sqlite_parent_dir(url: &str) -> Result<(), String> {
     let path = std::path::Path::new(path_part);
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("failed to create SQLite parent dir {}: {e}", parent.display()))?;
+            std::fs::create_dir_all(parent).map_err(|e| {
+                format!(
+                    "failed to create SQLite parent dir {}: {e}",
+                    parent.display()
+                )
+            })?;
         }
     }
     Ok(())

@@ -13,10 +13,7 @@ pub async fn watch_repository(
 ) -> Result<i64, String> {
     match pool {
         DbPool::Postgres(p) => {
-            let mut tx = p
-                .begin()
-                .await
-                .map_err(|e| format!("watch begin: {e}"))?;
+            let mut tx = p.begin().await.map_err(|e| format!("watch begin: {e}"))?;
             let prev: Option<String> = sqlx::query_scalar(
                 "SELECT level FROM repository_watches
                  WHERE user_id = $1 AND repository_id = $2",
@@ -49,23 +46,19 @@ pub async fn watch_repository(
                 .await
                 .map_err(|e| format!("watch bump: {e}"))?;
             }
-            let count: i64 = sqlx::query_scalar(
-                "SELECT watch_count FROM repositories WHERE id = $1",
-            )
-            .bind(repository_id)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|e| format!("watch count: {e}"))?;
+            let count: i64 =
+                sqlx::query_scalar("SELECT watch_count FROM repositories WHERE id = $1")
+                    .bind(repository_id)
+                    .fetch_one(&mut *tx)
+                    .await
+                    .map_err(|e| format!("watch count: {e}"))?;
             tx.commit()
                 .await
                 .map_err(|e| format!("watch commit: {e}"))?;
             Ok(count)
         }
         DbPool::MySql(p) => {
-            let mut tx = p
-                .begin()
-                .await
-                .map_err(|e| format!("watch begin: {e}"))?;
+            let mut tx = p.begin().await.map_err(|e| format!("watch begin: {e}"))?;
             let prev: Option<String> = sqlx::query_scalar(
                 "SELECT level FROM repository_watches WHERE user_id = ? AND repository_id = ?",
             )
@@ -109,10 +102,7 @@ pub async fn watch_repository(
             Ok(count)
         }
         DbPool::Sqlite(p) => {
-            let mut tx = p
-                .begin()
-                .await
-                .map_err(|e| format!("watch begin: {e}"))?;
+            let mut tx = p.begin().await.map_err(|e| format!("watch begin: {e}"))?;
             let prev: Option<String> = sqlx::query_scalar(
                 "SELECT level FROM repository_watches
                  WHERE user_id = ?1 AND repository_id = ?2",
@@ -175,10 +165,7 @@ pub async fn unwatch_repository(
 ) -> Result<i64, String> {
     match pool {
         DbPool::Postgres(p) => {
-            let mut tx = p
-                .begin()
-                .await
-                .map_err(|e| format!("unwatch begin: {e}"))?;
+            let mut tx = p.begin().await.map_err(|e| format!("unwatch begin: {e}"))?;
             let prev: Option<String> = sqlx::query_scalar(
                 "SELECT level FROM repository_watches
                  WHERE user_id = $1 AND repository_id = $2",
@@ -209,23 +196,19 @@ pub async fn unwatch_repository(
                 .await
                 .map_err(|e| format!("unwatch bump: {e}"))?;
             }
-            let count: i64 = sqlx::query_scalar(
-                "SELECT watch_count FROM repositories WHERE id = $1",
-            )
-            .bind(repository_id)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|e| format!("unwatch count: {e}"))?;
+            let count: i64 =
+                sqlx::query_scalar("SELECT watch_count FROM repositories WHERE id = $1")
+                    .bind(repository_id)
+                    .fetch_one(&mut *tx)
+                    .await
+                    .map_err(|e| format!("unwatch count: {e}"))?;
             tx.commit()
                 .await
                 .map_err(|e| format!("unwatch commit: {e}"))?;
             Ok(count)
         }
         DbPool::MySql(p) => {
-            let mut tx = p
-                .begin()
-                .await
-                .map_err(|e| format!("unwatch begin: {e}"))?;
+            let mut tx = p.begin().await.map_err(|e| format!("unwatch begin: {e}"))?;
             let prev: Option<String> = sqlx::query_scalar(
                 "SELECT level FROM repository_watches WHERE user_id = ? AND repository_id = ?",
             )
@@ -266,10 +249,7 @@ pub async fn unwatch_repository(
             Ok(count)
         }
         DbPool::Sqlite(p) => {
-            let mut tx = p
-                .begin()
-                .await
-                .map_err(|e| format!("unwatch begin: {e}"))?;
+            let mut tx = p.begin().await.map_err(|e| format!("unwatch begin: {e}"))?;
             let prev: Option<String> = sqlx::query_scalar(
                 "SELECT level FROM repository_watches
                  WHERE user_id = ?1 AND repository_id = ?2",
@@ -317,30 +297,30 @@ pub async fn unwatch_repository(
 
 pub async fn get_watch_count(pool: &DbPool, repository_id: &str) -> Result<i64, String> {
     match pool {
-        DbPool::Postgres(p) => sqlx::query_scalar(
-            "SELECT COALESCE(watch_count, 0) FROM repositories WHERE id = $1",
-        )
-        .bind(repository_id)
-        .fetch_optional(p)
-        .await
-        .map_err(|e| format!("get watch_count: {e}"))
-        .map(|o| o.unwrap_or(0)),
-        DbPool::MySql(p) => sqlx::query_scalar(
-            "SELECT COALESCE(watch_count, 0) FROM repositories WHERE id = ?",
-        )
-        .bind(repository_id)
-        .fetch_optional(p)
-        .await
-        .map_err(|e| format!("get watch_count: {e}"))
-        .map(|o| o.unwrap_or(0)),
-        DbPool::Sqlite(p) => sqlx::query_scalar(
-            "SELECT COALESCE(watch_count, 0) FROM repositories WHERE id = ?1",
-        )
-        .bind(repository_id)
-        .fetch_optional(p)
-        .await
-        .map_err(|e| format!("get watch_count: {e}"))
-        .map(|o| o.unwrap_or(0)),
+        DbPool::Postgres(p) => {
+            sqlx::query_scalar("SELECT COALESCE(watch_count, 0) FROM repositories WHERE id = $1")
+                .bind(repository_id)
+                .fetch_optional(p)
+                .await
+                .map_err(|e| format!("get watch_count: {e}"))
+                .map(|o| o.unwrap_or(0))
+        }
+        DbPool::MySql(p) => {
+            sqlx::query_scalar("SELECT COALESCE(watch_count, 0) FROM repositories WHERE id = ?")
+                .bind(repository_id)
+                .fetch_optional(p)
+                .await
+                .map_err(|e| format!("get watch_count: {e}"))
+                .map(|o| o.unwrap_or(0))
+        }
+        DbPool::Sqlite(p) => {
+            sqlx::query_scalar("SELECT COALESCE(watch_count, 0) FROM repositories WHERE id = ?1")
+                .bind(repository_id)
+                .fetch_optional(p)
+                .await
+                .map_err(|e| format!("get watch_count: {e}"))
+                .map(|o| o.unwrap_or(0))
+        }
     }
 }
 
@@ -658,27 +638,27 @@ pub async fn list_repo_watch_levels(
     repository_id: &str,
 ) -> Result<Vec<(String, String)>, String> {
     match pool {
-        DbPool::Postgres(p) => sqlx::query_as(
-            "SELECT user_id, level FROM repository_watches WHERE repository_id = $1",
-        )
-        .bind(repository_id)
-        .fetch_all(p)
-        .await
-        .map_err(|e| format!("list watch levels: {e}")),
-        DbPool::MySql(p) => sqlx::query_as(
-            "SELECT user_id, level FROM repository_watches WHERE repository_id = ?",
-        )
-        .bind(repository_id)
-        .fetch_all(p)
-        .await
-        .map_err(|e| format!("list watch levels: {e}")),
-        DbPool::Sqlite(p) => sqlx::query_as(
-            "SELECT user_id, level FROM repository_watches WHERE repository_id = ?1",
-        )
-        .bind(repository_id)
-        .fetch_all(p)
-        .await
-        .map_err(|e| format!("list watch levels: {e}")),
+        DbPool::Postgres(p) => {
+            sqlx::query_as("SELECT user_id, level FROM repository_watches WHERE repository_id = $1")
+                .bind(repository_id)
+                .fetch_all(p)
+                .await
+                .map_err(|e| format!("list watch levels: {e}"))
+        }
+        DbPool::MySql(p) => {
+            sqlx::query_as("SELECT user_id, level FROM repository_watches WHERE repository_id = ?")
+                .bind(repository_id)
+                .fetch_all(p)
+                .await
+                .map_err(|e| format!("list watch levels: {e}"))
+        }
+        DbPool::Sqlite(p) => {
+            sqlx::query_as("SELECT user_id, level FROM repository_watches WHERE repository_id = ?1")
+                .bind(repository_id)
+                .fetch_all(p)
+                .await
+                .map_err(|e| format!("list watch levels: {e}"))
+        }
     }
 }
 

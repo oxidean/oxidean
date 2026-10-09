@@ -66,6 +66,7 @@ pub async fn emit(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 /// Build a GitHub-compatible issues payload (D-HOOK-07 / D-HOOK-08).
 pub fn issues_payload(
     action: &str,
@@ -249,6 +250,7 @@ pub fn ping_payload(hook_id: &str, owner: &str, repo_name: &str) -> serde_json::
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 /// Notify subscribed `push` hooks after a successful receive (D-HOOK-10 / D-HOOK-22).
 pub async fn notify_push(
     db: &Database,
@@ -512,6 +514,7 @@ pub fn workflow_run_payload(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 /// GitHub-compatible `registry_package` payload (`published` / `updated`).
 /// Only emitted for packages linked to a repository (`packages.repository_id`)
 /// because webhooks are repo-scoped.
@@ -601,12 +604,7 @@ pub async fn notify_ref_events(
 /// `completed` once a terminal conclusion rolls up (API-04). Best-effort:
 /// missing run/repo rows just skip the fan-out.
 pub async fn notify_workflow_run(db: &Database, run_id: &str, action: &str, env_name: &str) {
-    let Some(run) = db
-        .find_action_run_by_id(run_id)
-        .await
-        .ok()
-        .flatten()
-    else {
+    let Some(run) = db.find_action_run_by_id(run_id).await.ok().flatten() else {
         return;
     };
     let Some((repo, owner)) = repo_context(db, &run.repository_id).await else {

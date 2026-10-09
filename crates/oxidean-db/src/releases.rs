@@ -114,6 +114,7 @@ const ASEL_PG: &str = "SELECT id, release_id, filename, content_type, byte_size,
 const ASEL_MY: &str = "SELECT id, release_id, filename, content_type, byte_size, uploader_id, DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at, DATE_FORMAT(updated_at, '%Y-%m-%dT%H:%i:%sZ') AS updated_at FROM release_assets";
 const ASEL_SQ: &str = "SELECT id, release_id, filename, content_type, byte_size, uploader_id, strftime('%Y-%m-%dT%H:%M:%SZ', created_at) AS created_at, strftime('%Y-%m-%dT%H:%M:%SZ', updated_at) AS updated_at FROM release_assets";
 
+#[allow(clippy::too_many_arguments)]
 pub async fn insert_release(
     pool: &DbPool,
     id: &str,

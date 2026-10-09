@@ -104,6 +104,7 @@ const INVITE_SELECT_SQLITE: &str =
          strftime('%Y-%m-%dT%H:%M:%SZ', revoked_at) END AS revoked_at
 FROM repository_invites";
 
+#[allow(clippy::too_many_arguments)]
 /// Insert a pending invite (hash-at-rest only).
 /// `email` None = shareable link; `expires_at` None = never; `max_uses` None = unlimited seats.
 pub async fn insert_invite(

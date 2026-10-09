@@ -140,6 +140,7 @@ const PULL_COLS_PG: &str = concat!(
     "(SELECT COUNT(*)::bigint FROM pull_comments pc WHERE pc.pull_id = pull_requests.id) AS comment_count"
 );
 
+#[allow(clippy::too_many_arguments)]
 pub async fn insert_pull(
     pool: &DbPool,
     id: &str,
@@ -1058,6 +1059,7 @@ const PC_SELECT_SQLITE: &str =
        strftime('%Y-%m-%dT%H:%M:%SZ', updated_at) AS updated_at
 FROM pull_comments";
 
+#[allow(clippy::too_many_arguments)]
 pub async fn insert_pull_comment(
     pool: &DbPool,
     id: &str,

@@ -258,7 +258,7 @@ async fn repo_settings_soft_delete_hides_row_keeps_disk() {
         .filter_map(|r| r["name"].as_str())
         .collect();
     assert!(
-        !names.iter().any(|n| *n == "goner"),
+        !names.contains(&"goner"),
         "listMine must omit soft-deleted — {names:?}"
     );
 

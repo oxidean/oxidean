@@ -191,7 +191,7 @@ async fn signup_open_without_invite_fields_auth05() {
 
 #[tokio::test]
 async fn seeded_admin_is_auto_verified() {
-    let _env = support::lock_admin_env();
+    let _env = support::lock_admin_env().await;
     let dir = tempfile::tempdir().expect("tempdir");
     let url = format!("sqlite:{}", dir.path().join("admin_seed.db").display());
     let db = Database::connect(&url).await.expect("connect");
@@ -243,7 +243,7 @@ async fn seeded_admin_is_auto_verified() {
 /// Wave 0: OXIDEAN_ALLOW_SIGNUP=true/1 must persist open signup on ENV seed (D-15).
 #[tokio::test]
 async fn seeded_admin_parses_allow_signup_true() {
-    let _env = support::lock_admin_env();
+    let _env = support::lock_admin_env().await;
     let dir = tempfile::tempdir().expect("tempdir");
     let url = format!("sqlite:{}", dir.path().join("admin_allow.db").display());
     let db = Database::connect(&url).await.expect("connect");
@@ -269,7 +269,7 @@ async fn seeded_admin_parses_allow_signup_true() {
 /// D-13: empty-string ADMIN ENV is treated as absent (same as unset).
 #[tokio::test]
 async fn seed_partial_env_empty_string_email_does_not_seed() {
-    let _env = support::lock_admin_env();
+    let _env = support::lock_admin_env().await;
     let dir = tempfile::tempdir().expect("tempdir");
     let url = format!("sqlite:{}", dir.path().join("empty_email.db").display());
     let db = Database::connect(&url).await.expect("connect");
@@ -292,7 +292,7 @@ async fn seed_partial_env_empty_string_email_does_not_seed() {
 /// D-13: empty-string password is treated as absent.
 #[tokio::test]
 async fn seed_partial_env_empty_string_password_does_not_seed() {
-    let _env = support::lock_admin_env();
+    let _env = support::lock_admin_env().await;
     let dir = tempfile::tempdir().expect("tempdir");
     let url = format!("sqlite:{}", dir.path().join("empty_pw.db").display());
     let db = Database::connect(&url).await.expect("connect");
@@ -470,7 +470,7 @@ async fn provider_config_includes_allow_signup() {
 /// AUTH-06 ordering / AUTH-07 adjacency: second seed with users present is a no-op.
 #[tokio::test]
 async fn seed_second_run_idempotent_when_users_exist() {
-    let _env = support::lock_admin_env();
+    let _env = support::lock_admin_env().await;
     let dir = tempfile::tempdir().expect("tempdir");
     let url = format!("sqlite:{}", dir.path().join("seed_idem.db").display());
     let db = Database::connect(&url).await.expect("connect");

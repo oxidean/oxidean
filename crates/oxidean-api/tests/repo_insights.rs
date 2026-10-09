@@ -206,7 +206,7 @@ async fn repo_insights_contributors_counts_and_account_link() {
     );
     assert!(c1["last_commit_sha"].as_str().unwrap().len() >= 7);
     assert!(c1["last_commit_unix"].as_i64().unwrap() > 0);
-    assert_eq!(c1["first_commit_unix"].as_i64().unwrap() > 0, true);
+    assert!(c1["first_commit_unix"].as_i64().unwrap() > 0);
     let ext = contributors
         .iter()
         .find(|c| c["email"].as_str() == Some("ext@other.example"))
@@ -214,7 +214,7 @@ async fn repo_insights_contributors_counts_and_account_link() {
     assert_eq!(ext["commit_count"].as_i64().unwrap(), 1);
     assert!(ext["username"].is_null(), "unknown email must not link");
     assert_eq!(res["data"]["scanned_commits"].as_u64().unwrap(), 4);
-    assert_eq!(res["data"]["truncated"].as_bool().unwrap(), false);
+    assert!(!res["data"]["truncated"].as_bool().unwrap());
 
     // limit=1 clips the list but the scan metadata stays honest.
     let capped = rpc_json(
@@ -277,7 +277,7 @@ async fn repo_insights_commit_activity_week_shape() {
         weeks[3]["total"].as_i64().unwrap() >= 4,
         "current week holds commits"
     );
-    assert_eq!(res["data"]["truncated"].as_bool().unwrap(), false);
+    assert!(!res["data"]["truncated"].as_bool().unwrap());
     assert!(res["data"]["scanned_commits"].as_u64().unwrap() >= 4);
 }
 
@@ -357,7 +357,7 @@ async fn repo_insights_empty_repo_ok() {
     assert_eq!(contrib["ok"], true, "{contrib}");
     assert_eq!(contrib["data"]["contributors"].as_array().unwrap().len(), 0);
     assert_eq!(contrib["data"]["scanned_commits"].as_u64().unwrap(), 0);
-    assert_eq!(contrib["data"]["truncated"].as_bool().unwrap(), false);
+    assert!(!contrib["data"]["truncated"].as_bool().unwrap());
 
     let act = rpc_json_anon(
         &app,
@@ -387,7 +387,7 @@ async fn repo_insights_empty_repo_ok() {
     assert_eq!(nodes[0]["is_current"].as_bool(), Some(true));
     assert!(nodes[0]["parent_owner"].is_null());
     assert_eq!(net["data"]["total"].as_i64().unwrap(), 1);
-    assert_eq!(net["data"]["truncated"].as_bool().unwrap(), false);
+    assert!(!net["data"]["truncated"].as_bool().unwrap());
 }
 
 #[tokio::test]
@@ -445,7 +445,7 @@ async fn repo_insights_fork_network_members_and_visibility() {
     let nodes = anon["data"]["nodes"].as_array().unwrap();
     assert_eq!(nodes.len(), 2, "private fork hidden: {nodes:?}");
     assert_eq!(anon["data"]["total"].as_i64().unwrap(), 2);
-    assert_eq!(anon["data"]["truncated"].as_bool().unwrap(), false);
+    assert!(!anon["data"]["truncated"].as_bool().unwrap());
 
     // Root is ordered first (network-root before forks) for one-pass tree builds.
     let root = nodes

@@ -386,6 +386,7 @@ impl Database {
 
     // --- organization invites ---
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn insert_org_invite(
         &self,
         id: &str,
@@ -464,6 +465,7 @@ impl Database {
 
     // --- repository invites ---
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn insert_repo_invite(
         &self,
         id: &str,
@@ -597,6 +599,7 @@ impl Database {
 
     // --- repositories ---
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn insert_repository(
         &self,
         id: &str,
@@ -1168,6 +1171,7 @@ impl Database {
 
     // --- pulls ---
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn insert_pull(
         &self,
         id: &str,
@@ -1313,6 +1317,7 @@ impl Database {
         .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn insert_pull_comment(
         &self,
         id: &str,
@@ -1636,6 +1641,7 @@ impl Database {
         tag_protection::find_rule(self.require_pool()?, repo_id, rule_id).await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn insert_tag_protection_rule(
         &self,
         id: &str,
@@ -1659,6 +1665,7 @@ impl Database {
         .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn update_tag_protection_rule(
         &self,
         repo_id: &str,
@@ -2164,6 +2171,7 @@ impl Database {
         issues::toggle_comment_reaction(self.require_pool()?, comment_id, user_id, content).await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn insert_issue_link(
         &self,
         id: &str,
@@ -2209,6 +2217,7 @@ impl Database {
 
     // --- users ---
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_user(
         &self,
         id: &str,
@@ -2408,6 +2417,7 @@ impl Database {
 
     // --- email tokens ---
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn upsert_email_token(
         &self,
         id: &str,
@@ -2592,6 +2602,7 @@ impl Database {
 
     // --- sessions ---
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_session(
         &self,
         id: &str,
@@ -3081,6 +3092,7 @@ impl Database {
         actions::find_runner_by_id(self.require_pool()?, id).await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn insert_action_run(
         &self,
         id: &str,
@@ -3573,6 +3585,7 @@ impl Database {
         auth_settings::get(self.require_pool()?).await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn update_auth_settings(
         &self,
         provider_mode: &str,
@@ -3600,6 +3613,7 @@ impl Database {
 
     // --- Releases / redirects (Phase 15) ---
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn insert_release(
         &self,
         id: &str,
@@ -3743,12 +3757,6 @@ impl Database {
         redirects::purge_expired_redirects(self.require_pool()?, now_rfc3339).await
     }
 
-    /// Wipe tenant + auth data so the instance returns to empty-setup (`needs_setup`).
-    /// Deletes repositories (cascades collaborators / PAT-repo links / issue domain
-    /// tables: issues, counters, comments, revisions, labels, assignees, reactions,
-    /// links), organizations (cascades members / invites / org-scoped labels), then
-    /// sessions, identities, email tokens, and users; resets auth settings to
-    /// local/log defaults with signup closed.
     // --- git LFS (D-LFS-02 / D-LFS-10) ---
 
     pub async fn get_repo_lfs_enabled(&self, repo_id: &str) -> Result<bool, String> {
@@ -3870,6 +3878,12 @@ impl Database {
         mcp_settings::update_mcp_settings(self.require_pool()?, enabled).await
     }
 
+    /// Wipe tenant + auth data so the instance returns to empty-setup (`needs_setup`).
+    /// Deletes repositories (cascades collaborators / PAT-repo links / issue domain
+    /// tables: issues, counters, comments, revisions, labels, assignees, reactions,
+    /// links), organizations (cascades members / invites / org-scoped labels), then
+    /// sessions, identities, email tokens, and users; resets auth settings to
+    /// local/log defaults with signup closed.
     pub async fn factory_reset_instance(&self) -> Result<(), String> {
         let pool = self.require_pool()?;
         // D-ACT-19: wipe Actions domain before cascading repo deletes (instance runners/tokens).
@@ -4024,6 +4038,7 @@ impl Database {
 
     // --- webhooks (Phase 18) ---
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn insert_webhook(
         &self,
         id: &str,
@@ -4142,6 +4157,7 @@ impl Database {
         mirrors::set_webhook_secret(self.require_pool()?, mirror_id, ciphertext).await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn upsert_mirror_ref_result(
         &self,
         id: &str,
@@ -4205,6 +4221,7 @@ impl Database {
         webhooks::delete_webhook(self.require_pool()?, id).await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn insert_repo_activity(
         &self,
         id: &str,
@@ -4275,6 +4292,7 @@ impl Database {
 
     // --- audit events ---
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn insert_audit_event(
         &self,
         id: &str,
@@ -4353,6 +4371,7 @@ impl Database {
         webhooks::list_deliveries_for_webhook(self.require_pool()?, webhook_id, limit).await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn insert_webhook_delivery_attempt(
         &self,
         id: &str,

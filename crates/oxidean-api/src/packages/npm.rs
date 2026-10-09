@@ -218,6 +218,7 @@ fn package_meta(pkg: &PackageRow) -> NpmPackageMeta {
     })
 }
 
+#[allow(clippy::result_large_err)]
 async fn require_write(
     state: &AppState,
     headers: &HeaderMap,
@@ -347,43 +348,44 @@ async fn put_publish(
     };
 
     // Deprecate path: update metadata only
-    if attachments.map(|a| a.is_empty()).unwrap_or(true) && versions.is_some() && existing.is_some()
-    {
-        let pkg = existing.unwrap();
-        let ok = match authorize_pkg(&state.db, Some(&identity), &pkg, PackageAction::Publish).await
-        {
-            Ok(v) => v,
-            Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-        };
-        if !ok {
-            return StatusCode::FORBIDDEN.into_response();
-        }
-        if let Some(vers) = versions {
-            for (ver, man) in vers {
-                if let Ok(Some(row)) = state.db.find_package_version(&pkg.id, ver).await {
-                    let mut vm: NpmVersionMeta =
-                        serde_json::from_str(&row.metadata_json).unwrap_or_default();
-                    if let Some(dep) = man.get("deprecated").and_then(|d| d.as_str()) {
-                        vm.deprecated = Some(dep.to_string());
-                    } else if man.get("deprecated").is_some() {
-                        vm.deprecated = None;
+    if attachments.map(|a| a.is_empty()).unwrap_or(true) && versions.is_some() {
+        if let Some(pkg) = existing.as_ref() {
+            let ok = match authorize_pkg(&state.db, Some(&identity), pkg, PackageAction::Publish)
+                .await
+            {
+                Ok(v) => v,
+                Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+            };
+            if !ok {
+                return StatusCode::FORBIDDEN.into_response();
+            }
+            if let Some(vers) = versions {
+                for (ver, man) in vers {
+                    if let Ok(Some(row)) = state.db.find_package_version(&pkg.id, ver).await {
+                        let mut vm: NpmVersionMeta =
+                            serde_json::from_str(&row.metadata_json).unwrap_or_default();
+                        if let Some(dep) = man.get("deprecated").and_then(|d| d.as_str()) {
+                            vm.deprecated = Some(dep.to_string());
+                        } else if man.get("deprecated").is_some() {
+                            vm.deprecated = None;
+                        }
+                        vm.manifest = man.clone();
+                        let meta_json = serde_json::to_string(&vm).unwrap_or_else(|_| "{}".into());
+                        let _ = state
+                            .db
+                            .update_package_version_metadata(&row.id, &meta_json)
+                            .await;
                     }
-                    vm.manifest = man.clone();
-                    let meta_json = serde_json::to_string(&vm).unwrap_or_else(|_| "{}".into());
-                    let _ = state
-                        .db
-                        .update_package_version_metadata(&row.id, &meta_json)
-                        .await;
                 }
             }
+            if let Some(tags) = doc.get("dist-tags").and_then(|t| t.as_object()) {
+                let mut meta = package_meta(pkg);
+                meta.dist_tags = tags.clone();
+                let desc = serde_json::to_string(&meta).unwrap_or_default();
+                let _ = update_package_description(&state.db, &pkg.id, &desc).await;
+            }
+            return StatusCode::OK.into_response();
         }
-        if let Some(tags) = doc.get("dist-tags").and_then(|t| t.as_object()) {
-            let mut meta = package_meta(&pkg);
-            meta.dist_tags = tags.clone();
-            let desc = serde_json::to_string(&meta).unwrap_or_default();
-            let _ = update_package_description(&state.db, &pkg.id, &desc).await;
-        }
-        return StatusCode::OK.into_response();
     }
 
     let Some(attachments) = attachments else {

@@ -398,6 +398,7 @@ impl ArchiveFormat {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 /// Async forge git operations. API/RPC never shell out directly.
 #[async_trait::async_trait]
 pub trait GitBackend: Send + Sync {
@@ -483,12 +484,7 @@ pub trait GitBackend: Send + Sync {
     ) -> Result<Vec<TreeEntry>, GitError>;
 
     /// Read blob bytes at `path` for `treeish`. Missing path → [`GitError::NotFound`].
-    async fn cat_blob(
-        &self,
-        repo: &Path,
-        treeish: &str,
-        path: &str,
-    ) -> Result<Vec<u8>, GitError>;
+    async fn cat_blob(&self, repo: &Path, treeish: &str, path: &str) -> Result<Vec<u8>, GitError>;
 
     /// List refs under `refs/heads` and `refs/tags` (name + oid). Empty → `Ok(vec![])`.
     async fn list_refs(&self, repo: &Path) -> Result<Vec<GitRef>, GitError>;
@@ -516,28 +512,13 @@ pub trait GitBackend: Send + Sync {
     ) -> Result<CommitDetail, GitError>;
 
     /// Unified diff `base...head`. Identical trees → `empty: true` (not an error).
-    async fn diff(
-        &self,
-        repo: &Path,
-        base: &str,
-        head: &str,
-    ) -> Result<DiffResult, GitError>;
+    async fn diff(&self, repo: &Path, base: &str, head: &str) -> Result<DiffResult, GitError>;
 
     /// Per-line blame for a text file (`git blame --line-porcelain`).
-    async fn blame(
-        &self,
-        repo: &Path,
-        refname: &str,
-        path: &str,
-    ) -> Result<BlameFile, GitError>;
+    async fn blame(&self, repo: &Path, refname: &str, path: &str) -> Result<BlameFile, GitError>;
 
     /// Create branch `name` pointing at `start` (branch/tag/sha).
-    async fn branch_create(
-        &self,
-        repo: &Path,
-        name: &str,
-        start: &str,
-    ) -> Result<(), GitError>;
+    async fn branch_create(&self, repo: &Path, name: &str, start: &str) -> Result<(), GitError>;
 
     /// Rename local branch `from` → `to`.
     async fn branch_rename(&self, repo: &Path, from: &str, to: &str) -> Result<(), GitError>;

@@ -134,6 +134,7 @@ fn parse_scopes(scopes_json: Option<&str>) -> Vec<ClassicPatScope> {
         .collect()
 }
 
+#[allow(clippy::result_large_err)]
 /// Resolve `Authorization: Bearer <pat>` to a session-equivalent identity.
 ///
 /// Returns `Err` for any presented-but-invalid token — a Bearer header is an
@@ -467,7 +468,7 @@ fn pat_scope_err(procedure: &str, message: &str) -> AppError {
 }
 
 fn has_scope(scopes: &[ClassicPatScope], scope: ClassicPatScope) -> bool {
-    scopes.iter().any(|s| *s == scope)
+    scopes.contains(&scope)
 }
 
 /// Classic-token scope check: `repo` covers the repo domain; `package:*` covers

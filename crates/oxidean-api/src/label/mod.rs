@@ -127,11 +127,7 @@ pub async fn effective_labels_for_repo(
     let mut out = Vec::new();
 
     if owner_type == "org" {
-        let org_labels = ctx
-            .db
-            .list_labels_for_org(owner_id)
-            .await
-            .map_err(db_err)?;
+        let org_labels = ctx.db.list_labels_for_org(owner_id).await.map_err(db_err)?;
         for row in org_labels {
             let is_hidden = hidden_ids.remove(&row.id);
             if is_hidden && !include_hidden {
@@ -141,16 +137,12 @@ pub async fn effective_labels_for_repo(
         }
     }
 
-    let repo_labels = ctx
-        .db
-        .list_labels_for_repo(repo_id)
-        .await
-        .map_err(db_err)?;
+    let repo_labels = ctx.db.list_labels_for_repo(repo_id).await.map_err(db_err)?;
     for row in repo_labels {
         out.push(to_public(&row, false));
     }
 
-    out.sort_by(|a, b| a.name.to_ascii_lowercase().cmp(&b.name.to_ascii_lowercase()));
+    out.sort_by_key(|a| a.name.to_ascii_lowercase());
     Ok(out)
 }
 
@@ -221,11 +213,7 @@ pub async fn list_for_org(
     let caller = require_verified(ctx).await?;
     let org = load_org_by_slug(ctx, &req.slug).await?;
     let _ = require_org_role(ctx, &org.id, &caller.id).await?;
-    let rows = ctx
-        .db
-        .list_labels_for_org(&org.id)
-        .await
-        .map_err(db_err)?;
+    let rows = ctx.db.list_labels_for_org(&org.id).await.map_err(db_err)?;
     Ok(LabelsListResponse {
         labels: rows.iter().map(|r| to_public(r, false)).collect(),
     })
@@ -233,9 +221,8 @@ pub async fn list_for_org(
 
 /// `label.create` — Admin (org or repo) (D-ISS-07 / T-11-02).
 pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<LabelPublic, AppError> {
-    let req: CreateLabelRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid label.create input: {e}"))
-    })?;
+    let req: CreateLabelRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid label.create input: {e}")))?;
     let name = validate_name(&req.name)?.to_string();
     let color = validate_color(&req.color)?;
     let description = validate_description(req.description.as_deref())?;
@@ -279,9 +266,8 @@ pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<LabelPubli
 
 /// `label.update` — Admin; may toggle `hidden` for org labels on a repo.
 pub async fn update(ctx: &RpcCtx, input: serde_json::Value) -> Result<LabelPublic, AppError> {
-    let req: UpdateLabelRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid label.update input: {e}"))
-    })?;
+    let req: UpdateLabelRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid label.update input: {e}")))?;
     let row = ctx
         .db
         .find_label_by_id(&req.id)
@@ -367,13 +353,9 @@ pub async fn update(ctx: &RpcCtx, input: serde_json::Value) -> Result<LabelPubli
 }
 
 /// `label.delete` — Admin (D-ISS-07).
-pub async fn delete(
-    ctx: &RpcCtx,
-    input: serde_json::Value,
-) -> Result<serde_json::Value, AppError> {
-    let req: DeleteLabelRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid label.delete input: {e}"))
-    })?;
+pub async fn delete(ctx: &RpcCtx, input: serde_json::Value) -> Result<serde_json::Value, AppError> {
+    let req: DeleteLabelRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid label.delete input: {e}")))?;
     let row = ctx
         .db
         .find_label_by_id(&req.id)

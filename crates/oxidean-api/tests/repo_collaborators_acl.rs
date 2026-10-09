@@ -393,10 +393,7 @@ async fn collab_permission_read_write_admin() {
 #[tokio::test]
 #[ignore = "covered by repo_private_404 stranger cases"]
 async fn collab_unauthorized_private_soft_not_found_web() {
-    assert!(
-        false,
-        "Wave 0: private non-grantee web path → repo.not_found (ORG-04 / D-ORG-05 / D-25)"
-    );
+    panic!("Wave 0: private non-grantee web path → repo.not_found (ORG-04 / D-ORG-05 / D-25)");
 }
 
 /// Collaborator grant raises Member with member_base=none on private org repo (ORG-02/03 / T-10-02).
