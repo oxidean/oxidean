@@ -326,11 +326,11 @@ function AccountClusterPending({ className }: { className?: string }) @{
     aria-busy="true"
     className={cn("flex h-9 shrink-0 items-center justify-end", className)}
   >
-    <div data-header-skeleton-anon className="flex items-center gap-2">
+    <div data-header-skeleton-anon className="items-center gap-2">
       <Skeleton className="h-9 w-[4.25rem]" />
       <Skeleton className="h-9 w-[4.5rem]" />
     </div>
-    <div data-header-skeleton-authed className="flex items-center gap-1">
+    <div data-header-skeleton-authed className="items-center gap-1">
       <Skeleton className="size-9" />
       <Skeleton className="size-9" />
       <Skeleton className="h-9 w-28" />

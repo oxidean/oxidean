@@ -288,7 +288,12 @@
 
   /* Header account cluster pending dual-render — same stamp: the button-
      shaped anon skeleton paints by default, the icon cluster only when the
-     web tier validated a session cookie. */
+     web tier validated a session cookie. Display is owned here end-to-end —
+     a `flex` utility on the candidates would live in @layer utilities and
+     beat these components-layer rules, leaving both skeletons visible. */
+  [data-header-skeleton-anon] {
+    display: flex;
+  }
   [data-header-skeleton-authed] {
     display: none;
   }
