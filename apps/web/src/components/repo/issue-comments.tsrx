@@ -15,7 +15,7 @@ import { apiClient } from "@/lib/api-client";
 import { formatRelative } from "@/lib/relative-time";
 import { AppLink } from "@/components/ui/app-link";
 
-export type IssueCommentsProps = {
+type IssueCommentsProps = {
   owner: string;
   repoName: string;
   number: number;

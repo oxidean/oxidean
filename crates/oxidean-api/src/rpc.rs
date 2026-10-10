@@ -17,6 +17,8 @@ use crate::auth::profile;
 use crate::auth::session::{ResolvedSession, SessionService};
 use crate::auth::verify_reset;
 use crate::email::EmailSender;
+use crate::emails;
+use crate::gpg_keys;
 use crate::invites;
 use crate::issue;
 use crate::label;
@@ -26,11 +28,9 @@ use crate::org;
 use crate::pat;
 use crate::pull;
 use crate::release;
-use crate::ssh_keys;
-use crate::gpg_keys;
-use crate::emails;
 use crate::repo;
 use crate::search;
+use crate::ssh_keys;
 use crate::user;
 use crate::user::rate_limit::LookupLimiter;
 use crate::webhook;
@@ -58,7 +58,7 @@ impl ClientMeta {
         let ip_address = headers
             .get("x-forwarded-for")
             .and_then(|v| v.to_str().ok())
-            .and_then(|s| s.split(',').map(str::trim).filter(|p| !p.is_empty()).next_back())
+            .and_then(|s| s.split(',').map(str::trim).rfind(|p| !p.is_empty()))
             .map(|s| s.to_string());
         let user_agent = headers
             .get(axum::http::header::USER_AGENT)
@@ -548,7 +548,7 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
                 Ok(v) => RpcResponse::ok(v),
                 Err(e) => RpcResponse::err(e),
             }
-        },
+        }
         "auth.reset_password" => match verify_reset::reset_password(ctx, req.input).await {
             Ok(user) => RpcResponse::ok(user),
             Err(e) => RpcResponse::err(e),
@@ -638,12 +638,10 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Ok(s) => RpcResponse::ok(s),
             Err(e) => RpcResponse::err(e),
         },
-        "admin.mcp.updateSettings" => {
-            match auth_admin::mcp_update_settings(ctx, req.input).await {
-                Ok(s) => RpcResponse::ok(s),
-                Err(e) => RpcResponse::err(e),
-            }
-        }
+        "admin.mcp.updateSettings" => match auth_admin::mcp_update_settings(ctx, req.input).await {
+            Ok(s) => RpcResponse::ok(s),
+            Err(e) => RpcResponse::err(e),
+        },
         "admin.templates.list" => match crate::templates::handlers::admin_list(ctx).await {
             Ok(s) => RpcResponse::ok(s),
             Err(e) => RpcResponse::err(e),
@@ -894,24 +892,20 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },
-        "repo.insights.contributors" => {
-            match repo::insights_contributors(ctx, req.input).await {
-                Ok(v) => RpcResponse::ok(v),
-                Err(e) => RpcResponse::err(e),
-            }
-        }
+        "repo.insights.contributors" => match repo::insights_contributors(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
         "repo.insights.commitActivity" => {
             match repo::insights_commit_activity(ctx, req.input).await {
                 Ok(v) => RpcResponse::ok(v),
                 Err(e) => RpcResponse::err(e),
             }
         }
-        "repo.insights.forkNetwork" => {
-            match repo::insights_fork_network(ctx, req.input).await {
-                Ok(v) => RpcResponse::ok(v),
-                Err(e) => RpcResponse::err(e),
-            }
-        }
+        "repo.insights.forkNetwork" => match repo::insights_fork_network(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
         "repo.commit" => match repo::commit(ctx, req.input).await {
             Ok(commit) => RpcResponse::ok(commit),
             Err(e) => RpcResponse::err(e),
@@ -1130,24 +1124,18 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },
-        "repo.tagProtection.create" => {
-            match repo::tag_protection_create(ctx, req.input).await {
-                Ok(v) => RpcResponse::ok(v),
-                Err(e) => RpcResponse::err(e),
-            }
-        }
-        "repo.tagProtection.update" => {
-            match repo::tag_protection_update(ctx, req.input).await {
-                Ok(v) => RpcResponse::ok(v),
-                Err(e) => RpcResponse::err(e),
-            }
-        }
-        "repo.tagProtection.delete" => {
-            match repo::tag_protection_delete(ctx, req.input).await {
-                Ok(v) => RpcResponse::ok(v),
-                Err(e) => RpcResponse::err(e),
-            }
-        }
+        "repo.tagProtection.create" => match repo::tag_protection_create(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "repo.tagProtection.update" => match repo::tag_protection_update(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "repo.tagProtection.delete" => match repo::tag_protection_delete(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
         "repo.deployKey.list" => match crate::deploy_keys::list(ctx, req.input).await {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
@@ -1532,18 +1520,22 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Ok(list) => RpcResponse::ok(list),
             Err(e) => RpcResponse::err(e),
         },
-        "packages.deleteVersion" => match crate::packages::rpc::delete_version(ctx, req.input).await {
-            Ok(v) => RpcResponse::ok(v),
-            Err(e) => RpcResponse::err(e),
-        },
+        "packages.deleteVersion" => {
+            match crate::packages::rpc::delete_version(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
         "packages.adminUsage" => match crate::packages::rpc::admin_usage(ctx, req.input).await {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },
-        "packages.adminSetQuota" => match crate::packages::rpc::admin_set_quota(ctx, req.input).await {
-            Ok(v) => RpcResponse::ok(v),
-            Err(e) => RpcResponse::err(e),
-        },
+        "packages.adminSetQuota" => {
+            match crate::packages::rpc::admin_set_quota(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
         "pat.createClassic" => match pat::create_classic(ctx, req.input).await {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),

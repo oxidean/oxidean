@@ -14,7 +14,7 @@ Get Oxidean running locally: install prerequisites, clone the monorepo, then bri
 Optional but useful:
 
 - `cargo-nextest` — preferred by `make test` (falls back to `cargo test` if missing)
-- A free host port **80** for Traefik (Compose), or **3000** / **8080** for host `make dev`
+- A free host port **80** for Traefik (Compose), or **4321** / **8080** for host `make dev`
 
 ## Installation steps
 
@@ -75,7 +75,7 @@ OXIDEAN_ENV=development API_BIND=127.0.0.1:8080 cargo run -p oxidean-api --bin o
 bun run --filter @oxidean/web dev
 ```
 
-Or run `make dev` to regenerate the client and echo the same commands. Vite serves the web app on `:3000` and proxies `/api`, `/uploads`, and `/health` to the API on `:8080`.
+Or run `make dev` to regenerate the client and echo the same commands. `astro dev` serves the web app on `:4321` for island iteration — it has **no `/api` proxy**, so for the same-origin stack run `cargo run -p oxidean-web` against a built `apps/web/dist` (or use Compose).
 
 List all Make targets with `make help`.
 
@@ -84,7 +84,7 @@ List all Make targets with `make help`.
 | Issue | What you see | Fix |
 |-------|----------------|-----|
 | **Docker / Compose missing** | `docker: command not found` or Compose errors from `make up` | Install Docker Engine and Compose v2 so `docker compose` works. Host-only path: use Option B (`make rpc-gen` + two terminals) with a reachable `DATABASE_URL`. |
-| **Port already in use** | Bind failures on **80** (Traefik), **2222** (Git SSH), **3000** (Vite/web), or **8080** (API) | Stop the conflicting process, or change binds (`API_BIND`, Vite port) for host dev. Compose exposes Traefik as `80:80` and SSH as `2222:2222` (`OXIDEAN_SSH_ENABLED=false` to disable SSH). |
+| **Port already in use** | Bind failures on **80** (Traefik), **2222** (Git SSH), **4321** (web dev), or **8080** (API) | Stop the conflicting process, or change binds (`API_BIND`, astro `--port`) for host dev. Compose exposes Traefik as `80:80` and SSH as `2222:2222` (`OXIDEAN_SSH_ENABLED=false` to disable SSH). |
 | **DB dialect mismatch** | Boot exit when `OXIDEAN_DB_DIALECT` disagrees with `DATABASE_URL`, or smoke expects another dialect | Keep scheme and dialect aligned (`postgres://` → postgres, `mysql://` → mysql, `sqlite:` → sqlite). Default stack is Postgres; use `make up-mysql` / `make up-sqlite` (and matching smoke targets) instead of mixing overlays. See [CONFIGURATION.md](CONFIGURATION.md) and [database.md](database.md). |
 | **Missing `.env`** | Compose/API using unexpected defaults or empty secrets | `cp .env.example .env` and edit before `make up`. Never commit `.env`. |
 

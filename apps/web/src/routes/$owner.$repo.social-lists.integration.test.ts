@@ -8,7 +8,7 @@ const dir = dirname(fileURLToPath(import.meta.url));
 describe("repo social list routes", () => {
   it("wires activity page with period/type filters and list SSR", () => {
     const src = readFileSync(join(dir, "$owner.$repo.activity.tsrx"), "utf8");
-    expect(src).toMatch(/createFileRoute\("\/\$owner\/\$repo\/activity"\)/);
+    expect(src).toMatch(/matchPath\("\/\$owner\/\$repo\/activity"/);
     expect(src).toMatch(/export function RepoActivityPage/);
     expect(src).toMatch(/fetchRepoActivity/);
     expect(src).toMatch(/period/);
@@ -19,7 +19,7 @@ describe("repo social list routes", () => {
 
   it("wires stargazers page with Write+ gate, list SSR, and Load more", () => {
     const src = readFileSync(join(dir, "$owner.$repo.stargazers.tsrx"), "utf8");
-    expect(src).toMatch(/createFileRoute\("\/\$owner\/\$repo\/stargazers"\)/);
+    expect(src).toMatch(/matchPath\("\/\$owner\/\$repo\/stargazers"/);
     expect(src).toMatch(/export function RepoStargazersPage/);
     expect(src).toMatch(/fetchRepoStargazers/);
     expect(src).toMatch(/can_write/);
@@ -30,7 +30,7 @@ describe("repo social list routes", () => {
 
   it("wires watchers page with list SSR, search, and Load more", () => {
     const src = readFileSync(join(dir, "$owner.$repo.watchers.tsrx"), "utf8");
-    expect(src).toMatch(/createFileRoute\("\/\$owner\/\$repo\/watchers"\)/);
+    expect(src).toMatch(/matchPath\("\/\$owner\/\$repo\/watchers"/);
     expect(src).toMatch(/export function RepoWatchersPage/);
     expect(src).toMatch(/fetchRepoWatchers/);
     expect(src).toMatch(/Find a watcher/);
@@ -40,7 +40,7 @@ describe("repo social list routes", () => {
 
   it("wires forks page with sort, search, and Load more", () => {
     const src = readFileSync(join(dir, "$owner.$repo.forks.tsrx"), "utf8");
-    expect(src).toMatch(/createFileRoute\("\/\$owner\/\$repo\/forks"\)/);
+    expect(src).toMatch(/matchPath\("\/\$owner\/\$repo\/forks"/);
     expect(src).toMatch(/export function RepoForksPage/);
     expect(src).toMatch(/fetchRepoForks/);
     expect(src).toMatch(/parseForksSort/);

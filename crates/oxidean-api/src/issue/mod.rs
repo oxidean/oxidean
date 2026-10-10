@@ -10,8 +10,8 @@ use oxidean_core::{
     IssueLinkKind, IssueLinkPublic, IssueLinksListResponse, IssueListRequest, IssueListResponse,
     IssuePublic, IssueRefRequest, IssueRevisionPublic, IssueState, ReactionGroupPublic,
     ReactionTarget, RemoveIssueLinkRequest, RemoveIssueLinkResponse, SetIssueAssigneesRequest,
-    SetIssueLabelsRequest, ToggleReactionRequest, ToggleReactionResponse, UpdateIssueCommentRequest,
-    UpdateIssueRequest,
+    SetIssueLabelsRequest, ToggleReactionRequest, ToggleReactionResponse,
+    UpdateIssueCommentRequest, UpdateIssueRequest,
 };
 use oxidean_db::{IssueCommentRow, IssueRow};
 use uuid::Uuid;
@@ -227,12 +227,8 @@ async fn load_issue_in_repo(
 /// `issue.create` — Read+ verified; allocates per-repo `#N` (D-ISS-01 / D-ISS-20).
 pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssuePublic, AppError> {
     let user = require_verified(ctx).await?;
-    let req: CreateIssueRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new(
-            "rpc.bad_input",
-            format!("invalid issue.create input: {e}"),
-        )
-    })?;
+    let req: CreateIssueRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid issue.create input: {e}")))?;
     let title = validate_title(&req.title)?.to_string();
     let body = validate_body(req.body.as_deref())?;
     // Read+ (public contributors) with GIT-20 archive gate — not Write+ ACL.
@@ -253,9 +249,25 @@ pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssuePubli
     }
     // One watch-level lookup serves both fanouts below.
     let watch = ctx.db.list_repo_watch_levels(&subject.repo_id).await;
-    notify::fanout_activity_with_watch(&ctx.db, &user.id, opened_recipients, "issue_opened", &subject, &watch).await;
+    notify::fanout_activity_with_watch(
+        &ctx.db,
+        &user.id,
+        opened_recipients,
+        "issue_opened",
+        &subject,
+        &watch,
+    )
+    .await;
     let mentions = notify::resolve_mention_user_ids(&ctx.db, &body).await;
-    notify::fanout_suppress_ignored_with_watch(&ctx.db, &user.id, mentions, "issue_mention", &subject, &watch).await;
+    notify::fanout_suppress_ignored_with_watch(
+        &ctx.db,
+        &user.id,
+        mentions,
+        "issue_mention",
+        &subject,
+        &watch,
+    )
+    .await;
     let payload = dispatch::issues_payload(
         "opened",
         row.number,
@@ -268,15 +280,22 @@ pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssuePubli
         &user.username,
         &user.id,
     );
-    dispatch::emit(&ctx.db, &accessible.row.id, "issues", "opened", payload, &ctx.env_name).await;
+    dispatch::emit(
+        &ctx.db,
+        &accessible.row.id,
+        "issues",
+        "opened",
+        payload,
+        &ctx.env_name,
+    )
+    .await;
     to_public(ctx, &row).await
 }
 
 /// `issue.get` — Read+; soft `repo.not_found` for unauthorized private (D-ISS-20).
 pub async fn get(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssuePublic, AppError> {
-    let req: IssueRefRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid issue.get input: {e}"))
-    })?;
+    let req: IssueRefRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid issue.get input: {e}")))?;
     let accessible = acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
     let row = load_issue_in_repo(ctx, &accessible.row.id, req.number).await?;
     to_public(ctx, &row).await
@@ -284,9 +303,8 @@ pub async fn get(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssuePublic, 
 
 /// `issue.list` — Read+; default state filter `open` (D-ISS-16..18).
 pub async fn list(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssueListResponse, AppError> {
-    let req: IssueListRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid issue.list input: {e}"))
-    })?;
+    let req: IssueListRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid issue.list input: {e}")))?;
     let accessible = acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
     let state = req.state.as_deref().unwrap_or("open");
     let offset = req.offset.unwrap_or(0);
@@ -294,7 +312,13 @@ pub async fn list(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssueListRes
 
     // Resolve author/assignee usernames → ids; unknown → empty page (not an error).
     let author_id = resolve_username_filter(ctx, req.author.as_deref()).await?;
-    if req.author.as_deref().map(str::trim).is_some_and(|s| !s.is_empty()) && author_id.is_none() {
+    if req
+        .author
+        .as_deref()
+        .map(str::trim)
+        .is_some_and(|s| !s.is_empty())
+        && author_id.is_none()
+    {
         return Ok(IssueListResponse {
             issues: vec![],
             total: 0,
@@ -363,17 +387,10 @@ async fn resolve_username_filter(
 /// `issue.update` — Author or Write+; appends full revision on title/body change (D-ISS-03 / D-ISS-04).
 pub async fn update(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssuePublic, AppError> {
     let user = require_verified(ctx).await?;
-    let req: UpdateIssueRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new(
-            "rpc.bad_input",
-            format!("invalid issue.update input: {e}"),
-        )
-    })?;
+    let req: UpdateIssueRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid issue.update input: {e}")))?;
     if req.title.is_none() && req.body.is_none() {
-        return Err(AppError::new(
-            "rpc.bad_input",
-            "title or body is required",
-        ));
+        return Err(AppError::new("rpc.bad_input", "title or body is required"));
     }
     let accessible = acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
     crate::repo::ensure_not_archived(&accessible)?;
@@ -417,16 +434,23 @@ pub async fn update(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssuePubli
         &user.username,
         &user.id,
     );
-    dispatch::emit(&ctx.db, &accessible.row.id, "issues", "edited", payload, &ctx.env_name).await;
+    dispatch::emit(
+        &ctx.db,
+        &accessible.row.id,
+        "issues",
+        "edited",
+        payload,
+        &ctx.env_name,
+    )
+    .await;
     to_public(ctx, &updated).await
 }
 
 /// `issue.close` — Author or Write+; open → closed (D-ISS-02 / D-ISS-20).
 pub async fn close(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssuePublic, AppError> {
     let user = require_verified(ctx).await?;
-    let req: IssueRefRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid issue.close input: {e}"))
-    })?;
+    let req: IssueRefRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid issue.close input: {e}")))?;
     let accessible = acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
     let row = load_issue_in_repo(ctx, &accessible.row.id, req.number).await?;
     if !acl::can_edit_issue(&user.id, &row, accessible.capability) {
@@ -455,19 +479,23 @@ pub async fn close(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssuePublic
         &user.username,
         &user.id,
     );
-    dispatch::emit(&ctx.db, &accessible.row.id, "issues", "closed", payload, &ctx.env_name).await;
+    dispatch::emit(
+        &ctx.db,
+        &accessible.row.id,
+        "issues",
+        "closed",
+        payload,
+        &ctx.env_name,
+    )
+    .await;
     to_public(ctx, &updated).await
 }
 
 /// `issue.reopen` — Author or Write+; closed → open (D-ISS-02 / D-ISS-20).
 pub async fn reopen(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssuePublic, AppError> {
     let user = require_verified(ctx).await?;
-    let req: IssueRefRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new(
-            "rpc.bad_input",
-            format!("invalid issue.reopen input: {e}"),
-        )
-    })?;
+    let req: IssueRefRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid issue.reopen input: {e}")))?;
     let accessible = acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
     let row = load_issue_in_repo(ctx, &accessible.row.id, req.number).await?;
     if !acl::can_edit_issue(&user.id, &row, accessible.capability) {
@@ -492,7 +520,15 @@ pub async fn reopen(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssuePubli
         &user.username,
         &user.id,
     );
-    dispatch::emit(&ctx.db, &accessible.row.id, "issues", "reopened", payload, &ctx.env_name).await;
+    dispatch::emit(
+        &ctx.db,
+        &accessible.row.id,
+        "issues",
+        "reopened",
+        payload,
+        &ctx.env_name,
+    )
+    .await;
     to_public(ctx, &updated).await
 }
 
@@ -501,19 +537,11 @@ pub async fn history(
     ctx: &RpcCtx,
     input: serde_json::Value,
 ) -> Result<IssueHistoryResponse, AppError> {
-    let req: IssueRefRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new(
-            "rpc.bad_input",
-            format!("invalid issue.history input: {e}"),
-        )
-    })?;
+    let req: IssueRefRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid issue.history input: {e}")))?;
     let accessible = acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
     let row = load_issue_in_repo(ctx, &accessible.row.id, req.number).await?;
-    let revs = ctx
-        .db
-        .list_issue_revisions(&row.id)
-        .await
-        .map_err(db_err)?;
+    let revs = ctx.db.list_issue_revisions(&row.id).await.map_err(db_err)?;
     let editor_ids: Vec<String> = {
         let mut v: Vec<String> = revs.iter().map(|r| r.editor_id.clone()).collect();
         v.sort();
@@ -545,14 +573,13 @@ pub async fn history(
 }
 
 /// `issue.delete` — Admin + confirmNumber; does not reclaim `#N` (D-ISS-02 / D-ISS-20).
-pub async fn delete(ctx: &RpcCtx, input: serde_json::Value) -> Result<DeleteIssueResponse, AppError> {
+pub async fn delete(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<DeleteIssueResponse, AppError> {
     let _user = require_verified(ctx).await?;
-    let req: DeleteIssueRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new(
-            "rpc.bad_input",
-            format!("invalid issue.delete input: {e}"),
-        )
-    })?;
+    let req: DeleteIssueRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid issue.delete input: {e}")))?;
     let accessible = acl::resolve_for_admin(ctx, &req.owner, &req.name).await?;
     crate::repo::ensure_not_archived(&accessible)?;
     let row = load_issue_in_repo(ctx, &accessible.row.id, req.number).await?;
@@ -564,9 +591,7 @@ pub async fn delete(ctx: &RpcCtx, input: serde_json::Value) -> Result<DeleteIssu
     }
     // Cascades comments/reactions/links/revisions via FK ON DELETE CASCADE.
     ctx.db.delete_issue(&row.id).await.map_err(db_err)?;
-    Ok(DeleteIssueResponse {
-        number: row.number,
-    })
+    Ok(DeleteIssueResponse { number: row.number })
 }
 
 fn comment_not_found() -> AppError {
@@ -720,13 +745,29 @@ pub async fn comments_create(
     let mentions = notify::resolve_mention_user_ids(&ctx.db, &body).await;
     // One watch-level lookup serves both fanouts below.
     let watch = ctx.db.list_repo_watch_levels(&subject.repo_id).await;
-    notify::fanout_activity_with_watch(&ctx.db, &user.id, participants.clone(), "issue_comment", &subject, &watch).await;
+    notify::fanout_activity_with_watch(
+        &ctx.db,
+        &user.id,
+        participants.clone(),
+        "issue_comment",
+        &subject,
+        &watch,
+    )
+    .await;
     let participant_set: std::collections::HashSet<_> = participants.into_iter().collect();
     let mention_only: Vec<_> = mentions
         .into_iter()
         .filter(|m| !participant_set.contains(m))
         .collect();
-    notify::fanout_suppress_ignored_with_watch(&ctx.db, &user.id, mention_only, "issue_mention", &subject, &watch).await;
+    notify::fanout_suppress_ignored_with_watch(
+        &ctx.db,
+        &user.id,
+        mention_only,
+        "issue_mention",
+        &subject,
+        &watch,
+    )
+    .await;
     let payload = dispatch::issue_comment_payload(
         "created",
         issue.number,
@@ -839,10 +880,7 @@ pub async fn comments_delete(
     if !acl::can_delete_comment(&user.id, &row.author_id, accessible.capability) {
         return Err(not_found());
     }
-    ctx.db
-        .delete_issue_comment(&row.id)
-        .await
-        .map_err(db_err)?;
+    ctx.db.delete_issue_comment(&row.id).await.map_err(db_err)?;
     let author_login = match ctx.db.find_user_by_id(&row.author_id).await {
         Ok(Some(u)) => u.username,
         Ok(None) => String::new(),
@@ -1019,17 +1057,12 @@ pub async fn assignees_set(
                 "assignee user was not found",
             ));
         };
-        let cap = crate::repo::effective_capability(
-            &ctx.db,
-            Some(id),
-            &accessible.row,
-            &owner_ref,
-        )
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "effective_capability for assignee failed");
-            AppError::new("issue.internal", "issue operation failed")
-        })?;
+        let cap = crate::repo::effective_capability(&ctx.db, Some(id), &accessible.row, &owner_ref)
+            .await
+            .map_err(|e| {
+                tracing::error!(error = %e, "effective_capability for assignee failed");
+                AppError::new("issue.internal", "issue operation failed")
+            })?;
         if !crate::repo::meets(cap, crate::repo::Capability::Read) {
             return Err(AppError::new(
                 "rpc.bad_input",
@@ -1050,8 +1083,24 @@ pub async fn assignees_set(
     let subject = notify::subject_for_issue(&issue);
     // One watch-level lookup serves both fanouts below.
     let watch = ctx.db.list_repo_watch_levels(&subject.repo_id).await;
-    notify::fanout_suppress_ignored_with_watch(&ctx.db, &user.id, newly_assigned, "issue_assigned", &subject, &watch).await;
-    notify::fanout_suppress_ignored_with_watch(&ctx.db, &user.id, newly_unassigned, "issue_unassigned", &subject, &watch).await;
+    notify::fanout_suppress_ignored_with_watch(
+        &ctx.db,
+        &user.id,
+        newly_assigned,
+        "issue_assigned",
+        &subject,
+        &watch,
+    )
+    .await;
+    notify::fanout_suppress_ignored_with_watch(
+        &ctx.db,
+        &user.id,
+        newly_unassigned,
+        "issue_unassigned",
+        &subject,
+        &watch,
+    )
+    .await;
 
     let refreshed = ctx
         .db
@@ -1133,17 +1182,13 @@ pub async fn assignee_candidates(
 
     let mut users = Vec::new();
     for user_id in candidate_ids {
-        let cap = crate::repo::effective_capability(
-            &ctx.db,
-            Some(&user_id),
-            &accessible.row,
-            &owner_ref,
-        )
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "effective_capability for candidate failed");
-            AppError::new("issue.internal", "issue operation failed")
-        })?;
+        let cap =
+            crate::repo::effective_capability(&ctx.db, Some(&user_id), &accessible.row, &owner_ref)
+                .await
+                .map_err(|e| {
+                    tracing::error!(error = %e, "effective_capability for candidate failed");
+                    AppError::new("issue.internal", "issue operation failed")
+                })?;
         if !crate::repo::meets(cap, crate::repo::Capability::Read) {
             continue;
         }
@@ -1161,7 +1206,11 @@ pub async fn assignee_candidates(
             display_name: u.display_name,
         });
     }
-    users.sort_by(|a, b| a.username.to_ascii_lowercase().cmp(&b.username.to_ascii_lowercase()));
+    users.sort_by(|a, b| {
+        a.username
+            .to_ascii_lowercase()
+            .cmp(&b.username.to_ascii_lowercase())
+    });
     Ok(AssigneeCandidatesResponse { users })
 }
 
@@ -1258,11 +1307,7 @@ pub async fn links_list(
     })?;
     let accessible = acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
     let issue = load_issue_in_repo(ctx, &accessible.row.id, req.number).await?;
-    let rows = ctx
-        .db
-        .list_issue_links(&issue.id)
-        .await
-        .map_err(db_err)?;
+    let rows = ctx.db.list_issue_links(&issue.id).await.map_err(db_err)?;
     let mut links = Vec::with_capacity(rows.len());
     for row in rows {
         links.push(link_row_to_public(row)?);
@@ -1285,9 +1330,9 @@ pub async fn links_add(
     let accessible = acl::resolve_for_write(ctx, &req.owner, &req.name).await?;
     let issue = load_issue_in_repo(ctx, &accessible.row.id, req.number).await?;
 
-    let target_number = req.target_number.ok_or_else(|| {
-        AppError::new("rpc.bad_input", "targetNumber is required")
-    })?;
+    let target_number = req
+        .target_number
+        .ok_or_else(|| AppError::new("rpc.bad_input", "targetNumber is required"))?;
     if target_number < 1 {
         return Err(AppError::new(
             "rpc.bad_input",

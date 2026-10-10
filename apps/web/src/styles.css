@@ -215,12 +215,8 @@
     scroll-behavior: auto;
   }
 
-  body,
-  #__app {
-    min-height: 100%;
-  }
-
   body {
+    min-height: 100%;
     margin: 0;
     font-family: var(--font-sans);
     font-size: 16px;
@@ -266,9 +262,52 @@
     bottom: calc(1rem + 11rem);
   }
 
+  /* Astro islands are custom elements (inline by default) — let their children
+     participate in the parent's flex/grid layout. */
+  astro-island {
+    display: contents;
+  }
+
   /* Named region for TanStack Router / View Transitions — header & footer stay put. */
   .oxidean-main {
     view-transition-name: oxidean-main;
+  }
+
+  /* Pending home `/` dual-render: the web tier stamps `data-oxidean-session`
+     on <html> when a session cookie is present, so signed-in visitors see the
+     content-sized skeleton instead of the anonymous landing before hydration. */
+  [data-home-skeleton] {
+    display: none;
+  }
+  html[data-oxidean-session] [data-anon-landing] {
+    display: none;
+  }
+  html[data-oxidean-session] [data-home-skeleton] {
+    display: block;
+  }
+
+  /* Header account cluster pending dual-render — same stamp: the button-
+     shaped anon skeleton paints by default, the icon cluster only when the
+     web tier validated a session cookie. Display is owned here end-to-end —
+     a `flex` utility on the candidates would live in @layer utilities and
+     beat these components-layer rules, leaving both skeletons visible. */
+  [data-header-skeleton-anon] {
+    display: flex;
+  }
+  [data-header-skeleton-authed] {
+    display: none;
+  }
+  html[data-oxidean-session] [data-header-skeleton-anon] {
+    display: none;
+  }
+  html[data-oxidean-session] [data-header-skeleton-authed] {
+    display: flex;
+  }
+  /* Sign-up-shaped bar only paints when the web tier's `data-oxidean-signup`
+     stamp (from the `oxidean_allow_signup` companion cookie) says registration
+     is open — unstamped means closed or unknown, matching the schema default. */
+  html:not([data-oxidean-signup]) [data-header-skeleton-signup] {
+    display: none;
   }
 
   /* Marketing landing reveal (home `/`). */

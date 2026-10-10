@@ -25,10 +25,7 @@ const LFS_JSON: &str = "application/vnd.git-lfs+json";
 const USERNAME_ALIASES: &[&str] = &["git", "oxidean"];
 
 fn lfs_json_headers() -> [(header::HeaderName, HeaderValue); 1] {
-    [(
-        header::CONTENT_TYPE,
-        HeaderValue::from_static(LFS_JSON),
-    )]
+    [(header::CONTENT_TYPE, HeaderValue::from_static(LFS_JSON))]
 }
 
 pub fn unauthorized_lfs() -> Response {
@@ -140,6 +137,7 @@ pub struct AuthedPat {
     pub owner: UserRow,
 }
 
+#[allow(clippy::result_large_err)]
 /// Resolve Basic credentials to a PAT. Cookies are never consulted (D-LFS-09).
 pub async fn authenticate_pat(
     state: &AppState,
@@ -190,6 +188,7 @@ pub async fn authenticate_pat(
     Ok(Some(AuthedPat { pat, owner }))
 }
 
+#[allow(clippy::result_large_err)]
 /// Classic `repo` / FG contents+selection — insufficient → caller maps to 403 (D-LFS-11).
 pub async fn pat_allows_operation(
     state: &AppState,
@@ -252,6 +251,7 @@ pub async fn pat_allows_operation(
     }
 }
 
+#[allow(clippy::result_large_err)]
 /// Authorize download or upload against ACL + PAT scopes (D-LFS-09/11).
 ///
 /// Returns the authenticated PAT when present and authorized. `None` means

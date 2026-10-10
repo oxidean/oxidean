@@ -44,26 +44,7 @@ const overriddenSettings = {
   enabled_overridden: true,
 };
 
-type LoaderShape =
-  | { kind: "unauthenticated" }
-  | { kind: "forbidden" }
-  | { kind: "error"; message: string }
-  | {
-      kind: "ready";
-      me: typeof sysAdmin;
-      settings: typeof envDefaultSettings | typeof overriddenSettings;
-    };
-
-let loaderData: LoaderShape | undefined;
 const assignMock = vi.fn();
-
-vi.mock("@octanejs/tanstack-router", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@octanejs/tanstack-router")>();
-  return {
-    ...actual,
-    useLoaderData: () => loaderData,
-  };
-});
 
 import { AdminMcpPage } from "./mcp";
 
@@ -83,17 +64,20 @@ describe("/admin/mcp", () => {
     assignMock.mockReset();
     Object.defineProperty(window, "location", {
       configurable: true,
-      value: { assign: assignMock, href: "http://localhost/" },
+      value: {
+        assign: assignMock,
+        href: "http://localhost/admin/mcp",
+        origin: "http://localhost",
+        pathname: "/admin/mcp",
+        search: "",
+        replace: vi.fn(),
+        reload: vi.fn(),
+      },
     });
 
     meMock.mockResolvedValue({ ok: true, data: sysAdmin });
     getSettingsMock.mockResolvedValue({ ok: true, data: envDefaultSettings });
     updateSettingsMock.mockResolvedValue({ ok: true, data: overriddenSettings });
-    loaderData = {
-      kind: "ready",
-      me: sysAdmin,
-      settings: envDefaultSettings,
-    };
   });
 
   it("exports AdminMcpPage without @else if and wires getSettings/updateSettings", async () => {
@@ -150,11 +134,7 @@ describe("/admin/mcp", () => {
   });
 
   it("shows the env-default reset when the override is active", async () => {
-    loaderData = {
-      kind: "ready",
-      me: sysAdmin,
-      settings: overriddenSettings,
-    };
+    getSettingsMock.mockResolvedValue({ ok: true, data: overriddenSettings });
     updateSettingsMock.mockResolvedValue({ ok: true, data: envDefaultSettings });
 
     renderWithQueryClient(AdminMcpPage);
@@ -176,7 +156,6 @@ describe("/admin/mcp", () => {
   });
 
   it("redirects signed-out sessions toward login", async () => {
-    loaderData = { kind: "unauthenticated" };
     meMock.mockResolvedValue({
       ok: false,
       error: { code: "auth.unauthenticated", message: "Not signed in" },
@@ -195,7 +174,6 @@ describe("/admin/mcp", () => {
   });
 
   it("shows forbidden for non sys-admin from loader", async () => {
-    loaderData = { kind: "forbidden" };
     meMock.mockResolvedValue({
       ok: true,
       data: { ...sysAdmin, role: "user" },

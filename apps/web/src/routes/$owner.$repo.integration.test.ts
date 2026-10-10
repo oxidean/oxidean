@@ -1,6 +1,6 @@
-import { cleanup, render, screen, waitFor } from "@octanejs/testing-library";
-import { createElement } from "octane";
+import { cleanup, screen, waitFor } from "@octanejs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { renderWithQueryClient } from "@/test/render-with-query";
 
 /**
  * Code / tree / blob browse (D-15, D-17, D-25 / GIT-05 UI).
@@ -11,14 +11,32 @@ const getMock = vi.fn();
 const treeMock = vi.fn();
 const blobMock = vi.fn();
 const refsMock = vi.fn();
+const commitsMock = vi.fn();
+const pathLastMock = vi.fn();
+const countMock = vi.fn();
+const releasesMock = vi.fn();
+const packagesMock = vi.fn();
+const contribMock = vi.fn();
+const langMock = vi.fn();
+const meMock = vi.fn();
 
 vi.mock("@/lib/api-client", () => ({
   apiClient: {
+    auth: {
+      me: (...args: unknown[]) => meMock(...args),
+    },
     repo: {
       get: (...args: unknown[]) => getMock(...args),
       tree: (...args: unknown[]) => treeMock(...args),
       blob: (...args: unknown[]) => blobMock(...args),
       refs: (...args: unknown[]) => refsMock(...args),
+      commits: (...args: unknown[]) => commitsMock(...args),
+      pathLastCommits: (...args: unknown[]) => pathLastMock(...args),
+      commitCount: (...args: unknown[]) => countMock(...args),
+      releases: (...args: unknown[]) => releasesMock(...args),
+      packages: (...args: unknown[]) => packagesMock(...args),
+      contributorsList: (...args: unknown[]) => contribMock(...args),
+      languages: (...args: unknown[]) => langMock(...args),
     },
   },
 }));
@@ -43,37 +61,31 @@ vi.mock("@/lib/use-chrome-account", () => ({
   resolveAllowSignup: () => true,
 }));
 
-vi.mock("@octanejs/tanstack-router", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@octanejs/tanstack-router")>();
-  function MockLink(props: {
-    to?: string;
-    href?: string;
-    children?: unknown;
-    className?: string;
-    preload?: string;
-  }) {
-    return createElement(
-      "a",
-      {
-        href: (props.href ?? props.to ?? "#") as string,
-        className: props.className,
-      } as never,
-      props.children as never,
-    );
-  }
-  return {
-    ...actual,
-    useParams: () => ({ owner: "ada", repo: "hello" }),
-    useLoaderData: () => undefined,
-    Link: MockLink,
-  };
-});
-
 beforeEach(() => {
+  window.history.pushState({}, "", "/ada/hello");
   getMock.mockReset();
   treeMock.mockReset();
   blobMock.mockReset();
   refsMock.mockReset();
+  commitsMock.mockReset();
+  pathLastMock.mockReset();
+  countMock.mockReset();
+  releasesMock.mockReset();
+  packagesMock.mockReset();
+  contribMock.mockReset();
+  langMock.mockReset();
+  meMock.mockReset();
+  meMock.mockResolvedValue({
+    ok: false,
+    error: { code: "auth.unauthenticated", message: "n" },
+  });
+  commitsMock.mockResolvedValue({ ok: true, data: { commits: [] } });
+  pathLastMock.mockResolvedValue({ ok: true, data: { last_commits: {} } });
+  countMock.mockResolvedValue({ ok: true, data: { count: 0 } });
+  releasesMock.mockResolvedValue({ ok: true, data: { releases: [] } });
+  packagesMock.mockResolvedValue({ ok: true, data: { packages: [] } });
+  contribMock.mockResolvedValue({ ok: true, data: { contributors: [] } });
+  langMock.mockResolvedValue({ ok: true, data: { languages: [] } });
 });
 
 afterEach(cleanup);
@@ -86,7 +98,8 @@ describe("/$owner/$repo layout chrome (D-QH-01)", () => {
     expect(src).toMatch(/RepoChrome/);
     expect(src).toMatch(/useRepoStore/);
     expect(src).toMatch(/repoChromeActiveFromPath/);
-    expect(src).toMatch(/Outlet/);
+    // Layout is a wrapper component now — children slot replaces <Outlet/>.
+    expect(src).toMatch(/props\.children|children/);
     expect(src).toMatch(/RepoLayoutChrome/);
   }, 30_000);
 
@@ -137,7 +150,7 @@ describe("/{owner}/{repo} Code home (D-15, D-25)", () => {
     refsMock.mockResolvedValue({ ok: true, data: { refs: [] } });
 
     const { RepoCodeHome } = await import("./$owner.$repo.index");
-    render(RepoCodeHome as never);
+    renderWithQueryClient(RepoCodeHome as never);
 
     await waitFor(() => {
       expect(screen.getByText("Quick setup")).toBeInTheDocument();
@@ -197,7 +210,7 @@ describe("/{owner}/{repo} Code home (D-15, D-25)", () => {
     });
 
     const { RepoCodeHome } = await import("./$owner.$repo.index");
-    render(RepoCodeHome as never);
+    renderWithQueryClient(RepoCodeHome as never);
 
     await waitFor(() => {
       expect(screen.getByText("src")).toBeInTheDocument();
@@ -227,7 +240,7 @@ describe("/{owner}/{repo} Code home (D-15, D-25)", () => {
     });
 
     const { RepoCodeHome } = await import("./$owner.$repo.index");
-    render(RepoCodeHome as never);
+    renderWithQueryClient(RepoCodeHome as never);
 
     await waitFor(() => {
       expect(screen.getByText("Page not found")).toBeInTheDocument();

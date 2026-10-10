@@ -1,9 +1,8 @@
 import { OTPField } from "@octanejs/base-ui/otp-field";
 import { cn } from "@/lib/utils";
 
-export const OTP_LENGTH = 8;
-
-export type InputOtpProps = {
+const OTP_LENGTH = 8;
+type InputOtpProps = {
   value: string;
   onChange: (value: string) => void;
   onComplete?: (value: string) => void;

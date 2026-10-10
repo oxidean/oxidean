@@ -92,10 +92,7 @@ pub async fn resolve_author_email(db: &Database, email: &str) -> ResolvedAuthor 
     match db.find_user_by_id(&user_id).await {
         Ok(Some(user)) => {
             if let Some(expected_username) = maybe_username {
-                if !user
-                    .username
-                    .eq_ignore_ascii_case(expected_username.trim())
-                {
+                if !user.username.eq_ignore_ascii_case(expected_username.trim()) {
                     return ResolvedAuthor::default();
                 }
             }
@@ -233,10 +230,7 @@ pub async fn resolve_authors_for_emails(
                 continue;
             };
             if let Some(expected_username) = maybe_username {
-                if !user
-                    .username
-                    .eq_ignore_ascii_case(expected_username.trim())
-                {
+                if !user.username.eq_ignore_ascii_case(expected_username.trim()) {
                     continue;
                 }
             }
@@ -268,7 +262,7 @@ pub fn lookup_resolved<'a>(
 
 /// OpenSSH public-key line pieces: `key-type key [comment…]`.
 fn openssh_key_material(line: &str) -> Option<(String, String)> {
-    let mut parts = line.trim().split_whitespace();
+    let mut parts = line.split_whitespace();
     let key_type = parts.next()?.to_string();
     let key = parts.next()?.to_string();
     if key_type.is_empty() || key.is_empty() {
@@ -342,7 +336,7 @@ pub async fn build_allowed_signers_file(
         // Always include the commit email that resolved this user, plus every
         // verified address on the account (forge multi-email principals).
         let mut principals: HashSet<String> = HashSet::new();
-        for e in verified_by_user.get(uid).into_iter().flatten().copied() {
+        for e in verified_by_user.get(uid).into_iter().flatten() {
             let t = e.trim().to_string();
             if !t.is_empty() {
                 principals.insert(t);
@@ -419,10 +413,7 @@ mod tests {
     #[tokio::test]
     async fn build_allowed_signers_excludes_can_sign_false() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let url = format!(
-            "sqlite:{}",
-            dir.path().join("allowed_signers.db").display()
-        );
+        let url = format!("sqlite:{}", dir.path().join("allowed_signers.db").display());
         let db = Database::connect(&url).await.expect("connect");
         db.migrate().await.expect("migrate");
         std::mem::forget(dir);

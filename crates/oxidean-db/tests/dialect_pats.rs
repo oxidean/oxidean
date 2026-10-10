@@ -56,13 +56,7 @@ async fn dialect_pats_migrate_0008_schema_presence() {
 
     let repo = db
         .insert_repository(
-            "r-pat-1",
-            &owner.id,
-            "user",
-            "pat_demo",
-            "private",
-            "pat demo",
-            "main",
+            "r-pat-1", &owner.id, "user", "pat_demo", "private", "pat demo", "main",
         )
         .await
         .expect("insert repo");
@@ -108,7 +102,7 @@ async fn dialect_pats_migrate_0008_schema_presence() {
         Some("write"),
         Some("selected"),
         None,
-        &[repo.id.clone()],
+        std::slice::from_ref(&repo.id),
     )
     .await
     .expect("create fg pat");

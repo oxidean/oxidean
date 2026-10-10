@@ -1,11 +1,18 @@
 import { Select } from "@octanejs/base-ui/select";
 import type { ComponentProps } from "octane";
+import { portalRoot } from "@/lib/portal-root";
 import { cn } from "@/lib/utils";
 
 export const SelectRoot = Select.Root;
 export const SelectValue = Select.Value;
-export const SelectPortal = Select.Portal;
+
+export function SelectPortal(props: ComponentProps<typeof Select.Portal>) @{
+  // octane-dom-race-ok: definition site — Select.Portal has no keepMounted
+  // escape hatch; container pins portals to the persisted host.
+  <Select.Portal container={portalRoot()} {...props} />;
+}
 export const SelectList = Select.List;
+export const SelectGroup = Select.Group;
 export const SelectItemText = Select.ItemText;
 export const SelectIcon = Select.Icon;
 export const SelectItemIndicator = Select.ItemIndicator;
@@ -43,6 +50,20 @@ export function SelectPopup({
     data-slot="select-popup"
     className={cn(
       "z-50 min-w-[10rem] rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-lg outline-none",
+      className,
+    )}
+    {...props}
+  />;
+}
+
+export function SelectGroupLabel({
+  className,
+  ...props
+}: ComponentProps<typeof Select.GroupLabel>) @{
+  <Select.GroupLabel
+    data-slot="select-group-label"
+    className={cn(
+      "px-2 pb-1 pt-2 text-[12px] font-semibold uppercase tracking-wide text-muted-foreground",
       className,
     )}
     {...props}

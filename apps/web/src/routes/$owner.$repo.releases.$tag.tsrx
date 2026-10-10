@@ -1,5 +1,9 @@
-import { createFileRoute, useLoaderData, useParams } from "@octanejs/tanstack-router";
-import { useQuery } from "@octanejs/tanstack-query";
+import { queryOptions, useQuery } from "@octanejs/tanstack-query";
+import { useRepoLayoutData } from "@/lib/repo-store.tsrx";
+import { matchPath } from "@/lib/route-params";
+import { usePathname, useSearchString } from "@/lib/pathname.tsrx";
+import { RepoLayout } from "@/routes/$owner.$repo.tsrx";
+import { AppPage } from "@/components/app-page";
 import type { ReleasePublic, RepoPublic } from "@oxidean/api-client";
 import { useEffect, useState } from "octane";
 import { Badge } from "@/components/ui/badge";
@@ -9,7 +13,7 @@ import { MarkdownHtml } from "@/components/repo/markdown-body";
 import { RepoNotFound } from "@/components/repo/repo-not-found";
 import { apiClient } from "@/lib/api-client";
 import { renderGfm } from "@/lib/markdown";
-import type { RepoLayoutLoaderData } from "@/lib/repo-store";
+
 import { fetchRepoGet } from "@/lib/ssr-repo";
 import { AppLink } from "@/components/ui/app-link";
 
@@ -25,7 +29,7 @@ async function loadReleaseDetail(
   repoName: string,
   tag: string,
 ): Promise<ReleaseDetailLoaderData> {
-  const got = await fetchRepoGet({ data: { owner, name: repoName } });
+  const got = await fetchRepoGet({ owner, name: repoName });
   if (!got.ok) {
     if (got.error.code === "repo.not_found") return { kind: "not_found" };
     return {
@@ -50,30 +54,41 @@ async function loadReleaseDetail(
   return { kind: "ready", repo: got.data, release: rel.data };
 }
 
-export const Route = createFileRoute("/$owner/$repo/releases/$tag")({
-  component: RepoReleaseDetailPage,
-  head: ({ params }) => ({
-    meta: [
-      {
-        title: `Release ${(params as { tag: string }).tag} · ${(params as { owner: string }).owner}/${(params as { repo: string }).repo} · Oxidean`,
-      },
+function repoReleasesTagQueryOptions(params: Record<string, string | undefined>, searchStr = "") {
+  return queryOptions({
+    queryKey: [
+      "repo-page",
+      "/$owner/$repo/releases/$tag",
+      params.owner ?? "",
+      params.repo ?? "",
+      params._splat ?? "",
+      params.n ?? "",
+      params.sha ?? "",
+      params.tag ?? "",
+      params.run ?? "",
+      searchStr,
     ],
-  }),
-  loader: async ({ params }): Promise<ReleaseDetailLoaderData> => {
-    const owner = String((params as { owner?: string }).owner ?? "");
-    const repoName = String((params as { repo?: string }).repo ?? "");
-    const tag = decodeURIComponent(String((params as { tag?: string }).tag ?? ""));
-    try {
-      return await loadReleaseDetail(owner, repoName, tag);
-    } catch {
-      return { kind: "error", message: NETWORK_ERROR };
-    }
-  },
-});
+    queryFn: async (): Promise<ReleaseDetailLoaderData> => {
+      const owner = String((params as { owner?: string }).owner ?? "");
+      const repoName = String((params as { repo?: string }).repo ?? "");
+      const tag = decodeURIComponent(String((params as { tag?: string }).tag ?? ""));
+      try {
+        return await loadReleaseDetail(owner, repoName, tag);
+      } catch {
+        return { kind: "error", message: NETWORK_ERROR };
+      }
+    },
+    enabled: Boolean(params.owner && params.repo),
+    retry: false,
+    staleTime: 30_000,
+  });
+}
 
 /** Release detail — notes via renderGfm; assets land in 15-02. */
-export function RepoReleaseDetailPage() @{
-  const params = useParams({ strict: false }) as {
+function RepoReleaseDetailPageContent() @{
+  const pathname = usePathname();
+  const searchStr = useSearchString();
+  const params = (matchPath("/$owner/$repo/releases/$tag", pathname) ?? {}) as {
     owner?: string;
     repo?: string;
     tag?: string;
@@ -81,10 +96,8 @@ export function RepoReleaseDetailPage() @{
   const owner = params.owner ?? "";
   const repoName = params.repo ?? "";
   const tag = decodeURIComponent(params.tag ?? "");
-  const layout = useLoaderData({ from: "/$owner/$repo" }) as RepoLayoutLoaderData | undefined;
-  const routeLoader = useLoaderData({
-    from: "/$owner/$repo/releases/$tag",
-  }) as ReleaseDetailLoaderData | undefined;
+  const layout = useRepoLayoutData();
+  const routeLoader = useQuery(repoReleasesTagQueryOptions(params, searchStr)).data;
 
   const [bodyHtml, setBodyHtml] = useState("");
 
@@ -204,6 +217,31 @@ export function RepoReleaseDetailPage() @{
         } @else {
           <p className="mb-4 text-[14px] text-muted-foreground">No assets attached.</p>;
         }
+        {/* Auto source archives — same endpoints the Code clone box uses. */}
+        <ul className="mb-4 flex flex-col gap-2 border-t border-border pt-3">
+          <li>
+            {/* raw-anchor-ok — /api download endpoint, not a router route */}
+            <a
+              href={
+                `/api/repos/${owner}/${repoName}/archive/${encodeURIComponent(release.tag_name)}.zip` as string
+              }
+              className="text-[14px] text-primary underline"
+            >
+              Source code (zip)
+            </a>
+          </li>
+          <li>
+            {/* raw-anchor-ok — /api download endpoint, not a router route */}
+            <a
+              href={
+                `/api/repos/${owner}/${repoName}/archive/${encodeURIComponent(release.tag_name)}.tar.gz` as string
+              }
+              className="text-[14px] text-primary underline"
+            >
+              Source code (tar.gz)
+            </a>
+          </li>
+        </ul>
         @if (repo.can_write && !repo.archived) {
           <form
             method="post"
@@ -216,7 +254,6 @@ export function RepoReleaseDetailPage() @{
             <Label htmlFor="release-asset-file">Upload asset</Label>
             <FileDropzone
               id="release-asset-file"
-              hint="Drop a release asset here, or click to browse"
               onFiles={(files) => {
                 const file = files[0];
                 if (!file || !release) return;
@@ -246,4 +283,13 @@ export function RepoReleaseDetailPage() @{
       </p>
     </>;
   }
+}
+
+/** Page root — RepoLayout (chrome + repo store) around the leaf content. */
+export function RepoReleaseDetailPage() @{
+  <AppPage>
+    <RepoLayout>
+      <RepoReleaseDetailPageContent />
+    </RepoLayout>
+  </AppPage>;
 }

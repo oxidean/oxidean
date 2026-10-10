@@ -1,7 +1,6 @@
 /**
  * Account page (`/settings/profile`): profile fields + email addresses section.
  */
-import { createElement } from "octane";
 import { cleanup, screen, waitFor } from "@octanejs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithQueryClient } from "@/test/render-with-query";
@@ -54,32 +53,27 @@ type LoaderShape =
       emails: unknown[];
     };
 
-let loaderData: LoaderShape;
+function applyLoader(d: LoaderShape | undefined) {
+  if (d === undefined) {
+    getProfileMock.mockReturnValue(new Promise(() => {}));
+    return;
+  }
+  if (d.kind === "unauthenticated") {
+    getProfileMock.mockResolvedValue({
+      ok: false,
+      error: { code: "auth.unauthenticated", message: "n" },
+    });
+    return;
+  }
+  if (d.kind === "error") {
+    getProfileMock.mockResolvedValue({ ok: false, error: { code: "x", message: d.message } });
+    return;
+  }
+  getProfileMock.mockResolvedValue({ ok: true, data: d.user });
+  listMock.mockResolvedValue({ ok: true, data: d.emails });
+}
 
-vi.mock("@octanejs/tanstack-router", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@octanejs/tanstack-router")>();
-  return {
-    ...actual,
-    useLoaderData: () => loaderData,
-    Link: (props: {
-      to?: string;
-      children?: unknown;
-      className?: string;
-      "aria-current"?: string;
-    }) =>
-      createElement(
-        "a",
-        {
-          href: props.to ?? "#",
-          className: props.className,
-          "aria-current": props["aria-current"],
-        },
-        props.children as never,
-      ),
-  };
-});
-
-import { ProfilePage, Route } from "./profile";
+import { ProfilePage } from "./profile";
 
 const readyUser = {
   id: "u1",
@@ -115,11 +109,12 @@ const readyEmails = [
 ];
 
 beforeEach(() => {
+  window.history.pushState({}, "", "/settings/profile");
   getProfileMock.mockReset();
   listMock.mockReset();
   meMock.mockReset();
   verifyMock.mockReset();
-  loaderData = { kind: "ready", user: readyUser, emails: readyEmails };
+  applyLoader({ kind: "ready", user: readyUser, emails: readyEmails });
   getProfileMock.mockResolvedValue({ ok: true, data: readyUser });
   listMock.mockResolvedValue({ ok: true, data: readyEmails });
   meMock.mockResolvedValue({ ok: true, data: readyUser });
@@ -131,8 +126,7 @@ afterEach(() => {
 });
 
 describe("/settings/profile (Account)", () => {
-  it("exports Route and ProfilePage", () => {
-    expect(Route).toBeTruthy();
+  it("exports ProfilePage", () => {
     expect(typeof ProfilePage).toBe("function");
   });
 

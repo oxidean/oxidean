@@ -90,7 +90,7 @@ pub async fn list_instance_template_packs(
             } else {
                 format!("{SELECT_PACK_SQLITE} ORDER BY label")
             };
-            let rows = sqlx::query(&sql)
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*sql))
                 .fetch_all(p)
                 .await
                 .map_err(|e| format!("list_instance_template_packs: {e}"))?;
@@ -105,7 +105,7 @@ pub async fn list_instance_template_packs(
             } else {
                 format!("{SELECT_PACK_PG} ORDER BY label")
             };
-            let rows = sqlx::query(&sql)
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*sql))
                 .fetch_all(p)
                 .await
                 .map_err(|e| format!("list_instance_template_packs: {e}"))?;
@@ -120,7 +120,7 @@ pub async fn list_instance_template_packs(
             } else {
                 format!("{SELECT_PACK_MYSQL} ORDER BY label")
             };
-            let rows = sqlx::query(&sql)
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*sql))
                 .fetch_all(p)
                 .await
                 .map_err(|e| format!("list_instance_template_packs: {e}"))?;
@@ -138,32 +138,34 @@ pub async fn get_instance_template_pack(
 ) -> Result<Option<InstanceTemplatePackRow>, String> {
     match pool {
         DbPool::Sqlite(p) => {
-            let row = sqlx::query(&format!("{SELECT_PACK_SQLITE} WHERE id = ?"))
-                .bind(id)
-                .fetch_optional(p)
-                .await
-                .map_err(|e| format!("get_instance_template_pack: {e}"))?;
-            Ok(row
-                .as_ref()
-                .map(|r| map_pack_fields!(r, enabled_sqlite(r))))
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{SELECT_PACK_SQLITE} WHERE id = ?"
+            )))
+            .bind(id)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("get_instance_template_pack: {e}"))?;
+            Ok(row.as_ref().map(|r| map_pack_fields!(r, enabled_sqlite(r))))
         }
         DbPool::Postgres(p) => {
-            let row = sqlx::query(&format!("{SELECT_PACK_PG} WHERE id = $1"))
-                .bind(id)
-                .fetch_optional(p)
-                .await
-                .map_err(|e| format!("get_instance_template_pack: {e}"))?;
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{SELECT_PACK_PG} WHERE id = $1"
+            )))
+            .bind(id)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("get_instance_template_pack: {e}"))?;
             Ok(row.as_ref().map(|r| map_pack_fields!(r, enabled_pg(r))))
         }
         DbPool::MySql(p) => {
-            let row = sqlx::query(&format!("{SELECT_PACK_MYSQL} WHERE id = ?"))
-                .bind(id)
-                .fetch_optional(p)
-                .await
-                .map_err(|e| format!("get_instance_template_pack: {e}"))?;
-            Ok(row
-                .as_ref()
-                .map(|r| map_pack_fields!(r, enabled_mysql(r))))
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{SELECT_PACK_MYSQL} WHERE id = ?"
+            )))
+            .bind(id)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("get_instance_template_pack: {e}"))?;
+            Ok(row.as_ref().map(|r| map_pack_fields!(r, enabled_mysql(r))))
         }
     }
 }
@@ -174,32 +176,34 @@ pub async fn get_instance_template_pack_by_slug(
 ) -> Result<Option<InstanceTemplatePackRow>, String> {
     match pool {
         DbPool::Sqlite(p) => {
-            let row = sqlx::query(&format!("{SELECT_PACK_SQLITE} WHERE slug = ?"))
-                .bind(slug)
-                .fetch_optional(p)
-                .await
-                .map_err(|e| format!("get_instance_template_pack_by_slug: {e}"))?;
-            Ok(row
-                .as_ref()
-                .map(|r| map_pack_fields!(r, enabled_sqlite(r))))
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{SELECT_PACK_SQLITE} WHERE slug = ?"
+            )))
+            .bind(slug)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("get_instance_template_pack_by_slug: {e}"))?;
+            Ok(row.as_ref().map(|r| map_pack_fields!(r, enabled_sqlite(r))))
         }
         DbPool::Postgres(p) => {
-            let row = sqlx::query(&format!("{SELECT_PACK_PG} WHERE slug = $1"))
-                .bind(slug)
-                .fetch_optional(p)
-                .await
-                .map_err(|e| format!("get_instance_template_pack_by_slug: {e}"))?;
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{SELECT_PACK_PG} WHERE slug = $1"
+            )))
+            .bind(slug)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("get_instance_template_pack_by_slug: {e}"))?;
             Ok(row.as_ref().map(|r| map_pack_fields!(r, enabled_pg(r))))
         }
         DbPool::MySql(p) => {
-            let row = sqlx::query(&format!("{SELECT_PACK_MYSQL} WHERE slug = ?"))
-                .bind(slug)
-                .fetch_optional(p)
-                .await
-                .map_err(|e| format!("get_instance_template_pack_by_slug: {e}"))?;
-            Ok(row
-                .as_ref()
-                .map(|r| map_pack_fields!(r, enabled_mysql(r))))
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{SELECT_PACK_MYSQL} WHERE slug = ?"
+            )))
+            .bind(slug)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("get_instance_template_pack_by_slug: {e}"))?;
+            Ok(row.as_ref().map(|r| map_pack_fields!(r, enabled_mysql(r))))
         }
     }
 }
@@ -501,14 +505,12 @@ pub async fn set_created_from_template_repo(
                 .map_err(|e| format!("set_created_from_template_repo: {e}"))?;
         }
         DbPool::Postgres(p) => {
-            sqlx::query(
-                "UPDATE repositories SET created_from_template_repo_id = $1 WHERE id = $2",
-            )
-            .bind(template_repo_id)
-            .bind(repo_id)
-            .execute(p)
-            .await
-            .map_err(|e| format!("set_created_from_template_repo: {e}"))?;
+            sqlx::query("UPDATE repositories SET created_from_template_repo_id = $1 WHERE id = $2")
+                .bind(template_repo_id)
+                .bind(repo_id)
+                .execute(p)
+                .await
+                .map_err(|e| format!("set_created_from_template_repo: {e}"))?;
         }
         DbPool::MySql(p) => {
             sqlx::query("UPDATE repositories SET created_from_template_repo_id = ? WHERE id = ?")
@@ -601,7 +603,7 @@ pub async fn list_template_repositories(
                          AND {VIEWER_CAN_SEE}
                        ORDER BY owner_slug, r.name"#
                 );
-                sqlx::query(&sql)
+                sqlx::query(sqlx::AssertSqlSafe(&*sql))
                     .bind(uid)
                     .bind(uid)
                     .bind(uid)
@@ -636,7 +638,10 @@ pub async fn list_template_repositories(
                          AND {VIEWER_CAN_SEE_PG}
                        ORDER BY owner_slug, r.name"#
                 );
-                sqlx::query(&sql).bind(uid).fetch_all(p).await
+                sqlx::query(sqlx::AssertSqlSafe(&*sql))
+                    .bind(uid)
+                    .fetch_all(p)
+                    .await
             } else {
                 sqlx::query(
                     r#"SELECT r.id, r.owner_id, r.owner_type, r.name, r.description, r.visibility,
@@ -666,7 +671,7 @@ pub async fn list_template_repositories(
                          AND {VIEWER_CAN_SEE}
                        ORDER BY owner_slug, r.name"#
                 );
-                sqlx::query(&sql)
+                sqlx::query(sqlx::AssertSqlSafe(&*sql))
                     .bind(uid)
                     .bind(uid)
                     .bind(uid)

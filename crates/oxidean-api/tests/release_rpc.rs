@@ -44,11 +44,20 @@ fn rpc_req_with_cookie(body: &str, cookie: &str) -> Request<Body> {
 }
 
 fn session_cookie_from_response(res: &axum::http::Response<Body>) -> String {
-    let set_cookie = res.headers().get("set-cookie").expect("Set-Cookie").to_str().unwrap();
+    let set_cookie = res
+        .headers()
+        .get("set-cookie")
+        .expect("Set-Cookie")
+        .to_str()
+        .unwrap();
     set_cookie.split(';').next().unwrap().trim().to_string()
 }
 
-async fn signup_and_login(app: &axum::Router, email: &str, username: &str) -> (String, serde_json::Value) {
+async fn signup_and_login(
+    app: &axum::Router,
+    email: &str,
+    username: &str,
+) -> (String, serde_json::Value) {
     let signup_body = format!(
         r#"{{"procedure":"auth.signup","input":{{"email":"{email}","username":"{username}","password":"password1"}}}}"#
     );
@@ -67,12 +76,24 @@ async fn signup_and_login(app: &axum::Router, email: &str, username: &str) -> (S
 }
 
 async fn rpc_json(app: &axum::Router, body: &str, cookie: &str) -> serde_json::Value {
-    let res = app.clone().oneshot(rpc_req_with_cookie(body, cookie)).await.unwrap();
+    let res = app
+        .clone()
+        .oneshot(rpc_req_with_cookie(body, cookie))
+        .await
+        .unwrap();
     let bytes = res.into_body().collect().await.unwrap().to_bytes();
     serde_json::from_slice(&bytes).expect("rpc json body")
 }
 
-async fn setup_repo_with_tag(app: &axum::Router, db: &Database, repos: &std::path::Path, cookie: &str, owner: &str, repo: &str, tag: &str) {
+async fn setup_repo_with_tag(
+    app: &axum::Router,
+    db: &Database,
+    repos: &std::path::Path,
+    cookie: &str,
+    owner: &str,
+    repo: &str,
+    tag: &str,
+) {
     let create = rpc_json(
         app,
         &format!(r#"{{"procedure":"repo.create","input":{{"name":"{repo}","visibility":"public","description":""}}}}"#),
@@ -81,10 +102,18 @@ async fn setup_repo_with_tag(app: &axum::Router, db: &Database, repos: &std::pat
     assert_eq!(create["ok"], true, "{create}");
     let bare = repos.join(owner).join(format!("{repo}.git"));
     let git = CliGitBackend::new();
-    git.seed_commit(&bare, "main", "seed", &[("README.md".into(), b"hi".to_vec())])
-        .await
-        .expect("seed");
-    let status = Command::new("git").args(["-C", bare.to_str().unwrap(), "tag", tag]).status().expect("tag");
+    git.seed_commit(
+        &bare,
+        "main",
+        "seed",
+        &[("README.md".into(), b"hi".to_vec())],
+    )
+    .await
+    .expect("seed");
+    let status = Command::new("git")
+        .args(["-C", bare.to_str().unwrap(), "tag", tag])
+        .status()
+        .expect("tag");
     assert!(status.success(), "git tag failed");
     let _ = db;
 }
@@ -101,7 +130,9 @@ async fn release_create_existing_tag_with_notes() {
     let (cookie, login_v) = signup_and_login(&app, "owner@ex.com", "owner1").await;
     let user_id = login_v["data"]["id"].as_str().unwrap().to_string();
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    db.set_email_verified_at(&user_id, &now).await.expect("verify");
+    db.set_email_verified_at(&user_id, &now)
+        .await
+        .expect("verify");
 
     setup_repo_with_tag(&app, &db, &repos, &cookie, "owner1", "hello", "v1.0.0").await;
 
@@ -121,7 +152,8 @@ async fn release_create_existing_tag_with_notes() {
         &app,
         r#"{"procedure":"release.list","input":{"owner":"owner1","name":"hello"}}"#,
         &cookie,
-    ).await;
+    )
+    .await;
     assert_eq!(listed["ok"], true, "{listed}");
     assert_eq!(listed["data"]["releases"].as_array().unwrap().len(), 1);
 }
@@ -138,7 +170,9 @@ async fn release_tag_missing_when_tag_absent() {
     let (cookie, login_v) = signup_and_login(&app, "owner2@ex.com", "owner2").await;
     let user_id = login_v["data"]["id"].as_str().unwrap().to_string();
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    db.set_email_verified_at(&user_id, &now).await.expect("verify");
+    db.set_email_verified_at(&user_id, &now)
+        .await
+        .expect("verify");
     setup_repo_with_tag(&app, &db, &repos, &cookie, "owner2", "hello", "v1.0.0").await;
 
     let missing = rpc_json(
@@ -162,12 +196,16 @@ async fn release_create_requires_write() {
     let (cookie, login_v) = signup_and_login(&app, "owner3@ex.com", "owner3").await;
     let user_id = login_v["data"]["id"].as_str().unwrap().to_string();
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    db.set_email_verified_at(&user_id, &now).await.expect("verify");
+    db.set_email_verified_at(&user_id, &now)
+        .await
+        .expect("verify");
     setup_repo_with_tag(&app, &db, &repos, &cookie, "owner3", "hello", "v1.0.0").await;
 
     let (reader_cookie, reader_v) = signup_and_login(&app, "reader@ex.com", "reader1").await;
     let reader_id = reader_v["data"]["id"].as_str().unwrap().to_string();
-    db.set_email_verified_at(&reader_id, &now).await.expect("verify reader");
+    db.set_email_verified_at(&reader_id, &now)
+        .await
+        .expect("verify reader");
 
     let denied = rpc_json(
         &app,
@@ -190,7 +228,9 @@ async fn release_draft_hidden_from_read_anon() {
     let (cookie, login_v) = signup_and_login(&app, "owner4@ex.com", "owner4").await;
     let user_id = login_v["data"]["id"].as_str().unwrap().to_string();
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    db.set_email_verified_at(&user_id, &now).await.expect("verify");
+    db.set_email_verified_at(&user_id, &now)
+        .await
+        .expect("verify");
     setup_repo_with_tag(&app, &db, &repos, &cookie, "owner4", "hello", "v2.0.0").await;
 
     let created = rpc_json(
@@ -202,7 +242,9 @@ async fn release_draft_hidden_from_read_anon() {
 
     let anon_list = app
         .clone()
-        .oneshot(rpc_req(r#"{"procedure":"release.list","input":{"owner":"owner4","name":"hello"}}"#))
+        .oneshot(rpc_req(
+            r#"{"procedure":"release.list","input":{"owner":"owner4","name":"hello"}}"#,
+        ))
         .await
         .unwrap();
     assert_eq!(anon_list.status(), StatusCode::OK);
@@ -215,7 +257,8 @@ async fn release_draft_hidden_from_read_anon() {
         &app,
         r#"{"procedure":"release.list","input":{"owner":"owner4","name":"hello"}}"#,
         &cookie,
-    ).await;
+    )
+    .await;
     assert_eq!(owner_list["data"]["releases"].as_array().unwrap().len(), 1);
 }
 
@@ -231,7 +274,9 @@ async fn release_update_notes_write_or_author() {
     let (cookie, login_v) = signup_and_login(&app, "owner5@ex.com", "owner5").await;
     let user_id = login_v["data"]["id"].as_str().unwrap().to_string();
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    db.set_email_verified_at(&user_id, &now).await.expect("verify");
+    db.set_email_verified_at(&user_id, &now)
+        .await
+        .expect("verify");
     setup_repo_with_tag(&app, &db, &repos, &cookie, "owner5", "hello", "v3.0.0").await;
     let _ = rpc_json(
         &app,
@@ -260,7 +305,9 @@ async fn release_delete_requires_admin() {
     let (cookie, login_v) = signup_and_login(&app, "owner6@ex.com", "owner6").await;
     let user_id = login_v["data"]["id"].as_str().unwrap().to_string();
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    db.set_email_verified_at(&user_id, &now).await.expect("verify");
+    db.set_email_verified_at(&user_id, &now)
+        .await
+        .expect("verify");
     setup_repo_with_tag(&app, &db, &repos, &cookie, "owner6", "hello", "v4.0.0").await;
     let _ = rpc_json(
         &app,
@@ -277,7 +324,8 @@ async fn release_delete_requires_admin() {
         &app,
         r#"{"procedure":"release.list","input":{"owner":"owner6","name":"hello"}}"#,
         &cookie,
-    ).await;
+    )
+    .await;
     assert!(listed["data"]["releases"].as_array().unwrap().is_empty());
 }
 
@@ -290,16 +338,22 @@ async fn release_asset_upload_download_acl() {
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
-    let state = AppState::new(db.clone(), Arc::new(LogSink) as Arc<dyn EmailSender>, "development")
-        .with_repos_dir(repos.clone())
-        .with_release_assets_dir(assets.clone())
-        .with_git(Arc::new(CliGitBackend::new()));
+    let state = AppState::new(
+        db.clone(),
+        Arc::new(LogSink) as Arc<dyn EmailSender>,
+        "development",
+    )
+    .with_repos_dir(repos.clone())
+    .with_release_assets_dir(assets.clone())
+    .with_git(Arc::new(CliGitBackend::new()));
     let cors = build_cors("development", None).expect("cors");
     let app = router_with_state(state, cors);
     let (cookie, login_v) = signup_and_login(&app, "a1@ex.com", "aowner").await;
     let user_id = login_v["data"]["id"].as_str().unwrap().to_string();
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    db.set_email_verified_at(&user_id, &now).await.expect("verify");
+    db.set_email_verified_at(&user_id, &now)
+        .await
+        .expect("verify");
     setup_repo_with_tag(&app, &db, &repos, &cookie, "aowner", "hello", "v1.0.0").await;
     let created = rpc_json(
         &app,
@@ -368,17 +422,23 @@ async fn release_asset_size_reject() {
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
-    let state = AppState::new(db.clone(), Arc::new(LogSink) as Arc<dyn EmailSender>, "development")
-        .with_repos_dir(repos.clone())
-        .with_release_assets_dir(assets)
-        .with_release_asset_max_bytes(64)
-        .with_git(Arc::new(CliGitBackend::new()));
+    let state = AppState::new(
+        db.clone(),
+        Arc::new(LogSink) as Arc<dyn EmailSender>,
+        "development",
+    )
+    .with_repos_dir(repos.clone())
+    .with_release_assets_dir(assets)
+    .with_release_asset_max_bytes(64)
+    .with_git(Arc::new(CliGitBackend::new()));
     let cors = build_cors("development", None).expect("cors");
     let app = router_with_state(state, cors);
     let (cookie, login_v) = signup_and_login(&app, "a2@ex.com", "bowner").await;
     let user_id = login_v["data"]["id"].as_str().unwrap().to_string();
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    db.set_email_verified_at(&user_id, &now).await.expect("verify");
+    db.set_email_verified_at(&user_id, &now)
+        .await
+        .expect("verify");
     setup_repo_with_tag(&app, &db, &repos, &cookie, "bowner", "hello", "v1.0.0").await;
     let created = rpc_json(
         &app,
@@ -426,16 +486,22 @@ async fn release_asset_replace_on_edit() {
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
-    let state = AppState::new(db.clone(), Arc::new(LogSink) as Arc<dyn EmailSender>, "development")
-        .with_repos_dir(repos.clone())
-        .with_release_assets_dir(assets.clone())
-        .with_git(Arc::new(CliGitBackend::new()));
+    let state = AppState::new(
+        db.clone(),
+        Arc::new(LogSink) as Arc<dyn EmailSender>,
+        "development",
+    )
+    .with_repos_dir(repos.clone())
+    .with_release_assets_dir(assets.clone())
+    .with_git(Arc::new(CliGitBackend::new()));
     let cors = build_cors("development", None).expect("cors");
     let app = router_with_state(state, cors);
     let (cookie, login_v) = signup_and_login(&app, "a3@ex.com", "cowner").await;
     let user_id = login_v["data"]["id"].as_str().unwrap().to_string();
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    db.set_email_verified_at(&user_id, &now).await.expect("verify");
+    db.set_email_verified_at(&user_id, &now)
+        .await
+        .expect("verify");
     setup_repo_with_tag(&app, &db, &repos, &cookie, "cowner", "hello", "v2.0.0").await;
     let created = rpc_json(
         &app,
@@ -505,16 +571,22 @@ async fn release_asset_draft_and_private_acl() {
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
-    let state = AppState::new(db.clone(), Arc::new(LogSink) as Arc<dyn EmailSender>, "development")
-        .with_repos_dir(repos.clone())
-        .with_release_assets_dir(assets)
-        .with_git(Arc::new(CliGitBackend::new()));
+    let state = AppState::new(
+        db.clone(),
+        Arc::new(LogSink) as Arc<dyn EmailSender>,
+        "development",
+    )
+    .with_repos_dir(repos.clone())
+    .with_release_assets_dir(assets)
+    .with_git(Arc::new(CliGitBackend::new()));
     let cors = build_cors("development", None).expect("cors");
     let app = router_with_state(state, cors);
     let (cookie, login_v) = signup_and_login(&app, "a4@ex.com", "downer").await;
     let user_id = login_v["data"]["id"].as_str().unwrap().to_string();
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    db.set_email_verified_at(&user_id, &now).await.expect("verify");
+    db.set_email_verified_at(&user_id, &now)
+        .await
+        .expect("verify");
     setup_repo_with_tag(&app, &db, &repos, &cookie, "downer", "hello", "v3.0.0").await;
     let created = rpc_json(
         &app,

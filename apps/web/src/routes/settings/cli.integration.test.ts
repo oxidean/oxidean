@@ -1,48 +1,49 @@
 /**
  * Account /settings/cli — ox install, login, and self-update commands.
  */
-import { createElement } from "octane";
 import { cleanup, screen, waitFor } from "@octanejs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderWithQueryClient } from "@/test/render-with-query";
 
-let loaderData: { kind: "unauthenticated" } | { kind: "ready"; origin: string } | undefined;
+const meMock = vi.fn();
 
-vi.mock("@octanejs/tanstack-router", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@octanejs/tanstack-router")>();
+vi.mock("@/lib/api-client", () => ({
+  apiClient: {
+    auth: {
+      me: (...args: unknown[]) => meMock(...args),
+    },
+  },
+}));
+
+vi.mock("@/lib/public-origin", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/public-origin")>();
   return {
     ...actual,
-    useLoaderData: () => loaderData,
-    Link: (props: {
-      to?: string;
-      children?: unknown;
-      className?: string;
-      "aria-current"?: string;
-    }) =>
-      createElement(
-        "a",
-        {
-          href: props.to ?? "#",
-          className: props.className,
-          "aria-current": props["aria-current"],
-        },
-        props.children as never,
-      ),
+    resolvePublicOriginClient: () => "https://forge.example",
   };
 });
 
-import { CliSettingsPage, Route } from "./cli";
+import { CliSettingsPage } from "./cli";
+
+const user = {
+  id: "u1",
+  email: "ada@example.com",
+  username: "ada",
+  display_name: "Ada",
+  bio: "",
+  avatar_url: null as null,
+  role: "user",
+  profile_incomplete: false,
+  email_verified: true,
+  must_change_credentials: false,
+};
 
 afterEach(cleanup);
 
 describe("/settings/cli", () => {
-  it("exports a file route for /settings/cli", () => {
-    expect(Route.options).toBeTruthy();
-    expect(Route.options.loader).toBeTypeOf("function");
-  });
-
   it("happy: renders origin-baked install and login commands", async () => {
-    loaderData = { kind: "ready", origin: "https://forge.example" };
+    window.history.pushState({}, "", "/settings/cli");
+    meMock.mockResolvedValue({ ok: true, data: user });
     renderWithQueryClient(CliSettingsPage);
 
     await waitFor(() => {
@@ -64,31 +65,16 @@ describe("/settings/cli", () => {
   });
 
   it("unhappy: unauthenticated sessions redirect to login", async () => {
-    const assign = vi.fn();
-    const originalLocation = window.location;
-    Object.defineProperty(window, "location", {
-      configurable: true,
-      value: {
-        href: "http://localhost/settings/cli",
-        search: "",
-        pathname: "/settings/cli",
-        assign,
-        replace: vi.fn(),
-        reload: vi.fn(),
-      },
+    window.history.pushState({}, "", "/settings/cli");
+    meMock.mockResolvedValue({
+      ok: false,
+      error: { code: "auth.unauthenticated", message: "n" },
     });
-    try {
-      loaderData = { kind: "unauthenticated" };
-      renderWithQueryClient(CliSettingsPage);
+    renderWithQueryClient(CliSettingsPage);
 
-      await waitFor(() => {
-        expect(assign).toHaveBeenCalledWith("/login?returnTo=/settings/cli");
-      });
-    } finally {
-      Object.defineProperty(window, "location", {
-        configurable: true,
-        value: originalLocation,
-      });
-    }
+    await waitFor(() => {
+      expect(window.location.pathname).toBe("/login");
+      expect(window.location.search).toBe("?returnTo=/settings/cli");
+    });
   });
 });

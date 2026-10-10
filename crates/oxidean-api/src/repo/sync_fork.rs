@@ -180,15 +180,17 @@ pub async fn sync_fork(
     input: serde_json::Value,
 ) -> Result<RepoSyncForkResponse, AppError> {
     let user = require_verified(ctx).await?;
-    let req: RepoSyncForkRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid repo.syncFork input: {e}"))
-    })?;
+    let req: RepoSyncForkRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid repo.syncFork input: {e}")))?;
     let accessible = super::resolve_repo_for_owner_mutate(ctx, &req.owner, &req.name).await?;
     let (parent, upstream_owner) = upstream_for_fork(ctx, &accessible).await?;
     let branch = sync_branch(req.branch.as_deref(), &accessible.row.default_branch)?;
 
-    let fork_bare =
-        bare_repo_path(&ctx.repos_dir, &accessible.owner_username, &accessible.row.name)?;
+    let fork_bare = bare_repo_path(
+        &ctx.repos_dir,
+        &accessible.owner_username,
+        &accessible.row.name,
+    )?;
     let upstream_bare = bare_repo_path(&ctx.repos_dir, upstream_owner.slug(), &parent.name)?;
     let state = fork_sync_state(ctx, &fork_bare, &upstream_bare, &branch).await?;
     let before_sha = state.fork_sha.clone().unwrap_or_default();
@@ -246,10 +248,7 @@ pub async fn sync_fork(
             .map_err(|e| {
                 let msg = e.to_string().to_lowercase();
                 if msg.contains("conflict") {
-                    AppError::new(
-                        "repo.sync_conflict",
-                        "merge conflict syncing with upstream",
-                    )
+                    AppError::new("repo.sync_conflict", "merge conflict syncing with upstream")
                 } else {
                     AppError::new("repo.sync_failed", format!("sync failed: {e}"))
                 }

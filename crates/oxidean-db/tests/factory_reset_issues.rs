@@ -12,7 +12,7 @@ async fn count_table(db_path: &std::path::Path, table: &str) -> i64 {
         .await
         .expect("reconnect for count");
     let sql = format!("SELECT COUNT(*) FROM {table}");
-    sqlx::query_scalar::<_, i64>(&sql)
+    sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(&*sql))
         .fetch_one(&pool)
         .await
         .unwrap_or_else(|e| panic!("count {table}: {e}"))
@@ -116,13 +116,10 @@ async fn seed_issue_domain(db: &Database) -> (String, String, String, String) {
     db.set_repo_label_hidden(&repo.id, &org_label.id, true)
         .await
         .expect("hide org label");
-    db.set_issue_labels(
-        &issue.id,
-        &[repo_label.id.clone(), org_label.id.clone()],
-    )
-    .await
-    .expect("issue labels");
-    db.set_issue_assignees(&issue.id, &[assignee.id.clone()])
+    db.set_issue_labels(&issue.id, &[repo_label.id.clone(), org_label.id.clone()])
+        .await
+        .expect("issue labels");
+    db.set_issue_assignees(&issue.id, std::slice::from_ref(&assignee.id))
         .await
         .expect("assignees");
 

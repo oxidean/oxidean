@@ -1,9 +1,10 @@
-import { createFileRoute, useLoaderData } from "@octanejs/tanstack-router";
+import { queryOptions, useQuery } from "@octanejs/tanstack-query";
 import type { HealthResponse, RpcResult } from "@oxidean/api-client";
+import { AppPage } from "@/components/app-page";
 import { StatusPageSkeleton } from "@/components/page-skeletons";
 import { fetchSystemHealth } from "@/lib/ssr-auth";
 
-export type StatusPhase =
+type StatusPhase =
   | { kind: "healthy"; version: string; database: string }
   | { kind: "unhealthy"; message: string }
   | { kind: "unreachable"; message: string };
@@ -32,21 +33,31 @@ export function resolveStatusPhase(res: RpcResult<HealthResponse>): StatusPhase 
   return UNHEALTHY;
 }
 
-export const Route = createFileRoute("/status")({
-  component: StatusPage,
-  head: () => ({ meta: [{ title: "Status · Oxidean" }] }),
-  loader: async (): Promise<StatusPhase> => {
-    try {
-      return resolveStatusPhase(await fetchSystemHealth());
-    } catch {
-      return UNREACHABLE;
-    }
-  },
-});
+function statusQueryOptions() {
+  return queryOptions({
+    queryKey: ["system", "health"],
+    queryFn: async (): Promise<StatusPhase> => {
+      try {
+        return resolveStatusPhase(await fetchSystemHealth());
+      } catch {
+        return UNREACHABLE;
+      }
+    },
+    retry: false,
+    staleTime: 15_000,
+  });
+}
 
-/** Exported for integration tests. */
+/** `/status` — public system-health page (title set on the Astro shell). */
 export function StatusPage() @{
-  const phase = useLoaderData({ from: "/status" }) as StatusPhase | undefined;
+  <AppPage>
+    <StatusContent />
+  </AppPage>;
+}
+
+function StatusContent() @{
+  const q = useQuery(statusQueryOptions());
+  const phase = q.data;
 
   @if (!phase) {
     <StatusPageSkeleton />;

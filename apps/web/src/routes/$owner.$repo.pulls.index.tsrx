@@ -1,5 +1,9 @@
-import { createFileRoute, useLoaderData, useParams } from "@octanejs/tanstack-router";
-import { useQuery } from "@octanejs/tanstack-query";
+import { queryOptions, useQuery } from "@octanejs/tanstack-query";
+import { useRepoLayoutData } from "@/lib/repo-store.tsrx";
+import { matchPath } from "@/lib/route-params";
+import { usePathname, useSearchString } from "@/lib/pathname.tsrx";
+import { RepoLayout } from "@/routes/$owner.$repo.tsrx";
+import { AppPage } from "@/components/app-page";
 import type { PullListResponse, RepoPublic } from "@oxidean/api-client";
 import { useState } from "octane";
 import { MemberLookup } from "@/components/org/member-lookup";
@@ -16,12 +20,12 @@ import {
 import { RepoNotFound } from "@/components/repo/repo-not-found";
 import { RepoUnitDisabled } from "@/components/repo/repo-unit-disabled";
 import { apiClient } from "@/lib/api-client";
-import type { RepoLayoutLoaderData } from "@/lib/repo-store";
+
 import { fetchPullList, fetchRepoGet } from "@/lib/ssr-repo";
 import { useChromeAccountState } from "@/lib/use-chrome-account";
 import { AppLink } from "@/components/ui/app-link";
 
-export type PullsLoaderData =
+type PullsLoaderData =
   | { kind: "not_found" }
   | { kind: "error"; message: string }
   // Pulls unit disabled for this repo (COL-13).
@@ -42,15 +46,13 @@ async function loadPullsPage(
   state: "open" | "closed" | "all",
 ): Promise<PullsLoaderData> {
   const [got, listRes] = await Promise.all([
-    fetchRepoGet({ data: { owner, name: repoName } }),
+    fetchRepoGet({ owner, name: repoName }),
     fetchPullList({
-      data: {
-        owner,
-        name: repoName,
-        state,
-        offset: 0,
-        limit: PAGE_SIZE,
-      },
+      owner,
+      name: repoName,
+      state,
+      offset: 0,
+      limit: PAGE_SIZE,
     }),
   ]);
   if (!got.ok) {
@@ -83,38 +85,47 @@ async function loadPullsPage(
   };
 }
 
-export const Route = createFileRoute("/$owner/$repo/pulls/")({
-  component: PullsListPage,
-  head: ({ params }) => ({
-    meta: [
-      {
-        title: `Pulls · ${(params as { owner: string }).owner}/${(params as { repo: string }).repo} · Oxidean`,
-      },
+function repoPullsIndexQueryOptions(params: Record<string, string | undefined>, searchStr = "") {
+  return queryOptions({
+    queryKey: [
+      "repo-page",
+      "/$owner/$repo/pulls/",
+      params.owner ?? "",
+      params.repo ?? "",
+      params._splat ?? "",
+      params.n ?? "",
+      params.sha ?? "",
+      params.tag ?? "",
+      params.run ?? "",
+      searchStr,
     ],
-  }),
-  loader: async ({ params }): Promise<PullsLoaderData> => {
-    const owner = String((params as { owner?: string }).owner ?? "");
-    const repoName = String((params as { repo?: string }).repo ?? "");
-    try {
-      return await loadPullsPage(owner, repoName, "open");
-    } catch {
-      return { kind: "error", message: NETWORK_ERROR };
-    }
-  },
-});
+    queryFn: async (): Promise<PullsLoaderData> => {
+      const owner = String((params as { owner?: string }).owner ?? "");
+      const repoName = String((params as { repo?: string }).repo ?? "");
+      try {
+        return await loadPullsPage(owner, repoName, "open");
+      } catch {
+        return { kind: "error", message: NETWORK_ERROR };
+      }
+    },
+    enabled: Boolean(params.owner && params.repo),
+    retry: false,
+    staleTime: 30_000,
+  });
+}
 
-export function PullsListPage() @{
-  const params = useParams({ strict: false }) as {
+function PullsListPageContent() @{
+  const pathname = usePathname();
+  const searchStr = useSearchString();
+  const params = (matchPath("/$owner/$repo/pulls/", pathname) ?? {}) as {
     owner?: string;
     repo?: string;
   };
   const owner = params.owner ?? "";
   const repoName = params.repo ?? "";
   const account = useChromeAccountState();
-  const layout = useLoaderData({ from: "/$owner/$repo" }) as RepoLayoutLoaderData | undefined;
-  const routeLoader = useLoaderData({ from: "/$owner/$repo/pulls/" }) as
-    | PullsLoaderData
-    | undefined;
+  const layout = useRepoLayoutData();
+  const routeLoader = useQuery(repoPullsIndexQueryOptions(params, searchStr)).data;
 
   const [state, setState] = useState<"open" | "closed" | "all">("open");
   const [author, setAuthor] = useState("");
@@ -291,4 +302,13 @@ export function PullsListPage() @{
       </div>;
     }
   }
+}
+
+/** Page root — RepoLayout (chrome + repo store) around the leaf content. */
+export function PullsListPage() @{
+  <AppPage>
+    <RepoLayout>
+      <PullsListPageContent />
+    </RepoLayout>
+  </AppPage>;
 }

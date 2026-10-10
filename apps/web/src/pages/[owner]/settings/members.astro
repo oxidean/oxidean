@@ -1,0 +1,12 @@
+---
+import AppShell from "@/layouts/AppShell.astro";
+import { OrgMembersPage } from "@/routes/$owner.settings.members.tsrx";
+
+export function getStaticPaths() {
+	return [{ params: { owner: "_" } }];
+}
+---
+
+<AppShell title="Members · Oxidean">
+	<OrgMembersPage client:load />
+</AppShell>

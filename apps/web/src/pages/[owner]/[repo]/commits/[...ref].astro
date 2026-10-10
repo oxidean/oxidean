@@ -1,0 +1,14 @@
+---
+import AppShell from "@/layouts/AppShell.astro";
+import { RepoCommitsPage } from "@/routes/$owner.$repo.commits.$.tsrx";
+
+// Placeholder shell — the middleware maps every real path for this route
+// onto this page; params resolve client-side from `location.pathname`.
+export function getStaticPaths() {
+	return [{ params: { owner: "_", repo: "_", ref: "_" } }];
+}
+---
+
+<AppShell title="Oxidean">
+	<RepoCommitsPage client:load />
+</AppShell>

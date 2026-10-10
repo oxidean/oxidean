@@ -13,10 +13,7 @@ pub async fn star_repository(
 ) -> Result<i64, String> {
     match pool {
         DbPool::Postgres(p) => {
-            let mut tx = p
-                .begin()
-                .await
-                .map_err(|e| format!("star begin: {e}"))?;
+            let mut tx = p.begin().await.map_err(|e| format!("star begin: {e}"))?;
             let inserted = sqlx::query(
                 "INSERT INTO repository_stars (user_id, repository_id)
                  VALUES ($1, $2) ON CONFLICT DO NOTHING",
@@ -37,23 +34,17 @@ pub async fn star_repository(
                 .await
                 .map_err(|e| format!("star bump: {e}"))?;
             }
-            let count: i64 = sqlx::query_scalar(
-                "SELECT star_count FROM repositories WHERE id = $1",
-            )
-            .bind(repository_id)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|e| format!("star count: {e}"))?;
-            tx.commit()
-                .await
-                .map_err(|e| format!("star commit: {e}"))?;
+            let count: i64 =
+                sqlx::query_scalar("SELECT star_count FROM repositories WHERE id = $1")
+                    .bind(repository_id)
+                    .fetch_one(&mut *tx)
+                    .await
+                    .map_err(|e| format!("star count: {e}"))?;
+            tx.commit().await.map_err(|e| format!("star commit: {e}"))?;
             Ok(count)
         }
         DbPool::MySql(p) => {
-            let mut tx = p
-                .begin()
-                .await
-                .map_err(|e| format!("star begin: {e}"))?;
+            let mut tx = p.begin().await.map_err(|e| format!("star begin: {e}"))?;
             let inserted = sqlx::query(
                 "INSERT IGNORE INTO repository_stars (user_id, repository_id) VALUES (?, ?)",
             )
@@ -78,16 +69,11 @@ pub async fn star_repository(
                 .fetch_one(&mut *tx)
                 .await
                 .map_err(|e| format!("star count: {e}"))?;
-            tx.commit()
-                .await
-                .map_err(|e| format!("star commit: {e}"))?;
+            tx.commit().await.map_err(|e| format!("star commit: {e}"))?;
             Ok(count)
         }
         DbPool::Sqlite(p) => {
-            let mut tx = p
-                .begin()
-                .await
-                .map_err(|e| format!("star begin: {e}"))?;
+            let mut tx = p.begin().await.map_err(|e| format!("star begin: {e}"))?;
             let inserted = sqlx::query(
                 "INSERT OR IGNORE INTO repository_stars (user_id, repository_id)
                  VALUES (?1, ?2)",
@@ -109,16 +95,13 @@ pub async fn star_repository(
                 .await
                 .map_err(|e| format!("star bump: {e}"))?;
             }
-            let count: i64 = sqlx::query_scalar(
-                "SELECT star_count FROM repositories WHERE id = ?1",
-            )
-            .bind(repository_id)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|e| format!("star count: {e}"))?;
-            tx.commit()
-                .await
-                .map_err(|e| format!("star commit: {e}"))?;
+            let count: i64 =
+                sqlx::query_scalar("SELECT star_count FROM repositories WHERE id = ?1")
+                    .bind(repository_id)
+                    .fetch_one(&mut *tx)
+                    .await
+                    .map_err(|e| format!("star count: {e}"))?;
+            tx.commit().await.map_err(|e| format!("star commit: {e}"))?;
             Ok(count)
         }
     }
@@ -132,10 +115,7 @@ pub async fn unstar_repository(
 ) -> Result<i64, String> {
     match pool {
         DbPool::Postgres(p) => {
-            let mut tx = p
-                .begin()
-                .await
-                .map_err(|e| format!("unstar begin: {e}"))?;
+            let mut tx = p.begin().await.map_err(|e| format!("unstar begin: {e}"))?;
             let deleted = sqlx::query(
                 "DELETE FROM repository_stars WHERE user_id = $1 AND repository_id = $2",
             )
@@ -155,32 +135,27 @@ pub async fn unstar_repository(
                 .await
                 .map_err(|e| format!("unstar bump: {e}"))?;
             }
-            let count: i64 = sqlx::query_scalar(
-                "SELECT star_count FROM repositories WHERE id = $1",
-            )
-            .bind(repository_id)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|e| format!("unstar count: {e}"))?;
+            let count: i64 =
+                sqlx::query_scalar("SELECT star_count FROM repositories WHERE id = $1")
+                    .bind(repository_id)
+                    .fetch_one(&mut *tx)
+                    .await
+                    .map_err(|e| format!("unstar count: {e}"))?;
             tx.commit()
                 .await
                 .map_err(|e| format!("unstar commit: {e}"))?;
             Ok(count)
         }
         DbPool::MySql(p) => {
-            let mut tx = p
-                .begin()
-                .await
-                .map_err(|e| format!("unstar begin: {e}"))?;
-            let deleted = sqlx::query(
-                "DELETE FROM repository_stars WHERE user_id = ? AND repository_id = ?",
-            )
-            .bind(user_id)
-            .bind(repository_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| format!("unstar delete: {e}"))?
-            .rows_affected();
+            let mut tx = p.begin().await.map_err(|e| format!("unstar begin: {e}"))?;
+            let deleted =
+                sqlx::query("DELETE FROM repository_stars WHERE user_id = ? AND repository_id = ?")
+                    .bind(user_id)
+                    .bind(repository_id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| format!("unstar delete: {e}"))?
+                    .rows_affected();
             if deleted > 0 {
                 sqlx::query(
                     "UPDATE repositories SET star_count = GREATEST(star_count - 1, 0),
@@ -202,10 +177,7 @@ pub async fn unstar_repository(
             Ok(count)
         }
         DbPool::Sqlite(p) => {
-            let mut tx = p
-                .begin()
-                .await
-                .map_err(|e| format!("unstar begin: {e}"))?;
+            let mut tx = p.begin().await.map_err(|e| format!("unstar begin: {e}"))?;
             let deleted = sqlx::query(
                 "DELETE FROM repository_stars WHERE user_id = ?1 AND repository_id = ?2",
             )
@@ -226,13 +198,12 @@ pub async fn unstar_repository(
                 .await
                 .map_err(|e| format!("unstar bump: {e}"))?;
             }
-            let count: i64 = sqlx::query_scalar(
-                "SELECT star_count FROM repositories WHERE id = ?1",
-            )
-            .bind(repository_id)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|e| format!("unstar count: {e}"))?;
+            let count: i64 =
+                sqlx::query_scalar("SELECT star_count FROM repositories WHERE id = ?1")
+                    .bind(repository_id)
+                    .fetch_one(&mut *tx)
+                    .await
+                    .map_err(|e| format!("unstar count: {e}"))?;
             tx.commit()
                 .await
                 .map_err(|e| format!("unstar commit: {e}"))?;
@@ -243,30 +214,30 @@ pub async fn unstar_repository(
 
 pub async fn get_star_count(pool: &DbPool, repository_id: &str) -> Result<i64, String> {
     match pool {
-        DbPool::Postgres(p) => sqlx::query_scalar(
-            "SELECT COALESCE(star_count, 0) FROM repositories WHERE id = $1",
-        )
-        .bind(repository_id)
-        .fetch_optional(p)
-        .await
-        .map_err(|e| format!("get star_count: {e}"))
-        .map(|o| o.unwrap_or(0)),
-        DbPool::MySql(p) => sqlx::query_scalar(
-            "SELECT COALESCE(star_count, 0) FROM repositories WHERE id = ?",
-        )
-        .bind(repository_id)
-        .fetch_optional(p)
-        .await
-        .map_err(|e| format!("get star_count: {e}"))
-        .map(|o| o.unwrap_or(0)),
-        DbPool::Sqlite(p) => sqlx::query_scalar(
-            "SELECT COALESCE(star_count, 0) FROM repositories WHERE id = ?1",
-        )
-        .bind(repository_id)
-        .fetch_optional(p)
-        .await
-        .map_err(|e| format!("get star_count: {e}"))
-        .map(|o| o.unwrap_or(0)),
+        DbPool::Postgres(p) => {
+            sqlx::query_scalar("SELECT COALESCE(star_count, 0) FROM repositories WHERE id = $1")
+                .bind(repository_id)
+                .fetch_optional(p)
+                .await
+                .map_err(|e| format!("get star_count: {e}"))
+                .map(|o| o.unwrap_or(0))
+        }
+        DbPool::MySql(p) => {
+            sqlx::query_scalar("SELECT COALESCE(star_count, 0) FROM repositories WHERE id = ?")
+                .bind(repository_id)
+                .fetch_optional(p)
+                .await
+                .map_err(|e| format!("get star_count: {e}"))
+                .map(|o| o.unwrap_or(0))
+        }
+        DbPool::Sqlite(p) => {
+            sqlx::query_scalar("SELECT COALESCE(star_count, 0) FROM repositories WHERE id = ?1")
+                .bind(repository_id)
+                .fetch_optional(p)
+                .await
+                .map_err(|e| format!("get star_count: {e}"))
+                .map(|o| o.unwrap_or(0))
+        }
     }
 }
 
@@ -309,13 +280,13 @@ pub async fn get_fork_network_id(
     repository_id: &str,
 ) -> Result<Option<String>, String> {
     match pool {
-        DbPool::Postgres(p) => sqlx::query_scalar(
-            "SELECT fork_network_id FROM repositories WHERE id = $1",
-        )
-        .bind(repository_id)
-        .fetch_optional(p)
-        .await
-        .map_err(|e| format!("get fork_network_id: {e}")),
+        DbPool::Postgres(p) => {
+            sqlx::query_scalar("SELECT fork_network_id FROM repositories WHERE id = $1")
+                .bind(repository_id)
+                .fetch_optional(p)
+                .await
+                .map_err(|e| format!("get fork_network_id: {e}"))
+        }
         DbPool::MySql(p) => {
             sqlx::query_scalar("SELECT fork_network_id FROM repositories WHERE id = ?")
                 .bind(repository_id)
@@ -323,13 +294,13 @@ pub async fn get_fork_network_id(
                 .await
                 .map_err(|e| format!("get fork_network_id: {e}"))
         }
-        DbPool::Sqlite(p) => sqlx::query_scalar(
-            "SELECT fork_network_id FROM repositories WHERE id = ?1",
-        )
-        .bind(repository_id)
-        .fetch_optional(p)
-        .await
-        .map_err(|e| format!("get fork_network_id: {e}")),
+        DbPool::Sqlite(p) => {
+            sqlx::query_scalar("SELECT fork_network_id FROM repositories WHERE id = ?1")
+                .bind(repository_id)
+                .fetch_optional(p)
+                .await
+                .map_err(|e| format!("get fork_network_id: {e}"))
+        }
     }
 }
 
@@ -643,7 +614,10 @@ pub enum ForkListSort {
 }
 
 fn social_like_pat(q: &str) -> String {
-    let escaped = q.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
+    let escaped = q
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_");
     format!("%{escaped}%")
 }
 
@@ -651,8 +625,12 @@ macro_rules! map_stargazer {
     ($row:expr) => {{
         let row = $row;
         RepoStargazerListRow {
-            user_id: row.try_get("user_id").map_err(|e| format!("stargazer row: {e}"))?,
-            username: row.try_get("username").map_err(|e| format!("stargazer row: {e}"))?,
+            user_id: row
+                .try_get("user_id")
+                .map_err(|e| format!("stargazer row: {e}"))?,
+            username: row
+                .try_get("username")
+                .map_err(|e| format!("stargazer row: {e}"))?,
             display_name: row
                 .try_get("display_name")
                 .map_err(|e| format!("stargazer row: {e}"))?,
@@ -710,7 +688,9 @@ pub async fn list_repo_stargazers(
     offset: i64,
     limit: i64,
 ) -> Result<Vec<RepoStargazerListRow>, String> {
-    let pat = q.filter(|s| !s.trim().is_empty()).map(|s| social_like_pat(s.trim()));
+    let pat = q
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| social_like_pat(s.trim()));
     match pool {
         DbPool::Postgres(p) => {
             let rows = if let Some(ref pat) = pat {
@@ -832,7 +812,9 @@ pub async fn count_repo_stargazers(
     repository_id: &str,
     q: Option<&str>,
 ) -> Result<i64, String> {
-    let pat = q.filter(|s| !s.trim().is_empty()).map(|s| social_like_pat(s.trim()));
+    let pat = q
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| social_like_pat(s.trim()));
     match pool {
         DbPool::Postgres(p) => {
             if let Some(ref pat) = pat {
@@ -921,7 +903,9 @@ pub async fn list_network_forks(
     offset: i64,
     limit: i64,
 ) -> Result<Vec<RepoForkListRow>, String> {
-    let pat = q.filter(|s| !s.trim().is_empty()).map(|s| social_like_pat(s.trim()));
+    let pat = q
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| social_like_pat(s.trim()));
     let order = fork_order_sql(sort);
     match pool {
         DbPool::Postgres(p) => {
@@ -973,7 +957,7 @@ pub async fn list_network_forks(
                 )
             };
             let rows = if let Some(ref pat) = pat {
-                sqlx::query(&sql)
+                sqlx::query(sqlx::AssertSqlSafe(&*sql))
                     .bind(fork_network_id)
                     .bind(pat)
                     .bind(limit)
@@ -981,7 +965,7 @@ pub async fn list_network_forks(
                     .fetch_all(p)
                     .await
             } else {
-                sqlx::query(&sql)
+                sqlx::query(sqlx::AssertSqlSafe(&*sql))
                     .bind(fork_network_id)
                     .bind(limit)
                     .bind(offset)
@@ -1040,7 +1024,7 @@ pub async fn list_network_forks(
                 )
             };
             let rows = if let Some(ref pat) = pat {
-                sqlx::query(&sql)
+                sqlx::query(sqlx::AssertSqlSafe(&*sql))
                     .bind(fork_network_id)
                     .bind(pat)
                     .bind(pat)
@@ -1049,7 +1033,7 @@ pub async fn list_network_forks(
                     .fetch_all(p)
                     .await
             } else {
-                sqlx::query(&sql)
+                sqlx::query(sqlx::AssertSqlSafe(&*sql))
                     .bind(fork_network_id)
                     .bind(limit)
                     .bind(offset)
@@ -1108,7 +1092,7 @@ pub async fn list_network_forks(
                 )
             };
             let rows = if let Some(ref pat) = pat {
-                sqlx::query(&sql)
+                sqlx::query(sqlx::AssertSqlSafe(&*sql))
                     .bind(fork_network_id)
                     .bind(pat)
                     .bind(limit)
@@ -1116,7 +1100,7 @@ pub async fn list_network_forks(
                     .fetch_all(p)
                     .await
             } else {
-                sqlx::query(&sql)
+                sqlx::query(sqlx::AssertSqlSafe(&*sql))
                     .bind(fork_network_id)
                     .bind(limit)
                     .bind(offset)
@@ -1158,7 +1142,9 @@ macro_rules! map_fork_network {
             .try_get("owner_avatar_path")
             .map_err(|e| format!("fork network row: {e}"))?;
         ForkNetworkRow {
-            id: row.try_get("id").map_err(|e| format!("fork network row: {e}"))?,
+            id: row
+                .try_get("id")
+                .map_err(|e| format!("fork network row: {e}"))?,
             owner_username: row
                 .try_get("owner_username")
                 .map_err(|e| format!("fork network row: {e}"))?,
@@ -1230,8 +1216,14 @@ pub async fn list_fork_network(
     match pool {
         DbPool::Postgres(p) => {
             let sql = FORK_NETWORK_SELECT
-                .replace("{created_at}", "to_char(r.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"')")
-                .replace("{updated_at}", "to_char(r.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"')")
+                .replace(
+                    "{created_at}",
+                    "to_char(r.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"')",
+                )
+                .replace(
+                    "{updated_at}",
+                    "to_char(r.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"')",
+                )
                 + "
     WHERE r.fork_network_id = $1
       AND r.deleted_at IS NULL
@@ -1239,19 +1231,27 @@ pub async fn list_fork_network(
     ORDER BY CASE WHEN r.forked_from_repo_id IS NULL THEN 0 ELSE 1 END,
              r.created_at ASC, r.id ASC
     LIMIT $3";
-            let rows = sqlx::query(&sql)
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*sql))
                 .bind(fork_network_id)
                 .bind(current_repo_id)
                 .bind(limit)
                 .fetch_all(p)
                 .await
                 .map_err(|e| format!("list fork network: {e}"))?;
-            rows.into_iter().map(|r| Ok(map_fork_network!(&r))).collect()
+            rows.into_iter()
+                .map(|r| Ok(map_fork_network!(&r)))
+                .collect()
         }
         DbPool::MySql(p) => {
             let sql = FORK_NETWORK_SELECT
-                .replace("{created_at}", "DATE_FORMAT(r.created_at, '%Y-%m-%dT%H:%i:%sZ')")
-                .replace("{updated_at}", "DATE_FORMAT(r.updated_at, '%Y-%m-%dT%H:%i:%sZ')")
+                .replace(
+                    "{created_at}",
+                    "DATE_FORMAT(r.created_at, '%Y-%m-%dT%H:%i:%sZ')",
+                )
+                .replace(
+                    "{updated_at}",
+                    "DATE_FORMAT(r.updated_at, '%Y-%m-%dT%H:%i:%sZ')",
+                )
                 + "
     WHERE r.fork_network_id = ?
       AND r.deleted_at IS NULL
@@ -1259,19 +1259,27 @@ pub async fn list_fork_network(
     ORDER BY CASE WHEN r.forked_from_repo_id IS NULL THEN 0 ELSE 1 END,
              r.created_at ASC, r.id ASC
     LIMIT ?";
-            let rows = sqlx::query(&sql)
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*sql))
                 .bind(fork_network_id)
                 .bind(current_repo_id)
                 .bind(limit)
                 .fetch_all(p)
                 .await
                 .map_err(|e| format!("list fork network: {e}"))?;
-            rows.into_iter().map(|r| Ok(map_fork_network!(&r))).collect()
+            rows.into_iter()
+                .map(|r| Ok(map_fork_network!(&r)))
+                .collect()
         }
         DbPool::Sqlite(p) => {
             let sql = FORK_NETWORK_SELECT
-                .replace("{created_at}", "strftime('%Y-%m-%dT%H:%M:%SZ', r.created_at)")
-                .replace("{updated_at}", "strftime('%Y-%m-%dT%H:%M:%SZ', r.updated_at)")
+                .replace(
+                    "{created_at}",
+                    "strftime('%Y-%m-%dT%H:%M:%SZ', r.created_at)",
+                )
+                .replace(
+                    "{updated_at}",
+                    "strftime('%Y-%m-%dT%H:%M:%SZ', r.updated_at)",
+                )
                 + "
     WHERE r.fork_network_id = ?1
       AND r.deleted_at IS NULL
@@ -1279,14 +1287,16 @@ pub async fn list_fork_network(
     ORDER BY CASE WHEN r.forked_from_repo_id IS NULL THEN 0 ELSE 1 END,
              r.created_at ASC, r.id ASC
     LIMIT ?3";
-            let rows = sqlx::query(&sql)
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*sql))
                 .bind(fork_network_id)
                 .bind(current_repo_id)
                 .bind(limit)
                 .fetch_all(p)
                 .await
                 .map_err(|e| format!("list fork network: {e}"))?;
-            rows.into_iter().map(|r| Ok(map_fork_network!(&r))).collect()
+            rows.into_iter()
+                .map(|r| Ok(map_fork_network!(&r)))
+                .collect()
         }
     }
 }
@@ -1340,7 +1350,9 @@ pub async fn count_network_forks(
     fork_network_id: &str,
     q: Option<&str>,
 ) -> Result<i64, String> {
-    let pat = q.filter(|s| !s.trim().is_empty()).map(|s| social_like_pat(s.trim()));
+    let pat = q
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| social_like_pat(s.trim()));
     match pool {
         DbPool::Postgres(p) => {
             if let Some(ref pat) = pat {

@@ -1,3 +1,11 @@
+/**
+ * Resolved app theme in-document — client-side replacement for the retired
+ * `ssrResolvedTheme` server fn (same localStorage + media-query chain; the
+ * middleware now stamps `<html class>` from cookies).
+ */
+function resolveDocumentTheme(): "light" | "dark" {
+  return resolveTheme(readThemePreference());
+}
 export type ThemePreference = "system" | "light" | "dark";
 
 export const THEME_STORAGE_KEY = "oxidean-theme";
@@ -20,6 +28,17 @@ export function resolveTheme(pref: ThemePreference): "light" | "dark" {
   if (pref === "light" || pref === "dark") return pref;
   if (typeof window === "undefined") return "light";
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
+/**
+ * Resolved app theme in-document — client-side replacement for the retired
+ * `ssrResolvedTheme` server fn (same localStorage + media-query chain; the
+ * middleware now stamps `<html class>` from cookies).
+ */
+
+/** Shiki theme matching the document theme (was `resolveSsrHighlightTheme`). */
+export function resolveDocumentHighlightTheme(): "oxidean-light" | "oxidean-dark" {
+  return resolveDocumentTheme() === "dark" ? "oxidean-dark" : "oxidean-light";
 }
 
 /** Parse `oxidean-theme` from a Cookie header (SSR). */

@@ -10,7 +10,7 @@ function repoFullName(repo: RepoPublic): string {
   return `${repo.owner_username}/${repo.name}`;
 }
 
-export type PatFgRepoPickerProps = {
+type PatFgRepoPickerProps = {
   visible: boolean;
   pending: boolean;
   reposLoading: boolean;

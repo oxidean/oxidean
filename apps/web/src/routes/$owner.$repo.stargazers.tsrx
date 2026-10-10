@@ -1,7 +1,13 @@
-import { createFileRoute, useLoaderData, useParams } from "@octanejs/tanstack-router";
+import { navigate } from "astro:transitions/client";
 import { Search, Star } from "@octanejs/lucide";
+import { queryOptions, useQuery } from "@octanejs/tanstack-query";
+import { useRepoLayoutData } from "@/lib/repo-store.tsrx";
+import { matchPath } from "@/lib/route-params";
+import { usePathname, useSearchString } from "@/lib/pathname.tsrx";
+import { RepoLayout } from "@/routes/$owner.$repo.tsrx";
+import { AppPage } from "@/components/app-page";
 import type { RepoPublic, RepoStargazerPublic } from "@oxidean/api-client";
-import { useState } from "octane";
+import { useEffect, useState } from "octane";
 import { RepoNotFound } from "@/components/repo/repo-not-found";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
@@ -10,11 +16,11 @@ import { List, ListRow } from "@/components/ui/list";
 import { PageHeader } from "@/components/ui/page-header";
 import { apiClient } from "@/lib/api-client";
 import { socialListHref } from "@/lib/repo-social-lists";
-import type { RepoLayoutLoaderData } from "@/lib/repo-store";
+
 import { fetchRepoGet, fetchRepoStargazers } from "@/lib/ssr-repo";
 import { AppLink } from "@/components/ui/app-link";
 
-export type StargazersLoaderData =
+type StargazersLoaderData =
   | { kind: "not_found" }
   | { kind: "error"; message: string }
   | {
@@ -35,7 +41,7 @@ async function loadStargazersPage(
   repoName: string,
   q: string,
 ): Promise<StargazersLoaderData> {
-  const got = await fetchRepoGet({ data: { owner, name: repoName } });
+  const got = await fetchRepoGet({ owner, name: repoName });
   if (!got.ok) {
     if (got.error.code === "repo.not_found") return { kind: "not_found" };
     return { kind: "error", message: got.error.message || "Could not load repository." };
@@ -43,7 +49,11 @@ async function loadStargazersPage(
   if (!got.data.can_write) return { kind: "not_found" };
 
   const listRes = await fetchRepoStargazers({
-    data: { owner, name: repoName, q, offset: 0, limit: PAGE_LIMIT },
+    owner,
+    name: repoName,
+    q,
+    offset: 0,
+    limit: PAGE_LIMIT,
   });
   if (!listRes.ok) {
     if (listRes.error.code === "repo.not_found") return { kind: "not_found" };
@@ -63,39 +73,51 @@ async function loadStargazersPage(
   };
 }
 
-export const Route = createFileRoute("/$owner/$repo/stargazers")({
-  component: RepoStargazersPage,
-  head: ({ params }) => ({
-    meta: [
-      {
-        title: `Stargazers · ${(params as { owner: string }).owner}/${(params as { repo: string }).repo} · Oxidean`,
-      },
+function repoStargazersQueryOptions(params: Record<string, string | undefined>, searchStr = "") {
+  return queryOptions({
+    queryKey: [
+      "repo-page",
+      "/$owner/$repo/stargazers",
+      params.owner ?? "",
+      params.repo ?? "",
+      params._splat ?? "",
+      params.n ?? "",
+      params.sha ?? "",
+      params.tag ?? "",
+      params.run ?? "",
+      searchStr,
     ],
-  }),
-  // Loader consumes ?q — loaderDeps keeps the match id search-aware so a
-  // search-only navigation refetches instead of reusing stale loaderData.
-  loaderDeps: ({ search }) => search,
-  loader: async ({ params, location }): Promise<StargazersLoaderData> => {
-    const owner = String((params as { owner?: string }).owner ?? "");
-    const repoName = String((params as { repo?: string }).repo ?? "");
-    const q = new URLSearchParams(location.searchStr.replace(/^\?/, "")).get("q") ?? "";
-    try {
-      return await loadStargazersPage(owner, repoName, q);
-    } catch {
-      return { kind: "error", message: NETWORK_ERROR };
-    }
-  },
-});
+    queryFn: async (): Promise<StargazersLoaderData> => {
+      // loader-deps-ok — searchStr is part of this query's queryKey; search-only navigations refetch via the query.
+      const location = { searchStr, pathname: "" };
+
+      const owner = String((params as { owner?: string }).owner ?? "");
+      const repoName = String((params as { repo?: string }).repo ?? "");
+      const q = new URLSearchParams(location.searchStr.replace(/^\?/, "")).get("q") ?? "";
+      try {
+        return await loadStargazersPage(owner, repoName, q);
+      } catch {
+        return { kind: "error", message: NETWORK_ERROR };
+      }
+    },
+    enabled: Boolean(params.owner && params.repo),
+    retry: false,
+    staleTime: 30_000,
+  });
+}
 
 /** Stargazers list — Write+ only (About sidebar + soft 404 for others). */
-export function RepoStargazersPage() @{
-  const params = useParams({ strict: false }) as { owner?: string; repo?: string };
+function RepoStargazersPageContent() @{
+  const pathname = usePathname();
+  const searchStr = useSearchString();
+  const params = (matchPath("/$owner/$repo/stargazers", pathname) ?? {}) as {
+    owner?: string;
+    repo?: string;
+  };
   const owner = params.owner ?? "";
   const repoName = params.repo ?? "";
-  const layout = useLoaderData({ from: "/$owner/$repo" }) as RepoLayoutLoaderData | undefined;
-  const data = useLoaderData({ from: "/$owner/$repo/stargazers" }) as
-    | StargazersLoaderData
-    | undefined;
+  const layout = useRepoLayoutData();
+  const data = useQuery(repoStargazersQueryOptions(params, searchStr)).data;
 
   const showNotFound = !data || data.kind === "not_found" || layout?.status === "not_found";
   const errorMessage = data?.kind === "error" ? data.message : "";
@@ -105,6 +127,14 @@ export function RepoStargazersPage() @{
   const [offset, setOffset] = useState(ready?.offset ?? 0);
   const [total, setTotal] = useState(ready?.total ?? 0);
   const [loadingMore, setLoadingMore] = useState(false);
+
+  useEffect(() => {
+    if (!ready) return;
+    setQ(ready.q);
+    setStargazers(ready.stargazers);
+    setOffset(ready.offset);
+    setTotal(ready.total);
+  }, [ready]);
   const limit = ready?.limit ?? PAGE_LIMIT;
   const base = `/${owner}/${repoName}/stargazers`;
   const activeQ = ready?.q ?? "";
@@ -159,7 +189,7 @@ export function RepoStargazersPage() @{
               className="flex w-full gap-2 sm:w-auto"
               onSubmit={(e) => {
                 e.preventDefault();
-                window.location.assign(socialListHref(base, { q }));
+                void navigate(socialListHref(base, { q }));
               }}
             >
               <div className="relative flex-1 sm:w-72">
@@ -243,4 +273,13 @@ export function RepoStargazersPage() @{
       </div>;
     }
   }
+}
+
+/** Page root — RepoLayout (chrome + repo store) around the leaf content. */
+export function RepoStargazersPage() @{
+  <AppPage>
+    <RepoLayout>
+      <RepoStargazersPageContent />
+    </RepoLayout>
+  </AppPage>;
 }

@@ -37,7 +37,7 @@ RUN apt-get update \
 # docker CLI only (no daemon) — enables `label:docker://image` execution when
 # /var/run/docker.sock is mounted. Host-mode labels need no Docker. Fetched as
 # a static binary: Railway's builder rejects `COPY --from=<external image>`.
-ARG DOCKER_CLI_VERSION=28.5.2
+ARG DOCKER_CLI_VERSION=29.9.0
 RUN curl -fsSL "https://download.docker.com/linux/static/stable/x86_64/docker-${DOCKER_CLI_VERSION}.tgz" \
     | tar -xz --strip-components=1 -C /usr/local/bin docker/docker
 COPY --from=builder /usr/local/bin/oxidean-runner /usr/local/bin/oxidean-runner

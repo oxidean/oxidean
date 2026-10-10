@@ -382,6 +382,7 @@ async fn touch_last_used(state: &AppState, pat_id: &str, ip: Option<&str>) {
     }
 }
 
+#[allow(clippy::result_large_err)]
 async fn authenticate(state: &AppState, headers: &HeaderMap) -> Result<McpAuth, Response> {
     if let Some(raw) = headers.get(header::AUTHORIZATION) {
         let raw = raw.to_str().map_err(|_| unauthorized())?;
@@ -399,6 +400,7 @@ async fn authenticate(state: &AppState, headers: &HeaderMap) -> Result<McpAuth, 
     Ok(McpAuth { session, pat: None })
 }
 
+#[allow(clippy::result_large_err)]
 /// Resolve `Authorization: Bearer <token>` to an [`McpAuth`].
 ///
 /// Extension point (AGT-03): `oxidean_pat_`/`oxidean_fg_` tokens resolve through
@@ -429,6 +431,7 @@ async fn resolve_bearer_identity(
     }
 }
 
+#[allow(clippy::result_large_err)]
 /// OAuth access-token (`oxidean_oat_…`) resolution seam.
 ///
 /// TODO(API-03): once the OAuth provider stack lands, look the token up by
@@ -451,6 +454,7 @@ async fn resolve_oat_bearer(
     Err(unauthorized())
 }
 
+#[allow(clippy::result_large_err)]
 /// Bearer PAT → PAT row + owner. Mirrors `git_smart_http::authenticate_pat`
 /// (hash lookup, expiry, banned-owner) without the username/alias dance —
 /// identity comes from the token hash alone. The caller

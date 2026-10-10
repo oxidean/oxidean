@@ -114,7 +114,7 @@ fn is_blocked_host(host: &str) -> bool {
         "metadata",
         "0.0.0.0",
     ];
-    if blocked.iter().any(|b| host == *b) {
+    if blocked.contains(&host) {
         return true;
     }
     if host.starts_with("169.254.") || host.starts_with("10.") {
@@ -300,12 +300,7 @@ async fn record_and_finish(
     } else if outcome.transient && attempt_number < max {
         let next = next_attempt_iso(attempt_number);
         let _ = db
-            .mark_webhook_delivery_result(
-                &delivery.id,
-                "pending",
-                attempt_number,
-                Some(&next),
-            )
+            .mark_webhook_delivery_result(&delivery.id, "pending", attempt_number, Some(&next))
             .await;
     } else {
         let _ = db

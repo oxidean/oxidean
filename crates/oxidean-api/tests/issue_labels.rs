@@ -210,8 +210,7 @@ async fn issue_labels_write_cannot_mutate_defs() {
     assert_eq!(created["ok"], true, "seed label — {created}");
     let label_id = created["data"]["id"].as_str().expect("id");
 
-    let (writer_cookie, writer_v) =
-        signup_and_login(&app, "lblwrite@ex.com", "lblwrite").await;
+    let (writer_cookie, writer_v) = signup_and_login(&app, "lblwrite@ex.com", "lblwrite").await;
     let writer_id = writer_v["data"]["id"].as_str().expect("id");
     verify_user(&db, writer_id).await;
     let add = rpc_json(
@@ -228,7 +227,10 @@ async fn issue_labels_write_cannot_mutate_defs() {
         r#"{"procedure":"label.create","input":{"scope":"repo","owner":"deny-org","repo":"app","name":"hack","color":"222222"}}"#,
     )
     .await;
-    assert_eq!(create_denied["ok"], false, "Write must not create defs — {create_denied}");
+    assert_eq!(
+        create_denied["ok"], false,
+        "Write must not create defs — {create_denied}"
+    );
     assert_eq!(create_denied["error"]["code"], "repo.not_found");
 
     let update_denied = rpc_json(
@@ -239,7 +241,10 @@ async fn issue_labels_write_cannot_mutate_defs() {
         ),
     )
     .await;
-    assert_eq!(update_denied["ok"], false, "Write must not update defs — {update_denied}");
+    assert_eq!(
+        update_denied["ok"], false,
+        "Write must not update defs — {update_denied}"
+    );
     assert_eq!(update_denied["error"]["code"], "repo.not_found");
 
     let delete_denied = rpc_json(
@@ -250,7 +255,10 @@ async fn issue_labels_write_cannot_mutate_defs() {
         ),
     )
     .await;
-    assert_eq!(delete_denied["ok"], false, "Write must not delete defs — {delete_denied}");
+    assert_eq!(
+        delete_denied["ok"], false,
+        "Write must not delete defs — {delete_denied}"
+    );
     assert_eq!(delete_denied["error"]["code"], "repo.not_found");
 }
 
@@ -422,8 +430,7 @@ async fn issue_labels_write_assign_on_issue() {
     assert_eq!(lab["ok"], true, "{lab}");
     let label_id = lab["data"]["id"].as_str().expect("id").to_string();
 
-    let (writer_cookie, writer_v) =
-        signup_and_login(&app, "asgwrite@ex.com", "asgwrite").await;
+    let (writer_cookie, writer_v) = signup_and_login(&app, "asgwrite@ex.com", "asgwrite").await;
     let writer_id = writer_v["data"]["id"].as_str().expect("id");
     verify_user(&db, writer_id).await;
     assert_eq!(
@@ -436,8 +443,7 @@ async fn issue_labels_write_assign_on_issue() {
         true
     );
 
-    let (reader_cookie, reader_v) =
-        signup_and_login(&app, "asgread@ex.com", "asgread").await;
+    let (reader_cookie, reader_v) = signup_and_login(&app, "asgread@ex.com", "asgread").await;
     let reader_id = reader_v["data"]["id"].as_str().expect("id");
     verify_user(&db, reader_id).await;
     assert_eq!(

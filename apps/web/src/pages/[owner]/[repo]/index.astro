@@ -1,0 +1,14 @@
+---
+import AppShell from "@/layouts/AppShell.astro";
+import { RepoIndexPage } from "@/routes/$owner.$repo.index.tsrx";
+
+// Placeholder shell — the middleware maps every real `/{owner}/{repo}` path
+// onto this page; params resolve client-side from `location.pathname`.
+export function getStaticPaths() {
+	return [{ params: { owner: "_", repo: "_" } }];
+}
+---
+
+<AppShell title="Oxidean">
+	<RepoIndexPage client:load />
+</AppShell>

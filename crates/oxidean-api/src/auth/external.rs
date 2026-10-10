@@ -68,10 +68,8 @@ fn candidate_from_email(email: &str) -> String {
     for c in local.chars() {
         if c.is_ascii_alphanumeric() {
             out.push(c.to_ascii_lowercase());
-        } else if c == '-' || c == '_' || c == '.' {
-            if !out.ends_with('-') && !out.is_empty() {
-                out.push('-');
-            }
+        } else if (c == '-' || c == '_' || c == '.') && !out.ends_with('-') && !out.is_empty() {
+            out.push('-');
         }
         if out.len() >= 39 {
             break;

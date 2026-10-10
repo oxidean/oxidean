@@ -1,4 +1,5 @@
-import { createFileRoute, useLoaderData } from "@octanejs/tanstack-router";
+import { queryOptions, useQuery } from "@octanejs/tanstack-query";
+import { AppPage } from "@/components/app-page";
 import type { RepoPublic, UserPublic, WatchLevel } from "@oxidean/api-client";
 import { useEffect, useState } from "octane";
 import { AccountSettingsLayout, SettingsShell } from "@/components/settings/settings-shell";
@@ -8,7 +9,7 @@ import { List, ListRow } from "@/components/ui/list";
 import { apiClient } from "@/lib/api-client";
 import { fetchSessionMe, fetchWatchedRepos } from "@/lib/ssr-auth";
 
-export type NotificationsSettingsLoaderData =
+type NotificationsSettingsLoaderData =
   | { kind: "unauthenticated" }
   | { kind: "error"; message: string }
   | {
@@ -20,39 +21,42 @@ export type NotificationsSettingsLoaderData =
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
 
-export const Route = createFileRoute("/settings/notifications")({
-  component: NotificationsSettingsPage,
-  head: () => ({ meta: [{ title: "Notifications · Oxidean" }] }),
-  loader: async (): Promise<NotificationsSettingsLoaderData> => {
-    try {
-      const res = await fetchSessionMe();
-      if (!res.ok) {
-        if (res.error.code === "auth.unauthenticated") {
-          return { kind: "unauthenticated" };
+function settingsNotificationsQueryOptions() {
+  return queryOptions({
+    queryKey: ["settings", "settingsNotifications"],
+    queryFn: async (): Promise<NotificationsSettingsLoaderData> => {
+      try {
+        const res = await fetchSessionMe();
+        if (!res.ok) {
+          if (res.error.code === "auth.unauthenticated") {
+            return { kind: "unauthenticated" };
+          }
+          return {
+            kind: "error",
+            message: res.error.message || "Could not load session.",
+          };
+        }
+        const watched = await fetchWatchedRepos();
+        if (!watched.ok) {
+          return {
+            kind: "error",
+            message: watched.error.message || "Could not load watched repositories.",
+          };
         }
         return {
-          kind: "error",
-          message: res.error.message || "Could not load session.",
+          kind: "ready",
+          user: res.data,
+          repos: watched.data.repos,
+          truncated: watched.data.truncated,
         };
+      } catch {
+        return { kind: "error", message: NETWORK_ERROR };
       }
-      const watched = await fetchWatchedRepos();
-      if (!watched.ok) {
-        return {
-          kind: "error",
-          message: watched.error.message || "Could not load watched repositories.",
-        };
-      }
-      return {
-        kind: "ready",
-        user: res.data,
-        repos: watched.data.repos,
-        truncated: watched.data.truncated,
-      };
-    } catch {
-      return { kind: "error", message: NETWORK_ERROR };
-    }
-  },
-});
+    },
+    retry: false,
+    staleTime: 30_000,
+  });
+}
 
 type Phase = { kind: "loading" } | { kind: "ready" } | { kind: "error"; message: string };
 
@@ -72,9 +76,13 @@ function levelOf(repo: RepoPublic): WatchLevel {
 
 /** Exported for tests — `/settings/notifications` per-repo watch matrix (DEBT-06). */
 export function NotificationsSettingsPage() @{
-  const loaderData = useLoaderData({ from: "/settings/notifications" }) as
-    | NotificationsSettingsLoaderData
-    | undefined;
+  <AppPage>
+    <NotificationsSettingsContent />
+  </AppPage>;
+}
+
+function NotificationsSettingsContent() @{
+  const loaderData = useQuery(settingsNotificationsQueryOptions()).data;
 
   useEffect(() => {
     if (loaderData?.kind === "unauthenticated") {

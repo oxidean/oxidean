@@ -34,7 +34,7 @@ const LIST_ERROR = "Couldn't load email addresses. Check your connection and try
 const VERIFY_INVALID = "That code is invalid or expired. Resend verification and try again.";
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
 
-export type AccountEmailsSectionProps = {
+type AccountEmailsSectionProps = {
   initialEmails?: EmailListItem[];
 };
 

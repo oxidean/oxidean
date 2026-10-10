@@ -1,7 +1,12 @@
-import { createFileRoute, useLoaderData, useParams } from "@octanejs/tanstack-router";
 import { Activity } from "@octanejs/lucide";
+import { queryOptions, useQuery } from "@octanejs/tanstack-query";
+
+import { matchPath } from "@/lib/route-params";
+import { usePathname, useSearchString } from "@/lib/pathname.tsrx";
+import { RepoLayout } from "@/routes/$owner.$repo.tsrx";
+import { AppPage } from "@/components/app-page";
 import type { RepoActivityItem, RepoPublic } from "@oxidean/api-client";
-import { useState } from "octane";
+import { useEffect, useState } from "octane";
 import { RepoActivityRow } from "@/components/repo/repo-activity-row";
 import { RepoNotFound } from "@/components/repo/repo-not-found";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -13,7 +18,7 @@ import { apiClient } from "@/lib/api-client";
 import { fetchRepoActivity, fetchRepoGet } from "@/lib/ssr-repo";
 import { AppLink } from "@/components/ui/app-link";
 
-export type ActivityLoaderData =
+type ActivityLoaderData =
   | { kind: "not_found" }
   | { kind: "error"; message: string }
   | {
@@ -91,20 +96,18 @@ async function loadActivityPage(
   period: string,
   pushType: string,
 ): Promise<ActivityLoaderData> {
-  const got = await fetchRepoGet({ data: { owner, name: repoName } });
+  const got = await fetchRepoGet({ owner, name: repoName });
   if (!got.ok) {
     if (got.error.code === "repo.not_found") return { kind: "not_found" };
     return { kind: "error", message: got.error.message || "Could not load repository." };
   }
   const listRes = await fetchRepoActivity({
-    data: {
-      owner,
-      name: repoName,
-      period,
-      push_type: pushType || undefined,
-      offset: 0,
-      limit: PAGE_LIMIT,
-    },
+    owner,
+    name: repoName,
+    period,
+    push_type: pushType || undefined,
+    offset: 0,
+    limit: PAGE_LIMIT,
   });
   if (!listRes.ok) {
     if (listRes.error.code === "repo.not_found") return { kind: "not_found" };
@@ -129,51 +132,52 @@ function toReadyPhase(data: Extract<ActivityLoaderData, { kind: "ready" }>): Pha
   return { ...data, loadingMore: false };
 }
 
-export const Route = createFileRoute("/$owner/$repo/activity")({
-  component: RepoActivityPage,
-  head: ({ params }) => ({
-    meta: [
-      {
-        title: `Activity · ${(params as { owner: string }).owner}/${(params as { repo: string }).repo} · Oxidean`,
-      },
+function repoActivityQueryOptions(params: Record<string, string | undefined>, searchStr = "") {
+  return queryOptions({
+    queryKey: [
+      "repo-page",
+      "/$owner/$repo/activity",
+      params.owner ?? "",
+      params.repo ?? "",
+      params._splat ?? "",
+      params.n ?? "",
+      params.sha ?? "",
+      params.tag ?? "",
+      params.run ?? "",
+      searchStr,
     ],
-    links: [
-      {
-        rel: "alternate",
-        type: "application/atom+xml",
-        title: `Activity feed · ${(params as { owner: string }).owner}/${(params as { repo: string }).repo}`,
-        href: `/api/repos/${(params as { owner: string }).owner}/${(params as { repo: string }).repo}/activity.atom`,
-      },
-    ],
-  }),
-  // Loader consumes ?period/?type — loaderDeps keeps the match id search-aware
-  // so filter navigations refetch instead of reusing stale loaderData.
-  loaderDeps: ({ search }) => search,
-  loader: async ({ params, location }): Promise<ActivityLoaderData> => {
-    const owner = String((params as { owner?: string }).owner ?? "");
-    const repoName = String((params as { repo?: string }).repo ?? "");
-    const search = new URLSearchParams(location.searchStr.replace(/^\?/, ""));
-    const period = search.get("period") || "all";
-    const pushType = search.get("type") || "";
-    try {
-      return await loadActivityPage(owner, repoName, period, pushType);
-    } catch {
-      return { kind: "error", message: NETWORK_ERROR };
-    }
-  },
-});
+    queryFn: async (): Promise<ActivityLoaderData> => {
+      // loader-deps-ok — searchStr is part of this query's queryKey; search-only navigations refetch via the query.
+      const location = { searchStr, pathname: "" };
+
+      const owner = String((params as { owner?: string }).owner ?? "");
+      const repoName = String((params as { repo?: string }).repo ?? "");
+      const search = new URLSearchParams(location.searchStr.replace(/^\?/, ""));
+      const period = search.get("period") || "all";
+      const pushType = search.get("type") || "";
+      try {
+        return await loadActivityPage(owner, repoName, period, pushType);
+      } catch {
+        return { kind: "error", message: NETWORK_ERROR };
+      }
+    },
+    enabled: Boolean(params.owner && params.repo),
+    retry: false,
+    staleTime: 30_000,
+  });
+}
 
 /** Repository activity feed — push / branch / merge events. */
-export function RepoActivityPage() @{
-  const params = useParams({ from: "/$owner/$repo/activity" }) as {
+function RepoActivityPageContent() @{
+  const pathname = usePathname();
+  const searchStr = useSearchString();
+  const params = (matchPath("/$owner/$repo/activity", pathname) ?? {}) as {
     owner: string;
     repo: string;
   };
   const owner = params.owner ?? "";
   const repoName = params.repo ?? "";
-  const loaderData = useLoaderData({ from: "/$owner/$repo/activity" }) as
-    | ActivityLoaderData
-    | undefined;
+  const loaderData = useQuery(repoActivityQueryOptions(params, searchStr)).data;
 
   const [phase, setPhase] = useState<Phase>(() =>
     loaderData
@@ -182,6 +186,16 @@ export function RepoActivityPage() @{
         : loaderData
       : { kind: "loading" },
   );
+
+  useEffect(() => {
+    setPhase(
+      loaderData
+        ? loaderData.kind === "ready"
+          ? toReadyPhase(loaderData)
+          : loaderData
+        : { kind: "loading" },
+    );
+  }, [owner, repoName, searchStr, loaderData]);
 
   const readyDesc =
     phase.kind === "ready"
@@ -292,4 +306,13 @@ export function RepoActivityPage() @{
       }
     </>;
   }
+}
+
+/** Page root — RepoLayout (chrome + repo store) around the leaf content. */
+export function RepoActivityPage() @{
+  <AppPage>
+    <RepoLayout>
+      <RepoActivityPageContent />
+    </RepoLayout>
+  </AppPage>;
 }

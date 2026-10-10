@@ -371,11 +371,11 @@ pub async fn key_present() -> bool {
 mod tests {
     use super::*;
     use russh::keys::Algorithm;
-    use std::sync::Mutex;
+    use tokio::sync::Mutex;
 
     /// Serialize tests that mutate process env (`OXIDEAN_ENV`,
     /// `OXIDEAN_SSH_HOST_KEY_DIR`, `OXIDEAN_WEB_FLOW_PRIVATE_KEY`).
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
+    static ENV_LOCK: Mutex<()> = Mutex::const_new(());
 
     fn fresh_ed25519_pem() -> String {
         let key = PrivateKey::random(&mut rand::rng(), Algorithm::Ed25519).expect("random key");
@@ -463,7 +463,7 @@ mod tests {
 
     #[tokio::test]
     async fn ensure_uses_env_key_even_on_production() {
-        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _g = ENV_LOCK.lock().await;
         let dir = tempfile::tempdir().expect("tempdir");
         let pem = fresh_ed25519_pem();
 
@@ -496,7 +496,7 @@ mod tests {
 
     #[tokio::test]
     async fn ensure_fails_closed_on_production_without_key() {
-        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _g = ENV_LOCK.lock().await;
         let dir = tempfile::tempdir().expect("tempdir");
 
         let prev_dir = std::env::var_os("OXIDEAN_SSH_HOST_KEY_DIR");
@@ -530,7 +530,7 @@ mod tests {
 
     #[tokio::test]
     async fn ensure_concurrent_generators_share_one_pair() {
-        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _g = ENV_LOCK.lock().await;
         let ssh_keygen_ok = std::process::Command::new("ssh-keygen")
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -590,7 +590,7 @@ mod tests {
 
     #[tokio::test]
     async fn ensure_autogenerates_on_preview_env() {
-        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _g = ENV_LOCK.lock().await;
         // Spawn-only check — ssh-keygen has no --version; exit code is irrelevant.
         let ssh_keygen_ok = std::process::Command::new("ssh-keygen")
             .stdin(Stdio::null())

@@ -1,118 +1,54 @@
-import {
-  Outlet,
-  createFileRoute,
-  useLoaderData,
-  useLocation,
-  useParams,
-} from "@octanejs/tanstack-router";
+import { useQuery } from "@octanejs/tanstack-query";
 import type { UserPublic } from "@oxidean/api-client";
 import { RepoChrome } from "@/components/repo/repo-chrome";
 import { RepoNotFound } from "@/components/repo/repo-not-found";
 import { RepoPageShell } from "@/components/repo/repo-page-shell";
 import { RepoStoreProvider } from "@/components/repo/repo-store-provider";
 import { Skeleton } from "@/components/ui/skeleton";
+import { usePathname } from "@/lib/pathname.tsrx";
 import { repoChromeActiveFromPath } from "@/lib/repo-chrome-active";
-import { type RepoLayoutLoaderData, useRepoStore } from "@/lib/repo-store";
-import { fetchSessionMe } from "@/lib/ssr-auth";
-import { fetchPublicOrigin, fetchRepoGet, fetchSshAdvertise } from "@/lib/ssr-repo";
+import { type RepoLayoutLoaderData, useRepoStore } from "@/lib/repo-store.tsrx";
+import { repoLayoutQueryOptions } from "@/lib/repo-queries";
+import {
+  resolvePublicOriginClient,
+  resolveSshAdvertiseHost,
+  resolveSshAdvertisePort,
+} from "@/lib/public-origin";
+import { repoParamsFromPathname } from "@/lib/route-params";
+import { authSessionQueryOptions } from "@/lib/session-queries";
 
 export type { RepoLayoutLoaderData };
 
 /**
- * Layout for `/{owner}/{repo}` — fixed max-w-7xl shell + SSR cookie-forward
- * repo/session/public origin so private repos and clone URLs paint without CLS.
+ * Layout for `/{owner}/{repo}/*` — fixed max-w-7xl shell with repo/session
+ * queries client-side (was: SSR cookie-forward loader). Every repo leaf page
+ * wraps its content in `<RepoLayout>` — the store provider keeps loader-data
+ * semantics alive for leaves (`useRepoStore`).
  */
-export const Route = createFileRoute("/$owner/$repo")({
-  component: RepoLayout,
-  loader: async ({ params }): Promise<RepoLayoutLoaderData> => {
-    const owner = String((params as { owner?: string }).owner ?? "");
-    const repoName = String((params as { repo?: string }).repo ?? "");
-    const publicOrigin = await fetchPublicOrigin();
-    const ssh = await fetchSshAdvertise({ data: { publicOrigin } });
-    const sshHost = ssh.sshHost;
-    const sshPort = ssh.sshPort;
+export function RepoLayout(props: { children?: unknown }) @{
+  const pathname = usePathname();
+  const params = repoParamsFromPathname(pathname) ?? { owner: "", repo: "" };
+  const owner = params.owner;
+  const repoName = params.repo;
 
-    let me: UserPublic | null = null;
-    try {
-      const meRes = await fetchSessionMe();
-      if (meRes.ok) me = meRes.data;
-    } catch {
-      /* anonymous */
-    }
+  const meQ = useQuery(authSessionQueryOptions());
+  const repoQ = useQuery({
+    ...repoLayoutQueryOptions(owner, repoName),
+    enabled: Boolean(owner && repoName),
+  });
 
-    try {
-      const got = await fetchRepoGet({ data: { owner, name: repoName } });
-      if (!got.ok) {
-        if (got.error.code === "repo.not_found") {
-          return {
-            owner,
-            repoName,
-            status: "not_found",
-            repo: null,
-            me,
-            message: "",
-            publicOrigin,
-            sshHost,
-            sshPort,
-          };
-        }
-        return {
-          owner,
-          repoName,
-          status: "error",
-          repo: null,
-          me,
-          message: got.error.message || "Could not load repository.",
-          publicOrigin,
-          sshHost,
-          sshPort,
-        };
-      }
-      return {
-        owner,
-        repoName,
-        status: "ok",
-        repo: got.data,
-        me,
-        message: "",
-        publicOrigin,
-        sshHost,
-        sshPort,
-      };
-    } catch {
-      return {
-        owner,
-        repoName,
-        status: "error",
-        repo: null,
-        me,
-        message: "Can't reach Oxidean. Check your connection and try again.",
-        publicOrigin,
-        sshHost,
-        sshPort,
-      };
-    }
-  },
-});
+  const publicOrigin = resolvePublicOriginClient();
+  const sshHost = resolveSshAdvertiseHost(publicOrigin);
+  const sshPort = resolveSshAdvertisePort();
 
-function RepoLayout() @{
-  const params = useParams({ from: "/$owner/$repo" }) as {
-    owner: string;
-    repo: string;
-  };
-  const data = useLoaderData({ from: "/$owner/$repo" }) as RepoLayoutLoaderData | undefined;
+  const status = repoQ.data?.status ?? (repoQ.isError ? "error" : null);
+  const repo = repoQ.data?.repo ?? null;
+  const message =
+    repoQ.data?.message ??
+    (repoQ.isError ? "Can't reach Oxidean. Check your connection and try again." : "");
+  const me: UserPublic | null = meQ.data ?? null;
 
-  const owner = data?.owner ?? params.owner ?? "";
-  const repoName = data?.repoName ?? params.repo ?? "";
-  const status = data?.status ?? "ok";
-  const repo = data?.repo ?? null;
-  const me = data?.me ?? null;
-  const message = data?.message ?? "";
-  const publicOrigin = data?.publicOrigin ?? "";
-  const sshHost = data?.sshHost ?? "";
-  const sshPort = data?.sshPort ?? 0;
-
-  @if (!data) {
+  @if (repoQ.isPending) {
     <RepoPageShell>
       <div className="flex flex-col gap-4" aria-busy="true">
         <Skeleton className="h-8 w-64" />
@@ -133,7 +69,7 @@ function RepoLayout() @{
       key={`${owner}/${repoName}` as string}
       owner={owner}
       repoName={repoName}
-      status={status}
+      status={status ?? "ok"}
       repo={repo}
       me={me}
       message={message}
@@ -142,26 +78,24 @@ function RepoLayout() @{
       sshPort={sshPort}
     >
       <RepoPageShell>
-        <RepoLayoutChrome />
+        <RepoLayoutChrome>{props.children}</RepoLayoutChrome>
       </RepoPageShell>
     </RepoStoreProvider>;
   }
 }
 
-/** Shared repo HI chrome above leaf Outlet (D-QH-01). Leaves may still remount until 11.1-03. */
-function RepoLayoutChrome() @{
+/** Shared repo chrome above leaf content (D-QH-01). */
+function RepoLayoutChrome(props: { children?: unknown }) @{
   const repo = useRepoStore((s) => s.repo);
-  const pathname = useLocation({
-    select: (loc) => (loc as { pathname?: string }).pathname,
-  });
-  const active = repoChromeActiveFromPath(String(pathname ?? ""));
+  const pathname = usePathname();
+  const active = repoChromeActiveFromPath(pathname);
 
   @if (repo) {
     <>
       <RepoChrome repo={repo} active={active} />
-      <Outlet />
+      {props.children}
     </>;
   } @else {
-    <Outlet />;
+    <>{props.children}</>;
   }
 }

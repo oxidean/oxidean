@@ -2,27 +2,10 @@ import { Dialog as DialogPrimitive } from "@octanejs/base-ui/dialog";
 import { X } from "@octanejs/lucide";
 import type { ComponentProps } from "octane";
 import { Button } from "@/components/ui/button";
+import { portalRoot } from "@/lib/portal-root";
 import { cn } from "@/lib/utils";
 
-export function Dialog(props: ComponentProps<typeof DialogPrimitive.Root>) @{
-  <DialogPrimitive.Root data-slot="dialog" {...props} />;
-}
-
-export function DialogTrigger(props: ComponentProps<typeof DialogPrimitive.Trigger>) @{
-  <DialogPrimitive.Trigger data-slot="dialog-trigger" {...props} />;
-}
-
-export function DialogPortal(props: ComponentProps<typeof DialogPrimitive.Portal>) @{
-  // octane-dom-race-ok: definition site — keepMounted flows through props;
-  // DialogContent sets it so every consumer stays mounted.
-  <DialogPrimitive.Portal data-slot="dialog-portal" {...props} />;
-}
-
-export function DialogClose(props: ComponentProps<typeof DialogPrimitive.Close>) @{
-  <DialogPrimitive.Close data-slot="dialog-close" {...props} />;
-}
-
-export function DialogOverlay({
+function DialogOverlay({
   className,
   ...props
 }: ComponentProps<typeof DialogPrimitive.Backdrop>) @{
@@ -34,6 +17,18 @@ export function DialogOverlay({
     )}
     {...props}
   />;
+}
+function DialogPortal(props: ComponentProps<typeof DialogPrimitive.Portal>) @{
+  // octane-dom-race-ok: definition site — keepMounted flows through props;
+  // DialogContent sets it so every consumer stays mounted.
+  <DialogPrimitive.Portal data-slot="dialog-portal" container={portalRoot()} {...props} />;
+}
+export function Dialog(props: ComponentProps<typeof DialogPrimitive.Root>) @{
+  <DialogPrimitive.Root data-slot="dialog" {...props} />;
+}
+
+export function DialogClose(props: ComponentProps<typeof DialogPrimitive.Close>) @{
+  <DialogPrimitive.Close data-slot="dialog-close" {...props} />;
 }
 
 export function DialogContent({

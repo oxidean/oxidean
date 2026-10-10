@@ -23,7 +23,7 @@ COMPOSE_FILE ?= docker-compose.yml
 help:
 	@echo "Oxidean targets:"
 	@echo "  make makefile-lint  - parse Makefile + checkmake (CI early gate)"
-	@echo "  make dev            - local API + web (Vite proxy; D-10)"
+	@echo "  make dev            - local API + web (astro dev proxies /api → OXIDEAN_API_ORIGIN; D-10)"
 	@echo "  make rpc-gen        - regenerate packages/api-client from Rust"
 	@echo "  make openapi-gen    - regenerate docs/openapi.yaml from the REST route table"
 	@echo "  make rpc-sync-check - fail if generated client is out of sync"
@@ -48,6 +48,7 @@ help:
 	@echo "  make coverage-contract - aggregator contract self-test"
 	@echo "  make route-coverage-check / browser-coverage-check - page + high-risk UI coverage gates"
 	@echo "  make web-lint / web-format-check / test-web-browser - oxlint, oxfmt, Chromium DOM races"
+	@echo "  make dead-code-check - knip (TS/.tsrx/.astro) + cargo machete + clippy -D warnings"
 	@echo "  make smoke-actions  - Actions/runner Compose smoke (ACT-04/05; skip-ok without Docker)"
 	@echo "  make smoke          - compose bring-up smoke (PLAT-01)"
 	@echo "  make smoke-protection - ORG-06 helper + HTTPS/SSH protected-push denial (D-PKG-03)"
@@ -325,10 +326,19 @@ web-lint:
 	bun run --filter @oxidean/web lint
 	bun run scripts/check-octane-dom-races.ts
 	bun run scripts/check-internal-anchors.ts
-	bun run scripts/check-loader-deps.ts
+	bun run scripts/check-route-sync.ts
 
 web-format-check:
 	bun run --filter @oxidean/web format:check
+
+# Dead-code gate: knip covers TS/Astro/.tsrx (files, exports, deps via custom
+# compilers in knip.ts); cargo-machete covers unused Cargo deps; clippy -D
+# warnings covers unused Rust items plus the rest of the default lint set —
+# the workspace is warning-clean, keep it that way.
+dead-code-check:
+	bunx knip
+	cargo machete
+	cargo clippy --workspace --all-targets -- -D warnings
 
 test-web-browser:
 	bun run --filter @oxidean/web test:browser

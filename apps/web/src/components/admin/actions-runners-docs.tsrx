@@ -121,7 +121,7 @@ docker run --rm -it \\
           </code>
           ) are returned once at register; session cookies are ignored on{" "}
           <code className="rounded bg-muted px-1 py-0.5 font-mono text-[12px] text-foreground">
-            /api/actions/*
+            {"/api/actions/*" as string}
           </code>
           .
         </p>

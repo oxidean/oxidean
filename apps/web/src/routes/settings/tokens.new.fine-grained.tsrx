@@ -1,4 +1,5 @@
-import { createFileRoute, useLoaderData } from "@octanejs/tanstack-router";
+import { queryOptions, useQuery } from "@octanejs/tanstack-query";
+import { AppPage } from "@/components/app-page";
 import type { UserPublic } from "@oxidean/api-client";
 import { useEffect, useState } from "octane";
 import { AuthShell } from "@/components/auth-shell";
@@ -18,27 +19,30 @@ export type TokensNewFgLoaderData =
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
 
-export const Route = createFileRoute("/settings/tokens/new/fine-grained")({
-  component: TokensNewFineGrainedPage,
-  head: () => ({ meta: [{ title: "New fine-grained token · Oxidean" }] }),
-  loader: async (): Promise<TokensNewFgLoaderData> => {
-    try {
-      const res = await fetchSessionMe();
-      if (!res.ok) {
-        if (res.error.code === "auth.unauthenticated") {
-          return { kind: "unauthenticated" };
+function settingsTokensNewFgQueryOptions() {
+  return queryOptions({
+    queryKey: ["settings", "settingsTokensNewFg"],
+    queryFn: async (): Promise<TokensNewFgLoaderData> => {
+      try {
+        const res = await fetchSessionMe();
+        if (!res.ok) {
+          if (res.error.code === "auth.unauthenticated") {
+            return { kind: "unauthenticated" };
+          }
+          return {
+            kind: "error",
+            message: res.error.message || "Could not load session.",
+          };
         }
-        return {
-          kind: "error",
-          message: res.error.message || "Could not load session.",
-        };
+        return { kind: "ready", user: res.data };
+      } catch {
+        return { kind: "error", message: NETWORK_ERROR };
       }
-      return { kind: "ready", user: res.data };
-    } catch {
-      return { kind: "error", message: NETWORK_ERROR };
-    }
-  },
-});
+    },
+    retry: false,
+    staleTime: 30_000,
+  });
+}
 
 type Phase =
   | { kind: "loading" }
@@ -47,9 +51,13 @@ type Phase =
 
 /** Exported for tokens.integration.test.ts (GIT-11 / D-05 / D-06 / D-15 / D-25). */
 export function TokensNewFineGrainedPage() @{
-  const loaderData = useLoaderData({
-    from: "/settings/tokens/new/fine-grained",
-  }) as TokensNewFgLoaderData | undefined;
+  <AppPage>
+    <TokensNewFineGrainedContent />
+  </AppPage>;
+}
+
+export function TokensNewFineGrainedContent() @{
+  const loaderData = useQuery(settingsTokensNewFgQueryOptions()).data;
 
   useEffect(() => {
     if (loaderData?.kind === "unauthenticated") {

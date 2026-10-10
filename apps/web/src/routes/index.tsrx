@@ -1,12 +1,18 @@
-import { createFileRoute, Link, useLoaderData } from "@octanejs/tanstack-router";
+import { useQuery } from "@octanejs/tanstack-query";
 import type { RepoPublic, UserPublic } from "@oxidean/api-client";
-import { useEffect, useState } from "octane";
+import { useEffect } from "octane";
+import { AppPage } from "@/components/app-page";
+import { AppLink } from "@/components/ui/app-link";
 import { buttonVariants } from "@/components/ui/button";
 import { OxideanMark } from "@/components/oxidean-mark";
 import { SignedInHomeSkeleton } from "@/components/page-skeletons";
 import { SignedInHome } from "@/components/signed-in-home";
-import { fetchProviderConfig, fetchRepoListMine, fetchSessionMe } from "@/lib/ssr-auth";
 import { hasSessionPresenceHint, syncSessionPresenceHint } from "@/lib/session-hint";
+import {
+  authProviderConfigQueryOptions,
+  authSessionQueryOptions,
+  repoListMineQueryOptions,
+} from "@/lib/session-queries";
 import { cn } from "@/lib/utils";
 
 /** D-20 home tree priority after shared root access gate. */
@@ -30,61 +36,6 @@ export type HomeLoaderData = {
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
 
-export const Route = createFileRoute("/")({
-  component: HomePage,
-  head: ({ loaderData }) => ({
-    meta: [
-      {
-        title:
-          (loaderData as HomeLoaderData | undefined)?.tree === "signed-in"
-            ? "Repositories · Oxidean"
-            : "Oxidean",
-      },
-    ],
-  }),
-  loader: async (): Promise<HomeLoaderData> => {
-    // needs_setup / must_change are owned by root loader — do not re-lock here.
-    let user: UserPublic | null = null;
-    try {
-      const me = await fetchSessionMe();
-      if (me.ok) user = me.data;
-    } catch {
-      /* anonymous */
-    }
-
-    const tree = selectHomeTree({
-      needs_setup: false,
-      hasSession: user != null,
-    }) as Exclude<HomeTree, "setup">;
-
-    let repos: RepoPublic[] = [];
-    let reposError: string | null = null;
-    let allowSignup = false;
-
-    if (tree === "signed-in") {
-      try {
-        const list = await fetchRepoListMine();
-        if (list.ok) {
-          repos = list.data.repos;
-        } else {
-          reposError = list.error.message || "Could not load repositories.";
-        }
-      } catch {
-        reposError = NETWORK_ERROR;
-      }
-    } else {
-      try {
-        const cfg = await fetchProviderConfig();
-        if (cfg.ok) allowSignup = cfg.data.allow_signup === true;
-      } catch {
-        allowSignup = false;
-      }
-    }
-
-    return { tree, user, repos, reposError, allowSignup };
-  },
-});
-
 function revealExploreTarget() {
   const el = document.getElementById("explore");
   if (!el) return;
@@ -97,7 +48,7 @@ function revealExploreTarget() {
   });
 }
 
-function useScrollReveal(enabled: boolean) {
+function useScrollReveal(enabled: boolean, epoch: unknown) {
   useEffect(() => {
     if (!enabled) return;
     const nodes = Array.from(document.querySelectorAll<HTMLElement>(".oct-reveal"));
@@ -120,40 +71,64 @@ function useScrollReveal(enabled: boolean) {
     );
     nodes.forEach((n) => io.observe(n));
     return () => io.disconnect();
-  }, [enabled]);
+    // epoch re-runs the query when the rendered tree shape changes: pending →
+    // marketing replaces the .oct-reveal nodes (wrapped → bare AnonLanding),
+    // and an observer holding the detached nodes would reveal nothing.
+  }, [enabled, epoch]);
 }
 
-function HomePage() {
-  const data = useLoaderData({ from: "/" }) as HomeLoaderData | undefined;
-  // Cookie is only readable after mount — reading during render mismatches SSR.
-  const [presenceHint, setPresenceHint] = useState(false);
+export function HomePage() @{
+  <AppPage>
+    <HomeContent />
+  </AppPage>;
+}
+
+function HomeContent() {
+  // needs_setup / must_change are owned by AppAccessGate — do not re-lock here.
+  const meQ = useQuery(authSessionQueryOptions());
+  const signedIn = meQ.data != null;
+  const reposQ = useQuery({ ...repoListMineQueryOptions(), enabled: signedIn });
+  const cfgQ = useQuery(authProviderConfigQueryOptions());
+
+  const tree: HomeTree | null = meQ.isPending ? null : signedIn ? "signed-in" : "marketing";
+  const user = meQ.data ?? null;
 
   useEffect(() => {
-    setPresenceHint(hasSessionPresenceHint());
-  }, []);
+    if (tree != null) syncSessionPresenceHint(tree === "signed-in");
+  }, [tree]);
 
-  useEffect(() => {
-    if (!data) return;
-    syncSessionPresenceHint(data.tree === "signed-in");
-  }, [data]);
+  // Cookie is only readable after mount — reading it for reveal gating feeds an
+  // effect arg, not SSR markup, so it's safe client-side.
+  const sessionHint = typeof document !== "undefined" ? hasSessionPresenceHint() : false;
+  useScrollReveal(tree === "marketing" || (tree == null && !sessionHint), tree);
 
-  const tree = data?.tree;
-  const user = data?.user;
-
-  useScrollReveal(tree === "marketing" || (tree == null && !presenceHint));
-
-  // Rare PE: presence cookie says signed-in before loader hydrates.
-  if (tree == null && presenceHint) {
-    return <SignedInHomeSkeleton />;
+  // Pending: SSR cannot see the session, so emit both candidates — the
+  // `data-oxidean-session` stamp on <html> (set per-request by the web tier)
+  // selects via CSS which one paints before `auth.me` resolves.
+  if (tree == null) {
+    return (
+      <>
+        <div data-anon-landing>
+          <AnonLanding allowSignup={cfgQ.data?.allow_signup === true} />
+        </div>
+        <div data-home-skeleton>
+          <SignedInHomeSkeleton />
+        </div>
+      </>
+    );
   }
 
   if (tree === "signed-in" && user) {
     return (
-      <SignedInHome user={user} repos={data?.repos ?? []} reposError={data?.reposError ?? null} />
+      <SignedInHome
+        user={user}
+        repos={reposQ.data ?? []}
+        reposError={reposQ.isError ? (reposQ.error?.message ?? NETWORK_ERROR) : null}
+      />
     );
   }
 
-  return <AnonLanding allowSignup={data?.allowSignup === true} />;
+  return <AnonLanding allowSignup={cfgQ.data?.allow_signup === true} />;
 }
 
 function AnonLanding({ allowSignup }: { allowSignup: boolean }) @{
@@ -180,17 +155,13 @@ function AnonLanding({ allowSignup }: { allowSignup: boolean }) @{
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
             @if (allowSignup) {
-              <Link to="/signup" preload="intent" className={cn(buttonVariants())}>
+              <AppLink href="/signup" className={cn(buttonVariants())}>
                 Get started
-              </Link>;
+              </AppLink>;
             }
-            <Link
-              to="/explore"
-              preload="intent"
-              className={cn(buttonVariants({ variant: "secondary" }))}
-            >
+            <AppLink href="/explore" className={cn(buttonVariants({ variant: "secondary" }))}>
               Explore
-            </Link>
+            </AppLink>
           </div>
         </div>
       </div>
@@ -253,17 +224,13 @@ function AnonLanding({ allowSignup }: { allowSignup: boolean }) @{
         </h2>
         <div className="mt-8 flex flex-wrap gap-3">
           @if (allowSignup) {
-            <Link to="/signup" preload="intent" className={cn(buttonVariants())}>
+            <AppLink href="/signup" className={cn(buttonVariants())}>
               Get started
-            </Link>;
+            </AppLink>;
           }
-          <Link
-            to="/explore"
-            preload="intent"
-            className={cn(buttonVariants({ variant: "secondary" }))}
-          >
+          <AppLink href="/explore" className={cn(buttonVariants({ variant: "secondary" }))}>
             Explore
-          </Link>
+          </AppLink>
         </div>
       </div>
     </section>

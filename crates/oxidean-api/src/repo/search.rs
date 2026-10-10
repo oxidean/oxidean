@@ -85,8 +85,8 @@ async fn search_code(
         Some(r) if !r.trim().is_empty() => r.trim().to_string(),
         _ => accessible.row.default_branch.clone(),
     };
-    let soft_cap = ctx.search_max_matches.max(1).min(10_000);
-    let max_files = ctx.search_max_files.max(1).min(10_000);
+    let soft_cap = ctx.search_max_matches.clamp(1, 10_000);
+    let max_files = ctx.search_max_files.clamp(1, 10_000);
     let fetch = offset
         .saturating_add(limit)
         .saturating_add(1)
@@ -273,7 +273,7 @@ async fn search_commits(
         Some(r) if !r.trim().is_empty() => r.trim().to_string(),
         _ => accessible.row.default_branch.clone(),
     };
-    let soft_cap = ctx.search_max_matches.max(1).min(10_000);
+    let soft_cap = ctx.search_max_matches.clamp(1, 10_000);
     let fetch = offset
         .saturating_add(limit)
         .saturating_add(1)
@@ -349,10 +349,7 @@ async fn search_issues(
     {
         return Ok((Vec::new(), false));
     }
-    let state = parsed
-        .is_state
-        .as_deref()
-        .unwrap_or("all");
+    let state = parsed.is_state.as_deref().unwrap_or("all");
     let q = parsed.keywords.trim();
     let q_opt = if q.is_empty() { None } else { Some(q) };
     // Fetch one extra to detect truncation.

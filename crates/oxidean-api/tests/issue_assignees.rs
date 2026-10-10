@@ -176,15 +176,10 @@ async fn issue_assignees_multi_assign() {
     support::unlock_signup(&db).await;
     let app = test_app(db.clone(), repos).await;
 
-    let (owner_cookie, writer_cookie, reader_id, _) =
-        setup_private_assign_fixture(&app, &db).await;
+    let (owner_cookie, writer_cookie, reader_id, _) = setup_private_assign_fixture(&app, &db).await;
 
-    let owner_id = rpc_json(
-        &app,
-        &owner_cookie,
-        r#"{"procedure":"auth.me","input":{}}"#,
-    )
-    .await["data"]["id"]
+    let owner_id = rpc_json(&app, &owner_cookie, r#"{"procedure":"auth.me","input":{}}"#).await
+        ["data"]["id"]
         .as_str()
         .expect("owner id")
         .to_string();
@@ -233,7 +228,9 @@ async fn issue_assignees_multi_assign() {
         .filter_map(|u| u["username"].as_str())
         .collect();
     assert!(
-        usernames.contains(&"asgown") && usernames.contains(&"asgwrite") && usernames.contains(&"asgread"),
+        usernames.contains(&"asgown")
+            && usernames.contains(&"asgwrite")
+            && usernames.contains(&"asgread"),
         "eligible Read+ profiles listed — {usernames:?}"
     );
     assert!(

@@ -1,520 +1,292 @@
-import { createServerFn } from "@octanejs/tanstack-start";
-import { getRequestHeader } from "@octanejs/tanstack-start/server";
 import {
-  createClient,
-  type OxideanClient,
   type RepoSearchHit,
   type RepoSearchResponse,
   type RepoSearchType,
 } from "@oxidean/api-client";
+import { apiClient } from "@/lib/api-client";
 import { highlightCode, languageIdForPath, type HighlightTheme } from "@/lib/highlight";
-import { ssrHighlightTheme } from "@/lib/ssr-auth";
-import { resolvePublicOriginFromEnv, resolveSshHost, resolveSshPort } from "@/lib/public-origin";
-
-/** API origin for SSR Cookie-forward RPCs — never the browser origin during SSR. */
-function ssrApiOrigin(): string {
-  return (
-    process.env.OXIDEAN_API_ORIGIN?.replace(/\/$/, "") ||
-    process.env.OXIDEAN_E2E_API_ORIGIN?.replace(/\/$/, "") ||
-    "http://127.0.0.1:8080"
-  );
-}
-
-/**
- * Cookie-forward Oxidean RPC client for repo SSR loaders.
- * Forwards the incoming request Cookie only — never logs cookie values (T-06-11).
- */
-function createSsrClient(cookie: string): OxideanClient {
-  return createClient({
-    baseUrl: ssrApiOrigin(),
-    credentials: "include",
-    fetch: (input, init) => {
-      const headers = new Headers(init?.headers);
-      if (cookie) {
-        headers.set("cookie", cookie);
-      }
-      return fetch(input, { ...init, headers });
-    },
-  });
-}
-
-function incomingCookie(): string {
-  return getRequestHeader("cookie") ?? "";
-}
+import { resolveClientHighlightTheme } from "@/lib/ssr-auth";
+import {
+  resolvePublicOriginClient,
+  resolveSshAdvertiseHost,
+  resolveSshAdvertisePort,
+} from "@/lib/public-origin";
 
 type OwnerName = { owner: string; name: string };
 
-function ownerNameValidator(data: OwnerName): OwnerName {
-  return {
-    owner: String(data?.owner ?? ""),
-    name: String(data?.name ?? ""),
-  };
+/** `repo.get` (private repos included when session owns them). */
+export async function fetchRepoGet(data: OwnerName) {
+  return apiClient.repo.get({ owner: data.owner, name: data.name });
 }
 
-/** SSR: `repo.get` with Cookie forward (private repos included when session owns them). */
-export const fetchRepoGet = createServerFn({ method: "GET" })
-  .validator(ownerNameValidator)
-  .handler(async ({ data }) => {
-    const client = createSsrClient(incomingCookie());
-    return client.repo.get({ owner: data.owner, name: data.name });
+/** `repo.tree`. */
+export async function fetchRepoTree(data: OwnerName & { ref: string; path?: string }) {
+  return apiClient.repo.tree({
+    owner: data.owner,
+    name: data.name,
+    ref: data.ref,
+    path: data.path ?? "",
   });
+}
 
-/** SSR: `repo.tree` with Cookie forward. */
-export const fetchRepoTree = createServerFn({ method: "GET" })
-  .validator((data: OwnerName & { ref: string; path?: string }) => ({
-    owner: String(data?.owner ?? ""),
-    name: String(data?.name ?? ""),
-    ref: String(data?.ref ?? ""),
-    path: String(data?.path ?? ""),
-  }))
-  .handler(async ({ data }) => {
-    const client = createSsrClient(incomingCookie());
-    return client.repo.tree({
-      owner: data.owner,
-      name: data.name,
-      ref: data.ref,
-      path: data.path,
-    });
+/** `repo.refs`. */
+export async function fetchRepoRefs(data: OwnerName) {
+  return apiClient.repo.refs({ owner: data.owner, name: data.name });
+}
+
+/** `repo.templates.list` — issue/PR file templates from the git tree (COL-02). */
+export async function fetchRepoFileTemplates(data: OwnerName) {
+  return apiClient.repo.templates.list({ owner: data.owner, name: data.name });
+}
+
+/** `repo.blob`. */
+export async function fetchRepoBlob(data: OwnerName & { ref: string; path: string }) {
+  return apiClient.repo.blob({
+    owner: data.owner,
+    name: data.name,
+    ref: data.ref,
+    path: data.path,
   });
+}
 
-/** SSR: `repo.refs` with Cookie forward. */
-export const fetchRepoRefs = createServerFn({ method: "GET" })
-  .validator(ownerNameValidator)
-  .handler(async ({ data }) => {
-    const client = createSsrClient(incomingCookie());
-    return client.repo.refs({ owner: data.owner, name: data.name });
+/** `repo.commits`. */
+export async function fetchRepoCommits(
+  data: OwnerName & { ref: string; skip?: number; limit?: number },
+) {
+  return apiClient.repo.commits({
+    owner: data.owner,
+    name: data.name,
+    ref: data.ref,
+    skip: typeof data.skip === "number" ? data.skip : 0,
+    limit: typeof data.limit === "number" ? data.limit : 30,
   });
+}
 
-/** SSR: `repo.templates.list` — issue/PR file templates from the git tree (COL-02). */
-export const fetchRepoFileTemplates = createServerFn({ method: "GET" })
-  .validator(ownerNameValidator)
-  .handler(async ({ data }) => {
-    const client = createSsrClient(incomingCookie());
-    return client.repo.templates.list({ owner: data.owner, name: data.name });
+/** `repo.pathLastCommits` (issue #23). */
+export async function fetchRepoPathLastCommits(data: OwnerName & { ref: string; path?: string }) {
+  return apiClient.repo.pathLastCommits({
+    owner: data.owner,
+    name: data.name,
+    ref: data.ref,
+    path: data.path || undefined,
   });
+}
 
-/** SSR: `repo.blob` with Cookie forward. */
-export const fetchRepoBlob = createServerFn({ method: "GET" })
-  .validator((data: OwnerName & { ref: string; path: string }) => ({
-    owner: String(data?.owner ?? ""),
-    name: String(data?.name ?? ""),
-    ref: String(data?.ref ?? ""),
-    path: String(data?.path ?? ""),
-  }))
-  .handler(async ({ data }) => {
-    const client = createSsrClient(incomingCookie());
-    return client.repo.blob({
-      owner: data.owner,
-      name: data.name,
-      ref: data.ref,
-      path: data.path,
-    });
+/** `repo.commitCount` (issue #23). */
+export async function fetchRepoCommitCount(data: OwnerName & { ref: string }) {
+  return apiClient.repo.commitCount({
+    owner: data.owner,
+    name: data.name,
+    ref: data.ref,
   });
+}
 
-/** SSR: `repo.commits` with Cookie forward. */
-export const fetchRepoCommits = createServerFn({ method: "GET" })
-  .validator((data: OwnerName & { ref: string; skip?: number; limit?: number }) => ({
-    owner: String(data?.owner ?? ""),
-    name: String(data?.name ?? ""),
-    ref: String(data?.ref ?? ""),
-    skip: typeof data?.skip === "number" ? data.skip : 0,
-    limit: typeof data?.limit === "number" ? data.limit : 30,
-  }))
-  .handler(async ({ data }) => {
-    const client = createSsrClient(incomingCookie());
-    return client.repo.commits({
-      owner: data.owner,
-      name: data.name,
-      ref: data.ref,
-      skip: data.skip,
-      limit: data.limit,
-    });
+/** `repo.contributors.list` (issue #23). */
+export async function fetchRepoContributors(data: OwnerName & { limit?: number }) {
+  return apiClient.repo.contributorsList({
+    owner: data.owner,
+    name: data.name,
+    limit: typeof data.limit === "number" ? data.limit : 30,
   });
+}
 
-/** SSR: `repo.pathLastCommits` with Cookie forward (issue #23). */
-export const fetchRepoPathLastCommits = createServerFn({ method: "GET" })
-  .validator((data: OwnerName & { ref: string; path?: string }) => ({
-    owner: String(data?.owner ?? ""),
-    name: String(data?.name ?? ""),
-    ref: String(data?.ref ?? ""),
-    path: String(data?.path ?? ""),
-  }))
-  .handler(async ({ data }) => {
-    const client = createSsrClient(incomingCookie());
-    return client.repo.pathLastCommits({
-      owner: data.owner,
-      name: data.name,
-      ref: data.ref,
-      path: data.path || undefined,
-    });
+/** `repo.languages` — About sidebar language bar (linguist-lite). */
+export async function fetchRepoLanguages(data: OwnerName) {
+  return apiClient.repo.languages({
+    owner: data.owner,
+    name: data.name,
   });
+}
 
-/** SSR: `repo.commitCount` with Cookie forward (issue #23). */
-export const fetchRepoCommitCount = createServerFn({ method: "GET" })
-  .validator((data: OwnerName & { ref: string }) => ({
-    owner: String(data?.owner ?? ""),
-    name: String(data?.name ?? ""),
-    ref: String(data?.ref ?? ""),
-  }))
-  .handler(async ({ data }) => {
-    const client = createSsrClient(incomingCookie());
-    return client.repo.commitCount({
-      owner: data.owner,
-      name: data.name,
-      ref: data.ref,
-    });
+/** `repo.activity.list` — push activity feed. */
+export async function fetchRepoActivity(
+  data: OwnerName & {
+    push_type?: string;
+    period?: string;
+    offset?: number;
+    limit?: number;
+  },
+) {
+  return apiClient.repo.activityList({
+    owner: data.owner,
+    name: data.name,
+    push_type: data.push_type?.trim() || null,
+    period: data.period?.trim() || "all",
+    offset: Number(data.offset ?? 0),
+    limit: Number(data.limit ?? 30),
   });
+}
 
-/** SSR: `repo.contributors.list` with Cookie forward (issue #23). */
-export const fetchRepoContributors = createServerFn({ method: "GET" })
-  .validator((data: OwnerName & { limit?: number }) => ({
-    owner: String(data?.owner ?? ""),
-    name: String(data?.name ?? ""),
-    limit: typeof data?.limit === "number" ? data.limit : 30,
-  }))
-  .handler(async ({ data }) => {
-    const client = createSsrClient(incomingCookie());
-    return client.repo.contributorsList({
-      owner: data.owner,
-      name: data.name,
-      limit: data.limit,
-    });
+/** `repo.insights.contributors` — Insights tab committer table (GIT-26). */
+export async function fetchRepoInsightsContributors(data: OwnerName & { limit?: number }) {
+  return apiClient.repo.insightsContributors({
+    owner: data.owner,
+    name: data.name,
+    limit: typeof data.limit === "number" ? data.limit : 30,
   });
+}
 
-/** SSR: `repo.languages` — About sidebar language bar (linguist-lite). */
-export const fetchRepoLanguages = createServerFn({ method: "GET" })
-  .validator((data: OwnerName) => ({
-    owner: String(data?.owner ?? ""),
-    name: String(data?.name ?? ""),
-  }))
-  .handler(async ({ data }) => {
-    const client = createSsrClient(incomingCookie());
-    return client.repo.languages({
-      owner: data.owner,
-      name: data.name,
-    });
+/** `repo.insights.commitActivity` — weekly buckets (GIT-26). */
+export async function fetchRepoInsightsCommitActivity(data: OwnerName & { weeks?: number }) {
+  return apiClient.repo.insightsCommitActivity({
+    owner: data.owner,
+    name: data.name,
+    weeks: typeof data.weeks === "number" ? data.weeks : 52,
   });
+}
 
-/** SSR: `repo.activity.list` — push activity feed. */
-export const fetchRepoActivity = createServerFn({ method: "GET" })
-  .validator(
-    (
-      data: OwnerName & {
-        push_type?: string;
-        period?: string;
-        offset?: number;
-        limit?: number;
-      },
-    ) => ({
-      owner: String(data?.owner ?? ""),
-      name: String(data?.name ?? ""),
-      push_type: data?.push_type ? String(data.push_type) : "",
-      period: data?.period ? String(data.period) : "all",
-      offset: Number(data?.offset ?? 0),
-      limit: Number(data?.limit ?? 30),
-    }),
-  )
-  .handler(async ({ data }) => {
-    const client = createSsrClient(incomingCookie());
-    return client.repo.activityList({
-      owner: data.owner,
-      name: data.name,
-      push_type: data.push_type.trim() || null,
-      period: data.period.trim() || "all",
-      offset: data.offset,
-      limit: data.limit,
-    });
+/** `repo.insights.forkNetwork` — fork-network member rows (GIT-26). */
+export async function fetchRepoInsightsForkNetwork(data: OwnerName & { limit?: number }) {
+  return apiClient.repo.insightsForkNetwork({
+    owner: data.owner,
+    name: data.name,
+    limit: typeof data.limit === "number" ? data.limit : 100,
   });
+}
 
-/** SSR: `repo.insights.contributors` — Insights tab committer table (GIT-26). */
-export const fetchRepoInsightsContributors = createServerFn({ method: "GET" })
-  .validator((data: OwnerName & { limit?: number }) => ({
-    owner: String(data?.owner ?? ""),
-    name: String(data?.name ?? ""),
-    limit: typeof data?.limit === "number" ? data.limit : 30,
-  }))
-  .handler(async ({ data }) => {
-    const client = createSsrClient(incomingCookie());
-    return client.repo.insightsContributors({
-      owner: data.owner,
-      name: data.name,
-      limit: data.limit,
-    });
+/** `packages.list` filtered by repository_id (issue #23 About). */
+export async function fetchPackagesForRepo(data: { repository_id: string }) {
+  return apiClient.packages.list({ repository_id: data.repository_id ?? "" });
+}
+
+/** `packages.list` by owner and/or repository_id (packages pages). */
+export async function fetchPackagesList(data: { owner?: string; repository_id?: string }) {
+  return apiClient.packages.list({
+    owner: data.owner ? String(data.owner) : null,
+    repository_id: data.repository_id ? String(data.repository_id) : null,
   });
+}
 
-/** SSR: `repo.insights.commitActivity` — weekly buckets (GIT-26). */
-export const fetchRepoInsightsCommitActivity = createServerFn({ method: "GET" })
-  .validator((data: OwnerName & { weeks?: number }) => ({
-    owner: String(data?.owner ?? ""),
-    name: String(data?.name ?? ""),
-    weeks: typeof data?.weeks === "number" ? data.weeks : 52,
-  }))
-  .handler(async ({ data }) => {
-    const client = createSsrClient(incomingCookie());
-    return client.repo.insightsCommitActivity({
-      owner: data.owner,
-      name: data.name,
-      weeks: data.weeks,
-    });
+/** `repo.actions.listRuns` (anonymous reads on public repos). */
+export async function fetchActionsListRuns(
+  data: OwnerName & {
+    page?: number;
+    per_page?: number;
+    status?: string;
+    event?: string;
+    branch?: string;
+    workflow?: string;
+    actor?: string;
+    query?: string;
+  },
+) {
+  return apiClient.repo.actions.listRuns({
+    owner: data.owner,
+    name: data.name,
+    page: typeof data.page === "number" ? data.page : 1,
+    per_page: typeof data.per_page === "number" ? data.per_page : 25,
+    status: data.status ? String(data.status) : undefined,
+    event: data.event ? String(data.event) : undefined,
+    branch: data.branch ? String(data.branch) : undefined,
+    workflow: data.workflow ? String(data.workflow) : undefined,
+    actor: data.actor ? String(data.actor) : undefined,
+    query: data.query ? String(data.query) : undefined,
   });
+}
 
-/** SSR: `repo.insights.forkNetwork` — fork-network member rows (GIT-26). */
-export const fetchRepoInsightsForkNetwork = createServerFn({ method: "GET" })
-  .validator((data: OwnerName & { limit?: number }) => ({
-    owner: String(data?.owner ?? ""),
-    name: String(data?.name ?? ""),
-    limit: typeof data?.limit === "number" ? data.limit : 100,
-  }))
-  .handler(async ({ data }) => {
-    const client = createSsrClient(incomingCookie());
-    return client.repo.insightsForkNetwork({
-      owner: data.owner,
-      name: data.name,
-      limit: data.limit,
-    });
+/** `repo.actions.listWorkflows`. */
+export async function fetchActionsListWorkflows(data: OwnerName & { git_ref?: string }) {
+  return apiClient.repo.actions.listWorkflows({
+    owner: data.owner,
+    name: data.name,
+    git_ref: data.git_ref ? String(data.git_ref) : undefined,
   });
+}
 
-/** SSR: `packages.list` filtered by repository_id (issue #23 About). */
-export const fetchPackagesForRepo = createServerFn({ method: "GET" })
-  .validator((data: { repository_id: string }) => ({
-    repository_id: String(data?.repository_id ?? ""),
-  }))
-  .handler(async ({ data }) => {
-    const client = createSsrClient(incomingCookie());
-    return client.packages.list({ repository_id: data.repository_id });
+/** `repo.actions.getRun`. */
+export async function fetchActionsGetRun(data: OwnerName & { run_id: string }) {
+  return apiClient.repo.actions.getRun({
+    owner: data.owner,
+    name: data.name,
+    run_id: String(data.run_id ?? ""),
   });
+}
 
-/** SSR: `packages.list` by owner and/or repository_id (packages pages). */
-export const fetchPackagesList = createServerFn({ method: "GET" })
-  .validator((data: { owner?: string; repository_id?: string }) => ({
-    owner: data?.owner ? String(data.owner) : null,
-    repository_id: data?.repository_id ? String(data.repository_id) : null,
-  }))
-  .handler(async ({ data }) => {
-    const client = createSsrClient(incomingCookie());
-    return client.packages.list({
-      owner: data.owner,
-      repository_id: data.repository_id,
-    });
+/** `repo.actions.getJobLog`. */
+export async function fetchActionsGetJobLog(data: OwnerName & { run_id: string; job_id: string }) {
+  return apiClient.repo.actions.getJobLog({
+    owner: data.owner,
+    name: data.name,
+    run_id: String(data.run_id ?? ""),
+    job_id: String(data.job_id ?? ""),
   });
+}
 
-/** SSR: `repo.actions.listRuns` with Cookie forward (anonymous reads on public repos). */
-export const fetchActionsListRuns = createServerFn({ method: "GET" })
-  .validator(
-    (
-      data: OwnerName & {
-        page?: number;
-        per_page?: number;
-        status?: string;
-        event?: string;
-        branch?: string;
-        workflow?: string;
-        actor?: string;
-        query?: string;
-      },
-    ) => ({
-      owner: String(data?.owner ?? ""),
-      name: String(data?.name ?? ""),
-      page: typeof data?.page === "number" ? data.page : 1,
-      per_page: typeof data?.per_page === "number" ? data.per_page : 25,
-      status: data?.status ? String(data.status) : undefined,
-      event: data?.event ? String(data.event) : undefined,
-      branch: data?.branch ? String(data.branch) : undefined,
-      workflow: data?.workflow ? String(data.workflow) : undefined,
-      actor: data?.actor ? String(data.actor) : undefined,
-      query: data?.query ? String(data.query) : undefined,
-    }),
-  )
-  .handler(async ({ data }) => {
-    const client = createSsrClient(incomingCookie());
-    return client.repo.actions.listRuns({
-      owner: data.owner,
-      name: data.name,
-      page: data.page,
-      per_page: data.per_page,
-      status: data.status,
-      event: data.event,
-      branch: data.branch,
-      workflow: data.workflow,
-      actor: data.actor,
-      query: data.query,
-    });
+/** `repo.stargazers.list` (Write+ gated). */
+export async function fetchRepoStargazers(
+  data: OwnerName & { q?: string; offset?: number; limit?: number },
+) {
+  return apiClient.repo.stargazersList({
+    owner: data.owner,
+    name: data.name,
+    q: data.q?.trim() || null,
+    offset: Number(data.offset ?? 0),
+    limit: Number(data.limit ?? 30),
   });
+}
 
-/** SSR: `repo.actions.listWorkflows` with Cookie forward. */
-export const fetchActionsListWorkflows = createServerFn({ method: "GET" })
-  .validator((data: OwnerName & { git_ref?: string }) => ({
-    owner: String(data?.owner ?? ""),
-    name: String(data?.name ?? ""),
-    git_ref: data?.git_ref ? String(data.git_ref) : undefined,
-  }))
-  .handler(async ({ data }) => {
-    const client = createSsrClient(incomingCookie());
-    return client.repo.actions.listWorkflows({
-      owner: data.owner,
-      name: data.name,
-      git_ref: data.git_ref,
-    });
+/** `repo.watchers.list`. */
+export async function fetchRepoWatchers(
+  data: OwnerName & { q?: string; offset?: number; limit?: number },
+) {
+  return apiClient.repo.watchersList({
+    owner: data.owner,
+    name: data.name,
+    q: data.q?.trim() || null,
+    offset: Number(data.offset ?? 0),
+    limit: Number(data.limit ?? 30),
   });
+}
 
-/** SSR: `repo.actions.getRun` with Cookie forward. */
-export const fetchActionsGetRun = createServerFn({ method: "GET" })
-  .validator((data: OwnerName & { run_id: string }) => ({
-    owner: String(data?.owner ?? ""),
-    name: String(data?.name ?? ""),
-    run_id: String(data?.run_id ?? ""),
-  }))
-  .handler(async ({ data }) => {
-    const client = createSsrClient(incomingCookie());
-    return client.repo.actions.getRun({
-      owner: data.owner,
-      name: data.name,
-      run_id: data.run_id,
-    });
+/** `repo.forks.list`. */
+export async function fetchRepoForks(
+  data: OwnerName & {
+    q?: string;
+    sort?: string;
+    offset?: number;
+    limit?: number;
+  },
+) {
+  return apiClient.repo.forksList({
+    owner: data.owner,
+    name: data.name,
+    q: data.q?.trim() || null,
+    sort: data.sort ? String(data.sort) : "stars",
+    offset: Number(data.offset ?? 0),
+    limit: Number(data.limit ?? 30),
   });
+}
 
-/** SSR: `repo.actions.getJobLog` with Cookie forward. */
-export const fetchActionsGetJobLog = createServerFn({ method: "GET" })
-  .validator((data: OwnerName & { run_id: string; job_id: string }) => ({
-    owner: String(data?.owner ?? ""),
-    name: String(data?.name ?? ""),
-    run_id: String(data?.run_id ?? ""),
-    job_id: String(data?.job_id ?? ""),
-  }))
-  .handler(async ({ data }) => {
-    const client = createSsrClient(incomingCookie());
-    return client.repo.actions.getJobLog({
-      owner: data.owner,
-      name: data.name,
-      run_id: data.run_id,
-      job_id: data.job_id,
-    });
+/** `repo.blame`. */
+export async function fetchRepoBlame(data: OwnerName & { ref: string; path: string }) {
+  return apiClient.repo.blame({
+    owner: data.owner,
+    name: data.name,
+    ref: data.ref,
+    path: data.path,
   });
+}
 
-/** SSR: `repo.stargazers.list` (Write+ gated). */
-export const fetchRepoStargazers = createServerFn({ method: "GET" })
-  .validator((data: OwnerName & { q?: string; offset?: number; limit?: number }) => ({
-    owner: String(data?.owner ?? ""),
-    name: String(data?.name ?? ""),
-    q: data?.q ? String(data.q) : "",
-    offset: Number(data?.offset ?? 0),
-    limit: Number(data?.limit ?? 30),
-  }))
-  .handler(async ({ data }) => {
-    const client = createSsrClient(incomingCookie());
-    return client.repo.stargazersList({
-      owner: data.owner,
-      name: data.name,
-      q: data.q.trim() || null,
-      offset: data.offset,
-      limit: data.limit,
-    });
+/** `repo.commit`. */
+export async function fetchRepoCommit(data: OwnerName & { sha: string }) {
+  return apiClient.repo.commit({
+    owner: data.owner,
+    name: data.name,
+    sha: data.sha,
   });
+}
 
-/** SSR: `repo.watchers.list`. */
-export const fetchRepoWatchers = createServerFn({ method: "GET" })
-  .validator((data: OwnerName & { q?: string; offset?: number; limit?: number }) => ({
-    owner: String(data?.owner ?? ""),
-    name: String(data?.name ?? ""),
-    q: data?.q ? String(data.q) : "",
-    offset: Number(data?.offset ?? 0),
-    limit: Number(data?.limit ?? 30),
-  }))
-  .handler(async ({ data }) => {
-    const client = createSsrClient(incomingCookie());
-    return client.repo.watchersList({
-      owner: data.owner,
-      name: data.name,
-      q: data.q.trim() || null,
-      offset: data.offset,
-      limit: data.limit,
-    });
+/** `repo.compare`. */
+export async function fetchRepoCompare(data: OwnerName & { base: string; head: string }) {
+  return apiClient.repo.compare({
+    owner: data.owner,
+    name: data.name,
+    base: data.base,
+    head: data.head,
   });
+}
 
-/** SSR: `repo.forks.list`. */
-export const fetchRepoForks = createServerFn({ method: "GET" })
-  .validator(
-    (
-      data: OwnerName & {
-        q?: string;
-        sort?: string;
-        offset?: number;
-        limit?: number;
-      },
-    ) => ({
-      owner: String(data?.owner ?? ""),
-      name: String(data?.name ?? ""),
-      q: data?.q ? String(data.q) : "",
-      sort: data?.sort ? String(data.sort) : "stars",
-      offset: Number(data?.offset ?? 0),
-      limit: Number(data?.limit ?? 30),
-    }),
-  )
-  .handler(async ({ data }) => {
-    const client = createSsrClient(incomingCookie());
-    return client.repo.forksList({
-      owner: data.owner,
-      name: data.name,
-      q: data.q.trim() || null,
-      sort: data.sort,
-      offset: data.offset,
-      limit: data.limit,
-    });
-  });
-
-/** SSR: `repo.blame` with Cookie forward. */
-export const fetchRepoBlame = createServerFn({ method: "GET" })
-  .validator((data: OwnerName & { ref: string; path: string }) => ({
-    owner: String(data?.owner ?? ""),
-    name: String(data?.name ?? ""),
-    ref: String(data?.ref ?? ""),
-    path: String(data?.path ?? ""),
-  }))
-  .handler(async ({ data }) => {
-    const client = createSsrClient(incomingCookie());
-    return client.repo.blame({
-      owner: data.owner,
-      name: data.name,
-      ref: data.ref,
-      path: data.path,
-    });
-  });
-
-/** SSR: `repo.commit` with Cookie forward. */
-export const fetchRepoCommit = createServerFn({ method: "GET" })
-  .validator((data: OwnerName & { sha: string }) => ({
-    owner: String(data?.owner ?? ""),
-    name: String(data?.name ?? ""),
-    sha: String(data?.sha ?? ""),
-  }))
-  .handler(async ({ data }) => {
-    const client = createSsrClient(incomingCookie());
-    return client.repo.commit({
-      owner: data.owner,
-      name: data.name,
-      sha: data.sha,
-    });
-  });
-
-/** SSR: `repo.compare` with Cookie forward. */
-export const fetchRepoCompare = createServerFn({ method: "GET" })
-  .validator((data: OwnerName & { base: string; head: string }) => ({
-    owner: String(data?.owner ?? ""),
-    name: String(data?.name ?? ""),
-    base: String(data?.base ?? ""),
-    head: String(data?.head ?? ""),
-  }))
-  .handler(async ({ data }) => {
-    const client = createSsrClient(incomingCookie());
-    return client.repo.compare({
-      owner: data.owner,
-      name: data.name,
-      base: data.base,
-      head: data.head,
-    });
-  });
-
-/** `repo.search` hit carrying SSR Shiki HTML when the server highlighted it. */
+/** `repo.search` hit carrying highlighted HTML when the client highlighted it. */
 export type SsrRepoSearchHit = RepoSearchHit & { html?: string };
 
 export type SsrRepoSearchResult =
@@ -526,194 +298,126 @@ export type SsrRepoSearchResult =
   | { ok: false; error: { code?: string; message?: string } };
 
 /**
- * SSR: `repo.search` with Cookie forward + server-side Shiki for code hits —
- * first paint ships highlighted markup so the client highlighter (which
- * eagerly loads ~100 grammars) only runs on a theme flip.
+ * `repo.search` + client-side Shiki for code hits — keeps the "highlighted on
+ * first paint" behavior without a server pass.
  */
-export const fetchRepoSearch = createServerFn({ method: "GET" })
-  .validator((data: OwnerName & { type?: string; q?: string }) => ({
-    owner: String(data?.owner ?? ""),
-    name: String(data?.name ?? ""),
-    type: (data?.type ? String(data.type) : "code") as RepoSearchType,
-    q: String(data?.q ?? ""),
-  }))
-  .handler(async ({ data }): Promise<SsrRepoSearchResult> => {
-    const client = createSsrClient(incomingCookie());
-    const res = await client.repo.search({
-      owner: data.owner,
-      name: data.name,
-      type: data.type,
-      q: data.q,
-    });
-    if (!res.ok) {
-      return { ok: false, error: res.error };
-    }
-    try {
-      const theme = ssrHighlightTheme();
-      const hits = await Promise.all(
-        res.data.hits.map(async (hit): Promise<SsrRepoSearchHit> => {
-          if (hit.kind !== "code" || !hit.content) return { ...hit };
-          try {
-            const html = await highlightCode(hit.content, {
-              lang: languageIdForPath(hit.path),
-              theme,
-            });
-            return { ...hit, html };
-          } catch {
-            return { ...hit };
-          }
-        }),
-      );
-      return { ok: true, data: { ...res.data, hits }, highlightTheme: theme };
-    } catch {
-      return { ok: true, data: { ...res.data }, highlightTheme: null };
-    }
+export async function fetchRepoSearch(
+  data: OwnerName & { type?: string; q?: string },
+): Promise<SsrRepoSearchResult> {
+  const res = await apiClient.repo.search({
+    owner: data.owner,
+    name: data.name,
+    type: (data.type ? String(data.type) : "code") as RepoSearchType,
+    q: String(data.q ?? ""),
   });
-
-/** SSR: `issue.list` with Cookie forward. */
-export const fetchIssueList = createServerFn({ method: "GET" })
-  .validator(
-    (
-      data: OwnerName & {
-        state?: string;
-        author?: string;
-        label?: string;
-        assignee?: string;
-        q?: string;
-        offset?: number;
-        limit?: number;
-      },
-    ) => ({
-      owner: String(data?.owner ?? ""),
-      name: String(data?.name ?? ""),
-      state: data?.state ? String(data.state) : "open",
-      author: data?.author ? String(data.author) : "",
-      label: data?.label ? String(data.label) : "",
-      assignee: data?.assignee ? String(data.assignee) : "",
-      q: data?.q ? String(data.q) : "",
-      offset: typeof data?.offset === "number" ? data.offset : 0,
-      limit: typeof data?.limit === "number" ? data.limit : 25,
-    }),
-  )
-  .handler(async ({ data }) => {
-    const client = createSsrClient(incomingCookie());
-    return client.issue.list({
-      owner: data.owner,
-      name: data.name,
-      state: data.state,
-      author: data.author || null,
-      label: data.label || null,
-      assignee: data.assignee || null,
-      q: data.q || null,
-      offset: data.offset,
-      limit: data.limit,
-    });
-  });
-
-/** SSR: `label.listForRepo` with Cookie forward. */
-export const fetchLabelListForRepo = createServerFn({ method: "GET" })
-  .validator(ownerNameValidator)
-  .handler(async ({ data }) => {
-    const client = createSsrClient(incomingCookie());
-    return client.label.listForRepo({ owner: data.owner, name: data.name });
-  });
-
-/** SSR: `issue.get` with Cookie forward. */
-export const fetchIssueGet = createServerFn({ method: "GET" })
-  .validator((data: OwnerName & { number: number }) => ({
-    owner: String(data?.owner ?? ""),
-    name: String(data?.name ?? ""),
-    number: typeof data?.number === "number" ? data.number : Number(data?.number),
-  }))
-  .handler(async ({ data }) => {
-    const client = createSsrClient(incomingCookie());
-    return client.issue.get({
-      owner: data.owner,
-      name: data.name,
-      number: data.number,
-    });
-  });
-
-/** SSR: `pull.get` with Cookie forward. */
-export const fetchPullGet = createServerFn({ method: "GET" })
-  .validator((data: OwnerName & { number: number }) => ({
-    owner: String(data?.owner ?? ""),
-    name: String(data?.name ?? ""),
-    number: typeof data?.number === "number" ? data.number : Number(data?.number),
-  }))
-  .handler(async ({ data }) => {
-    const client = createSsrClient(incomingCookie());
-    return client.pull.get({
-      owner: data.owner,
-      name: data.name,
-      number: data.number,
-    });
-  });
-
-/** SSR: `pull.list` with Cookie forward. */
-export const fetchPullList = createServerFn({ method: "GET" })
-  .validator((data: OwnerName & { state?: string | null; offset?: number; limit?: number }) => ({
-    owner: String(data?.owner ?? ""),
-    name: String(data?.name ?? ""),
-    state: data?.state == null || data.state === "" ? null : String(data.state),
-    offset: typeof data?.offset === "number" ? data.offset : Number(data?.offset ?? 0),
-    limit: typeof data?.limit === "number" ? data.limit : Number(data?.limit ?? 25),
-  }))
-  .handler(async ({ data }) => {
-    const client = createSsrClient(incomingCookie());
-    return client.pull.list({
-      owner: data.owner,
-      name: data.name,
-      state: data.state,
-      offset: data.offset,
-      limit: data.limit,
-    });
-  });
-
-/** SSR: `release.list` with Cookie forward. */
-export const fetchReleaseList = createServerFn({ method: "GET" })
-  .validator(ownerNameValidator)
-  .handler(async ({ data }) => {
-    const client = createSsrClient(incomingCookie());
-    return client.release.list({ owner: data.owner, name: data.name });
-  });
-
-/**
- * SSR: browser-facing origin for clone URLs.
- * Prefer OXIDEAN_PUBLIC_ORIGIN; fall back to forwarded Host.
- */
-export const fetchPublicOrigin = createServerFn({ method: "GET" }).handler(async () => {
-  const fromEnv = resolvePublicOriginFromEnv();
-  if (fromEnv) return fromEnv;
-
-  const host =
-    getRequestHeader("x-forwarded-host")?.split(",")[0]?.trim() ||
-    getRequestHeader("host")?.trim() ||
-    "";
-  if (!host) {
-    return "http://localhost";
+  if (!res.ok) {
+    return { ok: false, error: res.error };
   }
+  try {
+    const theme = resolveClientHighlightTheme();
+    const hits = await Promise.all(
+      res.data.hits.map(async (hit): Promise<SsrRepoSearchHit> => {
+        if (hit.kind !== "code" || !hit.content) return { ...hit };
+        try {
+          const html = await highlightCode(hit.content, {
+            lang: languageIdForPath(hit.path),
+            theme,
+          });
+          return { ...hit, html };
+        } catch {
+          return { ...hit };
+        }
+      }),
+    );
+    return { ok: true, data: { ...res.data, hits }, highlightTheme: theme };
+  } catch {
+    return { ok: true, data: { ...res.data }, highlightTheme: null };
+  }
+}
 
-  const protoRaw =
-    getRequestHeader("x-forwarded-proto")?.split(",")[0]?.trim() ||
-    (host.startsWith("localhost") || host.startsWith("127.0.0.1") ? "http" : "https");
-  const proto = protoRaw === "https" ? "https" : "http";
-  return `${proto}://${host}`.replace(/\/$/, "");
-});
+/** `issue.list`. */
+export async function fetchIssueList(
+  data: OwnerName & {
+    state?: string;
+    author?: string;
+    label?: string;
+    assignee?: string;
+    q?: string;
+    offset?: number;
+    limit?: number;
+  },
+) {
+  return apiClient.issue.list({
+    owner: data.owner,
+    name: data.name,
+    state: data.state ? String(data.state) : "open",
+    author: data.author ? String(data.author) : null,
+    label: data.label ? String(data.label) : null,
+    assignee: data.assignee ? String(data.assignee) : null,
+    q: data.q ? String(data.q) : null,
+    offset: typeof data.offset === "number" ? data.offset : 0,
+    limit: typeof data.limit === "number" ? data.limit : 25,
+  });
+}
+
+/** `label.listForRepo`. */
+export async function fetchLabelListForRepo(data: OwnerName) {
+  return apiClient.label.listForRepo({ owner: data.owner, name: data.name });
+}
+
+/** `issue.get`. */
+export async function fetchIssueGet(data: OwnerName & { number: number }) {
+  return apiClient.issue.get({
+    owner: data.owner,
+    name: data.name,
+    number: typeof data.number === "number" ? data.number : Number(data.number),
+  });
+}
+
+/** `pull.get`. */
+export async function fetchPullGet(data: OwnerName & { number: number }) {
+  return apiClient.pull.get({
+    owner: data.owner,
+    name: data.name,
+    number: typeof data.number === "number" ? data.number : Number(data.number),
+  });
+}
+
+/** `pull.list`. */
+export async function fetchPullList(
+  data: OwnerName & { state?: string | null; offset?: number; limit?: number },
+) {
+  return apiClient.pull.list({
+    owner: data.owner,
+    name: data.name,
+    state: data.state == null || data.state === "" ? null : String(data.state),
+    offset: typeof data.offset === "number" ? data.offset : Number(data.offset ?? 0),
+    limit: typeof data.limit === "number" ? data.limit : Number(data.limit ?? 25),
+  });
+}
+
+/** `release.list`. */
+export async function fetchReleaseList(data: OwnerName) {
+  return apiClient.release.list({ owner: data.owner, name: data.name });
+}
 
 /**
- * SSR: advertised Git SSH host + port for CloneBox.
- * Must be server-fn’d — browser bundles cannot read OXIDEAN_SSH_* at runtime.
+ * Browser-facing origin for clone URLs — the page's own origin under the
+ * static-serving model.
  */
-export const fetchSshAdvertise = createServerFn({ method: "GET" })
-  .validator((data: { publicOrigin?: string }) => ({
-    publicOrigin: typeof data?.publicOrigin === "string" ? data.publicOrigin : "",
-  }))
-  .handler(async ({ data }) => {
-    const publicOrigin =
-      data.publicOrigin.trim() || resolvePublicOriginFromEnv() || "http://localhost";
-    return {
-      sshHost: resolveSshHost(publicOrigin),
-      sshPort: resolveSshPort(),
-    };
-  });
+export async function fetchPublicOrigin() {
+  return resolvePublicOriginClient();
+}
+
+/**
+ * Advertised Git SSH host + port for CloneBox — read from
+ * `oxidean:ssh-host`/`oxidean:ssh-port` meta injected by the serving
+ * middleware (the only tier that can see OXIDEAN_SSH_* env).
+ */
+export async function fetchSshAdvertise(data: { publicOrigin?: string } = {}) {
+  const publicOrigin = (data.publicOrigin ?? "").trim() || resolvePublicOriginClient();
+  return {
+    sshHost: resolveSshAdvertiseHost(publicOrigin),
+    sshPort: resolveSshAdvertisePort(),
+  };
+}

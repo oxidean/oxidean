@@ -204,12 +204,8 @@ async fn gpg_key_add_list_revoke_roundtrip() {
         "{v}"
     );
 
-    let (status, list_v) = rpc_json(
-        &app,
-        r#"{"procedure":"gpgKey.list","input":{}}"#,
-        &cookie,
-    )
-    .await;
+    let (status, list_v) =
+        rpc_json(&app, r#"{"procedure":"gpgKey.list","input":{}}"#, &cookie).await;
     assert_eq!(status, StatusCode::OK, "{list_v}");
     assert_eq!(list_v["data"].as_array().unwrap().len(), 1);
 
@@ -222,12 +218,8 @@ async fn gpg_key_add_list_revoke_roundtrip() {
     assert_eq!(status, StatusCode::OK, "{rev_v}");
     assert_eq!(rev_v["data"]["ok"], true);
 
-    let (status, list_v) = rpc_json(
-        &app,
-        r#"{"procedure":"gpgKey.list","input":{}}"#,
-        &cookie,
-    )
-    .await;
+    let (status, list_v) =
+        rpc_json(&app, r#"{"procedure":"gpgKey.list","input":{}}"#, &cookie).await;
     assert_eq!(status, StatusCode::OK, "{list_v}");
     assert!(list_v["data"].as_array().unwrap().is_empty());
 }

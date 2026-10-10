@@ -1,6 +1,9 @@
+import { navigate as astroNavigate } from "astro:transitions/client";
 import { Check, ChevronDown } from "@octanejs/lucide";
 import type { RepoRefEntry } from "@oxidean/api-client";
 import {
+  SelectGroup,
+  SelectGroupLabel,
   SelectIcon,
   SelectItem,
   SelectItemIndicator,
@@ -25,7 +28,20 @@ type RefSelectProps = {
   mode?: "tree" | "blob" | "home";
 };
 
-/** Branch/tag Select — navigates to matching tree/blob URL (D-17). */
+type RefOption = { value: string; label: string };
+
+function renderItems(options: RefOption[]) @{
+  @for (const opt of options; key opt.value) {
+    <SelectItem value={opt.value}>
+      <SelectItemIndicator>
+        <Check aria-hidden size={16} className="text-primary" />
+      </SelectItemIndicator>
+      <SelectItemText>{opt.label as string}</SelectItemText>
+    </SelectItem>;
+  }
+}
+
+/** Branch/tag Select — grouped sections, navigates to matching tree/blob URL (D-17). */
 export function RefSelect({
   owner,
   repo,
@@ -34,21 +50,24 @@ export function RefSelect({
   pathUnderRef = "",
   mode = "tree",
 }: RefSelectProps) @{
-  const options = refs.map((r) => {
-    const short = shortRefName(r.name);
-    return { value: short, label: short, full: r.name };
-  });
+  const options = refs.map((r) => ({
+    value: shortRefName(r.name),
+    label: shortRefName(r.name),
+    isTag: r.name.startsWith("refs/tags/"),
+  }));
   const unique = options.filter((o, i, arr) => arr.findIndex((x) => x.value === o.value) === i);
+  const branches = unique.filter((o) => !o.isTag);
+  const tags = unique.filter((o) => o.isTag);
   const current =
-    unique.find((o) => o.value === value) ?? ({ value, label: value, full: value } as const);
+    unique.find((o) => o.value === value) ?? ({ value, label: value, isTag: false } as const);
 
-  function navigate(next: string) {
+  function goToRef(next: string) {
     if (mode === "home" || !pathUnderRef) {
-      window.location.assign(treeHref(owner, repo, next, ""));
+      void astroNavigate(treeHref(owner, repo, next, ""));
       return;
     }
     if (mode === "blob") {
-      window.location.assign(
+      void astroNavigate(
         `/${owner}/${repo}/blob/${encodeURIComponent(next)}/${pathUnderRef
           .split("/")
           .map(encodeURIComponent)
@@ -56,13 +75,13 @@ export function RefSelect({
       );
       return;
     }
-    window.location.assign(treeHref(owner, repo, next, pathUnderRef));
+    void astroNavigate(treeHref(owner, repo, next, pathUnderRef));
   }
 
   <SelectRoot
     value={value}
     onValueChange={(next) => {
-      if (typeof next === "string" && next !== value) navigate(next);
+      if (typeof next === "string" && next !== value) goToRef(next);
     }}
   >
     <SelectTrigger className="min-w-[10rem]" aria-label="Switch branch or tag">
@@ -74,16 +93,21 @@ export function RefSelect({
     {/* octane-dom-race-ok: Base UI SelectPortal has no keepMounted escape
         hatch; popup is anchor-scoped under the Select root. */}
     <SelectPortal>
-      <SelectPositioner sideOffset={4}>
-        <SelectPopup className="max-h-72 overflow-y-auto">
+      {/* collisionPadding keeps the popup off the viewport edge on mobile. */}
+      <SelectPositioner sideOffset={4} collisionPadding={12}>
+        <SelectPopup className="max-h-72 w-[min(20rem,calc(100vw-2rem))] overflow-y-auto">
           <SelectList>
-            @for (const opt of unique; key opt.value) {
-              <SelectItem value={opt.value}>
-                <SelectItemIndicator>
-                  <Check aria-hidden size={16} className="text-primary" />
-                </SelectItemIndicator>
-                <SelectItemText>{opt.label as string}</SelectItemText>
-              </SelectItem>;
+            @if (branches.length > 0) {
+              <SelectGroup>
+                <SelectGroupLabel>Branches</SelectGroupLabel>
+                {renderItems(branches)}
+              </SelectGroup>;
+            }
+            @if (tags.length > 0) {
+              <SelectGroup>
+                <SelectGroupLabel>Tags</SelectGroupLabel>
+                {renderItems(tags)}
+              </SelectGroup>;
             }
           </SelectList>
         </SelectPopup>

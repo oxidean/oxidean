@@ -96,10 +96,7 @@ async fn rpc_json(app: &axum::Router, body: &str, cookie: &str) -> (StatusCode, 
 #[tokio::test]
 async fn user_lookup_short_prefix_returns_empty() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let url = format!(
-        "sqlite:{}",
-        dir.path().join("lookup_short.db").display()
-    );
+    let url = format!("sqlite:{}", dir.path().join("lookup_short.db").display());
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
@@ -125,10 +122,7 @@ async fn user_lookup_short_prefix_returns_empty() {
 #[tokio::test]
 async fn user_lookup_prefix_returns_public_fields_without_email() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let url = format!(
-        "sqlite:{}",
-        dir.path().join("lookup_prefix.db").display()
-    );
+    let url = format!("sqlite:{}", dir.path().join("lookup_prefix.db").display());
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
@@ -153,7 +147,11 @@ async fn user_lookup_prefix_returns_public_fields_without_email() {
     assert_eq!(v["ok"], true, "{v}");
     let users = v["data"]["users"].as_array().expect("users array");
     assert!(!users.is_empty(), "prefix al must match alpha* — {v}");
-    assert!(users.len() <= 10, "must cap at 10 — got {} — {v}", users.len());
+    assert!(
+        users.len() <= 10,
+        "must cap at 10 — got {} — {v}",
+        users.len()
+    );
 
     for hit in users {
         assert!(hit.get("username").and_then(|x| x.as_str()).is_some());
@@ -175,10 +173,7 @@ async fn user_lookup_prefix_returns_public_fields_without_email() {
 #[tokio::test]
 async fn user_lookup_email_shaped_prefix_returns_empty() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let url = format!(
-        "sqlite:{}",
-        dir.path().join("lookup_email.db").display()
-    );
+    let url = format!("sqlite:{}", dir.path().join("lookup_email.db").display());
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
@@ -207,10 +202,7 @@ async fn user_lookup_email_shaped_prefix_returns_empty() {
 #[tokio::test]
 async fn user_lookup_empty_prefix_returns_empty() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let url = format!(
-        "sqlite:{}",
-        dir.path().join("lookup_empty.db").display()
-    );
+    let url = format!("sqlite:{}", dir.path().join("lookup_empty.db").display());
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
@@ -236,10 +228,7 @@ async fn user_lookup_empty_prefix_returns_empty() {
 #[tokio::test]
 async fn user_lookup_prefix_is_case_insensitive() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let url = format!(
-        "sqlite:{}",
-        dir.path().join("lookup_case.db").display()
-    );
+    let url = format!("sqlite:{}", dir.path().join("lookup_case.db").display());
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
@@ -267,10 +256,7 @@ async fn user_lookup_prefix_is_case_insensitive() {
 #[tokio::test]
 async fn user_lookup_org_context_excludes_members() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let url = format!(
-        "sqlite:{}",
-        dir.path().join("lookup_org_ctx.db").display()
-    );
+    let url = format!("sqlite:{}", dir.path().join("lookup_org_ctx.db").display());
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
@@ -317,13 +303,8 @@ async fn user_lookup_org_context_excludes_members() {
     assert!(users.iter().all(|u| u.get("email").is_none()));
 
     // Unauthorized (non-admin member) → empty.
-    let login_body =
-        r#"{"procedure":"auth.login","input":{"identifier":"mem@ex.com","password":"password1","remember_me":false}}"#;
-    let login = app
-        .clone()
-        .oneshot(rpc_req(login_body))
-        .await
-        .unwrap();
+    let login_body = r#"{"procedure":"auth.login","input":{"identifier":"mem@ex.com","password":"password1","remember_me":false}}"#;
+    let login = app.clone().oneshot(rpc_req(login_body)).await.unwrap();
     assert_eq!(login.status(), StatusCode::OK);
     let mem_cookie = session_cookie_from_response(&login);
     let _ = login.into_body().collect().await;
@@ -348,10 +329,7 @@ async fn user_lookup_org_context_excludes_members() {
 #[tokio::test]
 async fn user_lookup_repo_context_excludes_and_ranks() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let url = format!(
-        "sqlite:{}",
-        dir.path().join("lookup_repo_ctx.db").display()
-    );
+    let url = format!("sqlite:{}", dir.path().join("lookup_repo_ctx.db").display());
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
@@ -409,7 +387,10 @@ async fn user_lookup_repo_context_excludes_and_ranks() {
         .iter()
         .filter_map(|u| u["username"].as_str())
         .collect();
-    assert!(names.contains(&"rctxmem"), "org member ranked/included — {v}");
+    assert!(
+        names.contains(&"rctxmem"),
+        "org member ranked/included — {v}"
+    );
     assert!(names.contains(&"rctxout"), "global fill — {v}");
     assert!(!names.contains(&"rctxcol"), "collaborator excluded — {v}");
     // Org member should appear before outsider.
@@ -419,13 +400,8 @@ async fn user_lookup_repo_context_excludes_and_ranks() {
     assert!(users.iter().all(|u| u.get("email").is_none()));
 
     // Unauthorized outsider → empty.
-    let login_body =
-        r#"{"procedure":"auth.login","input":{"identifier":"rout@ex.com","password":"password1","remember_me":false}}"#;
-    let login = app
-        .clone()
-        .oneshot(rpc_req(login_body))
-        .await
-        .unwrap();
+    let login_body = r#"{"procedure":"auth.login","input":{"identifier":"rout@ex.com","password":"password1","remember_me":false}}"#;
+    let login = app.clone().oneshot(rpc_req(login_body)).await.unwrap();
     assert_eq!(login.status(), StatusCode::OK);
     let out_cookie = session_cookie_from_response(&login);
     let _ = login.into_body().collect().await;

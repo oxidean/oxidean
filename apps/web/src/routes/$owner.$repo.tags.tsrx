@@ -1,9 +1,14 @@
-import { createFileRoute, useLoaderData, useParams, useRouter } from "@octanejs/tanstack-router";
 import type { RepoPublic, RepoRefEntry } from "@oxidean/api-client";
+import { useQueryClient, queryOptions, useQuery } from "@octanejs/tanstack-query";
+
+import { matchPath } from "@/lib/route-params";
+import { usePathname, useSearchString } from "@/lib/pathname.tsrx";
+import { RepoLayout } from "@/routes/$owner.$repo.tsrx";
+import { AppPage } from "@/components/app-page";
 import { useEffect, useState } from "octane";
 import { FileArchive, Tag } from "@octanejs/lucide";
 import { RepoNotFound } from "@/components/repo/repo-not-found";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { List, ListRow } from "@/components/ui/list";
 import { PageHeader } from "@/components/ui/page-header";
@@ -40,7 +45,7 @@ function sortTags(refs: RepoRefEntry[]): RepoRefEntry[] {
 }
 
 async function loadTagsPage(owner: string, repoName: string): Promise<TagsLoaderData> {
-  const got = await fetchRepoGet({ data: { owner, name: repoName } });
+  const got = await fetchRepoGet({ owner, name: repoName });
   if (!got.ok) {
     if (got.error.code === "repo.not_found") return { kind: "not_found" };
     return {
@@ -48,7 +53,7 @@ async function loadTagsPage(owner: string, repoName: string): Promise<TagsLoader
       message: got.error.message || "Could not load repository.",
     };
   }
-  const refsRes = await fetchRepoRefs({ data: { owner, name: repoName } });
+  const refsRes = await fetchRepoRefs({ owner, name: repoName });
   if (!refsRes.ok) {
     if (refsRes.error.code === "repo.not_found") return { kind: "not_found" };
     return {
@@ -63,36 +68,47 @@ async function loadTagsPage(owner: string, repoName: string): Promise<TagsLoader
   };
 }
 
-export const Route = createFileRoute("/$owner/$repo/tags")({
-  component: RepoTagsPage,
-  head: ({ params }) => ({
-    meta: [
-      {
-        title: `Tags · ${(params as { owner: string }).owner}/${(params as { repo: string }).repo} · Oxidean`,
-      },
+function repoTagsQueryOptions(params: Record<string, string | undefined>, searchStr = "") {
+  return queryOptions({
+    queryKey: [
+      "repo-page",
+      "/$owner/$repo/tags",
+      params.owner ?? "",
+      params.repo ?? "",
+      params._splat ?? "",
+      params.n ?? "",
+      params.sha ?? "",
+      params.tag ?? "",
+      params.run ?? "",
+      searchStr,
     ],
-  }),
-  loader: async ({ params }): Promise<TagsLoaderData> => {
-    const owner = String((params as { owner?: string }).owner ?? "");
-    const repoName = String((params as { repo?: string }).repo ?? "");
-    try {
-      return await loadTagsPage(owner, repoName);
-    } catch {
-      return { kind: "error", message: NETWORK_ERROR };
-    }
-  },
-});
+    queryFn: async (): Promise<TagsLoaderData> => {
+      const owner = String((params as { owner?: string }).owner ?? "");
+      const repoName = String((params as { repo?: string }).repo ?? "");
+      try {
+        return await loadTagsPage(owner, repoName);
+      } catch {
+        return { kind: "error", message: NETWORK_ERROR };
+      }
+    },
+    enabled: Boolean(params.owner && params.repo),
+    retry: false,
+    staleTime: 30_000,
+  });
+}
 
 /** Tags list + archive download only — no create-tag CTA (UI-SPEC lock). */
-export function RepoTagsPage() @{
-  const params = useParams({ from: "/$owner/$repo/tags" }) as {
+function RepoTagsPageContent() @{
+  const pathname = usePathname();
+  const searchStr = useSearchString();
+  const params = (matchPath("/$owner/$repo/tags", pathname) ?? {}) as {
     owner: string;
     repo: string;
   };
   const owner = params.owner ?? "";
   const repoName = params.repo ?? "";
-  const router = useRouter();
-  const loaderData = useLoaderData({ from: "/$owner/$repo/tags" }) as TagsLoaderData | undefined;
+  const routerQueryClient = useQueryClient();
+  const loaderData = useQuery(repoTagsQueryOptions(params, searchStr)).data;
 
   const [phase, setPhase] = useState<Phase>(() => loaderData ?? { kind: "loading" });
 
@@ -137,7 +153,11 @@ export function RepoTagsPage() @{
       <p role="alert" className="text-[16px] text-destructive">
         {phase.message as string}
       </p>
-      <Button type="button" variant="outline" onClick={() => void router.invalidate()}>
+      <Button
+        type="button"
+        variant="outline"
+        onClick={() => void routerQueryClient.invalidateQueries()}
+      >
         Try again
       </Button>
     </div>;
@@ -200,28 +220,33 @@ function TagRow({
       }
     </div>
     <div className="flex flex-wrap gap-2">
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        onClick={() => {
-          window.location.assign(zipHref);
-        }}
+      {/* data-astro-reload: archive endpoints return attachments — full nav,
+          not a ClientRouter morph. */}
+      <AppLink
+        href={zipHref}
+        data-astro-reload
+        className={buttonVariants({ variant: "outline", size: "sm" })}
       >
         <FileArchive aria-hidden size={14} />
         ZIP
-      </Button>
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        onClick={() => {
-          window.location.assign(tarHref);
-        }}
+      </AppLink>
+      <AppLink
+        href={tarHref}
+        data-astro-reload
+        className={buttonVariants({ variant: "outline", size: "sm" })}
       >
         <FileArchive aria-hidden size={14} />
         tar.gz
-      </Button>
+      </AppLink>
     </div>
   </ListRow>;
+}
+
+/** Page root — RepoLayout (chrome + repo store) around the leaf content. */
+export function RepoTagsPage() @{
+  <AppPage>
+    <RepoLayout>
+      <RepoTagsPageContent />
+    </RepoLayout>
+  </AppPage>;
 }

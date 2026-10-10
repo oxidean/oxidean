@@ -75,12 +75,26 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(rootDir, "./src"),
+      // ClientRouter isn't present in happy-dom — stub pushes real history.
+      "astro:transitions/client": path.resolve(rootDir, "./src/test/astro-transitions-stub.ts"),
     },
   },
-  // Pre-bundle deps Vite discovers mid-suite via `cn` so Chromium iframes are
+  // Pre-bundle deps Vite discovers mid-suite so Chromium iframes are
   // not aborted by an optimizeDeps reload (CI flake for the browser project).
   optimizeDeps: {
-    include: ["class-variance-authority", "clsx", "tailwind-merge"],
+    include: [
+      "class-variance-authority",
+      "clsx",
+      "tailwind-merge",
+      // Markdown chain pulled by ReadmePanel/markdown components mid-suite.
+      "rehype-sanitize",
+      "rehype-stringify",
+      "remark-gfm",
+      "remark-github",
+      "remark-parse",
+      "remark-rehype",
+      "unified",
+    ],
   },
   test: {
     globals: false,

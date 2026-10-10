@@ -1,0 +1,8 @@
+---
+import AppShell from "@/layouts/AppShell.astro";
+import { AdminUsersPage } from "@/routes/admin/users.tsrx";
+---
+
+<AppShell title="Users · Oxidean">
+	<AdminUsersPage client:load />
+</AppShell>

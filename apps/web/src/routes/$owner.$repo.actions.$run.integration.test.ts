@@ -32,6 +32,6 @@ describe("/$owner/$repo/actions/$run", () => {
       (m) => m.default as string,
     );
     expect(src).not.toMatch(/RepoChrome/);
-    expect(src).toContain('createFileRoute("/$owner/$repo/actions/$run")');
+    expect(src).toContain('matchPath("/$owner/$repo/actions/$run"');
   });
 });

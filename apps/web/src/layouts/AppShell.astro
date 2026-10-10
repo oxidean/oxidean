@@ -1,0 +1,70 @@
+---
+/**
+ * Document shell — port of the former `__root.tsrx` RootShell.
+ *
+ * Emits the static document every page shares: boot scripts (theme,
+ * font warm-up), metas, font preloads, icons, and the Astro ClientRouter that
+ * drives view-transition navigations. The middleware rewrites this output per
+ * request for theme class + route meta before serving.
+ */
+import { ClientRouter, fade } from "astro:transitions";
+import { ChromeTop, ChromeBottom } from "@/components/app-page";
+import { THEME_BOOT_SCRIPT, FONT_WARM_SCRIPT } from "@/lib/theme";
+import { EARLY_NAV_BOOT_SCRIPT } from "@/lib/early-nav";
+import { buildSwRegisterScript } from "@/lib/sw-register";
+import { buildWebMcpRegisterScript, WEBMCP_WELL_KNOWN_PATH } from "@/lib/webmcp";
+import { resolveSwBuildId } from "@/lib/sw-build-id";
+import "../styles.css";
+
+interface Props {
+  title?: string;
+  /** Extra head markup (route meta, OG tags). */
+  head?: unknown;
+}
+
+const { title = "Oxidean" } = Astro.props;
+const swRegisterScript = buildSwRegisterScript(resolveSwBuildId());
+const webmcpRegisterScript = buildWebMcpRegisterScript();
+---
+
+<!doctype html>
+{/* Fade-only page transition — the default `slide` shifts the whole page
+    horizontally, which reads as layout jump on every navigation. */}
+<html lang="en" transition:animate={fade({ duration: "0.15s" })}>
+  <head>
+    <script is:inline set:html={THEME_BOOT_SCRIPT} />
+    <script is:inline set:html={FONT_WARM_SCRIPT} />
+    <script is:inline set:html={EARLY_NAV_BOOT_SCRIPT} />
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="preload" href="/fonts/sora-latin.woff2" as="font" type="font/woff2" crossorigin="anonymous" />
+    <link rel="preload" href="/fonts/source-sans-3-latin.woff2" as="font" type="font/woff2" crossorigin="anonymous" />
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="webmcp" type="application/json" href={WEBMCP_WELL_KNOWN_PATH} />
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#121212" media="(prefers-color-scheme: dark)" />
+    <meta name="apple-mobile-web-app-title" content="Oxidean" />
+    {/* Resolved per request by the web tier (cookie → light|dark). */}
+    <meta name="color-scheme" content="light" />
+    <title>{title}</title>
+    <slot name="head" />
+    <ClientRouter />
+  </head>
+  <body>
+    <div class="flex min-h-screen flex-col">
+      <ChromeTop client:load transition:persist />
+      <slot />
+      <ChromeBottom client:load transition:persist />
+    </div>
+    {/* Persisted host for all floating portals: swaps carry it (and every
+        portal subtree inside it) across navigations, so overlays owned by
+        persisted islands never lose their mount node. */}
+    <div id="oxidean-portal-root" data-astro-transition-persist="oxidean-portal-root"></div>
+    <script is:inline set:html={swRegisterScript} />
+    <script is:inline set:html={webmcpRegisterScript} />
+  </body>
+</html>

@@ -18,7 +18,15 @@ beforeEach(() => {
 async function openCloneMenu() {
   fireEvent.click(screen.getByRole("button", { name: "Clone or download" }));
   await waitFor(() => {
-    expect(screen.getByText("Clone with HTTPS")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "HTTPS" })).toBeInTheDocument();
+    expect(screen.getByLabelText("HTTPS clone URL")).toBeInTheDocument();
+  });
+}
+
+async function selectSshTab() {
+  fireEvent.click(screen.getByRole("tab", { name: "SSH" }));
+  await waitFor(() => {
+    expect(screen.getByLabelText(/SSH clone URL/i)).toBeInTheDocument();
   });
 }
 
@@ -46,7 +54,9 @@ describe("CloneBox (E12 / D-22 / D-29)", () => {
     expect(copyBtn).toBeInTheDocument();
     expect(copyBtn.querySelector("svg")).not.toBeNull();
 
-    expect(screen.getByText("Clone with SSH")).toBeInTheDocument();
+    // SSH section lives behind the SSH tab.
+    await selectSshTab();
+    expect(screen.getByLabelText(/SSH clone URL/i)).toBeInTheDocument();
 
     const zip = screen.getByRole("menuitem", { name: "Download ZIP" });
     const tar = screen.getByRole("menuitem", { name: "Download tar.gz" });
@@ -72,7 +82,7 @@ describe("CloneBox (E12 / D-22 / D-29)", () => {
     expect(screen.getByRole("textbox", { name: "HTTPS clone URL" })).toHaveValue(
       "http://127.0.0.1:3000/ada/empty.git",
     );
-    expect(screen.getByText("Clone with SSH")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "SSH" })).toBeInTheDocument();
 
     const zip = screen.getByRole("menuitem", { name: "Download ZIP" });
     const tar = screen.getByRole("menuitem", { name: "Download tar.gz" });
@@ -80,16 +90,7 @@ describe("CloneBox (E12 / D-22 / D-29)", () => {
     expect(tar).toHaveAttribute("aria-disabled", "true");
   });
 
-  it("assigns archive URL for the current ref when Download ZIP is chosen", async () => {
-    const assign = vi.fn();
-    Object.defineProperty(window, "location", {
-      configurable: true,
-      value: {
-        origin: "http://127.0.0.1:3000",
-        assign,
-      },
-    });
-
+  it("archive downloads are real anchors for the current ref", async () => {
     render(CloneBox, {
       props: {
         owner: "ada",
@@ -101,8 +102,14 @@ describe("CloneBox (E12 / D-22 / D-29)", () => {
     });
 
     await openCloneMenu();
-    fireEvent.click(screen.getByRole("menuitem", { name: "Download ZIP" }));
 
-    expect(assign).toHaveBeenCalledWith("/api/repos/ada/hello/archive/feature%2Fx.zip");
+    // LinkItem anchors carry the archive URL on href — no onClick navigation.
+    const zip = screen.getByRole("menuitem", { name: "Download ZIP" });
+    const tar = screen.getByRole("menuitem", { name: "Download tar.gz" });
+    expect(zip.tagName).toBe("A");
+    expect(zip).toHaveAttribute("href", "/api/repos/ada/hello/archive/feature%2Fx.zip");
+    expect(zip).toHaveAttribute("data-astro-reload");
+    expect(tar).toHaveAttribute("href", "/api/repos/ada/hello/archive/feature%2Fx.tar.gz");
+    expect(tar).toHaveAttribute("data-astro-reload");
   });
 });

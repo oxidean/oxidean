@@ -61,6 +61,37 @@ beforeEach(() => {
   } as never);
 });
 
+describe("chrome pending account cluster", () => {
+  it("emits both skeleton candidates while auth.me is pending", async () => {
+    let resolveMe: (v: unknown) => void = () => {};
+    vi.mocked(apiClient.auth.me).mockReturnValueOnce(
+      new Promise((res) => {
+        resolveMe = res;
+      }) as never,
+    );
+
+    renderWithQueryClient(SiteHeader);
+
+    await waitFor(() => {
+      expect(document.querySelector("[data-header-skeleton-anon]")).toBeTruthy();
+      expect(document.querySelector("[data-header-skeleton-authed]")).toBeTruthy();
+      // Sign-up bar carries its own marker so the web tier's
+      // `data-oxidean-signup` stamp can hide it on closed-registration shells.
+      expect(
+        document.querySelector("[data-header-skeleton-anon] [data-header-skeleton-signup]"),
+      ).toBeTruthy();
+    });
+    expect(document.querySelector('[role="group"][aria-busy="true"]')).toBeTruthy();
+
+    resolveMe({ ok: false, error: { code: "auth.unauthenticated", message: "n" } });
+    await waitFor(() => {
+      expect(screen.getByRole("link", { name: /sign in/i })).toBeInTheDocument();
+    });
+    expect(document.querySelector("[data-header-skeleton-anon]")).toBeNull();
+    expect(document.querySelector("[data-header-skeleton-authed]")).toBeNull();
+  });
+});
+
 describe("chrome Wave 0 (D-06 omit Sign up)", () => {
   it("omits Sign up when allow_signup is false", async () => {
     renderWithQueryClient(SiteHeader);

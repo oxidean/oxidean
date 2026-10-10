@@ -61,9 +61,9 @@ fn is_safe_spdx_id(id: &str) -> bool {
         && !id.contains('\\')
         && !id.contains('\0')
         && id.len() <= 128
-        && id.chars().all(|c| {
-            c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '+')
-        })
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '+'))
 }
 
 fn none_like(v: &Option<String>) -> bool {
@@ -143,7 +143,7 @@ fn load_stack_files(stack_id: &str) -> Result<BTreeMap<String, Vec<u8>>, AppErro
         ));
     }
     let dir = ASSETS
-        .get_dir(&format!("stack-presets/{stack_id}"))
+        .get_dir(format!("stack-presets/{stack_id}"))
         .ok_or_else(|| {
             AppError::new(
                 "repo.invalid_template",
@@ -359,9 +359,7 @@ mod tests {
         assert!(paths_default.contains(&"go.mod") || paths_default.contains(&"main.go"));
         assert!(paths_none.contains(&"go.mod") || paths_none.contains(&"main.go"));
         // Catalog overlay path: when the pack has no vendored .gitignore, none clears it.
-        let pack_has_gitignore = ASSETS
-            .get_file("stack-presets/go/.gitignore")
-            .is_some();
+        let pack_has_gitignore = ASSETS.get_file("stack-presets/go/.gitignore").is_some();
         if !pack_has_gitignore {
             assert!(paths_default.contains(&".gitignore"));
             assert!(!paths_none.contains(&".gitignore"));

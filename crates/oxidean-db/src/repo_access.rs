@@ -72,7 +72,7 @@ pub async fn readable_repo_ids(
                                     AND LOWER(TRIM(o.member_base_permission)) IN ('read', 'write')))))
                  )",
             );
-            let q = sqlx::query_scalar::<_, String>(&q_str);
+            let q = sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(&*q_str));
             // `?` binds are positional: ids first (the IN list), then uid ×3.
             let q = repo_ids.iter().fold(q, |q, id| q.bind(id));
             let q = q.bind(user_id).bind(user_id).bind(user_id);
@@ -101,7 +101,7 @@ pub async fn readable_repo_ids(
                                     AND LOWER(TRIM(o.member_base_permission)) IN ('read', 'write')))))
                  )",
             );
-            let q = sqlx::query_scalar::<_, String>(&q_str);
+            let q = sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(&*q_str));
             let q = q.bind(user_id);
             let q = repo_ids.iter().fold(q, |q, id| q.bind(id));
             q.fetch_all(p)
@@ -124,9 +124,8 @@ pub async fn readers_of_repo(
         return Ok(HashSet::new());
     }
     let ids = match pool {
-        DbPool::Postgres(p) => {
-            sqlx::query_scalar::<_, String>(
-                "SELECT DISTINCT sub.uid FROM (
+        DbPool::Postgres(p) => sqlx::query_scalar::<_, String>(
+            "SELECT DISTINCT sub.uid FROM (
                      SELECT r.owner_id AS uid FROM repositories r
                        WHERE r.id = $1 AND LOWER(r.owner_type) = 'user'
                          AND EXISTS (SELECT 1 FROM users u WHERE u.id = r.owner_id)
@@ -143,13 +142,12 @@ pub async fn readers_of_repo(
                               OR (LOWER(TRIM(m.role)) = 'member'
                                   AND LOWER(TRIM(o.member_base_permission)) IN ('read', 'write')))
                  ) sub WHERE sub.uid = ANY($2)",
-            )
-            .bind(repo_id)
-            .bind(user_ids)
-            .fetch_all(p)
-            .await
-            .map_err(|e| format!("repo readers failed: {e}"))?
-        }
+        )
+        .bind(repo_id)
+        .bind(user_ids)
+        .fetch_all(p)
+        .await
+        .map_err(|e| format!("repo readers failed: {e}"))?,
         DbPool::MySql(p) => {
             let in_list =
                 crate::dialect::in_placeholders(crate::dialect::Dialect::MySql, 1, user_ids.len());
@@ -172,7 +170,7 @@ pub async fn readers_of_repo(
                                   AND LOWER(TRIM(o.member_base_permission)) IN ('read', 'write')))
                  ) sub WHERE sub.uid IN ({in_list})",
             );
-            let q = sqlx::query_scalar::<_, String>(&q_str);
+            let q = sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(&*q_str));
             // `?` binds are positional: repo_id ×3 (UNION arms), then uids.
             let q = q.bind(repo_id).bind(repo_id).bind(repo_id);
             let q = user_ids.iter().fold(q, |q, id| q.bind(id));
@@ -202,7 +200,7 @@ pub async fn readers_of_repo(
                                   AND LOWER(TRIM(o.member_base_permission)) IN ('read', 'write')))
                  ) sub WHERE sub.uid IN ({in_list})",
             );
-            let q = sqlx::query_scalar::<_, String>(&q_str);
+            let q = sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(&*q_str));
             let q = q.bind(repo_id);
             let q = user_ids.iter().fold(q, |q, id| q.bind(id));
             q.fetch_all(p)

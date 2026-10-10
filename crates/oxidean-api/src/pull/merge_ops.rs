@@ -1,23 +1,25 @@
 //! Merge, files, commits, and merge-settings handlers.
 
+use crate::auth::gate::require_verified;
+use crate::git::bare_repo_path;
+use crate::notify;
+use crate::protection::{effective_for_branch, evaluate_merge, MergeEvalInput};
+use crate::pull::acl;
+use crate::rpc::RpcCtx;
+use crate::webhook::dispatch;
 use oxidean_core::{
     AppError, MergeMethod, MergePullRequest, MergePullResponse, PullCommitSummary,
     PullCommitsResponse, PullDiffFile, PullFilesResponse, PullRefRequest, RepoGetRequest,
     RepoMergeSettings, UpdateRepoMergeSettingsRequest,
 };
-use crate::auth::gate::require_verified;
-use crate::git::bare_repo_path;
-use crate::notify;
-use crate::protection::{
-    effective_for_branch, evaluate_merge, MergeEvalInput,
-};
-use crate::pull::acl;
-use crate::rpc::RpcCtx;
-use crate::webhook::dispatch;
 
 use super::{db_err, load_pull_in_repo, to_public};
 
-async fn git_is_ancestor(bare: &std::path::Path, maybe_ancestor: &str, tip: &str) -> Result<bool, String> {
+async fn git_is_ancestor(
+    bare: &std::path::Path,
+    maybe_ancestor: &str,
+    tip: &str,
+) -> Result<bool, String> {
     if maybe_ancestor.is_empty() || tip.is_empty() || maybe_ancestor == tip {
         return Ok(true);
     }
@@ -66,9 +68,8 @@ fn parse_closing_issue_numbers(text: &str) -> Vec<i64> {
 
 /// `pull.files` — Read+ unified diff base...head (PR-02).
 pub async fn files(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullFilesResponse, AppError> {
-    let req: PullRefRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid pull.files input: {e}"))
-    })?;
+    let req: PullRefRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid pull.files input: {e}")))?;
     let accessible = acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
     let row = load_pull_in_repo(ctx, &accessible.row.id, req.number).await?;
     let path = bare_repo_path(
@@ -129,12 +130,8 @@ pub async fn commits(
     ctx: &RpcCtx,
     input: serde_json::Value,
 ) -> Result<PullCommitsResponse, AppError> {
-    let req: PullRefRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new(
-            "rpc.bad_input",
-            format!("invalid pull.commits input: {e}"),
-        )
-    })?;
+    let req: PullRefRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid pull.commits input: {e}")))?;
     let accessible = acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
     let row = load_pull_in_repo(ctx, &accessible.row.id, req.number).await?;
     let path = bare_repo_path(
@@ -225,9 +222,8 @@ pub async fn commits(
 /// `pull.merge` — Write+ (PR-05 / D-PR-17..23).
 pub async fn merge(ctx: &RpcCtx, input: serde_json::Value) -> Result<MergePullResponse, AppError> {
     let user = require_verified(ctx).await?;
-    let req: MergePullRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid pull.merge input: {e}"))
-    })?;
+    let req: MergePullRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid pull.merge input: {e}")))?;
     let accessible = acl::resolve_for_write(ctx, &req.owner, &req.name).await?;
     let row = load_pull_in_repo(ctx, &accessible.row.id, req.number).await?;
     if row.state != "open" {
@@ -267,11 +263,7 @@ pub async fn merge(ctx: &RpcCtx, input: serde_json::Value) -> Result<MergePullRe
     {
         let eff = effective_for_branch(&ctx.db, &accessible.row.id, &row.base_ref).await?;
         if eff.matched {
-            let reviews = ctx
-                .db
-                .list_pull_reviews(&row.id)
-                .await
-                .map_err(db_err)?;
+            let reviews = ctx.db.list_pull_reviews(&row.id).await.map_err(db_err)?;
             // Latest-per-user review state (D-PR-07); dismiss_stale excludes Approves on older SHAs.
             let mut latest: std::collections::BTreeMap<String, &oxidean_db::PullReviewRow> =
                 std::collections::BTreeMap::new();
@@ -288,18 +280,14 @@ pub async fn merge(ctx: &RpcCtx, input: serde_json::Value) -> Result<MergePullRe
                 if r.state != "approved" {
                     continue;
                 }
-                if eff.dismiss_stale_reviews {
-                    if r.commit_sha.as_deref() != Some(row.head_sha.as_str()) {
-                        continue;
-                    }
+                if eff.dismiss_stale_reviews
+                    && r.commit_sha.as_deref() != Some(row.head_sha.as_str())
+                {
+                    continue;
                 }
                 approving_reviewer_ids.push(r.author_id.clone());
             }
-            let comments = ctx
-                .db
-                .list_pull_comments(&row.id)
-                .await
-                .map_err(db_err)?;
+            let comments = ctx.db.list_pull_comments(&row.id).await.map_err(db_err)?;
             let unresolved = comments
                 .iter()
                 .filter(|c| c.path.is_some() && !c.resolved)
@@ -482,24 +470,32 @@ pub async fn merge(ctx: &RpcCtx, input: serde_json::Value) -> Result<MergePullRe
         }
     }
 
-    if req.delete_branch.unwrap_or(false) && row.head_repo_id == row.repo_id {
-        if ctx.git.branch_delete(&path, &row.head_ref).await.is_ok() {
-            // API-04: deleting the head branch on merge fires `delete`.
-            let payload = dispatch::ref_event_payload(
-                "delete",
-                &row.head_ref,
-                "branch",
-                &accessible.row.default_branch,
-                &accessible.row.description,
-                &accessible.owner_username,
-                &accessible.row.name,
-                &accessible.row.id,
-                &user.username,
-                &user.id,
-            );
-            dispatch::emit(&ctx.db, &accessible.row.id, "delete", "", payload, &ctx.env_name)
-                .await;
-        }
+    if req.delete_branch.unwrap_or(false)
+        && row.head_repo_id == row.repo_id
+        && ctx.git.branch_delete(&path, &row.head_ref).await.is_ok()
+    {
+        // API-04: deleting the head branch on merge fires `delete`.
+        let payload = dispatch::ref_event_payload(
+            "delete",
+            &row.head_ref,
+            "branch",
+            &accessible.row.default_branch,
+            &accessible.row.description,
+            &accessible.owner_username,
+            &accessible.row.name,
+            &accessible.row.id,
+            &user.username,
+            &user.id,
+        );
+        dispatch::emit(
+            &ctx.db,
+            &accessible.row.id,
+            "delete",
+            "",
+            payload,
+            &ctx.env_name,
+        )
+        .await;
     }
 
     let updated = load_pull_in_repo(ctx, &accessible.row.id, req.number).await?;
@@ -566,12 +562,7 @@ pub async fn merge_settings_update(
     let allow_squash = req.allow_squash_merge.unwrap_or(current.allow_squash_merge);
     let allow_rebase = req.allow_rebase_merge.unwrap_or(current.allow_rebase_merge);
     ctx.db
-        .set_repo_merge_settings(
-            &accessible.row.id,
-            allow_merge,
-            allow_squash,
-            allow_rebase,
-        )
+        .set_repo_merge_settings(&accessible.row.id, allow_merge, allow_squash, allow_rebase)
         .await
         .map_err(db_err)?;
     Ok(RepoMergeSettings {

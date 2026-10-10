@@ -177,33 +177,39 @@ WHERE id = ?1",
 pub async fn find_by_id(pool: &DbPool, id: &str) -> Result<Option<OrganizationRow>, String> {
     match pool {
         DbPool::Postgres(p) => {
-            let row = sqlx::query(&format!("{ORG_SELECT_PG} WHERE id = $1"))
-                .bind(id)
-                .fetch_optional(p)
-                .await
-                .map_err(|e| format!("find organization failed: {e}"))?;
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{ORG_SELECT_PG} WHERE id = $1"
+            )))
+            .bind(id)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("find organization failed: {e}"))?;
             Ok(match row {
                 Some(r) => Some(map_org!(&r)),
                 None => None,
             })
         }
         DbPool::MySql(p) => {
-            let row = sqlx::query(&format!("{ORG_SELECT_MYSQL} WHERE id = ?"))
-                .bind(id)
-                .fetch_optional(p)
-                .await
-                .map_err(|e| format!("find organization failed: {e}"))?;
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{ORG_SELECT_MYSQL} WHERE id = ?"
+            )))
+            .bind(id)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("find organization failed: {e}"))?;
             Ok(match row {
                 Some(r) => Some(map_org!(&r)),
                 None => None,
             })
         }
         DbPool::Sqlite(p) => {
-            let row = sqlx::query(&format!("{ORG_SELECT_SQLITE} WHERE id = ?1"))
-                .bind(id)
-                .fetch_optional(p)
-                .await
-                .map_err(|e| format!("find organization failed: {e}"))?;
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{ORG_SELECT_SQLITE} WHERE id = ?1"
+            )))
+            .bind(id)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("find organization failed: {e}"))?;
             Ok(match row {
                 Some(r) => Some(map_org!(&r)),
                 None => None,
@@ -222,18 +228,20 @@ pub async fn find_many_by_id(
     }
     match pool {
         DbPool::Postgres(p) => {
-            let rows = sqlx::query(&format!("{ORG_SELECT_PG} WHERE id = ANY($1)"))
-                .bind(ids)
-                .fetch_all(p)
-                .await
-                .map_err(|e| format!("find organizations by ids failed: {e}"))?;
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{ORG_SELECT_PG} WHERE id = ANY($1)"
+            )))
+            .bind(ids)
+            .fetch_all(p)
+            .await
+            .map_err(|e| format!("find organizations by ids failed: {e}"))?;
             rows.iter().map(|r| Ok(map_org!(r))).collect()
         }
         DbPool::MySql(p) => {
             let in_list =
                 crate::dialect::in_placeholders(crate::dialect::Dialect::MySql, 1, ids.len());
             let q_str = format!("{ORG_SELECT_MYSQL} WHERE id IN ({in_list})");
-            let q = sqlx::query(&q_str);
+            let q = sqlx::query(sqlx::AssertSqlSafe(&*q_str));
             let q = ids.iter().fold(q, |q, id| q.bind(id));
             let rows = q
                 .fetch_all(p)
@@ -245,7 +253,7 @@ pub async fn find_many_by_id(
             let in_list =
                 crate::dialect::in_placeholders(crate::dialect::Dialect::Sqlite, 1, ids.len());
             let q_str = format!("{ORG_SELECT_SQLITE} WHERE id IN ({in_list})");
-            let q = sqlx::query(&q_str);
+            let q = sqlx::query(sqlx::AssertSqlSafe(&*q_str));
             let q = ids.iter().fold(q, |q, id| q.bind(id));
             let rows = q
                 .fetch_all(p)
@@ -288,33 +296,39 @@ pub async fn delete_organization(pool: &DbPool, id: &str) -> Result<(), String> 
 pub async fn find_by_slug(pool: &DbPool, slug: &str) -> Result<Option<OrganizationRow>, String> {
     match pool {
         DbPool::Postgres(p) => {
-            let row = sqlx::query(&format!("{ORG_SELECT_PG} WHERE lower(slug) = lower($1)"))
-                .bind(slug)
-                .fetch_optional(p)
-                .await
-                .map_err(|e| format!("find organization by slug failed: {e}"))?;
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{ORG_SELECT_PG} WHERE lower(slug) = lower($1)"
+            )))
+            .bind(slug)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("find organization by slug failed: {e}"))?;
             Ok(match row {
                 Some(r) => Some(map_org!(&r)),
                 None => None,
             })
         }
         DbPool::MySql(p) => {
-            let row = sqlx::query(&format!("{ORG_SELECT_MYSQL} WHERE LOWER(slug) = LOWER(?)"))
-                .bind(slug)
-                .fetch_optional(p)
-                .await
-                .map_err(|e| format!("find organization by slug failed: {e}"))?;
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{ORG_SELECT_MYSQL} WHERE LOWER(slug) = LOWER(?)"
+            )))
+            .bind(slug)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("find organization by slug failed: {e}"))?;
             Ok(match row {
                 Some(r) => Some(map_org!(&r)),
                 None => None,
             })
         }
         DbPool::Sqlite(p) => {
-            let row = sqlx::query(&format!("{ORG_SELECT_SQLITE} WHERE lower(slug) = lower(?1)"))
-                .bind(slug)
-                .fetch_optional(p)
-                .await
-                .map_err(|e| format!("find organization by slug failed: {e}"))?;
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{ORG_SELECT_SQLITE} WHERE lower(slug) = lower(?1)"
+            )))
+            .bind(slug)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("find organization by slug failed: {e}"))?;
             Ok(match row {
                 Some(r) => Some(map_org!(&r)),
                 None => None,

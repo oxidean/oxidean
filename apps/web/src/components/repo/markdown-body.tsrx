@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 export { isMarkdownPath };
 
 /** Shared GFM body class — styles live in `styles.css` (`.prose-oxidean`). */
-export const MARKDOWN_BODY_CLASS = "prose-oxidean max-w-none";
+const MARKDOWN_BODY_CLASS = "prose-oxidean max-w-none";
 
 type MarkdownHtmlProps = {
   /** Already sanitized HTML from `renderGfm`. */

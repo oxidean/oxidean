@@ -409,7 +409,7 @@ async fn deploy_key_rpc_non_admin_denied() {
     let pk = serde_json::to_string(ED25519_A).unwrap();
     for proc_name in ["create", "list", "delete"] {
         let input = if proc_name == "delete" {
-            format!(r#"{{"owner":"dkowner","name":"core","id":"x"}}"#)
+            r#"{"owner":"dkowner","name":"core","id":"x"}"#.to_string()
         } else if proc_name == "create" {
             format!(
                 r#"{{"owner":"dkowner","name":"core","title":"CI","public_key":{pk},"can_write":false}}"#

@@ -6,11 +6,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
  */
 
 const createMock = vi.fn();
+const meMock = vi.fn();
 
 vi.mock("@/lib/api-client", () => ({
   apiClient: {
     auth: {
-      me: vi.fn(),
+      me: (...args: unknown[]) => meMock(...args),
     },
     org: {
       create: (...args: unknown[]) => createMock(...args),
@@ -18,54 +19,34 @@ vi.mock("@/lib/api-client", () => ({
   },
 }));
 
-type LoaderShape = {
-  user: {
-    id: string;
-    email: string;
-    username: string;
-    display_name: string;
-    bio: string;
-    avatar_url: null;
-    role: string;
-    profile_incomplete: boolean;
-    email_verified: boolean;
-  };
+const user = {
+  id: "u1",
+  email: "ada@example.com",
+  username: "ada",
+  display_name: "Ada",
+  bio: "",
+  avatar_url: null as null,
+  role: "user",
+  profile_incomplete: false,
+  email_verified: false,
 };
 
-let loaderData: LoaderShape;
-
-vi.mock("@octanejs/tanstack-router", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@octanejs/tanstack-router")>();
-  return {
-    ...actual,
-    useLoaderData: () => loaderData,
-  };
-});
-
 beforeEach(() => {
+  window.history.pushState({}, "", "/orgs/new");
   createMock.mockReset();
-  loaderData = {
-    user: {
-      id: "u1",
-      email: "ada@example.com",
-      username: "ada",
-      display_name: "Ada",
-      bio: "",
-      avatar_url: null,
-      role: "user",
-      profile_incomplete: false,
-      email_verified: false,
-    },
-  };
+  user.email_verified = false;
+  meMock.mockReset();
+  meMock.mockResolvedValue({ ok: true, data: user });
 });
+
+import { OrgsNewPage } from "./orgs.new";
 
 afterEach(cleanup);
 
 describe("/orgs/new (ORG-01 / D-ORG-01 / D-ORG-06)", () => {
   it("verified: Slug + optional Display name + Create organization CTA", async () => {
-    loaderData.user.email_verified = true;
-    const { OrgsNewPage } = await import("./orgs.new");
-    render(OrgsNewPage as never);
+    user.email_verified = true;
+    render(OrgsNewPage);
 
     await waitFor(() => {
       expect(
@@ -87,7 +68,7 @@ describe("/orgs/new (ORG-01 / D-ORG-01 / D-ORG-06)", () => {
         updated_at: "2026-01-01T00:00:00Z",
       },
     });
-    const assign = vi.spyOn(window.location, "assign").mockImplementation(() => {});
+    const pushState = vi.spyOn(window.history, "pushState");
 
     fireEvent.input(screen.getByLabelText("Slug"), {
       target: { value: "acme" },
@@ -104,14 +85,13 @@ describe("/orgs/new (ORG-01 / D-ORG-01 / D-ORG-06)", () => {
       });
     });
     await waitFor(() => {
-      expect(assign).toHaveBeenCalledWith("/acme");
+      expect(pushState).toHaveBeenCalledWith({}, "", "/acme");
     });
-    assign.mockRestore();
+    pushState.mockRestore();
   });
 
   it("unverified: Verify your email wall — not the create form", async () => {
-    const { OrgsNewPage } = await import("./orgs.new");
-    render(OrgsNewPage as never);
+    render(OrgsNewPage);
 
     await waitFor(() => {
       expect(screen.getByText("Verify your email")).toBeInTheDocument();
@@ -124,9 +104,8 @@ describe("/orgs/new (ORG-01 / D-ORG-01 / D-ORG-06)", () => {
   });
 
   it("reserved slug shows That username is reserved. Choose a different username.", async () => {
-    loaderData.user.email_verified = true;
-    const { OrgsNewPage } = await import("./orgs.new");
-    render(OrgsNewPage as never);
+    user.email_verified = true;
+    render(OrgsNewPage);
 
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Create organization" })).toBeInTheDocument();
@@ -150,9 +129,8 @@ describe("/orgs/new (ORG-01 / D-ORG-01 / D-ORG-06)", () => {
   });
 
   it("taken slug shows slug already used by a user or org", async () => {
-    loaderData.user.email_verified = true;
-    const { OrgsNewPage } = await import("./orgs.new");
-    render(OrgsNewPage as never);
+    user.email_verified = true;
+    render(OrgsNewPage);
 
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Create organization" })).toBeInTheDocument();

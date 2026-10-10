@@ -1,19 +1,17 @@
-import { createFileRoute, useLoaderData } from "@octanejs/tanstack-router";
-import { createServerFn } from "@octanejs/tanstack-start";
-import { getRequestHeader } from "@octanejs/tanstack-start/server";
-import { useState } from "octane";
-import {
-  createClient,
-  type GlobalSearchCodeHit,
-  type GlobalSearchCommitHit,
-  type GlobalSearchGroup,
-  type GlobalSearchIssueHit,
-  type GlobalSearchKind,
-  type GlobalSearchOrgHit,
-  type GlobalSearchPullHit,
-  type GlobalSearchRepoHit,
-  type GlobalSearchResponse,
-  type GlobalSearchUserHit,
+import { navigate } from "astro:transitions/client";
+import { queryOptions, useQuery } from "@octanejs/tanstack-query";
+import { useEffect, useState } from "octane";
+import type {
+  GlobalSearchCodeHit,
+  GlobalSearchCommitHit,
+  GlobalSearchGroup,
+  GlobalSearchIssueHit,
+  GlobalSearchKind,
+  GlobalSearchOrgHit,
+  GlobalSearchPullHit,
+  GlobalSearchRepoHit,
+  GlobalSearchResponse,
+  GlobalSearchUserHit,
 } from "@oxidean/api-client";
 import {
   BookMarked,
@@ -26,8 +24,10 @@ import {
   Users,
 } from "@octanejs/lucide";
 import { CodeSnippet } from "@/components/code-snippet";
+import { apiClient } from "@/lib/api-client";
 import { highlightCode, languageIdForPath, type HighlightTheme } from "@/lib/highlight";
-import { ssrHighlightTheme } from "@/lib/ssr-auth";
+import { useSearchString } from "@/lib/pathname.tsrx";
+import { resolveDocumentHighlightTheme } from "@/lib/theme";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -35,15 +35,8 @@ import { Input } from "@/components/ui/input";
 import { List, ListRow } from "@/components/ui/list";
 import { PageHeader } from "@/components/ui/page-header";
 import { cn } from "@/lib/utils";
+import { AppPage } from "@/components/app-page";
 import { AppLink } from "@/components/ui/app-link";
-
-function ssrApiOrigin(): string {
-  return (
-    process.env.OXIDEAN_API_ORIGIN?.replace(/\/$/, "") ||
-    process.env.OXIDEAN_E2E_API_ORIGIN?.replace(/\/$/, "") ||
-    "http://127.0.0.1:8080"
-  );
-}
 
 type TabId = "overview" | GlobalSearchKind;
 
@@ -89,116 +82,89 @@ type SearchLoaderData = {
   signedIn: boolean;
 };
 
-const fetchSearch = createServerFn({ method: "GET" })
-  .validator((data: { q?: string; type?: string; offset?: string | number }) => ({
-    q: data?.q ? String(data.q) : "",
-    type: data?.type ? String(data.type) : "",
-    offset: data?.offset ? Number(data.offset) : 0,
-  }))
-  .handler(async ({ data }): Promise<SearchLoaderData> => {
-    const cookie = getRequestHeader("cookie") ?? "";
-    const client = createClient({
-      baseUrl: ssrApiOrigin(),
-      credentials: "include",
-      fetch: (input, init) => {
-        const headers = new Headers(init?.headers);
-        if (cookie) headers.set("cookie", cookie);
-        return fetch(input, { ...init, headers });
-      },
-    });
+/**
+ * Global search — one `search.global` RPC, grouped by entity. Code hits are
+ * highlighted with the document theme (was SSR Shiki; now runs in the query).
+ */
+function searchQueryOptions(qRaw: string, typeRaw: string, offsetRaw: number) {
+  const q = qRaw.trim();
+  const type = parseType(typeRaw);
+  const offset = Number.isFinite(offsetRaw) ? Math.max(0, Math.floor(offsetRaw)) : 0;
+  return queryOptions({
+    queryKey: ["search", "global", q, type, offset],
+    queryFn: async (): Promise<SearchLoaderData> => {
+      const me = await apiClient.auth.me();
+      const signedIn = me.ok;
 
-    const q = data.q.trim();
-    const type = parseType(data.type);
-    const offset = Number.isFinite(data.offset) ? Math.max(0, Math.floor(data.offset)) : 0;
-    const me = await client.auth.me();
-    const signedIn = me.ok;
+      if (!q) {
+        return { q, type, offset, results: null, highlightTheme: null, error: null, signedIn };
+      }
 
-    if (!q) {
-      return { q, type, offset, results: null, highlightTheme: null, error: null, signedIn };
-    }
-
-    const res = await client.search.global({
-      q,
-      // `types` limits the expensive commits/code git scans; database-backed
-      // groups always report `total` either way (tab badges).
-      types: type === "overview" ? null : [type as GlobalSearchKind],
-      offset,
-      limit: type === "overview" ? OVERVIEW_LIMIT : TAB_LIMIT,
-    });
-    if (!res.ok) {
-      return {
+      const res = await apiClient.search.global({
         q,
-        type,
+        // `types` limits the expensive commits/code git scans; database-backed
+        // groups always report `total` either way (tab badges).
+        types: type === "overview" ? null : [type as GlobalSearchKind],
         offset,
-        results: null,
-        highlightTheme: null,
-        error: res.error.message,
-        signedIn,
-      };
-    }
-
-    // Highlight code hits server-side so first paint ships Shiki markup — the
-    // client highlighter (which eagerly loads ~100 grammars) only ever runs on
-    // a theme flip. Same SSR-then-upgrade pattern as the blob viewer.
-    const codeHits = res.data.code.hits;
-    if (codeHits.length === 0) {
-      return { q, type, offset, results: res.data, highlightTheme: null, error: null, signedIn };
-    }
-    const hits = codeHits.map((hit): HighlightedCodeHit => ({ ...hit }));
-    let highlightTheme: HighlightTheme | null = null;
-    try {
-      const theme = ssrHighlightTheme();
-      const htmls = await Promise.all(
-        hits.map(async (hit) => {
-          try {
-            return await highlightCode(hit.content, {
-              lang: languageIdForPath(hit.path),
-              theme,
-            });
-          } catch {
-            return undefined;
-          }
-        }),
-      );
-      hits.forEach((hit, i) => {
-        hit.html = htmls[i];
+        limit: type === "overview" ? OVERVIEW_LIMIT : TAB_LIMIT,
       });
-      highlightTheme = theme;
-    } catch {
-      highlightTheme = null;
-    }
-    const results: SearchResults = {
-      ...res.data,
-      code: { ...res.data.code, hits },
-    };
-    return { q, type, offset, results, highlightTheme, error: null, signedIn };
-  });
+      if (!res.ok) {
+        return {
+          q,
+          type,
+          offset,
+          results: null,
+          highlightTheme: null,
+          error: res.error.message,
+          signedIn,
+        };
+      }
 
-export const Route = createFileRoute("/search")({
-  component: SearchPage,
-  head: ({ loaderData }) => {
-    const q = (loaderData as SearchLoaderData | undefined)?.q?.trim();
-    return {
-      meta: [{ title: q ? `Search · ${q} · Oxidean` : "Search · Oxidean" }],
-    };
-  },
-  // The loader's output depends on location.search — without loaderDeps all
-  // /search?… URLs share one match id, so search-only navigations keep serving
-  // the previous match's loaderData (tab clicks appear to do nothing until a
-  // second click forces a reload). Hashing search into the match gives each
-  // query/type/offset combination its own loaderData and preload slot.
-  loaderDeps: ({ search }) => search,
-  loader: async ({ location }): Promise<SearchLoaderData> => {
-    const params = new URLSearchParams(location.searchStr.replace(/^\?/, ""));
-    return fetchSearch({
-      data: {
-        q: params.get("q") ?? "",
-        type: params.get("type") ?? "",
-        offset: params.get("offset") ?? "0",
-      },
-    });
-  },
-});
+      const codeHits = res.data.code.hits;
+      if (codeHits.length === 0) {
+        return {
+          q,
+          type,
+          offset,
+          results: res.data,
+          highlightTheme: null,
+          error: null,
+          signedIn,
+        };
+      }
+      const hits = codeHits.map((hit): HighlightedCodeHit => ({ ...hit }));
+      let highlightTheme: HighlightTheme | null = null;
+      try {
+        const theme = resolveDocumentHighlightTheme();
+        const htmls = await Promise.all(
+          hits.map(async (hit) => {
+            try {
+              return await highlightCode(hit.content, {
+                lang: languageIdForPath(hit.path),
+                theme,
+              });
+            } catch {
+              return undefined;
+            }
+          }),
+        );
+        hits.forEach((hit, i) => {
+          hit.html = htmls[i];
+        });
+        highlightTheme = theme;
+      } catch {
+        highlightTheme = null;
+      }
+      const results: SearchResults = {
+        ...res.data,
+        code: { ...res.data.code, hits },
+      };
+      return { q, type, offset, results, highlightTheme, error: null, signedIn };
+    },
+    retry: false,
+    staleTime: 30_000,
+  });
+}
 
 function tabHref(q: string, type: TabId, offset = 0): string {
   const p = new URLSearchParams();
@@ -473,12 +439,31 @@ function SectionHeader({
   </div>;
 }
 
-/** Sitewide search results — one `search.global` RPC, grouped by entity. */
+/** `/search` — sitewide results (title/meta via shell). */
 export function SearchPage() @{
-  const data = useLoaderData({ from: "/search" }) as SearchLoaderData | undefined;
-  const q0 = data?.q ?? "";
-  const type: TabId = data?.type ?? "overview";
-  const offset = data?.offset ?? 0;
+  <AppPage>
+    <SearchContent />
+  </AppPage>;
+}
+
+/** Sitewide search results — one `search.global` RPC, grouped by entity. */
+export function SearchContent() @{
+  const searchStr = useSearchString();
+  const params = new URLSearchParams(searchStr);
+  const qParam = params.get("q") ?? "";
+  const typeParam = params.get("type") ?? "";
+  const offsetParam = Number(params.get("offset") ?? "0");
+  const searchQ = useQuery(searchQueryOptions(qParam, typeParam, offsetParam));
+  const data = searchQ.data;
+  const q0 = data?.q ?? qParam.trim();
+  const type: TabId = data?.type ?? parseType(typeParam);
+  const offset = data?.offset ?? (Number.isFinite(offsetParam) ? Math.max(0, offsetParam) : 0);
+
+  // Query-aware document title (shell carries the static fallback).
+  useEffect(() => {
+    const t = q0.trim();
+    document.title = t ? `Search · ${t} · Oxidean` : "Search · Oxidean";
+  }, [q0]);
   const results = data?.results ?? null;
   const signedIn = data?.signedIn === true;
   const [q, setQ] = useState(q0);
@@ -521,7 +506,7 @@ export function SearchPage() @{
       className="mt-6 flex max-w-xl gap-2"
       onSubmit={(e) => {
         e.preventDefault();
-        window.location.assign(tabHref(q, type));
+        void navigate(tabHref(q, type));
       }}
     >
       <div className="relative flex-1">

@@ -47,6 +47,7 @@ impl LanguageSpec {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 const fn lang(
     name: &'static str,
     group: Option<&'static str>,

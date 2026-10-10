@@ -1,5 +1,19 @@
-import { Bell, Menu, Plus, X } from "@octanejs/lucide";
-import { Link, useNavigate, useParams } from "@octanejs/tanstack-router";
+import {
+  Activity,
+  Bell,
+  BookMarked,
+  Building2,
+  CircleDot,
+  Home,
+  LogOut,
+  Menu,
+  Plus,
+  Settings,
+  ShieldCheck,
+  Tag,
+  Users,
+  X,
+} from "@octanejs/lucide";
 import { useQuery, useQueryClient } from "@octanejs/tanstack-query";
 import type { UserPublic } from "@oxidean/api-client";
 import { useEffect, useEffectEvent, useState } from "octane";
@@ -11,6 +25,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLinkItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -18,6 +33,7 @@ import { apiClient } from "@/lib/api-client";
 import { notificationUnreadCountQueryOptions } from "@/lib/notification-queries";
 import { clearSessionQueries, orgListMineQueryOptions } from "@/lib/session-queries";
 import { syncSessionPresenceHint } from "@/lib/session-hint";
+import { repoParamsFromPathname } from "@/lib/route-params";
 import { useChromeAccountState } from "@/lib/use-chrome-account";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -65,14 +81,7 @@ function AccountAvatar({ user, size = "sm" }: { user: UserPublic; size?: "sm" | 
 }
 
 function useRepoContext(): { owner: string; repo: string } | null {
-  const params = useParams({ strict: false }) as {
-    owner?: string;
-    repo?: string;
-  };
-  if (params.owner && params.repo) {
-    return { owner: params.owner, repo: params.repo };
-  }
-  return null;
+  return repoParamsFromPathname();
 }
 
 function CreateMenu({ onNavigated }: { onNavigated?: () => void }) @{
@@ -89,41 +98,27 @@ function CreateMenu({ onNavigated }: { onNavigated?: () => void }) @{
       <Plus aria-hidden size={18} />
     </DropdownMenuTrigger>
     <DropdownMenuContent align="end" className="min-w-52">
-      <DropdownMenuItem
-        onClick={() => {
-          onNavigated?.();
-          window.location.assign("/new");
-        }}
-      >
+      <DropdownMenuLinkItem href="/new" onClick={onNavigated}>
         New repository
-      </DropdownMenuItem>
-      <DropdownMenuItem
-        onClick={() => {
-          onNavigated?.();
-          window.location.assign("/orgs/new");
-        }}
-      >
+      </DropdownMenuLinkItem>
+      <DropdownMenuLinkItem href="/orgs/new" onClick={onNavigated}>
         New organization
-      </DropdownMenuItem>
+      </DropdownMenuLinkItem>
       @if (repo) {
         <>
           <DropdownMenuSeparator />
-          <DropdownMenuItem
-            onClick={() => {
-              onNavigated?.();
-              window.location.assign(`/${repo.owner}/${repo.repo}/issues/new`);
-            }}
+          <DropdownMenuLinkItem
+            href={`/${repo.owner}/${repo.repo}/issues/new`}
+            onClick={onNavigated}
           >
             New issue
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            onClick={() => {
-              onNavigated?.();
-              window.location.assign(`/${repo.owner}/${repo.repo}/releases/new`);
-            }}
+          </DropdownMenuLinkItem>
+          <DropdownMenuLinkItem
+            href={`/${repo.owner}/${repo.repo}/releases/new`}
+            onClick={onNavigated}
           >
             New release
-          </DropdownMenuItem>
+          </DropdownMenuLinkItem>
         </>;
       }
     </DropdownMenuContent>
@@ -167,43 +162,26 @@ function AccountMenu({
       <span className="hidden text-muted-foreground md:inline">{"@" + user.username}</span>
     </DropdownMenuTrigger>
     <DropdownMenuContent align="end" className="min-w-56">
-      <DropdownMenuItem
+      <DropdownMenuLinkItem
         className="h-auto cursor-pointer flex-col items-start gap-0.5 py-2"
         aria-label={`View @${user.username}'s profile`}
-        onClick={() => {
-          onNavigated?.();
-          window.location.assign(`/${user.username}`);
-        }}
+        href={`/${user.username}`}
+        onClick={onNavigated}
       >
         <span className="truncate text-[14px] font-medium text-foreground">{displayName}</span>
         <span className="truncate text-[13px] text-muted-foreground">{"@" + user.username}</span>
-      </DropdownMenuItem>
+      </DropdownMenuLinkItem>
       <DropdownMenuSeparator />
-      <DropdownMenuItem
-        onClick={() => {
-          onNavigated?.();
-          window.location.assign("/");
-        }}
-      >
+      <DropdownMenuLinkItem href="/" onClick={onNavigated}>
         Your repositories
-      </DropdownMenuItem>
-      <DropdownMenuItem
-        onClick={() => {
-          onNavigated?.();
-          window.location.assign("/settings/general");
-        }}
-      >
+      </DropdownMenuLinkItem>
+      <DropdownMenuLinkItem href="/settings/general" onClick={onNavigated}>
         Settings
-      </DropdownMenuItem>
+      </DropdownMenuLinkItem>
       @if (user.role === "sys-admin") {
-        <DropdownMenuItem
-          onClick={() => {
-            onNavigated?.();
-            window.location.assign("/admin/auth");
-          }}
-        >
+        <DropdownMenuLinkItem href="/admin/auth" onClick={onNavigated}>
           Admin
-        </DropdownMenuItem>;
+        </DropdownMenuLinkItem>;
       }
       @if (orgs.length > 0) {
         <>
@@ -215,14 +193,9 @@ function AccountMenu({
             Organizations
           </div>
           @for (const org of orgs; key org.id) {
-            <DropdownMenuItem
-              onClick={() => {
-                onNavigated?.();
-                window.location.assign(`/${org.slug}`);
-              }}
-            >
+            <DropdownMenuLinkItem href={`/${org.slug}`} onClick={onNavigated}>
               {(org.display_name?.trim() || org.slug) as string}
-            </DropdownMenuItem>;
+            </DropdownMenuLinkItem>;
           }
         </>;
       }
@@ -242,9 +215,8 @@ function NotificationsBell({ onNavigated }: { onNavigated?: () => void }) @{
       : ("Notifications" as string);
   const badgeText = (count > 99 ? "99+" : String(count)) as string;
 
-  <Link
-    to="/notifications"
-    preload="intent"
+  <AppLink
+    href="/notifications"
     aria-label={label}
     className={cn(
       "relative inline-flex size-9 items-center justify-center rounded-md text-foreground outline-none",
@@ -261,7 +233,91 @@ function NotificationsBell({ onNavigated }: { onNavigated?: () => void }) @{
         {badgeText}
       </span>;
     }
-  </Link>;
+  </AppLink>;
+}
+
+/** Resolved signed-in cluster — `gap-1`; mirrors `AccountClusterPending`'s authed candidate. */
+function AccountClusterSignedIn({
+  user,
+  onNavigated,
+  className,
+}: {
+  user: UserPublic;
+  onNavigated?: () => void;
+  className?: string;
+}) @{
+  <div
+    role="group"
+    aria-label="Account"
+    className={cn("flex h-9 shrink-0 items-center justify-end gap-1", className)}
+  >
+    <CreateMenu onNavigated={onNavigated} />
+    <NotificationsBell onNavigated={onNavigated} />
+    <AccountMenu user={user} onNavigated={onNavigated} />
+  </div>;
+}
+
+/** Resolved signed-out cluster — `gap-2`; mirrors `AccountClusterPending`'s anon candidate. */
+function AccountClusterAnon({
+  allowSignup,
+  onNavigated,
+  className,
+}: {
+  allowSignup: boolean;
+  onNavigated?: () => void;
+  className?: string;
+}) @{
+  <div
+    role="group"
+    aria-label="Account"
+    className={cn("flex h-9 shrink-0 items-center justify-end gap-2", className)}
+  >
+    <AppLink
+      href="/login"
+      className={cn(buttonVariants({ variant: "ghost" }), "h-9 px-3")}
+      onClick={onNavigated}
+    >
+      Sign in
+    </AppLink>
+    @if (allowSignup) {
+      <AppLink
+        href="/signup"
+        className={cn(buttonVariants({ variant: "secondary" }), "h-9 px-3")}
+        onClick={onNavigated}
+      >
+        Sign up
+      </AppLink>;
+    }
+  </div>;
+}
+
+/**
+ * Pending cluster — the island is SSR'd before `auth.me` resolves, so emit
+ * both candidates and let CSS pick by the `data-oxidean-session` stamp the
+ * web tier validated on `<html>` (same dual-render contract as the `/` body):
+ * anon button shapes paint by default, the signed-in cluster only when the
+ * stamp says a live session is present. Each candidate mirrors its resolved
+ * cluster's geometry so hydration swaps shape, not layout.
+ */
+function AccountClusterPending({ className }: { className?: string }) @{
+  <div
+    role="group"
+    aria-label="Account"
+    aria-busy="true"
+    className={cn("flex h-9 shrink-0 items-center justify-end", className)}
+  >
+    <div data-header-skeleton-anon className="items-center gap-2">
+      <Skeleton className="h-9 w-[4.25rem]" />
+      {/* The Sign-up-shaped bar paints only when the web tier's
+          `data-oxidean-signup` stamp says registration is open. */}
+      <Skeleton className="h-9 w-[4.5rem]" data-header-skeleton-signup />
+    </div>
+    <div data-header-skeleton-authed className="items-center gap-1">
+      <Skeleton className="size-9" />
+      <Skeleton className="size-9" />
+      <Skeleton className="h-9 w-28" />
+    </div>
+  </div>;
 }
 
 function AccountActions({
@@ -274,17 +330,7 @@ function AccountActions({
   const { pending, user, needsSetup, allowSignup } = useChromeAccountState();
 
   if (pending || user === undefined || needsSetup === null) {
-    return (
-      <div
-        role="group"
-        aria-label="Account"
-        aria-busy="true"
-        className={cn("flex h-9 shrink-0 items-center justify-end gap-1", className)}
-      >
-        <Skeleton className="size-9" />
-        <Skeleton className="h-9 w-24" />
-      </div>
-    );
+    return <AccountClusterPending className={className} />;
   }
 
   // UI-SPEC: while needs_setup, omit Sign in / Sign up (mark + theme OK).
@@ -299,52 +345,18 @@ function AccountActions({
   }
 
   if (user) {
-    return (
-      <div
-        role="group"
-        aria-label="Account"
-        className={cn("flex h-9 shrink-0 items-center justify-end gap-1", className)}
-      >
-        <CreateMenu onNavigated={onNavigated} />
-        <NotificationsBell onNavigated={onNavigated} />
-        <AccountMenu user={user} onNavigated={onNavigated} />
-      </div>
-    );
+    return <AccountClusterSignedIn user={user} onNavigated={onNavigated} className={className} />;
   }
 
   return (
-    <div
-      role="group"
-      aria-label="Account"
-      className={cn("flex h-9 shrink-0 items-center justify-end gap-2", className)}
-    >
-      <Link
-        to="/login"
-        preload="intent"
-        className={cn(buttonVariants({ variant: "ghost" }), "h-9 px-3")}
-        onClick={onNavigated}
-      >
-        Sign in
-      </Link>
-      @if (allowSignup) {
-        <Link
-          to="/signup"
-          preload="intent"
-          className={cn(buttonVariants({ variant: "secondary" }), "h-9 px-3")}
-          onClick={onNavigated}
-        >
-          Sign up
-        </Link>;
-      }
-    </div>
+    <AccountClusterAnon allowSignup={allowSignup} onNavigated={onNavigated} className={className} />
   );
 }
 
 const mobileNavItemClass =
-  "flex h-11 w-full items-center rounded-md px-3 text-[14px] font-medium text-foreground no-underline outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring";
+  "flex h-11 w-full items-center gap-3 rounded-md px-3 text-[14px] font-medium text-foreground no-underline outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring";
 
 function MobileNavSheet({ onClose }: { onClose: () => void }) @{
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { pending, user, needsSetup, allowSignup } = useChromeAccountState();
   const repo = useRepoContext();
@@ -412,35 +424,25 @@ function MobileNavSheet({ onClose }: { onClose: () => void }) @{
               </div>
             </AppLink>
             <div className="flex flex-col gap-0.5" role="list">
-              <button
-                type="button"
+              <AppLink
+                href="/"
                 className={cn(mobileNavItemClass, "text-left")}
-                onClick={() => {
-                  onClose();
-                  void navigate({ to: "/" });
-                }}
+                onClick={onClose}
               >
+                <Home aria-hidden size={16} className="text-muted-foreground" />
                 Home
-              </button>
+              </AppLink>
               <p className="px-3 pt-2 pb-1 text-[12px] font-medium text-muted-foreground">
                 Create
               </p>
-              <Link
-                to="/new"
-                preload="intent"
-                className={mobileNavItemClass}
-                onClick={onClose}
-              >
+              <AppLink href="/new" className={mobileNavItemClass} onClick={onClose}>
+                <BookMarked aria-hidden size={16} className="text-muted-foreground" />
                 New repository
-              </Link>
-              <Link
-                to="/orgs/new"
-                preload="intent"
-                className={mobileNavItemClass}
-                onClick={onClose}
-              >
+              </AppLink>
+              <AppLink href="/orgs/new" className={mobileNavItemClass} onClick={onClose}>
+                <Building2 aria-hidden size={16} className="text-muted-foreground" />
                 New organization
-              </Link>
+              </AppLink>
               @if (repo) {
                 <>
                   <AppLink
@@ -448,6 +450,11 @@ function MobileNavSheet({ onClose }: { onClose: () => void }) @{
                     className={mobileNavItemClass}
                     onClick={onClose}
                   >
+                    <CircleDot
+                      aria-hidden
+                      size={16}
+                      className="text-muted-foreground"
+                    />
                     New issue
                   </AppLink>
                   <AppLink
@@ -455,6 +462,7 @@ function MobileNavSheet({ onClose }: { onClose: () => void }) @{
                     className={mobileNavItemClass}
                     onClick={onClose}
                   >
+                    <Tag aria-hidden size={16} className="text-muted-foreground" />
                     New release
                   </AppLink>
                 </>;
@@ -462,34 +470,35 @@ function MobileNavSheet({ onClose }: { onClose: () => void }) @{
               <p className="px-3 pt-2 pb-1 text-[12px] font-medium text-muted-foreground">
                 Account
               </p>
-              <Link
-                to="/notifications"
-                preload="intent"
-                className={mobileNavItemClass}
-                onClick={onClose}
-              >
+              <AppLink href="/notifications" className={mobileNavItemClass} onClick={onClose}>
+                <Bell aria-hidden size={16} className="text-muted-foreground" />
                 Notifications
-              </Link>
-              <Link to="/" preload="intent" className={mobileNavItemClass} onClick={onClose}>
+              </AppLink>
+              <AppLink href="/" className={mobileNavItemClass} onClick={onClose}>
+                <BookMarked aria-hidden size={16} className="text-muted-foreground" />
                 Your repositories
-              </Link>
-              <Link
-                to="/settings/general"
-                preload="intent"
+              </AppLink>
+              <AppLink
+                href="/settings/general"
                 className={mobileNavItemClass}
                 onClick={onClose}
               >
+                <Settings aria-hidden size={16} className="text-muted-foreground" />
                 Settings
-              </Link>
+              </AppLink>
               @if (user.role === "sys-admin") {
-                <Link
-                  to="/admin/auth"
-                  preload="intent"
+                <AppLink
+                  href="/admin/auth"
                   className={mobileNavItemClass}
                   onClick={onClose}
                 >
+                  <ShieldCheck
+                    aria-hidden
+                    size={16}
+                    className="text-muted-foreground"
+                  />
                   Admin
-                </Link>;
+                </AppLink>;
               }
               @if (orgs.length > 0) {
                 <>
@@ -502,22 +511,27 @@ function MobileNavSheet({ onClose }: { onClose: () => void }) @{
                       className={mobileNavItemClass}
                       onClick={onClose}
                     >
+                      <Users
+                        aria-hidden
+                        size={16}
+                        className="text-muted-foreground"
+                      />
                       {(org.display_name?.trim() || org.slug) as string}
                     </AppLink>;
                   }
                 </>;
               }
-              <Link
-                to="/status"
-                preload="intent"
+              <AppLink
+                href="/status"
                 className={mobileNavItemClass}
                 activeProps={{
                   className: cn(mobileNavItemClass, "text-primary"),
                 }}
                 onClick={onClose}
               >
+                <Activity aria-hidden size={16} className="text-muted-foreground" />
                 Status
-              </Link>
+              </AppLink>
               <div className="my-1 h-px bg-border" role="separator" />
               <button
                 type="button"
@@ -529,15 +543,15 @@ function MobileNavSheet({ onClose }: { onClose: () => void }) @{
                   void logout();
                 }}
               >
+                <LogOut aria-hidden size={16} />
                 Sign out
               </button>
             </div>
           </div>;
         } @else {
           <div className="flex flex-col gap-2">
-            <Link
-              to="/status"
-              preload="intent"
+            <AppLink
+              href="/status"
               className={mobileNavItemClass}
               activeProps={{
                 className: cn(mobileNavItemClass, "text-primary"),
@@ -545,7 +559,7 @@ function MobileNavSheet({ onClose }: { onClose: () => void }) @{
               onClick={onClose}
             >
               Status
-            </Link>
+            </AppLink>
             @if (!needsSetup) {
               <div
                 className={cn(
@@ -553,9 +567,8 @@ function MobileNavSheet({ onClose }: { onClose: () => void }) @{
                   allowSignup ? "grid-cols-2" : "grid-cols-1",
                 )}
               >
-                <Link
-                  to="/login"
-                  preload="intent"
+                <AppLink
+                  href="/login"
                   className={cn(
                     buttonVariants({ variant: "ghost" }),
                     "h-11 w-full justify-center",
@@ -563,11 +576,10 @@ function MobileNavSheet({ onClose }: { onClose: () => void }) @{
                   onClick={onClose}
                 >
                   Sign in
-                </Link>
+                </AppLink>
                 @if (allowSignup) {
-                  <Link
-                    to="/signup"
-                    preload="intent"
+                  <AppLink
+                    href="/signup"
                     className={cn(
                       buttonVariants({ variant: "secondary" }),
                       "h-11 w-full justify-center",
@@ -575,7 +587,7 @@ function MobileNavSheet({ onClose }: { onClose: () => void }) @{
                     onClick={onClose}
                   >
                     Sign up
-                  </Link>;
+                  </AppLink>;
                 }
               </div>;
             }
@@ -632,9 +644,8 @@ export function SiteHeader() @{
     className="sticky top-0 z-50 border-b border-border bg-header/95 backdrop-blur-md supports-backdrop-filter:bg-header/85"
   >
     <div className="mx-auto grid h-14 max-w-6xl grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 px-3 sm:gap-x-3 sm:px-4 md:h-[3.75rem] md:gap-x-4">
-      <Link
-        to="/"
-        preload="intent"
+      <AppLink
+        href="/"
         className="col-start-1 row-start-1 flex shrink-0 items-center gap-2.5 no-underline"
         onClick={closeMenu}
       >
@@ -642,7 +653,7 @@ export function SiteHeader() @{
         <span className="hidden font-[family-name:var(--font-display)] text-[22px] font-semibold tracking-tight text-foreground md:inline">
           Oxidean
         </span>
-      </Link>
+      </AppLink>
 
       <GlobalSearch className="col-start-2 row-start-1" />
 
@@ -689,16 +700,15 @@ export function SiteFooter() @{
       <span className="font-[family-name:var(--font-display)] text-[13px] font-medium tracking-tight text-foreground/80">
         © Oxidean
       </span>
-      <Link
-        to="/status"
-        preload="intent"
+      <AppLink
+        href="/status"
         className="font-medium text-foreground underline-offset-4 hover:text-primary hover:underline"
         activeProps={{
           className: "font-medium text-primary underline underline-offset-4",
         }}
       >
         Status
-      </Link>
+      </AppLink>
     </div>
   </footer>;
 }

@@ -99,7 +99,9 @@ async fn rpc_json(app: &axum::Router, cookie: &str, body: &str) -> serde_json::V
 
 async fn verify_user(db: &Database, user_id: &str) {
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    db.set_email_verified_at(user_id, &now).await.expect("verify");
+    db.set_email_verified_at(user_id, &now)
+        .await
+        .expect("verify");
 }
 
 fn deny_reasons(err: &oxidean_core::AppError) -> Vec<String> {
@@ -160,8 +162,7 @@ async fn branch_protect_push_denies_direct_push_when_reviews_required() {
     support::unlock_signup(&db).await;
     let app = test_app(db.clone(), repos.clone()).await;
 
-    let (owner_cookie, owner_login) =
-        signup_and_login(&app, "owner@ex.com", "bpown").await;
+    let (owner_cookie, owner_login) = signup_and_login(&app, "owner@ex.com", "bpown").await;
     verify_user(&db, owner_login["data"]["id"].as_str().unwrap()).await;
     let create = rpc_json(
         &app,
@@ -411,10 +412,7 @@ async fn protection_hook_script_execs_helper_when_present() {
 
     let marker = dir.path().join("helper-ran");
     let helper = dir.path().join("fake-helper.sh");
-    let script = format!(
-        "#!/bin/sh\necho \"$1 $2\" > {}\nexit 0\n",
-        marker.display()
-    );
+    let script = format!("#!/bin/sh\necho \"$1 $2\" > {}\nexit 0\n", marker.display());
     std::fs::write(&helper, script).unwrap();
     #[cfg(unix)]
     {
@@ -438,11 +436,7 @@ async fn protection_hook_script_execs_helper_when_present() {
 }
 
 /// Minimal bare layout under `repos_dir/owner/name.git` (HEAD + objects).
-async fn make_sweep_bare(
-    repos: &std::path::Path,
-    owner: &str,
-    name: &str,
-) -> std::path::PathBuf {
+async fn make_sweep_bare(repos: &std::path::Path, owner: &str, name: &str) -> std::path::PathBuf {
     let bare = repos.join(owner).join(format!("{name}.git"));
     tokio::fs::create_dir_all(bare.join("objects"))
         .await
@@ -489,12 +483,9 @@ async fn sweep_protection_hooks_overwrites_outdated_hook() {
     tokio::fs::create_dir_all(&hooks).await.unwrap();
     let update = hooks.join("update");
     // Stale fail-open-only script (pre-D-PKG-02) — must be overwritten.
-    tokio::fs::write(
-        &update,
-        b"#!/bin/sh\n# STALE_PRE_DPKG02_HOOK\nexit 0\n",
-    )
-    .await
-    .unwrap();
+    tokio::fs::write(&update, b"#!/bin/sh\n# STALE_PRE_DPKG02_HOOK\nexit 0\n")
+        .await
+        .unwrap();
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -554,7 +545,7 @@ async fn sweep_protection_hooks_skips_non_bare() {
 /// alone.
 #[tokio::test]
 async fn branch_protect_push_requires_signed_commits() {
-    let _env_guard = support::lock_admin_env();
+    let _env_guard = support::lock_admin_env().await;
     let dir = tempfile::tempdir().unwrap();
     // The web-flow keypair lands here: repo.create seeds a forge-signed commit
     // and the verify keyring binds noreply@oxidean.local to that public key.

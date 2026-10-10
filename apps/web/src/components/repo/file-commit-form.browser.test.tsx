@@ -15,12 +15,12 @@ import {
 } from "@/test/browser-mount";
 import { trackDomErrors } from "@/test/dom-errors";
 
-// CloneBox (mounted inside the toolbar) reads process.env — absent under
-// Chromium. Stub the origin helpers it calls.
+// CloneBox (mounted inside the toolbar) reads injected origin meta — absent
+// under Chromium. Stub the origin helpers it calls.
 vi.mock("@/lib/public-origin", () => ({
   resolvePublicOriginClient: () => "http://localhost:3000",
-  resolveSshHost: () => "localhost",
-  resolveSshPort: () => 22,
+  resolveSshAdvertiseHost: () => "localhost",
+  resolveSshAdvertisePort: () => 22,
   httpsCloneUrl: (origin: string, owner: string, repo: string) => `${origin}/${owner}/${repo}.git`,
   sshCloneUrl: (host: string, _port: number, owner: string, repo: string) =>
     `git@${host}:${owner}/${repo}.git`,

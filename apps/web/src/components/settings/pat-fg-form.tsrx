@@ -1,5 +1,5 @@
 import { useEffect, useState } from "octane";
-import { useForm } from "@octanejs/tanstack-form";
+import { useForm, useStore } from "@octanejs/tanstack-form";
 import { Check, ChevronDown } from "@octanejs/lucide";
 import type { RepoPublic } from "@oxidean/api-client";
 import { Button } from "@/components/ui/button";
@@ -19,7 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { PatExpiryField } from "@/components/settings/pat-expiry-field";
+import { PatExpiryFields } from "@/components/settings/pat-expiry-field";
 import {
   resolveExpiresAt,
   tomorrowDateValue,
@@ -140,6 +140,10 @@ export function PatFgForm({ onCreated }: PatFgFormProps) @{
 
   const reposLoading = repos === null;
   const ownedRepos = repos ?? [];
+  // Reactive field reads hoist here: octane's lazy children resolver invokes
+  // function children eagerly when produced inside another render-prop, so a
+  // form.Field/Subscribe nested under a render-prop never receives its api.
+  const repoAccess = useStore(form.store, (s) => s.values.repoAccess);
   const filterNeedle = repoFilter.trim().toLowerCase();
   const filteredRepos =
     filterNeedle.length === 0
@@ -216,36 +220,32 @@ export function PatFgForm({ onCreated }: PatFgFormProps) @{
         )}
       </form.Field>
 
-      {/* Visibility only here — selectedIds go through form.Field so repo
-          checkbox toggles do not re-enter this Subscribe. */}
-      <form.Subscribe selector={(s) => s.values.repoAccess}>
-        {(repoAccess) => (
-          <form.Field name="selectedIds">
-            {(field) => (
-              <PatFgRepoPicker
-                visible={repoAccess === "selected"}
-                pending={pending}
-                reposLoading={reposLoading}
-                reposError={reposError}
-                ownedRepos={ownedRepos}
-                filteredRepos={filteredRepos}
-                selectedIds={field.state.value}
-                repoFilter={repoFilter}
-                onRepoFilterChange={setRepoFilter}
-                onToggleRepo={(id, checked) => {
-                  const current = field.state.value;
-                  if (checked) {
-                    if (current.includes(id)) return;
-                    field.handleChange([...current, id]);
-                  } else {
-                    field.handleChange(current.filter((x) => x !== id));
-                  }
-                }}
-              />
-            )}
-          </form.Field>
+      {/* repoAccess is read reactively at the top level (useStore) — nesting a
+          Field under a Subscribe render-prop crashes under octane 0.10. */}
+      <form.Field name="selectedIds">
+        {(field) => (
+          <PatFgRepoPicker
+            visible={repoAccess === "selected"}
+            pending={pending}
+            reposLoading={reposLoading}
+            reposError={reposError}
+            ownedRepos={ownedRepos}
+            filteredRepos={filteredRepos}
+            selectedIds={field.state.value}
+            repoFilter={repoFilter}
+            onRepoFilterChange={setRepoFilter}
+            onToggleRepo={(id, checked) => {
+              const current = field.state.value;
+              if (checked) {
+                if (current.includes(id)) return;
+                field.handleChange([...current, id]);
+              } else {
+                field.handleChange(current.filter((x) => x !== id));
+              }
+            }}
+          />
         )}
-      </form.Subscribe>
+      </form.Field>
 
       <p
         role="alert"
@@ -376,22 +376,11 @@ export function PatFgForm({ onCreated }: PatFgFormProps) @{
       </form.Field>
     </div>
 
-    <form.Field name="expiryPreset">
-      {(presetField) => (
-        <form.Field name="expiryDate">
-          {(dateField) => (
-            <PatExpiryField
-              preset={presetField.state.value}
-              customDate={dateField.state.value}
-              disabled={pending}
-              onPresetChange={(p) => presetField.handleChange(p)}
-              onCustomDateChange={(d) => dateField.handleChange(d)}
-              noneHint="This token will never expire. GitHub fine-grained tokens require an expiration; Oxidean still allows none for self-host flexibility."
-            />
-          )}
-        </form.Field>
-      )}
-    </form.Field>
+    <PatExpiryFields
+      form={form}
+      disabled={pending}
+      noneHint="This token will never expire. GitHub fine-grained tokens require an expiration; Oxidean still allows none for self-host flexibility."
+    />
 
     <form.Subscribe
       selector={(s) => ({

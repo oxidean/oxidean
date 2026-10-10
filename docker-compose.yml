@@ -175,8 +175,13 @@ services:
       PORT: "3000"
       # SSR Cookie-forward RPCs (bootstrap / session gate) — not 127.0.0.1 inside the container.
       OXIDEAN_API_ORIGIN: http://api:8080
+      # Traefik fronts this tier and sanitizes forwarded headers — trust its chain.
+      OXIDEAN_WEB_BEHIND_PROXY: "1"
       # Browser-facing origin for SSR clone URLs (Traefik Host(localhost)).
       OXIDEAN_PUBLIC_ORIGIN: ${OXIDEAN_COMPOSE_PUBLIC_ORIGIN:-http://localhost}
+      # Advertised Git SSH endpoint — injected as <meta> by the web middleware.
+      OXIDEAN_SSH_HOST: ${OXIDEAN_SSH_HOST:-localhost}
+      OXIDEAN_SSH_PORT: ${OXIDEAN_SSH_PORT:-2222}
     depends_on:
       api:
         condition: service_healthy

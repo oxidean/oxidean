@@ -31,12 +31,8 @@ async fn test_app_with_recorder(
     repos_dir: std::path::PathBuf,
 ) -> (axum::Router, Arc<RecordingSender>) {
     let recorder = Arc::new(RecordingSender::default());
-    let state = AppState::new(
-        db,
-        recorder.clone() as Arc<dyn EmailSender>,
-        "development",
-    )
-    .with_repos_dir(repos_dir);
+    let state = AppState::new(db, recorder.clone() as Arc<dyn EmailSender>, "development")
+        .with_repos_dir(repos_dir);
     let cors = build_cors("development", None).expect("cors");
     (router_with_state(state, cors), recorder)
 }

@@ -9,7 +9,9 @@ use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
 use oxidean_api::auth::hash_password_str;
 use oxidean_api::email::{EmailSender, LogSink};
-use oxidean_api::jobs::{orphan_reconcile, orphan_reconcile_with_retention, soft_delete_retention_days};
+use oxidean_api::jobs::{
+    orphan_reconcile, orphan_reconcile_with_retention, soft_delete_retention_days,
+};
 use oxidean_api::{build_cors, router_with_state, AppState};
 use oxidean_db::Database;
 use oxidean_git::{CliGitBackend, GitBackend};
@@ -153,14 +155,9 @@ async fn admin_repos_gc_runs_for_one_and_all() {
         .await
         .unwrap();
     git.init_bare(&bare, "main").await.unwrap();
-    git.seed_commit(
-        &bare,
-        "main",
-        "seed",
-        &[("a.txt".into(), b"a\n".to_vec())],
-    )
-    .await
-    .unwrap();
+    git.seed_commit(&bare, "main", "seed", &[("a.txt".into(), b"a\n".to_vec())])
+        .await
+        .unwrap();
 
     let db = Database::connect(&url).await.unwrap();
     db.migrate().await.unwrap();

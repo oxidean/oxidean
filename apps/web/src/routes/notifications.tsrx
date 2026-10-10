@@ -1,14 +1,15 @@
-import { createFileRoute, redirect } from "@octanejs/tanstack-router";
 import { useQuery, useQueryClient } from "@octanejs/tanstack-query";
 import type { NotificationPublic } from "@oxidean/api-client";
 import { useState } from "octane";
 import { BellRing, CheckCheck } from "@octanejs/lucide";
+import { AppLink } from "@/components/ui/app-link";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { List, ListRow } from "@/components/ui/list";
 import { PageHeader } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiClient } from "@/lib/api-client";
+import { formatRelative } from "@/lib/relative-time";
 import {
   invalidateNotificationQueries,
   notificationListQueryOptions,
@@ -17,27 +18,21 @@ import {
   subjectHref,
   subjectTail,
 } from "@/lib/notification-queries";
-import { fetchSessionMe } from "@/lib/ssr-auth";
+import { AppPage } from "@/components/app-page";
+import { usePageRedirect } from "@/lib/nav.tsrx";
+import { authSessionQueryOptions } from "@/lib/session-queries";
 import { cn } from "@/lib/utils";
 
-export const Route = createFileRoute("/notifications")({
-  component: NotificationsPage,
-  head: () => ({ meta: [{ title: "Notifications · Oxidean" }] }),
-  beforeLoad: async () => {
-    try {
-      const me = await fetchSessionMe();
-      if (!me.ok) {
-        throw redirect({ href: "/login?returnTo=/notifications" });
-      }
-    } catch (e) {
-      if (e && typeof e === "object" && "href" in e) throw e;
-      throw redirect({ href: "/login?returnTo=/notifications" });
-    }
-  },
-});
-
-/** Exported for integration tests (NOTF-02 / D-09 / D-12). */
+/** `/notifications` — signed-in only; anonymous hits bounce to /login. */
 export function NotificationsPage() @{
+  <AppPage>
+    <NotificationsContent />
+  </AppPage>;
+}
+
+function NotificationsContent() @{
+  const meQ = useQuery(authSessionQueryOptions());
+  usePageRedirect(meQ.data === null || meQ.isError ? "/login?returnTo=/notifications" : null);
   const qc = useQueryClient();
   const [filter, setFilter] = useState<"unread" | "all">("unread");
   const [offset, setOffset] = useState(0);
@@ -56,12 +51,13 @@ export function NotificationsPage() @{
     }
   }
 
-  async function activateRow(n: NotificationPublic) {
-    if (!n.read_at) {
-      await apiClient.notification.markRead({ ids: [n.id] });
-      invalidateNotificationQueries(qc);
-    }
-    window.location.assign(subjectHref(n));
+  function markReadOnActivate(n: NotificationPublic) {
+    // Fire-and-forget — the anchor navigates (ClientRouter morph) while the
+    // RPC is in flight; module JS stays alive across morphs so it completes.
+    if (n.read_at) return;
+    void apiClient.notification
+      .markRead({ ids: [n.id] })
+      .then(() => invalidateNotificationQueries(qc));
   }
 
   <div className="mx-auto max-w-3xl px-4 py-10">
@@ -149,14 +145,14 @@ export function NotificationsPage() @{
             <List>
               @for (const n of rows; key n.id) {
                 <ListRow className="p-0">
-                  <button
-                    type="button"
+                  <AppLink
+                    href={subjectHref(n)}
                     className={cn(
-                      "flex w-full items-start gap-3 px-4 py-3 text-left outline-none",
+                      "flex w-full items-start gap-3 px-4 py-3 text-left text-current no-underline outline-none",
                       "transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
                     )}
                     aria-label={`${n.actor_username} ${reasonLabel(n.reason)} ${n.owner}/${n.repo} ${subjectTail(n)}`}
-                    onClick={() => void activateRow(n)}
+                    onClick={() => markReadOnActivate(n)}
                   >
                     <span
                       aria-hidden
@@ -186,10 +182,10 @@ export function NotificationsPage() @{
                       <span className="truncate text-[13px] text-muted-foreground">
                         {n.subject_title as string}
                         {" · "}
-                        {n.created_at as string}
+                        {formatRelative(n.created_at) as string}
                       </span>
                     </span>
-                  </button>
+                  </AppLink>
                 </ListRow>;
               }
             </List>

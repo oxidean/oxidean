@@ -3,13 +3,6 @@
 import type { RepoTemplateOption } from "@oxidean/api-client";
 import spdxLicenseList from "spdx-license-list";
 
-export type SpdxLicenseOption = {
-  id: string;
-  label: string;
-};
-
-const NONE: SpdxLicenseOption = { id: "none", label: "None" };
-
 /** Featured licenses shown as descriptive cards before searching the full SPDX set. */
 const POPULAR: {
   id: string;
@@ -83,22 +76,7 @@ const POPULAR: {
   },
 ];
 
-let cachedSelect: SpdxLicenseOption[] | null = null;
 let cachedPicker: RepoTemplateOption[] | null = null;
-
-/** Full SPDX ID list + None, sorted by id (None first). Lazy-built for native selects. */
-export function listSpdxLicenseOptions(): SpdxLicenseOption[] {
-  if (cachedSelect) return cachedSelect;
-  const ids = Object.keys(spdxLicenseList).sort((a, b) => a.localeCompare(b));
-  cachedSelect = [
-    NONE,
-    ...ids.map((id) => ({
-      id,
-      label: `${id} — ${spdxLicenseList[id]?.name ?? id}`,
-    })),
-  ];
-  return cachedSelect;
-}
 
 /**
  * License options for the TemplatePicker modal.

@@ -527,7 +527,10 @@ async fn git_smart_pat_push_fetch_happy_path() {
     let bytes = create_pat.into_body().collect().await.unwrap().to_bytes();
     let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     let token = v["data"]["token"].as_str().expect("token");
-    let pat_id = v["data"]["item"]["id"].as_str().expect("pat id").to_string();
+    let pat_id = v["data"]["item"]["id"]
+        .as_str()
+        .expect("pat id")
+        .to_string();
 
     let req = Request::builder()
         .method("GET")
@@ -810,8 +813,7 @@ async fn git_smart_private_non_grantee_401() {
     assert_eq!(create.status(), StatusCode::OK);
     let _ = create.into_body().collect().await;
 
-    let (stranger_cookie, stranger_v) =
-        signup_and_login(&app, "ngstr@ex.com", "ngstr1").await;
+    let (stranger_cookie, stranger_v) = signup_and_login(&app, "ngstr@ex.com", "ngstr1").await;
     let stranger_id = stranger_v["data"]["id"].as_str().unwrap();
     db.set_email_verified_at(stranger_id, &now)
         .await
@@ -858,7 +860,10 @@ async fn git_smart_private_non_grantee_401() {
 async fn git_smart_fg_all_org_owner_receive_pack() {
     let dir = tempfile::tempdir().expect("tempdir");
     let repos = dir.path().join("repos");
-    let url = format!("sqlite:{}", dir.path().join("smart_fg_all_org.db").display());
+    let url = format!(
+        "sqlite:{}",
+        dir.path().join("smart_fg_all_org.db").display()
+    );
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
@@ -954,7 +959,10 @@ async fn git_smart_collaborator_fg_selected_push() {
     assert_eq!(create.status(), StatusCode::OK);
     let create_bytes = create.into_body().collect().await.unwrap().to_bytes();
     let create_v: serde_json::Value = serde_json::from_slice(&create_bytes).unwrap();
-    let repo_id = create_v["data"]["id"].as_str().expect("repo id").to_string();
+    let repo_id = create_v["data"]["id"]
+        .as_str()
+        .expect("repo id")
+        .to_string();
 
     let (collab_cookie, collab_v) = signup_and_login(&app, "fgssel@ex.com", "fgssel1").await;
     let collab_id = collab_v["data"]["id"].as_str().unwrap();

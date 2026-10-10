@@ -25,6 +25,7 @@ pub fn env_actions_enabled() -> bool {
         .unwrap_or(true)
 }
 
+#[allow(clippy::too_many_arguments)]
 /// Dispatch Actions evaluation after a successful receive-pack.
 ///
 /// Errors are logged only — callers must not fail the push (D-ACT-05 / T-19-09).
@@ -60,6 +61,7 @@ pub async fn notify_push_actions(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn dispatch_push_inner(
     db: &Database,
     git: &dyn GitBackend,
@@ -136,6 +138,7 @@ fn pick_push_tip(updates: &[(String, String, String)]) -> (String, String) {
     (String::new(), String::new())
 }
 
+#[allow(clippy::too_many_arguments)]
 /// Create a queued run + jobs from a parsed workflow (no step execution).
 pub async fn enqueue_run(
     db: &Database,
@@ -195,6 +198,7 @@ pub async fn enqueue_run(
     Ok((run_id, job_ids))
 }
 
+#[allow(clippy::too_many_arguments)]
 /// Test/helper path: enqueue from bare path + SHA without git receive-pack.
 pub async fn dispatch_push_for_sha(
     db: &Database,

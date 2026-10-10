@@ -90,7 +90,13 @@ async fn rpc_json(app: &axum::Router, cookie: &str, body: &str) -> serde_json::V
     serde_json::from_slice(&bytes).unwrap()
 }
 
-async fn seed_repo_with_feature(app: &axum::Router, db: &Database, email: &str, user: &str, repo: &str) -> String {
+async fn seed_repo_with_feature(
+    app: &axum::Router,
+    db: &Database,
+    email: &str,
+    user: &str,
+    repo: &str,
+) -> String {
     let (cookie, login_v) = signup_and_login(app, email, user).await;
     verify_user(db, login_v["data"]["id"].as_str().unwrap()).await;
     let create = rpc_json(
@@ -162,7 +168,10 @@ async fn pull_merge_merge_commit_and_closes_keyword_issue() {
     )
     .await;
     assert_eq!(closed["ok"], true, "{closed}");
-    assert_eq!(closed["data"]["state"], "closed", "closing keyword on default merge");
+    assert_eq!(
+        closed["data"]["state"], "closed",
+        "closing keyword on default merge"
+    );
 }
 
 #[tokio::test]

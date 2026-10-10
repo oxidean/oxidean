@@ -2,7 +2,7 @@ import { FileText } from "@octanejs/lucide";
 import type { RepoFileTemplate } from "@oxidean/api-client";
 import { cn } from "@/lib/utils";
 
-export type FileTemplateChooserProps = {
+type FileTemplateChooserProps = {
   /** Templates from `repo.templates.list` (issues or pulls). */
   templates: RepoFileTemplate[];
   /** Lowercase noun for copy — "issue" or "pull request". */

@@ -2,7 +2,7 @@ import type { RepoTemplateOption } from "@oxidean/api-client";
 import { useState } from "octane";
 import { TemplatePicker } from "@/components/repo/template-picker";
 
-export const HARNESS_STACKS: RepoTemplateOption[] = [
+const HARNESS_STACKS: RepoTemplateOption[] = [
   {
     id: "rust",
     label: "Rust",

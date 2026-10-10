@@ -1,5 +1,9 @@
-import { createFileRoute, useLoaderData, useParams } from "@octanejs/tanstack-router";
-import { useQuery } from "@octanejs/tanstack-query";
+import { queryOptions, useQuery } from "@octanejs/tanstack-query";
+import { useRepoLayoutData } from "@/lib/repo-store.tsrx";
+import { matchPath } from "@/lib/route-params";
+import { usePathname, useSearchString } from "@/lib/pathname.tsrx";
+import { RepoLayout } from "@/routes/$owner.$repo.tsrx";
+import { AppPage } from "@/components/app-page";
 import type { IssueListResponse, LabelPublic, RepoPublic } from "@oxidean/api-client";
 import { useState } from "octane";
 import {
@@ -11,7 +15,7 @@ import {
 import { RepoNotFound } from "@/components/repo/repo-not-found";
 import { RepoUnitDisabled } from "@/components/repo/repo-unit-disabled";
 import { apiClient } from "@/lib/api-client";
-import type { RepoLayoutLoaderData } from "@/lib/repo-store";
+
 import { fetchIssueList, fetchLabelListForRepo, fetchRepoGet } from "@/lib/ssr-repo";
 import { useChromeAccountState } from "@/lib/use-chrome-account";
 
@@ -35,7 +39,7 @@ async function loadIssuesPage(
   repoName: string,
   state: IssueListStateFilter,
 ): Promise<IssuesLoaderData> {
-  const got = await fetchRepoGet({ data: { owner, name: repoName } });
+  const got = await fetchRepoGet({ owner, name: repoName });
   if (!got.ok) {
     if (got.error.code === "repo.not_found") return { kind: "not_found" };
     return {
@@ -51,15 +55,13 @@ async function loadIssuesPage(
 
   const [listRes, labelsRes] = await Promise.all([
     fetchIssueList({
-      data: {
-        owner,
-        name: repoName,
-        state,
-        offset: 0,
-        limit: ISSUE_LIST_PAGE_SIZE,
-      },
+      owner,
+      name: repoName,
+      state,
+      offset: 0,
+      limit: ISSUE_LIST_PAGE_SIZE,
     }),
-    fetchLabelListForRepo({ data: { owner, name: repoName } }),
+    fetchLabelListForRepo({ owner, name: repoName }),
   ]);
 
   if (!listRes.ok) {
@@ -85,25 +87,34 @@ async function loadIssuesPage(
   };
 }
 
-export const Route = createFileRoute("/$owner/$repo/issues/")({
-  component: IssuesListPage,
-  head: ({ params }) => ({
-    meta: [
-      {
-        title: `Issues · ${(params as { owner: string }).owner}/${(params as { repo: string }).repo} · Oxidean`,
-      },
+function repoIssuesIndexQueryOptions(params: Record<string, string | undefined>, searchStr = "") {
+  return queryOptions({
+    queryKey: [
+      "repo-page",
+      "/$owner/$repo/issues/",
+      params.owner ?? "",
+      params.repo ?? "",
+      params._splat ?? "",
+      params.n ?? "",
+      params.sha ?? "",
+      params.tag ?? "",
+      params.run ?? "",
+      searchStr,
     ],
-  }),
-  loader: async ({ params }): Promise<IssuesLoaderData> => {
-    const owner = String((params as { owner?: string }).owner ?? "");
-    const repoName = String((params as { repo?: string }).repo ?? "");
-    try {
-      return await loadIssuesPage(owner, repoName, "open");
-    } catch {
-      return { kind: "error", message: NETWORK_ERROR };
-    }
-  },
-});
+    queryFn: async (): Promise<IssuesLoaderData> => {
+      const owner = String((params as { owner?: string }).owner ?? "");
+      const repoName = String((params as { repo?: string }).repo ?? "");
+      try {
+        return await loadIssuesPage(owner, repoName, "open");
+      } catch {
+        return { kind: "error", message: NETWORK_ERROR };
+      }
+    },
+    enabled: Boolean(params.owner && params.repo),
+    retry: false,
+    staleTime: 30_000,
+  });
+}
 
 function emptyFilters(state: IssueListStateFilter = "open"): IssueListFilters {
   return {
@@ -118,17 +129,17 @@ function emptyFilters(state: IssueListStateFilter = "open"): IssueListFilters {
 }
 
 /** Issues list — Open default + filters + offset pages (D-ISS-16..19). */
-export function IssuesListPage() @{
-  const params = useParams({ strict: false }) as {
+function IssuesListPageContent() @{
+  const pathname = usePathname();
+  const searchStr = useSearchString();
+  const params = (matchPath("/$owner/$repo/issues/", pathname) ?? {}) as {
     owner?: string;
     repo?: string;
   };
   const owner = params.owner ?? "";
   const repoName = params.repo ?? "";
-  const layout = useLoaderData({ from: "/$owner/$repo" }) as RepoLayoutLoaderData | undefined;
-  const routeLoader = useLoaderData({ from: "/$owner/$repo/issues/" }) as
-    | IssuesLoaderData
-    | undefined;
+  const layout = useRepoLayoutData();
+  const routeLoader = useQuery(repoIssuesIndexQueryOptions(params, searchStr)).data;
   const account = useChromeAccountState();
 
   const [filters, setFilters] = useState<IssueListFilters>(() => emptyFilters("open"));
@@ -286,3 +297,12 @@ export function IssuesListPage() @{
 }
 
 export default IssuesListPage;
+
+/** Page root — RepoLayout (chrome + repo store) around the leaf content. */
+export function IssuesListPage() @{
+  <AppPage>
+    <RepoLayout>
+      <IssuesListPageContent />
+    </RepoLayout>
+  </AppPage>;
+}

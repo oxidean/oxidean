@@ -19,6 +19,6 @@ pub use password::{
 };
 pub use session::{
     build_session_presence_cookie, clear_session_cookie, clear_session_presence_cookie,
-    secure_cookies, AuthError, ResolvedSession, SessionService, SESSION_COOKIE_NAME,
-    SESSION_IDLE, SESSION_PRESENCE_COOKIE_NAME, SESSION_REMEMBER,
+    secure_cookies, AuthError, ResolvedSession, SessionService, SESSION_COOKIE_NAME, SESSION_IDLE,
+    SESSION_PRESENCE_COOKIE_NAME, SESSION_REMEMBER,
 };

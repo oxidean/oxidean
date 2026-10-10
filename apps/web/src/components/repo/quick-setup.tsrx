@@ -1,5 +1,5 @@
-import { Link } from "@octanejs/tanstack-router";
 import { PatHowTo } from "@/components/repo/pat-how-to";
+import { AppLink } from "@/components/ui/app-link";
 import { httpsCloneUrl } from "@/lib/public-origin";
 import { useRepoStore } from "@/lib/repo-store";
 
@@ -63,13 +63,12 @@ ${pushCmd}`;
 
       <p className="text-[14px] text-muted-foreground">
         Prefer starting from the form?{" "}
-        <Link
-          to="/new"
-          preload="intent"
+        <AppLink
+          href="/new"
           className="font-semibold text-primary underline-offset-4 hover:underline"
         >
           Create another repository
-        </Link>
+        </AppLink>
       </p>
     </div>
   </section>;

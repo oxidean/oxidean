@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Bring up Mailpit + OIDC mock + HTTP stubs, run API (SQLite) + Vite, execute Vitest stack e2e.
+# Bring up Mailpit + OIDC mock + HTTP stubs, run API (SQLite) + oxidean-web, execute Vitest stack e2e.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -64,7 +64,7 @@ echo "==> starting dev-auth stubs (Mailpit, OIDC mock, HTTP stubs)"
 $COMPOSE -f docker-compose.dev-auth.yml --profile dev-auth up --build -d
 
 wait_http() {
-  # Prefer IPv4; also try localhost↔127.0.0.1 so Vite/services bound to only one still pass.
+  # Prefer IPv4; also try localhost↔127.0.0.1 so services bound to only one still pass.
   local url="$1" name="$2" tries="${3:-60}"
   local alt=""
   if [[ "$url" == *://127.0.0.1* ]]; then
@@ -149,30 +149,33 @@ OXIDEAN_RUNNER_WORK_DIR="$ROOT/var/e2e/runner-work" \
   cargo run -q -p oxidean-runner --bin oxidean-runner >"$ROOT/var/e2e/runner.log" 2>&1 &
 RUNNER_PID=$!
 
-echo "==> starting Vite web on :$WEB_PORT (proxies /api → API)"
-(
-  cd apps/web
-  # Point Vite proxy + SSR server fns at e2e API port
-  export OXIDEAN_E2E_API_ORIGIN="http://127.0.0.1:${API_PORT}"
-  export OXIDEAN_API_ORIGIN="http://127.0.0.1:${API_PORT}"
-  export OXIDEAN_PUBLIC_ORIGIN="http://127.0.0.1:${WEB_PORT}"
-  # Bind IPv4 explicitly — default localhost can be ::1-only on CI, while we poll 127.0.0.1.
-  bunx vite --host 127.0.0.1 --port "$WEB_PORT" --strictPort >"$ROOT/var/e2e/web.log" 2>&1
-) &
+# Web tier is the Rust middleware (crates/oxidean-web) serving the prebuilt
+# Astro dist — no JS runtime in the serving path. Build once per e2e run.
+# Rebuild when any web source/config is newer than the marker: a cached dist
+# silently tests stale islands (the file check alone misses edits entirely).
+# `public/` ships verbatim (sw.js etc.) and bun.lock pins dependency versions —
+# changes to either must invalidate the cache too.
+DIST_MARKER="$ROOT/apps/web/dist/index.html"
+if [[ ! -f "$DIST_MARKER" ]] || \
+   find "$ROOT/apps/web/src" "$ROOT/apps/web/public" "$ROOT/apps/web/astro.config.mjs" \
+        "$ROOT/apps/web/package.json" "$ROOT/bun.lock" \
+        -newer "$DIST_MARKER" -print -quit 2>/dev/null | grep -q .; then
+  echo "==> building apps/web dist (astro)"
+  (cd apps/web && bun run build) || {
+    echo "error: apps/web build failed" >&2
+    exit 1
+  }
+fi
+echo "==> starting oxidean-web on :$WEB_PORT (proxies /api → API)"
+PORT="$WEB_PORT" \
+OXIDEAN_WEB_DIST="$ROOT/apps/web/dist" \
+OXIDEAN_API_ORIGIN="http://127.0.0.1:${API_PORT}" \
+OXIDEAN_PUBLIC_ORIGIN="http://127.0.0.1:${WEB_PORT}" \
+OXIDEAN_SSH_HOST="127.0.0.1" \
+OXIDEAN_SSH_PORT="2222" \
+  cargo run -q -p oxidean-web --bin oxidean-web >"$ROOT/var/e2e/web.log" 2>&1 &
 WEB_PID=$!
 wait_http "http://127.0.0.1:${WEB_PORT}/" "web" 90
-
-# Cold routes can sit in Vite dep-optimize/reload; warm signup/login before Playwright.
-echo "==> warming auth routes"
-for path in /signup /login; do
-  for _ in 1 2 3 4 5; do
-    code=$(curl -4 -sS -o /dev/null -w "%{http_code}" "http://127.0.0.1:${WEB_PORT}${path}" || echo 000)
-    if [[ "$code" =~ ^(200|302|303|307|308)$ ]]; then
-      break
-    fi
-    sleep 2
-  done
-done
 
 export E2E_STACK=1
 export OXIDEAN_API_ORIGIN="http://127.0.0.1:${API_PORT}"

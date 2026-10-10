@@ -112,27 +112,7 @@ const pendingLinkInvite = {
   use_count: 2,
 };
 
-type LoaderShape =
-  | { kind: "unauthenticated" }
-  | { kind: "forbidden" }
-  | { kind: "error"; message: string }
-  | {
-      kind: "ready";
-      me: typeof sysAdmin;
-      users: typeof readyUsers;
-      invites: (typeof pendingInvite | typeof pendingLinkInvite)[];
-    };
-
-let loaderData: LoaderShape | undefined;
 const assignMock = vi.fn();
-
-vi.mock("@octanejs/tanstack-router", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@octanejs/tanstack-router")>();
-  return {
-    ...actual,
-    useLoaderData: () => loaderData,
-  };
-});
 
 import { AdminUsersPage } from "./users";
 
@@ -156,7 +136,15 @@ describe("/admin/users", () => {
     assignMock.mockReset();
     Object.defineProperty(window, "location", {
       configurable: true,
-      value: { assign: assignMock, href: "http://localhost/" },
+      value: {
+        assign: assignMock,
+        href: "http://localhost/admin/users",
+        origin: "http://localhost",
+        pathname: "/admin/users",
+        search: "",
+        replace: vi.fn(),
+        reload: vi.fn(),
+      },
     });
 
     meMock.mockResolvedValue({ ok: true, data: sysAdmin });
@@ -244,12 +232,6 @@ describe("/admin/users", () => {
         repos: [{ owner: "acme", name: "app", permission: "write" }],
       },
     });
-    loaderData = {
-      kind: "ready",
-      me: sysAdmin,
-      users: readyUsers,
-      invites: [pendingInvite],
-    };
   });
 
   // Row actions live behind the row overflow menu — drive the real flow:
@@ -266,7 +248,6 @@ describe("/admin/users", () => {
   }
 
   it("redirects signed-out sessions toward login", async () => {
-    loaderData = { kind: "unauthenticated" };
     meMock.mockResolvedValue({
       ok: false,
       error: { code: "auth.unauthenticated", message: "Not signed in" },
@@ -285,7 +266,6 @@ describe("/admin/users", () => {
   });
 
   it("shows forbidden for non sys-admin from loader", async () => {
-    loaderData = { kind: "forbidden" };
     meMock.mockResolvedValue({
       ok: true,
       data: { ...sysAdmin, role: "user" },
@@ -396,12 +376,6 @@ describe("/admin/users", () => {
       ok: true,
       data: { invites: [pendingInvite, pendingLinkInvite] },
     });
-    loaderData = {
-      kind: "ready",
-      me: sysAdmin,
-      users: readyUsers,
-      invites: [pendingInvite, pendingLinkInvite],
-    };
 
     renderWithQueryClient(AdminUsersPage);
 

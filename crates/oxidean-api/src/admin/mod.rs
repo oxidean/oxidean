@@ -9,9 +9,9 @@ pub use invites::{
 };
 pub use users::{
     ban as users_ban, delete as users_delete, get_access as users_get_access,
-    get_activity as users_get_activity, list as users_list,
-    list_sessions as users_list_sessions, revoke_sessions as users_revoke_sessions,
-    unban as users_unban, update_role as users_update_role,
+    get_activity as users_get_activity, list as users_list, list_sessions as users_list_sessions,
+    revoke_sessions as users_revoke_sessions, unban as users_unban,
+    update_role as users_update_role,
 };
 
 use oxidean_core::AppError;
@@ -45,9 +45,10 @@ pub fn reject_if_banned(user: &UserRow) -> Result<(), AppError> {
 /// Sys-admin gate that returns the caller row (for self-action guards).
 pub async fn require_admin_user(ctx: &RpcCtx) -> Result<UserRow, AppError> {
     crate::auth::admin::require_admin(ctx).await?;
-    let session = ctx.session.as_ref().ok_or_else(|| {
-        AppError::new("auth.unauthenticated", "not authenticated")
-    })?;
+    let session = ctx
+        .session
+        .as_ref()
+        .ok_or_else(|| AppError::new("auth.unauthenticated", "not authenticated"))?;
     let user = ctx
         .db
         .find_user_by_id(&session.user_id)

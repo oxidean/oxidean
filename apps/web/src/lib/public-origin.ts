@@ -22,7 +22,7 @@ function isRailwayAppHost(host: string): boolean {
 }
 
 /** Railway gateway hostname when the web process runs on Railway. */
-export function railwayGatewayHost(env: NodeJS.ProcessEnv = process.env): string | null {
+function railwayGatewayHost(env: NodeJS.ProcessEnv = process.env): string | null {
   for (const key of ["RAILWAY_SERVICE_GATEWAY_URL", "RAILWAY_PUBLIC_DOMAIN"] as const) {
     const raw = env[key]?.trim();
     if (!raw) continue;
@@ -95,30 +95,25 @@ export function sshNeedsPortHint(port: number): boolean {
   return Number.isFinite(port) && port > 0 && port !== 22;
 }
 
-/** Advertised SSH hostname (env or hostname of public origin). */
-export function resolveSshHost(
-  publicOrigin?: string,
-  envHost = process.env.OXIDEAN_SSH_HOST,
-): string {
-  const fromEnv = envHost?.trim();
-  if (fromEnv) {
-    // Prefer live Railway gateway host when SSH_HOST still points at another
-    // *.up.railway.app preview/PR host. Custom SSH advertise hosts stay put.
-    const railway = railwayGatewayHost();
-    if (railway) {
-      const envHostname = originHostname(fromEnv);
-      if (
-        envHostname &&
-        isRailwayAppHost(envHostname) &&
-        envHostname.toLowerCase() !== railway.toLowerCase()
-      ) {
-        return railway;
-      }
-    }
-    return fromEnv.replace(/\/$/, "");
+/**
+ * Meta tag content injected by the serving middleware (the tier that can read
+ * OXIDEAN_SSH_* env). Empty string when absent.
+ */
+function advertiseMeta(name: string): string {
+  if (typeof document === "undefined") return "";
+  return document.querySelector(`meta[name="${name}"]`)?.getAttribute("content")?.trim() ?? "";
+}
+
+/**
+ * Advertised SSH hostname from `<meta name="oxidean:ssh-host">` (middleware
+ * injected); falls back to the public origin's hostname.
+ */
+export function resolveSshAdvertiseHost(publicOrigin?: string): string {
+  const fromMeta = advertiseMeta("oxidean:ssh-host");
+  if (fromMeta) {
+    return fromMeta;
   }
-  const origin =
-    (publicOrigin || "").trim() || resolvePublicOriginFromEnv() || resolvePublicOriginClient();
+  const origin = (publicOrigin || "").trim() || resolvePublicOriginClient();
   try {
     const u = new URL(origin.includes("://") ? origin : `http://${origin}`);
     return u.hostname || "localhost";
@@ -127,12 +122,9 @@ export function resolveSshHost(
   }
 }
 
-/** Advertised/listen SSH port (env default 2222 for Compose). */
-export function resolveSshPort(envPort = process.env.OXIDEAN_SSH_PORT): number {
-  const raw = envPort?.trim();
-  if (raw) {
-    const n = Number.parseInt(raw, 10);
-    if (Number.isFinite(n) && n > 0) return n;
-  }
+/** Advertised SSH port from `<meta name="oxidean:ssh-port">`; default 2222. */
+export function resolveSshAdvertisePort(): number {
+  const n = Number.parseInt(advertiseMeta("oxidean:ssh-port"), 10);
+  if (Number.isFinite(n) && n > 0) return n;
   return 2222;
 }

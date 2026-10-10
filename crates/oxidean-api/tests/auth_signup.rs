@@ -68,7 +68,9 @@ async fn signup_sets_cookie_and_sends_welcome() {
         set_cookie.contains("oxidean_session="),
         "cookie: {set_cookie}"
     );
-    assert!(set_cookie.contains("HttpOnly") || set_cookie.to_ascii_lowercase().contains("httponly"));
+    assert!(
+        set_cookie.contains("HttpOnly") || set_cookie.to_ascii_lowercase().contains("httponly")
+    );
 
     let bytes = res.into_body().collect().await.unwrap().to_bytes();
     let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
@@ -189,7 +191,7 @@ async fn signup_open_without_invite_fields_auth05() {
 
 #[tokio::test]
 async fn seeded_admin_is_auto_verified() {
-    let _env = support::lock_admin_env();
+    let _env = support::lock_admin_env().await;
     let dir = tempfile::tempdir().expect("tempdir");
     let url = format!("sqlite:{}", dir.path().join("admin_seed.db").display());
     let db = Database::connect(&url).await.expect("connect");
@@ -241,7 +243,7 @@ async fn seeded_admin_is_auto_verified() {
 /// Wave 0: OXIDEAN_ALLOW_SIGNUP=true/1 must persist open signup on ENV seed (D-15).
 #[tokio::test]
 async fn seeded_admin_parses_allow_signup_true() {
-    let _env = support::lock_admin_env();
+    let _env = support::lock_admin_env().await;
     let dir = tempfile::tempdir().expect("tempdir");
     let url = format!("sqlite:{}", dir.path().join("admin_allow.db").display());
     let db = Database::connect(&url).await.expect("connect");
@@ -267,7 +269,7 @@ async fn seeded_admin_parses_allow_signup_true() {
 /// D-13: empty-string ADMIN ENV is treated as absent (same as unset).
 #[tokio::test]
 async fn seed_partial_env_empty_string_email_does_not_seed() {
-    let _env = support::lock_admin_env();
+    let _env = support::lock_admin_env().await;
     let dir = tempfile::tempdir().expect("tempdir");
     let url = format!("sqlite:{}", dir.path().join("empty_email.db").display());
     let db = Database::connect(&url).await.expect("connect");
@@ -290,7 +292,7 @@ async fn seed_partial_env_empty_string_email_does_not_seed() {
 /// D-13: empty-string password is treated as absent.
 #[tokio::test]
 async fn seed_partial_env_empty_string_password_does_not_seed() {
-    let _env = support::lock_admin_env();
+    let _env = support::lock_admin_env().await;
     let dir = tempfile::tempdir().expect("tempdir");
     let url = format!("sqlite:{}", dir.path().join("empty_pw.db").display());
     let db = Database::connect(&url).await.expect("connect");
@@ -365,7 +367,10 @@ async fn signup_succeeds_when_allow_signup_true() {
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
     let settings = db.get_auth_settings().await.expect("settings");
-    assert!(settings.allow_signup, "unlock_signup must open registration");
+    assert!(
+        settings.allow_signup,
+        "unlock_signup must open registration"
+    );
 
     let (app, recorder) = app_with_recorder(db).await;
     let res = app
@@ -433,7 +438,9 @@ async fn provider_config_includes_allow_signup() {
 
     let (app, _) = app_with_recorder(db.clone()).await;
     let res = app
-        .oneshot(rpc_req(r#"{"procedure":"auth.provider_config","input":{}}"#))
+        .oneshot(rpc_req(
+            r#"{"procedure":"auth.provider_config","input":{}}"#,
+        ))
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
@@ -450,7 +457,9 @@ async fn provider_config_includes_allow_signup() {
     support::unlock_signup(&db).await;
     let (app2, _) = app_with_recorder(db).await;
     let res2 = app2
-        .oneshot(rpc_req(r#"{"procedure":"auth.provider_config","input":{}}"#))
+        .oneshot(rpc_req(
+            r#"{"procedure":"auth.provider_config","input":{}}"#,
+        ))
         .await
         .unwrap();
     let bytes2 = res2.into_body().collect().await.unwrap().to_bytes();
@@ -461,7 +470,7 @@ async fn provider_config_includes_allow_signup() {
 /// AUTH-06 ordering / AUTH-07 adjacency: second seed with users present is a no-op.
 #[tokio::test]
 async fn seed_second_run_idempotent_when_users_exist() {
-    let _env = support::lock_admin_env();
+    let _env = support::lock_admin_env().await;
     let dir = tempfile::tempdir().expect("tempdir");
     let url = format!("sqlite:{}", dir.path().join("seed_idem.db").display());
     let db = Database::connect(&url).await.expect("connect");

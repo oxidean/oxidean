@@ -1,5 +1,11 @@
-import { createFileRoute, useLoaderData, useNavigate, useParams } from "@octanejs/tanstack-router";
 import type { OwnerType, RepoVisibility } from "@oxidean/api-client";
+
+import { navigate as astroNavigate } from "astro:transitions/client";
+import { useRepoLayoutData } from "@/lib/repo-store.tsrx";
+import { matchPath, routeHref } from "@/lib/route-params";
+import { usePathname } from "@/lib/pathname.tsrx";
+import { RepoLayout } from "@/routes/$owner.$repo.tsrx";
+import { AppPage } from "@/components/app-page";
 import { useState } from "octane";
 import { CollaboratorsPanel } from "@/components/repo/collaborators-panel";
 import { BranchProtectionPanel } from "@/components/repo/branch-protection-panel";
@@ -13,6 +19,7 @@ import { MergeSettingsPanel } from "@/components/repo/merge-settings-panel";
 import { OwnerLookup } from "@/components/repo/owner-lookup";
 import { TopicChipsInput } from "@/components/repo/topics-input";
 import { RepoNotFound } from "@/components/repo/repo-not-found";
+import { RepoSettingsNav } from "@/components/repo/repo-settings-nav";
 import { RepoFeaturesPanel } from "@/components/repo/repo-features-panel";
 import { WebhooksPanel } from "@/components/repo/webhooks-panel";
 import { MirrorSettingsPanel } from "@/components/repo/mirror-settings-panel";
@@ -22,19 +29,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { apiClient } from "@/lib/api-client";
-import { type RepoLayoutLoaderData, useRepoStore } from "@/lib/repo-store";
+import { useRepoStore } from "@/lib/repo-store";
 import { toastError, toastSuccess } from "@/lib/toast";
-
-export const Route = createFileRoute("/$owner/$repo/settings")({
-  component: RepoSettingsPage,
-  head: ({ params }) => ({
-    meta: [
-      {
-        title: `Settings · ${(params as { owner: string }).owner}/${(params as { repo: string }).repo} · Oxidean`,
-      },
-    ],
-  }),
-});
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
 const PRIVATE_HELPER = "Only people with access can see this private repository.";
@@ -48,15 +44,16 @@ const UNARCHIVE_BODY =
   "Restores write access. Pushes, issues, pull requests, and releases become editable again. Type the repository name to confirm.";
 
 /** Admin settings — visibility, collaborators, rename/transfer, soft-delete (D-ORG-04 / GIT-16/17). */
-export function RepoSettingsPage() @{
-  const params = useParams({ from: "/$owner/$repo/settings" }) as {
+function RepoSettingsPageContent() @{
+  const pathname = usePathname();
+  const params = (matchPath("/$owner/$repo/settings/", pathname) ?? {}) as {
     owner: string;
     repo: string;
   };
   const owner = params.owner ?? "";
   const repoName = params.repo ?? "";
-  const navigate = useNavigate();
-  const layout = useLoaderData({ from: "/$owner/$repo" }) as RepoLayoutLoaderData | undefined;
+  const navigate = astroNavigate;
+  const layout = useRepoLayoutData();
   const setRepo = useRepoStore((s) => s.setRepo);
 
   const repo = layout?.repo ?? null;
@@ -163,13 +160,12 @@ export function RepoSettingsPage() @{
       }
       setRepo(res.data.repo);
       toastSuccess("Repository renamed.");
-      await navigate({
-        to: "/$owner/$repo/settings",
-        params: {
+      await navigate(
+        routeHref("/$owner/$repo/settings", {
           owner: res.data.repo.owner_username,
           repo: res.data.repo.name,
-        },
-      });
+        }),
+      );
     } catch {
       toastError(NETWORK_ERROR);
       setRenamePending(false);
@@ -198,7 +194,7 @@ export function RepoSettingsPage() @{
       setTransferPending(false);
       setTransferOpen(false);
       toastSuccess("Repository transferred.");
-      window.location.assign(`/${nextOwner}/${nextName}/settings`);
+      void astroNavigate(`/${nextOwner}/${nextName}/settings`);
     } catch {
       setTransferError(NETWORK_ERROR);
       setTransferPending(false);
@@ -246,7 +242,7 @@ export function RepoSettingsPage() @{
       }
       setDeletePending(false);
       setDeleteOpen(false);
-      window.location.assign("/");
+      void astroNavigate("/");
     } catch {
       setDeleteError(NETWORK_ERROR);
       setDeletePending(false);
@@ -263,340 +259,392 @@ export function RepoSettingsPage() @{
     </div>;
   } @else if (repo && canAdmin) {
     <>
-      <div className="max-w-3xl">
-        <section className="mt-8 flex flex-col gap-4" aria-labelledby="general-heading">
-          <h2
-            id="general-heading"
-            className="font-[family-name:var(--font-display)] text-[18px] font-semibold text-foreground"
+      <div className="mb-6 lg:hidden">
+        <RepoSettingsNav mobile />
+      </div>
+      <div className="lg:grid lg:grid-cols-[13rem_minmax(0,1fr)] lg:gap-10">
+        <aside className="hidden lg:sticky lg:top-24 lg:block lg:self-start">
+          <RepoSettingsNav />
+        </aside>
+        <div className="min-w-0 max-w-3xl">
+          <section
+            id="repo-settings-general"
+            className="mt-8 flex scroll-mt-28 flex-col gap-4 lg:mt-0"
+            aria-labelledby="general-heading"
           >
-            General
-          </h2>
-          <p className="text-[14px] text-muted-foreground">
-            Description, homepage, and topics shown on the Code home About panel.
-          </p>
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="repo-description">Description</Label>
-            <Textarea
-              id="repo-description"
-              value={description}
-              onInput={(e) => setDescription((e.currentTarget as HTMLTextAreaElement).value)}
-              disabled={metaPending}
-              rows={3}
-              maxLength={350}
-            />
-          </div>
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="repo-homepage">Homepage</Label>
-            <Input
-              id="repo-homepage"
-              value={homepage}
-              onInput={(e) => setHomepage((e.currentTarget as HTMLInputElement).value)}
-              disabled={metaPending}
-              placeholder="https://example.com"
-              autoComplete="off"
-            />
-          </div>
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="repo-topics">Topics</Label>
-            <TopicChipsInput
-              id="repo-topics"
-              topics={editTopics}
-              onTopicsChange={setEditTopics}
-              disabled={metaPending}
-              placeholder="Add topics…"
-            />
-            <p className="text-[13px] text-muted-foreground">
-              Lowercase slugs (letters, digits, hyphens) — comma or Enter adds a topic.
-            </p>
-          </div>
-          <Button
-            type="button"
-            disabled={metaPending}
-            onClick={() => void saveMetadata()}
-            className="w-full sm:w-auto"
-          >
-            {(metaPending ? "Saving…" : "Save details") as string}
-          </Button>
-        </section>
-
-        <section className="mt-8 flex flex-col gap-4" aria-labelledby="vis-heading">
-          <h2
-            id="vis-heading"
-            className="font-[family-name:var(--font-display)] text-[18px] font-semibold text-foreground"
-          >
-            Visibility
-          </h2>
-          <p className="text-[14px] text-muted-foreground">Choose who can see this repository.</p>
-          <div className="flex flex-wrap gap-2" role="group" aria-label="Visibility">
-            <Button
-              type="button"
-              variant={visibility === "public" ? "default" : "secondary"}
-              aria-pressed={visibility === "public"}
-              disabled={visPending}
-              onClick={() => setVisibility("public")}
+            <h2
+              id="general-heading"
+              className="font-[family-name:var(--font-display)] text-[18px] font-semibold text-foreground"
             >
-              Public
-            </Button>
-            <Button
-              type="button"
-              variant={visibility === "private" ? "default" : "secondary"}
-              aria-pressed={visibility === "private"}
-              disabled={visPending}
-              onClick={() => setVisibility("private")}
-            >
-              Private
-            </Button>
-          </div>
-          @if (visibility === "private") {
-            <p className="text-[14px] text-muted-foreground">{PRIVATE_HELPER as string}</p>;
-          }
-          <Button
-            type="button"
-            disabled={visPending || visibility === repo.visibility}
-            onClick={() => void saveVisibility()}
-            className="w-full sm:w-auto"
-          >
-            {(visPending ? "Saving…" : "Save visibility") as string}
-          </Button>
-        </section>
-
-        <CollaboratorsPanel owner={owner} name={repoName} />
-
-        <BranchProtectionPanel owner={owner} name={repoName} can_admin={canAdmin} />
-
-        <DeployKeysPanel owner={owner} name={repoName} can_admin={canAdmin} />
-
-        <GitQuotaSettingsPanel owner={owner} name={repoName} can_admin={canAdmin} />
-
-        <LfsSettingsPanel owner={owner} name={repoName} can_admin={canAdmin} />
-        <TemplateRepoSettingsPanel owner={owner} name={repoName} can_admin={canAdmin} />
-        <RepoFeaturesPanel owner={owner} name={repoName} can_admin={canAdmin} repo={repo} />
-        <ActionsSettingsPanel owner={owner} name={repoName} can_admin={canAdmin} />
-
-        <MergeSettingsPanel owner={owner} name={repoName} can_admin={canAdmin} />
-
-        <WebhooksPanel owner={owner} name={repoName} can_admin={canAdmin} />
-        <MirrorSettingsPanel owner={owner} name={repoName} can_admin={canAdmin} />
-
-        <LfsBrowser owner={owner} name={repoName} />
-
-        <section
-          className="mt-12 flex flex-col gap-6 rounded-md border border-destructive/40 p-4"
-          aria-labelledby="danger-heading"
-        >
-          <h2
-            id="danger-heading"
-            className="font-[family-name:var(--font-display)] text-[18px] font-semibold text-destructive"
-          >
-            Danger zone
-          </h2>
-
-          <div className="flex flex-col gap-3" aria-labelledby="rename-heading">
-            <h3 id="rename-heading" className="text-[16px] font-semibold text-foreground">
-              Rename repository
-            </h3>
-            <p className="text-[14px] leading-[1.4] text-muted-foreground">
-              Change the repository name. Old URLs redirect for a retention period.
+              General
+            </h2>
+            <p className="text-[14px] text-muted-foreground">
+              Description, homepage, and topics shown on the Code home About panel.
             </p>
             <div className="flex flex-col gap-2">
-              <Label htmlFor="repo-rename-name">New name</Label>
-              <Input
-                id="repo-rename-name"
-                value={newName}
-                onInput={(e) => setNewName((e.currentTarget as HTMLInputElement).value)}
-                autoComplete="off"
-                disabled={renamePending}
-                placeholder={repo.name as string}
+              <Label htmlFor="repo-description">Description</Label>
+              <Textarea
+                id="repo-description"
+                value={description}
+                onInput={(e) => setDescription((e.currentTarget as HTMLTextAreaElement).value)}
+                disabled={metaPending}
+                rows={3}
+                maxLength={350}
               />
             </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="repo-homepage">Homepage</Label>
+              <Input
+                id="repo-homepage"
+                value={homepage}
+                onInput={(e) => setHomepage((e.currentTarget as HTMLInputElement).value)}
+                disabled={metaPending}
+                placeholder="https://example.com"
+                autoComplete="off"
+              />
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="repo-topics">Topics</Label>
+              <TopicChipsInput
+                id="repo-topics"
+                topics={editTopics}
+                onTopicsChange={setEditTopics}
+                disabled={metaPending}
+                placeholder="Add topics…"
+              />
+              <p className="text-[13px] text-muted-foreground">
+                Lowercase slugs (letters, digits, hyphens) — comma or Enter adds a topic.
+              </p>
+            </div>
             <Button
               type="button"
-              variant="destructive"
+              disabled={metaPending}
+              onClick={() => void saveMetadata()}
               className="w-full sm:w-auto"
-              disabled={renamePending || !newName.trim() || newName.trim() === repo.name}
-              onClick={() => void submitRename()}
             >
-              {(renamePending ? "Renaming…" : "Rename repository") as string}
+              {(metaPending ? "Saving…" : "Save details") as string}
             </Button>
-          </div>
+          </section>
 
-          <div className="flex flex-col gap-3" aria-labelledby="transfer-heading">
-            <h3 id="transfer-heading" className="text-[16px] font-semibold text-foreground">
-              Transfer ownership
-            </h3>
-            <p className="text-[14px] leading-[1.4] text-muted-foreground">
-              Move this repository to another user or organization. You must type the repository
-              name to confirm.
-            </p>
-            <div className="flex flex-wrap gap-2" role="group" aria-label="Destination type">
+          <section
+            id="repo-settings-visibility"
+            className="mt-8 flex scroll-mt-28 flex-col gap-4"
+            aria-labelledby="vis-heading"
+          >
+            <h2
+              id="vis-heading"
+              className="font-[family-name:var(--font-display)] text-[18px] font-semibold text-foreground"
+            >
+              Visibility
+            </h2>
+            <p className="text-[14px] text-muted-foreground">Choose who can see this repository.</p>
+            <div className="flex flex-wrap gap-2" role="group" aria-label="Visibility">
               <Button
                 type="button"
-                variant={destOwnerType === "user" ? "default" : "secondary"}
-                aria-pressed={destOwnerType === "user"}
-                disabled={transferPending}
-                onClick={() => {
-                  setDestOwnerType("user");
-                  setDestOwner("");
-                }}
+                variant={visibility === "public" ? "default" : "secondary"}
+                aria-pressed={visibility === "public"}
+                disabled={visPending}
+                onClick={() => setVisibility("public")}
               >
-                User
+                Public
               </Button>
               <Button
                 type="button"
-                variant={destOwnerType === "org" ? "default" : "secondary"}
-                aria-pressed={destOwnerType === "org"}
-                disabled={transferPending}
-                onClick={() => {
-                  setDestOwnerType("org");
-                  setDestOwner("");
-                }}
+                variant={visibility === "private" ? "default" : "secondary"}
+                aria-pressed={visibility === "private"}
+                disabled={visPending}
+                onClick={() => setVisibility("private")}
               >
-                Organization
+                Private
               </Button>
             </div>
-            <OwnerLookup
-              id="repo-transfer-dest"
-              label="Destination owner"
-              ownerType={destOwnerType}
-              value={destOwner}
-              onValueChange={setDestOwner}
-              disabled={transferPending}
-            />
+            @if (visibility === "private") {
+              <p className="text-[14px] text-muted-foreground">{PRIVATE_HELPER as string}</p>;
+            }
             <Button
               type="button"
-              variant="destructive"
+              disabled={visPending || visibility === repo.visibility}
+              onClick={() => void saveVisibility()}
               className="w-full sm:w-auto"
-              disabled={transferPending || !destOwner.trim()}
-              onClick={() => {
-                setTransferError("");
+            >
+              {(visPending ? "Saving…" : "Save visibility") as string}
+            </Button>
+          </section>
+
+          <div id="repo-settings-collaborators" className="scroll-mt-28">
+            <CollaboratorsPanel owner={owner} name={repoName} />
+          </div>
+
+          <div id="repo-settings-branch-protection" className="scroll-mt-28">
+            <BranchProtectionPanel owner={owner} name={repoName} can_admin={canAdmin} />
+          </div>
+
+          <div id="repo-settings-deploy-keys" className="scroll-mt-28">
+            <DeployKeysPanel owner={owner} name={repoName} can_admin={canAdmin} />
+          </div>
+
+          <div id="repo-settings-storage" className="scroll-mt-28">
+            <GitQuotaSettingsPanel owner={owner} name={repoName} can_admin={canAdmin} />
+          </div>
+
+          <div id="repo-settings-lfs" className="scroll-mt-28">
+            <LfsSettingsPanel owner={owner} name={repoName} can_admin={canAdmin} />
+          </div>
+          <div id="repo-settings-template" className="scroll-mt-28">
+            <TemplateRepoSettingsPanel owner={owner} name={repoName} can_admin={canAdmin} />
+          </div>
+          <div id="repo-settings-features" className="scroll-mt-28">
+            <RepoFeaturesPanel owner={owner} name={repoName} can_admin={canAdmin} repo={repo} />
+          </div>
+          <div id="repo-settings-actions" className="scroll-mt-28">
+            <ActionsSettingsPanel owner={owner} name={repoName} can_admin={canAdmin} />
+          </div>
+
+          <div id="repo-settings-merge" className="scroll-mt-28">
+            <MergeSettingsPanel owner={owner} name={repoName} can_admin={canAdmin} />
+          </div>
+
+          <div id="repo-settings-webhooks" className="scroll-mt-28">
+            <WebhooksPanel owner={owner} name={repoName} can_admin={canAdmin} />
+          </div>
+          <div id="repo-settings-mirror" className="scroll-mt-28">
+            <MirrorSettingsPanel owner={owner} name={repoName} can_admin={canAdmin} />
+          </div>
+
+          <div id="repo-settings-lfs-objects" className="scroll-mt-28">
+            <LfsBrowser owner={owner} name={repoName} />
+          </div>
+
+          <section
+            id="repo-settings-danger"
+            className="mt-12 flex scroll-mt-28 flex-col gap-6 rounded-md border border-destructive/40 p-4"
+            aria-labelledby="danger-heading"
+          >
+            <h2
+              id="danger-heading"
+              className="font-[family-name:var(--font-display)] text-[18px] font-semibold text-destructive"
+            >
+              Danger zone
+            </h2>
+
+            <div className="flex flex-col gap-3" aria-labelledby="rename-heading">
+              <h3 id="rename-heading" className="text-[16px] font-semibold text-foreground">
+                Rename repository
+              </h3>
+              <p className="text-[14px] leading-[1.4] text-muted-foreground">
+                Change the repository name. Old URLs redirect for a retention period.
+              </p>
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="repo-rename-name">New name</Label>
+                <Input
+                  id="repo-rename-name"
+                  value={newName}
+                  onInput={(e) => setNewName((e.currentTarget as HTMLInputElement).value)}
+                  autoComplete="off"
+                  disabled={renamePending}
+                  placeholder={repo.name as string}
+                />
+              </div>
+              <Button
+                type="button"
+                variant="destructive"
+                className="w-full sm:w-auto"
+                disabled={renamePending || !newName.trim() || newName.trim() === repo.name}
+                onClick={() => void submitRename()}
+              >
+                {(renamePending ? "Renaming…" : "Rename repository") as string}
+              </Button>
+            </div>
+
+            <div className="flex flex-col gap-3" aria-labelledby="transfer-heading">
+              <h3 id="transfer-heading" className="text-[16px] font-semibold text-foreground">
+                Transfer ownership
+              </h3>
+              <p className="text-[14px] leading-[1.4] text-muted-foreground">
+                Move this repository to another user or organization. You must type the repository
+                name to confirm.
+              </p>
+              <div className="flex flex-wrap gap-2" role="group" aria-label="Destination type">
+                <Button
+                  type="button"
+                  variant={destOwnerType === "user" ? "default" : "secondary"}
+                  aria-pressed={destOwnerType === "user"}
+                  disabled={transferPending}
+                  onClick={() => {
+                    setDestOwnerType("user");
+                    setDestOwner("");
+                  }}
+                >
+                  User
+                </Button>
+                <Button
+                  type="button"
+                  variant={destOwnerType === "org" ? "default" : "secondary"}
+                  aria-pressed={destOwnerType === "org"}
+                  disabled={transferPending}
+                  onClick={() => {
+                    setDestOwnerType("org");
+                    setDestOwner("");
+                  }}
+                >
+                  Organization
+                </Button>
+              </div>
+              <OwnerLookup
+                id="repo-transfer-dest"
+                label="Destination owner"
+                ownerType={destOwnerType}
+                value={destOwner}
+                onValueChange={setDestOwner}
+                disabled={transferPending}
+              />
+              <Button
+                type="button"
+                variant="destructive"
+                className="w-full sm:w-auto"
+                disabled={transferPending || !destOwner.trim()}
+                onClick={() => {
+                  setTransferError("");
+                  setTransferConfirm("");
+                  setTransferOpen(true);
+                }}
+              >
+                Transfer repository
+              </Button>
+            </div>
+
+            <div className="flex flex-col gap-3" aria-labelledby="archive-heading">
+              <h3 id="archive-heading" className="text-[16px] font-semibold text-foreground">
+                {(archived ? "Unarchive repository" : "Archive repository") as string}
+              </h3>
+              <p className="text-[14px] leading-[1.4] text-muted-foreground">
+                {
+                  (archived
+                    ? "Restore writes — pushes, issues, pull requests, and releases become editable again."
+                    : "Make this repository read-only. Code stays browsable and clonable; pushes, issues, pull requests, and releases are disabled until unarchived.") as string
+                }
+              </p>
+              <Button
+                type="button"
+                variant={archived ? "secondary" : "destructive"}
+                className="w-full sm:w-auto"
+                disabled={archivePending}
+                onClick={() => {
+                  setArchiveError("");
+                  setArchiveConfirm("");
+                  setArchiveOpen(true);
+                }}
+              >
+                {(archived ? "Unarchive repository" : "Archive repository") as string}
+              </Button>
+            </div>
+
+            <div className="flex flex-col gap-3">
+              <p className="text-[14px] leading-[1.4] text-muted-foreground">
+                Soft-delete removes this repository from Oxidean. Disk cleanup may run later.
+              </p>
+              <Button
+                type="button"
+                variant="destructive"
+                className="w-full sm:w-auto"
+                onClick={() => {
+                  setDeleteError("");
+                  setConfirmName("");
+                  setDeleteOpen(true);
+                }}
+              >
+                Delete repository
+              </Button>
+            </div>
+          </section>
+
+          <TypeToConfirmDialog
+            open={transferOpen}
+            title="Transfer repository?"
+            description={TRANSFER_BODY}
+            confirmLabel="Repository name"
+            confirmValue={transferConfirm}
+            expectedName={repo.name}
+            onConfirmValueChange={setTransferConfirm}
+            pending={transferPending}
+            error={transferError}
+            confirmButtonLabel="Transfer repository"
+            pendingButtonLabel="Transferring…"
+            inputId="transfer-confirm"
+            testId="repo-transfer-confirm"
+            onOpenChange={(open) => {
+              if (transferPending) return;
+              setTransferOpen(open);
+              if (!open) {
                 setTransferConfirm("");
-                setTransferOpen(true);
-              }}
-            >
-              Transfer repository
-            </Button>
-          </div>
-
-          <div className="flex flex-col gap-3" aria-labelledby="archive-heading">
-            <h3 id="archive-heading" className="text-[16px] font-semibold text-foreground">
-              {(archived ? "Unarchive repository" : "Archive repository") as string}
-            </h3>
-            <p className="text-[14px] leading-[1.4] text-muted-foreground">
-              {
-                (archived
-                  ? "Restore writes — pushes, issues, pull requests, and releases become editable again."
-                  : "Make this repository read-only. Code stays browsable and clonable; pushes, issues, pull requests, and releases are disabled until unarchived.") as string
+                setTransferError("");
               }
-            </p>
-            <Button
-              type="button"
-              variant={archived ? "secondary" : "destructive"}
-              className="w-full sm:w-auto"
-              disabled={archivePending}
-              onClick={() => {
-                setArchiveError("");
+            }}
+            onConfirm={() => void submitTransfer()}
+          />
+
+          <TypeToConfirmDialog
+            open={archiveOpen}
+            title={(archived ? "Unarchive repository?" : "Archive repository?") as string}
+            description={(archived ? UNARCHIVE_BODY : ARCHIVE_BODY) as string}
+            confirmLabel="Repository name"
+            confirmValue={archiveConfirm}
+            expectedName={repo.name}
+            onConfirmValueChange={setArchiveConfirm}
+            pending={archivePending}
+            error={archiveError}
+            confirmButtonLabel={
+              (archived ? "Unarchive repository" : "Archive repository") as string
+            }
+            pendingButtonLabel={(archived ? "Unarchiving…" : "Archiving…") as string}
+            inputId="archive-confirm"
+            testId="repo-archive-confirm"
+            onOpenChange={(open) => {
+              if (archivePending) return;
+              setArchiveOpen(open);
+              if (!open) {
                 setArchiveConfirm("");
-                setArchiveOpen(true);
-              }}
-            >
-              {(archived ? "Unarchive repository" : "Archive repository") as string}
-            </Button>
-          </div>
+                setArchiveError("");
+              }
+            }}
+            onConfirm={() => void submitArchive()}
+          />
 
-          <div className="flex flex-col gap-3">
-            <p className="text-[14px] leading-[1.4] text-muted-foreground">
-              Soft-delete removes this repository from Oxidean. Disk cleanup may run later.
-            </p>
-            <Button
-              type="button"
-              variant="destructive"
-              className="w-full sm:w-auto"
-              onClick={() => {
-                setDeleteError("");
+          <TypeToConfirmDialog
+            open={deleteOpen}
+            title="Delete repository?"
+            description={SOFT_DELETE_BODY}
+            confirmLabel="Repository name"
+            confirmValue={confirmName}
+            expectedName={repo.name}
+            onConfirmValueChange={setConfirmName}
+            pending={deletePending}
+            error={deleteError}
+            confirmButtonLabel="Delete repository"
+            pendingButtonLabel="Deleting…"
+            inputId="soft-delete-confirm"
+            testId="repo-delete-confirm"
+            onOpenChange={(open) => {
+              if (deletePending) return;
+              setDeleteOpen(open);
+              if (!open) {
                 setConfirmName("");
-                setDeleteOpen(true);
-              }}
-            >
-              Delete repository
-            </Button>
-          </div>
-        </section>
+                setDeleteError("");
+              }
+            }}
+            onConfirm={() => void submitDelete()}
+          />
+        </div>
       </div>
-
-      <TypeToConfirmDialog
-        open={transferOpen}
-        title="Transfer repository?"
-        description={TRANSFER_BODY}
-        confirmLabel="Repository name"
-        confirmValue={transferConfirm}
-        expectedName={repo.name}
-        onConfirmValueChange={setTransferConfirm}
-        pending={transferPending}
-        error={transferError}
-        confirmButtonLabel="Transfer repository"
-        pendingButtonLabel="Transferring…"
-        inputId="transfer-confirm"
-        testId="repo-transfer-confirm"
-        onOpenChange={(open) => {
-          if (transferPending) return;
-          setTransferOpen(open);
-          if (!open) {
-            setTransferConfirm("");
-            setTransferError("");
-          }
-        }}
-        onConfirm={() => void submitTransfer()}
-      />
-
-      <TypeToConfirmDialog
-        open={archiveOpen}
-        title={(archived ? "Unarchive repository?" : "Archive repository?") as string}
-        description={(archived ? UNARCHIVE_BODY : ARCHIVE_BODY) as string}
-        confirmLabel="Repository name"
-        confirmValue={archiveConfirm}
-        expectedName={repo.name}
-        onConfirmValueChange={setArchiveConfirm}
-        pending={archivePending}
-        error={archiveError}
-        confirmButtonLabel={(archived ? "Unarchive repository" : "Archive repository") as string}
-        pendingButtonLabel={(archived ? "Unarchiving…" : "Archiving…") as string}
-        inputId="archive-confirm"
-        testId="repo-archive-confirm"
-        onOpenChange={(open) => {
-          if (archivePending) return;
-          setArchiveOpen(open);
-          if (!open) {
-            setArchiveConfirm("");
-            setArchiveError("");
-          }
-        }}
-        onConfirm={() => void submitArchive()}
-      />
-
-      <TypeToConfirmDialog
-        open={deleteOpen}
-        title="Delete repository?"
-        description={SOFT_DELETE_BODY}
-        confirmLabel="Repository name"
-        confirmValue={confirmName}
-        expectedName={repo.name}
-        onConfirmValueChange={setConfirmName}
-        pending={deletePending}
-        error={deleteError}
-        confirmButtonLabel="Delete repository"
-        pendingButtonLabel="Deleting…"
-        inputId="soft-delete-confirm"
-        testId="repo-delete-confirm"
-        onOpenChange={(open) => {
-          if (deletePending) return;
-          setDeleteOpen(open);
-          if (!open) {
-            setConfirmName("");
-            setDeleteError("");
-          }
-        }}
-        onConfirm={() => void submitDelete()}
-      />
     </>;
   }
+}
+
+/** Page root — RepoLayout (chrome + repo store) around the leaf content. */
+export function RepoSettingsPage() @{
+  <AppPage>
+    <RepoLayout>
+      <RepoSettingsPageContent />
+    </RepoLayout>
+  </AppPage>;
 }

@@ -35,16 +35,16 @@ macro_rules! map_email_token {
     ($row:expr) => {{
         let row = $row;
         EmailTokenRow {
-            id: row.try_get("id").map_err(|e| format!("email token row: {e}"))?,
+            id: row
+                .try_get("id")
+                .map_err(|e| format!("email token row: {e}"))?,
             user_id: row
                 .try_get("user_id")
                 .map_err(|e| format!("email token row: {e}"))?,
             purpose: row
                 .try_get("purpose")
                 .map_err(|e| format!("email token row: {e}"))?,
-            target_email: row
-                .try_get::<String, _>("target_email")
-                .unwrap_or_default(),
+            target_email: row.try_get::<String, _>("target_email").unwrap_or_default(),
             token_hash: row
                 .try_get("token_hash")
                 .map_err(|e| format!("email token row: {e}"))?,
@@ -63,17 +63,20 @@ macro_rules! map_email_token {
     }};
 }
 
-const TOKEN_SELECT_PG: &str = "SELECT id, user_id, purpose, target_email, token_hash, otp_hash, attempt_count, issue_count,
+const TOKEN_SELECT_PG: &str =
+    "SELECT id, user_id, purpose, target_email, token_hash, otp_hash, attempt_count, issue_count,
        to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS expires_at,
        to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS created_at
 FROM auth_email_tokens";
 
-const TOKEN_SELECT_MYSQL: &str = "SELECT id, user_id, purpose, target_email, token_hash, otp_hash, attempt_count, issue_count,
+const TOKEN_SELECT_MYSQL: &str =
+    "SELECT id, user_id, purpose, target_email, token_hash, otp_hash, attempt_count, issue_count,
        DATE_FORMAT(expires_at, '%Y-%m-%dT%H:%i:%sZ') AS expires_at,
        DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at
 FROM auth_email_tokens";
 
-const TOKEN_SELECT_SQLITE: &str = "SELECT id, user_id, purpose, target_email, token_hash, otp_hash, attempt_count, issue_count,
+const TOKEN_SELECT_SQLITE: &str =
+    "SELECT id, user_id, purpose, target_email, token_hash, otp_hash, attempt_count, issue_count,
        strftime('%Y-%m-%dT%H:%M:%SZ', expires_at) AS expires_at,
        strftime('%Y-%m-%dT%H:%M:%SZ', created_at) AS created_at
 FROM auth_email_tokens";
@@ -186,9 +189,9 @@ pub async fn find_by_user_purpose(
     let target = target_email.trim().to_ascii_lowercase();
     match pool {
         DbPool::Postgres(p) => {
-            let row = sqlx::query(&format!(
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{TOKEN_SELECT_PG} WHERE user_id = $1 AND purpose = $2 AND target_email = $3"
-            ))
+            )))
             .bind(user_id)
             .bind(purpose)
             .bind(&target)
@@ -201,9 +204,9 @@ pub async fn find_by_user_purpose(
             })
         }
         DbPool::MySql(p) => {
-            let row = sqlx::query(&format!(
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{TOKEN_SELECT_MYSQL} WHERE user_id = ? AND purpose = ? AND target_email = ?"
-            ))
+            )))
             .bind(user_id)
             .bind(purpose)
             .bind(&target)
@@ -216,9 +219,9 @@ pub async fn find_by_user_purpose(
             })
         }
         DbPool::Sqlite(p) => {
-            let row = sqlx::query(&format!(
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{TOKEN_SELECT_SQLITE} WHERE user_id = ?1 AND purpose = ?2 AND target_email = ?3"
-            ))
+            )))
             .bind(user_id)
             .bind(purpose)
             .bind(&target)
@@ -239,33 +242,39 @@ pub async fn find_by_token_hash(
 ) -> Result<Option<EmailTokenRow>, String> {
     match pool {
         DbPool::Postgres(p) => {
-            let row = sqlx::query(&format!("{TOKEN_SELECT_PG} WHERE token_hash = $1"))
-                .bind(token_hash)
-                .fetch_optional(p)
-                .await
-                .map_err(|e| format!("find email token by token_hash failed: {e}"))?;
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{TOKEN_SELECT_PG} WHERE token_hash = $1"
+            )))
+            .bind(token_hash)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("find email token by token_hash failed: {e}"))?;
             Ok(match row {
                 Some(r) => Some(map_email_token!(&r)),
                 None => None,
             })
         }
         DbPool::MySql(p) => {
-            let row = sqlx::query(&format!("{TOKEN_SELECT_MYSQL} WHERE token_hash = ?"))
-                .bind(token_hash)
-                .fetch_optional(p)
-                .await
-                .map_err(|e| format!("find email token by token_hash failed: {e}"))?;
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{TOKEN_SELECT_MYSQL} WHERE token_hash = ?"
+            )))
+            .bind(token_hash)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("find email token by token_hash failed: {e}"))?;
             Ok(match row {
                 Some(r) => Some(map_email_token!(&r)),
                 None => None,
             })
         }
         DbPool::Sqlite(p) => {
-            let row = sqlx::query(&format!("{TOKEN_SELECT_SQLITE} WHERE token_hash = ?1"))
-                .bind(token_hash)
-                .fetch_optional(p)
-                .await
-                .map_err(|e| format!("find email token by token_hash failed: {e}"))?;
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{TOKEN_SELECT_SQLITE} WHERE token_hash = ?1"
+            )))
+            .bind(token_hash)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("find email token by token_hash failed: {e}"))?;
             Ok(match row {
                 Some(r) => Some(map_email_token!(&r)),
                 None => None,
@@ -280,33 +289,39 @@ pub async fn find_by_otp_hash(
 ) -> Result<Option<EmailTokenRow>, String> {
     match pool {
         DbPool::Postgres(p) => {
-            let row = sqlx::query(&format!("{TOKEN_SELECT_PG} WHERE otp_hash = $1"))
-                .bind(otp_hash)
-                .fetch_optional(p)
-                .await
-                .map_err(|e| format!("find email token by otp_hash failed: {e}"))?;
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{TOKEN_SELECT_PG} WHERE otp_hash = $1"
+            )))
+            .bind(otp_hash)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("find email token by otp_hash failed: {e}"))?;
             Ok(match row {
                 Some(r) => Some(map_email_token!(&r)),
                 None => None,
             })
         }
         DbPool::MySql(p) => {
-            let row = sqlx::query(&format!("{TOKEN_SELECT_MYSQL} WHERE otp_hash = ?"))
-                .bind(otp_hash)
-                .fetch_optional(p)
-                .await
-                .map_err(|e| format!("find email token by otp_hash failed: {e}"))?;
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{TOKEN_SELECT_MYSQL} WHERE otp_hash = ?"
+            )))
+            .bind(otp_hash)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("find email token by otp_hash failed: {e}"))?;
             Ok(match row {
                 Some(r) => Some(map_email_token!(&r)),
                 None => None,
             })
         }
         DbPool::Sqlite(p) => {
-            let row = sqlx::query(&format!("{TOKEN_SELECT_SQLITE} WHERE otp_hash = ?1"))
-                .bind(otp_hash)
-                .fetch_optional(p)
-                .await
-                .map_err(|e| format!("find email token by otp_hash failed: {e}"))?;
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{TOKEN_SELECT_SQLITE} WHERE otp_hash = ?1"
+            )))
+            .bind(otp_hash)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("find email token by otp_hash failed: {e}"))?;
             Ok(match row {
                 Some(r) => Some(map_email_token!(&r)),
                 None => None,

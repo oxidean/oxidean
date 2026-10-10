@@ -1,80 +1,61 @@
 import { cleanup, render, screen, waitFor } from "@octanejs/testing-library";
-import { isNotFound } from "@octanejs/tanstack-router";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/bootstrap", () => ({
   redirectIfNeedsSetup: vi.fn(async () => false),
 }));
 
+const providerConfigMock = vi.fn();
+const meMock = vi.fn();
+const signupMock = vi.fn();
+
 vi.mock("@/lib/api-client", () => ({
   apiClient: {
     auth: {
-      me: vi.fn(async () => ({
-        ok: false,
-        error: { code: "auth.unauthenticated", message: "n" },
-      })),
-      providerConfig: vi.fn(async () => ({
-        ok: true,
-        data: { mode: "local", allow_signup: true },
-      })),
-      signup: vi.fn(),
+      me: (...args: unknown[]) => meMock(...args),
+      providerConfig: (...args: unknown[]) => providerConfigMock(...args),
+      signup: (...args: unknown[]) => signupMock(...args),
     },
   },
 }));
 
-vi.mock("@/lib/ssr-auth", () => ({
-  fetchProviderConfig: vi.fn(),
-  fetchSessionMe: vi.fn(async () => ({
-    ok: false,
-    error: { code: "auth.unauthenticated", message: "n" },
-  })),
-}));
-
-vi.mock("@octanejs/tanstack-router", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@octanejs/tanstack-router")>();
-  return {
-    ...actual,
-    useLoaderData: () => ({ mode: "local", loadError: "" }),
-  };
-});
-
-import { fetchProviderConfig } from "@/lib/ssr-auth";
-import { Route, SignupPage } from "./signup";
+import { SignupPage } from "./signup";
 
 afterEach(cleanup);
 
-describe("/signup closed-signup SSR (D-06)", () => {
-  it("beforeLoad calls notFound when allow_signup is false", async () => {
-    expect(
-      Route.options.beforeLoad,
-      "signup beforeLoad must gate closed signup with notFound()",
-    ).toBeTypeOf("function");
+beforeEach(() => {
+  window.history.pushState({}, "", "/signup");
+  providerConfigMock.mockReset();
+  meMock.mockReset();
+  signupMock.mockReset();
+  meMock.mockResolvedValue({
+    ok: false,
+    error: { code: "auth.unauthenticated", message: "n" },
+  });
+  providerConfigMock.mockResolvedValue({
+    ok: true,
+    data: { mode: "local", allow_signup: true },
+  });
+});
 
-    vi.mocked(fetchProviderConfig).mockResolvedValue({
+describe("/signup closed-signup gate (D-06)", () => {
+  it("renders a closed-registration state instead of the form when allow_signup is false", async () => {
+    providerConfigMock.mockResolvedValue({
       ok: true,
       data: { mode: "local", allow_signup: false },
     });
-
-    let caught: unknown;
-    try {
-      await Route.options.beforeLoad!({} as never);
-    } catch (e) {
-      caught = e;
-    }
-    expect(isNotFound(caught), "closed signup must throw notFound() — no AuthShell soft page").toBe(
-      true,
-    );
+    render(SignupPage);
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Email")).not.toBeInTheDocument();
+      expect(document.body.textContent).toMatch(/closed/i);
+    });
   });
 
-  it("beforeLoad allows render when allow_signup is true", async () => {
-    expect(Route.options.beforeLoad).toBeTypeOf("function");
-
-    vi.mocked(fetchProviderConfig).mockResolvedValue({
-      ok: true,
-      data: { mode: "local", allow_signup: true },
+  it("renders the form when allow_signup is true", async () => {
+    render(SignupPage);
+    await waitFor(() => {
+      expect(screen.getByLabelText("Email")).toBeInTheDocument();
     });
-
-    await expect(Route.options.beforeLoad!({} as never)).resolves.toBeUndefined();
   });
 });
 

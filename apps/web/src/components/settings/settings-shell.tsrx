@@ -7,9 +7,9 @@ import { OrgSettingsNav, type OrgSettingsNavActive } from "@/components/org/org-
 import { SettingsNav, type SettingsNavActive } from "@/components/settings/settings-nav";
 
 /** Shared fixed canvas for account + admin settings (prevents width shift between pages). */
-export const SETTINGS_SHELL_MAX = "max-w-5xl";
+const SETTINGS_SHELL_MAX = "max-w-5xl";
 
-export type SettingsShellProps = {
+type SettingsShellProps = {
   children?: unknown;
   className?: string;
   "data-testid"?: string;
@@ -30,7 +30,7 @@ export function SettingsShell(props: SettingsShellProps) @{
   </div>;
 }
 
-export type AccountSettingsLayoutProps = {
+type AccountSettingsLayoutProps = {
   active: SettingsNavActive;
   children?: unknown;
   className?: string;
@@ -49,7 +49,7 @@ export function AccountSettingsLayout(props: AccountSettingsLayoutProps) @{
   </SettingsShell>;
 }
 
-export type AdminSettingsLayoutProps = {
+type AdminSettingsLayoutProps = {
   active: AdminSettingsNavActive;
   children?: unknown;
   className?: string;
@@ -68,7 +68,7 @@ export function AdminSettingsLayout(props: AdminSettingsLayoutProps) @{
   </SettingsShell>;
 }
 
-export type OrgSettingsLayoutProps = {
+type OrgSettingsLayoutProps = {
   slug: string;
   active: OrgSettingsNavActive;
   children?: unknown;

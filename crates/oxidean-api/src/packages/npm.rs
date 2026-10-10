@@ -9,7 +9,7 @@ use axum::{Json, Router};
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use sha1::{Digest as _, Sha1};
+use sha1::Sha1;
 use sha2::{Digest as _, Sha512};
 use uuid::Uuid;
 
@@ -57,13 +57,9 @@ fn from_hex(b: u8) -> Option<u8> {
 }
 
 fn b64_decode(input: &str) -> Option<Vec<u8>> {
-    const TABLE: &[u8] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const TABLE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = Vec::new();
-    let bytes: Vec<u8> = input
-        .bytes()
-        .filter(|b| !b.is_ascii_whitespace())
-        .collect();
+    let bytes: Vec<u8> = input.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
     let mut buf = 0u32;
     let mut bits = 0u32;
     for &b in &bytes {
@@ -113,10 +109,7 @@ fn tarball_url(owner: &str, pkg: &str, version: &str) -> String {
     )
 }
 
-async fn resolve_owner(
-    db: &Database,
-    login: &str,
-) -> Result<Option<(String, String)>, String> {
+async fn resolve_owner(db: &Database, login: &str) -> Result<Option<(String, String)>, String> {
     if let Some(u) = db.find_user_by_username(login).await? {
         return Ok(Some(("user".into(), u.id)));
     }
@@ -135,7 +128,13 @@ async fn capability_for_owner(
 ) -> Result<Option<Capability>, String> {
     let public = acl::is_public(visibility);
     let Some(uid) = user_id else {
-        return Ok(coalesce(false, None, MemberBasePermission::None, None, public));
+        return Ok(coalesce(
+            false,
+            None,
+            MemberBasePermission::None,
+            None,
+            public,
+        ));
     };
     if owner_type == "user" {
         return Ok(coalesce(
@@ -219,6 +218,7 @@ fn package_meta(pkg: &PackageRow) -> NpmPackageMeta {
     })
 }
 
+#[allow(clippy::result_large_err)]
 async fn require_write(
     state: &AppState,
     headers: &HeaderMap,
@@ -348,46 +348,44 @@ async fn put_publish(
     };
 
     // Deprecate path: update metadata only
-    if attachments.map(|a| a.is_empty()).unwrap_or(true)
-        && versions.is_some()
-        && existing.is_some()
-    {
-        let pkg = existing.unwrap();
-        let ok = match authorize_pkg(&state.db, Some(&identity), &pkg, PackageAction::Publish)
-            .await
-        {
-            Ok(v) => v,
-            Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-        };
-        if !ok {
-            return StatusCode::FORBIDDEN.into_response();
-        }
-        if let Some(vers) = versions {
-            for (ver, man) in vers {
-                if let Ok(Some(row)) = state.db.find_package_version(&pkg.id, ver).await {
-                    let mut vm: NpmVersionMeta =
-                        serde_json::from_str(&row.metadata_json).unwrap_or_default();
-                    if let Some(dep) = man.get("deprecated").and_then(|d| d.as_str()) {
-                        vm.deprecated = Some(dep.to_string());
-                    } else if man.get("deprecated").is_some() {
-                        vm.deprecated = None;
+    if attachments.map(|a| a.is_empty()).unwrap_or(true) && versions.is_some() {
+        if let Some(pkg) = existing.as_ref() {
+            let ok = match authorize_pkg(&state.db, Some(&identity), pkg, PackageAction::Publish)
+                .await
+            {
+                Ok(v) => v,
+                Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+            };
+            if !ok {
+                return StatusCode::FORBIDDEN.into_response();
+            }
+            if let Some(vers) = versions {
+                for (ver, man) in vers {
+                    if let Ok(Some(row)) = state.db.find_package_version(&pkg.id, ver).await {
+                        let mut vm: NpmVersionMeta =
+                            serde_json::from_str(&row.metadata_json).unwrap_or_default();
+                        if let Some(dep) = man.get("deprecated").and_then(|d| d.as_str()) {
+                            vm.deprecated = Some(dep.to_string());
+                        } else if man.get("deprecated").is_some() {
+                            vm.deprecated = None;
+                        }
+                        vm.manifest = man.clone();
+                        let meta_json = serde_json::to_string(&vm).unwrap_or_else(|_| "{}".into());
+                        let _ = state
+                            .db
+                            .update_package_version_metadata(&row.id, &meta_json)
+                            .await;
                     }
-                    vm.manifest = man.clone();
-                    let meta_json = serde_json::to_string(&vm).unwrap_or_else(|_| "{}".into());
-                    let _ = state
-                        .db
-                        .update_package_version_metadata(&row.id, &meta_json)
-                        .await;
                 }
             }
+            if let Some(tags) = doc.get("dist-tags").and_then(|t| t.as_object()) {
+                let mut meta = package_meta(pkg);
+                meta.dist_tags = tags.clone();
+                let desc = serde_json::to_string(&meta).unwrap_or_default();
+                let _ = update_package_description(&state.db, &pkg.id, &desc).await;
+            }
+            return StatusCode::OK.into_response();
         }
-        if let Some(tags) = doc.get("dist-tags").and_then(|t| t.as_object()) {
-            let mut meta = package_meta(&pkg);
-            meta.dist_tags = tags.clone();
-            let desc = serde_json::to_string(&meta).unwrap_or_default();
-            let _ = update_package_description(&state.db, &pkg.id, &desc).await;
-        }
-        return StatusCode::OK.into_response();
     }
 
     let Some(attachments) = attachments else {
@@ -396,10 +394,7 @@ async fn put_publish(
     let Some((filename, att)) = attachments.iter().next() else {
         return StatusCode::BAD_REQUEST.into_response();
     };
-    let data_b64 = att
-        .get("data")
-        .and_then(|d| d.as_str())
-        .unwrap_or("");
+    let data_b64 = att.get("data").and_then(|d| d.as_str()).unwrap_or("");
     let tarball = match b64_decode(data_b64) {
         Some(b) => b,
         None => return StatusCode::BAD_REQUEST.into_response(),
@@ -425,8 +420,7 @@ async fn put_publish(
         .unwrap_or("public");
 
     let pkg = if let Some(pkg) = existing {
-        let ok = match authorize_pkg(&state.db, Some(&identity), &pkg, PackageAction::Publish)
-            .await
+        let ok = match authorize_pkg(&state.db, Some(&identity), &pkg, PackageAction::Publish).await
         {
             Ok(v) => v,
             Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
@@ -465,12 +459,7 @@ async fn put_publish(
             Ok(c) => c,
             Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
         };
-        if !acl::authorize(
-            visibility,
-            have,
-            true,
-            PackageAction::Publish,
-        ) {
+        if !acl::authorize(visibility, have, true, PackageAction::Publish) {
             return StatusCode::FORBIDDEN.into_response();
         }
         let id = Uuid::new_v4().to_string();
@@ -583,7 +572,11 @@ async fn put_publish(
     StatusCode::CREATED.into_response()
 }
 
-async fn update_package_description(db: &Database, id: &str, description: &str) -> Result<(), String> {
+async fn update_package_description(
+    db: &Database,
+    id: &str,
+    description: &str,
+) -> Result<(), String> {
     // Reuse description column for npm package-level JSON (dist-tags).
     db.update_package_description(id, description).await
 }
@@ -687,7 +680,10 @@ async fn put_dist_tag(
         Err(r) => return r,
     };
     let pkg_name = decode_pkg_name(&package);
-    let version = String::from_utf8_lossy(&body).trim().trim_matches('"').to_string();
+    let version = String::from_utf8_lossy(&body)
+        .trim()
+        .trim_matches('"')
+        .to_string();
     let Some((ot, oid)) = (match resolve_owner(&state.db, &owner).await {
         Ok(v) => v,
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
@@ -784,17 +780,11 @@ async fn search_v1(
             continue;
         }
         // Authenticated callers must still pass Pull ACL — do not list private/linked-private.
-        let allowed = match authorize_pkg(
-            &state.db,
-            identity.as_ref(),
-            &pkg,
-            PackageAction::Pull,
-        )
-        .await
-        {
-            Ok(v) => v,
-            Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-        };
+        let allowed =
+            match authorize_pkg(&state.db, identity.as_ref(), &pkg, PackageAction::Pull).await {
+                Ok(v) => v,
+                Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+            };
         if !allowed {
             continue;
         }
@@ -819,18 +809,12 @@ pub fn router() -> Router<AppState> {
     let max = max_blob_bytes_from_env().min(usize::MAX as u64) as usize;
     Router::new()
         .route("/{owner}/-/v1/search", get(search_v1))
-        .route(
-            "/{owner}/-/package/{package}/dist-tags",
-            get(get_dist_tags),
-        )
+        .route("/{owner}/-/package/{package}/dist-tags", get(get_dist_tags))
         .route(
             "/{owner}/-/package/{package}/dist-tags/{tag}",
             put(put_dist_tag).delete(delete_dist_tag),
         )
-        .route(
-            "/{owner}/{package}/-/{filename}",
-            get(get_tarball),
-        )
+        .route("/{owner}/{package}/-/{filename}", get(get_tarball))
         .route("/{owner}/{package}", get(get_packument).put(put_publish))
         .layer(DefaultBodyLimit::max(max))
 }

@@ -108,10 +108,7 @@ async fn repo_create_verified_happy_path() {
     let bytes = create.into_body().collect().await.unwrap().to_bytes();
     let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(v["ok"], true, "repo.create ok=true — {v}");
-    assert_eq!(
-        v["data"]["name"], "hello-world",
-        "created repo name"
-    );
+    assert_eq!(v["data"]["name"], "hello-world", "created repo name");
     assert_eq!(v["data"]["owner_username"], "owner1");
     assert_eq!(v["data"]["visibility"], "public");
     assert_eq!(v["data"]["default_branch"], "main");
@@ -159,10 +156,7 @@ async fn repo_create_unverified_email_unverified() {
 async fn repo_create_duplicate_name_stable_error() {
     let dir = tempfile::tempdir().expect("tempdir");
     let repos = dir.path().join("repos");
-    let url = format!(
-        "sqlite:{}",
-        dir.path().join("repo_create_dup.db").display()
-    );
+    let url = format!("sqlite:{}", dir.path().join("repo_create_dup.db").display());
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
@@ -414,10 +408,7 @@ async fn repo_create_git_failure_soft_deletes_row_allows_recreate() {
 async fn repo_create_under_org_as_owner() {
     let dir = tempfile::tempdir().expect("tempdir");
     let repos = dir.path().join("repos");
-    let url = format!(
-        "sqlite:{}",
-        dir.path().join("repo_create_org.db").display()
-    );
+    let url = format!("sqlite:{}", dir.path().join("repo_create_org.db").display());
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
@@ -426,7 +417,9 @@ async fn repo_create_under_org_as_owner() {
     let (cookie, login_v) = signup_and_login(&app, "orgowner@ex.com", "orgowner1").await;
     let user_id = login_v["data"]["id"].as_str().expect("id");
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    db.set_email_verified_at(user_id, &now).await.expect("verify");
+    db.set_email_verified_at(user_id, &now)
+        .await
+        .expect("verify");
 
     let org = app
         .clone()
@@ -448,7 +441,11 @@ async fn repo_create_under_org_as_owner() {
         ))
         .await
         .unwrap();
-    assert_eq!(create.status(), StatusCode::OK, "Owner must create under org");
+    assert_eq!(
+        create.status(),
+        StatusCode::OK,
+        "Owner must create under org"
+    );
     let bytes = create.into_body().collect().await.unwrap().to_bytes();
     let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(v["ok"], true, "{v}");
@@ -482,7 +479,9 @@ async fn repo_create_under_org_as_member_denied() {
     let (owner_cookie, owner_v) = signup_and_login(&app, "boss@ex.com", "boss2").await;
     let owner_id = owner_v["data"]["id"].as_str().expect("id");
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    db.set_email_verified_at(owner_id, &now).await.expect("verify");
+    db.set_email_verified_at(owner_id, &now)
+        .await
+        .expect("verify");
 
     let org = app
         .clone()
@@ -498,7 +497,9 @@ async fn repo_create_under_org_as_member_denied() {
 
     let (member_cookie, member_v) = signup_and_login(&app, "peon@ex.com", "peon1").await;
     let member_id = member_v["data"]["id"].as_str().expect("id");
-    db.set_email_verified_at(member_id, &now).await.expect("verify");
+    db.set_email_verified_at(member_id, &now)
+        .await
+        .expect("verify");
     db.insert_org_member(org_id, member_id, "member")
         .await
         .expect("add member");
@@ -538,7 +539,9 @@ async fn repo_create_under_other_user_denied() {
     let (b_cookie, b_v) = signup_and_login(&app, "bob@ex.com", "bob1").await;
     let bob_id = b_v["data"]["id"].as_str().expect("id");
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    db.set_email_verified_at(bob_id, &now).await.expect("verify");
+    db.set_email_verified_at(bob_id, &now)
+        .await
+        .expect("verify");
 
     let create = app
         .oneshot(rpc_req_with_cookie(
@@ -553,4 +556,3 @@ async fn repo_create_under_other_user_denied() {
     assert_eq!(v["ok"], false);
     assert_eq!(v["error"]["code"], "repo.create_forbidden", "{v}");
 }
-

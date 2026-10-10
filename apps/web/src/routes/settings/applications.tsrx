@@ -1,6 +1,6 @@
-import { createFileRoute, useLoaderData } from "@octanejs/tanstack-router";
 import type { OAuthAppPublic, OAuthGrantPublic, UserPublic } from "@oxidean/api-client";
-import { useQuery } from "@octanejs/tanstack-query";
+import { queryOptions, useQuery } from "@octanejs/tanstack-query";
+import { AppPage } from "@/components/app-page";
 import { useEffect, useState } from "octane";
 import { oauthAppListQueryOptions } from "@oxidean/api-client";
 import { OAuthAppCreateForm } from "@/components/settings/oauth-app-create-form";
@@ -23,39 +23,46 @@ export type ApplicationsLoaderData =
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
 
-export const Route = createFileRoute("/settings/applications")({
-  component: ApplicationsPage,
-  head: () => ({ meta: [{ title: "OAuth applications · Oxidean" }] }),
-  loader: async (): Promise<ApplicationsLoaderData> => {
-    try {
-      const res = await fetchSessionMe();
-      if (!res.ok) {
-        if (res.error.code === "auth.unauthenticated") {
-          return { kind: "unauthenticated" };
+function settingsApplicationsQueryOptions() {
+  return queryOptions({
+    queryKey: ["settings", "settingsApplications"],
+    queryFn: async (): Promise<ApplicationsLoaderData> => {
+      try {
+        const res = await fetchSessionMe();
+        if (!res.ok) {
+          if (res.error.code === "auth.unauthenticated") {
+            return { kind: "unauthenticated" };
+          }
+          return {
+            kind: "error",
+            message: res.error.message || "Could not load session.",
+          };
         }
+        const [apps, grants] = await Promise.all([fetchOAuthAppList(), fetchOAuthGrantList()]);
         return {
-          kind: "error",
-          message: res.error.message || "Could not load session.",
+          kind: "ready",
+          user: res.data,
+          apps: apps.ok ? apps.data : [],
+          grants: grants.ok ? grants.data : [],
         };
+      } catch {
+        return { kind: "error", message: NETWORK_ERROR };
       }
-      const [apps, grants] = await Promise.all([fetchOAuthAppList(), fetchOAuthGrantList()]);
-      return {
-        kind: "ready",
-        user: res.data,
-        apps: apps.ok ? apps.data : [],
-        grants: grants.ok ? grants.data : [],
-      };
-    } catch {
-      return { kind: "error", message: NETWORK_ERROR };
-    }
-  },
-});
+    },
+    retry: false,
+    staleTime: 30_000,
+  });
+}
 
 /** Exported for applications.integration.test.ts (API-03). */
 export function ApplicationsPage() @{
-  const loaderData = useLoaderData({ from: "/settings/applications" }) as
-    | ApplicationsLoaderData
-    | undefined;
+  <AppPage>
+    <ApplicationsContent />
+  </AppPage>;
+}
+
+export function ApplicationsContent() @{
+  const loaderData = useQuery(settingsApplicationsQueryOptions()).data;
 
   useEffect(() => {
     if (loaderData?.kind === "unauthenticated") {
@@ -73,6 +80,10 @@ export function ApplicationsPage() @{
   const [grants, setGrants] = useState<OAuthGrantPublic[]>(
     loaderData?.kind === "ready" ? loaderData.grants : [],
   );
+  // loaderData arrives async (query) — sync grants once ready.
+  useEffect(() => {
+    if (loaderData?.kind === "ready") setGrants(loaderData.grants);
+  }, [loaderData]);
   const [showCreate, setShowCreate] = useState(false);
   const [freshSecret, setFreshSecret] = useState("");
 

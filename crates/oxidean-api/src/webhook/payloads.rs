@@ -2,6 +2,7 @@
 
 use serde_json::{json, Value};
 
+#[allow(clippy::too_many_arguments)]
 pub fn push_payload(
     owner: &str,
     repo_name: &str,
@@ -32,6 +33,7 @@ pub fn push_payload(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn pull_request_payload(
     action: &str,
     number: i64,

@@ -83,7 +83,9 @@ async fn signup_and_login(
 
 async fn verify_user(db: &Database, user_id: &str) {
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    db.set_email_verified_at(user_id, &now).await.expect("verify");
+    db.set_email_verified_at(user_id, &now)
+        .await
+        .expect("verify");
 }
 
 async fn rpc_json(app: &axum::Router, cookie: &str, body: &str) -> serde_json::Value {
@@ -96,10 +98,7 @@ async fn rpc_json(app: &axum::Router, cookie: &str, body: &str) -> serde_json::V
     serde_json::from_slice(&bytes).unwrap()
 }
 
-async fn seed_protected_repo(
-    app: &axum::Router,
-    db: &Database,
-) -> (String, String) {
+async fn seed_protected_repo(app: &axum::Router, db: &Database) -> (String, String) {
     let (owner_cookie, owner_login) = signup_and_login(app, "mown@ex.com", "mown").await;
     verify_user(db, owner_login["data"]["id"].as_str().unwrap()).await;
     let create = rpc_json(
@@ -123,7 +122,10 @@ async fn seed_protected_repo(
     )
     .await;
     assert_eq!(rule["ok"], true, "{rule}");
-    (owner_cookie, owner_login["data"]["id"].as_str().unwrap().to_string())
+    (
+        owner_cookie,
+        owner_login["data"]["id"].as_str().unwrap().to_string(),
+    )
 }
 
 /// Merge into protected base fails without required approvals (PR-08, D-22).
@@ -179,8 +181,7 @@ async fn branch_protect_merge_succeeds_after_approval() {
     let app = test_app(db.clone(), repos).await;
     let (owner_cookie, _) = seed_protected_repo(&app, &db).await;
 
-    let (reviewer_cookie, reviewer_login) =
-        signup_and_login(&app, "rev@ex.com", "revu").await;
+    let (reviewer_cookie, reviewer_login) = signup_and_login(&app, "rev@ex.com", "revu").await;
     verify_user(&db, reviewer_login["data"]["id"].as_str().unwrap()).await;
     let add = rpc_json(
         &app,

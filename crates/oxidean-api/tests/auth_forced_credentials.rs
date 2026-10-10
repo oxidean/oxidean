@@ -66,7 +66,7 @@ async fn try_admin_cookie(app: axum::Router) -> Option<String> {
 /// D-16: confirm rejects username equal to `system-administrator` (case-insensitive).
 #[tokio::test]
 async fn confirm_admin_rejects_default_system_administrator_username() {
-    let _env = support::lock_admin_env();
+    let _env = support::lock_admin_env().await;
     let dir = tempfile::tempdir().expect("tempdir");
     let url = format!("sqlite:{}", dir.path().join("forced_reject.db").display());
     let db = Database::connect(&url).await.expect("connect");
@@ -97,7 +97,7 @@ async fn confirm_admin_rejects_default_system_administrator_username() {
 /// D-17: keep-password path succeeds when username changes away from default.
 #[tokio::test]
 async fn confirm_admin_keep_password_ok_with_new_username() {
-    let _env = support::lock_admin_env();
+    let _env = support::lock_admin_env().await;
     let dir = tempfile::tempdir().expect("tempdir");
     let url = format!("sqlite:{}", dir.path().join("forced_keep.db").display());
     let db = Database::connect(&url).await.expect("connect");

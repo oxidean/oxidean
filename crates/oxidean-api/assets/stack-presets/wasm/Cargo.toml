@@ -14,3 +14,10 @@ wasm-bindgen-test = "0.3"
 
 [profile.release]
 opt-level = "s"
+
+# Embedded template asset — standalone manifest, not a workspace member.
+[workspace]
+
+# Template asset: deps are consumed by generated projects, not this repo.
+[package.metadata.cargo-machete]
+ignored = ["wasm-bindgen-test"]

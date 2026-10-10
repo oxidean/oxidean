@@ -49,26 +49,6 @@ const settings = {
   default_visibility: "public" as const,
 };
 
-type LoaderShape =
-  | { kind: "unauthenticated" }
-  | { kind: "forbidden" }
-  | { kind: "error"; message: string }
-  | {
-      kind: "ready";
-      me: typeof sysAdmin;
-      settings: typeof settings;
-    };
-
-let loaderData: LoaderShape | undefined;
-
-vi.mock("@octanejs/tanstack-router", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@octanejs/tanstack-router")>();
-  return {
-    ...actual,
-    useLoaderData: () => loaderData,
-  };
-});
-
 import { AdminAuthPage } from "./auth";
 
 describe("/admin/auth SSR-backed settings", () => {
@@ -81,11 +61,6 @@ describe("/admin/auth SSR-backed settings", () => {
     getSettingsMock.mockReset();
     meMock.mockResolvedValue({ ok: true, data: sysAdmin });
     getSettingsMock.mockResolvedValue({ ok: true, data: settings });
-    loaderData = {
-      kind: "ready",
-      me: sysAdmin,
-      settings,
-    };
   });
 
   it("declares SSR loader and seeds form without AdminAuthSkeleton", async () => {
@@ -115,7 +90,8 @@ describe("/admin/auth SSR-backed settings", () => {
   }, 10000);
 
   it("shows forbidden for non sys-admin from loader", async () => {
-    loaderData = { kind: "forbidden" };
+    meMock.mockResolvedValue({ ok: true, data: { ...sysAdmin, role: "user" } });
+
     meMock.mockResolvedValue({
       ok: true,
       data: { ...sysAdmin, role: "user" },

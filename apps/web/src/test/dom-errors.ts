@@ -21,14 +21,11 @@
 export const DOM_RACE_RE =
   /insertBefore|HierarchyRequestError|NotFoundError|The node before which/i;
 
-export function isDomRaceMessage(message: string): boolean {
+function isDomRaceMessage(message: string): boolean {
   return DOM_RACE_RE.test(message);
 }
 
 /** Set by a test to skip the global afterEach DOM-race assertion (rare). */
-export function allowDomRacesInThisTest(): void {
-  (globalThis as { __oxideanAllowDomRaces?: boolean }).__oxideanAllowDomRaces = true;
-}
 
 export function consumeDomRaceAllowlist(): boolean {
   const g = globalThis as { __oxideanAllowDomRaces?: boolean };

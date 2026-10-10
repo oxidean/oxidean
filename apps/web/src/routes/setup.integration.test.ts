@@ -1,5 +1,5 @@
 import { cleanup, render, screen, waitFor } from "@octanejs/testing-library";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/api-client", () => ({
   apiClient: {
@@ -13,19 +13,15 @@ vi.mock("@/lib/api-client", () => ({
   },
 }));
 
-vi.mock("@octanejs/tanstack-router", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@octanejs/tanstack-router")>();
-  return {
-    ...actual,
-    useLoaderData: () => ({ loadError: "" }),
-  };
-});
-
 afterEach(cleanup);
+
+beforeEach(() => {
+  window.history.pushState({}, "", "/setup");
+});
 
 describe("/setup Wave 0 (AUTH-07 UI-SPEC)", () => {
   it("exports SetupPage with Allow open signup Switch + Create system admin CTA", async () => {
-    const mod = await import("./setup");
+    const mod = await import("./setup.index");
     expect(mod, "SetupPage must be exported for integration tests (06-06)").toHaveProperty(
       "SetupPage",
     );

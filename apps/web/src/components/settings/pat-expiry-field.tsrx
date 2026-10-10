@@ -21,7 +21,7 @@ import {
 } from "@/components/settings/pat-expiry";
 import { cn } from "@/lib/utils";
 
-export type PatExpiryFieldProps = {
+type PatExpiryFieldProps = {
   preset: PatExpiryPreset;
   customDate: string;
   disabled?: boolean;
@@ -31,8 +31,60 @@ export type PatExpiryFieldProps = {
   noneHint?: string;
 };
 
+/**
+ * The `expiryPreset`/`expiryDate` field pair as one component. A `form.Field`
+ * nested inside another Field's render-prop never receives its field api under
+ * octane 0.10 (the lazy children resolver invokes function children eagerly) —
+ * the pair must be split across two component scopes.
+ */
+export function PatExpiryFields(props: {
+  // The octane useForm return type carries .Field — keep it loose; call sites
+  // all share the same expiryPreset/expiryDate value shape.
+  form: {
+    Field: (props: { name: string; children?: unknown }) => unknown;
+  };
+  disabled?: boolean;
+  noneHint?: string;
+}) @{
+  <props.form.Field name="expiryPreset">
+    {(presetField) => (
+      <PatExpiryDateInner
+        form={props.form}
+        presetField={presetField}
+        disabled={props.disabled}
+        noneHint={props.noneHint}
+      />
+    )}
+  </props.form.Field>;
+}
+
+function PatExpiryDateInner(props: {
+  form: {
+    Field: (props: { name: string; children?: unknown }) => unknown;
+  };
+  presetField: {
+    state: { value: PatExpiryPreset };
+    handleChange: (v: PatExpiryPreset) => void;
+  };
+  disabled?: boolean;
+  noneHint?: string;
+}) @{
+  <props.form.Field name="expiryDate">
+    {(dateField) => (
+      <PatExpiryField
+        preset={props.presetField.state.value}
+        customDate={dateField.state.value as string}
+        disabled={props.disabled}
+        onPresetChange={(p) => props.presetField.handleChange(p)}
+        onCustomDateChange={(d) => dateField.handleChange(d)}
+        noneHint={props.noneHint}
+      />
+    )}
+  </props.form.Field>;
+}
+
 /** Expiration preset Select + always-mounted custom date (toggled via `hidden`). */
-export function PatExpiryField({
+function PatExpiryField({
   preset,
   customDate,
   disabled,

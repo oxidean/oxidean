@@ -1,5 +1,5 @@
-import { createFileRoute, useLoaderData } from "@octanejs/tanstack-router";
-import { useQuery, useQueryClient } from "@octanejs/tanstack-query";
+import { queryOptions, useQuery, useQueryClient } from "@octanejs/tanstack-query";
+import { AppPage } from "@/components/app-page";
 import type { UserPublic } from "@oxidean/api-client";
 import { useEffect, useState } from "octane";
 import { Cpu } from "@octanejs/lucide";
@@ -24,32 +24,41 @@ type AdminGateLoader =
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
 const FORBIDDEN = "You need admin access to manage Actions runners.";
 
-export const Route = createFileRoute("/admin/runners")({
-  component: AdminRunnersPage,
-  head: () => ({ meta: [{ title: "Actions runners · Oxidean" }] }),
-  loader: async (): Promise<AdminGateLoader> => {
-    try {
-      const meRes = await fetchSessionMe();
-      if (!meRes.ok) {
-        if (meRes.error.code === "auth.unauthenticated") {
-          return { kind: "unauthenticated" };
+function adminRunnersQueryOptions() {
+  return queryOptions({
+    queryKey: ["admin", "adminRunners"],
+    queryFn: async (): Promise<AdminGateLoader> => {
+      try {
+        const meRes = await fetchSessionMe();
+        if (!meRes.ok) {
+          if (meRes.error.code === "auth.unauthenticated") {
+            return { kind: "unauthenticated" };
+          }
+          return { kind: "error", message: meRes.error.message || "Could not load session." };
         }
-        return { kind: "error", message: meRes.error.message || "Could not load session." };
+        if (meRes.data.role !== "sys-admin") {
+          return { kind: "forbidden" };
+        }
+        return { kind: "ready", me: meRes.data };
+      } catch {
+        return { kind: "error", message: NETWORK_ERROR };
       }
-      if (meRes.data.role !== "sys-admin") {
-        return { kind: "forbidden" };
-      }
-      return { kind: "ready", me: meRes.data };
-    } catch {
-      return { kind: "error", message: NETWORK_ERROR };
-    }
-  },
-});
+    },
+    retry: false,
+    staleTime: 30_000,
+  });
+}
 
 /** Instance registration tokens for official / third-party runners (D-ACT-08). */
 export function AdminRunnersPage() @{
+  <AppPage>
+    <AdminRunnersContent />
+  </AppPage>;
+}
+
+export function AdminRunnersContent() @{
   const queryClient = useQueryClient();
-  const loaderData = useLoaderData({ from: "/admin/runners" }) as AdminGateLoader | undefined;
+  const loaderData = useQuery(adminRunnersQueryOptions()).data;
   const [tokenOnce, setTokenOnce] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 

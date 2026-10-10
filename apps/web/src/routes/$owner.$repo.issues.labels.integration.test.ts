@@ -1,11 +1,9 @@
 /**
  * Repo issue labels view — route coverage (D-QH-03) + COL-13 unit toggles.
  */
-import { createElement } from "octane";
 import { cleanup, waitFor } from "@octanejs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithQueryClient } from "@/test/render-with-query";
-import type { RepoLayoutLoaderData } from "@/lib/repo-store";
 import { RepoIssueLabelsPage } from "./$owner.$repo.issues.labels";
 
 describe("/$owner/$repo/issues/labels", () => {
@@ -55,41 +53,8 @@ const adminRepo = {
   pulls_enabled: false,
 };
 
-const layoutData: RepoLayoutLoaderData = {
-  owner: "ada",
-  repoName: "hello",
-  status: "ok",
-  repo: adminRepo,
-  me: null,
-  message: "",
-  publicOrigin: "http://127.0.0.1:8080",
-  sshHost: "127.0.0.1",
-  sshPort: 2222,
-};
-
-const disabledRouteLoader = { kind: "disabled" as const, repo: adminRepo };
-
-vi.mock("@octanejs/tanstack-router", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@octanejs/tanstack-router")>();
-  return {
-    ...actual,
-    useParams: () => ({ owner: "ada", repo: "hello" }),
-    useLoaderData: (opts: { from?: string }) =>
-      opts?.from === "/$owner/$repo" ? layoutData : disabledRouteLoader,
-    useNavigate: () => vi.fn(),
-    Link: (props: { to?: string; href?: string; children?: unknown; className?: string }) =>
-      createElement(
-        "a",
-        {
-          href: props.to ?? props.href ?? "#",
-          className: props.className,
-        },
-        props.children,
-      ),
-  };
-});
-
 beforeEach(() => {
+  window.history.pushState({}, "", "/ada/hello/issues/labels");
   repoGetMock.mockReset();
   labelListMock.mockReset();
   repoGetMock.mockResolvedValue({ ok: true, data: adminRepo });
