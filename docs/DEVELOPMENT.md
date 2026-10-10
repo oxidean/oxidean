@@ -37,7 +37,7 @@ make rpc-gen
 # terminal 1
 OXIDEAN_ENV=development API_BIND=127.0.0.1:8080 cargo run -p oxidean-api --bin oxidean-api
 
-# terminal 2 — Astro dev server (island iteration only; no API proxy)
+# terminal 2 — Astro dev server on :3000 (proxies API prefixes → OXIDEAN_API_ORIGIN)
 bun run --filter @oxidean/web dev
 ```
 
@@ -61,7 +61,7 @@ Without Traefik, the browser talks to `oxidean-web` on port **3000**. It serves 
 | `/v2`, `/npm`, `/generic`, `/cli` | `http://127.0.0.1:8080` |
 | `/oauth/authorize`, `/oauth/token`, `/oauth/userinfo` | `http://127.0.0.1:8080` |
 
-The full prefix list lives in `crates/oxidean-web/src/proxy.rs` (`API_PREFIXES`). `bun run dev` (`astro dev`) is island/component iteration only — it does not proxy `/api`, so auth and RPC-dependent screens need the Compose or `oxidean-web` path.
+The full prefix list lives in `crates/oxidean-web/src/proxy.rs` (`API_PREFIXES`). `bun run dev` (`astro dev` on `:3000`) proxies the same prefixes to `OXIDEAN_API_ORIGIN` (default `http://127.0.0.1:8080`) so `make dev` auth and RPC screens work without Compose; only Git smart-HTTP (`/{owner}/{repo}.git/*`) — a pattern route, not a prefix — still requires Traefik or `oxidean-web`.
 
 Override the proxy upstream with `OXIDEAN_E2E_API_ORIGIN` (trailing slash stripped) when running stack e2e against a non-default API origin.
 

@@ -2,7 +2,7 @@
 //! `vite-plugins/webmcp-well-known.ts` (AGT-02). Traefik routes `/.well-known`
 //! to the web service, so these land on the site origin.
 
-use axum::http::{header, HeaderMap, StatusCode};
+use axum::http::header;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde_json::json;
@@ -46,7 +46,6 @@ fn json_doc(v: serde_json::Value) -> Response {
 }
 
 pub async fn webmcp() -> Response {
-    let _ = StatusCode::OK;
     json_doc(json!({
         "schema_version": 1,
         "site": {
@@ -74,8 +73,3 @@ pub async fn webmcp() -> Response {
 pub async fn mcp() -> Response {
     json_doc(mcp_document())
 }
-
-// HeaderMap import is exercised by the crate root; keep signature parity with
-// the other leaf handlers for future per-request fields.
-#[allow(dead_code)]
-fn _assert_handler_shape(_: HeaderMap) {}

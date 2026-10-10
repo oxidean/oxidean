@@ -7,7 +7,9 @@
 //! touch); when it isn't, or the probe fails, callers fall back to the
 //! cookie-presence heuristic so an API hiccup can't degrade first paint.
 
-use std::time::Duration;
+use std::collections::HashMap;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 /// What the request's credentials resolve to — feeds the protected gate and
 /// the `data-oxidean-session` stamp.
@@ -29,7 +31,19 @@ pub enum SessionSignal {
 pub struct SessionValidator {
     client: reqwest::Client,
     url: String,
+    /// Short-lived verdict cache keyed by session token. The probe runs on
+    /// every cookie-bearing shell render, so repeat navigations would double
+    /// API read traffic without it. ≤10s staleness is cosmetic-only — this
+    /// feeds a skeleton/login-redirect heuristic; the API stays authoritative
+    /// for every data call. Concurrent misses can still stampede a single
+    /// probe each — acceptable at this scale.
+    cache: Mutex<HashMap<String, (SessionSignal, Instant)>>,
 }
+
+/// How long a Valid/Invalid verdict is reused before re-probing upstream.
+const VERDICT_TTL: Duration = Duration::from_secs(10);
+/// Cache bound — cleared on overflow (sessions churn far slower than this).
+const VERDICT_CAP: usize = 4096;
 
 impl SessionValidator {
     pub fn new(api_origin: &str) -> Self {
@@ -41,16 +55,40 @@ impl SessionValidator {
         Self {
             client,
             url: format!("{api_origin}/api/auth/session-check"),
+            cache: Mutex::new(HashMap::new()),
         }
     }
 
-    /// `cookie` is the raw Cookie header value — forwarded verbatim so the API
-    /// parses the session token exactly as an edge-routed request would.
-    pub async fn check(&self, cookie: &str) -> SessionSignal {
+    /// `token` is the `oxidean_session` cookie value. Fresh cached verdicts
+    /// return without an upstream call; `Unknown` is never cached so a
+    /// transient outage doesn't pin a stale answer.
+    pub async fn check_token(&self, token: &str) -> SessionSignal {
+        if let Some(&(sig, at)) = self.cache.lock().unwrap().get(token) {
+            if at.elapsed() < VERDICT_TTL {
+                return sig;
+            }
+        }
+        let sig = self.probe(token).await;
+        if matches!(sig, SessionSignal::Valid | SessionSignal::Invalid) {
+            let mut cache = self.cache.lock().unwrap();
+            if cache.len() >= VERDICT_CAP {
+                cache.clear();
+            }
+            cache.insert(token.to_string(), (sig, Instant::now()));
+        }
+        sig
+    }
+
+    /// Probe upstream. The API reads only `oxidean_session` from Cookie, so a
+    /// narrowed header is exactly equivalent to forwarding it verbatim.
+    async fn probe(&self, token: &str) -> SessionSignal {
         let resp = self
             .client
             .get(&self.url)
-            .header(reqwest::header::COOKIE, cookie)
+            .header(
+                reqwest::header::COOKIE,
+                format!("oxidean_session={token}"),
+            )
             .send()
             .await;
         let Ok(resp) = resp else {
@@ -108,6 +146,20 @@ mod tests {
         (format!("http://127.0.0.1:{port}"), seen)
     }
 
+    /// Upstream variant that also counts how many probes it served.
+    async fn counted_upstream(
+        f: impl Fn(&HeaderMap) -> axum::response::Response + Send + Sync + 'static,
+    ) -> (String, Arc<Mutex<u32>>) {
+        let count = Arc::new(Mutex::new(0u32));
+        let count2 = count.clone();
+        let (origin, _) = upstream(move |h| {
+            *count2.lock().unwrap() += 1;
+            f(h)
+        })
+        .await;
+        (origin, count)
+    }
+
     #[tokio::test]
     async fn valid_cookie_maps_to_valid() {
         let (origin, seen) = upstream(|_| {
@@ -118,15 +170,12 @@ mod tests {
         })
         .await;
         let v = SessionValidator::new(&origin);
-        assert_eq!(
-            v.check("oxidean_session=abc; other=1").await,
-            SessionSignal::Valid
-        );
+        assert_eq!(v.check_token("abc").await, SessionSignal::Valid);
         let headers = seen.lock().unwrap().clone().unwrap();
         assert_eq!(
             headers.get("cookie").unwrap(),
-            "oxidean_session=abc; other=1",
-            "cookie header must reach the probe verbatim"
+            "oxidean_session=abc",
+            "the probe sends the session token as its narrowed Cookie"
         );
     }
 
@@ -140,10 +189,7 @@ mod tests {
         })
         .await;
         let v = SessionValidator::new(&origin);
-        assert_eq!(
-            v.check("oxidean_session=dead").await,
-            SessionSignal::Invalid
-        );
+        assert_eq!(v.check_token("dead").await, SessionSignal::Invalid);
 
         let (origin, _) = upstream(|_| {
             axum::response::Response::builder()
@@ -153,13 +199,50 @@ mod tests {
         })
         .await;
         let v = SessionValidator::new(&origin);
-        assert_eq!(v.check("oxidean_session=abc").await, SessionSignal::Unknown);
+        assert_eq!(v.check_token("abc").await, SessionSignal::Unknown);
 
         // Dead upstream → Unknown (presence fallback), never Invalid.
         let v = SessionValidator::new("http://127.0.0.1:1");
+        assert_eq!(v.check_token("abc").await, SessionSignal::Unknown);
+    }
+
+    #[tokio::test]
+    async fn verdicts_cache_briefly() {
+        let (origin, count) = counted_upstream(|_| {
+            axum::response::Response::builder()
+                .header("content-type", "application/json")
+                .body("{\"valid\":true}".into())
+                .unwrap()
+        })
+        .await;
+        let v = SessionValidator::new(&origin);
+        assert_eq!(v.check_token("abc").await, SessionSignal::Valid);
+        // Repeat checks within the TTL reuse the verdict — no new probe.
+        for _ in 0..3 {
+            assert_eq!(v.check_token("abc").await, SessionSignal::Valid);
+        }
+        assert_eq!(*count.lock().unwrap(), 1, "cached verdict must not re-probe");
+        // A different token is a different cache key.
+        assert_eq!(v.check_token("other").await, SessionSignal::Valid);
+        assert_eq!(*count.lock().unwrap(), 2);
+    }
+
+    #[tokio::test]
+    async fn unknown_is_never_cached() {
+        let (origin, count) = counted_upstream(|_| {
+            axum::response::Response::builder()
+                .status(500)
+                .body("oops".into())
+                .unwrap()
+        })
+        .await;
+        let v = SessionValidator::new(&origin);
+        assert_eq!(v.check_token("abc").await, SessionSignal::Unknown);
+        assert_eq!(v.check_token("abc").await, SessionSignal::Unknown);
         assert_eq!(
-            v.check("oxidean_session=abc").await,
-            SessionSignal::Unknown
+            *count.lock().unwrap(),
+            2,
+            "Unknown verdicts must re-probe, not pin a stale answer"
         );
     }
 }

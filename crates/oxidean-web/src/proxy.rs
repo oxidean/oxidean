@@ -67,6 +67,16 @@ pub fn is_api_prefix(path: &str) -> bool {
     })
 }
 
+/// Git smart-HTTP + LFS surface: `/{owner}/{repo}.git[...]` — the repo segment
+/// carries the `.git` suffix, so this can't be a prefix. Mirrors Traefik's
+/// `api-git` `PathRegexp(^/[^/]+/[^/]+\.git)` exactly, including the bare
+/// `/o/x.git` case (API 404s it there; identical here).
+pub fn is_api_git_path(path: &str) -> bool {
+    let mut segs = path.trim_start_matches('/').split('/');
+    matches!(segs.next(), Some(s) if !s.is_empty())
+        && segs.next().is_some_and(|repo| repo.ends_with(".git"))
+}
+
 pub struct ApiProxy {
     origin: String,
     client: reqwest::Client,
@@ -237,6 +247,24 @@ mod tests {
         assert!(!is_api_prefix("/oauth/consent"));
         assert!(!is_api_prefix("/apiary"));
         assert!(!is_api_prefix("/jesse/app"));
+    }
+
+    #[test]
+    fn git_path_boundaries() {
+        // Smart HTTP + LFS — Traefik `api-git` parity.
+        assert!(is_api_git_path("/jesse/app.git/info/refs"));
+        assert!(is_api_git_path("/jesse/app.git/git-upload-pack"));
+        assert!(is_api_git_path("/jesse/app.git/git-receive-pack"));
+        assert!(is_api_git_path("/jesse/app.git/info/lfs/objects/batch"));
+        // Bare `/o/x.git` proxies too — Traefik's regexp isn't end-anchored.
+        assert!(is_api_git_path("/jesse/app.git"));
+        // `.git` must be the whole second segment's suffix, and a real repo
+        // page without it stays on the SPA side.
+        assert!(!is_api_git_path("/jesse/app.gitignore/x"));
+        assert!(!is_api_git_path("/jesse/app"));
+        assert!(!is_api_git_path("/jesse"));
+        assert!(!is_api_git_path("/"));
+        assert!(!is_api_git_path("/x.git"));
     }
 
     /// Spin up a one-shot upstream that records the headers it receives.

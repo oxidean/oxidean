@@ -7,6 +7,14 @@ const SESSION_PRESENCE_COOKIE = "oxidean_signed_in";
  */
 const ALLOW_SIGNUP_COOKIE = "oxidean_allow_signup";
 
+/**
+ * `Secure` only on HTTPS origins — a literal `Secure` attr is ignored over
+ * `http://localhost` dev (and would split the jar from the non-Secure copy).
+ */
+function secureAttr(): string {
+  return typeof location !== "undefined" && location.protocol === "https:" ? "; Secure" : "";
+}
+
 /** Sync hint for choosing signed-in home skeleton before `auth.me` resolves. */
 export function hasSessionPresenceHint(): boolean {
   if (typeof document === "undefined") return false;
@@ -16,10 +24,11 @@ export function hasSessionPresenceHint(): boolean {
 /** Heal / clear the presence cookie after `auth.me` (covers sessions minted before the hint existed). */
 export function syncSessionPresenceHint(signedIn: boolean): void {
   if (typeof document === "undefined") return;
+  const secure = secureAttr();
   if (signedIn) {
-    document.cookie = `${SESSION_PRESENCE_COOKIE}=1; Path=/; SameSite=Lax; Max-Age=${30 * 24 * 3600}`;
+    document.cookie = `${SESSION_PRESENCE_COOKIE}=1; Path=/; SameSite=Lax; Max-Age=${30 * 24 * 3600}${secure}`;
   } else {
-    document.cookie = `${SESSION_PRESENCE_COOKIE}=; Path=/; SameSite=Lax; Max-Age=0`;
+    document.cookie = `${SESSION_PRESENCE_COOKIE}=; Path=/; SameSite=Lax; Max-Age=0${secure}`;
   }
 }
 
@@ -28,5 +37,5 @@ export function syncAllowSignupHint(allowed: boolean): void {
   if (typeof document === "undefined") return;
   const next = allowed ? "1" : "0";
   if (new RegExp(`(?:^|;\\s*)${ALLOW_SIGNUP_COOKIE}=${next}(?:;|$)`).test(document.cookie)) return;
-  document.cookie = `${ALLOW_SIGNUP_COOKIE}=${next}; Path=/; SameSite=Lax; Max-Age=${30 * 24 * 3600}`;
+  document.cookie = `${ALLOW_SIGNUP_COOKIE}=${next}; Path=/; SameSite=Lax; Max-Age=${30 * 24 * 3600}${secureAttr()}`;
 }

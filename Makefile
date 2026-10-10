@@ -23,7 +23,7 @@ COMPOSE_FILE ?= docker-compose.yml
 help:
 	@echo "Oxidean targets:"
 	@echo "  make makefile-lint  - parse Makefile + checkmake (CI early gate)"
-	@echo "  make dev            - local API + web (oxidean-web proxies /api; D-10)"
+	@echo "  make dev            - local API + web (astro dev proxies /api → OXIDEAN_API_ORIGIN; D-10)"
 	@echo "  make rpc-gen        - regenerate packages/api-client from Rust"
 	@echo "  make openapi-gen    - regenerate docs/openapi.yaml from the REST route table"
 	@echo "  make rpc-sync-check - fail if generated client is out of sync"

@@ -33,6 +33,12 @@ const HEALTH_PATH: &str = "/health";
 const HEALTH_PROBE_HEADER: &str = "oxidean-health-probe";
 const HEALTH_PROBE_VALUE: &str = "1";
 
+/// `Accept-CH` advertises the theme client hint — browsers only send
+/// `Sec-CH-Prefers-Color-Scheme` to origins that opt in. Not in the `http`
+/// crate's standard header set, hence a named constant.
+const ACCEPT_CH: axum::http::HeaderName =
+    axum::http::HeaderName::from_static("accept-ch");
+
 struct Shared {
     dist: PathBuf,
     meta: inject::AdvertiseMeta,
@@ -127,8 +133,30 @@ async fn main() {
         listener,
         app.into_make_service_with_connect_info::<SocketAddr>(),
     )
+    .with_graceful_shutdown(shutdown_signal())
     .await
     .expect("serve web");
+}
+
+/// SIGTERM (deploy/compose down) or Ctrl-C — drains in-flight requests
+/// (including proxied uploads) instead of severing them mid-stream.
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        tokio::signal::ctrl_c().await.ok();
+    };
+    #[cfg(unix)]
+    let term = async {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut s) => s.recv().await,
+            Err(_) => std::future::pending::<Option<()>>().await,
+        }
+    };
+    #[cfg(not(unix))]
+    let term = std::future::pending::<()>();
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = term => {},
+    }
 }
 
 async fn health(headers: HeaderMap) -> Response {
@@ -170,9 +198,11 @@ async fn spa(
         return not_found(&st.dist, &headers, &st.meta).await;
     }
 
-    // API-owned prefixes (dev parity / single-origin deploys without Traefik).
+    // API-owned prefixes (dev parity / single-origin deploys without Traefik)
+    // plus the `/{owner}/{repo}.git/*` smart-HTTP + LFS surface, which can't be
+    // a prefix — matches Traefik's `PathRegexp(^/[^/]+/[^/]+\.git)` rule.
     if let Some(px) = &st.proxy {
-        if proxy::is_api_prefix(path) {
+        if proxy::is_api_prefix(path) || proxy::is_api_git_path(path) {
             return px.forward(req, peer).await;
         }
     }
@@ -190,61 +220,26 @@ async fn spa(
             // e.g. /{owner}/{repo} matched "/brand/logo.png" — serve the real
             // file when present, else 404 (never a 200 HTML for a missing
             // chunk, which would poison caches and hide module failures).
-            if let Some(resp) = try_static(&st.dist, path, req).await {
-                return resp;
+            if static_file_present(&st.dist, path) {
+                if let Some(resp) = try_static(&st.dist, path, req).await {
+                    return resp;
+                }
+                return not_found(&st.dist, &headers, &st.meta).await;
+            }
+            // …except `/{owner}/{repo}` where repo is a legal *dotted* name
+            // (`my.app`, `three.js`, `.github`/`​.oxidean` org profile repos):
+            // when `owner` doesn't resolve to a real dist entry (`_astro/`,
+            // `brand/`, `fonts/`, …) the path is a repo page, not an asset —
+            // serve the shell and let the SPA render repo-not-found if needed.
+            // `RESERVED_USERNAMES` keeps dist-dir names unregisterable, so a
+            // real owner never shares a name with asset space.
+            let segs: Vec<&str> = path.trim_matches('/').split('/').collect();
+            if segs.len() == 2 && !st.dist.join(segs[0]).exists() {
+                return serve_shell(&st, m, &headers, req.method().clone(), path).await;
             }
             return not_found(&st.dist, &headers, &st.meta).await;
         }
-        // Shells are documents: GET/HEAD only. POST to a route path is almost
-        // always a stray form/action or a confused crawler — 405 it rather
-        // than serve 200 HTML that pretends the mutation worked.
-        if req.method() != Method::GET && req.method() != Method::HEAD {
-            return (
-                StatusCode::METHOD_NOT_ALLOWED,
-                [(header::ALLOW, "GET, HEAD")],
-            )
-                .into_response();
-        }
-        // Resolve the session signal once for both the protected gate and the
-        // `data-oxidean-session` stamp. Validated upstream when a validator is
-        // configured; Unknown degrades to the presence heuristic.
-        let signal = resolve_signal(&st, cookie_header(&headers)).await;
-        let passes_gate = match signal {
-            session::SessionSignal::Valid => true,
-            session::SessionSignal::Absent | session::SessionSignal::Invalid => false,
-            session::SessionSignal::Unknown => inject::signed_in(cookie_header(&headers)),
-        };
-        if m.protected && !passes_gate {
-            let target = format!("/login?returnTo={}", urlencoding(path));
-            return (StatusCode::FOUND, [(header::LOCATION, target)]).into_response();
-        }
-        match tokio::fs::read_to_string(st.dist.join(m.file)).await {
-            Ok(html) => {
-                // Static redirect stubs (Astro.redirect) become real 302s —
-                // no visible "Redirecting…" interstitial.
-                if let Some(target) = shells::redirect_stub_target(&html) {
-                    return (
-                        StatusCode::FOUND,
-                        [(header::LOCATION, target.to_string())],
-                    )
-                        .into_response();
-                }
-                let out = inject::inject(&html, &headers, m.title.as_deref(), &st.meta, signal);
-                return (
-                    StatusCode::OK,
-                    [
-                        (header::CONTENT_TYPE, "text/html; charset=utf-8"),
-                        (header::CACHE_CONTROL, "no-cache"),
-                    ],
-                    out,
-                )
-                    .into_response();
-            }
-            Err(e) => {
-                tracing::warn!("shell {} unreadable: {e}", m.file);
-                return not_found(&st.dist, &headers, &st.meta).await;
-            }
-        }
+        return serve_shell(&st, m, &headers, req.method().clone(), path).await;
     }
 
     // Non-routed path — asset or 404.
@@ -252,6 +247,91 @@ async fn spa(
         return resp;
     }
     not_found(&st.dist, &headers, &st.meta).await
+}
+
+/// Would `try_static` serve `dist{path}`? Same guards, without consuming the
+/// request — the asset-overlap branch needs to know before deciding whether
+/// to fall back to the repo shell.
+fn static_file_present(dist: &std::path::Path, path: &str) -> bool {
+    let rel = path.trim_start_matches('/');
+    !rel.is_empty() && !rel.ends_with(".html") && dist.join(rel).is_file()
+}
+
+/// Serve a dispatched shell: method gate → session signal → protected gate →
+/// pattern redirect → file → Astro stub → inject. Takes `method`/`path`
+/// rather than `&Request` — `Body` is `!Sync` (UnsyncBoxBody), so borrowing
+/// the request across an `.await` would make this future `!Send`.
+async fn serve_shell(
+    st: &Shared,
+    m: shells::Match,
+    headers: &HeaderMap,
+    method: Method,
+    path: &str,
+) -> Response {
+    // Shells are documents: GET/HEAD only. POST to a route path is almost
+    // always a stray form/action or a confused crawler — 405 it rather
+    // than serve 200 HTML that pretends the mutation worked.
+    if method != Method::GET && method != Method::HEAD {
+        return (
+            StatusCode::METHOD_NOT_ALLOWED,
+            [(header::ALLOW, "GET, HEAD")],
+        )
+            .into_response();
+    }
+    // Resolve the session signal once for both the protected gate and the
+    // `data-oxidean-session` stamp. Validated upstream when a validator is
+    // configured; Unknown degrades to the presence heuristic.
+    let cookie = cookie_header(headers);
+    let signal = resolve_signal(st, cookie).await;
+    let passes_gate = match signal {
+        session::SessionSignal::Valid => true,
+        session::SessionSignal::Absent | session::SessionSignal::Invalid => false,
+        session::SessionSignal::Unknown => inject::signed_in(cookie),
+    };
+    if m.protected && !passes_gate {
+        let target = format!("/login?returnTo={}", urlencoding(path));
+        return (StatusCode::FOUND, [(header::LOCATION, target)]).into_response();
+    }
+    // Legacy-alias redirect (e.g. `/{o}/{r}/settings/actions`) — a real 302 so
+    // bots/no-JS follow too. Params are already interpolated by dispatch.
+    if let Some(target) = &m.redirect {
+        return (
+            StatusCode::FOUND,
+            [(header::LOCATION, target.clone())],
+        )
+            .into_response();
+    }
+    match tokio::fs::read_to_string(st.dist.join(m.file)).await {
+        Ok(html) => {
+            // Static redirect stubs (Astro.redirect) become real 302s —
+            // no visible "Redirecting…" interstitial.
+            if let Some(target) = shells::redirect_stub_target(&html) {
+                return (
+                    StatusCode::FOUND,
+                    [(header::LOCATION, target.to_string())],
+                )
+                    .into_response();
+            }
+            let out = inject::inject(&html, headers, m.title.as_deref(), &st.meta, signal);
+            (
+                StatusCode::OK,
+                [
+                    (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+                    (header::CACHE_CONTROL, "no-cache"),
+                    // Advertise the theme client hint — browsers only send
+                    // `Sec-CH-Prefers-Color-Scheme` to origins that opt in.
+                    (ACCEPT_CH, "Sec-CH-Prefers-Color-Scheme"),
+                    (header::VARY, "Cookie, Sec-CH-Prefers-Color-Scheme"),
+                ],
+                out,
+            )
+                .into_response()
+        }
+        Err(e) => {
+            tracing::warn!("shell {} unreadable: {e}", m.file);
+            not_found(&st.dist, headers, &st.meta).await
+        }
+    }
 }
 
 fn cookie_header(headers: &HeaderMap) -> Option<&str> {
@@ -266,11 +346,14 @@ async fn resolve_signal(st: &Shared, cookie: Option<&str>) -> session::SessionSi
     let Some(c) = cookie else {
         return session::SessionSignal::Absent;
     };
-    if inject::find_cookie(c, "oxidean_session").is_none_or(|v| v.is_empty()) {
+    let Some(token) = inject::find_cookie(c, "oxidean_session") else {
+        return session::SessionSignal::Absent;
+    };
+    if token.is_empty() {
         return session::SessionSignal::Absent;
     }
     match &st.sessions {
-        Some(v) => v.check(c).await,
+        Some(v) => v.check_token(token).await,
         None => session::SessionSignal::Unknown,
     }
 }
@@ -321,20 +404,29 @@ async fn try_static(
 }
 
 /// 404 responses inject theme + advertise metas too (dark-theme users
-/// shouldn't get a light flash on a missing page) but never the session
-/// stamp — a missing route must not imply a signed-in browser.
+/// shouldn't get a light flash on a missing page). The session stamp mirrors
+/// cookie *presence* only — never probed upstream on this path (asset misses
+/// are too frequent to pay a probe per 404) — so a signed-in user keeps the
+/// correct skeleton on a bad URL while nothing authoritative is claimed.
 async fn not_found(
     dist: &std::path::Path,
     headers: &HeaderMap,
     meta: &inject::AdvertiseMeta,
 ) -> Response {
     if let Ok(html) = tokio::fs::read_to_string(dist.join("404.html")).await {
-        let out = inject::inject(&html, headers, None, meta, session::SessionSignal::Absent);
+        let signal = if inject::signed_in(cookie_header(headers)) {
+            session::SessionSignal::Unknown
+        } else {
+            session::SessionSignal::Absent
+        };
+        let out = inject::inject(&html, headers, None, meta, signal);
         return (
             StatusCode::NOT_FOUND,
             [
                 (header::CONTENT_TYPE, "text/html; charset=utf-8"),
                 (header::CACHE_CONTROL, "no-store"),
+                (ACCEPT_CH, "Sec-CH-Prefers-Color-Scheme"),
+                (header::VARY, "Cookie, Sec-CH-Prefers-Color-Scheme"),
             ],
             out,
         )
@@ -513,6 +605,121 @@ mod tests {
         // A normal shell is unaffected by stub detection.
         let resp = get(&st, "/", None).await;
         assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    /// H1 regression: `validate_repo_name` permits `.` (`my.app`, `three.js`)
+    /// and blesses `.github`/`.oxidean` org-profile repos — the dotted final
+    /// segment must not be swallowed by asset-space 404s. Missing chunks under
+    /// real dist dirs must still 404, never return 200 HTML.
+    #[tokio::test]
+    async fn dotted_repo_names_serve_the_repo_shell() {
+        let dist = dist_with(
+            "dotted-repo",
+            &[
+                ("index.html", "<html>app</html>"),
+                ("_/_/index.html", "<html>repo shell</html>"),
+                ("brand/logo.png", "PNG"),
+                ("_astro/chunk.js", "console.log(1)"),
+                ("404.html", "<html>nope</html>"),
+            ],
+        )
+        .await;
+        let st = shared(dist);
+
+        for p in [
+            "/jesse/three.js",
+            "/jesse/my.app",
+            "/acme/.github",
+            "/acme/.oxidean",
+            "/jesse/three.js/",
+        ] {
+            let resp = get(&st, p, None).await;
+            assert_eq!(
+                resp.status(),
+                StatusCode::OK,
+                "{p} must serve the repo shell"
+            );
+        }
+        // Shell responses advertise + vary on the theme client hint.
+        let resp = get(&st, "/jesse/three.js", None).await;
+        assert_eq!(
+            resp.headers().get(&ACCEPT_CH).unwrap(),
+            "Sec-CH-Prefers-Color-Scheme"
+        );
+        assert_eq!(
+            resp.headers().get(header::VARY).unwrap(),
+            "Cookie, Sec-CH-Prefers-Color-Scheme"
+        );
+        // A real file still beats the repo route.
+        let resp = get(&st, "/brand/logo.png", None).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers().get(header::CONTENT_TYPE).unwrap(),
+            "image/png"
+        );
+        // Missing files under real dist dirs → 404, never shell HTML.
+        for p in ["/_astro/missing.js", "/brand/missing.png"] {
+            let resp = get(&st, p, None).await;
+            assert_eq!(resp.status(), StatusCode::NOT_FOUND, "{p} must 404");
+        }
+    }
+
+    /// `/{owner}/{repo}.git/*` smart-HTTP must proxy to the API on bare
+    /// single-origin deploys — Traefik/Caddy carry it in edge-routed deploys.
+    #[tokio::test]
+    async fn git_paths_proxy_to_api() {
+        let dist = dist_with("git-proxy", &[("_/_/index.html", "<html>repo</html>")]).await;
+        let st = Arc::new(Shared {
+            dist,
+            meta: inject::AdvertiseMeta {
+                ssh_host: None,
+                ssh_port: None,
+            },
+            proxy: Some(proxy::ApiProxy::new("http://127.0.0.1:1", false)),
+            sessions: None,
+        });
+        // Dead upstream → 502 proves the request reached the proxy path
+        // rather than falling through to a local 404.
+        let resp = get(&st, "/jesse/app.git/info/refs", None).await;
+        assert_eq!(
+            resp.status(),
+            StatusCode::BAD_GATEWAY,
+            "git path must reach the proxy, not a local 404"
+        );
+        // The SPA route for the same repo name is unaffected.
+        let resp = get(&st, "/jesse/app", None).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    /// Legacy alias `/{o}/{r}/settings/actions` → real 302 with params
+    /// interpolated (anonymous still hits the protected gate first).
+    #[tokio::test]
+    async fn legacy_settings_actions_redirects() {
+        let dist = dist_with(
+            "legacy-redirect",
+            &[("_/_/settings/actions/index.html", "<html>stub</html>")],
+        )
+        .await;
+        let st = shared(dist);
+
+        let resp = get(&st, "/jesse/app/settings/actions", None).await;
+        assert_eq!(resp.status(), StatusCode::FOUND);
+        assert_eq!(
+            resp.headers().get(header::LOCATION).unwrap(),
+            "/login?returnTo=/jesse/app/settings/actions"
+        );
+
+        let resp = get(
+            &st,
+            "/jesse/app/settings/actions",
+            Some("oxidean_session=x"),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::FOUND);
+        assert_eq!(
+            resp.headers().get(header::LOCATION).unwrap(),
+            "/jesse/app/settings#repo-settings-actions"
+        );
     }
 
     /// End-to-end websocket passthrough: raw TCP client → this tier's real

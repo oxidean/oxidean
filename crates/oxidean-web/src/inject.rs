@@ -92,10 +92,12 @@ pub fn inject(
     // the theme class the FOUC boot script keys on, plus a signed-in stamp so
     // pending islands can pre-select their skeleton instead of flashing the
     // anonymous landing before hydration resolves `auth.me`.
-    let mut html_attrs = String::new();
+    // A pre-existing `class` on <html> must be merged, not duplicated — HTML
+    // takes the first attribute and drops repeats.
     if theme == "dark" {
-        html_attrs.push_str(" class=\"dark\"");
+        stamp_class(&mut out, "dark");
     }
+    let mut html_attrs = String::new();
     let stamped = match signal {
         SessionSignal::Valid => true,
         SessionSignal::Unknown => signed_in(cookie),
@@ -111,18 +113,12 @@ pub fn inject(
         html_attrs.push_str(" data-oxidean-signup=\"1\"");
     }
     if !html_attrs.is_empty() {
-        out = out.replacen(
-            "<html lang=\"en\"",
-            &format!("<html lang=\"en\"{html_attrs}"),
-            1,
-        );
+        if let Some(end) = html_tag_open_end(&out) {
+            out.insert_str(end, &html_attrs);
+        }
     }
     if theme == "dark" {
-        out = out.replacen(
-            "<meta name=\"color-scheme\" content=\"light\"",
-            "<meta name=\"color-scheme\" content=\"dark\"",
-            1,
-        );
+        set_meta_content(&mut out, "color-scheme", "dark");
     }
 
     // Route <title> — shells ship a generic "Oxidean" title for dynamic pages.
@@ -155,6 +151,66 @@ fn escape_attr(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('"', "&quot;")
         .replace('<', "&lt;")
+}
+
+/// Index just before the `>` closing the opening `<html …>` tag — attribute
+/// order-insensitive so `<html class="x" lang="en">` still stamps. None when
+/// the document has no `<html>` open tag (never true for our shells).
+fn html_tag_open_end(s: &str) -> Option<usize> {
+    let start = s.find("<html")?;
+    let next = s.as_bytes().get(start + "<html".len())?;
+    // `<htmlx` / `<htmlfoo` is not the tag.
+    if !matches!(next, b' ' | b'\t' | b'\r' | b'\n' | b'>' | b'/') {
+        return None;
+    }
+    s[start..].find('>').map(|i| start + i)
+}
+
+/// Add `class` to the `<html>` tag — merges into an existing `class="…"`
+/// (duplicated attributes are dropped by parsers, so a second `class` would
+/// be silently ignored).
+fn stamp_class(html: &mut String, class: &str) {
+    let Some(end) = html_tag_open_end(html) else {
+        return;
+    };
+    let start = html.find("<html").unwrap();
+    if let Some(cs) = html[start..end].find("class=\"") {
+        let val_start = start + cs + "class=\"".len();
+        if let Some(val_len) = html[val_start..end].find('"') {
+            let cur = &html[val_start..val_start + val_len];
+            if !cur.split_whitespace().any(|c| c == class) {
+                html.insert_str(val_start + val_len, &format!(" {class}"));
+            }
+            return;
+        }
+    }
+    html.insert_str(end, &format!(" class=\"{class}\""));
+}
+
+/// Rewrite `content="…"` on the `<meta name="{name}">` tag. Attribute order
+/// inside the tag is free — only the tag carrying the name is touched.
+fn set_meta_content(html: &mut String, name: &str, value: &str) {
+    let needle = format!("name=\"{name}\"");
+    let mut from = 0;
+    while let Some(rel) = html[from..].find("<meta") {
+        let tag_start = from + rel;
+        let Some(tag_len) = html[tag_start..].find('>') else {
+            return;
+        };
+        let tag_end = tag_start + tag_len;
+        if html[tag_start..tag_end].contains(&needle) {
+            let Some(val_rel) = html[tag_start..tag_end].find("content=\"") else {
+                return;
+            };
+            let val_start = tag_start + val_rel + "content=\"".len();
+            let Some(val_len) = html[val_start..tag_end].find('"') else {
+                return;
+            };
+            html.replace_range(val_start..val_start + val_len, value);
+            return;
+        }
+        from = tag_end;
+    }
 }
 
 #[cfg(test)]
@@ -260,5 +316,38 @@ mod tests {
         assert!(!out.contains("data-oxidean-signup"));
         let out = inject(html, &HeaderMap::new(), None, &meta, SessionSignal::Absent);
         assert!(!out.contains("data-oxidean-signup"));
+    }
+
+    /// Attribute order/position must not matter — a future layout emitting
+    /// `<html class="x" lang="en">` or `<html>` bare still gets stamped.
+    #[test]
+    fn stamps_survive_attr_reorder() {
+        let meta = AdvertiseMeta { ssh_host: None, ssh_port: None };
+        let mut h = HeaderMap::new();
+        h.insert(
+            "cookie",
+            HeaderValue::from_static("oxidean-theme=dark; oxidean_session=abc"),
+        );
+        for html in [
+            r#"<html class="a" lang="en"><head><meta content="light" name="color-scheme"></head>"#,
+            r#"<html><head><meta name="color-scheme" content="light" media="x"></head>"#,
+        ] {
+            let out = inject(html, &h, None, &meta, SessionSignal::Unknown);
+            assert!(
+                out.contains("class=\"dark\"") || out.contains("class=\"a dark\""),
+                "dark class must be stamped into {html}: {out}"
+            );
+            assert!(out.contains("data-oxidean-session=\"1\""), "{out}");
+            assert!(out.contains("content=\"dark\""), "{out}");
+        }
+        // `<htmlx>` is not the html tag — must not be stamped.
+        let out = inject(
+            r#"<htmlx><meta name="color-scheme" content="light"></htmlx>"#,
+            &h,
+            None,
+            &meta,
+            SessionSignal::Unknown,
+        );
+        assert!(out.contains("<htmlx>") && !out.contains("data-oxidean-session"));
     }
 }
