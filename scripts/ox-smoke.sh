@@ -17,6 +17,18 @@ if "$OX" frobnicate >/dev/null 2>&1; then
     echo "unknown command exited 0"; exit 1
 fi
 
+# Per-command help resolves without a config or network.
+"$OX" issue --help | grep -q 'ox issue'
+"$OX" issue create --help | grep -q 'ox issue create'
+"$OX" repo deploy-key --help | grep -q 'deploy-key'
+
+# Unknown / missing subcommands exit 2 (usage).
+set +e
+"$OX" frobnicate >/dev/null 2>&1; [ "$?" -eq 2 ] || { echo "unknown: expected 2"; exit 1; }
+"$OX" repo deploy-key >/dev/null 2>&1; [ "$?" -eq 2 ] || { echo "nested missing sub: expected 2"; exit 1; }
+"$OX" repo view badspec >/dev/null 2>&1; [ "$?" -eq 2 ] || { echo "bad repo spec: expected 2"; exit 1; }
+set -e
+
 # Scrubbed env: empty config dir + no instance/token env vars. `auth status`
 # must fail as a usage error (2, "no instance configured") without touching
 # the network — which also proves the config directory resolved (on Windows

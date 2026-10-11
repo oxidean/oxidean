@@ -138,29 +138,80 @@ for the resolved instance.
 
 ## Commands
 
+`ox` has per-command help — `ox <group> --help` and `ox <group> <sub> --help`
+list exact flags. The full surface, roughly `gh`-shaped:
+
 ```bash
 # Repositories
-ox repo list                       # your repos (repo.listMine)
-ox repo list --owner someorg       # an owner's repos (repo.listByOwner)
-ox repo view octo/demo
+ox repo list [--owner someorg]          # yours, or an owner's
+ox repo view|fork octo/demo             # fork: [--into-owner o] [--into-name n]
+ox repo create <name> [--org o] [--visibility public|private]
+ox repo sync|clone octo/demo            # clone runs `git clone` locally
+ox repo edit o/n [--description d] [--topics a,b] [--visibility v]
+ox repo rename|archive|unarchive octo/demo
+ox repo delete octo/demo --confirm demo # soft delete, name echoed back
+ox repo transfer o/n dest-owner --confirm name
+ox repo star|unstar|watch|unwatch octo/demo
+ox repo deploy-key list|add|delete o/n  # add: --title t --key-file pub [-w]
+ox repo collaborator list|add|set-role|remove o/n --permission read|write|admin
+ox repo invites list|create|link|revoke o/n
+ox repo branch-protection|tag-protection list|set|delete o/n --pattern glob
+ox repo mirror get|set|sync|delete|gen-key|rotate-secret o/n
+ox repo merge-settings o/n [--merge on|off --squash on|off --rebase on|off]
+ox repo lfs o/n [--usage|--objects|--enable|--disable]
+ox repo quota o/n [--set <bytes>]
 
 # Issues
-ox issue list octo/demo [--state open|closed|all] [--author u] [--assignee u]
-                        [--label l] [--search q] [--limit n]
-ox issue view octo/demo 12
-ox issue create octo/demo --title "bug report" --body "steps…"
+ox issue list octo/demo [--state s] [--author u] [--assignee u] [--label l]
+                        [--search q] [--limit n]
+ox issue view|create|edit octo/demo [<n>] # edit: --title --body --label --assignee
+ox issue close|reopen|delete|comment octo/demo <n>
 
 # Pull requests
-ox pr list octo/demo [--state open|closed|merged|all] [same filters]
-ox pr view octo/demo 7
-ox pr checks octo/demo 7           # commit statuses on the PR head
+ox pr list|view octo/demo [<n>]         # same filters as issue list
+ox pr create o/n --title t --base main --head feat [--draft]
+ox pr merge o/n <n> [--merge|--squash|--rebase] [--delete-branch]
+ox pr diff|files|checks o/n <n>
+ox pr review o/n <n> --approve|--request-changes|--comment [--body b]
+ox pr review o/n <n> --request <user>|--unrequest <user>|--dismiss <id>|--list
+ox pr comment|ready|update-branch|close|reopen|checkout o/n <n>
 
 # Actions
-ox run list octo/demo [--limit n] [--page n]
-ox run view octo/demo <run-id>
+ox run list o/n [--status s --event e --branch b --workflow w --limit n]
+ox run view o/n <run-id> [--log] [--job <id>]
+ox run rerun|cancel o/n <run-id> [--failed-only]
+ox workflow list|view|run o/n [<workflow-id>] [--ref r]
+ox secret list|set|delete o/n [<NAME>]  # set: --body v | --file path | stdin
+ox status create o/n --sha s --context c --state pending|success|failure|error
 
-# Packages
+# Releases & packages
+ox release list|view|create|edit|delete o/n [<tag>]
+ox release upload|download o/n <tag> [<file>...|--pattern g --dir d --clobber]
+ox release delete-asset o/n <tag> <filename>
 ox pkg list [--owner octo]
+
+# People & orgs
+ox org list|view|create|members|invites
+ox user view|lookup|follow|unfollow <u> | ox user starred|watched
+ox notification list|read [<id>...|--all]|unread
+ox label list|create|edit|delete <o/n>|--org <slug>
+ox webhook list|create|edit|delete|ping <o/n> | ox webhook deliveries|redeliver
+
+# Account
+ox ssh-key|gpg-key list|add|delete      # add: --title t --key-file path|- 
+ox email list|add|remove|set-primary|resend
+ox pat list|create|revoke               # create: --scopes … or --fine-grained
+ox invite accept --token <t>
+
+# Instance admin (requires an admin PAT)
+ox admin users list|ban|unban|delete|set-role|sessions|revoke-sessions|access|activity
+ox admin invites list|create|link|revoke
+ox admin runners | ox admin runner-token
+ox admin lfs|git|mcp [set …] | ox admin templates list|enable|disable|delete
+ox admin repos gc
+
+# Maintenance
+ox self-update                          # swap this binary for the instance's build
 
 # Escape hatch — any procedure, raw input fields
 ox api repo.get -f owner=octo -f name=demo
@@ -169,7 +220,13 @@ ox api issue.get -f owner=octo -f name=demo -F number=12
 
 `-f` sends the value as a string; `-F` parses the value as JSON (use it for
 numbers, booleans, arrays, objects). `owner/name` positionals may be replaced
-with `-R owner/name` anywhere a repo is expected.
+with `-R owner/name` anywhere a repo is expected. Content flags follow `gh`:
+`--body` inline, `--body-file <path>` or `-` for stdin, and piped stdin fills
+in automatically on verbs like `issue comment` and `secret set`.
+
+Release assets are the one path off `/api/rpc`: `release upload` POSTs
+multipart to `/api/repos/{o}/{n}/releases/{id}/assets` and `release download`
+GETs `/api/releases/assets/{id}` — both accept `Authorization: Bearer <pat>`.
 
 ## Instance compatibility (capability manifest)
 

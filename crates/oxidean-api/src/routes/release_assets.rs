@@ -28,6 +28,16 @@ fn session_token_from_headers(headers: &HeaderMap) -> Option<String> {
     None
 }
 
+fn bearer_token_from_headers(headers: &HeaderMap) -> Option<&str> {
+    headers
+        .get(header::AUTHORIZATION)?
+        .to_str()
+        .ok()?
+        .strip_prefix("Bearer ")
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+}
+
 fn err_response(status: StatusCode, code: &str, message: &str) -> Response {
     (
         status,
@@ -76,22 +86,40 @@ pub async fn remove_asset_file(release_assets_dir: &Path, asset_id: &str) {
     }
 }
 
+/// Cookie session or `Authorization: Bearer <pat>` — asset up/download is the
+/// CLI's path, so PATs (which never mint sessions) are honored alongside
+/// browser cookies.
 async fn resolve_session_user_id(state: &AppState, headers: &HeaderMap) -> Option<String> {
-    let token = session_token_from_headers(headers)?;
     let client = crate::rpc::ClientMeta::from_headers(headers);
-    match state
-        .sessions
-        .resolve(
+    if let Some(token) = session_token_from_headers(headers) {
+        return match state
+            .sessions
+            .resolve(
+                &state.db,
+                &token,
+                client.ip_address.as_deref(),
+                client.user_agent.as_deref(),
+            )
+            .await
+        {
+            Ok(Some(s)) => Some(s.user_id),
+            _ => None,
+        };
+    }
+    if let Some(token) = bearer_token_from_headers(headers) {
+        return match crate::pat::bearer::resolve_bearer(
             &state.db,
-            &token,
+            &state.git_auth_limiter,
+            token,
             client.ip_address.as_deref(),
-            client.user_agent.as_deref(),
         )
         .await
-    {
-        Ok(Some(s)) => Some(s.user_id),
-        _ => None,
+        {
+            Ok((session, _identity)) => Some(session.user_id),
+            Err(_) => None,
+        };
     }
+    None
 }
 
 /// `POST /api/repos/{owner}/{repo}/releases/{release_id}/assets` — multipart field `asset`.
