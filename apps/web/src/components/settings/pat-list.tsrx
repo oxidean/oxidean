@@ -38,11 +38,17 @@ function isExpired(item: PatListItem, nowMs = Date.now()): boolean {
 
 function scopeSummary(item: PatListItem): string {
   if (item.kind === "classic") {
-    return "Full control of private repositories";
+    const scopes = item.scopes ?? [];
+    return scopes.length > 0 ? scopes.join(", ") : "No scopes";
   }
-  const contents = item.contents === "write" ? "Read and write" : "Read-only";
-  const access = item.repo_access === "selected" ? "Only select repositories" : "All repositories";
-  return `${contents} · ${access}`;
+  const contents = `contents ${item.contents === "write" ? "read/write" : "read"}`;
+  const access = item.repo_access === "selected" ? "selected repos" : "all repos";
+  const extras: string[] = [];
+  if (item.packages) extras.push(`packages ${item.packages}`);
+  for (const [family, level] of Object.entries(item.perms ?? {})) {
+    if (level) extras.push(`${family.replace(/_/g, " ")} ${level}`);
+  }
+  return [contents, access, ...extras].join(" · ");
 }
 
 function lastUsedLabel(item: PatListItem): string {

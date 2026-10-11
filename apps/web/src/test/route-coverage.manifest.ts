@@ -205,6 +205,15 @@ export const routeCoverageManifest: RouteCoverageEntry[] = [
     ],
   },
   {
+    route: "oauth.device.tsrx",
+    coverage: [
+      {
+        kind: "happy-dom",
+        test: "apps/web/src/routes/oauth.device.integration.test.ts",
+      },
+    ],
+  },
+  {
     route: "settings/tokens.new.fine-grained.tsrx",
     coverage: [
       {

@@ -2225,9 +2225,62 @@ export const CLASSIC_PAT_PREFIX = "oxidean_pat_" as const;
 export const FINE_GRAINED_PAT_PREFIX = "oxidean_fg_" as const;
 
 export type PatKind = "classic" | "fine_grained";
-export type ClassicPatScope = "repo";
+export type ClassicPatScope =
+  | "repo"
+  | "repo:status"
+  | "repo:invite"
+  | "public_repo"
+  | "security_events"
+  | "workflow"
+  | "package:read"
+  | "package:write"
+  | "package:delete"
+  | "notifications"
+  | "read:user"
+  | "user"
+  | "user:email"
+  | "user:follow"
+  | "read:org"
+  | "write:org"
+  | "admin:repo_hook"
+  | "read:public_key"
+  | "write:public_key"
+  | "admin:public_key"
+  | "read:gpg_key"
+  | "write:gpg_key"
+  | "admin:gpg_key"
+  | "delete_repo"
+  | "project"
+  | "read:project";
 export type FgRepoAccess = "selected" | "all";
 export type ContentsPerm = "read" | "write";
+export type PackagesPerm = "read" | "write";
+export type FgPermLevel = "read" | "write";
+
+/** Fine-grained permission families — absent field = no grant. */
+export type FgPerms = {
+  issues?: FgPermLevel;
+  pull_requests?: FgPermLevel;
+  actions?: FgPermLevel;
+  commit_statuses?: FgPermLevel;
+  secrets?: FgPermLevel;
+  variables?: FgPermLevel;
+  environments?: FgPermLevel;
+  deployments?: FgPermLevel;
+  webhooks?: FgPermLevel;
+  administration?: FgPermLevel;
+  metadata?: FgPermLevel;
+  pages?: FgPermLevel;
+  releases?: FgPermLevel;
+  emails?: FgPermLevel;
+  notifications?: FgPermLevel;
+  profile?: FgPermLevel;
+  ssh_keys?: FgPermLevel;
+  gpg_keys?: FgPermLevel;
+  starring?: FgPermLevel;
+  watching?: FgPermLevel;
+  followers?: FgPermLevel;
+};
 
 export type CreateClassicPatRequest = {
   name: string;
@@ -2240,6 +2293,8 @@ export type CreateFineGrainedPatRequest = {
   repo_access: FgRepoAccess;
   repository_ids?: string[];
   contents: ContentsPerm;
+  packages?: PackagesPerm | null;
+  perms?: FgPerms;
   expires_at?: string | null;
 };
 
@@ -2322,7 +2377,9 @@ export type PatListItem = {
   token_prefix: string;
   scopes?: ClassicPatScope[];
   contents?: ContentsPerm;
+  packages?: PackagesPerm;
   repo_access?: FgRepoAccess;
+  perms?: FgPerms;
   repository_ids?: string[];
   expires_at?: string | null;
   last_used_at?: string | null;
@@ -2418,6 +2475,24 @@ export type OAuthAuthorizeRequest = {
 
 export type OAuthAuthorizeResponse = {
   redirect_to: string;
+};
+
+/** `oauth.deviceInfo` input — approval-page lookup for a pending user code. */
+export type OAuthDeviceInfoRequest = {
+  user_code: string;
+};
+
+/** What the `/oauth/device` approval page renders for a pending code. */
+export type OAuthDeviceInfo = {
+  user_code: string;
+  scopes: string[];
+  expires_at: string;
+};
+
+/** `oauth.deviceAuthorize` input — the approve/deny decision. */
+export type OAuthDeviceAuthorizeRequest = {
+  user_code: string;
+  approve: boolean;
 };
 
 /** `sshKey.add` input — OpenSSH one-line public key (not a private key). */
@@ -3851,6 +3926,12 @@ export function createClient(opts: CreateClientOptions) {
         rpcCall<OAuthAuthorizeInfo>(opts, "oauthApp.authorizeInfo", input),
       authorize: (input: OAuthAuthorizeRequest) =>
         rpcCall<OAuthAuthorizeResponse>(opts, "oauthApp.authorize", input),
+    },
+    oauth: {
+      deviceInfo: (input: OAuthDeviceInfoRequest) =>
+        rpcCall<OAuthDeviceInfo>(opts, "oauth.deviceInfo", input),
+      deviceAuthorize: (input: OAuthDeviceAuthorizeRequest) =>
+        rpcCall<{ ok: boolean }>(opts, "oauth.deviceAuthorize", input),
     },
     sshKey: {
       add: (input: AddSshKeyRequest) =>

@@ -12,6 +12,7 @@ use crate::args::{
     BodyArg, Command, Global, Invocation, ListFilters, ReviewAction, parse_repo,
 };
 use crate::config::{self, Config, InstanceEntry};
+use crate::device;
 use crate::manifest;
 use crate::output;
 use crate::rpc::{self, CallError, Client};
@@ -173,6 +174,54 @@ fn opt(map: &mut serde_json::Map<String, Value>, key: &str, v: Option<impl Into<
     if let Some(v) = v {
         map.insert(key.into(), v.into());
     }
+}
+
+/// Valid `pat create --fine-grained --perms` families (mirrors `FgPerms`).
+const FG_PERM_FAMILIES: &[&str] = &[
+    "issues",
+    "pull_requests",
+    "actions",
+    "commit_statuses",
+    "secrets",
+    "variables",
+    "environments",
+    "deployments",
+    "webhooks",
+    "administration",
+    "metadata",
+    "pages",
+    "releases",
+    "emails",
+    "notifications",
+    "profile",
+    "ssh_keys",
+    "gpg_keys",
+    "starring",
+    "watching",
+    "followers",
+];
+
+/// Parse `--perms issues=write,pull_requests=read` into the RPC `perms` object.
+fn parse_fg_perms(pairs: &[String]) -> Result<Value, CliError> {
+    let mut out = serde_json::Map::new();
+    for pair in pairs {
+        let (key, level) = pair.split_once('=').ok_or_else(|| {
+            CliError::Usage(format!("--perms entries need family=level, got `{pair}`"))
+        })?;
+        if !FG_PERM_FAMILIES.contains(&key) {
+            return Err(CliError::Usage(format!(
+                "unknown permission family `{key}` (one of: {})",
+                FG_PERM_FAMILIES.join(", ")
+            )));
+        }
+        if level != "read" && level != "write" {
+            return Err(CliError::Usage(format!(
+                "permission level for `{key}` must be read or write, got `{level}`"
+            )));
+        }
+        out.insert(key.to_string(), json!(level));
+    }
+    Ok(Value::Object(out))
 }
 
 /// Run one RPC and render `data` for text mode. The full envelope is kept so
@@ -795,8 +844,16 @@ pub async fn dispatch(inv: &Invocation, rt: &Runtime) -> Result<Out, CliError> {
             text: format!("ox {}", env!("CARGO_PKG_VERSION")),
             json: json!({"ok": true, "data": {"version": env!("CARGO_PKG_VERSION")}}),
         }),
-        Command::AuthLogin { token, token_stdin } => {
-            auth_login(g, rt, token.as_deref(), *token_stdin).await
+        Command::AuthLogin {
+            token,
+            token_stdin,
+            web,
+        } => {
+            if *web {
+                auth_login_web(g, rt).await
+            } else {
+                auth_login(g, rt, token.as_deref(), *token_stdin).await
+            }
         }
         Command::AuthStatus => auth_status(g, rt).await,
         Command::AuthLogout => auth_logout(g, rt),
@@ -2063,6 +2120,7 @@ pub async fn dispatch(inv: &Invocation, rt: &Runtime) -> Result<Out, CliError> {
             contents,
             repo_access,
             repo_ids,
+            perms,
             expires_at,
         } => {
             let input = if *fine_grained {
@@ -2078,9 +2136,17 @@ pub async fn dispatch(inv: &Invocation, rt: &Runtime) -> Result<Out, CliError> {
                         Value::Array(repo_ids.iter().cloned().map(Value::String).collect()),
                     );
                 }
+                if !perms.is_empty() {
+                    m.insert("perms".into(), parse_fg_perms(perms)?);
+                }
                 opt(m, "expires_at", expires_at.clone());
                 i
             } else {
+                if !perms.is_empty() {
+                    return Err(CliError::Usage(
+                        "--perms only applies to --fine-grained tokens".into(),
+                    ));
+                }
                 if scopes.is_empty() {
                     return Err(CliError::Usage(
                         "pat create needs --scopes repo[,package:read,...] or --fine-grained".into(),
@@ -2715,6 +2781,86 @@ async fn auth_login(
     })
 }
 
+/// `auth login --web` — RFC 8628 device grant: request a code, show it, open
+/// the approval page, poll until the user approves/denies, then store the
+/// minted PAT exactly like a pasted token.
+async fn auth_login_web(global: &Global, rt: &Runtime) -> Result<Out, CliError> {
+    use std::io::IsTerminal;
+
+    let instance = resolve_instance(global, &rt.config)?;
+
+    // Same reachability probe as token login.
+    let probe = Client::new(&instance, None);
+    match probe.call("system.health", json!({})).await {
+        Ok(resp) if rpc::is_ok(&resp) => {}
+        Ok(resp) => {
+            let err = rpc::error(&resp)
+                .cloned()
+                .unwrap_or_else(|| AppError::new("rpc.unknown", "unexpected response"));
+            return Err(CliError::Api(err));
+        }
+        Err(e) => return Err(CliError::Transport(format!("cannot reach {instance}: {e}"))),
+    }
+
+    // Classic scopes covering the full CLI surface (repo domain + registries).
+    let grant = device::request(&instance, "repo package:read package:write").await?;
+
+    let url = grant
+        .verification_uri_complete
+        .clone()
+        .unwrap_or(grant.verification_uri.clone());
+    eprintln!("! First copy your one-time code: {}", grant.user_code);
+    let tty = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
+    if tty {
+        eprintln!("Press Enter to open {url} in your browser…");
+        let mut line = String::new();
+        let _ = std::io::stdin().read_line(&mut line);
+        device::open_browser(&url);
+    } else {
+        eprintln!("Open {url} in your browser to approve this sign-in.");
+    }
+    eprintln!("Waiting for approval…");
+
+    let deadline = std::time::Instant::now()
+        + std::time::Duration::from_secs(grant.expires_in.max(60) as u64);
+    let mut interval = grant.interval.max(1) as u64;
+    let token = loop {
+        if std::time::Instant::now() >= deadline {
+            return Err(CliError::Auth("device code expired before approval".into()));
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(interval)).await;
+        match device::poll(&instance, &grant.device_code, interval as i64).await? {
+            device::Poll::Pending => {}
+            device::Poll::SlowDown(next) => interval = next.max(1) as u64,
+            device::Poll::Failed(msg) => return Err(CliError::Auth(msg)),
+            device::Poll::Token(t) => break t,
+        }
+    };
+
+    // Verify + store, mirroring auth_login.
+    let authed = Client::new(&instance, Some(token.clone()));
+    let username = match authed.call("auth.me", json!({})).await {
+        Ok(RpcResponse::Ok { data, .. }) => output::s(&data, "username").map(str::to_string),
+        _ => None,
+    };
+    let mut cfg = rt.config.clone();
+    cfg.instances
+        .insert(instance.clone(), InstanceEntry { token: Some(token) });
+    cfg.default_instance = Some(instance.clone());
+    config::save(&rt.config_path, &cfg).map_err(CliError::Config)?;
+
+    Ok(Out::Report {
+        text: match &username {
+            Some(user) => format!("Logged in to {instance} as {user}"),
+            None => format!("Logged in to {instance}"),
+        },
+        json: json!({
+            "ok": true,
+            "data": { "instance": instance, "authenticated_as": username }
+        }),
+    })
+}
+
 async fn auth_status(global: &Global, rt: &Runtime) -> Result<Out, CliError> {
     let instance = resolve_instance(global, &rt.config)?;
     invoke(global, rt, "auth.me", json!({}), move |data| {
@@ -2849,6 +2995,19 @@ fn label_write_input(repo: Option<&str>, org: Option<&str>) -> Result<Value, Cli
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_fg_perms_validates_family_and_level() {
+        let v = parse_fg_perms(&[
+            "issues=write".to_string(),
+            "pull_requests=read".to_string(),
+        ])
+        .unwrap();
+        assert_eq!(v, json!({"issues": "write", "pull_requests": "read"}));
+        assert!(parse_fg_perms(&["bogus=read".to_string()]).is_err());
+        assert!(parse_fg_perms(&["issues=admin".to_string()]).is_err());
+        assert!(parse_fg_perms(&["issues".to_string()]).is_err());
+    }
 
     #[test]
     fn list_input_omits_unset_filters() {

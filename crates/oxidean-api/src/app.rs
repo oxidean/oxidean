@@ -287,6 +287,7 @@ pub fn router_with_state(state: AppState, cors: CorsLayer) -> Router {
         .route("/oauth/authorize", get(crate::oauth::authorize))
         .route("/oauth/token", post(crate::oauth::token))
         .route("/oauth/userinfo", get(crate::oauth::userinfo))
+        .route("/oauth/device/code", post(crate::oauth::device_code))
         .route(
             "/api/user/avatar",
             post(avatar::upload_avatar)

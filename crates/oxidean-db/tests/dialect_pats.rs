@@ -79,6 +79,7 @@ async fn dialect_pats_migrate_0008_schema_presence() {
         None,
         None,
         None,
+        None,
         &[],
     )
     .await
@@ -106,6 +107,7 @@ async fn dialect_pats_migrate_0008_schema_presence() {
         &fg_hash,
         None,
         Some("write"),
+        Some(r#"{"issues":"read","pull_requests":"write"}"#),
         Some("selected"),
         None,
         &[repo.id.clone()],
@@ -120,6 +122,10 @@ async fn dialect_pats_migrate_0008_schema_presence() {
         .expect("fg present");
     assert_eq!(found_fg.kind, "fine_grained");
     assert_eq!(found_fg.contents_perm.as_deref(), Some("write"));
+    assert_eq!(
+        found_fg.perms_json.as_deref(),
+        Some(r#"{"issues":"read","pull_requests":"write"}"#)
+    );
     assert_eq!(found_fg.repo_access.as_deref(), Some("selected"));
     assert_eq!(found_fg.repository_ids, vec![repo.id.clone()]);
 

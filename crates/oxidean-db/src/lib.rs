@@ -66,7 +66,7 @@ pub use lfs::LfsObjectRow;
 pub use mcp_settings::McpSettingsRow;
 pub use mirrors::{RepositoryMirrorRefResultRow, RepositoryMirrorRow};
 pub use notifications::NotificationRow;
-pub use oauth::{OAuthAppRow, OAuthCodeRow, OAuthTokenRow};
+pub use oauth::{OAuthAppRow, OAuthCodeRow, OAuthDeviceCodeRow, OAuthTokenRow};
 pub use oxidean_core::DbProbeResponse;
 pub use pool::DbPool;
 pub use instance_invites::InstanceInviteRow;
@@ -2706,6 +2706,7 @@ impl Database {
         token_hash: &str,
         scopes_json: Option<&str>,
         contents_perm: Option<&str>,
+        perms_json: Option<&str>,
         repo_access: Option<&str>,
         expires_at: Option<&str>,
         repository_ids: &[String],
@@ -2720,6 +2721,7 @@ impl Database {
             token_hash,
             scopes_json,
             contents_perm,
+            perms_json,
             repo_access,
             expires_at,
             repository_ids,
@@ -2926,6 +2928,77 @@ impl Database {
         last_used_ip: Option<&str>,
     ) -> Result<(), String> {
         oauth::touch_token_last_used(self.require_pool()?, id, last_used_at, last_used_ip).await
+    }
+
+    // --- oauth device authorization grant (RFC 8628) ---
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn insert_oauth_device_code(
+        &self,
+        id: &str,
+        device_code_hash: &str,
+        user_code: &str,
+        scopes: &str,
+        interval_secs: i64,
+        expires_at: &str,
+    ) -> Result<(), String> {
+        oauth::insert_device_code(
+            self.require_pool()?,
+            id,
+            device_code_hash,
+            user_code,
+            scopes,
+            interval_secs,
+            expires_at,
+        )
+        .await
+    }
+
+    pub async fn find_oauth_device_code_by_hash(
+        &self,
+        device_code_hash: &str,
+    ) -> Result<Option<oauth::OAuthDeviceCodeRow>, String> {
+        oauth::find_device_code_by_hash(self.require_pool()?, device_code_hash).await
+    }
+
+    pub async fn find_oauth_device_code_by_user_code(
+        &self,
+        user_code: &str,
+    ) -> Result<Option<oauth::OAuthDeviceCodeRow>, String> {
+        oauth::find_device_code_by_user_code(self.require_pool()?, user_code).await
+    }
+
+    /// Single-claim approve — false when the code was not pending.
+    pub async fn approve_oauth_device_code(
+        &self,
+        id: &str,
+        user_id: &str,
+        approved_at: &str,
+    ) -> Result<bool, String> {
+        oauth::approve_device_code(self.require_pool()?, id, user_id, approved_at).await
+    }
+
+    /// Single-claim deny — false when the code was not pending.
+    pub async fn deny_oauth_device_code(&self, id: &str) -> Result<bool, String> {
+        oauth::deny_device_code(self.require_pool()?, id).await
+    }
+
+    /// Single-claim consume — false when the code was not approved.
+    pub async fn consume_oauth_device_code(&self, id: &str) -> Result<bool, String> {
+        oauth::consume_device_code(self.require_pool()?, id).await
+    }
+
+    pub async fn record_oauth_device_code_poll(
+        &self,
+        id: &str,
+        polled_at: &str,
+        new_interval_secs: i64,
+    ) -> Result<(), String> {
+        oauth::record_device_code_poll(self.require_pool()?, id, polled_at, new_interval_secs).await
+    }
+
+    pub async fn delete_expired_oauth_device_codes(&self, now: &str) -> Result<u64, String> {
+        oauth::delete_expired_device_codes(self.require_pool()?, now).await
     }
 
     // --- packages registry ---

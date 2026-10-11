@@ -731,6 +731,7 @@ async fn pat_bearer_expired_token_unauthenticated() {
         Some(r#"["repo"]"#),
         None,
         None,
+        None,
         Some(&past),
         &[],
     )
@@ -771,9 +772,8 @@ async fn pat_bearer_revoked_token_unauthenticated() {
 }
 
 /// API-02: scope denial is not an auth failure — a classic `repo` token cannot
-/// call `packages.*`, and a package-only token row (not mintable via
-/// `pat.createClassic`, which requires `repo`, but valid at rest) cannot call
-/// repo-domain procedures. Both → 403 `auth.pat_scope`.
+/// call `packages.*`, and a package-only token row cannot call repo-domain
+/// procedures. Both → 403 `auth.pat_scope`.
 #[tokio::test]
 async fn pat_bearer_scope_denied() {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -786,7 +786,7 @@ async fn pat_bearer_scope_denied() {
     support::unlock_signup(&db).await;
     let app = test_app(db.clone()).await;
 
-    // Minted classic tokens always carry `repo`; `packages.*` stays out of scope.
+    // A `repo`-only token stays out of scope for `packages.*`.
     let (_user_id, _cookie, repo_token) =
         verified_user_with_classic_pat(&app, &db, "scope@ex.com", "scopeuser", r#"["repo"]"#).await;
     let (status, _, v) = rpc_json_bearer(
@@ -798,8 +798,7 @@ async fn pat_bearer_scope_denied() {
     assert_eq!(status, StatusCode::FORBIDDEN, "{v}");
     assert_eq!(v["error"]["code"], "auth.pat_scope", "{v}");
 
-    // A package-only token at rest is denied on repo-domain procedures even
-    // though the mint path refuses to create one.
+    // A package-only token is denied on repo-domain procedures.
     let (_cookie2, login2) = signup_and_login(&app, "scope2@ex.com", "scopeuser2").await;
     let user2 = login2["data"]["id"].as_str().expect("id").to_string();
     let pkg_token = format!("{CLASSIC_PAT_PREFIX}{}", "a".repeat(64));
@@ -813,6 +812,7 @@ async fn pat_bearer_scope_denied() {
         pkg_prefix,
         &pkg_hash,
         Some(r#"["package:read"]"#),
+        None,
         None,
         None,
         None,
@@ -1080,4 +1080,473 @@ async fn pat_bearer_ws_auth() {
     let v: serde_json::Value = serde_json::from_str(&msg.into_text().unwrap()).unwrap();
     assert_eq!(v["ok"], false, "{v}");
     assert_eq!(v["error"]["code"], "auth.unauthenticated", "{v}");
+}
+
+// --- Expanded classic scope catalog (S7) ---
+
+/// A narrow `notifications` classic token reaches its own domain and is denied
+/// everywhere else — the mint path accepts any non-empty scope set.
+#[tokio::test]
+async fn pat_bearer_narrow_scope_notifications() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!("sqlite:{}", dir.path().join("pat_narrow.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone()).await;
+
+    let (_user_id, _cookie, token) = verified_user_with_classic_pat(
+        &app,
+        &db,
+        "narrow@ex.com",
+        "narrowuser",
+        r#"["notifications"]"#,
+    )
+    .await;
+
+    let (status, _, v) = rpc_json_bearer(
+        &app,
+        r#"{"procedure":"notification.unreadCount","input":{}}"#,
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["ok"], true, "{v}");
+
+    for procedure in [
+        r#"{"procedure":"repo.listMine","input":{}}"#,
+        r#"{"procedure":"issue.list","input":{"owner":"narrowuser","name":"x"}}"#,
+        r#"{"procedure":"email.list","input":{}}"#,
+        r#"{"procedure":"sshKey.list","input":{}}"#,
+        r#"{"procedure":"org.listMine","input":{}}"#,
+    ] {
+        let (status, _, v) = rpc_json_bearer(&app, procedure, &token).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{procedure} — {v}");
+        assert_eq!(v["error"]["code"], "auth.pat_scope", "{procedure} — {v}");
+    }
+}
+
+/// `public_repo` covers repo-domain collaboration on public repositories but
+/// not private ones (404 anti-enumeration), account-scoped reads, or admin.
+#[tokio::test]
+async fn pat_bearer_public_repo_scope() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!("sqlite:{}", dir.path().join("pat_pubrepo.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone()).await;
+
+    let (user_id, _cookie, token) = verified_user_with_classic_pat(
+        &app,
+        &db,
+        "pubrepo@ex.com",
+        "pubrepouser",
+        r#"["public_repo"]"#,
+    )
+    .await;
+    db.insert_repository(
+        "r-pub-1", &user_id, "user", "publicrepo", "public", "", "main",
+    )
+    .await
+    .expect("public repo");
+    db.insert_repository(
+        "r-priv-1", &user_id, "user", "privaterepo", "private", "", "main",
+    )
+    .await
+    .expect("private repo");
+
+    // Public repo read — allowed.
+    let (status, _, v) = rpc_json_bearer(
+        &app,
+        r#"{"procedure":"repo.get","input":{"owner":"pubrepouser","name":"publicrepo"}}"#,
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+
+    // Private repo — 404 anti-enumeration (existence stays hidden).
+    let (status, _, v) = rpc_json_bearer(
+        &app,
+        r#"{"procedure":"repo.get","input":{"owner":"pubrepouser","name":"privaterepo"}}"#,
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{v}");
+
+    // Repo creation names a repo that does not exist yet → plain scope denial.
+    let (status, _, v) = rpc_json_bearer(
+        &app,
+        r#"{"procedure":"repo.create","input":{"name":"newrepo"}}"#,
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{v}");
+    assert_eq!(v["error"]["code"], "auth.pat_scope", "{v}");
+
+    // Admin surface stays out of reach even on public repos.
+    let (status, _, v) = rpc_json_bearer(
+        &app,
+        r#"{"procedure":"repo.collaborators.list","input":{"owner":"pubrepouser","name":"publicrepo"}}"#,
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{v}");
+    assert_eq!(v["error"]["code"], "auth.pat_scope", "{v}");
+}
+
+/// `delete_repo` is standalone — `repo` alone cannot soft-delete (GH parity).
+#[tokio::test]
+async fn pat_bearer_delete_repo_is_standalone() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!("sqlite:{}", dir.path().join("pat_delrepo.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone()).await;
+
+    let (user_id, _cookie, repo_token) = verified_user_with_classic_pat(
+        &app,
+        &db,
+        "delrepo@ex.com",
+        "delrepouser",
+        r#"["repo"]"#,
+    )
+    .await;
+    db.insert_repository("r-del-1", &user_id, "user", "todelete", "private", "", "main")
+        .await
+        .expect("repo");
+
+    let (status, _, v) = rpc_json_bearer(
+        &app,
+        r#"{"procedure":"repo.softDelete","input":{"owner":"delrepouser","name":"todelete"}}"#,
+        &repo_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{v}");
+    assert_eq!(v["error"]["code"], "auth.pat_scope", "{v}");
+}
+
+/// Family gates: `workflow`, `repo:status`, org and key-tier scopes reach only
+/// their own procedures (the gate fires before handler-level validation, so a
+/// non-`pat_scope` error still proves the scope check passed).
+#[tokio::test]
+async fn pat_bearer_family_scope_gates() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!("sqlite:{}", dir.path().join("pat_famgates.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone()).await;
+
+    let (user_id, _cookie, wf_token) = verified_user_with_classic_pat(
+        &app,
+        &db,
+        "wf@ex.com",
+        "wfuser",
+        r#"["workflow"]"#,
+    )
+    .await;
+    db.insert_repository("r-wf-1", &user_id, "user", "wfrepo", "private", "", "main")
+        .await
+        .expect("repo");
+
+    // workflow → dispatch reaches the handler (fails on missing workflow —
+    // any error that is not auth.pat_scope proves the gate passed).
+    let (_, _, v) = rpc_json_bearer(
+        &app,
+        r#"{"procedure":"repo.actions.dispatchWorkflow","input":{"owner":"wfuser","name":"wfrepo","workflow_id":"ci.yml","ref":"main"}}"#,
+        &wf_token,
+    )
+    .await;
+    assert_ne!(v["error"]["code"], "auth.pat_scope", "{v}");
+
+    // …but cannot read issues — family tokens are single-domain.
+    let (status, _, v) = rpc_json_bearer(
+        &app,
+        r#"{"procedure":"issue.list","input":{"owner":"wfuser","name":"wfrepo"}}"#,
+        &wf_token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{v}");
+    assert_eq!(v["error"]["code"], "auth.pat_scope", "{v}");
+
+    // write:org creates orgs; read:org cannot.
+    let (_uid2, _c2, write_org) = verified_user_with_classic_pat(
+        &app,
+        &db,
+        "worg@ex.com",
+        "worguser",
+        r#"["write:org"]"#,
+    )
+    .await;
+    let (status, _, v) = rpc_json_bearer(
+        &app,
+        r#"{"procedure":"org.create","input":{"slug":"wg","display_name":"WG"}}"#,
+        &write_org,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+
+    let (_uid3, _c3, read_org) = verified_user_with_classic_pat(
+        &app,
+        &db,
+        "rorg@ex.com",
+        "rorguser",
+        r#"["read:org"]"#,
+    )
+    .await;
+    let (status, _, v) = rpc_json_bearer(
+        &app,
+        r#"{"procedure":"org.create","input":{"slug":"rg","display_name":"RG"}}"#,
+        &read_org,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{v}");
+    assert_eq!(v["error"]["code"], "auth.pat_scope", "{v}");
+
+    // read:public_key lists but cannot add; write:public_key implies read.
+    let (_uid4, _c4, rpk) = verified_user_with_classic_pat(
+        &app,
+        &db,
+        "rpk@ex.com",
+        "rpkuser",
+        r#"["read:public_key"]"#,
+    )
+    .await;
+    let (status, _, v) =
+        rpc_json_bearer(&app, r#"{"procedure":"sshKey.list","input":{}}"#, &rpk).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    let (status, _, v) = rpc_json_bearer(
+        &app,
+        r#"{"procedure":"sshKey.add","input":{"title":"k","key":"ssh-ed25519 AAAA"}}"#,
+        &rpk,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{v}");
+    assert_eq!(v["error"]["code"], "auth.pat_scope", "{v}");
+
+    let (_uid5, _c5, wpk) = verified_user_with_classic_pat(
+        &app,
+        &db,
+        "wpk@ex.com",
+        "wpkuser",
+        r#"["write:public_key"]"#,
+    )
+    .await;
+    let (status, _, v) =
+        rpc_json_bearer(&app, r#"{"procedure":"sshKey.list","input":{}}"#, &wpk).await;
+    assert_eq!(status, StatusCode::OK, "write implies read — {v}");
+}
+
+/// A PAT can never mint or revoke tokens — even with every scope.
+#[tokio::test]
+async fn pat_bearer_cannot_manage_pats() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!("sqlite:{}", dir.path().join("pat_nopats.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone()).await;
+
+    let (_uid, _cookie, token) = verified_user_with_classic_pat(
+        &app,
+        &db,
+        "nopats@ex.com",
+        "nopatsuser",
+        r#"["repo","user","write:org","package:write","delete_repo","admin:public_key","notifications","workflow"]"#,
+    )
+    .await;
+
+    for procedure in [
+        r#"{"procedure":"pat.list","input":{}}"#,
+        r#"{"procedure":"pat.createClassic","input":{"name":"x","scopes":["repo"]}}"#,
+        r#"{"procedure":"pat.revoke","input":{"id":"whatever"}}"#,
+        r#"{"procedure":"oauthApp.list","input":{}}"#,
+        r#"{"procedure":"oauth.deviceAuthorize","input":{"user_code":"ABCD-EFGH","approve":true}}"#,
+    ] {
+        let (status, _, v) = rpc_json_bearer(&app, procedure, &token).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{procedure} — {v}");
+        assert_eq!(v["error"]["code"], "auth.pat_scope", "{procedure} — {v}");
+    }
+}
+
+// --- Fine-grained permission families (S7) ---
+
+/// Mint an FG token via `pat.createFineGrained` and return the plaintext.
+async fn mint_fg(
+    app: &axum::Router,
+    cookie: &str,
+    body: &str,
+) -> String {
+    let (status, v) = rpc_json(
+        app,
+        &format!(r#"{{"procedure":"pat.createFineGrained","input":{body}}}"#),
+        cookie,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["ok"], true, "{v}");
+    v["data"]["token"].as_str().expect("token").to_string()
+}
+
+/// FG `issues`/`pull_requests` families gate their domains per-repository;
+/// `contents` alone does not reach them, and `issues:read` cannot write.
+#[tokio::test]
+async fn pat_bearer_fg_perm_families() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!("sqlite:{}", dir.path().join("pat_fgfam.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone()).await;
+
+    let (cookie, login_v) = signup_and_login(&app, "fgfam@ex.com", "fgfamuser").await;
+    let user_id = login_v["data"]["id"].as_str().expect("id").to_string();
+    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    db.set_email_verified_at(&user_id, &now)
+        .await
+        .expect("verify");
+    let repo = db
+        .insert_repository("r-fgfam", &user_id, "user", "famrepo", "private", "", "main")
+        .await
+        .expect("repo");
+
+    // contents:read + issues:read — reads issues, cannot create or pull.
+    let t1 = mint_fg(
+        &app,
+        &cookie,
+        &format!(
+            r#"{{"name":"i1","repo_access":"selected","contents":"read","repository_ids":["{}"],"perms":{{"issues":"read"}}}}"#,
+            repo.id
+        ),
+    )
+    .await;
+
+    let (status, _, v) = rpc_json_bearer(
+        &app,
+        r#"{"procedure":"issue.list","input":{"owner":"fgfamuser","name":"famrepo"}}"#,
+        &t1,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+
+    // release.list is NOT denied — `contents:read` satisfies releases read
+    // (GH parity: release reads ride the contents permission).
+    let (status, _, v) = rpc_json_bearer(
+        &app,
+        r#"{"procedure":"release.list","input":{"owner":"fgfamuser","name":"famrepo"}}"#,
+        &t1,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+
+    for procedure in [
+        r#"{"procedure":"issue.create","input":{"owner":"fgfamuser","name":"famrepo","title":"x"}}"#,
+        r#"{"procedure":"pull.list","input":{"owner":"fgfamuser","name":"famrepo"}}"#,
+        r#"{"procedure":"repo.actions.listRuns","input":{"owner":"fgfamuser","name":"famrepo"}}"#,
+        r#"{"procedure":"release.create","input":{"owner":"fgfamuser","name":"famrepo","tag_name":"v0"}}"#,
+        r#"{"procedure":"webhook.list","input":{"owner":"fgfamuser","name":"famrepo"}}"#,
+    ] {
+        let (status, _, v) = rpc_json_bearer(&app, procedure, &t1).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{procedure} — {v}");
+        assert_eq!(v["error"]["code"], "auth.pat_scope", "{procedure} — {v}");
+    }
+
+    // issues:write on all repos (contents:read still required by mint).
+    let t2 = mint_fg(
+        &app,
+        &cookie,
+        r#"{"name":"i2","repo_access":"all","contents":"read","perms":{"issues":"write"}}"#,
+    )
+    .await;
+    let (status, _, v) = rpc_json_bearer(
+        &app,
+        r#"{"procedure":"issue.create","input":{"owner":"fgfamuser","name":"famrepo","title":"from fg"}}"#,
+        &t2,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+
+    // releases:read alone reaches release.list without contents.
+    let t3 = mint_fg(
+        &app,
+        &cookie,
+        &format!(
+            r#"{{"name":"i3","repo_access":"selected","contents":"read","repository_ids":["{}"],"perms":{{"releases":"read"}}}}"#,
+            repo.id
+        ),
+    )
+    .await;
+    let (status, _, v) = rpc_json_bearer(
+        &app,
+        r#"{"procedure":"release.list","input":{"owner":"fgfamuser","name":"famrepo"}}"#,
+        &t3,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    // …but release.create needs releases:write.
+    let (status, _, v) = rpc_json_bearer(
+        &app,
+        r#"{"procedure":"release.create","input":{"owner":"fgfamuser","name":"famrepo","tag_name":"v1"}}"#,
+        &t3,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{v}");
+    assert_eq!(v["error"]["code"], "auth.pat_scope", "{v}");
+}
+
+/// FG account-level families act on the token owner without repo binding;
+/// absent families are denied.
+#[tokio::test]
+async fn pat_bearer_fg_account_perms() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!("sqlite:{}", dir.path().join("pat_fgacct.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone()).await;
+
+    let (cookie, login_v) = signup_and_login(&app, "fgacct@ex.com", "fgacctuser").await;
+    let user_id = login_v["data"]["id"].as_str().expect("id").to_string();
+    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    db.set_email_verified_at(&user_id, &now)
+        .await
+        .expect("verify");
+    let repo = db
+        .insert_repository("r-fgacct", &user_id, "user", "acctrepo", "private", "", "main")
+        .await
+        .expect("repo");
+
+    let token = mint_fg(
+        &app,
+        &cookie,
+        &format!(
+            r#"{{"name":"acct","repo_access":"selected","contents":"read","repository_ids":["{}"],"perms":{{"emails":"read","notifications":"read"}}}}"#,
+            repo.id
+        ),
+    )
+    .await;
+
+    let (status, _, v) =
+        rpc_json_bearer(&app, r#"{"procedure":"email.list","input":{}}"#, &token).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    let (status, _, v) = rpc_json_bearer(
+        &app,
+        r#"{"procedure":"notification.unreadCount","input":{}}"#,
+        &token,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+
+    for procedure in [
+        r#"{"procedure":"email.add","input":{"email":"x@ex.com"}}"#,
+        r#"{"procedure":"sshKey.list","input":{}}"#,
+        r#"{"procedure":"user.follow","input":{"username":"someone"}}"#,
+        r#"{"procedure":"user.update_profile","input":{"display_name":"X"}}"#,
+    ] {
+        let (status, _, v) = rpc_json_bearer(&app, procedure, &token).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{procedure} — {v}");
+        assert_eq!(v["error"]["code"], "auth.pat_scope", "{procedure} — {v}");
+    }
 }

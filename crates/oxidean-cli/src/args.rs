@@ -93,8 +93,8 @@ pub fn help_topic(group: &str, sub: &str) -> Option<&'static str> {
 
 /// `(command-path, help text)`. Every leaf lists its own flags.
 const HELP: &[(&str, &str)] = &[
-    ("auth", "ox auth — sign-in state\n\n  ox auth login --instance <url> [--token <pat> | --token-stdin]\n  ox auth status      show who you're logged in as\n  ox auth logout      remove the stored token for the instance\n  ox auth token       print the resolved token (for scripts)"),
-    ("auth login", "ox auth login --instance <url> [--token <pat> | --token-stdin]\n\nWith no token flag, a piped stdin is used as the token; on a TTY the\ncommand fails instead of hanging. Stores the token under the instance\nin ~/.config/ox/config.json and makes it the default."),
+    ("auth", "ox auth — sign-in state\n\n  ox auth login --instance <url> [--web | --token <pat> | --token-stdin]\n  ox auth status      show who you're logged in as\n  ox auth logout      remove the stored token for the instance\n  ox auth token       print the resolved token (for scripts)"),
+    ("auth login", "ox auth login --instance <url> [--web | --token <pat> | --token-stdin]\n\n--web runs the RFC 8628 device flow: prints a one-time code, opens the\ninstance's /oauth/device page, and polls until you approve or deny.\nWith no token flag and no --web, a piped stdin is used as the token; on\na TTY the command fails instead of hanging. Stores the token under the\ninstance in ~/.config/ox/config.json and makes it the default."),
     ("auth status", "ox auth status\n\nCalls auth.me on the resolved instance and prints the login."),
     ("auth logout", "ox auth logout\n\nDrops the stored token for the resolved instance (config file edit —\nno network call)."),
     ("auth token", "ox auth token\n\nPrints the token that would be sent (OXIDEAN_TOKEN wins over the\nstored credential). For scripts: TOKEN=$(ox auth token)."),
@@ -181,7 +181,7 @@ const HELP: &[(&str, &str)] = &[
     ("ssh-key", "ox ssh-key list · add --title <t> --key-file <path> [--no-auth|--no-sign]\n           delete --id <id>      (key-file '-' = stdin)"),
     ("gpg-key", "ox gpg-key list · add --title <t> --key-file <path> · delete --id <id>"),
     ("email", "ox email list · add <addr> · remove --id <id> · set-primary --id <id>\n         resend --id <id>"),
-    ("pat", "ox pat — personal access tokens\n\n  list\n  create --name <n> --scopes repo,package:read,... [--expires <iso>]\n  create --name <n> --fine-grained --contents read|write\n      [--repo-access all|selected] [--repos <id,id>] [--expires <iso>]\n  revoke --id <id>\n\nThe minted token is printed once — store it somewhere safe."),
+    ("pat", "ox pat — personal access tokens\n\n  list\n  create --name <n> --scopes repo,package:read,... [--expires <iso>]\n  create --name <n> --fine-grained --contents read|write\n      [--repo-access all|selected] [--repos <id,id>]\n      [--perms issues=write,pull_requests=read,...] [--expires <iso>]\n  revoke --id <id>\n\nThe minted token is printed once — store it somewhere safe."),
     ("label", "ox label list <o/n>|--org <slug>\n  ox label create <o/n>|--org <slug> --name <n> --color <hex> [--description <d>]\n  ox label edit <o/n>|--org <slug> --id <id> [--name][--color][--description][--hidden]\n  ox label delete <o/n>|--org <slug> --id <id>"),
     ("webhook", "ox webhook list|create|edit|delete|ping <o/n>\n  create --url <u> --secret <s> --events push,pull_request [--name <n>]\n         [--description <d>] [--inactive]\n  edit --id <id> [--url][--secret][--events][--name][--description][--inactive|--active]\n  ping --id <id> · deliveries <o/n> --id <id> [--limit n]\n  redeliver <o/n> --id <id> --delivery <delivery-id>"),
     ("invite", "ox invite accept --token <t> [--email <e>] [--username <u>] [--password <p>]\n\nAccept a repo/org invite link."),
@@ -252,6 +252,8 @@ pub enum Command {
     AuthLogin {
         token: Option<String>,
         token_stdin: bool,
+        /// `--web` — RFC 8628 device authorization grant (browser sign-in).
+        web: bool,
     },
     AuthStatus,
     AuthLogout,
@@ -758,6 +760,8 @@ pub enum Command {
         contents: Option<String>,
         repo_access: Option<String>,
         repo_ids: Vec<String>,
+        /// `--perms issues=write,pull_requests=read` (fine-grained only).
+        perms: Vec<String>,
         expires_at: Option<String>,
     },
     PatRevoke {
@@ -1320,11 +1324,22 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
 
     let command = match (group, sub, leaf) {
         ("auth", "login", "") => {
-            let f = scan(tail, &["--token"], &["--token-stdin"], &[])?;
+            let f = scan(
+                tail,
+                &["--token"],
+                &["--token-stdin", "--web"],
+                &[],
+            )?;
             expect_no_positionals(&f, "auth login")?;
+            if f.bools.contains("--web")
+                && (f.values.contains_key("--token") || f.bools.contains("--token-stdin"))
+            {
+                return Err(usage("--web cannot be combined with --token/--token-stdin"));
+            }
             Command::AuthLogin {
                 token: f.values.get("--token").cloned(),
                 token_stdin: f.bools.contains("--token-stdin"),
+                web: f.bools.contains("--web"),
             }
         }
         ("auth", "status", "") => {
@@ -2720,6 +2735,7 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
                     "--contents",
                     "--repo-access",
                     "--repos",
+                    "--perms",
                     "--expires",
                 ],
                 &["--fine-grained", "--fg", "--classic"],
@@ -2735,6 +2751,7 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
                 contents: f.values.get("--contents").cloned(),
                 repo_access: f.values.get("--repo-access").cloned(),
                 repo_ids: f.values.get("--repos").map(|s| csv(s)).unwrap_or_default(),
+                perms: f.values.get("--perms").map(|s| csv(s)).unwrap_or_default(),
                 expires_at: f.values.get("--expires").cloned(),
             }
         }
@@ -3396,5 +3413,34 @@ mod tests {
     fn missing_subcommand_named() {
         let err = parse(&argv(&["issue"])).unwrap_err();
         assert!(err.0.contains("missing subcommand"), "{err}");
+    }
+
+    #[test]
+    fn pat_create_fine_grained_perms() {
+        let inv = parse(&argv(&[
+            "pat",
+            "create",
+            "--name",
+            "ci",
+            "--fine-grained",
+            "--contents",
+            "write",
+            "--perms",
+            "issues=write,pull_requests=read",
+        ]))
+        .unwrap();
+        match inv.command {
+            Command::PatCreate {
+                fine_grained,
+                contents,
+                perms,
+                ..
+            } => {
+                assert!(fine_grained);
+                assert_eq!(contents.as_deref(), Some("write"));
+                assert_eq!(perms, vec!["issues=write", "pull_requests=read"]);
+            }
+            other => panic!("{other:?}"),
+        }
     }
 }

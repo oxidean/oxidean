@@ -209,9 +209,14 @@ pub async fn pat_allows_operation(
                     Some(Ok(v)) => v,
                     Some(Err(_)) | None => return Ok(false),
                 };
-            Ok(scopes
-                .iter()
-                .any(|s| ClassicPatScope::parse(s).ok() == Some(ClassicPatScope::Repo)))
+            let has = |want: ClassicPatScope| {
+                scopes
+                    .iter()
+                    .any(|s| ClassicPatScope::parse(s).ok() == Some(want))
+            };
+            Ok(has(ClassicPatScope::Repo)
+                || (has(ClassicPatScope::PublicRepo)
+                    && !crate::repo::is_private_visibility(&repo.visibility)))
         }
         PatKind::FineGrained => {
             let access = match pat

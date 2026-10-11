@@ -43,33 +43,143 @@ impl PatKind {
     }
 }
 
-/// Classic scope catalog: `repo` (git) + `package:read` / `package:write` (D-PKG-04).
+/// Classic scope catalog (GitHub-classic parity where a procedure family
+/// exists). `repo` is the umbrella repo-domain scope; the narrower scopes
+/// gate single families (`pat::bearer::classify` maps procedures → gates).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub enum ClassicPatScope {
     #[serde(rename = "repo")]
     Repo,
+    /// Commit statuses only (`repo.commitStatus.*`).
+    #[serde(rename = "repo:status")]
+    RepoStatus,
+    /// Repository invitations (`repo.invites.*`).
+    #[serde(rename = "repo:invite")]
+    RepoInvite,
+    /// Public-repo read/write only (no private repos, no admin surface).
+    #[serde(rename = "public_repo")]
+    PublicRepo,
+    /// Security-events surface — mintable; no procedures map yet.
+    #[serde(rename = "security_events")]
+    SecurityEvents,
+    /// Actions runs/workflows (dispatch, rerun, cancel).
+    #[serde(rename = "workflow")]
+    Workflow,
     #[serde(rename = "package:read")]
     PackageRead,
     #[serde(rename = "package:write")]
     PackageWrite,
+    /// Package version deletion (held back from `package:write`, GH parity).
+    #[serde(rename = "package:delete")]
+    PackageDelete,
+    #[serde(rename = "notifications")]
+    Notifications,
+    /// Profile + public user lookups.
+    #[serde(rename = "read:user")]
+    ReadUser,
+    /// Full user profile: profile writes + email management + follow.
+    #[serde(rename = "user")]
+    User,
+    /// `email.list` (read own addresses).
+    #[serde(rename = "user:email")]
+    UserEmail,
+    /// `user.follow` / `user.unfollow`.
+    #[serde(rename = "user:follow")]
+    UserFollow,
+    /// Org profile/membership reads.
+    #[serde(rename = "read:org")]
+    ReadOrg,
+    /// Org creation/settings/membership writes (implies `read:org`).
+    #[serde(rename = "write:org")]
+    WriteOrg,
+    /// Repository webhooks (`webhook.*` read + write).
+    #[serde(rename = "admin:repo_hook")]
+    AdminRepoHook,
+    #[serde(rename = "read:public_key")]
+    ReadPublicKey,
+    #[serde(rename = "write:public_key")]
+    WritePublicKey,
+    #[serde(rename = "admin:public_key")]
+    AdminPublicKey,
+    #[serde(rename = "read:gpg_key")]
+    ReadGpgKey,
+    #[serde(rename = "write:gpg_key")]
+    WriteGpgKey,
+    #[serde(rename = "admin:gpg_key")]
+    AdminGpgKey,
+    /// `repo.softDelete` — deliberately NOT implied by `repo` (GH parity).
+    #[serde(rename = "delete_repo")]
+    DeleteRepo,
+    /// Project boards — mintable forward-compat; no procedures map yet.
+    #[serde(rename = "project")]
+    Project,
+    #[serde(rename = "read:project")]
+    ReadProject,
 }
 
 impl ClassicPatScope {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Repo => "repo",
+            Self::RepoStatus => "repo:status",
+            Self::RepoInvite => "repo:invite",
+            Self::PublicRepo => "public_repo",
+            Self::SecurityEvents => "security_events",
+            Self::Workflow => "workflow",
             Self::PackageRead => "package:read",
             Self::PackageWrite => "package:write",
+            Self::PackageDelete => "package:delete",
+            Self::Notifications => "notifications",
+            Self::ReadUser => "read:user",
+            Self::User => "user",
+            Self::UserEmail => "user:email",
+            Self::UserFollow => "user:follow",
+            Self::ReadOrg => "read:org",
+            Self::WriteOrg => "write:org",
+            Self::AdminRepoHook => "admin:repo_hook",
+            Self::ReadPublicKey => "read:public_key",
+            Self::WritePublicKey => "write:public_key",
+            Self::AdminPublicKey => "admin:public_key",
+            Self::ReadGpgKey => "read:gpg_key",
+            Self::WriteGpgKey => "write:gpg_key",
+            Self::AdminGpgKey => "admin:gpg_key",
+            Self::DeleteRepo => "delete_repo",
+            Self::Project => "project",
+            Self::ReadProject => "read:project",
         }
     }
 
+    /// Full parse table — accepts every `as_str` wire name.
     pub fn parse(s: &str) -> Result<Self, String> {
-        match s.trim() {
-            "repo" => Ok(Self::Repo),
-            "package:read" => Ok(Self::PackageRead),
-            "package:write" => Ok(Self::PackageWrite),
-            other => Err(format!("invalid classic scope: {other}")),
-        }
+        Ok(match s.trim() {
+            "repo" => Self::Repo,
+            "repo:status" => Self::RepoStatus,
+            "repo:invite" => Self::RepoInvite,
+            "public_repo" => Self::PublicRepo,
+            "security_events" => Self::SecurityEvents,
+            "workflow" => Self::Workflow,
+            "package:read" => Self::PackageRead,
+            "package:write" => Self::PackageWrite,
+            "package:delete" => Self::PackageDelete,
+            "notifications" => Self::Notifications,
+            "read:user" => Self::ReadUser,
+            "user" => Self::User,
+            "user:email" => Self::UserEmail,
+            "user:follow" => Self::UserFollow,
+            "read:org" => Self::ReadOrg,
+            "write:org" => Self::WriteOrg,
+            "admin:repo_hook" => Self::AdminRepoHook,
+            "read:public_key" => Self::ReadPublicKey,
+            "write:public_key" => Self::WritePublicKey,
+            "admin:public_key" => Self::AdminPublicKey,
+            "read:gpg_key" => Self::ReadGpgKey,
+            "write:gpg_key" => Self::WriteGpgKey,
+            "admin:gpg_key" => Self::AdminGpgKey,
+            "delete_repo" => Self::DeleteRepo,
+            "project" => Self::Project,
+            "read:project" => Self::ReadProject,
+            other => return Err(format!("invalid classic scope: {other}")),
+        })
     }
 }
 
@@ -148,6 +258,107 @@ impl ContentsPerm {
     }
 }
 
+/// Fine-grained permission level shared by every family — `read` | `write`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum FgPermLevel {
+    Read,
+    Write,
+}
+
+impl FgPermLevel {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Read => "read",
+            Self::Write => "write",
+        }
+    }
+
+    pub fn parse(s: &str) -> Result<Self, String> {
+        match s.trim() {
+            "read" => Ok(Self::Read),
+            "write" => Ok(Self::Write),
+            other => Err(format!("invalid permission level: {other}")),
+        }
+    }
+
+    /// `write` implies `read` (GH parity).
+    pub const fn meets(self, required: FgPermLevel) -> bool {
+        self as u8 >= required as u8
+    }
+}
+
+/// Fine-grained permission families (GitHub FG parity). Absent field = no
+/// grant. `contents` stays on `CreateFineGrainedPatRequest.contents`
+/// (required, existing column); `packages` keeps its dedicated field —
+/// `perms` holds every *other* family, persisted as JSON on the token row.
+///
+/// Repo-bound families require the procedure to name a covered repository;
+/// account-level families (`emails`, `notifications`, `profile`, `ssh_keys`,
+/// `gpg_keys`, `starring`, `watching`, `followers`) act on the token owner's
+/// account directly.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct FgPerms {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub issues: Option<FgPermLevel>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pull_requests: Option<FgPermLevel>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actions: Option<FgPermLevel>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commit_statuses: Option<FgPermLevel>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secrets: Option<FgPermLevel>,
+    /// Actions variables — mintable forward-compat; no procedures map yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub variables: Option<FgPermLevel>,
+    /// Environments — mintable forward-compat; no procedures map yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environments: Option<FgPermLevel>,
+    /// Deployments — mintable forward-compat; no procedures map yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deployments: Option<FgPermLevel>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub webhooks: Option<FgPermLevel>,
+    /// Repository administration (collaborators, protection rules, mirrors,
+    /// LFS/quota/settings writes, deploy keys, repo delete).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub administration: Option<FgPermLevel>,
+    /// Repo metadata reads — satisfies the `RepoRead` procedure class without
+    /// `contents` (GH grants Metadata:read implicitly).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<FgPermLevel>,
+    /// Pages — mintable forward-compat; no procedures map yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pages: Option<FgPermLevel>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub releases: Option<FgPermLevel>,
+    // --- account-level ---
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub emails: Option<FgPermLevel>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notifications: Option<FgPermLevel>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<FgPermLevel>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssh_keys: Option<FgPermLevel>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gpg_keys: Option<FgPermLevel>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub starring: Option<FgPermLevel>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub watching: Option<FgPermLevel>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub followers: Option<FgPermLevel>,
+}
+
+impl FgPerms {
+    /// True when no family is granted (useful for "pick at least one" checks).
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
 /// `pat.createClassic` input (RPC wired in 08-04+).
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct CreateClassicPatRequest {
@@ -173,6 +384,9 @@ pub struct CreateFineGrainedPatRequest {
     /// Optional packages permission for FG tokens (D-PKG-04).
     #[serde(default)]
     pub packages: Option<PackagesPerm>,
+    /// Additional permission families (issues/pull_requests/actions/…).
+    #[serde(default)]
+    pub perms: FgPerms,
     #[serde(default)]
     pub expires_at: Option<String>,
 }
@@ -192,6 +406,9 @@ pub struct PatListItem {
     pub packages: Option<PackagesPerm>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub repo_access: Option<FgRepoAccess>,
+    /// Extra FG permission families (fine-grained only).
+    #[serde(default, skip_serializing_if = "FgPerms::is_empty")]
+    pub perms: FgPerms,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub repository_ids: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -245,6 +462,7 @@ mod tests {
             contents: None,
             packages: None,
             repo_access: None,
+            perms: FgPerms::default(),
             repository_ids: vec![],
             expires_at: None,
             last_used_at: None,
@@ -268,6 +486,7 @@ mod tests {
                 scopes: Some(vec![ClassicPatScope::Repo]),
                 contents: None,
                 packages: None,
+                perms: FgPerms::default(),
                 repo_access: None,
                 repository_ids: vec![],
                 expires_at: None,

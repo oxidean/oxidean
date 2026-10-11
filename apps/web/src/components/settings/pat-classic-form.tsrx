@@ -1,15 +1,16 @@
 import { useForm } from "@octanejs/tanstack-form";
 import { useState } from "octane";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { ClassicScopeGroups } from "@/components/settings/pat-classic-scopes";
 import { PatExpiryField } from "@/components/settings/pat-expiry-field";
 import {
   resolveExpiresAt,
   tomorrowDateValue,
   type PatExpiryPreset,
 } from "@/components/settings/pat-expiry";
+import { selectedScopes, type ClassicScopeValues } from "@/components/settings/pat-scopes";
 import { apiClient } from "@/lib/api-client";
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
@@ -28,9 +29,7 @@ export function PatClassicForm({ onCreated }: PatClassicFormProps) @{
   const form = useForm({
     defaultValues: {
       note: "",
-      repoChecked: true,
-      packageRead: false,
-      packageWrite: false,
+      scopes: { repo: true } as ClassicScopeValues,
       expiryPreset: "30" as PatExpiryPreset,
       expiryDate: tomorrowDateValue(),
     },
@@ -43,21 +42,16 @@ export function PatClassicForm({ onCreated }: PatClassicFormProps) @{
         setNoteError("Note is required.");
         return;
       }
-      if (!value.repoChecked) {
-        setScopeError("Full control of private repositories is required.");
+      const scopes = selectedScopes(value.scopes);
+      if (scopes.length === 0) {
+        setScopeError("Select at least one scope.");
         return;
       }
       setPending(true);
       try {
-        const scopes: string[] = ["repo"];
-        if (value.packageWrite) {
-          scopes.push("package:write");
-        } else if (value.packageRead) {
-          scopes.push("package:read");
-        }
         const res = await apiClient.pat.createClassic({
           name: trimmed,
-          scopes: scopes as ("repo" | "package:read" | "package:write")[],
+          scopes,
           expires_at: resolveExpiresAt(value.expiryPreset, value.expiryDate),
         });
         if (!res.ok) {
@@ -116,100 +110,25 @@ export function PatClassicForm({ onCreated }: PatClassicFormProps) @{
       )}
     </form.Field>
 
-    <div className="flex flex-col gap-3" data-testid="pat-classic-scopes">
-      <p className="text-[14px] font-medium text-foreground">Scopes</p>
+    <form.Field name="scopes">
+      {(field) => (
+        <ClassicScopeGroups
+          values={field.state.value}
+          pending={pending}
+          onToggle={(scope, checked) =>
+            field.handleChange({ ...field.state.value, [scope]: checked })
+          }
+        />
+      )}
+    </form.Field>
 
-      <div className="flex flex-col gap-2">
-        <p className="text-[13px] font-medium uppercase tracking-wide text-muted-foreground">
-          Repository
-        </p>
-        <form.Field name="repoChecked">
-          {(field) => (
-            <label className="flex cursor-pointer items-start gap-3">
-              <Checkbox
-                checked={field.state.value}
-                disabled={pending}
-                aria-label="Full control of private repositories"
-                data-testid="scope-repo"
-                onCheckedChange={(checked) => field.handleChange(checked === true)}
-              />
-              <span className="flex flex-col gap-0.5">
-                <span className="text-[14px] text-foreground">
-                  repo — Full control of private repositories
-                </span>
-                <span className="text-[13px] text-muted-foreground">
-                  Required for git clone, fetch, and push over HTTPS.
-                </span>
-              </span>
-            </label>
-          )}
-        </form.Field>
-      </div>
-
-      <div className="flex flex-col gap-2">
-        <p className="text-[13px] font-medium uppercase tracking-wide text-muted-foreground">
-          Packages
-        </p>
-        <form.Field name="packageRead">
-          {(field) => (
-            <form.Subscribe selector={(s) => s.values.packageWrite}>
-              {(packageWrite) => (
-                <label className="flex cursor-pointer items-start gap-3">
-                  <Checkbox
-                    checked={field.state.value || packageWrite}
-                    disabled={pending || packageWrite}
-                    aria-label="package:read"
-                    data-testid="scope-package-read"
-                    onCheckedChange={(checked) => field.handleChange(checked === true)}
-                  />
-                  <span className="flex flex-col gap-0.5">
-                    <span className="text-[14px] text-foreground">
-                      package:read — Download packages
-                    </span>
-                    <span className="text-[13px] text-muted-foreground">
-                      Registry download only; does not include repository access by itself.
-                    </span>
-                  </span>
-                </label>
-              )}
-            </form.Subscribe>
-          )}
-        </form.Field>
-        <form.Field name="packageWrite">
-          {(field) => (
-            <label className="flex cursor-pointer items-start gap-3">
-              <Checkbox
-                checked={field.state.value}
-                disabled={pending}
-                aria-label="package:write"
-                data-testid="scope-package-write"
-                onCheckedChange={(checked) => {
-                  const on = checked === true;
-                  field.handleChange(on);
-                  if (on) form.setFieldValue("packageRead", true);
-                }}
-              />
-              <span className="flex flex-col gap-0.5">
-                <span className="text-[14px] text-foreground">
-                  package:write — Publish and manage packages
-                </span>
-                <span className="text-[13px] text-muted-foreground">
-                  Implies package:read. Publish, overwrite, and delete package versions.
-                </span>
-              </span>
-            </label>
-          )}
-        </form.Field>
-      </div>
-
-      <p
-        role="alert"
-        className={scopeError ? "text-[14px] text-destructive" : "hidden"}
-        data-testid="pat-classic-scope-error"
-      >
-        {(scopeError || "") as string}
-      </p>
-    </div>
+    <p
+      role="alert"
+      className={scopeError ? "text-[14px] text-destructive" : "hidden"}
+      data-testid="pat-classic-scope-error"
+    >
+      {(scopeError || "") as string}
+    </p>
 
     <form.Field name="expiryPreset">
       {(presetField) => (
@@ -229,17 +148,12 @@ export function PatClassicForm({ onCreated }: PatClassicFormProps) @{
 
     <form.Subscribe
       selector={(s) => ({
-        repo: s.values.repoChecked,
-        packageRead: s.values.packageRead,
-        packageWrite: s.values.packageWrite,
+        scopes: s.values.scopes,
         expiryPreset: s.values.expiryPreset,
       })}
     >
       {(v) => {
-        const parts: string[] = [];
-        if (v.repo) parts.push("repo");
-        if (v.packageWrite) parts.push("package:write");
-        else if (v.packageRead) parts.push("package:read");
+        const parts = selectedScopes(v.scopes);
         const scopeText = parts.length > 0 ? parts.join(", ") : "no scopes";
         const expText =
           v.expiryPreset === "none"
@@ -263,9 +177,9 @@ export function PatClassicForm({ onCreated }: PatClassicFormProps) @{
       {(formError || "") as string}
     </p>
 
-    <form.Subscribe selector={(s) => s.values.repoChecked}>
-      {(repoChecked) => (
-        <Button type="submit" className="h-11 w-fit" disabled={pending || !repoChecked}>
+    <form.Subscribe selector={(s) => selectedScopes(s.values.scopes).length}>
+      {(count) => (
+        <Button type="submit" className="h-11 w-fit" disabled={pending || count === 0}>
           {(pending ? "Generating…" : "Generate token") as string}
         </Button>
       )}

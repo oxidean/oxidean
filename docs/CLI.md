@@ -108,6 +108,11 @@ ox auth login --instance https://forge.example.com --token oxidean_pat_…
 OXIDEAN_TOKEN=oxidean_pat_… ox auth login --instance https://forge.example.com
 echo "$TOKEN" | ox auth login --instance https://forge.example.com
 echo "$TOKEN" | ox auth login --instance https://forge.example.com --token-stdin
+
+# Browser device grant (RFC 8628): prints a user code + verification URL,
+# approves in the browser at /oauth/device, polls until approved — the
+# resulting PAT is stored like a --token login.
+ox auth login --instance https://forge.example.com --web
 ```
 
 Login writes `config.json` under the config directory
@@ -200,10 +205,13 @@ ox webhook list|create|edit|delete|ping <o/n> | ox webhook deliveries|redeliver
 # Account
 ox ssh-key|gpg-key list|add|delete      # add: --title t --key-file path|- 
 ox email list|add|remove|set-primary|resend
-ox pat list|create|revoke               # create: --scopes … or --fine-grained
+ox pat list|create|revoke               # classic: --scopes repo,workflow,…
+                                        # fine-grained: --fine-grained --contents read|write
+                                        #   [--repo-access all|selected] [--repos id,id]
+                                        #   [--perms issues=write,pull_requests=read,…]
 ox invite accept --token <t>
 
-# Instance admin (requires an admin PAT)
+# Instance admin (admin.* is session-only — not callable with PAT auth)
 ox admin users list|ban|unban|delete|set-role|sessions|revoke-sessions|access|activity
 ox admin invites list|create|link|revoke
 ox admin runners | ox admin runner-token

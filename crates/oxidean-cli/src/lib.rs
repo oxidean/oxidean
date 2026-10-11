@@ -7,6 +7,7 @@
 pub mod args;
 pub mod commands;
 pub mod config;
+pub mod device;
 pub mod http;
 pub mod manifest;
 pub mod output;

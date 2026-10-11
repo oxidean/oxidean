@@ -88,8 +88,12 @@ pub async fn remove_asset_file(release_assets_dir: &Path, asset_id: &str) {
 
 /// Cookie session or `Authorization: Bearer <pat>` — asset up/download is the
 /// CLI's path, so PATs (which never mint sessions) are honored alongside
-/// browser cookies.
-async fn resolve_session_user_id(state: &AppState, headers: &HeaderMap) -> Option<String> {
+/// browser cookies. Returns the user id plus the `PatIdentity` (when
+/// bearer-authed) so callers can scope-gate the operation.
+async fn resolve_session_user_id(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Option<(String, Option<crate::pat::bearer::PatIdentity>)> {
     let client = crate::rpc::ClientMeta::from_headers(headers);
     if let Some(token) = session_token_from_headers(headers) {
         return match state
@@ -102,7 +106,7 @@ async fn resolve_session_user_id(state: &AppState, headers: &HeaderMap) -> Optio
             )
             .await
         {
-            Ok(Some(s)) => Some(s.user_id),
+            Ok(Some(s)) => Some((s.user_id, None)),
             _ => None,
         };
     }
@@ -115,11 +119,24 @@ async fn resolve_session_user_id(state: &AppState, headers: &HeaderMap) -> Optio
         )
         .await
         {
-            Ok((session, _identity)) => Some(session.user_id),
+            Ok((session, identity)) => Some((session.user_id, Some(identity))),
             Err(_) => None,
         };
     }
     None
+}
+
+/// Map a `pat::bearer` scope error to the route's error body (mirrors the
+/// RPC status mapping: scope denial → 403, anti-enumeration → 404).
+fn pat_err_response(e: &oxidean_core::AppError) -> Response {
+    let status = if e.code.ends_with(".not_found") {
+        StatusCode::NOT_FOUND
+    } else if e.code == "auth.pat_scope" {
+        StatusCode::FORBIDDEN
+    } else {
+        StatusCode::INTERNAL_SERVER_ERROR
+    };
+    err_response(status, &e.code, &e.message)
 }
 
 /// `POST /api/repos/{owner}/{repo}/releases/{release_id}/assets` — multipart field `asset`.
@@ -129,7 +146,7 @@ pub async fn upload_asset(
     headers: HeaderMap,
     mut multipart: Multipart,
 ) -> Response {
-    let Some(user_id) = resolve_session_user_id(&state, &headers).await else {
+    let Some((user_id, pat)) = resolve_session_user_id(&state, &headers).await else {
         return err_response(
             StatusCode::UNAUTHORIZED,
             "auth.unauthenticated",
@@ -169,6 +186,19 @@ pub async fn upload_asset(
             );
         }
     };
+    if let Some(pat) = &pat {
+        if let Err(e) = crate::pat::bearer::authorize_pat_on_repo(
+            &state.db,
+            pat,
+            "release.update",
+            &repo_row,
+            &owner_ref,
+        )
+        .await
+        {
+            return pat_err_response(&e);
+        }
+    }
     let capability = match effective_capability(&state.db, Some(&user_id), &repo_row, &owner_ref)
         .await
     {
@@ -451,8 +481,23 @@ pub async fn download_asset(
     };
 
     let caller = resolve_session_user_id(&state, &headers).await;
+    if let Some((_, Some(pat))) = &caller {
+        if let Err(e) =
+            crate::pat::bearer::authorize_pat_on_repo(&state.db, pat, "release.get", &repo, &owner_ref)
+                .await
+        {
+            return pat_err_response(&e);
+        }
+    }
     let capability =
-        match effective_capability(&state.db, caller.as_deref(), &repo, &owner_ref).await {
+        match effective_capability(
+            &state.db,
+            caller.as_ref().map(|(id, _)| id.as_str()),
+            &repo,
+            &owner_ref,
+        )
+        .await
+        {
             Ok(c) => c,
             Err(e) => {
                 tracing::error!(error = %e, "effective_capability download");
