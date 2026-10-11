@@ -159,9 +159,8 @@ fn parse_cgi_response(stdout: &[u8]) -> Result<Response, String> {
             continue;
         }
         if let Some(rest) = line.strip_prefix("Status:") {
-            let code = rest.trim().split_whitespace().next().unwrap_or("200");
-            status = StatusCode::from_u16(code.parse().unwrap_or(200))
-                .unwrap_or(StatusCode::OK);
+            let code = rest.split_whitespace().next().unwrap_or("200");
+            status = StatusCode::from_u16(code.parse().unwrap_or(200)).unwrap_or(StatusCode::OK);
             continue;
         }
         if let Some((name, value)) = line.split_once(':') {

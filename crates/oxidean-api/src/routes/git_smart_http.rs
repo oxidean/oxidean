@@ -115,6 +115,7 @@ fn limiter_lock(
         .unwrap_or_else(|e| e.into_inner())
 }
 
+#[allow(clippy::result_large_err)]
 /// Decode `Authorization: Basic …` → (username, password).
 fn parse_basic(headers: &HeaderMap) -> Result<Option<(String, String)>, Response> {
     let Some(raw) = headers.get(header::AUTHORIZATION) else {
@@ -149,12 +150,7 @@ fn client_ip(headers: &HeaderMap) -> Option<String> {
     headers
         .get("x-forwarded-for")
         .and_then(|v| v.to_str().ok())
-        .and_then(|s| {
-            s.split(',')
-                .map(str::trim)
-                .filter(|p| !p.is_empty())
-                .next_back()
-        })
+        .and_then(|s| s.split(',').map(str::trim).rfind(|p| !p.is_empty()))
         .map(|s| s.to_string())
 }
 
@@ -198,6 +194,7 @@ async fn record_failed_auth(state: &AppState, headers: &HeaderMap, username: Opt
     }
 }
 
+#[allow(clippy::result_large_err)]
 /// Resolve Basic credentials to a PAT owner. Cookies are never consulted (D-12).
 async fn authenticate_pat(
     state: &AppState,
@@ -301,11 +298,8 @@ struct ResolvedRepo {
     disk_name: String,
 }
 
-async fn resolve_repo(
-    state: &AppState,
-    owner: &str,
-    name: &str,
-) -> Result<ResolvedRepo, Response> {
+#[allow(clippy::result_large_err)]
+async fn resolve_repo(state: &AppState, owner: &str, name: &str) -> Result<ResolvedRepo, Response> {
     let pair = match lookup_repo_row_or_redirect(&state.db, owner, name).await {
         Ok(Some(p)) => p,
         Ok(None) => return Err(unauthorized_basic()),
@@ -325,6 +319,7 @@ async fn resolve_repo(
     })
 }
 
+#[allow(clippy::result_large_err)]
 /// Classic `repo` / FG contents+selection checks — insufficient → 403 (D-23).
 /// ACL capability is checked separately via [`effective_capability`]; this only
 /// validates PAT scope/contents (T-10-13 / D-ORG-05). Classic push no longer
@@ -701,9 +696,7 @@ async fn authorize_and_cgi(
                         let git3 = state.git.clone();
                         let repos3 = state.repos_dir.clone();
                         let rid3 = resolved.row.id.clone();
-                        crate::mirror::notify_mirror_after_local_mutation(
-                            db3, git3, repos3, rid3,
-                        );
+                        crate::mirror::notify_mirror_after_local_mutation(db3, git3, repos3, rid3);
                     }
                 }
             }

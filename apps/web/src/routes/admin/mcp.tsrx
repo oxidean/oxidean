@@ -1,5 +1,5 @@
-import { createFileRoute, useLoaderData } from "@octanejs/tanstack-router";
-import { useQuery, useQueryClient } from "@octanejs/tanstack-query";
+import { queryOptions, useQuery, useQueryClient } from "@octanejs/tanstack-query";
+import { AppPage } from "@/components/app-page";
 import type { AdminMcpSettingsPublic, UserPublic } from "@oxidean/api-client";
 import { useEffect, useState } from "octane";
 import { AdminSettingsLayout, SettingsShell } from "@/components/settings/settings-shell";
@@ -27,49 +27,58 @@ const FORBIDDEN = "You need admin access to manage MCP settings.";
 
 const settingsQueryKey = ["admin", "mcp", "settings"] as const;
 
-export const Route = createFileRoute("/admin/mcp")({
-  component: AdminMcpPage,
-  head: () => ({ meta: [{ title: "MCP endpoint · Oxidean" }] }),
-  loader: async (): Promise<AdminMcpLoaderData> => {
-    try {
-      const meRes = await fetchSessionMe();
-      if (!meRes.ok) {
-        if (meRes.error.code === "auth.unauthenticated") {
-          return { kind: "unauthenticated" };
+function adminMcpQueryOptions() {
+  return queryOptions({
+    queryKey: ["admin", "adminMcp"],
+    queryFn: async (): Promise<AdminMcpLoaderData> => {
+      try {
+        const meRes = await fetchSessionMe();
+        if (!meRes.ok) {
+          if (meRes.error.code === "auth.unauthenticated") {
+            return { kind: "unauthenticated" };
+          }
+          return {
+            kind: "error",
+            message: meRes.error.message || "Could not load session.",
+          };
         }
-        return {
-          kind: "error",
-          message: meRes.error.message || "Could not load session.",
-        };
-      }
-      if (meRes.data.role !== "sys-admin") {
-        return { kind: "forbidden" };
-      }
-      const settingsRes = await fetchAdminMcpSettings();
-      if (!settingsRes.ok) {
-        if (settingsRes.error.code === "admin.forbidden") {
+        if (meRes.data.role !== "sys-admin") {
           return { kind: "forbidden" };
         }
+        const settingsRes = await fetchAdminMcpSettings();
+        if (!settingsRes.ok) {
+          if (settingsRes.error.code === "admin.forbidden") {
+            return { kind: "forbidden" };
+          }
+          return {
+            kind: "error",
+            message: settingsRes.error.message || FORBIDDEN,
+          };
+        }
         return {
-          kind: "error",
-          message: settingsRes.error.message || FORBIDDEN,
+          kind: "ready",
+          me: meRes.data,
+          settings: settingsRes.data,
         };
+      } catch {
+        return { kind: "error", message: NETWORK_ERROR };
       }
-      return {
-        kind: "ready",
-        me: meRes.data,
-        settings: settingsRes.data,
-      };
-    } catch {
-      return { kind: "error", message: NETWORK_ERROR };
-    }
-  },
-});
+    },
+    retry: false,
+    staleTime: 30_000,
+  });
+}
 
 /** Exported for admin/mcp integration + browser tests (AGT-03). */
 export function AdminMcpPage() @{
+  <AppPage>
+    <AdminMcpContent />
+  </AppPage>;
+}
+
+export function AdminMcpContent() @{
   const queryClient = useQueryClient();
-  const loaderData = useLoaderData({ from: "/admin/mcp" }) as AdminMcpLoaderData | undefined;
+  const loaderData = useQuery(adminMcpQueryOptions()).data;
 
   useEffect(() => {
     if (loaderData?.kind === "unauthenticated") {

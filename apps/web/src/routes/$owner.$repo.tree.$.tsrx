@@ -1,4 +1,9 @@
-import { createFileRoute, useLoaderData, useParams } from "@octanejs/tanstack-router";
+import { queryOptions, useQuery } from "@octanejs/tanstack-query";
+
+import { matchPath } from "@/lib/route-params";
+import { usePathname, useSearchString } from "@/lib/pathname.tsrx";
+import { RepoLayout } from "@/routes/$owner.$repo.tsrx";
+import { AppPage } from "@/components/app-page";
 import type {
   PackagePublic,
   ReleasePublic,
@@ -40,7 +45,7 @@ import {
   fetchRepoTree,
 } from "@/lib/ssr-repo";
 
-export type TreeLoaderData =
+type TreeLoaderData =
   | { kind: "not_found" }
   | { kind: "error"; message: string }
   | {
@@ -84,7 +89,7 @@ async function loadTreePage(
   fetchContributors: typeof fetchRepoContributors = fetchRepoContributors,
   fetchLanguages: typeof fetchRepoLanguages = fetchRepoLanguages,
 ): Promise<TreeLoaderData> {
-  const got = await fetchGet({ data: { owner, name: repoName } });
+  const got = await fetchGet({ owner, name: repoName });
   if (!got.ok) {
     if (got.error.code === "repo.not_found") return { kind: "not_found" };
     return {
@@ -93,22 +98,41 @@ async function loadTreePage(
     };
   }
   const repo = got.data;
-  const refsRes = await fetchRefs({ data: { owner, name: repoName } });
+  const refsRes = await fetchRefs({ owner, name: repoName });
   const refs = refsRes.ok ? refsRes.data.refs : [];
   const knownRefs = refs.map((r) => shortRefName(r.name));
   const parsed = parseRefAndPath(splat, knownRefs);
   const refName = parsed.ref || repo.default_branch || "main";
+  // A splat whose leading segment isn't a real ref means the ref itself is bogus
+  // (parseRefAndPath falls back to treating segment 0 as the ref). Show the
+  // not-found state rather than an empty tree for a branch that doesn't exist.
+  // SHA-looking refs pass through — commits are valid tree-ish even though they
+  // never appear in the branch/tag list; git resolves or 404s them.
+  const looksLikeSha = /^[0-9a-f]{7,40}$/i.test(refName);
+  if (
+    splat &&
+    parsed.ref &&
+    knownRefs.length > 0 &&
+    !knownRefs.includes(refName) &&
+    !looksLikeSha
+  ) {
+    return { kind: "not_found" };
+  }
   const path = parsed.path || "";
   const treeRes = await fetchTree({
-    data: {
-      owner,
-      name: repoName,
-      ref: refName,
-      path,
-    },
+    owner,
+    name: repoName,
+    ref: refName,
+    path,
   });
   if (!treeRes.ok) {
-    if (treeRes.error.code === "repo.not_found") return { kind: "not_found" };
+    if (
+      treeRes.error.code === "repo.not_found" ||
+      treeRes.error.code === "repo.git_failed" ||
+      treeRes.error.code === "git.not_found"
+    ) {
+      return { kind: "not_found" };
+    }
     return {
       kind: "error",
       message: treeRes.error.message || "Could not load tree.",
@@ -121,12 +145,10 @@ async function loadTreePage(
 
   async function fetchUtf8Blob(relPath: string): Promise<string | null> {
     const blobRes = await fetchBlob({
-      data: {
-        owner,
-        name: repoName,
-        ref: shortRef,
-        path: relPath,
-      },
+      owner,
+      name: repoName,
+      ref: shortRef,
+      path: relPath,
     });
     if (
       blobRes.ok &&
@@ -141,17 +163,13 @@ async function loadTreePage(
 
   const [commitsRes, pathRes, countRes, relRes, pkgRes, contribRes, langRes, readme, aboutFiles] =
     await Promise.all([
-      fetchCommits({
-        data: { owner, name: repoName, ref: shortRef, skip: 0, limit: 1 },
-      }).catch(() => null),
-      fetchPathLast({
-        data: { owner, name: repoName, ref: shortRef, path: dirPath },
-      }).catch(() => null),
-      fetchCount({ data: { owner, name: repoName, ref: shortRef } }).catch(() => null),
-      fetchReleases({ data: { owner, name: repoName } }).catch(() => null),
-      fetchPackages({ data: { repository_id: repo.id } }).catch(() => null),
-      fetchContributors({ data: { owner, name: repoName, limit: 30 } }).catch(() => null),
-      fetchLanguages({ data: { owner, name: repoName } }).catch(() => null),
+      fetchCommits({ owner, name: repoName, ref: shortRef, skip: 0, limit: 1 }).catch(() => null),
+      fetchPathLast({ owner, name: repoName, ref: shortRef, path: dirPath }).catch(() => null),
+      fetchCount({ owner, name: repoName, ref: shortRef }).catch(() => null),
+      fetchReleases({ owner, name: repoName }).catch(() => null),
+      fetchPackages({ repository_id: repo.id }).catch(() => null),
+      fetchContributors({ owner, name: repoName, limit: 30 }).catch(() => null),
+      fetchLanguages({ owner, name: repoName }).catch(() => null),
       (async () => {
         const readmeName = findReadmeName(entries);
         if (!readmeName) return null as { name: string; html: string } | null;
@@ -209,33 +227,41 @@ async function loadTreePage(
   };
 }
 
-export const Route = createFileRoute("/$owner/$repo/tree/$")({
-  component: RepoTreePage,
-  head: ({ params }) => {
-    const { path } = parseRefAndPath((params as { _splat?: string })._splat);
-    const owner = (params as { owner: string }).owner;
-    const repo = (params as { repo: string }).repo;
-    const titlePath = path || "root";
-    const trunc = titlePath.length > 40 ? `…${titlePath.slice(-36)}` : titlePath;
-    return {
-      meta: [{ title: `${trunc} · ${owner}/${repo} · Oxidean` }],
-    };
-  },
-  loader: async ({ params }): Promise<TreeLoaderData> => {
-    const owner = String((params as { owner?: string }).owner ?? "");
-    const repoName = String((params as { repo?: string }).repo ?? "");
-    const splat = (params as { _splat?: string })._splat;
-    try {
-      return await loadTreePage(owner, repoName, splat);
-    } catch {
-      return { kind: "error", message: NETWORK_ERROR };
-    }
-  },
-});
+function repoTreeQueryOptions(params: Record<string, string | undefined>, searchStr = "") {
+  return queryOptions({
+    queryKey: [
+      "repo-page",
+      "/$owner/$repo/tree/$",
+      params.owner ?? "",
+      params.repo ?? "",
+      params._splat ?? "",
+      params.n ?? "",
+      params.sha ?? "",
+      params.tag ?? "",
+      params.run ?? "",
+      searchStr,
+    ],
+    queryFn: async (): Promise<TreeLoaderData> => {
+      const owner = String((params as { owner?: string }).owner ?? "");
+      const repoName = String((params as { repo?: string }).repo ?? "");
+      const splat = (params as { _splat?: string })._splat;
+      try {
+        return await loadTreePage(owner, repoName, splat);
+      } catch {
+        return { kind: "error", message: NETWORK_ERROR };
+      }
+    },
+    enabled: Boolean(params.owner && params.repo),
+    retry: false,
+    staleTime: 30_000,
+  });
+}
 
 /** Nested tree — toolbar / last-commit / file list / About / README (issue #23). */
-export function RepoTreePage() @{
-  const params = useParams({ from: "/$owner/$repo/tree/$" }) as {
+function RepoTreePageContent() @{
+  const pathname = usePathname();
+  const searchStr = useSearchString();
+  const params = (matchPath("/$owner/$repo/tree/$", pathname) ?? {}) as {
     owner: string;
     repo: string;
     _splat?: string;
@@ -243,7 +269,7 @@ export function RepoTreePage() @{
   const owner = params.owner ?? "";
   const repoName = params.repo ?? "";
   const splat = params._splat;
-  const loaderData = useLoaderData({ from: "/$owner/$repo/tree/$" }) as TreeLoaderData | undefined;
+  const loaderData = useQuery(repoTreeQueryOptions(params, searchStr)).data;
 
   const [phase, setPhase] = useState<Phase>(() => loaderData ?? { kind: "loading" });
 
@@ -350,4 +376,13 @@ export function RepoTreePage() @{
       }
     }
   }
+}
+
+/** Page root — RepoLayout (chrome + repo store) around the leaf content. */
+export function RepoTreePage() @{
+  <AppPage>
+    <RepoLayout>
+      <RepoTreePageContent />
+    </RepoLayout>
+  </AppPage>;
 }

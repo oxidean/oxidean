@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 
+use aes_gcm::aead::consts::U12;
 use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Nonce};
 use oxidean_db::Database;
@@ -40,8 +41,11 @@ pub fn validate_secret_name(name: &str) -> Result<(), String> {
 pub fn encrypt_secret(plaintext: &str) -> Result<String, String> {
     let key = Aes256Gcm::new_from_slice(&secrets_key_bytes()?).map_err(|e| e.to_string())?;
     let mut nonce_bytes = [0u8; 12];
-    getrandom::getrandom(&mut nonce_bytes).map_err(|e| e.to_string())?;
-    let nonce = Nonce::from_slice(&nonce_bytes);
+    getrandom::fill(&mut nonce_bytes).map_err(|e| e.to_string())?;
+    let nonce: &Nonce<U12> = nonce_bytes
+        .as_slice()
+        .try_into()
+        .map_err(|_| "invalid nonce length")?;
     let ct = key
         .encrypt(nonce, plaintext.as_bytes())
         .map_err(|e| e.to_string())?;
@@ -58,7 +62,7 @@ pub fn decrypt_secret(blob: &str) -> Result<String, String> {
     }
     let (nonce_bytes, ct) = raw.split_at(12);
     let key = Aes256Gcm::new_from_slice(&secrets_key_bytes()?).map_err(|e| e.to_string())?;
-    let nonce = Nonce::from_slice(nonce_bytes);
+    let nonce: &Nonce<U12> = nonce_bytes.try_into().map_err(|_| "invalid nonce length")?;
     let pt = key.decrypt(nonce, ct).map_err(|e| e.to_string())?;
     String::from_utf8(pt).map_err(|e| e.to_string())
 }
@@ -68,7 +72,7 @@ fn hex_encode(bytes: &[u8]) -> String {
 }
 
 fn hex_decode(s: &str) -> Result<Vec<u8>, String> {
-    if s.len() % 2 != 0 {
+    if !s.len().is_multiple_of(2) {
         return Err("bad hex ciphertext".into());
     }
     (0..s.len())

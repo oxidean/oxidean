@@ -119,7 +119,28 @@ export function DiffPatch({
     };
   }, [patch, path, initialRows, highlightTheme]);
 
-  const keyed = rows.map((line, index) => ({ ...line, index }));
+  // Old/new line numbers from hunk headers — GitHub's two gutter columns.
+  let oldN = 0;
+  let newN = 0;
+  const keyed = rows.map((line, index) => {
+    let oldNo: number | null = null;
+    let newNo: number | null = null;
+    if (line.kind === "hunk") {
+      const m = /@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line.text);
+      if (m) {
+        oldN = Number(m[1]);
+        newN = Number(m[2]);
+      }
+    } else if (line.kind === "del") {
+      oldNo = oldN++;
+    } else if (line.kind === "add") {
+      newNo = newN++;
+    } else if (line.kind === "ctx") {
+      oldNo = oldN++;
+      newNo = newN++;
+    }
+    return { ...line, index, oldNo, newNo };
+  });
 
   <section className="overflow-hidden border border-border">
     <h3 className="border-b border-border bg-muted/40 px-3 py-2 font-mono text-[14px] text-foreground">
@@ -137,26 +158,37 @@ export function DiffPatch({
       >
         @for (const line of keyed; key line.index) {
           <div
-            className={cn(
-              "flex whitespace-pre px-3 py-0.5",
-              lineClass(line.kind) as string,
-            )}
+            className={cn("flex whitespace-pre py-0.5", lineClass(line.kind) as string)}
             role="row"
             data-diff-kind={line.kind as string}
           >
+            <span
+              aria-hidden="true"
+              className="w-10 shrink-0 select-none pr-2 text-right text-muted-foreground/60"
+            >
+              {(line.oldNo ?? "") as number | string}
+            </span>
+            <span
+              aria-hidden="true"
+              className="w-10 shrink-0 select-none border-r border-border/60 pr-2 text-right text-muted-foreground/60"
+            >
+              {(line.newNo ?? "") as number | string}
+            </span>
             @if (line.prefix) {
               <span
                 className={cn(
-                  "shrink-0 select-none",
+                  "shrink-0 select-none pl-3",
                   prefixClass(line.kind) as string,
                 )}
                 aria-hidden="true"
               >
                 {line.prefix as string}
               </span>;
+            } @else {
+              <span aria-hidden="true" className="shrink-0 select-none pl-3" />;
             }
             <span
-              className="min-w-0 grow"
+              className="min-w-0 grow pr-3"
               dangerouslySetInnerHTML={{ __html: line.contentHtml as string }}
             />
           </div>;

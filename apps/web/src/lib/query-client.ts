@@ -1,7 +1,7 @@
 import { QueryClient } from "@octanejs/tanstack-query";
 
 /** Browser QueryClient — shared cache for session/config RPCs. */
-export function createAppQueryClient() {
+function createAppQueryClient() {
   return new QueryClient({
     defaultOptions: {
       queries: {
@@ -12,6 +12,7 @@ export function createAppQueryClient() {
     },
   });
 }
+/** Browser QueryClient — shared cache for session/config RPCs. */
 
 let browserClient: QueryClient | undefined;
 

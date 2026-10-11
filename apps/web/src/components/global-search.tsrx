@@ -1,3 +1,4 @@
+import { navigate } from "astro:transitions/client";
 import {
   Building2,
   Code2,
@@ -130,11 +131,11 @@ export function GlobalSearch({ className }: GlobalSearchProps) @{
     const nextType: SearchEntityType = (SEARCH_ENTITY_TYPES as readonly string[]).includes(rawType)
       ? (rawType as SearchEntityType)
       : "repositories";
-    window.location.assign(searchResultsHref(nextQ, nextType));
+    void navigate(searchResultsHref(nextQ, nextType));
   }
 
   function activate(item: FlatItem) {
-    window.location.assign(item.item.href);
+    void navigate(item.item.href);
   }
 
   function onKeyDown(ev: KeyboardEvent) {

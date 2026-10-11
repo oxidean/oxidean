@@ -1,88 +1,74 @@
-import { Link, useRouter } from "@octanejs/tanstack-router";
 import type { ComponentProps } from "octane";
+import { cn } from "@/lib/utils";
+import { usePathname } from "@/lib/pathname.tsrx";
 
 type AppLinkProps = ComponentProps<"a"> & {
-  /** Preload behavior; defaults to "intent" (hover/focus/touch). */
+  /**
+   * Document prefetch strategy — mapped to Astro's `data-astro-prefetch`
+   * (`intent`→hover, `render`→load). `/api/` links always opt out.
+   */
   preload?: "intent" | "viewport" | "render" | false;
   /**
-   * Router active-state control, forwarded to Link. Pass `{ exact: true }` for
-   * same-path destinations that differ only in search/hash (e.g. tab bars) —
-   * the default fuzzy match would otherwise mark every variant active.
+   * Active-state control. `{ exact: true }` marks the link active only on an
+   * exact path match; otherwise a path-prefix match marks it active.
    */
   activeOptions?: { exact?: boolean; includeSearch?: boolean; includeHash?: boolean };
+  /** Class applied while the link is active (router-era `activeProps`). */
+  activeProps?: { className?: string };
 };
 
-/**
- * Split an app-internal href into the router-facing pieces (`to`, raw
- * `search`, `hash`) — the same decomposition `navigate({ href })` performs
- * internally in `buildAndCommitLocation`. `Link`'s rendered `href`, active
- * state, and preload target are computed by `buildLocation`, which reads
- * `to`/`search`/`hash` and ignores a raw `href` prop — so passing these
- * explicitly is what makes a fully-built path behave like a router link.
- *
- * Returns `undefined` for anything that is not an absolute-path internal
- * URL (relative paths, protocol-relative, absolute external URLs, bare
- * `#fragment`s, missing href) — those keep native anchor semantics.
- */
-function splitInternalHref(
-  href: string | undefined,
-): { to: string; search: string; hash: string | undefined } | undefined {
-  if (typeof href !== "string" || !href.startsWith("/") || href.startsWith("//")) {
-    return undefined;
-  }
-  try {
-    const url = new URL(href, "http://internal.invalid");
-    return {
-      to: url.pathname,
-      search: url.search,
-      hash: url.hash.slice(1) || undefined,
-    };
-  } catch {
-    return undefined;
-  }
-}
+const PRELOAD_TO_PREFETCH = {
+  intent: "hover",
+  viewport: "viewport",
+  render: "load",
+} as const;
 
 /**
- * Internal navigation link — the shared replacement for raw `<a>` elements
- * pointing at app routes.
- * Inside the app router it renders a router-aware anchor: client-side
- * navigation, intent preloading, and active-state attributes while still
- * emitting a normal `href` for SSR / middle-click / screen readers.
- * Without a router context (standalone component tests) it falls back to a
- * plain `<a>`, so RouterProvider-free harnesses keep working.
+ * Internal navigation link — a plain anchor now that Astro's ClientRouter
+ * drives view-transition navigations off document-level click delegation
+ * (every same-origin `<a>` navigates with a morph + transition).
  *
  * Keep a plain `<a>` (annotated `raw-anchor-ok`) for external URLs,
- * downloads, `#` same-page anchors, and `/api/` endpoints that are not
- * router routes.
+ * downloads, `#` same-page anchors, and `/api/` endpoints.
  */
 export function AppLink({
   href,
   preload,
   activeOptions,
+  activeProps,
   children,
   ...rest
 }: AppLinkProps) @{
-  const router = useRouter({ warn: false });
-  const dest = splitInternalHref(typeof href === "string" ? href : undefined);
-  <>
-    @if (router && dest) {
-      <Link
-        to={dest.to}
-        search={router.options.parseSearch(dest.search) as Record<string, unknown>}
-        hash={dest.hash}
-        preload={preload ?? "intent"}
-        activeOptions={activeOptions}
-        {...rest}
-      >
-        {children}
-      </Link>;
-    } @else {
-      {
-        /* raw-anchor-ok — no RouterProvider (tests) or non-route href */
-      }
-      <a href={href} {...rest}>
-        {children}
-      </a>;
-    }
-  </>;
+  // Router-era active-state parity: callers pass activeOptions on nav tabs.
+  // `usePathname` keeps the active flag correct inside `transition:persist`
+  // islands (header/footer) that never remount across ClientRouter swaps.
+  const pathname = usePathname();
+  const wantsActive = !!(activeOptions || activeProps);
+  let active = false;
+  if (wantsActive && typeof href === "string") {
+    const target = href.split(/[?#]/)[0]!;
+    active = activeOptions?.exact
+      ? pathname === target
+      : pathname === target || pathname.startsWith(target + "/");
+  }
+  const mergedClass =
+    active && activeProps?.className ? cn(rest.className, activeProps.className) : rest.className;
+  const prefetch =
+    preload === false
+      ? "false"
+      : typeof href === "string" && (href === "/api" || href.startsWith("/api/"))
+        ? "false"
+        : preload
+          ? PRELOAD_TO_PREFETCH[preload]
+          : undefined;
+  // raw-anchor-ok — AppLink IS the sanctioned internal-link primitive.
+  <a
+    href={href}
+    {...rest}
+    className={mergedClass}
+    {...(prefetch !== undefined ? { "data-astro-prefetch": prefetch } : {})}
+    {...(active ? { "data-status": "active", "aria-current": "page" } : {})}
+  >
+    {children}
+  </a>;
 }

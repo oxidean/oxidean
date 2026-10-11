@@ -1,5 +1,10 @@
-import { createFileRoute, useNavigate, useParams, useSearch } from "@octanejs/tanstack-router";
 import { useQuery } from "@octanejs/tanstack-query";
+import { navigate as astroNavigate } from "astro:transitions/client";
+
+import { matchPath, routeHref, searchRecord } from "@/lib/route-params";
+import { usePathname, useSearchString } from "@/lib/pathname.tsrx";
+import { RepoLayout } from "@/routes/$owner.$repo.tsrx";
+import { AppPage } from "@/components/app-page";
 import { useState } from "octane";
 import type { RepoSearchType } from "@oxidean/api-client";
 import type { HighlightTheme } from "@/lib/highlight";
@@ -48,28 +53,25 @@ function hitKey(hit: SsrRepoSearchHit): string {
   }
 }
 
-export const Route = createFileRoute("/$owner/$repo/search")({
-  validateSearch: (search: Record<string, unknown>): SearchSearch => ({
+/** In-repo search results — type tabs + hit lists (D-SRCH-02, D-SRCH-15). */
+function validateSearch(search: Record<string, unknown>): SearchSearch {
+  return {
     q: typeof search.q === "string" ? search.q : undefined,
     type: typeof search.type === "string" ? search.type : undefined,
-  }),
-  component: RepoSearchPage,
-  head: ({ params }) => ({
-    meta: [
-      {
-        title: `Search · ${(params as { owner: string }).owner}/${(params as { repo: string }).repo} · Oxidean`,
-      },
-    ],
-  }),
-});
+  };
+}
 
-/** In-repo search results — type tabs + hit lists (D-SRCH-02, D-SRCH-15). */
-export function RepoSearchPage() @{
-  const params = useParams({ strict: false }) as { owner?: string; repo?: string };
+function RepoSearchPageContent() @{
+  const pathname = usePathname();
+  const searchStr = useSearchString();
+  const params = (matchPath("/$owner/$repo/search", pathname) ?? {}) as {
+    owner?: string;
+    repo?: string;
+  };
   const owner = params.owner ?? "";
   const repoName = params.repo ?? "";
-  const search = useSearch({ strict: false }) as SearchSearch;
-  const navigate = useNavigate();
+  const search = validateSearch(searchRecord(searchStr)) as SearchSearch;
+  const navigate = astroNavigate;
   const qParam = search.q ?? "";
   const typeParam = parseType(search.type);
   const [draft, setDraft] = useState(qParam);
@@ -87,9 +89,7 @@ export function RepoSearchPage() @{
   const searchQ = useQuery({
     queryKey: ["repo", "search", owner, repoName, typeParam, qParam] as const,
     queryFn: async () => {
-      const res = await fetchRepoSearch({
-        data: { owner, name: repoName, type: typeParam, q: qParam },
-      });
+      const res = await fetchRepoSearch({ owner, name: repoName, type: typeParam, q: qParam });
       if (!res.ok) throw new Error(res.error.message || NETWORK_ERROR);
       return res;
     },
@@ -101,14 +101,16 @@ export function RepoSearchPage() @{
   const highlightTheme: HighlightTheme | null = searchQ.data?.highlightTheme ?? null;
 
   function go(next: { q?: string; type?: RepoSearchType }) {
-    void navigate({
-      to: "/$owner/$repo/search",
-      params: { owner, repo: repoName },
-      search: {
-        q: next.q ?? qParam,
-        type: next.type ?? typeParam,
-      },
-    });
+    void navigate(
+      routeHref(
+        "/$owner/$repo/search",
+        { owner, repo: repoName },
+        {
+          q: next.q ?? qParam,
+          type: next.type ?? typeParam,
+        },
+      ),
+    );
   }
 
   function submitSearch() {
@@ -202,15 +204,17 @@ export function RepoSearchPage() @{
                     {hit.path as string}
                   </AppLink>
                   @if (hit.line > 0) {
-                    <span className="text-muted-foreground">
-                      :{String(hit.line)}
-                    </span>;
-                    <CodeSnippet
-                      code={hit.content}
-                      path={hit.path}
-                      highlightedHtml={hit.html ?? null}
-                      highlightTheme={highlightTheme}
-                    />;
+                    <>
+                      <span className="text-muted-foreground">
+                        :{String(hit.line)}
+                      </span>
+                      <CodeSnippet
+                        code={hit.content}
+                        path={hit.path}
+                        highlightedHtml={hit.html ?? null}
+                        highlightTheme={highlightTheme}
+                      />
+                    </>;
                   }
                 </li>;
               } @else {
@@ -263,4 +267,13 @@ export function RepoSearchPage() @{
       }
     </div>;
     };
+}
+
+/** Page root — RepoLayout (chrome + repo store) around the leaf content. */
+export function RepoSearchPage() @{
+  <AppPage>
+    <RepoLayout>
+      <RepoSearchPageContent />
+    </RepoLayout>
+  </AppPage>;
 }

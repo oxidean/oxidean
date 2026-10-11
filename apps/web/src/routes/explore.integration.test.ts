@@ -9,6 +9,6 @@ describe("explore route (SOC-03)", () => {
   it("defines ExplorePage export in explore.tsrx", () => {
     const src = readFileSync(join(dir, "explore.tsrx"), "utf8");
     expect(src).toMatch(/export function ExplorePage/);
-    expect(src).toMatch(/createFileRoute\("\/explore"\)/);
+    expect(src).toMatch(/"repo", "explore"/);
   });
 });

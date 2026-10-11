@@ -383,11 +383,7 @@ impl RemoteAuthFiles {
         let mut env = Vec::new();
         match credentials.kind {
             RemoteAuthKind::HttpsToken => {
-                let user = credentials
-                    .username
-                    .as_deref()
-                    .unwrap_or("git")
-                    .trim();
+                let user = credentials.username.as_deref().unwrap_or("git").trim();
                 if user.is_empty() {
                     return Err(GitError::InvalidArg("HTTPS username is required".into()));
                 }
@@ -586,8 +582,7 @@ fn aggregate_author_log(stdout: &[u8], limit: u32) -> Vec<ContributorStat> {
         last_unix: i64,
     }
     let text = String::from_utf8_lossy(stdout);
-    let mut by_author: std::collections::HashMap<String, Acc> =
-        std::collections::HashMap::new();
+    let mut by_author: std::collections::HashMap<String, Acc> = std::collections::HashMap::new();
     let mut order: Vec<String> = Vec::new();
     for line in text.split('\n') {
         let line = line.trim_end_matches('\r');
@@ -1241,7 +1236,7 @@ fn parse_blame_porcelain(text: &str, soft_max_lines: usize) -> (Vec<BlameLine>, 
     let mut line_number = 0u32;
 
     for raw in text.lines() {
-        if raw.starts_with('\t') {
+        if let Some(content) = raw.strip_prefix('\t') {
             if lines.len() >= soft_max_lines {
                 truncated = true;
                 break;
@@ -1252,7 +1247,7 @@ fn parse_blame_porcelain(text: &str, soft_max_lines: usize) -> (Vec<BlameLine>, 
                 author_email: author_email.clone(),
                 authored_at: authored_at.clone(),
                 line_number,
-                content: raw[1..].to_string(),
+                content: content.to_string(),
             });
             continue;
         }
@@ -1801,11 +1796,7 @@ impl GitBackend for CliGitBackend {
             return Ok(Vec::new());
         }
 
-        let mut args: Vec<String> = vec![
-            "-C".into(),
-            repo_str.into(),
-            "ls-tree".into(),
-        ];
+        let mut args: Vec<String> = vec!["-C".into(), repo_str.into(), "ls-tree".into()];
         if path.is_empty() {
             args.push(treeish.to_string());
         } else {
@@ -1843,12 +1834,7 @@ impl GitBackend for CliGitBackend {
         Ok(entries)
     }
 
-    async fn cat_blob(
-        &self,
-        repo: &Path,
-        treeish: &str,
-        path: &str,
-    ) -> Result<Vec<u8>, GitError> {
+    async fn cat_blob(&self, repo: &Path, treeish: &str, path: &str) -> Result<Vec<u8>, GitError> {
         let treeish = validate_treeish(treeish)?;
         let path = validate_repo_rel_path(path)?;
         if path.is_empty() {
@@ -2208,18 +2194,11 @@ impl GitBackend for CliGitBackend {
                 } else {
                     // Real %G? for this commit — ssh/unknown sig kinds and
                     // verifiable keyrings need git's own answer.
-                    if let Ok(g) = run_git_stdout(&[
-                        "-C",
-                        repo_s,
-                        "show",
-                        "-s",
-                        "--format=%G?",
-                        &full_sha,
-                    ])
-                    .await
+                    if let Ok(g) =
+                        run_git_stdout(&["-C", repo_s, "show", "-s", "--format=%G?", &full_sha])
+                            .await
                     {
-                        signature_status =
-                            map_signature_status(String::from_utf8_lossy(&g).trim());
+                        signature_status = map_signature_status(String::from_utf8_lossy(&g).trim());
                     }
                     if signature_status != "none" {
                         signature_kind = match &entry {
@@ -2261,12 +2240,7 @@ impl GitBackend for CliGitBackend {
         })
     }
 
-    async fn diff(
-        &self,
-        repo: &Path,
-        base: &str,
-        head: &str,
-    ) -> Result<DiffResult, GitError> {
+    async fn diff(&self, repo: &Path, base: &str, head: &str) -> Result<DiffResult, GitError> {
         let base = validate_treeish(base)?;
         let head = validate_treeish(head)?;
         let repo_s = repo_str(repo)?;
@@ -2288,14 +2262,7 @@ impl GitBackend for CliGitBackend {
 
         let range = format!("{base}...{head}");
         let output = Command::new("git")
-            .args([
-                "-C",
-                repo_s,
-                "diff",
-                "--find-renames",
-                "--patch",
-                &range,
-            ])
+            .args(["-C", repo_s, "diff", "--find-renames", "--patch", &range])
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -2350,12 +2317,7 @@ impl GitBackend for CliGitBackend {
         })
     }
 
-    async fn blame(
-        &self,
-        repo: &Path,
-        refname: &str,
-        path: &str,
-    ) -> Result<BlameFile, GitError> {
+    async fn blame(&self, repo: &Path, refname: &str, path: &str) -> Result<BlameFile, GitError> {
         let refname = validate_treeish(refname)?;
         let path = validate_repo_rel_path(path)?;
         if path.is_empty() {
@@ -2406,12 +2368,7 @@ impl GitBackend for CliGitBackend {
         })
     }
 
-    async fn branch_create(
-        &self,
-        repo: &Path,
-        name: &str,
-        start: &str,
-    ) -> Result<(), GitError> {
+    async fn branch_create(&self, repo: &Path, name: &str, start: &str) -> Result<(), GitError> {
         let name = validate_treeish(name)?;
         let start = validate_treeish(start)?;
         let repo_s = repo_str(repo)?;
@@ -2861,10 +2818,7 @@ impl GitBackend for CliGitBackend {
             let backend = self.clone();
             joins.push(tokio::spawn(async move {
                 let _permit = sem.acquire().await.ok()?;
-                let commits = backend
-                    .log_path(&repo, &refname, &full, 1)
-                    .await
-                    .ok()?;
+                let commits = backend.log_path(&repo, &refname, &full, 1).await.ok()?;
                 commits.into_iter().next().map(|c| (name, c))
             }));
         }
@@ -3039,8 +2993,7 @@ impl GitBackend for CliGitBackend {
 
         // `@<epoch>` only parses for plausible dates (`@0` is not a real
         // cutoff), so a non-positive bound simply skips the filter.
-        let since_arg =
-            since_unix.and_then(|s| (s > 0).then(|| format!("--since=@{s}")));
+        let since_arg = since_unix.and_then(|s| (s > 0).then(|| format!("--since=@{s}")));
         let max_count_arg = format!("--max-count={}", max_commits.saturating_add(1));
         let mut args = vec!["-C", repo_s, "log", "--format=%ct", &max_count_arg];
         if let Some(arg) = &since_arg {
@@ -3086,29 +3039,22 @@ impl GitBackend for CliGitBackend {
         }
 
         // `-l` adds blob size after the OID; `-r` walks the full tree.
-        let stdout = match run_git_stdout(&[
-            "-C",
-            repo_s,
-            "ls-tree",
-            "-r",
-            "-l",
-            "--full-tree",
-            treeish,
-        ])
-        .await
-        {
-            Ok(b) => b,
-            Err(e) => {
-                let msg = e.to_string();
-                if msg.contains("Not a valid object name")
-                    || msg.contains("does not exist")
-                    || msg.contains("not exist")
-                {
-                    return Ok(Vec::new());
+        let stdout =
+            match run_git_stdout(&["-C", repo_s, "ls-tree", "-r", "-l", "--full-tree", treeish])
+                .await
+            {
+                Ok(b) => b,
+                Err(e) => {
+                    let msg = e.to_string();
+                    if msg.contains("Not a valid object name")
+                        || msg.contains("does not exist")
+                        || msg.contains("not exist")
+                    {
+                        return Ok(Vec::new());
+                    }
+                    return Err(e);
                 }
-                return Err(e);
-            }
-        };
+            };
         let text = String::from_utf8_lossy(&stdout);
         let mut out = Vec::new();
         for line in text.lines() {
@@ -3128,8 +3074,7 @@ impl GitBackend for CliGitBackend {
         credentials: &RemoteCredentials,
     ) -> Result<Vec<GitRef>, GitError> {
         let url = validate_remote_url(url)?;
-        let stdout =
-            run_git_remote(&["ls-remote", "--heads", "--tags", url], credentials).await?;
+        let stdout = run_git_remote(&["ls-remote", "--heads", "--tags", url], credentials).await?;
         let text = String::from_utf8_lossy(&stdout);
         let mut out = Vec::new();
         for line in text.lines() {
@@ -3296,8 +3241,7 @@ impl GitBackend for CliGitBackend {
     async fn committer_unix_time(&self, repo: &Path, sha: &str) -> Result<i64, GitError> {
         let sha = validate_treeish(sha)?;
         let repo_s = repo_str(repo)?;
-        let stdout =
-            run_git_stdout(&["-C", repo_s, "log", "-1", "--format=%ct", sha]).await?;
+        let stdout = run_git_stdout(&["-C", repo_s, "log", "-1", "--format=%ct", sha]).await?;
         let s = String::from_utf8_lossy(&stdout).trim().to_string();
         s.parse::<i64>()
             .map_err(|e| GitError::Process(format!("invalid committer time for {sha}: {e}")))
@@ -3483,9 +3427,7 @@ fn parse_ls_tree_sized_blob_line(line: &str) -> Option<SizedBlobEntry> {
 }
 
 fn parse_grep_line(line: &str, treeish: &str) -> Option<GrepHit> {
-    let rest = line
-        .strip_prefix(&format!("{treeish}:"))
-        .unwrap_or(line);
+    let rest = line.strip_prefix(&format!("{treeish}:")).unwrap_or(line);
     let (path, after_path) = rest.split_once(':')?;
     let (line_s, content) = after_path.split_once(':')?;
     let line_no: u32 = line_s.parse().ok()?;
@@ -3633,9 +3575,12 @@ fn safe_worktree_path(work: &Path, rel: &str) -> Result<PathBuf, GitError> {
     }
     let candidate = Path::new(rel);
     if candidate.is_absolute()
-        || candidate
-            .components()
-            .any(|c| matches!(c, Component::ParentDir | Component::RootDir | Component::Prefix(_)))
+        || candidate.components().any(|c| {
+            matches!(
+                c,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        })
     {
         return Err(GitError::InvalidArg(format!(
             "path escapes worktree: {rel}"
@@ -3854,21 +3799,30 @@ mod tests {
             "main",
             "c",
             &[
-                ("SRC/A.RS".into(), b"fn TOK() {}
-".to_vec()),
-                ("src/b.ts".into(), b"const TOK = 1;
-".to_vec()),
-                ("src/readme.md".into(), b"TOK docs
-".to_vec()),
+                (
+                    "SRC/A.RS".into(),
+                    b"fn TOK() {}
+"
+                    .to_vec(),
+                ),
+                (
+                    "src/b.ts".into(),
+                    b"const TOK = 1;
+"
+                    .to_vec(),
+                ),
+                (
+                    "src/readme.md".into(),
+                    b"TOK docs
+"
+                    .to_vec(),
+                ),
             ],
         )
         .await
         .unwrap();
         // Language-style pathspecs: `:(icase)` extension glob OR'd across specs.
-        let specs = vec![
-            ":(icase)*.rs".to_string(),
-            ":(icase)*.ts".to_string(),
-        ];
+        let specs = vec![":(icase)*.rs".to_string(), ":(icase)*.ts".to_string()];
         let hits = git
             .grep(&bare, "main", "TOK", &specs, 50)
             .await
@@ -3911,14 +3865,7 @@ mod tests {
         .await
         .unwrap();
         let by_msg = git
-            .log_search(
-                &bare,
-                "main",
-                Some("UNIQUE_COMMIT_MSG_TOKEN"),
-                None,
-                0,
-                10,
-            )
+            .log_search(&bare, "main", Some("UNIQUE_COMMIT_MSG_TOKEN"), None, 0, 10)
             .await
             .expect("log_search msg");
         assert_eq!(by_msg.len(), 1);
@@ -4071,10 +4018,7 @@ mod tests {
         .await
         .unwrap();
 
-        let blame = git
-            .blame(&bare, "main", "lines.txt")
-            .await
-            .expect("blame");
+        let blame = git.blame(&bare, "main", "lines.txt").await.expect("blame");
         assert_eq!(blame.path, "lines.txt");
         assert!(
             blame.lines.len() >= 2,
@@ -4107,20 +4051,14 @@ mod tests {
             .archive(&bare, "main", ArchiveFormat::Zip, "arch")
             .await
             .expect("zip archive");
-        assert!(
-            !zip.is_empty(),
-            "zip archive bytes must be non-empty"
-        );
+        assert!(!zip.is_empty(), "zip archive bytes must be non-empty");
         assert_eq!(&zip[0..2], b"PK", "zip should start with PK magic");
 
         let tar_gz = git
             .archive(&bare, "main", ArchiveFormat::TarGz, "arch")
             .await
             .expect("tar.gz archive");
-        assert!(
-            !tar_gz.is_empty(),
-            "tar.gz archive bytes must be non-empty"
-        );
+        assert!(!tar_gz.is_empty(), "tar.gz archive bytes must be non-empty");
         // gzip magic 1f 8b
         assert_eq!(&tar_gz[0..2], &[0x1f, 0x8b], "tar.gz should be gzip");
     }
@@ -4201,8 +4139,7 @@ mod tests {
         )
         .await
         .unwrap();
-        push_branch_with_file(&bare, "feature", "main", "b.txt", b"feat\n", "feat")
-            .await;
+        push_branch_with_file(&bare, "feature", "main", "b.txt", b"feat\n", "feat").await;
         let head = String::from_utf8_lossy(
             &run_git_stdout(&[
                 "-C",
@@ -4244,8 +4181,7 @@ mod tests {
         )
         .await
         .unwrap();
-        push_branch_with_file(&bare, "feature", "main", "c.txt", b"sq\n", "sq")
-            .await;
+        push_branch_with_file(&bare, "feature", "main", "c.txt", b"sq\n", "sq").await;
         let head = String::from_utf8_lossy(
             &run_git_stdout(&[
                 "-C",
@@ -4279,8 +4215,7 @@ mod tests {
         )
         .await
         .unwrap();
-        push_branch_with_file(&bare, "feature", "main", "d.txt", b"rb\n", "rb")
-            .await;
+        push_branch_with_file(&bare, "feature", "main", "d.txt", b"rb\n", "rb").await;
         let head = String::from_utf8_lossy(
             &run_git_stdout(&[
                 "-C",
@@ -4833,8 +4768,7 @@ mod tests {
         {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&sign_home, std::fs::Permissions::from_mode(0o700)).unwrap();
-            std::fs::set_permissions(&verify_home, std::fs::Permissions::from_mode(0o700))
-                .unwrap();
+            std::fs::set_permissions(&verify_home, std::fs::Permissions::from_mode(0o700)).unwrap();
         }
 
         let email = "gpg-signer@example.com";

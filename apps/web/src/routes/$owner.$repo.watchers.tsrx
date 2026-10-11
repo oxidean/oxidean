@@ -1,7 +1,13 @@
-import { createFileRoute, useLoaderData, useParams } from "@octanejs/tanstack-router";
+import { navigate } from "astro:transitions/client";
 import { Eye, Search } from "@octanejs/lucide";
+import { queryOptions, useQuery } from "@octanejs/tanstack-query";
+import { useRepoLayoutData } from "@/lib/repo-store.tsrx";
+import { matchPath } from "@/lib/route-params";
+import { usePathname, useSearchString } from "@/lib/pathname.tsrx";
+import { RepoLayout } from "@/routes/$owner.$repo.tsrx";
+import { AppPage } from "@/components/app-page";
 import type { RepoPublic, RepoWatcherPublic } from "@oxidean/api-client";
-import { useState } from "octane";
+import { useEffect, useState } from "octane";
 import { RepoNotFound } from "@/components/repo/repo-not-found";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
@@ -10,11 +16,11 @@ import { List, ListRow } from "@/components/ui/list";
 import { PageHeader } from "@/components/ui/page-header";
 import { apiClient } from "@/lib/api-client";
 import { socialListHref } from "@/lib/repo-social-lists";
-import type { RepoLayoutLoaderData } from "@/lib/repo-store";
+
 import { fetchRepoGet, fetchRepoWatchers } from "@/lib/ssr-repo";
 import { AppLink } from "@/components/ui/app-link";
 
-export type WatchersLoaderData =
+type WatchersLoaderData =
   | { kind: "not_found" }
   | { kind: "error"; message: string }
   | {
@@ -35,13 +41,17 @@ async function loadWatchersPage(
   repoName: string,
   q: string,
 ): Promise<WatchersLoaderData> {
-  const got = await fetchRepoGet({ data: { owner, name: repoName } });
+  const got = await fetchRepoGet({ owner, name: repoName });
   if (!got.ok) {
     if (got.error.code === "repo.not_found") return { kind: "not_found" };
     return { kind: "error", message: got.error.message || "Could not load repository." };
   }
   const listRes = await fetchRepoWatchers({
-    data: { owner, name: repoName, q, offset: 0, limit: PAGE_LIMIT },
+    owner,
+    name: repoName,
+    q,
+    offset: 0,
+    limit: PAGE_LIMIT,
   });
   if (!listRes.ok) {
     if (listRes.error.code === "repo.not_found") return { kind: "not_found" };
@@ -61,36 +71,50 @@ async function loadWatchersPage(
   };
 }
 
-export const Route = createFileRoute("/$owner/$repo/watchers")({
-  component: RepoWatchersPage,
-  head: ({ params }) => ({
-    meta: [
-      {
-        title: `Watchers · ${(params as { owner: string }).owner}/${(params as { repo: string }).repo} · Oxidean`,
-      },
+function repoWatchersQueryOptions(params: Record<string, string | undefined>, searchStr = "") {
+  return queryOptions({
+    queryKey: [
+      "repo-page",
+      "/$owner/$repo/watchers",
+      params.owner ?? "",
+      params.repo ?? "",
+      params._splat ?? "",
+      params.n ?? "",
+      params.sha ?? "",
+      params.tag ?? "",
+      params.run ?? "",
+      searchStr,
     ],
-  }),
-  // Loader consumes ?q — loaderDeps keeps the match id search-aware so a
-  // search-only navigation refetches instead of reusing stale loaderData.
-  loaderDeps: ({ search }) => search,
-  loader: async ({ params, location }): Promise<WatchersLoaderData> => {
-    const owner = String((params as { owner?: string }).owner ?? "");
-    const repoName = String((params as { repo?: string }).repo ?? "");
-    const q = new URLSearchParams(location.searchStr.replace(/^\?/, "")).get("q") ?? "";
-    try {
-      return await loadWatchersPage(owner, repoName, q);
-    } catch {
-      return { kind: "error", message: NETWORK_ERROR };
-    }
-  },
-});
+    queryFn: async (): Promise<WatchersLoaderData> => {
+      // loader-deps-ok — searchStr is part of this query's queryKey; search-only navigations refetch via the query.
+      const location = { searchStr, pathname: "" };
 
-export function RepoWatchersPage() @{
-  const params = useParams({ strict: false }) as { owner?: string; repo?: string };
+      const owner = String((params as { owner?: string }).owner ?? "");
+      const repoName = String((params as { repo?: string }).repo ?? "");
+      const q = new URLSearchParams(location.searchStr.replace(/^\?/, "")).get("q") ?? "";
+      try {
+        return await loadWatchersPage(owner, repoName, q);
+      } catch {
+        return { kind: "error", message: NETWORK_ERROR };
+      }
+    },
+    enabled: Boolean(params.owner && params.repo),
+    retry: false,
+    staleTime: 30_000,
+  });
+}
+
+function RepoWatchersPageContent() @{
+  const pathname = usePathname();
+  const searchStr = useSearchString();
+  const params = (matchPath("/$owner/$repo/watchers", pathname) ?? {}) as {
+    owner?: string;
+    repo?: string;
+  };
   const owner = params.owner ?? "";
   const repoName = params.repo ?? "";
-  const layout = useLoaderData({ from: "/$owner/$repo" }) as RepoLayoutLoaderData | undefined;
-  const data = useLoaderData({ from: "/$owner/$repo/watchers" }) as WatchersLoaderData | undefined;
+  const layout = useRepoLayoutData();
+  const data = useQuery(repoWatchersQueryOptions(params, searchStr)).data;
 
   const showNotFound = !data || data.kind === "not_found" || layout?.status === "not_found";
   const errorMessage = data?.kind === "error" ? data.message : "";
@@ -100,6 +124,14 @@ export function RepoWatchersPage() @{
   const [offset, setOffset] = useState(ready?.offset ?? 0);
   const [total, setTotal] = useState(ready?.total ?? 0);
   const [loadingMore, setLoadingMore] = useState(false);
+
+  useEffect(() => {
+    if (!ready) return;
+    setQ(ready.q);
+    setWatchers(ready.watchers);
+    setOffset(ready.offset);
+    setTotal(ready.total);
+  }, [ready]);
   const limit = ready?.limit ?? PAGE_LIMIT;
   const base = `/${owner}/${repoName}/watchers`;
   const activeQ = ready?.q ?? "";
@@ -154,7 +186,7 @@ export function RepoWatchersPage() @{
               className="flex w-full gap-2 sm:w-auto"
               onSubmit={(e) => {
                 e.preventDefault();
-                window.location.assign(socialListHref(base, { q }));
+                void navigate(socialListHref(base, { q }));
               }}
             >
               <div className="relative flex-1 sm:w-72">
@@ -238,4 +270,13 @@ export function RepoWatchersPage() @{
       </div>;
     }
   }
+}
+
+/** Page root — RepoLayout (chrome + repo store) around the leaf content. */
+export function RepoWatchersPage() @{
+  <AppPage>
+    <RepoLayout>
+      <RepoWatchersPageContent />
+    </RepoLayout>
+  </AppPage>;
 }

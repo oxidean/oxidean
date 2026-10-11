@@ -1,0 +1,8 @@
+---
+import AppShell from "@/layouts/AppShell.astro";
+import { AdminPackagesPage } from "@/routes/admin/packages.tsrx";
+---
+
+<AppShell title="Package storage · Oxidean">
+	<AdminPackagesPage client:load />
+</AppShell>

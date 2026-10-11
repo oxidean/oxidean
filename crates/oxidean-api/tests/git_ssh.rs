@@ -7,15 +7,15 @@ use std::process::Command as StdCommand;
 use std::sync::Arc;
 use std::time::Duration;
 
-use oxidean_api::ssh::{spawn_listener, SshState};
 use oxidean_api::ssh::rate_limit::SshAuthLimiter;
-use std::sync::Mutex;
+use oxidean_api::ssh::{spawn_listener, SshState};
 use oxidean_core::Role;
 use oxidean_db::Database;
 use russh::client;
-use russh::keys::{load_secret_key, PrivateKey, PrivateKeyWithHashAlg, PublicKeyOrCertificate};
 use russh::keys::ssh_key::{Algorithm, HashAlg, LineEnding};
+use russh::keys::{load_secret_key, PrivateKey, PrivateKeyWithHashAlg, PublicKeyOrCertificate};
 use ssh_key::PublicKey;
+use std::sync::Mutex;
 use tempfile::TempDir;
 use uuid::Uuid;
 
@@ -53,10 +53,7 @@ async fn connect_auth(
         .await
         .map_err(|e| format!("connect: {e}"))?;
     let ok = session
-        .authenticate_publickey(
-            user,
-            PrivateKeyWithHashAlg::new(key, None),
-        )
+        .authenticate_publickey(user, PrivateKeyWithHashAlg::new(key, None))
         .await
         .map_err(|e| format!("auth: {e}"))?;
     if !ok.success() {
@@ -181,16 +178,17 @@ async fn git_ssh_username_other_than_git_rejected() {
     .await
     .unwrap();
 
-    let (addr, _stop) = spawn_listener(
-        ssh_state(db, repos),
-        "127.0.0.1:0".parse().unwrap(),
-    )
-    .await
-    .expect("listen");
+    let (addr, _stop) = spawn_listener(ssh_state(db, repos), "127.0.0.1:0".parse().unwrap())
+        .await
+        .expect("listen");
 
     let key = Arc::new(load_secret_key(&priv_path, None).unwrap());
     let err = connect_auth(addr, "notgit", key).await;
-    assert!(err.is_err(), "non-git username must be rejected: {}", err.err().unwrap());
+    assert!(
+        err.is_err(),
+        "non-git username must be rejected: {}",
+        err.err().unwrap()
+    );
 }
 
 /// Registered public key + username `git` is accepted (D-SSH-03).
@@ -231,12 +229,9 @@ async fn git_ssh_registered_key_user_git_accepted() {
     .await
     .unwrap();
 
-    let (addr, _stop) = spawn_listener(
-        ssh_state(db, repos),
-        "127.0.0.1:0".parse().unwrap(),
-    )
-    .await
-    .expect("listen");
+    let (addr, _stop) = spawn_listener(ssh_state(db, repos), "127.0.0.1:0".parse().unwrap())
+        .await
+        .expect("listen");
 
     let key = Arc::new(load_secret_key(&priv_path, None).unwrap());
     connect_auth(addr, "git", key)
@@ -282,31 +277,17 @@ async fn git_ssh_public_upload_pack_happy_path() {
     )
     .await
     .unwrap();
-    db.insert_repository(
-        "r-demo",
-        &user_id,
-        "user",
-        "demo",
-        "public",
-        "demo",
-        "main",
-    )
-    .await
-    .unwrap();
+    db.insert_repository("r-demo", &user_id, "user", "demo", "public", "demo", "main")
+        .await
+        .unwrap();
 
-    let (addr, _stop) = spawn_listener(
-        ssh_state(db, repos),
-        "127.0.0.1:0".parse().unwrap(),
-    )
-    .await
-    .expect("listen");
+    let (addr, _stop) = spawn_listener(ssh_state(db, repos), "127.0.0.1:0".parse().unwrap())
+        .await
+        .expect("listen");
 
     let key = Arc::new(load_secret_key(&priv_path, None).unwrap());
     let session = connect_auth(addr, "git", key).await.expect("auth");
-    let mut channel = session
-        .channel_open_session()
-        .await
-        .expect("open session");
+    let mut channel = session.channel_open_session().await.expect("open session");
     channel
         .exec(true, "git-upload-pack 'sshuser3/demo.git'")
         .await
@@ -375,14 +356,25 @@ async fn git_ssh_private_non_owner_git_stderr_deny() {
     .unwrap();
     let bare = repos.join("owneru").join("secret.git");
     init_bare_repo(&bare);
-    db.insert_repository("r-sec", &owner_id, "user", "secret", "private", "sec", "main")
-        .await
-        .unwrap();
+    db.insert_repository(
+        "r-sec", &owner_id, "user", "secret", "private", "sec", "main",
+    )
+    .await
+    .unwrap();
 
     let (priv_path, pub_line, fp) = write_keypair(tmp.path());
-    db.create_ssh_key("k-priv", &other_id, "laptop", &pub_line, &fp, "ssh-ed25519", true, true)
-        .await
-        .unwrap();
+    db.create_ssh_key(
+        "k-priv",
+        &other_id,
+        "laptop",
+        &pub_line,
+        &fp,
+        "ssh-ed25519",
+        true,
+        true,
+    )
+    .await
+    .unwrap();
 
     let (addr, _stop) = spawn_listener(ssh_state(db, repos), "127.0.0.1:0".parse().unwrap())
         .await
@@ -444,9 +436,18 @@ async fn git_ssh_push_unverified_email_denied() {
         .unwrap();
 
     let (priv_path, pub_line, fp) = write_keypair(tmp.path());
-    db.create_ssh_key("k-push", &user_id, "laptop", &pub_line, &fp, "ssh-ed25519", true, true)
-        .await
-        .unwrap();
+    db.create_ssh_key(
+        "k-push",
+        &user_id,
+        "laptop",
+        &pub_line,
+        &fp,
+        "ssh-ed25519",
+        true,
+        true,
+    )
+    .await
+    .unwrap();
 
     let (addr, _stop) = spawn_listener(ssh_state(db, repos), "127.0.0.1:0".parse().unwrap())
         .await
@@ -516,12 +517,9 @@ async fn git_ssh_non_pack_exec_shell_rejected() {
     .await
     .unwrap();
 
-    let (addr, _stop) = spawn_listener(
-        ssh_state(db, repos),
-        "127.0.0.1:0".parse().unwrap(),
-    )
-    .await
-    .expect("listen");
+    let (addr, _stop) = spawn_listener(ssh_state(db, repos), "127.0.0.1:0".parse().unwrap())
+        .await
+        .expect("listen");
 
     let key = Arc::new(load_secret_key(&priv_path, None).unwrap());
     let session = connect_auth(addr, "git", key).await.expect("auth");

@@ -1,6 +1,6 @@
 import { Check, ChevronDown } from "@octanejs/lucide";
-import { createFileRoute, useLoaderData } from "@octanejs/tanstack-router";
-import { useQuery, useQueryClient } from "@octanejs/tanstack-query";
+import { queryOptions, useQuery, useQueryClient } from "@octanejs/tanstack-query";
+import { AppPage } from "@/components/app-page";
 import type {
   AuthSettingsPublic,
   EmailProviderKind,
@@ -63,44 +63,47 @@ export type AdminAuthLoaderData =
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
 const FORBIDDEN = "You need admin access to manage auth settings.";
 
-export const Route = createFileRoute("/admin/auth")({
-  component: AdminAuthPage,
-  head: () => ({ meta: [{ title: "Auth settings · Oxidean" }] }),
-  loader: async (): Promise<AdminAuthLoaderData> => {
-    try {
-      const meRes = await fetchSessionMe();
-      if (!meRes.ok) {
-        if (meRes.error.code === "auth.unauthenticated") {
-          return { kind: "unauthenticated" };
+function adminAuthQueryOptions() {
+  return queryOptions({
+    queryKey: ["admin", "adminAuth"],
+    queryFn: async (): Promise<AdminAuthLoaderData> => {
+      try {
+        const meRes = await fetchSessionMe();
+        if (!meRes.ok) {
+          if (meRes.error.code === "auth.unauthenticated") {
+            return { kind: "unauthenticated" };
+          }
+          return {
+            kind: "error",
+            message: meRes.error.message || "Could not load session.",
+          };
         }
-        return {
-          kind: "error",
-          message: meRes.error.message || "Could not load session.",
-        };
-      }
-      if (meRes.data.role !== "sys-admin") {
-        return { kind: "forbidden" };
-      }
-      const settingsRes = await fetchAdminAuthSettings();
-      if (!settingsRes.ok) {
-        if (settingsRes.error.code === "admin.forbidden") {
+        if (meRes.data.role !== "sys-admin") {
           return { kind: "forbidden" };
         }
+        const settingsRes = await fetchAdminAuthSettings();
+        if (!settingsRes.ok) {
+          if (settingsRes.error.code === "admin.forbidden") {
+            return { kind: "forbidden" };
+          }
+          return {
+            kind: "error",
+            message: settingsRes.error.message || FORBIDDEN,
+          };
+        }
         return {
-          kind: "error",
-          message: settingsRes.error.message || FORBIDDEN,
+          kind: "ready",
+          me: meRes.data,
+          settings: settingsRes.data,
         };
+      } catch {
+        return { kind: "error", message: NETWORK_ERROR };
       }
-      return {
-        kind: "ready",
-        me: meRes.data,
-        settings: settingsRes.data,
-      };
-    } catch {
-      return { kind: "error", message: NETWORK_ERROR };
-    }
-  },
-});
+    },
+    retry: false,
+    staleTime: 30_000,
+  });
+}
 
 const PROVIDER_OPTIONS: { value: ProviderMode; label: string }[] = [
   { value: "local", label: "Local" },
@@ -204,8 +207,14 @@ function ModeSelect<T extends string>({
 
 /** Exported for D-08 integration tests (Allow open signup Switch). */
 export function AdminAuthPage() @{
+  <AppPage>
+    <AdminAuthContent />
+  </AppPage>;
+}
+
+export function AdminAuthContent() @{
   const queryClient = useQueryClient();
-  const loaderData = useLoaderData({ from: "/admin/auth" }) as AdminAuthLoaderData | undefined;
+  const loaderData = useQuery(adminAuthQueryOptions()).data;
 
   useEffect(() => {
     if (loaderData?.kind === "unauthenticated") {

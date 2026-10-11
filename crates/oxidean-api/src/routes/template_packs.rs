@@ -38,7 +38,7 @@ async fn build_ctx(state: &AppState, headers: &HeaderMap) -> RpcCtx {
     let raw = session_token_from_headers(headers);
     let client = crate::rpc::ClientMeta::from_headers(headers);
     let session = match raw.as_deref() {
-        Some(token) => match state
+        Some(token) => state
             .sessions
             .resolve(
                 &state.db,
@@ -47,10 +47,7 @@ async fn build_ctx(state: &AppState, headers: &HeaderMap) -> RpcCtx {
                 client.user_agent.as_deref(),
             )
             .await
-        {
-            Ok(s) => s,
-            Err(_) => None,
-        },
+            .unwrap_or_default(),
         None => None,
     };
     RpcCtx {
@@ -84,7 +81,7 @@ pub async fn upload_pack(
     headers: HeaderMap,
     mut multipart: Multipart,
 ) -> Response {
-    let mut ctx = build_ctx(&state, &headers).await;
+    let ctx = build_ctx(&state, &headers).await;
     let mut slug = String::new();
     let mut label = String::new();
     let mut group = String::from("Custom");
@@ -151,7 +148,7 @@ pub async fn upload_pack(
     }
 
     match handlers::create_pack_from_bytes(
-        &mut ctx,
+        &ctx,
         &slug,
         &label,
         &group,

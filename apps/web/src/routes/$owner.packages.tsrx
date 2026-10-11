@@ -1,4 +1,3 @@
-import { createFileRoute, useLoaderData, useParams } from "@octanejs/tanstack-router";
 import { useMutation, useQuery, useQueryClient } from "@octanejs/tanstack-query";
 import { useState } from "octane";
 import { Package } from "@octanejs/lucide";
@@ -6,11 +5,12 @@ import {
   packagesDeleteVersionMutationOptions,
   packagesListQueryOptions,
   type PackagePublic,
-  type PackagesListResponse,
 } from "@oxidean/api-client";
 import { apiClient } from "@/lib/api-client";
+import { AppPage } from "@/components/app-page";
+import { usePathname } from "@/lib/pathname.tsrx";
+import { matchPath } from "@/lib/route-params";
 import { formatRelative } from "@/lib/relative-time";
-import { fetchPackagesList } from "@/lib/ssr-repo";
 import { PublishQuickstart } from "@/components/packages/publish-quickstart";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -21,48 +21,19 @@ import { AppLink } from "@/components/ui/app-link";
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
 
-export type OwnerPackagesLoaderData =
-  | { kind: "error"; message: string }
-  | { kind: "ready"; list: PackagesListResponse };
-
-export const Route = createFileRoute("/$owner/packages")({
-  component: OwnerPackagesPage,
-  head: ({ params }) => ({
-    meta: [
-      {
-        title: `${String((params as { owner?: string }).owner ?? "")} packages · Oxidean`,
-      },
-    ],
-  }),
-  loader: async ({ params }): Promise<OwnerPackagesLoaderData> => {
-    const owner = String((params as { owner?: string }).owner ?? "");
-    try {
-      const res = await fetchPackagesList({ data: { owner } });
-      if (!res.ok) {
-        return {
-          kind: "error",
-          message: res.error.message || "Could not load packages.",
-        };
-      }
-      return { kind: "ready", list: res.data };
-    } catch {
-      return { kind: "error", message: NETWORK_ERROR };
-    }
-  },
-});
+/** `/{owner}/packages` — registry package list (title via shell). */
+export function OwnerPackagesPage() @{
+  <AppPage>
+    <OwnerPackagesContent />
+  </AppPage>;
+}
 
 /** Owner packages list (D-PKG-11) — formats oci/npm/generic. */
-export function OwnerPackagesPage() @{
-  const params = useParams({ from: "/$owner/packages" }) as { owner?: string };
-  const owner = String(params.owner ?? "");
-  const routeLoader = useLoaderData({ from: "/$owner/packages" }) as
-    | OwnerPackagesLoaderData
-    | undefined;
+function OwnerPackagesContent() @{
+  const pathname = usePathname();
+  const owner = matchPath("/$owner/packages", pathname)?.owner ?? "";
   const qc = useQueryClient();
-  const listQ = useQuery({
-    ...packagesListQueryOptions(apiClient, { owner }),
-    initialData: routeLoader?.kind === "ready" ? routeLoader.list : undefined,
-  });
+  const listQ = useQuery(packagesListQueryOptions(apiClient, { owner }));
   const [pendingDelete, setPendingDelete] = useState<{
     pkg: PackagePublic;
     version: string;
@@ -75,14 +46,8 @@ export function OwnerPackagesPage() @{
     },
   });
 
-  const packages =
-    listQ.data?.packages ?? (routeLoader?.kind === "ready" ? routeLoader.list.packages : []);
-  const loadError =
-    routeLoader?.kind === "error"
-      ? routeLoader.message
-      : listQ.isError
-        ? String(listQ.error?.message || NETWORK_ERROR)
-        : "";
+  const packages = listQ.data?.packages ?? [];
+  const loadError = listQ.isError ? String(listQ.error?.message || NETWORK_ERROR) : "";
 
   @{
     <div className="mx-auto max-w-6xl px-4 py-12" data-testid="owner-packages">

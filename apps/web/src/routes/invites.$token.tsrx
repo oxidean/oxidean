@@ -1,21 +1,16 @@
-import { createFileRoute, useParams } from "@octanejs/tanstack-router";
 import { useForm } from "@octanejs/tanstack-form";
 import type { InvitesAcceptResponse, InvitesGetResponse, UserPublic } from "@oxidean/api-client";
 import { useEffect, useState } from "octane";
+import { AppPage } from "@/components/app-page";
 import { AuthErrorBanner, AuthShell } from "@/components/auth-shell";
 import { AuthFormSkeleton } from "@/components/page-skeletons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiClient } from "@/lib/api-client";
+import { usePathname } from "@/lib/pathname.tsrx";
+import { matchPath } from "@/lib/route-params";
 import { AppLink } from "@/components/ui/app-link";
-
-export const Route = createFileRoute("/invites/$token")({
-  component: InviteAcceptPage,
-  head: () => ({
-    meta: [{ title: "Accept invitation · Oxidean" }, { name: "referrer", content: "no-referrer" }],
-  }),
-});
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
 const INVALID_INVITE =
@@ -56,9 +51,16 @@ function inviteTargetText(invite: InvitesGetResponse): string {
   return "You've been invited to join this Oxidean instance.";
 }
 
+/** `/invites/{token}` — accept org/repo/instance invite (title/meta via shell). */
 export function InviteAcceptPage() @{
-  const params = useParams({ from: "/invites/$token" }) as { token?: string };
-  const token = String(params?.token ?? "").trim();
+  <AppPage>
+    <InviteAcceptContent />
+  </AppPage>;
+}
+
+function InviteAcceptContent() @{
+  const pathname = usePathname();
+  const token = String(matchPath("/invites/$token", pathname)?.token ?? "").trim();
 
   const [phase, setPhase] = useState<Phase>({ kind: "loading" });
   const [invite, setInvite] = useState<InvitesGetResponse | null>(null);

@@ -1,66 +1,46 @@
-import { createFileRoute, Link, useLoaderData } from "@octanejs/tanstack-router";
-import { createServerFn } from "@octanejs/tanstack-start";
-import { getRequestHeader } from "@octanejs/tanstack-start/server";
+import { navigate } from "astro:transitions/client";
+import { queryOptions, useQuery } from "@octanejs/tanstack-query";
 import { useState } from "octane";
 import { BookMarked, Compass, Search, Star } from "@octanejs/lucide";
-import { createClient, type RepoPublic } from "@oxidean/api-client";
+import type { RepoPublic } from "@oxidean/api-client";
+import { AppPage } from "@/components/app-page";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { List, ListRow } from "@/components/ui/list";
 import { PageHeader } from "@/components/ui/page-header";
 import { AppLink } from "@/components/ui/app-link";
+import { apiClient } from "@/lib/api-client";
+import { useSearchString } from "@/lib/pathname.tsrx";
 
-function ssrApiOrigin(): string {
-  return (
-    process.env.OXIDEAN_API_ORIGIN?.replace(/\/$/, "") ||
-    process.env.OXIDEAN_E2E_API_ORIGIN?.replace(/\/$/, "") ||
-    "http://127.0.0.1:8080"
-  );
+type ExploreLoaderData = { repos: RepoPublic[]; q: string };
+
+function exploreQueryOptions(q: string) {
+  return queryOptions({
+    queryKey: ["repo", "explore", q],
+    queryFn: async (): Promise<ExploreLoaderData> => {
+      const res = await apiClient.repo.explore({ q: q || null, offset: 0, limit: 40 });
+      return { repos: res.ok ? res.data.repos : [], q };
+    },
+    retry: false,
+    staleTime: 30_000,
+  });
 }
 
-const fetchExplore = createServerFn({ method: "GET" })
-  .validator((data: { q?: string }) => ({
-    q: data?.q ? String(data.q) : "",
-  }))
-  .handler(async ({ data }): Promise<{ repos: RepoPublic[]; q: string }> => {
-    const cookie = getRequestHeader("cookie") ?? "";
-    const client = createClient({
-      baseUrl: ssrApiOrigin(),
-      credentials: "include",
-      fetch: (input, init) => {
-        const headers = new Headers(init?.headers);
-        if (cookie) headers.set("cookie", cookie);
-        return fetch(input, { ...init, headers });
-      },
-    });
-    const q = data.q.trim();
-    const res = await client.repo.explore({
-      q: q || null,
-      offset: 0,
-      limit: 40,
-    });
-    return { repos: res.ok ? res.data.repos : [], q };
-  });
-
-export type ExploreLoaderData = { repos: RepoPublic[]; q: string };
-
-export const Route = createFileRoute("/explore")({
-  component: ExplorePage,
-  head: () => ({ meta: [{ title: "Explore · Oxidean" }] }),
-  // Loader consumes ?q — loaderDeps keeps the match id search-aware so a
-  // search-only navigation refetches instead of reusing stale loaderData.
-  loaderDeps: ({ search }) => search,
-  loader: async ({ location }): Promise<ExploreLoaderData> => {
-    const q = new URLSearchParams(location.searchStr.replace(/^\?/, "")).get("q") ?? "";
-    return fetchExplore({ data: { q } });
-  },
-});
-
 export function ExplorePage() @{
-  const data = useLoaderData({ from: "/explore" }) as ExploreLoaderData | undefined;
+  <AppPage>
+    <ExploreContent />
+  </AppPage>;
+}
+
+function ExploreContent() @{
+  // `?q` is reactive so a same-page search refetches instead of going stale.
+  const search = useSearchString();
+  const urlQ = new URLSearchParams(search).get("q") ?? "";
+  const q2 = useQuery(exploreQueryOptions(urlQ));
+  const data = q2.data;
   const repos = data?.repos ?? [];
-  const [q, setQ] = useState(data?.q ?? "");
+  const [q, setQ] = useState(urlQ);
 
   <div className="relative overflow-hidden">
     <div
@@ -84,7 +64,7 @@ export function ExplorePage() @{
             onSubmit={(e) => {
               e.preventDefault();
               const next = q.trim();
-              window.location.assign(next ? `/explore?q=${encodeURIComponent(next)}` : "/explore");
+              void navigate(next ? `/explore?q=${encodeURIComponent(next)}` : "/explore");
             }}
           >
             <div className="relative flex-1 sm:w-72">
@@ -138,14 +118,12 @@ export function ExplorePage() @{
                 className="mt-0.5 shrink-0 text-muted-foreground"
               />
               <div className="min-w-0 flex-1">
-                <Link
-                  to="/$owner/$repo"
-                  params={{ owner: repo.owner_username, repo: repo.name }}
-                  preload="intent"
+                <AppLink
+                  href={("/" + repo.owner_username + "/" + repo.name) as string}
                   className="font-[family-name:var(--font-display)] text-[16px] font-semibold text-primary no-underline hover:underline"
                 >
                   {(repo.owner_username + "/" + repo.name) as string}
-                </Link>
+                </AppLink>
                 @if (repo.description?.trim()) {
                   <p className="mt-1 line-clamp-2 text-[14px] text-muted-foreground">
                     {repo.description as string}

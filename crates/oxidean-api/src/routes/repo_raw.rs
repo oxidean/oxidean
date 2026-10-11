@@ -39,6 +39,7 @@ fn err_json(status: StatusCode, code: &str, message: &str) -> Response {
         .into_response()
 }
 
+#[allow(clippy::result_large_err)]
 fn validate_ref(ref_name: &str) -> Result<&str, Response> {
     let t = ref_name.trim();
     // Allow `/` for hierarchical branches (WR-02); reject leading `-` / `..` / NUL / metachar (CR-01).
@@ -64,6 +65,7 @@ fn validate_ref(ref_name: &str) -> Result<&str, Response> {
     Ok(t)
 }
 
+#[allow(clippy::result_large_err)]
 /// Treeish for archives — allow `/` in branch names (e.g. `feature/x`), reject `..` / NUL / leading `-` (CR-01).
 fn validate_archive_treeish(treeish: &str) -> Result<&str, Response> {
     let t = treeish.trim();
@@ -89,6 +91,7 @@ fn validate_archive_treeish(treeish: &str) -> Result<&str, Response> {
     Ok(t)
 }
 
+#[allow(clippy::result_large_err)]
 fn validate_blob_path(path: &str) -> Result<String, Response> {
     let rel = path.trim().trim_start_matches('/');
     if rel.is_empty() || rel.contains('\0') {
@@ -116,6 +119,7 @@ fn validate_blob_path(path: &str) -> Result<String, Response> {
     Ok(rel.to_string())
 }
 
+#[allow(clippy::result_large_err)]
 /// Parse `main.zip` / `main.tar.gz` / `feature/x.tar.gz` into (treeish, format).
 fn parse_archive_filename(name: &str) -> Result<(&str, ArchiveFormat), Response> {
     let name = name.trim().trim_start_matches('/');
@@ -336,7 +340,13 @@ pub async fn serve_archive(
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, format.content_type())
         .body(axum::body::Body::from(bytes))
-        .unwrap_or_else(|_| err_json(StatusCode::INTERNAL_SERVER_ERROR, "repo.git_failed", "response build failed"));
+        .unwrap_or_else(|_| {
+            err_json(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "repo.git_failed",
+                "response build failed",
+            )
+        });
 
     if let Ok(v) = HeaderValue::from_str(&disposition) {
         res.headers_mut().insert(header::CONTENT_DISPOSITION, v);

@@ -6,12 +6,10 @@ import type {
 } from "@oxidean/api-client";
 import { apiClient } from "@/lib/api-client";
 
-export const notificationUnreadCountQueryKey = ["notification", "unreadCount"] as const;
-
-export function notificationListQueryKey(filter: "unread" | "all", offset = 0) {
+const notificationUnreadCountQueryKey = ["notification", "unreadCount"] as const;
+function notificationListQueryKey(filter: "unread" | "all", offset = 0) {
   return ["notification", "list", filter, offset] as const;
 }
-
 /** Soft unread badge — unauthenticated → 0 (chrome must not throw). */
 export function notificationUnreadCountQueryOptions() {
   return queryOptions({
@@ -78,6 +76,8 @@ export function subjectTail(n: NotificationPublic): string {
   if (n.subject_kind === "issue" || n.subject_kind === "pull_request") {
     return `#${n.subject_number}`;
   }
+  // Workflow-run refs carry the run UUID purely for deep links — never display it.
+  if (n.subject_kind === "workflow_run") return "";
   return n.subject_ref ?? "";
 }
 

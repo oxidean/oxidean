@@ -10,7 +10,8 @@ Self-hostable code forge (git, issues, pull requests, orgs, LFS, releases, packa
 
 | Layer | Tech |
 |-------|------|
-| Web UI | **Octane** (`.tsrx`), TanStack Start / Router / Query / Form via `@octanejs/*`; file pickers via `@octanejs/dropzone` |
+| Web UI | **Octane** (`.tsrx`) islands on **Astro** static shells (`apps/web/src/pages/**`); TanStack Query / Form via `@octanejs/*`; file pickers via `@octanejs/dropzone` |
+| Web serving | **`oxidean-web`** Rust binary (`crates/oxidean-web`) — serves Astro `dist`, injects theme/title/session metas per request, gates protected routes, reverse-proxies API prefixes via `OXIDEAN_API_ORIGIN` |
 | API | Rust Axum + typed JSON RPC (`oxidean-api`) |
 | Domain types | `oxidean-core` |
 | Persistence | `oxidean-db` (Postgres / MySQL / SQLite) |
@@ -69,6 +70,7 @@ make up / make smoke         # Compose + health
 make rpc-sync-check          # CI gate for client drift
 make web-lint                # oxlint type-aware (apps/web; @tsrx/oxc) + octane DOM-race heuristic
 make web-format-check        # oxfmt --check (apps/web)
+make dead-code-check         # knip (.ts/.tsrx/.astro) + cargo machete + clippy -D dead_code
 make test-web-browser           # Vitest Chromium component DOM-race tests
 make browser-coverage-check-pr  # high-risk UI Chromium gate (change-aware vs origin/main)
 ```

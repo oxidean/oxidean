@@ -1,5 +1,5 @@
-import { createFileRoute, useLoaderData } from "@octanejs/tanstack-router";
-import { useQuery, useQueryClient } from "@octanejs/tanstack-query";
+import { queryOptions, useQuery, useQueryClient } from "@octanejs/tanstack-query";
+import { AppPage } from "@/components/app-page";
 import type {
   InstanceTemplatePackPublic,
   RepoCreateDefaults,
@@ -42,32 +42,41 @@ function uniqueSorted(values: string[]): string[] {
   );
 }
 
-export const Route = createFileRoute("/admin/templates")({
-  component: AdminTemplatesPage,
-  head: () => ({ meta: [{ title: "Templates · Oxidean" }] }),
-  loader: async (): Promise<AdminGateLoader> => {
-    try {
-      const meRes = await fetchSessionMe();
-      if (!meRes.ok) {
-        if (meRes.error.code === "auth.unauthenticated") {
-          return { kind: "unauthenticated" };
+function adminTemplatesQueryOptions() {
+  return queryOptions({
+    queryKey: ["admin", "adminTemplates"],
+    queryFn: async (): Promise<AdminGateLoader> => {
+      try {
+        const meRes = await fetchSessionMe();
+        if (!meRes.ok) {
+          if (meRes.error.code === "auth.unauthenticated") {
+            return { kind: "unauthenticated" };
+          }
+          return { kind: "error", message: meRes.error.message || "Could not load session." };
         }
-        return { kind: "error", message: meRes.error.message || "Could not load session." };
+        if (meRes.data.role !== "sys-admin") {
+          return { kind: "forbidden" };
+        }
+        return { kind: "ready", me: meRes.data };
+      } catch {
+        return { kind: "error", message: NETWORK_ERROR };
       }
-      if (meRes.data.role !== "sys-admin") {
-        return { kind: "forbidden" };
-      }
-      return { kind: "ready", me: meRes.data };
-    } catch {
-      return { kind: "error", message: NETWORK_ERROR };
-    }
-  },
-});
+    },
+    retry: false,
+    staleTime: 30_000,
+  });
+}
 
 /** Built-in + instance template packs (issue #18). */
 export function AdminTemplatesPage() @{
+  <AppPage>
+    <AdminTemplatesContent />
+  </AppPage>;
+}
+
+function AdminTemplatesContent() @{
   const qc = useQueryClient();
-  const loaderData = useLoaderData({ from: "/admin/templates" }) as AdminGateLoader | undefined;
+  const loaderData = useQuery(adminTemplatesQueryOptions()).data;
   const [slug, setSlug] = useState("");
   const [label, setLabel] = useState("");
   const [group, setGroup] = useState("Custom");

@@ -151,12 +151,7 @@ async fn ssh_key_list_after_add() {
     let (_, b) = rpc_json(&app, &add_body("second", ED25519_B), &cookie).await;
     assert_eq!(b["ok"], true, "{b}");
 
-    let (status, v) = rpc_json(
-        &app,
-        r#"{"procedure":"sshKey.list","input":{}}"#,
-        &cookie,
-    )
-    .await;
+    let (status, v) = rpc_json(&app, r#"{"procedure":"sshKey.list","input":{}}"#, &cookie).await;
     assert_eq!(status, StatusCode::OK, "{v}");
     assert_eq!(v["ok"], true);
     let arr = v["data"].as_array().expect("array");
@@ -195,12 +190,7 @@ async fn ssh_key_revoke_removes_from_list() {
     assert_eq!(status, StatusCode::OK, "{rev}");
     assert_eq!(rev["ok"], true, "{rev}");
 
-    let (_, listed) = rpc_json(
-        &app,
-        r#"{"procedure":"sshKey.list","input":{}}"#,
-        &cookie,
-    )
-    .await;
+    let (_, listed) = rpc_json(&app, r#"{"procedure":"sshKey.list","input":{}}"#, &cookie).await;
     let arr = listed["data"].as_array().expect("array");
     assert!(arr.is_empty(), "revoked key must be absent — {listed}");
 

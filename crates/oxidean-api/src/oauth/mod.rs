@@ -656,7 +656,7 @@ impl OAuthTokenIdentity {
     }
 
     pub fn has_scope(&self, scope: OAuthScope) -> bool {
-        self.scopes().iter().any(|s| *s == scope)
+        self.scopes().contains(&scope)
     }
 
     /// Synthesize a classic-PAT-shaped row so existing ACL helpers

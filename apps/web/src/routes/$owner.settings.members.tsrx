@@ -1,16 +1,8 @@
-import {
-  createFileRoute,
-  notFound,
-  redirect,
-  useLoaderData,
-  useParams,
-} from "@octanejs/tanstack-router";
 import { useQuery, useQueryClient } from "@octanejs/tanstack-query";
 import type {
   OrgInvitePublic,
   OrgInvitesCreateItemResult,
   OrgMemberPublic,
-  OrgPublic,
   OrgRole,
 } from "@oxidean/api-client";
 import { Check, ChevronDown, Link2 } from "@octanejs/lucide";
@@ -45,13 +37,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { apiClient } from "@/lib/api-client";
-import { fetchOrgGet, fetchOrgListMine } from "@/lib/ssr-org";
-import { fetchSessionMe } from "@/lib/ssr-auth";
-
-export type OrgMembersLoaderData = {
-  org: OrgPublic;
-  canAdmin: boolean;
-};
+import { AppPage } from "@/components/app-page";
+import {
+  OrgSettingsShell,
+  orgSettingsAccessQueryOptions,
+  orgSettingsOwner,
+} from "@/components/org/org-settings-shell.tsrx";
+import { usePathname } from "@/lib/pathname.tsrx";
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
 const LAST_OWNER_ERROR = "Cannot demote or remove the last organization owner.";
@@ -84,48 +76,6 @@ function membersQueryKey(slug: string) {
 function invitesQueryKey(slug: string) {
   return ["org", "invites", slug] as const;
 }
-
-export const Route = createFileRoute("/$owner/settings/members")({
-  component: OrgMembersPage,
-  head: ({ loaderData, params }) => {
-    const data = loaderData as OrgMembersLoaderData | undefined;
-    const owner = String((params as { owner?: string }).owner ?? "");
-    const name = data?.org?.display_name || data?.org?.slug || owner;
-    return { meta: [{ title: `Members · ${name}` }] };
-  },
-  beforeLoad: async ({ params }) => {
-    const owner = String((params as { owner?: string }).owner ?? "");
-    try {
-      const me = await fetchSessionMe();
-      if (!me.ok) {
-        throw redirect({
-          href: `/login?returnTo=/${owner}/settings/members`,
-        });
-      }
-    } catch (e) {
-      if (e && typeof e === "object" && "href" in e) throw e;
-      throw redirect({
-        href: `/login?returnTo=/${owner}/settings/members`,
-      });
-    }
-  },
-  loader: async ({ params }): Promise<OrgMembersLoaderData> => {
-    const owner = String((params as { owner?: string }).owner ?? "");
-    const got = await fetchOrgGet({ data: { slug: owner } });
-    if (!got.ok) throw notFound();
-
-    let canAdmin = false;
-    const mine = await fetchOrgListMine();
-    if (mine.ok) {
-      const entry = mine.data.orgs.find((o) => o.slug === got.data.slug);
-      canAdmin = entry?.role === "owner" || entry?.role === "admin";
-    }
-    if (!canAdmin) {
-      throw redirect({ href: `/${got.data.slug}` });
-    }
-    return { org: got.data, canAdmin };
-  },
-});
 
 function RoleSelect({
   id,
@@ -172,18 +122,25 @@ function RoleSelect({
 }
 
 /** Exported for members Wave 0 tests (ORG-01 / D-ORG-03). */
+/** `/{owner}/settings/members` — org membership admin (title via shell). */
 export function OrgMembersPage() @{
-  const params = useParams({ from: "/$owner/settings/members" }) as {
-    owner?: string;
-  };
-  const data = useLoaderData({ from: "/$owner/settings/members" }) as
-    | OrgMembersLoaderData
-    | undefined;
+  <AppPage>
+    <OrgSettingsShell active="members">
+      <OrgMembersContent />
+    </OrgSettingsShell>
+  </AppPage>;
+}
+
+/** Exported for members Wave 0 tests (ORG-01 / D-ORG-03). */
+function OrgMembersContent() @{
+  const pathname = usePathname();
+  const owner = orgSettingsOwner(pathname);
+  const data = useQuery(orgSettingsAccessQueryOptions(owner)).data;
   const queryClient = useQueryClient();
 
-  const org = data?.org;
-  const slug = org?.slug ?? params.owner ?? "";
-  const canAdmin = data?.canAdmin === true;
+  const org = data?.kind === "ready" ? data.org : null;
+  const slug = org?.slug ?? owner;
+  const canAdmin = data?.kind === "ready" && data.canAdmin;
 
   const membersQ = useQuery({
     queryKey: membersQueryKey(slug),
@@ -904,4 +861,3 @@ export function OrgMembersPage() @{
 }
 
 /** Alias for Wave 0 import flexibility. */
-export const MembersPage = OrgMembersPage;

@@ -109,8 +109,15 @@ pub async fn insert_runner(
                    (id, name, token_hash, labels_json, repository_id, ephemeral)
                    VALUES ($1, $2, $3, $4, $5, $6)"#,
             )
-            .bind(id).bind(name).bind(token_hash).bind(labels_json).bind(repository_id).bind(ephemeral)
-            .execute(p).await.map_err(|e| e.to_string())?;
+            .bind(id)
+            .bind(name)
+            .bind(token_hash)
+            .bind(labels_json)
+            .bind(repository_id)
+            .bind(ephemeral)
+            .execute(p)
+            .await
+            .map_err(|e| e.to_string())?;
         }
         DbPool::MySql(p) => {
             sqlx::query(
@@ -118,8 +125,15 @@ pub async fn insert_runner(
                    (id, name, token_hash, labels_json, repository_id, ephemeral)
                    VALUES (?, ?, ?, ?, ?, ?)"#,
             )
-            .bind(id).bind(name).bind(token_hash).bind(labels_json).bind(repository_id).bind(eph_i as i8)
-            .execute(p).await.map_err(|e| e.to_string())?;
+            .bind(id)
+            .bind(name)
+            .bind(token_hash)
+            .bind(labels_json)
+            .bind(repository_id)
+            .bind(eph_i as i8)
+            .execute(p)
+            .await
+            .map_err(|e| e.to_string())?;
         }
         DbPool::Sqlite(p) => {
             sqlx::query(
@@ -127,22 +141,33 @@ pub async fn insert_runner(
                    (id, name, token_hash, labels_json, repository_id, ephemeral)
                    VALUES (?, ?, ?, ?, ?, ?)"#,
             )
-            .bind(id).bind(name).bind(token_hash).bind(labels_json).bind(repository_id).bind(eph_i)
-            .execute(p).await.map_err(|e| e.to_string())?;
+            .bind(id)
+            .bind(name)
+            .bind(token_hash)
+            .bind(labels_json)
+            .bind(repository_id)
+            .bind(eph_i)
+            .execute(p)
+            .await
+            .map_err(|e| e.to_string())?;
         }
     }
     Ok(ActionRunnerRow {
-        id: id.into(), name: name.into(), token_hash: token_hash.into(),
-        labels_json: labels_json.into(), owner_type: None, owner_id: None,
-        repository_id: repository_id.map(str::to_string), ephemeral,
-        last_online: None, created_at: String::new(), updated_at: String::new(),
+        id: id.into(),
+        name: name.into(),
+        token_hash: token_hash.into(),
+        labels_json: labels_json.into(),
+        owner_type: None,
+        owner_id: None,
+        repository_id: repository_id.map(str::to_string),
+        ephemeral,
+        last_online: None,
+        created_at: String::new(),
+        updated_at: String::new(),
     })
 }
 
-pub async fn find_runner_by_id(
-    pool: &DbPool,
-    id: &str,
-) -> Result<Option<ActionRunnerRow>, String> {
+pub async fn find_runner_by_id(pool: &DbPool, id: &str) -> Result<Option<ActionRunnerRow>, String> {
     match pool {
         DbPool::Postgres(p) => {
             let row = sqlx::query(
@@ -153,10 +178,15 @@ pub async fn find_runner_by_id(
                    FROM action_runners WHERE id = $1"#,
             ).bind(id).fetch_optional(p).await.map_err(|e| e.to_string())?;
             Ok(row.map(|r| ActionRunnerRow {
-                id: r.get("id"), name: r.get("name"), token_hash: r.get("token_hash"),
-                labels_json: r.get("labels_json"), owner_type: r.get("owner_type"),
-                owner_id: r.get("owner_id"), repository_id: r.get("repository_id"),
-                ephemeral: r.get("ephemeral"), last_online: r.get("last_online"),
+                id: r.get("id"),
+                name: r.get("name"),
+                token_hash: r.get("token_hash"),
+                labels_json: r.get("labels_json"),
+                owner_type: r.get("owner_type"),
+                owner_id: r.get("owner_id"),
+                repository_id: r.get("repository_id"),
+                ephemeral: r.get("ephemeral"),
+                last_online: r.get("last_online"),
                 created_at: r.try_get("created_at").unwrap_or_default(),
                 updated_at: r.try_get("updated_at").unwrap_or_default(),
             }))
@@ -170,10 +200,17 @@ pub async fn find_runner_by_id(
                    FROM action_runners WHERE id = ?"#,
             ).bind(id).fetch_optional(p).await.map_err(|e| e.to_string())?;
             Ok(row.map(|r| ActionRunnerRow {
-                id: r.get("id"), name: r.get("name"), token_hash: r.get("token_hash"),
-                labels_json: r.get("labels_json"), owner_type: r.get("owner_type"),
-                owner_id: r.get("owner_id"), repository_id: r.get("repository_id"),
-                ephemeral: r.try_get::<i8,_>("ephemeral").map(|i| i!=0).unwrap_or(false),
+                id: r.get("id"),
+                name: r.get("name"),
+                token_hash: r.get("token_hash"),
+                labels_json: r.get("labels_json"),
+                owner_type: r.get("owner_type"),
+                owner_id: r.get("owner_id"),
+                repository_id: r.get("repository_id"),
+                ephemeral: r
+                    .try_get::<i8, _>("ephemeral")
+                    .map(|i| i != 0)
+                    .unwrap_or(false),
                 last_online: r.get("last_online"),
                 created_at: r.try_get("created_at").unwrap_or_default(),
                 updated_at: r.try_get("updated_at").unwrap_or_default(),
@@ -186,12 +223,23 @@ pub async fn find_runner_by_id(
                           strftime('%Y-%m-%dT%H:%M:%SZ', created_at) AS created_at,
                           strftime('%Y-%m-%dT%H:%M:%SZ', updated_at) AS updated_at
                    FROM action_runners WHERE id = ?"#,
-            ).bind(id).fetch_optional(p).await.map_err(|e| e.to_string())?;
+            )
+            .bind(id)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| e.to_string())?;
             Ok(row.map(|r| ActionRunnerRow {
-                id: r.get("id"), name: r.get("name"), token_hash: r.get("token_hash"),
-                labels_json: r.get("labels_json"), owner_type: r.get("owner_type"),
-                owner_id: r.get("owner_id"), repository_id: r.get("repository_id"),
-                ephemeral: r.try_get::<i64,_>("ephemeral").map(|i| i!=0).unwrap_or(false),
+                id: r.get("id"),
+                name: r.get("name"),
+                token_hash: r.get("token_hash"),
+                labels_json: r.get("labels_json"),
+                owner_type: r.get("owner_type"),
+                owner_id: r.get("owner_id"),
+                repository_id: r.get("repository_id"),
+                ephemeral: r
+                    .try_get::<i64, _>("ephemeral")
+                    .map(|i| i != 0)
+                    .unwrap_or(false),
                 last_online: r.get("last_online"),
                 created_at: r.try_get("created_at").unwrap_or_default(),
                 updated_at: r.try_get("updated_at").unwrap_or_default(),
@@ -200,9 +248,18 @@ pub async fn find_runner_by_id(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn insert_run(
-    pool: &DbPool, id: &str, repository_id: &str, workflow_path: &str, workflow_name: &str,
-    event: &str, head_sha: &str, head_ref: &str, title: &str, triggered_by: Option<&str>,
+    pool: &DbPool,
+    id: &str,
+    repository_id: &str,
+    workflow_path: &str,
+    workflow_name: &str,
+    event: &str,
+    head_sha: &str,
+    head_ref: &str,
+    title: &str,
+    triggered_by: Option<&str>,
 ) -> Result<ActionRunRow, String> {
     match pool {
         DbPool::Postgres(p) => {
@@ -231,18 +288,27 @@ pub async fn insert_run(
         }
     }
     Ok(ActionRunRow {
-        id: id.into(), repository_id: repository_id.into(), workflow_path: workflow_path.into(),
-        workflow_name: workflow_name.into(), event: event.into(), head_sha: head_sha.into(),
-        head_ref: head_ref.into(), status: "queued".into(), title: title.into(),
-        run_number: 0, triggered_by: triggered_by.map(str::to_string), created_at: String::new(),
-        updated_at: String::new(), finished_at: None,
+        id: id.into(),
+        repository_id: repository_id.into(),
+        workflow_path: workflow_path.into(),
+        workflow_name: workflow_name.into(),
+        event: event.into(),
+        head_sha: head_sha.into(),
+        head_ref: head_ref.into(),
+        status: "queued".into(),
+        title: title.into(),
+        run_number: 0,
+        triggered_by: triggered_by.map(str::to_string),
+        created_at: String::new(),
+        updated_at: String::new(),
+        finished_at: None,
     })
 }
 
 pub async fn find_run_by_id(pool: &DbPool, id: &str) -> Result<Option<ActionRunRow>, String> {
     match pool {
         DbPool::Postgres(p) => {
-            let row = sqlx::query(&format!("SELECT id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, status, title, triggered_by, finished_at::text AS finished_at, {RUN_NUMBER_SQL} FROM action_runs WHERE id = $1"))
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!("SELECT id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, status, title, triggered_by, finished_at::text AS finished_at, {RUN_NUMBER_SQL} FROM action_runs WHERE id = $1")))
                 .bind(id).fetch_optional(p).await.map_err(|e| e.to_string())?;
             Ok(row.map(|r| ActionRunRow {
                 id: r.get("id"),
@@ -262,7 +328,7 @@ pub async fn find_run_by_id(pool: &DbPool, id: &str) -> Result<Option<ActionRunR
             }))
         }
         DbPool::MySql(p) => {
-            let row = sqlx::query(&format!("SELECT id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, status, title, triggered_by, CAST(finished_at AS CHAR) AS finished_at, {RUN_NUMBER_SQL} FROM action_runs WHERE id = ?"))
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!("SELECT id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, status, title, triggered_by, CAST(finished_at AS CHAR) AS finished_at, {RUN_NUMBER_SQL} FROM action_runs WHERE id = ?")))
                 .bind(id).fetch_optional(p).await.map_err(|e| e.to_string())?;
             Ok(row.map(|r| ActionRunRow {
                 id: r.get("id"),
@@ -282,7 +348,7 @@ pub async fn find_run_by_id(pool: &DbPool, id: &str) -> Result<Option<ActionRunR
             }))
         }
         DbPool::Sqlite(p) => {
-            let row = sqlx::query(&format!("SELECT id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, status, title, triggered_by, finished_at, {RUN_NUMBER_SQL} FROM action_runs WHERE id = ?"))
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!("SELECT id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, status, title, triggered_by, finished_at, {RUN_NUMBER_SQL} FROM action_runs WHERE id = ?")))
                 .bind(id).fetch_optional(p).await.map_err(|e| e.to_string())?;
             Ok(row.map(|r| ActionRunRow {
                 id: r.get("id"),
@@ -305,7 +371,12 @@ pub async fn find_run_by_id(pool: &DbPool, id: &str) -> Result<Option<ActionRunR
 }
 
 pub async fn insert_job(
-    pool: &DbPool, id: &str, run_id: &str, job_key: &str, name: &str, runs_on_json: &str,
+    pool: &DbPool,
+    id: &str,
+    run_id: &str,
+    job_key: &str,
+    name: &str,
+    runs_on_json: &str,
 ) -> Result<ActionJobRow, String> {
     match pool {
         DbPool::Postgres(p) => {
@@ -325,9 +396,17 @@ pub async fn insert_job(
         }
     }
     Ok(ActionJobRow {
-        id: id.into(), run_id: run_id.into(), job_key: job_key.into(), name: name.into(),
-        runs_on_json: runs_on_json.into(), status: "queued".into(), runner_id: None,
-        started_at: None, finished_at: None, created_at: String::new(), updated_at: String::new(),
+        id: id.into(),
+        run_id: run_id.into(),
+        job_key: job_key.into(),
+        name: name.into(),
+        runs_on_json: runs_on_json.into(),
+        status: "queued".into(),
+        runner_id: None,
+        started_at: None,
+        finished_at: None,
+        created_at: String::new(),
+        updated_at: String::new(),
     })
 }
 
@@ -388,7 +467,11 @@ pub async fn find_job_by_id(pool: &DbPool, id: &str) -> Result<Option<ActionJobR
 }
 
 pub async fn insert_secret(
-    pool: &DbPool, id: &str, repository_id: &str, name: &str, ciphertext: &str,
+    pool: &DbPool,
+    id: &str,
+    repository_id: &str,
+    name: &str,
+    ciphertext: &str,
 ) -> Result<(), String> {
     match pool {
         DbPool::Postgres(p) => {
@@ -467,7 +550,8 @@ pub async fn list_secret_ciphertexts(
 }
 
 pub async fn list_secret_names(
-    pool: &DbPool, repository_id: &str,
+    pool: &DbPool,
+    repository_id: &str,
 ) -> Result<Vec<ActionSecretMetaRow>, String> {
     match pool {
         DbPool::Postgres(p) => {
@@ -477,11 +561,16 @@ pub async fn list_secret_names(
                           to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS updated_at
                    FROM action_secrets WHERE repository_id = $1 ORDER BY name"#,
             ).bind(repository_id).fetch_all(p).await.map_err(|e| e.to_string())?;
-            Ok(rows.iter().map(|row| ActionSecretMetaRow {
-                id: row.get("id"), repository_id: row.get("repository_id"), name: row.get("name"),
-                created_at: row.try_get("created_at").unwrap_or_default(),
-                updated_at: row.try_get("updated_at").unwrap_or_default(),
-            }).collect())
+            Ok(rows
+                .iter()
+                .map(|row| ActionSecretMetaRow {
+                    id: row.get("id"),
+                    repository_id: row.get("repository_id"),
+                    name: row.get("name"),
+                    created_at: row.try_get("created_at").unwrap_or_default(),
+                    updated_at: row.try_get("updated_at").unwrap_or_default(),
+                })
+                .collect())
         }
         DbPool::MySql(p) => {
             let rows = sqlx::query(
@@ -489,12 +578,21 @@ pub async fn list_secret_names(
                           DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at,
                           DATE_FORMAT(updated_at, '%Y-%m-%dT%H:%i:%sZ') AS updated_at
                    FROM action_secrets WHERE repository_id = ? ORDER BY name"#,
-            ).bind(repository_id).fetch_all(p).await.map_err(|e| e.to_string())?;
-            Ok(rows.iter().map(|row| ActionSecretMetaRow {
-                id: row.get("id"), repository_id: row.get("repository_id"), name: row.get("name"),
-                created_at: row.try_get("created_at").unwrap_or_default(),
-                updated_at: row.try_get("updated_at").unwrap_or_default(),
-            }).collect())
+            )
+            .bind(repository_id)
+            .fetch_all(p)
+            .await
+            .map_err(|e| e.to_string())?;
+            Ok(rows
+                .iter()
+                .map(|row| ActionSecretMetaRow {
+                    id: row.get("id"),
+                    repository_id: row.get("repository_id"),
+                    name: row.get("name"),
+                    created_at: row.try_get("created_at").unwrap_or_default(),
+                    updated_at: row.try_get("updated_at").unwrap_or_default(),
+                })
+                .collect())
         }
         DbPool::Sqlite(p) => {
             let rows = sqlx::query(
@@ -502,12 +600,21 @@ pub async fn list_secret_names(
                           strftime('%Y-%m-%dT%H:%M:%SZ', created_at) AS created_at,
                           strftime('%Y-%m-%dT%H:%M:%SZ', updated_at) AS updated_at
                    FROM action_secrets WHERE repository_id = ? ORDER BY name"#,
-            ).bind(repository_id).fetch_all(p).await.map_err(|e| e.to_string())?;
-            Ok(rows.iter().map(|row| ActionSecretMetaRow {
-                id: row.get("id"), repository_id: row.get("repository_id"), name: row.get("name"),
-                created_at: row.try_get("created_at").unwrap_or_default(),
-                updated_at: row.try_get("updated_at").unwrap_or_default(),
-            }).collect())
+            )
+            .bind(repository_id)
+            .fetch_all(p)
+            .await
+            .map_err(|e| e.to_string())?;
+            Ok(rows
+                .iter()
+                .map(|row| ActionSecretMetaRow {
+                    id: row.get("id"),
+                    repository_id: row.get("repository_id"),
+                    name: row.get("name"),
+                    created_at: row.try_get("created_at").unwrap_or_default(),
+                    updated_at: row.try_get("updated_at").unwrap_or_default(),
+                })
+                .collect())
         }
     }
 }
@@ -519,12 +626,13 @@ pub async fn delete_secret_by_name(
 ) -> Result<bool, String> {
     match pool {
         DbPool::Postgres(p) => {
-            let r = sqlx::query("DELETE FROM action_secrets WHERE repository_id = $1 AND name = $2")
-                .bind(repository_id)
-                .bind(name)
-                .execute(p)
-                .await
-                .map_err(|e| e.to_string())?;
+            let r =
+                sqlx::query("DELETE FROM action_secrets WHERE repository_id = $1 AND name = $2")
+                    .bind(repository_id)
+                    .bind(name)
+                    .execute(p)
+                    .await
+                    .map_err(|e| e.to_string())?;
             Ok(r.rows_affected() > 0)
         }
         DbPool::MySql(p) => {
@@ -644,7 +752,12 @@ pub async fn list_runners(pool: &DbPool) -> Result<Vec<ActionRunnerRow>, String>
 }
 
 pub async fn insert_runner_token(
-    pool: &DbPool, id: &str, token_hash: &str, scope_type: &str, scope_id: Option<&str>, active: bool,
+    pool: &DbPool,
+    id: &str,
+    token_hash: &str,
+    scope_type: &str,
+    scope_id: Option<&str>,
+    active: bool,
 ) -> Result<(), String> {
     let active_i = if active { 1i64 } else { 0 };
     match pool {
@@ -676,9 +789,24 @@ pub async fn wipe_actions_domain(pool: &DbPool) -> Result<(), String> {
         "DELETE FROM action_runner_tokens",
     ] {
         match pool {
-            DbPool::Postgres(p) => { sqlx::query(sql).execute(p).await.map_err(|e| e.to_string())?; }
-            DbPool::MySql(p) => { sqlx::query(sql).execute(p).await.map_err(|e| e.to_string())?; }
-            DbPool::Sqlite(p) => { sqlx::query(sql).execute(p).await.map_err(|e| e.to_string())?; }
+            DbPool::Postgres(p) => {
+                sqlx::query(sql)
+                    .execute(p)
+                    .await
+                    .map_err(|e| e.to_string())?;
+            }
+            DbPool::MySql(p) => {
+                sqlx::query(sql)
+                    .execute(p)
+                    .await
+                    .map_err(|e| e.to_string())?;
+            }
+            DbPool::Sqlite(p) => {
+                sqlx::query(sql)
+                    .execute(p)
+                    .await
+                    .map_err(|e| e.to_string())?;
+            }
         }
     }
     Ok(())
@@ -719,7 +847,11 @@ pub async fn get_actions_enabled(pool: &DbPool, repo_id: &str) -> Result<bool, S
     }
 }
 
-pub async fn set_actions_enabled(pool: &DbPool, repo_id: &str, enabled: bool) -> Result<(), String> {
+pub async fn set_actions_enabled(
+    pool: &DbPool,
+    repo_id: &str,
+    enabled: bool,
+) -> Result<(), String> {
     let v = if enabled { 1i64 } else { 0 };
     match pool {
         DbPool::Sqlite(p) => {
@@ -806,7 +938,10 @@ pub async fn find_runner_by_token_hash(
                 owner_type: r.get("owner_type"),
                 owner_id: r.get("owner_id"),
                 repository_id: r.get("repository_id"),
-                ephemeral: r.try_get::<i64, _>("ephemeral").map(|i| i != 0).unwrap_or(false),
+                ephemeral: r
+                    .try_get::<i64, _>("ephemeral")
+                    .map(|i| i != 0)
+                    .unwrap_or(false),
                 last_online: r.get("last_online"),
                 created_at: String::new(),
                 updated_at: String::new(),
@@ -850,7 +985,10 @@ pub async fn find_runner_by_token_hash(
                 owner_type: r.get("owner_type"),
                 owner_id: r.get("owner_id"),
                 repository_id: r.get("repository_id"),
-                ephemeral: r.try_get::<i8, _>("ephemeral").map(|i| i != 0).unwrap_or(false),
+                ephemeral: r
+                    .try_get::<i8, _>("ephemeral")
+                    .map(|i| i != 0)
+                    .unwrap_or(false),
                 last_online: r.get("last_online"),
                 created_at: String::new(),
                 updated_at: String::new(),
@@ -1065,9 +1203,9 @@ pub async fn list_runs_for_repo(
     match pool {
         DbPool::Sqlite(p) => {
             let rows = bind_run_filter!(
-                sqlx::query(&format!(
+                sqlx::query(sqlx::AssertSqlSafe(format!(
                     "SELECT id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, status, title, triggered_by, created_at, updated_at, finished_at, {RUN_NUMBER_SQL} FROM action_runs WHERE repository_id = ?{RUNS_FILTER_SQLITE} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?"
-                ))
+                )))
                 .bind(repository_id),
                 filter,
                 &branch_ref,
@@ -1099,9 +1237,9 @@ pub async fn list_runs_for_repo(
         }
         DbPool::Postgres(p) => {
             let rows = bind_run_filter_pg!(
-                sqlx::query(&format!(
+                sqlx::query(sqlx::AssertSqlSafe(format!(
                     "SELECT id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, status, title, triggered_by, created_at::text AS created_at, updated_at::text AS updated_at, finished_at::text AS finished_at, {RUN_NUMBER_SQL} FROM action_runs WHERE repository_id = $1{RUNS_FILTER_PG} ORDER BY created_at DESC, id DESC LIMIT $9 OFFSET $10"
-                ))
+                )))
                 .bind(repository_id),
                 filter,
                 &branch_ref,
@@ -1133,9 +1271,9 @@ pub async fn list_runs_for_repo(
         }
         DbPool::MySql(p) => {
             let rows = bind_run_filter!(
-                sqlx::query(&format!(
+                sqlx::query(sqlx::AssertSqlSafe(format!(
                     "SELECT id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, status, title, triggered_by, CAST(created_at AS CHAR) AS created_at, CAST(updated_at AS CHAR) AS updated_at, CAST(finished_at AS CHAR) AS finished_at, {RUN_NUMBER_SQL} FROM action_runs WHERE repository_id = ?{RUNS_FILTER_MYSQL} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?"
-                ))
+                )))
                 .bind(repository_id),
                 filter,
                 &branch_ref,
@@ -1248,12 +1386,7 @@ pub async fn list_jobs_for_run(pool: &DbPool, run_id: &str) -> Result<Vec<Action
     }
 }
 
-
-pub async fn update_job_status(
-    pool: &DbPool,
-    job_id: &str,
-    status: &str,
-) -> Result<(), String> {
+pub async fn update_job_status(pool: &DbPool, job_id: &str, status: &str) -> Result<(), String> {
     let in_progress = status == "in_progress";
     let terminal = matches!(status, "success" | "failure" | "cancelled");
     match pool {
@@ -1278,6 +1411,7 @@ pub async fn update_job_status(
 /// - all jobs terminal → `failure` if any job failed, else `cancelled` if
 ///   any job cancelled, else `success`
 /// - otherwise → keep current status (jobs still queued/claimed)
+///
 /// `finished_at` is set exactly when the run first reaches a terminal status.
 pub async fn recompute_run_status(pool: &DbPool, run_id: &str) -> Result<(), String> {
     const ROLLUP: &str = "UPDATE action_runs SET \
@@ -1312,13 +1446,25 @@ pub async fn recompute_run_status(pool: &DbPool, run_id: &str) -> Result<(), Str
         WHERE id = $1";
     match pool {
         DbPool::Sqlite(p) => {
-            sqlx::query(ROLLUP).bind(run_id).execute(p).await.map_err(|e| e.to_string())?;
+            sqlx::query(ROLLUP)
+                .bind(run_id)
+                .execute(p)
+                .await
+                .map_err(|e| e.to_string())?;
         }
         DbPool::Postgres(p) => {
-            sqlx::query(ROLLUP_PG).bind(run_id).execute(p).await.map_err(|e| e.to_string())?;
+            sqlx::query(ROLLUP_PG)
+                .bind(run_id)
+                .execute(p)
+                .await
+                .map_err(|e| e.to_string())?;
         }
         DbPool::MySql(p) => {
-            sqlx::query(ROLLUP).bind(run_id).execute(p).await.map_err(|e| e.to_string())?;
+            sqlx::query(ROLLUP)
+                .bind(run_id)
+                .execute(p)
+                .await
+                .map_err(|e| e.to_string())?;
         }
     }
     Ok(())
@@ -1333,8 +1479,13 @@ pub async fn touch_runner_online(pool: &DbPool, runner_id: &str) -> Result<(), S
                 .bind(runner_id).execute(p).await.map_err(|e| e.to_string())?;
         }
         DbPool::Postgres(p) => {
-            sqlx::query("UPDATE action_runners SET last_online = now(), updated_at = now() WHERE id = $1")
-                .bind(runner_id).execute(p).await.map_err(|e| e.to_string())?;
+            sqlx::query(
+                "UPDATE action_runners SET last_online = now(), updated_at = now() WHERE id = $1",
+            )
+            .bind(runner_id)
+            .execute(p)
+            .await
+            .map_err(|e| e.to_string())?;
         }
         DbPool::MySql(p) => {
             sqlx::query("UPDATE action_runners SET last_online = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
@@ -1344,7 +1495,6 @@ pub async fn touch_runner_online(pool: &DbPool, runner_id: &str) -> Result<(), S
     Ok(())
 }
 
-
 pub async fn update_runner_labels(
     pool: &DbPool,
     runner_id: &str,
@@ -1353,15 +1503,27 @@ pub async fn update_runner_labels(
     match pool {
         DbPool::Sqlite(p) => {
             sqlx::query("UPDATE action_runners SET labels_json = ? WHERE id = ?")
-                .bind(labels_json).bind(runner_id).execute(p).await.map_err(|e| e.to_string())?;
+                .bind(labels_json)
+                .bind(runner_id)
+                .execute(p)
+                .await
+                .map_err(|e| e.to_string())?;
         }
         DbPool::Postgres(p) => {
             sqlx::query("UPDATE action_runners SET labels_json = $1 WHERE id = $2")
-                .bind(labels_json).bind(runner_id).execute(p).await.map_err(|e| e.to_string())?;
+                .bind(labels_json)
+                .bind(runner_id)
+                .execute(p)
+                .await
+                .map_err(|e| e.to_string())?;
         }
         DbPool::MySql(p) => {
             sqlx::query("UPDATE action_runners SET labels_json = ? WHERE id = ?")
-                .bind(labels_json).bind(runner_id).execute(p).await.map_err(|e| e.to_string())?;
+                .bind(labels_json)
+                .bind(runner_id)
+                .execute(p)
+                .await
+                .map_err(|e| e.to_string())?;
         }
     }
     Ok(())
@@ -1377,9 +1539,9 @@ pub async fn count_runs_for_repo(
     match pool {
         DbPool::Sqlite(p) => {
             let n: i64 = bind_run_filter!(
-                sqlx::query_scalar(&format!(
+                sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
                     "SELECT COUNT(*) FROM action_runs WHERE repository_id = ?{RUNS_FILTER_SQLITE}"
-                ))
+                )))
                 .bind(repository_id),
                 filter,
                 &branch_ref,
@@ -1391,9 +1553,9 @@ pub async fn count_runs_for_repo(
         }
         DbPool::Postgres(p) => {
             let n: i64 = bind_run_filter_pg!(
-                sqlx::query_scalar(&format!(
+                sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
                     "SELECT COUNT(*) FROM action_runs WHERE repository_id = $1{RUNS_FILTER_PG}"
-                ))
+                )))
                 .bind(repository_id),
                 filter,
                 &branch_ref,
@@ -1405,9 +1567,9 @@ pub async fn count_runs_for_repo(
         }
         DbPool::MySql(p) => {
             let n: i64 = bind_run_filter!(
-                sqlx::query_scalar(&format!(
+                sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
                     "SELECT COUNT(*) FROM action_runs WHERE repository_id = ?{RUNS_FILTER_MYSQL}"
-                ))
+                )))
                 .bind(repository_id),
                 filter,
                 &branch_ref,
@@ -1440,14 +1602,28 @@ pub async fn requeue_run(
             )
             .bind(run_id).execute(p).await.map_err(|e| e.to_string())?;
             if let Some(j) = job_id {
-                sqlx::query(&format!("{JOB_RESET_SQLITE} AND id = ?"))
-                    .bind(run_id).bind(j).execute(p).await.map_err(|e| e.to_string())?;
+                sqlx::query(sqlx::AssertSqlSafe(format!(
+                    "{JOB_RESET_SQLITE} AND id = ?"
+                )))
+                .bind(run_id)
+                .bind(j)
+                .execute(p)
+                .await
+                .map_err(|e| e.to_string())?;
             } else if failed_only {
-                sqlx::query(&format!("{JOB_RESET_SQLITE} AND status IN ('failure','cancelled')"))
-                    .bind(run_id).execute(p).await.map_err(|e| e.to_string())?;
+                sqlx::query(sqlx::AssertSqlSafe(format!(
+                    "{JOB_RESET_SQLITE} AND status IN ('failure','cancelled')"
+                )))
+                .bind(run_id)
+                .execute(p)
+                .await
+                .map_err(|e| e.to_string())?;
             } else {
                 sqlx::query(JOB_RESET_SQLITE)
-                    .bind(run_id).execute(p).await.map_err(|e| e.to_string())?;
+                    .bind(run_id)
+                    .execute(p)
+                    .await
+                    .map_err(|e| e.to_string())?;
             }
         }
         DbPool::Postgres(p) => {
@@ -1456,14 +1632,26 @@ pub async fn requeue_run(
             )
             .bind(run_id).execute(p).await.map_err(|e| e.to_string())?;
             if let Some(j) = job_id {
-                sqlx::query(&format!("{JOB_RESET_PG} AND id = $2"))
-                    .bind(run_id).bind(j).execute(p).await.map_err(|e| e.to_string())?;
+                sqlx::query(sqlx::AssertSqlSafe(format!("{JOB_RESET_PG} AND id = $2")))
+                    .bind(run_id)
+                    .bind(j)
+                    .execute(p)
+                    .await
+                    .map_err(|e| e.to_string())?;
             } else if failed_only {
-                sqlx::query(&format!("{JOB_RESET_PG} AND status IN ('failure','cancelled')"))
-                    .bind(run_id).execute(p).await.map_err(|e| e.to_string())?;
+                sqlx::query(sqlx::AssertSqlSafe(format!(
+                    "{JOB_RESET_PG} AND status IN ('failure','cancelled')"
+                )))
+                .bind(run_id)
+                .execute(p)
+                .await
+                .map_err(|e| e.to_string())?;
             } else {
                 sqlx::query(JOB_RESET_PG)
-                    .bind(run_id).execute(p).await.map_err(|e| e.to_string())?;
+                    .bind(run_id)
+                    .execute(p)
+                    .await
+                    .map_err(|e| e.to_string())?;
             }
         }
         DbPool::MySql(p) => {
@@ -1472,14 +1660,26 @@ pub async fn requeue_run(
             )
             .bind(run_id).execute(p).await.map_err(|e| e.to_string())?;
             if let Some(j) = job_id {
-                sqlx::query(&format!("{JOB_RESET_MYSQL} AND id = ?"))
-                    .bind(run_id).bind(j).execute(p).await.map_err(|e| e.to_string())?;
+                sqlx::query(sqlx::AssertSqlSafe(format!("{JOB_RESET_MYSQL} AND id = ?")))
+                    .bind(run_id)
+                    .bind(j)
+                    .execute(p)
+                    .await
+                    .map_err(|e| e.to_string())?;
             } else if failed_only {
-                sqlx::query(&format!("{JOB_RESET_MYSQL} AND status IN ('failure','cancelled')"))
-                    .bind(run_id).execute(p).await.map_err(|e| e.to_string())?;
+                sqlx::query(sqlx::AssertSqlSafe(format!(
+                    "{JOB_RESET_MYSQL} AND status IN ('failure','cancelled')"
+                )))
+                .bind(run_id)
+                .execute(p)
+                .await
+                .map_err(|e| e.to_string())?;
             } else {
                 sqlx::query(JOB_RESET_MYSQL)
-                    .bind(run_id).execute(p).await.map_err(|e| e.to_string())?;
+                    .bind(run_id)
+                    .execute(p)
+                    .await
+                    .map_err(|e| e.to_string())?;
             }
         }
     }

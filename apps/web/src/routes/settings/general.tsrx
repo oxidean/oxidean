@@ -1,6 +1,6 @@
-import { createFileRoute, redirect, useLoaderData } from "@octanejs/tanstack-router";
+import { AppPage } from "@/components/app-page";
 import { useForm } from "@octanejs/tanstack-form";
-import { useQueryClient } from "@octanejs/tanstack-query";
+import { queryOptions, useQuery, useQueryClient } from "@octanejs/tanstack-query";
 import type { UserPublic } from "@oxidean/api-client";
 import { useEffect, useState } from "octane";
 import { AccountSettingsLayout, SettingsShell } from "@/components/settings/settings-shell";
@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { apiClient } from "@/lib/api-client";
 import { clearSessionQueries, setAuthMeCache } from "@/lib/session-queries";
 import { syncSessionPresenceHint } from "@/lib/session-hint";
-import { fetchSessionMe, fetchUserGetProfile } from "@/lib/ssr-auth";
+import { fetchUserGetProfile } from "@/lib/ssr-auth";
 import { toastError, toastSuccess } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 
@@ -24,38 +24,30 @@ const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.
 const BIO_MAX = 160;
 const LOGIN_RETURN = "/login?returnTo=/settings/general";
 
-export const Route = createFileRoute("/settings/general")({
-  component: GeneralPage,
-  head: () => ({ meta: [{ title: "General · Oxidean" }] }),
-  beforeLoad: async () => {
-    try {
-      const me = await fetchSessionMe();
-      if (!me.ok) {
-        throw redirect({ href: LOGIN_RETURN });
-      }
-    } catch (e) {
-      if (e && typeof e === "object" && "href" in e) throw e;
-      throw redirect({ href: LOGIN_RETURN });
-    }
-  },
-  loader: async (): Promise<GeneralLoaderData> => {
-    try {
-      const res = await fetchUserGetProfile();
-      if (!res.ok) {
-        if (res.error.code === "auth.unauthenticated") {
-          return { kind: "unauthenticated" };
+function settingsGeneralQueryOptions() {
+  return queryOptions({
+    queryKey: ["settings", "settingsGeneral"],
+    queryFn: async (): Promise<GeneralLoaderData> => {
+      try {
+        const res = await fetchUserGetProfile();
+        if (!res.ok) {
+          if (res.error.code === "auth.unauthenticated") {
+            return { kind: "unauthenticated" };
+          }
+          return {
+            kind: "error",
+            message: res.error.message || "Could not load settings.",
+          };
         }
-        return {
-          kind: "error",
-          message: res.error.message || "Could not load settings.",
-        };
+        return { kind: "ready", user: res.data };
+      } catch {
+        return { kind: "error", message: NETWORK_ERROR };
       }
-      return { kind: "ready", user: res.data };
-    } catch {
-      return { kind: "error", message: NETWORK_ERROR };
-    }
-  },
-});
+    },
+    retry: false,
+    staleTime: 30_000,
+  });
+}
 type Phase =
   | { kind: "loading" }
   | { kind: "ready"; user: UserPublic }
@@ -63,8 +55,14 @@ type Phase =
 
 /** Account General: theme, default branch, session logout. */
 export function GeneralPage() @{
+  <AppPage>
+    <GeneralContent />
+  </AppPage>;
+}
+
+export function GeneralContent() @{
   const queryClient = useQueryClient();
-  const loaderData = useLoaderData({ from: "/settings/general" }) as GeneralLoaderData | undefined;
+  const loaderData = useQuery(settingsGeneralQueryOptions()).data;
 
   useEffect(() => {
     if (loaderData?.kind === "unauthenticated") {

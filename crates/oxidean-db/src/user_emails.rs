@@ -17,18 +17,9 @@ pub struct UserEmailRow {
 macro_rules! map_bool {
     ($row:expr, $name:expr) => {{
         $row.try_get::<i64, _>($name)
-            .or_else(|_| {
-                $row.try_get::<i32, _>($name)
-                    .map(|v| i64::from(v))
-            })
-            .or_else(|_| {
-                $row.try_get::<i16, _>($name)
-                    .map(|v| i64::from(v))
-            })
-            .or_else(|_| {
-                $row.try_get::<i8, _>($name)
-                    .map(|v| i64::from(v))
-            })
+            .or_else(|_| $row.try_get::<i32, _>($name).map(|v| i64::from(v)))
+            .or_else(|_| $row.try_get::<i16, _>($name).map(|v| i64::from(v)))
+            .or_else(|_| $row.try_get::<i8, _>($name).map(|v| i64::from(v)))
             .or_else(|_| {
                 $row.try_get::<bool, _>($name)
                     .map(|v| if v { 1 } else { 0 })
@@ -42,7 +33,9 @@ macro_rules! map_user_email {
     ($row:expr) => {{
         let row = $row;
         UserEmailRow {
-            id: row.try_get("id").map_err(|e| format!("user email row: {e}"))?,
+            id: row
+                .try_get("id")
+                .map_err(|e| format!("user email row: {e}"))?,
             user_id: row
                 .try_get("user_id")
                 .map_err(|e| format!("user email row: {e}"))?,
@@ -140,7 +133,7 @@ VALUES (?1, ?2, ?3, ?4, ?5)",
 pub async fn find_by_id(pool: &DbPool, id: &str) -> Result<Option<UserEmailRow>, String> {
     match pool {
         DbPool::Postgres(p) => {
-            let row = sqlx::query(&format!("{SELECT_PG} WHERE id = $1"))
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!("{SELECT_PG} WHERE id = $1")))
                 .bind(id)
                 .fetch_optional(p)
                 .await
@@ -151,7 +144,7 @@ pub async fn find_by_id(pool: &DbPool, id: &str) -> Result<Option<UserEmailRow>,
             })
         }
         DbPool::MySql(p) => {
-            let row = sqlx::query(&format!("{SELECT_MYSQL} WHERE id = ?"))
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!("{SELECT_MYSQL} WHERE id = ?")))
                 .bind(id)
                 .fetch_optional(p)
                 .await
@@ -162,11 +155,13 @@ pub async fn find_by_id(pool: &DbPool, id: &str) -> Result<Option<UserEmailRow>,
             })
         }
         DbPool::Sqlite(p) => {
-            let row = sqlx::query(&format!("{SELECT_SQLITE} WHERE id = ?1"))
-                .bind(id)
-                .fetch_optional(p)
-                .await
-                .map_err(|e| format!("find user email failed: {e}"))?;
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{SELECT_SQLITE} WHERE id = ?1"
+            )))
+            .bind(id)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("find user email failed: {e}"))?;
             Ok(match row {
                 Some(r) => Some(map_user_email!(&r)),
                 None => None,
@@ -179,33 +174,39 @@ pub async fn find_by_email(pool: &DbPool, email: &str) -> Result<Option<UserEmai
     let email = email.trim().to_ascii_lowercase();
     match pool {
         DbPool::Postgres(p) => {
-            let row = sqlx::query(&format!("{SELECT_PG} WHERE lower(email) = lower($1)"))
-                .bind(&email)
-                .fetch_optional(p)
-                .await
-                .map_err(|e| format!("find user email by address failed: {e}"))?;
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{SELECT_PG} WHERE lower(email) = lower($1)"
+            )))
+            .bind(&email)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("find user email by address failed: {e}"))?;
             Ok(match row {
                 Some(r) => Some(map_user_email!(&r)),
                 None => None,
             })
         }
         DbPool::MySql(p) => {
-            let row = sqlx::query(&format!("{SELECT_MYSQL} WHERE lower(email) = lower(?)"))
-                .bind(&email)
-                .fetch_optional(p)
-                .await
-                .map_err(|e| format!("find user email by address failed: {e}"))?;
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{SELECT_MYSQL} WHERE lower(email) = lower(?)"
+            )))
+            .bind(&email)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("find user email by address failed: {e}"))?;
             Ok(match row {
                 Some(r) => Some(map_user_email!(&r)),
                 None => None,
             })
         }
         DbPool::Sqlite(p) => {
-            let row = sqlx::query(&format!("{SELECT_SQLITE} WHERE lower(email) = lower(?1)"))
-                .bind(&email)
-                .fetch_optional(p)
-                .await
-                .map_err(|e| format!("find user email by address failed: {e}"))?;
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{SELECT_SQLITE} WHERE lower(email) = lower(?1)"
+            )))
+            .bind(&email)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("find user email by address failed: {e}"))?;
             Ok(match row {
                 Some(r) => Some(map_user_email!(&r)),
                 None => None,
@@ -230,18 +231,22 @@ pub async fn find_many_by_email(
     }
     match pool {
         DbPool::Postgres(p) => {
-            let rows = sqlx::query(&format!("{SELECT_PG} WHERE lower(email) = ANY($1)"))
-                .bind(&emails)
-                .fetch_all(p)
-                .await
-                .map_err(|e| format!("find user emails by addresses failed: {e}"))?;
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{SELECT_PG} WHERE lower(email) = ANY($1)"
+            )))
+            .bind(&emails)
+            .fetch_all(p)
+            .await
+            .map_err(|e| format!("find user emails by addresses failed: {e}"))?;
             rows.iter().map(|r| Ok(map_user_email!(r))).collect()
         }
         DbPool::MySql(p) => {
             let in_list =
                 crate::dialect::in_placeholders(crate::dialect::Dialect::MySql, 1, emails.len());
             let q_str = format!("{SELECT_MYSQL} WHERE lower(email) IN ({in_list})");
-            let q = emails.iter().fold(sqlx::query(&q_str), |q, e| q.bind(e));
+            let q = emails
+                .iter()
+                .fold(sqlx::query(sqlx::AssertSqlSafe(&*q_str)), |q, e| q.bind(e));
             let rows = q
                 .fetch_all(p)
                 .await
@@ -252,7 +257,9 @@ pub async fn find_many_by_email(
             let in_list =
                 crate::dialect::in_placeholders(crate::dialect::Dialect::Sqlite, 1, emails.len());
             let q_str = format!("{SELECT_SQLITE} WHERE lower(email) IN ({in_list})");
-            let q = emails.iter().fold(sqlx::query(&q_str), |q, e| q.bind(e));
+            let q = emails
+                .iter()
+                .fold(sqlx::query(sqlx::AssertSqlSafe(&*q_str)), |q, e| q.bind(e));
             let rows = q
                 .fetch_all(p)
                 .await
@@ -299,7 +306,11 @@ pub async fn list_verified_emails_for_users(
                 "SELECT user_id, email FROM user_emails
                  WHERE user_id IN ({in_list}) AND verified_at IS NOT NULL"
             );
-            let q = user_ids.iter().fold(sqlx::query(&q_str), |q, id| q.bind(id));
+            let q = user_ids
+                .iter()
+                .fold(sqlx::query(sqlx::AssertSqlSafe(&*q_str)), |q, id| {
+                    q.bind(id)
+                });
             let rows = q
                 .fetch_all(p)
                 .await
@@ -322,7 +333,11 @@ pub async fn list_verified_emails_for_users(
                 "SELECT user_id, email FROM user_emails
                  WHERE user_id IN ({in_list}) AND verified_at IS NOT NULL"
             );
-            let q = user_ids.iter().fold(sqlx::query(&q_str), |q, id| q.bind(id));
+            let q = user_ids
+                .iter()
+                .fold(sqlx::query(sqlx::AssertSqlSafe(&*q_str)), |q, id| {
+                    q.bind(id)
+                });
             let rows = q
                 .fetch_all(p)
                 .await
@@ -344,9 +359,9 @@ pub async fn list_verified_emails_for_users(
 pub async fn list_for_user(pool: &DbPool, user_id: &str) -> Result<Vec<UserEmailRow>, String> {
     match pool {
         DbPool::Postgres(p) => {
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{SELECT_PG} WHERE user_id = $1 ORDER BY is_primary DESC, created_at ASC"
-            ))
+            )))
             .bind(user_id)
             .fetch_all(p)
             .await
@@ -358,9 +373,9 @@ pub async fn list_for_user(pool: &DbPool, user_id: &str) -> Result<Vec<UserEmail
             Ok(mapped)
         }
         DbPool::MySql(p) => {
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{SELECT_MYSQL} WHERE user_id = ? ORDER BY is_primary DESC, created_at ASC"
-            ))
+            )))
             .bind(user_id)
             .fetch_all(p)
             .await
@@ -372,9 +387,9 @@ pub async fn list_for_user(pool: &DbPool, user_id: &str) -> Result<Vec<UserEmail
             Ok(mapped)
         }
         DbPool::Sqlite(p) => {
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{SELECT_SQLITE} WHERE user_id = ?1 ORDER BY is_primary DESC, created_at ASC"
-            ))
+            )))
             .bind(user_id)
             .fetch_all(p)
             .await
@@ -397,20 +412,20 @@ pub async fn count_for_user(pool: &DbPool, user_id: &str) -> Result<i64, String>
         .fetch_one(p)
         .await
         .map_err(|e| format!("count user emails failed: {e}")),
-        DbPool::MySql(p) => sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM user_emails WHERE user_id = ?",
-        )
-        .bind(user_id)
-        .fetch_one(p)
-        .await
-        .map_err(|e| format!("count user emails failed: {e}")),
-        DbPool::Sqlite(p) => sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM user_emails WHERE user_id = ?1",
-        )
-        .bind(user_id)
-        .fetch_one(p)
-        .await
-        .map_err(|e| format!("count user emails failed: {e}")),
+        DbPool::MySql(p) => {
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM user_emails WHERE user_id = ?")
+                .bind(user_id)
+                .fetch_one(p)
+                .await
+                .map_err(|e| format!("count user emails failed: {e}"))
+        }
+        DbPool::Sqlite(p) => {
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM user_emails WHERE user_id = ?1")
+                .bind(user_id)
+                .fetch_one(p)
+                .await
+                .map_err(|e| format!("count user emails failed: {e}"))
+        }
     }
 }
 
@@ -421,14 +436,12 @@ pub async fn set_verified_at(
 ) -> Result<UserEmailRow, String> {
     match pool {
         DbPool::Postgres(p) => {
-            sqlx::query(
-                "UPDATE user_emails SET verified_at = $2::timestamptz WHERE id = $1",
-            )
-            .bind(id)
-            .bind(verified_at)
-            .execute(p)
-            .await
-            .map_err(|e| format!("set user email verified_at failed: {e}"))?;
+            sqlx::query("UPDATE user_emails SET verified_at = $2::timestamptz WHERE id = $1")
+                .bind(id)
+                .bind(verified_at)
+                .execute(p)
+                .await
+                .map_err(|e| format!("set user email verified_at failed: {e}"))?;
         }
         DbPool::MySql(p) => {
             sqlx::query("UPDATE user_emails SET verified_at = ? WHERE id = ?")
@@ -590,9 +603,9 @@ pub async fn find_primary_for_user(
 ) -> Result<Option<UserEmailRow>, String> {
     match pool {
         DbPool::Postgres(p) => {
-            let row = sqlx::query(&format!(
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{SELECT_PG} WHERE user_id = $1 AND is_primary = true LIMIT 1"
-            ))
+            )))
             .bind(user_id)
             .fetch_optional(p)
             .await
@@ -603,9 +616,9 @@ pub async fn find_primary_for_user(
             })
         }
         DbPool::MySql(p) => {
-            let row = sqlx::query(&format!(
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{SELECT_MYSQL} WHERE user_id = ? AND is_primary = 1 LIMIT 1"
-            ))
+            )))
             .bind(user_id)
             .fetch_optional(p)
             .await
@@ -616,9 +629,9 @@ pub async fn find_primary_for_user(
             })
         }
         DbPool::Sqlite(p) => {
-            let row = sqlx::query(&format!(
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{SELECT_SQLITE} WHERE user_id = ?1 AND is_primary = 1 LIMIT 1"
-            ))
+            )))
             .bind(user_id)
             .fetch_optional(p)
             .await

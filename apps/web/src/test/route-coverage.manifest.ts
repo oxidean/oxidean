@@ -33,13 +33,6 @@ const FORGE_DANGER = "apps/web/e2e/stack-browser/forge-repo-danger-zone.stack.br
 const FORGE_BRANCHES = "apps/web/e2e/stack-browser/forge-branches.stack.browser.test.tsx";
 
 export const routeCoverageManifest: RouteCoverageEntry[] = [
-  // --- shells / Outlet-only layouts (excluded from required set) ---
-  { route: "__root.tsrx", layoutOnly: true, coverage: [] },
-  { route: "$owner.tsrx", layoutOnly: true, coverage: [] },
-  { route: "$owner.$repo.issues.tsrx", layoutOnly: true, coverage: [] },
-  { route: "$owner.$repo.releases.tsrx", layoutOnly: true, coverage: [] },
-  { route: "setup.tsrx", layoutOnly: true, coverage: [] },
-
   // --- auth + marketing (11.1-04) ---
   {
     route: "login.tsrx",
@@ -131,15 +124,6 @@ export const routeCoverageManifest: RouteCoverageEntry[] = [
     ],
   },
   {
-    route: "settings/emails.tsrx",
-    coverage: [
-      {
-        kind: "happy-dom",
-        test: "apps/web/src/routes/settings/emails.integration.test.ts",
-      },
-    ],
-  },
-  {
     route: "settings/ssh-keys.tsrx",
     coverage: [
       {
@@ -150,11 +134,6 @@ export const routeCoverageManifest: RouteCoverageEntry[] = [
     ],
   },
   {
-    route: "settings/tokens.tsrx",
-    layoutOnly: true,
-    coverage: [],
-  },
-  {
     route: "settings/tokens.index.tsrx",
     coverage: [
       {
@@ -162,11 +141,6 @@ export const routeCoverageManifest: RouteCoverageEntry[] = [
         test: "apps/web/src/routes/settings/tokens.integration.test.ts",
       },
     ],
-  },
-  {
-    route: "settings/tokens.new.tsrx",
-    layoutOnly: true,
-    coverage: [],
   },
   {
     route: "settings/tokens.new.index.tsrx",
@@ -228,16 +202,6 @@ export const routeCoverageManifest: RouteCoverageEntry[] = [
   {
     route: "orgs.new.tsrx",
     coverage: [{ kind: "happy-dom", test: "apps/web/src/routes/orgs.new.integration.test.ts" }],
-  },
-  {
-    route: "dashboard.tsrx",
-    coverage: [
-      {
-        kind: "skip",
-        rationale:
-          "Hard-404 beforeLoad only (notFound); no UI to mount — covered by dashboard.integration.test.ts contract",
-      },
-    ],
   },
   {
     route: "invites.$token.tsrx",
@@ -343,11 +307,6 @@ export const routeCoverageManifest: RouteCoverageEntry[] = [
     coverage: [{ kind: "stack-browser", test: FORGE_REPO }],
   },
   {
-    route: "$owner.$repo.actions.tsrx",
-    layoutOnly: true,
-    coverage: [],
-  },
-  {
     route: "$owner.$repo.actions.index.tsrx",
     coverage: [
       {
@@ -362,16 +321,6 @@ export const routeCoverageManifest: RouteCoverageEntry[] = [
       {
         kind: "happy-dom",
         test: "apps/web/src/routes/$owner.$repo.actions.$run.integration.test.ts",
-      },
-    ],
-  },
-  {
-    route: "$owner.$repo.settings.actions.tsrx",
-    coverage: [
-      {
-        kind: "skip",
-        rationale:
-          "Phase 19 repo Actions enable/secrets settings panel; happy-dom deferred — RPC covered by actions_secrets nextest",
       },
     ],
   },
@@ -460,8 +409,8 @@ export const routeCoverageManifest: RouteCoverageEntry[] = [
     route: "$owner.$repo.commit.$sha.tsrx",
     coverage: [
       {
-        kind: "skip",
-        rationale: "Commit detail not in D-QH-03 matrix; deferred stack-browser",
+        kind: "happy-dom",
+        test: "apps/web/src/routes/$owner.$repo.commit.$sha.integration.test.ts",
       },
     ],
   },
@@ -575,11 +524,6 @@ export const routeCoverageManifest: RouteCoverageEntry[] = [
   },
 
   // --- pulls (Phase 12) ---
-  {
-    route: "$owner.$repo.pulls.tsrx",
-    layoutOnly: true,
-    coverage: [],
-  },
   {
     route: "$owner.$repo.pulls.index.tsrx",
     coverage: [
@@ -697,11 +641,6 @@ export const routeCoverageManifest: RouteCoverageEntry[] = [
     ],
   },
   {
-    route: "$owner.settings.tsrx",
-    layoutOnly: true,
-    coverage: [],
-  },
-  {
     route: "$owner.settings.index.tsrx",
     coverage: [
       {
@@ -723,12 +662,7 @@ export const routeCoverageManifest: RouteCoverageEntry[] = [
   },
   {
     route: "$owner.settings.labels.tsrx",
-    coverage: [
-      {
-        kind: "skip",
-        rationale: "Org-wide labels settings deferred behind repo issue labels",
-      },
-    ],
+    coverage: [{ kind: "stack-browser", test: FORGE_SSH_ORGS }],
   },
 
   // --- explore / notifications / global search (Phases 17 / 21) ---

@@ -1,18 +1,17 @@
-import {
-  createFileRoute,
-  Link,
-  notFound,
-  useLoaderData,
-  useParams,
-} from "@octanejs/tanstack-router";
-import { useState } from "octane";
+import { queryOptions, useQuery } from "@octanejs/tanstack-query";
+import { useEffect, useState } from "octane";
 import { BookMarked, Star } from "@octanejs/lucide";
 import { ReadmePanel } from "@/components/repo/readme-panel";
+import { AvatarPreview } from "@/components/avatar-preview";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { List, ListRow } from "@/components/ui/list";
 import { apiClient } from "@/lib/api-client";
+import { AppPage } from "@/components/app-page";
+import { RepoNotFound } from "@/components/repo/repo-not-found";
+import { usePathname } from "@/lib/pathname.tsrx";
+import { matchPath } from "@/lib/route-params";
 import { fetchOrgOverview, type OrgOverviewPayload } from "@/lib/ssr-org";
 import { fetchUserProfile, type UserProfilePayload } from "@/lib/ssr-user-profile";
 import { useChromeAccountState } from "@/lib/use-chrome-account";
@@ -23,11 +22,33 @@ export type OwnerIndexLoaderData =
   | { kind: "org"; org: OrgOverviewPayload }
   | { kind: "user"; user: UserProfilePayload };
 
-export const Route = createFileRoute("/$owner/")({
-  component: OwnerIndexPage,
-  head: ({ loaderData, params }) => {
-    const data = loaderData as OwnerIndexLoaderData | undefined;
-    const owner = String((params as { owner?: string }).owner ?? "");
+/**
+ * `/{owner}` resolution — org overview first, then user profile; null when
+ * neither exists (was `throw notFound()`).
+ */
+export function ownerIndexQueryOptions(owner: string) {
+  return queryOptions({
+    queryKey: ["owner", "index", owner],
+    queryFn: async (): Promise<OwnerIndexLoaderData | null> => {
+      const org = await fetchOrgOverview({ owner });
+      if (org) return { kind: "org", org };
+      const user = await fetchUserProfile({ username: owner });
+      if (user) return { kind: "user", user };
+      return null;
+    },
+    enabled: !!owner,
+    retry: false,
+    staleTime: 30_000,
+  });
+}
+
+function ownerFromPathname(pathname: string): string {
+  return matchPath("/$owner", pathname)?.owner ?? "";
+}
+
+/** Entity-aware title + atom feed link (shell carries the static fallback). */
+function useOwnerIndexMeta(data: OwnerIndexLoaderData | null | undefined, owner: string): void {
+  useEffect(() => {
     let title = `${owner} · Oxidean`;
     if (data?.kind === "org" && data.org.org) {
       title = `${data.org.org.display_name || data.org.org.slug} · Oxidean`;
@@ -35,33 +56,42 @@ export const Route = createFileRoute("/$owner/")({
       const p = data.user.profile;
       title = `${p.display_name || p.username} · Oxidean`;
     }
-    const links =
-      data?.kind === "user" && data.user.profile
-        ? [
-            {
-              rel: "alternate",
-              type: "application/atom+xml",
-              title: `${data.user.profile.username} activity feed`,
-              href: `/api/users/${data.user.profile.username}/activity.atom`,
-            },
-          ]
-        : [];
-    return { meta: [{ title }], links };
-  },
-  loader: async ({ params }): Promise<OwnerIndexLoaderData> => {
-    const owner = String((params as { owner?: string }).owner ?? "");
-    const org = await fetchOrgOverview({ data: { owner } });
-    if (org) return { kind: "org", org };
-    const user = await fetchUserProfile({ data: { username: owner } });
-    if (user) return { kind: "user", user };
-    throw notFound();
-  },
-});
+    document.title = title;
 
+    let link: HTMLLinkElement | null = null;
+    if (data?.kind === "user" && data.user.profile) {
+      link = document.createElement("link");
+      link.rel = "alternate";
+      link.type = "application/atom+xml";
+      link.title = `${data.user.profile.username} activity feed`;
+      link.href = `/api/users/${data.user.profile.username}/activity.atom`;
+      document.head.appendChild(link);
+    }
+    return () => {
+      link?.remove();
+    };
+  }, [data, owner]);
+}
+
+/** `/{owner}` — org overview or user profile (title via effect above). */
 export function OwnerIndexPage() @{
-  const data = useLoaderData({ from: "/$owner/" }) as OwnerIndexLoaderData | undefined;
+  <AppPage>
+    <OwnerIndexContent />
+  </AppPage>;
+}
 
-  @if (data?.kind === "org") {
+export function OwnerIndexContent() @{
+  const pathname = usePathname();
+  const owner = ownerFromPathname(pathname);
+  const dataQ = useQuery(ownerIndexQueryOptions(owner));
+  const data = dataQ.data;
+  useOwnerIndexMeta(data, owner);
+
+  @if (data === null) {
+    <div className="mx-auto max-w-6xl px-4 py-16">
+      <RepoNotFound />
+    </div>;
+  } @else if (data?.kind === "org") {
     <OrgOverviewPage />;
   } @else {
     <UserProfilePage />;
@@ -70,12 +100,12 @@ export function OwnerIndexPage() @{
 
 /** Org overview at exact `/{owner}` (D-ORG-06). */
 export function OrgOverviewPage() @{
-  const params = useParams({ from: "/$owner/" }) as { owner?: string };
-  const data = useLoaderData({ from: "/$owner/" }) as OwnerIndexLoaderData | undefined;
+  const pathname = usePathname();
+  const data = useQuery(ownerIndexQueryOptions(ownerFromPathname(pathname))).data;
   const orgData = data?.kind === "org" ? data.org : undefined;
 
   const org = orgData?.org;
-  const slug = org?.slug ?? params.owner ?? "";
+  const slug = org?.slug ?? ownerFromPathname(pathname);
   const display = org?.display_name?.trim() || slug;
   const memberCount = orgData?.memberCount;
   const repos = orgData?.repos ?? [];
@@ -153,14 +183,12 @@ export function OrgOverviewPage() @{
                 />
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <Link
-                      to="/$owner/$repo"
-                      params={{ owner: slug, repo: repo.name }}
-                      preload="intent"
+                    <AppLink
+                      href={`/${slug as string}/${repo.name as string}`}
                       className="text-[16px] font-semibold text-primary no-underline hover:underline"
                     >
                       {repo.name as string}
-                    </Link>
+                    </AppLink>
                     <Badge
                       variant={repo.visibility === "private" ? "outline" : "success"}
                     >
@@ -184,7 +212,7 @@ export function OrgOverviewPage() @{
 
 /** Public user profile at `/{username}` (D-SOC-05…08). */
 export function UserProfilePage() @{
-  const data = useLoaderData({ from: "/$owner/" }) as OwnerIndexLoaderData | undefined;
+  const data = useQuery(ownerIndexQueryOptions(ownerFromPathname(usePathname()))).data;
   const payload = data?.kind === "user" ? data.user : undefined;
   const profile = payload?.profile;
   const repos = payload?.repos ?? [];
@@ -241,18 +269,16 @@ export function UserProfilePage() @{
   } @else {
     <div className="mx-auto max-w-6xl px-4 py-12">
       <div className="flex flex-wrap items-start gap-4">
-        @if (profile.avatar_url) {
-          <img
-            src={profile.avatar_url as string}
-            alt=""
-            className="size-20 rounded-full object-cover"
-          />;
-        }
+        <AvatarPreview user={profile} size={80} />
         <div>
           <h1 className="font-[family-name:var(--font-display)] text-[28px] font-semibold leading-[1.2] text-foreground">
             {display as string}
           </h1>
-          <p className="mt-1 text-[16px] text-muted-foreground">{"@" + (username as string)}</p>
+          @if (display !== username) {
+            <p className="mt-1 text-[16px] text-muted-foreground">
+              {"@" + (username as string)}
+            </p>;
+          }
           @if (profile.bio?.trim()) {
             <p className="mt-3 max-w-xl text-[16px] text-muted-foreground">
               {profile.bio as string}
@@ -385,14 +411,12 @@ export function UserProfilePage() @{
                   />
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <Link
-                        to="/$owner/$repo"
-                        params={{ owner: username, repo: repo.name }}
-                        preload="intent"
+                      <AppLink
+                        href={`/${username as string}/${repo.name as string}`}
                         className="text-[16px] font-semibold text-primary no-underline hover:underline"
                       >
                         {repo.name as string}
-                      </Link>
+                      </AppLink>
                       <Badge
                         variant={
                           repo.visibility === "private" ? "outline" : "success"

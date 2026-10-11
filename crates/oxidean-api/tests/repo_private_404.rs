@@ -79,7 +79,10 @@ async fn signup_and_login(
 async fn repo_private_404_identical_not_found_for_missing_and_private() {
     let dir = tempfile::tempdir().expect("tempdir");
     let repos = dir.path().join("repos");
-    let url = format!("sqlite:{}", dir.path().join("repo_private_404.db").display());
+    let url = format!(
+        "sqlite:{}",
+        dir.path().join("repo_private_404.db").display()
+    );
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
@@ -101,7 +104,11 @@ async fn repo_private_404_identical_not_found_for_missing_and_private() {
         ))
         .await
         .unwrap();
-    assert_eq!(create.status(), StatusCode::OK, "private create must succeed");
+    assert_eq!(
+        create.status(),
+        StatusCode::OK,
+        "private create must succeed"
+    );
     let create_bytes = create.into_body().collect().await.unwrap().to_bytes();
     let create_v: serde_json::Value = serde_json::from_slice(&create_bytes).unwrap();
     assert_eq!(create_v["ok"], true, "private create ok — {create_v}");
@@ -188,7 +195,11 @@ async fn repo_private_404_public_anonymous_get_succeeds() {
         ))
         .await
         .unwrap();
-    assert_eq!(get.status(), StatusCode::OK, "anonymous public get must be 200");
+    assert_eq!(
+        get.status(),
+        StatusCode::OK,
+        "anonymous public get must be 200"
+    );
     let bytes = get.into_body().collect().await.unwrap().to_bytes();
     let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(v["ok"], true, "anonymous public get ok — {v}");
@@ -202,10 +213,7 @@ async fn repo_private_404_public_anonymous_get_succeeds() {
 async fn repo_private_404_empty_tree_structured() {
     let dir = tempfile::tempdir().expect("tempdir");
     let repos = dir.path().join("repos");
-    let url = format!(
-        "sqlite:{}",
-        dir.path().join("repo_empty_tree.db").display()
-    );
+    let url = format!("sqlite:{}", dir.path().join("repo_empty_tree.db").display());
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
@@ -304,8 +312,14 @@ async fn repo_private_404_org_non_member_soft_not_found() {
         .unwrap();
     let owner_bytes = owner_get.into_body().collect().await.unwrap().to_bytes();
     let owner_get_v: serde_json::Value = serde_json::from_slice(&owner_bytes).unwrap();
-    assert_eq!(owner_get_v["ok"], true, "org Owner must read private — {owner_get_v}");
-    assert_eq!(owner_get_v["data"]["can_admin"], true, "Owner can_admin — {owner_get_v}");
+    assert_eq!(
+        owner_get_v["ok"], true,
+        "org Owner must read private — {owner_get_v}"
+    );
+    assert_eq!(
+        owner_get_v["data"]["can_admin"], true,
+        "Owner can_admin — {owner_get_v}"
+    );
     assert_eq!(owner_get_v["data"]["can_write"], true);
 
     // Stranger → identical soft not_found (D-25 / T-10-01).
@@ -705,17 +719,16 @@ async fn issue_private_unauthorized_soft_not_found() {
     );
 }
 
-
 // --- Phase 12 pull private ACL Wave 0 stubs ---
 
 #[tokio::test]
 #[ignore = "Wave 0 stub — greened with pull.list soft not_found"]
 async fn repo_private_404_pull_list_unauthorized() {
-    assert!(false, "Wave 0: private pull.list soft not_found");
+    panic!("Wave 0: private pull.list soft not_found");
 }
 
 #[tokio::test]
 #[ignore = "Wave 0 stub — greened with pull.get soft not_found"]
 async fn repo_private_404_pull_get_unauthorized() {
-    assert!(false, "Wave 0: private pull.get soft not_found");
+    panic!("Wave 0: private pull.get soft not_found");
 }

@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 
-export type RerunTarget = { job_id?: string; failed_only?: boolean };
+type RerunTarget = { job_id?: string; failed_only?: boolean };
 
 const FAILED_STATUSES = new Set(["failure", "failed", "error", "cancelled"]);
 

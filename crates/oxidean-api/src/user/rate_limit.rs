@@ -30,16 +30,16 @@ impl LookupLimiter {
         }
     }
 
-    /// `Ok(())` if under limit; `Err(())` when blocked.
-    pub fn check_and_record(&mut self, session_id: &str) -> Result<(), ()> {
+    /// `true` if under limit; `false` when blocked.
+    pub fn check_and_record(&mut self, session_id: &str) -> bool {
         let now = Instant::now();
         let q = self.by_session.entry(session_id.to_string()).or_default();
         Self::prune(q, now);
         if q.len() >= SESSION_LIMIT {
-            return Err(());
+            return false;
         }
         q.push_back(now);
-        Ok(())
+        true
     }
 }
 
@@ -51,9 +51,9 @@ mod tests {
     fn session_limit_trips_at_60() {
         let mut lim = LookupLimiter::new();
         for _ in 0..60 {
-            assert!(lim.check_and_record("sess-1").is_ok());
+            assert!(lim.check_and_record("sess-1"));
         }
-        assert!(lim.check_and_record("sess-1").is_err());
-        assert!(lim.check_and_record("sess-2").is_ok());
+        assert!(!lim.check_and_record("sess-1"));
+        assert!(lim.check_and_record("sess-2"));
     }
 }

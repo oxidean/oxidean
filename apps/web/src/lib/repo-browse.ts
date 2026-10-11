@@ -131,10 +131,6 @@ export function deleteHref(owner: string, repo: string, ref: string, path: strin
   return `/${owner}/${repo}/delete/${encodeURIComponent(ref)}${relSuffix(path)}`;
 }
 
-export function commitsHref(owner: string, repo: string, ref: string): string {
-  return `/${owner}/${repo}/commits/${encodeURIComponent(ref)}`;
-}
-
 /** Repository activity feed (`/:owner/:repo/activity`). */
 export function activityHref(owner: string, repo: string): string {
   return `/${owner}/${repo}/activity`;

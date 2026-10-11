@@ -3,7 +3,7 @@ import { MarkdownHtml } from "@/components/repo/markdown-body";
 import { Textarea } from "@/components/ui/textarea";
 import { renderGfm } from "@/lib/markdown";
 
-export type MarkdownWritePreviewProps = {
+type MarkdownWritePreviewProps = {
   id?: string;
   value: string;
   onValueChange: (next: string) => void;

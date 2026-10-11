@@ -2,7 +2,7 @@
 
 ## System overview
 
-Oxidean is a self-hostable social coding platform delivered as one product for cloud and on-prem. The system is a **layered monorepo**: a TanStack Start (Octane) web app talks to a Rust Axum API over a versioned JSON RPC (HTTP and WebSocket), which persists through a multi-dialect database adapter (`postgres` / `mysql` / `sqlite`). **Local Compose** fronts the stack with Traefik (Docker provider) so the browser hits a single origin (`Host(localhost)`), with path-based routing to web and API. **Oxidean Cloud** uses the same api/web images behind a **file-configured Caddy** gateway (`deploy/cloud/`) — no Docker socket on the host (D-CLOUD-03).
+Oxidean is a self-hostable social coding platform delivered as one product for cloud and on-prem. The system is a **layered monorepo**: the web app is **Octane (`.tsrx`) islands on static Astro shells**, served by **`oxidean-web`** — a small Rust tier that injects per-request metas, gates protected routes, and reverse-proxies API prefixes to the Rust Axum API (`oxidean-api`, versioned JSON RPC over HTTP and WebSocket), which persists through a multi-dialect database adapter (`postgres` / `mysql` / `sqlite`). **Local Compose** fronts the stack with Traefik (Docker provider) so the browser hits a single origin (`Host(localhost)`), with path-based routing to web and API. **Oxidean Cloud** uses the same api/web images behind a **file-configured Caddy** gateway (`deploy/cloud/`) — no Docker socket on the host (D-CLOUD-03).
 
 ## Component diagram
 
@@ -31,7 +31,7 @@ graph TD
   Api --> Packages["Package blobs<br/>OXIDEAN_PACKAGES_DIR"]
 ```
 
-Local development without Compose runs the API on `127.0.0.1:8080` and the Vite dev server on `:3000`, with proxies for `/api/*`, `/uploads`, `/health`, and package prefixes `/v2`, `/npm`, `/generic` (see `apps/web/vite.config.ts`). Smart HTTP on `/{owner}/{repo}.git` is served by the API directly in local `make` workflows (no Traefik PathRegexp required).
+Local development without Compose runs the API on `127.0.0.1:8080` and `oxidean-web` on `:3000` serving `apps/web/dist` and proxying `/api/*`, `/uploads`, and package prefixes `/v2`, `/npm`, `/generic`, `/cli` plus `/oauth/authorize|token|userinfo` (see `crates/oxidean-web/src/proxy.rs` `API_PREFIXES`). Smart HTTP on `/{owner}/{repo}.git` is served by the API directly in local `make` workflows (no Traefik PathRegexp required).
 
 ## Data flow
 
@@ -221,7 +221,7 @@ Rust types and procedure names in `oxidean-core` / `rpc.rs` are authoritative. `
 
 ```
 oxidean/
-├── apps/web/              # Octane TanStack Start UI (routes, chrome, auth screens)
+├── apps/web/              # Octane islands on Astro shells (pages/, components/, chrome, auth screens)
 ├── packages/api-client/   # Generated TS RPC client (do not hand-edit src/index.ts)
 ├── crates/
 │   ├── oxidean-api/      # Axum HTTP/WS server, auth, repo RPC/HTTP, email, rpc-gen

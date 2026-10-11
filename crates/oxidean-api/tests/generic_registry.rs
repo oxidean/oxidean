@@ -216,7 +216,10 @@ async fn generic_registry_delete_version() {
         .uri("/generic/pkgowner/tool/1.0.0/app.bin")
         .body(Body::empty())
         .unwrap();
-    assert_eq!(app.clone().oneshot(get).await.unwrap().status(), StatusCode::NOT_FOUND);
+    assert_eq!(
+        app.clone().oneshot(get).await.unwrap().status(),
+        StatusCode::NOT_FOUND
+    );
 
     // Republish allowed after delete (D-PKG-10).
     let put2 = Request::builder()

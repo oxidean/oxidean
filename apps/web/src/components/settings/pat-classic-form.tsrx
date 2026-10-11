@@ -1,10 +1,10 @@
-import { useForm } from "@octanejs/tanstack-form";
+import { useForm, useStore } from "@octanejs/tanstack-form";
 import { useState } from "octane";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { PatExpiryField } from "@/components/settings/pat-expiry-field";
+import { PatExpiryFields } from "@/components/settings/pat-expiry-field";
 import {
   resolveExpiresAt,
   tomorrowDateValue,
@@ -79,6 +79,11 @@ export function PatClassicForm({ onCreated }: PatClassicFormProps) @{
     },
   });
 
+  // packageWrite must be read reactively at component scope — a form.Subscribe
+  // nested under a Field render-prop crashes under octane 0.10 (function
+  // children get invoked eagerly by the children resolver).
+  const packageWrite = useStore(form.store, (s) => s.values.packageWrite);
+
   <form
     method="post"
     action="#"
@@ -152,27 +157,23 @@ export function PatClassicForm({ onCreated }: PatClassicFormProps) @{
         </p>
         <form.Field name="packageRead">
           {(field) => (
-            <form.Subscribe selector={(s) => s.values.packageWrite}>
-              {(packageWrite) => (
-                <label className="flex cursor-pointer items-start gap-3">
-                  <Checkbox
-                    checked={field.state.value || packageWrite}
-                    disabled={pending || packageWrite}
-                    aria-label="package:read"
-                    data-testid="scope-package-read"
-                    onCheckedChange={(checked) => field.handleChange(checked === true)}
-                  />
-                  <span className="flex flex-col gap-0.5">
-                    <span className="text-[14px] text-foreground">
-                      package:read — Download packages
-                    </span>
-                    <span className="text-[13px] text-muted-foreground">
-                      Registry download only; does not include repository access by itself.
-                    </span>
-                  </span>
-                </label>
-              )}
-            </form.Subscribe>
+            <label className="flex cursor-pointer items-start gap-3">
+              <Checkbox
+                checked={field.state.value || packageWrite}
+                disabled={pending || packageWrite}
+                aria-label="package:read"
+                data-testid="scope-package-read"
+                onCheckedChange={(checked) => field.handleChange(checked === true)}
+              />
+              <span className="flex flex-col gap-0.5">
+                <span className="text-[14px] text-foreground">
+                  package:read — Download packages
+                </span>
+                <span className="text-[13px] text-muted-foreground">
+                  Registry download only; does not include repository access by itself.
+                </span>
+              </span>
+            </label>
           )}
         </form.Field>
         <form.Field name="packageWrite">
@@ -211,21 +212,7 @@ export function PatClassicForm({ onCreated }: PatClassicFormProps) @{
       </p>
     </div>
 
-    <form.Field name="expiryPreset">
-      {(presetField) => (
-        <form.Field name="expiryDate">
-          {(dateField) => (
-            <PatExpiryField
-              preset={presetField.state.value}
-              customDate={dateField.state.value}
-              disabled={pending}
-              onPresetChange={(p) => presetField.handleChange(p)}
-              onCustomDateChange={(d) => dateField.handleChange(d)}
-            />
-          )}
-        </form.Field>
-      )}
-    </form.Field>
+    <PatExpiryFields form={form} disabled={pending} />
 
     <form.Subscribe
       selector={(s) => ({

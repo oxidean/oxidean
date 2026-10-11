@@ -1,9 +1,8 @@
 /**
  * Account /settings/general — theme, default branch, logout controls.
  */
-import { createElement } from "octane";
 import { cleanup, screen, waitFor } from "@octanejs/testing-library";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithQueryClient } from "@/test/render-with-query";
 
 const getProfileMock = vi.fn();
@@ -26,52 +25,7 @@ vi.mock("@/lib/api-client", () => ({
   },
 }));
 
-type LoaderShape =
-  | { kind: "unauthenticated" }
-  | { kind: "error"; message: string }
-  | {
-      kind: "ready";
-      user: {
-        id: string;
-        email: string;
-        username: string;
-        display_name: string;
-        bio: string;
-        avatar_url: null;
-        role: string;
-        profile_incomplete: boolean;
-        email_verified: boolean;
-        must_change_credentials: boolean;
-        default_branch: string;
-      };
-    };
-
-let loaderData: LoaderShape;
-
-vi.mock("@octanejs/tanstack-router", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@octanejs/tanstack-router")>();
-  return {
-    ...actual,
-    useLoaderData: () => loaderData,
-    Link: (props: {
-      to?: string;
-      children?: unknown;
-      className?: string;
-      "aria-current"?: string;
-    }) =>
-      createElement(
-        "a",
-        {
-          href: props.to ?? "#",
-          className: props.className,
-          "aria-current": props["aria-current"],
-        },
-        props.children as never,
-      ),
-  };
-});
-
-import { GeneralPage, Route } from "./general";
+import { GeneralPage } from "./general";
 
 const readyUser = {
   id: "u1",
@@ -89,17 +43,37 @@ const readyUser = {
 
 afterEach(cleanup);
 
+beforeEach(() => {
+  window.history.pushState({}, "", "/settings/general");
+  meMock.mockReset();
+  logoutMock.mockReset();
+  logoutAllMock.mockReset();
+  updateProfileMock.mockReset();
+  getProfileMock.mockReset();
+  meMock.mockResolvedValue({ ok: true, data: readyUser });
+  getProfileMock.mockResolvedValue({ ok: true, data: readyUser });
+});
+
 describe("/settings/general", () => {
-  it("exports a file route for /settings/general", () => {
-    expect(Route.options).toBeTruthy();
+  it("keys the page query on settingsGeneral", async () => {
+    const src = await import("./general.tsrx?raw").then((m) => String(m.default));
+    expect(src).toContain('"settingsGeneral"');
   });
 
-  it("beforeLoad redirects anonymous sessions to login", () => {
-    expect(Route.options.beforeLoad).toBeTypeOf("function");
+  it("redirects anonymous sessions to login", async () => {
+    getProfileMock.mockResolvedValue({
+      ok: false,
+      error: { code: "auth.unauthenticated", message: "sign in required" },
+    });
+    const assign = vi.spyOn(window.location, "assign").mockImplementation(() => {});
+    renderWithQueryClient(GeneralPage);
+    await waitFor(() => {
+      expect(assign).toHaveBeenCalledWith("/login?returnTo=/settings/general");
+    });
+    assign.mockRestore();
   });
 
   it("happy: renders theme, default branch, and logout controls", async () => {
-    loaderData = { kind: "ready", user: readyUser };
     renderWithQueryClient(GeneralPage);
 
     await waitFor(() => {
@@ -120,7 +94,10 @@ describe("/settings/general", () => {
   });
 
   it("unhappy: shows loader error message", async () => {
-    loaderData = { kind: "error", message: "Could not load settings." };
+    getProfileMock.mockResolvedValue({
+      ok: false,
+      error: { code: "internal", message: "Could not load settings." },
+    });
     renderWithQueryClient(GeneralPage);
 
     await waitFor(() => {
@@ -130,7 +107,6 @@ describe("/settings/general", () => {
   });
 
   it("edge: opens logout-all confirm dialog and can dismiss", async () => {
-    loaderData = { kind: "ready", user: readyUser };
     renderWithQueryClient(GeneralPage);
 
     await waitFor(() => {

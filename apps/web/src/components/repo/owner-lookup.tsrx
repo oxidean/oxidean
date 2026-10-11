@@ -8,7 +8,7 @@ import { apiClient } from "@/lib/api-client";
 import { orgListMineQueryOptions } from "@/lib/session-queries";
 import { cn } from "@/lib/utils";
 
-export type OwnerLookupProps = {
+type OwnerLookupProps = {
   id?: string;
   label?: string;
   /** Destination kind — users via `user.lookup`, orgs via `org.listMine` (admin/owner). */

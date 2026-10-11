@@ -46,11 +46,20 @@ fn rpc_req_with_cookie(body: &str, cookie: &str) -> Request<Body> {
 }
 
 fn session_cookie_from_response(res: &axum::http::Response<Body>) -> String {
-    let set_cookie = res.headers().get("set-cookie").expect("Set-Cookie").to_str().unwrap();
+    let set_cookie = res
+        .headers()
+        .get("set-cookie")
+        .expect("Set-Cookie")
+        .to_str()
+        .unwrap();
     set_cookie.split(';').next().unwrap().trim().to_string()
 }
 
-async fn signup_and_login(app: &axum::Router, email: &str, username: &str) -> (String, serde_json::Value) {
+async fn signup_and_login(
+    app: &axum::Router,
+    email: &str,
+    username: &str,
+) -> (String, serde_json::Value) {
     let signup_body = format!(
         r#"{{"procedure":"auth.signup","input":{{"email":"{email}","username":"{username}","password":"password1"}}}}"#
     );
@@ -69,7 +78,11 @@ async fn signup_and_login(app: &axum::Router, email: &str, username: &str) -> (S
 }
 
 async fn rpc_json(app: &axum::Router, body: &str, cookie: &str) -> serde_json::Value {
-    let res = app.clone().oneshot(rpc_req_with_cookie(body, cookie)).await.unwrap();
+    let res = app
+        .clone()
+        .oneshot(rpc_req_with_cookie(body, cookie))
+        .await
+        .unwrap();
     let bytes = res.into_body().collect().await.unwrap().to_bytes();
     serde_json::from_slice(&bytes).expect("rpc json body")
 }
@@ -78,7 +91,9 @@ async fn verified_owner(app: &axum::Router, db: &Database, email: &str, username
     let (cookie, login_v) = signup_and_login(app, email, username).await;
     let user_id = login_v["data"]["id"].as_str().unwrap().to_string();
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    db.set_email_verified_at(&user_id, &now).await.expect("verify");
+    db.set_email_verified_at(&user_id, &now)
+        .await
+        .expect("verify");
     cookie
 }
 
@@ -131,7 +146,10 @@ async fn webhook_issues_deliver_opened() {
     let mut attempt_status = None;
     for _ in 0..40 {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        let deliveries = db.list_webhook_deliveries(&hook_id, 10).await.expect("list");
+        let deliveries = db
+            .list_webhook_deliveries(&hook_id, 10)
+            .await
+            .expect("list");
         if let Some(d) = deliveries.first() {
             if d.status == "success" || d.attempt_count > 0 {
                 let latest = db
@@ -145,13 +163,19 @@ async fn webhook_issues_deliver_opened() {
             }
         }
     }
-    assert_eq!(attempt_status, Some(200), "expected successful delivery attempt");
+    assert_eq!(
+        attempt_status,
+        Some(200),
+        "expected successful delivery attempt"
+    );
 
     let requests = sink.received_requests().await.expect("received requests");
     assert!(!requests.is_empty());
     let req = &requests[0];
     assert_eq!(
-        req.headers.get("x-github-event").map(|v| v.to_str().unwrap()),
+        req.headers
+            .get("x-github-event")
+            .map(|v| v.to_str().unwrap()),
         Some("issues")
     );
     assert!(req.headers.get("x-hub-signature-256").is_some());
@@ -288,7 +312,10 @@ async fn webhook_issues_edited_closed_reopened() {
     let mut actions = std::collections::HashSet::new();
     for _ in 0..50 {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        let deliveries = db.list_webhook_deliveries(&hook_id, 50).await.expect("list");
+        let deliveries = db
+            .list_webhook_deliveries(&hook_id, 50)
+            .await
+            .expect("list");
         for d in deliveries {
             actions.insert(d.action);
         }
@@ -305,7 +332,6 @@ async fn webhook_issues_edited_closed_reopened() {
     assert!(actions.contains("closed"), "{actions:?}");
     assert!(actions.contains("reopened"), "{actions:?}");
 }
-
 
 #[tokio::test]
 async fn webhook_issue_comment_lifecycle() {
@@ -379,13 +405,14 @@ async fn webhook_issue_comment_lifecycle() {
     let mut actions = std::collections::HashSet::new();
     for _ in 0..50 {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        let deliveries = db.list_webhook_deliveries(&hook_id, 50).await.expect("list");
+        let deliveries = db
+            .list_webhook_deliveries(&hook_id, 50)
+            .await
+            .expect("list");
         for d in deliveries.iter().filter(|d| d.event == "issue_comment") {
             actions.insert(d.action.clone());
         }
-        if actions.contains("created")
-            && actions.contains("edited")
-            && actions.contains("deleted")
+        if actions.contains("created") && actions.contains("edited") && actions.contains("deleted")
         {
             break;
         }
@@ -407,7 +434,9 @@ async fn webhook_issue_comment_lifecycle() {
     assert!(!requests.is_empty());
     for req in &requests {
         assert_eq!(
-            req.headers.get("x-github-event").map(|v| v.to_str().unwrap()),
+            req.headers
+                .get("x-github-event")
+                .map(|v| v.to_str().unwrap()),
             Some("issue_comment")
         );
     }
@@ -422,11 +451,9 @@ async fn webhook_issue_comment_lifecycle() {
         "{bodies:?}"
     );
     assert!(
-        bodies
-            .iter()
-            .any(|b| b.contains("\"action\":\"edited\"")
-                && b.contains("\"changes\"")
-                && b.contains("first take")),
+        bodies.iter().any(|b| b.contains("\"action\":\"edited\"")
+            && b.contains("\"changes\"")
+            && b.contains("first take")),
         "{bodies:?}"
     );
 }
@@ -511,7 +538,10 @@ async fn webhook_issue_comment_pull_conversation() {
 
     // Delivery rows are inserted inside `emit` before the RPC returns, so the
     // line-anchored comment must not have produced a second `issue_comment` row.
-    let deliveries = db.list_webhook_deliveries(&hook_id, 50).await.expect("list");
+    let deliveries = db
+        .list_webhook_deliveries(&hook_id, 50)
+        .await
+        .expect("list");
     let ic: Vec<_> = deliveries
         .iter()
         .filter(|d| d.event == "issue_comment")
@@ -611,7 +641,10 @@ async fn webhook_pull_request_review_comment_lifecycle() {
     assert_eq!(line["ok"], true, "{line}");
     let comment_id = line["data"]["id"].as_str().unwrap().to_string();
 
-    let deliveries = db.list_webhook_deliveries(&hook_id, 50).await.expect("list");
+    let deliveries = db
+        .list_webhook_deliveries(&hook_id, 50)
+        .await
+        .expect("list");
     assert_eq!(deliveries.len(), 1, "{deliveries:?}");
     let created_row = &deliveries[0];
     assert_eq!(created_row.event, "pull_request_review_comment");
@@ -643,7 +676,10 @@ async fn webhook_pull_request_review_comment_lifecycle() {
     .await;
     assert_eq!(del["ok"], true, "{del}");
 
-    let deliveries = db.list_webhook_deliveries(&hook_id, 50).await.expect("list");
+    let deliveries = db
+        .list_webhook_deliveries(&hook_id, 50)
+        .await
+        .expect("list");
     let prc: Vec<_> = deliveries
         .iter()
         .filter(|d| d.event == "pull_request_review_comment")
@@ -679,7 +715,9 @@ async fn webhook_pull_request_review_comment_lifecycle() {
     assert_eq!(requests.len(), 3, "{requests:?}");
     for req in &requests {
         assert_eq!(
-            req.headers.get("x-github-event").map(|v| v.to_str().unwrap()),
+            req.headers
+                .get("x-github-event")
+                .map(|v| v.to_str().unwrap()),
             Some("pull_request_review_comment")
         );
     }
@@ -713,7 +751,10 @@ async fn commit_on_branch(
         vec!["-C", wt_s, "commit", "-m", message],
         vec!["-C", wt_s, "push", "origin", "HEAD"],
     ] {
-        let status = std::process::Command::new("git").args(&args).status().unwrap();
+        let status = std::process::Command::new("git")
+            .args(&args)
+            .status()
+            .unwrap();
         assert!(status.success(), "git {args:?}");
     }
 }
@@ -780,7 +821,10 @@ async fn webhook_timeout_records_error() {
     let mut saw_error = false;
     for _ in 0..40 {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        let deliveries = db.list_webhook_deliveries(&hook_id, 10).await.expect("list");
+        let deliveries = db
+            .list_webhook_deliveries(&hook_id, 10)
+            .await
+            .expect("list");
         if let Some(d) = deliveries.first() {
             if let Ok(Some(a)) = db.latest_webhook_delivery_attempt(&d.id).await {
                 if a.error_message.is_some() {
@@ -838,7 +882,10 @@ async fn webhook_retry_transient() {
     let mut pending_with_attempt = false;
     for _ in 0..40 {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        let deliveries = db.list_webhook_deliveries(&hook_id, 10).await.expect("list");
+        let deliveries = db
+            .list_webhook_deliveries(&hook_id, 10)
+            .await
+            .expect("list");
         if let Some(d) = deliveries.first() {
             if d.attempt_count >= 1 && (d.status == "pending" || d.status == "failed") {
                 let latest = db.latest_webhook_delivery_attempt(&d.id).await.unwrap();
@@ -850,7 +897,6 @@ async fn webhook_retry_transient() {
     }
     assert!(pending_with_attempt, "expected 503 attempt recorded");
 }
-
 
 #[tokio::test]
 async fn webhook_push_https_receive() {
@@ -925,7 +971,10 @@ async fn webhook_push_https_receive() {
     let reqs = sink.received_requests().await.unwrap_or_default();
     assert!(!reqs.is_empty());
     assert_eq!(
-        reqs[0].headers.get("x-github-event").and_then(|v| v.to_str().ok()),
+        reqs[0]
+            .headers
+            .get("x-github-event")
+            .and_then(|v| v.to_str().ok()),
         Some("push")
     );
 }
@@ -1212,11 +1261,16 @@ async fn webhook_release_lifecycle() {
     let mut actions = std::collections::HashSet::new();
     for _ in 0..50 {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        let deliveries = db.list_webhook_deliveries(&hook_id, 50).await.expect("list");
+        let deliveries = db
+            .list_webhook_deliveries(&hook_id, 50)
+            .await
+            .expect("list");
         for d in deliveries.iter().filter(|d| d.event == "release") {
             actions.insert(d.action.clone());
         }
-        if actions.contains("published") && actions.contains("edited") && actions.contains("deleted")
+        if actions.contains("published")
+            && actions.contains("edited")
+            && actions.contains("deleted")
         {
             break;
         }
@@ -1236,7 +1290,9 @@ async fn webhook_release_lifecycle() {
     assert!(!requests.is_empty());
     for req in &requests {
         assert_eq!(
-            req.headers.get("x-github-event").map(|v| v.to_str().unwrap()),
+            req.headers
+                .get("x-github-event")
+                .map(|v| v.to_str().unwrap()),
             Some("release")
         );
     }
@@ -1313,7 +1369,10 @@ async fn webhook_star_created_deleted() {
     let mut actions = Vec::new();
     for _ in 0..50 {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        let deliveries = db.list_webhook_deliveries(&hook_id, 50).await.expect("list");
+        let deliveries = db
+            .list_webhook_deliveries(&hook_id, 50)
+            .await
+            .expect("list");
         actions = deliveries
             .iter()
             .filter(|d| d.event == "star")
@@ -1497,7 +1556,10 @@ async fn webhook_create_delete_branch_rpc() {
     let mut events = std::collections::HashSet::new();
     for _ in 0..50 {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        let deliveries = db.list_webhook_deliveries(&hook_id, 50).await.expect("list");
+        let deliveries = db
+            .list_webhook_deliveries(&hook_id, 50)
+            .await
+            .expect("list");
         for d in deliveries {
             events.insert(d.event);
         }
@@ -1521,8 +1583,9 @@ async fn webhook_create_delete_branch_rpc() {
         }
     }
     assert!(
-        bodies.iter().any(|b| b.contains("\"ref\":\"topic\"")
-            && b.contains("\"ref_type\":\"branch\"")),
+        bodies
+            .iter()
+            .any(|b| b.contains("\"ref\":\"topic\"") && b.contains("\"ref_type\":\"branch\"")),
         "{bodies:?}"
     );
 }
@@ -1592,7 +1655,10 @@ async fn webhook_ref_events_receive_pack() {
     let mut deliveries = Vec::new();
     for _ in 0..50 {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        deliveries = db.list_webhook_deliveries(&hook_id, 50).await.expect("list");
+        deliveries = db
+            .list_webhook_deliveries(&hook_id, 50)
+            .await
+            .expect("list");
         if deliveries.len() >= 3 {
             break;
         }
@@ -1618,7 +1684,10 @@ async fn webhook_ref_events_receive_pack() {
     );
     assert!(deletes[0].payload_json.contains("\"ref\":\"old\""));
     // `create`/`delete` carry no action (GitHub parity — the event is the action).
-    assert!(deliveries.iter().all(|d| d.action.is_empty()), "{deliveries:?}");
+    assert!(
+        deliveries.iter().all(|d| d.action.is_empty()),
+        "{deliveries:?}"
+    );
 }
 
 /// `workflow_run` fires `requested` when a run is enqueued and `completed`
@@ -1702,7 +1771,10 @@ jobs:
     let mut completed_payload = String::new();
     for _ in 0..50 {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        let deliveries = db.list_webhook_deliveries(&hook_id, 50).await.expect("list");
+        let deliveries = db
+            .list_webhook_deliveries(&hook_id, 50)
+            .await
+            .expect("list");
         for d in deliveries.iter().filter(|d| d.event == "workflow_run") {
             actions.insert(d.action.clone());
             if d.action == "completed" {
@@ -1715,9 +1787,18 @@ jobs:
     }
     assert!(actions.contains("requested"), "{actions:?}");
     assert!(actions.contains("completed"), "{actions:?}");
-    assert!(completed_payload.contains("\"conclusion\":\"cancelled\""), "{completed_payload}");
-    assert!(completed_payload.contains("\"status\":\"completed\""), "{completed_payload}");
-    assert!(completed_payload.contains("\"name\":\"CI\""), "{completed_payload}");
+    assert!(
+        completed_payload.contains("\"conclusion\":\"cancelled\""),
+        "{completed_payload}"
+    );
+    assert!(
+        completed_payload.contains("\"status\":\"completed\""),
+        "{completed_payload}"
+    );
+    assert!(
+        completed_payload.contains("\"name\":\"CI\""),
+        "{completed_payload}"
+    );
 }
 
 /// `registry_package` fires for generic-registry publishes on repo-linked
@@ -1739,10 +1820,14 @@ async fn webhook_registry_package_generic_publish() {
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
-    let state = AppState::new(db.clone(), Arc::new(LogSink) as Arc<dyn EmailSender>, "development")
-        .with_repos_dir(repos)
-        .with_packages_dir(packages)
-        .with_git(Arc::new(CliGitBackend::new()));
+    let state = AppState::new(
+        db.clone(),
+        Arc::new(LogSink) as Arc<dyn EmailSender>,
+        "development",
+    )
+    .with_repos_dir(repos)
+    .with_packages_dir(packages)
+    .with_git(Arc::new(CliGitBackend::new()));
     let cors = build_cors("development", None).expect("cors");
     let app = router_with_state(state, cors);
 
@@ -1800,7 +1885,10 @@ async fn webhook_registry_package_generic_publish() {
     let mut actions = std::collections::HashSet::new();
     for _ in 0..50 {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        let deliveries = db.list_webhook_deliveries(&hook_id, 50).await.expect("list");
+        let deliveries = db
+            .list_webhook_deliveries(&hook_id, 50)
+            .await
+            .expect("list");
         for d in deliveries.iter().filter(|d| d.event == "registry_package") {
             actions.insert(d.action.clone());
         }

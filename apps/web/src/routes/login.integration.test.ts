@@ -2,7 +2,7 @@
  * RESEARCH P1 / D-QH-03 — login route export/render contracts (happy-dom).
  */
 import { cleanup, render, screen, waitFor } from "@octanejs/testing-library";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/api-client", () => ({
   apiClient: {
@@ -20,36 +20,16 @@ vi.mock("@/lib/api-client", () => ({
   },
 }));
 
-vi.mock("@/lib/ssr-auth", () => ({
-  fetchProviderConfig: vi.fn(async () => ({
-    ok: true,
-    data: { mode: "local", allow_signup: true },
-  })),
-  fetchSessionMe: vi.fn(async () => ({
-    ok: false,
-    error: { code: "auth.unauthenticated", message: "n" },
-  })),
-}));
-
-vi.mock("@octanejs/tanstack-router", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@octanejs/tanstack-router")>();
-  return {
-    ...actual,
-    useLoaderData: () => ({
-      mode: "local",
-      allow_signup: true,
-      loadError: "",
-    }),
-  };
-});
-
-import { LoginPage, Route } from "./login";
+import { LoginPage } from "./login";
 
 afterEach(cleanup);
 
+beforeEach(() => {
+  window.history.pushState({}, "", "/login");
+});
+
 describe("/login Wave 0 contracts (RESEARCH P1)", () => {
-  it("exports Route and LoginPage", () => {
-    expect(Route).toBeTruthy();
+  it("exports LoginPage", () => {
     expect(typeof LoginPage).toBe("function");
   });
 
@@ -58,9 +38,9 @@ describe("/login Wave 0 contracts (RESEARCH P1)", () => {
 
     await waitFor(() => {
       expect(screen.getByLabelText("Email or username")).toBeInTheDocument();
+      expect(screen.getByText("Create an account")).toBeInTheDocument();
     });
     expect(screen.getByLabelText("Password")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Sign in" })).toBeInTheDocument();
-    expect(screen.getByText("Create an account")).toBeInTheDocument();
   });
 });

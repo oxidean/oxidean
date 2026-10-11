@@ -84,10 +84,7 @@ async fn verify_user(db: &Database, user_id: &str) {
 #[tokio::test]
 async fn org_create_reserves_shared_slug_namespace() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let url = format!(
-        "sqlite:{}",
-        dir.path().join("org_create_slug.db").display()
-    );
+    let url = format!("sqlite:{}", dir.path().join("org_create_slug.db").display());
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
@@ -143,15 +140,11 @@ async fn org_create_reserves_shared_slug_namespace() {
     assert_eq!(dup_v["error"]["code"], "org.slug_taken");
 }
 
-
 /// Signup must not claim an existing org slug (D-ORG-01 reverse direction).
 #[tokio::test]
 async fn signup_rejects_existing_org_slug() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let url = format!(
-        "sqlite:{}",
-        dir.path().join("signup_org_slug.db").display()
-    );
+    let url = format!("sqlite:{}", dir.path().join("signup_org_slug.db").display());
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
@@ -218,9 +211,17 @@ async fn org_create_owned_repo_resolves_by_org_slug() {
 
     // Fixture: org-owned row (owner_id = org). owner_type set via insert API once GREEN;
     // until then insert defaults owner_type=user but lookup keys on owner_id.
-    db.insert_repository("r-org-resolve", org_id, "org", "widget", "public", "", "main")
-        .await
-        .expect("insert org-owned repo");
+    db.insert_repository(
+        "r-org-resolve",
+        org_id,
+        "org",
+        "widget",
+        "public",
+        "",
+        "main",
+    )
+    .await
+    .expect("insert org-owned repo");
 
     let get = app
         .oneshot(rpc_req(
@@ -228,7 +229,11 @@ async fn org_create_owned_repo_resolves_by_org_slug() {
         ))
         .await
         .unwrap();
-    assert_eq!(get.status(), StatusCode::OK, "org slug must resolve like username");
+    assert_eq!(
+        get.status(),
+        StatusCode::OK,
+        "org slug must resolve like username"
+    );
     let get_bytes = get.into_body().collect().await.unwrap().to_bytes();
     let get_v: serde_json::Value = serde_json::from_slice(&get_bytes).unwrap();
     assert_eq!(get_v["ok"], true, "repo.get under org slug — {get_v}");
@@ -374,12 +379,8 @@ async fn org_get_and_list_mine() {
     assert_eq!(missing_v["ok"], false, "{missing_v}");
     assert_eq!(missing_v["error"]["code"], "org.not_found");
 
-    let (list_anon_status, list_anon_v) = rpc_json(
-        &app,
-        r#"{"procedure":"org.listMine","input":{}}"#,
-        None,
-    )
-    .await;
+    let (list_anon_status, list_anon_v) =
+        rpc_json(&app, r#"{"procedure":"org.listMine","input":{}}"#, None).await;
     assert_eq!(list_anon_v["ok"], false, "{list_anon_v}");
     assert_eq!(list_anon_v["error"]["code"], "auth.unauthenticated");
     let _ = list_anon_status;
@@ -402,10 +403,7 @@ async fn org_get_and_list_mine() {
 #[tokio::test]
 async fn org_members_add_by_username() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let url = format!(
-        "sqlite:{}",
-        dir.path().join("org_members_add.db").display()
-    );
+    let url = format!("sqlite:{}", dir.path().join("org_members_add.db").display());
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
@@ -453,7 +451,9 @@ async fn org_members_add_by_username() {
     assert_eq!(list_v["ok"], true, "{list_v}");
     let members = list_v["data"]["members"].as_array().expect("members");
     assert!(
-        members.iter().any(|m| m["username"] == "addmem1" && m["role"] == "member"),
+        members
+            .iter()
+            .any(|m| m["username"] == "addmem1" && m["role"] == "member"),
         "list must include added member — {list_v}"
     );
     assert!(
@@ -564,10 +564,7 @@ async fn org_members_update_role() {
 #[tokio::test]
 async fn org_members_last_owner_demote_or_remove_rejected() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let url = format!(
-        "sqlite:{}",
-        dir.path().join("org_last_owner.db").display()
-    );
+    let url = format!("sqlite:{}", dir.path().join("org_last_owner.db").display());
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
@@ -618,10 +615,7 @@ async fn org_members_last_owner_demote_or_remove_rejected() {
 #[tokio::test]
 async fn org_member_base_none_denies_private_repo_read() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let url = format!(
-        "sqlite:{}",
-        dir.path().join("org_base_none.db").display()
-    );
+    let url = format!("sqlite:{}", dir.path().join("org_base_none.db").display());
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
@@ -695,10 +689,7 @@ async fn org_member_base_none_denies_private_repo_read() {
 #[tokio::test]
 async fn org_member_base_read_allows_private_repo_read() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let url = format!(
-        "sqlite:{}",
-        dir.path().join("org_base_read.db").display()
-    );
+    let url = format!("sqlite:{}", dir.path().join("org_base_read.db").display());
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
@@ -761,7 +752,10 @@ async fn org_member_base_read_allows_private_repo_read() {
     )
     .await;
     assert_eq!(mem_get["ok"], true, "Member + base read — {mem_get}");
-    assert_eq!(mem_get["data"]["can_write"], false, "read is not write — {mem_get}");
+    assert_eq!(
+        mem_get["data"]["can_write"], false,
+        "read is not write — {mem_get}"
+    );
     assert_eq!(mem_get["data"]["can_admin"], false);
 }
 
@@ -769,10 +763,7 @@ async fn org_member_base_read_allows_private_repo_read() {
 #[tokio::test]
 async fn org_member_base_write_allows_private_repo_write() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let url = format!(
-        "sqlite:{}",
-        dir.path().join("org_base_write.db").display()
-    );
+    let url = format!("sqlite:{}", dir.path().join("org_base_write.db").display());
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
@@ -844,7 +835,10 @@ async fn org_member_base_write_allows_private_repo_write() {
     .await;
     assert_eq!(mem_get["ok"], true, "Member + base write — {mem_get}");
     assert_eq!(mem_get["data"]["can_write"], true, "{mem_get}");
-    assert_eq!(mem_get["data"]["can_admin"], false, "write is not admin — {mem_get}");
+    assert_eq!(
+        mem_get["data"]["can_admin"], false,
+        "write is not admin — {mem_get}"
+    );
 
     let (_, pub_get) = rpc_json(
         &app,

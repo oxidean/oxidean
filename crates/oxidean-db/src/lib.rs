@@ -10,6 +10,9 @@ pub mod email_tokens;
 pub mod follows;
 pub mod git_settings;
 
+pub mod deploy_keys;
+pub mod gpg_keys;
+pub mod instance_invites;
 pub mod issue_labels;
 pub mod issues;
 pub mod lfs;
@@ -18,10 +21,8 @@ pub mod migrate;
 pub mod mirrors;
 pub mod notifications;
 pub mod oauth;
-pub mod instance_invites;
 pub mod org_invites;
 pub mod org_members;
-pub mod repo_invites;
 pub mod organizations;
 pub mod packages;
 pub mod pats;
@@ -29,35 +30,39 @@ pub mod pool;
 pub mod probe;
 pub mod pulls;
 pub mod redirects;
-pub mod repo_access;
 pub mod releases;
-pub mod webhooks;
+pub mod repo_access;
 pub mod repo_activity;
 pub mod repo_collaborators;
+pub mod repo_invites;
+pub mod repo_units;
 pub mod repositories;
 pub mod search;
-pub mod repo_units;
 pub mod sessions;
 pub mod ssh_keys;
-pub mod deploy_keys;
-pub mod gpg_keys;
-pub mod user_emails;
 pub mod stars;
 pub mod tag_protection;
 pub mod templates;
 pub mod topics;
+pub mod user_emails;
 pub mod users;
 pub mod watches;
+pub mod webhooks;
 
 pub use actions::{
     ActionJobRow, ActionRunFilter, ActionRunRow, ActionRunnerRow, ActionSecretCipherRow,
     ActionSecretMetaRow,
 };
 pub use audit_events::AuditEventRow;
+pub use auth_settings::AuthSettingsRow;
 pub use branch_protection::{BranchProtectionRuleRow, CommitStatusRow};
-pub use tag_protection::TagProtectionRuleRow;
+pub use deploy_keys::DeployKeyRow;
+use dialect::resolve_dialect_from_env as resolve_from_env;
 pub use dialect::{redact_url, resolve_dialect, resolve_dialect_from_env, Dialect};
+pub use follows::UserFollowListRow;
 pub use git_settings::GitSettingsRow;
+pub use gpg_keys::GpgKeyRow;
+pub use instance_invites::InstanceInviteRow;
 pub use issue_labels::{IssueAssigneeRow, LabelRow};
 pub use issues::{
     CommentRevisionRow, IssueCommentRow, IssueLinkRow, IssueListFilters, IssueRevisionRow, IssueRow,
@@ -67,15 +72,14 @@ pub use mcp_settings::McpSettingsRow;
 pub use mirrors::{RepositoryMirrorRefResultRow, RepositoryMirrorRow};
 pub use notifications::NotificationRow;
 pub use oauth::{OAuthAppRow, OAuthCodeRow, OAuthTokenRow};
-pub use oxidean_core::DbProbeResponse;
-pub use pool::DbPool;
-pub use instance_invites::InstanceInviteRow;
 pub use org_invites::OrgInviteRow;
-pub use repo_invites::RepoInviteRow;
 pub use org_members::{OrgMemberListRow, OrgMemberRow, OrgMineRow};
 pub use organizations::OrganizationRow;
-pub use packages::{PackageRow, PackageVersionRow, PackageUsageBreakdownRow};
+pub use oxidean_core::DbProbeResponse;
+pub use packages::{PackageRow, PackageUsageBreakdownRow, PackageVersionRow};
 pub use pats::PatRow;
+pub use pool::DbPool;
+use pool::DbPool as Pool;
 pub use pulls::{PullCommentRow, PullReviewRow, PullRow, PullSearchFilters, RepoMergeSettingsRow};
 pub use redirects::RedirectRow;
 pub use releases::{ReleaseAssetRow, ReleaseRow};
@@ -83,25 +87,21 @@ pub use repo_activity::RepoActivityRow;
 pub use repo_collaborators::{
     RepoCollaboratorGrantRow, RepoCollaboratorListRow, RepoCollaboratorRow,
 };
+pub use repo_invites::RepoInviteRow;
+pub use repo_units::RepoUnitFlags;
+pub use repositories::{RepoDiskRef, RepositoryRow};
 pub use search::{
     GlobalIssueHitRow, GlobalOrgHitRow, GlobalPullHitRow, GlobalRepoHitRow, GlobalUserHitRow,
     ScanRepoRow,
 };
-pub use stars::{ForkListSort, ForkNetworkRow, RepoForkListRow, RepoStargazerListRow};
-pub use follows::UserFollowListRow;
-pub use watches::RepoWatcherListRow;
-pub use repositories::{RepoDiskRef, RepositoryRow};
-pub use repo_units::RepoUnitFlags;
 pub use ssh_keys::SshKeyRow;
-pub use deploy_keys::DeployKeyRow;
-pub use gpg_keys::GpgKeyRow;
-pub use user_emails::UserEmailRow;
+pub use stars::{ForkListSort, ForkNetworkRow, RepoForkListRow, RepoStargazerListRow};
+pub use tag_protection::TagProtectionRuleRow;
 pub use templates::{InstanceTemplatePackRow, TemplateRepoListRow};
+pub use user_emails::UserEmailRow;
 pub use users::UserRow;
-pub use auth_settings::AuthSettingsRow;
+pub use watches::RepoWatcherListRow;
 pub use webhooks::{WebhookDeliveryAttemptRow, WebhookDeliveryRow, WebhookRow};
-use dialect::resolve_dialect_from_env as resolve_from_env;
-use pool::DbPool as Pool;
 
 #[derive(Clone)]
 pub struct Database {
@@ -158,7 +158,11 @@ impl Database {
             Pool::MySql(p) => sqlx::query("SELECT 1").execute(p).await.is_ok(),
             Pool::Sqlite(p) => sqlx::query("SELECT 1").execute(p).await.is_ok(),
         };
-        if ok { "ok" } else { "error" }
+        if ok {
+            "ok"
+        } else {
+            "error"
+        }
     }
 
     pub async fn migrate(&self) -> Result<(), String> {
@@ -382,6 +386,7 @@ impl Database {
 
     // --- organization invites ---
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn insert_org_invite(
         &self,
         id: &str,
@@ -460,6 +465,7 @@ impl Database {
 
     // --- repository invites ---
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn insert_repo_invite(
         &self,
         id: &str,
@@ -485,10 +491,7 @@ impl Database {
         .await
     }
 
-    pub async fn find_repo_invite_by_id(
-        &self,
-        id: &str,
-    ) -> Result<Option<RepoInviteRow>, String> {
+    pub async fn find_repo_invite_by_id(&self, id: &str) -> Result<Option<RepoInviteRow>, String> {
         repo_invites::find_by_id(self.require_pool()?, id).await
     }
 
@@ -567,13 +570,8 @@ impl Database {
         user_id: &str,
         permission: &str,
     ) -> Result<RepoCollaboratorRow, String> {
-        repo_collaborators::insert_collaborator(
-            self.require_pool()?,
-            repo_id,
-            user_id,
-            permission,
-        )
-        .await
+        repo_collaborators::insert_collaborator(self.require_pool()?, repo_id, user_id, permission)
+            .await
     }
 
     pub async fn update_repo_collaborator_permission(
@@ -601,6 +599,7 @@ impl Database {
 
     // --- repositories ---
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn insert_repository(
         &self,
         id: &str,
@@ -796,12 +795,20 @@ impl Database {
     }
 
     /// Follower count matching the `q` filter used by `list_user_followers`.
-    pub async fn count_user_followers(&self, user_id: &str, q: Option<&str>) -> Result<i64, String> {
+    pub async fn count_user_followers(
+        &self,
+        user_id: &str,
+        q: Option<&str>,
+    ) -> Result<i64, String> {
         follows::count_followers(self.require_pool()?, user_id, q).await
     }
 
     /// Following count matching the `q` filter used by `list_user_following`.
-    pub async fn count_user_following(&self, user_id: &str, q: Option<&str>) -> Result<i64, String> {
+    pub async fn count_user_following(
+        &self,
+        user_id: &str,
+        q: Option<&str>,
+    ) -> Result<i64, String> {
         follows::count_following(self.require_pool()?, user_id, q).await
     }
 
@@ -831,8 +838,15 @@ impl Database {
         offset: i64,
         limit: i64,
     ) -> Result<Vec<stars::RepoForkListRow>, String> {
-        stars::list_network_forks(self.require_pool()?, fork_network_id, q, sort, offset, limit)
-            .await
+        stars::list_network_forks(
+            self.require_pool()?,
+            fork_network_id,
+            q,
+            sort,
+            offset,
+            limit,
+        )
+        .await
     }
 
     pub async fn count_network_forks(
@@ -851,8 +865,13 @@ impl Database {
         current_repo_id: &str,
         limit: i64,
     ) -> Result<Vec<stars::ForkNetworkRow>, String> {
-        stars::list_fork_network(self.require_pool()?, fork_network_id, current_repo_id, limit)
-            .await
+        stars::list_fork_network(
+            self.require_pool()?,
+            fork_network_id,
+            current_repo_id,
+            limit,
+        )
+        .await
     }
 
     /// Total rows [`Database::list_fork_network`] can return (same filter).
@@ -903,10 +922,7 @@ impl Database {
         repositories::get_fork_count(self.require_pool()?, repository_id).await
     }
 
-    pub async fn recount_fork_count_for_network(
-        &self,
-        network_id: &str,
-    ) -> Result<i64, String> {
+    pub async fn recount_fork_count_for_network(&self, network_id: &str) -> Result<i64, String> {
         repositories::recount_fork_count_for_network(self.require_pool()?, network_id).await
     }
 
@@ -1155,6 +1171,7 @@ impl Database {
 
     // --- pulls ---
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn insert_pull(
         &self,
         id: &str,
@@ -1300,6 +1317,7 @@ impl Database {
         .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn insert_pull_comment(
         &self,
         id: &str,
@@ -1334,18 +1352,12 @@ impl Database {
         pulls::find_pull_comment_by_id(self.require_pool()?, id).await
     }
 
-    pub async fn list_pull_comments(
-        &self,
-        pull_id: &str,
-    ) -> Result<Vec<PullCommentRow>, String> {
+    pub async fn list_pull_comments(&self, pull_id: &str) -> Result<Vec<PullCommentRow>, String> {
         pulls::list_pull_comments(self.require_pool()?, pull_id).await
     }
 
     /// Distinct comment author ids — participant fan-out (no body transfer).
-    pub async fn list_pull_comment_author_ids(
-        &self,
-        pull_id: &str,
-    ) -> Result<Vec<String>, String> {
+    pub async fn list_pull_comment_author_ids(&self, pull_id: &str) -> Result<Vec<String>, String> {
         pulls::list_pull_comment_author_ids(self.require_pool()?, pull_id).await
     }
 
@@ -1377,14 +1389,8 @@ impl Database {
         editor_id: &str,
         body: &str,
     ) -> Result<CommentRevisionRow, String> {
-        pulls::insert_pull_comment_revision(
-            self.require_pool()?,
-            id,
-            comment_id,
-            editor_id,
-            body,
-        )
-        .await
+        pulls::insert_pull_comment_revision(self.require_pool()?, id, comment_id, editor_id, body)
+            .await
     }
 
     pub async fn list_pull_comment_revisions(
@@ -1463,10 +1469,7 @@ impl Database {
         .await
     }
 
-    pub async fn find_pull_review_by_id(
-        &self,
-        id: &str,
-    ) -> Result<Option<PullReviewRow>, String> {
+    pub async fn find_pull_review_by_id(&self, id: &str) -> Result<Option<PullReviewRow>, String> {
         pulls::find_pull_review_by_id(self.require_pool()?, id).await
     }
 
@@ -1475,10 +1478,7 @@ impl Database {
     }
 
     /// Distinct review author ids — participant fan-out (no row transfer).
-    pub async fn list_pull_review_author_ids(
-        &self,
-        pull_id: &str,
-    ) -> Result<Vec<String>, String> {
+    pub async fn list_pull_review_author_ids(&self, pull_id: &str) -> Result<Vec<String>, String> {
         pulls::list_pull_review_author_ids(self.require_pool()?, pull_id).await
     }
 
@@ -1641,6 +1641,7 @@ impl Database {
         tag_protection::find_rule(self.require_pool()?, repo_id, rule_id).await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn insert_tag_protection_rule(
         &self,
         id: &str,
@@ -1664,6 +1665,7 @@ impl Database {
         .await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn update_tag_protection_rule(
         &self,
         repo_id: &str,
@@ -1743,15 +1745,7 @@ impl Database {
         title: &str,
         body: &str,
     ) -> Result<IssueRow, String> {
-        issues::insert_issue(
-            self.require_pool()?,
-            id,
-            repo_id,
-            author_id,
-            title,
-            body,
-        )
-        .await
+        issues::insert_issue(self.require_pool()?, id, repo_id, author_id, title, body).await
     }
 
     pub async fn find_issue_by_id(&self, id: &str) -> Result<Option<IssueRow>, String> {
@@ -1789,15 +1783,8 @@ impl Database {
         title: &str,
         body: &str,
     ) -> Result<IssueRevisionRow, String> {
-        issues::insert_issue_revision(
-            self.require_pool()?,
-            id,
-            issue_id,
-            editor_id,
-            title,
-            body,
-        )
-        .await
+        issues::insert_issue_revision(self.require_pool()?, id, issue_id, editor_id, title, body)
+            .await
     }
 
     pub async fn list_issue_revisions(
@@ -1890,11 +1877,8 @@ impl Database {
         &self,
         recipient_id: &str,
     ) -> Result<Vec<String>, String> {
-        notifications::list_notification_repo_ids_for_recipient(
-            self.require_pool()?,
-            recipient_id,
-        )
-        .await
+        notifications::list_notification_repo_ids_for_recipient(self.require_pool()?, recipient_id)
+            .await
     }
 
     /// Distinct recipients holding notifications for one repository (affected
@@ -2010,8 +1994,7 @@ impl Database {
         editor_id: &str,
         body: &str,
     ) -> Result<CommentRevisionRow, String> {
-        issues::insert_comment_revision(self.require_pool()?, id, comment_id, editor_id, body)
-            .await
+        issues::insert_comment_revision(self.require_pool()?, id, comment_id, editor_id, body).await
     }
 
     pub async fn list_comment_revisions(
@@ -2151,8 +2134,7 @@ impl Database {
         comment_id: &str,
         viewer_user_id: Option<&str>,
     ) -> Result<Vec<issues::ReactionGroupRow>, String> {
-        issues::list_comment_reaction_groups(self.require_pool()?, comment_id, viewer_user_id)
-            .await
+        issues::list_comment_reaction_groups(self.require_pool()?, comment_id, viewer_user_id).await
     }
 
     /// Batch variant — `(comment_id, group)` pairs in one `IN (...)` round trip.
@@ -2189,6 +2171,7 @@ impl Database {
         issues::toggle_comment_reaction(self.require_pool()?, comment_id, user_id, content).await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn insert_issue_link(
         &self,
         id: &str,
@@ -2228,16 +2211,13 @@ impl Database {
         issues::list_issue_links(self.require_pool()?, issue_id).await
     }
 
-    pub async fn delete_issue_link(
-        &self,
-        issue_id: &str,
-        link_id: &str,
-    ) -> Result<bool, String> {
+    pub async fn delete_issue_link(&self, issue_id: &str, link_id: &str) -> Result<bool, String> {
         issues::delete_issue_link(self.require_pool()?, issue_id, link_id).await
     }
 
     // --- users ---
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_user(
         &self,
         id: &str,
@@ -2263,7 +2243,10 @@ impl Database {
         )
         .await?;
         // Mirror primary into user_emails (idempotent if backfill already ran).
-        if user_emails::find_primary_for_user(pool, id).await?.is_none() {
+        if user_emails::find_primary_for_user(pool, id)
+            .await?
+            .is_none()
+        {
             let email_id = format!("{id}-primary-email");
             let _ = user_emails::create(pool, &email_id, id, email, true, None).await;
         }
@@ -2378,11 +2361,7 @@ impl Database {
         users::delete_user(self.require_pool()?, id).await
     }
 
-    pub async fn set_email_verified_at(
-        &self,
-        id: &str,
-        at: &str,
-    ) -> Result<UserRow, String> {
+    pub async fn set_email_verified_at(&self, id: &str, at: &str) -> Result<UserRow, String> {
         let pool = self.require_pool()?;
         let user = users::set_email_verified_at(pool, id, at).await?;
         if let Some(primary) = user_emails::find_primary_for_user(pool, id).await? {
@@ -2438,6 +2417,7 @@ impl Database {
 
     // --- email tokens ---
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn upsert_email_token(
         &self,
         id: &str,
@@ -2561,10 +2541,7 @@ impl Database {
         .await
     }
 
-    pub async fn find_user_email_by_id(
-        &self,
-        id: &str,
-    ) -> Result<Option<UserEmailRow>, String> {
+    pub async fn find_user_email_by_id(&self, id: &str) -> Result<Option<UserEmailRow>, String> {
         user_emails::find_by_id(self.require_pool()?, id).await
     }
 
@@ -2575,10 +2552,7 @@ impl Database {
         user_emails::find_by_email(self.require_pool()?, email).await
     }
 
-    pub async fn list_user_emails(
-        &self,
-        user_id: &str,
-    ) -> Result<Vec<UserEmailRow>, String> {
+    pub async fn list_user_emails(&self, user_id: &str) -> Result<Vec<UserEmailRow>, String> {
         user_emails::list_for_user(self.require_pool()?, user_id).await
     }
 
@@ -2628,6 +2602,7 @@ impl Database {
 
     // --- sessions ---
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_session(
         &self,
         id: &str,
@@ -3040,9 +3015,6 @@ impl Database {
         packages::delete_package(self.require_pool()?, package_id).await
     }
 
-
-
-
     pub async fn find_package_quota_override(
         &self,
         owner_type: &str,
@@ -3057,7 +3029,13 @@ impl Database {
         owner_id: &str,
         max_bytes: i64,
     ) -> Result<(), String> {
-        packages::upsert_package_quota_override(self.require_pool()?, owner_type, owner_id, max_bytes).await
+        packages::upsert_package_quota_override(
+            self.require_pool()?,
+            owner_type,
+            owner_id,
+            max_bytes,
+        )
+        .await
     }
 
     pub async fn sum_package_blob_bytes_for_owner(
@@ -3114,6 +3092,7 @@ impl Database {
         actions::find_runner_by_id(self.require_pool()?, id).await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn insert_action_run(
         &self,
         id: &str,
@@ -3233,7 +3212,11 @@ impl Database {
         actions::get_actions_enabled(self.require_pool()?, repo_id).await
     }
 
-    pub async fn set_repo_actions_enabled(&self, repo_id: &str, enabled: bool) -> Result<(), String> {
+    pub async fn set_repo_actions_enabled(
+        &self,
+        repo_id: &str,
+        enabled: bool,
+    ) -> Result<(), String> {
         actions::set_actions_enabled(self.require_pool()?, repo_id, enabled).await
     }
 
@@ -3242,7 +3225,11 @@ impl Database {
         repo_units::get_unit_flags(self.require_pool()?, repo_id).await
     }
 
-    pub async fn set_repo_issues_enabled(&self, repo_id: &str, enabled: bool) -> Result<(), String> {
+    pub async fn set_repo_issues_enabled(
+        &self,
+        repo_id: &str,
+        enabled: bool,
+    ) -> Result<(), String> {
         repo_units::set_issues_enabled(self.require_pool()?, repo_id, enabled).await
     }
 
@@ -3279,7 +3266,8 @@ impl Database {
         limit: i64,
         offset: i64,
     ) -> Result<Vec<actions::ActionRunRow>, String> {
-        actions::list_runs_for_repo(self.require_pool()?, repository_id, filter, limit, offset).await
+        actions::list_runs_for_repo(self.require_pool()?, repository_id, filter, limit, offset)
+            .await
     }
 
     pub async fn count_action_runs_for_repo(
@@ -3343,7 +3331,10 @@ impl Database {
         actions::wipe_actions_domain(self.require_pool()?).await
     }
 
-    pub async fn find_package_by_id(&self, id: &str) -> Result<Option<packages::PackageRow>, String> {
+    pub async fn find_package_by_id(
+        &self,
+        id: &str,
+    ) -> Result<Option<packages::PackageRow>, String> {
         packages::find_package_by_id(self.require_pool()?, id).await
     }
 
@@ -3594,6 +3585,7 @@ impl Database {
         auth_settings::get(self.require_pool()?).await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn update_auth_settings(
         &self,
         provider_mode: &str,
@@ -3621,31 +3613,71 @@ impl Database {
 
     // --- Releases / redirects (Phase 15) ---
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn insert_release(
-        &self, id: &str, repo_id: &str, tag_name: &str, title: &str, body: &str,
-        draft: bool, prerelease: bool, author_id: &str,
+        &self,
+        id: &str,
+        repo_id: &str,
+        tag_name: &str,
+        title: &str,
+        body: &str,
+        draft: bool,
+        prerelease: bool,
+        author_id: &str,
     ) -> Result<ReleaseRow, String> {
-        releases::insert_release(self.require_pool()?, id, repo_id, tag_name, title, body, draft, prerelease, author_id).await
+        releases::insert_release(
+            self.require_pool()?,
+            id,
+            repo_id,
+            tag_name,
+            title,
+            body,
+            draft,
+            prerelease,
+            author_id,
+        )
+        .await
     }
     pub async fn find_release_by_id(&self, id: &str) -> Result<Option<ReleaseRow>, String> {
         releases::find_release_by_id(self.require_pool()?, id).await
     }
-    pub async fn find_release_by_repo_tag(&self, repo_id: &str, tag_name: &str) -> Result<Option<ReleaseRow>, String> {
+    pub async fn find_release_by_repo_tag(
+        &self,
+        repo_id: &str,
+        tag_name: &str,
+    ) -> Result<Option<ReleaseRow>, String> {
         releases::find_release_by_repo_tag(self.require_pool()?, repo_id, tag_name).await
     }
-    pub async fn list_releases_for_repo(&self, repo_id: &str, include_drafts: bool) -> Result<Vec<ReleaseRow>, String> {
+    pub async fn list_releases_for_repo(
+        &self,
+        repo_id: &str,
+        include_drafts: bool,
+    ) -> Result<Vec<ReleaseRow>, String> {
         releases::list_releases_for_repo(self.require_pool()?, repo_id, include_drafts).await
     }
-    pub async fn update_release(&self, id: &str, title: &str, body: &str, draft: bool, prerelease: bool) -> Result<ReleaseRow, String> {
+    pub async fn update_release(
+        &self,
+        id: &str,
+        title: &str,
+        body: &str,
+        draft: bool,
+        prerelease: bool,
+    ) -> Result<ReleaseRow, String> {
         releases::update_release(self.require_pool()?, id, title, body, draft, prerelease).await
     }
     pub async fn delete_release(&self, id: &str) -> Result<(), String> {
         releases::delete_release(self.require_pool()?, id).await
     }
-    pub async fn list_assets_for_release(&self, release_id: &str) -> Result<Vec<ReleaseAssetRow>, String> {
+    pub async fn list_assets_for_release(
+        &self,
+        release_id: &str,
+    ) -> Result<Vec<ReleaseAssetRow>, String> {
         releases::list_assets_for_release(self.require_pool()?, release_id).await
     }
-    pub async fn find_release_asset_by_id(&self, id: &str) -> Result<Option<ReleaseAssetRow>, String> {
+    pub async fn find_release_asset_by_id(
+        &self,
+        id: &str,
+    ) -> Result<Option<ReleaseAssetRow>, String> {
         releases::find_asset_by_id(self.require_pool()?, id).await
     }
     pub async fn find_release_asset_by_filename(
@@ -3655,34 +3687,76 @@ impl Database {
     ) -> Result<Option<ReleaseAssetRow>, String> {
         releases::find_asset_by_release_filename(self.require_pool()?, release_id, filename).await
     }
-    pub async fn insert_release_asset(&self, id: &str, release_id: &str, filename: &str, content_type: &str, byte_size: i64, uploader_id: &str) -> Result<ReleaseAssetRow, String> {
-        releases::insert_asset(self.require_pool()?, id, release_id, filename, content_type, byte_size, uploader_id).await
+    pub async fn insert_release_asset(
+        &self,
+        id: &str,
+        release_id: &str,
+        filename: &str,
+        content_type: &str,
+        byte_size: i64,
+        uploader_id: &str,
+    ) -> Result<ReleaseAssetRow, String> {
+        releases::insert_asset(
+            self.require_pool()?,
+            id,
+            release_id,
+            filename,
+            content_type,
+            byte_size,
+            uploader_id,
+        )
+        .await
     }
-    pub async fn update_release_asset_bytes(&self, id: &str, content_type: &str, byte_size: i64) -> Result<ReleaseAssetRow, String> {
+    pub async fn update_release_asset_bytes(
+        &self,
+        id: &str,
+        content_type: &str,
+        byte_size: i64,
+    ) -> Result<ReleaseAssetRow, String> {
         releases::update_asset_bytes(self.require_pool()?, id, content_type, byte_size).await
     }
     pub async fn delete_release_asset(&self, id: &str) -> Result<(), String> {
         releases::delete_asset(self.require_pool()?, id).await
     }
-    pub async fn insert_repository_redirect(&self, id: &str, old_owner_slug: &str, old_name: &str, repo_id: &str, expires_at: &str) -> Result<RedirectRow, String> {
-        redirects::insert_redirect(self.require_pool()?, id, old_owner_slug, old_name, repo_id, expires_at).await
+    pub async fn insert_repository_redirect(
+        &self,
+        id: &str,
+        old_owner_slug: &str,
+        old_name: &str,
+        repo_id: &str,
+        expires_at: &str,
+    ) -> Result<RedirectRow, String> {
+        redirects::insert_redirect(
+            self.require_pool()?,
+            id,
+            old_owner_slug,
+            old_name,
+            repo_id,
+            expires_at,
+        )
+        .await
     }
-    pub async fn find_repository_redirect(&self, old_owner_slug: &str, old_name: &str) -> Result<Option<RedirectRow>, String> {
+    pub async fn find_repository_redirect(
+        &self,
+        old_owner_slug: &str,
+        old_name: &str,
+    ) -> Result<Option<RedirectRow>, String> {
         redirects::find_redirect(self.require_pool()?, old_owner_slug, old_name).await
     }
-    pub async fn delete_repository_redirect(&self, old_owner_slug: &str, old_name: &str) -> Result<(), String> {
+    pub async fn delete_repository_redirect(
+        &self,
+        old_owner_slug: &str,
+        old_name: &str,
+    ) -> Result<(), String> {
         redirects::delete_redirect(self.require_pool()?, old_owner_slug, old_name).await
     }
-    pub async fn purge_expired_repository_redirects(&self, now_rfc3339: &str) -> Result<u64, String> {
+    pub async fn purge_expired_repository_redirects(
+        &self,
+        now_rfc3339: &str,
+    ) -> Result<u64, String> {
         redirects::purge_expired_redirects(self.require_pool()?, now_rfc3339).await
     }
 
-    /// Wipe tenant + auth data so the instance returns to empty-setup (`needs_setup`).
-    /// Deletes repositories (cascades collaborators / PAT-repo links / issue domain
-    /// tables: issues, counters, comments, revisions, labels, assignees, reactions,
-    /// links), organizations (cascades members / invites / org-scoped labels), then
-    /// sessions, identities, email tokens, and users; resets auth settings to
-    /// local/log defaults with signup closed.
     // --- git LFS (D-LFS-02 / D-LFS-10) ---
 
     pub async fn get_repo_lfs_enabled(&self, repo_id: &str) -> Result<bool, String> {
@@ -3804,6 +3878,12 @@ impl Database {
         mcp_settings::update_mcp_settings(self.require_pool()?, enabled).await
     }
 
+    /// Wipe tenant + auth data so the instance returns to empty-setup (`needs_setup`).
+    /// Deletes repositories (cascades collaborators / PAT-repo links / issue domain
+    /// tables: issues, counters, comments, revisions, labels, assignees, reactions,
+    /// links), organizations (cascades members / invites / org-scoped labels), then
+    /// sessions, identities, email tokens, and users; resets auth settings to
+    /// local/log defaults with signup closed.
     pub async fn factory_reset_instance(&self) -> Result<(), String> {
         let pool = self.require_pool()?;
         // D-ACT-19: wipe Actions domain before cascading repo deletes (instance runners/tokens).
@@ -3958,6 +4038,7 @@ impl Database {
 
     // --- webhooks (Phase 18) ---
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn insert_webhook(
         &self,
         id: &str,
@@ -4001,10 +4082,7 @@ impl Database {
         mirrors::get_mirror_by_repo(self.require_pool()?, repository_id).await
     }
 
-    pub async fn get_mirror_by_id(
-        &self,
-        id: &str,
-    ) -> Result<Option<RepositoryMirrorRow>, String> {
+    pub async fn get_mirror_by_id(&self, id: &str) -> Result<Option<RepositoryMirrorRow>, String> {
         mirrors::get_mirror_by_id(self.require_pool()?, id).await
     }
 
@@ -4079,6 +4157,7 @@ impl Database {
         mirrors::set_webhook_secret(self.require_pool()?, mirror_id, ciphertext).await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn upsert_mirror_ref_result(
         &self,
         id: &str,
@@ -4142,6 +4221,7 @@ impl Database {
         webhooks::delete_webhook(self.require_pool()?, id).await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn insert_repo_activity(
         &self,
         id: &str,
@@ -4212,6 +4292,7 @@ impl Database {
 
     // --- audit events ---
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn insert_audit_event(
         &self,
         id: &str,
@@ -4290,6 +4371,7 @@ impl Database {
         webhooks::list_deliveries_for_webhook(self.require_pool()?, webhook_id, limit).await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn insert_webhook_delivery_attempt(
         &self,
         id: &str,

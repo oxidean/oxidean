@@ -83,7 +83,9 @@ async fn signup_and_login(
 
 async fn verify_user(db: &Database, user_id: &str) {
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    db.set_email_verified_at(user_id, &now).await.expect("verify");
+    db.set_email_verified_at(user_id, &now)
+        .await
+        .expect("verify");
 }
 
 async fn rpc_json(app: &axum::Router, cookie: &str, body: &str) -> serde_json::Value {
@@ -95,7 +97,6 @@ async fn rpc_json(app: &axum::Router, cookie: &str, body: &str) -> serde_json::V
     let bytes = res.into_body().collect().await.unwrap().to_bytes();
     serde_json::from_slice(&bytes).unwrap()
 }
-
 
 async fn commit_on_branch(
     bare: &std::path::Path,
@@ -125,7 +126,10 @@ async fn commit_on_branch(
         vec!["-C", wt_s, "commit", "-m", message],
         vec!["-C", wt_s, "push", "origin", "HEAD"],
     ] {
-        let status = std::process::Command::new("git").args(&args).status().unwrap();
+        let status = std::process::Command::new("git")
+            .args(&args)
+            .status()
+            .unwrap();
         assert!(status.success(), "git {args:?}");
     }
 }

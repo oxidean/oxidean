@@ -75,5 +75,3 @@ export function swBuildIdPlugin(): Plugin {
     },
   };
 }
-
-export { resolveSwBuildId, stampSwSource };

@@ -6,7 +6,7 @@
   "rules": {
     "typescript/no-redundant-type-constituents": "off"
   },
-  "ignorePatterns": ["**/routeTree.gen.ts", "dist/**", "coverage/**"],
+  "ignorePatterns": ["dist/**", "coverage/**", ".astro/**"],
   "env": {
     "builtin": true
   }

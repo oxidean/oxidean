@@ -1,3 +1,4 @@
+import { createElement } from "octane";
 import { cleanup, fireEvent, screen, waitFor } from "@octanejs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BYTE_UNIT_FACTORS } from "@/lib/byte-units";
@@ -22,6 +23,25 @@ vi.mock("@/lib/api-client", () => ({
     },
   },
 }));
+
+// @octanejs/recharts hits an octane 0.10 scoped-children bug
+// (RegisterGraphicalItemId invokes a `children` render-prop that the runtime
+// resolves before call). Stub the recharts primitives so the quota form tests
+// exercise the real page without the dependency's chart internals.
+vi.mock("@octanejs/recharts", () => {
+  const stub = (name: string) => {
+    const C = (_props: Record<string, unknown>) =>
+      createElement("div", { "data-recharts-stub": name });
+    return C;
+  };
+  return {
+    BarChart: stub("BarChart"),
+    Bar: stub("Bar"),
+    CartesianGrid: stub("CartesianGrid"),
+    XAxis: stub("XAxis"),
+    YAxis: stub("YAxis"),
+  };
+});
 
 const sysAdmin = {
   id: "u1",
@@ -76,27 +96,6 @@ const readyUsage = {
   ],
 };
 
-type LoaderShape =
-  | { kind: "unauthenticated" }
-  | { kind: "forbidden" }
-  | { kind: "error"; message: string }
-  | {
-      kind: "ready";
-      me: typeof sysAdmin;
-      settings: typeof readySettings;
-      usage: typeof readyUsage;
-    };
-
-let loaderData: LoaderShape | undefined;
-
-vi.mock("@octanejs/tanstack-router", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@octanejs/tanstack-router")>();
-  return {
-    ...actual,
-    useLoaderData: () => loaderData,
-  };
-});
-
 import { AdminLfsPage } from "./lfs";
 
 /**
@@ -126,12 +125,6 @@ describe("admin LFS quotas (D-LFS-12 / D-LFS-13 / D-LFS-19)", () => {
       ok: true,
       data: { ...readySettings, quota_repo_bytes_overridden: true },
     });
-    loaderData = {
-      kind: "ready",
-      me: sysAdmin,
-      settings: readySettings,
-      usage: readyUsage,
-    };
   });
 
   it("exports AdminLfsPage without @else if / bare Loading text and declares error/pending state", async () => {

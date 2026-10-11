@@ -4,7 +4,7 @@ import { pullBranchStatusQueryOptions, pullUpdateBranchMutationOptions } from "@
 import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api-client";
 
-export type PullUpdateBranchProps = {
+type PullUpdateBranchProps = {
   owner: string;
   repoName: string;
   number: number;

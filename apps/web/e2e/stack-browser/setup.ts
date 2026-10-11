@@ -11,8 +11,11 @@ beforeAll(async () => {
   requireStack();
 
   const web = webOrigin();
-  const res = await fetch(web).catch(() => null);
-  if (!res?.ok) {
+  // Cross-origin ping from the vitest browser context: oxidean-web serves no
+  // CORS headers (Vite dev used to), so probe with no-cors — an opaque
+  // response still proves the server is alive.
+  const res = await fetch(web, { mode: "no-cors" }).catch(() => null);
+  if (!res || (res.type !== "opaque" && !res.ok)) {
     throw new Error(`E2E_STACK=1 but web origin failed at ${web} — run make test-e2e-stack`);
   }
 });

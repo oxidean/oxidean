@@ -743,10 +743,7 @@ async fn lfs_quota_over_quota_upload_rejected() {
     assert_eq!(res2.status(), StatusCode::OK);
     let bytes2 = res2.into_body().collect().await.unwrap().to_bytes();
     let v2: serde_json::Value = serde_json::from_slice(&bytes2).unwrap();
-    assert_eq!(
-        v2["objects"][0]["error"]["code"], 507,
-        "repo quota — {v2}"
-    );
+    assert_eq!(v2["objects"][0]["error"]["code"], 507, "repo quota — {v2}");
 }
 
 /// Admin override RPC affects subsequent upload reject threshold.
@@ -865,12 +862,7 @@ async fn lfs_dedup_existing_oid_omits_upload_actions() {
     let (cookie_b, login_b) = signup_and_login(&app, "b@ex.com", "bown").await;
     verify_user(&db, login_b["data"]["id"].as_str().unwrap()).await;
 
-    async fn create_enabled(
-        app: &axum::Router,
-        db: &Database,
-        cookie: &str,
-        name: &str,
-    ) -> String {
+    async fn create_enabled(app: &axum::Router, db: &Database, cookie: &str, name: &str) -> String {
         let body = format!(
             r#"{{"procedure":"repo.create","input":{{"name":"{name}","visibility":"public","description":""}}}}"#
         );
@@ -980,8 +972,7 @@ async fn lfs_dedup_existing_oid_omits_upload_actions() {
     let b2 = r2.into_body().collect().await.unwrap().to_bytes();
     let v2: serde_json::Value = serde_json::from_slice(&b2).unwrap();
     assert!(
-        v2["objects"][0]["actions"].is_null()
-            || v2["objects"][0]["actions"]["upload"].is_null(),
+        v2["objects"][0]["actions"].is_null() || v2["objects"][0]["actions"]["upload"].is_null(),
         "second repo must omit upload — {v2}"
     );
     assert!(

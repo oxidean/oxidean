@@ -17,7 +17,7 @@ async fn package_quota_rejects_over_owner_limit() {
         .unwrap();
     let err = check_can_store(&db, "user", uid, 11).await.unwrap_err();
     assert!(err.contains("quota"), "{err}");
-    assert!(DEFAULT_OWNER_QUOTA_BYTES > 0);
+    const { assert!(DEFAULT_OWNER_QUOTA_BYTES > 0) };
 }
 
 #[tokio::test]

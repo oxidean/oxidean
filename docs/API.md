@@ -20,7 +20,7 @@ Session auth uses an **opaque HttpOnly cookie** named `oxidean_session` (not JWT
 
 **How to send credentials**
 
-- Browser / generated client: `credentials: "include"` so the cookie is sent same-origin (Vite proxy or Traefik).
+- Browser / generated client: `credentials: "include"` so the cookie is sent same-origin (`oxidean-web` proxy or Traefik).
 - Manual HTTP: include `Cookie: oxidean_session=<token>`.
 - Signup, login, and WorkOS/OIDC callbacks attach `Set-Cookie`. Logout / logout-all clear the cookie (`Max-Age=0`).
 
@@ -822,7 +822,7 @@ Settings UI: repository **Settings → Two-way mirror** (after Webhooks).
 
 ### Packages registry (OCI / npm / generic)
 
-Same-host path prefixes (Traefik/Vite must route to the API **before** the SPA):
+Same-host path prefixes (Traefik/`oxidean-web` must route to the API **before** the SPA shells):
 
 | Prefix | Clients | Notes |
 | --- | --- | --- |

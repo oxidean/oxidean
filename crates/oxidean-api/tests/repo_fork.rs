@@ -152,7 +152,9 @@ async fn repo_fork_public_ok_network_id() {
         forked["data"]["fork_network_id"].as_str().unwrap(),
         root_id.as_str()
     );
-    assert!(forked["data"]["forked_from"].is_object() || forked["data"]["forked_from_id"].is_string());
+    assert!(
+        forked["data"]["forked_from"].is_object() || forked["data"]["forked_from_id"].is_string()
+    );
 }
 
 #[tokio::test]
@@ -220,7 +222,11 @@ async fn repo_fork_head_valid_for_base() {
     use oxidean_api::repo::head_valid_for_base;
     assert!(head_valid_for_base("base-id", "base-id", Some("base-id")));
     assert!(head_valid_for_base("base-id", "fork-id", Some("base-id")));
-    assert!(!head_valid_for_base("base-id", "other-id", Some("other-root")));
+    assert!(!head_valid_for_base(
+        "base-id",
+        "other-id",
+        Some("other-root")
+    ));
     assert!(!head_valid_for_base("base-id", "other-id", None));
 }
 
@@ -304,10 +310,7 @@ async fn repo_fork_failed_when_hook_install_blocked() {
     );
 
     let dest = bare_repo_path(&repos, "failfork", "upstream").expect("dest path");
-    assert!(
-        !dest.exists(),
-        "compensate must remove leftover dest bare"
-    );
+    assert!(!dest.exists(), "compensate must remove leftover dest bare");
     let live = db
         .find_repository_by_owner_name(&fork_uid, "upstream")
         .await

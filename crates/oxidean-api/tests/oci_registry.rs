@@ -79,7 +79,10 @@ fn encode_b64(input: &[u8]) -> String {
 }
 
 fn basic_header(user: &str, password: &str) -> String {
-    format!("Basic {}", encode_b64(format!("{user}:{password}").as_bytes()))
+    format!(
+        "Basic {}",
+        encode_b64(format!("{user}:{password}").as_bytes())
+    )
 }
 
 async fn signup_login_pat(app: &axum::Router, db: &Database) -> (String, String) {
@@ -193,12 +196,7 @@ async fn oci_registry_v2_discovery() {
     support::unlock_signup(&db).await;
     let app = test_app(db, dir.path().join("pkg")).await;
     let res = app
-        .oneshot(
-            Request::builder()
-                .uri("/v2/")
-                .body(Body::empty())
-                .unwrap(),
-        )
+        .oneshot(Request::builder().uri("/v2/").body(Body::empty()).unwrap())
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::OK);
@@ -288,8 +286,14 @@ async fn oci_registry_tags_list() {
     let (_c, token) = signup_login_pat(&app, &db).await;
     let name = "ociowner/tags";
     let m = br#"{"schemaVersion":2}"#;
-    assert_eq!(put_manifest(&app, &token, name, "a", m).await, StatusCode::CREATED);
-    assert_eq!(put_manifest(&app, &token, name, "b", m).await, StatusCode::CREATED);
+    assert_eq!(
+        put_manifest(&app, &token, name, "a", m).await,
+        StatusCode::CREATED
+    );
+    assert_eq!(
+        put_manifest(&app, &token, name, "b", m).await,
+        StatusCode::CREATED
+    );
     let res = app
         .oneshot(
             Request::builder()

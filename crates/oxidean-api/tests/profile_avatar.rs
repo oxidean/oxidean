@@ -1,6 +1,5 @@
 //! AUTH-08: profile update + avatar multipart round-trip + traversal/size rejects.
 
-
 mod support;
 use std::sync::Arc;
 

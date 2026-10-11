@@ -532,7 +532,10 @@ async fn commit_on_branch(
         vec!["-C", wt_s, "commit", "-m", message],
         vec!["-C", wt_s, "push", "origin", "HEAD"],
     ] {
-        let status = std::process::Command::new("git").args(&args).status().unwrap();
+        let status = std::process::Command::new("git")
+            .args(&args)
+            .status()
+            .unwrap();
         assert!(status.success(), "git {args:?}");
     }
 }

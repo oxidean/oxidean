@@ -1,3 +1,5 @@
+/** Protocol versions the endpoint negotiates — keep in sync with mcp.rs. */
+const MCP_PROTOCOL_VERSIONS = ["2024-11-05", "2025-03-26", "2025-06-18"];
 /**
  * WebMCP surface (AGT-02): advertise the instance MCP endpoint to browser-side
  * agents and bridge the tools a page registers to `POST /api/mcp`.
@@ -21,18 +23,17 @@ export const MCP_ENDPOINT_PATH = "/api/mcp";
 
 /**
  * WebMCP discovery document (`rel="webmcp"` link target). Served by the web
- * app — see `vite-plugins/webmcp-well-known.ts`.
+ * app — see `crates/oxidean-web/src/wellknown.rs`.
  */
 export const WEBMCP_WELL_KNOWN_PATH = "/.well-known/webmcp";
 
 /**
  * MCP server metadata document (`.well-known` URI in the style of the
- * discovery proposals circulating for MCP servers). Same plugin.
+ * discovery proposals circulating for MCP servers). Same endpoint.
  */
 export const MCP_WELL_KNOWN_PATH = "/.well-known/mcp";
 
 /** Protocol versions the endpoint negotiates — keep in sync with mcp.rs. */
-export const MCP_PROTOCOL_VERSIONS = ["2024-11-05", "2025-03-26", "2025-06-18"];
 
 /**
  * Declarative WebMCP surface (the spec's second API): `toolname` /

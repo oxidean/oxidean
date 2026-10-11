@@ -52,12 +52,7 @@ fn map_package_sqlite(row: &sqlx::sqlite::SqliteRow) -> PackageRow {
 }
 
 /// Dialect-agnostic helpers via raw SQL with `?` / `$1` branching — keep simple inserts.
-
-pub async fn upsert_blob(
-    pool: &DbPool,
-    digest: &str,
-    size_bytes: i64,
-) -> Result<(), String> {
+pub async fn upsert_blob(pool: &DbPool, digest: &str, size_bytes: i64) -> Result<(), String> {
     match pool {
         DbPool::Postgres(p) => {
             sqlx::query(
@@ -97,11 +92,7 @@ pub async fn upsert_blob(
     Ok(())
 }
 
-pub async fn adjust_blob_refcount(
-    pool: &DbPool,
-    digest: &str,
-    delta: i64,
-) -> Result<i64, String> {
+pub async fn adjust_blob_refcount(pool: &DbPool, digest: &str, delta: i64) -> Result<i64, String> {
     match pool {
         DbPool::Postgres(p) => {
             let row = sqlx::query(

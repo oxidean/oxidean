@@ -151,10 +151,7 @@ mod tests {
     #[test]
     fn redact_url_hides_password() {
         let redacted = redact_url("postgres://oxidean:hunter2@db:5432/oxidean");
-        assert!(
-            !redacted.contains("hunter2"),
-            "password leaked: {redacted}"
-        );
+        assert!(!redacted.contains("hunter2"), "password leaked: {redacted}");
         assert!(redacted.contains("oxidean:***@db:5432/oxidean"));
     }
 }

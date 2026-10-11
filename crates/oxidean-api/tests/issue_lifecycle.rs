@@ -102,10 +102,7 @@ async fn create_repo(app: &axum::Router, cookie: &str, name: &str, visibility: &
 async fn issue_lifecycle_create_allocates_per_repo_number() {
     let dir = tempfile::tempdir().expect("tempdir");
     let repos = dir.path().join("repos");
-    let url = format!(
-        "sqlite:{}",
-        dir.path().join("issue_create_n1.db").display()
-    );
+    let url = format!("sqlite:{}", dir.path().join("issue_create_n1.db").display());
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
@@ -164,10 +161,7 @@ async fn issue_lifecycle_create_allocates_per_repo_number() {
 async fn issue_lifecycle_second_create_monotonic_number() {
     let dir = tempfile::tempdir().expect("tempdir");
     let repos = dir.path().join("repos");
-    let url = format!(
-        "sqlite:{}",
-        dir.path().join("issue_create_n2.db").display()
-    );
+    let url = format!("sqlite:{}", dir.path().join("issue_create_n2.db").display());
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
@@ -223,10 +217,7 @@ async fn issue_lifecycle_second_create_monotonic_number() {
 async fn issue_lifecycle_edit_title_body() {
     let dir = tempfile::tempdir().expect("tempdir");
     let repos = dir.path().join("repos");
-    let url = format!(
-        "sqlite:{}",
-        dir.path().join("issue_edit.db").display()
-    );
+    let url = format!("sqlite:{}", dir.path().join("issue_edit.db").display());
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
@@ -264,8 +255,7 @@ async fn issue_lifecycle_edit_title_body() {
     assert_eq!(update_v["data"]["body"], "v2");
 
     // Read collaborator cannot update (D-ISS-03 / D-ISS-20).
-    let (reader_cookie, reader_v) =
-        signup_and_login(&app, "editread@ex.com", "editread").await;
+    let (reader_cookie, reader_v) = signup_and_login(&app, "editread@ex.com", "editread").await;
     let reader_id = reader_v["data"]["id"].as_str().expect("id");
     verify_user(&db, reader_id).await;
     let add = app
@@ -301,10 +291,7 @@ async fn issue_lifecycle_edit_title_body() {
 async fn issue_lifecycle_close_and_reopen() {
     let dir = tempfile::tempdir().expect("tempdir");
     let repos = dir.path().join("repos");
-    let url = format!(
-        "sqlite:{}",
-        dir.path().join("issue_close.db").display()
-    );
+    let url = format!("sqlite:{}", dir.path().join("issue_close.db").display());
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
@@ -353,10 +340,7 @@ async fn issue_lifecycle_close_and_reopen() {
     let reopen_v: serde_json::Value = serde_json::from_slice(&reopen_b).unwrap();
     assert_eq!(reopen_v["ok"], true, "reopen — {reopen_v}");
     assert_eq!(reopen_v["data"]["state"], "open");
-    assert!(
-        reopen_v["data"]["closed_at"].is_null()
-            || reopen_v["data"].get("closed_at").is_none()
-    );
+    assert!(reopen_v["data"]["closed_at"].is_null() || reopen_v["data"].get("closed_at").is_none());
 }
 
 /// Full edit history trail for title/body (ISS-01 / D-ISS-04).
@@ -364,10 +348,7 @@ async fn issue_lifecycle_close_and_reopen() {
 async fn issue_history_full_title_body_trail() {
     let dir = tempfile::tempdir().expect("tempdir");
     let repos = dir.path().join("repos");
-    let url = format!(
-        "sqlite:{}",
-        dir.path().join("issue_hist.db").display()
-    );
+    let url = format!("sqlite:{}", dir.path().join("issue_hist.db").display());
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
@@ -549,14 +530,20 @@ async fn issue_list_filters_and_offset_pagination() {
     )
     .await;
     assert_eq!(open_default["ok"], true, "{open_default}");
-    assert_eq!(open_default["data"]["total"], 2, "default open total — {open_default}");
+    assert_eq!(
+        open_default["data"]["total"], 2,
+        "default open total — {open_default}"
+    );
     let open_nums: Vec<i64> = open_default["data"]["issues"]
         .as_array()
         .unwrap()
         .iter()
         .map(|i| i["number"].as_i64().unwrap())
         .collect();
-    assert!(!open_nums.contains(&3), "closed #3 excluded from default open");
+    assert!(
+        !open_nums.contains(&3),
+        "closed #3 excluded from default open"
+    );
     assert!(open_nums.contains(&1) && open_nums.contains(&2));
 
     let closed_only = rpc_json(
@@ -596,7 +583,10 @@ async fn issue_list_filters_and_offset_pagination() {
     assert_eq!(by_author["ok"], true, "{by_author}");
     assert_eq!(by_author["data"]["total"], 1);
     assert_eq!(by_author["data"]["issues"][0]["number"], 2);
-    assert_eq!(by_author["data"]["issues"][0]["author_username"], "filtwrite");
+    assert_eq!(
+        by_author["data"]["issues"][0]["author_username"],
+        "filtwrite"
+    );
 
     let by_label = rpc_json(
         &app,
@@ -754,7 +744,10 @@ async fn issue_public_participation_read_only_user() {
         r#"{"procedure":"issue.close","input":{"owner":"pubown","name":"town","number":1}}"#,
     )
     .await;
-    assert_eq!(close_denied["ok"], false, "cannot close others' — {close_denied}");
+    assert_eq!(
+        close_denied["ok"], false,
+        "cannot close others' — {close_denied}"
+    );
     assert_eq!(close_denied["error"]["code"], "repo.not_found");
 
     // Cannot moderate: labels/assignees stay Write+.
@@ -764,14 +757,20 @@ async fn issue_public_participation_read_only_user() {
         r#"{"procedure":"issue.labels.set","input":{"owner":"pubown","name":"town","number":1,"labelIds":[]}}"#,
     )
     .await;
-    assert_eq!(labels_denied["ok"], false, "labels stay Write+ — {labels_denied}");
+    assert_eq!(
+        labels_denied["ok"], false,
+        "labels stay Write+ — {labels_denied}"
+    );
     let assign_denied = rpc_json(
         &app,
         &stranger_cookie,
         r#"{"procedure":"issue.assignees.set","input":{"owner":"pubown","name":"town","number":1,"userIds":[]}}"#,
     )
     .await;
-    assert_eq!(assign_denied["ok"], false, "assignees stay Write+ — {assign_denied}");
+    assert_eq!(
+        assign_denied["ok"], false,
+        "assignees stay Write+ — {assign_denied}"
+    );
 
     // Anonymous cannot participate.
     let anon = app

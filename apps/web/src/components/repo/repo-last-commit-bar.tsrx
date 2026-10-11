@@ -63,7 +63,7 @@ export function RepoLastCommitBar({
         >
           {tip.short_sha as string}
         </AppLink>
-        <time dateTime={tip.authored_at as string}>
+        <time datetime={tip.authored_at as string}>
           {relativeCommitTime(tip.authored_at) as string}
         </time>
         @if (commitCount != null && commitCount > 0) {

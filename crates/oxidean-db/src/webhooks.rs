@@ -114,20 +114,20 @@ macro_rules! map_attempt {
         let row = $row;
         let attempt_number: i64 = row
             .try_get::<i64, _>("attempt_number")
-            .or_else(|_| row.try_get::<i32, _>("attempt_number").map(|v| i64::from(v)))
+            .or_else(|_| {
+                row.try_get::<i32, _>("attempt_number")
+                    .map(|v| i64::from(v))
+            })
             .map_err(|e| format!("attempt_number: {e}"))?;
         let http_status: Option<i32> = row
             .try_get::<i32, _>("http_status")
             .ok()
-            .or_else(|| {
-                row.try_get::<i64, _>("http_status")
-                    .ok()
-                    .map(|v| v as i32)
-            });
-        let duration_ms: Option<i64> = row
-            .try_get::<i64, _>("duration_ms")
-            .ok()
-            .or_else(|| row.try_get::<i32, _>("duration_ms").ok().map(|v| i64::from(v)));
+            .or_else(|| row.try_get::<i64, _>("http_status").ok().map(|v| v as i32));
+        let duration_ms: Option<i64> = row.try_get::<i64, _>("duration_ms").ok().or_else(|| {
+            row.try_get::<i32, _>("duration_ms")
+                .ok()
+                .map(|v| i64::from(v))
+        });
         WebhookDeliveryAttemptRow {
             id: row.try_get("id").map_err(|e| format!("id: {e}"))?,
             delivery_id: row
@@ -157,6 +157,7 @@ const ATT_SEL_PG: &str = "SELECT id, delivery_id, attempt_number, to_char(attemp
 const ATT_SEL_MY: &str = "SELECT id, delivery_id, attempt_number, DATE_FORMAT(attempted_at, '%Y-%m-%dT%H:%i:%sZ') AS attempted_at, http_status, error_message, duration_ms, response_snippet FROM webhook_delivery_attempts";
 const ATT_SEL_SQ: &str = "SELECT id, delivery_id, attempt_number, strftime('%Y-%m-%dT%H:%M:%SZ', attempted_at) AS attempted_at, http_status, error_message, duration_ms, response_snippet FROM webhook_delivery_attempts";
 
+#[allow(clippy::too_many_arguments)]
 pub async fn insert_webhook(
     pool: &DbPool,
     id: &str,
@@ -226,7 +227,7 @@ pub async fn get_webhook(pool: &DbPool, id: &str) -> Result<WebhookRow, String> 
     match pool {
         DbPool::Postgres(pool) => {
             let q = format!("{HOOK_SEL_PG} WHERE id = $1");
-            let row = sqlx::query(&q)
+            let row = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(id)
                 .fetch_optional(pool)
                 .await
@@ -236,7 +237,7 @@ pub async fn get_webhook(pool: &DbPool, id: &str) -> Result<WebhookRow, String> 
         }
         DbPool::MySql(pool) => {
             let q = format!("{HOOK_SEL_MY} WHERE id = ?");
-            let row = sqlx::query(&q)
+            let row = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(id)
                 .fetch_optional(pool)
                 .await
@@ -246,7 +247,7 @@ pub async fn get_webhook(pool: &DbPool, id: &str) -> Result<WebhookRow, String> 
         }
         DbPool::Sqlite(pool) => {
             let q = format!("{HOOK_SEL_SQ} WHERE id = ?");
-            let row = sqlx::query(&q)
+            let row = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(id)
                 .fetch_optional(pool)
                 .await
@@ -264,7 +265,7 @@ pub async fn list_webhooks_for_repo(
     match pool {
         DbPool::Postgres(pool) => {
             let q = format!("{HOOK_SEL_PG} WHERE repository_id = $1 ORDER BY created_at DESC");
-            let rows = sqlx::query(&q)
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(repository_id)
                 .fetch_all(pool)
                 .await
@@ -273,7 +274,7 @@ pub async fn list_webhooks_for_repo(
         }
         DbPool::MySql(pool) => {
             let q = format!("{HOOK_SEL_MY} WHERE repository_id = ? ORDER BY created_at DESC");
-            let rows = sqlx::query(&q)
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(repository_id)
                 .fetch_all(pool)
                 .await
@@ -282,7 +283,7 @@ pub async fn list_webhooks_for_repo(
         }
         DbPool::Sqlite(pool) => {
             let q = format!("{HOOK_SEL_SQ} WHERE repository_id = ? ORDER BY created_at DESC");
-            let rows = sqlx::query(&q)
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(repository_id)
                 .fetch_all(pool)
                 .await
@@ -470,7 +471,7 @@ pub async fn get_delivery(pool: &DbPool, id: &str) -> Result<WebhookDeliveryRow,
     match pool {
         DbPool::Postgres(pool) => {
             let q = format!("{DEL_SEL_PG} WHERE id = $1");
-            let row = sqlx::query(&q)
+            let row = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(id)
                 .fetch_optional(pool)
                 .await
@@ -480,7 +481,7 @@ pub async fn get_delivery(pool: &DbPool, id: &str) -> Result<WebhookDeliveryRow,
         }
         DbPool::MySql(pool) => {
             let q = format!("{DEL_SEL_MY} WHERE id = ?");
-            let row = sqlx::query(&q)
+            let row = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(id)
                 .fetch_optional(pool)
                 .await
@@ -490,7 +491,7 @@ pub async fn get_delivery(pool: &DbPool, id: &str) -> Result<WebhookDeliveryRow,
         }
         DbPool::Sqlite(pool) => {
             let q = format!("{DEL_SEL_SQ} WHERE id = ?");
-            let row = sqlx::query(&q)
+            let row = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(id)
                 .fetch_optional(pool)
                 .await
@@ -510,7 +511,7 @@ pub async fn list_deliveries_for_webhook(
     match pool {
         DbPool::Postgres(pool) => {
             let q = format!("{DEL_SEL_PG} WHERE webhook_id = $1 ORDER BY created_at DESC LIMIT $2");
-            let rows = sqlx::query(&q)
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(webhook_id)
                 .bind(limit)
                 .fetch_all(pool)
@@ -520,7 +521,7 @@ pub async fn list_deliveries_for_webhook(
         }
         DbPool::MySql(pool) => {
             let q = format!("{DEL_SEL_MY} WHERE webhook_id = ? ORDER BY created_at DESC LIMIT ?");
-            let rows = sqlx::query(&q)
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(webhook_id)
                 .bind(limit)
                 .fetch_all(pool)
@@ -530,7 +531,7 @@ pub async fn list_deliveries_for_webhook(
         }
         DbPool::Sqlite(pool) => {
             let q = format!("{DEL_SEL_SQ} WHERE webhook_id = ? ORDER BY created_at DESC LIMIT ?");
-            let rows = sqlx::query(&q)
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(webhook_id)
                 .bind(limit)
                 .fetch_all(pool)
@@ -541,6 +542,7 @@ pub async fn list_deliveries_for_webhook(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn insert_delivery_attempt(
     pool: &DbPool,
     id: &str,
@@ -609,10 +611,9 @@ pub async fn latest_attempt_for_delivery(
 ) -> Result<Option<WebhookDeliveryAttemptRow>, String> {
     match pool {
         DbPool::Postgres(pool) => {
-            let q = format!(
-                "{ATT_SEL_PG} WHERE delivery_id = $1 ORDER BY attempt_number DESC LIMIT 1"
-            );
-            let row = sqlx::query(&q)
+            let q =
+                format!("{ATT_SEL_PG} WHERE delivery_id = $1 ORDER BY attempt_number DESC LIMIT 1");
+            let row = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(delivery_id)
                 .fetch_optional(pool)
                 .await
@@ -623,10 +624,9 @@ pub async fn latest_attempt_for_delivery(
             }
         }
         DbPool::MySql(pool) => {
-            let q = format!(
-                "{ATT_SEL_MY} WHERE delivery_id = ? ORDER BY attempt_number DESC LIMIT 1"
-            );
-            let row = sqlx::query(&q)
+            let q =
+                format!("{ATT_SEL_MY} WHERE delivery_id = ? ORDER BY attempt_number DESC LIMIT 1");
+            let row = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(delivery_id)
                 .fetch_optional(pool)
                 .await
@@ -637,10 +637,9 @@ pub async fn latest_attempt_for_delivery(
             }
         }
         DbPool::Sqlite(pool) => {
-            let q = format!(
-                "{ATT_SEL_SQ} WHERE delivery_id = ? ORDER BY attempt_number DESC LIMIT 1"
-            );
-            let row = sqlx::query(&q)
+            let q =
+                format!("{ATT_SEL_SQ} WHERE delivery_id = ? ORDER BY attempt_number DESC LIMIT 1");
+            let row = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(delivery_id)
                 .fetch_optional(pool)
                 .await
@@ -724,7 +723,7 @@ pub async fn list_pending_deliveries(
             let q = format!(
                 "{DEL_SEL_PG} WHERE status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= now()) ORDER BY created_at ASC LIMIT $1"
             );
-            let rows = sqlx::query(&q)
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(limit)
                 .fetch_all(pool)
                 .await
@@ -735,7 +734,7 @@ pub async fn list_pending_deliveries(
             let q = format!(
                 "{DEL_SEL_MY} WHERE status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= CURRENT_TIMESTAMP) ORDER BY created_at ASC LIMIT ?"
             );
-            let rows = sqlx::query(&q)
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(limit)
                 .fetch_all(pool)
                 .await
@@ -746,7 +745,7 @@ pub async fn list_pending_deliveries(
             let q = format!(
                 "{DEL_SEL_SQ} WHERE status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= strftime('%Y-%m-%d %H:%M:%S','now')) ORDER BY created_at ASC LIMIT ?"
             );
-            let rows = sqlx::query(&q)
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(limit)
                 .fetch_all(pool)
                 .await

@@ -6,7 +6,7 @@ import { MarkdownWritePreview } from "@/components/repo/markdown-write-preview";
 import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api-client";
 
-export type PullReviewsProps = {
+type PullReviewsProps = {
   owner: string;
   repoName: string;
   number: number;

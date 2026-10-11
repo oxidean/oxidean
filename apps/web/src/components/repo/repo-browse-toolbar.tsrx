@@ -7,7 +7,7 @@ import { buttonVariants } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
+  DropdownMenuLinkItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { mkdirHref, newFileHref, uploadHref } from "@/lib/repo-browse";
@@ -43,10 +43,6 @@ export function RepoBrowseToolbar({
 }: RepoBrowseToolbarProps) @{
   const mode = showPathCrumbs ? "tree" : "home";
 
-  function go(href: string) {
-    window.location.assign(href);
-  }
-
   <div className="mb-4 flex flex-wrap items-center gap-3" data-testid="repo-browse-toolbar">
     <RefSelect
       owner={owner}
@@ -77,27 +73,27 @@ export function RepoBrowseToolbar({
             <ChevronDown aria-hidden size={14} />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem
+            <DropdownMenuLinkItem
               data-testid="add-file-new"
-              onClick={() => go(newFileHref(owner, repo, refName, path))}
+              href={newFileHref(owner, repo, refName, path)}
             >
               <FilePlus2 aria-hidden size={14} />
               Create new file
-            </DropdownMenuItem>
-            <DropdownMenuItem
+            </DropdownMenuLinkItem>
+            <DropdownMenuLinkItem
               data-testid="add-file-mkdir"
-              onClick={() => go(mkdirHref(owner, repo, refName, path))}
+              href={mkdirHref(owner, repo, refName, path)}
             >
               <FolderPlus aria-hidden size={14} />
               Create directory
-            </DropdownMenuItem>
-            <DropdownMenuItem
+            </DropdownMenuLinkItem>
+            <DropdownMenuLinkItem
               data-testid="add-file-upload"
-              onClick={() => go(uploadHref(owner, repo, refName, path))}
+              href={uploadHref(owner, repo, refName, path)}
             >
               <Upload aria-hidden size={14} />
               Upload files
-            </DropdownMenuItem>
+            </DropdownMenuLinkItem>
           </DropdownMenuContent>
         </DropdownMenu>;
       }

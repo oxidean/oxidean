@@ -1,4 +1,5 @@
-import { createFileRoute, useLoaderData } from "@octanejs/tanstack-router";
+import { queryOptions, useQuery } from "@octanejs/tanstack-query";
+import { AppPage } from "@/components/app-page";
 import type { PatListItem, UserPublic } from "@oxidean/api-client";
 import { useEffect, useState } from "octane";
 import { ChevronDown } from "@octanejs/lucide";
@@ -8,48 +9,51 @@ import { buttonVariants } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
+  DropdownMenuLinkItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { apiClient } from "@/lib/api-client";
 import { fetchPatList, fetchSessionMe } from "@/lib/ssr-auth";
 import { cn } from "@/lib/utils";
 
-export type TokensLoaderData =
+type TokensLoaderData =
   | { kind: "unauthenticated" }
   | { kind: "error"; message: string }
   | { kind: "ready"; user: UserPublic; tokens: PatListItem[] };
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
 
-export const Route = createFileRoute("/settings/tokens/")({
-  component: TokensPage,
-  head: () => ({ meta: [{ title: "Personal access tokens · Oxidean" }] }),
-  loader: async (): Promise<TokensLoaderData> => {
-    try {
-      const res = await fetchSessionMe();
-      if (!res.ok) {
-        if (res.error.code === "auth.unauthenticated") {
-          return { kind: "unauthenticated" };
+function settingsTokensQueryOptions() {
+  return queryOptions({
+    queryKey: ["settings", "settingsTokens"],
+    queryFn: async (): Promise<TokensLoaderData> => {
+      try {
+        const res = await fetchSessionMe();
+        if (!res.ok) {
+          if (res.error.code === "auth.unauthenticated") {
+            return { kind: "unauthenticated" };
+          }
+          return {
+            kind: "error",
+            message: res.error.message || "Could not load session.",
+          };
         }
-        return {
-          kind: "error",
-          message: res.error.message || "Could not load session.",
-        };
+        const listRes = await fetchPatList();
+        if (!listRes.ok) {
+          return {
+            kind: "error",
+            message: listRes.error.message || "Could not load tokens.",
+          };
+        }
+        return { kind: "ready", user: res.data, tokens: listRes.data };
+      } catch {
+        return { kind: "error", message: NETWORK_ERROR };
       }
-      const listRes = await fetchPatList();
-      if (!listRes.ok) {
-        return {
-          kind: "error",
-          message: listRes.error.message || "Could not load tokens.",
-        };
-      }
-      return { kind: "ready", user: res.data, tokens: listRes.data };
-    } catch {
-      return { kind: "error", message: NETWORK_ERROR };
-    }
-  },
-});
+    },
+    retry: false,
+    staleTime: 30_000,
+  });
+}
 
 type Phase =
   | { kind: "loading" }
@@ -58,7 +62,13 @@ type Phase =
 
 /** Exported for tokens.integration.test.ts (GIT-11 / D-14). */
 export function TokensPage() @{
-  const loaderData = useLoaderData({ from: "/settings/tokens/" }) as TokensLoaderData | undefined;
+  <AppPage>
+    <TokensContent />
+  </AppPage>;
+}
+
+function TokensContent() @{
+  const loaderData = useQuery(settingsTokensQueryOptions()).data;
 
   useEffect(() => {
     if (loaderData?.kind === "unauthenticated") {
@@ -163,20 +173,10 @@ export function TokensPage() @{
               <ChevronDown aria-hidden size={16} />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="min-w-48">
-              <DropdownMenuItem
-                onClick={() => {
-                  window.location.assign("/settings/tokens/new");
-                }}
-              >
-                Classic token
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => {
-                  window.location.assign("/settings/tokens/new/fine-grained");
-                }}
-              >
+              <DropdownMenuLinkItem href="/settings/tokens/new">Classic token</DropdownMenuLinkItem>
+              <DropdownMenuLinkItem href="/settings/tokens/new/fine-grained">
                 Fine-grained token
-              </DropdownMenuItem>
+              </DropdownMenuLinkItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>

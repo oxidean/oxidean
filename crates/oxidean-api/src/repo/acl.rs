@@ -4,9 +4,9 @@
 //! stays separate (web → `repo.not_found`; git private unauth → 401, D-21).
 //! Callers map HTTP status — this module never embeds 401.
 
+use chrono::Utc;
 use oxidean_core::AppError;
 use oxidean_db::{Database, RepositoryRow};
-use chrono::Utc;
 
 use crate::rpc::RpcCtx;
 
@@ -193,10 +193,7 @@ impl OwnerRef {
 }
 
 /// Resolve shared slug → user (first) or organization. Missing → `Ok(None)`.
-pub async fn resolve_owner_slug(
-    db: &Database,
-    slug: &str,
-) -> Result<Option<OwnerRef>, String> {
+pub async fn resolve_owner_slug(db: &Database, slug: &str) -> Result<Option<OwnerRef>, String> {
     let slug = slug.trim();
     if slug.is_empty() {
         return Ok(None);

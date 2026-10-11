@@ -4,9 +4,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use oxidean_db::{Database, RepositoryMirrorRow};
-use oxidean_git::{
-    validate_remote_url, GitBackend, RemoteAuthKind, RemoteCredentials,
-};
+use oxidean_git::{validate_remote_url, GitBackend, RemoteAuthKind, RemoteCredentials};
 use uuid::Uuid;
 
 use crate::actions::secrets::{decrypt_secret, encrypt_secret};
@@ -59,9 +57,7 @@ pub async fn run_mirror_sync(
             Ok(())
         }
         Err(e) => {
-            let _ = db
-                .update_mirror_status(mirror_id, "error", &e, true)
-                .await;
+            let _ = db.update_mirror_status(mirror_id, "error", &e, true).await;
             Err(e)
         }
     }
@@ -78,8 +74,7 @@ async fn run_mirror_sync_inner(
         .await?
         .ok_or_else(|| "repository not found".to_string())?;
     let owner_slug = owner_slug_for_repo(db, &repo).await?;
-    let bare = bare_repo_path(repos_dir, &owner_slug, &repo.name)
-        .map_err(|e| e.message.clone())?;
+    let bare = bare_repo_path(repos_dir, &owner_slug, &repo.name).map_err(|e| e.message.clone())?;
 
     let credentials = credentials_from_mirror(mirror)?;
     let url = validate_remote_url(&mirror.remote_url)
@@ -291,7 +286,11 @@ async fn run_exact_sync(
         record_outcome(db, &mirror.id, &local_ref, &outcome).await?;
 
         // Agreed tip for snapshot: surviving side after sync.
-        match (outcome.outcome.as_str(), local_oid.as_deref(), remote_oid.as_deref()) {
+        match (
+            outcome.outcome.as_str(),
+            local_oid.as_deref(),
+            remote_oid.as_deref(),
+        ) {
             ("error", _, _) => {
                 // Keep prior snapshot entry if any so deletes can retry.
                 if let Some(prev) = snapshot.get(&local_ref) {
@@ -348,7 +347,11 @@ async fn run_exact_sync(
         }
         record_outcome(db, &mirror.id, &local_ref, &outcome).await?;
 
-        match (outcome.outcome.as_str(), local_oid.as_deref(), remote_oid.as_deref()) {
+        match (
+            outcome.outcome.as_str(),
+            local_oid.as_deref(),
+            remote_oid.as_deref(),
+        ) {
             ("error", _, _) => {
                 if let Some(prev) = snapshot.get(&local_ref) {
                     next_snapshot.insert(local_ref.clone(), prev.clone());
@@ -375,25 +378,20 @@ async fn run_exact_sync(
     }
 
     if !had_error {
-        let snap_json =
-            serde_json::to_string(&next_snapshot).unwrap_or_else(|_| "{}".to_string());
+        let snap_json = serde_json::to_string(&next_snapshot).unwrap_or_else(|_| "{}".to_string());
         db.update_mirror_ref_snapshot(&mirror.id, &snap_json)
             .await?;
         Ok("ok")
     } else {
         // Still persist partial snapshot progress so baselines advance when possible.
-        let snap_json =
-            serde_json::to_string(&next_snapshot).unwrap_or_else(|_| "{}".to_string());
-        let _ = db
-            .update_mirror_ref_snapshot(&mirror.id, &snap_json)
-            .await;
+        let snap_json = serde_json::to_string(&next_snapshot).unwrap_or_else(|_| "{}".to_string());
+        let _ = db.update_mirror_ref_snapshot(&mirror.id, &snap_json).await;
         Ok("error")
     }
 }
 
 fn parse_ref_snapshot(raw: &str) -> HashMap<String, String> {
-    serde_json::from_str::<HashMap<String, String>>(raw.trim())
-        .unwrap_or_default()
+    serde_json::from_str::<HashMap<String, String>>(raw.trim()).unwrap_or_default()
 }
 
 async fn cleanup_mirror_helper_branches(git: &dyn GitBackend, bare: &Path) {
@@ -409,6 +407,7 @@ async fn cleanup_mirror_helper_branches(git: &dyn GitBackend, bare: &Path) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn exact_sync_one_ref(
     db: &Database,
     git: &dyn GitBackend,
@@ -446,8 +445,16 @@ async fn exact_sync_one_ref(
                 )
                 .await
             } else {
-                exact_force_remote(git, bare, url, credentials, local_ref, l, "exact: local LWW")
-                    .await
+                exact_force_remote(
+                    git,
+                    bare,
+                    url,
+                    credentials,
+                    local_ref,
+                    l,
+                    "exact: local LWW",
+                )
+                .await
             }
         }
         (None, Some(r)) => {
@@ -496,6 +503,7 @@ async fn exact_sync_one_ref(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn exact_force_local(
     db: &Database,
     git: &dyn GitBackend,
@@ -507,9 +515,7 @@ async fn exact_force_local(
     detail: &str,
 ) -> RefOutcome {
     if is_branch {
-        let branch = local_ref
-            .strip_prefix("refs/heads/")
-            .unwrap_or(local_ref);
+        let branch = local_ref.strip_prefix("refs/heads/").unwrap_or(local_ref);
         if let Ok(eff) = effective_for_branch(db, repository_id, branch).await {
             if evaluate_push(
                 &eff,
@@ -581,9 +587,7 @@ async fn exact_delete_local(
     is_branch: bool,
 ) -> RefOutcome {
     if is_branch {
-        let branch = local_ref
-            .strip_prefix("refs/heads/")
-            .unwrap_or(local_ref);
+        let branch = local_ref.strip_prefix("refs/heads/").unwrap_or(local_ref);
         if let Ok(eff) = effective_for_branch(db, repository_id, branch).await {
             if evaluate_push(
                 &eff,
@@ -691,6 +695,7 @@ struct RefOutcome {
     detail: String,
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn sync_branch(
     db: &Database,
     git: &dyn GitBackend,
@@ -703,16 +708,22 @@ async fn sync_branch(
     local_oid: Option<&str>,
     remote_oid: &str,
 ) -> RefOutcome {
-    let branch = local_ref
-        .strip_prefix("refs/heads/")
-        .unwrap_or(local_ref);
+    let branch = local_ref.strip_prefix("refs/heads/").unwrap_or(local_ref);
 
     match local_oid {
         None => {
             // Create local from remote (through FF push path for hooks).
-            if let Err(e) =
-                apply_local_ff(db, git, bare, mirror_id, repository_id, local_ref, remote_oid, false)
-                    .await
+            if let Err(e) = apply_local_ff(
+                db,
+                git,
+                bare,
+                mirror_id,
+                repository_id,
+                local_ref,
+                remote_oid,
+                false,
+            )
+            .await
             {
                 return RefOutcome {
                     outcome: "error".into(),
@@ -849,10 +860,7 @@ async fn sync_tag(
     remote_oid: &str,
 ) -> RefOutcome {
     match local_oid {
-        None => match git
-            .fast_forward_ref(bare, local_ref, remote_oid)
-            .await
-        {
+        None => match git.fast_forward_ref(bare, local_ref, remote_oid).await {
             // Tags: create via update — fast_forward_ref uses refs/heads path.
             // For tags, push into bare with update-ref via a dedicated path:
             Ok(()) => RefOutcome {
@@ -863,7 +871,7 @@ async fn sync_tag(
             },
             Err(_) => {
                 // Fallback: push from a temp tracking ref by fetching already done —
-                // use push to local? For tags, call update via git push . 
+                // use push to local? For tags, call update via git push .
                 match push_tag_local(git, bare, local_ref, remote_oid).await {
                     Ok(()) => RefOutcome {
                         outcome: "ff_in".into(),
@@ -913,9 +921,7 @@ async fn push_tag_local(
     // Use fast_forward_ref only for heads; for tags create via clone+push.
     // Simpler: call git update-ref through a worktree push of an annotated/lightweight tag.
     // We reuse GitBackend by temporarily using branch_create-like path — push tag ref.
-    let bare_s = bare
-        .to_str()
-        .ok_or_else(|| "non-utf8 bare".to_string())?;
+    let bare_s = bare.to_str().ok_or_else(|| "non-utf8 bare".to_string())?;
     // Ensure object present then update-ref (tags typically don't run branch protection hooks
     // the same way; still prefer push). Use `git -C bare update-ref` via CliGitBackend is not
     // exposed — call through fast_forward by treating as heads is wrong.
@@ -957,6 +963,7 @@ async fn push_tag_local(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn apply_local_ff(
     db: &Database,
     git: &dyn GitBackend,
@@ -967,9 +974,7 @@ async fn apply_local_ff(
     target_sha: &str,
     local_exists: bool,
 ) -> Result<(), String> {
-    let branch = local_ref
-        .strip_prefix("refs/heads/")
-        .unwrap_or(local_ref);
+    let branch = local_ref.strip_prefix("refs/heads/").unwrap_or(local_ref);
     // Unborn / missing local branch: always create from the remote tip. Branch
     // protection cannot apply to a ref that does not exist yet — diverting to a
     // mirror/*/sync/* PR leaves the default branch empty (seen in production).
@@ -1004,8 +1009,14 @@ async fn open_protection_pr(
     git.branch_create(bare, &head_branch, head_sha)
         .await
         .map_err(|e| e.to_string())?;
-    create_mirror_pr(db, repository_id, base_branch, &head_branch, "Mirror sync (protected branch)")
-        .await
+    create_mirror_pr(
+        db,
+        repository_id,
+        base_branch,
+        &head_branch,
+        "Mirror sync (protected branch)",
+    )
+    .await
 }
 
 async fn open_conflict_pr(
@@ -1047,7 +1058,10 @@ async fn create_mirror_pr(
     let author_id = match repo.owner_type.as_str() {
         "user" => repo.owner_id.clone(),
         _ => {
-            let members = db.list_org_members(&repo.owner_id).await.unwrap_or_default();
+            let members = db
+                .list_org_members(&repo.owner_id)
+                .await
+                .unwrap_or_default();
             members
                 .into_iter()
                 .find(|m| {
@@ -1086,9 +1100,7 @@ async fn list_mirror_namespace(
     prefix: &str,
 ) -> Result<HashMap<String, String>, String> {
     // list_refs only returns heads+tags — use rev-parse via for-each-ref shell.
-    let bare_s = bare
-        .to_str()
-        .ok_or_else(|| "non-utf8 bare".to_string())?;
+    let bare_s = bare.to_str().ok_or_else(|| "non-utf8 bare".to_string())?;
     let output = tokio::process::Command::new("git")
         .args([
             "-C",
@@ -1195,7 +1207,7 @@ pub fn encrypt_mirror_secret(plaintext: &str) -> Result<String, String> {
 pub fn generate_webhook_secret() -> String {
     use sha2::{Digest, Sha256};
     let mut raw = [0u8; 32];
-    let _ = getrandom::getrandom(&mut raw);
+    let _ = getrandom::fill(&mut raw);
     let mut h = Sha256::new();
     h.update(raw);
     let dig = h.finalize();

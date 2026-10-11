@@ -37,7 +37,7 @@ async fn rpc_json(app: axum::Router, body: &str) -> serde_json::Value {
 /// D-13: email-only ENV must not seed — wizard path (`needs_setup` true).
 #[tokio::test]
 async fn bootstrap_partial_env_email_only_needs_setup() {
-    let _env = support::lock_admin_env();
+    let _env = support::lock_admin_env().await;
     let dir = tempfile::tempdir().expect("tempdir");
     let url = format!("sqlite:{}", dir.path().join("partial_email.db").display());
     let db = Database::connect(&url).await.expect("connect");
@@ -70,7 +70,7 @@ async fn bootstrap_partial_env_email_only_needs_setup() {
 /// D-13: password-only ENV must not seed — wizard path.
 #[tokio::test]
 async fn bootstrap_partial_env_password_only_needs_setup() {
-    let _env = support::lock_admin_env();
+    let _env = support::lock_admin_env().await;
     let dir = tempfile::tempdir().expect("tempdir");
     let url = format!("sqlite:{}", dir.path().join("partial_pw.db").display());
     let db = Database::connect(&url).await.expect("connect");
@@ -98,7 +98,7 @@ async fn bootstrap_partial_env_password_only_needs_setup() {
 /// D-11: while needs_setup, non-allowlisted RPC fails; allowlisted procs succeed.
 #[tokio::test]
 async fn bootstrap_strict_rpc_allowlist_while_needs_setup() {
-    let _env = support::lock_admin_env();
+    let _env = support::lock_admin_env().await;
     let dir = tempfile::tempdir().expect("tempdir");
     let url = format!("sqlite:{}", dir.path().join("allowlist.db").display());
     let db = Database::connect(&url).await.expect("connect");
@@ -168,7 +168,7 @@ async fn bootstrap_strict_rpc_allowlist_while_needs_setup() {
 /// Setup wizard must reject path-colliding reserved usernames (e.g. `admin` vs `/admin/*`).
 #[tokio::test]
 async fn bootstrap_rejects_reserved_admin_username() {
-    let _env = support::lock_admin_env();
+    let _env = support::lock_admin_env().await;
     let dir = tempfile::tempdir().expect("tempdir");
     let url = format!("sqlite:{}", dir.path().join("reserved.db").display());
     let db = Database::connect(&url).await.expect("connect");
@@ -193,7 +193,7 @@ async fn bootstrap_rejects_reserved_admin_username() {
 /// AUTH-07: second bootstrap_setup → auth.setup_unavailable.
 #[tokio::test]
 async fn bootstrap_second_setup_unavailable() {
-    let _env = support::lock_admin_env();
+    let _env = support::lock_admin_env().await;
     let dir = tempfile::tempdir().expect("tempdir");
     let url = format!("sqlite:{}", dir.path().join("second.db").display());
     let db = Database::connect(&url).await.expect("connect");
@@ -226,7 +226,7 @@ async fn bootstrap_second_setup_unavailable() {
 /// Wizard persists allow_signup; closed signup rejects auth.signup after bootstrap.
 #[tokio::test]
 async fn bootstrap_allow_signup_false_blocks_signup() {
-    let _env = support::lock_admin_env();
+    let _env = support::lock_admin_env().await;
     let dir = tempfile::tempdir().expect("tempdir");
     let url = format!("sqlite:{}", dir.path().join("closed.db").display());
     let db = Database::connect(&url).await.expect("connect");
@@ -284,7 +284,7 @@ async fn bootstrap_allow_signup_false_blocks_signup() {
 /// Wizard allow_signup=true persists open registration.
 #[tokio::test]
 async fn bootstrap_allow_signup_true_persists() {
-    let _env = support::lock_admin_env();
+    let _env = support::lock_admin_env().await;
     let dir = tempfile::tempdir().expect("tempdir");
     let url = format!("sqlite:{}", dir.path().join("open_signup.db").display());
     let db = Database::connect(&url).await.expect("connect");

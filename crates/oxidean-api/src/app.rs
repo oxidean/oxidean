@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock};
 
-use axum::extract::DefaultBodyLimit;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::extract::DefaultBodyLimit;
 use axum::extract::State;
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::IntoResponse;
@@ -24,7 +24,10 @@ use crate::auth::session::{
 use crate::email::{self, EmailSender};
 use crate::pat::bearer::{self, BearerRejection};
 use crate::pat::rate_limit::FailedAuthLimiter;
-use crate::routes::{auth_callbacks, avatar, cli_dist, feeds, git_lfs, git_smart_http, release_assets, repo_raw, template_packs};
+use crate::routes::{
+    auth_callbacks, avatar, cli_dist, feeds, git_lfs, git_smart_http, release_assets, repo_raw,
+    template_packs,
+};
 use crate::rpc::{self, CookieChange, RpcCtx, VERSION_HEADER};
 use crate::user::rate_limit::LookupLimiter;
 
@@ -71,11 +74,7 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new(
-        db: Database,
-        email: Arc<dyn EmailSender>,
-        env_name: impl Into<String>,
-    ) -> Self {
+    pub fn new(db: Database, email: Arc<dyn EmailSender>, env_name: impl Into<String>) -> Self {
         let env_name = env_name.into();
         let repos_dir = std::env::var("OXIDEAN_REPOS_DIR")
             .map(PathBuf::from)
@@ -281,6 +280,10 @@ pub fn router_with_state(state: AppState, cors: CorsLayer) -> Router {
             "/api/auth/oidc/callback",
             get(auth_callbacks::oidc_callback),
         )
+        // Web-tier session probe (`oxidean-web` stamps `data-oxidean-session`
+        // and gates protected shells on the result): read-only, one SELECT,
+        // no session touch on the document path.
+        .route("/api/auth/session-check", get(session_check))
         // OAuth2 provider surface (API-03). The consent screen itself is the
         // SPA route /oauth/consent; these three paths are API-owned and must be
         // routed to the API at the edge (Caddyfile / Traefik / vite proxy).
@@ -379,6 +382,25 @@ pub fn router_with_state(state: AppState, cors: CorsLayer) -> Router {
 
 async fn health() -> Json<serde_json::Value> {
     Json(serde_json::json!({ "ok": true }))
+}
+
+/// `GET /api/auth/session-check` — reports whether the presented
+/// `oxidean_session` cookie maps to a live session. Store failures surface as
+/// 500 (never `valid:false`) so the web tier can tell "definitively signed
+/// out" from "couldn't ask" and keep its presence fallback on errors.
+async fn session_check(State(state): State<AppState>, headers: HeaderMap) -> impl IntoResponse {
+    // no-store — a cached probe result would pin a stale validity verdict.
+    let no_store = [(header::CACHE_CONTROL, "no-store")];
+    let Some(token) = session_token_from_headers(&headers) else {
+        return (no_store, Json(serde_json::json!({ "valid": false }))).into_response();
+    };
+    match state.sessions.peek(&state.db, &token).await {
+        Ok(valid) => (no_store, Json(serde_json::json!({ "valid": valid }))).into_response(),
+        Err(e) => {
+            tracing::warn!(error = %e, "session-check probe failed");
+            (no_store, StatusCode::INTERNAL_SERVER_ERROR).into_response()
+        }
+    }
 }
 
 pub(crate) fn session_token_from_headers(headers: &HeaderMap) -> Option<String> {
@@ -481,6 +503,7 @@ pub(crate) fn edge_credential(headers: &HeaderMap) -> RpcCredential {
     RpcCredential::Anonymous
 }
 
+#[allow(clippy::result_large_err)]
 pub(crate) async fn build_rpc_ctx(
     state: &AppState,
     credential: RpcCredential,
@@ -586,10 +609,7 @@ fn attach_set_cookie(
                 .map(|d| std::time::Duration::from_secs(d.whole_seconds().max(0) as u64))
                 .unwrap_or(SESSION_IDLE);
             append_set_cookie(&mut response, &c);
-            append_set_cookie(
-                &mut response,
-                &build_session_presence_cookie(ttl, env_name),
-            );
+            append_set_cookie(&mut response, &build_session_presence_cookie(ttl, env_name));
         }
         CookieChange::Clear => {
             append_set_cookie(&mut response, &clear_session_cookie(env_name));
@@ -608,23 +628,17 @@ fn rpc_status(resp: &RpcResponse) -> StatusCode {
         RpcResponse::Err { error, .. } if error.code == "auth.unauthenticated" => {
             StatusCode::UNAUTHORIZED
         }
-        RpcResponse::Err { error, .. } if error.code == "admin.forbidden" => {
-            StatusCode::FORBIDDEN
-        }
+        RpcResponse::Err { error, .. } if error.code == "admin.forbidden" => StatusCode::FORBIDDEN,
         RpcResponse::Err { error, .. } if error.code == "auth.email_unverified" => {
             StatusCode::FORBIDDEN
         }
-        RpcResponse::Err { error, .. } if error.code == "auth.pat_scope" => {
-            StatusCode::FORBIDDEN
-        }
+        RpcResponse::Err { error, .. } if error.code == "auth.pat_scope" => StatusCode::FORBIDDEN,
         RpcResponse::Err { error, .. } if error.code == "repo.create_forbidden" => {
             StatusCode::FORBIDDEN
         }
         RpcResponse::Err { error, .. } if error.code == "repo.not_found" => StatusCode::NOT_FOUND,
         RpcResponse::Err { error, .. } if error.code == "issue.not_found" => StatusCode::NOT_FOUND,
-        RpcResponse::Err { error, .. }
-            if error.code == "issue.comment_not_found" =>
-        {
+        RpcResponse::Err { error, .. } if error.code == "issue.comment_not_found" => {
             StatusCode::NOT_FOUND
         }
         RpcResponse::Err { error, .. } if error.code == "repo.path_not_found" => {
@@ -646,12 +660,11 @@ async fn rpc_http(
 
     let credential = edge_credential(&headers);
     let bearer_auth = matches!(credential, RpcCredential::Bearer(_));
-    let mut ctx = match build_rpc_ctx(&state, credential, rpc::ClientMeta::from_headers(&headers))
-        .await
-    {
-        Ok(ctx) => ctx,
-        Err(rejection) => return bearer_rejection_response(rejection),
-    };
+    let mut ctx =
+        match build_rpc_ctx(&state, credential, rpc::ClientMeta::from_headers(&headers)).await {
+            Ok(ctx) => ctx,
+            Err(rejection) => return bearer_rejection_response(rejection),
+        };
     let resp = rpc::dispatch(&mut ctx, body).await;
     let status = rpc_status(&resp);
     // PAT Bearer calls never mint or mutate cookies (API-02).

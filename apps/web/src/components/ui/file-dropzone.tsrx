@@ -1,7 +1,7 @@
 import { useDropzone, type Accept, type FileRejection } from "@octanejs/dropzone";
 import { cn } from "@/lib/utils";
 
-export type FileDropzoneProps = {
+type FileDropzoneProps = {
   id?: string;
   accept?: Accept;
   maxFiles?: number;

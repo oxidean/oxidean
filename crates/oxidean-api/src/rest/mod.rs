@@ -96,6 +96,7 @@ fn bearer_rejection_response(rejection: BearerRejection) -> Response {
     res
 }
 
+#[allow(clippy::result_large_err)]
 /// Resolve the edge credential (session cookie or PAT Bearer) into an `RpcCtx`
 /// — identical to the `/api/rpc` HTTP edge.
 async fn ctx_for(state: &AppState, headers: &HeaderMap) -> Result<RpcCtx, Response> {

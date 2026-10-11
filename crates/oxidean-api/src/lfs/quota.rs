@@ -17,10 +17,7 @@ pub const DEFAULT_QUOTA_USER_BYTES: i64 = 50 * 1024 * 1024 * 1024;
 const LFS_JSON: &str = "application/vnd.git-lfs+json";
 
 fn lfs_json_headers() -> [(header::HeaderName, HeaderValue); 1] {
-    [(
-        header::CONTENT_TYPE,
-        HeaderValue::from_static(LFS_JSON),
-    )]
+    [(header::CONTENT_TYPE, HeaderValue::from_static(LFS_JSON))]
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -110,6 +107,7 @@ pub async fn raw_effective_limits(state: &AppState) -> Result<(i64, i64, i64, bo
     ))
 }
 
+#[allow(clippy::result_large_err)]
 /// Resolve effective limits: Admin DB override (when Some) wins over env default.
 pub async fn effective_limits(state: &AppState) -> Result<EffectiveLimits, Response> {
     let (max, repo, user, _, _, _) = match raw_effective_limits(state).await {
@@ -168,11 +166,7 @@ pub async fn check_upload(
     // New physical OID: charge full size. Linking existing OID still charges logical
     // once per repo (already_linked false + on_disk true).
     if let Some(repo_q) = limits.quota_repo_bytes {
-        let used = state
-            .db
-            .lfs_repo_logical_bytes(repo_id)
-            .await
-            .unwrap_or(0);
+        let used = state.db.lfs_repo_logical_bytes(repo_id).await.unwrap_or(0);
         if used.saturating_add(size) > repo_q {
             return Err(QuotaReject::RepoQuota);
         }

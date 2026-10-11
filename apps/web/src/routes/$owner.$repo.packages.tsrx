@@ -1,5 +1,9 @@
-import { createFileRoute, useLoaderData, useParams } from "@octanejs/tanstack-router";
-import { useQuery } from "@octanejs/tanstack-query";
+import { queryOptions, useQuery } from "@octanejs/tanstack-query";
+
+import { matchPath } from "@/lib/route-params";
+import { usePathname, useSearchString } from "@/lib/pathname.tsrx";
+import { RepoLayout } from "@/routes/$owner.$repo.tsrx";
+import { AppPage } from "@/components/app-page";
 import {
   packagesListQueryOptions,
   type PackagesListResponse,
@@ -31,7 +35,7 @@ async function loadRepoPackagesPage(
   owner: string,
   repoName: string,
 ): Promise<RepoPackagesLoaderData> {
-  const got = await fetchRepoGet({ data: { owner, name: repoName } });
+  const got = await fetchRepoGet({ owner, name: repoName });
   if (!got.ok) {
     if (got.error.code === "repo.not_found") return { kind: "not_found" };
     return {
@@ -39,9 +43,7 @@ async function loadRepoPackagesPage(
       message: got.error.message || "Could not load repository.",
     };
   }
-  const list = await fetchPackagesList({
-    data: { repository_id: got.data.id },
-  });
+  const list = await fetchPackagesList({ repository_id: got.data.id });
   if (!list.ok) {
     return {
       kind: "error",
@@ -51,43 +53,49 @@ async function loadRepoPackagesPage(
   return { kind: "ready", repo: got.data, list: list.data };
 }
 
-export const Route = createFileRoute("/$owner/$repo/packages")({
-  component: RepoPackagesPage,
-  head: ({ params }) => {
-    const p = params as { owner?: string; repo?: string };
-    return {
-      meta: [
-        {
-          title: `${String(p.owner ?? "")}/${String(p.repo ?? "")} packages · Oxidean`,
-        },
-      ],
-    };
-  },
-  loader: async ({ params }): Promise<RepoPackagesLoaderData> => {
-    const owner = String((params as { owner?: string }).owner ?? "");
-    const repoName = String((params as { repo?: string }).repo ?? "");
-    try {
-      return await loadRepoPackagesPage(owner, repoName);
-    } catch {
-      return { kind: "error", message: NETWORK_ERROR };
-    }
-  },
-});
+function repoPackagesQueryOptions(params: Record<string, string | undefined>, searchStr = "") {
+  return queryOptions({
+    queryKey: [
+      "repo-page",
+      "/$owner/$repo/packages",
+      params.owner ?? "",
+      params.repo ?? "",
+      params._splat ?? "",
+      params.n ?? "",
+      params.sha ?? "",
+      params.tag ?? "",
+      params.run ?? "",
+      searchStr,
+    ],
+    queryFn: async (): Promise<RepoPackagesLoaderData> => {
+      const owner = String((params as { owner?: string }).owner ?? "");
+      const repoName = String((params as { repo?: string }).repo ?? "");
+      try {
+        return await loadRepoPackagesPage(owner, repoName);
+      } catch {
+        return { kind: "error", message: NETWORK_ERROR };
+      }
+    },
+    enabled: Boolean(params.owner && params.repo),
+    retry: false,
+    staleTime: 30_000,
+  });
+}
 
 /**
  * Repo-linked packages (D-PKG-11) — scoped by repository_id.
  * Chrome/shell come from `$owner.$repo` layout (D-QH-01).
  */
-export function RepoPackagesPage() @{
-  const params = useParams({ from: "/$owner/$repo/packages" }) as {
+function RepoPackagesPageContent() @{
+  const pathname = usePathname();
+  const searchStr = useSearchString();
+  const params = (matchPath("/$owner/$repo/packages", pathname) ?? {}) as {
     owner?: string;
     repo?: string;
   };
   const owner = String(params.owner ?? "");
   const repoName = String(params.repo ?? "");
-  const routeLoader = useLoaderData({ from: "/$owner/$repo/packages" }) as
-    | RepoPackagesLoaderData
-    | undefined;
+  const routeLoader = useQuery(repoPackagesQueryOptions(params, searchStr)).data;
 
   const layoutRepo = useRepoStore((s) => s.repo);
   const repositoryId = layoutRepo?.id ?? null;
@@ -189,4 +197,13 @@ export function RepoPackagesPage() @{
       }
     </div>;
     };
+}
+
+/** Page root — RepoLayout (chrome + repo store) around the leaf content. */
+export function RepoPackagesPage() @{
+  <AppPage>
+    <RepoLayout>
+      <RepoPackagesPageContent />
+    </RepoLayout>
+  </AppPage>;
 }

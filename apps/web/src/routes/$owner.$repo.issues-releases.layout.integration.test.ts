@@ -1,33 +1,23 @@
 /**
- * Layout parents for issues/releases must Outlet so detail/new routes render.
- * Leaf chrome lives only on `$owner.$repo` (D-QH-01).
+ * Issues/releases list leaves own their data + rendering (no layout parents
+ * under Astro). Leaf chrome lives only on `$owner.$repo` (D-QH-01).
  */
 import { describe, expect, it } from "vitest";
 
-describe("issues/releases layout parents", () => {
-  it("issues layout Outlets; list is on index", async () => {
-    const layout = await import("./$owner.$repo.issues.tsrx?raw").then((m) =>
-      String((m as { default: string }).default),
-    );
+describe("issues/releases leaves", () => {
+  it("issues list lives on index", async () => {
     const index = await import("./$owner.$repo.issues.index.tsrx?raw").then((m) =>
       String((m as { default: string }).default),
     );
-    expect(layout).toMatch(/Outlet/);
-    expect(layout).not.toMatch(/IssuesListPage/);
     expect(index).toMatch(/IssuesListPage/);
     expect(index).toMatch(/fetchLabelListForRepo/);
     expect(index).toMatch(/fetchIssueList/);
   });
 
-  it("releases layout Outlets; list is on index + SSR release.list", async () => {
-    const layout = await import("./$owner.$repo.releases.tsrx?raw").then((m) =>
-      String((m as { default: string }).default),
-    );
+  it("releases list lives on index + release.list fetch", async () => {
     const index = await import("./$owner.$repo.releases.index.tsrx?raw").then((m) =>
       String((m as { default: string }).default),
     );
-    expect(layout).toMatch(/Outlet/);
-    expect(layout).not.toMatch(/RepoReleasesPage/);
     expect(index).toMatch(/RepoReleasesPage/);
     expect(index).toMatch(/fetchReleaseList/);
   });

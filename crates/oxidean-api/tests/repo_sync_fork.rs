@@ -134,7 +134,10 @@ async fn commit_on_branch(
         vec!["-C", wt_s, "commit", "-m", message],
         vec!["-C", wt_s, "push", "origin", "HEAD"],
     ] {
-        let status = std::process::Command::new("git").args(&args).status().unwrap();
+        let status = std::process::Command::new("git")
+            .args(&args)
+            .status()
+            .unwrap();
         assert!(status.success(), "git {args:?}");
     }
 }
@@ -208,8 +211,14 @@ async fn fork_status_behind_then_sync_fast_forwards() {
     support::unlock_signup(&db).await;
     let app = test_app(db.clone(), repos.clone()).await;
 
-    let (_owner_c, fork_c) =
-        fork_fixture(&app, &db, ("up@ex.com", "upown"), ("fk@ex.com", "fkown"), "core").await;
+    let (_owner_c, fork_c) = fork_fixture(
+        &app,
+        &db,
+        ("up@ex.com", "upown"),
+        ("fk@ex.com", "fkown"),
+        "core",
+    )
+    .await;
 
     // Upstream advances after the fork.
     let up_bare = repos.join("upown").join("core.git");
@@ -254,8 +263,14 @@ async fn fork_status_up_to_date_and_sync_noop() {
     support::unlock_signup(&db).await;
     let app = test_app(db.clone(), repos.clone()).await;
 
-    let (_owner_c, fork_c) =
-        fork_fixture(&app, &db, ("u@ex.com", "uown"), ("f@ex.com", "fown"), "core").await;
+    let (_owner_c, fork_c) = fork_fixture(
+        &app,
+        &db,
+        ("u@ex.com", "uown"),
+        ("f@ex.com", "fown"),
+        "core",
+    )
+    .await;
 
     let status = rpc_json(
         &app,
@@ -288,8 +303,14 @@ async fn fork_sync_diverged_creates_merge_commit() {
     support::unlock_signup(&db).await;
     let app = test_app(db.clone(), repos.clone()).await;
 
-    let (_owner_c, fork_c) =
-        fork_fixture(&app, &db, ("up@ex.com", "upown"), ("fk@ex.com", "fkown"), "core").await;
+    let (_owner_c, fork_c) = fork_fixture(
+        &app,
+        &db,
+        ("up@ex.com", "upown"),
+        ("fk@ex.com", "fkown"),
+        "core",
+    )
+    .await;
 
     let up_bare = repos.join("upown").join("core.git");
     let fork_bare = repos.join("fkown").join("core.git");
@@ -316,7 +337,11 @@ async fn fork_sync_diverged_creates_merge_commit() {
     assert_eq!(sync["data"]["status"], "merged");
     let merge_sha = sync["data"]["merge_commit_sha"].as_str().unwrap();
     assert_eq!(bare_tip(&fork_bare, "main"), merge_sha);
-    assert_eq!(bare_parents(&fork_bare, "main").len(), 3, "merge has 2 parents");
+    assert_eq!(
+        bare_parents(&fork_bare, "main").len(),
+        3,
+        "merge has 2 parents"
+    );
 }
 
 #[tokio::test]
@@ -329,8 +354,14 @@ async fn fork_sync_diverged_denied_when_merge_commits_disabled() {
     support::unlock_signup(&db).await;
     let app = test_app(db.clone(), repos.clone()).await;
 
-    let (_owner_c, fork_c) =
-        fork_fixture(&app, &db, ("up@ex.com", "upown"), ("fk@ex.com", "fkown"), "core").await;
+    let (_owner_c, fork_c) = fork_fixture(
+        &app,
+        &db,
+        ("up@ex.com", "upown"),
+        ("fk@ex.com", "fkown"),
+        "core",
+    )
+    .await;
 
     commit_on_branch(
         &repos.join("upown").join("core.git"),
@@ -375,8 +406,14 @@ async fn fork_sync_diverged_conflict_reports_conflict() {
     support::unlock_signup(&db).await;
     let app = test_app(db.clone(), repos.clone()).await;
 
-    let (_owner_c, fork_c) =
-        fork_fixture(&app, &db, ("up@ex.com", "upown"), ("fk@ex.com", "fkown"), "core").await;
+    let (_owner_c, fork_c) = fork_fixture(
+        &app,
+        &db,
+        ("up@ex.com", "upown"),
+        ("fk@ex.com", "fkown"),
+        "core",
+    )
+    .await;
 
     // Same path edited on both sides → merge conflict.
     commit_on_branch(
@@ -414,8 +451,14 @@ async fn sync_fork_denied_for_non_writer() {
     support::unlock_signup(&db).await;
     let app = test_app(db.clone(), repos.clone()).await;
 
-    let (_owner_c, _fork_c) =
-        fork_fixture(&app, &db, ("up@ex.com", "upown"), ("fk@ex.com", "fkown"), "core").await;
+    let (_owner_c, _fork_c) = fork_fixture(
+        &app,
+        &db,
+        ("up@ex.com", "upown"),
+        ("fk@ex.com", "fkown"),
+        "core",
+    )
+    .await;
 
     let (other_c, other_v) = signup_and_login(&app, "rando@ex.com", "rando").await;
     verify_user(&db, other_v["data"]["id"].as_str().unwrap()).await;
@@ -449,8 +492,14 @@ async fn sync_fork_denied_by_branch_protection() {
     support::unlock_signup(&db).await;
     let app = test_app(db.clone(), repos.clone()).await;
 
-    let (_owner_c, fork_c) =
-        fork_fixture(&app, &db, ("up@ex.com", "upown"), ("fk@ex.com", "fkown"), "core").await;
+    let (_owner_c, fork_c) = fork_fixture(
+        &app,
+        &db,
+        ("up@ex.com", "upown"),
+        ("fk@ex.com", "fkown"),
+        "core",
+    )
+    .await;
 
     commit_on_branch(
         &repos.join("upown").join("core.git"),
@@ -508,9 +557,7 @@ async fn fork_status_errors_for_non_fork() {
         let res = rpc_json(
             &app,
             &cookie,
-            &format!(
-                r#"{{"procedure":"{proc}","input":{{"owner":"solo","name":"plain"}}}}"#
-            ),
+            &format!(r#"{{"procedure":"{proc}","input":{{"owner":"solo","name":"plain"}}}}"#),
         )
         .await;
         assert_eq!(res["ok"], false, "{proc} — {res}");

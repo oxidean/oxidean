@@ -30,10 +30,7 @@ async fn dialect_issues_migrate_0011_schema_presence() {
         "comment_reactions",
         "issue_links",
     ] {
-        assert!(
-            sql.contains(needle),
-            "0011 must define {needle}"
-        );
+        assert!(sql.contains(needle), "0011 must define {needle}");
     }
     assert!(
         sql.contains("max_number"),
@@ -77,13 +74,7 @@ async fn dialect_issues_migrate_0011_schema_presence() {
         .expect("insert repo");
 
     let first = db
-        .insert_issue(
-            "i-1",
-            &repo.id,
-            &author.id,
-            "First issue",
-            "body one",
-        )
+        .insert_issue("i-1", &repo.id, &author.id, "First issue", "body one")
         .await
         .expect("insert first issue");
     assert_eq!(first.number, 1);
@@ -91,13 +82,7 @@ async fn dialect_issues_migrate_0011_schema_presence() {
     assert_eq!(first.title, "First issue");
 
     let second = db
-        .insert_issue(
-            "i-2",
-            &repo.id,
-            &author.id,
-            "Second issue",
-            "body two",
-        )
+        .insert_issue("i-2", &repo.id, &author.id, "Second issue", "body two")
         .await
         .expect("insert second issue");
     assert_eq!(second.number, 2);
@@ -107,13 +92,7 @@ async fn dialect_issues_migrate_0011_schema_presence() {
         .expect("hard-delete first issue");
 
     let third = db
-        .insert_issue(
-            "i-3",
-            &repo.id,
-            &author.id,
-            "Third issue",
-            "body three",
-        )
+        .insert_issue("i-3", &repo.id, &author.id, "Third issue", "body three")
         .await
         .expect("insert third after delete");
     assert_eq!(
@@ -123,14 +102,7 @@ async fn dialect_issues_migrate_0011_schema_presence() {
     );
 
     let label = db
-        .insert_label(
-            "l-bug",
-            "bug",
-            "d73a4a",
-            "A bug",
-            None,
-            Some(&repo.id),
-        )
+        .insert_label("l-bug", "bug", "d73a4a", "A bug", None, Some(&repo.id))
         .await
         .expect("insert repo-local label");
     assert_eq!(label.name, "bug");
@@ -139,7 +111,7 @@ async fn dialect_issues_migrate_0011_schema_presence() {
     db.set_issue_labels(&third.id, &["l-bug".to_string()])
         .await
         .expect("assign label");
-    db.set_issue_assignees(&third.id, &[author.id.clone()])
+    db.set_issue_assignees(&third.id, std::slice::from_ref(&author.id))
         .await
         .expect("assign assignee");
 }
@@ -224,16 +196,16 @@ async fn dialect_issues_batch_enrichment() {
         .insert_label("lb-bug", "bug", "d73a4a", "A bug", None, Some(&repo.id))
         .await
         .expect("insert label");
-    db.set_issue_labels(&i1.id, &[label.id.clone()])
+    db.set_issue_labels(&i1.id, std::slice::from_ref(&label.id))
         .await
         .expect("labels i1");
-    db.set_issue_labels(&i3.id, &[label.id.clone()])
+    db.set_issue_labels(&i3.id, std::slice::from_ref(&label.id))
         .await
         .expect("labels i3");
     db.set_issue_assignees(&i1.id, &[author.id.clone(), other.id.clone()])
         .await
         .expect("assignees i1");
-    db.set_issue_assignees(&i2.id, &[other.id.clone()])
+    db.set_issue_assignees(&i2.id, std::slice::from_ref(&other.id))
         .await
         .expect("assignees i2");
 
@@ -280,11 +252,7 @@ async fn dialect_issues_batch_enrichment() {
             .filter(|(iid, _)| iid == id)
             .map(|(_, l)| l)
             .collect();
-        assert_eq!(
-            single.len(),
-            batched.len(),
-            "label count mismatch for {id}"
-        );
+        assert_eq!(single.len(), batched.len(), "label count mismatch for {id}");
         for l in &single {
             assert!(batched.iter().any(|b| b.id == l.id));
         }
@@ -333,7 +301,7 @@ async fn dialect_issues_batch_enrichment() {
         assert!(users.iter().any(|x| x.id == u.id && x.username == u.username));
     }
     let repos = db
-        .find_repositories_by_ids(&[repo.id.clone()])
+        .find_repositories_by_ids(std::slice::from_ref(&repo.id))
         .await
         .expect("batch repos");
     assert_eq!(repos.len(), 1);

@@ -14,16 +14,6 @@ import { act } from "octane";
 
 const bootstrapMock = vi.fn();
 
-const loaderState = vi.hoisted(() => {
-  let data: unknown;
-  return {
-    get: () => data,
-    set: (next: unknown) => {
-      data = next;
-    },
-  };
-});
-
 vi.mock("@/lib/api-client", () => ({
   apiClient: {
     auth: {
@@ -33,22 +23,22 @@ vi.mock("@/lib/api-client", () => ({
 }));
 
 // Route module imports ssr-auth → tanstack-start; stub so Chromium Vite never loads Start.
-vi.mock("@/lib/ssr-auth", () => ({
-  fetchBootstrapStatus: vi.fn(),
-}));
-
-vi.mock("@octanejs/tanstack-router", () => ({
-  createFileRoute: () => (opts: unknown) => opts,
-  redirect: (opts: unknown) => opts,
-  useLoaderData: () => loaderState.get(),
-}));
+const fetchBootstrapStatusMock = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/ssr-auth", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/ssr-auth")>();
+  return { ...actual, fetchBootstrapStatus: fetchBootstrapStatusMock };
+});
 
 import { SetupPage } from "./setup.index";
 
 beforeEach(() => {
   bootstrapMock.mockReset();
   bootstrapMock.mockResolvedValue({ ok: true, data: {} });
-  loaderState.set({ loadError: "" });
+  fetchBootstrapStatusMock.mockReset();
+  fetchBootstrapStatusMock.mockResolvedValue({
+    ok: true,
+    data: { needs_setup: true },
+  });
 });
 
 afterEach(async () => {

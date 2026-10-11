@@ -120,8 +120,8 @@ pub async fn finish(
 
     let c = api_client(cfg);
     let params = AuthenticateWithCodeParams {
-        code: code.to_string(),
-        code_verifier: Some(pending_auth.code_verifier),
+        code: code.to_string().into(),
+        code_verifier: Some(pending_auth.code_verifier.into()),
         invitation_token: None,
         ip_address: None,
         device_id: None,

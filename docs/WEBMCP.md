@@ -101,5 +101,5 @@ curl -s https://forge.example.com/api/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
 ```
 
-In local development the Vite dev server proxies `/api/mcp` to the API (see
-`vite.config.ts`), so the bridge works on `localhost:3000` too.
+In local development `oxidean-web` proxies `/api/mcp` to the API (see
+`crates/oxidean-web/src/proxy.rs`), so the bridge works on `localhost:3000` too.

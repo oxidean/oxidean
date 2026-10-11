@@ -4,12 +4,12 @@ use std::net::IpAddr;
 use std::time::Instant;
 
 use openidconnect::core::{CoreAuthenticationFlow, CoreClient, CoreProviderMetadata};
+use openidconnect::reqwest;
 use openidconnect::{
     AuthType, AuthorizationCode, ClientId, ClientSecret, CsrfToken, EndpointMaybeSet,
     EndpointNotSet, EndpointSet, IssuerUrl, Nonce, PkceCodeChallenge, PkceCodeVerifier,
     RedirectUrl, Scope, TokenResponse,
 };
-use openidconnect::reqwest;
 use url::Url;
 
 use crate::auth::external::{ExternalAuthError, ExternalIdentity};
@@ -66,9 +66,8 @@ impl OidcConfig {
 /// Local mock IdPs (`docs/dev-auth.md`) may set `OXIDEAN_OIDC_ALLOW_INSECURE=1` when
 /// `OXIDEAN_ENV` is `development` / `dev` / `compose` so http:// and loopback issuers work.
 pub fn validate_issuer_url(issuer: &str) -> Result<Url, ExternalAuthError> {
-    let url = Url::parse(issuer.trim()).map_err(|e| {
-        ExternalAuthError::Failed(format!("invalid issuer URL: {e}"))
-    })?;
+    let url = Url::parse(issuer.trim())
+        .map_err(|e| ExternalAuthError::Failed(format!("invalid issuer URL: {e}")))?;
     let allow_insecure = oidc_allow_insecure_issuer();
     if !allow_insecure && url.scheme() != "https" {
         return Err(ExternalAuthError::Failed(
@@ -105,12 +104,12 @@ pub fn validate_issuer_url(issuer: &str) -> Result<Url, ExternalAuthError> {
                     ));
                 }
             }
-            IpAddr::V6(v6) if v6.is_loopback() || v6.is_unicast_link_local() => {
-                if !allow_insecure {
-                    return Err(ExternalAuthError::Failed(
-                        "OIDC issuer host is not allowed".into(),
-                    ));
-                }
+            IpAddr::V6(v6)
+                if (v6.is_loopback() || v6.is_unicast_link_local()) && !allow_insecure =>
+            {
+                return Err(ExternalAuthError::Failed(
+                    "OIDC issuer host is not allowed".into(),
+                ));
             }
             _ => {}
         }
@@ -126,10 +125,7 @@ fn oidc_allow_insecure_issuer() -> bool {
         return false;
     }
     let env_name = std::env::var("OXIDEAN_ENV").unwrap_or_else(|_| "development".into());
-    matches!(
-        env_name.as_str(),
-        "development" | "dev" | "compose"
-    )
+    matches!(env_name.as_str(), "development" | "dev" | "compose")
 }
 
 fn http_client() -> Result<reqwest::Client, ExternalAuthError> {
@@ -156,17 +152,15 @@ async fn build_core_client(
         .map_err(|e| ExternalAuthError::Failed(format!("OIDC discovery failed: {e}")))?;
     let redirect = RedirectUrl::new(redirect_uri.to_string())
         .map_err(|e| ExternalAuthError::Failed(e.to_string()))?;
-    Ok(
-        CoreClient::from_provider_metadata(
-            metadata,
-            ClientId::new(cfg.client_id.clone()),
-            Some(ClientSecret::new(cfg.client_secret.clone())),
-        )
-        // Prefer form client_id/secret so IdP tokenCallbacks that key on body
-        // params (e.g. navikt mock-oauth2-server) still match.
-        .set_auth_type(AuthType::RequestBody)
-        .set_redirect_uri(redirect),
+    Ok(CoreClient::from_provider_metadata(
+        metadata,
+        ClientId::new(cfg.client_id.clone()),
+        Some(ClientSecret::new(cfg.client_secret.clone())),
     )
+    // Prefer form client_id/secret so IdP tokenCallbacks that key on body
+    // params (e.g. navikt mock-oauth2-server) still match.
+    .set_auth_type(AuthType::RequestBody)
+    .set_redirect_uri(redirect))
 }
 
 /// Begin OIDC authorize with PKCE + nonce; stash verifier/state/nonce.

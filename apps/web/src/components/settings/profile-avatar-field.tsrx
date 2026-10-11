@@ -16,7 +16,7 @@ const ACCEPT = {
 const MAX_SIZE = 2 * 1024 * 1024;
 const AVATAR_PX = 96;
 
-export type ProfileAvatarFieldProps = {
+type ProfileAvatarFieldProps = {
   user: Pick<UserPublic, "display_name" | "username" | "avatar_url">;
   src?: string | null;
   disabled?: boolean;

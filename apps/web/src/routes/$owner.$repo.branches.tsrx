@@ -1,5 +1,10 @@
-import { createFileRoute, useLoaderData, useParams, useRouter } from "@octanejs/tanstack-router";
 import type { RepoPublic, RepoRefEntry } from "@oxidean/api-client";
+import { useQueryClient, queryOptions, useQuery } from "@octanejs/tanstack-query";
+
+import { matchPath } from "@/lib/route-params";
+import { usePathname, useSearchString } from "@/lib/pathname.tsrx";
+import { RepoLayout } from "@/routes/$owner.$repo.tsrx";
+import { AppPage } from "@/components/app-page";
 import { useEffect, useState } from "octane";
 import { GitBranch, Plus } from "@octanejs/lucide";
 import { RepoNotFound } from "@/components/repo/repo-not-found";
@@ -62,7 +67,7 @@ function sortBranches(refs: RepoRefEntry[]): RepoRefEntry[] {
 }
 
 async function loadBranchesPage(owner: string, repoName: string): Promise<BranchesLoaderData> {
-  const got = await fetchRepoGet({ data: { owner, name: repoName } });
+  const got = await fetchRepoGet({ owner, name: repoName });
   if (!got.ok) {
     if (got.error.code === "repo.not_found") return { kind: "not_found" };
     return {
@@ -70,7 +75,7 @@ async function loadBranchesPage(owner: string, repoName: string): Promise<Branch
       message: got.error.message || "Could not load repository.",
     };
   }
-  const refsRes = await fetchRepoRefs({ data: { owner, name: repoName } });
+  const refsRes = await fetchRepoRefs({ owner, name: repoName });
   if (!refsRes.ok) {
     if (refsRes.error.code === "repo.not_found") return { kind: "not_found" };
     return {
@@ -85,37 +90,46 @@ async function loadBranchesPage(owner: string, repoName: string): Promise<Branch
   };
 }
 
-export const Route = createFileRoute("/$owner/$repo/branches")({
-  component: RepoBranchesPage,
-  head: ({ params }) => ({
-    meta: [
-      {
-        title: `Branches · ${(params as { owner: string }).owner}/${(params as { repo: string }).repo} · Oxidean`,
-      },
+function repoBranchesQueryOptions(params: Record<string, string | undefined>, searchStr = "") {
+  return queryOptions({
+    queryKey: [
+      "repo-page",
+      "/$owner/$repo/branches",
+      params.owner ?? "",
+      params.repo ?? "",
+      params._splat ?? "",
+      params.n ?? "",
+      params.sha ?? "",
+      params.tag ?? "",
+      params.run ?? "",
+      searchStr,
     ],
-  }),
-  loader: async ({ params }): Promise<BranchesLoaderData> => {
-    const owner = String((params as { owner?: string }).owner ?? "");
-    const repoName = String((params as { repo?: string }).repo ?? "");
-    try {
-      return await loadBranchesPage(owner, repoName);
-    } catch {
-      return { kind: "error", message: NETWORK_ERROR };
-    }
-  },
-});
+    queryFn: async (): Promise<BranchesLoaderData> => {
+      const owner = String((params as { owner?: string }).owner ?? "");
+      const repoName = String((params as { repo?: string }).repo ?? "");
+      try {
+        return await loadBranchesPage(owner, repoName);
+      } catch {
+        return { kind: "error", message: NETWORK_ERROR };
+      }
+    },
+    enabled: Boolean(params.owner && params.repo),
+    retry: false,
+    staleTime: 30_000,
+  });
+}
 
-export function RepoBranchesPage() @{
-  const params = useParams({ from: "/$owner/$repo/branches" }) as {
+function RepoBranchesPageContent() @{
+  const pathname = usePathname();
+  const searchStr = useSearchString();
+  const params = (matchPath("/$owner/$repo/branches", pathname) ?? {}) as {
     owner: string;
     repo: string;
   };
   const owner = params.owner ?? "";
   const repoName = params.repo ?? "";
-  const router = useRouter();
-  const loaderData = useLoaderData({ from: "/$owner/$repo/branches" }) as
-    | BranchesLoaderData
-    | undefined;
+  const routerQueryClient = useQueryClient();
+  const loaderData = useQuery(repoBranchesQueryOptions(params, searchStr)).data;
 
   const [phase, setPhase] = useState<Phase>(() => loaderData ?? { kind: "loading" });
   const [dialog, setDialog] = useState<DialogState>({ kind: "none" });
@@ -175,7 +189,7 @@ export function RepoBranchesPage() @{
   }
 
   async function refreshBranches() {
-    await router.invalidate();
+    await routerQueryClient.invalidateQueries();
   }
 
   async function submitCreate() {
@@ -540,4 +554,13 @@ function BranchRow({
       }
     </div>
   </ListRow>;
+}
+
+/** Page root — RepoLayout (chrome + repo store) around the leaf content. */
+export function RepoBranchesPage() @{
+  <AppPage>
+    <RepoLayout>
+      <RepoBranchesPageContent />
+    </RepoLayout>
+  </AppPage>;
 }

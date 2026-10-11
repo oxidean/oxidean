@@ -121,9 +121,9 @@ export default defineRailway((ctx) => {
       OXIDEAN_API_ORIGIN: "http://${{api.RAILWAY_PRIVATE_DOMAIN}}:8080",
       // Public site origin — track gateway domain (PR Environments need this).
       OXIDEAN_PUBLIC_ORIGIN: "https://${{gateway.RAILWAY_PUBLIC_DOMAIN}}",
-      // Vite preview Host allowlist (comma-separated; leading `.` = suffix).
-      // Example: `.up.railway.app,app.oxidean.dev` — see docs/CONFIGURATION.md.
-      OXIDEAN_VITE_ALLOWED_HOSTS: preserve(),
+      // Railway's gateway sanitizes X-Forwarded-* before traffic reaches this
+      // tier — trust the edge's chain instead of rewriting it.
+      OXIDEAN_WEB_BEHIND_PROXY: "1",
       // CloneBox SSH advertise (SSR’d into the page; match api listen/advertise).
       OXIDEAN_SSH_HOST: "${{gateway.RAILWAY_PUBLIC_DOMAIN}}",
       OXIDEAN_SSH_PORT: "22",

@@ -1,6 +1,5 @@
 //! AUTH-04 tracer: require_verified + auth.dev.privileged_ping.
 
-
 mod support;
 use std::sync::Arc;
 
@@ -130,7 +129,10 @@ async fn unverified_privileged_ping_forbidden_then_ok_after_otp() {
 #[tokio::test]
 async fn privileged_ping_unknown_outside_env_allowlist() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let url = format!("sqlite:{}", dir.path().join("verify_gate_prod.db").display());
+    let url = format!(
+        "sqlite:{}",
+        dir.path().join("verify_gate_prod.db").display()
+    );
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;

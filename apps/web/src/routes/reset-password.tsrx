@@ -1,8 +1,8 @@
-import { createFileRoute } from "@octanejs/tanstack-router";
 import { useForm } from "@octanejs/tanstack-form";
 import type { ProviderMode } from "@oxidean/api-client";
 import { useEffect, useRef, useState } from "octane";
 import { AuthErrorBanner, AuthShell } from "@/components/auth-shell";
+import { AppPage } from "@/components/app-page";
 import { AuthFormSkeleton } from "@/components/page-skeletons";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,13 +27,6 @@ import {
 import { readReturnToFromLocation, safeReturnTo } from "@/lib/return-to";
 import { AppLink } from "@/components/ui/app-link";
 
-export const Route = createFileRoute("/reset-password")({
-  component: ResetPasswordPage,
-  head: () => ({
-    meta: [{ title: "Reset password · Oxidean" }, { name: "referrer", content: "no-referrer" }],
-  }),
-});
-
 function readTokenFromLocation(): string | null {
   if (typeof window === "undefined") return null;
   const raw = new URLSearchParams(window.location.search).get("token");
@@ -49,8 +42,15 @@ type View =
   | { kind: "request-sent" }
   | { kind: "redeem"; token: string | null };
 
-/** Exported for integration tests (AUTH-12 anti-enumeration + redeem UX). */
+/** `/reset-password` — request + redeem flow (title/meta via shell). */
 export function ResetPasswordPage() @{
+  <AppPage>
+    <ResetPasswordContent />
+  </AppPage>;
+}
+
+/** Exported for integration tests (AUTH-12 anti-enumeration + redeem UX). */
+function ResetPasswordContent() @{
   const [view, setView] = useState<View>({ kind: "loading" });
   const [error, setError] = useState("");
   const [mismatchFields, setMismatchFields] = useState(false);

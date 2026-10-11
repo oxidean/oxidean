@@ -182,11 +182,7 @@ pub async fn comments_create(
     crate::repo::ensure_not_archived(&accessible)?;
     let pull = load_pull_in_repo(ctx, &accessible.row.id, req.number).await?;
 
-    let path = req
-        .path
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty());
+    let path = req.path.as_deref().map(str::trim).filter(|s| !s.is_empty());
     let side = req
         .side
         .as_deref()
@@ -195,10 +191,7 @@ pub async fn comments_create(
         .map(|s| s.to_ascii_uppercase());
     if let Some(ref s) = side {
         if s != "LEFT" && s != "RIGHT" {
-            return Err(AppError::new(
-                "rpc.bad_input",
-                "side must be LEFT or RIGHT",
-            ));
+            return Err(AppError::new("rpc.bad_input", "side must be LEFT or RIGHT"));
         }
     }
     if path.is_some() && (side.is_none() || req.line.is_none()) {
@@ -354,10 +347,7 @@ pub async fn comments_delete(
     if !crate::issue::acl::can_delete_comment(&user.id, &row.author_id, accessible.capability) {
         return Err(crate::repo::not_found());
     }
-    ctx.db
-        .delete_pull_comment(&row.id)
-        .await
-        .map_err(db_err)?;
+    ctx.db.delete_pull_comment(&row.id).await.map_err(db_err)?;
     let author_login = match ctx.db.find_user_by_id(&row.author_id).await {
         Ok(Some(u)) => u.username,
         Ok(None) => String::new(),

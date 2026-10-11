@@ -13,7 +13,7 @@ import {
 import { parseUnifiedDiffLines } from "@/lib/parse-unified-diff";
 import { cn } from "@/lib/utils";
 
-export type PullFilesProps = {
+type PullFilesProps = {
   owner: string;
   repoName: string;
   number: number;

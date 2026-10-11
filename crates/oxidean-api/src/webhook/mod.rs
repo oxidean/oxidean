@@ -39,7 +39,10 @@ const ALLOWED_EVENTS: &[&str] = &[
 
 fn db_err(e: String) -> AppError {
     if e == "database not configured" {
-        AppError::new("db.not_configured", "no database configured for this instance")
+        AppError::new(
+            "db.not_configured",
+            "no database configured for this instance",
+        )
     } else if e == "webhook not found" {
         AppError::new("webhook.not_found", "Webhook not found")
     } else if e == "delivery not found" {
@@ -148,7 +151,10 @@ async fn load_hook_in_repo(
 pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<WebhookPublic, AppError> {
     let user = require_verified(ctx).await?;
     let req: CreateWebhookRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid webhook.create input: {e}"))
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid webhook.create input: {e}"),
+        )
     })?;
     let accessible = resolve_repo_for_admin(ctx, &req.owner, &req.name).await?;
     let url = req.url.trim();
@@ -190,9 +196,8 @@ pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<WebhookPub
 
 pub async fn list(ctx: &RpcCtx, input: serde_json::Value) -> Result<WebhookListResponse, AppError> {
     let _user = require_verified(ctx).await?;
-    let req: WebhookListRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid webhook.list input: {e}"))
-    })?;
+    let req: WebhookListRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid webhook.list input: {e}")))?;
     let accessible = resolve_repo_for_admin(ctx, &req.owner, &req.name).await?;
     let rows = ctx
         .db
@@ -206,9 +211,8 @@ pub async fn list(ctx: &RpcCtx, input: serde_json::Value) -> Result<WebhookListR
 
 pub async fn get(ctx: &RpcCtx, input: serde_json::Value) -> Result<WebhookPublic, AppError> {
     let _user = require_verified(ctx).await?;
-    let req: WebhookIdRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid webhook.get input: {e}"))
-    })?;
+    let req: WebhookIdRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid webhook.get input: {e}")))?;
     let accessible = resolve_repo_for_admin(ctx, &req.owner, &req.name).await?;
     let row = load_hook_in_repo(ctx, &accessible.row.id, &req.id).await?;
     Ok(to_public(&row, None))
@@ -217,7 +221,10 @@ pub async fn get(ctx: &RpcCtx, input: serde_json::Value) -> Result<WebhookPublic
 pub async fn update(ctx: &RpcCtx, input: serde_json::Value) -> Result<WebhookPublic, AppError> {
     let _user = require_verified(ctx).await?;
     let req: UpdateWebhookRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid webhook.update input: {e}"))
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid webhook.update input: {e}"),
+        )
     })?;
     let accessible = resolve_repo_for_admin(ctx, &req.owner, &req.name).await?;
     let _existing = load_hook_in_repo(ctx, &accessible.row.id, &req.id).await?;
@@ -261,7 +268,10 @@ pub async fn delete(
 ) -> Result<DeleteWebhookResponse, AppError> {
     let _user = require_verified(ctx).await?;
     let req: WebhookIdRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid webhook.delete input: {e}"))
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid webhook.delete input: {e}"),
+        )
     })?;
     let accessible = resolve_repo_for_admin(ctx, &req.owner, &req.name).await?;
     let _ = load_hook_in_repo(ctx, &accessible.row.id, &req.id).await?;
@@ -324,12 +334,12 @@ pub async fn deliveries_get(
 
 pub async fn ping(ctx: &RpcCtx, input: serde_json::Value) -> Result<WebhookPingResponse, AppError> {
     let _user = require_verified(ctx).await?;
-    let req: WebhookIdRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid webhook.ping input: {e}"))
-    })?;
+    let req: WebhookIdRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid webhook.ping input: {e}")))?;
     let accessible = resolve_repo_for_admin(ctx, &req.owner, &req.name).await?;
     let hook = load_hook_in_repo(ctx, &accessible.row.id, &req.id).await?;
-    let payload = dispatch::ping_payload(&hook.id, &accessible.owner_username, &accessible.row.name);
+    let payload =
+        dispatch::ping_payload(&hook.id, &accessible.owner_username, &accessible.row.name);
     let delivery_id = Uuid::new_v4().to_string();
     let delivery_guid = Uuid::new_v4().to_string();
     let payload_json = serde_json::to_string(&payload).unwrap_or_else(|_| "{}".into());

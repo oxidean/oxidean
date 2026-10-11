@@ -25,7 +25,7 @@ export type AnsiSegment = {
   dim?: boolean;
 };
 
-export type LogLineKind = "out" | "error" | "warning" | "notice";
+type LogLineKind = "out" | "error" | "warning" | "notice";
 
 export type LogLine = {
   /** 1-based line number in the raw log. */
@@ -36,7 +36,7 @@ export type LogLine = {
   plain: string;
 };
 
-export type LogStep = {
+type LogStep = {
   name: string;
   status: StepStatus;
   startLine: number;

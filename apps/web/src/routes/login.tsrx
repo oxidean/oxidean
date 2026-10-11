@@ -1,68 +1,43 @@
-import { createFileRoute, redirect, useLoaderData } from "@octanejs/tanstack-router";
+import { useEffect, useState } from "octane";
+import { useQuery } from "@octanejs/tanstack-query";
 import { useForm } from "@octanejs/tanstack-form";
-import type { ProviderMode } from "@oxidean/api-client";
-import { useState } from "octane";
 import { AuthErrorBanner, AuthShell } from "@/components/auth-shell";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { AppPage } from "@/components/app-page";
 import { apiClient } from "@/lib/api-client";
 import { networkErrorMessage, rpcErrorMessage } from "@/lib/rpc-error-message";
 import { readReturnToFromLocation, safeReturnTo } from "@/lib/return-to";
-import { fetchProviderConfig, fetchSessionMe } from "@/lib/ssr-auth";
+import { authProviderConfigQueryOptions, authSessionQueryOptions } from "@/lib/session-queries";
 import { AppLink } from "@/components/ui/app-link";
-
-export type LoginLoaderData = {
-  mode: ProviderMode;
-  allow_signup: boolean;
-  loadError: string;
-};
+import { navigate } from "@/lib/nav";
 
 const LOGIN_ERROR = "Incorrect email/username or password. Check your details and try again.";
 const NETWORK_ERROR = networkErrorMessage();
 
-export const Route = createFileRoute("/login")({
-  component: LoginPage,
-  head: () => ({ meta: [{ title: "Sign in · Oxidean" }] }),
-  loader: async (): Promise<LoginLoaderData> => {
-    try {
-      const me = await fetchSessionMe();
-      if (me.ok) {
-        const dest = me.data.must_change_credentials ? "/setup/credentials" : "/";
-        throw redirect({ href: dest });
-      }
-    } catch (e) {
-      if (e && typeof e === "object" && "href" in e) throw e;
-      /* anonymous */
-    }
-
-    try {
-      const cfg = await fetchProviderConfig();
-      if (!cfg.ok) {
-        return { mode: "local", allow_signup: false, loadError: rpcErrorMessage(cfg.error) };
-      }
-      return {
-        mode: cfg.data.mode,
-        allow_signup: cfg.data.allow_signup === true,
-        loadError: "",
-      };
-    } catch {
-      return { mode: "local", allow_signup: false, loadError: NETWORK_ERROR };
-    }
-  },
-});
-
-/** Exported for login.integration.test.ts (RESEARCH P1 / D-QH-03). */
 export function LoginPage() @{
-  const data = useLoaderData({ from: "/login" }) as LoginLoaderData;
-  const mode = data.mode;
-  const allowSignup = data.allow_signup;
-  const loadError = data.loadError;
+  <AppPage>
+    <LoginContent />
+  </AppPage>;
+}
+
+function LoginContent() @{
+  const cfgQ = useQuery(authProviderConfigQueryOptions());
+  const meQ = useQuery(authSessionQueryOptions());
   const [error, setError] = useState("");
 
   const returnTo = readReturnToFromLocation();
   const signupHref = `/signup?returnTo=${encodeURIComponent(returnTo)}`;
+
+  // Signed-in users bounce off the auth pages (the middleware covers the
+  // cold-load case via the presence cookie; this catches stale-cookie and
+  // client-initiated states).
+  useEffect(() => {
+    const me = meQ.data;
+    if (me) navigate(me.must_change_credentials ? "/setup/credentials" : "/");
+  });
 
   const form = useForm({
     defaultValues: {
@@ -96,6 +71,11 @@ export function LoginPage() @{
     const path = kind === "workos" ? "/api/auth/workos/start" : "/api/auth/oidc/start";
     window.location.assign(`${path}?returnTo=${encodeURIComponent(returnTo)}`);
   }
+
+  const cfg = cfgQ.data;
+  const mode = cfg?.mode ?? "local";
+  const allowSignup = cfg?.allow_signup === true;
+  const loadError = cfgQ.isError ? rpcErrorMessage(cfgQ.error) : "";
 
   const support =
     mode === "workos"
