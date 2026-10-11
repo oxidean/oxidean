@@ -57,7 +57,8 @@ GLOBAL FLAGS
 ENVIRONMENT
   OXIDEAN_INSTANCE    default instance URL
   OXIDEAN_TOKEN       token override for any command
-  OXIDEAN_CONFIG_DIR  config directory override (default: ~/.config/ox)
+  OXIDEAN_CONFIG_DIR  config directory override (default: ~/.config/ox,
+                      %APPDATA%\\ox on Windows)
 
 EXIT CODES
   0 ok · 1 api error · 2 usage · 3 auth";

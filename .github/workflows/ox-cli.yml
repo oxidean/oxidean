@@ -1,0 +1,439 @@
+# ox CLI — cross-platform build matrix, install/package smoke tests, and
+# release asset publishing (issue #117 workstream 3 + matrix testing).
+#
+# - Every leg builds `ox-{target}` and smoke-runs it where a matching
+#   executor exists (native runners, qemu/binfmt containers, Rosetta).
+# - Distro legs run the real `install.sh` inside each primary distribution's
+#   container (apt/dnf/pacman/zypper/apk) against a fixture server, so the
+#   curl|sh path — including musl detection — is exercised end to end.
+# - Native packages (.deb/.rpm/.apk/.pkg.tar.zst) are produced with nfpm and
+#   test-installed in their matching distro container.
+# - Tag pushes (v*.*.*) publish everything as GitHub release assets —
+#   `ox-targets.txt` is the manifest the release Dockerfile fetches via
+#   OXIDEAN_CLI_DIST_URL.
+#
+# FreeBSD is build+package only: GitHub has no FreeBSD executor (Cirrus CI
+# is the follow-up if exec coverage there is ever needed).
+
+name: ox CLI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - crates/oxidean-cli/**
+      - crates/oxidean-api/src/routes/cli_dist.rs
+      - crates/oxidean-api/assets/cli/**
+      - crates/oxidean-api/Dockerfile
+      - packaging/**
+      - scripts/ox-*
+      - Cargo.toml
+      - Cargo.lock
+      - .github/workflows/ox-cli.yml
+    tags: ["v*.*.*"]
+  pull_request:
+    paths:
+      - crates/oxidean-cli/**
+      - crates/oxidean-api/src/routes/cli_dist.rs
+      - crates/oxidean-api/assets/cli/**
+      - crates/oxidean-api/Dockerfile
+      - packaging/**
+      - scripts/ox-*
+      - Cargo.toml
+      - Cargo.lock
+      - .github/workflows/ox-cli.yml
+  workflow_dispatch:
+
+concurrency:
+  group: ox-cli-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FIXTURE_PORT: "8901"
+  FIXTURE_NAME: oxfix
+
+permissions:
+  contents: read
+
+jobs:
+  # ── Build + smoke every target ──────────────────────────────────────────
+  build:
+    name: ox ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: x86_64-unknown-linux-gnu,      os: ubuntu-latest,    method: native }
+          # arm64 hosted runners are free for public repos; if the plan lacks
+          # them, switch this leg to `method: cross` on ubuntu-latest.
+          - { target: aarch64-unknown-linux-gnu,     os: ubuntu-24.04-arm, method: native }
+          - { target: x86_64-unknown-linux-musl,     os: ubuntu-latest,    method: cross }
+          - { target: aarch64-unknown-linux-musl,    os: ubuntu-latest,    method: cross }
+          - { target: armv7-unknown-linux-gnueabihf, os: ubuntu-latest,    method: cross }
+          # x86_64-unknown-freebsd is NOT here — see the build-freebsd job
+          # (cross's freebsd image is pinned to old glibc; a real VM is
+          # better coverage anyway).
+          # arm64 macOS builder compiles the x86_64 target via --target.
+          - { target: x86_64-apple-darwin,           os: macos-latest,     method: native }
+          - { target: aarch64-apple-darwin,          os: macos-latest,     method: native }
+          - { target: x86_64-pc-windows-msvc,        os: windows-latest,   method: native }
+          - { target: aarch64-pc-windows-msvc,       os: windows-11-arm,   method: native }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "ox-${{ matrix.target }}"
+      # `cross` (docker) — its images ship cmake+cc, which aws-lc-sys needs.
+      - uses: taiki-e/install-action@v2
+        if: matrix.method == 'cross'
+        with:
+          tool: cross
+      - name: build ox
+        run: |
+          if [ "${{ matrix.method }}" = "cross" ]; then
+            cross build --release -p oxidean-cli --bin ox --target ${{ matrix.target }}
+          else
+            cargo build --release -p oxidean-cli --bin ox --target ${{ matrix.target }}
+          fi
+      - name: stage artifact + digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          src="target/${{ matrix.target }}/release/ox"
+          [ -f "$src" ] || src="$src.exe"
+          cp "$src" "dist/ox-${{ matrix.target }}"
+          (cd dist && sha256sum "ox-${{ matrix.target }}" > "ox-${{ matrix.target }}.sha256")
+          ls -lh dist/
+      - name: qemu binfmt for foreign-arch exec
+        if: matrix.os == 'ubuntu-latest' && matrix.method == 'cross' && matrix.target != 'x86_64-unknown-linux-musl'
+        uses: docker/setup-qemu-action@v3
+      - name: smoke (foreign arch inside a real userspace container)
+        if: matrix.os == 'ubuntu-latest' && matrix.method == 'cross' && matrix.target != 'x86_64-unknown-linux-musl'
+        run: |
+          set -euo pipefail
+          case "${{ matrix.target }}" in
+            aarch64-*) platform=linux/arm64;  image=alpine ;;
+            armv7-*)   platform=linux/arm/v7; image=debian:bookworm-slim ;; # gnueabihf needs glibc
+          esac
+          docker run --rm --platform "$platform" -v "$PWD/dist:/dist:ro" "$image" \
+            /dist/ox-${{ matrix.target }} --version
+          docker run --rm --platform "$platform" -v "$PWD/dist:/dist:ro" "$image" \
+            /dist/ox-${{ matrix.target }} --help
+      - name: smoke (musl static runs on the gnu host)
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: ./scripts/ox-smoke.sh ./dist/ox-${{ matrix.target }}
+      - name: smoke (native unix)
+        if: matrix.method == 'native' && !startsWith(matrix.os, 'windows')
+        run: ./scripts/ox-smoke.sh ./dist/ox-${{ matrix.target }}
+      - name: smoke (x86_64 mac under Rosetta)
+        if: matrix.target == 'x86_64-apple-darwin'
+        run: |
+          if arch -x86_64 /usr/bin/true 2>/dev/null; then
+            arch -x86_64 ./dist/ox-${{ matrix.target }} --version
+          else
+            echo "Rosetta unavailable — build-only coverage for x86_64-apple-darwin"
+          fi
+      - name: smoke (native windows)
+        if: startsWith(matrix.os, 'windows')
+        shell: pwsh
+        run: ./scripts/ox-smoke.ps1 ./dist/ox-${{ matrix.target }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ox-${{ matrix.target }}
+          path: dist/
+          if-no-files-found: error
+
+  # ── FreeBSD: build + exec inside a real VM (cross's freebsd image is too
+  #    old for host-compiled build scripts; a VM is stronger coverage) ─────
+  build-freebsd:
+    name: ox x86_64-unknown-freebsd
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: build + smoke inside FreeBSD
+        uses: vmactions/freebsd-vm@v1
+        with:
+          sync: rsync
+          run: |
+            set -e
+            pkg install -y rust cmake gmake
+            cargo build --release -p oxidean-cli --bin ox
+            ./scripts/ox-smoke.sh ./target/release/ox
+      - name: stage artifact + digest
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp target/release/ox dist/ox-x86_64-unknown-freebsd
+          (cd dist && sha256sum ox-x86_64-unknown-freebsd > ox-x86_64-unknown-freebsd.sha256)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ox-x86_64-unknown-freebsd
+          path: dist/
+          if-no-files-found: error
+
+  # ── install.sh end-to-end per primary distro / package manager ──────────
+  install-linux:
+    name: install.sh (${{ matrix.name }})
+    needs: [build, build-freebsd]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: debian,       image: debian:bookworm-slim,       pm: "apt-get update -qq && apt-get install -y -qq curl ca-certificates",        expect: gnu }
+          - { name: ubuntu,       image: ubuntu:24.04,               pm: "apt-get update -qq && apt-get install -y -qq curl ca-certificates",        expect: gnu }
+          - { name: fedora,       image: fedora:latest,              pm: "dnf install -y -q curl",                                                 expect: gnu }
+          - { name: arch,         image: archlinux:latest,           pm: "pacman -Sy --noconfirm curl",                                            expect: gnu }
+          - { name: alpine,       image: alpine:latest,              pm: "apk add -q curl",                                                        expect: musl }
+          - { name: opensuse,     image: opensuse/tumbleweed:latest, pm: "zypper --non-interactive install --no-recommends curl",                    expect: gnu }
+          - { name: debian-arm64, image: debian:bookworm-slim,       pm: "apt-get update -qq && apt-get install -y -qq curl ca-certificates",        expect: gnu, platform: linux/arm64 }
+    steps:
+      - uses: actions/checkout@v4
+      - name: qemu for non-native arch legs
+        if: matrix.platform
+        uses: docker/setup-qemu-action@v3
+      - name: lay out fixture site (www/cli/*)
+        run: |
+          set -euo pipefail
+          mkdir -p www/cli/bin
+          sed "s|@OXIDEAN_ORIGIN@|http://${FIXTURE_NAME}:${FIXTURE_PORT}|g" \
+            crates/oxidean-api/assets/cli/install.sh > www/cli/install.sh
+          cp crates/oxidean-api/assets/cli/install.ps1 www/cli/install.ps1
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ox-*
+          path: artifacts
+          merge-multiple: true
+      - name: stage binaries under /cli/bin
+        run: |
+          cp artifacts/ox-* www/cli/bin/
+          # package artifacts share the ox-* glob — keep /cli/bin binaries-only
+          rm -f www/cli/bin/*.deb www/cli/bin/*.rpm www/cli/bin/*.apk www/cli/bin/*.zst
+      - name: serve fixture (busybox httpd)
+        run: |
+          docker network create oxnet
+          docker run -d --name "$FIXTURE_NAME" --network oxnet \
+            -v "$PWD/www:/www:ro" busybox httpd -f -p "$FIXTURE_PORT" -h /www
+          sleep 1
+          docker run --rm --network oxnet busybox \
+            wget -qO- "http://$FIXTURE_NAME:$FIXTURE_PORT/cli/install.sh" | head -3
+      - name: install + smoke inside ${{ matrix.image }}
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -euo pipefail
+          docker run --rm --network oxnet ${PLATFORM:+--platform $PLATFORM} \
+            "${{ matrix.image }}" sh -c '${{ matrix.pm }} >/dev/null 2>&1 && \
+              curl -fsSL http://$FIXTURE_NAME:$FIXTURE_PORT/cli/install.sh | sh && \
+              "$HOME/.local/bin/ox" --version && "$HOME/.local/bin/ox" --help >/dev/null' \
+            | tee /tmp/install.log
+          # Proves the right triple was selected (musl leg is the Alpine gate).
+          grep -q "installing ox for .*-linux-${{ matrix.expect }}" /tmp/install.log
+          grep -qE "^ox [0-9]+\.[0-9]+\.[0-9]+" /tmp/install.log
+
+  install-macos:
+    name: install.sh (macOS)
+    needs: [build, build-freebsd]
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ox-*
+          path: artifacts
+          merge-multiple: true
+      - name: serve fixture + curl | sh install + smoke
+        run: |
+          set -euo pipefail
+          mkdir -p www/cli/bin
+          sed "s|@OXIDEAN_ORIGIN@|http://127.0.0.1:${FIXTURE_PORT}|g" \
+            crates/oxidean-api/assets/cli/install.sh > www/cli/install.sh
+          cp artifacts/ox-* www/cli/bin/
+          rm -f www/cli/bin/*.deb www/cli/bin/*.rpm www/cli/bin/*.apk www/cli/bin/*.zst
+          (cd www && nohup python3 -m http.server "$FIXTURE_PORT" >/dev/null 2>&1 &)
+          sleep 1
+          curl -fsS "http://127.0.0.1:$FIXTURE_PORT/cli/install.sh" | head -3
+          export OXIDEAN_INSTALL_DIR="$PWD/ox-bin"
+          curl -fsSL "http://127.0.0.1:$FIXTURE_PORT/cli/install.sh" | sh | tee /tmp/install.log
+          grep -q "installing ox for aarch64-apple-darwin" /tmp/install.log
+          "$OXIDEAN_INSTALL_DIR/ox" --version
+
+  install-windows:
+    name: install.ps1 (Windows)
+    needs: [build, build-freebsd]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ox-*
+          path: artifacts
+          merge-multiple: true
+      - name: serve fixture
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path www/cli/bin | Out-Null
+          (Get-Content crates/oxidean-api/assets/cli/install.ps1) `
+            -replace '@OXIDEAN_ORIGIN@', "http://127.0.0.1:$env:FIXTURE_PORT" |
+            Set-Content www/cli/install.ps1 -Encoding ascii
+          Copy-Item artifacts/ox-* www/cli/bin/
+          Remove-Item www/cli/bin/*.deb,www/cli/bin/*.rpm,www/cli/bin/*.apk,`
+            www/cli/bin/*.zst -ErrorAction SilentlyContinue
+          Start-Process python -ArgumentList '-m','http.server',$env:FIXTURE_PORT `
+            -WorkingDirectory "$PWD\www" -WindowStyle Hidden
+          Start-Sleep 2
+          (Invoke-WebRequest "http://127.0.0.1:$env:FIXTURE_PORT/cli/install.ps1" `
+            -UseBasicParsing).Content.Split("`n")[0]
+      - name: irm | iex install + smoke
+        shell: pwsh
+        run: |
+          $env:OXIDEAN_INSTALL_DIR = "$PWD\ox-bin"
+          Invoke-Expression (Invoke-WebRequest `
+            "http://127.0.0.1:$env:FIXTURE_PORT/cli/install.ps1" -UseBasicParsing).Content
+          & "$env:OXIDEAN_INSTALL_DIR\ox.exe" --version
+
+  # ── native packages (nfpm) + install-test legs ──────────────────────────
+  packages:
+    name: pkg ${{ matrix.fmt }}/${{ matrix.arch }}
+    needs: [build, build-freebsd]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # fmt: nfpm packager; file: emitted artifact name; test_* installs it
+          # with the distro's own package manager (the package-manager leg).
+          - { fmt: deb,       arch: amd64,   target: x86_64-unknown-linux-gnu,   ext: deb,         test_image: debian:bookworm-slim, test_cmd: "apt-get update -qq && apt-get install -y -qq /pkg/PKGFILE" }
+          - { fmt: rpm,       arch: x86_64,  target: x86_64-unknown-linux-gnu,   ext: rpm,         test_image: fedora:latest,        test_cmd: "dnf install -y -q /pkg/PKGFILE" }
+          - { fmt: apk,       arch: x86_64,  target: x86_64-unknown-linux-musl,  ext: apk,         test_image: alpine:latest,        test_cmd: "apk add --allow-untrusted -q /pkg/PKGFILE" }
+          - { fmt: archlinux, arch: x86_64,  target: x86_64-unknown-linux-gnu,   ext: pkg.tar.zst, test_image: archlinux:latest,     test_cmd: "pacman -U --noconfirm /pkg/PKGFILE" }
+          - { fmt: deb,       arch: arm64,   target: aarch64-unknown-linux-gnu,  ext: deb,         test_image: debian:bookworm-slim, test_cmd: "apt-get update -qq && apt-get install -y -qq /pkg/PKGFILE", platform: linux/arm64 }
+          - { fmt: rpm,       arch: aarch64, target: aarch64-unknown-linux-gnu,  ext: rpm,         test_image: fedora:latest,        test_cmd: "dnf install -y -q /pkg/PKGFILE",                 platform: linux/arm64 }
+          - { fmt: apk,       arch: aarch64, target: aarch64-unknown-linux-musl, ext: apk,         test_image: alpine:latest,        test_cmd: "apk add --allow-untrusted -q /pkg/PKGFILE",       platform: linux/arm64 }
+          - { fmt: archlinux, arch: aarch64, target: aarch64-unknown-linux-gnu,  ext: pkg.tar.zst, test_image: archlinux:latest,     test_cmd: "pacman -U --noconfirm /pkg/PKGFILE",             platform: linux/arm64 }
+    steps:
+      - uses: actions/checkout@v4
+      - name: package version (tag → semver, else dev)
+        id: ver
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            # no + or - in the version — apk pkgver and pacman pkgver reject them
+            echo "version=0.0.0.dev.${GITHUB_RUN_ID:-0}" >> "$GITHUB_OUTPUT"
+          fi
+      - name: download target binary
+        uses: actions/download-artifact@v4
+        with:
+          name: ox-${{ matrix.target }}
+          path: dist
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: nfpm
+      - name: nfpm package
+        env:
+          PKG_ARCH: ${{ matrix.arch }}
+          PKG_VERSION: ${{ steps.ver.outputs.version }}
+          PKG_TARGET: ${{ matrix.target }}
+          PKG_FILE: ox-${{ steps.ver.outputs.version }}-${{ matrix.arch }}.${{ matrix.ext }}
+        run: |
+          set -euo pipefail
+          mkdir -p pkg
+          sed -e "s|@PKG_ARCH@|$PKG_ARCH|g" \
+              -e "s|@PKG_VERSION@|$PKG_VERSION|g" \
+              -e "s|@PKG_TARGET@|$PKG_TARGET|g" \
+              packaging/nfpm.yaml > /tmp/nfpm.yaml
+          nfpm package -f /tmp/nfpm.yaml -p ${{ matrix.fmt }} -t "pkg/$PKG_FILE"
+          ls -lh pkg/
+      - name: qemu for non-native arch legs
+        if: matrix.platform
+        uses: docker/setup-qemu-action@v3
+      - name: install package inside ${{ matrix.test_image }} + smoke
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          PKG_FILE: ox-${{ steps.ver.outputs.version }}-${{ matrix.arch }}.${{ matrix.ext }}
+        run: |
+          cmd='${{ matrix.test_cmd }}'
+          docker run --rm ${PLATFORM:+--platform $PLATFORM} \
+            -v "$PWD/pkg:/pkg:ro" "${{ matrix.test_image }}" \
+            sh -c "${cmd//PKGFILE/$PKG_FILE} && ox --version && ox --help >/dev/null"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ox-pkg-${{ matrix.fmt }}-${{ matrix.arch }}
+          path: pkg/
+
+  # ── tags: publish the full matrix + packages as release assets ──────────
+  release:
+    name: publish ox release assets
+    needs: [build, build-freebsd, install-linux, install-macos, install-windows, packages]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+      - name: manifest + installer templates
+        run: |
+          set -euo pipefail
+          for f in assets/ox-*; do
+            case "$f" in *.sha256|*.deb|*.rpm|*.apk|*.zst) continue ;; esac
+            basename "$f" | sed 's|^ox-||'
+          done | sort > assets/ox-targets.txt
+          cat assets/ox-targets.txt
+          # The released install.sh/install.ps1 are rendered against this
+          # release's flat download URL so `curl|sh` / `irm|iex` from GitHub
+          # works standalone (BIN_BASE defaults to $BASE, not $BASE/cli/bin).
+          # The canonical instance path stays the API-rendered /cli/install.*.
+          DL="https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}"
+          # shellcheck disable=SC2016 # the $VARS are literal text in the output file
+          sed -e "s|@OXIDEAN_ORIGIN@|$DL|g" \
+              -e 's|BIN_BASE="${OXIDEAN_BIN_BASE:-$BASE/cli/bin}"|BIN_BASE="${OXIDEAN_BIN_BASE:-$BASE}"|' \
+              crates/oxidean-api/assets/cli/install.sh > assets/install.sh
+          # shellcheck disable=SC2016 # the $VARS are literal text in the output file
+          sed -e "s|@OXIDEAN_ORIGIN@|$DL|g" \
+              -e 's|"\$Base/cli/bin"|"$Base"|' \
+              crates/oxidean-api/assets/cli/install.ps1 > assets/install.ps1
+      - name: github release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" assets/* --title "ox ${{ github.ref_name }}" --generate-notes
+
+  # ── tags: prove the release image stages + serves the full matrix ───────
+  image-matrix:
+    name: release image serves all targets
+    needs: [release]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: free disk for api image build
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /usr/local/share/boost /usr/share/swift || true
+      - uses: docker/setup-buildx-action@v3
+      - name: build api image with dist URL
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: crates/oxidean-api/Dockerfile
+          load: true
+          tags: oxidean-api:ox-matrix
+          build-args: |
+            OXIDEAN_CLI_DIST_URL=https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}
+          cache-from: type=gha,scope=oxidean-api
+          cache-to: type=gha,mode=max,scope=oxidean-api
+      - name: every shipped target is staged in the image
+        run: |
+          docker run --rm --entrypoint ls oxidean-api:ox-matrix \
+            -1 /usr/local/share/oxidean-cli | tee /tmp/staged.txt
+          curl -fsSL "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/ox-targets.txt" \
+            | while read -r t; do grep -q "ox-$t" /tmp/staged.txt; done

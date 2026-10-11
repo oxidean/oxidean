@@ -1,0 +1,19 @@
+# ox CLI native package — built by .github/workflows/ox-cli.yml `packages`.
+# @PKG_ARCH@, @PKG_VERSION@, @PKG_TARGET@ are substituted at package time.
+name: ox
+arch: "@PKG_ARCH@"
+version: "@PKG_VERSION@"
+version_schema: none
+section: utils
+priority: optional
+maintainer: Oxidean
+description: |
+  ox is the companion command-line tool for Oxidean forge instances —
+  repos, issues, pull requests, actions, and packages from your terminal.
+homepage: https://github.com/oxidean/oxidean
+license: MIT
+contents:
+  - src: dist/ox-@PKG_TARGET@
+    dst: /usr/bin/ox
+    file_info:
+      mode: "0755"

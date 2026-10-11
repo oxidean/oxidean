@@ -69,7 +69,28 @@ async fn install_script_serves_origin_substituted_shell() {
     assert!(body.starts_with("#!/bin/sh"));
     assert!(body.contains("BASE=\"https://forge.example.com\""));
     assert!(!body.contains("@OXIDEAN_ORIGIN@"));
-    assert!(body.contains("/cli/bin/ox-"));
+    // Binary fetch defaults to the instance's /cli/bin route unless the
+    // installer is pointed at a flat mirror via OXIDEAN_BIN_BASE.
+    assert!(body.contains("$BASE/cli/bin"));
+    assert!(body.contains("$BIN_BASE/ox-$TARGET"));
+    assert!(body.contains("OXIDEAN_BIN_BASE"));
+}
+
+#[tokio::test]
+async fn install_ps1_serves_origin_substituted_powershell() {
+    let app = setup().await;
+    let (status, body, headers) = get(&app, "/cli/install.ps1").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        headers.get(header::CONTENT_TYPE).unwrap(),
+        "text/plain; charset=utf-8"
+    );
+    assert!(body.contains("$Base = 'https://forge.example.com'"));
+    assert!(!body.contains("@OXIDEAN_ORIGIN@"));
+    assert!(body.contains("$Base/cli/bin"));
+    assert!(body.contains("$BinBase/ox-$target"));
+    assert!(body.contains("OXIDEAN_BIN_BASE"));
+    assert!(body.contains("Get-FileHash"));
 }
 
 #[tokio::test]

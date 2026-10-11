@@ -10,16 +10,47 @@ The binary lives at `crates/oxidean-cli` in the Cargo workspace.
 
 ## Install
 
-Any Oxidean instance that ships the CLI distribution serves an install script
-at `/cli/install.sh` — also linked under **Settings → Command line**:
+Any Oxidean instance that ships the CLI distribution serves install scripts
+— also linked under **Settings → Command line**:
 
 ```bash
+# Linux / macOS / FreeBSD (sh — musl systems like Alpine get the musl build)
 curl -fsSL https://forge.example.com/cli/install.sh | sh
 ```
 
-The script detects your platform (`uname`), downloads
-`/cli/bin/ox-{target}` plus its published `.sha256`, verifies the checksum, and
-installs to `~/.local/bin/ox` (override with `OXIDEAN_INSTALL_DIR`).
+```powershell
+# Windows (PowerShell 5.1+)
+irm https://forge.example.com/cli/install.ps1 | iex
+```
+
+The scripts detect your platform, download `ox-{target}` plus its published
+`.sha256`, verify the checksum, and install to `~/.local/bin/ox`
+(`%LOCALAPPDATA%\Programs\ox` on Windows — override either with
+`OXIDEAN_INSTALL_DIR`). Supported targets: `x86_64`/`aarch64` for Linux (gnu
+and musl), macOS, and Windows; plus `armv7-unknown-linux-gnueabihf` and
+`x86_64-unknown-freebsd` where the instance ships them.
+
+The binary/checksum base defaults to `{instance}/cli/bin`; point
+`OXIDEAN_BIN_BASE` at any flat mirror instead — e.g. a GitHub release's
+download URL, whose `install.sh`/`install.ps1` assets are pre-rendered for
+standalone installs:
+
+```bash
+DL=https://github.com/oxidean/oxidean/releases/download/vX.Y.Z
+curl -fsSL "$DL/install.sh" | sh          # already pinned to that release
+OXIDEAN_BIN_BASE="$DL" sh install.sh      # or: template + explicit mirror
+```
+
+Tagged releases also publish native packages — `ox-*.deb` (apt),
+`ox-*.rpm` (dnf/zypper), `ox-*.apk` (apk), `ox-*.pkg.tar.zst` (pacman) —
+each `ox` binary installed to `/usr/bin/ox`:
+
+```bash
+sudo dpkg -i ox-*-amd64.deb            # Debian/Ubuntu
+sudo dnf install ./ox-*-x86_64.rpm     # Fedora/RHEL
+apk add --allow-untrusted ox-*.apk     # Alpine
+sudo pacman -U ox-*.pkg.tar.zst        # Arch
+```
 
 If the instance has no prebuilt binary for your platform, install from source:
 
@@ -46,9 +77,12 @@ artifact for your platform it says so and points at the installer instead.
 ### For operators: serving binaries
 
 The API serves every `ox-{rust-target-triple}` file found in
-`OXIDEAN_CLI_DIST_DIR` (default `/usr/local/share/oxidean-cli`). The release
-image stages the server's own platform; to offer more (e.g. macOS/ARM builds
-for your users), drop additional binaries into that directory:
+`OXIDEAN_CLI_DIST_DIR` (default `/usr/local/share/oxidean-cli`). Self-built
+images stage the server's own platform; the published release image is built
+with `OXIDEAN_CLI_DIST_URL` pointing at the GitHub release and stages the
+full matrix (fetched + sha256-verified at image-build time). To offer more
+targets yourself, build with that arg or drop additional binaries into the
+dist dir:
 
 ```text
 /usr/local/share/oxidean-cli/

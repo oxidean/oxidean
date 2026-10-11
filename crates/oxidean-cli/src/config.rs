@@ -5,7 +5,8 @@
 //! - token:    `OXIDEAN_TOKEN` env → per-instance token in config
 //!
 //! Config lives at `$OXIDEAN_CONFIG_DIR/config.json`, else
-//! `$XDG_CONFIG_HOME/ox/config.json`, else `~/.config/ox/config.json`.
+//! `$XDG_CONFIG_HOME/ox/config.json`, else `%APPDATA%/ox/config.json` on
+//! Windows or `~/.config/ox/config.json` everywhere else.
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -36,8 +37,14 @@ pub struct InstanceEntry {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
-    /// Neither `OXIDEAN_CONFIG_DIR`, `XDG_CONFIG_HOME`, nor `HOME` is set.
+    /// No usable config-dir env — on Windows `HOME` is usually unset, so
+    /// `%APPDATA%` is the platform fallback there instead.
+    #[cfg(not(windows))]
     #[error("cannot locate a config directory (set OXIDEAN_CONFIG_DIR, XDG_CONFIG_HOME, or HOME)")]
+    NoConfigDir,
+    /// Windows variant of `NoConfigDir` — `HOME` is not a platform default.
+    #[cfg(windows)]
+    #[error("cannot locate a config directory (set OXIDEAN_CONFIG_DIR, XDG_CONFIG_HOME, or APPDATA)")]
     NoConfigDir,
     #[error("{0}")]
     Io(String),
@@ -56,16 +63,25 @@ fn env_var(name: &str) -> Option<String> {
 }
 
 /// Pure resolution so precedence is unit-testable without env mutation.
+/// `app_data` is the Windows roaming profile dir (`%APPDATA%`) — the
+/// platform-appropriate default there since `HOME` is usually unset; it is
+/// ignored on unix where `~/.config` is the fallback.
 pub fn config_dir_from(
     override_dir: Option<&str>,
     xdg: Option<&str>,
     home: Option<&str>,
+    app_data: Option<&str>,
 ) -> Option<PathBuf> {
     if let Some(d) = override_dir {
         return Some(PathBuf::from(d));
     }
     if let Some(d) = xdg {
         return Some(PathBuf::from(d).join(APP_DIR));
+    }
+    if cfg!(windows) {
+        if let Some(d) = app_data {
+            return Some(PathBuf::from(d).join(APP_DIR));
+        }
     }
     home.map(|h| PathBuf::from(h).join(".config").join(APP_DIR))
 }
@@ -75,6 +91,7 @@ pub fn config_dir() -> Result<PathBuf, ConfigError> {
         env_var(ENV_CONFIG_DIR).as_deref(),
         env_var("XDG_CONFIG_HOME").as_deref(),
         env_var("HOME").as_deref(),
+        env_var("APPDATA").as_deref(),
     )
     .ok_or(ConfigError::NoConfigDir)
 }
@@ -236,18 +253,40 @@ mod tests {
     #[test]
     fn config_dir_precedence() {
         assert_eq!(
-            config_dir_from(Some("/tmp/oxcfg"), Some("/xdg"), Some("/home/u")).unwrap(),
+            config_dir_from(Some("/tmp/oxcfg"), Some("/xdg"), Some("/home/u"), None).unwrap(),
             PathBuf::from("/tmp/oxcfg")
         );
         assert_eq!(
-            config_dir_from(None, Some("/xdg"), Some("/home/u")).unwrap(),
+            config_dir_from(None, Some("/xdg"), Some("/home/u"), None).unwrap(),
             PathBuf::from("/xdg/ox")
         );
         assert_eq!(
-            config_dir_from(None, None, Some("/home/u")).unwrap(),
+            config_dir_from(None, None, Some("/home/u"), None).unwrap(),
             PathBuf::from("/home/u/.config/ox")
         );
-        assert!(config_dir_from(None, None, None).is_none());
+        assert!(config_dir_from(None, None, None, None).is_none());
+    }
+
+    #[test]
+    fn config_dir_windows_appdata() {
+        if cfg!(windows) {
+            // Native Windows: %APPDATA% is the fallback when HOME is unset.
+            assert_eq!(
+                config_dir_from(None, None, None, Some("C:\\Users\\u\\AppData\\Roaming")).unwrap(),
+                PathBuf::from("C:\\Users\\u\\AppData\\Roaming").join(APP_DIR)
+            );
+            // Explicit env overrides still win over the platform default.
+            assert_eq!(
+                config_dir_from(Some("D:\\ox"), None, None, Some("C:\\AppData")).unwrap(),
+                PathBuf::from("D:\\ox")
+            );
+        } else {
+            // On unix APPDATA is never consulted — HOME/.config stays the default.
+            assert_eq!(
+                config_dir_from(None, None, Some("/home/u"), Some("/ignored")).unwrap(),
+                PathBuf::from("/home/u/.config/ox")
+            );
+        }
     }
 
     #[test]
