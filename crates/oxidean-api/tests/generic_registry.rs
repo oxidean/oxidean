@@ -120,6 +120,21 @@ async fn mint_package_write_pat(app: &axum::Router, cookie: &str) -> String {
     v["data"]["token"].as_str().expect("token").to_string()
 }
 
+async fn mint_classic_pat(app: &axum::Router, cookie: &str, scopes: &str) -> String {
+    let body = format!(
+        r#"{{"procedure":"pat.createClassic","input":{{"name":"classic","scopes":{scopes}}}}}"#
+    );
+    let res = app
+        .clone()
+        .oneshot(rpc_req_with_cookie(&body, cookie))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    v["data"]["token"].as_str().expect("token").to_string()
+}
+
 async fn setup_owner() -> (axum::Router, Database, String, String, tempfile::TempDir) {
     let dir = tempfile::tempdir().expect("tempdir");
     let packages = dir.path().join("packages");
@@ -135,13 +150,13 @@ async fn setup_owner() -> (axum::Router, Database, String, String, tempfile::Tem
         .await
         .expect("verify");
     let token = mint_package_write_pat(&app, &cookie).await;
-    (app, db, token, user_id, dir)
+    (app, db, token, cookie, dir)
 }
 
 /// PUT /generic/<owner>/<name>/<version>/<file> uploads a file.
 #[tokio::test]
 async fn generic_registry_put_file() {
-    let (app, _db, token, _uid, _dir) = setup_owner().await;
+    let (app, _db, token, _cookie, _dir) = setup_owner().await;
     let body = b"hello-generic-bytes";
     let req = Request::builder()
         .method("PUT")
@@ -161,7 +176,7 @@ async fn generic_registry_put_file() {
 /// GET downloads a previously uploaded file.
 #[tokio::test]
 async fn generic_registry_get_file() {
-    let (app, _db, token, _uid, _dir) = setup_owner().await;
+    let (app, _db, token, _cookie, _dir) = setup_owner().await;
     let body = b"download-me";
     let put = Request::builder()
         .method("PUT")
@@ -183,10 +198,11 @@ async fn generic_registry_get_file() {
     assert_eq!(&bytes[..], body, "expected GET to return stored bytes");
 }
 
-/// DELETE version removes all files for that version id.
+/// DELETE version removes all files for that version id. `package:delete`
+/// is a standalone scope — an FG `packages:write` token cannot delete.
 #[tokio::test]
 async fn generic_registry_delete_version() {
-    let (app, _db, token, _uid, _dir) = setup_owner().await;
+    let (app, _db, token, cookie, _dir) = setup_owner().await;
     let put = Request::builder()
         .method("PUT")
         .uri("/generic/pkgowner/tool/1.0.0/app.bin?visibility=public")
@@ -198,17 +214,32 @@ async fn generic_registry_delete_version() {
         StatusCode::CREATED
     );
 
-    let del = Request::builder()
+    // FG `packages:write` carries no delete grant → 403.
+    let del_fg = Request::builder()
         .method("DELETE")
         .uri("/generic/pkgowner/tool/1.0.0")
         .header(header::AUTHORIZATION, basic_header("pkgowner", &token))
+        .body(Body::empty())
+        .unwrap();
+    assert_eq!(
+        app.clone().oneshot(del_fg).await.unwrap().status(),
+        StatusCode::FORBIDDEN,
+        "FG packages:write must not delete versions"
+    );
+
+    let del_token =
+        mint_classic_pat(&app, &cookie, r#"["package:write","package:delete"]"#).await;
+    let del = Request::builder()
+        .method("DELETE")
+        .uri("/generic/pkgowner/tool/1.0.0")
+        .header(header::AUTHORIZATION, basic_header("pkgowner", &del_token))
         .body(Body::empty())
         .unwrap();
     let del_res = app.clone().oneshot(del).await.unwrap();
     assert_eq!(
         del_res.status(),
         StatusCode::NO_CONTENT,
-        "expected DELETE version to remove files (Admin + package:write)"
+        "expected DELETE version to remove files (Admin + package:delete)"
     );
 
     let get = Request::builder()
@@ -222,7 +253,7 @@ async fn generic_registry_delete_version() {
     let put2 = Request::builder()
         .method("PUT")
         .uri("/generic/pkgowner/tool/1.0.0/app.bin?visibility=public")
-        .header(header::AUTHORIZATION, basic_header("pkgowner", &token))
+        .header(header::AUTHORIZATION, basic_header("pkgowner", &del_token))
         .body(Body::from(&b"again"[..]))
         .unwrap();
     assert_eq!(
@@ -234,7 +265,7 @@ async fn generic_registry_delete_version() {
 /// Overwrite of an existing version returns 409 (immutable versions).
 #[tokio::test]
 async fn generic_registry_overwrite_conflict() {
-    let (app, _db, token, _uid, _dir) = setup_owner().await;
+    let (app, _db, token, _cookie, _dir) = setup_owner().await;
     let put1 = Request::builder()
         .method("PUT")
         .uri("/generic/pkgowner/tool/1.0.0/app.bin?visibility=public")
@@ -263,7 +294,7 @@ async fn generic_registry_overwrite_conflict() {
 /// List versions/files for a generic package.
 #[tokio::test]
 async fn generic_registry_list() {
-    let (app, _db, token, _uid, _dir) = setup_owner().await;
+    let (app, _db, token, _cookie, _dir) = setup_owner().await;
     for (ver, file) in [("1.0.0", "a.bin"), ("1.0.1", "b.bin")] {
         let put = Request::builder()
             .method("PUT")

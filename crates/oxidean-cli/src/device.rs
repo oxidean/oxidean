@@ -187,3 +187,25 @@ pub fn open_browser(url: &str) {
     let ok = false;
     let _ = ok;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn url_encode_percent_encodes_utf8_bytes() {
+        assert_eq!(url_encode("abc-XYZ_09.~"), "abc-XYZ_09.~");
+        assert_eq!(url_encode("a b"), "a%20b");
+        assert_eq!(url_encode("a=b&c"), "a%3Db%26c");
+        // Multi-byte UTF-8 encodes per byte (é = 0xC3 0xA9).
+        assert_eq!(url_encode("é"), "%C3%A9");
+    }
+
+    #[test]
+    fn form_encode_joins_pairs() {
+        assert_eq!(
+            form_encode(&[("grant_type", "urn:ietf:x"), ("device_code", "a b")]),
+            "grant_type=urn%3Aietf%3Ax&device_code=a%20b"
+        );
+    }
+}
