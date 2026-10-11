@@ -35,7 +35,13 @@ function AppAccessGate() @{
   // Register SPA navigate for taps held by the early-nav boot listener (the
   // head script only resolves them once this bridge exists, which implies the
   // module graph — ClientRouter included — is up and safe to swap).
-  useEffect(() => installEarlyNavBridge(({ href }) => navigate(href)), []);
+  useEffect(
+    () =>
+      installEarlyNavBridge(({ href, history }) =>
+        navigate(href, history === "replace" ? { history: "replace" } : undefined),
+      ),
+    [],
+  );
 
   <></>;
 }

@@ -241,10 +241,10 @@ export function CloneBox({
       } @else {
         <>
           {/* data-astro-reload: archive endpoints return attachments — full nav, not morph. */}
-          <DropdownMenuLinkItem href={zipHref} data-astro-reload>
+          <DropdownMenuLinkItem href={zipHref} data-astro-reload data-astro-prefetch="false">
             Download ZIP
           </DropdownMenuLinkItem>
-          <DropdownMenuLinkItem href={tarHref} data-astro-reload>
+          <DropdownMenuLinkItem href={tarHref} data-astro-reload data-astro-prefetch="false">
             Download tar.gz
           </DropdownMenuLinkItem>
         </>;

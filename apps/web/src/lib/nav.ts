@@ -11,6 +11,10 @@ export function navigate(to: string) {
   a.href = to;
   a.style.display = "none";
   a.setAttribute("data-oxidean-nav", "");
+  // Programmatic clicks would otherwise be captured as pre-hydration taps
+  // by the early-nav bridge (no $$click slot) and deferred through its
+  // pending queue instead of reaching ClientRouter's delegation directly.
+  a.setAttribute("data-no-early-nav", "");
   document.body.appendChild(a);
   try {
     a.click();

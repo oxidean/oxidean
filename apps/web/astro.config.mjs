@@ -73,6 +73,13 @@ const apiProxy = {
 export default defineConfig({
   output: "static",
   integrations: [octane()],
+  // Hover/focus/tap prefetch on every internal link — shells are small and
+  // the Rust tier serves them fast, so ClientRouter swaps read as instant.
+  // Non-route endpoints opt out via `data-astro-prefetch="false"`.
+  prefetch: {
+    prefetchAll: true,
+    defaultStrategy: "hover",
+  },
   server: {
     port: 3000,
     allowedHosts: resolveViteAllowedHosts(),

@@ -17,6 +17,7 @@ import {
 import { useQuery, useQueryClient } from "@octanejs/tanstack-query";
 import type { UserPublic } from "@oxidean/api-client";
 import { useEffect, useEffectEvent, useState } from "octane";
+import { usePathname } from "@/lib/pathname.tsrx";
 import { GlobalSearch } from "@/components/global-search";
 import { OxideanMark } from "@/components/oxidean-mark";
 import { ThemeSelect } from "@/components/theme-select";
@@ -81,7 +82,10 @@ function AccountAvatar({ user, size = "sm" }: { user: UserPublic; size?: "sm" | 
 }
 
 function useRepoContext(): { owner: string; repo: string } | null {
-  return repoParamsFromPathname();
+  // Reactive pathname — this chrome persists across ClientRouter swaps, so a
+  // non-reactive read would leave repo-scoped links (New issue/release) bound
+  // to the repo you navigated AWAY from.
+  return repoParamsFromPathname(usePathname());
 }
 
 function CreateMenu({ onNavigated }: { onNavigated?: () => void }) @{
@@ -601,8 +605,16 @@ function MobileNavSheet({ onClose }: { onClose: () => void }) @{
 export function SiteHeader() @{
   const [menuOpen, setMenuOpen] = useState(false);
   const { needsSetup } = useChromeAccountState();
+  const pathname = usePathname();
 
   const closeMenu = useEffectEvent(() => setMenuOpen(false));
+
+  // This header persists across ClientRouter swaps — a navigation that came
+  // from outside the sheet (logo, GlobalSearch, browser back) would otherwise
+  // leave the overlay stuck open on the new route.
+  useEffect(() => {
+    closeMenu();
+  }, [pathname]);
 
   const onDocPointer = useEffectEvent((event: PointerEvent) => {
     const t = event.target;

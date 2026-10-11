@@ -204,6 +204,8 @@ function RepoReleaseDetailPageContent() @{
                 {/* raw-anchor-ok — /api download endpoint, not a router route */}
                 <a
                   href={`/api/releases/assets/${a.id}` as string}
+                  data-astro-reload
+                  data-astro-prefetch="false"
                   className="text-[14px] text-primary underline"
                 >
                   {(a.filename || a.id) as string}
@@ -225,6 +227,8 @@ function RepoReleaseDetailPageContent() @{
               href={
                 `/api/repos/${owner}/${repoName}/archive/${encodeURIComponent(release.tag_name)}.zip` as string
               }
+              data-astro-reload
+              data-astro-prefetch="false"
               className="text-[14px] text-primary underline"
             >
               Source code (zip)
@@ -236,6 +240,8 @@ function RepoReleaseDetailPageContent() @{
               href={
                 `/api/repos/${owner}/${repoName}/archive/${encodeURIComponent(release.tag_name)}.tar.gz` as string
               }
+              data-astro-reload
+              data-astro-prefetch="false"
               className="text-[14px] text-primary underline"
             >
               Source code (tar.gz)

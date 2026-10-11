@@ -11,6 +11,7 @@ import { ClientRouter, fade } from "astro:transitions";
 import { ChromeTop, ChromeBottom } from "@/components/app-page";
 import { THEME_BOOT_SCRIPT, FONT_WARM_SCRIPT } from "@/lib/theme";
 import { EARLY_NAV_BOOT_SCRIPT } from "@/lib/early-nav";
+import { NAV_PROGRESS_BOOT_SCRIPT } from "@/lib/nav-progress";
 import { buildSwRegisterScript } from "@/lib/sw-register";
 import { buildWebMcpRegisterScript, WEBMCP_WELL_KNOWN_PATH } from "@/lib/webmcp";
 import { resolveSwBuildId } from "@/lib/sw-build-id";
@@ -35,6 +36,7 @@ const webmcpRegisterScript = buildWebMcpRegisterScript();
     <script is:inline set:html={THEME_BOOT_SCRIPT} />
     <script is:inline set:html={FONT_WARM_SCRIPT} />
     <script is:inline set:html={EARLY_NAV_BOOT_SCRIPT} />
+    <script is:inline set:html={NAV_PROGRESS_BOOT_SCRIPT} />
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="preload" href="/fonts/sora-latin.woff2" as="font" type="font/woff2" crossorigin="anonymous" />

@@ -6,7 +6,7 @@
  * - the anchor already owns a delegated click slot (hydrated router link or
  *   any component `onClick`);
  * - `target` other than `_self`, `download`, or explicit opt-out
- *   (`data-no-early-nav`);
+ *   (`data-no-early-nav`), or ClientRouter opt-out (`data-astro-reload`);
  * - non-route paths: external/protocol-relative URLs and same-origin `/api/*`
  *   endpoints (asset downloads, RPC) that are not router routes.
  */
@@ -21,7 +21,11 @@ function earlyNavAnchorForTarget(target: EventTarget | null): HTMLAnchorElement 
   if (href === "/api" || href.startsWith("/api/")) return null;
   const targetAttr = anchor.getAttribute("target");
   if (targetAttr != null && targetAttr !== "_self") return null;
-  if (anchor.hasAttribute("download") || anchor.hasAttribute("data-no-early-nav")) {
+  if (
+    anchor.hasAttribute("download") ||
+    anchor.hasAttribute("data-no-early-nav") ||
+    anchor.hasAttribute("data-astro-reload")
+  ) {
     return null;
   }
   return anchor;
@@ -82,12 +86,12 @@ const RESOLVE_TICK_MS = 40;
 
 declare global {
   interface Window {
-    __oxideanEarlyNav?: ((href: string) => void) | null;
-    __oxideanEarlyNavReady?: (nav: (href: string) => void) => void;
+    __oxideanEarlyNav?: ((href: string, el?: Element | null) => void) | null;
+    __oxideanEarlyNavReady?: (nav: (href: string, el?: Element | null) => void) => void;
   }
 }
 
-export type EarlyNavHandler = (opts: { href: string }) => unknown;
+export type EarlyNavHandler = (opts: { href: string; history?: "replace" | "auto" }) => unknown;
 
 /**
  * Resolve the `<a href>` this click should be bridged through, or `null` when
@@ -117,7 +121,7 @@ export function earlyNavHrefForTarget(target: EventTarget | null): string | unde
  * `navigate` is safe. `appHydrated()` from the Octane-root era is gone:
  * the `#__app` container no longer exists.
  */
-export const EARLY_NAV_BOOT_SCRIPT = `(function(){var CLICK_SLOT=${JSON.stringify(CLICK_SLOT)},CAPTURE_CLICK_SLOT=${JSON.stringify(CAPTURE_CLICK_SLOT)},PENDING_MAX=${PENDING_MAX_MS},TICK=${RESOLVE_TICK_MS};var earlyNavAnchorForTarget=${earlyNavAnchorForTarget.toString()};var pending=null,timer=0;window.__oxideanEarlyNav=null;window.__oxideanEarlyNavReady=function(nav){window.__oxideanEarlyNav=nav;};function wired(el){return el[CLICK_SLOT]!=null||el[CAPTURE_CLICK_SLOT]!=null;}function fallback(href){try{window.location.assign(href);}catch(e){}}function resolve(){if(!pending)return;var el=pending.el,href=pending.href;if(!el.isConnected){pending=null;fallback(href);return;}if(wired(el)){pending=null;try{el.click();}catch(e){fallback(href);}return;}var nav=window.__oxideanEarlyNav;if(nav){pending=null;try{nav(href);return;}catch(e){fallback(href);return;}}if(Date.now()-pending.ts>=PENDING_MAX){pending=null;fallback(href);}}document.addEventListener("click",function(event){if(event.defaultPrevented||event.button!==0||event.metaKey||event.altKey||event.ctrlKey||event.shiftKey)return;var anchor=earlyNavAnchorForTarget(event.target);if(anchor===null)return;event.preventDefault();pending={el:anchor,href:anchor.getAttribute("href"),ts:Date.now()};resolve();if(pending&&!timer){timer=setInterval(function(){resolve();if(!pending&&timer){clearInterval(timer);timer=0;}},TICK);}},true);window.addEventListener("unhandledrejection",function(event){var reason=event&&event.reason;if(reason&&reason.name==="InvalidStateError"&&/Transition was aborted/.test(String(reason.message||reason))){event.preventDefault();}});})();`;
+export const EARLY_NAV_BOOT_SCRIPT = `(function(){var CLICK_SLOT=${JSON.stringify(CLICK_SLOT)},CAPTURE_CLICK_SLOT=${JSON.stringify(CAPTURE_CLICK_SLOT)},PENDING_MAX=${PENDING_MAX_MS},TICK=${RESOLVE_TICK_MS};var earlyNavAnchorForTarget=${earlyNavAnchorForTarget.toString()};var pending=null,timer=0;window.__oxideanEarlyNav=null;window.__oxideanEarlyNavReady=function(nav){window.__oxideanEarlyNav=nav;};function wired(el){return el[CLICK_SLOT]!=null||el[CAPTURE_CLICK_SLOT]!=null;}function fallback(href){try{window.location.assign(href);}catch(e){}}function resolve(){if(!pending)return;var el=pending.el,href=pending.href;if(!el.isConnected){pending=null;fallback(href);return;}if(wired(el)){pending=null;try{el.click();}catch(e){fallback(href);}return;}var nav=window.__oxideanEarlyNav;if(nav){pending=null;try{nav(href,el);return;}catch(e){fallback(href);return;}}if(Date.now()-pending.ts>=PENDING_MAX){pending=null;fallback(href);}}document.addEventListener("click",function(event){if(event.defaultPrevented||event.button!==0||event.metaKey||event.altKey||event.ctrlKey||event.shiftKey)return;var anchor=earlyNavAnchorForTarget(event.target);if(anchor===null)return;event.preventDefault();pending={el:anchor,href:anchor.getAttribute("href"),ts:Date.now()};resolve();if(pending&&!timer){timer=setInterval(function(){resolve();if(!pending&&timer){clearInterval(timer);timer=0;}},TICK);}},true);window.addEventListener("unhandledrejection",function(event){var reason=event&&event.reason;if(reason&&reason.name==="InvalidStateError"&&/Transition was aborted/.test(String(reason.message||reason))){event.preventDefault();}});})();`;
 
 /**
  * Wire the SPA navigate into the bridge (called from the persistent chrome
@@ -132,9 +136,14 @@ export const EARLY_NAV_BOOT_SCRIPT = `(function(){var CLICK_SLOT=${JSON.stringif
  */
 export function installEarlyNavBridge(navigate: EarlyNavHandler): () => void {
   if (typeof document === "undefined") return () => {};
-  const nav = (href: string) => {
+  const nav = (href: string, el?: Element | null) => {
+    // ClientRouter parity: `data-astro-history="replace"` survives the bridge.
+    const history =
+      el instanceof HTMLElement && el.dataset.astroHistory === "replace"
+        ? ("replace" as const)
+        : undefined;
     try {
-      navigate({ href });
+      navigate({ href, history });
     } catch {
       window.location.assign(href);
     }
@@ -162,7 +171,7 @@ export function installEarlyNavBridge(navigate: EarlyNavHandler): () => void {
     const href = earlyNavHrefForTarget(event.target);
     if (href === undefined) return;
     event.preventDefault();
-    nav(href);
+    nav(href, event.target instanceof Element ? event.target.closest("a") : null);
   };
   document.addEventListener("click", onClick, true);
   return () => document.removeEventListener("click", onClick, true);

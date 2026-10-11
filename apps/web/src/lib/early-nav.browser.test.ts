@@ -74,6 +74,9 @@ describe("earlyNavHrefForTarget", () => {
     expect(earlyNavHrefForTarget(anchor('<a href="/x" target="_blank">x</a>'))).toBeUndefined();
     expect(earlyNavHrefForTarget(anchor('<a href="/x" download>x</a>'))).toBeUndefined();
     expect(earlyNavHrefForTarget(anchor('<a href="/x" data-no-early-nav>x</a>'))).toBeUndefined();
+    // ClientRouter opt-out — full-reload anchors must keep native semantics
+    // through the bridge too, or they morph a non-HTML response into <body>.
+    expect(earlyNavHrefForTarget(anchor('<a href="/x" data-astro-reload>x</a>'))).toBeUndefined();
   });
 
   it("ignores non-anchor targets", () => {
@@ -126,6 +129,14 @@ describe("installEarlyNavBridge", () => {
     event.preventDefault();
     a.dispatchEvent(event);
     expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("forwards data-astro-history=replace through to navigate", () => {
+    const navigate = vi.fn();
+    disposers.push(installEarlyNavBridge(navigate));
+    const a = anchor('<a href="/login" data-astro-history="replace">Sign in</a>');
+    clickOn(a);
+    expect(navigate).toHaveBeenCalledWith({ href: "/login", history: "replace" });
   });
 
   it("detaches on dispose", () => {
