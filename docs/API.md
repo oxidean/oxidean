@@ -54,7 +54,8 @@ Missing or mismatched value → error `rpc.version_mismatch` (HTTP 400).
 | `GET` | `/api/auth/oidc/start` | Start OIDC + PKCE (optional `?return_to=`) | No (redirect) |
 | `GET` | `/api/auth/oidc/callback` | OIDC code exchange; sets session cookie | No (redirect) |
 | `GET` | `/oauth/authorize` | OAuth2 authorization endpoint → consent page / login | Session cookie (or login redirect) |
-| `POST` | `/oauth/token` | OAuth2 token endpoint (`grant_type=authorization_code`) | Client secret |
+| `POST` | `/oauth/device/code` | RFC 8628 device code → `{user_code, verification_uri}` | Public |
+| `POST` | `/oauth/token` | OAuth2 token endpoint (`grant_type=authorization_code` or `…:device_code`) | Client secret (`device_code` grant is a public-client exchange) |
 | `GET` | `/oauth/userinfo` | OAuth2 identity surface | `oxidean_oat_` Bearer |
 | `POST` | `/api/user/avatar` | Multipart avatar upload (field `avatar`) | Yes (`oxidean_session`) |
 | `DELETE` | `/api/user/avatar` | Remove profile picture | Yes (`oxidean_session`) |
@@ -598,6 +599,23 @@ that app/user pair; revoked tokens fail immediately everywhere.
 Minting codes (`oauthApp.authorize` with `approve: true`) and registering apps
 require a verified email (`auth.email_unverified` otherwise), matching PAT
 minting posture.
+
+### Device authorization grant (RFC 8628)
+
+`ox auth login --web` uses the device flow for browser-approved sign-in on
+input-constrained clients. `POST /oauth/device/code` (form-encoded `scope`
+— space-delimited classic PAT scopes) is unauthenticated and returns
+`{ device_code, user_code, verification_uri, verification_uri_complete,
+expires_in, interval }`. The user approves at `/oauth/device` (session-gated;
+`oauth.deviceInfo` resolves the user code and `oauth.deviceAuthorize` records
+approve/deny). The client polls `POST /oauth/token` with
+`grant_type=urn:ietf:params:oauth:grant-type:device_code&device_code=…` —
+a public-client exchange (the `device_code` is the credential; no client
+auth). Pending polls return `authorization_pending` (keep polling at
+`interval`) or `slow_down` (add 5 s); terminal states are `access_denied`
+and `expired_token`. On approval the endpoint mints a classic PAT
+(`oxidean_pat_…`) with the requested scopes — returned as `access_token` —
+so device sign-ins land on the same Bearer credential `--token` logins use.
 
 ### Organizations (`org.*`) & collaborators
 
