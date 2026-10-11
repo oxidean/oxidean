@@ -12,3 +12,4 @@ pub mod manifest;
 pub mod output;
 pub mod rpc;
 pub mod self_update;
+pub mod skill;

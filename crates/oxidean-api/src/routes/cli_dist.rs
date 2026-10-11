@@ -3,6 +3,7 @@
 //! Routes:
 //!   GET /cli/install.sh       POSIX installer with the public origin baked in
 //!   GET /cli/install.ps1      PowerShell installer (native Windows)
+//!   GET /cli/skill.md         consumer-facing agent skill (embedded single source)
 //!   GET /cli/latest           JSON { version, targets: [{ target, sha256, bytes }] }
 //!   GET /cli/bin/{*file}      `ox-{target}` binary, or `ox-{target}.sha256` digest
 //!
@@ -203,6 +204,28 @@ const INSTALL_SCRIPT: &str = include_str!("../../assets/cli/install.sh");
 /// verify → `%LOCALAPPDATA%\Programs\ox\ox.exe` → PATH hint.
 const INSTALL_PS1: &str = include_str!("../../assets/cli/install.ps1");
 
+/// Consumer-facing agent SKILL.md — single source of truth lives in the CLI
+/// crate (`crates/oxidean-cli/skill/SKILL.md`) and is embedded into `ox` for
+/// `ox skill print`/`install`; serving it here versions the doc with the
+/// server so fetched copies match the RPC surface they document.
+const SKILL_MD: &str = include_str!("../../../oxidean-cli/skill/SKILL.md");
+
+/// `GET /cli/skill.md` — the agent skill document, unauthenticated like the
+/// install scripts.
+pub async fn skill_md() -> Response {
+    (
+        [
+            (header::CONTENT_TYPE, "text/markdown; charset=utf-8"),
+            (
+                header::CONTENT_DISPOSITION,
+                "inline; filename=\"SKILL.md\"",
+            ),
+        ],
+        SKILL_MD,
+    )
+        .into_response()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -241,6 +264,13 @@ mod tests {
         ] {
             assert!(INSTALL_SCRIPT.contains(needle), "install.sh missing {needle}");
         }
+    }
+
+    #[test]
+    fn skill_doc_is_the_embedded_source() {
+        assert!(SKILL_MD.starts_with("---\nname: ox"));
+        assert!(SKILL_MD.contains("ox api"));
+        assert!(SKILL_MD.contains("--json"));
     }
 
     #[test]

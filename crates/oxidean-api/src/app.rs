@@ -365,6 +365,7 @@ pub fn router_with_state(state: AppState, cors: CorsLayer) -> Router {
         // API at the edge (unauthenticated; ox self-update consumes it).
         .route("/cli/install.sh", get(cli_dist::install_script))
         .route("/cli/install.ps1", get(cli_dist::install_ps1))
+        .route("/cli/skill.md", get(cli_dist::skill_md))
         .route("/cli/latest", get(cli_dist::latest))
         .route("/cli/bin/{*file}", get(cli_dist::binary))
         // Package registry (D-PKG-01) — path prefixes must outrank SPA at the edge.

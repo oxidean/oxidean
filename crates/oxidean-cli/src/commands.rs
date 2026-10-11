@@ -737,7 +737,10 @@ fn required_procedures(cmd: &Command) -> Vec<String> {
         Command::PkgList { .. } => one("packages.list"),
         Command::Api { procedure, .. } => vec![procedure.clone()],
         // self-update talks to /cli/* HTTP, not /api/rpc — no manifest gate.
+        // skill commands are fully local.
         Command::SelfUpdate
+        | Command::SkillPrint
+        | Command::SkillInstall { .. }
         | Command::Help
         | Command::HelpTopic(_)
         | Command::Version => vec![],
@@ -2500,6 +2503,12 @@ pub async fn dispatch(inv: &Invocation, rt: &Runtime) -> Result<Out, CliError> {
             .await
         }
 
+        Command::SkillPrint => Ok(crate::skill::print_skill()),
+        Command::SkillInstall {
+            harnesses,
+            project,
+            global,
+        } => crate::skill::install(g, rt, harnesses, *project, *global),
         Command::SelfUpdate => crate::self_update::run(g, rt).await,
         Command::Api { procedure, input } => {
             invoke(g, rt, procedure, input.clone(), |data| {

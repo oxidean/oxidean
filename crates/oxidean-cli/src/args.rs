@@ -59,6 +59,7 @@ INSTANCE ADMIN
 
 MAINTENANCE
   ox self-update     replace this binary with the build the instance serves
+  ox skill print|install                             agent skill: emit or install SKILL.md
 
 ESCAPE HATCH
   ox api <procedure> [-f field=value]... [-F field=<json>]...
@@ -193,6 +194,9 @@ const HELP: &[(&str, &str)] = &[
     ("admin mcp", "ox admin mcp                            show MCP settings\n  ox admin mcp set [--enable|--disable|--clear]"),
     ("admin templates", "ox admin templates list\n  ox admin templates enable|disable --id <pack-id>\n  ox admin templates delete --id <pack-id>"),
     ("self-update", "ox self-update\n\nDownloads the ox build for this platform the configured instance\nserves, verifies the published sha256, and swaps this executable."),
+    ("skill", "ox skill — the consumer-facing agent SKILL.md\n\n  ox skill print     write SKILL.md to stdout\n  ox skill install   write SKILL.md into harness skill dirs\n\nThe document is embedded in this binary and also served by the\ninstance at /cli/skill.md."),
+    ("skill print", "ox skill print\n\nPrints the embedded SKILL.md verbatim — `ox skill print > SKILL.md`\nor pipe into `ox skill install`-style tooling."),
+    ("skill install", "ox skill install [--harness <id,...> | --harness all] [--project | --global]\n\nWrites the embedded SKILL.md to <skills-dir>/ox/SKILL.md for each\nharness. On a TTY it prompts for harnesses (project dirs that already\nexist are marked) and scope. Non-interactive requires --harness and a\nscope flag.\n\nHarness ids: claude cursor codex copilot gemini opencode amp devin\nwindsurf kiro roo goose cline openclaw generic"),
     ("api", "ox api <procedure> [-f field=value]... [-F field=<json>]...\n\nRaw RPC escape hatch. -f values are strings; -F parses JSON."),
 ];
 
@@ -902,6 +906,12 @@ pub enum Command {
     AdminReposGc,
     PkgList {
         owner: Option<String>,
+    },
+    SkillPrint,
+    SkillInstall {
+        harnesses: Vec<String>,
+        project: bool,
+        global: bool,
     },
     SelfUpdate,
     Api {
@@ -3110,6 +3120,25 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
                 owner: f.values.get("--owner").cloned(),
             }
         }
+        ("skill", "print", "") => {
+            let f = scan(tail, &[], &[], &[])?;
+            expect_no_positionals(&f, "skill print")?;
+            Command::SkillPrint
+        }
+        ("skill", "install", "") => {
+            let f = scan(tail, &[], &["--project", "--global"], &["--harness"])?;
+            expect_no_positionals(&f, "skill install")?;
+            Command::SkillInstall {
+                harnesses: f
+                    .multi
+                    .iter()
+                    .filter(|(k, _)| k == "--harness")
+                    .map(|(_, v)| v.clone())
+                    .collect(),
+                project: f.bools.contains("--project"),
+                global: f.bools.contains("--global"),
+            }
+        }
         ("self-update", "", "") => {
             let f = scan(tail, &[], &[], &[])?;
             expect_no_positionals(&f, "self-update")?;
@@ -3140,7 +3169,7 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
                 "auth", "repo", "issue", "pr", "run", "workflow", "secret", "release",
                 "pkg", "search", "browse", "status", "org", "notification", "user",
                 "ssh-key", "gpg-key", "email", "pat", "label", "webhook", "invite",
-                "admin", "self-update", "api",
+                "admin", "self-update", "skill", "api",
             ];
             if GROUPS.contains(&group) {
                 return Err(usage(format!(

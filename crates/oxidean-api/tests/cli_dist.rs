@@ -94,6 +94,20 @@ async fn install_ps1_serves_origin_substituted_powershell() {
 }
 
 #[tokio::test]
+async fn skill_md_serves_the_embedded_agent_skill() {
+    let app = setup().await;
+    let (status, body, headers) = get(&app, "/cli/skill.md").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        headers.get(header::CONTENT_TYPE).unwrap(),
+        "text/markdown; charset=utf-8"
+    );
+    assert!(body.starts_with("---\nname: ox"));
+    assert!(body.contains("ox api"));
+    assert!(body.contains("ox skill install"));
+}
+
+#[tokio::test]
 async fn latest_lists_targets_with_digests() {
     let app = setup().await;
     let (status, body, _) = get(&app, "/cli/latest").await;
