@@ -76,7 +76,9 @@ export function CliSettingsPage() @{
       ? loaderData.origin
       : resolvePublicOriginClient();
   const installCmd = `curl -fsSL ${origin}/cli/install.sh | sh`;
+  const installPs1Cmd = `irm ${origin}/cli/install.ps1 | iex`;
   const loginCmd = `ox auth login --instance ${origin} --token <pat>`;
+  const loginWebCmd = `ox auth login --instance ${origin} --web`;
 
   <AccountSettingsLayout active="cli" data-testid="settings-cli-page">
     <PageHeader
@@ -91,13 +93,20 @@ export function CliSettingsPage() @{
       The installer downloads the prebuilt binary for your platform from this instance and verifies
       its checksum.
     </p>
-    <div className="mt-3">
+    <p className="mt-3 text-[13px] font-medium text-foreground">Linux · macOS · WSL</p>
+    <div className="mt-2">
       <CopyCommand command={installCmd} ariaLabel="Copy install command" />
+    </div>
+    <p className="mt-3 text-[13px] font-medium text-foreground">Windows (PowerShell)</p>
+    <div className="mt-2">
+      <CopyCommand command={installPs1Cmd} ariaLabel="Copy PowerShell install command" />
     </div>
     <p className="mt-2 text-[13px] text-muted-foreground">
       Installs to <code className="font-mono">~/.local/bin/ox</code> by default — set{" "}
-      <code className="font-mono">OXIDEAN_INSTALL_DIR</code> to change it. No prebuilt binary for
-      your platform? Build from source with{" "}
+      <code className="font-mono">OXIDEAN_INSTALL_DIR</code> to change it. Native{" "}
+      <code className="font-mono">.deb</code>/<code className="font-mono">.rpm</code>/
+      <code className="font-mono">.apk</code>/Arch packages ship on the project&apos;s release page.
+      No prebuilt binary for your platform? Build from source with{" "}
       <code className="font-mono">cargo install --path crates/oxidean-cli</code>.
     </p>
 
@@ -109,6 +118,12 @@ export function CliSettingsPage() @{
     </p>
     <div className="mt-3">
       <CopyCommand command={loginCmd} ariaLabel="Copy login command" />
+    </div>
+    <p className="mt-2 text-[13px] text-muted-foreground">
+      Or approve in the browser instead — the CLI prints a code and polls until you confirm:
+    </p>
+    <div className="mt-2">
+      <CopyCommand command={loginWebCmd} ariaLabel="Copy browser login command" />
     </div>
 
     <h2 className="mt-8 font-[family-name:var(--font-display)] text-[18px] font-semibold text-foreground">
