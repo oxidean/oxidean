@@ -142,12 +142,48 @@ clearing it reverts to the env value. While disabled, both `POST` and `GET`
 
 The endpoint speaks streamable-HTTP in JSON mode: one JSON-RPC 2.0 message per
 `POST`, `application/json` response, `202` for notifications — no SSE stream
-and no `Mcp-Session-Id`. Two ways to connect:
+and no `Mcp-Session-Id`. The web setup page at **Settings → AI**
+(`/settings/ai`) shows the live endpoint URL, copy-ready client snippets, and
+these same commands. Two ways to connect:
 
-- **Native HTTP transport** — clients that support it point straight at
-  `POST /api/mcp` with an `Authorization: Bearer` header.
-- **`mcp-remote` bridge** — stdio-only clients spawn `npx mcp-remote <url>`
-  which forwards stdio ↔ HTTP and can inject the Bearer header.
+- **`ox mcp install`** — the `ox` CLI writes the harness config for you
+  (recommended; see below).
+- **Manual config** — point the client's native HTTP transport at
+  `POST /api/mcp` with an `Authorization: Bearer` header, or bridge stdio-only
+  clients through `npx mcp-remote`.
+
+### `ox mcp` — configure harnesses automatically
+
+`ox mcp` merges an `oxidean` server entry into each harness's MCP config file.
+Sibling servers and unrelated keys are preserved, re-runs update the entry in
+place, and files that may embed a bearer token are written `0600`:
+
+```bash
+ox mcp install                              # TTY picker (detected harnesses marked)
+ox mcp install --harness claude,cursor --project
+ox mcp install --detected --global          # every harness found on this machine
+ox mcp print --harness vscode               # config block to paste by hand
+ox mcp status                               # configured files + endpoint probe
+ox mcp remove --harness cursor --project
+```
+
+Harness ids: `claude`, `cursor`, `vscode`, `windsurf`, `gemini`, `codex`,
+`kiro`, `opencode`, `zed` (stdio-bridged through `mcp-remote`), and `generic`
+for any `mcpServers`-shaped config.
+
+Auth resolves in this order: `--token` / `--token-stdin` (use that PAT) →
+`--web` (RFC 8628 device grant — the same browser sign-in as
+`ox auth login --web`) → the stored `ox` login for the instance →
+`--anonymous` (no header; public data only). Codex stores
+`bearer_token_env_var = "OXIDEAN_TOKEN"` instead of the token — export that
+variable for the harness to pick it up.
+
+`ox mcp status` never prints tokens: it lists each found config file, whether
+it has an `oxidean` entry, the endpoint it targets, and the auth kind, then
+POSTs `initialize` + `tools/list` at the resolved endpoint to report
+reachable / disabled (`mcp.disabled`) / unauthorized (401).
+
+### Manual client config
 
 ### Claude Code
 

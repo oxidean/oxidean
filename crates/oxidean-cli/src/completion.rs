@@ -74,6 +74,10 @@ pub const COMMAND_TREE: &[(&str, Subs)] = &[
     ("secret", &[("list", &[]), ("set", &[]), ("delete", &[])]),
     ("self-update", &[]),
     ("skill", &[("print", &[]), ("install", &[])]),
+    (
+        "mcp",
+        &[("print", &[]), ("install", &[]), ("status", &[]), ("remove", &[])],
+    ),
     ("ssh-key", &[("list", &[]), ("add", &[]), ("delete", &[])]),
     ("status", &[("create", &[])]),
     ("user", &[("view", &[]), ("lookup", &[]), ("follow", &[]), ("unfollow", &[]), ("starred", &[]), ("watched", &[])]),

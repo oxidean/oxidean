@@ -188,6 +188,36 @@ intersects. `--upgrade` never creates installs and never prompts — sweep all
 harnesses, or narrow with `--harness`/`--detected`/`--project`/`--global`.
 The same document is served by the instance at `/cli/skill.md`.
 
+## MCP server
+
+Every Oxidean instance serves a Model Context Protocol endpoint at
+`POST {instance}/api/mcp` (see [MCP.md](MCP.md)). `ox mcp` wires agent
+harnesses to it — same harness-selection machinery as `ox skill`:
+
+```bash
+ox mcp print [--harness <id>]             # config block to stdout (token placeholder)
+ox mcp install                            # TTY picker (detected harnesses marked)
+ox mcp install --harness claude,cursor --project
+ox mcp install --detected --global
+ox mcp status                             # local config state + endpoint probe
+ox mcp remove --harness claude --project
+```
+
+`install` merges an `oxidean` entry into each harness's MCP config
+(`.mcp.json`, `.vscode/mcp.json`, `~/.cursor/mcp.json`, …): sibling servers
+and unrelated keys are preserved, re-runs update the entry in place,
+unparsable files are never clobbered, and token-bearing files land `0600`.
+Harness ids: `claude`, `cursor`, `vscode`, `windsurf`, `gemini`, `codex`,
+`kiro`, `opencode`, `zed` (stdio-bridged through `mcp-remote`), `generic`.
+
+Auth precedence: `--token` / `--token-stdin` → `--web` (RFC 8628 device
+grant, same browser sign-in as `ox auth login --web`) → the stored `ox`
+login for the instance → `--anonymous` (no header; public repos only).
+Codex writes `bearer_token_env_var = "OXIDEAN_TOKEN"` instead of the token —
+export it for the harness. `status` never prints tokens; it lists found
+configs and POSTs `initialize`/`tools/list` to report
+reachable/disabled/unauthorized.
+
 ## Commands
 
 `ox` has per-command help — `ox <group> --help` and `ox <group> <sub> --help`
@@ -271,6 +301,7 @@ ox admin repos gc
 ox self-update                          # swap this binary for the instance's build
                                         #   (--no-skill-refresh skips the skill sweep)
 ox skill print|install                  # embedded agent SKILL.md → harness dirs
+ox mcp print|install|status|remove      # wire /api/mcp into harness MCP configs
 ox config list|get|set                  # local config file (tokens redacted)
 ox completion bash|zsh|fish|pwsh        # static shell completion script
 ox search <query> [--type repos|issues|pulls|users|orgs|commits|code]

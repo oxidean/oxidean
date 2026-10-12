@@ -10,14 +10,23 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
 use oxidean_api::auth::hash_password_str;
+use oxidean_api::auth::session::sha256_hex;
 use oxidean_api::email::{EmailSender, LogSink};
 use oxidean_api::{build_cors, router_with_state, AppState};
 use oxidean_db::Database;
+use oxidean_git::{CliGitBackend, GitBackend};
 use tower::ServiceExt;
 use uuid::Uuid;
 
 async fn test_app(db: Database) -> axum::Router {
     let state = AppState::new(db, Arc::new(LogSink) as Arc<dyn EmailSender>, "development");
+    let cors = build_cors("development", None).expect("cors");
+    router_with_state(state, cors)
+}
+
+async fn test_app_repos(db: Database, repos_dir: std::path::PathBuf) -> axum::Router {
+    let state = AppState::new(db, Arc::new(LogSink) as Arc<dyn EmailSender>, "development")
+        .with_repos_dir(repos_dir);
     let cors = build_cors("development", None).expect("cors");
     router_with_state(state, cors)
 }
@@ -791,4 +800,1147 @@ async fn admin_mcp_settings_rpc() {
     assert_eq!(v["data"]["enabled_overridden"], false);
     let (status, _) = mcp_json(&app, mcp_req(&rpc_call(10, "ping", serde_json::json!({})))).await;
     assert_eq!(status, StatusCode::OK);
+}
+
+// ---------------------------------------------------------------------------
+// Framing, negotiation, list surfaces
+// ---------------------------------------------------------------------------
+
+fn mcp_req_raw(body: &str) -> Request<Body> {
+    Request::builder()
+        .method("POST")
+        .uri("/api/mcp")
+        .header("content-type", "application/json")
+        .body(Body::from(body.to_owned()))
+        .unwrap()
+}
+
+fn mcp_req_auth(body: &serde_json::Value, authorization: &str) -> Request<Body> {
+    Request::builder()
+        .method("POST")
+        .uri("/api/mcp")
+        .header("content-type", "application/json")
+        .header("authorization", authorization.to_owned())
+        .body(Body::from(body.to_string()))
+        .unwrap()
+}
+
+fn mcp_req_bearer_xff(body: &serde_json::Value, token: &str, ip: &str) -> Request<Body> {
+    Request::builder()
+        .method("POST")
+        .uri("/api/mcp")
+        .header("content-type", "application/json")
+        .header("authorization", format!("Bearer {token}"))
+        .header("x-forwarded-for", ip.to_owned())
+        .body(Body::from(body.to_string()))
+        .unwrap()
+}
+
+/// JSON-RPC framing edges — parse error, batch rejection, version check, the
+/// no-reply cases for notifications and client responses.
+#[tokio::test]
+async fn mcp_framing_edges() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!("sqlite:{}", dir.path().join("mcp_framing.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    let app = test_app(db).await;
+
+    // Unparseable body → HTTP 400 + -32700.
+    let (status, v) = mcp_json(&app, mcp_req_raw("{\"jsonrpc\": \"2.0\",")).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{v}");
+    assert_eq!(v["error"]["code"], -32700, "{v}");
+    assert_eq!(v["id"], serde_json::Value::Null);
+
+    // Non-object payloads (batch array, scalar) → 400 + -32600.
+    for raw in [
+        "[]",
+        "[{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}]",
+        "42",
+        "\"hi\"",
+    ] {
+        let (status, v) = mcp_json(&app, mcp_req_raw(raw)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{raw} → {v}");
+        assert_eq!(v["error"]["code"], -32600, "{raw} → {v}");
+    }
+
+    // `jsonrpc` present but not "2.0" → 400 + -32600.
+    for raw in [
+        r#"{"jsonrpc":"1.0","id":1,"method":"ping"}"#,
+        r#"{"jsonrpc":2.0,"id":1,"method":"ping"}"#,
+    ] {
+        let (status, v) = mcp_json(&app, mcp_req_raw(raw)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{raw} → {v}");
+        assert_eq!(v["error"]["code"], -32600, "{raw} → {v}");
+    }
+
+    // Missing `method` without result/error keys → 400 + -32600.
+    for raw in [
+        r#"{"jsonrpc":"2.0","id":9}"#,
+        r#"{"jsonrpc":"2.0","id":9,"method":42}"#,
+    ] {
+        let (status, v) = mcp_json(&app, mcp_req_raw(raw)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{raw} → {v}");
+        assert_eq!(v["error"]["code"], -32600, "{raw} → {v}");
+        assert_eq!(v["id"], 9);
+    }
+
+    // Client response frames (result/error, no method) → 202 no body.
+    for raw in [
+        r#"{"jsonrpc":"2.0","id":3,"result":{}}"#,
+        r#"{"jsonrpc":"2.0","id":3,"error":{"code":-32601,"message":"x"}}"#,
+    ] {
+        let res = app.clone().oneshot(mcp_req_raw(raw)).await.unwrap();
+        assert_eq!(res.status(), StatusCode::ACCEPTED, "{raw}");
+        let bytes = res.into_body().collect().await.unwrap().to_bytes();
+        assert!(bytes.is_empty(), "{raw} must have empty body");
+    }
+
+    // Notification-style requests (no id) → 202 for ANY method.
+    let res = app
+        .clone()
+        .oneshot(mcp_req_raw(r#"{"jsonrpc":"2.0","method":"bogus/method"}"#))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::ACCEPTED);
+
+    // `jsonrpc` key absent entirely → still served (lenient framing).
+    let (status, v) = mcp_json(&app, mcp_req_raw(r#"{"id":7,"method":"ping"}"#)).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["result"], serde_json::json!({}));
+
+    // String and null ids echo back unchanged.
+    let (status, v) = mcp_json(
+        &app,
+        mcp_req_raw(r#"{"jsonrpc":"2.0","id":"req-42","method":"ping"}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["id"], "req-42");
+    let (status, v) = mcp_json(
+        &app,
+        mcp_req_raw(r#"{"jsonrpc":"2.0","id":null,"method":"ping"}"#),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["id"], serde_json::Value::Null);
+}
+
+/// initialize negotiates: unknown or missing protocol versions fall back to the
+/// newest supported; every advertised version echoes; capabilities advertised.
+#[tokio::test]
+async fn mcp_initialize_negotiation() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!("sqlite:{}", dir.path().join("mcp_init.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    let app = test_app(db).await;
+
+    for version in ["2024-11-05", "2025-03-26", "2025-06-18"] {
+        let (status, v) = mcp_json(
+            &app,
+            mcp_req(&rpc_call(
+                1,
+                "initialize",
+                serde_json::json!({
+                    "protocolVersion": version,
+                    "capabilities": {},
+                    "clientInfo": {"name": "t", "version": "0"},
+                }),
+            )),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{v}");
+        assert_eq!(v["result"]["protocolVersion"], version, "{v}");
+    }
+
+    // Unknown / absent version → newest supported.
+    for params in [
+        serde_json::json!({"protocolVersion": "1999-01-01"}),
+        serde_json::json!({}),
+    ] {
+        let (status, v) = mcp_json(&app, mcp_req(&rpc_call(2, "initialize", params))).await;
+        assert_eq!(status, StatusCode::OK, "{v}");
+        assert_eq!(v["result"]["protocolVersion"], "2025-06-18", "{v}");
+    }
+
+    let (status, v) = mcp_json(
+        &app,
+        mcp_req(&rpc_call(3, "initialize", serde_json::json!({}))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["result"]["serverInfo"]["name"], "oxidean");
+    assert!(v["result"]["serverInfo"]["version"].is_string());
+    assert_eq!(v["result"]["capabilities"]["tools"]["listChanged"], false);
+    assert_eq!(
+        v["result"]["capabilities"]["resources"]["listChanged"],
+        false
+    );
+    assert_eq!(v["result"]["capabilities"]["prompts"]["listChanged"], false);
+    assert!(v["result"]["instructions"]
+        .as_str()
+        .expect("instructions")
+        .contains("oxidean_pat_"));
+}
+
+/// tools/list shape: every entry exposes name + description + an object input
+/// schema; resources/prompts list surfaces answer their documented shapes.
+#[tokio::test]
+async fn mcp_list_surfaces() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!("sqlite:{}", dir.path().join("mcp_lists.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    let app = test_app(db).await;
+
+    let (status, v) = mcp_json(
+        &app,
+        mcp_req(&rpc_call(1, "tools/list", serde_json::json!({}))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    let tools = v["result"]["tools"].as_array().expect("tools");
+    assert!(tools.len() >= 16, "tool registry shrank: {}", tools.len());
+    let mut names = std::collections::HashSet::new();
+    for t in tools {
+        let name = t["name"].as_str().expect("tool name");
+        assert!(names.insert(name.to_string()), "duplicate {name}");
+        assert!(
+            t["description"]
+                .as_str()
+                .map(|d| !d.is_empty())
+                .unwrap_or(false),
+            "{name}"
+        );
+        assert_eq!(t["inputSchema"]["type"], "object", "{name}");
+    }
+
+    let (status, v) = mcp_json(
+        &app,
+        mcp_req(&rpc_call(2, "resources/list", serde_json::json!({}))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["result"]["resources"], serde_json::json!([]));
+
+    let (status, v) = mcp_json(
+        &app,
+        mcp_req(&rpc_call(
+            3,
+            "resources/templates/list",
+            serde_json::json!({}),
+        )),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    let tpls = v["result"]["resourceTemplates"]
+        .as_array()
+        .expect("templates");
+    assert_eq!(tpls.len(), 3, "{v}");
+    for t in tpls {
+        assert!(t["uriTemplate"]
+            .as_str()
+            .expect("uriTemplate")
+            .starts_with("oxidean://repo/"));
+    }
+
+    let (status, v) = mcp_json(
+        &app,
+        mcp_req(&rpc_call(4, "prompts/list", serde_json::json!({}))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["result"]["prompts"], serde_json::json!([]));
+}
+
+/// tools/call parameter edges — `-32602` for malformed params; a null
+/// `arguments` is the same as an empty object.
+#[tokio::test]
+async fn mcp_tool_call_param_edges() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!("sqlite:{}", dir.path().join("mcp_params.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone()).await;
+
+    let (cookie, _login_v) = signup_and_login(&app, "pe@ex.com", "peuser").await;
+
+    // Missing / non-string params.name → -32602.
+    for params in [
+        serde_json::json!({}),
+        serde_json::json!({"name": 42}),
+        serde_json::json!({"arguments": {}}),
+    ] {
+        let (_, v) = mcp_json(
+            &app,
+            mcp_req_cookie(&rpc_call(1, "tools/call", params), &cookie),
+        )
+        .await;
+        assert_eq!(v["error"]["code"], -32602, "{v}");
+    }
+
+    // Non-object arguments → -32602.
+    for args in [
+        serde_json::json!("x"),
+        serde_json::json!([]),
+        serde_json::json!(5),
+    ] {
+        let (_, v) = mcp_json(
+            &app,
+            mcp_req_cookie(
+                &rpc_call(
+                    2,
+                    "tools/call",
+                    serde_json::json!({"name": "repo_list", "arguments": args}),
+                ),
+                &cookie,
+            ),
+        )
+        .await;
+        assert_eq!(v["error"]["code"], -32602, "{v}");
+    }
+
+    // Null arguments ≡ {} — repo_list runs for the authed user.
+    let (status, v) = mcp_json(
+        &app,
+        mcp_req_cookie(
+            &rpc_call(
+                3,
+                "tools/call",
+                serde_json::json!({"name": "repo_list", "arguments": null}),
+            ),
+            &cookie,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["result"]["isError"], false, "{v}");
+}
+
+// ---------------------------------------------------------------------------
+// Bearer auth edges + rate limiting
+// ---------------------------------------------------------------------------
+
+/// Presented credentials must validate: non-Bearer schemes, unknown prefixes,
+/// empty tokens, expired/revoked PATs, and banned owners all → 401 with
+/// `WWW-Authenticate`; a lowercase `bearer` scheme is accepted.
+#[tokio::test]
+async fn mcp_bearer_auth_edges() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!("sqlite:{}", dir.path().join("mcp_auth.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone()).await;
+
+    let ping = rpc_call(1, "ping", serde_json::json!({}));
+    let assert_401 = |res: axum::http::Response<Body>, label: &str| {
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED, "{label}");
+        let www = res
+            .headers()
+            .get("www-authenticate")
+            .expect("WWW-Authenticate")
+            .to_str()
+            .unwrap()
+            .to_string();
+        assert!(www.starts_with("Bearer"), "{label}: {www}");
+    };
+
+    // Non-Bearer scheme.
+    let res = app
+        .clone()
+        .oneshot(mcp_req_auth(&ping, "Basic dXNlcjpwYXNz"))
+        .await
+        .unwrap();
+    assert_401(res, "basic scheme");
+
+    // Unrecognized token families.
+    for token in [
+        "ghp_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "oxidean_zzz_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "", // `Bearer ` with an empty token
+    ] {
+        let res = app
+            .clone()
+            .oneshot(mcp_req_bearer(&ping, token))
+            .await
+            .unwrap();
+        assert_401(res, token);
+    }
+
+    // Valid PAT minted via RPC → 200, including lowercase `bearer`.
+    let (cookie, login_v) = signup_and_login(&app, "ae@ex.com", "aeuser").await;
+    let user_id = login_v["data"]["id"].as_str().expect("id").to_string();
+    verify_user(&db, &user_id).await;
+    let (_, pat_v) = rpc_json(
+        &app,
+        r#"{"procedure":"pat.createClassic","input":{"name":"ok","scopes":["repo"]}}"#,
+        &cookie,
+    )
+    .await;
+    let good = pat_v["data"]["token"].as_str().expect("token").to_string();
+    let (status, _) = mcp_json(&app, mcp_req_bearer(&ping, &good)).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = mcp_json(&app, mcp_req_auth(&ping, &format!("bearer {good}"))).await;
+    assert_eq!(status, StatusCode::OK, "lowercase bearer accepted");
+
+    // Expired PAT row → 401.
+    let expired_token = format!("oxidean_pat_{}", "e".repeat(40));
+    db.create_pat(
+        "pat-expired",
+        &user_id,
+        "classic",
+        "expired",
+        &expired_token[..15],
+        &sha256_hex(expired_token.as_bytes()),
+        Some(r#"["repo"]"#),
+        None,
+        None,
+        None,
+        Some("2020-01-01T00:00:00Z"),
+        &[],
+    )
+    .await
+    .expect("insert expired pat");
+    let res = app
+        .clone()
+        .oneshot(mcp_req_bearer(&ping, &expired_token))
+        .await
+        .unwrap();
+    assert_401(res, "expired pat");
+
+    // Revoked PAT → 401.
+    let revoked_token = format!("oxidean_pat_{}", "r".repeat(40));
+    db.create_pat(
+        "pat-revoked",
+        &user_id,
+        "classic",
+        "revoked",
+        &revoked_token[..15],
+        &sha256_hex(revoked_token.as_bytes()),
+        Some(r#"["repo"]"#),
+        None,
+        None,
+        None,
+        None,
+        &[],
+    )
+    .await
+    .expect("insert revoked pat");
+    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    db.revoke_pat("pat-revoked", &now).await.expect("revoke");
+    let res = app
+        .clone()
+        .oneshot(mcp_req_bearer(&ping, &revoked_token))
+        .await
+        .unwrap();
+    assert_401(res, "revoked pat");
+
+    // PAT whose owner is banned → 401.
+    let (_, pat_v) = rpc_json(
+        &app,
+        r#"{"procedure":"pat.createClassic","input":{"name":"ban","scopes":["repo"]}}"#,
+        &cookie,
+    )
+    .await;
+    let banned_token = pat_v["data"]["token"].as_str().expect("token").to_string();
+    db.set_user_banned_at(&user_id, &now)
+        .await
+        .expect("ban user");
+    let res = app
+        .clone()
+        .oneshot(mcp_req_bearer(&ping, &banned_token))
+        .await
+        .unwrap();
+    assert_401(res, "banned owner pat");
+}
+
+/// Failed bearer auth shares the D-26 limiter with Smart HTTP: after 20 bad
+/// attempts on one IP the next call → 429 + `Retry-After`; another IP is still
+/// evaluated normally (per-IP buckets).
+#[tokio::test]
+async fn mcp_failed_auth_rate_limit() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!("sqlite:{}", dir.path().join("mcp_rl.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    let app = test_app(db).await;
+
+    let ping = rpc_call(1, "ping", serde_json::json!({}));
+    let bad = "oxidean_zzz_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    for i in 0..20 {
+        let res = app
+            .clone()
+            .oneshot(mcp_req_bearer_xff(&ping, bad, "10.9.8.7"))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED, "attempt {i}");
+        let _ = res.into_body().collect().await;
+    }
+    // 21st on the same IP → 429 + Retry-After, still a JSON-RPC error body.
+    let res = app
+        .clone()
+        .oneshot(mcp_req_bearer_xff(&ping, bad, "10.9.8.7"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::TOO_MANY_REQUESTS);
+    assert!(res.headers().get("retry-after").is_some(), "Retry-After");
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(v["error"]["code"], -32000, "{v}");
+
+    // A different IP is a fresh bucket → 401 (evaluated, not blocked).
+    let res = app
+        .clone()
+        .oneshot(mcp_req_bearer_xff(&ping, bad, "10.9.8.8"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+}
+
+/// A classic PAT without the `repo` scope passes authentication but fails the
+/// tool-scope gate: repo tools → `mcp.insufficient_scope` isError, while
+/// `packages_list` succeeds on a `package:read` grant.
+#[tokio::test]
+async fn mcp_classic_pat_scope_gating() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!("sqlite:{}", dir.path().join("mcp_classic.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone()).await;
+
+    let (cookie, login_v) = signup_and_login(&app, "cs@ex.com", "csuser").await;
+    let user_id = login_v["data"]["id"].as_str().expect("id").to_string();
+    verify_user(&db, &user_id).await;
+    db.insert_repository("r-cs-1", &user_id, "user", "cdemo", "public", "", "main")
+        .await
+        .expect("insert repo");
+
+    let (_, pat_v) = rpc_json(
+        &app,
+        r#"{"procedure":"pat.createClassic","input":{"name":"pkg","scopes":["package:read"]}}"#,
+        &cookie,
+    )
+    .await;
+    let token = pat_v["data"]["token"].as_str().expect("token").to_string();
+
+    // repo_get without `repo` scope → isError insufficient_scope.
+    let (status, v) = mcp_json(
+        &app,
+        mcp_req_bearer(
+            &tool_call(
+                1,
+                "repo_get",
+                serde_json::json!({"owner": "csuser", "name": "cdemo"}),
+            ),
+            &token,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["result"]["isError"], true, "{v}");
+    let text = v["result"]["content"][0]["text"].as_str().expect("err");
+    assert!(text.contains("insufficient_scope"), "{text}");
+
+    // packages_list with `package:read` → allowed.
+    let (status, v) = mcp_json(
+        &app,
+        mcp_req_bearer(
+            &tool_call(2, "packages_list", serde_json::json!({"owner": "csuser"})),
+            &token,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["result"]["isError"], false, "{v}");
+}
+
+// ---------------------------------------------------------------------------
+// Full tool surface + resources on a seeded repo
+// ---------------------------------------------------------------------------
+
+/// Seed `{repos_dir}/{owner}/{name}.git` with a text file and a binary blob.
+async fn seed_repo_tree(repos_dir: &std::path::Path, owner: &str, name: &str) {
+    let bare = repos_dir.join(owner).join(format!("{name}.git"));
+    let git = CliGitBackend::new();
+    git.init_bare(&bare, "main").await.expect("init bare");
+    git.seed_commit(
+        &bare,
+        "main",
+        "seed",
+        &[
+            ("README.md".into(), b"hello oxidean\n".to_vec()),
+            (
+                "src/main.rs".into(),
+                b"fn main() { println!(\"hi\"); }\n".to_vec(),
+            ),
+            ("bin.dat".into(), vec![0x00, 0x01, 0xff, 0x00]),
+        ],
+    )
+    .await
+    .expect("seed commit");
+}
+
+/// Session-cookie caller across the whole tool surface on a seeded repo:
+/// identity, repo, issue, pull, actions, packages, and search tools all run;
+/// a bogus `run_id` lands as `isError` rather than a protocol failure.
+#[tokio::test]
+async fn mcp_full_tool_surface_on_seeded_repo() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!("sqlite:{}", dir.path().join("mcp_tools.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let repos_dir = dir.path().join("repos");
+    let app = test_app_repos(db.clone(), repos_dir.clone()).await;
+
+    let (cookie, login_v) = signup_and_login(&app, "ts@ex.com", "tsuser").await;
+    let user_id = login_v["data"]["id"].as_str().expect("id").to_string();
+    verify_user(&db, &user_id).await;
+    let repo = db
+        .insert_repository("r-ts-1", &user_id, "user", "toolbox", "public", "", "main")
+        .await
+        .expect("insert repo");
+    seed_repo_tree(&repos_dir, "tsuser", "toolbox").await;
+    db.insert_pull(
+        "p-ts-1",
+        &repo.id,
+        1,
+        "first pr",
+        "pr body",
+        &user_id,
+        "main",
+        "0".repeat(40).as_str(),
+        &repo.id,
+        "feature",
+        "1".repeat(40).as_str(),
+        false,
+    )
+    .await
+    .expect("insert pull");
+
+    // repo_list — no owner → own repos; with owner → listByOwner.
+    for args in [
+        serde_json::json!({}),
+        serde_json::json!({"owner": "tsuser"}),
+    ] {
+        let (status, v) = mcp_json(
+            &app,
+            mcp_req_cookie(&tool_call(1, "repo_list", args), &cookie),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{v}");
+        assert_eq!(v["result"]["isError"], false, "{v}");
+        let text = v["result"]["content"][0]["text"].as_str().expect("text");
+        assert!(text.contains("\"toolbox\""), "{text}");
+    }
+
+    // repo_get + repo_tree on the seeded tree.
+    let (status, v) = mcp_json(
+        &app,
+        mcp_req_cookie(
+            &tool_call(
+                2,
+                "repo_get",
+                serde_json::json!({"owner": "tsuser", "name": "toolbox"}),
+            ),
+            &cookie,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["result"]["structuredContent"]["name"], "toolbox");
+
+    let (status, v) = mcp_json(
+        &app,
+        mcp_req_cookie(
+            // `ref` omitted — the tool schema advertises it as optional and the
+            // dispatch defaults it to the default branch.
+            &tool_call(
+                3,
+                "repo_tree",
+                serde_json::json!({"owner": "tsuser", "name": "toolbox"}),
+            ),
+            &cookie,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["result"]["isError"], false, "{v}");
+    let text = v["result"]["content"][0]["text"].as_str().expect("tree");
+    assert!(text.contains("README.md"), "{text}");
+
+    // issue_create → issue_list/issue_get → issue_comment → issue_list_comments.
+    let (status, v) = mcp_json(
+        &app,
+        mcp_req_cookie(
+            &tool_call(
+                4,
+                "issue_create",
+                serde_json::json!({"owner": "tsuser", "name": "toolbox", "title": "it broke", "body": "details"}),
+            ),
+            &cookie,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["result"]["structuredContent"]["number"], 1, "{v}");
+
+    let (status, v) = mcp_json(
+        &app,
+        mcp_req_cookie(
+            &tool_call(
+                5,
+                "issue_list",
+                serde_json::json!({"owner": "tsuser", "name": "toolbox"}),
+            ),
+            &cookie,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["result"]["isError"], false, "{v}");
+    let text = v["result"]["content"][0]["text"].as_str().expect("issues");
+    assert!(text.contains("it broke"), "{text}");
+
+    let (status, v) = mcp_json(
+        &app,
+        mcp_req_cookie(
+            &tool_call(
+                6,
+                "issue_get",
+                serde_json::json!({"owner": "tsuser", "name": "toolbox", "number": 1}),
+            ),
+            &cookie,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["result"]["structuredContent"]["title"], "it broke", "{v}");
+
+    let (status, v) = mcp_json(
+        &app,
+        mcp_req_cookie(
+            &tool_call(
+                7,
+                "issue_comment",
+                serde_json::json!({"owner": "tsuser", "name": "toolbox", "number": 1, "body": "me too"}),
+            ),
+            &cookie,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["result"]["isError"], false, "{v}");
+
+    let (status, v) = mcp_json(
+        &app,
+        mcp_req_cookie(
+            &tool_call(
+                8,
+                "issue_list_comments",
+                serde_json::json!({"owner": "tsuser", "name": "toolbox", "number": 1}),
+            ),
+            &cookie,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    let text = v["result"]["content"][0]["text"]
+        .as_str()
+        .expect("comments");
+    assert!(text.contains("me too"), "{text}");
+
+    // pull_list + pull_get on the seeded pull.
+    let (status, v) = mcp_json(
+        &app,
+        mcp_req_cookie(
+            &tool_call(
+                9,
+                "pull_list",
+                serde_json::json!({"owner": "tsuser", "name": "toolbox"}),
+            ),
+            &cookie,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["result"]["isError"], false, "{v}");
+    let text = v["result"]["content"][0]["text"].as_str().expect("pulls");
+    assert!(text.contains("first pr"), "{text}");
+
+    let (status, v) = mcp_json(
+        &app,
+        mcp_req_cookie(
+            &tool_call(
+                10,
+                "pull_get",
+                serde_json::json!({"owner": "tsuser", "name": "toolbox", "number": 1}),
+            ),
+            &cookie,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["result"]["isError"], false, "{v}");
+
+    // actions tools — empty run list is fine; a bogus run_id → isError.
+    let (status, v) = mcp_json(
+        &app,
+        mcp_req_cookie(
+            &tool_call(
+                11,
+                "actions_list_runs",
+                serde_json::json!({"owner": "tsuser", "name": "toolbox"}),
+            ),
+            &cookie,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["result"]["isError"], false, "{v}");
+
+    let (status, v) = mcp_json(
+        &app,
+        mcp_req_cookie(
+            &tool_call(
+                12,
+                "actions_get_run",
+                serde_json::json!({"owner": "tsuser", "name": "toolbox", "run_id": "r-nope"}),
+            ),
+            &cookie,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["result"]["isError"], true, "{v}");
+
+    // packages_list on the owner.
+    let (status, v) = mcp_json(
+        &app,
+        mcp_req_cookie(
+            &tool_call(13, "packages_list", serde_json::json!({"owner": "tsuser"})),
+            &cookie,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["result"]["isError"], false, "{v}");
+
+    // search tools — explore + repo.search types.
+    let (status, v) = mcp_json(
+        &app,
+        mcp_req_cookie(
+            &tool_call(14, "search_repos", serde_json::json!({"q": "toolbox"})),
+            &cookie,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["result"]["isError"], false, "{v}");
+
+    for (id, tool) in [
+        (15, "search_issues"),
+        (16, "search_pulls"),
+        (17, "search_code"),
+    ] {
+        let (status, v) = mcp_json(
+            &app,
+            mcp_req_cookie(
+                &tool_call(
+                    id,
+                    tool,
+                    serde_json::json!({"owner": "tsuser", "name": "toolbox", "q": "the"}),
+                ),
+                &cookie,
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{tool} → {v}");
+        assert_eq!(v["result"]["isError"], false, "{tool} → {v}");
+    }
+}
+
+/// resources/read — blob (text + binary), pull markdown — plus the -32602 URI
+/// errors and the -32000 domain-error wrap on private repos.
+#[tokio::test]
+async fn mcp_resource_reads_and_errors() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!("sqlite:{}", dir.path().join("mcp_res.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let repos_dir = dir.path().join("repos");
+    let app = test_app_repos(db.clone(), repos_dir.clone()).await;
+
+    let (cookie, login_v) = signup_and_login(&app, "rs@ex.com", "rsuser").await;
+    let user_id = login_v["data"]["id"].as_str().expect("id").to_string();
+    verify_user(&db, &user_id).await;
+    let repo = db
+        .insert_repository("r-rs-1", &user_id, "user", "rdemo", "public", "", "main")
+        .await
+        .expect("insert repo");
+    seed_repo_tree(&repos_dir, "rsuser", "rdemo").await;
+    db.insert_pull(
+        "p-rs-1",
+        &repo.id,
+        1,
+        "ship it",
+        "pull body",
+        &user_id,
+        "main",
+        "0".repeat(40).as_str(),
+        &repo.id,
+        "feature",
+        "1".repeat(40).as_str(),
+        false,
+    )
+    .await
+    .expect("insert pull");
+
+    // Text blob → text/plain + contents.
+    let (status, v) = mcp_json(
+        &app,
+        mcp_req_cookie(
+            &rpc_call(
+                1,
+                "resources/read",
+                serde_json::json!({"uri": "oxidean://repo/rsuser/rdemo/blob/README.md"}),
+            ),
+            &cookie,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    let entry = &v["result"]["contents"][0];
+    assert_eq!(entry["mimeType"], "text/plain", "{v}");
+    assert!(
+        entry["text"]
+            .as_str()
+            .expect("text")
+            .contains("hello oxidean"),
+        "{v}"
+    );
+
+    // Binary blob → application/octet-stream + base64 blob field.
+    let (status, v) = mcp_json(
+        &app,
+        mcp_req_cookie(
+            &rpc_call(
+                2,
+                "resources/read",
+                serde_json::json!({"uri": "oxidean://repo/rsuser/rdemo/blob/bin.dat?ref=main"}),
+            ),
+            &cookie,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    let entry = &v["result"]["contents"][0];
+    assert_eq!(entry["mimeType"], "application/octet-stream", "{v}");
+    assert!(entry.get("blob").is_some(), "{v}");
+
+    // Pull resource → markdown doc.
+    let (status, v) = mcp_json(
+        &app,
+        mcp_req_cookie(
+            &rpc_call(
+                3,
+                "resources/read",
+                serde_json::json!({"uri": "oxidean://repo/rsuser/rdemo/pull/1"}),
+            ),
+            &cookie,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    let text = v["result"]["contents"][0]["text"]
+        .as_str()
+        .expect("pull md");
+    assert!(text.contains("# Pull request #1: ship it"), "{text}");
+    assert!(text.contains("pull body"), "{text}");
+
+    // URI errors → -32602.
+    for params in [
+        serde_json::json!({}),
+        serde_json::json!({"uri": "https://example.com/x"}),
+        serde_json::json!({"uri": "oxidean://repo/rsuser/rdemo/issue/nope"}),
+        serde_json::json!({"uri": "oxidean://repo/rsuser/rdemo/unknown/1"}),
+        serde_json::json!({"uri": 42}),
+    ] {
+        let (_, v) = mcp_json(
+            &app,
+            mcp_req_cookie(&rpc_call(4, "resources/read", params), &cookie),
+        )
+        .await;
+        assert_eq!(v["error"]["code"], -32602, "{v}");
+    }
+
+    // Private repo read as anonymous → -32000 carrying repo.not_found.
+    db.insert_repository("r-rs-2", &user_id, "user", "hidden", "private", "", "main")
+        .await
+        .expect("insert private repo");
+    let (status, v) = mcp_json(
+        &app,
+        mcp_req(&rpc_call(
+            5,
+            "resources/read",
+            serde_json::json!({"uri": "oxidean://repo/rsuser/hidden/issue/1"}),
+        )),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["error"]["code"], -32000, "{v}");
+    let msg = v["error"]["message"].as_str().expect("message");
+    assert!(msg.contains("repo.not_found"), "{msg}");
+}
+
+/// FG `repo_list` filtering: `selected` drops private repos outside the grant
+/// but keeps covered + public repos — on both `repo.listMine` and
+/// `repo.listByOwner`. FG `all` covers the owner's personal namespace.
+#[tokio::test]
+async fn mcp_fg_repo_list_filtering() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!("sqlite:{}", dir.path().join("mcp_fglist.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone()).await;
+
+    let (cookie, login_v) = signup_and_login(&app, "fl@ex.com", "fluser").await;
+    let user_id = login_v["data"]["id"].as_str().expect("id").to_string();
+    verify_user(&db, &user_id).await;
+    let covered = db
+        .insert_repository("r-fl-1", &user_id, "user", "fgkeep", "private", "", "main")
+        .await
+        .expect("covered repo");
+    db.insert_repository("r-fl-2", &user_id, "user", "fgdrop", "private", "", "main")
+        .await
+        .expect("dropped repo");
+    db.insert_repository("r-fl-3", &user_id, "user", "fgpub", "public", "", "main")
+        .await
+        .expect("public repo");
+
+    let (_, pat_v) = rpc_json(
+        &app,
+        &format!(
+            r#"{{"procedure":"pat.createFineGrained","input":{{"name":"fl","repo_access":"selected","contents":"read","repository_ids":["{}"]}}}}"#,
+            covered.id
+        ),
+        &cookie,
+    )
+    .await;
+    assert_eq!(pat_v["ok"], true, "{pat_v}");
+    let token = pat_v["data"]["token"].as_str().expect("token").to_string();
+
+    // repo_listMine and repo.listByOwner: covered + public stay, dropped goes.
+    for args in [
+        serde_json::json!({}),
+        serde_json::json!({"owner": "fluser"}),
+    ] {
+        let (status, v) = mcp_json(
+            &app,
+            mcp_req_bearer(&tool_call(1, "repo_list", args.clone()), &token),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{v}");
+        assert_eq!(v["result"]["isError"], false, "{v}");
+        let text = v["result"]["content"][0]["text"].as_str().expect("repos");
+        assert!(text.contains("fgkeep"), "{args} → {text}");
+        assert!(text.contains("fgpub"), "{args} → {text}");
+        assert!(!text.contains("fgdrop"), "{args} → {text}");
+    }
+
+    // FG `all` covers the owner's whole personal namespace.
+    let (_, pat_v) = rpc_json(
+        &app,
+        r#"{"procedure":"pat.createFineGrained","input":{"name":"fl-all","repo_access":"all","contents":"read"}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(pat_v["ok"], true, "{pat_v}");
+    let all_token = pat_v["data"]["token"].as_str().expect("token").to_string();
+    let (status, v) = mcp_json(
+        &app,
+        mcp_req_bearer(
+            &tool_call(2, "repo_list", serde_json::json!({})),
+            &all_token,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    let text = v["result"]["content"][0]["text"].as_str().expect("repos");
+    for name in ["fgkeep", "fgdrop", "fgpub"] {
+        assert!(text.contains(name), "all-access → {text}");
+    }
+}
+
+/// FG `contents:write` on a covered repo may write — the write-side mirror of
+/// the read-only denial above.
+#[tokio::test]
+async fn mcp_fg_write_scope_allows_write() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!("sqlite:{}", dir.path().join("mcp_fgw.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone()).await;
+
+    let (cookie, login_v) = signup_and_login(&app, "fw@ex.com", "fwuser").await;
+    let user_id = login_v["data"]["id"].as_str().expect("id").to_string();
+    verify_user(&db, &user_id).await;
+    let covered = db
+        .insert_repository("r-fw-1", &user_id, "user", "fwdemo", "private", "", "main")
+        .await
+        .expect("insert repo");
+
+    let (_, pat_v) = rpc_json(
+        &app,
+        &format!(
+            r#"{{"procedure":"pat.createFineGrained","input":{{"name":"fw","repo_access":"selected","contents":"write","repository_ids":["{}"]}}}}"#,
+            covered.id
+        ),
+        &cookie,
+    )
+    .await;
+    assert_eq!(pat_v["ok"], true, "{pat_v}");
+    let token = pat_v["data"]["token"].as_str().expect("token").to_string();
+
+    let (status, v) = mcp_json(
+        &app,
+        mcp_req_bearer(
+            &tool_call(
+                1,
+                "issue_create",
+                serde_json::json!({"owner": "fwuser", "name": "fwdemo", "title": "written"}),
+            ),
+            &token,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["result"]["isError"], false, "{v}");
+    assert_eq!(v["result"]["structuredContent"]["number"], 1, "{v}");
+
+    // Writes stay denied on a repo outside the grant.
+    db.insert_repository("r-fw-2", &user_id, "user", "fwother", "private", "", "main")
+        .await
+        .expect("insert repo");
+    let (status, v) = mcp_json(
+        &app,
+        mcp_req_bearer(
+            &tool_call(
+                2,
+                "issue_create",
+                serde_json::json!({"owner": "fwuser", "name": "fwother", "title": "nope"}),
+            ),
+            &token,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["result"]["isError"], true, "{v}");
 }

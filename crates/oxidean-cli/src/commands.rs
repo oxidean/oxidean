@@ -803,10 +803,15 @@ fn required_procedures(cmd: &Command) -> Vec<String> {
         Command::PkgList { .. } => one("packages.list"),
         Command::Api { procedure, .. } => vec![procedure.clone()],
         // self-update talks to /cli/* HTTP, not /api/rpc — no manifest gate.
-        // skill commands are fully local.
+        // skill and mcp commands are fully local (mcp probes /api/mcp
+        // directly, outside the RPC surface).
         Command::SelfUpdate { .. }
         | Command::SkillPrint
         | Command::SkillInstall { .. }
+        | Command::McpPrint { .. }
+        | Command::McpInstall { .. }
+        | Command::McpStatus
+        | Command::McpRemove { .. }
         | Command::Help
         | Command::HelpTopic(_)
         | Command::Version => vec![],
@@ -2668,6 +2673,38 @@ pub async fn dispatch(inv: &Invocation, rt: &Runtime) -> Result<Out, CliError> {
             upgrade,
             detected,
         } => crate::skill::install(g, rt, harnesses, *project, *global, *upgrade, *detected),
+        Command::McpPrint { harness } => crate::mcp::print_cfg(g, rt, harness.as_deref()),
+        Command::McpInstall {
+            harnesses,
+            project,
+            global,
+            detected,
+            token,
+            token_stdin,
+            web,
+            anonymous,
+        } => {
+            crate::mcp::install(
+                g,
+                rt,
+                harnesses,
+                *detected,
+                *project,
+                *global,
+                token.clone(),
+                *token_stdin,
+                *web,
+                *anonymous,
+            )
+            .await
+        }
+        Command::McpStatus => crate::mcp::status(g, rt).await,
+        Command::McpRemove {
+            harnesses,
+            project,
+            global,
+            detected,
+        } => crate::mcp::remove(g, rt, harnesses, *detected, *project, *global),
         Command::SelfUpdate { no_skill_refresh } => {
             crate::self_update::run(g, rt, *no_skill_refresh).await
         }
@@ -2880,8 +2917,6 @@ async fn auth_login(
 /// the approval page, poll until the user approves/denies, then store the
 /// minted PAT exactly like a pasted token.
 async fn auth_login_web(global: &Global, rt: &Runtime) -> Result<Out, CliError> {
-    use std::io::IsTerminal;
-
     let instance = resolve_instance(global, &rt.config)?;
 
     // Same reachability probe as token login.
@@ -2898,39 +2933,7 @@ async fn auth_login_web(global: &Global, rt: &Runtime) -> Result<Out, CliError> 
     }
 
     // Classic scopes covering the full CLI surface (repo domain + registries).
-    let grant = device::request(&instance, "repo package:read package:write").await?;
-
-    let url = grant
-        .verification_uri_complete
-        .clone()
-        .unwrap_or(grant.verification_uri.clone());
-    eprintln!("! First copy your one-time code: {}", grant.user_code);
-    let tty = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
-    if tty {
-        eprintln!("Press Enter to open {url} in your browser…");
-        let mut line = String::new();
-        let _ = std::io::stdin().read_line(&mut line);
-        device::open_browser(&url);
-    } else {
-        eprintln!("Open {url} in your browser to approve this sign-in.");
-    }
-    eprintln!("Waiting for approval…");
-
-    let deadline = std::time::Instant::now()
-        + std::time::Duration::from_secs(grant.expires_in.max(60) as u64);
-    let mut interval = grant.interval.max(1) as u64;
-    let token = loop {
-        if std::time::Instant::now() >= deadline {
-            return Err(CliError::Auth("device code expired before approval".into()));
-        }
-        tokio::time::sleep(std::time::Duration::from_secs(interval)).await;
-        match device::poll(&instance, &grant.device_code, interval as i64).await? {
-            device::Poll::Pending => {}
-            device::Poll::SlowDown(next) => interval = next.max(1) as u64,
-            device::Poll::Failed(msg) => return Err(CliError::Auth(msg)),
-            device::Poll::Token(t) => break t,
-        }
-    };
+    let token = device::run_grant(&instance, "repo package:read package:write").await?;
 
     // Verify + store, mirroring auth_login.
     let authed = Client::new(&instance, Some(token.clone()));

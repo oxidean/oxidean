@@ -1,5 +1,5 @@
 /**
- * Account /settings/ai — agent skills install + upgrade commands.
+ * Account /settings/ai — agent skill installs + MCP server wiring.
  */
 import { cleanup, screen, waitFor } from "@octanejs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -74,6 +74,51 @@ describe("/settings/ai", () => {
 
     const nav = screen.getByRole("navigation", { name: "Account settings" });
     expect(nav.querySelector('a[href="/settings/ai"]')).toBeTruthy();
+  });
+
+  it("happy: renders the MCP section — endpoint, CLI commands, client snippets", async () => {
+    window.history.pushState({}, "", "/settings/ai");
+    meMock.mockResolvedValue({ ok: true, data: user });
+    renderWithQueryClient(AiSettingsPage);
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "MCP server" })).toBeInTheDocument();
+    });
+
+    const endpoint = screen.getByRole("textbox", { name: "Copy MCP endpoint URL" });
+    expect(endpoint).toHaveValue("https://forge.example/api/mcp");
+    const install = screen.getByRole("textbox", { name: "Copy MCP install command" });
+    expect(install).toHaveValue("ox mcp install");
+    const detected = screen.getByRole("textbox", { name: "Copy detected MCP install command" });
+    expect(detected).toHaveValue("ox mcp install --detected --project");
+    const status = screen.getByRole("textbox", { name: "Copy MCP status command" });
+    expect(status).toHaveValue("ox mcp status");
+
+    const claude = screen.getByRole("textbox", { name: "Copy Claude Code MCP add command" });
+    expect(claude).toHaveValue(
+      'claude mcp add --transport http oxidean https://forge.example/api/mcp --header "Authorization: Bearer <pat>"',
+    );
+    const cursor = screen.getByRole("textbox", { name: "Copy Cursor MCP config JSON" });
+    expect(cursor).toHaveValue(
+      '{"mcpServers":{"oxidean":{"url":"https://forge.example/api/mcp","headers":{"Authorization":"Bearer <pat>"}}}}',
+    );
+    const vscode = screen.getByRole("textbox", { name: "Copy VS Code MCP config JSON" });
+    expect(vscode).toHaveValue(
+      '{"servers":{"oxidean":{"type":"http","url":"https://forge.example/api/mcp","headers":{"Authorization":"Bearer <pat>"}}}}',
+    );
+    const remote = screen.getByRole("textbox", { name: "Copy mcp-remote bridge command" });
+    expect(remote).toHaveValue(
+      'npx mcp-remote https://forge.example/api/mcp --header "Authorization: Bearer <pat>"',
+    );
+
+    // Guidance links — PAT minting and the admin gate. ("Personal access
+    // tokens" also appears in the settings nav, so match by href.)
+    expect(
+      screen.getAllByRole("link").some((l) => l.getAttribute("href") === "/settings/tokens"),
+    ).toBe(true);
+    expect(screen.getAllByRole("link").some((l) => l.getAttribute("href") === "/admin/mcp")).toBe(
+      true,
+    );
   });
 
   it("unhappy: unauthenticated sessions redirect to login", async () => {

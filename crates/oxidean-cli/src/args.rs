@@ -62,6 +62,7 @@ INSTANCE ADMIN
 MAINTENANCE
   ox self-update     replace this binary with the build the instance serves
   ox skill print|install                             agent skill: emit or install SKILL.md
+  ox mcp print|install|status|remove                 wire the MCP endpoint into harnesses
 
 ESCAPE HATCH
   ox api <procedure> [-f field=value]... [-F field=<json>]...
@@ -206,6 +207,11 @@ const HELP: &[(&str, &str)] = &[
     ("skill", "ox skill — the consumer-facing agent SKILL.md\n\n  ox skill print     write SKILL.md to stdout\n  ox skill install   write SKILL.md into harness skill dirs\n\nThe document is embedded in this binary and also served by the\ninstance at /cli/skill.md."),
     ("skill print", "ox skill print\n\nPrints the embedded SKILL.md verbatim — `ox skill print > SKILL.md`\nor pipe into `ox skill install`-style tooling."),
     ("skill install", "ox skill install [--harness <id,...> | --harness all] [--detected]\n                 [--upgrade] [--project | --global]\n\nWrites the embedded SKILL.md to <skills-dir>/ox/SKILL.md for each\nharness. --detected selects only harnesses found installed on this\nmachine (config dirs, PATH binaries); combined with --harness it\nintersects. On a TTY it prompts for harnesses (detected ones marked,\n'd' selects them all) and scope. Non-interactive requires --harness\nor --detected, plus a scope flag.\n\n--upgrade rewrites only ox/SKILL.md files that already exist — it\ncreates no new installs and never prompts. Bare --upgrade sweeps all\nharnesses at both scopes; --harness/--detected/scope flags narrow it.\n\nHarness ids follow the vercel-labs/skills registry (~70 rows: claude,\ncursor, codex, copilot, gemini, opencode, amp, devin, windsurf, kiro,\nroo, goose, cline, openclaw, continue, trae, qwen, grok, …) — `generic`\ncovers any other `.agents/skills` consumer"),
+    ("mcp", "ox mcp — wire the instance MCP endpoint into agent harnesses\n\n  ox mcp print     emit the config block to paste by hand\n  ox mcp install   merge an `oxidean` entry into harness MCP configs\n  ox mcp status    show what's configured + probe the endpoint\n  ox mcp remove    strip the `oxidean` entry again\n\nThe endpoint is POST {instance}/api/mcp (streamable HTTP, JSON-RPC 2.0).\nHarnesses: claude, cursor, vscode, windsurf, gemini, codex, kiro,\nopencode, zed — `generic` covers any `mcpServers`-shaped config."),
+    ("mcp print", "ox mcp print [--harness <id>]\n\nPrints the JSON block (or Codex TOML section) for manual pasting.\nThe bearer is a `<token>` placeholder — substitute a PAT from\n{instance}/settings/tokens or `ox pat create`."),
+    ("mcp install", "ox mcp install [--harness <id,...> | --harness all] [--detected]\n               [--project | --global]\n               [--token <pat> | --token-stdin | --web | --anonymous]\n\nMerges an `oxidean` server entry into each harness's MCP config file\n— existing servers and unrelated keys are preserved, and the\n`oxidean` entry is replaced in place on re-runs (idempotent update).\nFiles are written 0600 since they may embed the bearer.\n\nAuth resolution: --token/--token-stdin use that PAT; --web runs the\nRFC 8628 device grant (browser sign-in, stored like `ox auth login`);\nwith no auth flag the stored `ox` credential for the instance is\nused; --anonymous writes no auth header (public repos only).\n\n--detected selects only harnesses found installed (config dirs, PATH\nbinaries); combined with --harness it intersects. On a TTY it prompts\nfor harnesses and scope; non-interactive requires --harness or\n--detected plus a scope flag.\n\nCodex writes `bearer_token_env_var = \"OXIDEAN_TOKEN\"` instead of the\ntoken itself — export that env var for the harness to pick it up."),
+    ("mcp status", "ox mcp status\n\nLists every harness MCP config file found on this machine — whether\nit has an `oxidean` entry, which endpoint it points at, and its auth\nkind (never the token itself) — then POSTs `initialize` + `tools/list`\nat the resolved endpoint to report reachable/disabled/401."),
+    ("mcp remove", "ox mcp remove [--harness <id,...> | --harness all] [--detected]\n              [--project | --global]\n\nDeletes only the `oxidean` server entry from each config file — other\nservers and keys are untouched, and files without an entry report\n`skipped (no entry)`."),
     ("api", "ox api <procedure> [-f field=value]... [-F field=<json>]...\n\nRaw RPC escape hatch. -f values are strings; -F parses JSON."),
 ];
 
@@ -958,6 +964,26 @@ pub enum Command {
         project: bool,
         global: bool,
         upgrade: bool,
+        detected: bool,
+    },
+    McpPrint {
+        harness: Option<String>,
+    },
+    McpInstall {
+        harnesses: Vec<String>,
+        project: bool,
+        global: bool,
+        detected: bool,
+        token: Option<String>,
+        token_stdin: bool,
+        web: bool,
+        anonymous: bool,
+    },
+    McpStatus,
+    McpRemove {
+        harnesses: Vec<String>,
+        project: bool,
+        global: bool,
         detected: bool,
     },
     SelfUpdate {
@@ -3342,6 +3368,78 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
                 detected: f.bools.contains("--detected"),
             }
         }
+        ("mcp", "print", "") => {
+            let f = scan(tail, &["--harness"], &[], &[])?;
+            expect_no_positionals(&f, "mcp print")?;
+            Command::McpPrint {
+                harness: f.values.get("--harness").cloned(),
+            }
+        }
+        ("mcp", "install", "") => {
+            let f = scan(
+                tail,
+                &["--token"],
+                &[
+                    "--token-stdin",
+                    "--web",
+                    "--anonymous",
+                    "--project",
+                    "--global",
+                    "--detected",
+                ],
+                &["--harness"],
+            )?;
+            expect_no_positionals(&f, "mcp install")?;
+            let auth_flags = f.values.contains_key("--token") as usize
+                + f.bools.contains("--token-stdin") as usize
+                + f.bools.contains("--web") as usize
+                + f.bools.contains("--anonymous") as usize;
+            if auth_flags > 1 {
+                return Err(usage(
+                    "--token, --token-stdin, --web, and --anonymous are exclusive",
+                ));
+            }
+            Command::McpInstall {
+                harnesses: f
+                    .multi
+                    .iter()
+                    .filter(|(k, _)| k == "--harness")
+                    .map(|(_, v)| v.clone())
+                    .collect(),
+                project: f.bools.contains("--project"),
+                global: f.bools.contains("--global"),
+                detected: f.bools.contains("--detected"),
+                token: f.values.get("--token").cloned(),
+                token_stdin: f.bools.contains("--token-stdin"),
+                web: f.bools.contains("--web"),
+                anonymous: f.bools.contains("--anonymous"),
+            }
+        }
+        ("mcp", "status", "") => {
+            let f = scan(tail, &[], &[], &[])?;
+            expect_no_positionals(&f, "mcp status")?;
+            Command::McpStatus
+        }
+        ("mcp", "remove", "") => {
+            let f = scan(
+                tail,
+                &[],
+                &["--project", "--global", "--detected"],
+                &["--harness"],
+            )?;
+            expect_no_positionals(&f, "mcp remove")?;
+            Command::McpRemove {
+                harnesses: f
+                    .multi
+                    .iter()
+                    .filter(|(k, _)| k == "--harness")
+                    .map(|(_, v)| v.clone())
+                    .collect(),
+                project: f.bools.contains("--project"),
+                global: f.bools.contains("--global"),
+                detected: f.bools.contains("--detected"),
+            }
+        }
         ("self-update", _, _) => {
             // flags sit at the `sub` position — rescan rest[1..] like browse.
             let f = scan(&rest[1..], &[], &["--no-skill-refresh"], &[])?;
@@ -3375,7 +3473,7 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
                 "auth", "config", "repo", "issue", "pr", "run", "workflow", "secret",
                 "release", "pkg", "search", "browse", "status", "org", "notification",
                 "user", "ssh-key", "gpg-key", "email", "pat", "label", "webhook",
-                "invite", "admin", "self-update", "skill", "api", "completion",
+                "invite", "admin", "self-update", "skill", "mcp", "api", "completion",
             ];
             if GROUPS.contains(&group) {
                 return Err(usage(format!(
@@ -3460,6 +3558,88 @@ mod tests {
         );
         let err = parse(&argv(&["self-update", "extra"])).unwrap_err();
         assert!(err.0.contains("unexpected argument"), "{err}");
+    }
+
+    #[test]
+    fn mcp_subcommands_parse() {
+        let inv = parse(&argv(&["mcp", "print"])).unwrap();
+        assert_eq!(inv.command, Command::McpPrint { harness: None });
+        let inv = parse(&argv(&["mcp", "print", "--harness", "codex"])).unwrap();
+        assert_eq!(
+            inv.command,
+            Command::McpPrint {
+                harness: Some("codex".into())
+            }
+        );
+
+        let inv = parse(&argv(&["mcp", "status"])).unwrap();
+        assert_eq!(inv.command, Command::McpStatus);
+        let err = parse(&argv(&["mcp", "status", "extra"])).unwrap_err();
+        assert!(err.0.contains("unexpected argument"), "{err}");
+
+        let inv = parse(&argv(&["mcp", "install", "--detected", "--project"])).unwrap();
+        assert_eq!(
+            inv.command,
+            Command::McpInstall {
+                harnesses: vec![],
+                project: true,
+                global: false,
+                detected: true,
+                token: None,
+                token_stdin: false,
+                web: false,
+                anonymous: false,
+            }
+        );
+        let inv = parse(&argv(&[
+            "mcp",
+            "install",
+            "--harness",
+            "cursor",
+            "--harness",
+            "claude",
+            "--global",
+            "--token",
+            "pat_x",
+        ]))
+        .unwrap();
+        assert_eq!(
+            inv.command,
+            Command::McpInstall {
+                harnesses: vec!["cursor".into(), "claude".into()],
+                project: false,
+                global: true,
+                detected: false,
+                token: Some("pat_x".into()),
+                token_stdin: false,
+                web: false,
+                anonymous: false,
+            }
+        );
+        // auth modes are exclusive.
+        for args in [
+            vec!["mcp", "install", "--token", "x", "--web"],
+            vec!["mcp", "install", "--token-stdin", "--anonymous"],
+            vec!["mcp", "install", "--web", "--anonymous"],
+        ] {
+            let err = parse(&argv(&args)).unwrap_err();
+            assert!(err.0.contains("are exclusive"), "{err}");
+        }
+
+        let inv = parse(&argv(&["mcp", "remove", "--harness", "all", "--global"])).unwrap();
+        assert_eq!(
+            inv.command,
+            Command::McpRemove {
+                harnesses: vec!["all".into()],
+                project: false,
+                global: true,
+                detected: false,
+            }
+        );
+
+        // bare `ox mcp` is a group — missing-subcommand hint, not unknown.
+        let err = parse(&argv(&["mcp"])).unwrap_err();
+        assert!(err.0.contains("missing subcommand"), "{err}");
     }
 
     #[test]

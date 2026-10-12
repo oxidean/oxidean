@@ -2,12 +2,13 @@ import { useQuery } from "@octanejs/tanstack-query";
 import { AppPage } from "@/components/app-page";
 import { AccountSettingsLayout } from "@/components/settings/settings-shell";
 import { CopyCommand } from "@/components/settings/copy-command";
+import { AppLink } from "@/components/ui/app-link";
 import { PageHeader } from "@/components/ui/page-header";
 import { usePageRedirect } from "@/lib/nav.tsrx";
 import { resolvePublicOriginClient } from "@/lib/public-origin";
 import { authSessionQueryOptions } from "@/lib/session-queries";
 
-/** `/settings/ai` — agent-facing integrations (skills today, MCP later). */
+/** `/settings/ai` — agent-facing integrations: ox skill installs + MCP wiring. */
 export function AiSettingsPage() @{
   <AppPage>
     <AiSettingsContent />
@@ -26,10 +27,19 @@ function AiSettingsContent() @{
   const skillUpgradeCmd = "ox skill install --upgrade";
   const skillFetchCmd = `curl -fsSL ${origin}/cli/skill.md`;
 
+  const mcpEndpoint = `${origin}/api/mcp`;
+  const mcpInstallCmd = "ox mcp install";
+  const mcpDetectedCmd = "ox mcp install --detected --project";
+  const mcpStatusCmd = "ox mcp status";
+  const mcpClaudeCmd = `claude mcp add --transport http oxidean ${mcpEndpoint} --header "Authorization: Bearer <pat>"`;
+  const mcpCursorJson = `{"mcpServers":{"oxidean":{"url":"${mcpEndpoint}","headers":{"Authorization":"Bearer <pat>"}}}}`;
+  const mcpVscodeJson = `{"servers":{"oxidean":{"type":"http","url":"${mcpEndpoint}","headers":{"Authorization":"Bearer <pat>"}}}}`;
+  const mcpRemoteCmd = `npx mcp-remote ${mcpEndpoint} --header "Authorization: Bearer <pat>"`;
+
   <AccountSettingsLayout active="ai" data-testid="settings-ai-page">
     <PageHeader
       title="AI agents"
-      description="Give coding agents the context to work with this Oxidean instance — install the ox skill into your harness today, wire MCP servers here later."
+      description="Give coding agents the context to work with this Oxidean instance — install the ox skill into your harness, or point an MCP-capable client at the forge endpoint."
     />
 
     <h2 className="mt-8 font-[family-name:var(--font-display)] text-[18px] font-semibold text-foreground">
@@ -71,6 +81,85 @@ function AiSettingsContent() @{
     </p>
     <div className="mt-2">
       <CopyCommand command={skillFetchCmd} ariaLabel="Copy skill download command" />
+    </div>
+
+    <h2 className="mt-10 font-[family-name:var(--font-display)] text-[18px] font-semibold text-foreground">
+      MCP server
+    </h2>
+    <p className="mt-1 text-[14px] text-muted-foreground">
+      This instance serves a Model Context Protocol endpoint at{" "}
+      <code className="font-mono">{mcpEndpoint}</code> — streamable HTTP, JSON-RPC 2.0. It exposes
+      repository, issue, pull request, Actions, and package tools so MCP-capable agents can work the
+      forge directly. Private data needs a bearer credential — mint a PAT under{" "}
+      <AppLink href="/settings/tokens" className="text-foreground underline underline-offset-2">
+        Personal access tokens
+      </AppLink>{" "}
+      (<code className="font-mono">repo</code>, plus <code className="font-mono">package:*</code>{" "}
+      for the registry tools); the token lives in your harness config, never in this page. Anonymous
+      access sees public repositories only. Instance admins can disable the endpoint under{" "}
+      <AppLink href="/admin/mcp" className="text-foreground underline underline-offset-2">
+        Site administration
+      </AppLink>
+      .
+    </p>
+
+    <p className="mt-4 text-[13px] font-medium text-foreground">
+      Endpoint — <code className="font-mono">POST</code> accepts one JSON-RPC message per request
+    </p>
+    <div className="mt-2">
+      <CopyCommand command={mcpEndpoint} ariaLabel="Copy MCP endpoint URL" />
+    </div>
+
+    <p className="mt-4 text-[13px] font-medium text-foreground">
+      Configure harnesses with the CLI — picks them interactively, merges an{" "}
+      <code className="font-mono">oxidean</code> entry (and reuses your{" "}
+      <code className="font-mono">ox</code> login as the bearer)
+    </p>
+    <div className="mt-2">
+      <CopyCommand command={mcpInstallCmd} ariaLabel="Copy MCP install command" />
+    </div>
+    <div className="mt-2">
+      <CopyCommand command={mcpDetectedCmd} ariaLabel="Copy detected MCP install command" />
+    </div>
+    <p className="mt-3 text-[13px] font-medium text-foreground">
+      Check what's configured — files plus a live probe of the endpoint
+    </p>
+    <div className="mt-2">
+      <CopyCommand command={mcpStatusCmd} ariaLabel="Copy MCP status command" />
+    </div>
+    <p className="mt-2 text-[13px] text-muted-foreground">
+      <code className="font-mono">ox mcp print</code> emits the config block to paste by hand,{" "}
+      <code className="font-mono">ox mcp remove</code> strips it again, and{" "}
+      <code className="font-mono">--token</code>/<code className="font-mono">--token-stdin</code>/
+      <code className="font-mono">--web</code>/<code className="font-mono">--anonymous</code>{" "}
+      override how install resolves the credential.
+    </p>
+
+    <p className="mt-4 text-[13px] font-medium text-foreground">
+      By hand — common clients (replace <code className="font-mono">&lt;pat&gt;</code>)
+    </p>
+    <p className="mt-2 text-[13px] text-muted-foreground">Claude Code:</p>
+    <div className="mt-2">
+      <CopyCommand command={mcpClaudeCmd} ariaLabel="Copy Claude Code MCP add command" />
+    </div>
+    <p className="mt-3 text-[13px] text-muted-foreground">
+      Cursor — <code className="font-mono">.cursor/mcp.json</code> (project) or{" "}
+      <code className="font-mono">~/.cursor/mcp.json</code> (global):
+    </p>
+    <div className="mt-2">
+      <CopyCommand command={mcpCursorJson} ariaLabel="Copy Cursor MCP config JSON" />
+    </div>
+    <p className="mt-3 text-[13px] text-muted-foreground">
+      VS Code — <code className="font-mono">.vscode/mcp.json</code>:
+    </p>
+    <div className="mt-2">
+      <CopyCommand command={mcpVscodeJson} ariaLabel="Copy VS Code MCP config JSON" />
+    </div>
+    <p className="mt-3 text-[13px] text-muted-foreground">
+      Stdio-only clients — bridge through <code className="font-mono">mcp-remote</code>:
+    </p>
+    <div className="mt-2">
+      <CopyCommand command={mcpRemoteCmd} ariaLabel="Copy mcp-remote bridge command" />
     </div>
   </AccountSettingsLayout>;
 }

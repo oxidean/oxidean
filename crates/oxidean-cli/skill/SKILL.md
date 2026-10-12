@@ -57,6 +57,7 @@ Non-interactive environments: set `OXIDEAN_INSTANCE` + `OXIDEAN_TOKEN` and skip
 | prs | `pr list\|view\|create\|merge\|diff\|files\|review\|comment\|ready\|update-branch\|checks\|close\|reopen\|checkout` |
 | actions | `run list\|view [--log]\|rerun\|cancel`, `workflow list\|view\|run`, `secret list\|set\|delete`, `status create` |
 | releases | `release list\|view\|create\|edit\|delete`, `release upload\|download\|delete-asset` |
+| mcp | `mcp print\|install\|status\|remove` — wire the instance's `/api/mcp` endpoint into agent-harness MCP configs |
 | everything else | `search`, `browse`, `pkg list`, `org …`, `user …`, `notification …`, `label …`, `webhook …`, `ssh-key`, `gpg-key`, `email`, `pat …`, `invite accept`, `admin …` |
 
 `<o/n>` is the `owner/name` repo spec; `-R/--repo` supplies it as a flag.
@@ -147,6 +148,28 @@ more). Harnesses that share a skills dir (many read `.agents/skills`) write
 it once; `generic` covers any other `.agents/skills` consumer. Run
 `ox skill install --help` for the full id list — pass `--harness <id>` to
 skip the picker.
+
+## Configure MCP clients (`ox mcp`)
+
+The instance serves MCP over `POST {instance}/api/mcp` (streamable HTTP,
+JSON-RPC 2.0 — repos, issues, pulls, actions, packages, search). `ox mcp`
+writes the `oxidean` entry into harness MCP configs:
+
+```sh
+ox mcp install --detected --project       # every harness found, repo-local
+ox mcp install --harness claude,cursor --global
+ox mcp status                             # configured files + endpoint probe
+ox mcp print --harness vscode             # raw config block to paste
+ox mcp remove --harness cursor --project
+```
+
+Auth precedence: `--token` / `--token-stdin` → `--web` (device grant) →
+stored `ox` login → `--anonymous` (public data only). Mint a PAT via
+`ox pat create` or `/settings/tokens`; token-bearing configs land `0600`.
+Harness ids: `claude`, `cursor`, `vscode`, `windsurf`, `gemini`, `codex`,
+`kiro`, `opencode`, `zed` (via `mcp-remote`), `generic`. Codex stores
+`bearer_token_env_var = "OXIDEAN_TOKEN"` — export it. Re-running `install`
+updates the entry; `remove` deletes only the `oxidean` entry.
 
 ## Notes for agents
 
