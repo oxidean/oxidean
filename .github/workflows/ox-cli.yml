@@ -113,8 +113,9 @@ jobs:
           # 404 the installers' canonical /cli/bin/ox-<target> path.
           cat "$src" > "dist/ox-${{ matrix.target }}"
           chmod +x "dist/ox-${{ matrix.target }}"
-          # Local exec twin — pwsh resolves `& ./foo` to `./foo.exe`.
-          case "$src" in *.exe) cat "$src" > "dist/ox-${{ matrix.target }}.exe";; esac
+          # Local exec twin — pwsh resolves `& ./foo` to `./foo.exe`. Gate on
+          # RUNNER_OS: MSYS `-f` resolves ox→ox.exe so $src keeps no suffix.
+          [ "$RUNNER_OS" = "Windows" ] && cat "$src" > "dist/ox-${{ matrix.target }}.exe" || true
           (cd dist && sha256sum "ox-${{ matrix.target }}" > "ox-${{ matrix.target }}.sha256")
           ls -lh dist/
       - name: qemu binfmt for foreign-arch exec
