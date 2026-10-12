@@ -55,6 +55,9 @@ static SHELLS: &[Shell] = &[
     Shell { pattern: &[L("explore")], file: "explore/index.html", title: None, protected: false, redirect: None },
     Shell { pattern: &[L("search")], file: "search/index.html", title: None, protected: false, redirect: None },
     Shell { pattern: &[L("oauth"), L("consent")], file: "oauth/consent/index.html", title: None, protected: false, redirect: None },
+    // RFC 8628 approval page — `protected: false` keeps `?user_code=` in the
+    // client-side /login?returnTo= (a server 302 would drop the query).
+    Shell { pattern: &[L("oauth"), L("device")], file: "oauth/device/index.html", title: None, protected: false, redirect: None },
     Shell { pattern: &[L("invites"), P("token")], file: "invites/_/index.html", title: Some("Accept invitation · Oxidean"), protected: false, redirect: None },
     Shell { pattern: &[L("setup")], file: "setup/index.html", title: None, protected: false, redirect: None },
     Shell { pattern: &[L("setup"), L("credentials")], file: "setup/credentials/index.html", title: None, protected: false, redirect: None },

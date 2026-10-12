@@ -1,0 +1,8 @@
+---
+import AppShell from "@/layouts/AppShell.astro";
+import { OAuthDevicePage } from "@/routes/oauth.device.tsrx";
+---
+
+<AppShell title="Authorize CLI sign-in · Oxidean">
+	<OAuthDevicePage client:load />
+</AppShell>

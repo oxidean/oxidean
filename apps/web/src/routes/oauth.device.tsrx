@@ -1,10 +1,12 @@
-import { createFileRoute, useLoaderData, useSearch } from "@octanejs/tanstack-router";
+import { queryOptions, useQuery } from "@octanejs/tanstack-query";
 import type { OAuthDeviceInfo } from "@oxidean/api-client";
 import { useEffect, useState } from "octane";
+import { AppPage } from "@/components/app-page";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { apiClient } from "@/lib/api-client";
+import { useSearchString } from "@/lib/pathname.tsrx";
 import { fetchSessionMe } from "@/lib/ssr-auth";
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
@@ -20,29 +22,40 @@ const SCOPE_LABELS: Record<string, string> = {
   "user:email": "View your email address",
   repo: "Read and write your repositories over HTTPS",
   "package:read": "Download packages you can access",
-  "package:write": "Publish and delete packages as you",
+  "package:write": "Publish packages as you",
+  "package:delete": "Delete packages as you",
 };
 
-export const Route = createFileRoute("/oauth/device")({
-  component: OAuthDevicePage,
-  validateSearch: (search: Record<string, unknown>): DeviceSearch => ({
-    user_code: typeof search.user_code === "string" ? search.user_code : undefined,
-  }),
-  loaderDeps: ({ search }) => search,
-  head: () => ({ meta: [{ title: "Authorize CLI sign-in · Oxidean" }] }),
-  loader: async ({ location }): Promise<DeviceLoaderData> => {
-    const returnTo = `/oauth/device${location.searchStr ?? ""}`;
-    try {
-      const me = await fetchSessionMe();
-      if (!me.ok) {
+function parseDeviceSearch(params: URLSearchParams): DeviceSearch {
+  return { user_code: params.get("user_code") ?? undefined };
+}
+
+function deviceQueryOptions(searchStr: string) {
+  return queryOptions({
+    queryKey: ["oauth", "device", searchStr],
+    queryFn: async (): Promise<DeviceLoaderData> => {
+      const returnTo = `/oauth/device${searchStr}`;
+      try {
+        const me = await fetchSessionMe();
+        if (!me.ok) {
+          return { kind: "unauthenticated", returnTo };
+        }
+        return { kind: "ready" };
+      } catch {
         return { kind: "unauthenticated", returnTo };
       }
-      return { kind: "ready" };
-    } catch {
-      return { kind: "unauthenticated", returnTo };
-    }
-  },
-});
+    },
+    retry: false,
+    staleTime: 0,
+  });
+}
+
+/** `/oauth/device` — RFC 8628 approval page for `ox auth login --web` (title on the Astro shell). */
+export function OAuthDevicePage() @{
+  <AppPage>
+    <OAuthDeviceContent />
+  </AppPage>;
+}
 
 type Step =
   | { kind: "enter" }
@@ -51,10 +64,11 @@ type Step =
   | { kind: "done"; approved: boolean }
   | { kind: "error"; message: string };
 
-/** `/oauth/device` — RFC 8628 approval page for `ox auth login --web`. */
-export function OAuthDevicePage() @{
-  const loaderData = useLoaderData({ from: "/oauth/device" }) as DeviceLoaderData | undefined;
-  const search = useSearch({ strict: false }) as DeviceSearch;
+function OAuthDeviceContent() @{
+  const searchStr = useSearchString();
+  const search = parseDeviceSearch(new URLSearchParams(searchStr));
+  const deviceQ = useQuery(deviceQueryOptions(searchStr));
+  const loaderData = deviceQ.data;
   const [step, setStep] = useState<Step>({ kind: "enter" });
   const [code, setCode] = useState(search.user_code ?? "");
   const [pending, setPending] = useState<"approve" | "deny" | "lookup" | null>(null);
@@ -118,11 +132,11 @@ export function OAuthDevicePage() @{
   }
 
   @if (loaderData?.kind === "unauthenticated") {
-    <main className="mx-auto flex min-h-[60vh] w-full max-w-xl flex-col justify-center px-4 py-10">
+    <div className="mx-auto flex min-h-[60vh] w-full max-w-xl flex-col justify-center px-4 py-10">
       <p className="text-[14px] text-muted-foreground">Redirecting to sign in…</p>
-    </main>;
+    </div>;
   } @else {
-    <main className="mx-auto flex min-h-[60vh] w-full max-w-xl flex-col justify-center px-4 py-10">
+    <div className="mx-auto flex min-h-[60vh] w-full max-w-xl flex-col justify-center px-4 py-10">
       @if (step.kind === "done") {
         <div className="rounded-md border border-border bg-card p-6">
           <h1 className="font-[family-name:var(--font-display)] text-[22px] font-semibold text-foreground">
@@ -219,6 +233,6 @@ export function OAuthDevicePage() @{
           }
         </div>;
       }
-    </main>;
+    </div>;
   }
 }

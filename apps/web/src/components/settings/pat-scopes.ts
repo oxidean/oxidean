@@ -3,7 +3,7 @@ import type { ClassicPatScope, FgPerms, FgPermLevel } from "@oxidean/api-client"
 /** Three-way permission picker value — `none` omits the family from `perms`. */
 export type PermChoice = "none" | "read" | "write";
 
-export type ClassicScopeRow = {
+type ClassicScopeRow = {
   scope: ClassicPatScope;
   testid: string;
   label: string;
@@ -206,7 +206,7 @@ export const CLASSIC_SCOPE_GROUPS: ClassicScopeGroup[] = [
 ];
 
 /** Broader scope ⇒ scopes it implies (UI greys implied boxes; the API enforces). */
-export const CLASSIC_SCOPE_IMPLIES: Partial<Record<ClassicPatScope, ClassicPatScope[]>> = {
+const CLASSIC_SCOPE_IMPLIES: Partial<Record<ClassicPatScope, ClassicPatScope[]>> = {
   user: ["read:user", "user:email", "user:follow"],
   "write:org": ["read:org"],
   "write:public_key": ["read:public_key"],
@@ -219,7 +219,7 @@ export const CLASSIC_SCOPE_IMPLIES: Partial<Record<ClassicPatScope, ClassicPatSc
 export type ClassicScopeValues = Record<string, boolean>;
 
 /** Every scope `scope` implies — transitively flattened. */
-export function impliedScopes(scope: ClassicPatScope): ClassicPatScope[] {
+function impliedScopes(scope: ClassicPatScope): ClassicPatScope[] {
   const seen = new Set<ClassicPatScope>();
   const walk = (s: ClassicPatScope) => {
     for (const next of CLASSIC_SCOPE_IMPLIES[s] ?? []) {

@@ -1,4 +1,3 @@
-import { createElement } from "octane";
 import { cleanup, screen, waitFor } from "@octanejs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithQueryClient } from "@/test/render-with-query";
@@ -11,9 +10,13 @@ import { renderWithQueryClient } from "@/test/render-with-query";
 
 const deviceInfoMock = vi.fn();
 const deviceAuthorizeMock = vi.fn();
+const authMeMock = vi.fn();
 
 vi.mock("@/lib/api-client", () => ({
   apiClient: {
+    auth: {
+      me: (...args: unknown[]) => authMeMock(...args),
+    },
     oauth: {
       deviceInfo: (...args: unknown[]) => deviceInfoMock(...args),
       deviceAuthorize: (...args: unknown[]) => deviceAuthorizeMock(...args),
@@ -21,34 +24,18 @@ vi.mock("@/lib/api-client", () => ({
   },
 }));
 
-type LoaderShape = { kind: "unauthenticated"; returnTo: string } | { kind: "ready" };
-
-let loaderData: LoaderShape;
-let searchParams: Record<string, string | undefined> = {};
-
-vi.mock("@octanejs/tanstack-router", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@octanejs/tanstack-router")>();
-  return {
-    ...actual,
-    useLoaderData: () => loaderData,
-    useSearch: () => searchParams,
-    Link: (props: {
-      to?: string;
-      children?: unknown;
-      className?: string;
-      "aria-current"?: string;
-    }) =>
-      createElement(
-        "a",
-        {
-          href: props.to ?? "#",
-          className: props.className,
-          "aria-current": props["aria-current"],
-        },
-        props.children as never,
-      ),
-  };
-});
+const verifiedUser = {
+  id: "u1",
+  email: "ada@example.com",
+  username: "ada",
+  display_name: "Ada",
+  bio: "",
+  avatar_url: null,
+  role: "user",
+  profile_incomplete: false,
+  email_verified: true,
+  must_change_credentials: false,
+};
 
 const info = {
   user_code: "WDJB-MJHT",
@@ -56,20 +43,21 @@ const info = {
   expires_at: "2030-01-01T00:00:00Z",
 };
 
-const assign = vi.fn();
+function setLocation(path: string) {
+  window.history.pushState({}, "", path);
+}
 
 beforeEach(() => {
   deviceInfoMock.mockReset();
   deviceAuthorizeMock.mockReset();
-  assign.mockReset();
-  vi.stubGlobal("location", { assign });
-  loaderData = { kind: "ready" };
-  searchParams = {};
+  authMeMock.mockReset();
+  setLocation("/oauth/device");
+  authMeMock.mockResolvedValue({ ok: true, data: verifiedUser });
 });
 
 afterEach(() => {
   cleanup();
-  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 async function loadModule(): Promise<Record<string, unknown>> {
@@ -79,7 +67,7 @@ async function loadModule(): Promise<Record<string, unknown>> {
 describe("/oauth/device", () => {
   it("auto-looks up ?user_code= and renders scopes with approve/deny", async () => {
     deviceInfoMock.mockResolvedValue({ ok: true, data: info });
-    searchParams = { user_code: "wdjb-mjht" };
+    setLocation("/oauth/device?user_code=wdjb-mjht");
     const mod = await loadModule();
     const Page = (mod.OAuthDevicePage ?? mod.default) as unknown;
     renderWithQueryClient(Page);
@@ -98,7 +86,7 @@ describe("/oauth/device", () => {
   it("approve calls deviceAuthorize with approve:true", async () => {
     deviceInfoMock.mockResolvedValue({ ok: true, data: info });
     deviceAuthorizeMock.mockResolvedValue({ ok: true, data: { ok: true } });
-    searchParams = { user_code: info.user_code };
+    setLocation(`/oauth/device?user_code=${info.user_code}`);
     const mod = await loadModule();
     const Page = (mod.OAuthDevicePage ?? mod.default) as unknown;
     renderWithQueryClient(Page);
@@ -122,7 +110,7 @@ describe("/oauth/device", () => {
   it("deny calls deviceAuthorize with approve:false", async () => {
     deviceInfoMock.mockResolvedValue({ ok: true, data: info });
     deviceAuthorizeMock.mockResolvedValue({ ok: true, data: { ok: true } });
-    searchParams = { user_code: info.user_code };
+    setLocation(`/oauth/device?user_code=${info.user_code}`);
     const mod = await loadModule();
     const Page = (mod.OAuthDevicePage ?? mod.default) as unknown;
     renderWithQueryClient(Page);
@@ -148,7 +136,7 @@ describe("/oauth/device", () => {
       ok: false,
       error: { code: "oauth.device_code_not_found", message: "no pending device code" },
     });
-    searchParams = { user_code: "ZZZZ-ZZZZ" };
+    setLocation("/oauth/device?user_code=ZZZZ-ZZZZ");
     const mod = await loadModule();
     const Page = (mod.OAuthDevicePage ?? mod.default) as unknown;
     renderWithQueryClient(Page);
