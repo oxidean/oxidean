@@ -412,11 +412,12 @@ pub fn manifest_response() -> ManifestResponse {
         server_version: env!("CARGO_PKG_VERSION").into(),
         procedures: PROCEDURES.iter().map(|p| ((*p).to_string(), true)).collect(),
         capabilities: ManifestCapabilities {
-            // No MCP endpoint (AGT-01), typed REST surface, or
-            // instance-as-OAuth-provider (API-03) yet.
-            mcp: false,
-            rest: false,
-            oauth: false,
+            // All mounted unconditionally in app.rs: /api/mcp, /api/v1,
+            // /oauth/*, /cli/*.
+            mcp: true,
+            rest: true,
+            oauth: true,
+            cli_dist: true,
         },
         min_cli_version: MIN_CLI_VERSION.into(),
     }
@@ -1697,7 +1698,12 @@ mod tests {
         assert_eq!(m.procedures.len(), PROCEDURES.len());
         assert_eq!(m.procedures.get("repo.listMine"), Some(&true));
         assert_eq!(m.procedures.get("system.manifest"), Some(&true));
-        assert!(!m.capabilities.mcp && !m.capabilities.rest && !m.capabilities.oauth);
+        assert!(
+            m.capabilities.mcp
+                && m.capabilities.rest
+                && m.capabilities.oauth
+                && m.capabilities.cli_dist
+        );
         let v = serde_json::to_value(&m).unwrap();
         for key in [
             "protocol_version",

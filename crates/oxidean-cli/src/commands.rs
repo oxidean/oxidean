@@ -475,7 +475,14 @@ fn run_git(args: &[&str]) -> Result<(), CliError> {
 fn required_procedures(cmd: &Command) -> Vec<String> {
     let one = |p: &str| vec![p.to_string()];
     match cmd {
-        Command::AuthLogin { .. } | Command::AuthToken | Command::AuthLogout => vec![],
+        Command::AuthLogin { .. }
+        | Command::AuthToken
+        | Command::AuthLogout
+        | Command::AuthSwitch { .. }
+        | Command::ConfigList
+        | Command::ConfigGet { .. }
+        | Command::ConfigSet { .. }
+        | Command::Completion { .. } => vec![],
         Command::AuthStatus => one("auth.me"),
         Command::RepoList { owner } => vec![if owner.is_some() {
             "repo.listByOwner"
@@ -646,6 +653,7 @@ fn required_procedures(cmd: &Command) -> Vec<String> {
         }
         Command::RunRerun { .. } => one("repo.actions.rerunRun"),
         Command::RunCancel { .. } => one("repo.actions.cancelRun"),
+        Command::RunWatch { .. } => one("repo.actions.getRun"),
         Command::WorkflowList { .. } => one("repo.actions.listWorkflows"),
         Command::WorkflowView { git_ref, .. } => {
             let mut p = vec!["repo.blob".to_string()];
@@ -779,6 +787,16 @@ fn required_procedures(cmd: &Command) -> Vec<String> {
         } else {
             "admin.mcp.getSettings"
         }),
+        Command::AdminAuth { set, .. } => {
+            if *set {
+                vec![
+                    "admin.auth.get_settings".into(),
+                    "admin.auth.update_settings".into(),
+                ]
+            } else {
+                one("admin.auth.get_settings")
+            }
+        }
         Command::AdminTemplatesList => one("admin.templates.list"),
         Command::AdminTemplatesSetEnabled { .. } => one("admin.templates.setEnabled"),
         Command::AdminTemplatesDelete { .. } => one("admin.templates.delete"),
@@ -786,7 +804,7 @@ fn required_procedures(cmd: &Command) -> Vec<String> {
         Command::Api { procedure, .. } => vec![procedure.clone()],
         // self-update talks to /cli/* HTTP, not /api/rpc — no manifest gate.
         // skill commands are fully local.
-        Command::SelfUpdate
+        Command::SelfUpdate { .. }
         | Command::SkillPrint
         | Command::SkillInstall { .. }
         | Command::Help
@@ -857,6 +875,11 @@ pub async fn dispatch(inv: &Invocation, rt: &Runtime) -> Result<Out, CliError> {
         Command::AuthStatus => auth_status(g, rt).await,
         Command::AuthLogout => auth_logout(g, rt),
         Command::AuthToken => auth_token(g, rt),
+        Command::AuthSwitch { instance } => auth_switch(rt, instance.as_deref()),
+        Command::ConfigList => config_list(rt),
+        Command::ConfigGet { key } => config_get(rt, key),
+        Command::ConfigSet { key, value } => config_set(rt, key, value),
+        Command::Completion { shell } => crate::completion::run(shell),
 
         // ── repos ───────────────────────────────────────────────────
         Command::RepoList { owner } => {
@@ -1615,6 +1638,46 @@ pub async fn dispatch(inv: &Invocation, rt: &Runtime) -> Result<Out, CliError> {
             mm.insert("run_id".into(), json!(run_id));
             opt(mm, "job_id", m.job_id.clone());
             invoke(g, rt, "repo.actions.cancelRun", input, output::generic).await
+        }
+        Command::RunWatch {
+            repo,
+            run_id,
+            interval,
+            timeout,
+            exit_status,
+        } => {
+            let (owner, name) = repo_parts(repo)?;
+            let input = json!({ "owner": owner, "name": name, "run_id": run_id });
+            let every = std::time::Duration::from_secs(interval.unwrap_or(5).max(1));
+            let deadline = timeout
+                .map(|t| std::time::Instant::now() + std::time::Duration::from_secs(t));
+            let mut last_status = String::new();
+            loop {
+                let data = call(g, rt, "repo.actions.getRun", input.clone()).await?;
+                let status = data
+                    .pointer("/run/status")
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                if !status.is_empty() && status != last_status {
+                    eprintln!("run {run_id}: {status}");
+                    last_status = status.to_string();
+                }
+                if matches!(status, "success" | "failure" | "cancelled") {
+                    if *exit_status && status != "success" {
+                        return Err(CliError::Api(AppError::new(
+                            "run.failed",
+                            format!("run {run_id} ended {status}"),
+                        )));
+                    }
+                    return invoke(g, rt, "repo.actions.getRun", input, output::run_view).await;
+                }
+                if deadline.is_some_and(|d| std::time::Instant::now() >= d) {
+                    return Err(CliError::Usage(format!(
+                        "timed out waiting for run {run_id} ({status})"
+                    )));
+                }
+                tokio::time::sleep(every).await;
+            }
         }
         Command::WorkflowList { repo, git_ref } => {
             let mut input = repo_input(repo)?;
@@ -2544,6 +2607,35 @@ pub async fn dispatch(inv: &Invocation, rt: &Runtime) -> Result<Out, CliError> {
             }
             invoke(g, rt, "admin.mcp.updateSettings", input, output::generic).await
         }
+        Command::AdminAuth {
+            set,
+            provider_mode,
+            email_provider,
+            from_address,
+            oidc_issuer,
+            oidc_client_id,
+            workos_client_id,
+            allow_signup,
+            default_visibility,
+        } => {
+            if !*set {
+                return invoke(g, rt, "admin.auth.get_settings", json!({}), output::generic).await;
+            }
+            // update_settings takes the full settings object — fetch current,
+            // overlay the flag values, send the merged payload back.
+            let cur = call(g, rt, "admin.auth.get_settings", json!({})).await?;
+            let mut input = cur;
+            let m = input.as_object_mut().unwrap();
+            opt(m, "provider_mode", provider_mode.clone());
+            opt(m, "email_provider", email_provider.clone());
+            opt(m, "from_address", from_address.clone());
+            opt(m, "oidc_issuer", oidc_issuer.clone());
+            opt(m, "oidc_client_id", oidc_client_id.clone());
+            opt(m, "workos_client_id", workos_client_id.clone());
+            opt(m, "allow_signup", *allow_signup);
+            opt(m, "default_visibility", default_visibility.clone());
+            invoke(g, rt, "admin.auth.update_settings", input, output::generic).await
+        }
         Command::AdminTemplatesList => {
             invoke(g, rt, "admin.templates.list", json!({}), output::generic).await
         }
@@ -2576,7 +2668,9 @@ pub async fn dispatch(inv: &Invocation, rt: &Runtime) -> Result<Out, CliError> {
             upgrade,
             detected,
         } => crate::skill::install(g, rt, harnesses, *project, *global, *upgrade, *detected),
-        Command::SelfUpdate => crate::self_update::run(g, rt).await,
+        Command::SelfUpdate { no_skill_refresh } => {
+            crate::self_update::run(g, rt, *no_skill_refresh).await
+        }
         Command::Api { procedure, input } => {
             invoke(g, rt, procedure, input.clone(), |data| {
                 serde_json::to_string_pretty(data).unwrap_or_else(|_| "{}".to_string())
@@ -2868,6 +2962,193 @@ async fn auth_status(global: &Global, rt: &Runtime) -> Result<Out, CliError> {
         output::auth_status(data, &instance)
     })
     .await
+}
+
+/// `auth switch` — change the default instance; arg or TTY picker over the
+/// logged-in set. Config-file edit only, no network call.
+fn auth_switch(rt: &Runtime, instance: Option<&str>) -> Result<Out, CliError> {
+    use std::io::IsTerminal;
+
+    if rt.config.instances.is_empty() {
+        return Err(CliError::Usage(
+            "no logged-in instances — run `ox auth login`".into(),
+        ));
+    }
+    let chosen = match instance {
+        Some(raw) => {
+            let url = config::normalize_instance(raw).map_err(CliError::Usage)?;
+            if !rt.config.instances.contains_key(&url) {
+                return Err(CliError::Usage(format!(
+                    "not logged in to {url} — known: {}",
+                    rt.config
+                        .instances
+                        .keys()
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )));
+            }
+            url
+        }
+        None => {
+            if !(std::io::stdin().is_terminal() && std::io::stdout().is_terminal()) {
+                return Err(CliError::Usage(
+                    "non-interactive: pass the instance URL — `ox auth switch <url>`".into(),
+                ));
+            }
+            let keys: Vec<String> = rt.config.instances.keys().cloned().collect();
+            eprintln!("Default instance?");
+            for (i, k) in keys.iter().enumerate() {
+                let mark = if rt.config.default_instance.as_ref() == Some(k) {
+                    " (current)"
+                } else {
+                    ""
+                };
+                eprintln!("  {:2}. {}{}", i + 1, k, mark);
+            }
+            let mut line = String::new();
+            std::io::stdin()
+                .read_line(&mut line)
+                .map_err(|e| CliError::Usage(format!("read selection: {e}")))?;
+            let n: usize = line
+                .trim()
+                .parse()
+                .map_err(|_| CliError::Usage(format!("invalid selection {:?}", line.trim())))?;
+            keys.get(n.wrapping_sub(1))
+                .cloned()
+                .ok_or_else(|| CliError::Usage(format!("selection {n} out of range")))?
+        }
+    };
+    let mut cfg = rt.config.clone();
+    cfg.default_instance = Some(chosen.clone());
+    config::save(&rt.config_path, &cfg).map_err(CliError::Config)?;
+    Ok(Out::Report {
+        text: format!("default instance: {chosen}"),
+        json: json!({"ok": true, "data": {"default_instance": chosen}}),
+    })
+}
+
+/// `config list` — the local config file. Stored tokens are never printed;
+/// they report as `set`/`unset`.
+fn config_list(rt: &Runtime) -> Result<Out, CliError> {
+    let mut text = format!("config file: {}\n", rt.config_path.display());
+    text.push_str(&format!(
+        "default_instance: {}\n",
+        rt.config.default_instance.as_deref().unwrap_or("(unset)")
+    ));
+    for (url, e) in &rt.config.instances {
+        text.push_str(&format!(
+            "{url}  token={}\n",
+            if e.token.is_some() { "set" } else { "unset" }
+        ));
+    }
+    let instances: Vec<Value> = rt
+        .config
+        .instances
+        .iter()
+        .map(|(url, e)| {
+            json!({ "url": url, "token": if e.token.is_some() { "set" } else { "unset" } })
+        })
+        .collect();
+    Ok(Out::Report {
+        text: text.trim_end().to_string(),
+        json: json!({"ok": true, "data": {
+            "config_path": rt.config_path.display().to_string(),
+            "default_instance": rt.config.default_instance,
+            "instances": instances,
+        }}),
+    })
+}
+
+/// Split `instances.<url>.<field>` — the URL is normalized so lookups and
+/// writes agree on one spelling.
+fn config_instance_key(key: &str) -> Result<(String, String), CliError> {
+    let rest = key.strip_prefix("instances.").ok_or_else(|| {
+        CliError::Usage(format!(
+            "unknown config key '{key}' — valid keys: default_instance, instances.<url>.token"
+        ))
+    })?;
+    let (url, field) = rest.rsplit_once('.').ok_or_else(|| {
+        CliError::Usage(format!(
+            "unknown config key '{key}' — valid keys: default_instance, instances.<url>.token"
+        ))
+    })?;
+    let url = config::normalize_instance(url).map_err(CliError::Usage)?;
+    Ok((url, field.to_string()))
+}
+
+/// `config get` — `default_instance` prints its value; instance tokens
+/// report `set`/`unset` rather than the secret.
+fn config_get(rt: &Runtime, key: &str) -> Result<Out, CliError> {
+    if key == "default_instance" {
+        let v = rt.config.default_instance.clone();
+        return Ok(Out::Report {
+            text: v.clone().unwrap_or_default(),
+            json: json!({"ok": true, "data": {"default_instance": v}}),
+        });
+    }
+    let (url, field) = config_instance_key(key)?;
+    match field.as_str() {
+        "token" => {
+            let state = match rt.config.instances.get(&url).and_then(|e| e.token.as_ref()) {
+                Some(_) => "set",
+                None => "unset",
+            };
+            Ok(Out::Report {
+                text: state.to_string(),
+                json: json!({"ok": true, "data": {"url": url, "token": state}}),
+            })
+        }
+        _ => Err(CliError::Usage(format!(
+            "unknown config key '{key}' — for instances only .token is stored"
+        ))),
+    }
+}
+
+/// `config set` — `default_instance` must name a known (logged-in)
+/// instance; `instances.<url>.token` upserts the entry.
+fn config_set(rt: &Runtime, key: &str, value: &str) -> Result<Out, CliError> {
+    if key == "default_instance" {
+        let url = config::normalize_instance(value).map_err(CliError::Usage)?;
+        if !rt.config.instances.contains_key(&url) {
+            return Err(CliError::Usage(format!(
+                "not logged in to {url} — known: {}",
+                rt.config
+                    .instances
+                    .keys()
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )));
+        }
+        let mut cfg = rt.config.clone();
+        cfg.default_instance = Some(url.clone());
+        config::save(&rt.config_path, &cfg).map_err(CliError::Config)?;
+        return Ok(Out::Report {
+            text: format!("default_instance = {url}"),
+            json: json!({"ok": true, "data": {"default_instance": url}}),
+        });
+    }
+    let (url, field) = config_instance_key(key)?;
+    match field.as_str() {
+        "token" => {
+            if value.is_empty() {
+                return Err(CliError::Usage(
+                    "empty token — use `ox auth logout` to remove a credential".into(),
+                ));
+            }
+            let mut cfg = rt.config.clone();
+            cfg.instances.entry(url.clone()).or_default().token = Some(value.to_string());
+            config::save(&rt.config_path, &cfg).map_err(CliError::Config)?;
+            Ok(Out::Report {
+                text: format!("{url}: token set"),
+                json: json!({"ok": true, "data": {"url": url, "token": "set"}}),
+            })
+        }
+        _ => Err(CliError::Usage(format!(
+            "unknown config key '{key}' — for instances only .token is stored"
+        ))),
+    }
 }
 
 /// `auth logout` — drop the stored token for the resolved instance.

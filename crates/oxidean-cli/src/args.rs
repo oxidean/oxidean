@@ -14,7 +14,9 @@ USAGE
   ox <command> [flags]
 
 GETTING AROUND
-  ox auth login|status|logout|token                sign-in state and tokens
+  ox auth login|status|switch|logout|token         sign-in state and tokens
+  ox config list|get|set                           local config file (tokens redacted)
+  ox completion <bash|zsh|fish|pwsh>               shell completion script
   ox browse [<o/n>]                                open the repo (or instance) in a browser
   ox search <query>                                global search — --type repos|issues|pulls|…
 
@@ -32,7 +34,7 @@ ISSUES & PULL REQUESTS
   ox pr ready|update-branch|checks|close|reopen|checkout
 
 ACTIONS
-  ox run list|view|rerun|cancel                    --job/--log for logs
+  ox run list|view|watch|rerun|cancel              --job/--log for logs
   ox workflow list|view|run
   ox secret list|set|delete
   ox status create <o/n> --sha <s> --context <c> --state <st>
@@ -55,7 +57,7 @@ ACCOUNT
   ox invite accept --token <t>
 
 INSTANCE ADMIN
-  ox admin users …|invites …|runners|lfs|git|mcp|templates
+  ox admin users …|invites …|runners|lfs|git|mcp|auth|templates
 
 MAINTENANCE
   ox self-update     replace this binary with the build the instance serves
@@ -93,11 +95,16 @@ pub fn help_topic(group: &str, sub: &str) -> Option<&'static str> {
 
 /// `(command-path, help text)`. Every leaf lists its own flags.
 const HELP: &[(&str, &str)] = &[
-    ("auth", "ox auth — sign-in state\n\n  ox auth login --instance <url> [--web | --token <pat> | --token-stdin]\n  ox auth status      show who you're logged in as\n  ox auth logout      remove the stored token for the instance\n  ox auth token       print the resolved token (for scripts)"),
+    ("auth", "ox auth — sign-in state\n\n  ox auth login --instance <url> [--web | --token <pat> | --token-stdin]\n  ox auth status      show who you're logged in as\n  ox auth switch      change the default instance (picker, or pass the URL)\n  ox auth logout      remove the stored token for the instance\n  ox auth token       print the resolved token (for scripts)"),
+    ("auth switch", "ox auth switch [<instance-url>]\n\nChanges the default instance used when neither --instance nor\nOXIDEAN_INSTANCE is set. With no argument, lists logged-in instances and\nprompts for one (TTY only)."),
     ("auth login", "ox auth login --instance <url> [--web | --token <pat> | --token-stdin]\n\n--web runs the RFC 8628 device flow: prints a one-time code, opens the\ninstance's /oauth/device page, and polls until you approve or deny.\nWith no token flag and no --web, a piped stdin is used as the token; on\na TTY the command fails instead of hanging. Stores the token under the\ninstance in ~/.config/ox/config.json and makes it the default."),
     ("auth status", "ox auth status\n\nCalls auth.me on the resolved instance and prints the login."),
     ("auth logout", "ox auth logout\n\nDrops the stored token for the resolved instance (config file edit —\nno network call)."),
     ("auth token", "ox auth token\n\nPrints the token that would be sent (OXIDEAN_TOKEN wins over the\nstored credential). For scripts: TOKEN=$(ox auth token)."),
+    ("config", "ox config — local config file\n\n  list|get|set\n\nKeys: default_instance · instances.<url>.token\nStored tokens are never printed — they report as set/unset."),
+    ("config get", "ox config get <key>\n\n  default_instance            prints the configured default instance URL\n  instances.<url>.token       prints 'set' or 'unset' (never the secret)"),
+    ("config set", "ox config set <key> <value>\n\n  default_instance <url>      must name a logged-in instance\n  instances.<url>.token <t>   stores the token (600 config file)"),
+    ("completion", "ox completion <bash|zsh|fish|pwsh>\n\nPrints a static completion script for the shell — command and\nsubcommand names (per-leaf flags are not completed).\n\n  bash:  ox completion bash | sudo tee /etc/bash_completion.d/ox\n         or per-shell: source <(ox completion bash)\n  zsh:   save as _ox in a directory on $fpath, then compinit\n  fish:  ox completion fish > ~/.config/fish/completions/ox.fish\n  pwsh:  add to $PROFILE: ox completion pwsh | Out-String | Invoke-Expression"),
     ("repo", "ox repo — repositories\n\n  list|view|create|fork|sync|clone|edit|rename|archive|unarchive\n  delete|transfer|star|unstar|watch|unwatch\n  deploy-key list|add|delete · collaborator list|add|set-role|remove\n  invites list|create|link|revoke\n  branch-protection list|set|delete · tag-protection list|set|delete\n  mirror get|set|sync|delete|gen-key|rotate-secret\n  merge-settings [get|set] · lfs [--usage|--objects|--enable|--disable]\n  quota [--set <bytes>]"),
     ("repo list", "ox repo list [--owner <user|org>]\n\n`--owner` → repo.listByOwner; bare → repo.listMine."),
     ("repo view", "ox repo view <owner/name>"),
@@ -145,7 +152,8 @@ const HELP: &[(&str, &str)] = &[
     ("pr close", "ox pr close <o/n> <number>   /   reopen"),
     ("pr reopen", "ox pr reopen <o/n> <number>"),
     ("pr checkout", "ox pr checkout <o/n> <number>  fetch the head into a local branch"),
-    ("run", "ox run — actions runs\n\n  list|view|rerun|cancel"),
+    ("run", "ox run — actions runs\n\n  list|view|watch|rerun|cancel"),
+    ("run watch", "ox run watch <o/n> <run-id> [--interval <secs>] [--timeout <secs>]\n                  [--exit-status]\n\nPolls the run until it completes (success|failure|cancelled), printing\nstatus changes as they happen and the final run on completion. Default\ninterval is 5s; --exit-status exits nonzero on failure/cancelled."),
     ("run list", "ox run list <o/n> [--limit n] [--page n] [--status s] [--event e]\n            [--branch b] [--workflow w] [--actor u] [--query q]"),
     ("run view", "ox run view <o/n> <run-id> [--log] [--job <job-id>]\n\n--log streams the job log (first job unless --job)."),
     ("run rerun", "ox run rerun <o/n> <run-id> [--failed-only]"),
@@ -185,7 +193,8 @@ const HELP: &[(&str, &str)] = &[
     ("label", "ox label list <o/n>|--org <slug>\n  ox label create <o/n>|--org <slug> --name <n> --color <hex> [--description <d>]\n  ox label edit <o/n>|--org <slug> --id <id> [--name][--color][--description][--hidden]\n  ox label delete <o/n>|--org <slug> --id <id>"),
     ("webhook", "ox webhook list|create|edit|delete|ping <o/n>\n  create --url <u> --secret <s> --events push,pull_request [--name <n>]\n         [--description <d>] [--inactive]\n  edit --id <id> [--url][--secret][--events][--name][--description][--inactive|--active]\n  ping --id <id> · deliveries <o/n> --id <id> [--limit n]\n  redeliver <o/n> --id <id> --delivery <delivery-id>"),
     ("invite", "ox invite accept --token <t> [--email <e>] [--username <u>] [--password <p>]\n\nAccept a repo/org invite link."),
-    ("admin", "ox admin — instance administration\n\n  users list|ban|unban|delete|set-role|sessions|revoke-sessions|access|activity\n  invites list|create|link|revoke\n  runners · runner-token\n  lfs|git|mcp (settings get/set) · templates list|enable|disable|delete\n  repos gc"),
+    ("admin", "ox admin — instance administration\n\n  users list|ban|unban|delete|set-role|sessions|revoke-sessions|access|activity\n  invites list|create|link|revoke\n  runners · runner-token\n  lfs|git|mcp|auth (settings get/set) · templates list|enable|disable|delete\n  repos gc"),
+    ("admin auth", "ox admin auth            show instance auth settings\n  ox admin auth set [--provider-mode local|workos|oidc]\n      [--email-provider log|smtp|resend] [--from-address <addr>]\n      [--oidc-issuer <url>] [--oidc-client-id <id>] [--workos-client-id <id>]\n      [--allow-signup | --no-signup] [--default-visibility public|private]\n\nset merges flags over current settings server-side."),
     ("admin users", "ox admin users list [--query q] [--limit n] [--offset n]\n  ox admin users ban|unban --id <user-id>\n  ox admin users delete --id <id> --confirm <email-or-username> [--delete-orgs]\n  ox admin users set-role --id <id> --role user|admin|sys-admin\n  ox admin users sessions|revoke-sessions|access|activity --id <id>\n      [--source audit|repository] [--event-type <t>] [--limit n]"),
     ("admin invites", "ox admin invites list\n  ox admin invites create --emails a@x,b@y\n  ox admin invites link [--expires <iso>] [--max-uses <n>]\n  ox admin invites revoke --id <invite-id>"),
     ("admin runners", "ox admin runners          list registered action runners\n  ox admin runner-token     mint a runner registration token"),
@@ -193,10 +202,10 @@ const HELP: &[(&str, &str)] = &[
     ("admin git", "ox admin git                            show git settings\n  ox admin git set [--repo-quota-bytes n] [--clear]"),
     ("admin mcp", "ox admin mcp                            show MCP settings\n  ox admin mcp set [--enable|--disable|--clear]"),
     ("admin templates", "ox admin templates list\n  ox admin templates enable|disable --id <pack-id>\n  ox admin templates delete --id <pack-id>"),
-    ("self-update", "ox self-update\n\nDownloads the ox build for this platform the configured instance\nserves, verifies the published sha256, and swaps this executable."),
+    ("self-update", "ox self-update [--no-skill-refresh]\n\nDownloads the ox build for this platform the configured instance\nserves, verifies the published sha256, and swaps this executable.\nAfter a successful swap, existing `ox skill` installs are refreshed to\nthe new embedded copy (same sweep as `ox skill install --upgrade`);\n--no-skill-refresh skips that step."),
     ("skill", "ox skill — the consumer-facing agent SKILL.md\n\n  ox skill print     write SKILL.md to stdout\n  ox skill install   write SKILL.md into harness skill dirs\n\nThe document is embedded in this binary and also served by the\ninstance at /cli/skill.md."),
     ("skill print", "ox skill print\n\nPrints the embedded SKILL.md verbatim — `ox skill print > SKILL.md`\nor pipe into `ox skill install`-style tooling."),
-    ("skill install", "ox skill install [--harness <id,...> | --harness all] [--detected]\n                 [--upgrade] [--project | --global]\n\nWrites the embedded SKILL.md to <skills-dir>/ox/SKILL.md for each\nharness. --detected selects only harnesses found installed on this\nmachine (config dirs, PATH binaries); combined with --harness it\nintersects. On a TTY it prompts for harnesses (detected ones marked,\n'd' selects them all) and scope. Non-interactive requires --harness\nor --detected, plus a scope flag.\n\n--upgrade rewrites only ox/SKILL.md files that already exist — it\ncreates no new installs and never prompts. Bare --upgrade sweeps all\nharnesses at both scopes; --harness/--detected/scope flags narrow it.\n\nHarness ids: claude cursor codex copilot gemini opencode amp devin\nwindsurf kiro roo goose cline openclaw generic"),
+    ("skill install", "ox skill install [--harness <id,...> | --harness all] [--detected]\n                 [--upgrade] [--project | --global]\n\nWrites the embedded SKILL.md to <skills-dir>/ox/SKILL.md for each\nharness. --detected selects only harnesses found installed on this\nmachine (config dirs, PATH binaries); combined with --harness it\nintersects. On a TTY it prompts for harnesses (detected ones marked,\n'd' selects them all) and scope. Non-interactive requires --harness\nor --detected, plus a scope flag.\n\n--upgrade rewrites only ox/SKILL.md files that already exist — it\ncreates no new installs and never prompts. Bare --upgrade sweeps all\nharnesses at both scopes; --harness/--detected/scope flags narrow it.\n\nHarness ids follow the vercel-labs/skills registry (~70 rows: claude,\ncursor, codex, copilot, gemini, opencode, amp, devin, windsurf, kiro,\nroo, goose, cline, openclaw, continue, trae, qwen, grok, …) — `generic`\ncovers any other `.agents/skills` consumer"),
     ("api", "ox api <procedure> [-f field=value]... [-F field=<json>]...\n\nRaw RPC escape hatch. -f values are strings; -F parses JSON."),
 ];
 
@@ -258,6 +267,20 @@ pub enum Command {
     AuthStatus,
     AuthLogout,
     AuthToken,
+    AuthSwitch {
+        instance: Option<String>,
+    },
+    ConfigList,
+    ConfigGet {
+        key: String,
+    },
+    ConfigSet {
+        key: String,
+        value: String,
+    },
+    Completion {
+        shell: String,
+    },
     RepoList {
         owner: Option<String>,
     },
@@ -558,6 +581,13 @@ pub enum Command {
         run_id: String,
         job: Option<String>,
         log: bool,
+    },
+    RunWatch {
+        repo: String,
+        run_id: String,
+        interval: Option<u64>,
+        timeout: Option<u64>,
+        exit_status: bool,
     },
     RunRerun {
         repo: String,
@@ -899,6 +929,17 @@ pub enum Command {
         enable: Option<bool>,
         clear: bool,
     },
+    AdminAuth {
+        set: bool,
+        provider_mode: Option<String>,
+        email_provider: Option<String>,
+        from_address: Option<String>,
+        oidc_issuer: Option<String>,
+        oidc_client_id: Option<String>,
+        workos_client_id: Option<String>,
+        allow_signup: Option<bool>,
+        default_visibility: Option<String>,
+    },
     AdminTemplatesList,
     AdminTemplatesSetEnabled {
         id: String,
@@ -919,7 +960,10 @@ pub enum Command {
         upgrade: bool,
         detected: bool,
     },
-    SelfUpdate,
+    SelfUpdate {
+        /// Skip the post-update `skill install --upgrade` sweep.
+        no_skill_refresh: bool,
+    },
     Api {
         procedure: String,
         input: Value,
@@ -1202,6 +1246,31 @@ fn check_choice(f: &Flags, name: &str, choices: &[&str], usage_str: &str) -> Res
     Ok(())
 }
 
+/// Third-level command groups: `ox <group> <sub> <op>`. The op word becomes
+/// `leaf` only when rest[2] names a known op — otherwise it's data (a slug,
+/// a repo spec) and `default` decides the leaf op.
+const NESTED: &[(&str, &str, &[&str], Option<&str>)] = &[
+    ("repo", "deploy-key", &["list", "add", "delete"], None),
+    ("repo", "collaborator", &["list", "add", "set-role", "remove"], Some("list")),
+    ("repo", "collaborators", &["list", "add", "set-role", "remove"], Some("list")),
+    ("repo", "invites", &["list", "create", "link", "revoke"], Some("list")),
+    ("repo", "branch-protection", &["list", "set", "delete"], None),
+    ("repo", "tag-protection", &["list", "set", "delete"], None),
+    ("repo", "mirror", &["get", "set", "upsert", "sync", "delete", "gen-key", "rotate-secret"], Some("get")),
+    ("org", "members", &["list", "add", "remove", "set-role"], Some("list")),
+    ("org", "invites", &["list", "create", "link", "revoke"], Some("list")),
+    ("webhook", "deliveries", &["list", "get", "view", "redeliver"], Some("list")),
+    ("admin", "users", &["list", "ban", "unban", "delete", "set-role", "sessions", "revoke-sessions", "access", "activity"], None),
+    ("admin", "invites", &["list", "create", "link", "revoke"], Some("list")),
+    ("admin", "actions", &["runners", "runner-token"], None),
+    ("admin", "repos", &["gc"], None),
+    ("admin", "lfs", &["get", "set"], Some("get")),
+    ("admin", "git", &["get", "set"], Some("get")),
+    ("admin", "mcp", &["get", "set"], Some("get")),
+    ("admin", "auth", &["get", "set"], Some("get")),
+    ("admin", "templates", &["list", "enable", "disable", "delete"], Some("list")),
+];
+
 /// Split argv into globals + command. Global flags may appear anywhere;
 /// everything else keeps its order and is parsed per-subcommand.
 pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
@@ -1282,31 +1351,8 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
         return Err(usage(format!("unknown command: {topic} — see `ox --help`")));
     }
 
-    // Third level for nested groups: `ox repo deploy-key list` etc. The op
-    // word becomes `leaf` only when rest[2] names a known op — otherwise it's
-    // data (a slug, a repo spec) and `default` decides the leaf op.
-    const NESTED: &[(&str, &str, &[&str], Option<&str>)] = &[
-        ("repo", "deploy-key", &["list", "add", "delete"], None),
-        ("repo", "collaborator", &["list", "add", "set-role", "remove"], Some("list")),
-        ("repo", "collaborators", &["list", "add", "set-role", "remove"], Some("list")),
-        ("repo", "invites", &["list", "create", "link", "revoke"], Some("list")),
-        ("repo", "branch-protection", &["list", "set", "delete"], None),
-        ("repo", "tag-protection", &["list", "set", "delete"], None),
-        ("repo", "mirror", &["get", "set", "upsert", "sync", "delete", "gen-key", "rotate-secret"], Some("get")),
-        ("org", "members", &["list", "add", "remove", "set-role"], Some("list")),
-        ("org", "invites", &["list", "create", "link", "revoke"], Some("list")),
-        ("webhook", "deliveries", &["list", "get", "view", "redeliver"], Some("list")),
-        ("admin", "users", &["list", "ban", "unban", "delete", "set-role", "sessions", "revoke-sessions", "access", "activity"], None),
-        ("admin", "invites", &["list", "create", "link", "revoke"], Some("list")),
-        ("admin", "actions", &["runners", "runner-token"], None),
-        ("admin", "repos", &["gc"], None),
-        ("admin", "lfs", &["get", "set"], Some("get")),
-        ("admin", "git", &["get", "set"], Some("get")),
-        ("admin", "mcp", &["get", "set"], Some("get")),
-        ("admin", "templates", &["list", "enable", "disable", "delete"], Some("list")),
-    ];
-    // leaf is "" for two-level commands (`ox repo view <spec>`); nested
-    // groups below replace it with the resolved op word.
+    // leaf is "" for two-level commands (`ox repo view <spec>`); the NESTED
+    // groups above replace it with the resolved op word.
     let mut leaf = "";
     let mut tail: &[String] = &rest[rest.len().min(2)..];
     if let Some((_, _, ops, default)) =
@@ -1358,6 +1404,51 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
             let f = scan(tail, &[], &[], &[])?;
             expect_no_positionals(&f, "auth token")?;
             Command::AuthToken
+        }
+        ("auth", "switch", "") => {
+            let f = scan(tail, &[], &[], &[])?;
+            if f.positionals.len() > 1 {
+                return Err(usage("usage: ox auth switch [<instance-url>]"));
+            }
+            Command::AuthSwitch {
+                instance: f.positionals.first().cloned(),
+            }
+        }
+
+        ("config", "", "") | ("config", "list", "") => {
+            let f = scan(tail, &[], &[], &[])?;
+            expect_no_positionals(&f, "config list")?;
+            Command::ConfigList
+        }
+        ("config", "get", "") => {
+            let f = scan(tail, &[], &[], &[])?;
+            if f.positionals.len() != 1 {
+                return Err(usage("usage: ox config get <key>"));
+            }
+            Command::ConfigGet {
+                key: f.positionals[0].clone(),
+            }
+        }
+        ("config", "set", "") => {
+            let f = scan(tail, &[], &[], &[])?;
+            if f.positionals.len() != 2 {
+                return Err(usage("usage: ox config set <key> <value>"));
+            }
+            Command::ConfigSet {
+                key: f.positionals[0].clone(),
+                value: f.positionals[1].clone(),
+            }
+        }
+
+        ("completion", sh, "") => {
+            let f = scan(tail, &[], &[], &[])?;
+            expect_no_positionals(&f, "completion")?;
+            match sh {
+                "bash" | "zsh" | "fish" | "pwsh" | "powershell" => Command::Completion {
+                    shell: sh.to_string(),
+                },
+                _ => return Err(usage("usage: ox completion <bash|zsh|fish|pwsh>")),
+            }
         }
 
         ("repo", "list", "") => {
@@ -2196,6 +2287,22 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
                     job_id: f.values.get("--job").cloned(),
                     failed_only: false,
                 },
+            }
+        }
+        ("run", "watch", "") => {
+            let f = scan(
+                tail,
+                &["-R", "--repo", "--interval", "--timeout"],
+                &["--exit-status"],
+                &[],
+            )?;
+            let (repo, run_id) = repo_and_arg(&f, "run watch", "run-id")?;
+            Command::RunWatch {
+                repo,
+                run_id,
+                interval: opt_u64(&f, "--interval")?,
+                timeout: opt_u64(&f, "--timeout")?,
+                exit_status: f.bools.contains("--exit-status"),
             }
         }
         ("workflow", "list", "") => {
@@ -3111,6 +3218,76 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
                 clear: f.bools.contains("--clear"),
             }
         }
+        ("admin", "auth", "") | ("admin", "auth", "get") => {
+            let f = scan(tail, &[], &[], &[])?;
+            expect_no_positionals(&f, "admin auth")?;
+            Command::AdminAuth {
+                set: false,
+                provider_mode: None,
+                email_provider: None,
+                from_address: None,
+                oidc_issuer: None,
+                oidc_client_id: None,
+                workos_client_id: None,
+                allow_signup: None,
+                default_visibility: None,
+            }
+        }
+        ("admin", "auth", "set") => {
+            let f = scan(
+                tail,
+                &[
+                    "--provider-mode",
+                    "--email-provider",
+                    "--from-address",
+                    "--oidc-issuer",
+                    "--oidc-client-id",
+                    "--workos-client-id",
+                    "--default-visibility",
+                ],
+                &["--allow-signup", "--no-signup"],
+                &[],
+            )?;
+            expect_no_positionals(&f, "admin auth set")?;
+            check_choice(
+                &f,
+                "--provider-mode",
+                &["local", "workos", "oidc"],
+                "admin auth set",
+            )?;
+            check_choice(
+                &f,
+                "--email-provider",
+                &["log", "smtp", "resend"],
+                "admin auth set",
+            )?;
+            check_choice(
+                &f,
+                "--default-visibility",
+                &["public", "private"],
+                "admin auth set",
+            )?;
+            if f.bools.contains("--allow-signup") && f.bools.contains("--no-signup") {
+                return Err(usage("--allow-signup and --no-signup are exclusive"));
+            }
+            Command::AdminAuth {
+                set: true,
+                provider_mode: f.values.get("--provider-mode").cloned(),
+                email_provider: f.values.get("--email-provider").cloned(),
+                from_address: f.values.get("--from-address").cloned(),
+                oidc_issuer: f.values.get("--oidc-issuer").cloned(),
+                oidc_client_id: f.values.get("--oidc-client-id").cloned(),
+                workos_client_id: f.values.get("--workos-client-id").cloned(),
+                allow_signup: if f.bools.contains("--allow-signup") {
+                    Some(true)
+                } else if f.bools.contains("--no-signup") {
+                    Some(false)
+                } else {
+                    None
+                },
+                default_visibility: f.values.get("--default-visibility").cloned(),
+            }
+        }
         ("admin", "templates", "list") | ("admin", "templates", "") => {
             let f = scan(tail, &[], &[], &[])?;
             expect_no_positionals(&f, "admin templates list")?;
@@ -3165,10 +3342,13 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
                 detected: f.bools.contains("--detected"),
             }
         }
-        ("self-update", "", "") => {
-            let f = scan(tail, &[], &[], &[])?;
+        ("self-update", _, _) => {
+            // flags sit at the `sub` position — rescan rest[1..] like browse.
+            let f = scan(&rest[1..], &[], &["--no-skill-refresh"], &[])?;
             expect_no_positionals(&f, "self-update")?;
-            Command::SelfUpdate
+            Command::SelfUpdate {
+                no_skill_refresh: f.bools.contains("--no-skill-refresh"),
+            }
         }
         ("api", proc, _) if !proc.is_empty() => {
             // procedure is `sub`; everything after it is flags.
@@ -3192,10 +3372,10 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
         }
         (_, "", "") => {
             const GROUPS: &[&str] = &[
-                "auth", "repo", "issue", "pr", "run", "workflow", "secret", "release",
-                "pkg", "search", "browse", "status", "org", "notification", "user",
-                "ssh-key", "gpg-key", "email", "pat", "label", "webhook", "invite",
-                "admin", "self-update", "skill", "api",
+                "auth", "config", "repo", "issue", "pr", "run", "workflow", "secret",
+                "release", "pkg", "search", "browse", "status", "org", "notification",
+                "user", "ssh-key", "gpg-key", "email", "pat", "label", "webhook",
+                "invite", "admin", "self-update", "skill", "api", "completion",
             ];
             if GROUPS.contains(&group) {
                 return Err(usage(format!(
@@ -3265,9 +3445,21 @@ mod tests {
     #[test]
     fn self_update_parses() {
         let inv = parse(&argv(&["self-update"])).unwrap();
-        assert_eq!(inv.command, Command::SelfUpdate);
+        assert_eq!(
+            inv.command,
+            Command::SelfUpdate {
+                no_skill_refresh: false
+            }
+        );
+        let inv = parse(&argv(&["self-update", "--no-skill-refresh"])).unwrap();
+        assert_eq!(
+            inv.command,
+            Command::SelfUpdate {
+                no_skill_refresh: true
+            }
+        );
         let err = parse(&argv(&["self-update", "extra"])).unwrap_err();
-        assert!(err.0.contains("unknown"), "{err}");
+        assert!(err.0.contains("unexpected argument"), "{err}");
     }
 
     #[test]
@@ -3450,6 +3642,173 @@ mod tests {
                 assert_eq!(perms, vec!["issues=write", "pull_requests=read"]);
             }
             other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn run_watch_parses() {
+        let inv = parse(&argv(&[
+            "run", "watch", "o/n", "r1", "--interval", "2", "--timeout", "60",
+            "--exit-status",
+        ]))
+        .unwrap();
+        match inv.command {
+            Command::RunWatch {
+                repo,
+                run_id,
+                interval,
+                timeout,
+                exit_status,
+            } => {
+                assert_eq!(repo, "o/n");
+                assert_eq!(run_id, "r1");
+                assert_eq!(interval, Some(2));
+                assert_eq!(timeout, Some(60));
+                assert!(exit_status);
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(parse(&argv(&["run", "watch", "o/n"])).is_err());
+    }
+
+    #[test]
+    fn config_and_completion_parse() {
+        match parse(&argv(&["config", "get", "default_instance"]))
+            .unwrap()
+            .command
+        {
+            Command::ConfigGet { key } => assert_eq!(key, "default_instance"),
+            other => panic!("{other:?}"),
+        }
+        match parse(&argv(&["config"])).unwrap().command {
+            Command::ConfigList => {}
+            other => panic!("{other:?}"),
+        }
+        match parse(&argv(&["config", "set", "k", "v"])).unwrap().command {
+            Command::ConfigSet { key, value } => {
+                assert_eq!((key.as_str(), value.as_str()), ("k", "v"));
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(parse(&argv(&["config", "set", "only-key"])).is_err());
+        match parse(&argv(&["completion", "zsh"])).unwrap().command {
+            Command::Completion { shell } => assert_eq!(shell, "zsh"),
+            other => panic!("{other:?}"),
+        }
+        assert!(parse(&argv(&["completion", "tcsh"])).is_err());
+        assert!(parse(&argv(&["completion"])).is_err());
+    }
+
+    #[test]
+    fn admin_auth_parses() {
+        match parse(&argv(&["admin", "auth"])).unwrap().command {
+            Command::AdminAuth { set, .. } => assert!(!set),
+            other => panic!("{other:?}"),
+        }
+        match parse(&argv(&[
+            "admin",
+            "auth",
+            "set",
+            "--provider-mode",
+            "oidc",
+            "--no-signup",
+        ]))
+        .unwrap()
+        .command
+        {
+            Command::AdminAuth {
+                set,
+                provider_mode,
+                allow_signup,
+                ..
+            } => {
+                assert!(set);
+                assert_eq!(provider_mode.as_deref(), Some("oidc"));
+                assert_eq!(allow_signup, Some(false));
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(
+            parse(&argv(&["admin", "auth", "set", "--provider-mode", "bogus"])).is_err()
+        );
+        assert!(parse(&argv(&[
+            "admin",
+            "auth",
+            "set",
+            "--allow-signup",
+            "--no-signup"
+        ]))
+        .is_err());
+    }
+
+    #[test]
+    fn auth_switch_parses() {
+        match parse(&argv(&["auth", "switch"])).unwrap().command {
+            Command::AuthSwitch { instance } => assert!(instance.is_none()),
+            other => panic!("{other:?}"),
+        }
+        match parse(&argv(&["auth", "switch", "https://f.example.com"]))
+            .unwrap()
+            .command
+        {
+            Command::AuthSwitch { instance } => {
+                assert_eq!(instance.as_deref(), Some("https://f.example.com"));
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// Every verb/op in `completion::COMMAND_TREE` must resolve through the
+    /// parser — a missing parse arm or NESTED row shows up as an
+    /// "unknown command"/"expected subcommand" usage error.
+    #[test]
+    fn completion_tree_parses() {
+        for (group, subs) in crate::completion::COMMAND_TREE {
+            for (sub, ops) in *subs {
+                // NESTED groups without a default legitimately reject bare
+                // `ox <group> <sub>` — their ops are checked individually.
+                if ops.is_empty() {
+                    if let Err(e) = parse(&argv(&[group, sub])) {
+                        assert!(
+                            !e.0.contains("unknown command")
+                                && !e.0.contains("expected subcommand"),
+                            "tree entry `ox {group} {sub}` does not parse: {e}"
+                        );
+                    }
+                }
+                for op in *ops {
+                    if let Err(e) = parse(&argv(&[group, sub, op])) {
+                        assert!(
+                            !e.0.contains("unknown command")
+                                && !e.0.contains("expected subcommand"),
+                            "tree entry `ox {group} {sub} {op}` does not parse: {e}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// Inverse direction: every NESTED group must appear in the completion
+    /// tree with the same op list, so adding a NESTED row without updating
+    /// COMMAND_TREE fails the test.
+    #[test]
+    fn completion_tree_covers_nested() {
+        for (group, sub, ops, _) in NESTED {
+            let subs = crate::completion::COMMAND_TREE
+                .iter()
+                .find(|(g, _)| g == group)
+                .unwrap_or_else(|| panic!("completion tree missing group {group}"))
+                .1;
+            let entry = subs
+                .iter()
+                .find(|(s, _)| s == sub)
+                .unwrap_or_else(|| panic!("completion tree missing {group} {sub}"));
+            let mut want: Vec<&str> = ops.to_vec();
+            want.sort_unstable();
+            let mut got: Vec<&str> = entry.1.to_vec();
+            got.sort_unstable();
+            assert_eq!(want, got, "ops differ for {group} {sub}");
         }
     }
 }

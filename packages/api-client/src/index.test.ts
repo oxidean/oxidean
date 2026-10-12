@@ -64,7 +64,7 @@ describe("api-client", () => {
               protocol_version: 1,
               server_version: "0.1.0",
               procedures: { "system.manifest": true },
-              capabilities: { mcp: false, rest: false, oauth: false },
+              capabilities: { mcp: false, rest: false, oauth: false, cli_dist: false },
               min_cli_version: "0.1.0",
             },
           }),

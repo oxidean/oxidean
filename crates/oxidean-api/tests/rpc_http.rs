@@ -135,9 +135,10 @@ async fn system_manifest_shape() {
     }
     assert!(procedures.values().all(|v| *v == serde_json::json!(true)));
     let caps = &data["capabilities"];
-    assert_eq!(caps["mcp"], false);
-    assert_eq!(caps["rest"], false);
-    assert_eq!(caps["oauth"], false);
+    assert_eq!(caps["mcp"], true);
+    assert_eq!(caps["rest"], true);
+    assert_eq!(caps["oauth"], true);
+    assert_eq!(caps["cli_dist"], true);
 }
 
 #[tokio::test]

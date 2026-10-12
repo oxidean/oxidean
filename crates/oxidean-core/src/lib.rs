@@ -102,13 +102,21 @@ pub struct EchoResponse {
 }
 
 /// Optional-instance-feature flags advertised by `system.manifest` (CLI-02).
-/// All `false` today — they flip on as the corresponding surfaces land
-/// (MCP: AGT-01, a typed REST surface, instance-as-OAuth-provider: API-03).
+/// Fields default to `false` so older manifests deserialize cleanly.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ManifestCapabilities {
+    /// `/api/mcp` agent surface.
+    #[serde(default)]
     pub mcp: bool,
+    /// `/api/v1` typed REST facade.
+    #[serde(default)]
     pub rest: bool,
+    /// `/oauth/*` provider endpoints (incl. RFC 8628 device flow).
+    #[serde(default)]
     pub oauth: bool,
+    /// `/cli/*` binary distribution, install scripts, and agent SKILL.md.
+    #[serde(default)]
+    pub cli_dist: bool,
 }
 
 /// `system.manifest` response — the server-driven compatibility contract that
