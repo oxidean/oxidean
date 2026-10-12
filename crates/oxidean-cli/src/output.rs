@@ -992,17 +992,17 @@ pub fn admin_access(data: &Value) -> String {
     let mut out = Vec::new();
     for r in arr(data, "repos") {
         out.push(join_nonempty(vec![
-            s(&r, "full_name")
-                .or_else(|| s(&r, "name"))
+            s(r, "full_name")
+                .or_else(|| s(r, "name"))
                 .unwrap_or_default()
                 .to_string(),
-            s(&r, "permission").unwrap_or_default().to_string(),
+            s(r, "permission").unwrap_or_default().to_string(),
         ]));
     }
     for o in arr(data, "orgs") {
         out.push(join_nonempty(vec![
-            format!("org:{}", s(&o, "slug").unwrap_or("?")),
-            s(&o, "role").unwrap_or_default().to_string(),
+            format!("org:{}", s(o, "slug").unwrap_or("?")),
+            s(o, "role").unwrap_or_default().to_string(),
         ]));
     }
     if out.is_empty() {

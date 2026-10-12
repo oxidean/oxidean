@@ -27,3 +27,6 @@ if ($LASTEXITCODE -ne 2) { throw "auth status: expected exit 2, got $LASTEXITCOD
 if ($err -notmatch 'instance') { throw "auth status: unexpected message — $err" }
 
 Write-Host "smoke OK: $out"
+# $LASTEXITCODE still holds `ox auth status`'s expected 2 — without an
+# explicit exit, pwsh propagates it and the step reads as failed.
+exit 0

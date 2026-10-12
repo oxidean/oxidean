@@ -444,9 +444,8 @@ fn open_url(url: &str) -> Result<(), CliError> {
         ("open", &[])
     } else if cfg!(target_os = "windows") {
         ("cmd", &["/c", "start", ""])
-    } else if cfg!(target_os = "freebsd") {
-        ("xdg-open", &[])
     } else {
+        // linux, freebsd, and the rest fall back to xdg-open.
         ("xdg-open", &[])
     };
     let mut cmd = std::process::Command::new(prog);
