@@ -112,6 +112,14 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
     ],
   },
   {
+    surface: "components/settings/pat-classic-scopes.tsrx",
+    coverage: [{ kind: "browser", test: PAT_BROWSER, subject: "scope-repo" }],
+  },
+  {
+    surface: "components/settings/pat-fg-perms.tsrx",
+    coverage: [{ kind: "browser", test: PAT_BROWSER, subject: "fg-perm-issues" }],
+  },
+  {
     surface: "components/settings/pat-fg-repo-picker.tsrx",
     coverage: [{ kind: "browser", test: PAT_BROWSER, subject: "fg-repo-item" }],
   },

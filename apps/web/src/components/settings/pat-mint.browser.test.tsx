@@ -8,6 +8,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PatClassicForm } from "@/components/settings/pat-classic-form";
 import { PatFgForm } from "@/components/settings/pat-fg-form";
+import { ClassicScopeGroups } from "@/components/settings/pat-classic-scopes";
+import { FgPermRows } from "@/components/settings/pat-fg-perms";
+import { FG_REPO_PERMS } from "@/components/settings/pat-scopes";
 import {
   cleanupBrowserMount,
   clickTestId,
@@ -143,7 +146,38 @@ describe("PAT mint browser DOM races", () => {
       await clickTestId("fg-repo-item-r1");
       await clickTestId("fg-repo-item-r2");
 
+      await pickSelectOptionByTestId("fg-perm-issues-select", "fg-perm-issues-option-read");
+
       expect(document.querySelector('[data-testid="pat-fg-summary"]')).toBeTruthy();
+      tracker.expectNoDomRaces();
+      expectNoOctaneOverlayInDocument();
+    } finally {
+      tracker.dispose();
+    }
+  }, 30_000);
+
+  it("scope surfaces: standalone mounts toggle without insertBefore / overlay", async () => {
+    const tracker = trackDomErrors();
+    try {
+      const toggles: string[] = [];
+      await mountComponent(ClassicScopeGroups, {
+        values: { repo: true },
+        pending: false,
+        onToggle: (scope: string, checked: boolean) => toggles.push(`${scope}:${checked}`),
+      });
+      await clickTestId("scope-package-read");
+      expect(toggles).toContain("package:read:true");
+
+      const changes: string[] = [];
+      await mountComponent(FgPermRows, {
+        rows: FG_REPO_PERMS,
+        values: { issues: "none" },
+        pending: false,
+        onChange: (key: string, choice: string) => changes.push(`${key}:${choice}`),
+      });
+      await pickSelectOptionByTestId("fg-perm-issues-select", "fg-perm-issues-option-read");
+      expect(changes).toContain("issues:read");
+
       tracker.expectNoDomRaces();
       expectNoOctaneOverlayInDocument();
     } finally {
