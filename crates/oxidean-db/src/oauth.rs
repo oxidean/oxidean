@@ -1070,7 +1070,7 @@ macro_rules! map_device_code {
 }
 
 const DEVICE_SELECT_PG: &str = "SELECT id, device_code_hash, user_code, user_id, scopes, status,
-       interval_secs,
+       interval_secs::bigint AS interval_secs,
        CASE WHEN last_polled_at IS NULL THEN NULL
             ELSE to_char(last_polled_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') END AS last_polled_at,
        to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS expires_at,
