@@ -29,8 +29,15 @@ try {
     Invoke-WebRequest -Uri $binUrl -OutFile $oxPath -UseBasicParsing
 
     # Verify against the published digest when the instance serves one.
+    # .Content is byte[] when the host guesses application/octet-stream (the
+    # GitHub release download URL does) — decode before splitting.
     $sha = $null
-    try { $sha = (Invoke-WebRequest -Uri "$binUrl.sha256" -UseBasicParsing).Content } catch { }
+    try {
+        $resp = Invoke-WebRequest -Uri "$binUrl.sha256" -UseBasicParsing
+        $sha = if ($resp.Content -is [byte[]]) {
+            [System.Text.Encoding]::UTF8.GetString($resp.Content)
+        } else { $resp.Content }
+    } catch { }
     if ($sha) {
         $expected = ($sha -split '\s+')[0]
         $actual = (Get-FileHash -Path $oxPath -Algorithm SHA256).Hash
