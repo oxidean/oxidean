@@ -24,7 +24,8 @@ beforeEach(() => {
 async function openCloneMenu() {
   fireEvent.click(screen.getByRole("button", { name: "Clone or download" }));
   await waitFor(() => {
-    expect(screen.getByText("Clone with HTTPS")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "HTTPS" })).toBeInTheDocument();
+    expect(screen.getByLabelText("HTTPS clone URL")).toBeInTheDocument();
   });
 }
 

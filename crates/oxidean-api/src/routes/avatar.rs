@@ -44,6 +44,7 @@ fn err_response(status: StatusCode, code: &str, message: &str) -> Response {
         .into_response()
 }
 
+#[allow(clippy::result_large_err)]
 async fn require_session(
     state: &AppState,
     headers: &HeaderMap,
@@ -103,10 +104,7 @@ fn process_avatar(bytes: &[u8]) -> Result<Vec<u8>, AppError> {
     let resized = resize_longest_edge(img, 512);
     let mut out = Vec::new();
     resized
-        .write_to(
-            &mut std::io::Cursor::new(&mut out),
-            ImageFormat::WebP,
-        )
+        .write_to(&mut std::io::Cursor::new(&mut out), ImageFormat::WebP)
         .map_err(|e| {
             AppError::new(
                 "avatar.encode_failed",

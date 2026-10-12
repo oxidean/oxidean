@@ -1,5 +1,6 @@
 import { Menu as MenuPrimitive } from "@octanejs/base-ui/menu";
 import type { ComponentProps } from "octane";
+import { portalRoot } from "@/lib/portal-root";
 import { cn } from "@/lib/utils";
 
 export function DropdownMenu(props: ComponentProps<typeof MenuPrimitive.Root>) @{
@@ -22,7 +23,7 @@ export function DropdownMenuContent({
     ComponentProps<typeof MenuPrimitive.Positioner>,
     "align" | "alignOffset" | "side" | "sideOffset"
   >) @{
-  <MenuPrimitive.Portal keepMounted>
+  <MenuPrimitive.Portal keepMounted container={portalRoot()}>
     <MenuPrimitive.Positioner
       className="isolate z-50 outline-none"
       align={align}
@@ -50,6 +51,31 @@ export function DropdownMenuItem({
     data-slot="dropdown-menu-item"
     className={cn(
       "flex h-11 cursor-default select-none items-center gap-2 rounded-sm px-2 text-[14px] font-normal outline-none",
+      "data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground",
+      "data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+      className,
+    )}
+    {...props}
+  />;
+}
+
+/**
+ * Menu item that navigates — renders a real `<a>` via Base UI `LinkItem` so
+ * clicks get anchor semantics (ClientRouter morph nav, early-nav bridging,
+ * middle-click open-in-new-tab) instead of `window.location.assign` reloads.
+ * `closeOnClick` defaults true: the header island persists across morphs, so
+ * the popup must close itself on navigation.
+ */
+export function DropdownMenuLinkItem({
+  className,
+  closeOnClick = true,
+  ...props
+}: ComponentProps<typeof MenuPrimitive.LinkItem>) @{
+  <MenuPrimitive.LinkItem
+    data-slot="dropdown-menu-item"
+    closeOnClick={closeOnClick}
+    className={cn(
+      "flex h-11 cursor-default select-none items-center gap-2 rounded-sm px-2 text-[14px] font-normal text-current no-underline outline-none",
       "data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground",
       "data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
       className,

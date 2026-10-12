@@ -19,10 +19,7 @@ fn review_not_found() -> AppError {
     AppError::new("pull.review_not_found", "Review not found")
 }
 
-async fn review_to_public(
-    ctx: &RpcCtx,
-    row: &PullReviewRow,
-) -> Result<PullReviewPublic, AppError> {
+async fn review_to_public(ctx: &RpcCtx, row: &PullReviewRow) -> Result<PullReviewPublic, AppError> {
     let author_username = ctx
         .db
         .find_user_by_id(&row.author_id)
@@ -59,11 +56,7 @@ pub async fn reviews_list(
     })?;
     let accessible = acl::resolve_for_read(ctx, &req.owner, &req.name).await?;
     let pull = load_pull_in_repo(ctx, &accessible.row.id, req.number).await?;
-    let rows = ctx
-        .db
-        .list_pull_reviews(&pull.id)
-        .await
-        .map_err(db_err)?;
+    let rows = ctx.db.list_pull_reviews(&pull.id).await.map_err(db_err)?;
     let mut reviews = Vec::with_capacity(rows.len());
     for row in &rows {
         reviews.push(review_to_public(ctx, row).await?);
@@ -83,9 +76,8 @@ pub async fn reviews_submit(
             format!("invalid pull.reviews.submit input: {e}"),
         )
     })?;
-    let state = PullReviewState::parse(&req.state).map_err(|e| {
-        AppError::new("rpc.bad_input", e)
-    })?;
+    let state =
+        PullReviewState::parse(&req.state).map_err(|e| AppError::new("rpc.bad_input", e))?;
     if matches!(state, PullReviewState::Dismissed) {
         return Err(AppError::new(
             "rpc.bad_input",

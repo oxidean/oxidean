@@ -613,12 +613,20 @@ const RESERVED_USERNAMES: &[&str] = &[
     "v2",
     "npm",
     "generic",
+    // Static-asset dirs under apps/web/dist — an owner named e.g. `brand`
+    // would claim `/brand/*` asset space and its own dotted repos would 404
+    // (`/{owner}/{repo}` prefers existing dist entries). `_astro` needs no
+    // entry — `_` is illegal in usernames.
+    "brand",
+    "emoji",
+    "fonts",
+    "icons",
 ];
 
 /// Returns true if `u` matches a reserved username (case-insensitive).
 pub fn is_reserved_username(u: &str) -> bool {
     let lower = u.to_ascii_lowercase();
-    RESERVED_USERNAMES.iter().any(|r| *r == lower.as_str())
+    RESERVED_USERNAMES.contains(&lower.as_str())
 }
 
 /// Username rules (D-03): 1–39 chars, ascii alphanumeric + hyphen,
@@ -663,6 +671,14 @@ mod tests {
     fn validate_username_rejects_reserved() {
         let err = validate_username("admin").unwrap_err();
         assert!(err.contains("reserved"));
+        // dist/ asset dirs — an owner sharing the name would shadow assets
+        // and its own dotted repos would 404 at the web tier.
+        for name in ["brand", "Brand", "EMOJI", "fonts", "icons"] {
+            assert!(
+                validate_username(name).is_err(),
+                "{name} must be reserved (dist/ asset dir)"
+            );
+        }
     }
 
     #[test]

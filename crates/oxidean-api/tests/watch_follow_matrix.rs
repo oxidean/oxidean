@@ -111,7 +111,13 @@ async fn create_repo(app: &axum::Router, cookie: &str, name: &str) {
     assert_eq!(v["ok"], true, "repo.create — {v}");
 }
 
-async fn add_collaborator(app: &axum::Router, cookie: &str, owner: &str, name: &str, username: &str) {
+async fn add_collaborator(
+    app: &axum::Router,
+    cookie: &str,
+    owner: &str,
+    name: &str,
+    username: &str,
+) {
     let body = format!(
         r#"{{"procedure":"repo.collaborators.add","input":{{"owner":"{owner}","name":"{name}","username":"{username}","permission":"write"}}}}"#
     );
@@ -140,7 +146,13 @@ async fn comment_issue(
     rpc_json(app, cookie, &body).await
 }
 
-async fn watch(app: &axum::Router, cookie: &str, owner: &str, name: &str, level: &str) -> serde_json::Value {
+async fn watch(
+    app: &axum::Router,
+    cookie: &str,
+    owner: &str,
+    name: &str,
+    level: &str,
+) -> serde_json::Value {
     let body = if level.is_empty() {
         format!(r#"{{"procedure":"repo.watch","input":{{"owner":"{owner}","name":"{name}"}}}}"#)
     } else {
@@ -288,9 +300,7 @@ async fn fanout_honors_watch_levels() {
         verify_user(&db, v["data"]["id"].as_str().unwrap()).await;
         cookies.push((username.to_string(), cookie));
     }
-    let cookie_of = |name: &str| -> &String {
-        &cookies.iter().find(|(u, _)| u == name).unwrap().1
-    };
+    let cookie_of = |name: &str| -> &String { &cookies.iter().find(|(u, _)| u == name).unwrap().1 };
     let all_cookie = cookie_of("foall").clone();
     let part_cookie = cookie_of("fopart").clone();
     let ign_cookie = cookie_of("foign").clone();
@@ -309,7 +319,9 @@ async fn fanout_honors_watch_levels() {
     // Issue open → `all` watcher gets issue_opened; participating/ignore do not.
     create_issue(&app, &writer_cookie, "foown", "loud", "First").await;
     assert!(
-        unread_reasons(&app, &all_cookie).await.contains(&"issue_opened".to_string()),
+        unread_reasons(&app, &all_cookie)
+            .await
+            .contains(&"issue_opened".to_string()),
         "all watcher should see issue_opened"
     );
     assert_eq!(unread_count(&app, &part_cookie).await, 0);
@@ -327,7 +339,9 @@ async fn fanout_honors_watch_levels() {
     let v = comment_issue(&app, &writer_cookie, "foown", "loud", "first ping").await;
     assert_eq!(v["ok"], true, "{v}");
     assert!(
-        unread_reasons(&app, &all_cookie).await.contains(&"issue_comment".to_string()),
+        unread_reasons(&app, &all_cookie)
+            .await
+            .contains(&"issue_comment".to_string()),
         "all watcher should see issue_comment"
     );
     assert_eq!(unread_count(&app, &part_cookie).await, 0);
@@ -351,14 +365,20 @@ async fn fanout_honors_watch_levels() {
         "participating watcher should see issue_comment after joining"
     );
     assert!(
-        unread_reasons(&app, &all_cookie).await.contains(&"issue_comment".to_string()),
+        unread_reasons(&app, &all_cookie)
+            .await
+            .contains(&"issue_comment".to_string()),
         "all watcher should see second issue_comment"
     );
 
     // Ignore suppresses even direct @-mentions.
     let v = comment_issue(&app, &writer_cookie, "foown", "loud", "hey @foign look").await;
     assert_eq!(v["ok"], true, "{v}");
-    assert_eq!(unread_count(&app, &ign_cookie).await, 0, "ignore watcher must stay silent");
+    assert_eq!(
+        unread_count(&app, &ign_cookie).await,
+        0,
+        "ignore watcher must stay silent"
+    );
 
     // Non-watcher mention still delivers (legacy pass-through).
     let (_anon_cookie, _anon_v) = ("", ());
@@ -522,10 +542,12 @@ async fn create_repo_for_owner(
     assert_eq!(v["ok"], true, "repo.create {name} — {v}");
 }
 
-async fn notification_list_total(app: &axum::Router, cookie: &str, filter: &str) -> (Vec<serde_json::Value>, i64) {
-    let body = format!(
-        r#"{{"procedure":"notification.list","input":{{"filter":"{filter}"}}}}"#
-    );
+async fn notification_list_total(
+    app: &axum::Router,
+    cookie: &str,
+    filter: &str,
+) -> (Vec<serde_json::Value>, i64) {
+    let body = format!(r#"{{"procedure":"notification.list","input":{{"filter":"{filter}"}}}}"#);
     let v = rpc_json(app, cookie, &body).await;
     assert_eq!(v["ok"], true, "notification.list — {v}");
     (
@@ -589,9 +611,16 @@ async fn access_loss_on_collaborator_removal_prunes_watch_and_notifications() {
     assert_eq!(v["ok"], true, "{v}");
 
     // GitHub behavior: watch row auto-pruned, stale notifications dropped.
-    assert_eq!(unread_count(&app, &watcher_cookie).await, 0, "stale unread must be gone");
+    assert_eq!(
+        unread_count(&app, &watcher_cookie).await,
+        0,
+        "stale unread must be gone"
+    );
     let (rows, total) = notification_list_total(&app, &watcher_cookie, "all").await;
-    assert_eq!(total, 0, "notification.list must re-check access — {rows:?}");
+    assert_eq!(
+        total, 0,
+        "notification.list must re-check access — {rows:?}"
+    );
     assert_eq!(
         list_watched_len(&app, &watcher_cookie).await,
         0,
@@ -665,7 +694,12 @@ async fn notification_list_rechecks_access_and_prunes_lazily() {
     // Revoke access below the RPC layer — the read path must still self-heal.
     let repo = db
         .find_repository_by_owner_name(
-            db.find_user_by_username("plown").await.unwrap().unwrap().id.as_str(),
+            db.find_user_by_username("plown")
+                .await
+                .unwrap()
+                .unwrap()
+                .id
+                .as_str(),
             "lazyrepo",
         )
         .await
@@ -676,7 +710,11 @@ async fn notification_list_rechecks_access_and_prunes_lazily() {
         .expect("flip visibility");
 
     let (rows, total) = notification_list_total(&app, &watcher_cookie, "unread").await;
-    assert_eq!(rows.len(), 0, "unreadable-repo rows must be filtered — {rows:?}");
+    assert_eq!(
+        rows.len(),
+        0,
+        "unreadable-repo rows must be filtered — {rows:?}"
+    );
     assert_eq!(total, 0);
     assert_eq!(unread_count(&app, &watcher_cookie).await, 0);
     assert_eq!(
@@ -763,7 +801,12 @@ async fn release_fanout_honors_watch_levels() {
     create_repo_vis(&app, &owner_cookie, "shipit", "public").await;
     let bare = repos.join("rown").join("shipit.git");
     CliGitBackend::new()
-        .seed_commit(&bare, "main", "seed", &[("README.md".into(), b"hi".to_vec())])
+        .seed_commit(
+            &bare,
+            "main",
+            "seed",
+            &[("README.md".into(), b"hi".to_vec())],
+        )
         .await
         .expect("seed");
     let status = Command::new("git")
@@ -782,15 +825,23 @@ async fn release_fanout_honors_watch_levels() {
         verify_user(&db, v["data"]["id"].as_str().unwrap()).await;
         cookies.push((username.to_string(), cookie));
     }
-    let cookie_of = |name: &str| -> String {
-        cookies.iter().find(|(u, _)| u == name).unwrap().1.clone()
-    };
+    let cookie_of =
+        |name: &str| -> String { cookies.iter().find(|(u, _)| u == name).unwrap().1.clone() };
     let all_cookie = cookie_of("rall");
     let part_cookie = cookie_of("rpart");
     let ign_cookie = cookie_of("rign");
-    assert_eq!(watch(&app, &all_cookie, "rown", "shipit", "all").await["ok"], true);
-    assert_eq!(watch(&app, &part_cookie, "rown", "shipit", "participating").await["ok"], true);
-    assert_eq!(watch(&app, &ign_cookie, "rown", "shipit", "ignore").await["ok"], true);
+    assert_eq!(
+        watch(&app, &all_cookie, "rown", "shipit", "all").await["ok"],
+        true
+    );
+    assert_eq!(
+        watch(&app, &part_cookie, "rown", "shipit", "participating").await["ok"],
+        true
+    );
+    assert_eq!(
+        watch(&app, &ign_cookie, "rown", "shipit", "ignore").await["ok"],
+        true
+    );
 
     // Draft release — silent.
     let v = rpc_json(
@@ -800,7 +851,11 @@ async fn release_fanout_honors_watch_levels() {
     )
     .await;
     assert_eq!(v["ok"], true, "{v}");
-    assert_eq!(unread_count(&app, &all_cookie).await, 0, "drafts must not notify");
+    assert_eq!(
+        unread_count(&app, &all_cookie).await,
+        0,
+        "drafts must not notify"
+    );
 
     // Publish the draft → all watcher notified.
     let v = rpc_json(
@@ -817,8 +872,16 @@ async fn release_fanout_honors_watch_levels() {
             && n["subject_ref"] == "v1.0.0"),
         "all watcher should see release_published — {rows:?}"
     );
-    assert_eq!(unread_count(&app, &part_cookie).await, 0, "participating watcher must stay silent");
-    assert_eq!(unread_count(&app, &ign_cookie).await, 0, "ignore watcher must stay silent");
+    assert_eq!(
+        unread_count(&app, &part_cookie).await,
+        0,
+        "participating watcher must stay silent"
+    );
+    assert_eq!(
+        unread_count(&app, &ign_cookie).await,
+        0,
+        "ignore watcher must stay silent"
+    );
 
     // Edit → release_edited for the all watcher.
     let _ = rpc_json(
@@ -897,15 +960,23 @@ async fn workflow_run_completion_fanout_once_and_honors_watch_levels() {
         verify_user(&db, v["data"]["id"].as_str().unwrap()).await;
         cookies.push((username.to_string(), cookie));
     }
-    let cookie_of = |name: &str| -> String {
-        cookies.iter().find(|(u, _)| u == name).unwrap().1.clone()
-    };
+    let cookie_of =
+        |name: &str| -> String { cookies.iter().find(|(u, _)| u == name).unwrap().1.clone() };
     let all_cookie = cookie_of("wall");
     let part_cookie = cookie_of("wpart");
     let ign_cookie = cookie_of("wign");
-    assert_eq!(watch(&app, &all_cookie, "wpush", "ci", "all").await["ok"], true);
-    assert_eq!(watch(&app, &part_cookie, "wpush", "ci", "participating").await["ok"], true);
-    assert_eq!(watch(&app, &ign_cookie, "wpush", "ci", "ignore").await["ok"], true);
+    assert_eq!(
+        watch(&app, &all_cookie, "wpush", "ci", "all").await["ok"],
+        true
+    );
+    assert_eq!(
+        watch(&app, &part_cookie, "wpush", "ci", "participating").await["ok"],
+        true
+    );
+    assert_eq!(
+        watch(&app, &ign_cookie, "wpush", "ci", "ignore").await["ok"],
+        true
+    );
 
     // Enqueue a push-triggered run attributed to the pusher.
     let doc = parse_workflow_yaml(
@@ -997,7 +1068,10 @@ jobs:
     // `all` watcher and the triggering user got exactly one completion notice.
     let reasons = unread_reasons(&app, &all_cookie).await;
     assert_eq!(
-        reasons.iter().filter(|r| **r == "workflow_run_success").count(),
+        reasons
+            .iter()
+            .filter(|r| **r == "workflow_run_success")
+            .count(),
         1,
         "all watcher should see exactly one workflow_run_success — {reasons:?}"
     );
@@ -1010,8 +1084,16 @@ jobs:
         1,
         "triggering user must learn their own run's outcome — {pusher_reasons:?}"
     );
-    assert_eq!(unread_count(&app, &part_cookie).await, 0, "participating watcher didn't trigger it");
-    assert_eq!(unread_count(&app, &ign_cookie).await, 0, "ignore watcher suppressed");
+    assert_eq!(
+        unread_count(&app, &part_cookie).await,
+        0,
+        "participating watcher didn't trigger it"
+    );
+    assert_eq!(
+        unread_count(&app, &ign_cookie).await,
+        0,
+        "ignore watcher suppressed"
+    );
 
     let (rows, _t) = notification_list_total(&app, &all_cookie, "unread").await;
     let n = rows
@@ -1019,7 +1101,7 @@ jobs:
         .find(|n| n["reason"] == "workflow_run_success")
         .expect("workflow notification row");
     assert_eq!(n["subject_kind"], "workflow_run");
-    assert_eq!(n["subject_ref"].as_str().unwrap().len() > 8, true);
+    assert!(n["subject_ref"].as_str().unwrap().len() > 8);
 }
 
 /// DEBT-06 review coverage: a failed run emits `workflow_run_failure` through
@@ -1046,9 +1128,15 @@ async fn workflow_run_failure_fanout() {
 
     let (watch_cookie, wv) = signup_and_login(&app, "fw@ex.com", "fw").await;
     verify_user(&db, wv["data"]["id"].as_str().unwrap()).await;
-    assert_eq!(watch(&app, &watch_cookie, "fpush", "ci", "all").await["ok"], true);
+    assert_eq!(
+        watch(&app, &watch_cookie, "fpush", "ci", "all").await["ok"],
+        true
+    );
 
-    let doc = parse_workflow_yaml(b"name: CI\non: [push]\njobs:\n  b:\n    runs-on: x\n    steps:\n      - run: echo hi\n").unwrap();
+    let doc = parse_workflow_yaml(
+        b"name: CI\non: [push]\njobs:\n  b:\n    runs-on: x\n    steps:\n      - run: echo hi\n",
+    )
+    .unwrap();
     enqueue_run(
         &db,
         &repo.id,
@@ -1117,7 +1205,10 @@ async fn workflow_run_failure_fanout() {
 
     let reasons = unread_reasons(&app, &watch_cookie).await;
     assert_eq!(
-        reasons.iter().filter(|r| **r == "workflow_run_failure").count(),
+        reasons
+            .iter()
+            .filter(|r| **r == "workflow_run_failure")
+            .count(),
         1,
         "all watcher should see exactly one workflow_run_failure — {reasons:?}"
     );
@@ -1158,9 +1249,15 @@ async fn workflow_run_cancel_fanout_and_finished_guard() {
 
     let (watch_cookie, wv) = signup_and_login(&app, "cw@ex.com", "cw").await;
     verify_user(&db, wv["data"]["id"].as_str().unwrap()).await;
-    assert_eq!(watch(&app, &watch_cookie, "cown", "ci", "all").await["ok"], true);
+    assert_eq!(
+        watch(&app, &watch_cookie, "cown", "ci", "all").await["ok"],
+        true
+    );
 
-    let doc = parse_workflow_yaml(b"name: CI\non: [push]\njobs:\n  b:\n    runs-on: x\n    steps:\n      - run: echo hi\n").unwrap();
+    let doc = parse_workflow_yaml(
+        b"name: CI\non: [push]\njobs:\n  b:\n    runs-on: x\n    steps:\n      - run: echo hi\n",
+    )
+    .unwrap();
     let (run_id, _jobs) = enqueue_run(
         &db,
         &repo.id,
@@ -1298,7 +1395,10 @@ async fn banned_users_unfollowable_and_hidden_from_follow_lists() {
     )
     .await;
     assert_eq!(list["ok"], true, "followers.list — {list}");
-    assert_eq!(list["data"]["total"], 0, "banned follower hidden from total");
+    assert_eq!(
+        list["data"]["total"], 0,
+        "banned follower hidden from total"
+    );
     assert_eq!(list["data"]["users"].as_array().unwrap().len(), 0);
 
     let profile = rpc_json(

@@ -28,7 +28,7 @@ function sendJson(res: ServerResponse, body: string): void {
   res.end(body);
 }
 
-export function webmcpWellKnownMiddleware(): Connect.NextHandleFunction {
+function webmcpWellKnownMiddleware(): Connect.NextHandleFunction {
   const webmcp = JSON.stringify(buildWebMcpWellKnownDocument(), null, 2);
   const mcp = JSON.stringify(buildMcpWellKnownDocument(), null, 2);
   return (req, res, next) => {

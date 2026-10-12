@@ -162,10 +162,7 @@ async fn repo_branch_soft_protect_blocks_default_rename_and_delete() {
 async fn repo_branch_soft_protect_allows_non_default_crud() {
     let dir = tempfile::tempdir().expect("tempdir");
     let repos = dir.path().join("repos");
-    let url = format!(
-        "sqlite:{}",
-        dir.path().join("branch_crud.db").display()
-    );
+    let url = format!("sqlite:{}", dir.path().join("branch_crud.db").display());
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
@@ -213,11 +210,15 @@ async fn repo_branch_soft_protect_allows_non_default_crud() {
         .filter_map(|r| r["name"].as_str())
         .collect();
     assert!(
-        !names.iter().any(|n| n.contains("feature-y") || n.contains("feature-x")),
+        !names
+            .iter()
+            .any(|n| n.contains("feature-y") || n.contains("feature-x")),
         "deleted branch must not appear in refs — {names:?}"
     );
     assert!(
-        names.iter().any(|n| n.contains("main") || n.ends_with("/main")),
+        names
+            .iter()
+            .any(|n| n.contains("main") || n.ends_with("/main")),
         "default branch must remain — {names:?}"
     );
 }
@@ -253,10 +254,7 @@ async fn repo_branch_create_rejects_option_like_name_leaves_default_intact() {
         code == "repo.invalid_ref" || code == "rpc.bad_input" || code.starts_with("repo."),
         "expected invalid-ref style error, got {code} — {create}"
     );
-    assert_ne!(
-        code, "ok",
-        "must not succeed — {create}"
-    );
+    assert_ne!(code, "ok", "must not succeed — {create}");
 
     // Soft-protect still observes the default: delete of main must return protected.
     let delete = rpc_json(

@@ -23,10 +23,7 @@ use crate::repo::{resolve_owner_slug, OwnerRef};
 const LFS_JSON: &str = "application/vnd.git-lfs+json";
 
 fn lfs_json_headers() -> [(header::HeaderName, HeaderValue); 1] {
-    [(
-        header::CONTENT_TYPE,
-        HeaderValue::from_static(LFS_JSON),
-    )]
+    [(header::CONTENT_TYPE, HeaderValue::from_static(LFS_JSON))]
 }
 
 fn not_found_lfs(msg: &str) -> Response {
@@ -50,11 +47,8 @@ struct ResolvedRepo {
     owner: OwnerRef,
 }
 
-async fn resolve_repo(
-    state: &AppState,
-    owner: &str,
-    name: &str,
-) -> Result<ResolvedRepo, Response> {
+#[allow(clippy::result_large_err)]
+async fn resolve_repo(state: &AppState, owner: &str, name: &str) -> Result<ResolvedRepo, Response> {
     let owner_ref = match resolve_owner_slug(&state.db, owner).await {
         Ok(Some(r)) => r,
         Ok(None) => return Err(not_found_lfs("Repository not found")),
@@ -89,6 +83,7 @@ fn verify_href(origin: &str, owner: &str, repo_git: &str) -> String {
     format!("{origin}/{owner}/{repo_git}/info/lfs/objects/verify")
 }
 
+#[allow(clippy::result_large_err)]
 async fn require_lfs_enabled(state: &AppState, repo_id: &str) -> Result<(), Response> {
     let enabled = match state.db.get_repo_lfs_enabled(repo_id).await {
         Ok(v) => v,
@@ -136,8 +131,7 @@ pub async fn batch(
             .into_response();
     }
 
-    if let Err(r) = authorize_lfs(&state, &headers, &resolved.row, &resolved.owner, upload).await
-    {
+    if let Err(r) = authorize_lfs(&state, &headers, &resolved.row, &resolved.owner, upload).await {
         return r;
     }
 

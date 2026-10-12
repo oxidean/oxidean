@@ -12,9 +12,9 @@
     "build": "echo 'api-client: types-only package'"
   },
   "peerDependencies": {
-    "@octanejs/tanstack-query": "^0.1.0"
+    "@octanejs/tanstack-query": "^0.1.63"
   },
   "devDependencies": {
-    "vitest": "^5.0.0"
+    "vitest": "^5.0.3"
   }
 }

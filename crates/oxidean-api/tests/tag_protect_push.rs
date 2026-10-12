@@ -11,7 +11,7 @@ use http_body_util::BodyExt;
 use oxidean_api::email::{EmailSender, LogSink};
 use oxidean_api::git::bare_repo_path;
 use oxidean_api::protection::{
-    check_ref_update, hooks_installed, union_tag_rules, evaluate_tag_push, TagProtectionIntent,
+    check_ref_update, evaluate_tag_push, hooks_installed, union_tag_rules, TagProtectionIntent,
     ZERO_SHA,
 };
 use oxidean_api::repo::Capability;
@@ -100,7 +100,9 @@ async fn rpc_json(app: &axum::Router, cookie: &str, body: &str) -> serde_json::V
 
 async fn verify_user(db: &Database, user_id: &str) {
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    db.set_email_verified_at(user_id, &now).await.expect("verify");
+    db.set_email_verified_at(user_id, &now)
+        .await
+        .expect("verify");
 }
 
 const SHA_A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -109,7 +111,11 @@ const SHA_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 fn deny_reasons(err: &oxidean_core::AppError) -> Vec<String> {
     err.data.as_ref().unwrap()["reasons"]
         .as_array()
-        .map(|a| a.iter().filter_map(|r| r.as_str().map(String::from)).collect())
+        .map(|a| {
+            a.iter()
+                .filter_map(|r| r.as_str().map(String::from))
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -151,9 +157,17 @@ async fn tag_protect_push_denies_create_for_write() {
     assert_eq!(rule["ok"], true, "create tag rule — {rule}");
 
     // Write create on matching tag denied.
-    let err = check_ref_update(&db, &repos, &bare, "refs/tags/v1.0.0", ZERO_SHA, SHA_A, Capability::Write)
-        .await
-        .expect_err("Write create must be denied on protected tag");
+    let err = check_ref_update(
+        &db,
+        &repos,
+        &bare,
+        "refs/tags/v1.0.0",
+        ZERO_SHA,
+        SHA_A,
+        Capability::Write,
+    )
+    .await
+    .expect_err("Write create must be denied on protected tag");
     assert_eq!(err.code, "repo.tag_protection");
     assert!(
         deny_reasons(&err).iter().any(|r| r == "create"),
@@ -161,26 +175,58 @@ async fn tag_protect_push_denies_create_for_write() {
     );
 
     // Write update (retarget) denied.
-    let err = check_ref_update(&db, &repos, &bare, "refs/tags/v1.0.0", SHA_A, SHA_B, Capability::Write)
-        .await
-        .expect_err("Write update must be denied on protected tag");
+    let err = check_ref_update(
+        &db,
+        &repos,
+        &bare,
+        "refs/tags/v1.0.0",
+        SHA_A,
+        SHA_B,
+        Capability::Write,
+    )
+    .await
+    .expect_err("Write update must be denied on protected tag");
     assert!(deny_reasons(&err).iter().any(|r| r == "update"), "{err:?}");
 
     // Write delete denied.
-    let err = check_ref_update(&db, &repos, &bare, "refs/tags/v1.0.0", SHA_A, ZERO_SHA, Capability::Write)
-        .await
-        .expect_err("Write delete must be denied on protected tag");
+    let err = check_ref_update(
+        &db,
+        &repos,
+        &bare,
+        "refs/tags/v1.0.0",
+        SHA_A,
+        ZERO_SHA,
+        Capability::Write,
+    )
+    .await
+    .expect_err("Write delete must be denied on protected tag");
     assert!(deny_reasons(&err).iter().any(|r| r == "delete"), "{err:?}");
 
     // Admin bypass when enforce_admins=false (default).
-    check_ref_update(&db, &repos, &bare, "refs/tags/v1.0.0", ZERO_SHA, SHA_A, Capability::Admin)
-        .await
-        .expect("Admin may create when enforce_admins=false");
+    check_ref_update(
+        &db,
+        &repos,
+        &bare,
+        "refs/tags/v1.0.0",
+        ZERO_SHA,
+        SHA_A,
+        Capability::Admin,
+    )
+    .await
+    .expect("Admin may create when enforce_admins=false");
 
     // Non-matching tag is unaffected.
-    check_ref_update(&db, &repos, &bare, "refs/tags/nightly-1", ZERO_SHA, SHA_A, Capability::Write)
-        .await
-        .expect("non-matching tag pattern must allow create");
+    check_ref_update(
+        &db,
+        &repos,
+        &bare,
+        "refs/tags/nightly-1",
+        ZERO_SHA,
+        SHA_A,
+        Capability::Write,
+    )
+    .await
+    .expect("non-matching tag pattern must allow create");
 }
 
 /// GIT-21: `allow_create` on the rule lets Write create while delete stays denied.
@@ -215,16 +261,40 @@ async fn tag_protect_push_allows_create_when_rule_permits() {
 
     let bare = bare_repo_path(&repos, "tpown2", "core").expect("bare path");
 
-    check_ref_update(&db, &repos, &bare, "refs/tags/v2.0", ZERO_SHA, SHA_A, Capability::Write)
-        .await
-        .expect("allow_create must permit Write create");
-    let err = check_ref_update(&db, &repos, &bare, "refs/tags/v2.0", SHA_A, ZERO_SHA, Capability::Write)
-        .await
-        .expect_err("delete still denied when allow_delete=false");
+    check_ref_update(
+        &db,
+        &repos,
+        &bare,
+        "refs/tags/v2.0",
+        ZERO_SHA,
+        SHA_A,
+        Capability::Write,
+    )
+    .await
+    .expect("allow_create must permit Write create");
+    let err = check_ref_update(
+        &db,
+        &repos,
+        &bare,
+        "refs/tags/v2.0",
+        SHA_A,
+        ZERO_SHA,
+        Capability::Write,
+    )
+    .await
+    .expect_err("delete still denied when allow_delete=false");
     assert!(deny_reasons(&err).iter().any(|r| r == "delete"), "{err:?}");
-    let err = check_ref_update(&db, &repos, &bare, "refs/tags/v2.0", SHA_A, SHA_B, Capability::Write)
-        .await
-        .expect_err("update still denied when allow_update=false");
+    let err = check_ref_update(
+        &db,
+        &repos,
+        &bare,
+        "refs/tags/v2.0",
+        SHA_A,
+        SHA_B,
+        Capability::Write,
+    )
+    .await
+    .expect_err("update still denied when allow_update=false");
     assert!(deny_reasons(&err).iter().any(|r| r == "update"), "{err:?}");
 }
 
@@ -259,9 +329,17 @@ async fn tag_protect_push_enforce_admins_blocks_admin() {
     assert_eq!(rule["ok"], true, "create tag rule — {rule}");
 
     let bare = bare_repo_path(&repos, "tpown3", "core").expect("bare path");
-    let err = check_ref_update(&db, &repos, &bare, "refs/tags/v9", ZERO_SHA, SHA_A, Capability::Admin)
-        .await
-        .expect_err("enforce_admins must deny Admin create");
+    let err = check_ref_update(
+        &db,
+        &repos,
+        &bare,
+        "refs/tags/v9",
+        ZERO_SHA,
+        SHA_A,
+        Capability::Admin,
+    )
+    .await
+    .expect_err("enforce_admins must deny Admin create");
     assert_eq!(err.code, "repo.tag_protection");
 }
 
@@ -298,6 +376,10 @@ fn tag_union_most_restrictive_wins() {
 
     let unmatched = union_tag_rules(&[], "v1.2");
     assert!(!unmatched.matched);
-    evaluate_tag_push(&unmatched, TagProtectionIntent::Delete, Some(Capability::Read))
-        .expect("no matching rule → allowed");
+    evaluate_tag_push(
+        &unmatched,
+        TagProtectionIntent::Delete,
+        Some(Capability::Read),
+    )
+    .expect("no matching rule → allowed");
 }

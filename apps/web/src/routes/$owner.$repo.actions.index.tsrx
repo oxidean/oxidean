@@ -1,11 +1,10 @@
-import {
-  createFileRoute,
-  useLoaderData,
-  useNavigate,
-  useParams,
-  useSearch,
-} from "@octanejs/tanstack-router";
-import { useMutation, useQuery, useQueryClient } from "@octanejs/tanstack-query";
+import { queryOptions, useMutation, useQuery, useQueryClient } from "@octanejs/tanstack-query";
+import { navigate as astroNavigate } from "astro:transitions/client";
+
+import { matchPath, routeHref, searchRecord } from "@/lib/route-params";
+import { usePathname, useSearchString } from "@/lib/pathname.tsrx";
+import { RepoLayout } from "@/routes/$owner.$repo.tsrx";
+import { AppPage } from "@/components/app-page";
 import { useState } from "octane";
 import type {
   ActionRunPublic,
@@ -106,7 +105,7 @@ async function loadActionsIndexPage(
   repoName: string,
   filters: ActionsIndexSearch,
 ): Promise<ActionsIndexLoaderData> {
-  const got = await fetchRepoGet({ data: { owner, name: repoName } });
+  const got = await fetchRepoGet({ owner, name: repoName });
   if (!got.ok) {
     if (got.error.code === "repo.not_found") return { kind: "not_found" };
     return {
@@ -119,20 +118,18 @@ async function loadActionsIndexPage(
   // stay gated on can_write below.
   const [runsRes, workflowsRes] = await Promise.all([
     fetchActionsListRuns({
-      data: {
-        owner,
-        name: repoName,
-        page: 1,
-        per_page: ACTIONS_RUNS_PER_PAGE,
-        status: filters.status,
-        event: filters.event,
-        branch: filters.branch,
-        workflow: filters.workflow,
-        actor: filters.actor,
-        query: filters.q,
-      },
+      owner,
+      name: repoName,
+      page: 1,
+      per_page: ACTIONS_RUNS_PER_PAGE,
+      status: filters.status,
+      event: filters.event,
+      branch: filters.branch,
+      workflow: filters.workflow,
+      actor: filters.actor,
+      query: filters.q,
     }),
-    fetchActionsListWorkflows({ data: { owner, name: repoName } }),
+    fetchActionsListWorkflows({ owner, name: repoName }),
   ]);
   if (!runsRes.ok) {
     if (runsRes.error.code === "repo.not_found") return { kind: "not_found" };
@@ -148,58 +145,61 @@ async function loadActionsIndexPage(
   };
 }
 
-export const Route = createFileRoute("/$owner/$repo/actions/")({
-  validateSearch: (search: Record<string, unknown>): ActionsIndexSearch => ({
+function validateSearch(search: Record<string, unknown>): ActionsIndexSearch {
+  return {
     status: typeof search.status === "string" ? search.status : undefined,
     event: typeof search.event === "string" ? search.event : undefined,
     branch: typeof search.branch === "string" ? search.branch : undefined,
     workflow: typeof search.workflow === "string" ? search.workflow : undefined,
     actor: typeof search.actor === "string" ? search.actor : undefined,
     q: typeof search.q === "string" ? search.q : undefined,
-  }),
-  component: RepoActionsPage,
-  head: ({ params }) => {
-    const p = params as { owner?: string; repo?: string };
-    return {
-      meta: [
-        {
-          title: `${String(p.owner ?? "")}/${String(p.repo ?? "")} actions · Oxidean`,
-        },
-      ],
-    };
-  },
-  loaderDeps: ({ search }): ActionsIndexSearch => ({
-    status: search.status,
-    event: search.event,
-    branch: search.branch,
-    workflow: search.workflow,
-    actor: search.actor,
-    q: search.q,
-  }),
-  loader: async ({ params, deps }): Promise<ActionsIndexLoaderData> => {
-    const owner = String((params as { owner?: string }).owner ?? "");
-    const repoName = String((params as { repo?: string }).repo ?? "");
-    try {
-      return await loadActionsIndexPage(owner, repoName, deps);
-    } catch {
-      return { kind: "error", message: NETWORK_ERROR };
-    }
-  },
-});
+  };
+}
+
+function repoActionsIndexQueryOptions(params: Record<string, string | undefined>, searchStr = "") {
+  return queryOptions({
+    queryKey: [
+      "repo-page",
+      "/$owner/$repo/actions/",
+      params.owner ?? "",
+      params.repo ?? "",
+      params._splat ?? "",
+      params.n ?? "",
+      params.sha ?? "",
+      params.tag ?? "",
+      params.run ?? "",
+      searchStr,
+    ],
+    queryFn: async (): Promise<ActionsIndexLoaderData> => {
+      const deps = validateSearch(searchRecord(searchStr)) as never;
+
+      const owner = String((params as { owner?: string }).owner ?? "");
+      const repoName = String((params as { repo?: string }).repo ?? "");
+      try {
+        return await loadActionsIndexPage(owner, repoName, deps);
+      } catch {
+        return { kind: "error", message: NETWORK_ERROR };
+      }
+    },
+    enabled: Boolean(params.owner && params.repo),
+    retry: false,
+    staleTime: 30_000,
+  });
+}
 
 /** Workflow runs list — sidebar + filters + run rows (ACT-03 / D-ACT-12, #44). */
-export function RepoActionsPage() @{
-  const params = useParams({ from: "/$owner/$repo/actions/" }) as {
+function RepoActionsPageContent() @{
+  const pathname = usePathname();
+  const searchStr = useSearchString();
+  const params = (matchPath("/$owner/$repo/actions/", pathname) ?? {}) as {
     owner?: string;
     repo?: string;
   };
   const owner = String(params.owner ?? "");
   const repoName = String(params.repo ?? "");
-  const search = useSearch({ strict: false }) as ActionsIndexSearch;
-  const navigate = useNavigate();
-  const routeLoader = useLoaderData({ from: "/$owner/$repo/actions/" }) as
-    | ActionsIndexLoaderData
-    | undefined;
+  const search = validateSearch(searchRecord(searchStr)) as ActionsIndexSearch;
+  const navigate = astroNavigate;
+  const routeLoader = useQuery(repoActionsIndexQueryOptions(params, searchStr)).data;
   const repo = useRepoStore((s) => s.repo);
   const canWrite = !!repo?.can_write;
   const [page, setPage] = useState(1);
@@ -282,11 +282,7 @@ export function RepoActionsPage() @{
 
   function goSearch(next: ActionsIndexSearch) {
     setPage(1);
-    void navigate({
-      to: "/$owner/$repo/actions",
-      params: { owner, repo: repoName },
-      search: searchFor(next),
-    });
+    void navigate(routeHref("/$owner/$repo/actions", { owner, repo: repoName }, searchFor(next)));
   }
 
   function applyFilters(next: ActionsFilterDraft) {
@@ -655,4 +651,13 @@ export function RepoActionsPage() @{
       }
     </div>;
     };
+}
+
+/** Page root — RepoLayout (chrome + repo store) around the leaf content. */
+export function RepoActionsPage() @{
+  <AppPage>
+    <RepoLayout>
+      <RepoActionsPageContent />
+    </RepoLayout>
+  </AppPage>;
 }

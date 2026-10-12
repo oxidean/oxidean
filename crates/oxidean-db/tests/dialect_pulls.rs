@@ -42,10 +42,7 @@ async fn dialect_pulls_migrate_0016_schema_presence() {
             "allow_rebase_merge",
             "forked_from_repo_id",
         ] {
-            assert!(
-                sql.contains(needle),
-                "{label} 0016 must define {needle}"
-            );
+            assert!(sql.contains(needle), "{label} 0016 must define {needle}");
         }
         assert!(
             sql.contains("'pr'") || sql.contains("\"pr\"") || sql.contains(", 'pr'") || sql.contains("pr'"),
@@ -343,7 +340,7 @@ async fn dialect_pulls_batch_enrichment() {
 
     // Batch repo/user lookups used by pull list enrichment.
     let repos = db
-        .find_repositories_by_ids(&[repo.id.clone()])
+        .find_repositories_by_ids(std::slice::from_ref(&repo.id))
         .await
         .expect("batch repos");
     assert_eq!(repos.len(), 1);

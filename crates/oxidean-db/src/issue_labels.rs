@@ -72,9 +72,7 @@ pub async fn insert_label(
     match (org_id, repo_id) {
         (Some(_), None) | (None, Some(_)) => {}
         _ => {
-            return Err(
-                "label scope requires exactly one of org_id or repo_id".into(),
-            );
+            return Err("label scope requires exactly one of org_id or repo_id".into());
         }
     }
     match pool {
@@ -132,33 +130,39 @@ VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
 pub async fn find_label_by_id(pool: &DbPool, id: &str) -> Result<Option<LabelRow>, String> {
     match pool {
         DbPool::Postgres(p) => {
-            let row = sqlx::query(&format!("{LABEL_SELECT_PG} WHERE id = $1"))
-                .bind(id)
-                .fetch_optional(p)
-                .await
-                .map_err(|e| format!("find label by id failed: {e}"))?;
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{LABEL_SELECT_PG} WHERE id = $1"
+            )))
+            .bind(id)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("find label by id failed: {e}"))?;
             Ok(match row {
                 Some(r) => Some(map_label!(&r)),
                 None => None,
             })
         }
         DbPool::MySql(p) => {
-            let row = sqlx::query(&format!("{LABEL_SELECT_MYSQL} WHERE id = ?"))
-                .bind(id)
-                .fetch_optional(p)
-                .await
-                .map_err(|e| format!("find label by id failed: {e}"))?;
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{LABEL_SELECT_MYSQL} WHERE id = ?"
+            )))
+            .bind(id)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("find label by id failed: {e}"))?;
             Ok(match row {
                 Some(r) => Some(map_label!(&r)),
                 None => None,
             })
         }
         DbPool::Sqlite(p) => {
-            let row = sqlx::query(&format!("{LABEL_SELECT_SQLITE} WHERE id = ?1"))
-                .bind(id)
-                .fetch_optional(p)
-                .await
-                .map_err(|e| format!("find label by id failed: {e}"))?;
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{LABEL_SELECT_SQLITE} WHERE id = ?1"
+            )))
+            .bind(id)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("find label by id failed: {e}"))?;
             Ok(match row {
                 Some(r) => Some(map_label!(&r)),
                 None => None,
@@ -251,9 +255,9 @@ pub async fn delete_label(pool: &DbPool, id: &str) -> Result<(), String> {
 pub async fn list_labels_for_org(pool: &DbPool, org_id: &str) -> Result<Vec<LabelRow>, String> {
     match pool {
         DbPool::Postgres(p) => {
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{LABEL_SELECT_PG} WHERE org_id = $1 ORDER BY lower(name)"
-            ))
+            )))
             .bind(org_id)
             .fetch_all(p)
             .await
@@ -265,9 +269,9 @@ pub async fn list_labels_for_org(pool: &DbPool, org_id: &str) -> Result<Vec<Labe
             Ok(out)
         }
         DbPool::MySql(p) => {
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{LABEL_SELECT_MYSQL} WHERE org_id = ? ORDER BY LOWER(name)"
-            ))
+            )))
             .bind(org_id)
             .fetch_all(p)
             .await
@@ -279,9 +283,9 @@ pub async fn list_labels_for_org(pool: &DbPool, org_id: &str) -> Result<Vec<Labe
             Ok(out)
         }
         DbPool::Sqlite(p) => {
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{LABEL_SELECT_SQLITE} WHERE org_id = ?1 ORDER BY lower(name)"
-            ))
+            )))
             .bind(org_id)
             .fetch_all(p)
             .await
@@ -298,9 +302,9 @@ pub async fn list_labels_for_org(pool: &DbPool, org_id: &str) -> Result<Vec<Labe
 pub async fn list_labels_for_repo(pool: &DbPool, repo_id: &str) -> Result<Vec<LabelRow>, String> {
     match pool {
         DbPool::Postgres(p) => {
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{LABEL_SELECT_PG} WHERE repo_id = $1 ORDER BY lower(name)"
-            ))
+            )))
             .bind(repo_id)
             .fetch_all(p)
             .await
@@ -312,9 +316,9 @@ pub async fn list_labels_for_repo(pool: &DbPool, repo_id: &str) -> Result<Vec<La
             Ok(out)
         }
         DbPool::MySql(p) => {
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{LABEL_SELECT_MYSQL} WHERE repo_id = ? ORDER BY LOWER(name)"
-            ))
+            )))
             .bind(repo_id)
             .fetch_all(p)
             .await
@@ -326,9 +330,9 @@ pub async fn list_labels_for_repo(pool: &DbPool, repo_id: &str) -> Result<Vec<La
             Ok(out)
         }
         DbPool::Sqlite(p) => {
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{LABEL_SELECT_SQLITE} WHERE repo_id = ?1 ORDER BY lower(name)"
-            ))
+            )))
             .bind(repo_id)
             .fetch_all(p)
             .await
@@ -342,10 +346,7 @@ pub async fn list_labels_for_repo(pool: &DbPool, repo_id: &str) -> Result<Vec<La
     }
 }
 
-pub async fn list_hidden_label_ids(
-    pool: &DbPool,
-    repo_id: &str,
-) -> Result<Vec<String>, String> {
+pub async fn list_hidden_label_ids(pool: &DbPool, repo_id: &str) -> Result<Vec<String>, String> {
     match pool {
         DbPool::Postgres(p) => {
             let rows = sqlx::query("SELECT label_id FROM repo_hidden_labels WHERE repo_id = $1")
@@ -432,52 +433,43 @@ ON CONFLICT DO NOTHING",
     } else {
         match pool {
             DbPool::Postgres(p) => {
-                sqlx::query(
-                    "DELETE FROM repo_hidden_labels WHERE repo_id = $1 AND label_id = $2",
-                )
-                .bind(repo_id)
-                .bind(label_id)
-                .execute(p)
-                .await
-                .map_err(|e| format!("unhide label failed: {e}"))?;
+                sqlx::query("DELETE FROM repo_hidden_labels WHERE repo_id = $1 AND label_id = $2")
+                    .bind(repo_id)
+                    .bind(label_id)
+                    .execute(p)
+                    .await
+                    .map_err(|e| format!("unhide label failed: {e}"))?;
             }
             DbPool::MySql(p) => {
-                sqlx::query(
-                    "DELETE FROM repo_hidden_labels WHERE repo_id = ? AND label_id = ?",
-                )
-                .bind(repo_id)
-                .bind(label_id)
-                .execute(p)
-                .await
-                .map_err(|e| format!("unhide label failed: {e}"))?;
+                sqlx::query("DELETE FROM repo_hidden_labels WHERE repo_id = ? AND label_id = ?")
+                    .bind(repo_id)
+                    .bind(label_id)
+                    .execute(p)
+                    .await
+                    .map_err(|e| format!("unhide label failed: {e}"))?;
             }
             DbPool::Sqlite(p) => {
-                sqlx::query(
-                    "DELETE FROM repo_hidden_labels WHERE repo_id = ?1 AND label_id = ?2",
-                )
-                .bind(repo_id)
-                .bind(label_id)
-                .execute(p)
-                .await
-                .map_err(|e| format!("unhide label failed: {e}"))?;
+                sqlx::query("DELETE FROM repo_hidden_labels WHERE repo_id = ?1 AND label_id = ?2")
+                    .bind(repo_id)
+                    .bind(label_id)
+                    .execute(p)
+                    .await
+                    .map_err(|e| format!("unhide label failed: {e}"))?;
             }
         }
     }
     Ok(())
 }
 
-pub async fn list_labels_for_issue(
-    pool: &DbPool,
-    issue_id: &str,
-) -> Result<Vec<LabelRow>, String> {
+pub async fn list_labels_for_issue(pool: &DbPool, issue_id: &str) -> Result<Vec<LabelRow>, String> {
     match pool {
         DbPool::Postgres(p) => {
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{LABEL_SELECT_PG}
 INNER JOIN issue_labels il ON il.label_id = labels.id
 WHERE il.issue_id = $1
 ORDER BY lower(labels.name)"
-            ))
+            )))
             .bind(issue_id)
             .fetch_all(p)
             .await
@@ -489,12 +481,12 @@ ORDER BY lower(labels.name)"
             Ok(out)
         }
         DbPool::MySql(p) => {
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{LABEL_SELECT_MYSQL}
 INNER JOIN issue_labels il ON il.label_id = labels.id
 WHERE il.issue_id = ?
 ORDER BY LOWER(labels.name)"
-            ))
+            )))
             .bind(issue_id)
             .fetch_all(p)
             .await
@@ -506,12 +498,12 @@ ORDER BY LOWER(labels.name)"
             Ok(out)
         }
         DbPool::Sqlite(p) => {
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{LABEL_SELECT_SQLITE}
 INNER JOIN issue_labels il ON il.label_id = labels.id
 WHERE il.issue_id = ?1
 ORDER BY lower(labels.name)"
-            ))
+            )))
             .bind(issue_id)
             .fetch_all(p)
             .await
@@ -544,13 +536,13 @@ pub async fn list_labels_for_issues(
     }
     match pool {
         DbPool::Postgres(p) => {
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "SELECT il.issue_id, labels.*
 FROM ({LABEL_SELECT_PG}) labels
 INNER JOIN issue_labels il ON il.label_id = labels.id
 WHERE il.issue_id = ANY($1)
 ORDER BY lower(labels.name)"
-            ))
+            )))
             .bind(issue_ids)
             .fetch_all(p)
             .await
@@ -567,7 +559,7 @@ INNER JOIN issue_labels il ON il.label_id = labels.id
 WHERE il.issue_id IN ({in_list})
 ORDER BY LOWER(labels.name)"
             );
-            let q = sqlx::query(&q_str);
+            let q = sqlx::query(sqlx::AssertSqlSafe(&*q_str));
             let q = issue_ids.iter().fold(q, |q, id| q.bind(id));
             let rows = q
                 .fetch_all(p)
@@ -588,7 +580,7 @@ INNER JOIN issue_labels il ON il.label_id = labels.id
 WHERE il.issue_id IN ({in_list})
 ORDER BY lower(labels.name)"
             );
-            let q = sqlx::query(&q_str);
+            let q = sqlx::query(sqlx::AssertSqlSafe(&*q_str));
             let q = issue_ids.iter().fold(q, |q, id| q.bind(id));
             let rows = q
                 .fetch_all(p)
@@ -617,14 +609,12 @@ pub async fn set_issue_labels(
                 .await
                 .map_err(|e| format!("clear issue labels failed: {e}"))?;
             for label_id in label_ids {
-                sqlx::query(
-                    "INSERT INTO issue_labels (issue_id, label_id) VALUES ($1, $2)",
-                )
-                .bind(issue_id)
-                .bind(label_id)
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| format!("insert issue label failed: {e}"))?;
+                sqlx::query("INSERT INTO issue_labels (issue_id, label_id) VALUES ($1, $2)")
+                    .bind(issue_id)
+                    .bind(label_id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| format!("insert issue label failed: {e}"))?;
             }
             tx.commit()
                 .await
@@ -641,14 +631,12 @@ pub async fn set_issue_labels(
                 .await
                 .map_err(|e| format!("clear issue labels failed: {e}"))?;
             for label_id in label_ids {
-                sqlx::query(
-                    "INSERT INTO issue_labels (issue_id, label_id) VALUES (?, ?)",
-                )
-                .bind(issue_id)
-                .bind(label_id)
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| format!("insert issue label failed: {e}"))?;
+                sqlx::query("INSERT INTO issue_labels (issue_id, label_id) VALUES (?, ?)")
+                    .bind(issue_id)
+                    .bind(label_id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| format!("insert issue label failed: {e}"))?;
             }
             tx.commit()
                 .await
@@ -665,14 +653,12 @@ pub async fn set_issue_labels(
                 .await
                 .map_err(|e| format!("clear issue labels failed: {e}"))?;
             for label_id in label_ids {
-                sqlx::query(
-                    "INSERT INTO issue_labels (issue_id, label_id) VALUES (?1, ?2)",
-                )
-                .bind(issue_id)
-                .bind(label_id)
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| format!("insert issue label failed: {e}"))?;
+                sqlx::query("INSERT INTO issue_labels (issue_id, label_id) VALUES (?1, ?2)")
+                    .bind(issue_id)
+                    .bind(label_id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| format!("insert issue label failed: {e}"))?;
             }
             tx.commit()
                 .await
@@ -840,7 +826,7 @@ JOIN users u ON u.id = a.user_id
 WHERE a.issue_id IN ({in_list})
 ORDER BY LOWER(u.username)"
             );
-            let q = sqlx::query(&q_str);
+            let q = sqlx::query(sqlx::AssertSqlSafe(&*q_str));
             let q = issue_ids.iter().fold(q, |q, id| q.bind(id));
             let rows = q
                 .fetch_all(p)
@@ -861,7 +847,7 @@ JOIN users u ON u.id = a.user_id
 WHERE a.issue_id IN ({in_list})
 ORDER BY lower(u.username)"
             );
-            let q = sqlx::query(&q_str);
+            let q = sqlx::query(sqlx::AssertSqlSafe(&*q_str));
             let q = issue_ids.iter().fold(q, |q, id| q.bind(id));
             let rows = q
                 .fetch_all(p)
@@ -890,14 +876,12 @@ pub async fn set_issue_assignees(
                 .await
                 .map_err(|e| format!("clear issue assignees failed: {e}"))?;
             for user_id in user_ids {
-                sqlx::query(
-                    "INSERT INTO issue_assignees (issue_id, user_id) VALUES ($1, $2)",
-                )
-                .bind(issue_id)
-                .bind(user_id)
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| format!("insert issue assignee failed: {e}"))?;
+                sqlx::query("INSERT INTO issue_assignees (issue_id, user_id) VALUES ($1, $2)")
+                    .bind(issue_id)
+                    .bind(user_id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| format!("insert issue assignee failed: {e}"))?;
             }
             tx.commit()
                 .await
@@ -914,14 +898,12 @@ pub async fn set_issue_assignees(
                 .await
                 .map_err(|e| format!("clear issue assignees failed: {e}"))?;
             for user_id in user_ids {
-                sqlx::query(
-                    "INSERT INTO issue_assignees (issue_id, user_id) VALUES (?, ?)",
-                )
-                .bind(issue_id)
-                .bind(user_id)
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| format!("insert issue assignee failed: {e}"))?;
+                sqlx::query("INSERT INTO issue_assignees (issue_id, user_id) VALUES (?, ?)")
+                    .bind(issue_id)
+                    .bind(user_id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| format!("insert issue assignee failed: {e}"))?;
             }
             tx.commit()
                 .await
@@ -938,14 +920,12 @@ pub async fn set_issue_assignees(
                 .await
                 .map_err(|e| format!("clear issue assignees failed: {e}"))?;
             for user_id in user_ids {
-                sqlx::query(
-                    "INSERT INTO issue_assignees (issue_id, user_id) VALUES (?1, ?2)",
-                )
-                .bind(issue_id)
-                .bind(user_id)
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| format!("insert issue assignee failed: {e}"))?;
+                sqlx::query("INSERT INTO issue_assignees (issue_id, user_id) VALUES (?1, ?2)")
+                    .bind(issue_id)
+                    .bind(user_id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| format!("insert issue assignee failed: {e}"))?;
             }
             tx.commit()
                 .await

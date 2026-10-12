@@ -1,0 +1,8 @@
+---
+import AppShell from "@/layouts/AppShell.astro";
+import { TokensPage } from "@/routes/settings/tokens.index.tsrx";
+---
+
+<AppShell title="Personal access tokens · Oxidean">
+	<TokensPage client:load />
+</AppShell>

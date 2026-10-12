@@ -42,22 +42,17 @@ pub async fn branch_tip(
     branch: &str,
 ) -> Result<Option<String>, AppError> {
     let want = format!("refs/heads/{branch}");
-    let refs = git
-        .list_refs(bare)
-        .await
-        .map_err(|e| AppError::new("repo.ref_lookup_failed", format!("could not list refs: {e}")))?;
-    Ok(refs
-        .iter()
-        .find(|r| r.name == want)
-        .map(|r| r.oid.clone()))
+    let refs = git.list_refs(bare).await.map_err(|e| {
+        AppError::new(
+            "repo.ref_lookup_failed",
+            format!("could not list refs: {e}"),
+        )
+    })?;
+    Ok(refs.iter().find(|r| r.name == want).map(|r| r.oid.clone()))
 }
 
 fn validate_owner_segment(owner: &str) -> Result<(), AppError> {
-    if owner.is_empty()
-        || owner.contains('/')
-        || owner.contains('\\')
-        || owner.contains("..")
-    {
+    if owner.is_empty() || owner.contains('/') || owner.contains('\\') || owner.contains("..") {
         return Err(AppError::new(
             "repo.invalid_path",
             "invalid repository path components",

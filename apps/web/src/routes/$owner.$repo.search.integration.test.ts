@@ -3,34 +3,58 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithQueryClient } from "@/test/render-with-query";
 
 const searchMock = vi.fn();
+const repoGetMock = vi.fn();
+const authMeMock = vi.fn();
 
 vi.mock("@/lib/ssr-repo", () => ({
   fetchRepoSearch: (opts: { data: unknown }) => searchMock(opts.data),
+  fetchRepoGet: (opts: { data: unknown }) => repoGetMock(opts.data),
 }));
 
-const navigateMock = vi.fn();
-let searchState = { q: "UNIQUE_HIT", type: "code" };
+vi.mock("@/lib/api-client", () => ({
+  apiClient: {
+    auth: {
+      me: (...args: unknown[]) => authMeMock(...args),
+    },
+    repo: {
+      search: (...args: unknown[]) => searchMock(...args),
+    },
+  },
+}));
 
-vi.mock("@octanejs/tanstack-router", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@octanejs/tanstack-router")>();
-  return {
-    ...actual,
-    useParams: () => ({ owner: "ada", repo: "hello" }),
-    useSearch: () => searchState,
-    useNavigate: () => navigateMock,
-  };
-});
+function setLocation(path: string) {
+  window.history.pushState({}, "", path);
+}
 
 import { RepoSearchPage } from "./$owner.$repo.search";
+import { getQueryClient } from "@/lib/query-client";
 
 afterEach(() => {
   cleanup();
   searchMock.mockReset();
-  navigateMock.mockReset();
-  searchState = { q: "UNIQUE_HIT", type: "code" };
+  repoGetMock.mockReset();
+  authMeMock.mockReset();
 });
 
 beforeEach(() => {
+  setLocation("/ada/hello/search?q=UNIQUE_HIT&type=code");
+  authMeMock.mockResolvedValue({ ok: false, error: { code: "auth.unauthenticated", message: "" } });
+  repoGetMock.mockResolvedValue({
+    ok: true,
+    data: {
+      id: "r1",
+      owner_id: "u1",
+      owner_type: "user",
+      owner_username: "ada",
+      name: "hello",
+      description: "",
+      visibility: "public",
+      default_branch: "main",
+      updated_at: "2026-09-14T00:00:00Z",
+      can_admin: false,
+      can_write: false,
+    },
+  });
   searchMock.mockResolvedValue({
     ok: true,
     data: {
@@ -80,9 +104,9 @@ describe("repo search route (GIT-18 / D-SRCH-02 / D-SRCH-15)", () => {
     renderWithQueryClient(RepoSearchPage);
     const commitsTab = await screen.findByTestId("search-tab-commits");
     fireEvent.click(commitsTab);
-    expect(navigateMock).toHaveBeenCalled();
-    const arg = navigateMock.mock.calls[0]?.[0] as { search?: { type?: string } };
-    expect(arg?.search?.type).toBe("commits");
+    await waitFor(() => {
+      expect(new URLSearchParams(window.location.search).get("type")).toBe("commits");
+    });
   });
 
   it("renders empty and truncated states", async () => {
@@ -102,12 +126,13 @@ describe("repo search route (GIT-18 / D-SRCH-02 / D-SRCH-15)", () => {
       highlightTheme: "oxidean-light",
     });
     cleanup();
+    getQueryClient().clear();
     renderWithQueryClient(RepoSearchPage);
     expect(await screen.findByTestId("search-empty")).toBeTruthy();
   });
 
   it("renders language browse hits as file links without line/content", async () => {
-    searchState = { q: "language:Rust", type: "code" };
+    setLocation("/ada/hello/search?q=language:Rust&type=code");
     searchMock.mockResolvedValueOnce({
       ok: true,
       data: {

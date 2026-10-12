@@ -6,7 +6,7 @@ Conventions for Oxidean humans and agents. Complements [CONTRIBUTING.md](../CONT
 
 | Path | Owns | Must not |
 |------|------|----------|
-| `apps/web` | Octane UI, routes, Vite, Vitest projects | Dialect SQL; hand-written RPC DTOs as source of truth |
+| `apps/web` | Octane UI islands, Astro shells, Vitest projects | Dialect SQL; hand-written RPC DTOs as source of truth |
 | `packages/api-client` | Generated TS client | Manual “fixes” without regenerating from Rust |
 | `crates/oxidean-api` | HTTP/RPC, auth, email, handlers | DB dialect `if` trees |
 | `crates/oxidean-core` | Shared domain types / pure logic | I/O, SQL, Axum |
@@ -42,7 +42,7 @@ Full skill: [`.agents/skills/octane/SKILL.md`](../.agents/skills/octane/SKILL.md
 - Author in **`.tsrx`** with Rivet templates (`@{`, `@if`/`@else`, `@for`).
 - Do not mix React `return (` JSX with Rivet directives in one component.
 - Server/session data: TanStack Query (`apps/web/src/lib/session-queries.ts`). Forms: `@octanejs/tanstack-form`. File uploads: `@octanejs/dropzone` / `FileDropzone`.
-- Text fields: native `onInput` (or `field.handleChange`). Anonymous auth pages: SSR loaders, no decorative form skeletons.
+- Text fields: native `onInput` (or `field.handleChange`). Anonymous auth pages: presence-gated shells, no decorative form skeletons.
 - Preserve chrome / brand patterns; do not introduce a second design system.
 - **DOM races:** do not `@if`/`@else`-swap large sibling trees next to Base UI `RadioGroup` / Select, and do not nest `@if`/`@for` inside `form.Subscribe` bodies that re-render on checkbox/radio clicks (causes `insertBefore` / “Something went wrong!”). Keep both panels mounted and toggle with `hidden`, use per-field `form.Field`, or isolate the swap in a child component. Wrap multi-root `@if` bodies in `<>…</>`. Prefer `keepMounted` on Checkbox/Radio Indicators (shipped in `components/ui`). Happy-dom integration, Vitest browser (`*.browser.test.tsx`), and stack-browser e2e fail automatically on these races (`setup-integration.ts`, `setup-browser.ts`, `newGuardedPage` / `assertNoOctaneOverlay`).
 - **Browser coverage required for high-risk UI:** any new or changed `.tsrx` that uses `Checkbox`, `RadioGroup` / `RadioGroupItem`, `form.Subscribe`, Select, Switch, or Dialog/Menu portals must register Chromium proof in `apps/web/src/test/browser-coverage.manifest.ts`. Prefer a colocated `*.browser.test.tsx` (use `pickSelectOptionByTestId` for Base UI Select). Run `make browser-coverage-check-pr` before push. Bootstrap `skip` is inventory-only — **CI fails if you add or edit a skip-only surface without real evidence**. See [TESTING.md](TESTING.md).

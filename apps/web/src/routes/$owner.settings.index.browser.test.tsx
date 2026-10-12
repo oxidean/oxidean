@@ -15,35 +15,35 @@ import { act } from "octane";
 
 const updateSettingsMock = vi.fn();
 
-const loaderState = vi.hoisted(() => {
-  let data: unknown;
-  return {
-    get: () => data,
-    set: (next: unknown) => {
-      data = next;
-    },
-  };
-});
+const meMock = vi.fn();
+const orgGetMock = vi.fn();
+const listMineMock = vi.fn();
 
 vi.mock("@/lib/api-client", () => ({
   apiClient: {
+    auth: { me: (...args: unknown[]) => meMock(...args) },
     org: {
+      get: (...args: unknown[]) => orgGetMock(...args),
+      listMine: (...args: unknown[]) => listMineMock(...args),
       updateSettings: (...args: unknown[]) => updateSettingsMock(...args),
     },
   },
 }));
 
 vi.mock("@/lib/toast", () => ({
+  // Toaster mounts appToastManager — a bare-object stub keeps it inert.
+  appToastManager: {
+    add: vi.fn(),
+    remove: vi.fn(),
+    update: vi.fn(),
+    close: vi.fn(),
+    promise: vi.fn(),
+  },
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
 }));
 
 // Avoid importing Start/router entry points in the Chromium iframe.
-vi.mock("@octanejs/tanstack-router", () => ({
-  createFileRoute: () => (opts: unknown) => opts,
-  useLoaderData: () => loaderState.get(),
-  useParams: () => ({ owner: "acme" }),
-}));
 
 import { OrgSettingsPage } from "./$owner.settings.index";
 
@@ -55,12 +55,21 @@ const org = {
 };
 
 beforeEach(() => {
+  window.history.pushState({}, "", "/acme/settings");
+  meMock.mockReset();
+  orgGetMock.mockReset();
+  listMineMock.mockReset();
+  meMock.mockResolvedValue({ ok: true, data: { id: "u1", username: "ada" } });
+  orgGetMock.mockResolvedValue({ ok: true, data: org });
+  listMineMock.mockResolvedValue({
+    ok: true,
+    data: { orgs: [{ slug: "acme", role: "admin" }] },
+  });
   updateSettingsMock.mockReset();
   updateSettingsMock.mockResolvedValue({
     ok: true,
     data: { ...org, member_base_permission: "write" },
   });
-  loaderState.set({ org, canAdmin: true });
 });
 
 afterEach(async () => {

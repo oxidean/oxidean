@@ -43,11 +43,20 @@ fn rpc_req_with_cookie(body: &str, cookie: &str) -> Request<Body> {
 }
 
 fn session_cookie_from_response(res: &axum::http::Response<Body>) -> String {
-    let set_cookie = res.headers().get("set-cookie").expect("Set-Cookie").to_str().unwrap();
+    let set_cookie = res
+        .headers()
+        .get("set-cookie")
+        .expect("Set-Cookie")
+        .to_str()
+        .unwrap();
     set_cookie.split(';').next().unwrap().trim().to_string()
 }
 
-async fn signup_and_login(app: &axum::Router, email: &str, username: &str) -> (String, serde_json::Value) {
+async fn signup_and_login(
+    app: &axum::Router,
+    email: &str,
+    username: &str,
+) -> (String, serde_json::Value) {
     let signup_body = format!(
         r#"{{"procedure":"auth.signup","input":{{"email":"{email}","username":"{username}","password":"password1"}}}}"#
     );
@@ -66,7 +75,11 @@ async fn signup_and_login(app: &axum::Router, email: &str, username: &str) -> (S
 }
 
 async fn rpc_json(app: &axum::Router, body: &str, cookie: &str) -> serde_json::Value {
-    let res = app.clone().oneshot(rpc_req_with_cookie(body, cookie)).await.unwrap();
+    let res = app
+        .clone()
+        .oneshot(rpc_req_with_cookie(body, cookie))
+        .await
+        .unwrap();
     let bytes = res.into_body().collect().await.unwrap().to_bytes();
     serde_json::from_slice(&bytes).expect("rpc json body")
 }
@@ -75,7 +88,9 @@ async fn verified_owner(app: &axum::Router, db: &Database, email: &str, username
     let (cookie, login_v) = signup_and_login(app, email, username).await;
     let user_id = login_v["data"]["id"].as_str().unwrap().to_string();
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    db.set_email_verified_at(&user_id, &now).await.expect("verify");
+    db.set_email_verified_at(&user_id, &now)
+        .await
+        .expect("verify");
     cookie
 }
 
@@ -107,7 +122,10 @@ async fn webhook_create_admin() {
     assert_eq!(created["ok"], true, "{created}");
     assert_eq!(created["data"]["url"], "https://example.com/hook");
     assert_eq!(created["data"]["secret"], "supersecret");
-    assert!(created["data"]["secret_masked"].as_str().unwrap().contains("****"));
+    assert!(created["data"]["secret_masked"]
+        .as_str()
+        .unwrap()
+        .contains("****"));
     assert_eq!(created["data"]["events"][0], "issues");
     assert_eq!(created["data"]["active"], true);
 }
@@ -144,7 +162,13 @@ async fn webhook_list_admin() {
     assert_eq!(listed["ok"], true, "{listed}");
     let hooks = listed["data"]["webhooks"].as_array().unwrap();
     assert_eq!(hooks.len(), 1);
-    assert!(hooks[0]["secret"].is_null() || !hooks[0].get("secret").map(|s| s.is_string()).unwrap_or(false));
+    assert!(
+        hooks[0]["secret"].is_null()
+            || !hooks[0]
+                .get("secret")
+                .map(|s| s.is_string())
+                .unwrap_or(false)
+    );
     assert_ne!(hooks[0]["secret_masked"], "sekrit1");
 }
 
@@ -303,10 +327,12 @@ async fn webhook_inactive_skips_enqueue() {
     assert_eq!(issue["ok"], true, "{issue}");
 
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-    let deliveries = db.list_webhook_deliveries(&hook_id, 10).await.expect("list");
+    let deliveries = db
+        .list_webhook_deliveries(&hook_id, 10)
+        .await
+        .expect("list");
     assert!(deliveries.is_empty(), "inactive hook must not enqueue");
 }
-
 
 #[tokio::test]
 async fn webhook_deliveries_list() {

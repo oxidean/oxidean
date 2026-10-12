@@ -30,11 +30,7 @@ impl EmailSender for RecordingSender {
 
 async fn test_app_with_recorder(db: Database) -> (axum::Router, Arc<RecordingSender>) {
     let recorder = Arc::new(RecordingSender::default());
-    let state = AppState::new(
-        db,
-        recorder.clone() as Arc<dyn EmailSender>,
-        "development",
-    );
+    let state = AppState::new(db, recorder.clone() as Arc<dyn EmailSender>, "development");
     let cors = build_cors("development", None).expect("cors");
     (router_with_state(state, cors), recorder)
 }
@@ -143,7 +139,6 @@ fn sha256_hex(data: &[u8]) -> String {
     out
 }
 
-
 fn invite_email(sent: &[OutboundEmail]) -> &OutboundEmail {
     sent.iter()
         .find(|m| m.text.contains("/invites/"))
@@ -211,8 +206,7 @@ async fn org_invites_create() {
     let invite_url = first["invite_url"].as_str().expect("invite_url");
     assert!(invite_url.contains("/invites/"), "{v}");
     assert!(
-        first["invite"].get("token").is_none()
-            && first["invite"].get("token_hash").is_none(),
+        first["invite"].get("token").is_none() && first["invite"].get("token_hash").is_none(),
         "create must not return plaintext token or hash: {v}"
     );
 
@@ -301,16 +295,9 @@ async fn org_invites_create_link_accept() {
     let inst_token = "a".repeat(64);
     let inst_hash = sha256_hex(inst_token.as_bytes());
     let owner_id = members[0].user_id.clone();
-    db.insert_instance_invite(
-        "inst-inv-1",
-        None,
-        &inst_hash,
-        None,
-        &owner_id,
-        Some(1),
-    )
-    .await
-    .expect("insert instance invite");
+    db.insert_instance_invite("inst-inv-1", None, &inst_hash, None, &owner_id, Some(1))
+        .await
+        .expect("insert instance invite");
     let (status, wrong_kind) = rpc_json(
         &app,
         &format!(
@@ -320,7 +307,10 @@ async fn org_invites_create_link_accept() {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{wrong_kind}");
-    assert_eq!(wrong_kind["error"]["code"], "org.invalid_invite", "{wrong_kind}");
+    assert_eq!(
+        wrong_kind["error"]["code"], "org.invalid_invite",
+        "{wrong_kind}"
+    );
     let inst_row = db
         .find_instance_invite_by_token_hash(&inst_hash)
         .await
@@ -526,8 +516,12 @@ async fn org_invites_token_hash_at_rest() {
     .await;
     assert_eq!(create_v["ok"], true, "{create_v}");
     assert!(
-        create_v["data"]["results"][0]["invite"].get("token").is_none()
-            && create_v["data"]["results"][0]["invite"].get("token_hash").is_none()
+        create_v["data"]["results"][0]["invite"]
+            .get("token")
+            .is_none()
+            && create_v["data"]["results"][0]["invite"]
+                .get("token_hash")
+                .is_none()
             && create_v["data"].get("token").is_none()
             && create_v["data"].get("token_hash").is_none(),
         "RPC must not expose token or hash: {create_v}"

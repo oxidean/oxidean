@@ -1,5 +1,10 @@
-import { createFileRoute, useLoaderData, useParams } from "@octanejs/tanstack-router";
 import type { RepoCommitSummary, RepoPublic } from "@oxidean/api-client";
+import { queryOptions, useQuery } from "@octanejs/tanstack-query";
+
+import { matchPath } from "@/lib/route-params";
+import { usePathname, useSearchString } from "@/lib/pathname.tsrx";
+import { RepoLayout } from "@/routes/$owner.$repo.tsrx";
+import { AppPage } from "@/components/app-page";
 import { useEffect, useState } from "octane";
 import { GitCommitHorizontal } from "@octanejs/lucide";
 import { CommitAuthorLink } from "@/components/repo/commit-author-link";
@@ -54,7 +59,7 @@ async function loadCommitsPage(
   repoName: string,
   refFromUrl: string,
 ): Promise<CommitsLoaderData> {
-  const got = await fetchRepoGet({ data: { owner, name: repoName } });
+  const got = await fetchRepoGet({ owner, name: repoName });
   if (!got.ok) {
     if (got.error.code === "repo.not_found") return { kind: "not_found" };
     return {
@@ -64,11 +69,11 @@ async function loadCommitsPage(
   }
   const repo = got.data;
   const refName = refFromUrl || repo.default_branch || "main";
-  const list = await fetchRepoCommits({
-    data: { owner, name: repoName, ref: refName, skip: 0, limit: 30 },
-  });
+  const list = await fetchRepoCommits({ owner, name: repoName, ref: refName, skip: 0, limit: 30 });
   if (!list.ok) {
-    if (list.error.code === "repo.not_found") return { kind: "not_found" };
+    if (list.error.code === "repo.not_found" || list.error.code === "repo.git_failed") {
+      return { kind: "not_found" };
+    }
     return {
       kind: "error",
       message: list.error.message || "Could not load commits.",
@@ -84,34 +89,45 @@ async function loadCommitsPage(
   };
 }
 
-export const Route = createFileRoute("/$owner/$repo/commits/$")({
-  component: RepoCommitsPage,
-  head: ({ params }) => ({
-    meta: [
-      {
-        title: `Commits · ${(params as { owner: string }).owner}/${(params as { repo: string }).repo} · Oxidean`,
-      },
+function repoCommitsQueryOptions(params: Record<string, string | undefined>, searchStr = "") {
+  return queryOptions({
+    queryKey: [
+      "repo-page",
+      "/$owner/$repo/commits/$",
+      params.owner ?? "",
+      params.repo ?? "",
+      params._splat ?? "",
+      params.n ?? "",
+      params.sha ?? "",
+      params.tag ?? "",
+      params.run ?? "",
+      searchStr,
     ],
-  }),
-  loader: async ({ params }): Promise<CommitsLoaderData> => {
-    const owner = String((params as { owner?: string }).owner ?? "");
-    const repoName = String((params as { repo?: string }).repo ?? "");
-    const splat = String((params as { _splat?: string })._splat ?? "");
-    const refFromUrl = decodeURIComponent(splat.split("/")[0] ?? "");
-    try {
-      return await loadCommitsPage(owner, repoName, refFromUrl);
-    } catch {
-      return { kind: "error", message: NETWORK_ERROR };
-    }
-  },
-});
+    queryFn: async (): Promise<CommitsLoaderData> => {
+      const owner = String((params as { owner?: string }).owner ?? "");
+      const repoName = String((params as { repo?: string }).repo ?? "");
+      const splat = String((params as { _splat?: string })._splat ?? "");
+      const refFromUrl = decodeURIComponent(splat.split("/")[0] ?? "");
+      try {
+        return await loadCommitsPage(owner, repoName, refFromUrl);
+      } catch {
+        return { kind: "error", message: NETWORK_ERROR };
+      }
+    },
+    enabled: Boolean(params.owner && params.repo),
+    retry: false,
+    staleTime: 30_000,
+  });
+}
 
 function relativeCommitTime(iso: string): string {
   return formatRelativeUpdated(iso).replace(/^Updated\s+/i, "");
 }
 
-export function RepoCommitsPage() @{
-  const params = useParams({ from: "/$owner/$repo/commits/$" }) as {
+function RepoCommitsPageContent() @{
+  const pathname = usePathname();
+  const searchStr = useSearchString();
+  const params = (matchPath("/$owner/$repo/commits/$", pathname) ?? {}) as {
     owner: string;
     repo: string;
     _splat?: string;
@@ -119,9 +135,7 @@ export function RepoCommitsPage() @{
   const owner = params.owner ?? "";
   const repoName = params.repo ?? "";
   const refFromUrl = decodeURIComponent((params._splat ?? "").split("/")[0] ?? "");
-  const loaderData = useLoaderData({ from: "/$owner/$repo/commits/$" }) as
-    | CommitsLoaderData
-    | undefined;
+  const loaderData = useQuery(repoCommitsQueryOptions(params, searchStr)).data;
 
   const [phase, setPhase] = useState<Phase>(() =>
     loaderData
@@ -243,7 +257,7 @@ export function RepoCommitsPage() @{
                 />
                 <time
                   className="text-[13px] text-muted-foreground"
-                  dateTime={c.authored_at as string}
+                  datetime={c.authored_at as string}
                 >
                   {relativeCommitTime(c.authored_at) as string}
                 </time>
@@ -269,4 +283,13 @@ export function RepoCommitsPage() @{
       }
     </>;
   }
+}
+
+/** Page root — RepoLayout (chrome + repo store) around the leaf content. */
+export function RepoCommitsPage() @{
+  <AppPage>
+    <RepoLayout>
+      <RepoCommitsPageContent />
+    </RepoLayout>
+  </AppPage>;
 }

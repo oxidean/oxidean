@@ -67,10 +67,7 @@ fn row_to_list_item(row: &oxidean_db::PatRow) -> Result<PatListItem, AppError> {
             })?;
             let mut out = Vec::with_capacity(names.len());
             for n in names {
-                out.push(
-                    ClassicPatScope::parse(&n)
-                        .map_err(|e| AppError::new("pat.internal", e))?,
-                );
+                out.push(ClassicPatScope::parse(&n).map_err(|e| AppError::new("pat.internal", e))?);
             }
             Some(out)
         }
@@ -78,19 +75,18 @@ fn row_to_list_item(row: &oxidean_db::PatRow) -> Result<PatListItem, AppError> {
     };
     let contents = match row.contents_perm.as_deref() {
         Some(s) => Some(
-            oxidean_core::ContentsPerm::parse(s)
-                .map_err(|e| AppError::new("pat.internal", e))?,
+            oxidean_core::ContentsPerm::parse(s).map_err(|e| AppError::new("pat.internal", e))?,
         ),
         None => None,
     };
     let packages = match kind {
         PatKind::FineGrained => scopes.as_ref().and_then(|sc| {
-            if sc.iter().any(|s| matches!(s, ClassicPatScope::PackageWrite)) {
-                Some(oxidean_core::PackagesPerm::Write)
-            } else if sc
+            if sc
                 .iter()
-                .any(|s| matches!(s, ClassicPatScope::PackageRead))
+                .any(|s| matches!(s, ClassicPatScope::PackageWrite))
             {
+                Some(oxidean_core::PackagesPerm::Write)
+            } else if sc.iter().any(|s| matches!(s, ClassicPatScope::PackageRead)) {
                 Some(oxidean_core::PackagesPerm::Read)
             } else {
                 None
@@ -100,8 +96,7 @@ fn row_to_list_item(row: &oxidean_db::PatRow) -> Result<PatListItem, AppError> {
     };
     let repo_access = match row.repo_access.as_deref() {
         Some(s) => Some(
-            oxidean_core::FgRepoAccess::parse(s)
-                .map_err(|e| AppError::new("pat.internal", e))?,
+            oxidean_core::FgRepoAccess::parse(s).map_err(|e| AppError::new("pat.internal", e))?,
         ),
         None => None,
     };
@@ -397,12 +392,14 @@ struct RevokePatRequest {
 /// Soft-revoke a PAT owned by the signed-in user.
 pub async fn revoke(ctx: &RpcCtx, input: serde_json::Value) -> Result<serde_json::Value, AppError> {
     let user_id = require_session_user_id(ctx)?;
-    let req: RevokePatRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid pat.revoke input: {e}"))
-    })?;
+    let req: RevokePatRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid pat.revoke input: {e}")))?;
     let id = req.id.trim();
     if id.is_empty() {
-        return Err(AppError::new("pat.not_found", "personal access token not found"));
+        return Err(AppError::new(
+            "pat.not_found",
+            "personal access token not found",
+        ));
     }
 
     let owned = ctx

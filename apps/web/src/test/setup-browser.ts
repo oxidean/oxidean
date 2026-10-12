@@ -1,6 +1,8 @@
 import { afterEach, beforeEach } from "vitest";
 import { cleanupBrowserMount } from "./browser-mount";
 import { consumeDomRaceAllowlist, trackDomErrors, type DomErrorTracker } from "./dom-errors";
+import { getQueryClient } from "@/lib/query-client";
+import "../styles.css";
 
 /**
  * Chromium browser-mode suite: fail on Octane insertBefore / hierarchy races.
@@ -14,6 +16,9 @@ let suiteTracker: DomErrorTracker | null = null;
 beforeEach(() => {
   suiteTracker?.dispose();
   suiteTracker = trackDomErrors();
+  // Same singleton-cache reset as setup-integration.ts — pages mount AppPage,
+  // which provides the shared getQueryClient(), not the mount-time client.
+  getQueryClient().clear();
 });
 
 afterEach(async () => {

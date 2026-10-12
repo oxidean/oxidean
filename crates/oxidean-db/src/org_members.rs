@@ -16,11 +16,15 @@ macro_rules! map_member {
     ($row:expr) => {{
         let row = $row;
         OrgMemberRow {
-            org_id: row.try_get("org_id").map_err(|e| format!("org member row: {e}"))?,
+            org_id: row
+                .try_get("org_id")
+                .map_err(|e| format!("org member row: {e}"))?,
             user_id: row
                 .try_get("user_id")
                 .map_err(|e| format!("org member row: {e}"))?,
-            role: row.try_get("role").map_err(|e| format!("org member row: {e}"))?,
+            role: row
+                .try_get("role")
+                .map_err(|e| format!("org member row: {e}"))?,
             created_at: row
                 .try_get("created_at")
                 .map_err(|e| format!("org member row: {e}"))?,
@@ -105,9 +109,7 @@ pub async fn find_member_role(
     org_id: &str,
     user_id: &str,
 ) -> Result<Option<String>, String> {
-    Ok(find_member(pool, org_id, user_id)
-        .await?
-        .map(|m| m.role))
+    Ok(find_member(pool, org_id, user_id).await?.map(|m| m.role))
 }
 
 /// Membership row with username for `org.members.list` (no email).
@@ -234,33 +236,33 @@ WHERE org_id = ?1 AND user_id = ?2",
 
 pub async fn remove_member(pool: &DbPool, org_id: &str, user_id: &str) -> Result<(), String> {
     let n = match pool {
-        DbPool::Postgres(p) => sqlx::query(
-            "DELETE FROM organization_members WHERE org_id = $1 AND user_id = $2",
-        )
-        .bind(org_id)
-        .bind(user_id)
-        .execute(p)
-        .await
-        .map_err(|e| format!("remove org member failed: {e}"))?
-        .rows_affected(),
-        DbPool::MySql(p) => sqlx::query(
-            "DELETE FROM organization_members WHERE org_id = ? AND user_id = ?",
-        )
-        .bind(org_id)
-        .bind(user_id)
-        .execute(p)
-        .await
-        .map_err(|e| format!("remove org member failed: {e}"))?
-        .rows_affected(),
-        DbPool::Sqlite(p) => sqlx::query(
-            "DELETE FROM organization_members WHERE org_id = ?1 AND user_id = ?2",
-        )
-        .bind(org_id)
-        .bind(user_id)
-        .execute(p)
-        .await
-        .map_err(|e| format!("remove org member failed: {e}"))?
-        .rows_affected(),
+        DbPool::Postgres(p) => {
+            sqlx::query("DELETE FROM organization_members WHERE org_id = $1 AND user_id = $2")
+                .bind(org_id)
+                .bind(user_id)
+                .execute(p)
+                .await
+                .map_err(|e| format!("remove org member failed: {e}"))?
+                .rows_affected()
+        }
+        DbPool::MySql(p) => {
+            sqlx::query("DELETE FROM organization_members WHERE org_id = ? AND user_id = ?")
+                .bind(org_id)
+                .bind(user_id)
+                .execute(p)
+                .await
+                .map_err(|e| format!("remove org member failed: {e}"))?
+                .rows_affected()
+        }
+        DbPool::Sqlite(p) => {
+            sqlx::query("DELETE FROM organization_members WHERE org_id = ?1 AND user_id = ?2")
+                .bind(org_id)
+                .bind(user_id)
+                .execute(p)
+                .await
+                .map_err(|e| format!("remove org member failed: {e}"))?
+                .rows_affected()
+        }
     };
     if n == 0 {
         return Err("org member not found".into());
@@ -286,14 +288,18 @@ ORDER BY m.created_at ASC, m.user_id ASC",
             rows.into_iter()
                 .map(|row| {
                     Ok(OrgMemberListRow {
-                        org_id: row.try_get("org_id").map_err(|e| format!("member list: {e}"))?,
+                        org_id: row
+                            .try_get("org_id")
+                            .map_err(|e| format!("member list: {e}"))?,
                         user_id: row
                             .try_get("user_id")
                             .map_err(|e| format!("member list: {e}"))?,
                         username: row
                             .try_get("username")
                             .map_err(|e| format!("member list: {e}"))?,
-                        role: row.try_get("role").map_err(|e| format!("member list: {e}"))?,
+                        role: row
+                            .try_get("role")
+                            .map_err(|e| format!("member list: {e}"))?,
                         created_at: row
                             .try_get("created_at")
                             .map_err(|e| format!("member list: {e}"))?,
@@ -317,14 +323,18 @@ ORDER BY m.created_at ASC, m.user_id ASC",
             rows.into_iter()
                 .map(|row| {
                     Ok(OrgMemberListRow {
-                        org_id: row.try_get("org_id").map_err(|e| format!("member list: {e}"))?,
+                        org_id: row
+                            .try_get("org_id")
+                            .map_err(|e| format!("member list: {e}"))?,
                         user_id: row
                             .try_get("user_id")
                             .map_err(|e| format!("member list: {e}"))?,
                         username: row
                             .try_get("username")
                             .map_err(|e| format!("member list: {e}"))?,
-                        role: row.try_get("role").map_err(|e| format!("member list: {e}"))?,
+                        role: row
+                            .try_get("role")
+                            .map_err(|e| format!("member list: {e}"))?,
                         created_at: row
                             .try_get("created_at")
                             .map_err(|e| format!("member list: {e}"))?,
@@ -348,14 +358,18 @@ ORDER BY m.created_at ASC, m.user_id ASC",
             rows.into_iter()
                 .map(|row| {
                     Ok(OrgMemberListRow {
-                        org_id: row.try_get("org_id").map_err(|e| format!("member list: {e}"))?,
+                        org_id: row
+                            .try_get("org_id")
+                            .map_err(|e| format!("member list: {e}"))?,
                         user_id: row
                             .try_get("user_id")
                             .map_err(|e| format!("member list: {e}"))?,
                         username: row
                             .try_get("username")
                             .map_err(|e| format!("member list: {e}"))?,
-                        role: row.try_get("role").map_err(|e| format!("member list: {e}"))?,
+                        role: row
+                            .try_get("role")
+                            .map_err(|e| format!("member list: {e}"))?,
                         created_at: row
                             .try_get("created_at")
                             .map_err(|e| format!("member list: {e}"))?,
@@ -486,9 +500,9 @@ pub async fn find_member(
 ) -> Result<Option<OrgMemberRow>, String> {
     match pool {
         DbPool::Postgres(p) => {
-            let row = sqlx::query(&format!(
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{MEMBER_SELECT_PG} WHERE org_id = $1 AND user_id = $2"
-            ))
+            )))
             .bind(org_id)
             .bind(user_id)
             .fetch_optional(p)
@@ -500,9 +514,9 @@ pub async fn find_member(
             })
         }
         DbPool::MySql(p) => {
-            let row = sqlx::query(&format!(
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{MEMBER_SELECT_MYSQL} WHERE org_id = ? AND user_id = ?"
-            ))
+            )))
             .bind(org_id)
             .bind(user_id)
             .fetch_optional(p)
@@ -514,9 +528,9 @@ pub async fn find_member(
             })
         }
         DbPool::Sqlite(p) => {
-            let row = sqlx::query(&format!(
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{MEMBER_SELECT_SQLITE} WHERE org_id = ?1 AND user_id = ?2"
-            ))
+            )))
             .bind(org_id)
             .bind(user_id)
             .fetch_optional(p)

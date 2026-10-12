@@ -36,28 +36,11 @@ const sysAdmin = {
   default_branch: "main",
 };
 
-type LoaderShape =
-  | { kind: "unauthenticated" }
-  | { kind: "forbidden" }
-  | { kind: "error"; message: string }
-  | { kind: "ready"; me: typeof sysAdmin };
-
-let loaderData: LoaderShape | undefined;
-
-vi.mock("@octanejs/tanstack-router", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@octanejs/tanstack-router")>();
-  return {
-    ...actual,
-    useLoaderData: () => loaderData,
-  };
-});
-
 import { AdminPackagesPage } from "./packages";
 
 afterEach(cleanup);
 
 beforeEach(() => {
-  loaderData = { kind: "ready", me: sysAdmin };
   meMock.mockResolvedValue({ ok: true, data: sysAdmin });
   adminUsageMock.mockReset();
   adminSetQuotaMock.mockReset();
@@ -87,7 +70,8 @@ describe("/admin/packages", () => {
   }, 15_000);
 
   it("shows forbidden for non sys-admin from loader", async () => {
-    loaderData = { kind: "forbidden" };
+    meMock.mockResolvedValue({ ok: true, data: { ...sysAdmin, role: "user" } });
+
     renderWithQueryClient(AdminPackagesPage);
 
     await waitFor(() => {

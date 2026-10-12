@@ -157,10 +157,7 @@ async fn setup_links_fixture(app: &axum::Router, db: &Database) -> (String, Stri
 async fn issue_links_manual_add_stub() {
     let dir = tempfile::tempdir().expect("tempdir");
     let repos = dir.path().join("repos");
-    let url = format!(
-        "sqlite:{}",
-        dir.path().join("issue_links_add.db").display()
-    );
+    let url = format!("sqlite:{}", dir.path().join("issue_links_add.db").display());
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
@@ -177,7 +174,12 @@ async fn issue_links_manual_add_stub() {
     assert_eq!(add_pr["ok"], true, "Write+ add pr_stub — {add_pr}");
     let link = &add_pr["data"];
     assert_eq!(link["kind"], "pr_stub");
-    assert_eq!(link["targetNumber"].as_i64().or_else(|| link["target_number"].as_i64()), Some(42));
+    assert_eq!(
+        link["targetNumber"]
+            .as_i64()
+            .or_else(|| link["target_number"].as_i64()),
+        Some(42)
+    );
     assert_eq!(
         link["title"].as_str(),
         Some("Stub PR title"),
@@ -349,7 +351,10 @@ async fn issue_links_list_stubs_for_panel() {
     assert_eq!(links.len(), 1, "one stub for panel — {list}");
     assert_eq!(links[0]["kind"], "pr_stub");
     assert!(
-        links[0]["id"].as_str().map(|s| !s.is_empty()).unwrap_or(false),
+        links[0]["id"]
+            .as_str()
+            .map(|s| !s.is_empty())
+            .unwrap_or(false),
         "opaque id present"
     );
     assert_eq!(

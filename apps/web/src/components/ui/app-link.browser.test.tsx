@@ -1,20 +1,12 @@
 /**
- * Chromium gate for mobile (touch) navigation on router links — issue #111.
+ * Chromium gate for mobile (touch) navigation on internal links — issue #111.
  * Simulates the real tap sequence (pointerdown → touchstart → pointerup →
- * touchend → mousedown → mouseup → click) against a memory-history router and
- * asserts navigation commits. `preload="intent"` fires on touchstart, so the
- * click lands while a preload is in flight — the path desktop never takes.
+ * touchend → mousedown → mouseup → click) against AppLink and asserts the
+ * click lands on the anchor. Under Astro, AppLink is a plain `<a>` and the
+ * ClientRouter's document-level delegation drives the navigation — the tap
+ * must reach the element as an unswallowed click event.
  */
 import { afterEach, describe, expect, it } from "vitest";
-import {
-  createMemoryHistory,
-  createRootRoute,
-  createRoute,
-  createRouter,
-  Link,
-  Outlet,
-  RouterProvider,
-} from "@octanejs/tanstack-router";
 import { createElement } from "octane";
 import { AppLink } from "@/components/ui/app-link";
 import {
@@ -41,47 +33,6 @@ function dispatchTouchTap(el: Element): void {
   el.dispatchEvent(new MouseEvent("click", { ...init, button: 0 }));
 }
 
-function makeRouter() {
-  const rootRoute = createRootRoute({
-    component: () => createElement(Outlet as never),
-  });
-  const indexRoute = createRoute({
-    getParentRoute: () => rootRoute,
-    path: "/",
-    component: function Index() {
-      return createElement(
-        "div",
-        {},
-        createElement(AppLink as never, {
-          href: "/target",
-          "data-testid": "nav-applink",
-          children: "Go target",
-        }),
-        createElement(Link as never, {
-          to: "/target",
-          preload: "intent",
-          "data-testid": "nav-link",
-          children: "Go target link",
-        }),
-      );
-    },
-  });
-  const targetRoute = createRoute({
-    getParentRoute: () => rootRoute,
-    path: "/target",
-    component: function Target() {
-      return createElement("div", { "data-testid": "target-page" }, "Target");
-    },
-  });
-  const routeTree = rootRoute.addChildren([indexRoute, targetRoute]);
-  return createRouter({
-    routeTree,
-    history: createMemoryHistory({ initialEntries: ["/"] }),
-    defaultPreload: "intent",
-    defaultPreloadDelay: 50,
-  });
-}
-
 async function waitForTestId(testId: string, ms = 10_000): Promise<Element> {
   const deadline = Date.now() + ms;
   while (Date.now() < deadline) {
@@ -97,31 +48,33 @@ describe("mobile touch navigation (issue #111)", () => {
     await cleanupBrowserMount();
   });
 
-  it("tap on AppLink navigates", async () => {
+  it("tap on AppLink delivers a click to the anchor", async () => {
     const tracker = trackDomErrors();
     try {
-      const router = makeRouter();
-      await mountComponent(RouterProvider, { router });
+      let clicked: MouseEvent | null = null;
+      function Host() {
+        return createElement(
+          "div",
+          {},
+          createElement(AppLink as never, {
+            href: "/target",
+            "data-testid": "nav-applink",
+            onClick: (e: MouseEvent) => {
+              clicked = e;
+              // Prevent the anchor's default navigation — it would move the
+              // vitest iframe off the test page.
+              e.preventDefault();
+            },
+            children: "Go target",
+          }),
+        );
+      }
+      await mountComponent(Host as never);
       const link = await waitForTestId("nav-applink");
+      expect(link.tagName).toBe("A");
+      expect(link.getAttribute("href")).toBe("/target");
       dispatchTouchTap(link);
-      await waitForTestId("target-page");
-      expect(router.state.location.pathname).toBe("/target");
-      expectNoOctaneOverlayInDocument();
-      tracker.expectNoDomRaces();
-    } finally {
-      tracker.dispose();
-    }
-  });
-
-  it("tap on Link with preload=intent navigates", async () => {
-    const tracker = trackDomErrors();
-    try {
-      const router = makeRouter();
-      await mountComponent(RouterProvider, { router });
-      const link = await waitForTestId("nav-link");
-      dispatchTouchTap(link);
-      await waitForTestId("target-page");
-      expect(router.state.location.pathname).toBe("/target");
+      expect(clicked).not.toBeNull();
       expectNoOctaneOverlayInDocument();
       tracker.expectNoDomRaces();
     } finally {

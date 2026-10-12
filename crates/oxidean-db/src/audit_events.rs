@@ -33,7 +33,9 @@ macro_rules! map_event {
     ($row:expr) => {{
         let row = $row;
         AuditEventRow {
-            id: row.try_get("id").map_err(|e| format!("audit event row: {e}"))?,
+            id: row
+                .try_get("id")
+                .map_err(|e| format!("audit event row: {e}"))?,
             actor_id: map_opt_str!(row, "actor_id"),
             actor_username: row
                 .try_get("actor_username")
@@ -58,12 +60,14 @@ const SELECT_PG: &str = "SELECT id, actor_id, actor_username, event_type, target
        to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS created_at
 FROM audit_events";
 
-const SELECT_MYSQL: &str = "SELECT id, actor_id, actor_username, event_type, target_type, target_id,
+const SELECT_MYSQL: &str =
+    "SELECT id, actor_id, actor_username, event_type, target_type, target_id,
        detail, ip_address, user_agent,
        DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at
 FROM audit_events";
 
-const SELECT_SQLITE: &str = "SELECT id, actor_id, actor_username, event_type, target_type, target_id,
+const SELECT_SQLITE: &str =
+    "SELECT id, actor_id, actor_username, event_type, target_type, target_id,
        detail, ip_address, user_agent,
        strftime('%Y-%m-%dT%H:%M:%SZ', created_at) AS created_at
 FROM audit_events";
@@ -174,7 +178,7 @@ pub async fn list_for_actor(
  LIMIT $2"
                 ),
             };
-            let mut query = sqlx::query(&q).bind(actor_id);
+            let mut query = sqlx::query(sqlx::AssertSqlSafe(&*q)).bind(actor_id);
             if let Some(et) = event_type {
                 query = query.bind(et);
             }
@@ -200,7 +204,7 @@ pub async fn list_for_actor(
  LIMIT ?"
                 ),
             };
-            let mut query = sqlx::query(&q).bind(actor_id);
+            let mut query = sqlx::query(sqlx::AssertSqlSafe(&*q)).bind(actor_id);
             if let Some(et) = event_type {
                 query = query.bind(et);
             }
@@ -226,7 +230,7 @@ pub async fn list_for_actor(
  LIMIT ?2"
                 ),
             };
-            let mut query = sqlx::query(&q).bind(actor_id);
+            let mut query = sqlx::query(sqlx::AssertSqlSafe(&*q)).bind(actor_id);
             if let Some(et) = event_type {
                 query = query.bind(et);
             }

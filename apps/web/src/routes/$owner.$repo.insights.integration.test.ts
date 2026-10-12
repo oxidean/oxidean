@@ -8,7 +8,7 @@ const dir = dirname(fileURLToPath(import.meta.url));
 describe("repo insights route", () => {
   it("wires the insights page with all three SSR + client sections", () => {
     const src = readFileSync(join(dir, "$owner.$repo.insights.tsrx"), "utf8");
-    expect(src).toMatch(/createFileRoute\("\/\$owner\/\$repo\/insights"\)/);
+    expect(src).toMatch(/matchPath\("\/\$owner\/\$repo\/insights"/);
     expect(src).toMatch(/export function RepoInsightsPage/);
     expect(src).toMatch(/fetchRepoGet/);
     expect(src).toMatch(/fetchRepoInsightsContributors/);
@@ -23,7 +23,7 @@ describe("repo insights route", () => {
   it("isolates per-section failures so one bad RPC does not sink the page", () => {
     const src = readFileSync(join(dir, "$owner.$repo.insights.tsrx"), "utf8");
     expect(src).toMatch(/Promise\.all\(\[/);
-    expect((src.match(/\.catch\(\(\) => null\)/g) ?? []).length).toBe(3);
+    expect((src.match(/\.catch\(\s*\(\)\s*=>\s*null\s*,?\s*\)/g) ?? []).length).toBe(3);
     expect(src).toMatch(/contributorsQ\.isError/);
     expect(src).toMatch(/activityQ\.isError/);
     expect(src).toMatch(/networkQ\.isError/);

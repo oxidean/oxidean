@@ -1,5 +1,9 @@
-import { createFileRoute, useLoaderData, useParams } from "@octanejs/tanstack-router";
-import { useQuery, useQueryClient } from "@octanejs/tanstack-query";
+import { queryOptions, useQuery, useQueryClient } from "@octanejs/tanstack-query";
+import { useRepoLayoutData } from "@/lib/repo-store.tsrx";
+import { matchPath } from "@/lib/route-params";
+import { usePathname, useSearchString } from "@/lib/pathname.tsrx";
+import { RepoLayout } from "@/routes/$owner.$repo.tsrx";
+import { AppPage } from "@/components/app-page";
 import type { LabelPublic, RepoPublic } from "@oxidean/api-client";
 import { useForm } from "@octanejs/tanstack-form";
 import { useState } from "octane";
@@ -10,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiClient } from "@/lib/api-client";
-import type { RepoLayoutLoaderData } from "@/lib/repo-store";
+
 import { fetchRepoGet } from "@/lib/ssr-repo";
 import { AppLink } from "@/components/ui/app-link";
 
@@ -33,7 +37,7 @@ function swatchStyle(color: string): { backgroundColor: string } {
 }
 
 async function loadRepoLabels(owner: string, repoName: string): Promise<RepoLabelsLoaderData> {
-  const got = await fetchRepoGet({ data: { owner, name: repoName } });
+  const got = await fetchRepoGet({ owner, name: repoName });
   if (!got.ok) {
     if (got.error.code === "repo.not_found") return { kind: "not_found" };
     return {
@@ -50,38 +54,47 @@ async function loadRepoLabels(owner: string, repoName: string): Promise<RepoLabe
   return { kind: "ready", repo: got.data };
 }
 
-export const Route = createFileRoute("/$owner/$repo/issues/labels")({
-  component: RepoIssueLabelsPage,
-  head: ({ params }) => ({
-    meta: [
-      {
-        title: `Labels · ${(params as { owner: string }).owner}/${(params as { repo: string }).repo} · Oxidean`,
-      },
+function repoIssuesLabelsQueryOptions(params: Record<string, string | undefined>, searchStr = "") {
+  return queryOptions({
+    queryKey: [
+      "repo-page",
+      "/$owner/$repo/issues/labels",
+      params.owner ?? "",
+      params.repo ?? "",
+      params._splat ?? "",
+      params.n ?? "",
+      params.sha ?? "",
+      params.tag ?? "",
+      params.run ?? "",
+      searchStr,
     ],
-  }),
-  loader: async ({ params }): Promise<RepoLabelsLoaderData> => {
-    const owner = String((params as { owner?: string }).owner ?? "");
-    const repoName = String((params as { repo?: string }).repo ?? "");
-    try {
-      return await loadRepoLabels(owner, repoName);
-    } catch {
-      return { kind: "error", message: NETWORK_ERROR };
-    }
-  },
-});
+    queryFn: async (): Promise<RepoLabelsLoaderData> => {
+      const owner = String((params as { owner?: string }).owner ?? "");
+      const repoName = String((params as { repo?: string }).repo ?? "");
+      try {
+        return await loadRepoLabels(owner, repoName);
+      } catch {
+        return { kind: "error", message: NETWORK_ERROR };
+      }
+    },
+    enabled: Boolean(params.owner && params.repo),
+    retry: false,
+    staleTime: 30_000,
+  });
+}
 
 /** Repo label overrides — local labels + hide org defaults (D-ISS-05 / D-ISS-07). */
-export function RepoIssueLabelsPage() @{
-  const params = useParams({ strict: false }) as {
+function RepoIssueLabelsPageContent() @{
+  const pathname = usePathname();
+  const searchStr = useSearchString();
+  const params = (matchPath("/$owner/$repo/issues/labels", pathname) ?? {}) as {
     owner?: string;
     repo?: string;
   };
   const owner = params.owner ?? "";
   const repoName = params.repo ?? "";
-  const layout = useLoaderData({ from: "/$owner/$repo" }) as RepoLayoutLoaderData | undefined;
-  const routeLoader = useLoaderData({
-    from: "/$owner/$repo/issues/labels",
-  }) as RepoLabelsLoaderData | undefined;
+  const layout = useRepoLayoutData();
+  const routeLoader = useQuery(repoIssuesLabelsQueryOptions(params, searchStr)).data;
   const queryClient = useQueryClient();
 
   const repoQ = useQuery({
@@ -374,3 +387,12 @@ export function RepoIssueLabelsPage() @{
 }
 
 export default RepoIssueLabelsPage;
+
+/** Page root — RepoLayout (chrome + repo store) around the leaf content. */
+export function RepoIssueLabelsPage() @{
+  <AppPage>
+    <RepoLayout>
+      <RepoIssueLabelsPageContent />
+    </RepoLayout>
+  </AppPage>;
+}

@@ -1,11 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@octanejs/tanstack-query";
-import { useRouter } from "@octanejs/tanstack-router";
 import { useState } from "octane";
 import { repoForkStatusQueryOptions, repoSyncForkMutationOptions } from "@oxidean/api-client";
 import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api-client";
 
-export type SyncForkPanelProps = {
+type SyncForkPanelProps = {
   owner: string;
   repoName: string;
   /** Write+ on the fork — the sync button only shows for writers. */
@@ -18,7 +17,6 @@ function commitsLabel(n: number): string {
 
 /** "Sync fork" card — live upstream divergence + ff/merge action (GIT-24). */
 export function SyncForkPanel(props: SyncForkPanelProps) @{
-  const router = useRouter();
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -42,11 +40,10 @@ export function SyncForkPanel(props: SyncForkPanelProps) @{
             ? `Merged ${data.upstream_owner}/${data.upstream_name}:${data.upstream_branch} into ${data.branch}.`
             : `${data.branch} is already up to date.`,
       );
+      // Refreshes repo-scoped queries (fork status, tree, commits) to the new tip.
       await queryClient.invalidateQueries({
-        queryKey: ["repo", "forkStatus", props.owner, props.repoName],
+        queryKey: ["repo", props.owner, props.repoName],
       });
-      // Refreshes loader-driven trees (code home, commits) to the new tip.
-      await router.invalidate();
     },
     onError: (err: Error) => {
       setNotice(null);

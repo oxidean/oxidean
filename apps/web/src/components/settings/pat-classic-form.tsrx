@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ClassicScopeGroups } from "@/components/settings/pat-classic-scopes";
-import { PatExpiryField } from "@/components/settings/pat-expiry-field";
+import { PatExpiryFields } from "@/components/settings/pat-expiry-field";
 import {
   resolveExpiresAt,
   tomorrowDateValue,
@@ -130,21 +130,7 @@ export function PatClassicForm({ onCreated }: PatClassicFormProps) @{
       {(scopeError || "") as string}
     </p>
 
-    <form.Field name="expiryPreset">
-      {(presetField) => (
-        <form.Field name="expiryDate">
-          {(dateField) => (
-            <PatExpiryField
-              preset={presetField.state.value}
-              customDate={dateField.state.value}
-              disabled={pending}
-              onPresetChange={(p) => presetField.handleChange(p)}
-              onCustomDateChange={(d) => dateField.handleChange(d)}
-            />
-          )}
-        </form.Field>
-      )}
-    </form.Field>
+    <PatExpiryFields form={form} disabled={pending} />
 
     <form.Subscribe
       selector={(s) => ({

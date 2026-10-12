@@ -1,5 +1,5 @@
-import { createFileRoute, useLoaderData } from "@octanejs/tanstack-router";
-import { useQuery, useQueryClient } from "@octanejs/tanstack-query";
+import { queryOptions, useQuery, useQueryClient } from "@octanejs/tanstack-query";
+import { AppPage } from "@/components/app-page";
 import type {
   AdminLfsSettingsPublic,
   AdminLfsUsageResponse,
@@ -7,14 +7,13 @@ import type {
 } from "@oxidean/api-client";
 import { useForm } from "@octanejs/tanstack-form";
 import { useEffect, useState } from "octane";
-import { ByteQuotaField } from "@/components/admin/byte-quota-field";
+import { ByteQuotaFields } from "@/components/admin/byte-quota-field";
 import { LfsUsageBarChartGate } from "@/components/admin/lfs-usage-charts-gate";
 import { AdminSettingsLayout, SettingsShell } from "@/components/settings/settings-shell";
 import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api-client";
 import {
   bytesToUnitString,
-  convertUnitDisplay,
   formatBytes,
   pickDisplayUnit,
   toLfsUsageChartRows,
@@ -66,56 +65,65 @@ function settingsToFormValues(settings: AdminLfsSettingsPublic): QuotaFormValues
   };
 }
 
-export const Route = createFileRoute("/admin/lfs")({
-  component: AdminLfsPage,
-  head: () => ({ meta: [{ title: "LFS quotas · Oxidean" }] }),
-  loader: async (): Promise<AdminLfsLoaderData> => {
-    try {
-      const meRes = await fetchSessionMe();
-      if (!meRes.ok) {
-        if (meRes.error.code === "auth.unauthenticated") {
-          return { kind: "unauthenticated" };
+function adminLfsQueryOptions() {
+  return queryOptions({
+    queryKey: ["admin", "adminLfs"],
+    queryFn: async (): Promise<AdminLfsLoaderData> => {
+      try {
+        const meRes = await fetchSessionMe();
+        if (!meRes.ok) {
+          if (meRes.error.code === "auth.unauthenticated") {
+            return { kind: "unauthenticated" };
+          }
+          return {
+            kind: "error",
+            message: meRes.error.message || "Could not load session.",
+          };
+        }
+        if (meRes.data.role !== "sys-admin") {
+          return { kind: "forbidden" };
+        }
+        const [settingsRes, usageRes] = await Promise.all([
+          fetchAdminLfsSettings(),
+          fetchAdminLfsUsage(),
+        ]);
+        if (!settingsRes.ok) {
+          return {
+            kind: "error",
+            message: settingsRes.error.message || FORBIDDEN,
+          };
+        }
+        if (!usageRes.ok) {
+          return {
+            kind: "error",
+            message: usageRes.error.message || "Could not load usage.",
+          };
         }
         return {
-          kind: "error",
-          message: meRes.error.message || "Could not load session.",
+          kind: "ready",
+          me: meRes.data,
+          settings: settingsRes.data,
+          usage: usageRes.data,
         };
+      } catch {
+        return { kind: "error", message: NETWORK_ERROR };
       }
-      if (meRes.data.role !== "sys-admin") {
-        return { kind: "forbidden" };
-      }
-      const [settingsRes, usageRes] = await Promise.all([
-        fetchAdminLfsSettings(),
-        fetchAdminLfsUsage(),
-      ]);
-      if (!settingsRes.ok) {
-        return {
-          kind: "error",
-          message: settingsRes.error.message || FORBIDDEN,
-        };
-      }
-      if (!usageRes.ok) {
-        return {
-          kind: "error",
-          message: usageRes.error.message || "Could not load usage.",
-        };
-      }
-      return {
-        kind: "ready",
-        me: meRes.data,
-        settings: settingsRes.data,
-        usage: usageRes.data,
-      };
-    } catch {
-      return { kind: "error", message: NETWORK_ERROR };
-    }
-  },
-});
+    },
+    retry: false,
+    staleTime: 30_000,
+  });
+}
 
 /** Exported for admin/lfs integration tests (D-LFS-12 / D-LFS-13 / D-LFS-19). */
 export function AdminLfsPage() @{
+  <AppPage>
+    <AdminLfsContent />
+  </AppPage>;
+}
+
+export function AdminLfsContent() @{
   const queryClient = useQueryClient();
-  const loaderData = useLoaderData({ from: "/admin/lfs" }) as AdminLfsLoaderData | undefined;
+  const loaderData = useQuery(adminLfsQueryOptions()).data;
 
   useEffect(() => {
     if (loaderData?.kind === "unauthenticated") {
@@ -339,90 +347,33 @@ export function AdminLfsPage() @{
                   void form.handleSubmit();
                 }}
               >
-                <form.Field name="maxObject">
-                  {(amountField) => (
-                    <form.Field name="maxObjectUnit">
-                      {(unitField) => (
-                        <ByteQuotaField
-                          id="lfs-max-object"
-                          label="Max object size"
-                          value={amountField.state.value}
-                          unit={unitField.state.value}
-                          overridden={settings?.max_object_bytes_overridden}
-                          disabled={pending}
-                          onBlur={amountField.handleBlur}
-                          onValueChange={amountField.handleChange}
-                          onUnitChange={(next) => {
-                            amountField.handleChange(
-                              convertUnitDisplay(
-                                amountField.state.value,
-                                unitField.state.value,
-                                next,
-                              ),
-                            );
-                            unitField.handleChange(next);
-                          }}
-                        />
-                      )}
-                    </form.Field>
-                  )}
-                </form.Field>
-                <form.Field name="quotaRepo">
-                  {(amountField) => (
-                    <form.Field name="quotaRepoUnit">
-                      {(unitField) => (
-                        <ByteQuotaField
-                          id="lfs-quota-repo"
-                          label="Per-repo quota"
-                          value={amountField.state.value}
-                          unit={unitField.state.value}
-                          overridden={settings?.quota_repo_bytes_overridden}
-                          disabled={pending}
-                          onBlur={amountField.handleBlur}
-                          onValueChange={amountField.handleChange}
-                          onUnitChange={(next) => {
-                            amountField.handleChange(
-                              convertUnitDisplay(
-                                amountField.state.value,
-                                unitField.state.value,
-                                next,
-                              ),
-                            );
-                            unitField.handleChange(next);
-                          }}
-                        />
-                      )}
-                    </form.Field>
-                  )}
-                </form.Field>
-                <form.Field name="quotaUser">
-                  {(amountField) => (
-                    <form.Field name="quotaUserUnit">
-                      {(unitField) => (
-                        <ByteQuotaField
-                          id="lfs-quota-user"
-                          label="Per-user quota"
-                          value={amountField.state.value}
-                          unit={unitField.state.value}
-                          overridden={settings?.quota_user_bytes_overridden}
-                          disabled={pending}
-                          onBlur={amountField.handleBlur}
-                          onValueChange={amountField.handleChange}
-                          onUnitChange={(next) => {
-                            amountField.handleChange(
-                              convertUnitDisplay(
-                                amountField.state.value,
-                                unitField.state.value,
-                                next,
-                              ),
-                            );
-                            unitField.handleChange(next);
-                          }}
-                        />
-                      )}
-                    </form.Field>
-                  )}
-                </form.Field>
+                <ByteQuotaFields
+                  form={form}
+                  amountName="maxObject"
+                  unitName="maxObjectUnit"
+                  id="lfs-max-object"
+                  label="Max object size"
+                  overridden={settings?.max_object_bytes_overridden}
+                  disabled={pending}
+                />
+                <ByteQuotaFields
+                  form={form}
+                  amountName="quotaRepo"
+                  unitName="quotaRepoUnit"
+                  id="lfs-quota-repo"
+                  label="Per-repo quota"
+                  overridden={settings?.quota_repo_bytes_overridden}
+                  disabled={pending}
+                />
+                <ByteQuotaFields
+                  form={form}
+                  amountName="quotaUser"
+                  unitName="quotaUserUnit"
+                  id="lfs-quota-user"
+                  label="Per-user quota"
+                  overridden={settings?.quota_user_bytes_overridden}
+                  disabled={pending}
+                />
                 <div className="flex flex-wrap gap-2">
                   <Button type="submit" disabled={pending}>
                     {(pending ? "Saving…" : "Save quotas") as string}

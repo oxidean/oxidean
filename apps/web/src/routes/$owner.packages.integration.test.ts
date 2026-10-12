@@ -18,21 +18,13 @@ vi.mock("@/lib/api-client", () => ({
   },
 }));
 
-vi.mock("@octanejs/tanstack-router", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@octanejs/tanstack-router")>();
-  return {
-    ...actual,
-    useParams: () => ({ owner: "acme" }),
-    useLoaderData: () => undefined,
-  };
-});
-
 import { OwnerPackagesPage } from "./$owner.packages";
 
 afterEach(cleanup);
 
 describe("/$owner/packages", () => {
   beforeEach(() => {
+    window.history.pushState({}, "", "/acme/packages");
     listMock.mockReset();
     deleteVersionMock.mockReset();
     listMock.mockResolvedValue({

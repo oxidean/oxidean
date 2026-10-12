@@ -1,6 +1,6 @@
 import { AppLink } from "@/components/ui/app-link";
 
-export type CommitAuthorLinkProps = {
+type CommitAuthorLinkProps = {
   name: string;
   username?: string | null;
   avatarUrl?: string | null;

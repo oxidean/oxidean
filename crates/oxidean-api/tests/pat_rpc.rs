@@ -146,7 +146,9 @@ async fn pat_create_classic_returns_one_time_token() {
     );
     assert_eq!(v["data"]["item"]["kind"], "classic");
     assert_eq!(v["data"]["item"]["name"], "laptop");
-    let prefix = v["data"]["item"]["token_prefix"].as_str().expect("token_prefix");
+    let prefix = v["data"]["item"]["token_prefix"]
+        .as_str()
+        .expect("token_prefix");
     assert!(
         prefix.starts_with(CLASSIC_PAT_PREFIX) && prefix.len() == CLASSIC_PAT_PREFIX.len() + 8,
         "token_prefix must be brand + 8 hex fingerprint — {prefix}"
@@ -195,7 +197,10 @@ async fn pat_list_omits_secret_token() {
         !dumped.contains(&plaintext),
         "plaintext must not appear in list response"
     );
-    assert_eq!(items[0]["token_prefix"].as_str().unwrap().len(), CLASSIC_PAT_PREFIX.len() + 8);
+    assert_eq!(
+        items[0]["token_prefix"].as_str().unwrap().len(),
+        CLASSIC_PAT_PREFIX.len() + 8
+    );
     assert!(plaintext.starts_with(items[0]["token_prefix"].as_str().unwrap()));
 }
 
@@ -323,7 +328,9 @@ async fn pat_create_fine_grained_all_returns_fg_token() {
     );
     assert_eq!(v["data"]["item"]["kind"], "fine_grained");
     assert_eq!(v["data"]["item"]["name"], "ci-all");
-    let prefix = v["data"]["item"]["token_prefix"].as_str().expect("token_prefix");
+    let prefix = v["data"]["item"]["token_prefix"]
+        .as_str()
+        .expect("token_prefix");
     assert!(
         prefix.starts_with(FINE_GRAINED_PAT_PREFIX)
             && prefix.len() == FINE_GRAINED_PAT_PREFIX.len() + 8,
@@ -339,7 +346,10 @@ async fn pat_create_fine_grained_all_returns_fg_token() {
         .as_array()
         .cloned()
         .unwrap_or_default();
-    assert!(repos.is_empty(), "all mode must not persist join rows — {v}");
+    assert!(
+        repos.is_empty(),
+        "all mode must not persist join rows — {v}"
+    );
     assert!(v["data"]["item"].get("token").is_none());
 }
 
@@ -476,7 +486,15 @@ async fn pat_create_fine_grained_foreign_repo_rejected() {
         .expect("verify b");
 
     let foreign = db
-        .insert_repository("r-foreign", &user_a, "user", "secrets", "private", "", "main")
+        .insert_repository(
+            "r-foreign",
+            &user_a,
+            "user",
+            "secrets",
+            "private",
+            "",
+            "main",
+        )
         .await
         .expect("foreign repo");
 
@@ -518,7 +536,15 @@ async fn pat_create_fine_grained_selected_allows_collaborator_repo() {
         .expect("verify collab");
 
     let repo = db
-        .insert_repository("r-collab-fg", &owner_id, "user", "shared", "private", "", "main")
+        .insert_repository(
+            "r-collab-fg",
+            &owner_id,
+            "user",
+            "shared",
+            "private",
+            "",
+            "main",
+        )
         .await
         .expect("repo");
     db.insert_repo_collaborator(&repo.id, &collab_id, "write")
@@ -551,7 +577,10 @@ async fn pat_create_fine_grained_selected_allows_collaborator_repo() {
 #[tokio::test]
 async fn pat_create_fine_grained_selected_read_collab_write_contents_rejected() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let url = format!("sqlite:{}", dir.path().join("pat_fg_read_deny.db").display());
+    let url = format!(
+        "sqlite:{}",
+        dir.path().join("pat_fg_read_deny.db").display()
+    );
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;

@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { apiClient } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 
-export type MemberLookupProps = {
+type MemberLookupProps = {
   id?: string;
   name?: string;
   label?: string;

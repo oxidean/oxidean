@@ -1,11 +1,12 @@
 import { Toast } from "@octanejs/base-ui/toast";
 import { X } from "@octanejs/lucide";
-import { cva, type VariantProps } from "class-variance-authority";
+import { cva } from "class-variance-authority";
+import { portalRoot } from "@/lib/portal-root";
 import { appToastManager, type ToastVariant } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 
 /** Toast card chrome — mirrors verify callout sizing/typography for form feedback. */
-export const toastVariants = cva(
+const toastVariants = cva(
   [
     "oct-toast group relative w-full origin-bottom rounded-lg border bg-card/95 p-4 text-foreground shadow-lg backdrop-blur-sm",
     "outline-none transition-[transform,opacity] duration-200 ease-out",
@@ -25,7 +26,7 @@ export const toastVariants = cva(
   },
 );
 
-export const toastAccentVariants = cva("mt-0.5 w-1 shrink-0 self-stretch rounded-full", {
+const toastAccentVariants = cva("mt-0.5 w-1 shrink-0 self-stretch rounded-full", {
   variants: {
     variant: {
       success: "bg-primary",
@@ -36,8 +37,6 @@ export const toastAccentVariants = cva("mt-0.5 w-1 shrink-0 self-stretch rounded
   },
   defaultVariants: { variant: "info" },
 });
-
-export type ToastVariantProps = VariantProps<typeof toastVariants>;
 
 function toastVariantFromType(type: string | undefined): ToastVariant {
   if (type === "success" || type === "error" || type === "warning" || type === "info") {
@@ -55,7 +54,8 @@ function ToastList() @{
 
   // octane-dom-race-ok: app-root singleton — mounts once at boot and never
   // unmounts; toast items inside change but the portal node itself is stable.
-  <Toast.Portal>
+  // container: persisted host, so view-transition swaps don't detach it.
+  <Toast.Portal container={portalRoot()}>
     <Toast.Viewport
       className={cn(
         "oct-toast-viewport fixed right-4 bottom-4 z-[100] flex w-[min(100%-2rem,22rem)] flex-col-reverse gap-2 outline-none",

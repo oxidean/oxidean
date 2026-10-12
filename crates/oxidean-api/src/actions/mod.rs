@@ -12,9 +12,7 @@ pub mod statuses;
 pub mod tokens;
 pub mod workflow;
 
-pub use dispatch::{
-    dispatch_push_for_sha, enqueue_run, env_actions_enabled, notify_push_actions,
-};
+pub use dispatch::{dispatch_push_for_sha, enqueue_run, env_actions_enabled, notify_push_actions};
 pub use events::{
     dispatch_pull_request, dispatch_pull_request_for_sha, notify_pull_request_actions,
     PullRequestAction, PullRequestEvent,
@@ -26,6 +24,6 @@ pub use parse::{
 pub use statuses::{job_status_to_commit_state, publish_from_job_update, status_context};
 pub use tokens::mint_registration_token;
 pub use workflow::{
-    discover_workflows, DiscoverError, DiscoveredWorkflow, DiscoveryFileError,
-    WorkflowDiscovery, MAX_WORKFLOW_BYTES,
+    discover_workflows, DiscoverError, DiscoveredWorkflow, DiscoveryFileError, WorkflowDiscovery,
+    MAX_WORKFLOW_BYTES,
 };

@@ -181,8 +181,7 @@ async fn exchange_code(
     let form = format!(
         "grant_type=authorization_code&code={}&redirect_uri={}&client_id={}&client_secret={}",
         url::form_urlencoded::byte_serialize(code.as_bytes()).collect::<String>(),
-        url::form_urlencoded::byte_serialize(b"https://app.example/callback")
-            .collect::<String>(),
+        url::form_urlencoded::byte_serialize(b"https://app.example/callback").collect::<String>(),
         client_id,
         secret,
     );

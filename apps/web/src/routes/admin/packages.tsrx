@@ -1,6 +1,6 @@
-import { createFileRoute, useLoaderData } from "@octanejs/tanstack-router";
 import { useForm } from "@octanejs/tanstack-form";
-import { useQuery, useQueryClient } from "@octanejs/tanstack-query";
+import { queryOptions, useQuery, useQueryClient } from "@octanejs/tanstack-query";
+import { AppPage } from "@/components/app-page";
 import type { PackagesAdminUsageResponse, UserPublic } from "@oxidean/api-client";
 import { packagesAdminUsageQueryOptions } from "@oxidean/api-client";
 import { useEffect, useState } from "octane";
@@ -37,27 +37,30 @@ type AdminGateLoader =
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
 const FORBIDDEN = "You need admin access to manage package storage.";
 
-export const Route = createFileRoute("/admin/packages")({
-  component: AdminPackagesPage,
-  head: () => ({ meta: [{ title: "Package storage · Oxidean" }] }),
-  loader: async (): Promise<AdminGateLoader> => {
-    try {
-      const meRes = await fetchSessionMe();
-      if (!meRes.ok) {
-        if (meRes.error.code === "auth.unauthenticated") {
-          return { kind: "unauthenticated" };
+function adminPackagesQueryOptions() {
+  return queryOptions({
+    queryKey: ["admin", "adminPackages"],
+    queryFn: async (): Promise<AdminGateLoader> => {
+      try {
+        const meRes = await fetchSessionMe();
+        if (!meRes.ok) {
+          if (meRes.error.code === "auth.unauthenticated") {
+            return { kind: "unauthenticated" };
+          }
+          return { kind: "error", message: meRes.error.message || "Could not load session." };
         }
-        return { kind: "error", message: meRes.error.message || "Could not load session." };
+        if (meRes.data.role !== "sys-admin") {
+          return { kind: "forbidden" };
+        }
+        return { kind: "ready", me: meRes.data };
+      } catch {
+        return { kind: "error", message: NETWORK_ERROR };
       }
-      if (meRes.data.role !== "sys-admin") {
-        return { kind: "forbidden" };
-      }
-      return { kind: "ready", me: meRes.data };
-    } catch {
-      return { kind: "error", message: NETWORK_ERROR };
-    }
-  },
-});
+    },
+    retry: false,
+    staleTime: 30_000,
+  });
+}
 
 type QuotaDraft = {
   amount: string;
@@ -76,11 +79,17 @@ function usagePercent(used: number, quota: number): number {
 
 /** Admin package storage quota/usage (D-PKG-09). */
 export function AdminPackagesPage() @{
+  <AppPage>
+    <AdminPackagesContent />
+  </AppPage>;
+}
+
+function AdminPackagesContent() @{
   const [activeOwner, setActiveOwner] = useState("");
   const [pending, setPending] = useState(false);
   const [draft, setDraft] = useState<QuotaDraft>({ amount: "", unit: "GiB" });
   const qc = useQueryClient();
-  const loaderData = useLoaderData({ from: "/admin/packages" }) as AdminGateLoader | undefined;
+  const loaderData = useQuery(adminPackagesQueryOptions()).data;
 
   useEffect(() => {
     if (loaderData?.kind === "unauthenticated") {

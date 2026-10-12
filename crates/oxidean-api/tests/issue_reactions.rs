@@ -163,7 +163,11 @@ fn viewer_reacted(reactions: &serde_json::Value, content: &str) -> bool {
         .expect("reactions array")
         .iter()
         .find(|g| g["content"].as_str() == Some(content))
-        .and_then(|g| g["viewerHasReacted"].as_bool().or_else(|| g["viewer_has_reacted"].as_bool()))
+        .and_then(|g| {
+            g["viewerHasReacted"]
+                .as_bool()
+                .or_else(|| g["viewer_has_reacted"].as_bool())
+        })
         .unwrap_or(false)
 }
 
@@ -239,7 +243,10 @@ async fn issue_reactions_eight_content_on_issue() {
     )
     .await;
     assert_eq!(allowed["ok"], true, "Read can react — {allowed}");
-    assert!(viewer_reacted(&allowed["data"]["reactions"], "+1"), "{allowed}");
+    assert!(
+        viewer_reacted(&allowed["data"]["reactions"], "+1"),
+        "{allowed}"
+    );
 
     // Verified stranger with no access to the private repo is denied.
     let (stranger_cookie, stranger_v) =

@@ -117,9 +117,9 @@ fn render_entry(e: &AtomEntry) -> String {
         );
     }
     if let Some(content) = e.content.as_ref().filter(|c| !c.is_empty()) {
-        let _ = write!(
+        let _ = writeln!(
             s,
-            "    <content type=\"text\">{}</content>\n",
+            "    <content type=\"text\">{}</content>",
             xml_escape(content)
         );
     }
@@ -145,8 +145,8 @@ fn render_feed(
     s.push_str(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<feed xmlns=\"http://www.w3.org/2005/Atom\">\n",
     );
-    let _ = write!(s, "  <title>{}</title>\n", xml_escape(title));
-    let _ = write!(s, "  <id>{}</id>\n", xml_escape(self_href));
+    let _ = writeln!(s, "  <title>{}</title>", xml_escape(title));
+    let _ = writeln!(s, "  <id>{}</id>", xml_escape(self_href));
     let _ = write!(
         s,
         "  <link rel=\"self\" type=\"application/atom+xml\" href=\"{}\"/>\n  <link rel=\"alternate\" type=\"text/html\" href=\"{}\"/>\n  <updated>{updated}</updated>\n",

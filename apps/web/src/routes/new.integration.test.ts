@@ -29,62 +29,32 @@ vi.mock("@/lib/spdx-licenses", () => ({
   ],
 }));
 
+const meMock = vi.fn();
+const createDefaultsMock = vi.fn();
+const listMineMock = vi.fn();
+
 vi.mock("@/lib/api-client", () => ({
   apiClient: {
     auth: {
-      me: vi.fn(),
+      me: (...args: unknown[]) => meMock(...args),
     },
     repo: {
       create: (...args: unknown[]) => createMock(...args),
-      createDefaults: vi.fn(),
+      createDefaults: (...args: unknown[]) => createDefaultsMock(...args),
+    },
+    org: {
+      listMine: (...args: unknown[]) => listMineMock(...args),
     },
   },
 }));
 
-type LoaderShape = {
-  user: {
-    id: string;
-    email: string;
-    username: string;
-    display_name: string;
-    bio: string;
-    avatar_url: null;
-    role: string;
-    profile_incomplete: boolean;
-    email_verified: boolean;
-  };
-  defaults: {
-    default_visibility: "public" | "private";
-    stacks: {
-      id: string;
-      label: string;
-      group: string;
-      description: string;
-      default_gitignore?: string;
-    }[];
-    gitignores: {
-      id: string;
-      label: string;
-      group: string;
-      description: string;
-    }[];
-  } | null;
-  ownerOrgs: never[];
-};
-
-let loaderData: LoaderShape;
-
-vi.mock("@octanejs/tanstack-router", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@octanejs/tanstack-router")>();
-  return {
-    ...actual,
-    useLoaderData: () => loaderData,
-  };
-});
-
 beforeEach(() => {
+  window.history.pushState({}, "", "/new");
   createMock.mockReset();
-  loaderData = {
+  meMock.mockReset();
+  createDefaultsMock.mockReset();
+  listMineMock.mockReset();
+  const __ld = {
     user: {
       id: "u1",
       email: "ada@example.com",
@@ -99,6 +69,13 @@ beforeEach(() => {
     defaults: null,
     ownerOrgs: [],
   };
+  meMock.mockResolvedValue({ ok: true, data: __ld.user });
+  createDefaultsMock.mockResolvedValue(
+    __ld.defaults
+      ? { ok: true, data: __ld.defaults }
+      : { ok: false, error: { code: "x", message: "x" } },
+  );
+  listMineMock.mockResolvedValue({ ok: true, data: { orgs: __ld.ownerOrgs ?? [] } });
 });
 
 afterEach(cleanup);
@@ -122,7 +99,7 @@ describe("/new create form (D-02, D-04, D-12)", () => {
   it("verified form shows stack, license, gitignore pickers", async () => {
     const tracker = trackDomErrors();
     try {
-      loaderData = {
+      const __ld = {
         user: {
           id: "u1",
           email: "ada@example.com",
@@ -185,6 +162,13 @@ describe("/new create form (D-02, D-04, D-12)", () => {
         },
         ownerOrgs: [],
       };
+      meMock.mockResolvedValue({ ok: true, data: __ld.user });
+      createDefaultsMock.mockResolvedValue(
+        __ld.defaults
+          ? { ok: true, data: __ld.defaults }
+          : { ok: false, error: { code: "x", message: "x" } },
+      );
+      listMineMock.mockResolvedValue({ ok: true, data: { orgs: __ld.ownerOrgs ?? [] } });
 
       const { NewPage } = await import("./new");
       render(NewPage as never);
@@ -233,7 +217,7 @@ describe("/new create form (D-02, D-04, D-12)", () => {
   }, 20000);
 
   it("duplicate name maps to exact inline field copy", async () => {
-    loaderData = {
+    const __ld = {
       user: {
         id: "u1",
         email: "ada@example.com",
@@ -252,6 +236,13 @@ describe("/new create form (D-02, D-04, D-12)", () => {
       },
       ownerOrgs: [],
     };
+    meMock.mockResolvedValue({ ok: true, data: __ld.user });
+    createDefaultsMock.mockResolvedValue(
+      __ld.defaults
+        ? { ok: true, data: __ld.defaults }
+        : { ok: false, error: { code: "x", message: "x" } },
+    );
+    listMineMock.mockResolvedValue({ ok: true, data: { orgs: __ld.ownerOrgs ?? [] } });
 
     createMock.mockResolvedValueOnce({
       ok: false,

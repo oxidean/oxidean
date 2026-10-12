@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   httpsCloneUrl,
   resolvePublicOriginFromEnv,
-  resolveSshHost,
-  resolveSshPort,
+  resolveSshAdvertiseHost,
+  resolveSshAdvertisePort,
   sshCloneUrl,
   sshNeedsPortHint,
 } from "./public-origin";
@@ -77,13 +77,12 @@ describe("public-origin", () => {
     expect(sshNeedsPortHint(2222)).toBe(true);
   });
 
-  it("resolveSshHost prefers OXIDEAN_SSH_HOST then origin hostname", () => {
-    expect(resolveSshHost("http://127.0.0.1:3000", undefined)).toBe("127.0.0.1");
-    expect(resolveSshHost("http://127.0.0.1:3000", "git.example")).toBe("git.example");
+  it("resolveSshAdvertiseHost falls back to the public origin hostname", () => {
+    // No middleware metas exist in this environment.
+    expect(resolveSshAdvertiseHost("http://127.0.0.1:3000")).toBe("127.0.0.1");
   });
 
-  it("resolveSshPort defaults to 2222", () => {
-    expect(resolveSshPort(undefined)).toBe(2222);
-    expect(resolveSshPort("22")).toBe(22);
+  it("resolveSshAdvertisePort defaults to 2222", () => {
+    expect(resolveSshAdvertisePort()).toBe(2222);
   });
 });

@@ -64,9 +64,7 @@ macro_rules! map_rule {
                 let n: i64 = row
                     .try_get("required_approving_review_count")
                     .map_err(|e| format!("rule review count: {e}"))?;
-                i32::try_from(n).map_err(|_| {
-                    format!("rule review count out of range: {n}")
-                })?
+                i32::try_from(n).map_err(|_| format!("rule review count out of range: {n}"))?
             }
         };
         BranchProtectionRuleRow {
@@ -136,7 +134,8 @@ macro_rules! map_status {
     }};
 }
 
-const RULE_SELECT_PG: &str = "SELECT id, repo_id, pattern, require_reviews, required_approving_review_count, \
+const RULE_SELECT_PG: &str =
+    "SELECT id, repo_id, pattern, require_reviews, required_approving_review_count, \
  dismiss_stale_reviews, require_conversation_resolution, require_last_push_approval, \
  required_status_contexts, strict_status_checks, allow_force_pushes, allow_deletions, \
  enforce_admins, required_linear_history, lock_branch, require_signed_commits, \
@@ -144,7 +143,8 @@ const RULE_SELECT_PG: &str = "SELECT id, repo_id, pattern, require_reviews, requ
  to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS updated_at \
  FROM branch_protection_rules";
 
-const RULE_SELECT_MYSQL: &str = "SELECT id, repo_id, pattern, require_reviews, required_approving_review_count, \
+const RULE_SELECT_MYSQL: &str =
+    "SELECT id, repo_id, pattern, require_reviews, required_approving_review_count, \
  dismiss_stale_reviews, require_conversation_resolution, require_last_push_approval, \
  required_status_contexts, strict_status_checks, allow_force_pushes, allow_deletions, \
  enforce_admins, required_linear_history, lock_branch, require_signed_commits, \
@@ -152,7 +152,8 @@ const RULE_SELECT_MYSQL: &str = "SELECT id, repo_id, pattern, require_reviews, r
  DATE_FORMAT(updated_at, '%Y-%m-%dT%H:%i:%sZ') AS updated_at \
  FROM branch_protection_rules";
 
-const RULE_SELECT_SQLITE: &str = "SELECT id, repo_id, pattern, require_reviews, required_approving_review_count, \
+const RULE_SELECT_SQLITE: &str =
+    "SELECT id, repo_id, pattern, require_reviews, required_approving_review_count, \
  dismiss_stale_reviews, require_conversation_resolution, require_last_push_approval, \
  required_status_contexts, strict_status_checks, allow_force_pushes, allow_deletions, \
  enforce_admins, required_linear_history, lock_branch, require_signed_commits, \
@@ -160,17 +161,20 @@ const RULE_SELECT_SQLITE: &str = "SELECT id, repo_id, pattern, require_reviews, 
  strftime('%Y-%m-%dT%H:%M:%SZ', updated_at) AS updated_at \
  FROM branch_protection_rules";
 
-const STATUS_SELECT_PG: &str = "SELECT id, repo_id, sha, context, state, description, target_url, creator_id, \
+const STATUS_SELECT_PG: &str =
+    "SELECT id, repo_id, sha, context, state, description, target_url, creator_id, \
  to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS created_at, \
  to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS updated_at \
  FROM commit_statuses";
 
-const STATUS_SELECT_MYSQL: &str = "SELECT id, repo_id, sha, context, state, description, target_url, creator_id, \
+const STATUS_SELECT_MYSQL: &str =
+    "SELECT id, repo_id, sha, context, state, description, target_url, creator_id, \
  DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at, \
  DATE_FORMAT(updated_at, '%Y-%m-%dT%H:%i:%sZ') AS updated_at \
  FROM commit_statuses";
 
-const STATUS_SELECT_SQLITE: &str = "SELECT id, repo_id, sha, context, state, description, target_url, creator_id, \
+const STATUS_SELECT_SQLITE: &str =
+    "SELECT id, repo_id, sha, context, state, description, target_url, creator_id, \
  strftime('%Y-%m-%dT%H:%M:%SZ', created_at) AS created_at, \
  strftime('%Y-%m-%dT%H:%M:%SZ', updated_at) AS updated_at \
  FROM commit_statuses";
@@ -179,12 +183,15 @@ fn as_int(b: bool) -> i32 {
     i32::from(b)
 }
 
-pub async fn list_rules(pool: &DbPool, repo_id: &str) -> Result<Vec<BranchProtectionRuleRow>, String> {
+pub async fn list_rules(
+    pool: &DbPool,
+    repo_id: &str,
+) -> Result<Vec<BranchProtectionRuleRow>, String> {
     match pool {
         DbPool::Postgres(p) => {
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{RULE_SELECT_PG} WHERE repo_id = $1 ORDER BY created_at ASC, id ASC"
-            ))
+            )))
             .bind(repo_id)
             .fetch_all(p)
             .await
@@ -196,9 +203,9 @@ pub async fn list_rules(pool: &DbPool, repo_id: &str) -> Result<Vec<BranchProtec
             Ok(out)
         }
         DbPool::MySql(p) => {
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{RULE_SELECT_MYSQL} WHERE repo_id = ? ORDER BY created_at ASC, id ASC"
-            ))
+            )))
             .bind(repo_id)
             .fetch_all(p)
             .await
@@ -210,9 +217,9 @@ pub async fn list_rules(pool: &DbPool, repo_id: &str) -> Result<Vec<BranchProtec
             Ok(out)
         }
         DbPool::Sqlite(p) => {
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{RULE_SELECT_SQLITE} WHERE repo_id = ?1 ORDER BY created_at ASC, id ASC"
-            ))
+            )))
             .bind(repo_id)
             .fetch_all(p)
             .await
@@ -233,9 +240,9 @@ pub async fn find_rule(
 ) -> Result<Option<BranchProtectionRuleRow>, String> {
     match pool {
         DbPool::Postgres(p) => {
-            let row = sqlx::query(&format!(
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{RULE_SELECT_PG} WHERE repo_id = $1 AND id = $2"
-            ))
+            )))
             .bind(repo_id)
             .bind(rule_id)
             .fetch_optional(p)
@@ -247,9 +254,9 @@ pub async fn find_rule(
             })
         }
         DbPool::MySql(p) => {
-            let row = sqlx::query(&format!(
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{RULE_SELECT_MYSQL} WHERE repo_id = ? AND id = ?"
-            ))
+            )))
             .bind(repo_id)
             .bind(rule_id)
             .fetch_optional(p)
@@ -261,9 +268,9 @@ pub async fn find_rule(
             })
         }
         DbPool::Sqlite(p) => {
-            let row = sqlx::query(&format!(
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{RULE_SELECT_SQLITE} WHERE repo_id = ?1 AND id = ?2"
-            ))
+            )))
             .bind(repo_id)
             .bind(rule_id)
             .fetch_optional(p)
@@ -520,40 +527,37 @@ pub async fn update_rule(
 pub async fn delete_rule(pool: &DbPool, repo_id: &str, rule_id: &str) -> Result<(), String> {
     match pool {
         DbPool::Postgres(p) => {
-            let res = sqlx::query(
-                "DELETE FROM branch_protection_rules WHERE repo_id = $1 AND id = $2",
-            )
-            .bind(repo_id)
-            .bind(rule_id)
-            .execute(p)
-            .await
-            .map_err(|e| format!("delete branch_protection_rule: {e}"))?;
+            let res =
+                sqlx::query("DELETE FROM branch_protection_rules WHERE repo_id = $1 AND id = $2")
+                    .bind(repo_id)
+                    .bind(rule_id)
+                    .execute(p)
+                    .await
+                    .map_err(|e| format!("delete branch_protection_rule: {e}"))?;
             if res.rows_affected() == 0 {
                 return Err("branch protection rule not found".into());
             }
         }
         DbPool::MySql(p) => {
-            let res = sqlx::query(
-                "DELETE FROM branch_protection_rules WHERE repo_id = ? AND id = ?",
-            )
-            .bind(repo_id)
-            .bind(rule_id)
-            .execute(p)
-            .await
-            .map_err(|e| format!("delete branch_protection_rule: {e}"))?;
+            let res =
+                sqlx::query("DELETE FROM branch_protection_rules WHERE repo_id = ? AND id = ?")
+                    .bind(repo_id)
+                    .bind(rule_id)
+                    .execute(p)
+                    .await
+                    .map_err(|e| format!("delete branch_protection_rule: {e}"))?;
             if res.rows_affected() == 0 {
                 return Err("branch protection rule not found".into());
             }
         }
         DbPool::Sqlite(p) => {
-            let res = sqlx::query(
-                "DELETE FROM branch_protection_rules WHERE repo_id = ?1 AND id = ?2",
-            )
-            .bind(repo_id)
-            .bind(rule_id)
-            .execute(p)
-            .await
-            .map_err(|e| format!("delete branch_protection_rule: {e}"))?;
+            let res =
+                sqlx::query("DELETE FROM branch_protection_rules WHERE repo_id = ?1 AND id = ?2")
+                    .bind(repo_id)
+                    .bind(rule_id)
+                    .execute(p)
+                    .await
+                    .map_err(|e| format!("delete branch_protection_rule: {e}"))?;
             if res.rows_affected() == 0 {
                 return Err("branch protection rule not found".into());
             }
@@ -569,9 +573,9 @@ pub async fn list_statuses_for_sha(
 ) -> Result<Vec<CommitStatusRow>, String> {
     match pool {
         DbPool::Postgres(p) => {
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{STATUS_SELECT_PG} WHERE repo_id = $1 AND sha = $2 ORDER BY context ASC"
-            ))
+            )))
             .bind(repo_id)
             .bind(sha)
             .fetch_all(p)
@@ -584,9 +588,9 @@ pub async fn list_statuses_for_sha(
             Ok(out)
         }
         DbPool::MySql(p) => {
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{STATUS_SELECT_MYSQL} WHERE repo_id = ? AND sha = ? ORDER BY context ASC"
-            ))
+            )))
             .bind(repo_id)
             .bind(sha)
             .fetch_all(p)
@@ -599,9 +603,9 @@ pub async fn list_statuses_for_sha(
             Ok(out)
         }
         DbPool::Sqlite(p) => {
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{STATUS_SELECT_SQLITE} WHERE repo_id = ?1 AND sha = ?2 ORDER BY context ASC"
-            ))
+            )))
             .bind(repo_id)
             .bind(sha)
             .fetch_all(p)

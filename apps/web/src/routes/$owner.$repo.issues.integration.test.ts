@@ -2,6 +2,11 @@ import { createElement } from "octane";
 import { cleanup, fireEvent, render, screen, waitFor } from "@octanejs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithQueryClient } from "@/test/render-with-query";
+import { getQueryClient } from "@/lib/query-client";
+
+function setLocation(path: string) {
+  window.history.pushState({}, "", path);
+}
 
 /**
  * Phase 11 Issues UI — create/list/detail lifecycle greened through 11-09
@@ -31,11 +36,19 @@ const linksListMock = vi.fn();
 const linksAddMock = vi.fn();
 const linksRemoveMock = vi.fn();
 const userLookupMock = vi.fn();
+const authMeMock = vi.fn();
+const repoTemplatesMock = vi.fn();
 
 vi.mock("@/lib/api-client", () => ({
   apiClient: {
+    auth: {
+      me: (...args: unknown[]) => authMeMock(...args),
+    },
     repo: {
       get: (...args: unknown[]) => getMock(...args),
+      templates: {
+        list: (...args: unknown[]) => repoTemplatesMock(...args),
+      },
     },
     issue: {
       list: (...args: unknown[]) => listMock(...args),
@@ -98,38 +111,17 @@ vi.mock("@/lib/use-chrome-account", () => ({
   resolveAllowSignup: () => true,
 }));
 
-/** Per-route loader data + search params for the issues routes under test. */
-let loaderDataByFrom: Record<string, unknown> = {};
-let searchState: Record<string, unknown> = {};
-
-vi.mock("@octanejs/tanstack-router", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@octanejs/tanstack-router")>();
-  function MockLink(props: {
-    to?: string;
-    href?: string;
-    children?: unknown;
-    className?: string;
-    preload?: string;
-  }) {
-    return createElement(
-      "a",
-      {
-        href: (props.href ?? props.to ?? "#") as string,
-        className: props.className,
-      } as never,
-      props.children as never,
-    );
-  }
-  return {
-    ...actual,
-    useParams: () => ({ owner: "ada", repo: "hello", n: "1" }),
-    useLoaderData: (opts?: { from?: string }) =>
-      opts?.from ? loaderDataByFrom[opts.from] : undefined,
-    useSearch: () => searchState,
-    useNavigate: () => vi.fn(),
-    Link: MockLink,
-  };
-});
+const sessionUser = {
+  id: "u1",
+  email: "ada@example.com",
+  username: "ada",
+  display_name: "Ada",
+  bio: "",
+  role: "user",
+  profile_incomplete: false,
+  email_verified: true,
+  must_change_credentials: false,
+};
 
 const readableRepo = {
   id: "r1",
@@ -162,8 +154,9 @@ const sampleIssue = {
 };
 
 beforeEach(() => {
-  loaderDataByFrom = {};
-  searchState = {};
+  setLocation("/ada/hello/issues");
+  authMeMock.mockReset();
+  repoTemplatesMock.mockReset();
   getMock.mockReset();
   listMock.mockReset();
   issueGetMock.mockReset();
@@ -187,6 +180,8 @@ beforeEach(() => {
   linksAddMock.mockReset();
   linksRemoveMock.mockReset();
   userLookupMock.mockReset();
+  authMeMock.mockResolvedValue({ ok: true, data: sessionUser });
+  repoTemplatesMock.mockResolvedValue({ ok: true, data: { issues: [], pulls: [] } });
   getMock.mockResolvedValue({ ok: true, data: readableRepo });
   listMock.mockResolvedValue({
     ok: true,
@@ -478,6 +473,7 @@ describe("/{owner}/{repo}/issues list Wave 0 (D-ISS-16 / D-ISS-19)", () => {
       data: { ...readableRepo, can_write: true, can_admin: false },
     });
     cleanup();
+    getQueryClient().clear();
     const mod2 = await loadIssuesListModule();
     renderWithQueryClient(issuesListPage(mod2));
     await waitFor(() => {
@@ -488,6 +484,8 @@ describe("/{owner}/{repo}/issues list Wave 0 (D-ISS-16 / D-ISS-19)", () => {
 });
 
 describe("/{owner}/{repo}/issues/new Wave 0 (D-ISS-10)", () => {
+  beforeEach(() => setLocation("/ada/hello/issues/new"));
+
   it("Write|Preview tabs on new issue form", async () => {
     const mod = await loadIssuesNewModule();
     renderWithQueryClient(issuesNewPage(mod));
@@ -500,32 +498,29 @@ describe("/{owner}/{repo}/issues/new Wave 0 (D-ISS-10)", () => {
 });
 
 describe("/{owner}/{repo}/issues/new template chooser (COL-02)", () => {
-  const loaderWithTemplates = {
-    kind: "ready",
-    repo: { ...readableRepo, can_write: true },
-    templates: {
-      issues: [
-        {
-          name: "Bug report",
-          description: "File a bug to help us improve",
-          title: "[BUG] ",
-          labels: ["bug"],
-          body: "**Steps to reproduce**\n\n1. …\n",
-          filename: ".github/ISSUE_TEMPLATE/bug.md",
-        },
-        {
-          name: "Feature request",
-          description: "Suggest an idea",
-          body: "## Summary\n\nDescribe it.\n",
-          filename: ".github/ISSUE_TEMPLATE/feature.md",
-        },
-      ],
-      pulls: [],
-    },
+  const templatesPayload = {
+    issues: [
+      {
+        name: "Bug report",
+        description: "File a bug to help us improve",
+        title: "[BUG] ",
+        labels: ["bug"],
+        body: "**Steps to reproduce**\n\n1. …\n",
+        filename: ".github/ISSUE_TEMPLATE/bug.md",
+      },
+      {
+        name: "Feature request",
+        description: "Suggest an idea",
+        body: "## Summary\n\nDescribe it.\n",
+        filename: ".github/ISSUE_TEMPLATE/feature.md",
+      },
+    ],
+    pulls: [],
   };
 
   it("multi-template repos show a chooser; picking prefills title + body", async () => {
-    loaderDataByFrom["/$owner/$repo/issues/new"] = loaderWithTemplates;
+    repoTemplatesMock.mockResolvedValue({ ok: true, data: templatesPayload });
+    setLocation("/ada/hello/issues/new");
     const mod = await loadIssuesNewModule();
     renderWithQueryClient(issuesNewPage(mod));
 
@@ -550,7 +545,8 @@ describe("/{owner}/{repo}/issues/new template chooser (COL-02)", () => {
   }, 15_000);
 
   it("blank issue skips the chooser with an empty form", async () => {
-    loaderDataByFrom["/$owner/$repo/issues/new"] = loaderWithTemplates;
+    repoTemplatesMock.mockResolvedValue({ ok: true, data: templatesPayload });
+    setLocation("/ada/hello/issues/new");
     const mod = await loadIssuesNewModule();
     renderWithQueryClient(issuesNewPage(mod));
 
@@ -566,8 +562,8 @@ describe("/{owner}/{repo}/issues/new template chooser (COL-02)", () => {
   }, 15_000);
 
   it("?template=<filename> selects directly without the chooser", async () => {
-    loaderDataByFrom["/$owner/$repo/issues/new"] = loaderWithTemplates;
-    searchState = { template: ".github/ISSUE_TEMPLATE/feature.md" };
+    repoTemplatesMock.mockResolvedValue({ ok: true, data: templatesPayload });
+    setLocation("/ada/hello/issues/new?template=.github/ISSUE_TEMPLATE/feature.md");
     const mod = await loadIssuesNewModule();
     renderWithQueryClient(issuesNewPage(mod));
 
@@ -575,16 +571,14 @@ describe("/{owner}/{repo}/issues/new template chooser (COL-02)", () => {
       expect(screen.getByPlaceholderText("Issue title")).toBeInTheDocument();
     });
     expect(screen.queryByTestId("issue-template-chooser")).not.toBeInTheDocument();
-    const bodyEl = document.getElementById("issue-body") as HTMLTextAreaElement | null;
-    expect(bodyEl?.value).toContain("Describe it.");
+    await waitFor(() => {
+      const bodyEl = document.getElementById("issue-body") as HTMLTextAreaElement | null;
+      expect(bodyEl?.value).toContain("Describe it.");
+    });
   }, 15_000);
 
   it("template-less repos render the plain form (no chooser)", async () => {
-    loaderDataByFrom["/$owner/$repo/issues/new"] = {
-      kind: "ready",
-      repo: { ...readableRepo, can_write: true },
-      templates: { issues: [], pulls: [] },
-    };
+    setLocation("/ada/hello/issues/new");
     const mod = await loadIssuesNewModule();
     renderWithQueryClient(issuesNewPage(mod));
 
@@ -596,6 +590,8 @@ describe("/{owner}/{repo}/issues/new template chooser (COL-02)", () => {
 });
 
 describe("/{owner}/{repo}/issues/{n} detail Wave 0 (ISS-01..04 / D-ISS-13)", () => {
+  beforeEach(() => setLocation("/ada/hello/issues/1"));
+
   it("detail shows title/body/comments/labels/assignees + Linked PRs panel shell", async () => {
     const mod = await loadIssueDetailModule();
     renderWithQueryClient(issueDetailPage(mod));
@@ -761,7 +757,9 @@ describe("/{owner}/{repo}/issues/{n} detail Wave 0 (ISS-01..04 / D-ISS-13)", () 
         screen.getAllByRole("toolbar", { name: /^Reactions$/i }).length,
       ).toBeGreaterThanOrEqual(2);
     });
-    expect(document.body.textContent).toMatch(/\+1|👍|react/i);
+    // Glyphs render as vendored /emoji/*.svg imgs; the native char lives in alt.
+    expect(document.querySelectorAll('img[src^="/emoji/"]').length).toBeGreaterThan(0);
+    expect(document.querySelector('img[alt="👍"]')).toBeTruthy();
 
     const plusOne = await screen.findAllByRole("button", {
       name: /React \+1/i,

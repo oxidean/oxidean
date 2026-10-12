@@ -13,10 +13,20 @@ const invitesCreateMock = vi.fn();
 const invitesCreateLinkMock = vi.fn();
 const invitesRevokeMock = vi.fn();
 const labelsListMock = vi.fn();
+const authMeMock = vi.fn();
+const bootstrapStatusMock = vi.fn();
+const orgGetMock = vi.fn();
+const orgListMineMock = vi.fn();
 
 vi.mock("@/lib/api-client", () => ({
   apiClient: {
+    auth: {
+      me: (...args: unknown[]) => authMeMock(...args),
+      bootstrapStatus: (...args: unknown[]) => bootstrapStatusMock(...args),
+    },
     org: {
+      get: (...args: unknown[]) => orgGetMock(...args),
+      listMine: (...args: unknown[]) => orgListMineMock(...args),
       updateSettings: (...args: unknown[]) => updateSettingsMock(...args),
       members: {
         list: (...args: unknown[]) => membersListMock(...args),
@@ -50,49 +60,54 @@ const org = {
   created_at: "2026-01-01T00:00:00Z",
 };
 
-let settingsLoader: { org: typeof org; canAdmin: boolean } | undefined = {
-  org,
-  canAdmin: true,
-};
-let membersLoader: { org: typeof org; canAdmin: boolean } | undefined = {
-  org,
-  canAdmin: true,
-};
-let labelsLoader: { org: typeof org; canAdmin: boolean } | undefined = {
-  org,
-  canAdmin: true,
-};
-let pathname = "/acme/settings";
+/**
+ * Access resolution moved from the `$owner.settings` layout loader to
+ * `orgSettingsAccessQueryOptions` — drive it by mocking `apiClient.auth.me`,
+ * `org.get`, and `org.listMine`. A never-resolving `org.get` simulates the
+ * loader-less "loading" state.
+ */
+let accessPending = false;
 
-vi.mock("@octanejs/tanstack-router", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@octanejs/tanstack-router")>();
-  return {
-    ...actual,
-    Outlet: () => createElement("div", { "data-testid": "org-settings-outlet" }, "outlet"),
-    useParams: () => ({ owner: "acme" }),
-    useLocation: (opts?: { select?: (loc: { pathname: string }) => unknown }) => {
-      const loc = { pathname };
-      return opts?.select ? opts.select(loc) : loc;
-    },
-    useLoaderData: (opts?: { from?: string }) => {
-      const from = opts?.from ?? "";
-      if (from.includes("members")) return membersLoader;
-      if (from.includes("labels")) return labelsLoader;
-      return settingsLoader;
-    },
-  };
-});
-
-import { OrgSettingsLayoutPage } from "./$owner.settings";
+import { OrgSettingsShell } from "@/components/org/org-settings-shell";
 import { OrgSettingsPage } from "./$owner.settings.index";
 import { OrgMembersPage } from "./$owner.settings.members";
 import { OrgLabelsPage } from "./$owner.settings.labels";
 
+function setPathname(path: string) {
+  window.history.pushState({}, "", path);
+}
+
+function mockAccessReady() {
+  authMeMock.mockResolvedValue({ ok: true, data: ME });
+  bootstrapStatusMock.mockResolvedValue({ ok: true, data: { needs_setup: false } });
+  orgGetMock.mockImplementation(() =>
+    accessPending ? new Promise(() => {}) : Promise.resolve({ ok: true, data: org }),
+  );
+  orgListMineMock.mockResolvedValue({
+    ok: true,
+    data: {
+      orgs: [{ slug: "acme", role: "owner", display_name: "Acme" }],
+    },
+  });
+}
+
+const ME = {
+  id: "u1",
+  email: "ada@example.com",
+  username: "ada",
+  display_name: "Ada",
+  bio: "",
+  avatar_url: null,
+  role: "user",
+  profile_incomplete: false,
+  email_verified: true,
+  must_change_credentials: false,
+};
+
 beforeEach(() => {
-  pathname = "/acme/settings";
-  settingsLoader = { org, canAdmin: true };
-  membersLoader = { org, canAdmin: true };
-  labelsLoader = { org, canAdmin: true };
+  accessPending = false;
+  setPathname("/acme/settings");
+  mockAccessReady();
   membersListMock.mockResolvedValue({
     ok: true,
     data: {
@@ -162,7 +177,12 @@ afterEach(cleanup);
 
 describe("org settings layout", () => {
   it("happy: sidebar links for General, Members, Labels", async () => {
-    renderWithQueryClient(OrgSettingsLayoutPage);
+    renderWithQueryClient(OrgSettingsShell, {
+      props: {
+        active: "general",
+        children: createElement("div", { "data-testid": "org-settings-outlet" }, "outlet"),
+      },
+    });
 
     await waitFor(() => {
       expect(screen.getByTestId("org-settings-layout")).toBeInTheDocument();
@@ -175,8 +195,10 @@ describe("org settings layout", () => {
   });
 
   it("edge: highlights Members when pathname ends with /members", async () => {
-    pathname = "/acme/settings/members";
-    renderWithQueryClient(OrgSettingsLayoutPage);
+    setPathname("/acme/settings/members");
+    renderWithQueryClient(OrgSettingsShell, {
+      props: { active: "members", children: createElement("div") },
+    });
 
     await waitFor(() => {
       expect(screen.getByRole("link", { name: "Members" })).toHaveAttribute("aria-current", "page");
@@ -184,8 +206,10 @@ describe("org settings layout", () => {
   });
 
   it("unhappy: loading state when org missing", async () => {
-    settingsLoader = undefined;
-    renderWithQueryClient(OrgSettingsLayoutPage);
+    accessPending = true;
+    renderWithQueryClient(OrgSettingsShell, {
+      props: { active: "general", children: createElement("div") },
+    });
     expect(screen.getByText("Loading…")).toBeInTheDocument();
   });
 });
@@ -330,7 +354,7 @@ describe("org settings members", () => {
   });
 
   it("unhappy: shows loading when org missing", () => {
-    membersLoader = undefined;
+    accessPending = true;
     renderWithQueryClient(OrgMembersPage);
     expect(screen.getByText("Loading…")).toBeInTheDocument();
   });

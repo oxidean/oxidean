@@ -74,6 +74,9 @@ describe("earlyNavHrefForTarget", () => {
     expect(earlyNavHrefForTarget(anchor('<a href="/x" target="_blank">x</a>'))).toBeUndefined();
     expect(earlyNavHrefForTarget(anchor('<a href="/x" download>x</a>'))).toBeUndefined();
     expect(earlyNavHrefForTarget(anchor('<a href="/x" data-no-early-nav>x</a>'))).toBeUndefined();
+    // ClientRouter opt-out — full-reload anchors must keep native semantics
+    // through the bridge too, or they morph a non-HTML response into <body>.
+    expect(earlyNavHrefForTarget(anchor('<a href="/x" data-astro-reload>x</a>'))).toBeUndefined();
   });
 
   it("ignores non-anchor targets", () => {
@@ -128,6 +131,14 @@ describe("installEarlyNavBridge", () => {
     expect(navigate).not.toHaveBeenCalled();
   });
 
+  it("forwards data-astro-history=replace through to navigate", () => {
+    const navigate = vi.fn();
+    disposers.push(installEarlyNavBridge(navigate));
+    const a = anchor('<a href="/login" data-astro-history="replace">Sign in</a>');
+    clickOn(a);
+    expect(navigate).toHaveBeenCalledWith({ href: "/login", history: "replace" });
+  });
+
   it("detaches on dispose", () => {
     const navigate = vi.fn();
     const dispose = installEarlyNavBridge(navigate);
@@ -150,15 +161,6 @@ describe("EARLY_NAV_BOOT_SCRIPT", () => {
     });
   }
 
-  /** The SSR mount container Octane marks with a delegation onclick on hydrate. */
-  function hydratedAppRoot(): HTMLDivElement {
-    const root = document.createElement("div");
-    root.id = "__app";
-    root.onclick = () => {};
-    document.body.appendChild(root);
-    return root;
-  }
-
   it("holds a pre-hydration tap and replays it once the anchor is wired", async () => {
     boot();
     const a = anchor('<a href="/owner/repo/issues">Issues</a>');
@@ -173,33 +175,33 @@ describe("EARLY_NAV_BOOT_SCRIPT", () => {
     await vi.waitFor(() => expect(replayed).toHaveBeenCalledOnce(), { timeout: 2_000 });
   });
 
-  it("SPA-navigates a tap whose anchor stayed unwired past hydration", () => {
+  it("SPA-navigates a tap once the navigate bridge registers", async () => {
     boot();
-    hydratedAppRoot();
-    const navigate = vi.fn();
-    disposers.push(installEarlyNavBridge(navigate));
     const a = anchor('<a href="/owner/repo/pulls">Pulls</a>');
     const event = clickOn(a);
     expect(event.defaultPrevented).toBe(true);
-    // Hydration ran without wiring this anchor — safe to router.navigate now.
-    expect(navigate).toHaveBeenCalledWith({ href: "/owner/repo/pulls" });
-  });
-
-  it("does not navigate while hydration may still be pending", async () => {
-    boot();
+    // Tap lands before any island effect ran — held with no nav handler yet.
     const navigate = vi.fn();
-    disposers.push(installEarlyNavBridge(navigate));
-    const a = anchor('<a href="/owner/repo/issues">Issues</a>');
-    clickOn(a);
-    // Router registered but #__app has no delegation marker: hydration could
-    // still be in flight, so navigate must not fire (mid-hydration route
-    // commits corrupt the render).
     await new Promise((r) => setTimeout(r, 150));
     expect(navigate).not.toHaveBeenCalled();
-    // Once the anchor wires, the tap replays through it instead.
+    // The chrome island mounts and registers SPA navigate — safe to swap.
+    disposers.push(installEarlyNavBridge(navigate));
+    await vi.waitFor(() => expect(navigate).toHaveBeenCalledWith({ href: "/owner/repo/pulls" }), {
+      timeout: 2_000,
+    });
+  });
+
+  it("still prefers a wired anchor over the navigate bridge", async () => {
+    boot();
+    const a = anchor('<a href="/owner/repo/issues">Issues</a>');
+    clickOn(a);
+    // Anchor wires during the hold, before the bridge registers — the replay
+    // check runs first, so the element's own handler wins over SPA nav.
     const replayed = vi.fn((e: Event) => e.preventDefault());
     a.addEventListener("click", replayed);
     (a as unknown as Record<string, unknown>).$$click = () => {};
+    const navigate = vi.fn();
+    disposers.push(installEarlyNavBridge(navigate));
     await vi.waitFor(() => expect(replayed).toHaveBeenCalledOnce(), { timeout: 2_000 });
     expect(navigate).not.toHaveBeenCalled();
   });

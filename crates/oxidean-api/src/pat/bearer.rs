@@ -149,6 +149,7 @@ fn parse_scopes(scopes_json: Option<&str>) -> Vec<ClassicPatScope> {
         .collect()
 }
 
+#[allow(clippy::result_large_err)]
 /// Resolve `Authorization: Bearer <pat>` to a session-equivalent identity.
 ///
 /// Returns `Err` for any presented-but-invalid token — a Bearer header is an

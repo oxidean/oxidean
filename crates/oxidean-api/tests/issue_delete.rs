@@ -179,10 +179,7 @@ async fn issue_delete_admin_hard_delete_requires_confirm_number() {
 async fn issue_delete_write_role_rejected() {
     let dir = tempfile::tempdir().expect("tempdir");
     let repos = dir.path().join("repos");
-    let url = format!(
-        "sqlite:{}",
-        dir.path().join("issue_del_write.db").display()
-    );
+    let url = format!("sqlite:{}", dir.path().join("issue_del_write.db").display());
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
@@ -201,8 +198,7 @@ async fn issue_delete_write_role_rejected() {
     .await;
     assert_eq!(created["ok"], true, "{created}");
 
-    let (writer_cookie, writer_v) =
-        signup_and_login(&app, "delwrite@ex.com", "delwrite").await;
+    let (writer_cookie, writer_v) = signup_and_login(&app, "delwrite@ex.com", "delwrite").await;
     let writer_id = writer_v["data"]["id"].as_str().expect("id");
     verify_user(&db, writer_id).await;
     let add = rpc_json(
@@ -239,10 +235,7 @@ async fn issue_delete_write_role_rejected() {
 async fn issue_delete_number_not_reused_after_hard_delete() {
     let dir = tempfile::tempdir().expect("tempdir");
     let repos = dir.path().join("repos");
-    let url = format!(
-        "sqlite:{}",
-        dir.path().join("issue_del_reuse.db").display()
-    );
+    let url = format!("sqlite:{}", dir.path().join("issue_del_reuse.db").display());
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;

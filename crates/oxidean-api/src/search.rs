@@ -285,8 +285,7 @@ pub async fn global(
         .is_some_and(|v| !v.trim().is_empty())
         && langs.is_empty();
     let code_pathspecs = code_search_pathspecs(parsed.path.as_deref(), &langs);
-    let need_code =
-        wanted.contains(&GlobalSearchKind::Code) && !keywords.is_empty() && !lang_miss;
+    let need_code = wanted.contains(&GlobalSearchKind::Code) && !keywords.is_empty() && !lang_miss;
     let need_commits = wanted.contains(&GlobalSearchKind::Commits)
         && (!keywords.is_empty() || author_login.is_some_and(|s| !s.is_empty()));
     let mut commits = GlobalSearchGroup::<GlobalSearchCommitHit>::default();
@@ -301,7 +300,7 @@ pub async fn global(
         scan.truncate(SCAN_REPO_CAP as usize);
 
         let timeout = Duration::from_millis(ctx.search_timeout_ms.max(1));
-        let soft_cap = ctx.search_max_matches.max(1).min(10_000);
+        let soft_cap = ctx.search_max_matches.clamp(1, 10_000);
         // Per-repo fetch ceiling; the merged list is sliced to offset+limit.
         let fetch = (offset as u32)
             .saturating_add(limit as u32)
@@ -387,7 +386,7 @@ async fn scan_code(
     per_repo.sort_by_key(|(idx, _)| *idx);
 
     // Soft-cap distinct files across the merged hits (same rule as repo.search).
-    let max_files = ctx.search_max_files.max(1).min(10_000) as usize;
+    let max_files = ctx.search_max_files.clamp(1, 10_000) as usize;
     let mut seen_files: HashSet<(usize, String)> = HashSet::new();
     let mut file_truncated = false;
     let mut hits: Vec<GlobalSearchCodeHit> = Vec::new();

@@ -97,7 +97,11 @@ async fn create_repo(app: &axum::Router, cookie: &str, name: &str, visibility: &
 
 async fn rpc_json(app: &axum::Router, cookie: Option<&str>, body: &str) -> serde_json::Value {
     let res = match cookie {
-        Some(c) => app.clone().oneshot(rpc_req_with_cookie(body, c)).await.unwrap(),
+        Some(c) => app
+            .clone()
+            .oneshot(rpc_req_with_cookie(body, c))
+            .await
+            .unwrap(),
         None => app.clone().oneshot(rpc_req(body)).await.unwrap(),
     };
     let bytes = res.into_body().collect().await.unwrap().to_bytes();
@@ -128,8 +132,7 @@ async fn social_lists_empty_and_acl() {
     .await;
     assert_eq!(got["ok"], true, "anonymous repo.get public — {got}");
 
-    let (outsider_cookie, outsider_login) =
-        signup_and_login(&app, "out@ex.com", "listout").await;
+    let (outsider_cookie, outsider_login) = signup_and_login(&app, "out@ex.com", "listout").await;
     let outsider_id = outsider_login["data"]["id"].as_str().unwrap();
     verify_user(&db, outsider_id).await;
 
@@ -142,7 +145,10 @@ async fn social_lists_empty_and_acl() {
     .await;
     assert_eq!(empty_watch["ok"], true, "{empty_watch}");
     assert_eq!(empty_watch["data"]["total"], 0);
-    assert!(empty_watch["data"]["watchers"].as_array().unwrap().is_empty());
+    assert!(empty_watch["data"]["watchers"]
+        .as_array()
+        .unwrap()
+        .is_empty());
 
     let empty_forks = rpc_json(
         &app,
@@ -206,10 +212,7 @@ async fn social_lists_empty_and_acl() {
     .await;
     assert_eq!(listed_stars["ok"], true, "{listed_stars}");
     assert_eq!(listed_stars["data"]["total"], 1);
-    assert_eq!(
-        listed_stars["data"]["stargazers"][0]["username"],
-        "listout"
-    );
+    assert_eq!(listed_stars["data"]["stargazers"][0]["username"], "listout");
 
     let listed_watch = rpc_json(
         &app,

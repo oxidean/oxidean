@@ -97,6 +97,7 @@ pub async fn get(pool: &DbPool) -> Result<AuthSettingsRow, String> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn update(
     pool: &DbPool,
     provider_mode: &str,

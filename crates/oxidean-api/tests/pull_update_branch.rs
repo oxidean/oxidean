@@ -135,7 +135,10 @@ async fn commit_on_branch(
         vec!["-C", wt_s, "commit", "-m", message],
         vec!["-C", wt_s, "push", "origin", "HEAD"],
     ] {
-        let status = std::process::Command::new("git").args(&args).status().unwrap();
+        let status = std::process::Command::new("git")
+            .args(&args)
+            .status()
+            .unwrap();
         assert!(status.success(), "git {args:?}");
     }
 }
@@ -232,7 +235,10 @@ async fn pull_update_branch_merges_base_into_head_same_repo() {
     .await;
     assert_eq!(upd["ok"], true, "{upd}");
     assert_eq!(upd["data"]["status"], "updated");
-    let merge_sha = upd["data"]["merge_commit_sha"].as_str().unwrap().to_string();
+    let merge_sha = upd["data"]["merge_commit_sha"]
+        .as_str()
+        .unwrap()
+        .to_string();
     assert_eq!(upd["data"]["pull"]["head_sha"], merge_sha);
     assert_eq!(bare_tip(&bare, "feature"), merge_sha);
 
@@ -370,7 +376,10 @@ async fn pull_update_branch_into_fork_head() {
     .await;
     assert_eq!(upd["ok"], true, "{upd}");
     assert_eq!(upd["data"]["status"], "updated");
-    let merge_sha = upd["data"]["merge_commit_sha"].as_str().unwrap().to_string();
+    let merge_sha = upd["data"]["merge_commit_sha"]
+        .as_str()
+        .unwrap()
+        .to_string();
     assert_eq!(upd["data"]["pull"]["head_sha"], merge_sha);
     // The merge commit lives on the FORK's feature branch.
     assert_eq!(bare_tip(&fork_bare, "feature"), merge_sha);

@@ -84,8 +84,9 @@ describe("buildSwRegisterScript", () => {
         setItem: () => {},
       },
     };
-    // oxlint-disable-next-line no-eval — executes the emitted boot script
-    // verbatim against stubbed globals; that is the test.
+    // Executes the emitted boot script verbatim against stubbed globals; that
+    // is the test.
+    // oxlint-disable-next-line no-eval
     const run = (0, eval)(
       "(function(window,navigator,sessionStorage){" + buildSwRegisterScript("b1") + "})",
     ) as (w: unknown, n: unknown, s: unknown) => void;

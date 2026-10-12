@@ -8,7 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { apiClient } from "@/lib/api-client";
 import { formatRelative } from "@/lib/relative-time";
 
-export type PullChecksProps = {
+type PullChecksProps = {
   owner: string;
   repoName: string;
   /** Head SHA whose commit statuses gate the merge (PR head commit). */

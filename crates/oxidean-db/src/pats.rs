@@ -86,7 +86,8 @@ const PAT_SELECT_PG: &str = "SELECT id, user_id, kind, name, token_prefix, token
        to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS created_at
 FROM personal_access_tokens";
 
-const PAT_SELECT_MYSQL: &str = "SELECT id, user_id, kind, name, token_prefix, token_hash, scopes_json,
+const PAT_SELECT_MYSQL: &str =
+    "SELECT id, user_id, kind, name, token_prefix, token_hash, scopes_json,
        contents_perm, perms_json, repo_access,
        CASE WHEN expires_at IS NULL THEN NULL
             ELSE DATE_FORMAT(expires_at, '%Y-%m-%dT%H:%i:%sZ') END AS expires_at,
@@ -98,7 +99,8 @@ const PAT_SELECT_MYSQL: &str = "SELECT id, user_id, kind, name, token_prefix, to
        DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at
 FROM personal_access_tokens";
 
-const PAT_SELECT_SQLITE: &str = "SELECT id, user_id, kind, name, token_prefix, token_hash, scopes_json,
+const PAT_SELECT_SQLITE: &str =
+    "SELECT id, user_id, kind, name, token_prefix, token_hash, scopes_json,
        contents_perm, perms_json, repo_access,
        CASE WHEN expires_at IS NULL THEN NULL
             ELSE strftime('%Y-%m-%dT%H:%M:%SZ', expires_at) END AS expires_at,
@@ -121,7 +123,10 @@ async fn load_repo_ids(pool: &DbPool, token_id: &str) -> Result<Vec<String>, Str
             .await
             .map_err(|e| format!("list pat repos failed: {e}"))?;
             rows.into_iter()
-                .map(|r| r.try_get("repository_id").map_err(|e| format!("pat repo row: {e}")))
+                .map(|r| {
+                    r.try_get("repository_id")
+                        .map_err(|e| format!("pat repo row: {e}"))
+                })
                 .collect()
         }
         DbPool::MySql(p) => {
@@ -133,7 +138,10 @@ async fn load_repo_ids(pool: &DbPool, token_id: &str) -> Result<Vec<String>, Str
             .await
             .map_err(|e| format!("list pat repos failed: {e}"))?;
             rows.into_iter()
-                .map(|r| r.try_get("repository_id").map_err(|e| format!("pat repo row: {e}")))
+                .map(|r| {
+                    r.try_get("repository_id")
+                        .map_err(|e| format!("pat repo row: {e}"))
+                })
                 .collect()
         }
         DbPool::Sqlite(p) => {
@@ -145,7 +153,10 @@ async fn load_repo_ids(pool: &DbPool, token_id: &str) -> Result<Vec<String>, Str
             .await
             .map_err(|e| format!("list pat repos failed: {e}"))?;
             rows.into_iter()
-                .map(|r| r.try_get("repository_id").map_err(|e| format!("pat repo row: {e}")))
+                .map(|r| {
+                    r.try_get("repository_id")
+                        .map_err(|e| format!("pat repo row: {e}"))
+                })
                 .collect()
         }
     }
@@ -289,15 +300,12 @@ VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
 }
 
 /// Lookup by SHA-256 hex. Returns `None` when missing or soft-revoked.
-pub async fn find_by_token_hash(
-    pool: &DbPool,
-    token_hash: &str,
-) -> Result<Option<PatRow>, String> {
+pub async fn find_by_token_hash(pool: &DbPool, token_hash: &str) -> Result<Option<PatRow>, String> {
     let mut pat = match pool {
         DbPool::Postgres(p) => {
-            let row = sqlx::query(&format!(
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{PAT_SELECT_PG} WHERE token_hash = $1 AND revoked_at IS NULL"
-            ))
+            )))
             .bind(token_hash)
             .fetch_optional(p)
             .await
@@ -308,9 +316,9 @@ pub async fn find_by_token_hash(
             }
         }
         DbPool::MySql(p) => {
-            let row = sqlx::query(&format!(
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{PAT_SELECT_MYSQL} WHERE token_hash = ? AND revoked_at IS NULL"
-            ))
+            )))
             .bind(token_hash)
             .fetch_optional(p)
             .await
@@ -321,9 +329,9 @@ pub async fn find_by_token_hash(
             }
         }
         DbPool::Sqlite(p) => {
-            let row = sqlx::query(&format!(
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{PAT_SELECT_SQLITE} WHERE token_hash = ?1 AND revoked_at IS NULL"
-            ))
+            )))
             .bind(token_hash)
             .fetch_optional(p)
             .await
@@ -344,10 +352,10 @@ pub async fn find_by_token_hash(
 pub async fn list_for_user(pool: &DbPool, user_id: &str) -> Result<Vec<PatRow>, String> {
     let mut out = match pool {
         DbPool::Postgres(p) => {
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{PAT_SELECT_PG} WHERE user_id = $1 AND revoked_at IS NULL
 ORDER BY created_at DESC, id DESC"
-            ))
+            )))
             .bind(user_id)
             .fetch_all(p)
             .await
@@ -359,10 +367,10 @@ ORDER BY created_at DESC, id DESC"
             mapped
         }
         DbPool::MySql(p) => {
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{PAT_SELECT_MYSQL} WHERE user_id = ? AND revoked_at IS NULL
 ORDER BY created_at DESC, id DESC"
-            ))
+            )))
             .bind(user_id)
             .fetch_all(p)
             .await
@@ -374,10 +382,10 @@ ORDER BY created_at DESC, id DESC"
             mapped
         }
         DbPool::Sqlite(p) => {
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{PAT_SELECT_SQLITE} WHERE user_id = ?1 AND revoked_at IS NULL
 ORDER BY created_at DESC, id DESC"
-            ))
+            )))
             .bind(user_id)
             .fetch_all(p)
             .await

@@ -184,9 +184,9 @@ pub async fn find_by_fingerprint(
 ) -> Result<Option<DeployKeyRow>, String> {
     match pool {
         DbPool::Postgres(p) => {
-            let row = sqlx::query(&format!(
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{DEPLOY_KEY_SELECT_PG} WHERE fingerprint = $1 ORDER BY created_at ASC, id ASC LIMIT 1"
-            ))
+            )))
             .bind(fingerprint)
             .fetch_optional(p)
             .await
@@ -197,9 +197,9 @@ pub async fn find_by_fingerprint(
             }
         }
         DbPool::MySql(p) => {
-            let row = sqlx::query(&format!(
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{DEPLOY_KEY_SELECT_MYSQL} WHERE fingerprint = ? ORDER BY created_at ASC, id ASC LIMIT 1"
-            ))
+            )))
             .bind(fingerprint)
             .fetch_optional(p)
             .await
@@ -210,9 +210,9 @@ pub async fn find_by_fingerprint(
             }
         }
         DbPool::Sqlite(p) => {
-            let row = sqlx::query(&format!(
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{DEPLOY_KEY_SELECT_SQLITE} WHERE fingerprint = ?1 ORDER BY created_at ASC, id ASC LIMIT 1"
-            ))
+            )))
             .bind(fingerprint)
             .fetch_optional(p)
             .await
@@ -234,9 +234,9 @@ pub async fn find_for_repo(
 ) -> Result<Option<DeployKeyRow>, String> {
     match pool {
         DbPool::Postgres(p) => {
-            let row = sqlx::query(&format!(
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{DEPLOY_KEY_SELECT_PG} WHERE repo_id = $1 AND fingerprint = $2"
-            ))
+            )))
             .bind(repo_id)
             .bind(fingerprint)
             .fetch_optional(p)
@@ -248,9 +248,9 @@ pub async fn find_for_repo(
             }
         }
         DbPool::MySql(p) => {
-            let row = sqlx::query(&format!(
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{DEPLOY_KEY_SELECT_MYSQL} WHERE repo_id = ? AND fingerprint = ?"
-            ))
+            )))
             .bind(repo_id)
             .bind(fingerprint)
             .fetch_optional(p)
@@ -262,9 +262,9 @@ pub async fn find_for_repo(
             }
         }
         DbPool::Sqlite(p) => {
-            let row = sqlx::query(&format!(
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{DEPLOY_KEY_SELECT_SQLITE} WHERE repo_id = ?1 AND fingerprint = ?2"
-            ))
+            )))
             .bind(repo_id)
             .bind(fingerprint)
             .fetch_optional(p)
@@ -282,9 +282,9 @@ pub async fn find_for_repo(
 pub async fn list_for_repo(pool: &DbPool, repo_id: &str) -> Result<Vec<DeployKeyRow>, String> {
     match pool {
         DbPool::Postgres(p) => {
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{DEPLOY_KEY_SELECT_PG} WHERE repo_id = $1 ORDER BY created_at DESC, id DESC"
-            ))
+            )))
             .bind(repo_id)
             .fetch_all(p)
             .await
@@ -296,9 +296,9 @@ pub async fn list_for_repo(pool: &DbPool, repo_id: &str) -> Result<Vec<DeployKey
             Ok(mapped)
         }
         DbPool::MySql(p) => {
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{DEPLOY_KEY_SELECT_MYSQL} WHERE repo_id = ? ORDER BY created_at DESC, id DESC"
-            ))
+            )))
             .bind(repo_id)
             .fetch_all(p)
             .await
@@ -310,9 +310,9 @@ pub async fn list_for_repo(pool: &DbPool, repo_id: &str) -> Result<Vec<DeployKey
             Ok(mapped)
         }
         DbPool::Sqlite(p) => {
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{DEPLOY_KEY_SELECT_SQLITE} WHERE repo_id = ?1 ORDER BY created_at DESC, id DESC"
-            ))
+            )))
             .bind(repo_id)
             .fetch_all(p)
             .await

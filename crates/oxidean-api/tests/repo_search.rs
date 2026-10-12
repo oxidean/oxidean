@@ -76,7 +76,11 @@ async fn signup_and_login(
 
 async fn rpc_json(app: &axum::Router, body: &str, cookie: Option<&str>) -> serde_json::Value {
     let res = match cookie {
-        Some(c) => app.clone().oneshot(rpc_req_with_cookie(body, c)).await.unwrap(),
+        Some(c) => app
+            .clone()
+            .oneshot(rpc_req_with_cookie(body, c))
+            .await
+            .unwrap(),
         None => app.clone().oneshot(rpc_req(body)).await.unwrap(),
     };
     // Soft `repo.not_found` is HTTP 404 with RPC error body (anti-enumeration).
@@ -120,7 +124,10 @@ async fn create_and_seed(
 async fn repo_search_code() {
     let dir = tempfile::tempdir().expect("tempdir");
     let repos = dir.path().join("repos");
-    let url = format!("sqlite:{}", dir.path().join("repo_search_code.db").display());
+    let url = format!(
+        "sqlite:{}",
+        dir.path().join("repo_search_code.db").display()
+    );
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
@@ -134,7 +141,10 @@ async fn repo_search_code() {
         .expect("verify");
 
     let needle = "OXIDEAN_SRCH_UNIQUE_CODE_42";
-    create_and_seed(&app, &repos, &cookie, "codesrch", "widgets", "public", needle).await;
+    create_and_seed(
+        &app, &repos, &cookie, "codesrch", "widgets", "public", needle,
+    )
+    .await;
 
     let res = rpc_json(
         &app,
@@ -171,7 +181,10 @@ async fn repo_search_code() {
 async fn repo_search_commits() {
     let dir = tempfile::tempdir().expect("tempdir");
     let repos = dir.path().join("repos");
-    let url = format!("sqlite:{}", dir.path().join("repo_search_commits.db").display());
+    let url = format!(
+        "sqlite:{}",
+        dir.path().join("repo_search_commits.db").display()
+    );
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
@@ -238,7 +251,10 @@ async fn repo_search_commits() {
 async fn repo_search_issues() {
     let dir = tempfile::tempdir().expect("tempdir");
     let repos = dir.path().join("repos");
-    let url = format!("sqlite:{}", dir.path().join("repo_search_issues.db").display());
+    let url = format!(
+        "sqlite:{}",
+        dir.path().join("repo_search_issues.db").display()
+    );
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
@@ -309,7 +325,10 @@ async fn repo_search_issues() {
     .await;
     assert_eq!(issues_only["ok"], true, "{issues_only}");
     for hit in issues_only["data"]["hits"].as_array().unwrap() {
-        assert_eq!(hit["kind"], "issue", "issues tab must not mix PRs — {issues_only}");
+        assert_eq!(
+            hit["kind"], "issue",
+            "issues tab must not mix PRs — {issues_only}"
+        );
     }
 }
 
@@ -318,7 +337,10 @@ async fn repo_search_issues() {
 async fn repo_search_pulls() {
     let dir = tempfile::tempdir().expect("tempdir");
     let repos = dir.path().join("repos");
-    let url = format!("sqlite:{}", dir.path().join("repo_search_pulls.db").display());
+    let url = format!(
+        "sqlite:{}",
+        dir.path().join("repo_search_pulls.db").display()
+    );
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
@@ -380,7 +402,10 @@ async fn repo_search_pulls() {
         "{found}"
     );
     for hit in hits {
-        assert_eq!(hit["kind"], "pull", "pulls tab must not mix issues — {found}");
+        assert_eq!(
+            hit["kind"], "pull",
+            "pulls tab must not mix issues — {found}"
+        );
     }
 
     let issues_tab = rpc_json(
@@ -462,7 +487,10 @@ async fn repo_search_acl() {
 async fn repo_search_limits() {
     let dir = tempfile::tempdir().expect("tempdir");
     let repos = dir.path().join("repos");
-    let url = format!("sqlite:{}", dir.path().join("repo_search_limits.db").display());
+    let url = format!(
+        "sqlite:{}",
+        dir.path().join("repo_search_limits.db").display()
+    );
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;

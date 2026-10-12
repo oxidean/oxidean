@@ -21,8 +21,12 @@ async fn setup() -> (axum::Router, Database, String, String, tempfile::TempDir) 
     db.migrate().await.unwrap();
     support::unlock_signup(&db).await;
     let app = router_with_state(
-        AppState::new(db.clone(), Arc::new(LogSink) as Arc<dyn EmailSender>, "development")
-            .with_packages_dir(dir.path().join("pkg")),
+        AppState::new(
+            db.clone(),
+            Arc::new(LogSink) as Arc<dyn EmailSender>,
+            "development",
+        )
+        .with_packages_dir(dir.path().join("pkg")),
         build_cors("development", None).unwrap(),
     );
     let _ = app
@@ -97,7 +101,11 @@ async fn package_rpc_list_by_owner() {
     let v: serde_json::Value =
         serde_json::from_slice(&res.into_body().collect().await.unwrap().to_bytes()).unwrap();
     assert!(
-        v["data"]["packages"].as_array().unwrap().iter().any(|p| p["name"] == "tool"),
+        v["data"]["packages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p["name"] == "tool"),
         "expected packages.list by owner — {v}"
     );
 }
@@ -137,9 +145,7 @@ async fn package_rpc_list_by_repo_link() {
     let res = app
         .clone()
         .oneshot(rpc(
-            &format!(
-                r#"{{"procedure":"packages.list","input":{{"repository_id":"{repo_id}"}}}}"#
-            ),
+            &format!(r#"{{"procedure":"packages.list","input":{{"repository_id":"{repo_id}"}}}}"#),
             Some(&cookie),
         ))
         .await
@@ -159,9 +165,7 @@ async fn package_rpc_list_by_repo_link() {
     // Anonymous viewers of a public repo must still see linked public packages (About sidebar).
     let anon = app
         .oneshot(rpc(
-            &format!(
-                r#"{{"procedure":"packages.list","input":{{"repository_id":"{repo_id}"}}}}"#
-            ),
+            &format!(r#"{{"procedure":"packages.list","input":{{"repository_id":"{repo_id}"}}}}"#),
             None,
         ))
         .await
@@ -250,8 +254,12 @@ async fn package_rpc_admin_usage_and_set_quota() {
     db.set_email_verified_at(&id, &now).await.unwrap();
 
     let app = router_with_state(
-        AppState::new(db.clone(), Arc::new(LogSink) as Arc<dyn EmailSender>, "development")
-            .with_packages_dir(dir.path().join("pkg")),
+        AppState::new(
+            db.clone(),
+            Arc::new(LogSink) as Arc<dyn EmailSender>,
+            "development",
+        )
+        .with_packages_dir(dir.path().join("pkg")),
         build_cors("development", None).unwrap(),
     );
     let login = app

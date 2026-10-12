@@ -1,7 +1,13 @@
-import { createFileRoute, useLoaderData, useParams } from "@octanejs/tanstack-router";
+import { navigate } from "astro:transitions/client";
 import type { RepoCompareResponse, RepoPublic, RepoRefEntry } from "@oxidean/api-client";
+import { queryOptions, useQuery } from "@octanejs/tanstack-query";
+
+import { matchPath } from "@/lib/route-params";
+import { usePathname, useSearchString } from "@/lib/pathname.tsrx";
+import { RepoLayout } from "@/routes/$owner.$repo.tsrx";
+import { AppPage } from "@/components/app-page";
 import { useEffect, useState } from "octane";
-import { GitCompareArrows } from "@octanejs/lucide";
+import { ArrowLeftRight, GitCompareArrows } from "@octanejs/lucide";
 import { DiffPatch } from "@/components/repo/diff-patch";
 import { RepoNotFound } from "@/components/repo/repo-not-found";
 import { Button } from "@/components/ui/button";
@@ -56,7 +62,7 @@ async function loadComparePage(
   splat: string | undefined,
 ): Promise<CompareLoaderData> {
   const parsed = parseCompareSplat(splat);
-  const got = await fetchRepoGet({ data: { owner, name: repoName } });
+  const got = await fetchRepoGet({ owner, name: repoName });
   if (!got.ok) {
     if (got.error.code === "repo.not_found") return { kind: "not_found" };
     return {
@@ -65,7 +71,7 @@ async function loadComparePage(
     };
   }
   const repo = got.data;
-  const refsRes = await fetchRepoRefs({ data: { owner, name: repoName } });
+  const refsRes = await fetchRepoRefs({ owner, name: repoName });
   const refs = refsRes.ok ? refsRes.data.refs : [];
   const base = parsed.base || repo.default_branch || "main";
   const head = parsed.head || repo.default_branch || "main";
@@ -83,11 +89,13 @@ async function loadComparePage(
     };
   }
 
-  const cmp = await fetchRepoCompare({
-    data: { owner, name: repoName, base, head },
-  });
+  const cmp = await fetchRepoCompare({ owner, name: repoName, base, head });
   if (!cmp.ok) {
-    if (cmp.error.code === "repo.not_found" || cmp.error.code === "repo.path_not_found") {
+    if (
+      cmp.error.code === "repo.not_found" ||
+      cmp.error.code === "repo.path_not_found" ||
+      cmp.error.code === "repo.git_failed"
+    ) {
       return { kind: "not_found" };
     }
     return {
@@ -108,29 +116,40 @@ async function loadComparePage(
   };
 }
 
-export const Route = createFileRoute("/$owner/$repo/compare/$")({
-  component: RepoComparePage,
-  head: ({ params }) => ({
-    meta: [
-      {
-        title: `Compare · ${(params as { owner: string }).owner}/${(params as { repo: string }).repo} · Oxidean`,
-      },
+function repoCompareQueryOptions(params: Record<string, string | undefined>, searchStr = "") {
+  return queryOptions({
+    queryKey: [
+      "repo-page",
+      "/$owner/$repo/compare/$",
+      params.owner ?? "",
+      params.repo ?? "",
+      params._splat ?? "",
+      params.n ?? "",
+      params.sha ?? "",
+      params.tag ?? "",
+      params.run ?? "",
+      searchStr,
     ],
-  }),
-  loader: async ({ params }): Promise<CompareLoaderData> => {
-    const owner = String((params as { owner?: string }).owner ?? "");
-    const repoName = String((params as { repo?: string }).repo ?? "");
-    const splat = (params as { _splat?: string })._splat;
-    try {
-      return await loadComparePage(owner, repoName, splat);
-    } catch {
-      return { kind: "error", message: NETWORK_ERROR };
-    }
-  },
-});
+    queryFn: async (): Promise<CompareLoaderData> => {
+      const owner = String((params as { owner?: string }).owner ?? "");
+      const repoName = String((params as { repo?: string }).repo ?? "");
+      const splat = (params as { _splat?: string })._splat;
+      try {
+        return await loadComparePage(owner, repoName, splat);
+      } catch {
+        return { kind: "error", message: NETWORK_ERROR };
+      }
+    },
+    enabled: Boolean(params.owner && params.repo),
+    retry: false,
+    staleTime: 30_000,
+  });
+}
 
-export function RepoComparePage() @{
-  const params = useParams({ from: "/$owner/$repo/compare/$" }) as {
+function RepoComparePageContent() @{
+  const pathname = usePathname();
+  const searchStr = useSearchString();
+  const params = (matchPath("/$owner/$repo/compare/$", pathname) ?? {}) as {
     owner: string;
     repo: string;
     _splat?: string;
@@ -138,9 +157,7 @@ export function RepoComparePage() @{
   const owner = params.owner ?? "";
   const repoName = params.repo ?? "";
   const parsed = parseCompareSplat(params._splat);
-  const loaderData = useLoaderData({ from: "/$owner/$repo/compare/$" }) as
-    | CompareLoaderData
-    | undefined;
+  const loaderData = useQuery(repoCompareQueryOptions(params, searchStr)).data;
 
   const [phase, setPhase] = useState<Phase>(() => loaderData ?? { kind: "loading" });
   const [baseDraft, setBaseDraft] = useState(() =>
@@ -182,9 +199,7 @@ export function RepoComparePage() @{
   function goCompare() {
     const b = baseDraft.trim() || "main";
     const h = headDraft.trim() || "main";
-    if (typeof window !== "undefined") {
-      window.location.href = compareHref(owner, repoName, b, h);
-    }
+    void navigate(compareHref(owner, repoName, b, h));
   }
 
   @if (phase.kind === "not_found") {
@@ -229,6 +244,18 @@ export function RepoComparePage() @{
             }}
           />
         </label>
+        <button
+          type="button"
+          className="mb-0.5 inline-flex h-9 items-center gap-1 rounded-md border border-border px-2 text-muted-foreground hover:bg-muted hover:text-foreground"
+          aria-label="Swap base and head"
+          title="Swap base and head"
+          onClick={() => {
+            setBaseDraft(headDraft);
+            setHeadDraft(baseDraft);
+          }}
+        >
+          <ArrowLeftRight aria-hidden size={14} />
+        </button>
         <datalist id="oxidean-compare-refs">
           @for (const r of phase.refs; key r.name) {
             <option value={shortRefName(r.name) as string} />;
@@ -288,4 +315,13 @@ export function RepoComparePage() @{
       }
     </>;
   }
+}
+
+/** Page root — RepoLayout (chrome + repo store) around the leaf content. */
+export function RepoComparePage() @{
+  <AppPage>
+    <RepoLayout>
+      <RepoComparePageContent />
+    </RepoLayout>
+  </AppPage>;
 }

@@ -1,4 +1,5 @@
-import { createFileRoute, useLoaderData } from "@octanejs/tanstack-router";
+import { queryOptions, useQuery } from "@octanejs/tanstack-query";
+import { AppPage } from "@/components/app-page";
 import type { UserPublic } from "@oxidean/api-client";
 import { useEffect, useState } from "octane";
 import { AuthShell } from "@/components/auth-shell";
@@ -11,34 +12,37 @@ import { fetchSessionMe } from "@/lib/ssr-auth";
 import { cn } from "@/lib/utils";
 import { AppLink } from "@/components/ui/app-link";
 
-export type TokensNewLoaderData =
+type TokensNewLoaderData =
   | { kind: "unauthenticated" }
   | { kind: "error"; message: string }
   | { kind: "ready"; user: UserPublic };
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
 
-export const Route = createFileRoute("/settings/tokens/new/")({
-  component: TokensNewPage,
-  head: () => ({ meta: [{ title: "New classic token · Oxidean" }] }),
-  loader: async (): Promise<TokensNewLoaderData> => {
-    try {
-      const res = await fetchSessionMe();
-      if (!res.ok) {
-        if (res.error.code === "auth.unauthenticated") {
-          return { kind: "unauthenticated" };
+function settingsTokensNewQueryOptions() {
+  return queryOptions({
+    queryKey: ["settings", "settingsTokensNew"],
+    queryFn: async (): Promise<TokensNewLoaderData> => {
+      try {
+        const res = await fetchSessionMe();
+        if (!res.ok) {
+          if (res.error.code === "auth.unauthenticated") {
+            return { kind: "unauthenticated" };
+          }
+          return {
+            kind: "error",
+            message: res.error.message || "Could not load session.",
+          };
         }
-        return {
-          kind: "error",
-          message: res.error.message || "Could not load session.",
-        };
+        return { kind: "ready", user: res.data };
+      } catch {
+        return { kind: "error", message: NETWORK_ERROR };
       }
-      return { kind: "ready", user: res.data };
-    } catch {
-      return { kind: "error", message: NETWORK_ERROR };
-    }
-  },
-});
+    },
+    retry: false,
+    staleTime: 30_000,
+  });
+}
 
 type Phase =
   | { kind: "loading" }
@@ -47,9 +51,13 @@ type Phase =
 
 /** Exported for tokens.integration.test.ts (GIT-11 / D-05 / D-15 / D-25). */
 export function TokensNewPage() @{
-  const loaderData = useLoaderData({ from: "/settings/tokens/new/" }) as
-    | TokensNewLoaderData
-    | undefined;
+  <AppPage>
+    <TokensNewContent />
+  </AppPage>;
+}
+
+function TokensNewContent() @{
+  const loaderData = useQuery(settingsTokensNewQueryOptions()).data;
 
   useEffect(() => {
     if (loaderData?.kind === "unauthenticated") {

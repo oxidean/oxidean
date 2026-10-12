@@ -169,6 +169,7 @@ async fn fanout_activity_inner(
 ///   * `participating` watchers receive only when already in that set;
 ///   * `ignore` watchers are suppressed even when they participate;
 ///   * users with no subscription row keep legacy participating delivery.
+///
 /// Soft-fails like `fanout`: a watch-level lookup error falls back to the
 /// participant set so delivery is never lost.
 pub async fn fanout_activity(
@@ -512,20 +513,18 @@ pub async fn sweep_org_access(db: &Database, org_id: &str) {
 /// Soft-fails.
 pub async fn prune_stale_notifications(db: &Database, user_id: &str) {
     match db.list_notification_repo_ids_for_recipient(user_id).await {
-        Ok(repo_ids) => {
-            match db.readable_repo_ids(user_id, &repo_ids).await {
-                Ok(readable) => {
-                    for repo_id in repo_ids {
-                        if !readable.contains(&repo_id) {
-                            drop_access_rows(db, user_id, &repo_id).await;
-                        }
+        Ok(repo_ids) => match db.readable_repo_ids(user_id, &repo_ids).await {
+            Ok(readable) => {
+                for repo_id in repo_ids {
+                    if !readable.contains(&repo_id) {
+                        drop_access_rows(db, user_id, &repo_id).await;
                     }
                 }
-                Err(e) => {
-                    tracing::warn!(error = %e, user_id = %user_id, "stale notification readable check failed")
-                }
             }
-        }
+            Err(e) => {
+                tracing::warn!(error = %e, user_id = %user_id, "stale notification readable check failed")
+            }
+        },
         Err(e) => {
             tracing::warn!(error = %e, user_id = %user_id, "stale notification sweep failed")
         }

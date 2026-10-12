@@ -1,4 +1,3 @@
-import { createElement } from "octane";
 import { cleanup, screen, waitFor } from "@octanejs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithQueryClient } from "@/test/render-with-query";
@@ -7,6 +6,7 @@ import { renderWithQueryClient } from "@/test/render-with-query";
  * API-03 /settings/applications — developer apps + authorized grants UI.
  */
 
+const meMock = vi.fn();
 const listMock = vi.fn();
 const grantsMock = vi.fn();
 const createMock = vi.fn();
@@ -17,6 +17,9 @@ const revokeMock = vi.fn();
 
 vi.mock("@/lib/api-client", () => ({
   apiClient: {
+    auth: {
+      me: (...args: unknown[]) => meMock(...args),
+    },
     oauthApp: {
       list: (...args: unknown[]) => listMock(...args),
       listGrants: (...args: unknown[]) => grantsMock(...args),
@@ -34,30 +37,23 @@ type LoaderShape =
   | { kind: "error"; message: string }
   | { kind: "ready"; user: unknown; apps: unknown[]; grants: unknown[] };
 
-let loaderData: LoaderShape;
-
-vi.mock("@octanejs/tanstack-router", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@octanejs/tanstack-router")>();
-  return {
-    ...actual,
-    useLoaderData: () => loaderData,
-    Link: (props: {
-      to?: string;
-      children?: unknown;
-      className?: string;
-      "aria-current"?: string;
-    }) =>
-      createElement(
-        "a",
-        {
-          href: props.to ?? "#",
-          className: props.className,
-          "aria-current": props["aria-current"],
-        },
-        props.children as never,
-      ),
-  };
-});
+function applyLoader(d: LoaderShape | undefined) {
+  if (d === undefined) {
+    meMock.mockReturnValue(new Promise(() => {}));
+    return;
+  }
+  if (d.kind === "unauthenticated") {
+    meMock.mockResolvedValue({ ok: false, error: { code: "auth.unauthenticated", message: "n" } });
+    return;
+  }
+  if (d.kind === "error") {
+    meMock.mockResolvedValue({ ok: false, error: { code: "x", message: d.message } });
+    return;
+  }
+  meMock.mockResolvedValue({ ok: true, data: d.user });
+  listMock.mockResolvedValue({ ok: true, data: d.apps });
+  grantsMock.mockResolvedValue({ ok: true, data: d.grants });
+}
 
 const verifiedUser = {
   id: "u1",
@@ -99,12 +95,16 @@ beforeEach(() => {
   deleteMock.mockReset();
   rotateMock.mockReset();
   revokeMock.mockReset();
-  loaderData = { kind: "ready", user: verifiedUser, apps: [appRow], grants: [grantRow] };
+  applyLoader({ kind: "ready", user: verifiedUser, apps: [appRow], grants: [grantRow] });
   listMock.mockResolvedValue({ ok: true, data: [appRow] });
   grantsMock.mockResolvedValue({ ok: true, data: [grantRow] });
 });
 
 afterEach(cleanup);
+
+beforeEach(() => {
+  window.history.pushState({}, "", "/settings/applications");
+});
 
 async function loadModule(): Promise<Record<string, unknown>> {
   return (await import("./applications")) as Record<string, unknown>;
@@ -117,8 +117,9 @@ describe("/settings/applications (API-03)", () => {
     renderWithQueryClient(Page);
 
     await waitFor(() => {
-      expect(document.body.textContent).toContain("OAuth applications");
+      expect(document.body.textContent).toContain("test-cli");
     });
+    expect(document.body.textContent).toContain("OAuth applications");
     expect(document.body.textContent).toContain("Authorized applications");
     expect(document.body.textContent).toContain("Developer applications");
     expect(document.body.textContent).toContain("test-cli");
@@ -130,7 +131,7 @@ describe("/settings/applications (API-03)", () => {
   }, 30_000);
 
   it("empty state when no apps or grants", async () => {
-    loaderData = { kind: "ready", user: verifiedUser, apps: [], grants: [] };
+    applyLoader({ kind: "ready", user: verifiedUser, apps: [], grants: [] });
     listMock.mockResolvedValue({ ok: true, data: [] });
     const mod = await loadModule();
     const Page = (mod.ApplicationsPage ?? mod.default) as unknown;
@@ -138,7 +139,7 @@ describe("/settings/applications (API-03)", () => {
 
     await waitFor(() => {
       expect(document.body.textContent).toContain("No authorized applications");
+      expect(document.body.textContent).toContain("No OAuth applications");
     });
-    expect(document.body.textContent).toContain("No OAuth applications");
   }, 30_000);
 });

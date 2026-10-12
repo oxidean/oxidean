@@ -2,16 +2,17 @@
 
 #![allow(dead_code)]
 
-use std::sync::{Mutex, MutexGuard};
+use tokio::sync::{Mutex, MutexGuard};
 
 use oxidean_api::auth::hash_password_str;
 use oxidean_db::Database;
 use uuid::Uuid;
 
 /// Serialize tests that mutate `OXIDEAN_ADMIN_*` / `OXIDEAN_ALLOW_SIGNUP` (process-wide env).
-pub fn lock_admin_env() -> MutexGuard<'static, ()> {
-    static LOCK: Mutex<()> = Mutex::new(());
-    LOCK.lock().unwrap_or_else(|e| e.into_inner())
+/// Async mutex: the guard is `Send` and intentionally held across `.await`s.
+pub async fn lock_admin_env() -> MutexGuard<'static, ()> {
+    static LOCK: Mutex<()> = Mutex::const_new(());
+    LOCK.lock().await
 }
 
 /// Create a verified `sys-admin` when the users table is empty and open local signup

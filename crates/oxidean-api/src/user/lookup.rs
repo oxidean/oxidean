@@ -148,9 +148,7 @@ async fn with_repo_context(
         members
             .into_iter()
             .filter(|m| {
-                m.username
-                    .to_ascii_lowercase()
-                    .starts_with(&prefix_lower)
+                m.username.to_ascii_lowercase().starts_with(&prefix_lower)
                     && !exclude.contains(&m.username.to_ascii_lowercase())
             })
             .take(LOOKUP_LIMIT as usize)
@@ -192,10 +190,7 @@ async fn with_repo_context(
     Ok(UserLookupResponse { users })
 }
 
-async fn with_instance_context(
-    ctx: &RpcCtx,
-    prefix: &str,
-) -> Result<UserLookupResponse, AppError> {
+async fn with_instance_context(ctx: &RpcCtx, prefix: &str) -> Result<UserLookupResponse, AppError> {
     let caller = require_verified(ctx).await?;
     if caller.role != Role::SysAdmin {
         return Ok(empty());
@@ -205,19 +200,20 @@ async fn with_instance_context(
 }
 
 /// `user.lookup` — verified session, rate-limited, username prefix only (never email).
-pub async fn lookup(ctx: &RpcCtx, input: serde_json::Value) -> Result<UserLookupResponse, AppError> {
+pub async fn lookup(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<UserLookupResponse, AppError> {
     let _caller = require_verified(ctx).await?;
 
-    let session = ctx.session.as_ref().ok_or_else(|| {
-        AppError::new("auth.unauthenticated", "Sign in to look up users.")
-    })?;
+    let session = ctx
+        .session
+        .as_ref()
+        .ok_or_else(|| AppError::new("auth.unauthenticated", "Sign in to look up users."))?;
 
     {
-        let mut lim = ctx
-            .lookup_limiter
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        if lim.check_and_record(&session.session_id).is_err() {
+        let mut lim = ctx.lookup_limiter.lock().unwrap_or_else(|e| e.into_inner());
+        if !lim.check_and_record(&session.session_id) {
             return Err(AppError::new(
                 "user.rate_limited",
                 "Too many lookup requests. Try again shortly.",
@@ -225,9 +221,8 @@ pub async fn lookup(ctx: &RpcCtx, input: serde_json::Value) -> Result<UserLookup
         }
     }
 
-    let req: UserLookupRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid user.lookup input: {e}"))
-    })?;
+    let req: UserLookupRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid user.lookup input: {e}")))?;
 
     let prefix = req.prefix.trim();
 

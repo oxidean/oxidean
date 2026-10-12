@@ -38,7 +38,12 @@ async fn rpc_json(app: &axum::Router, cookie: &str, body: &str) -> serde_json::V
     serde_json::from_slice(&bytes).unwrap()
 }
 
-async fn signup_verified_owner(app: &axum::Router, db: &Database, email: &str, username: &str) -> String {
+async fn signup_verified_owner(
+    app: &axum::Router,
+    db: &Database,
+    email: &str,
+    username: &str,
+) -> String {
     let signup = rpc_json(
         app,
         "",
@@ -50,7 +55,9 @@ async fn signup_verified_owner(app: &axum::Router, db: &Database, email: &str, u
     assert_eq!(signup["ok"], true, "signup — {signup}");
     let user_id = signup["data"]["id"].as_str().expect("user id");
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    db.set_email_verified_at(user_id, &now).await.expect("verify");
+    db.set_email_verified_at(user_id, &now)
+        .await
+        .expect("verify");
 
     let login = app
         .clone()
@@ -109,13 +116,7 @@ async fn fixture(visibility: &str) -> Fixture {
     // A public/private repo row; the bare git dir is created lazily by tests
     // that exercise workflow discovery.
     db.insert_repository(
-        "r-act",
-        &owner.id,
-        "user",
-        "actdemo",
-        visibility,
-        "",
-        "main",
+        "r-act", &owner.id, "user", "actdemo", visibility, "", "main",
     )
     .await
     .unwrap();

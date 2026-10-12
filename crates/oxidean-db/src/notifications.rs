@@ -24,7 +24,9 @@ macro_rules! map_notification {
     ($row:expr) => {{
         let row = $row;
         NotificationRow {
-            id: row.try_get("id").map_err(|e| format!("notification row: {e}"))?,
+            id: row
+                .try_get("id")
+                .map_err(|e| format!("notification row: {e}"))?,
             recipient_id: row
                 .try_get("recipient_id")
                 .map_err(|e| format!("notification row: {e}"))?,
@@ -66,20 +68,23 @@ const NOTIF_SELECT_PG: &str = "SELECT id, recipient_id, actor_id, reason, subjec
        to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS created_at
 FROM notifications";
 
-const NOTIF_SELECT_MYSQL: &str = "SELECT id, recipient_id, actor_id, reason, subject_kind, subject_repo_id,
+const NOTIF_SELECT_MYSQL: &str =
+    "SELECT id, recipient_id, actor_id, reason, subject_kind, subject_repo_id,
        subject_number, subject_title, subject_ref,
        CASE WHEN read_at IS NULL THEN NULL
             ELSE DATE_FORMAT(read_at, '%Y-%m-%dT%H:%i:%sZ') END AS read_at,
        DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at
 FROM notifications";
 
-const NOTIF_SELECT_SQLITE: &str = "SELECT id, recipient_id, actor_id, reason, subject_kind, subject_repo_id,
+const NOTIF_SELECT_SQLITE: &str =
+    "SELECT id, recipient_id, actor_id, reason, subject_kind, subject_repo_id,
        subject_number, subject_title, subject_ref,
        CASE WHEN read_at IS NULL THEN NULL
             ELSE strftime('%Y-%m-%dT%H:%M:%SZ', read_at) END AS read_at,
        strftime('%Y-%m-%dT%H:%M:%SZ', created_at) AS created_at
 FROM notifications";
 
+#[allow(clippy::too_many_arguments)]
 pub async fn insert_notification(
     pool: &DbPool,
     id: &str,
@@ -163,7 +168,7 @@ pub async fn find_notification_by_id(
     match pool {
         DbPool::Postgres(p) => {
             let q = format!("{NOTIF_SELECT_PG} WHERE id = $1");
-            let row = sqlx::query(&q)
+            let row = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(id)
                 .fetch_optional(p)
                 .await
@@ -175,7 +180,7 @@ pub async fn find_notification_by_id(
         }
         DbPool::MySql(p) => {
             let q = format!("{NOTIF_SELECT_MYSQL} WHERE id = ?");
-            let row = sqlx::query(&q)
+            let row = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(id)
                 .fetch_optional(p)
                 .await
@@ -187,7 +192,7 @@ pub async fn find_notification_by_id(
         }
         DbPool::Sqlite(p) => {
             let q = format!("{NOTIF_SELECT_SQLITE} WHERE id = ?1");
-            let row = sqlx::query(&q)
+            let row = sqlx::query(sqlx::AssertSqlSafe(&*q))
                 .bind(id)
                 .fetch_optional(p)
                 .await
@@ -235,7 +240,7 @@ ORDER BY created_at DESC, id DESC LIMIT $2 OFFSET $3"
                 .fetch_one(p)
                 .await
                 .map_err(|e| format!("count notifications failed: {e}"))?;
-            let rows = sqlx::query(&list_sql)
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*list_sql))
                 .bind(recipient_id)
                 .bind(limit)
                 .bind(offset)
@@ -271,7 +276,7 @@ ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?"
                 .fetch_one(p)
                 .await
                 .map_err(|e| format!("count notifications failed: {e}"))?;
-            let rows = sqlx::query(&list_sql)
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*list_sql))
                 .bind(recipient_id)
                 .bind(limit)
                 .bind(offset)
@@ -307,7 +312,7 @@ ORDER BY created_at DESC, id DESC LIMIT ?2 OFFSET ?3"
                 .fetch_one(p)
                 .await
                 .map_err(|e| format!("count notifications failed: {e}"))?;
-            let rows = sqlx::query(&list_sql)
+            let rows = sqlx::query(sqlx::AssertSqlSafe(&*list_sql))
                 .bind(recipient_id)
                 .bind(limit)
                 .bind(offset)
@@ -460,15 +465,15 @@ pub async fn delete_notifications_for_repo_recipient(
         .await
         .map_err(|e| format!("delete notifications for repo failed: {e}"))?
         .rows_affected(),
-        DbPool::MySql(p) => sqlx::query(
-            "DELETE FROM notifications WHERE recipient_id = ? AND subject_repo_id = ?",
-        )
-        .bind(recipient_id)
-        .bind(subject_repo_id)
-        .execute(p)
-        .await
-        .map_err(|e| format!("delete notifications for repo failed: {e}"))?
-        .rows_affected(),
+        DbPool::MySql(p) => {
+            sqlx::query("DELETE FROM notifications WHERE recipient_id = ? AND subject_repo_id = ?")
+                .bind(recipient_id)
+                .bind(subject_repo_id)
+                .execute(p)
+                .await
+                .map_err(|e| format!("delete notifications for repo failed: {e}"))?
+                .rows_affected()
+        }
         DbPool::Sqlite(p) => sqlx::query(
             "DELETE FROM notifications WHERE recipient_id = ?1 AND subject_repo_id = ?2",
         )

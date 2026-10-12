@@ -215,12 +215,8 @@
     scroll-behavior: auto;
   }
 
-  body,
-  #__app {
-    min-height: 100%;
-  }
-
   body {
+    min-height: 100%;
     margin: 0;
     font-family: var(--font-sans);
     font-size: 16px;
@@ -266,9 +262,53 @@
     bottom: calc(1rem + 11rem);
   }
 
-  /* Named region for TanStack Router / View Transitions — header & footer stay put. */
-  .oxidean-main {
-    view-transition-name: oxidean-main;
+  /* Astro islands are custom elements (inline by default) — let their children
+     participate in the parent's flex/grid layout. */
+  astro-island {
+    display: contents;
+  }
+
+  /* Intentionally NOT a named view-transition region: transitions fade the
+     root image only (see `transition:animate` on <html>), so no element can
+     pick up position/size interpolation — persisted chrome stays put because
+     its pixels are identical across the swap. The class remains as a
+     styling/test hook. */
+
+  /* Pending home `/` dual-render: the web tier stamps `data-oxidean-session`
+     on <html> when a session cookie is present, so signed-in visitors see the
+     content-sized skeleton instead of the anonymous landing before hydration. */
+  [data-home-skeleton] {
+    display: none;
+  }
+  html[data-oxidean-session] [data-anon-landing] {
+    display: none;
+  }
+  html[data-oxidean-session] [data-home-skeleton] {
+    display: block;
+  }
+
+  /* Header account cluster pending dual-render — same stamp: the button-
+     shaped anon skeleton paints by default, the icon cluster only when the
+     web tier validated a session cookie. Display is owned here end-to-end —
+     a `flex` utility on the candidates would live in @layer utilities and
+     beat these components-layer rules, leaving both skeletons visible. */
+  [data-header-skeleton-anon] {
+    display: flex;
+  }
+  [data-header-skeleton-authed] {
+    display: none;
+  }
+  html[data-oxidean-session] [data-header-skeleton-anon] {
+    display: none;
+  }
+  html[data-oxidean-session] [data-header-skeleton-authed] {
+    display: flex;
+  }
+  /* Sign-up-shaped bar only paints when the web tier's `data-oxidean-signup`
+     stamp (from the `oxidean_allow_signup` companion cookie) says registration
+     is open — unstamped means closed or unknown, matching the schema default. */
+  html:not([data-oxidean-signup]) [data-header-skeleton-signup] {
+    display: none;
   }
 
   /* Marketing landing reveal (home `/`). */
@@ -496,15 +536,6 @@
 }
 
 @layer base {
-  @media (prefers-reduced-motion: no-preference) {
-    ::view-transition-old(oxidean-main) {
-      animation: oct-vt-out 220ms ease-out both;
-    }
-    ::view-transition-new(oxidean-main) {
-      animation: oct-vt-in 220ms ease-out both;
-    }
-  }
-
   @media (prefers-reduced-motion: reduce) {
     ::view-transition-group(*),
     ::view-transition-old(*),
@@ -514,16 +545,41 @@
   }
 }
 
-@keyframes oct-vt-out {
-  to {
+@layer base {
+  /* ClientRouter progress bar — `html::before` so it survives the body swap.
+     `nav-pending` trickles toward ~82%; `nav-done` completes then fades. */
+  html.nav-pending::before,
+  html.nav-done::before {
+    content: "";
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 2px;
+    z-index: 2147483647;
+    background: var(--primary);
+    pointer-events: none;
+  }
+  html.nav-pending::before {
+    animation: oct-nav-trickle 8s cubic-bezier(0.05, 0.4, 0.1, 1) forwards;
+  }
+  html.nav-done::before {
+    width: 100%;
     opacity: 0;
-    transform: translateY(8px);
+    transition: opacity 320ms ease;
+  }
+
+  /* Post-swap focus target — suppress the ring on programmatic focus; the
+     ring still shows for genuine keyboard (:focus-visible) focus. */
+  main[tabindex="-1"]:focus:not(:focus-visible) {
+    outline: none;
   }
 }
 
-@keyframes oct-vt-in {
+@keyframes oct-nav-trickle {
   from {
-    opacity: 0;
-    transform: translateY(-8px);
+    width: 0;
+  }
+  to {
+    width: 82%;
   }
 }

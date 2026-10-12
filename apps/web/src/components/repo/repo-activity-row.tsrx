@@ -106,7 +106,7 @@ export function RepoActivityRow(props: RepoActivityRowProps) @{
     </div>
     <time
       className="shrink-0 text-[12px] text-muted-foreground"
-      dateTime={item.pushed_at as string}
+      datetime={item.pushed_at as string}
       title={item.pushed_at as string}
     >
       {when as string}

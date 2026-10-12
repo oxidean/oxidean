@@ -23,7 +23,7 @@ cargo metadata -q
 cp .env.example .env
 ```
 
-For host `make` / Vite development (API on `127.0.0.1:8080`, Vite on `:3000`), prefer the commented local block in `.env.example`: `OXIDEAN_ENV=development`, a host-reachable `DATABASE_URL` (e.g. Postgres on `localhost:5432`), and optional `OXIDEAN_CORS_ORIGINS=http://localhost:3000`. Full variable reference: [CONFIGURATION.md](CONFIGURATION.md).
+For host `make` development (API on `127.0.0.1:8080`, web tier on `:3000`), prefer the commented local block in `.env.example`: `OXIDEAN_ENV=development`, a host-reachable `DATABASE_URL` (e.g. Postgres on `localhost:5432`), and optional `OXIDEAN_CORS_ORIGINS=http://localhost:3000`. Full variable reference: [CONFIGURATION.md](CONFIGURATION.md).
 
 4. **RPC client once** — Before the first web run:
 
@@ -37,21 +37,31 @@ make rpc-gen
 # terminal 1
 OXIDEAN_ENV=development API_BIND=127.0.0.1:8080 cargo run -p oxidean-api --bin oxidean-api
 
-# terminal 2
+# terminal 2 — Astro dev server on :3000 (proxies API prefixes → OXIDEAN_API_ORIGIN)
 bun run --filter @oxidean/web dev
+```
+
+For a same-origin local stack without Compose, serve the built dist through the Rust web tier instead:
+
+```bash
+(cd apps/web && bun run build)
+OXIDEAN_API_ORIGIN=http://127.0.0.1:8080 OXIDEAN_WEB_DIST=apps/web/dist \
+  cargo run -p oxidean-web --bin oxidean-web
 ```
 
 Or bring up the Compose stack instead: `make up` (Traefik on `:80`). See [Compose overlays](#compose-overlays) below.
 
-## Local API + Vite proxy
+## Local API + web proxy
 
-Without Traefik, the browser talks to Vite on port **3000**. `apps/web/vite.config.ts` proxies same-origin paths to the API so cookies and RPC stay on one origin:
+Without Traefik, the browser talks to `oxidean-web` on port **3000**. It serves the built Astro shells/assets and reverse-proxies API-owned prefixes to `OXIDEAN_API_ORIGIN` so cookies and RPC stay on one origin:
 
 | Path | Target (default) |
 |------|------------------|
-| `/api/rpc/ws` | `ws://127.0.0.1:8080` (WebSocket) |
-| `/api/rpc`, `/api/auth`, `/api/user` | `http://127.0.0.1:8080` |
-| `/uploads`, `/health` | `http://127.0.0.1:8080` |
+| `/api/*`, `/uploads` | `http://127.0.0.1:8080` |
+| `/v2`, `/npm`, `/generic`, `/cli` | `http://127.0.0.1:8080` |
+| `/oauth/authorize`, `/oauth/token`, `/oauth/userinfo` | `http://127.0.0.1:8080` |
+
+The full prefix list lives in `crates/oxidean-web/src/proxy.rs` (`API_PREFIXES`). `bun run dev` (`astro dev` on `:3000`) proxies the same prefixes to `OXIDEAN_API_ORIGIN` (default `http://127.0.0.1:8080`) so `make dev` auth and RPC screens work without Compose; only Git smart-HTTP (`/{owner}/{repo}.git/*`) — a pattern route, not a prefix — still requires Traefik or `oxidean-web`.
 
 Override the proxy upstream with `OXIDEAN_E2E_API_ORIGIN` (trailing slash stripped) when running stack e2e against a non-default API origin.
 
@@ -101,11 +111,11 @@ Dialect ops (`db-migrate`, `db-switch-dialect`, `db-matrix`): [database.md](data
 
 ```
 oxidean/
-├── apps/web/                 # @oxidean/web — Octane / TanStack Start (Vite :3000)
-│   ├── src/routes/           # UI routes (incl. admin/, settings/)
-│   ├── src/components/       # UI + chrome
+├── apps/web/                 # @oxidean/web — Octane islands on Astro shells
+│   ├── src/pages/            # Astro page shells (one per route pattern)
+│   ├── src/components/       # UI + chrome (.tsrx)
 │   ├── src/lib/              # api-client wrapper, helpers
-│   └── vite.config.ts        # Dev proxy to API
+│   └── astro.config.mjs      # Static build config (vite plugins: tailwind, sw build id)
 ├── packages/api-client/      # Generated TS RPC client (make rpc-gen)
 ├── crates/
 │   ├── oxidean-api/         # Axum API, auth, email, rpc-gen binary
@@ -141,8 +151,8 @@ oxidean/
 
 | Command | Description |
 |---------|-------------|
-| `bun run --filter @oxidean/web dev` | Vite dev server for the web app |
-| `bun run --filter @oxidean/web build` | `vite build` |
+| `bun run --filter @oxidean/web dev` | Astro dev server (island iteration; no API proxy) |
+| `bun run --filter @oxidean/web build` | `astro build` → `apps/web/dist` (served by `oxidean-web`) |
 | `bun run --filter @oxidean/web test` | Vitest (unit / integration / e2e projects) |
 | `bun run --filter @oxidean/web test:e2e:stack` | Stack e2e Vitest projects |
 | `bun run --filter @oxidean/web lint` | `oxlint --type-aware --deny-warnings` via `@tsrx/oxc` + `oxlint-tsgolint` |

@@ -26,10 +26,7 @@ fn db_err(e: String) -> AppError {
             "That user is already a collaborator on this repository.",
         )
     } else if e == "repo collaborator not found" {
-        AppError::new(
-            "repo.collaborator_not_found",
-            "collaborator not found",
-        )
+        AppError::new("repo.collaborator_not_found", "collaborator not found")
     } else {
         tracing::error!("repo collaborator db error: {e}");
         AppError::new("repo.internal", "repository operation failed")

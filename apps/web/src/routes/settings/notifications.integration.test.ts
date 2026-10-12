@@ -1,4 +1,3 @@
-import { createElement } from "octane";
 import { cleanup, fireEvent, screen, waitFor } from "@octanejs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithQueryClient } from "@/test/render-with-query";
@@ -37,21 +36,25 @@ type LoaderShape =
       truncated?: boolean;
     };
 
-let loaderData: LoaderShape | undefined;
-
-vi.mock("@octanejs/tanstack-router", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@octanejs/tanstack-router")>();
-  return {
-    ...actual,
-    useLoaderData: () => loaderData,
-    Link: (props: { to?: string; children?: unknown; className?: string }) =>
-      createElement(
-        "a",
-        { href: props.to ?? "#", className: props.className },
-        props.children as never,
-      ),
-  };
-});
+function applyLoader(d: LoaderShape | undefined) {
+  if (d === undefined) {
+    meMock.mockReturnValue(new Promise(() => {}));
+    return;
+  }
+  if (d.kind === "unauthenticated") {
+    meMock.mockResolvedValue({ ok: false, error: { code: "auth.unauthenticated", message: "n" } });
+    return;
+  }
+  if (d.kind === "error") {
+    meMock.mockResolvedValue({ ok: false, error: { code: "x", message: d.message } });
+    return;
+  }
+  meMock.mockResolvedValue({ ok: true, data: d.user });
+  listWatchedMock.mockResolvedValue({
+    ok: true,
+    data: { repos: d.repos, truncated: d.truncated ?? false },
+  });
+}
 
 const sessionUser = {
   id: "u1",
@@ -87,16 +90,20 @@ import { NotificationsSettingsPage } from "./notifications.tsrx";
 
 afterEach(cleanup);
 
+beforeEach(() => {
+  window.history.pushState({}, "", "/settings/notifications");
+});
+
 describe("/settings/notifications watch matrix", () => {
   beforeEach(() => {
-    loaderData = undefined;
+    applyLoader(undefined);
     meMock.mockReset();
     listWatchedMock.mockReset();
     watchMock.mockReset();
   });
 
   it("renders watched repos with their current levels", async () => {
-    loaderData = {
+    applyLoader({
       kind: "ready",
       user: sessionUser,
       repos: [
@@ -104,7 +111,7 @@ describe("/settings/notifications watch matrix", () => {
         watchedRepo("participating", "quiet"),
         watchedRepo("ignore", "muted"),
       ],
-    };
+    });
     renderWithQueryClient(NotificationsSettingsPage);
 
     await waitFor(() => {
@@ -122,11 +129,11 @@ describe("/settings/notifications watch matrix", () => {
   });
 
   it("calls repo.watch with the chosen level on change", async () => {
-    loaderData = {
+    applyLoader({
       kind: "ready",
       user: sessionUser,
       repos: [watchedRepo("all")],
-    };
+    });
     watchMock.mockResolvedValue({ ok: true, data: watchedRepo("ignore") });
     renderWithQueryClient(NotificationsSettingsPage);
 
@@ -148,7 +155,7 @@ describe("/settings/notifications watch matrix", () => {
   });
 
   it("shows an empty state when nothing is watched", async () => {
-    loaderData = { kind: "ready", user: sessionUser, repos: [] };
+    applyLoader({ kind: "ready", user: sessionUser, repos: [] });
     renderWithQueryClient(NotificationsSettingsPage);
     await waitFor(() => {
       expect(screen.getByText("No watched repositories")).toBeTruthy();
@@ -156,7 +163,7 @@ describe("/settings/notifications watch matrix", () => {
   });
 
   it("falls back to the client when no loader data is present", async () => {
-    loaderData = undefined;
+    applyLoader(undefined);
     meMock.mockResolvedValue({ ok: true, data: sessionUser });
     listWatchedMock.mockResolvedValue({
       ok: true,
@@ -171,7 +178,7 @@ describe("/settings/notifications watch matrix", () => {
   });
 
   it("renders an error state when the loader fails", async () => {
-    loaderData = { kind: "error", message: "Could not load watched repositories." };
+    applyLoader({ kind: "error", message: "Could not load watched repositories." });
     renderWithQueryClient(NotificationsSettingsPage);
     await waitFor(() => {
       expect(screen.getByRole("alert").textContent).toContain(

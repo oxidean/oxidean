@@ -608,7 +608,9 @@ async fn mcp_instance_toggle_gate() {
     assert_eq!(status, StatusCode::OK, "{v}");
 
     // Admin override off → 404 + mcp.disabled (POST and GET alike).
-    db.update_mcp_settings(Some(false)).await.expect("disable mcp");
+    db.update_mcp_settings(Some(false))
+        .await
+        .expect("disable mcp");
     let (status, v) = mcp_json(&app, mcp_req(&rpc_call(2, "ping", serde_json::json!({})))).await;
     assert_eq!(status, StatusCode::NOT_FOUND, "{v}");
     let msg = v["error"]["message"].as_str().unwrap_or_default();
@@ -649,7 +651,9 @@ async fn mcp_instance_toggle_gate() {
 
     // Admin override still wins over a `false` env default (env is the
     // default, not a hard kill switch — same split as admin.lfs.*).
-    db.update_mcp_settings(Some(true)).await.expect("enable mcp");
+    db.update_mcp_settings(Some(true))
+        .await
+        .expect("enable mcp");
     let (status, v) = mcp_json(
         &app_off,
         mcp_req(&rpc_call(5, "ping", serde_json::json!({}))),

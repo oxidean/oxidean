@@ -10,21 +10,11 @@ import {
   mountWithQueryClient,
 } from "@/test/browser-mount";
 import { trackDomErrors } from "@/test/dom-errors";
-import { act, createElement } from "octane";
+import { act } from "octane";
 
 const meMock = vi.fn();
 const invitesGetMock = vi.fn();
 const invitesAcceptMock = vi.fn();
-
-const paramsState = vi.hoisted(() => {
-  let token = "tok-link";
-  return {
-    get: () => ({ token }),
-    set: (next: string) => {
-      token = next;
-    },
-  };
-});
 
 vi.mock("@/lib/api-client", () => ({
   apiClient: {
@@ -38,22 +28,13 @@ vi.mock("@/lib/api-client", () => ({
   },
 }));
 
-vi.mock("@octanejs/tanstack-router", () => ({
-  createFileRoute: () => (opts: unknown) => opts,
-  useParams: () => paramsState.get(),
-  // No RouterProvider — AppLink must see "no router" and render its <a> fallback.
-  useRouter: () => undefined,
-  Link: (props: { href?: string; children?: unknown }) =>
-    createElement("a", { href: props.href }, props.children as never),
-}));
-
 import { InviteAcceptPage } from "./invites.$token";
 
 beforeEach(() => {
   meMock.mockReset();
   invitesGetMock.mockReset();
   invitesAcceptMock.mockReset();
-  paramsState.set("tok-link");
+  window.history.pushState({}, "", "/invites/tok-link");
 
   meMock.mockResolvedValue({ ok: false, error: { code: "auth.unauthenticated", message: "" } });
 });

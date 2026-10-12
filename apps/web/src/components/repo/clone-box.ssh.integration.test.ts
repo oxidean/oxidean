@@ -26,7 +26,16 @@ beforeEach(() => {
 async function openCloneMenu() {
   fireEvent.click(screen.getByRole("button", { name: "Clone or download" }));
   await waitFor(() => {
-    expect(screen.getByText("Clone with HTTPS")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "HTTPS" })).toBeInTheDocument();
+    expect(screen.getByLabelText("HTTPS clone URL")).toBeInTheDocument();
+  });
+}
+
+/** SSH content lives behind the SSH tab — select it like a user. */
+async function selectSshTab() {
+  fireEvent.click(screen.getByRole("tab", { name: "SSH" }));
+  await waitFor(() => {
+    expect(screen.getByLabelText(/SSH clone URL/i)).toBeInTheDocument();
   });
 }
 
@@ -43,10 +52,7 @@ describe("CloneBox SSH (GIT-03 / D-SSH-02 / D-SSH-06)", () => {
     });
 
     await openCloneMenu();
-
-    await waitFor(() => {
-      expect(screen.getByText("Clone with SSH")).toBeInTheDocument();
-    });
+    await selectSshTab();
 
     const sshInput = screen.getByLabelText(/SSH clone URL/i) as HTMLInputElement;
     expect(sshInput.value).toBe("git@127.0.0.1:ada/hello.git");
@@ -67,6 +73,7 @@ describe("CloneBox SSH (GIT-03 / D-SSH-02 / D-SSH-06)", () => {
     });
 
     await openCloneMenu();
+    await selectSshTab();
 
     await waitFor(() => {
       expect(screen.getByText(/Port 2222/)).toBeInTheDocument();
@@ -88,10 +95,8 @@ describe("CloneBox SSH (GIT-03 / D-SSH-02 / D-SSH-06)", () => {
     });
 
     await openCloneMenu();
+    await selectSshTab();
 
-    await waitFor(() => {
-      expect(screen.getByLabelText(/SSH clone URL/i)).toBeInTheDocument();
-    });
     expect(document.body.textContent).not.toMatch(/Port 22/);
     expect(document.body.textContent).not.toMatch(/~\/\.ssh\/config/);
   }, 20_000);
@@ -108,6 +113,7 @@ describe("CloneBox SSH (GIT-03 / D-SSH-02 / D-SSH-06)", () => {
     });
 
     await openCloneMenu();
+    await selectSshTab();
 
     const cta = await waitFor(() => screen.getByRole("link", { name: "Add an SSH key" }));
     expect(cta).toHaveAttribute("href", "/settings/ssh-keys");
@@ -125,6 +131,7 @@ describe("CloneBox SSH (GIT-03 / D-SSH-02 / D-SSH-06)", () => {
     });
 
     await openCloneMenu();
+    await selectSshTab();
 
     await waitFor(() => {
       expect(

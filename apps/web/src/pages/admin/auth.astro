@@ -1,0 +1,8 @@
+---
+import AppShell from "@/layouts/AppShell.astro";
+import { AdminAuthPage } from "@/routes/admin/auth.tsrx";
+---
+
+<AppShell title="Auth settings · Oxidean">
+	<AdminAuthPage client:load />
+</AppShell>

@@ -21,15 +21,15 @@ pub async fn follow_user(
         .await
         .map_err(|e| format!("follow insert: {e}"))?
         .rows_affected(),
-        DbPool::MySql(p) => sqlx::query(
-            "INSERT IGNORE INTO user_follows (follower_id, followed_id) VALUES (?, ?)",
-        )
-        .bind(follower_id)
-        .bind(followed_id)
-        .execute(p)
-        .await
-        .map_err(|e| format!("follow insert: {e}"))?
-        .rows_affected(),
+        DbPool::MySql(p) => {
+            sqlx::query("INSERT IGNORE INTO user_follows (follower_id, followed_id) VALUES (?, ?)")
+                .bind(follower_id)
+                .bind(followed_id)
+                .execute(p)
+                .await
+                .map_err(|e| format!("follow insert: {e}"))?
+                .rows_affected()
+        }
         DbPool::Sqlite(p) => sqlx::query(
             "INSERT OR IGNORE INTO user_follows (follower_id, followed_id) VALUES (?1, ?2)",
         )
@@ -50,33 +50,33 @@ pub async fn unfollow_user(
     followed_id: &str,
 ) -> Result<bool, String> {
     let deleted = match pool {
-        DbPool::Postgres(p) => sqlx::query(
-            "DELETE FROM user_follows WHERE follower_id = $1 AND followed_id = $2",
-        )
-        .bind(follower_id)
-        .bind(followed_id)
-        .execute(p)
-        .await
-        .map_err(|e| format!("unfollow delete: {e}"))?
-        .rows_affected(),
-        DbPool::MySql(p) => sqlx::query(
-            "DELETE FROM user_follows WHERE follower_id = ? AND followed_id = ?",
-        )
-        .bind(follower_id)
-        .bind(followed_id)
-        .execute(p)
-        .await
-        .map_err(|e| format!("unfollow delete: {e}"))?
-        .rows_affected(),
-        DbPool::Sqlite(p) => sqlx::query(
-            "DELETE FROM user_follows WHERE follower_id = ?1 AND followed_id = ?2",
-        )
-        .bind(follower_id)
-        .bind(followed_id)
-        .execute(p)
-        .await
-        .map_err(|e| format!("unfollow delete: {e}"))?
-        .rows_affected(),
+        DbPool::Postgres(p) => {
+            sqlx::query("DELETE FROM user_follows WHERE follower_id = $1 AND followed_id = $2")
+                .bind(follower_id)
+                .bind(followed_id)
+                .execute(p)
+                .await
+                .map_err(|e| format!("unfollow delete: {e}"))?
+                .rows_affected()
+        }
+        DbPool::MySql(p) => {
+            sqlx::query("DELETE FROM user_follows WHERE follower_id = ? AND followed_id = ?")
+                .bind(follower_id)
+                .bind(followed_id)
+                .execute(p)
+                .await
+                .map_err(|e| format!("unfollow delete: {e}"))?
+                .rows_affected()
+        }
+        DbPool::Sqlite(p) => {
+            sqlx::query("DELETE FROM user_follows WHERE follower_id = ?1 AND followed_id = ?2")
+                .bind(follower_id)
+                .bind(followed_id)
+                .execute(p)
+                .await
+                .map_err(|e| format!("unfollow delete: {e}"))?
+                .rows_affected()
+        }
     };
     Ok(deleted > 0)
 }
@@ -192,7 +192,10 @@ pub struct UserFollowListRow {
 }
 
 fn like_pat(q: &str) -> String {
-    let escaped = q.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
+    let escaped = q
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_");
     format!("%{escaped}%")
 }
 
@@ -200,8 +203,12 @@ macro_rules! map_follow {
     ($row:expr) => {{
         let row = $row;
         UserFollowListRow {
-            user_id: row.try_get("user_id").map_err(|e| format!("follow row: {e}"))?,
-            username: row.try_get("username").map_err(|e| format!("follow row: {e}"))?,
+            user_id: row
+                .try_get("user_id")
+                .map_err(|e| format!("follow row: {e}"))?,
+            username: row
+                .try_get("username")
+                .map_err(|e| format!("follow row: {e}"))?,
             display_name: row
                 .try_get("display_name")
                 .map_err(|e| format!("follow row: {e}"))?,
@@ -237,7 +244,7 @@ async fn list_follow_edges(
     match pool {
         DbPool::Postgres(p) => {
             let rows = if let Some(ref pat) = pat {
-                sqlx::query(&format!(
+                sqlx::query(sqlx::AssertSqlSafe(format!(
                     "SELECT u.id AS user_id, u.username, u.display_name, u.avatar_path,
                             to_char(f.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS followed_at
                      FROM user_follows f
@@ -246,7 +253,7 @@ async fn list_follow_edges(
                        AND (u.username ILIKE $2 ESCAPE '\\' OR COALESCE(u.display_name, '') ILIKE $2 ESCAPE '\\')
                      ORDER BY f.created_at DESC
                      LIMIT $3 OFFSET $4",
-                ))
+                )))
                 .bind(user_id)
                 .bind(pat)
                 .bind(limit)
@@ -254,7 +261,7 @@ async fn list_follow_edges(
                 .fetch_all(p)
                 .await
             } else {
-                sqlx::query(&format!(
+                sqlx::query(sqlx::AssertSqlSafe(format!(
                     "SELECT u.id AS user_id, u.username, u.display_name, u.avatar_path,
                             to_char(f.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS followed_at
                      FROM user_follows f
@@ -262,7 +269,7 @@ async fn list_follow_edges(
                      WHERE {edge_col} = $1 AND u.banned_at IS NULL
                      ORDER BY f.created_at DESC
                      LIMIT $2 OFFSET $3",
-                ))
+                )))
                 .bind(user_id)
                 .bind(limit)
                 .bind(offset)
@@ -274,7 +281,7 @@ async fn list_follow_edges(
         }
         DbPool::MySql(p) => {
             let rows = if let Some(ref pat) = pat {
-                sqlx::query(&format!(
+                sqlx::query(sqlx::AssertSqlSafe(format!(
                     "SELECT u.id AS user_id, u.username, u.display_name, u.avatar_path,
                             DATE_FORMAT(f.created_at, '%Y-%m-%dT%H:%i:%sZ') AS followed_at
                      FROM user_follows f
@@ -283,7 +290,7 @@ async fn list_follow_edges(
                        AND (u.username LIKE ? ESCAPE '\\\\' OR COALESCE(u.display_name, '') LIKE ? ESCAPE '\\\\')
                      ORDER BY f.created_at DESC
                      LIMIT ? OFFSET ?",
-                ))
+                )))
                 .bind(user_id)
                 .bind(pat)
                 .bind(pat)
@@ -292,7 +299,7 @@ async fn list_follow_edges(
                 .fetch_all(p)
                 .await
             } else {
-                sqlx::query(&format!(
+                sqlx::query(sqlx::AssertSqlSafe(format!(
                     "SELECT u.id AS user_id, u.username, u.display_name, u.avatar_path,
                             DATE_FORMAT(f.created_at, '%Y-%m-%dT%H:%i:%sZ') AS followed_at
                      FROM user_follows f
@@ -300,7 +307,7 @@ async fn list_follow_edges(
                      WHERE {edge_col} = ? AND u.banned_at IS NULL
                      ORDER BY f.created_at DESC
                      LIMIT ? OFFSET ?",
-                ))
+                )))
                 .bind(user_id)
                 .bind(limit)
                 .bind(offset)
@@ -312,7 +319,7 @@ async fn list_follow_edges(
         }
         DbPool::Sqlite(p) => {
             let rows = if let Some(ref pat) = pat {
-                sqlx::query(&format!(
+                sqlx::query(sqlx::AssertSqlSafe(format!(
                     "SELECT u.id AS user_id, u.username, u.display_name, u.avatar_path,
                             strftime('%Y-%m-%dT%H:%M:%SZ', f.created_at) AS followed_at
                      FROM user_follows f
@@ -321,7 +328,7 @@ async fn list_follow_edges(
                        AND (u.username LIKE ?2 ESCAPE '\\' OR COALESCE(u.display_name, '') LIKE ?2 ESCAPE '\\')
                      ORDER BY f.created_at DESC
                      LIMIT ?3 OFFSET ?4",
-                ))
+                )))
                 .bind(user_id)
                 .bind(pat)
                 .bind(limit)
@@ -329,7 +336,7 @@ async fn list_follow_edges(
                 .fetch_all(p)
                 .await
             } else {
-                sqlx::query(&format!(
+                sqlx::query(sqlx::AssertSqlSafe(format!(
                     "SELECT u.id AS user_id, u.username, u.display_name, u.avatar_path,
                             strftime('%Y-%m-%dT%H:%M:%SZ', f.created_at) AS followed_at
                      FROM user_follows f
@@ -337,7 +344,7 @@ async fn list_follow_edges(
                      WHERE {edge_col} = ?1 AND u.banned_at IS NULL
                      ORDER BY f.created_at DESC
                      LIMIT ?2 OFFSET ?3",
-                ))
+                )))
                 .bind(user_id)
                 .bind(limit)
                 .bind(offset)
@@ -389,22 +396,22 @@ async fn count_follow_edges(
     match pool {
         DbPool::Postgres(p) => {
             if let Some(ref pat) = pat {
-                sqlx::query_scalar(&format!(
+                sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
                     "SELECT COUNT(*) FROM user_follows f
                      JOIN users u ON u.id = {join_col}
                      WHERE {edge_col} = $1 AND u.banned_at IS NULL
                        AND (u.username ILIKE $2 ESCAPE '\\' OR COALESCE(u.display_name, '') ILIKE $2 ESCAPE '\\')",
-                ))
+                )))
                 .bind(user_id)
                 .bind(pat)
                 .fetch_one(p)
                 .await
             } else {
-                sqlx::query_scalar(&format!(
+                sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
                     "SELECT COUNT(*) FROM user_follows f
                      JOIN users u ON u.id = {join_col}
                      WHERE {edge_col} = $1 AND u.banned_at IS NULL"
-                ))
+                )))
                 .bind(user_id)
                 .fetch_one(p)
                 .await
@@ -413,23 +420,23 @@ async fn count_follow_edges(
         }
         DbPool::MySql(p) => {
             if let Some(ref pat) = pat {
-                sqlx::query_scalar(&format!(
+                sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
                     "SELECT COUNT(*) FROM user_follows f
                      JOIN users u ON u.id = {join_col}
                      WHERE {edge_col} = ? AND u.banned_at IS NULL
                        AND (u.username LIKE ? ESCAPE '\\\\' OR COALESCE(u.display_name, '') LIKE ? ESCAPE '\\\\')",
-                ))
+                )))
                 .bind(user_id)
                 .bind(pat)
                 .bind(pat)
                 .fetch_one(p)
                 .await
             } else {
-                sqlx::query_scalar(&format!(
+                sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
                     "SELECT COUNT(*) FROM user_follows f
                      JOIN users u ON u.id = {join_col}
                      WHERE {edge_col} = ? AND u.banned_at IS NULL"
-                ))
+                )))
                 .bind(user_id)
                 .fetch_one(p)
                 .await
@@ -438,22 +445,22 @@ async fn count_follow_edges(
         }
         DbPool::Sqlite(p) => {
             if let Some(ref pat) = pat {
-                sqlx::query_scalar(&format!(
+                sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
                     "SELECT COUNT(*) FROM user_follows f
                      JOIN users u ON u.id = {join_col}
                      WHERE {edge_col} = ?1 AND u.banned_at IS NULL
                        AND (u.username LIKE ?2 ESCAPE '\\' OR COALESCE(u.display_name, '') LIKE ?2 ESCAPE '\\')",
-                ))
+                )))
                 .bind(user_id)
                 .bind(pat)
                 .fetch_one(p)
                 .await
             } else {
-                sqlx::query_scalar(&format!(
+                sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
                     "SELECT COUNT(*) FROM user_follows f
                      JOIN users u ON u.id = {join_col}
                      WHERE {edge_col} = ?1 AND u.banned_at IS NULL"
-                ))
+                )))
                 .bind(user_id)
                 .fetch_one(p)
                 .await
@@ -464,19 +471,11 @@ async fn count_follow_edges(
 }
 
 /// Follower count matching the `q` filter used by `list_followers`.
-pub async fn count_followers(
-    pool: &DbPool,
-    user_id: &str,
-    q: Option<&str>,
-) -> Result<i64, String> {
+pub async fn count_followers(pool: &DbPool, user_id: &str, q: Option<&str>) -> Result<i64, String> {
     count_follow_edges(pool, user_id, true, q).await
 }
 
 /// Following count matching the `q` filter used by `list_following`.
-pub async fn count_following(
-    pool: &DbPool,
-    user_id: &str,
-    q: Option<&str>,
-) -> Result<i64, String> {
+pub async fn count_following(pool: &DbPool, user_id: &str, q: Option<&str>) -> Result<i64, String> {
     count_follow_edges(pool, user_id, false, q).await
 }

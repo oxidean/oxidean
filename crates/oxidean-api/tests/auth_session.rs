@@ -1,6 +1,5 @@
 //! AUTH-02/03: login cookie → auth.me; logout; logout_all across devices.
 
-
 mod support;
 use std::sync::Arc;
 

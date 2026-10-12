@@ -1,4 +1,3 @@
-import { createElement } from "octane";
 import { cleanup, screen, waitFor } from "@octanejs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithQueryClient } from "@/test/render-with-query";
@@ -9,56 +8,20 @@ import { renderWithQueryClient } from "@/test/render-with-query";
  */
 
 const authorizeMock = vi.fn();
+const authorizeInfoMock = vi.fn();
+const authMeMock = vi.fn();
 
 vi.mock("@/lib/api-client", () => ({
   apiClient: {
+    auth: {
+      me: (...args: unknown[]) => authMeMock(...args),
+    },
     oauthApp: {
       authorize: (...args: unknown[]) => authorizeMock(...args),
+      authorizeInfo: (...args: unknown[]) => authorizeInfoMock(...args),
     },
   },
 }));
-
-type LoaderShape =
-  | { kind: "unauthenticated"; returnTo: string }
-  | { kind: "error"; message: string }
-  | {
-      kind: "ready";
-      user: unknown;
-      info: {
-        app_name: string;
-        client_id: string;
-        redirect_uri: string;
-        scopes: string[];
-        owner_username: string;
-      };
-    };
-
-let loaderData: LoaderShape;
-let searchParams: Record<string, string | undefined> = {};
-
-vi.mock("@octanejs/tanstack-router", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@octanejs/tanstack-router")>();
-  return {
-    ...actual,
-    useLoaderData: () => loaderData,
-    useSearch: () => searchParams,
-    Link: (props: {
-      to?: string;
-      children?: unknown;
-      className?: string;
-      "aria-current"?: string;
-    }) =>
-      createElement(
-        "a",
-        {
-          href: props.to ?? "#",
-          className: props.className,
-          "aria-current": props["aria-current"],
-        },
-        props.children as never,
-      ),
-  };
-});
 
 const verifiedUser = {
   id: "u1",
@@ -81,25 +44,30 @@ const info = {
   owner_username: "devuser",
 };
 
-const assign = vi.fn();
+let assign: ReturnType<typeof vi.spyOn>;
+
+function setLocation(path: string) {
+  window.history.pushState({}, "", path);
+}
+
+const consentUrl =
+  `/oauth/consent?client_id=${encodeURIComponent("oxidean_oc_0123456789abcdef0123456789abcdef")}` +
+  `&redirect_uri=${encodeURIComponent("https://app.example/callback")}` +
+  `&scope=${encodeURIComponent("repo read:user")}&state=xyz&response_type=code`;
 
 beforeEach(() => {
   authorizeMock.mockReset();
-  assign.mockReset();
-  vi.stubGlobal("location", { assign });
-  loaderData = { kind: "ready", user: verifiedUser, info };
-  searchParams = {
-    client_id: info.client_id,
-    redirect_uri: info.redirect_uri,
-    scope: "repo read:user",
-    state: "xyz",
-    response_type: "code",
-  };
+  authorizeInfoMock.mockReset();
+  authMeMock.mockReset();
+  assign = vi.spyOn(window.location, "assign").mockImplementation(() => {});
+  setLocation(consentUrl);
+  authMeMock.mockResolvedValue({ ok: true, data: verifiedUser });
+  authorizeInfoMock.mockResolvedValue({ ok: true, data: info });
 });
 
 afterEach(() => {
   cleanup();
-  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 async function loadModule(): Promise<Record<string, unknown>> {
@@ -178,7 +146,10 @@ describe("/oauth/consent (API-03)", () => {
   }, 30_000);
 
   it("error kind renders the message", async () => {
-    loaderData = { kind: "error", message: "Invalid authorization request." };
+    authorizeInfoMock.mockResolvedValue({
+      ok: false,
+      error: { code: "oauth.invalid_request", message: "Invalid authorization request." },
+    });
     const mod = await loadModule();
     const Page = (mod.OAuthConsentPage ?? mod.default) as unknown;
     renderWithQueryClient(Page);

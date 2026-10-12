@@ -83,7 +83,9 @@ async fn signup_and_login(
 
 async fn verify_user(db: &Database, user_id: &str) {
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    db.set_email_verified_at(user_id, &now).await.expect("verify");
+    db.set_email_verified_at(user_id, &now)
+        .await
+        .expect("verify");
 }
 
 async fn rpc_json(app: &axum::Router, cookie: &str, body: &str) -> serde_json::Value {

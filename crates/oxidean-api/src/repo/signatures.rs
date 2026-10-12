@@ -360,15 +360,13 @@ mod tests {
             .await
             .unwrap();
 
-        let status =
-            apply_verified_policy(&db, "sec@ex.com", "sec@ex.com", "valid", "ssh").await;
+        let status = apply_verified_policy(&db, "sec@ex.com", "sec@ex.com", "valid", "ssh").await;
         assert_eq!(status, "unknown");
 
         db.set_user_email_verified_at("sec-unverified", Some(&now))
             .await
             .unwrap();
-        let status =
-            apply_verified_policy(&db, "sec@ex.com", "sec@ex.com", "valid", "ssh").await;
+        let status = apply_verified_policy(&db, "sec@ex.com", "sec@ex.com", "valid", "ssh").await;
         assert_eq!(status, "valid");
     }
 
@@ -382,19 +380,12 @@ mod tests {
 
         // Forge committer resolves to no user — a crypto-valid SSH signature
         // under the web-flow principal still reports verified.
-        let status = apply_verified_policy(
-            &db,
-            FORGE_NOREPLY_EMAIL,
-            "someone@ex.com",
-            "valid",
-            "ssh",
-        )
-        .await;
+        let status =
+            apply_verified_policy(&db, FORGE_NOREPLY_EMAIL, "someone@ex.com", "valid", "ssh").await;
         assert_eq!(status, "valid");
 
         // Empty committer falls back to the author address — same forge case.
-        let status =
-            apply_verified_policy(&db, "", FORGE_NOREPLY_EMAIL, "valid", "ssh").await;
+        let status = apply_verified_policy(&db, "", FORGE_NOREPLY_EMAIL, "valid", "ssh").await;
         assert_eq!(status, "valid");
 
         // GPG under the forge identity still requires user resolution.

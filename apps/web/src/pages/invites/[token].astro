@@ -1,0 +1,12 @@
+---
+import AppShell from "@/layouts/AppShell.astro";
+import { InviteAcceptPage } from "@/routes/invites.$token.tsrx";
+
+export function getStaticPaths() {
+	return [{ params: { token: "_" } }];
+}
+---
+
+<AppShell title="Accept invitation · Oxidean">
+	<InviteAcceptPage client:load />
+</AppShell>
