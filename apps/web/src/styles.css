@@ -213,6 +213,17 @@
   html {
     min-height: 100%;
     scroll-behavior: auto;
+    /* Always-reserve (and always-render) the vertical scrollbar so navigating
+       between a scrollable page and a short page never shifts layout
+       horizontally. `overflow-y` covers engines without scrollbar-gutter. */
+    overflow-y: scroll;
+    scrollbar-gutter: stable;
+  }
+
+  /* Footer lives below the fold on every page — short content still pushes it
+     past the initial viewport, so nothing pops when taller routes load. */
+  .oxidean-main {
+    min-height: 100vh;
   }
 
   body {

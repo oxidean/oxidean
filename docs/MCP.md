@@ -162,6 +162,7 @@ place, and files that may embed a bearer token are written `0600`:
 ox mcp install                              # TTY picker (detected harnesses marked)
 ox mcp install --harness claude,cursor --project
 ox mcp install --detected --global          # every harness found on this machine
+ox mcp install --upgrade                    # refresh existing entries only, both scopes
 ox mcp print --harness vscode               # config block to paste by hand
 ox mcp status                               # configured files + endpoint probe
 ox mcp remove --harness cursor --project
@@ -170,6 +171,14 @@ ox mcp remove --harness cursor --project
 Harness ids: `claude`, `cursor`, `vscode`, `windsurf`, `gemini`, `codex`,
 `kiro`, `opencode`, `zed` (stdio-bridged through `mcp-remote`), and `generic`
 for any `mcpServers`-shaped config.
+
+`--upgrade` mirrors `ox skill install --upgrade`: it rewrites only files that
+already carry an `oxidean` entry — never prompts, never creates files — and a
+bare invocation sweeps every harness at both scopes. Entries keep their
+existing credential unless an explicit auth flag overrides it, so
+`ox mcp install --upgrade --token-stdin` rotates the bearer everywhere.
+`ox self-update` runs the same refresh automatically (preserve endpoint +
+credential) unless `--no-mcp-refresh` is passed.
 
 Auth resolves in this order: `--token` / `--token-stdin` (use that PAT) →
 `--web` (RFC 8628 device grant — the same browser sign-in as

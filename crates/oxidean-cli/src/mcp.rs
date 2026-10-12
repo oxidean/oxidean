@@ -277,13 +277,24 @@ fn entry_json(kind: &EntryKind, endpoint: &str, token: Option<&str>) -> Value {
 }
 
 /// `[mcp_servers.oxidean]` section for Codex `config.toml`. With a token the
-/// bearer rides `$OXIDEAN_TOKEN`, so the file itself stays secret-free.
-fn codex_section(endpoint: &str, with_token_env: bool) -> String {
+/// bearer rides an env var (`OXIDEAN_TOKEN` by default), so the file itself
+/// stays secret-free.
+fn codex_section(endpoint: &str, env_var: Option<&str>) -> String {
     let mut s = format!("[mcp_servers.{SERVER_NAME}]\nurl = \"{endpoint}\"\n");
-    if with_token_env {
-        s.push_str(&format!("bearer_token_env_var = \"{CODEX_TOKEN_ENV}\"\n"));
+    if let Some(var) = env_var {
+        s.push_str(&format!("bearer_token_env_var = \"{var}\"\n"));
     }
     s
+}
+
+/// The `bearer_token_env_var` value inside a codex section body.
+fn codex_env_var(body: &str) -> Option<String> {
+    body.lines().find_map(|l| {
+        let l = l.trim();
+        l.strip_prefix("bearer_token_env_var")
+            .and_then(|r| r.trim().strip_prefix('='))
+            .map(|v| v.trim().trim_matches('"').to_string())
+    })
 }
 
 /// Remove every `[mcp_servers.oxidean…]` table (our section plus nested
@@ -450,7 +461,7 @@ fn install_entry(
             if !content.is_empty() {
                 content.push_str("\n\n");
             }
-            content.push_str(&codex_section(endpoint, token.is_some()));
+            content.push_str(&codex_section(endpoint, token.map(|_| CODEX_TOKEN_ENV)));
             write_text(path, &content)
         }
     }
@@ -518,7 +529,7 @@ fn print_block(harness_id: Option<&str>, endpoint: &str) -> Result<Out, CliError
     };
     let (text, entry) = match h.map(|h| &h.format) {
         Some(Format::CodexToml) => {
-            let text = codex_section(endpoint, true);
+            let text = codex_section(endpoint, Some(CODEX_TOKEN_ENV));
             (text.clone(), json!({"format": "toml", "section": text}))
         }
         other => {
@@ -576,25 +587,10 @@ async fn resolve_install_token(
         return Ok((Some(t), "--token-stdin"));
     }
     if web {
-        // Device grant — the minted PAT is stored like `ox auth login`, so
-        // the CLI and every configured harness share one credential.
-        let token = crate::device::run_grant(instance, DEVICE_SCOPES).await?;
-        let authed = Client::new(instance, Some(token.clone()));
-        if let Ok(RpcResponse::Ok { data, .. }) = authed.call("auth.me", json!({})).await {
-            if let Some(user) = data.get("username").and_then(Value::as_str) {
-                eprintln!("Logged in to {instance} as {user}");
-            }
-        }
-        let mut cfg = rt.config.clone();
-        cfg.instances.insert(
-            instance.to_string(),
-            InstanceEntry {
-                token: Some(token.clone()),
-            },
-        );
-        cfg.default_instance = Some(instance.to_string());
-        config::save(&rt.config_path, &cfg).map_err(CliError::Config)?;
-        return Ok((Some(token), "device grant"));
+        return Ok((
+            Some(device_grant_login(rt, instance).await?),
+            "device grant",
+        ));
     }
     if anonymous {
         return Ok((None, "anonymous"));
@@ -613,6 +609,73 @@ async fn resolve_install_token(
     }
 }
 
+/// Run the RFC 8628 device grant and store the minted PAT like `ox auth
+/// login`, so the CLI and every configured harness share one credential.
+async fn device_grant_login(rt: &Runtime, instance: &str) -> Result<String, CliError> {
+    let token = crate::device::run_grant(instance, DEVICE_SCOPES).await?;
+    let authed = Client::new(instance, Some(token.clone()));
+    if let Ok(RpcResponse::Ok { data, .. }) = authed.call("auth.me", json!({})).await {
+        if let Some(user) = data.get("username").and_then(Value::as_str) {
+            eprintln!("Logged in to {instance} as {user}");
+        }
+    }
+    let mut cfg = rt.config.clone();
+    cfg.instances.insert(
+        instance.to_string(),
+        InstanceEntry {
+            token: Some(token.clone()),
+        },
+    );
+    cfg.default_instance = Some(instance.to_string());
+    config::save(&rt.config_path, &cfg).map_err(CliError::Config)?;
+    Ok(token)
+}
+
+/// `--upgrade` credential handling — existing entries keep their auth unless
+/// an explicit flag replaces it (`--anonymous` strips it). The stored `ox`
+/// login is never consulted: an upgrade shouldn't change who a file speaks as.
+enum AuthOverride {
+    Preserve,
+    Set(Option<String>),
+}
+
+async fn resolve_upgrade_override(
+    rt: &Runtime,
+    instance: &str,
+    token: Option<String>,
+    token_stdin: bool,
+    web: bool,
+    anonymous: bool,
+) -> Result<AuthOverride, CliError> {
+    if let Some(t) = token {
+        let t = t.trim().to_string();
+        if t.is_empty() {
+            return Err(CliError::Usage("--token: empty token".into()));
+        }
+        return Ok(AuthOverride::Set(Some(t)));
+    }
+    if token_stdin {
+        let mut buf = String::new();
+        std::io::stdin()
+            .read_to_string(&mut buf)
+            .map_err(|e| CliError::Usage(format!("--token-stdin: read stdin: {e}")))?;
+        let t = buf.trim().to_string();
+        if t.is_empty() {
+            return Err(CliError::Usage("--token-stdin: empty token".into()));
+        }
+        return Ok(AuthOverride::Set(Some(t)));
+    }
+    if web {
+        return Ok(AuthOverride::Set(Some(
+            device_grant_login(rt, instance).await?,
+        )));
+    }
+    if anonymous {
+        return Ok(AuthOverride::Set(None));
+    }
+    Ok(AuthOverride::Preserve)
+}
+
 /// `ox mcp install` — select harnesses + scope, resolve credentials, merge
 /// the entry into each config file.
 #[allow(clippy::too_many_arguments)]
@@ -627,8 +690,23 @@ pub async fn install(
     token_stdin: bool,
     web: bool,
     anonymous: bool,
+    upgrade: bool,
 ) -> Result<Out, CliError> {
     let instance = resolve_instance(g, &rt.config)?;
+    if upgrade {
+        let auth =
+            resolve_upgrade_override(rt, &instance, token, token_stdin, web, anonymous).await?;
+        return upgrade_at(
+            &Dirs::env(),
+            Path::new(""),
+            harness_flags,
+            detected,
+            project,
+            global,
+            Some(&endpoint_url(&instance)),
+            &auth,
+        );
+    }
     let (token, auth_src) =
         resolve_install_token(g, rt, &instance, token, token_stdin, web, anonymous).await?;
     install_at(
@@ -795,6 +873,283 @@ fn remove_at(
     })
 }
 
+/// Endpoint URL a JSON entry points at (`url`/`httpUrl`/`serverUrl`, or
+/// `args[1]` for the zed mcp-remote bridge).
+fn entry_url(entry: &Value) -> Option<String> {
+    entry
+        .get("url")
+        .or_else(|| entry.get("httpUrl"))
+        .or_else(|| entry.get("serverUrl"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .or_else(|| {
+            entry
+                .pointer("/command/args/1")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+}
+
+/// Bearer token a JSON entry carries — `headers.Authorization` for HTTP
+/// entries, the arg after `--header` for the zed bridge.
+fn entry_token(entry: &Value) -> Option<String> {
+    entry
+        .pointer("/headers/Authorization")
+        .and_then(Value::as_str)
+        .and_then(|s| s.strip_prefix("Bearer "))
+        .map(str::to_string)
+        .or_else(|| {
+            let args = entry.pointer("/command/args")?.as_array()?;
+            let i = args.iter().position(|a| a.as_str() == Some("--header"))?;
+            args.get(i + 1)?
+                .as_str()?
+                .strip_prefix("Authorization: Bearer ")
+                .map(str::to_string)
+        })
+}
+
+/// Rebuild an existing `oxidean` entry in canonical shape — `endpoint`
+/// replaces the URL when `Some` (the `None` case is the self-update refresh,
+/// which keeps whatever instance the entry already targets). Auth comes from
+/// `auth`: preserved verbatim or replaced by an explicit flag. `None` when
+/// the entry isn't an object or carries no URL we can keep.
+fn upgraded_entry(
+    existing: &Value,
+    kind: &EntryKind,
+    endpoint: Option<&str>,
+    auth: &AuthOverride,
+) -> Option<Value> {
+    if !existing.is_object() {
+        return None;
+    }
+    let url = endpoint
+        .map(str::to_string)
+        .or_else(|| entry_url(existing))?;
+    Some(match kind {
+        EntryKind::ZedBridge => {
+            let header = match auth {
+                AuthOverride::Preserve => existing
+                    .pointer("/command/args")
+                    .and_then(Value::as_array)
+                    .and_then(|a| {
+                        a.iter()
+                            .position(|v| v.as_str() == Some("--header"))
+                            .and_then(|i| a.get(i + 1))
+                            .and_then(Value::as_str)
+                    })
+                    .map(str::to_string),
+                AuthOverride::Set(t) => t.as_ref().map(|t| format!("Authorization: Bearer {t}")),
+            };
+            let mut args = vec![json!("mcp-remote"), json!(url)];
+            if let Some(h) = header {
+                args.push(json!("--header"));
+                args.push(json!(h));
+            }
+            json!({"command": {"path": "npx", "args": args}})
+        }
+        _ => {
+            let mut e = match auth {
+                AuthOverride::Preserve => entry_json(kind, &url, None),
+                AuthOverride::Set(t) => entry_json(kind, &url, t.as_deref()),
+            };
+            if let AuthOverride::Preserve = auth {
+                // Keep the headers object verbatim — extra custom headers
+                // ride along untouched.
+                if let Some(h) = existing.get("headers").filter(|h| h.is_object()) {
+                    e["headers"] = h.clone();
+                }
+            }
+            e
+        }
+    })
+}
+
+/// Outcome of a single-file upgrade sweep.
+enum Upgrade {
+    /// No `oxidean` entry — file untouched.
+    NoEntry,
+    /// Entry exists but isn't a shape we generated, or the file doesn't
+    /// parse — untouched, reported as skipped.
+    Unrecognized,
+    /// Already canonical.
+    UpToDate,
+    /// Rewritten.
+    Upgraded,
+}
+
+fn upgrade_entry(
+    path: &Path,
+    format: &Format,
+    endpoint: Option<&str>,
+    auth: &AuthOverride,
+) -> Result<Upgrade, CliError> {
+    match format {
+        Format::Json { top_key, kind } => {
+            // A file we can't parse is skipped, never clobbered — same house
+            // rule as install, but a sweep skips instead of aborting.
+            let Ok((mut doc, existed)) = load_json(path) else {
+                return Ok(Upgrade::Unrecognized);
+            };
+            if !existed {
+                return Ok(Upgrade::NoEntry);
+            }
+            let Some(existing) = doc.get(*top_key).and_then(|t| t.get(SERVER_NAME)).cloned() else {
+                return Ok(Upgrade::NoEntry);
+            };
+            let Some(new_entry) = upgraded_entry(&existing, kind, endpoint, auth) else {
+                return Ok(Upgrade::Unrecognized);
+            };
+            if existing == new_entry {
+                return Ok(Upgrade::UpToDate);
+            }
+            doc[*top_key][SERVER_NAME] = new_entry;
+            write_json(path, &doc)?;
+            Ok(Upgrade::Upgraded)
+        }
+        Format::CodexToml => {
+            let Ok(raw) = std::fs::read_to_string(path) else {
+                return Ok(Upgrade::NoEntry);
+            };
+            let Some(body) = codex_entry_body(&raw) else {
+                return Ok(Upgrade::NoEntry);
+            };
+            let url = endpoint
+                .map(str::to_string)
+                .or_else(|| codex_entry_url(&body));
+            let Some(url) = url else {
+                return Ok(Upgrade::Unrecognized);
+            };
+            let env_var = match auth {
+                AuthOverride::Preserve => codex_env_var(&body),
+                AuthOverride::Set(Some(_)) => Some(CODEX_TOKEN_ENV.to_string()),
+                AuthOverride::Set(None) => None,
+            };
+            let mut content = strip_codex_section(&raw).trim_end().to_string();
+            if !content.is_empty() {
+                content.push_str("\n\n");
+            }
+            content.push_str(&codex_section(&url, env_var.as_deref()));
+            if content.trim_end() == raw.trim_end() {
+                return Ok(Upgrade::UpToDate);
+            }
+            write_text(path, &content)?;
+            Ok(Upgrade::Upgraded)
+        }
+    }
+}
+
+/// The `url = "…"` value inside a codex section body.
+fn codex_entry_url(body: &str) -> Option<String> {
+    body.lines().find_map(|l| {
+        let l = l.trim();
+        l.strip_prefix("url")
+            .and_then(|r| r.trim().strip_prefix('='))
+            .map(|v| v.trim().trim_matches('"').to_string())
+    })
+}
+
+/// `--upgrade` — rewrite the `oxidean` entry only where it already exists.
+/// Never prompts, never creates files; bare invocation sweeps every harness
+/// at both scopes, `--harness`/`--detected`/scope flags narrow it. `endpoint`
+/// `None` preserves each entry's URL (`ox self-update` refresh).
+#[allow(clippy::too_many_arguments)]
+fn upgrade_at(
+    dirs: &Dirs,
+    root: &Path,
+    harness_flags: &[String],
+    detected_only: bool,
+    project: bool,
+    global: bool,
+    endpoint: Option<&str>,
+    auth: &AuthOverride,
+) -> Result<Out, CliError> {
+    let scopes: &[Scope] = match (project, global) {
+        (true, false) => &[Scope::Project],
+        (false, true) => &[Scope::Global],
+        (true, true) => {
+            return Err(CliError::Usage(
+                "--project and --global are exclusive".into(),
+            ));
+        }
+        (false, false) => &[Scope::Project, Scope::Global],
+    };
+    let harnesses: Vec<&McpHarness> = if harness_flags.is_empty() && !detected_only {
+        HARNESSES.iter().filter(|h| h.id != "generic").collect()
+    } else {
+        harness::select_harnesses(HARNESSES, dirs, root, harness_flags, detected_only)?
+    };
+
+    let mut upgraded = Vec::new();
+    let mut current = Vec::new();
+    let mut skipped = Vec::new();
+    let mut seen = BTreeSet::new();
+    for h in harnesses {
+        for &scope in scopes {
+            let Ok(files) = target_files(dirs, root, h, scope) else {
+                continue;
+            };
+            for path in files {
+                if !seen.insert(path.clone()) {
+                    continue;
+                }
+                match upgrade_entry(&path, &h.format, endpoint, auth)? {
+                    Upgrade::Upgraded => upgraded.push(path.display().to_string()),
+                    Upgrade::UpToDate => current.push(path.display().to_string()),
+                    Upgrade::Unrecognized => skipped.push(path.display().to_string()),
+                    Upgrade::NoEntry => {}
+                }
+            }
+        }
+    }
+
+    let mut text = String::new();
+    for w in &upgraded {
+        text.push_str(&format!("upgraded {w}\n"));
+    }
+    for c in &current {
+        text.push_str(&format!("up-to-date {c}\n"));
+    }
+    for s in &skipped {
+        text.push_str(&format!("skipped {s}\n"));
+    }
+    if upgraded.is_empty() && current.is_empty() && skipped.is_empty() {
+        text.push_str("no MCP server entries found\n");
+    }
+    let upgraded_v: Vec<Value> = upgraded.iter().map(|w| json!(w)).collect();
+    let current_v: Vec<Value> = current.iter().map(|w| json!(w)).collect();
+    Ok(Out::Report {
+        text: text.trim_end().to_string(),
+        json: json!({"ok": true, "data": {
+            "endpoint": endpoint,
+            "upgraded": upgraded_v, "current": current_v, "skipped": skipped,
+        }}),
+    })
+}
+
+/// `ox self-update` hook — re-render every existing `oxidean` entry into this
+/// binary's canonical shape, keeping each entry's endpoint and credential.
+/// Returns the number of files rewritten. Never prompts or creates files.
+pub(crate) fn refresh_installed() -> Result<usize, CliError> {
+    let out = upgrade_at(
+        &Dirs::env(),
+        Path::new(""),
+        &[],
+        false,
+        false,
+        false,
+        None,
+        &AuthOverride::Preserve,
+    )?;
+    Ok(match &out {
+        Out::Report { json, .. } => json
+            .pointer("/data/upgraded")
+            .and_then(Value::as_array)
+            .map(|a| a.len())
+            .unwrap_or(0),
+        _ => 0,
+    })
+}
+
 /// One discovered config file and what its `oxidean` entry says.
 struct StatusRow {
     harness: &'static str,
@@ -814,32 +1169,14 @@ fn inspect_file(path: &Path, format: &Format) -> Result<Option<(String, String)>
             let Some(entry) = doc.get(*top_key).and_then(|t| t.get(SERVER_NAME)) else {
                 return Ok(None);
             };
-            let url = entry
-                .get("url")
-                .or_else(|| entry.get("httpUrl"))
-                .or_else(|| entry.get("serverUrl"))
-                .and_then(Value::as_str)
-                .map(str::to_string)
-                // zed bridge — endpoint is args[1].
-                .or_else(|| {
-                    entry
-                        .pointer("/command/args/1")
-                        .and_then(Value::as_str)
-                        .map(str::to_string)
-                })
-                .unwrap_or_default();
-            let authed = entry
-                .pointer("/headers/Authorization")
-                .and_then(Value::as_str)
-                .is_some()
-                || entry
-                    .pointer("/command/args")
-                    .and_then(Value::as_array)
-                    .map(|a| a.iter().any(|v| v.as_str() == Some("--header")))
-                    .unwrap_or(false);
             Ok(Some((
-                url,
-                if authed { "bearer" } else { "none" }.to_string(),
+                entry_url(entry).unwrap_or_default(),
+                if entry_token(entry).is_some() {
+                    "bearer"
+                } else {
+                    "none"
+                }
+                .to_string(),
             )))
         }
         Format::CodexToml => {
@@ -847,20 +1184,10 @@ fn inspect_file(path: &Path, format: &Format) -> Result<Option<(String, String)>
             let Some(body) = codex_entry_body(&raw) else {
                 return Ok(None);
             };
-            let url = body
-                .lines()
-                .find_map(|l| {
-                    let l = l.trim();
-                    l.strip_prefix("url")
-                        .and_then(|r| r.trim().strip_prefix('='))
-                        .map(|v| v.trim().trim_matches('"').to_string())
-                })
-                .unwrap_or_default();
-            let auth = if body.contains("bearer_token_env_var") {
-                format!("env {CODEX_TOKEN_ENV}")
-            } else {
-                "none".to_string()
-            };
+            let url = codex_entry_url(&body).unwrap_or_default();
+            let auth = codex_env_var(&body)
+                .map(|v| format!("env {v}"))
+                .unwrap_or_else(|| "none".to_string());
             Ok(Some((url, auth)))
         }
     }
@@ -1474,5 +1801,303 @@ mod tests {
         assert!(out.contains("[mcp_servers.a]"));
         assert!(out.contains("[settings]"));
         assert!(out.contains("# head"));
+    }
+
+    /// Seed a cursor config that carries an `oxidean` entry.
+    fn seed_cursor(dir: &Path, url: &str, token: Option<&str>) -> PathBuf {
+        let cursor = dir.join(".cursor");
+        std::fs::create_dir_all(&cursor).unwrap();
+        let mut e = json!({"url": url});
+        if let Some(t) = token {
+            e["headers"] = json!({"Authorization": format!("Bearer {t}")});
+        }
+        let path = cursor.join("mcp.json");
+        std::fs::write(
+            &path,
+            serde_json::to_string_pretty(&json!({"mcpServers": {"oxidean": e}})).unwrap(),
+        )
+        .unwrap();
+        path
+    }
+
+    #[test]
+    fn upgrade_rewrites_only_existing() {
+        let dir = test_dir("upgrade-only-existing");
+        // cursor has an entry; vscode's file exists without one; claude
+        // has no file at all.
+        seed_cursor(&dir, "https://old.example/api/mcp", Some("pat_keep"));
+        std::fs::create_dir_all(dir.join(".vscode")).unwrap();
+        std::fs::write(
+            dir.join(".vscode/mcp.json"),
+            r#"{"servers": {"other": {}}}"#,
+        )
+        .unwrap();
+
+        let out = upgrade_at(
+            &test_dirs(&dir),
+            &dir,
+            &[],
+            false,
+            false,
+            false,
+            Some("https://new.example/api/mcp"),
+            &AuthOverride::Preserve,
+        )
+        .unwrap();
+        match &out {
+            Out::Report { text, json } => {
+                assert!(text.contains("upgraded"), "{text}");
+                assert!(text.contains(".cursor/mcp.json"), "{text}");
+                assert_eq!(json["data"]["upgraded"].as_array().unwrap().len(), 1);
+            }
+            _ => panic!(),
+        }
+        // Entry rewritten to the new endpoint, bearer preserved verbatim.
+        let doc: Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join(".cursor/mcp.json")).unwrap())
+                .unwrap();
+        let e = &doc["mcpServers"]["oxidean"];
+        assert_eq!(e["url"], "https://new.example/api/mcp");
+        assert_eq!(e["headers"]["Authorization"], "Bearer pat_keep");
+        // vscode's entry-less file and claude's absent file are untouched.
+        assert_eq!(
+            std::fs::read_to_string(dir.join(".vscode/mcp.json")).unwrap(),
+            r#"{"servers": {"other": {}}}"#
+        );
+        assert!(!dir.join(".mcp.json").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn upgrade_reports_up_to_date_and_none() {
+        let dir = test_dir("upgrade-current");
+        seed_cursor(&dir, "https://f/api/mcp", Some("pat"));
+        // Canonical entry already → up-to-date, file bytes unchanged.
+        let out = upgrade_at(
+            &test_dirs(&dir),
+            &dir,
+            &[],
+            false,
+            false,
+            false,
+            Some("https://f/api/mcp"),
+            &AuthOverride::Preserve,
+        )
+        .unwrap();
+        match &out {
+            Out::Report { text, json } => {
+                assert!(text.contains("up-to-date"), "{text}");
+                assert_eq!(json["data"]["upgraded"].as_array().unwrap().len(), 0);
+                assert_eq!(json["data"]["current"].as_array().unwrap().len(), 1);
+            }
+            _ => panic!(),
+        }
+
+        let empty = test_dir("upgrade-none");
+        let out = upgrade_at(
+            &test_dirs(&empty),
+            &empty,
+            &[],
+            false,
+            false,
+            false,
+            Some("https://f/api/mcp"),
+            &AuthOverride::Preserve,
+        )
+        .unwrap();
+        match &out {
+            Out::Report { text, .. } => {
+                assert!(text.contains("no MCP server entries found"), "{text}")
+            }
+            _ => panic!(),
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&empty);
+    }
+
+    #[test]
+    fn upgrade_auth_override_rotates_and_strips() {
+        let dir = test_dir("upgrade-auth");
+        seed_cursor(&dir, "https://f/api/mcp", Some("pat_old"));
+        // Explicit token rotates the bearer everywhere it exists.
+        upgrade_at(
+            &test_dirs(&dir),
+            &dir,
+            &["cursor".to_string()],
+            false,
+            false,
+            false,
+            Some("https://f/api/mcp"),
+            &AuthOverride::Set(Some("pat_new".into())),
+        )
+        .unwrap();
+        let doc: Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join(".cursor/mcp.json")).unwrap())
+                .unwrap();
+        assert_eq!(
+            doc["mcpServers"]["oxidean"]["headers"]["Authorization"],
+            "Bearer pat_new"
+        );
+        // --anonymous strips auth.
+        upgrade_at(
+            &test_dirs(&dir),
+            &dir,
+            &["cursor".to_string()],
+            false,
+            false,
+            false,
+            Some("https://f/api/mcp"),
+            &AuthOverride::Set(None),
+        )
+        .unwrap();
+        let doc: Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join(".cursor/mcp.json")).unwrap())
+                .unwrap();
+        assert!(doc["mcpServers"]["oxidean"].get("headers").is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn upgrade_skips_malformed_and_non_object() {
+        let dir = test_dir("upgrade-skip");
+        std::fs::create_dir_all(dir.join(".cursor")).unwrap();
+        std::fs::write(dir.join(".cursor/mcp.json"), "{not json").unwrap();
+        std::fs::create_dir_all(dir.join(".kiro/settings")).unwrap();
+        std::fs::write(
+            dir.join(".kiro/settings/mcp.json"),
+            r#"{"mcpServers": {"oxidean": "https://f/api/mcp"}}"#,
+        )
+        .unwrap();
+        let out = upgrade_at(
+            &test_dirs(&dir),
+            &dir,
+            &[],
+            false,
+            false,
+            false,
+            Some("https://f/api/mcp"),
+            &AuthOverride::Preserve,
+        )
+        .unwrap();
+        match &out {
+            Out::Report { text, json } => {
+                assert!(text.contains("skipped"), "{text}");
+                assert_eq!(
+                    json["data"]["skipped"].as_array().unwrap().len(),
+                    2,
+                    "{json}"
+                );
+            }
+            _ => panic!(),
+        }
+        // Neither file was touched.
+        assert_eq!(
+            std::fs::read_to_string(dir.join(".cursor/mcp.json")).unwrap(),
+            "{not json"
+        );
+        assert!(std::fs::read_to_string(dir.join(".kiro/settings/mcp.json"))
+            .unwrap()
+            .contains("\"oxidean\": \"https://f/api/mcp\""));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn upgrade_codex_preserves_env_var() {
+        let dir = test_dir("upgrade-codex");
+        std::fs::create_dir_all(dir.join(".codex")).unwrap();
+        std::fs::write(
+            dir.join(".codex/config.toml"),
+            "[mcp_servers.oxidean]\nurl = \"https://old/api/mcp\"\nbearer_token_env_var = \"MY_TOKEN\"\n\n[settings]\nx = 1\n",
+        )
+        .unwrap();
+        upgrade_at(
+            &test_dirs(&dir),
+            &dir,
+            &["codex".to_string()],
+            false,
+            false,
+            false,
+            Some("https://new/api/mcp"),
+            &AuthOverride::Preserve,
+        )
+        .unwrap();
+        let raw = std::fs::read_to_string(dir.join(".codex/config.toml")).unwrap();
+        // Custom env var name survives; endpoint updates; sibling table stays.
+        assert!(raw.contains("url = \"https://new/api/mcp\""), "{raw}");
+        assert!(raw.contains("bearer_token_env_var = \"MY_TOKEN\""), "{raw}");
+        assert!(raw.contains("[settings]"), "{raw}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn upgrade_zed_preserves_header() {
+        let dir = test_dir("upgrade-zed");
+        let zed = dir.join("xdg/zed");
+        std::fs::create_dir_all(&zed).unwrap();
+        std::fs::write(
+            zed.join("settings.json"),
+            serde_json::to_string_pretty(&json!({
+                "context_servers": {"oxidean": {"command": {"path": "npx", "args": [
+                    "mcp-remote", "https://old/api/mcp", "--header",
+                    "Authorization: Bearer pat_zed"]}}}
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        upgrade_at(
+            &test_dirs(&dir),
+            &dir,
+            &["zed".to_string()],
+            false,
+            false,
+            true,
+            Some("https://new/api/mcp"),
+            &AuthOverride::Preserve,
+        )
+        .unwrap();
+        let doc: Value =
+            serde_json::from_str(&std::fs::read_to_string(zed.join("settings.json")).unwrap())
+                .unwrap();
+        let args = doc["context_servers"]["oxidean"]["command"]["args"]
+            .as_array()
+            .unwrap();
+        assert_eq!(args[1], "https://new/api/mcp");
+        assert!(args
+            .iter()
+            .any(|a| a.as_str() == Some("Authorization: Bearer pat_zed")));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn refresh_installed_preserves_url_and_auth() {
+        let dir = test_dir("refresh");
+        // An entry aimed at a different instance keeps its URL — self-update
+        // refresh never repoints configs.
+        seed_cursor(&dir, "https://other.example/api/mcp", Some("pat_x"));
+        let n = upgrade_at(
+            &test_dirs(&dir),
+            &dir,
+            &[],
+            false,
+            false,
+            false,
+            None,
+            &AuthOverride::Preserve,
+        )
+        .unwrap();
+        match &n {
+            Out::Report { json, .. } => {
+                // Canonical already → nothing to rewrite, nothing repointed.
+                assert_eq!(json["data"]["upgraded"].as_array().unwrap().len(), 0);
+            }
+            _ => panic!(),
+        }
+        let doc: Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join(".cursor/mcp.json")).unwrap())
+                .unwrap();
+        let e = &doc["mcpServers"]["oxidean"];
+        assert_eq!(e["url"], "https://other.example/api/mcp");
+        assert_eq!(e["headers"]["Authorization"], "Bearer pat_x");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

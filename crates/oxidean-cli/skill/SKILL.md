@@ -169,7 +169,10 @@ stored `ox` login → `--anonymous` (public data only). Mint a PAT via
 Harness ids: `claude`, `cursor`, `vscode`, `windsurf`, `gemini`, `codex`,
 `kiro`, `opencode`, `zed` (via `mcp-remote`), `generic`. Codex stores
 `bearer_token_env_var = "OXIDEAN_TOKEN"` — export it. Re-running `install`
-updates the entry; `remove` deletes only the `oxidean` entry.
+updates the entry; `install --upgrade` rewrites only existing `oxidean`
+entries (never prompts, never creates; preserves each file's credential —
+add `--token-stdin` to rotate), and runs automatically on `ox self-update`
+unless `--no-mcp-refresh`. `remove` deletes only the `oxidean` entry.
 
 ## Notes for agents
 

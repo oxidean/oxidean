@@ -91,20 +91,26 @@ describe("/settings/ai", () => {
     expect(install).toHaveValue("ox mcp install");
     const detected = screen.getByRole("textbox", { name: "Copy detected MCP install command" });
     expect(detected).toHaveValue("ox mcp install --detected --project");
+    const upgrade = screen.getByRole("textbox", { name: "Copy MCP upgrade command" });
+    expect(upgrade).toHaveValue("ox mcp install --upgrade");
     const status = screen.getByRole("textbox", { name: "Copy MCP status command" });
     expect(status).toHaveValue("ox mcp status");
+
+    // Per-harness picker — defaults to Claude Code, renders a real JSON block
+    // (never a live token) and names the file it belongs in.
+    expect(screen.getByTestId("mcp-harness-select")).toBeTruthy();
+    const block = screen.getByTestId("mcp-snippet-block");
+    expect(block.getAttribute("data-harness")).toBe("claude");
+    expect(block.textContent).toContain('"mcpServers"');
+    expect(block.textContent).toContain('"oxidean"');
+    expect(block.textContent).toContain('"https://forge.example/api/mcp"');
+    expect(block.textContent).toContain('"Bearer <pat>"');
+    expect(screen.getByTestId("mcp-snippet-file").textContent).toContain(".mcp.json");
+    expect(screen.getByRole("button", { name: "Copy Claude Code config" })).toBeTruthy();
 
     const claude = screen.getByRole("textbox", { name: "Copy Claude Code MCP add command" });
     expect(claude).toHaveValue(
       'claude mcp add --transport http oxidean https://forge.example/api/mcp --header "Authorization: Bearer <pat>"',
-    );
-    const cursor = screen.getByRole("textbox", { name: "Copy Cursor MCP config JSON" });
-    expect(cursor).toHaveValue(
-      '{"mcpServers":{"oxidean":{"url":"https://forge.example/api/mcp","headers":{"Authorization":"Bearer <pat>"}}}}',
-    );
-    const vscode = screen.getByRole("textbox", { name: "Copy VS Code MCP config JSON" });
-    expect(vscode).toHaveValue(
-      '{"servers":{"oxidean":{"type":"http","url":"https://forge.example/api/mcp","headers":{"Authorization":"Bearer <pat>"}}}}',
     );
     const remote = screen.getByRole("textbox", { name: "Copy mcp-remote bridge command" });
     expect(remote).toHaveValue(

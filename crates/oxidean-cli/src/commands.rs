@@ -6,11 +6,9 @@ use std::io::Read;
 use std::path::PathBuf;
 
 use oxidean_core::{AppError, RpcResponse};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
-use crate::args::{
-    BodyArg, Command, Global, Invocation, ListFilters, ReviewAction, parse_repo,
-};
+use crate::args::{parse_repo, BodyArg, Command, Global, Invocation, ListFilters, ReviewAction};
 use crate::config::{self, Config, InstanceEntry};
 use crate::device;
 use crate::manifest;
@@ -282,9 +280,8 @@ fn body_text(b: &BodyArg, what: &str) -> Result<Option<String>, CliError> {
 
 /// Fail when no body came from anywhere (for verbs that require one).
 fn require_body(b: &BodyArg, what: &str) -> Result<String, CliError> {
-    body_text(b, what)?.ok_or_else(|| {
-        CliError::Usage(format!("{what} needs --body, --body-file, or piped stdin"))
-    })
+    body_text(b, what)?
+        .ok_or_else(|| CliError::Usage(format!("{what} needs --body, --body-file, or piped stdin")))
 }
 
 /// `--file`/`--key-file` source: `-` or missing file → stdin.
@@ -296,8 +293,7 @@ fn read_body_source(path: &str) -> Result<String, CliError> {
             .map_err(|e| CliError::Transport(format!("reading stdin: {e}")))?;
         return Ok(buf);
     }
-    std::fs::read_to_string(path)
-        .map_err(|e| CliError::Transport(format!("reading {path}: {e}")))
+    std::fs::read_to_string(path).map_err(|e| CliError::Transport(format!("reading {path}: {e}")))
 }
 
 /// `pull.get` → head sha — used by `pr checks`.
@@ -332,7 +328,11 @@ async fn pr_checks(
 }
 
 /// `pr merge` without --method — first strategy `repo.mergeSettings.get` allows.
-async fn default_merge_method(global: &Global, rt: &Runtime, repo: &str) -> Result<String, CliError> {
+async fn default_merge_method(
+    global: &Global,
+    rt: &Runtime,
+    repo: &str,
+) -> Result<String, CliError> {
     let data = call(global, rt, "repo.mergeSettings.get", repo_input(repo)?).await?;
     let settings = data.get("settings").unwrap_or(&data);
     for (field, method) in [
@@ -340,7 +340,11 @@ async fn default_merge_method(global: &Global, rt: &Runtime, repo: &str) -> Resu
         ("allow_squash_merge", "squash"),
         ("allow_rebase_merge", "rebase"),
     ] {
-        if settings.get(field).and_then(Value::as_bool).unwrap_or(false) {
+        if settings
+            .get(field)
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
             return Ok(method.to_string());
         }
     }
@@ -432,9 +436,7 @@ async fn resolve_collaborator_id(
         })
         .and_then(|c| output::s(c, "user_id"))
         .map(str::to_string)
-        .ok_or_else(|| {
-            CliError::Usage(format!("'{username}' is not a collaborator on {repo}"))
-        })
+        .ok_or_else(|| CliError::Usage(format!("'{username}' is not a collaborator on {repo}")))
 }
 
 /// `ox browse` / `pr checkout` / `repo clone` — open a URL in the user's
@@ -506,9 +508,7 @@ fn required_procedures(cmd: &Command) -> Vec<String> {
         Command::RepoDelete { .. } => one("repo.softDelete"),
         Command::RepoTransfer { .. } => one("repo.transfer"),
         Command::RepoStar { star, .. } => one(if *star { "repo.star" } else { "repo.unstar" }),
-        Command::RepoWatch { watch, .. } => {
-            one(if *watch { "repo.watch" } else { "repo.unwatch" })
-        }
+        Command::RepoWatch { watch, .. } => one(if *watch { "repo.watch" } else { "repo.unwatch" }),
         Command::DeployKeyList { .. } => one("repo.deployKey.list"),
         Command::DeployKeyAdd { .. } => one("repo.deployKey.create"),
         Command::DeployKeyDelete { .. } => one("repo.deployKey.delete"),
@@ -572,7 +572,11 @@ fn required_procedures(cmd: &Command) -> Vec<String> {
         Command::IssueView { .. } => one("issue.get"),
         Command::IssueCreate { .. } => one("issue.create"),
         Command::IssueEdit {
-            labels, assignees, title, body, ..
+            labels,
+            assignees,
+            title,
+            body,
+            ..
         } => {
             let mut p = Vec::new();
             if title.is_some() || body.body.is_some() || body.body_file.is_some() {
@@ -690,14 +694,12 @@ fn required_procedures(cmd: &Command) -> Vec<String> {
         Command::OrgCreate { .. } => one("org.create"),
         Command::OrgMembers { .. } => one("org.members.list"),
         Command::OrgMemberAdd { .. } => one("org.members.add"),
-        Command::OrgMemberRemove { .. } => vec![
-            "org.members.list".into(),
-            "org.members.remove".into(),
-        ],
-        Command::OrgMemberRole { .. } => vec![
-            "org.members.list".into(),
-            "org.members.updateRole".into(),
-        ],
+        Command::OrgMemberRemove { .. } => {
+            vec!["org.members.list".into(), "org.members.remove".into()]
+        }
+        Command::OrgMemberRole { .. } => {
+            vec!["org.members.list".into(), "org.members.updateRole".into()]
+        }
         Command::OrgInviteList { .. } => one("org.invites.list"),
         Command::OrgInviteCreate { .. } => one("org.invites.create"),
         Command::OrgInviteLink { .. } => one("org.invites.createLink"),
@@ -711,9 +713,11 @@ fn required_procedures(cmd: &Command) -> Vec<String> {
         Command::NotificationUnread => one("notification.unreadCount"),
         Command::UserView { .. } => one("user.getPublicProfile"),
         Command::UserLookup { .. } => one("user.lookup"),
-        Command::UserFollow { follow, .. } => {
-            one(if *follow { "user.follow" } else { "user.unfollow" })
-        }
+        Command::UserFollow { follow, .. } => one(if *follow {
+            "user.follow"
+        } else {
+            "user.unfollow"
+        }),
         Command::UserStarred => one("user.listStarred"),
         Command::UserWatched => one("user.listWatched"),
         Command::SshKeyList => one("sshKey.list"),
@@ -734,14 +738,14 @@ fn required_procedures(cmd: &Command) -> Vec<String> {
             "pat.createClassic"
         }),
         Command::PatRevoke { .. } => one("pat.revoke"),
-        Command::LabelList { org, .. } => {
-            one(if org.is_some() {
-                "label.listForOrg"
-            } else {
-                "label.listForRepo"
-            })
-        }
-        Command::LabelCreate { org, .. } | Command::LabelEdit { org, .. } | Command::LabelDelete { org, .. } => {
+        Command::LabelList { org, .. } => one(if org.is_some() {
+            "label.listForOrg"
+        } else {
+            "label.listForRepo"
+        }),
+        Command::LabelCreate { org, .. }
+        | Command::LabelEdit { org, .. }
+        | Command::LabelDelete { org, .. } => {
             let _ = org;
             one("label.create") // update/delete share the label.* family
         }
@@ -1185,7 +1189,11 @@ pub async fn dispatch(inv: &Invocation, rt: &Runtime) -> Result<Out, CliError> {
             )
             .await
         }
-        Command::BranchProtectionSet { repo, pattern, opts } => {
+        Command::BranchProtectionSet {
+            repo,
+            pattern,
+            opts,
+        } => {
             let mut input = repo_input(repo)?;
             let m = input.as_object_mut().unwrap();
             m.insert("pattern".into(), json!(pattern));
@@ -1194,7 +1202,14 @@ pub async fn dispatch(inv: &Invocation, rt: &Runtime) -> Result<Out, CliError> {
                     m.insert(k.clone(), v.clone());
                 }
             }
-            invoke(g, rt, "repo.branchProtection.create", input, output::generic).await
+            invoke(
+                g,
+                rt,
+                "repo.branchProtection.create",
+                input,
+                output::generic,
+            )
+            .await
         }
         Command::BranchProtectionDelete { repo, id } => {
             let mut input = repo_input(repo)?;
@@ -1202,7 +1217,14 @@ pub async fn dispatch(inv: &Invocation, rt: &Runtime) -> Result<Out, CliError> {
                 .as_object_mut()
                 .unwrap()
                 .insert("id".into(), json!(id));
-            invoke(g, rt, "repo.branchProtection.delete", input, output::generic).await
+            invoke(
+                g,
+                rt,
+                "repo.branchProtection.delete",
+                input,
+                output::generic,
+            )
+            .await
         }
         Command::TagProtectionList { repo } => {
             invoke(
@@ -1214,7 +1236,11 @@ pub async fn dispatch(inv: &Invocation, rt: &Runtime) -> Result<Out, CliError> {
             )
             .await
         }
-        Command::TagProtectionSet { repo, pattern, opts } => {
+        Command::TagProtectionSet {
+            repo,
+            pattern,
+            opts,
+        } => {
             let mut input = repo_input(repo)?;
             let m = input.as_object_mut().unwrap();
             m.insert("pattern".into(), json!(pattern));
@@ -1247,10 +1273,24 @@ pub async fn dispatch(inv: &Invocation, rt: &Runtime) -> Result<Out, CliError> {
             invoke(g, rt, "repo.mirror.upsert", input, output::mirror).await
         }
         Command::MirrorSync { repo } => {
-            invoke(g, rt, "repo.mirror.syncNow", repo_input(repo)?, output::generic).await
+            invoke(
+                g,
+                rt,
+                "repo.mirror.syncNow",
+                repo_input(repo)?,
+                output::generic,
+            )
+            .await
         }
         Command::MirrorDelete { repo } => {
-            invoke(g, rt, "repo.mirror.delete", repo_input(repo)?, output::generic).await
+            invoke(
+                g,
+                rt,
+                "repo.mirror.delete",
+                repo_input(repo)?,
+                output::generic,
+            )
+            .await
         }
         Command::MirrorGenKey { repo } => {
             invoke(
@@ -1293,7 +1333,14 @@ pub async fn dispatch(inv: &Invocation, rt: &Runtime) -> Result<Out, CliError> {
             opt(m, "allow_merge_commit", *merge);
             opt(m, "allow_squash_merge", *squash);
             opt(m, "allow_rebase_merge", *rebase);
-            invoke(g, rt, "repo.mergeSettings.update", input, output::merge_settings).await
+            invoke(
+                g,
+                rt,
+                "repo.mergeSettings.update",
+                input,
+                output::merge_settings,
+            )
+            .await
         }
         Command::RepoLfs {
             repo,
@@ -1332,10 +1379,24 @@ pub async fn dispatch(inv: &Invocation, rt: &Runtime) -> Result<Out, CliError> {
 
         // ── issues ──────────────────────────────────────────────────
         Command::IssueList { repo, filters } => {
-            invoke(g, rt, "issue.list", list_input(repo, filters)?, output::issue_list).await
+            invoke(
+                g,
+                rt,
+                "issue.list",
+                list_input(repo, filters)?,
+                output::issue_list,
+            )
+            .await
         }
         Command::IssueView { repo, number } => {
-            invoke(g, rt, "issue.get", ref_input(repo, *number)?, output::issue_view).await
+            invoke(
+                g,
+                rt,
+                "issue.get",
+                ref_input(repo, *number)?,
+                output::issue_view,
+            )
+            .await
         }
         Command::IssueCreate { repo, title, body } => {
             let mut input = repo_input(repo)?;
@@ -1382,18 +1443,46 @@ pub async fn dispatch(inv: &Invocation, rt: &Runtime) -> Result<Out, CliError> {
                 Some(out) => Ok(out),
                 // Bare `issue edit` — show the issue (gh does the same).
                 None => {
-                    invoke(g, rt, "issue.get", ref_input(repo, *number)?, output::issue_view).await
+                    invoke(
+                        g,
+                        rt,
+                        "issue.get",
+                        ref_input(repo, *number)?,
+                        output::issue_view,
+                    )
+                    .await
                 }
             }
         }
         Command::IssueClose { repo, number } => {
-            invoke(g, rt, "issue.close", ref_input(repo, *number)?, output::issue_view).await
+            invoke(
+                g,
+                rt,
+                "issue.close",
+                ref_input(repo, *number)?,
+                output::issue_view,
+            )
+            .await
         }
         Command::IssueReopen { repo, number } => {
-            invoke(g, rt, "issue.reopen", ref_input(repo, *number)?, output::issue_view).await
+            invoke(
+                g,
+                rt,
+                "issue.reopen",
+                ref_input(repo, *number)?,
+                output::issue_view,
+            )
+            .await
         }
         Command::IssueDelete { repo, number } => {
-            invoke(g, rt, "issue.delete", ref_input(repo, *number)?, output::generic).await
+            invoke(
+                g,
+                rt,
+                "issue.delete",
+                ref_input(repo, *number)?,
+                output::generic,
+            )
+            .await
         }
         Command::IssueComment { repo, number, body } => {
             let mut input = ref_input(repo, *number)?;
@@ -1406,10 +1495,24 @@ pub async fn dispatch(inv: &Invocation, rt: &Runtime) -> Result<Out, CliError> {
 
         // ── pull requests ───────────────────────────────────────────
         Command::PrList { repo, filters } => {
-            invoke(g, rt, "pull.list", list_input(repo, filters)?, output::pull_list).await
+            invoke(
+                g,
+                rt,
+                "pull.list",
+                list_input(repo, filters)?,
+                output::pull_list,
+            )
+            .await
         }
         Command::PrView { repo, number } => {
-            invoke(g, rt, "pull.get", ref_input(repo, *number)?, output::pull_view).await
+            invoke(
+                g,
+                rt,
+                "pull.get",
+                ref_input(repo, *number)?,
+                output::pull_view,
+            )
+            .await
         }
         Command::PrChecks { repo, number } => pr_checks(g, rt, repo, *number).await,
         Command::PrCreate {
@@ -1461,7 +1564,14 @@ pub async fn dispatch(inv: &Invocation, rt: &Runtime) -> Result<Out, CliError> {
             invoke(g, rt, "pull.files", ref_input(repo, *number)?, output::diff).await
         }
         Command::PrFiles { repo, number } => {
-            invoke(g, rt, "pull.files", ref_input(repo, *number)?, output::file_list).await
+            invoke(
+                g,
+                rt,
+                "pull.files",
+                ref_input(repo, *number)?,
+                output::file_list,
+            )
+            .await
         }
         Command::PrReview {
             repo,
@@ -1542,13 +1652,34 @@ pub async fn dispatch(inv: &Invocation, rt: &Runtime) -> Result<Out, CliError> {
                     json: json!({"ok": true, "data": status}),
                 });
             }
-            invoke(g, rt, "pull.updateBranch", ref_input(repo, *number)?, output::generic).await
+            invoke(
+                g,
+                rt,
+                "pull.updateBranch",
+                ref_input(repo, *number)?,
+                output::generic,
+            )
+            .await
         }
         Command::PrClose { repo, number } => {
-            invoke(g, rt, "pull.close", ref_input(repo, *number)?, output::pull_view).await
+            invoke(
+                g,
+                rt,
+                "pull.close",
+                ref_input(repo, *number)?,
+                output::pull_view,
+            )
+            .await
         }
         Command::PrReopen { repo, number } => {
-            invoke(g, rt, "pull.reopen", ref_input(repo, *number)?, output::pull_view).await
+            invoke(
+                g,
+                rt,
+                "pull.reopen",
+                ref_input(repo, *number)?,
+                output::pull_view,
+            )
+            .await
         }
         Command::PrCheckout { repo, number } => {
             let pull = call(g, rt, "pull.get", ref_input(repo, *number)?).await?;
@@ -1654,8 +1785,8 @@ pub async fn dispatch(inv: &Invocation, rt: &Runtime) -> Result<Out, CliError> {
             let (owner, name) = repo_parts(repo)?;
             let input = json!({ "owner": owner, "name": name, "run_id": run_id });
             let every = std::time::Duration::from_secs(interval.unwrap_or(5).max(1));
-            let deadline = timeout
-                .map(|t| std::time::Instant::now() + std::time::Duration::from_secs(t));
+            let deadline =
+                timeout.map(|t| std::time::Instant::now() + std::time::Duration::from_secs(t));
             let mut last_status = String::new();
             loop {
                 let data = call(g, rt, "repo.actions.getRun", input.clone()).await?;
@@ -1735,7 +1866,14 @@ pub async fn dispatch(inv: &Invocation, rt: &Runtime) -> Result<Out, CliError> {
             let m = input.as_object_mut().unwrap();
             m.insert("workflow_id".into(), json!(workflow_id));
             m.insert("git_ref".into(), json!(git_ref));
-            invoke(g, rt, "repo.actions.dispatchWorkflow", input, output::generic).await
+            invoke(
+                g,
+                rt,
+                "repo.actions.dispatchWorkflow",
+                input,
+                output::generic,
+            )
+            .await
         }
         Command::SecretList { repo } => {
             invoke(
@@ -1766,7 +1904,14 @@ pub async fn dispatch(inv: &Invocation, rt: &Runtime) -> Result<Out, CliError> {
 
         // ── releases & packages ─────────────────────────────────────
         Command::ReleaseList { repo } => {
-            invoke(g, rt, "release.list", repo_input(repo)?, output::release_list).await
+            invoke(
+                g,
+                rt,
+                "release.list",
+                repo_input(repo)?,
+                output::release_list,
+            )
+            .await
         }
         Command::ReleaseView { repo, tag } => {
             let mut input = repo_input(repo)?;
@@ -2044,10 +2189,7 @@ pub async fn dispatch(inv: &Invocation, rt: &Runtime) -> Result<Out, CliError> {
         Command::NotificationList { all, limit, offset } => {
             let mut input = json!({});
             let m = input.as_object_mut().unwrap();
-            m.insert(
-                "filter".into(),
-                json!(if *all { "all" } else { "unread" }),
-            );
+            m.insert("filter".into(), json!(if *all { "all" } else { "unread" }));
             opt(m, "limit", *limit);
             opt(m, "offset", *offset);
             invoke(g, rt, "notification.list", input, output::notification_list).await
@@ -2106,7 +2248,11 @@ pub async fn dispatch(inv: &Invocation, rt: &Runtime) -> Result<Out, CliError> {
             invoke(
                 g,
                 rt,
-                if *follow { "user.follow" } else { "user.unfollow" },
+                if *follow {
+                    "user.follow"
+                } else {
+                    "user.unfollow"
+                },
                 json!({ "username": username }),
                 output::generic,
             )
@@ -2120,9 +2266,7 @@ pub async fn dispatch(inv: &Invocation, rt: &Runtime) -> Result<Out, CliError> {
         }
 
         // ── account: keys, emails, PATs ─────────────────────────────
-        Command::SshKeyList => {
-            invoke(g, rt, "sshKey.list", json!({}), output::ssh_key_list).await
-        }
+        Command::SshKeyList => invoke(g, rt, "sshKey.list", json!({}), output::ssh_key_list).await,
         Command::SshKeyAdd {
             title,
             key_file,
@@ -2147,9 +2291,7 @@ pub async fn dispatch(inv: &Invocation, rt: &Runtime) -> Result<Out, CliError> {
         Command::SshKeyDelete { id } => {
             invoke(g, rt, "sshKey.delete", json!({ "id": id }), output::generic).await
         }
-        Command::GpgKeyList => {
-            invoke(g, rt, "gpgKey.list", json!({}), output::gpg_key_list).await
-        }
+        Command::GpgKeyList => invoke(g, rt, "gpgKey.list", json!({}), output::gpg_key_list).await,
         Command::GpgKeyAdd { title, key_file } => {
             let armored = read_body_source(key_file)?;
             invoke(
@@ -2164,20 +2306,39 @@ pub async fn dispatch(inv: &Invocation, rt: &Runtime) -> Result<Out, CliError> {
         Command::GpgKeyDelete { id } => {
             invoke(g, rt, "gpgKey.delete", json!({ "id": id }), output::generic).await
         }
-        Command::EmailList => {
-            invoke(g, rt, "email.list", json!({}), output::email_list).await
-        }
+        Command::EmailList => invoke(g, rt, "email.list", json!({}), output::email_list).await,
         Command::EmailAdd { email } => {
-            invoke(g, rt, "email.add", json!({ "email": email }), output::generic).await
+            invoke(
+                g,
+                rt,
+                "email.add",
+                json!({ "email": email }),
+                output::generic,
+            )
+            .await
         }
         Command::EmailRemove { id } => {
             invoke(g, rt, "email.remove", json!({ "id": id }), output::generic).await
         }
         Command::EmailSetPrimary { id } => {
-            invoke(g, rt, "email.setPrimary", json!({ "id": id }), output::generic).await
+            invoke(
+                g,
+                rt,
+                "email.setPrimary",
+                json!({ "id": id }),
+                output::generic,
+            )
+            .await
         }
         Command::EmailResend { id } => {
-            invoke(g, rt, "email.resendVerify", json!({ "id": id }), output::generic).await
+            invoke(
+                g,
+                rt,
+                "email.resendVerify",
+                json!({ "id": id }),
+                output::generic,
+            )
+            .await
         }
         Command::PatList => invoke(g, rt, "pat.list", json!({}), output::pat_list).await,
         Command::PatCreate {
@@ -2216,7 +2377,8 @@ pub async fn dispatch(inv: &Invocation, rt: &Runtime) -> Result<Out, CliError> {
                 }
                 if scopes.is_empty() {
                     return Err(CliError::Usage(
-                        "pat create needs --scopes repo[,package:read,...] or --fine-grained".into(),
+                        "pat create needs --scopes repo[,package:read,...] or --fine-grained"
+                            .into(),
                     ));
                 }
                 let mut i = json!({ "name": name, "scopes": scopes });
@@ -2417,7 +2579,11 @@ pub async fn dispatch(inv: &Invocation, rt: &Runtime) -> Result<Out, CliError> {
             invoke(
                 g,
                 rt,
-                if *ban { "admin.users.ban" } else { "admin.users.unban" },
+                if *ban {
+                    "admin.users.ban"
+                } else {
+                    "admin.users.unban"
+                },
                 json!({ "user_id": id }),
                 output::generic,
             )
@@ -2492,17 +2658,17 @@ pub async fn dispatch(inv: &Invocation, rt: &Runtime) -> Result<Out, CliError> {
             opt(m, "source", source.clone());
             opt(m, "event_type", event_type.clone());
             opt(m, "limit", *limit);
-            invoke(g, rt, "admin.users.getActivity", input, output::admin_activity).await
-        }
-        Command::AdminInviteList => {
             invoke(
                 g,
                 rt,
-                "admin.invites.list",
-                json!({}),
-                output::invite_list,
+                "admin.users.getActivity",
+                input,
+                output::admin_activity,
             )
             .await
+        }
+        Command::AdminInviteList => {
+            invoke(g, rt, "admin.invites.list", json!({}), output::invite_list).await
         }
         Command::AdminInviteCreate { emails } => {
             invoke(
@@ -2561,9 +2727,7 @@ pub async fn dispatch(inv: &Invocation, rt: &Runtime) -> Result<Out, CliError> {
             )
             .await
         }
-        Command::AdminReposGc => {
-            invoke(g, rt, "admin.repos.gc", json!({}), output::generic).await
-        }
+        Command::AdminReposGc => invoke(g, rt, "admin.repos.gc", json!({}), output::generic).await,
         Command::AdminLfs {
             set,
             max_object_bytes,
@@ -2683,6 +2847,7 @@ pub async fn dispatch(inv: &Invocation, rt: &Runtime) -> Result<Out, CliError> {
             token_stdin,
             web,
             anonymous,
+            upgrade,
         } => {
             crate::mcp::install(
                 g,
@@ -2695,6 +2860,7 @@ pub async fn dispatch(inv: &Invocation, rt: &Runtime) -> Result<Out, CliError> {
                 *token_stdin,
                 *web,
                 *anonymous,
+                *upgrade,
             )
             .await
         }
@@ -2705,9 +2871,10 @@ pub async fn dispatch(inv: &Invocation, rt: &Runtime) -> Result<Out, CliError> {
             global,
             detected,
         } => crate::mcp::remove(g, rt, harnesses, *detected, *project, *global),
-        Command::SelfUpdate { no_skill_refresh } => {
-            crate::self_update::run(g, rt, *no_skill_refresh).await
-        }
+        Command::SelfUpdate {
+            no_skill_refresh,
+            no_mcp_refresh,
+        } => crate::self_update::run(g, rt, *no_skill_refresh, *no_mcp_refresh).await,
         Command::Api { procedure, input } => {
             invoke(g, rt, procedure, input.clone(), |data| {
                 serde_json::to_string_pretty(data).unwrap_or_else(|_| "{}".to_string())
@@ -2795,9 +2962,7 @@ fn glob_match(pattern: &str, name: &str) -> bool {
             _ => return false,
         }
     }
-    pattern.ends_with('*')
-        || parts.last().map(|p| p.is_empty()).unwrap_or(false)
-        || rest.is_empty()
+    pattern.ends_with('*') || parts.last().map(|p| p.is_empty()).unwrap_or(false) || rest.is_empty()
 }
 
 async fn release_download(
@@ -2817,13 +2982,11 @@ async fn release_download(
         .unwrap_or_default();
     let selected: Vec<&Value> = assets
         .iter()
-        .filter(|a| {
-            match pattern {
-                Some(p) => output::s(a, "filename")
-                    .map(|f| glob_match(p, f))
-                    .unwrap_or(false),
-                None => true,
-            }
+        .filter(|a| match pattern {
+            Some(p) => output::s(a, "filename")
+                .map(|f| glob_match(p, f))
+                .unwrap_or(false),
+            None => true,
         })
         .collect();
     if selected.is_empty() {
@@ -3242,14 +3405,14 @@ async fn resolve_member_id(
 
 /// label scope plumbing — `--org` vs repo arg → `{scope, owner, repo?}` or
 /// `{org}` inputs depending on the procedure family.
-fn label_scope_input(repo: Option<&str>, org: Option<&str>) -> Result<(&'static str, Value), CliError> {
+fn label_scope_input(
+    repo: Option<&str>,
+    org: Option<&str>,
+) -> Result<(&'static str, Value), CliError> {
     match (repo, org) {
         (Some(r), None) => {
             let (owner, name) = repo_parts(r)?;
-            Ok((
-                "label.listForRepo",
-                json!({ "owner": owner, "name": name }),
-            ))
+            Ok(("label.listForRepo", json!({ "owner": owner, "name": name })))
         }
         (None, Some(o)) => Ok(("label.listForOrg", json!({ "owner": o }))),
         (None, None) => Err(CliError::Usage(
@@ -3284,11 +3447,8 @@ mod tests {
 
     #[test]
     fn parse_fg_perms_validates_family_and_level() {
-        let v = parse_fg_perms(&[
-            "issues=write".to_string(),
-            "pull_requests=read".to_string(),
-        ])
-        .unwrap();
+        let v = parse_fg_perms(&["issues=write".to_string(), "pull_requests=read".to_string()])
+            .unwrap();
         assert_eq!(v, json!({"issues": "write", "pull_requests": "read"}));
         assert!(parse_fg_perms(&["bogus=read".to_string()]).is_err());
         assert!(parse_fg_perms(&["issues=admin".to_string()]).is_err());

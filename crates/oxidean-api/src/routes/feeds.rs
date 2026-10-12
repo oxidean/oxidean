@@ -6,7 +6,7 @@
 //! a private repo answers the identical `repo.not_found` 404 anonymously.
 //! The user feed is public-only: private-repo activity never appears in it.
 //!
-//! XML is rendered by hand with [`xml_escape`] on every interpolated value —
+//! XML is rendered by hand with `xml_escape` on every interpolated value —
 //! no xml crate (workspace dependency policy prefers minimal deps).
 
 use std::collections::HashMap;

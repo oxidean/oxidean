@@ -97,6 +97,26 @@ export default defineConfig({
     server: {
       proxy: apiProxy,
     },
+    build: {
+      // Shiki grammars (cpp/emacs-lisp/wasm ≈ 0.6–0.8 MB) are lazy chunks
+      // fetched per-language on demand — not on the critical path.
+      chunkSizeWarningLimit: 900,
+      rollupOptions: {
+        onLog(level, log, defaultHandler) {
+          // @octanejs/base-ui ships React-style "use client" directives that
+          // rolldown cannot preserve — upstream noise (~180 lines). Filter only
+          // that code from node_modules so real warnings still surface.
+          if (
+            level === "warn" &&
+            log.code === "MODULE_LEVEL_DIRECTIVE" &&
+            String(log.id ?? log.loc?.file ?? "").includes("node_modules")
+          ) {
+            return;
+          }
+          defaultHandler(level, log);
+        },
+      },
+    },
     preview: {
       allowedHosts: resolveViteAllowedHosts(),
       proxy: apiProxy,

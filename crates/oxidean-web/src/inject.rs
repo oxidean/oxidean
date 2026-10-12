@@ -60,10 +60,66 @@ pub fn signed_in(cookie: Option<&str>) -> bool {
 }
 
 /// Extra `<head>` meta the serving tier knows and the client cannot derive:
-/// advertised SSH clone host/port.
+/// advertised SSH clone host/port and the canonical public origin.
+#[derive(Default)]
 pub struct AdvertiseMeta {
     pub ssh_host: Option<String>,
     pub ssh_port: Option<u16>,
+    /// `OXIDEAN_PUBLIC_ORIGIN` — operator-set canonical origin. None falls
+    /// back to per-request derivation from Host / X-Forwarded-* (the latter
+    /// only when `behind_proxy`).
+    pub public_origin: Option<String>,
+    /// `OXIDEAN_WEB_BEHIND_PROXY` — a sanitizing edge is in front, so
+    /// X-Forwarded-* headers may be trusted for origin derivation.
+    pub behind_proxy: bool,
+}
+
+/// Build-time origin placeholder. Astro prerenders shells before the deploy
+/// origin exists, so `resolvePublicOriginClient()` emits this literal into
+/// `dist/` — the serving tier rewrites it per request. Never carries a port:
+/// `http://localhost:8080` in docs/example text must survive untouched.
+const BUILD_ORIGIN_PLACEHOLDER: &str = "http://localhost";
+
+/// Public origin for this request: the configured `OXIDEAN_PUBLIC_ORIGIN`
+/// wins; otherwise derive from the request — `X-Forwarded-Host`/`Proto` only
+/// behind a declared edge (`behind_proxy`), raw `Host` always. HTTP scheme
+/// unless the edge says otherwise (this tier terminates no TLS itself).
+fn request_origin(headers: &HeaderMap, behind_proxy: bool) -> Option<String> {
+    let hdr = |name: &str| {
+        headers
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+    };
+    let fwd_host = behind_proxy.then(|| hdr("x-forwarded-host")).flatten();
+    let host = fwd_host.or_else(|| hdr("host"))?;
+    let proto = behind_proxy
+        .then(|| hdr("x-forwarded-proto"))
+        .flatten()
+        .filter(|p| *p == "https" || *p == "http")
+        .unwrap_or("http");
+    Some(format!("{proto}://{host}"))
+}
+
+/// Replace every bare `http://localhost` placeholder with the resolved origin.
+/// `http://localhost:PORT` occurrences are left alone — those are legitimate
+/// example text, not the placeholder.
+fn rewrite_build_origin(html: &mut String, origin: &str) {
+    if origin == BUILD_ORIGIN_PLACEHOLDER {
+        return;
+    }
+    let mut from = 0;
+    while let Some(rel) = html[from..].find(BUILD_ORIGIN_PLACEHOLDER) {
+        let at = from + rel;
+        let end = at + BUILD_ORIGIN_PLACEHOLDER.len();
+        if html.as_bytes().get(end) == Some(&b':') {
+            from = end;
+            continue;
+        }
+        html.replace_range(at..end, origin);
+        from = at + origin.len();
+    }
 }
 
 /// Apply the per-request stamps to a shell's HTML.
@@ -128,8 +184,25 @@ pub fn inject(
         }
     }
 
+    // Public origin — canonical env first, request-derived otherwise. The meta
+    // is read by `resolvePublicOriginClient`; the rewrite fixes shells that
+    // baked the build-time placeholder into SSR'd markup.
+    let origin = meta
+        .public_origin
+        .clone()
+        .or_else(|| request_origin(headers, meta.behind_proxy));
+    if let Some(o) = &origin {
+        rewrite_build_origin(&mut out, o);
+    }
+
     // SSH advertise metas — read by `resolveSshAdvertiseHost/Port` in the SPA.
     let mut extra = String::new();
+    if let Some(o) = &origin {
+        extra.push_str(&format!(
+            "<meta name=\"oxidean:public-origin\" content=\"{}\">",
+            escape_attr(o)
+        ));
+    }
     if let Some(h) = &meta.ssh_host {
         extra.push_str(&format!(
             "<meta name=\"oxidean:ssh-host\" content=\"{}\">",
@@ -257,7 +330,11 @@ mod tests {
             html,
             &h,
             Some("Issues · a/b · Oxidean"),
-            &AdvertiseMeta { ssh_host: Some("git.example.com".into()), ssh_port: Some(2222) },
+            &AdvertiseMeta {
+                ssh_host: Some("git.example.com".into()),
+                ssh_port: Some(2222),
+                ..Default::default()
+            },
             SessionSignal::Absent,
         );
         assert!(out.contains("<html lang=\"en\" class=\"dark\""));
@@ -269,7 +346,7 @@ mod tests {
     #[test]
     fn session_stamp() {
         let html = r#"<html lang="en"><head><title>Oxidean</title></head>"#;
-        let meta = AdvertiseMeta { ssh_host: None, ssh_port: None };
+        let meta = AdvertiseMeta::default();
         let mut h = HeaderMap::new();
         h.insert("cookie", HeaderValue::from_static("oxidean_session=abc"));
 
@@ -295,7 +372,7 @@ mod tests {
     #[test]
     fn signup_stamp() {
         let html = r#"<html lang="en"><head><title>Oxidean</title></head>"#;
-        let meta = AdvertiseMeta { ssh_host: None, ssh_port: None };
+        let meta = AdvertiseMeta::default();
 
         // Open registration per the companion cookie → stamped.
         let mut open = HeaderMap::new();
@@ -322,7 +399,7 @@ mod tests {
     /// `<html class="x" lang="en">` or `<html>` bare still gets stamped.
     #[test]
     fn stamps_survive_attr_reorder() {
-        let meta = AdvertiseMeta { ssh_host: None, ssh_port: None };
+        let meta = AdvertiseMeta::default();
         let mut h = HeaderMap::new();
         h.insert(
             "cookie",
@@ -349,5 +426,77 @@ mod tests {
             SessionSignal::Unknown,
         );
         assert!(out.contains("<htmlx>") && !out.contains("data-oxidean-session"));
+    }
+
+    /// Configured `OXIDEAN_PUBLIC_ORIGIN` wins over request headers and both
+    /// injects the meta and rewrites the build-time `http://localhost`
+    /// placeholder everywhere it appears.
+    #[test]
+    fn public_origin_meta_and_placeholder_rewrite() {
+        let html = concat!(
+            r#"<html><head><title>Oxidean</title></head><body>"#,
+            r#"<input value="curl -fsSL http://localhost/cli/install.sh | sh">"#,
+            r#"<code>http://localhost/api/mcp</code>"#,
+            r#"<p>dev setup: OXIDEAN_API_ORIGIN=http://localhost:8080</p>"#,
+            r#"</body></html>"#
+        );
+        let meta = AdvertiseMeta {
+            public_origin: Some("https://git.example.com".into()),
+            ..Default::default()
+        };
+        let mut h = HeaderMap::new();
+        h.insert("host", HeaderValue::from_static("internal.lan:3000"));
+
+        let out = inject(html, &h, None, &meta, SessionSignal::Absent);
+
+        assert!(out.contains("oxidean:public-origin\" content=\"https://git.example.com\""));
+        // Placeholder rewritten in attribute and text contexts alike.
+        assert!(out.contains("value=\"curl -fsSL https://git.example.com/cli/install.sh | sh\""));
+        assert!(out.contains("<code>https://git.example.com/api/mcp</code>"));
+        // Port-bearing localhost is real example text — untouched.
+        assert!(out.contains("http://localhost:8080"));
+        assert!(!out.contains("http://localhost/"));
+    }
+
+    /// No configured origin → derive per request: raw `Host` always,
+    /// X-Forwarded-* only when a sanitizing edge is declared.
+    #[test]
+    fn public_origin_request_fallback() {
+        let html = r#"<html><head></head><body>http://localhost/api/mcp</body></html>"#;
+        let meta = AdvertiseMeta::default();
+        let mut h = HeaderMap::new();
+        h.insert("host", HeaderValue::from_static("forge.internal:3000"));
+
+        let out = inject(html, &h, None, &meta, SessionSignal::Absent);
+        assert!(out.contains("oxidean:public-origin\" content=\"http://forge.internal:3000\""));
+        assert!(out.contains("<body>http://forge.internal:3000/api/mcp</body>"));
+
+        // Direct (not behind a declared edge): client-sent X-Forwarded-* are
+        // ignored — Host alone derives the origin.
+        h.insert("x-forwarded-host", HeaderValue::from_static("evil.example"));
+        h.insert("x-forwarded-proto", HeaderValue::from_static("https"));
+        let out = inject(html, &h, None, &meta, SessionSignal::Absent);
+        assert!(out.contains("oxidean:public-origin\" content=\"http://forge.internal:3000\""));
+
+        // Behind a sanitizing edge the forwarded pair wins.
+        let meta = AdvertiseMeta {
+            behind_proxy: true,
+            ..Default::default()
+        };
+        let out = inject(html, &h, None, &meta, SessionSignal::Absent);
+        assert!(out.contains("oxidean:public-origin\" content=\"https://evil.example\""));
+    }
+
+    /// An origin equal to the placeholder (Compose default) is a no-op rewrite.
+    #[test]
+    fn public_origin_localhost_noop() {
+        let html = r#"<html><head></head><body>http://localhost/api/mcp</body></html>"#;
+        let meta = AdvertiseMeta {
+            public_origin: Some("http://localhost".into()),
+            ..Default::default()
+        };
+        let out = inject(html, &HeaderMap::new(), None, &meta, SessionSignal::Absent);
+        assert!(out.contains("oxidean:public-origin\" content=\"http://localhost\""));
+        assert!(out.contains("<body>http://localhost/api/mcp</body>"));
     }
 }

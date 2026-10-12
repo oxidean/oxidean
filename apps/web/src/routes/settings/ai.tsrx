@@ -2,6 +2,7 @@ import { useQuery } from "@octanejs/tanstack-query";
 import { AppPage } from "@/components/app-page";
 import { AccountSettingsLayout } from "@/components/settings/settings-shell";
 import { CopyCommand } from "@/components/settings/copy-command";
+import { McpHarnessBlocks } from "@/components/settings/mcp-harness-blocks";
 import { AppLink } from "@/components/ui/app-link";
 import { PageHeader } from "@/components/ui/page-header";
 import { usePageRedirect } from "@/lib/nav.tsrx";
@@ -30,10 +31,9 @@ function AiSettingsContent() @{
   const mcpEndpoint = `${origin}/api/mcp`;
   const mcpInstallCmd = "ox mcp install";
   const mcpDetectedCmd = "ox mcp install --detected --project";
+  const mcpUpgradeCmd = "ox mcp install --upgrade";
   const mcpStatusCmd = "ox mcp status";
   const mcpClaudeCmd = `claude mcp add --transport http oxidean ${mcpEndpoint} --header "Authorization: Bearer <pat>"`;
-  const mcpCursorJson = `{"mcpServers":{"oxidean":{"url":"${mcpEndpoint}","headers":{"Authorization":"Bearer <pat>"}}}}`;
-  const mcpVscodeJson = `{"servers":{"oxidean":{"type":"http","url":"${mcpEndpoint}","headers":{"Authorization":"Bearer <pat>"}}}}`;
   const mcpRemoteCmd = `npx mcp-remote ${mcpEndpoint} --header "Authorization: Bearer <pat>"`;
 
   <AccountSettingsLayout active="ai" data-testid="settings-ai-page">
@@ -127,6 +127,14 @@ function AiSettingsContent() @{
     <div className="mt-2">
       <CopyCommand command={mcpStatusCmd} ariaLabel="Copy MCP status command" />
     </div>
+    <p className="mt-3 text-[13px] font-medium text-foreground">
+      Refresh existing entries after <code className="font-mono">ox self-update</code> or a token
+      rotation — rewrites <code className="font-mono">oxidean</code> blocks in place, keeping each
+      file's credential
+    </p>
+    <div className="mt-2">
+      <CopyCommand command={mcpUpgradeCmd} ariaLabel="Copy MCP upgrade command" />
+    </div>
     <p className="mt-2 text-[13px] text-muted-foreground">
       <code className="font-mono">ox mcp print</code> emits the config block to paste by hand,{" "}
       <code className="font-mono">ox mcp remove</code> strips it again, and{" "}
@@ -136,24 +144,17 @@ function AiSettingsContent() @{
     </p>
 
     <p className="mt-4 text-[13px] font-medium text-foreground">
-      By hand — common clients (replace <code className="font-mono">&lt;pat&gt;</code>)
+      By hand — pick your client, paste the block into its config file (replace{" "}
+      <code className="font-mono">&lt;pat&gt;</code>)
     </p>
-    <p className="mt-2 text-[13px] text-muted-foreground">Claude Code:</p>
+    <div className="mt-2">
+      <McpHarnessBlocks endpoint={mcpEndpoint} />
+    </div>
+    <p className="mt-3 text-[13px] text-muted-foreground">
+      Claude Code also has its own add command:
+    </p>
     <div className="mt-2">
       <CopyCommand command={mcpClaudeCmd} ariaLabel="Copy Claude Code MCP add command" />
-    </div>
-    <p className="mt-3 text-[13px] text-muted-foreground">
-      Cursor — <code className="font-mono">.cursor/mcp.json</code> (project) or{" "}
-      <code className="font-mono">~/.cursor/mcp.json</code> (global):
-    </p>
-    <div className="mt-2">
-      <CopyCommand command={mcpCursorJson} ariaLabel="Copy Cursor MCP config JSON" />
-    </div>
-    <p className="mt-3 text-[13px] text-muted-foreground">
-      VS Code — <code className="font-mono">.vscode/mcp.json</code>:
-    </p>
-    <div className="mt-2">
-      <CopyCommand command={mcpVscodeJson} ariaLabel="Copy VS Code MCP config JSON" />
     </div>
     <p className="mt-3 text-[13px] text-muted-foreground">
       Stdio-only clients — bridge through <code className="font-mono">mcp-remote</code>:

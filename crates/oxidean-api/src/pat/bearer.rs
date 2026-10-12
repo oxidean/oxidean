@@ -9,7 +9,7 @@
 //! A resolved PAT produces a *session-equivalent* identity: `RpcCtx.session`
 //! carries the token owner's `user_id` so existing capability/ACL gates apply
 //! unchanged, while `RpcCtx.pat` carries the parsed token permissions that
-//! [`authorize_rpc`] enforces at dispatch time (see [`classify`]).
+//! [`authorize_rpc`] enforces at dispatch time (see `classify`).
 //!
 //! Scope model (docs/API.md):
 //! - Classic `repo` → all repo-domain procedures (read, write, administration

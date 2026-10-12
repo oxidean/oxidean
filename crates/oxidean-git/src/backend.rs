@@ -417,7 +417,7 @@ pub trait GitBackend: Send + Sync {
         files: &[(String, Vec<u8>)],
     ) -> Result<(), GitError>;
 
-    /// Like [`seed_commit`], but author is `author_name`/`author_email`, committer is
+    /// Like [`Self::seed_commit`], but author is `author_name`/`author_email`, committer is
     /// Oxidean noreply, and optionally SSH-signs with `signing_key_path` (`gpg.format=ssh`).
     async fn seed_commit_authored(
         &self,

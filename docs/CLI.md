@@ -199,6 +199,7 @@ ox mcp print [--harness <id>]             # config block to stdout (token placeh
 ox mcp install                            # TTY picker (detected harnesses marked)
 ox mcp install --harness claude,cursor --project
 ox mcp install --detected --global
+ox mcp install --upgrade                  # refresh existing entries only (no prompt)
 ox mcp status                             # local config state + endpoint probe
 ox mcp remove --harness claude --project
 ```
@@ -299,9 +300,11 @@ ox admin repos gc
 
 # Maintenance & local
 ox self-update                          # swap this binary for the instance's build
-                                        #   (--no-skill-refresh skips the skill sweep)
+                                        #   (--no-skill-refresh / --no-mcp-refresh skip the
+                                        #   post-swap skill + MCP config refresh sweeps)
 ox skill print|install                  # embedded agent SKILL.md → harness dirs
 ox mcp print|install|status|remove      # wire /api/mcp into harness MCP configs
+                                        #   (install --upgrade refreshes existing entries)
 ox config list|get|set                  # local config file (tokens redacted)
 ox completion bash|zsh|fish|pwsh        # static shell completion script
 ox search <query> [--type repos|issues|pulls|users|orgs|commits|code]

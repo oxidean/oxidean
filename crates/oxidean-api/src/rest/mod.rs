@@ -10,7 +10,7 @@
 //! - Success → the procedure's `data` payload directly (no `{ok,data}` wrap).
 //!   `POST` create endpoints return 201.
 //! - Failure → the `AppError` object (`{code, message, data?}`) with a mapped
-//!   HTTP status (see [`status_for_error`]).
+//!   HTTP status (see `status_for_error`).
 //!
 //! Auth: the `oxidean_session` cookie wins; `Authorization: Bearer <pat>`
 //! applies when no cookie is present — same as `/api/rpc` (API-02).

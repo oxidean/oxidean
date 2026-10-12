@@ -14,7 +14,7 @@
 //! protocol-level failure (same `repo.not_found` anti-enumeration shape as the
 //! RPC layer).
 //!
-//! `oxidean_oat_…` OAuth access tokens are dispatched to [`resolve_oat_bearer`]
+//! `oxidean_oat_…` OAuth access tokens are dispatched to `resolve_oat_bearer`
 //! — the documented seam where the OAuth provider work (API-03) plugs in token
 //! resolution. Until that lands they are rejected like any other invalid
 //! credential; prefix dispatch keeps the three token families disjoint.
