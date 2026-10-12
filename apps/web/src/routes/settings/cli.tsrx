@@ -96,16 +96,16 @@ function CliSettingsContent() @{
       Sign in
     </h2>
     <p className="mt-1 text-[14px] text-muted-foreground">
-      Create a personal access token under Personal access tokens, then:
+      Approve in the browser — the CLI prints a code and polls until you confirm:
     </p>
     <div className="mt-3">
-      <CopyCommand command={loginCmd} ariaLabel="Copy login command" />
+      <CopyCommand command={loginWebCmd} ariaLabel="Copy browser login command" />
     </div>
     <p className="mt-2 text-[13px] text-muted-foreground">
-      Or approve in the browser instead — the CLI prints a code and polls until you confirm:
+      Or create a personal access token under Personal access tokens and paste it:
     </p>
     <div className="mt-2">
-      <CopyCommand command={loginWebCmd} ariaLabel="Copy browser login command" />
+      <CopyCommand command={loginCmd} ariaLabel="Copy login command" />
     </div>
 
     <h2 className="mt-8 font-[family-name:var(--font-display)] text-[18px] font-semibold text-foreground">

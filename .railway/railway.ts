@@ -110,7 +110,8 @@ export default defineRailway((ctx) => {
     build: {
       builder: "DOCKERFILE",
       dockerfilePath: "apps/web/Dockerfile",
-      watchPatterns: ["apps/web/**", "packages/**"],
+      // The image also compiles crates/oxidean-web (SPA server + API proxy).
+      watchPatterns: ["apps/web/**", "packages/**", "crates/oxidean-web/**", "Cargo.lock"],
     },
     // Private behind gateway; SPA `/` can 403 for bare probes. Rely on gateway + api checks.
     env: {
