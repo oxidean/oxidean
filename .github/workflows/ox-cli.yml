@@ -118,7 +118,9 @@ jobs:
           set -euo pipefail
           case "${{ matrix.target }}" in
             aarch64-*) platform=linux/arm64;  image=alpine ;;
-            armv7-*)   platform=linux/arm/v7; image=debian:bookworm-slim ;; # gnueabihf needs glibc
+            # gnueabihf needs glibc; cross :main links against 2.39, so the
+            # userspace must be trixie (bookworm's 2.36 is too old).
+            armv7-*)   platform=linux/arm/v7; image=debian:trixie-slim ;;
           esac
           docker run --rm --platform "$platform" -v "$PWD/dist:/dist:ro" "$image" \
             /dist/ox-${{ matrix.target }} --version
@@ -185,13 +187,17 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: debian,       image: debian:bookworm-slim,       pm: "apt-get update -qq && apt-get install -y -qq curl ca-certificates",        expect: gnu }
+          - { name: debian,       image: debian:trixie-slim,         pm: "apt-get update -qq && apt-get install -y -qq curl ca-certificates",        expect: gnu }
           - { name: ubuntu,       image: ubuntu:24.04,               pm: "apt-get update -qq && apt-get install -y -qq curl ca-certificates",        expect: gnu }
           - { name: fedora,       image: fedora:latest,              pm: "dnf install -y -q curl",                                                 expect: gnu }
           - { name: arch,         image: archlinux:latest,           pm: "pacman -Sy --noconfirm curl",                                            expect: gnu }
           - { name: alpine,       image: alpine:latest,              pm: "apk add -q curl",                                                        expect: musl }
           - { name: opensuse,     image: opensuse/tumbleweed:latest, pm: "zypper --non-interactive install --no-recommends curl",                    expect: gnu }
-          - { name: debian-arm64, image: debian:bookworm-slim,       pm: "apt-get update -qq && apt-get install -y -qq curl ca-certificates",        expect: gnu, platform: linux/arm64 }
+          - { name: debian-arm64, image: debian:trixie-slim,         pm: "apt-get update -qq && apt-get install -y -qq curl ca-certificates",        expect: gnu, platform: linux/arm64 }
+    # matrix legs may share a daemon (self-hosted, act) — unique names per leg
+    env:
+      FIXTURE_NAME: oxfix-${{ matrix.name }}
+      NET_NAME: oxnet-${{ matrix.name }}
     steps:
       - uses: actions/checkout@v4
       - name: qemu for non-native arch legs
@@ -216,18 +222,20 @@ jobs:
           rm -f www/cli/bin/*.deb www/cli/bin/*.rpm www/cli/bin/*.apk www/cli/bin/*.zst
       - name: serve fixture (busybox httpd)
         run: |
-          docker network create oxnet
-          docker run -d --name "$FIXTURE_NAME" --network oxnet \
+          docker network inspect "$NET_NAME" >/dev/null 2>&1 || docker network create "$NET_NAME" >/dev/null
+          docker rm -f "$FIXTURE_NAME" >/dev/null 2>&1 || true
+          docker run -d --name "$FIXTURE_NAME" --network "$NET_NAME" \
             -v "$PWD/www:/www:ro" busybox httpd -f -p "$FIXTURE_PORT" -h /www
           sleep 1
-          docker run --rm --network oxnet busybox \
+          docker run --rm --network "$NET_NAME" busybox \
             wget -qO- "http://$FIXTURE_NAME:$FIXTURE_PORT/cli/install.sh" | head -3
       - name: install + smoke inside ${{ matrix.image }}
         env:
           PLATFORM: ${{ matrix.platform }}
         run: |
           set -euo pipefail
-          docker run --rm --network oxnet ${PLATFORM:+--platform $PLATFORM} \
+          docker run --rm --network "$NET_NAME" -e FIXTURE_NAME -e FIXTURE_PORT \
+            ${PLATFORM:+--platform $PLATFORM} \
             "${{ matrix.image }}" sh -c '${{ matrix.pm }} >/dev/null 2>&1 && \
               curl -fsSL http://$FIXTURE_NAME:$FIXTURE_PORT/cli/install.sh | sh && \
               "$HOME/.local/bin/ox" --version && "$HOME/.local/bin/ox" --help >/dev/null' \
@@ -308,14 +316,15 @@ jobs:
         include:
           # fmt: nfpm packager; file: emitted artifact name; test_* installs it
           # with the distro's own package manager (the package-manager leg).
-          - { fmt: deb,       arch: amd64,   target: x86_64-unknown-linux-gnu,   ext: deb,         test_image: debian:bookworm-slim, test_cmd: "apt-get update -qq && apt-get install -y -qq /pkg/PKGFILE" }
+          - { fmt: deb,       arch: amd64,   target: x86_64-unknown-linux-gnu,   ext: deb,         test_image: debian:trixie-slim,   test_cmd: "apt-get update -qq && apt-get install -y -qq /pkg/PKGFILE" }
           - { fmt: rpm,       arch: x86_64,  target: x86_64-unknown-linux-gnu,   ext: rpm,         test_image: fedora:latest,        test_cmd: "dnf install -y -q /pkg/PKGFILE" }
           - { fmt: apk,       arch: x86_64,  target: x86_64-unknown-linux-musl,  ext: apk,         test_image: alpine:latest,        test_cmd: "apk add --allow-untrusted -q /pkg/PKGFILE" }
           - { fmt: archlinux, arch: x86_64,  target: x86_64-unknown-linux-gnu,   ext: pkg.tar.zst, test_image: archlinux:latest,     test_cmd: "pacman -U --noconfirm /pkg/PKGFILE" }
-          - { fmt: deb,       arch: arm64,   target: aarch64-unknown-linux-gnu,  ext: deb,         test_image: debian:bookworm-slim, test_cmd: "apt-get update -qq && apt-get install -y -qq /pkg/PKGFILE", platform: linux/arm64 }
+          - { fmt: deb,       arch: arm64,   target: aarch64-unknown-linux-gnu,  ext: deb,         test_image: debian:trixie-slim,   test_cmd: "apt-get update -qq && apt-get install -y -qq /pkg/PKGFILE", platform: linux/arm64 }
           - { fmt: rpm,       arch: aarch64, target: aarch64-unknown-linux-gnu,  ext: rpm,         test_image: fedora:latest,        test_cmd: "dnf install -y -q /pkg/PKGFILE",                 platform: linux/arm64 }
           - { fmt: apk,       arch: aarch64, target: aarch64-unknown-linux-musl, ext: apk,         test_image: alpine:latest,        test_cmd: "apk add --allow-untrusted -q /pkg/PKGFILE",       platform: linux/arm64 }
-          - { fmt: archlinux, arch: aarch64, target: aarch64-unknown-linux-gnu,  ext: pkg.tar.zst, test_image: archlinux:latest,     test_cmd: "pacman -U --noconfirm /pkg/PKGFILE",             platform: linux/arm64 }
+          # archlinux ships no arm64 image — archlinuxarm is the ARM port.
+          - { fmt: archlinux, arch: aarch64, target: aarch64-unknown-linux-gnu,  ext: pkg.tar.zst, test_image: menci/archlinuxarm:latest, test_cmd: "pacman -U --noconfirm /pkg/PKGFILE",             platform: linux/arm64 }
     steps:
       - uses: actions/checkout@v4
       - name: package version (tag → semver, else dev)
@@ -332,9 +341,17 @@ jobs:
         with:
           name: ox-${{ matrix.target }}
           path: dist
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: nfpm
+      - name: install nfpm (static binary, checksum-verified)
+        run: |
+          set -euo pipefail
+          NFPM_VER=2.47.0
+          base="https://github.com/goreleaser/nfpm/releases/download/v${NFPM_VER}"
+          curl -fsSL "$base/checksums.txt" -o /tmp/nfpm.sha
+          cd /tmp
+          curl -fsSLO "$base/nfpm_${NFPM_VER}_Linux_x86_64.tar.gz"
+          grep "nfpm_${NFPM_VER}_Linux_x86_64.tar.gz\$" /tmp/nfpm.sha | sha256sum -c -
+          SUDO=""; [ -w /usr/local/bin ] || SUDO="sudo -n"
+          $SUDO tar -xzf "nfpm_${NFPM_VER}_Linux_x86_64.tar.gz" -C /usr/local/bin nfpm
       - name: nfpm package
         env:
           PKG_ARCH: ${{ matrix.arch }}

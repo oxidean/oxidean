@@ -16,4 +16,4 @@ contents:
   - src: dist/ox-@PKG_TARGET@
     dst: /usr/bin/ox
     file_info:
-      mode: "0755"
+      mode: 0755
