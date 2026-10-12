@@ -55,6 +55,9 @@ static SHELLS: &[Shell] = &[
     Shell { pattern: &[L("explore")], file: "explore/index.html", title: None, protected: false, redirect: None },
     Shell { pattern: &[L("search")], file: "search/index.html", title: None, protected: false, redirect: None },
     Shell { pattern: &[L("oauth"), L("consent")], file: "oauth/consent/index.html", title: None, protected: false, redirect: None },
+    // RFC 8628 approval page — `protected: false` keeps `?user_code=` in the
+    // client-side /login?returnTo= (a server 302 would drop the query).
+    Shell { pattern: &[L("oauth"), L("device")], file: "oauth/device/index.html", title: None, protected: false, redirect: None },
     Shell { pattern: &[L("invites"), P("token")], file: "invites/_/index.html", title: Some("Accept invitation · Oxidean"), protected: false, redirect: None },
     Shell { pattern: &[L("setup")], file: "setup/index.html", title: None, protected: false, redirect: None },
     Shell { pattern: &[L("setup"), L("credentials")], file: "setup/credentials/index.html", title: None, protected: false, redirect: None },
@@ -69,6 +72,7 @@ static SHELLS: &[Shell] = &[
     Shell { pattern: &[L("settings"), L("emails")], file: "settings/emails/index.html", title: None, protected: true, redirect: None },
     Shell { pattern: &[L("settings"), L("ssh-keys")], file: "settings/ssh-keys/index.html", title: None, protected: true, redirect: None },
     Shell { pattern: &[L("settings"), L("cli")], file: "settings/cli/index.html", title: None, protected: true, redirect: None },
+    Shell { pattern: &[L("settings"), L("ai")], file: "settings/ai/index.html", title: None, protected: true, redirect: None },
     Shell { pattern: &[L("settings"), L("applications")], file: "settings/applications/index.html", title: None, protected: true, redirect: None },
     Shell { pattern: &[L("settings"), L("tokens")], file: "settings/tokens/index.html", title: None, protected: true, redirect: None },
     Shell { pattern: &[L("settings"), L("tokens"), L("new")], file: "settings/tokens/new/index.html", title: None, protected: true, redirect: None },

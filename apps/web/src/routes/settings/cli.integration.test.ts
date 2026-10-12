@@ -55,8 +55,14 @@ describe("/settings/cli", () => {
       name: "Copy install command",
     });
     expect(install).toHaveValue("curl -fsSL https://forge.example/cli/install.sh | sh");
+    const installPs1 = screen.getByRole("textbox", {
+      name: "Copy PowerShell install command",
+    });
+    expect(installPs1).toHaveValue("irm https://forge.example/cli/install.ps1 | iex");
     const login = screen.getByRole("textbox", { name: "Copy login command" });
     expect(login).toHaveValue("ox auth login --instance https://forge.example --token <pat>");
+    const loginWeb = screen.getByRole("textbox", { name: "Copy browser login command" });
+    expect(loginWeb).toHaveValue("ox auth login --instance https://forge.example --web");
     expect(screen.getByRole("button", { name: "Copy install command" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Copy login command" })).toBeInTheDocument();
 

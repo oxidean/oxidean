@@ -413,6 +413,115 @@ async fn release_asset_upload_download_acl() {
     assert_eq!(&bytes[..], b"hello-asset");
 }
 
+/// Asset up/download honors PAT scopes — the HTTP route is outside RPC
+/// dispatch so the scope gate runs through `authorize_pat_on_repo`.
+#[tokio::test]
+async fn release_asset_pat_scope_gate() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let assets = dir.path().join("release-assets");
+    let url = format!("sqlite:{}", dir.path().join("asset_pat.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let state = AppState::new(db.clone(), Arc::new(LogSink) as Arc<dyn EmailSender>, "development")
+        .with_repos_dir(repos.clone())
+        .with_release_assets_dir(assets.clone())
+        .with_git(Arc::new(CliGitBackend::new()));
+    let cors = build_cors("development", None).expect("cors");
+    let app = router_with_state(state, cors);
+    let (cookie, login_v) = signup_and_login(&app, "pa1@ex.com", "powner").await;
+    let user_id = login_v["data"]["id"].as_str().unwrap().to_string();
+    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    db.set_email_verified_at(&user_id, &now).await.expect("verify");
+    setup_repo_with_tag(&app, &db, &repos, &cookie, "powner", "hello", "v1.0.0").await;
+    let created = rpc_json(
+        &app,
+        r#"{"procedure":"release.create","input":{"owner":"powner","name":"hello","tag_name":"v1.0.0","title":"One","body":"","draft":false}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(created["ok"], true, "{created}");
+    let release_id = created["data"]["id"].as_str().unwrap().to_string();
+
+    async fn mint(app: &axum::Router, cookie: &str, body: &str) -> String {
+        let v = rpc_json(app, body, cookie).await;
+        assert_eq!(v["ok"], true, "{v}");
+        v["data"]["token"].as_str().unwrap().to_string()
+    }
+    let workflow_pat = mint(
+        &app,
+        &cookie,
+        r#"{"procedure":"pat.createClassic","input":{"name":"wf","scopes":["workflow"]}}"#,
+    )
+    .await;
+    let repo_pat = mint(
+        &app,
+        &cookie,
+        r#"{"procedure":"pat.createClassic","input":{"name":"r","scopes":["repo"]}}"#,
+    )
+    .await;
+    let fg_contents = mint(
+        &app,
+        &cookie,
+        r#"{"procedure":"pat.createFineGrained","input":{"name":"fgc","repo_access":"all","contents":"write"}}"#,
+    )
+    .await;
+    let fg_releases = mint(
+        &app,
+        &cookie,
+        r#"{"procedure":"pat.createFineGrained","input":{"name":"fgr","repo_access":"all","contents":"read","perms":{"releases":"write"}}}"#,
+    )
+    .await;
+
+    async fn upload(app: &axum::Router, release_id: &str, token: &str) -> StatusCode {
+        let boundary = "----oxidean";
+        let mut body = Vec::new();
+        body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+        body.extend_from_slice(
+            b"Content-Disposition: form-data; name=\"asset\"; filename=\"bin.txt\"\r\n",
+        );
+        body.extend_from_slice(b"Content-Type: text/plain\r\n\r\n");
+        body.extend_from_slice(b"hello-asset");
+        body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+        app.clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!(
+                        "/api/repos/powner/hello/releases/{release_id}/assets"
+                    ))
+                    .header(
+                        "content-type",
+                        format!("multipart/form-data; boundary={boundary}"),
+                    )
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+            .status()
+    }
+
+    // `workflow` is not a release scope → 403 auth.pat_scope.
+    assert_eq!(
+        upload(&app, &release_id, &workflow_pat).await,
+        StatusCode::FORBIDDEN
+    );
+    // FG contents:write alone does not cover releases → 403.
+    assert_eq!(
+        upload(&app, &release_id, &fg_contents).await,
+        StatusCode::FORBIDDEN
+    );
+    // Classic `repo` and FG releases:write upload fine.
+    assert_eq!(upload(&app, &release_id, &repo_pat).await, StatusCode::OK);
+    assert_eq!(
+        upload(&app, &release_id, &fg_releases).await,
+        StatusCode::OK
+    );
+}
+
 #[tokio::test]
 async fn release_asset_size_reject() {
     let dir = tempfile::tempdir().expect("tempdir");

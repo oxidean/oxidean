@@ -54,7 +54,8 @@ Missing or mismatched value → error `rpc.version_mismatch` (HTTP 400).
 | `GET` | `/api/auth/oidc/start` | Start OIDC + PKCE (optional `?return_to=`) | No (redirect) |
 | `GET` | `/api/auth/oidc/callback` | OIDC code exchange; sets session cookie | No (redirect) |
 | `GET` | `/oauth/authorize` | OAuth2 authorization endpoint → consent page / login | Session cookie (or login redirect) |
-| `POST` | `/oauth/token` | OAuth2 token endpoint (`grant_type=authorization_code`) | Client secret |
+| `POST` | `/oauth/device/code` | RFC 8628 device code → `{user_code, verification_uri}` | Public |
+| `POST` | `/oauth/token` | OAuth2 token endpoint (`grant_type=authorization_code` or `…:device_code`) | Client secret (`device_code` grant is a public-client exchange) |
 | `GET` | `/oauth/userinfo` | OAuth2 identity surface | `oxidean_oat_` Bearer |
 | `POST` | `/api/user/avatar` | Multipart avatar upload (field `avatar`) | Yes (`oxidean_session`) |
 | `DELETE` | `/api/user/avatar` | Remove profile picture | Yes (`oxidean_session`) |
@@ -421,16 +422,18 @@ Response includes boolean badges such as `smtp_configured`, `resend_configured`,
 
 Manage tokens with the session cookie via RPC (or `@oxidean/api-client`). Token **prefixes** (redacted examples only):
 
-| Kind | Prefix | Phase 8 capability |
+| Kind | Prefix | Capability |
 | --- | --- | --- |
-| Classic | `oxidean_pat_` | Scope catalog: `repo` (HTTPS fetch + push where ACL allows) |
-| Fine-grained | `oxidean_fg_` | `repo_access`: `selected` \| `all`; `contents`: `read` \| `write` |
+| Classic | `oxidean_pat_` | Scope catalog (`repo`, `workflow`, `read:org`, `package:write`, `delete_repo`, …) |
+| Fine-grained | `oxidean_fg_` | `repo_access`: `selected` \| `all`; `contents` + `packages` + `perms` families, `read` \| `write` |
 
-`pat.createClassic` input:
+`pat.createClassic` input — `scopes` accepts any non-empty subset of the classic catalog:
 
 ```json
 { "name": "laptop", "scopes": ["repo"], "expires_at": null }
 ```
+
+Classic catalog (GitHub-classic parity): `repo`, `repo:status`, `repo:invite`, `public_repo`, `security_events`, `workflow`, `package:read`, `package:write`, `package:delete`, `notifications`, `read:user`, `user`, `user:email`, `user:follow`, `read:org`, `write:org`, `admin:repo_hook`, `read:public_key`, `write:public_key`, `admin:public_key`, `read:gpg_key`, `write:gpg_key`, `admin:gpg_key`, `delete_repo`, `project`, `read:project`. Scope implications follow GitHub: `user` ⊃ `read:user`/`user:email`/`user:follow`; `write:org` ⊃ `read:org`; `admin:`/`write:` key scopes imply their `read:` tier; `package:write` ⊃ `package:read`. `delete_repo` and `package:delete` are standalone — never implied.
 
 `pat.createFineGrained` input:
 
@@ -440,9 +443,13 @@ Manage tokens with the session cookie via RPC (or `@oxidean/api-client`). Token 
   "repo_access": "selected",
   "repository_ids": ["…repo-id…"],
   "contents": "write",
+  "packages": "read",
+  "perms": { "issues": "write", "pull_requests": "read", "emails": "read" },
   "expires_at": null
 }
 ```
+
+`perms` families — repo-bound (require a covered repository): `issues`, `pull_requests`, `actions`, `commit_statuses`, `secrets`, `variables`, `environments`, `deployments`, `webhooks`, `administration`, `metadata`, `pages`, `releases`. Account-level (act on the token owner): `emails`, `notifications`, `profile`, `ssh_keys`, `gpg_keys`, `starring`, `watching`, `followers`. Each takes `"read"` or `"write"`; `write` implies `read`. `metadata` satisfies repo-metadata reads in place of `contents`; `releases:read` also accepts `contents`.
 
 Create responses include a one-time plaintext `token` (store it immediately) plus a metadata `item` **without** the secret. `pat.list` / list items never return the secret — only `token_prefix`, scopes/permissions, `last_used_at` / `last_used_ip`, etc. `pat.revoke` input: `{ "id": "…" }`.
 
@@ -474,15 +481,27 @@ Rules:
 | Token | Allowed procedures |
 | --- | --- |
 | Classic `repo` | All repo-domain procedures: repo read/write (issues, pulls, releases, actions, LFS flags), repo administration (collaborators, webhooks, branch protection, mirrors, visibility), plus account-level repo reads (`repo.listMine`, notifications, `user.lookup`) |
+| Classic `public_repo` | Repo-domain collaboration (contents, issues, pulls, actions, statuses, releases, star/watch) on **public** repositories only |
+| Classic `workflow` | `repo.actions.dispatchWorkflow` / `rerunRun` / `cancelRun` |
+| Classic `repo:status` | `repo.commitStatus.list` / `create` |
+| Classic `repo:invite` | `repo.invites.*` |
+| Classic `admin:repo_hook` | `webhook.*` |
+| Classic `notifications` | `notification.*` |
+| Classic `user` | `email.*`, `user.update_profile`, `user.follow`/`unfollow` (implies `read:user`, `user:email`, `user:follow`) |
+| Classic `read:user` | `user.listStarred` / `listWatched` / `followers.list` / `following.list` |
+| Classic `read:org` / `write:org` | Org reads; `write:org` adds `org.create`/`updateSettings`/member/invite mutations |
+| Classic `*:public_key` / `*:gpg_key` tiers | `sshKey.*` / `gpgKey.*` reads and writes (`admin:` ⊃ `write:` ⊃ `read:`) |
+| Classic `delete_repo` | `repo.softDelete` (not implied by `repo`) |
 | Classic `package:read` | `packages.list` |
-| Classic `package:write` | `packages.list`, `packages.deleteVersion` |
-| Fine-grained `contents: read` | Repo-domain read procedures on covered repositories |
-| Fine-grained `contents: write` | Repo-domain read **and** write procedures on covered repositories |
+| Classic `package:write` | `packages.list` (implies `package:read`) |
+| Classic `package:delete` | `packages.deleteVersion` (not implied by `package:write`) |
+| Fine-grained `contents: read`/`write` | Contents-domain read/write procedures on covered repositories |
+| Fine-grained `perms` families | Their own domains on covered repositories (`issues`, `pull_requests`, `actions`, `commit_statuses`, `secrets`, `webhooks`, `administration`, `releases`, `metadata`, …) or on the token owner (account families) |
 | Fine-grained `packages: read`/`write` | `packages.list` when `repository_id` names a covered repository |
 
-Fine-grained coverage = `repo_access` `selected` ids, or `all` (personal-owned plus org Owner/Admin repositories — same rule as Git Smart HTTP). Public repositories stay readable with any valid fine-grained token; denied reads on private repositories return `repo.not_found` rather than a scope error, matching the anti-enumeration rule for anonymous callers.
+Fine-grained coverage = `repo_access` `selected` ids, or `all` (personal-owned plus org Owner/Admin repositories — same rule as Git Smart HTTP). Public repositories stay readable with any valid fine-grained token; denied reads on private repositories return `repo.not_found` rather than a scope error, matching the anti-enumeration rule for anonymous callers. Account-level FG families need no repository binding.
 
-**Never callable with a PAT** (session cookie required, `auth.pat_scope` otherwise): `admin.*` and `packages.admin*` (instance administration), auth lifecycle (`auth.login`/`signup`/`logout`/verify/reset/setup), credential management (`pat.*`, `sshKey.*`, `gpgKey.*`, `email.*`), org mutations and invites, profile writes, and any procedure not in the allowed classes above. Unrecognized procedures fail closed.
+**Never callable with a PAT** (session cookie required, `auth.pat_scope` otherwise): `admin.*` and `packages.admin*` (instance administration), auth lifecycle (`auth.login`/`signup`/`logout`/verify/reset/setup), PAT management (`pat.*` — a token never mints or revokes tokens), OAuth app + device-grant procedures (`oauthApp.*`, `oauth.*`), invite accepts, and any procedure not in the allowed classes above. Unrecognized procedures fail closed.
 
 WebSocket: send the `Authorization` header on the upgrade request. The credential is re-validated per RPC frame, so revoking or expiring a token takes effect on the next frame.
 
@@ -580,6 +599,23 @@ that app/user pair; revoked tokens fail immediately everywhere.
 Minting codes (`oauthApp.authorize` with `approve: true`) and registering apps
 require a verified email (`auth.email_unverified` otherwise), matching PAT
 minting posture.
+
+### Device authorization grant (RFC 8628)
+
+`ox auth login --web` uses the device flow for browser-approved sign-in on
+input-constrained clients. `POST /oauth/device/code` (form-encoded `scope`
+— space-delimited classic PAT scopes) is unauthenticated and returns
+`{ device_code, user_code, verification_uri, verification_uri_complete,
+expires_in, interval }`. The user approves at `/oauth/device` (session-gated;
+`oauth.deviceInfo` resolves the user code and `oauth.deviceAuthorize` records
+approve/deny). The client polls `POST /oauth/token` with
+`grant_type=urn:ietf:params:oauth:grant-type:device_code&device_code=…` —
+a public-client exchange (the `device_code` is the credential; no client
+auth). Pending polls return `authorization_pending` (keep polling at
+`interval`) or `slow_down` (add 5 s); terminal states are `access_denied`
+and `expired_token`. On approval the endpoint mints a classic PAT
+(`oxidean_pat_…`) with the requested scopes — returned as `access_token` —
+so device sign-ins land on the same Bearer credential `--token` logins use.
 
 ### Organizations (`org.*`) & collaborators
 

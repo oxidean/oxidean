@@ -77,6 +77,7 @@ async fn make_pat(db: &Database, user_id: &str) -> String {
         None,
         None,
         None,
+        None,
         &[],
     )
     .await

@@ -26,6 +26,13 @@ import {
   type PatExpiryPreset,
 } from "@/components/settings/pat-expiry";
 import { PatFgRepoPicker } from "@/components/settings/pat-fg-repo-picker";
+import { FgPermRows } from "@/components/settings/pat-fg-perms";
+import {
+  buildPerms,
+  FG_ACCOUNT_PERMS,
+  FG_REPO_PERMS,
+  type FgPermValues,
+} from "@/components/settings/pat-scopes";
 import { apiClient } from "@/lib/api-client";
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
@@ -68,6 +75,7 @@ export function PatFgForm({ onCreated }: PatFgFormProps) @{
       selectedIds: [] as string[],
       contents: "read" as ContentsChoice,
       packagesPerm: "none" as PackagesChoice,
+      perms: {} as FgPermValues,
       expiryPreset: "30" as PatExpiryPreset,
       expiryDate: tomorrowDateValue(),
     },
@@ -92,6 +100,7 @@ export function PatFgForm({ onCreated }: PatFgFormProps) @{
           repository_ids: value.repoAccess === "selected" ? value.selectedIds : undefined,
           contents: value.contents,
           packages: value.packagesPerm === "none" ? null : value.packagesPerm,
+          perms: buildPerms(value.perms),
           expires_at: resolveExpiresAt(value.expiryPreset, value.expiryDate),
         });
         if (!res.ok) {
@@ -372,6 +381,31 @@ export function PatFgForm({ onCreated }: PatFgFormProps) @{
               </SelectPortal>
             </SelectRoot>
           </div>
+        )}
+      </form.Field>
+
+      <form.Field name="perms">
+        {(field) => (
+          <FgPermRows
+            rows={FG_REPO_PERMS}
+            values={field.state.value}
+            pending={pending}
+            onChange={(key, choice) => field.handleChange({ ...field.state.value, [key]: choice })}
+          />
+        )}
+      </form.Field>
+    </div>
+
+    <div className="flex flex-col gap-3">
+      <p className="text-[14px] font-medium text-foreground">Account permissions</p>
+      <form.Field name="perms">
+        {(field) => (
+          <FgPermRows
+            rows={FG_ACCOUNT_PERMS}
+            values={field.state.value}
+            pending={pending}
+            onChange={(key, choice) => field.handleChange({ ...field.state.value, [key]: choice })}
+          />
         )}
       </form.Field>
     </div>

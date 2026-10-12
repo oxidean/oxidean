@@ -34,26 +34,27 @@ pub fn pat_allows_packages(
     fg_packages: Option<PackagesPerm>,
     action: PackageAction,
 ) -> bool {
-    let need_write = matches!(action, PackageAction::Publish | PackageAction::Delete);
     if let Some(scopes) = classic_scopes {
-        let has_read = scopes.iter().any(|s| {
-            matches!(
-                s,
-                ClassicPatScope::PackageRead | ClassicPatScope::PackageWrite
-            )
-        });
-        let has_write = scopes
-            .iter()
-            .any(|s| matches!(s, ClassicPatScope::PackageWrite));
-        if need_write {
-            return has_write;
-        }
-        return has_read || has_write;
+        return match action {
+            // `package:delete` is standalone — `package:write` does not imply
+            // it (same rule as RPC `packages.deleteVersion`).
+            PackageAction::Delete => scopes
+                .iter()
+                .any(|s| matches!(s, ClassicPatScope::PackageDelete)),
+            PackageAction::Publish => scopes
+                .iter()
+                .any(|s| matches!(s, ClassicPatScope::PackageWrite)),
+            PackageAction::Pull => scopes.iter().any(|s| {
+                matches!(s, ClassicPatScope::PackageRead | ClassicPatScope::PackageWrite)
+            }),
+        };
     }
-    match fg_packages {
-        Some(PackagesPerm::Write) => true,
-        Some(PackagesPerm::Read) => !need_write,
-        None => false,
+    match (fg_packages, action) {
+        // FG tokens carry `package:read`/`package:write` only — no delete grant.
+        (_, PackageAction::Delete) => false,
+        (Some(PackagesPerm::Write), _) => true,
+        (Some(PackagesPerm::Read), PackageAction::Pull) => true,
+        _ => false,
     }
 }
 

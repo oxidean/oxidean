@@ -8,7 +8,8 @@ export type SettingsNavActive =
   | "tokens"
   | "ssh-keys"
   | "applications"
-  | "cli";
+  | "cli"
+  | "ai";
 
 type SettingsNavProps = {
   active: SettingsNavActive;
@@ -30,6 +31,7 @@ const LINKS: { id: SettingsNavActive; href: string; label: string }[] = [
   { id: "ssh-keys", href: "/settings/ssh-keys", label: "SSH and GPG keys" },
   { id: "applications", href: "/settings/applications", label: "OAuth applications" },
   { id: "cli", href: "/settings/cli", label: "Command line" },
+  { id: "ai", href: "/settings/ai", label: "AI agents" },
 ];
 
 function linkClass(isActive: boolean): string {

@@ -160,6 +160,28 @@ macro_rules! map_token {
     }};
 }
 
+/// RFC 8628 device authorization grant row (CLI `ox auth login --web`).
+/// `device_code` is stored hashed; `user_code` is stored normalized
+/// (uppercase, no dash) since the user types it back on the approve page.
+#[derive(Debug, Clone)]
+pub struct OAuthDeviceCodeRow {
+    pub id: String,
+    pub device_code_hash: String,
+    /// Normalized `user_code` (no dash) — also the UNIQUE lookup key.
+    pub user_code: String,
+    /// Approving user — `None` while pending.
+    pub user_id: Option<String>,
+    /// Space-delimited classic PAT scopes the eventual token will carry.
+    pub scopes: String,
+    /// pending | approved | denied | consumed
+    pub status: String,
+    pub interval_secs: i64,
+    pub last_polled_at: Option<String>,
+    pub expires_at: String,
+    pub approved_at: Option<String>,
+    pub created_at: String,
+}
+
 const APP_SELECT_PG: &str = "SELECT id, owner_id, name, client_id, client_secret_hash,
        client_secret_prefix, redirect_uris_json,
        to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS created_at,
@@ -1000,4 +1022,459 @@ WHERE id = ?1 AND revoked_at IS NULL",
         }
     }
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Device authorization grant (RFC 8628) — `ox auth login --web`
+// ---------------------------------------------------------------------------
+
+macro_rules! map_device_code {
+    ($row:expr) => {{
+        let row = $row;
+        OAuthDeviceCodeRow {
+            id: row
+                .try_get("id")
+                .map_err(|e| format!("oauth device code row: {e}"))?,
+            device_code_hash: row
+                .try_get("device_code_hash")
+                .map_err(|e| format!("oauth device code row: {e}"))?,
+            user_code: row
+                .try_get("user_code")
+                .map_err(|e| format!("oauth device code row: {e}"))?,
+            user_id: row
+                .try_get("user_id")
+                .map_err(|e| format!("oauth device code row: {e}"))?,
+            scopes: row
+                .try_get("scopes")
+                .map_err(|e| format!("oauth device code row: {e}"))?,
+            status: row
+                .try_get("status")
+                .map_err(|e| format!("oauth device code row: {e}"))?,
+            interval_secs: row
+                .try_get("interval_secs")
+                .map_err(|e| format!("oauth device code row: {e}"))?,
+            last_polled_at: row
+                .try_get("last_polled_at")
+                .map_err(|e| format!("oauth device code row: {e}"))?,
+            expires_at: row
+                .try_get("expires_at")
+                .map_err(|e| format!("oauth device code row: {e}"))?,
+            approved_at: row
+                .try_get("approved_at")
+                .map_err(|e| format!("oauth device code row: {e}"))?,
+            created_at: row
+                .try_get("created_at")
+                .map_err(|e| format!("oauth device code row: {e}"))?,
+        }
+    }};
+}
+
+const DEVICE_SELECT_PG: &str = "SELECT id, device_code_hash, user_code, user_id, scopes, status,
+       interval_secs::bigint AS interval_secs,
+       CASE WHEN last_polled_at IS NULL THEN NULL
+            ELSE to_char(last_polled_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') END AS last_polled_at,
+       to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS expires_at,
+       CASE WHEN approved_at IS NULL THEN NULL
+            ELSE to_char(approved_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') END AS approved_at,
+       to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS created_at
+FROM oauth_device_codes";
+
+const DEVICE_SELECT_MYSQL: &str = "SELECT id, device_code_hash, user_code, user_id, scopes, status,
+       interval_secs,
+       DATE_FORMAT(last_polled_at, '%Y-%m-%dT%H:%i:%sZ') AS last_polled_at,
+       DATE_FORMAT(expires_at, '%Y-%m-%dT%H:%i:%sZ') AS expires_at,
+       DATE_FORMAT(approved_at, '%Y-%m-%dT%H:%i:%sZ') AS approved_at,
+       DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at
+FROM oauth_device_codes";
+
+const DEVICE_SELECT_SQLITE: &str = "SELECT id, device_code_hash, user_code, user_id, scopes, status,
+       interval_secs,
+       strftime('%Y-%m-%dT%H:%M:%SZ', last_polled_at) AS last_polled_at,
+       strftime('%Y-%m-%dT%H:%M:%SZ', expires_at) AS expires_at,
+       strftime('%Y-%m-%dT%H:%M:%SZ', approved_at) AS approved_at,
+       strftime('%Y-%m-%dT%H:%M:%SZ', created_at) AS created_at
+FROM oauth_device_codes";
+
+#[allow(clippy::too_many_arguments)]
+pub async fn insert_device_code(
+    pool: &DbPool,
+    id: &str,
+    device_code_hash: &str,
+    user_code: &str,
+    scopes: &str,
+    interval_secs: i64,
+    expires_at: &str,
+) -> Result<(), String> {
+    match pool {
+        DbPool::Postgres(p) => {
+            sqlx::query(
+                "INSERT INTO oauth_device_codes
+(id, device_code_hash, user_code, scopes, interval_secs, expires_at)
+VALUES ($1, $2, $3, $4, $5, $6::timestamptz)",
+            )
+            .bind(id)
+            .bind(device_code_hash)
+            .bind(user_code)
+            .bind(scopes)
+            .bind(interval_secs)
+            .bind(expires_at)
+            .execute(p)
+            .await
+            .map_err(|e| format!("insert oauth device code failed: {e}"))?;
+        }
+        DbPool::MySql(p) => {
+            sqlx::query(
+                "INSERT INTO oauth_device_codes
+(id, device_code_hash, user_code, scopes, interval_secs, expires_at)
+VALUES (?, ?, ?, ?, ?, ?)",
+            )
+            .bind(id)
+            .bind(device_code_hash)
+            .bind(user_code)
+            .bind(scopes)
+            .bind(interval_secs)
+            .bind(expires_at)
+            .execute(p)
+            .await
+            .map_err(|e| format!("insert oauth device code failed: {e}"))?;
+        }
+        DbPool::Sqlite(p) => {
+            sqlx::query(
+                "INSERT INTO oauth_device_codes
+(id, device_code_hash, user_code, scopes, interval_secs, expires_at)
+VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            )
+            .bind(id)
+            .bind(device_code_hash)
+            .bind(user_code)
+            .bind(scopes)
+            .bind(interval_secs)
+            .bind(expires_at)
+            .execute(p)
+            .await
+            .map_err(|e| format!("insert oauth device code failed: {e}"))?;
+        }
+    }
+    Ok(())
+}
+
+pub async fn find_device_code_by_hash(
+    pool: &DbPool,
+    device_code_hash: &str,
+) -> Result<Option<OAuthDeviceCodeRow>, String> {
+    match pool {
+        DbPool::Postgres(p) => {
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{DEVICE_SELECT_PG} WHERE device_code_hash = $1"
+            )))
+                .bind(device_code_hash)
+                .fetch_optional(p)
+                .await
+                .map_err(|e| format!("find oauth device code failed: {e}"))?;
+            match row {
+                Some(r) => Ok(Some(map_device_code!(&r))),
+                None => Ok(None),
+            }
+        }
+        DbPool::MySql(p) => {
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{DEVICE_SELECT_MYSQL} WHERE device_code_hash = ?"
+            )))
+                .bind(device_code_hash)
+                .fetch_optional(p)
+                .await
+                .map_err(|e| format!("find oauth device code failed: {e}"))?;
+            match row {
+                Some(r) => Ok(Some(map_device_code!(&r))),
+                None => Ok(None),
+            }
+        }
+        DbPool::Sqlite(p) => {
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{DEVICE_SELECT_SQLITE} WHERE device_code_hash = ?1"
+            )))
+                .bind(device_code_hash)
+                .fetch_optional(p)
+                .await
+                .map_err(|e| format!("find oauth device code failed: {e}"))?;
+            match row {
+                Some(r) => Ok(Some(map_device_code!(&r))),
+                None => Ok(None),
+            }
+        }
+    }
+}
+
+/// Look up a pending row by the normalized user code (`approve` page path).
+pub async fn find_device_code_by_user_code(
+    pool: &DbPool,
+    user_code: &str,
+) -> Result<Option<OAuthDeviceCodeRow>, String> {
+    match pool {
+        DbPool::Postgres(p) => {
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{DEVICE_SELECT_PG} WHERE user_code = $1"
+            )))
+                .bind(user_code)
+                .fetch_optional(p)
+                .await
+                .map_err(|e| format!("find oauth device code failed: {e}"))?;
+            match row {
+                Some(r) => Ok(Some(map_device_code!(&r))),
+                None => Ok(None),
+            }
+        }
+        DbPool::MySql(p) => {
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{DEVICE_SELECT_MYSQL} WHERE user_code = ?"
+            )))
+                .bind(user_code)
+                .fetch_optional(p)
+                .await
+                .map_err(|e| format!("find oauth device code failed: {e}"))?;
+            match row {
+                Some(r) => Ok(Some(map_device_code!(&r))),
+                None => Ok(None),
+            }
+        }
+        DbPool::Sqlite(p) => {
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "{DEVICE_SELECT_SQLITE} WHERE user_code = ?1"
+            )))
+                .bind(user_code)
+                .fetch_optional(p)
+                .await
+                .map_err(|e| format!("find oauth device code failed: {e}"))?;
+            match row {
+                Some(r) => Ok(Some(map_device_code!(&r))),
+                None => Ok(None),
+            }
+        }
+    }
+}
+
+/// Approve a pending code (records approver). Returns false if the row was not
+/// pending — the approval is a single-claim update so races resolve to one side.
+pub async fn approve_device_code(
+    pool: &DbPool,
+    id: &str,
+    user_id: &str,
+    approved_at: &str,
+) -> Result<bool, String> {
+    match pool {
+        DbPool::Postgres(p) => {
+            let n = sqlx::query(
+                "UPDATE oauth_device_codes
+SET status = 'approved', user_id = $2, approved_at = $3::timestamptz
+WHERE id = $1 AND status = 'pending'",
+            )
+            .bind(id)
+            .bind(user_id)
+            .bind(approved_at)
+            .execute(p)
+            .await
+            .map_err(|e| format!("approve oauth device code failed: {e}"))?
+            .rows_affected();
+            Ok(n > 0)
+        }
+        DbPool::MySql(p) => {
+            let n = sqlx::query(
+                "UPDATE oauth_device_codes
+SET status = 'approved', user_id = ?, approved_at = ?
+WHERE id = ? AND status = 'pending'",
+            )
+            .bind(user_id)
+            .bind(approved_at)
+            .bind(id)
+            .execute(p)
+            .await
+            .map_err(|e| format!("approve oauth device code failed: {e}"))?
+            .rows_affected();
+            Ok(n > 0)
+        }
+        DbPool::Sqlite(p) => {
+            let n = sqlx::query(
+                "UPDATE oauth_device_codes
+SET status = 'approved', user_id = ?2, approved_at = ?3
+WHERE id = ?1 AND status = 'pending'",
+            )
+            .bind(id)
+            .bind(user_id)
+            .bind(approved_at)
+            .execute(p)
+            .await
+            .map_err(|e| format!("approve oauth device code failed: {e}"))?
+            .rows_affected();
+            Ok(n > 0)
+        }
+    }
+}
+
+/// Deny a pending code. Same single-claim semantics as approve.
+pub async fn deny_device_code(pool: &DbPool, id: &str) -> Result<bool, String> {
+    match pool {
+        DbPool::Postgres(p) => {
+            let n = sqlx::query(
+                "UPDATE oauth_device_codes SET status = 'denied'
+WHERE id = $1 AND status = 'pending'",
+            )
+            .bind(id)
+            .execute(p)
+            .await
+            .map_err(|e| format!("deny oauth device code failed: {e}"))?
+            .rows_affected();
+            Ok(n > 0)
+        }
+        DbPool::MySql(p) => {
+            let n = sqlx::query(
+                "UPDATE oauth_device_codes SET status = 'denied'
+WHERE id = ? AND status = 'pending'",
+            )
+            .bind(id)
+            .execute(p)
+            .await
+            .map_err(|e| format!("deny oauth device code failed: {e}"))?
+            .rows_affected();
+            Ok(n > 0)
+        }
+        DbPool::Sqlite(p) => {
+            let n = sqlx::query(
+                "UPDATE oauth_device_codes SET status = 'denied'
+WHERE id = ?1 AND status = 'pending'",
+            )
+            .bind(id)
+            .execute(p)
+            .await
+            .map_err(|e| format!("deny oauth device code failed: {e}"))?
+            .rows_affected();
+            Ok(n > 0)
+        }
+    }
+}
+
+/// Mark an approved code consumed (single token-mint claim). Returns false when
+/// the row wasn't in `approved` — so a racing poll cannot mint twice.
+pub async fn consume_device_code(pool: &DbPool, id: &str) -> Result<bool, String> {
+    match pool {
+        DbPool::Postgres(p) => {
+            let n = sqlx::query(
+                "UPDATE oauth_device_codes SET status = 'consumed'
+WHERE id = $1 AND status = 'approved'",
+            )
+            .bind(id)
+            .execute(p)
+            .await
+            .map_err(|e| format!("consume oauth device code failed: {e}"))?
+            .rows_affected();
+            Ok(n > 0)
+        }
+        DbPool::MySql(p) => {
+            let n = sqlx::query(
+                "UPDATE oauth_device_codes SET status = 'consumed'
+WHERE id = ? AND status = 'approved'",
+            )
+            .bind(id)
+            .execute(p)
+            .await
+            .map_err(|e| format!("consume oauth device code failed: {e}"))?
+            .rows_affected();
+            Ok(n > 0)
+        }
+        DbPool::Sqlite(p) => {
+            let n = sqlx::query(
+                "UPDATE oauth_device_codes SET status = 'consumed'
+WHERE id = ?1 AND status = 'approved'",
+            )
+            .bind(id)
+            .execute(p)
+            .await
+            .map_err(|e| format!("consume oauth device code failed: {e}"))?
+            .rows_affected();
+            Ok(n > 0)
+        }
+    }
+}
+
+/// Record a poll hit; `new_interval_secs` implements RFC 8628 `slow_down`.
+pub async fn record_device_code_poll(
+    pool: &DbPool,
+    id: &str,
+    polled_at: &str,
+    new_interval_secs: i64,
+) -> Result<(), String> {
+    match pool {
+        DbPool::Postgres(p) => {
+            sqlx::query(
+                "UPDATE oauth_device_codes
+SET last_polled_at = $2::timestamptz, interval_secs = $3
+WHERE id = $1",
+            )
+            .bind(id)
+            .bind(polled_at)
+            .bind(new_interval_secs)
+            .execute(p)
+            .await
+            .map_err(|e| format!("record oauth device poll failed: {e}"))?;
+        }
+        DbPool::MySql(p) => {
+            sqlx::query(
+                "UPDATE oauth_device_codes SET last_polled_at = ?, interval_secs = ?
+WHERE id = ?",
+            )
+            .bind(polled_at)
+            .bind(new_interval_secs)
+            .bind(id)
+            .execute(p)
+            .await
+            .map_err(|e| format!("record oauth device poll failed: {e}"))?;
+        }
+        DbPool::Sqlite(p) => {
+            sqlx::query(
+                "UPDATE oauth_device_codes SET last_polled_at = ?2, interval_secs = ?3
+WHERE id = ?1",
+            )
+            .bind(id)
+            .bind(polled_at)
+            .bind(new_interval_secs)
+            .execute(p)
+            .await
+            .map_err(|e| format!("record oauth device poll failed: {e}"))?;
+        }
+    }
+    Ok(())
+}
+
+/// Drop codes past expiry — opportunistic GC called from the poll path.
+pub async fn delete_expired_device_codes(pool: &DbPool, now: &str) -> Result<u64, String> {
+    match pool {
+        DbPool::Postgres(p) => {
+            let n = sqlx::query(
+                "DELETE FROM oauth_device_codes WHERE expires_at < $1::timestamptz",
+            )
+            .bind(now)
+            .execute(p)
+            .await
+            .map_err(|e| format!("gc oauth device codes failed: {e}"))?
+            .rows_affected();
+            Ok(n)
+        }
+        DbPool::MySql(p) => {
+            let n = sqlx::query("DELETE FROM oauth_device_codes WHERE expires_at < ?")
+                .bind(now)
+                .execute(p)
+                .await
+                .map_err(|e| format!("gc oauth device codes failed: {e}"))?
+                .rows_affected();
+            Ok(n)
+        }
+        DbPool::Sqlite(p) => {
+            let n = sqlx::query("DELETE FROM oauth_device_codes WHERE expires_at < ?1")
+                .bind(now)
+                .execute(p)
+                .await
+                .map_err(|e| format!("gc oauth device codes failed: {e}"))?
+                .rows_affected();
+            Ok(n)
+        }
+    }
 }

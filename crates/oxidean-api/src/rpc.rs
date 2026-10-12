@@ -390,6 +390,8 @@ pub const PROCEDURES: &[&str] = &[
     "oauthApp.revoke",
     "oauthApp.authorizeInfo",
     "oauthApp.authorize",
+    "oauth.deviceInfo",
+    "oauth.deviceAuthorize",
     "sshKey.add",
     "sshKey.list",
     "sshKey.revoke",
@@ -1585,6 +1587,14 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Err(e) => RpcResponse::err(e),
         },
         "oauthApp.authorize" => match oauth::authorize_rpc(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "oauth.deviceInfo" => match oauth::device_info(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "oauth.deviceAuthorize" => match oauth::device_authorize(ctx, req.input).await {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },

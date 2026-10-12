@@ -15,9 +15,9 @@ RUN cargo chef prepare --recipe-path recipe.json
 
 FROM chef AS builder
 # protobuf-compiler: prost-build compiles proto/runner.proto (Phase 19).
-# mold: fast linker for the release binaries.
+# mold: fast linker for the release binaries. curl: OXIDEAN_CLI_DIST_URL fetch.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends protobuf-compiler mold \
+  && apt-get install -y --no-install-recommends protobuf-compiler mold curl ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 ENV RUSTFLAGS="-C link-arg=-fuse-ld=mold"
 COPY --from=planner /app/recipe.json recipe.json
@@ -27,11 +27,29 @@ COPY crates ./crates
 RUN cargo build --release -p oxidean-api --bin oxidean-api --bin oxidean-protection-hook \
   && cp /app/target/release/oxidean-api /app/target/release/oxidean-protection-hook /usr/local/bin/
 # CLI distribution (D-CLI-DIST): the api serves /cli/bin/ox-{target} — stage the
-# companion `ox` build under the server's own target triple.
+# companion `ox` build under the server's own target triple. When
+# OXIDEAN_CLI_DIST_URL points at a published artifact set (an
+# `ox-targets.txt` manifest plus `ox-{target}` + `.sha256` files — e.g. a
+# GitHub release download URL), the full matrix is layered in with per-file
+# sha256 verification. Self-host builds without the arg keep host-only staging;
+# extra targets can always be dropped into OXIDEAN_CLI_DIST_DIR directly.
+ARG OXIDEAN_CLI_DIST_URL=""
 RUN cargo build --release -p oxidean-cli --bin ox \
   && mkdir -p /usr/local/share/oxidean-cli \
   && target=$(rustc -vV | awk '/^host:/ {print $2}') \
-  && cp /app/target/release/ox "/usr/local/share/oxidean-cli/ox-$target"
+  && cp /app/target/release/ox "/usr/local/share/oxidean-cli/ox-$target" \
+  && if [ -n "$OXIDEAN_CLI_DIST_URL" ]; then \
+       echo "staging full ox matrix from $OXIDEAN_CLI_DIST_URL"; \
+       curl -fsSL "$OXIDEAN_CLI_DIST_URL/ox-targets.txt" -o /tmp/ox-targets.txt; \
+       while read -r t || [ -n "$t" ]; do \
+         [ -z "$t" ] && continue; \
+         [ "$t" = "$target" ] && continue; \
+         curl -fsSL "$OXIDEAN_CLI_DIST_URL/ox-$t" -o "/usr/local/share/oxidean-cli/ox-$t"; \
+         curl -fsSL "$OXIDEAN_CLI_DIST_URL/ox-$t.sha256" -o "/tmp/ox-$t.sha256"; \
+         (cd /usr/local/share/oxidean-cli && sha256sum -c "/tmp/ox-$t.sha256"); \
+       done < /tmp/ox-targets.txt; \
+       ls -lh /usr/local/share/oxidean-cli; \
+     fi
 
 FROM debian:bookworm-slim
 # git: forge ops + D-33 boot gate (GIT-09); ca-certificates/curl: TLS + healthcheck;

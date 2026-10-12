@@ -10,16 +10,47 @@ The binary lives at `crates/oxidean-cli` in the Cargo workspace.
 
 ## Install
 
-Any Oxidean instance that ships the CLI distribution serves an install script
-at `/cli/install.sh` — also linked under **Settings → Command line**:
+Any Oxidean instance that ships the CLI distribution serves install scripts
+— also linked under **Settings → Command line**:
 
 ```bash
+# Linux / macOS / FreeBSD (sh — musl systems like Alpine get the musl build)
 curl -fsSL https://forge.example.com/cli/install.sh | sh
 ```
 
-The script detects your platform (`uname`), downloads
-`/cli/bin/ox-{target}` plus its published `.sha256`, verifies the checksum, and
-installs to `~/.local/bin/ox` (override with `OXIDEAN_INSTALL_DIR`).
+```powershell
+# Windows (PowerShell 5.1+)
+irm https://forge.example.com/cli/install.ps1 | iex
+```
+
+The scripts detect your platform, download `ox-{target}` plus its published
+`.sha256`, verify the checksum, and install to `~/.local/bin/ox`
+(`%LOCALAPPDATA%\Programs\ox` on Windows — override either with
+`OXIDEAN_INSTALL_DIR`). Supported targets: `x86_64`/`aarch64` for Linux (gnu
+and musl), macOS, and Windows; plus `armv7-unknown-linux-gnueabihf` and
+`x86_64-unknown-freebsd` where the instance ships them.
+
+The binary/checksum base defaults to `{instance}/cli/bin`; point
+`OXIDEAN_BIN_BASE` at any flat mirror instead — e.g. a GitHub release's
+download URL, whose `install.sh`/`install.ps1` assets are pre-rendered for
+standalone installs:
+
+```bash
+DL=https://github.com/oxidean/oxidean/releases/download/vX.Y.Z
+curl -fsSL "$DL/install.sh" | sh          # already pinned to that release
+OXIDEAN_BIN_BASE="$DL" sh install.sh      # or: template + explicit mirror
+```
+
+Tagged releases also publish native packages — `ox-*.deb` (apt),
+`ox-*.rpm` (dnf/zypper), `ox-*.apk` (apk), `ox-*.pkg.tar.zst` (pacman) —
+each `ox` binary installed to `/usr/bin/ox`:
+
+```bash
+sudo dpkg -i ox-*-amd64.deb            # Debian/Ubuntu
+sudo dnf install ./ox-*-x86_64.rpm     # Fedora/RHEL
+apk add --allow-untrusted ox-*.apk     # Alpine
+sudo pacman -U ox-*.pkg.tar.zst        # Arch
+```
 
 If the instance has no prebuilt binary for your platform, install from source:
 
@@ -46,9 +77,12 @@ artifact for your platform it says so and points at the installer instead.
 ### For operators: serving binaries
 
 The API serves every `ox-{rust-target-triple}` file found in
-`OXIDEAN_CLI_DIST_DIR` (default `/usr/local/share/oxidean-cli`). The release
-image stages the server's own platform; to offer more (e.g. macOS/ARM builds
-for your users), drop additional binaries into that directory:
+`OXIDEAN_CLI_DIST_DIR` (default `/usr/local/share/oxidean-cli`). Self-built
+images stage the server's own platform; the published release image is built
+with `OXIDEAN_CLI_DIST_URL` pointing at the GitHub release and stages the
+full matrix (fetched + sha256-verified at image-build time). To offer more
+targets yourself, build with that arg or drop additional binaries into the
+dist dir:
 
 ```text
 /usr/local/share/oxidean-cli/
@@ -74,6 +108,11 @@ ox auth login --instance https://forge.example.com --token oxidean_pat_…
 OXIDEAN_TOKEN=oxidean_pat_… ox auth login --instance https://forge.example.com
 echo "$TOKEN" | ox auth login --instance https://forge.example.com
 echo "$TOKEN" | ox auth login --instance https://forge.example.com --token-stdin
+
+# Browser device grant (RFC 8628): prints a user code + verification URL,
+# approves in the browser at /oauth/device, polls until approved — the
+# resulting PAT is stored like a --token login.
+ox auth login --instance https://forge.example.com --web
 ```
 
 Login writes `config.json` under the config directory
@@ -104,29 +143,83 @@ for the resolved instance.
 
 ## Commands
 
+`ox` has per-command help — `ox <group> --help` and `ox <group> <sub> --help`
+list exact flags. The full surface, roughly `gh`-shaped:
+
 ```bash
 # Repositories
-ox repo list                       # your repos (repo.listMine)
-ox repo list --owner someorg       # an owner's repos (repo.listByOwner)
-ox repo view octo/demo
+ox repo list [--owner someorg]          # yours, or an owner's
+ox repo view|fork octo/demo             # fork: [--into-owner o] [--into-name n]
+ox repo create <name> [--org o] [--visibility public|private]
+ox repo sync|clone octo/demo            # clone runs `git clone` locally
+ox repo edit o/n [--description d] [--topics a,b] [--visibility v]
+ox repo rename|archive|unarchive octo/demo
+ox repo delete octo/demo --confirm demo # soft delete, name echoed back
+ox repo transfer o/n dest-owner --confirm name
+ox repo star|unstar|watch|unwatch octo/demo
+ox repo deploy-key list|add|delete o/n  # add: --title t --key-file pub [-w]
+ox repo collaborator list|add|set-role|remove o/n --permission read|write|admin
+ox repo invites list|create|link|revoke o/n
+ox repo branch-protection|tag-protection list|set|delete o/n --pattern glob
+ox repo mirror get|set|sync|delete|gen-key|rotate-secret o/n
+ox repo merge-settings o/n [--merge on|off --squash on|off --rebase on|off]
+ox repo lfs o/n [--usage|--objects|--enable|--disable]
+ox repo quota o/n [--set <bytes>]
 
 # Issues
-ox issue list octo/demo [--state open|closed|all] [--author u] [--assignee u]
-                        [--label l] [--search q] [--limit n]
-ox issue view octo/demo 12
-ox issue create octo/demo --title "bug report" --body "steps…"
+ox issue list octo/demo [--state s] [--author u] [--assignee u] [--label l]
+                        [--search q] [--limit n]
+ox issue view|create|edit octo/demo [<n>] # edit: --title --body --label --assignee
+ox issue close|reopen|delete|comment octo/demo <n>
 
 # Pull requests
-ox pr list octo/demo [--state open|closed|merged|all] [same filters]
-ox pr view octo/demo 7
-ox pr checks octo/demo 7           # commit statuses on the PR head
+ox pr list|view octo/demo [<n>]         # same filters as issue list
+ox pr create o/n --title t --base main --head feat [--draft]
+ox pr merge o/n <n> [--merge|--squash|--rebase] [--delete-branch]
+ox pr diff|files|checks o/n <n>
+ox pr review o/n <n> --approve|--request-changes|--comment [--body b]
+ox pr review o/n <n> --request <user>|--unrequest <user>|--dismiss <id>|--list
+ox pr comment|ready|update-branch|close|reopen|checkout o/n <n>
 
 # Actions
-ox run list octo/demo [--limit n] [--page n]
-ox run view octo/demo <run-id>
+ox run list o/n [--status s --event e --branch b --workflow w --limit n]
+ox run view o/n <run-id> [--log] [--job <id>]
+ox run rerun|cancel o/n <run-id> [--failed-only]
+ox workflow list|view|run o/n [<workflow-id>] [--ref r]
+ox secret list|set|delete o/n [<NAME>]  # set: --body v | --file path | stdin
+ox status create o/n --sha s --context c --state pending|success|failure|error
 
-# Packages
+# Releases & packages
+ox release list|view|create|edit|delete o/n [<tag>]
+ox release upload|download o/n <tag> [<file>...|--pattern g --dir d --clobber]
+ox release delete-asset o/n <tag> <filename>
 ox pkg list [--owner octo]
+
+# People & orgs
+ox org list|view|create|members|invites
+ox user view|lookup|follow|unfollow <u> | ox user starred|watched
+ox notification list|read [<id>...|--all]|unread
+ox label list|create|edit|delete <o/n>|--org <slug>
+ox webhook list|create|edit|delete|ping <o/n> | ox webhook deliveries|redeliver
+
+# Account
+ox ssh-key|gpg-key list|add|delete      # add: --title t --key-file path|- 
+ox email list|add|remove|set-primary|resend
+ox pat list|create|revoke               # classic: --scopes repo,workflow,…
+                                        # fine-grained: --fine-grained --contents read|write
+                                        #   [--repo-access all|selected] [--repos id,id]
+                                        #   [--perms issues=write,pull_requests=read,…]
+ox invite accept --token <t>
+
+# Instance admin (admin.* is session-only — not callable with PAT auth)
+ox admin users list|ban|unban|delete|set-role|sessions|revoke-sessions|access|activity
+ox admin invites list|create|link|revoke
+ox admin runners | ox admin runner-token
+ox admin lfs|git|mcp [set …] | ox admin templates list|enable|disable|delete
+ox admin repos gc
+
+# Maintenance
+ox self-update                          # swap this binary for the instance's build
 
 # Escape hatch — any procedure, raw input fields
 ox api repo.get -f owner=octo -f name=demo
@@ -135,7 +228,13 @@ ox api issue.get -f owner=octo -f name=demo -F number=12
 
 `-f` sends the value as a string; `-F` parses the value as JSON (use it for
 numbers, booleans, arrays, objects). `owner/name` positionals may be replaced
-with `-R owner/name` anywhere a repo is expected.
+with `-R owner/name` anywhere a repo is expected. Content flags follow `gh`:
+`--body` inline, `--body-file <path>` or `-` for stdin, and piped stdin fills
+in automatically on verbs like `issue comment` and `secret set`.
+
+Release assets are the one path off `/api/rpc`: `release upload` POSTs
+multipart to `/api/repos/{o}/{n}/releases/{id}/assets` and `release download`
+GETs `/api/releases/assets/{id}` — both accept `Authorization: Bearer <pat>`.
 
 ## Instance compatibility (capability manifest)
 

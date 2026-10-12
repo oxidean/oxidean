@@ -14,6 +14,8 @@ pub struct PatRow {
     pub token_hash: String,
     pub scopes_json: Option<String>,
     pub contents_perm: Option<String>,
+    /// Fine-grained permission families JSON (`{"issues":"write",…}`).
+    pub perms_json: Option<String>,
     pub repo_access: Option<String>,
     pub expires_at: Option<String>,
     pub revoked_at: Option<String>,
@@ -46,6 +48,9 @@ macro_rules! map_pat {
             contents_perm: row
                 .try_get("contents_perm")
                 .map_err(|e| format!("pat row: {e}"))?,
+            perms_json: row
+                .try_get("perms_json")
+                .map_err(|e| format!("pat row: {e}"))?,
             repo_access: row
                 .try_get("repo_access")
                 .map_err(|e| format!("pat row: {e}"))?,
@@ -70,7 +75,7 @@ macro_rules! map_pat {
 }
 
 const PAT_SELECT_PG: &str = "SELECT id, user_id, kind, name, token_prefix, token_hash, scopes_json,
-       contents_perm, repo_access,
+       contents_perm, perms_json, repo_access,
        CASE WHEN expires_at IS NULL THEN NULL
             ELSE to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') END AS expires_at,
        CASE WHEN revoked_at IS NULL THEN NULL
@@ -83,7 +88,7 @@ FROM personal_access_tokens";
 
 const PAT_SELECT_MYSQL: &str =
     "SELECT id, user_id, kind, name, token_prefix, token_hash, scopes_json,
-       contents_perm, repo_access,
+       contents_perm, perms_json, repo_access,
        CASE WHEN expires_at IS NULL THEN NULL
             ELSE DATE_FORMAT(expires_at, '%Y-%m-%dT%H:%i:%sZ') END AS expires_at,
        CASE WHEN revoked_at IS NULL THEN NULL
@@ -96,7 +101,7 @@ FROM personal_access_tokens";
 
 const PAT_SELECT_SQLITE: &str =
     "SELECT id, user_id, kind, name, token_prefix, token_hash, scopes_json,
-       contents_perm, repo_access,
+       contents_perm, perms_json, repo_access,
        CASE WHEN expires_at IS NULL THEN NULL
             ELSE strftime('%Y-%m-%dT%H:%M:%SZ', expires_at) END AS expires_at,
        CASE WHEN revoked_at IS NULL THEN NULL
@@ -170,6 +175,7 @@ pub async fn create(
     token_hash: &str,
     scopes_json: Option<&str>,
     contents_perm: Option<&str>,
+    perms_json: Option<&str>,
     repo_access: Option<&str>,
     expires_at: Option<&str>,
     repository_ids: &[String],
@@ -182,8 +188,8 @@ pub async fn create(
                 .map_err(|e| format!("begin pat create tx failed: {e}"))?;
             sqlx::query(
                 "INSERT INTO personal_access_tokens
-(id, user_id, kind, name, token_prefix, token_hash, scopes_json, contents_perm, repo_access, expires_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::timestamptz)",
+(id, user_id, kind, name, token_prefix, token_hash, scopes_json, contents_perm, perms_json, repo_access, expires_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::timestamptz)",
             )
             .bind(id)
             .bind(user_id)
@@ -193,6 +199,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::timestamptz)",
             .bind(token_hash)
             .bind(scopes_json)
             .bind(contents_perm)
+            .bind(perms_json)
             .bind(repo_access)
             .bind(expires_at)
             .execute(&mut *tx)
@@ -219,8 +226,8 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::timestamptz)",
                 .map_err(|e| format!("begin pat create tx failed: {e}"))?;
             sqlx::query(
                 "INSERT INTO personal_access_tokens
-(id, user_id, kind, name, token_prefix, token_hash, scopes_json, contents_perm, repo_access, expires_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+(id, user_id, kind, name, token_prefix, token_hash, scopes_json, contents_perm, perms_json, repo_access, expires_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(id)
             .bind(user_id)
@@ -230,6 +237,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             .bind(token_hash)
             .bind(scopes_json)
             .bind(contents_perm)
+            .bind(perms_json)
             .bind(repo_access)
             .bind(expires_at)
             .execute(&mut *tx)
@@ -256,8 +264,8 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 .map_err(|e| format!("begin pat create tx failed: {e}"))?;
             sqlx::query(
                 "INSERT INTO personal_access_tokens
-(id, user_id, kind, name, token_prefix, token_hash, scopes_json, contents_perm, repo_access, expires_at)
-VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+(id, user_id, kind, name, token_prefix, token_hash, scopes_json, contents_perm, perms_json, repo_access, expires_at)
+VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             )
             .bind(id)
             .bind(user_id)
@@ -267,6 +275,7 @@ VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             .bind(token_hash)
             .bind(scopes_json)
             .bind(contents_perm)
+            .bind(perms_json)
             .bind(repo_access)
             .bind(expires_at)
             .execute(&mut *tx)

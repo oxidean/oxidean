@@ -370,23 +370,42 @@ async fn oci_registry_manifest_delete_admin() {
     db.migrate().await.unwrap();
     support::unlock_signup(&db).await;
     let app = test_app(db.clone(), dir.path().join("pkg")).await;
-    let (_c, token) = signup_login_pat(&app, &db).await;
+    let (cookie, token) = signup_login_pat(&app, &db).await;
     let name = "ociowner/del";
     assert_eq!(
         put_manifest(&app, &token, name, "gone", br#"{"x":1}"#).await,
         StatusCode::CREATED
     );
-    let del = Request::builder()
-        .method("DELETE")
-        .uri(format!("/v2/{name}/manifests/gone"))
-        .header(header::AUTHORIZATION, basic_header("ociowner", &token))
-        .body(Body::empty())
+    async fn del_manifest(app: &axum::Router, name: &str, token: &str) -> StatusCode {
+        let del = Request::builder()
+            .method("DELETE")
+            .uri(format!("/v2/{name}/manifests/gone"))
+            .header(header::AUTHORIZATION, basic_header("ociowner", token))
+            .body(Body::empty())
+            .unwrap();
+        app.clone().oneshot(del).await.unwrap().status()
+    }
+    // FG `packages:write` carries no delete grant — `package:delete` is a
+    // standalone classic scope (D-PKG-06).
+    assert_eq!(
+        del_manifest(&app, name, &token).await,
+        StatusCode::FORBIDDEN
+    );
+    let create = app
+        .clone()
+        .oneshot(rpc_req_with_cookie(
+            r#"{"procedure":"pat.createClassic","input":{"name":"pkgdel","scopes":["package:write","package:delete"]}}"#,
+            &cookie,
+        ))
+        .await
         .unwrap();
-    let res = app.oneshot(del).await.unwrap();
+    let bytes = create.into_body().collect().await.unwrap().to_bytes();
+    let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let del_token = v["data"]["token"].as_str().unwrap().to_string();
+    let status = del_manifest(&app, name, &del_token).await;
     assert!(
-        res.status() == StatusCode::ACCEPTED || res.status() == StatusCode::NO_CONTENT,
-        "expected DELETE manifest only for Admin + package:write (D-PKG-06) — {}",
-        res.status()
+        status == StatusCode::ACCEPTED || status == StatusCode::NO_CONTENT,
+        "expected DELETE manifest for Admin + package:delete (D-PKG-06) — {status}"
     );
 }
 

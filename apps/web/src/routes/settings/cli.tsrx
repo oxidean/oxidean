@@ -1,48 +1,11 @@
 import { useQuery } from "@octanejs/tanstack-query";
-import { useState } from "octane";
 import { AppPage } from "@/components/app-page";
 import { AccountSettingsLayout } from "@/components/settings/settings-shell";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { CopyCommand } from "@/components/settings/copy-command";
 import { PageHeader } from "@/components/ui/page-header";
 import { usePageRedirect } from "@/lib/nav.tsrx";
 import { resolvePublicOriginClient } from "@/lib/public-origin";
 import { authSessionQueryOptions } from "@/lib/session-queries";
-
-function CopyCommand(props: { command: string; ariaLabel: string }) @{
-  const [copied, setCopied] = useState(false);
-
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(props.command);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2000);
-    } catch {
-      /* manual copy via focus-select */
-    }
-  }
-
-  <div className="flex flex-col gap-3 sm:flex-row">
-    <Input
-      readOnly
-      value={props.command as string}
-      aria-label={props.ariaLabel as string}
-      className="min-w-0 flex-1 font-mono text-[13px]"
-      onFocus={(e) => {
-        (e.currentTarget as HTMLInputElement).select();
-      }}
-    />
-    <Button
-      type="button"
-      variant="outline"
-      className="shrink-0"
-      aria-label={props.ariaLabel as string}
-      onClick={() => void copy()}
-    >
-      {(copied ? "Copied" : "Copy") as string}
-    </Button>
-  </div>;
-}
 
 /** `/settings/cli` — ox CLI install + sign-in (title/meta via shell). */
 export function CliSettingsPage() @{
@@ -58,7 +21,9 @@ function CliSettingsContent() @{
 
   const origin = resolvePublicOriginClient();
   const installCmd = `curl -fsSL ${origin}/cli/install.sh | sh`;
+  const installPs1Cmd = `irm ${origin}/cli/install.ps1 | iex`;
   const loginCmd = `ox auth login --instance ${origin} --token <pat>`;
+  const loginWebCmd = `ox auth login --instance ${origin} --web`;
 
   <AccountSettingsLayout active="cli" data-testid="settings-cli-page">
     <PageHeader
@@ -73,13 +38,20 @@ function CliSettingsContent() @{
       The installer downloads the prebuilt binary for your platform from this instance and verifies
       its checksum.
     </p>
-    <div className="mt-3">
+    <p className="mt-3 text-[13px] font-medium text-foreground">Linux · macOS · WSL</p>
+    <div className="mt-2">
       <CopyCommand command={installCmd} ariaLabel="Copy install command" />
+    </div>
+    <p className="mt-3 text-[13px] font-medium text-foreground">Windows (PowerShell)</p>
+    <div className="mt-2">
+      <CopyCommand command={installPs1Cmd} ariaLabel="Copy PowerShell install command" />
     </div>
     <p className="mt-2 text-[13px] text-muted-foreground">
       Installs to <code className="font-mono">~/.local/bin/ox</code> by default — set{" "}
-      <code className="font-mono">OXIDEAN_INSTALL_DIR</code> to change it. No prebuilt binary for
-      your platform? Build from source with{" "}
+      <code className="font-mono">OXIDEAN_INSTALL_DIR</code> to change it. Native{" "}
+      <code className="font-mono">.deb</code>/<code className="font-mono">.rpm</code>/
+      <code className="font-mono">.apk</code>/Arch packages ship on the project&apos;s release page.
+      No prebuilt binary for your platform? Build from source with{" "}
       <code className="font-mono">cargo install --path crates/oxidean-cli</code>.
     </p>
 
@@ -87,9 +59,15 @@ function CliSettingsContent() @{
       Sign in
     </h2>
     <p className="mt-1 text-[14px] text-muted-foreground">
-      Create a personal access token under Personal access tokens, then:
+      Approve in the browser — the CLI prints a code and polls until you confirm:
     </p>
     <div className="mt-3">
+      <CopyCommand command={loginWebCmd} ariaLabel="Copy browser login command" />
+    </div>
+    <p className="mt-2 text-[13px] text-muted-foreground">
+      Or create a personal access token under Personal access tokens and paste it:
+    </p>
+    <div className="mt-2">
       <CopyCommand command={loginCmd} ariaLabel="Copy login command" />
     </div>
 

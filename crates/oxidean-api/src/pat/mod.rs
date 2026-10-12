@@ -5,7 +5,7 @@ pub mod rate_limit;
 
 use oxidean_core::{
     AppError, ClassicPatScope, ContentsPerm, CreateClassicPatRequest, CreateFineGrainedPatRequest,
-    CreatePatResponse, FgRepoAccess, PatKind, PatListItem, CLASSIC_PAT_PREFIX,
+    CreatePatResponse, FgPerms, FgRepoAccess, PatKind, PatListItem, CLASSIC_PAT_PREFIX,
     FINE_GRAINED_PAT_PREFIX,
 };
 use serde::Deserialize;
@@ -100,6 +100,13 @@ fn row_to_list_item(row: &oxidean_db::PatRow) -> Result<PatListItem, AppError> {
         ),
         None => None,
     };
+    let perms = match row.perms_json.as_deref() {
+        Some(raw) => serde_json::from_str::<FgPerms>(raw).map_err(|e| {
+            tracing::error!(error = %e, "invalid perms_json");
+            AppError::new("pat.internal", "corrupt pat permissions")
+        })?,
+        None => FgPerms::default(),
+    };
     Ok(PatListItem {
         id: row.id.clone(),
         kind,
@@ -112,12 +119,59 @@ fn row_to_list_item(row: &oxidean_db::PatRow) -> Result<PatListItem, AppError> {
         contents,
         packages,
         repo_access,
+        perms,
         repository_ids: row.repository_ids.clone(),
         expires_at: row.expires_at.clone(),
         last_used_at: row.last_used_at.clone(),
         last_used_ip: row.last_used_ip.clone(),
         created_at: row.created_at.clone(),
     })
+}
+
+/// Insert a classic PAT row for `user_id` and return the plaintext token.
+/// Shared by `pat.createClassic` (session-gated RPC) and the OAuth device-grant
+/// token exchange, which mints the PAT the CLI stores.
+pub(crate) async fn mint_classic_pat(
+    db: &oxidean_db::Database,
+    user_id: &str,
+    name: &str,
+    scopes: &[ClassicPatScope],
+    expires_at: Option<&str>,
+) -> Result<(String, String), AppError> {
+    let mut secret_bytes = [0u8; TOKEN_BYTES];
+    rand::fill(&mut secret_bytes);
+    let secret_hex = bytes_to_hex(&secret_bytes);
+    let plaintext = format!("{CLASSIC_PAT_PREFIX}{secret_hex}");
+    let token_hash = sha256_hex(plaintext.as_bytes());
+    // Display fingerprint: brand prefix + first 8 hex of secret (not the hash).
+    let token_prefix = format!("{CLASSIC_PAT_PREFIX}{}", &secret_hex[..8]);
+
+    let scopes_json = serde_json::to_string(
+        &scopes
+            .iter()
+            .map(|s| s.as_str())
+            .collect::<Vec<_>>(),
+    )
+    .map_err(|e| AppError::new("pat.internal", format!("scopes serialize: {e}")))?;
+
+    let id = Uuid::new_v4().to_string();
+    db.create_pat(
+        &id,
+        user_id,
+        PatKind::Classic.as_str(),
+        name,
+        &token_prefix,
+        &token_hash,
+        Some(&scopes_json),
+        None,
+        None,
+        None,
+        expires_at,
+        &[],
+    )
+    .await
+    .map_err(db_err)?;
+    Ok((id, plaintext))
 }
 
 /// Mint classic PAT: verified session, non-empty note, `repo` scope (D-08 / D-15 / D-16 / D-24).
@@ -139,44 +193,18 @@ pub async fn create_classic(
             "A note (name) is required for personal access tokens",
         ));
     }
-    if !req.scopes.contains(&ClassicPatScope::Repo) {
+    // Any non-empty scope set is valid — narrow tokens (e.g. `notifications`
+    // only) are legitimate now that the catalog has breadth.
+    if req.scopes.is_empty() {
         return Err(AppError::new(
             "pat.invalid_scope",
-            "classic tokens must include the repo scope",
+            "classic tokens require at least one scope",
         ));
     }
 
-    let mut secret_bytes = [0u8; TOKEN_BYTES];
-    rand::fill(&mut secret_bytes);
-    let secret_hex = bytes_to_hex(&secret_bytes);
-    let plaintext = format!("{CLASSIC_PAT_PREFIX}{secret_hex}");
-    let token_hash = sha256_hex(plaintext.as_bytes());
-    // Display fingerprint: brand prefix + first 8 hex of secret (not the hash).
-    let token_prefix = format!("{CLASSIC_PAT_PREFIX}{}", &secret_hex[..8]);
-
-    let scopes_json =
-        serde_json::to_string(&req.scopes.iter().map(|s| s.as_str()).collect::<Vec<_>>())
-            .map_err(|e| AppError::new("pat.internal", format!("scopes serialize: {e}")))?;
-
     let expires_at = validate_expires_at(req.expires_at.as_deref())?;
-
-    let id = Uuid::new_v4().to_string();
-    ctx.db
-        .create_pat(
-            &id,
-            &user.id,
-            PatKind::Classic.as_str(),
-            req.name.trim(),
-            &token_prefix,
-            &token_hash,
-            Some(&scopes_json),
-            None,
-            None,
-            expires_at,
-            &[],
-        )
-        .await
-        .map_err(db_err)?;
+    let (id, plaintext) =
+        mint_classic_pat(&ctx.db, &user.id, req.name.trim(), &req.scopes, expires_at).await?;
 
     let row = ctx
         .db
@@ -301,6 +329,16 @@ pub async fn create_fine_grained(
         None => None,
     };
 
+    // Extra FG families persist as JSON on the row (NULL for legacy tokens).
+    let perms_json = if req.perms.is_empty() {
+        None
+    } else {
+        Some(
+            serde_json::to_string(&req.perms)
+                .map_err(|e| AppError::new("pat.internal", format!("perms serialize: {e}")))?,
+        )
+    };
+
     let id = Uuid::new_v4().to_string();
     ctx.db
         .create_pat(
@@ -312,6 +350,7 @@ pub async fn create_fine_grained(
             &token_hash,
             scopes_json.as_deref(),
             Some(req.contents.as_str()),
+            perms_json.as_deref(),
             Some(req.repo_access.as_str()),
             expires_at,
             &repository_ids,

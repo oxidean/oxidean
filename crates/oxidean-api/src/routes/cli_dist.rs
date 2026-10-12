@@ -2,6 +2,8 @@
 //!
 //! Routes:
 //!   GET /cli/install.sh       POSIX installer with the public origin baked in
+//!   GET /cli/install.ps1      PowerShell installer (native Windows)
+//!   GET /cli/skill.md         consumer-facing agent skill (embedded single source)
 //!   GET /cli/latest           JSON { version, targets: [{ target, sha256, bytes }] }
 //!   GET /cli/bin/{*file}      `ox-{target}` binary, or `ox-{target}.sha256` digest
 //!
@@ -175,79 +177,54 @@ pub async fn install_script() -> Response {
         .into_response()
 }
 
+/// `install.ps1` with the resolved public origin substituted.
+pub async fn install_ps1() -> Response {
+    let origin = resolve_public_origin();
+    let script = INSTALL_PS1.replace("@OXIDEAN_ORIGIN@", &origin);
+    (
+        [
+            (header::CONTENT_TYPE, "text/plain; charset=utf-8"),
+            (
+                header::CONTENT_DISPOSITION,
+                "inline; filename=\"install.ps1\"",
+            ),
+        ],
+        script,
+    )
+        .into_response()
+}
+
 /// POSIX installer — detect the target triple, download `ox-{target}` plus its
 /// published digest, verify, and place the binary. Falls back to `cargo
 /// install` instructions when the instance has no prebuilt artifact.
-const INSTALL_SCRIPT: &str = r#"#!/bin/sh
-# ox — Oxidean CLI installer. Served by the instance itself:
-#   curl -fsSL @OXIDEAN_ORIGIN@/cli/install.sh | sh
-set -eu
+const INSTALL_SCRIPT: &str = include_str!("../../assets/cli/install.sh");
 
-BASE="@OXIDEAN_ORIGIN@"
-DEST="${OXIDEAN_INSTALL_DIR:-$HOME/.local/bin}"
+/// PowerShell installer for native Windows (`irm …/cli/install.ps1 | iex`).
+/// Same contract: detect arch → `ox-{target}` + `.sha256` → `Get-FileHash`
+/// verify → `%LOCALAPPDATA%\Programs\ox\ox.exe` → PATH hint.
+const INSTALL_PS1: &str = include_str!("../../assets/cli/install.ps1");
 
-have() { command -v "$1" >/dev/null 2>&1; }
+/// Consumer-facing agent SKILL.md — single source of truth lives in the CLI
+/// crate (`crates/oxidean-cli/skill/SKILL.md`) and is embedded into `ox` for
+/// `ox skill print`/`install`; serving it here versions the doc with the
+/// server so fetched copies match the RPC surface they document.
+const SKILL_MD: &str = include_str!("../../../oxidean-cli/skill/SKILL.md");
 
-fetch() {
-    if have curl; then curl -fsSL "$1"; elif have wget; then wget -qO- "$1"; else
-        echo "error: need curl or wget" >&2; exit 1; fi
+/// `GET /cli/skill.md` — the agent skill document, unauthenticated like the
+/// install scripts.
+pub async fn skill_md() -> Response {
+    (
+        [
+            (header::CONTENT_TYPE, "text/markdown; charset=utf-8"),
+            (
+                header::CONTENT_DISPOSITION,
+                "inline; filename=\"SKILL.md\"",
+            ),
+        ],
+        SKILL_MD,
+    )
+        .into_response()
 }
-
-os=$(uname -s | tr '[:upper:]' '[:lower:]')
-arch=$(uname -m)
-case "$os" in
-    linux)   os_part=unknown-linux-gnu ;;
-    darwin)  os_part=apple-darwin ;;
-    freebsd) os_part=unknown-freebsd ;;
-    *) echo "error: unsupported OS '$os' — install from source: cargo install --git <repo> oxidean-cli" >&2; exit 1 ;;
-esac
-case "$arch" in
-    x86_64|amd64) arch_part=x86_64 ;;
-    aarch64|arm64) arch_part=aarch64 ;;
-    armv7l)        arch_part=armv7 ;;
-    *) echo "error: unsupported architecture '$arch'" >&2; exit 1 ;;
-esac
-TARGET="$arch_part-$os_part"
-[ "$arch_part" = armv7 ] && TARGET="armv7-$os_part"
-
-echo "installing ox for $TARGET from $BASE"
-
-tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT
-
-if ! fetch "$BASE/cli/bin/ox-$TARGET" > "$tmp/ox"; then
-    echo "error: this instance has no prebuilt ox for $TARGET." >&2
-    echo "build from source instead: cargo install --git <repo> oxidean-cli" >&2
-    exit 1
-fi
-fetch "$BASE/cli/bin/ox-$TARGET.sha256" > "$tmp/ox.sha256" || true
-
-expected=$(awk '{print $1}' "$tmp/ox.sha256" 2>/dev/null || true)
-if [ -n "$expected" ]; then
-    if have sha256sum; then actual=$(sha256sum "$tmp/ox" | awk '{print $1}');
-    elif have shasum; then actual=$(shasum -a 256 "$tmp/ox" | awk '{print $1}');
-    elif have openssl; then actual=$(openssl dgst -sha256 "$tmp/ox" | awk '{print $NF}');
-    else actual=""; fi
-    if [ -n "$actual" ] && [ "$actual" != "$expected" ]; then
-        echo "error: checksum mismatch — aborting" >&2; exit 1
-    fi
-fi
-
-chmod +x "$tmp/ox"
-mkdir -p "$DEST"
-if ! mv "$tmp/ox" "$DEST/ox" 2>/dev/null; then
-    echo "cannot write $DEST — retry with: sudo mv $tmp/ox /usr/local/bin/ox" >&2
-    exit 1
-fi
-
-echo "installed ox to $DEST/ox"
-"$DEST/ox" --version || true
-case ":$PATH:" in
-    *":$DEST:"*) ;;
-    *) echo "note: $DEST is not on your PATH" ;;
-esac
-echo "next: ox auth login --instance $BASE --token <pat>"
-"#;
 
 #[cfg(test)]
 mod tests {
@@ -270,5 +247,38 @@ mod tests {
         assert!(out.contains("BASE=\"https://forge.example.com\""));
         assert!(!out.contains("@OXIDEAN_ORIGIN@"));
         assert!(out.starts_with("#!/bin/sh"));
+    }
+
+    #[test]
+    fn install_script_covers_shipped_targets() {
+        // Target mapping contract: every triple the build matrix ships has an
+        // install.sh path — including musl (Alpine) and the corrected armv7
+        // ABI-suffixed triples.
+        for needle in [
+            "unknown-linux-musl",
+            "apple-darwin",
+            "unknown-freebsd",
+            "pc-windows-msvc",
+            "armv7-unknown-linux-gnueabihf",
+            "armv7-unknown-linux-musleabihf",
+        ] {
+            assert!(INSTALL_SCRIPT.contains(needle), "install.sh missing {needle}");
+        }
+    }
+
+    #[test]
+    fn skill_doc_is_the_embedded_source() {
+        assert!(SKILL_MD.starts_with("---\nname: ox"));
+        assert!(SKILL_MD.contains("ox api"));
+        assert!(SKILL_MD.contains("--json"));
+    }
+
+    #[test]
+    fn install_ps1_substitutes_origin() {
+        let out = INSTALL_PS1.replace("@OXIDEAN_ORIGIN@", "https://forge.example.com");
+        assert!(out.contains("$Base = 'https://forge.example.com'"));
+        assert!(!out.contains("@OXIDEAN_ORIGIN@"));
+        assert!(out.contains("pc-windows-msvc"));
+        assert!(out.contains("Get-FileHash"));
     }
 }

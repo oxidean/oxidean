@@ -29,12 +29,14 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 use oxidean_core::{
-    format_oauth_scopes, oauth_scopes_or_default, parse_oauth_scopes, AppError,
+    format_oauth_scopes, oauth_scopes_or_default, parse_oauth_scopes, AppError, ClassicPatScope,
     CreateOAuthAppRequest, CreateOAuthAppResponse, OAuthAppIdRequest, OAuthAppPublic,
     OAuthAuthorizeInfo, OAuthAuthorizeInfoRequest, OAuthAuthorizeRequest, OAuthAuthorizeResponse,
+    OAuthDeviceAuthorizeRequest, OAuthDeviceCodeResponse, OAuthDeviceInfo, OAuthDeviceInfoRequest,
     OAuthGrantPublic, OAuthScope, OAuthTokenResponse, OAuthUserInfoResponse, UpdateOAuthAppRequest,
     OAUTH_ACCESS_TOKEN_PREFIX, OAUTH_CLIENT_ID_PREFIX, OAUTH_CLIENT_SECRET_PREFIX,
-    OAUTH_CODE_PREFIX, OAUTH_CODE_TTL_SECS, OAUTH_TOKEN_TTL_SECS,
+    OAUTH_CODE_PREFIX, OAUTH_CODE_TTL_SECS, OAUTH_DEVICE_CODE_PREFIX, OAUTH_DEVICE_CODE_TTL_SECS,
+    OAUTH_DEVICE_POLL_INTERVAL_SECS, OAUTH_TOKEN_TTL_SECS,
 };
 use oxidean_db::{OAuthAppRow, OAuthTokenRow, PatRow, UserRow};
 
@@ -411,6 +413,7 @@ struct TokenForm {
     redirect_uri: Option<String>,
     client_id: Option<String>,
     client_secret: Option<String>,
+    device_code: Option<String>,
 }
 
 fn token_error(status: StatusCode, error: &str, description: &str) -> Response {
@@ -467,6 +470,7 @@ pub async fn token(
                 redirect_uri: None,
                 client_id: None,
                 client_secret: None,
+                device_code: None,
             };
             for (k, v) in url::form_urlencoded::parse(&body) {
                 match k.as_ref() {
@@ -475,6 +479,7 @@ pub async fn token(
                     "redirect_uri" => form.redirect_uri = Some(v.into_owned()),
                     "client_id" => form.client_id = Some(v.into_owned()),
                     "client_secret" => form.client_secret = Some(v.into_owned()),
+                    "device_code" => form.device_code = Some(v.into_owned()),
                     _ => {}
                 }
             }
@@ -482,11 +487,19 @@ pub async fn token(
         }
     };
 
+    // RFC 8628 §3.4 — device_code grant is a public-client exchange: the
+    // device_code itself is the credential, no client auth.
+    if form.grant_type.as_deref()
+        == Some("urn:ietf:params:oauth:grant-type:device_code")
+    {
+        return device_token_exchange(state, headers, form.device_code.as_deref()).await;
+    }
+
     if form.grant_type.as_deref() != Some("authorization_code") {
         return token_error(
             StatusCode::BAD_REQUEST,
             "unsupported_grant_type",
-            "only grant_type=authorization_code is supported",
+            "supported grant types: authorization_code, urn:ietf:params:oauth:grant-type:device_code",
         );
     }
     let code = form.code.as_deref().unwrap_or("").trim();
@@ -676,6 +689,7 @@ impl OAuthTokenIdentity {
             token_hash: self.token.token_hash.clone(),
             scopes_json: Some(scopes_json),
             contents_perm: None,
+            perms_json: None,
             repo_access: None,
             expires_at: Some(self.token.expires_at.clone()),
             revoked_at: self.token.revoked_at.clone(),
@@ -1155,4 +1169,434 @@ pub async fn authorize_rpc(
     Ok(OAuthAuthorizeResponse {
         redirect_to: build_redirect(&uri, &pairs),
     })
+}
+
+// ---------------------------------------------------------------------------
+// Device authorization grant (RFC 8628) — `ox auth login --web`
+// ---------------------------------------------------------------------------
+//
+// `POST /oauth/device/code` starts a grant (public endpoint — the device_code
+// is the credential). The CLI prints `user_code` + `verification_uri`, the
+// user approves on `/oauth/device` (session-gated `oauth.deviceInfo` /
+// `oauth.deviceAuthorize` RPCs), and the CLI polls `POST /oauth/token` with
+// `grant_type=urn:ietf:params:oauth:grant-type:device_code`. On first
+// successful poll the server mints a classic PAT (token seam option (a):
+// `/api/rpc` Bearer already accepts PATs, so no RPC-edge change is needed).
+
+/// Unambiguous alphabet for human-typed codes — no vowels, no 0/1/I/O.
+const USER_CODE_ALPHABET: &[u8] = b"BCDFGHJKLMNPQRSTVWXZ23456789";
+const USER_CODE_LEN: usize = 8;
+/// RFC 8628 §3.5 `slow_down` step: each too-fast poll adds 5s.
+const SLOW_DOWN_STEP_SECS: i64 = 5;
+
+/// `XXXX-XXXX` from the unambiguous alphabet.
+fn generate_user_code() -> String {
+    let mut bytes = [0u8; USER_CODE_LEN];
+    rand::fill(&mut bytes);
+    let mut out = String::with_capacity(USER_CODE_LEN + 1);
+    for (i, b) in bytes.iter().enumerate() {
+        if i == 4 {
+            out.push('-');
+        }
+        out.push(USER_CODE_ALPHABET[(*b as usize) % USER_CODE_ALPHABET.len()] as char);
+    }
+    out
+}
+
+/// Uppercase alphanumeric squash — `abcd-1234`, `ABCD1234`, `abcd 1234` all
+/// resolve to the same stored form.
+fn normalize_user_code(raw: &str) -> String {
+    raw.chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .flat_map(|c| c.to_uppercase())
+        .collect()
+}
+
+/// Pretty `XXXX-XXXX` form of a normalized code for display.
+fn display_user_code(normalized: &str) -> String {
+    if normalized.len() == USER_CODE_LEN {
+        format!("{}-{}", &normalized[..4], &normalized[4..])
+    } else {
+        normalized.to_string()
+    }
+}
+
+/// `POST /oauth/device/code` — RFC 8628 §3.1/3.2. Accepts `scope` as a
+/// space-delimited list of classic PAT scope names (default `repo`); the
+/// approved grant mints a classic PAT with exactly those scopes.
+pub async fn device_code(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    let client = crate::rpc::ClientMeta::from_headers(&headers);
+    let ip = client.ip_address.as_deref().unwrap_or("unknown");
+    if let Err(retry) = crate::pat::bearer::lock(&state.git_auth_limiter).check_ip(ip) {
+        let mut res = token_error(
+            StatusCode::TOO_MANY_REQUESTS,
+            "rate_limited",
+            "too many requests",
+        );
+        res.headers_mut().insert(
+            header::RETRY_AFTER,
+            HeaderValue::from_str(&retry.as_secs().max(1).to_string())
+                .unwrap_or_else(|_| HeaderValue::from_static("60")),
+        );
+        return res;
+    }
+
+    let mut scope_param: Option<String> = None;
+    for (k, v) in url::form_urlencoded::parse(&body) {
+        if k == "scope" {
+            scope_param = Some(v.into_owned());
+        }
+    }
+    let scopes: Vec<ClassicPatScope> = match scope_param
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        Some(raw) => {
+            let mut parsed = Vec::new();
+            for part in raw.split_whitespace() {
+                match ClassicPatScope::parse(part) {
+                    Ok(s) if !parsed.contains(&s) => parsed.push(s),
+                    Ok(_) => {}
+                    Err(e) => {
+                        return token_error(
+                            StatusCode::BAD_REQUEST,
+                            "invalid_scope",
+                            &e,
+                        )
+                    }
+                }
+            }
+            parsed
+        }
+        None => vec![ClassicPatScope::Repo],
+    };
+    if scopes.is_empty() {
+        return token_error(StatusCode::BAD_REQUEST, "invalid_scope", "scope is required");
+    }
+    let scopes_wire = scopes
+        .iter()
+        .map(|s| s.as_str())
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    let (device_code, device_code_hash, _prefix) = mint_secret(OAUTH_DEVICE_CODE_PREFIX);
+    // Collision on UNIQUE user_code is astronomically unlikely but retried once.
+    let id = Uuid::new_v4().to_string();
+    let expires_at = rfc3339_in(OAUTH_DEVICE_CODE_TTL_SECS);
+    let mut user_code = String::new();
+    let mut inserted = false;
+    for _ in 0..3 {
+        user_code = generate_user_code();
+        match state
+            .db
+            .insert_oauth_device_code(
+                &id,
+                &device_code_hash,
+                &normalize_user_code(&user_code),
+                &scopes_wire,
+                OAUTH_DEVICE_POLL_INTERVAL_SECS,
+                &expires_at,
+            )
+            .await
+        {
+            Ok(()) => {
+                inserted = true;
+                break;
+            }
+            Err(e) if e.contains("UNIQUE") || e.contains("unique") => continue,
+            Err(e) => {
+                tracing::error!(error = %e, "oauth device_code: insert failed");
+                return token_error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "server_error",
+                    "internal error",
+                );
+            }
+        }
+    }
+    if !inserted {
+        return token_error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "server_error",
+            "could not allocate device code",
+        );
+    }
+
+    let origin = crate::public_origin::resolve_public_origin();
+    let verification_uri = format!("{origin}/oauth/device");
+    let body_out = OAuthDeviceCodeResponse {
+        device_code,
+        user_code: user_code.clone(),
+        verification_uri: verification_uri.clone(),
+        verification_uri_complete: format!("{verification_uri}?user_code={user_code}"),
+        expires_in: OAUTH_DEVICE_CODE_TTL_SECS,
+        interval: OAUTH_DEVICE_POLL_INTERVAL_SECS,
+    };
+    let mut res = Json(body_out).into_response();
+    res.headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    res
+}
+
+/// Device-grant poll: `device_code` → pending/denied/expired or a minted PAT.
+async fn device_token_exchange(
+    state: AppState,
+    headers: HeaderMap,
+    device_code: Option<&str>,
+) -> Response {
+    let raw = device_code.map(str::trim).unwrap_or("");
+    if raw.is_empty() {
+        return token_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_request",
+            "device_code is required",
+        );
+    }
+
+    let row = match state
+        .db
+        .find_oauth_device_code_by_hash(&sha256_hex(raw.as_bytes()))
+        .await
+    {
+        Ok(Some(r)) => r,
+        Ok(None) => {
+            return token_error(StatusCode::BAD_REQUEST, "invalid_grant", "unknown device_code")
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "oauth device poll: lookup failed");
+            return token_error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "server_error",
+                "internal error",
+            );
+        }
+    };
+
+    // Opportunistic GC of expired rows (cheap, keeps the table bounded).
+    let now = now_rfc3339();
+    let _ = state.db.delete_expired_oauth_device_codes(&now).await;
+
+    if rfc3339_expired(&row.expires_at) {
+        return token_error(
+            StatusCode::BAD_REQUEST,
+            "expired_token",
+            "device code expired — run `ox auth login --web` again",
+        );
+    }
+    match row.status.as_str() {
+        "denied" => {
+            return token_error(
+                StatusCode::BAD_REQUEST,
+                "access_denied",
+                "the user denied this sign-in",
+            )
+        }
+        "consumed" => {
+            return token_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_grant",
+                "device code already exchanged",
+            )
+        }
+        "approved" => {
+            // Single claim — a racing poll loses and must re-exchange → pending.
+            match state.db.consume_oauth_device_code(&row.id).await {
+                Ok(true) => {}
+                Ok(false) => {
+                    return token_error(
+                        StatusCode::BAD_REQUEST,
+                        "authorization_pending",
+                        "authorization is being finalized",
+                    )
+                }
+                Err(e) => {
+                    tracing::error!(error = %e, "oauth device poll: consume failed");
+                    return token_error(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "server_error",
+                        "internal error",
+                    );
+                }
+            }
+            let Some(user_id) = row.user_id.as_deref() else {
+                return token_error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "server_error",
+                    "internal error",
+                );
+            };
+            let scopes: Vec<ClassicPatScope> = row
+                .scopes
+                .split_whitespace()
+                .filter_map(|s| ClassicPatScope::parse(s).ok())
+                .collect();
+            let name = format!(
+                "ox cli — device login {}",
+                Utc::now().format("%Y-%m-%d")
+            );
+            let (_id, pat) = match crate::pat::mint_classic_pat(
+                &state.db, user_id, &name, &scopes, None,
+            )
+            .await
+            {
+                Ok(t) => t,
+                Err(e) => {
+                    tracing::error!(error = %e.message, "oauth device poll: pat mint failed");
+                    return token_error(
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "server_error",
+                        "internal error",
+                    );
+                }
+            };
+
+            crate::audit::record_with(
+                &state.db,
+                &crate::rpc::ClientMeta::from_headers(&headers),
+                None,
+                "oauth.device_token_minted",
+                None,
+                None,
+            )
+            .await;
+
+            let body = OAuthTokenResponse {
+                access_token: pat,
+                token_type: "bearer".into(),
+                // PATs minted here carry no expiry.
+                expires_in: 0,
+                scope: row.scopes.clone(),
+            };
+            let mut res = Json(body).into_response();
+            res.headers_mut()
+                .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+            return res;
+        }
+        _ => {}
+    }
+
+    // status == "pending" — enforce the poll interval (RFC 8628 §3.5).
+    let too_fast = row
+        .last_polled_at
+        .as_deref()
+        .and_then(|s| DateTime::parse_from_rfc3339(s).ok())
+        .map(|dt| {
+            dt.with_timezone(&Utc) + chrono::Duration::seconds(row.interval_secs) > Utc::now()
+        })
+        .unwrap_or(false);
+    let new_interval = if too_fast {
+        row.interval_secs + SLOW_DOWN_STEP_SECS
+    } else {
+        row.interval_secs
+    };
+    let _ = state
+        .db
+        .record_oauth_device_code_poll(&row.id, &now, new_interval)
+        .await;
+    if too_fast {
+        return token_error(
+            StatusCode::BAD_REQUEST,
+            "slow_down",
+            "polling faster than the granted interval",
+        );
+    }
+    token_error(
+        StatusCode::BAD_REQUEST,
+        "authorization_pending",
+        "the user has not yet approved this sign-in",
+    )
+}
+
+/// `oauth.deviceInfo` — approve page lookup: pending code → scopes + expiry.
+/// Session required (any authenticated user may *look* at a pending code —
+/// approving is the security decision).
+pub async fn device_info(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<OAuthDeviceInfo, AppError> {
+    require_session_user_id(ctx)?;
+    let req: OAuthDeviceInfoRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid oauth.deviceInfo input: {e}"),
+        )
+    })?;
+    let normalized = normalize_user_code(&req.user_code);
+    let row = ctx
+        .db
+        .find_oauth_device_code_by_user_code(&normalized)
+        .await
+        .map_err(db_err)?
+        .filter(|r| r.status == "pending" && !rfc3339_expired(&r.expires_at))
+        .ok_or_else(|| {
+            AppError::new("oauth.device_code_not_found", "no pending device code")
+        })?;
+    Ok(OAuthDeviceInfo {
+        user_code: display_user_code(&row.user_code),
+        scopes: row
+            .scopes
+            .split_whitespace()
+            .map(|s| s.to_string())
+            .collect(),
+        expires_at: row.expires_at.clone(),
+    })
+}
+
+/// `oauth.deviceAuthorize` — the approve/deny decision (verified session).
+pub async fn device_authorize(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<serde_json::Value, AppError> {
+    let user = require_verified(ctx).await?;
+    let req: OAuthDeviceAuthorizeRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid oauth.deviceAuthorize input: {e}"),
+        )
+    })?;
+    let normalized = normalize_user_code(&req.user_code);
+    let row = ctx
+        .db
+        .find_oauth_device_code_by_user_code(&normalized)
+        .await
+        .map_err(db_err)?
+        .filter(|r| !rfc3339_expired(&r.expires_at))
+        .ok_or_else(|| {
+            AppError::new("oauth.device_code_not_found", "no pending device code")
+        })?;
+
+    let ok = if req.approve {
+        ctx.db
+            .approve_oauth_device_code(&row.id, &user.id, &now_rfc3339())
+            .await
+            .map_err(db_err)?
+    } else {
+        ctx.db.deny_oauth_device_code(&row.id).await.map_err(db_err)?
+    };
+    if !ok {
+        return Err(AppError::new(
+            "oauth.device_code_not_found",
+            "device code is no longer pending",
+        ));
+    }
+
+    crate::audit::record_with(
+        &ctx.db,
+        &ctx.client,
+        Some((&user.id, &user.username)),
+        if req.approve {
+            "oauth.device_approved"
+        } else {
+            "oauth.device_denied"
+        },
+        None,
+        None,
+    )
+    .await;
+    Ok(serde_json::json!({ "ok": true }))
 }

@@ -227,6 +227,56 @@ pub struct OAuthUserInfoResponse {
     pub email: Option<String>,
 }
 
+// ---------------------------------------------------------------------------
+// Device authorization grant (RFC 8628) — `ox auth login --web`
+// ---------------------------------------------------------------------------
+
+/// `device_code` plaintext prefix; only the SHA-256 hash is stored.
+pub const OAUTH_DEVICE_CODE_PREFIX: &str = "oxidean_odc_";
+
+/// Device grant lifetime — 15 minutes (RFC 8628 §3.2 `expires_in` guidance).
+pub const OAUTH_DEVICE_CODE_TTL_SECS: i64 = 900;
+
+/// Minimum poll interval the server advertises (seconds).
+pub const OAUTH_DEVICE_POLL_INTERVAL_SECS: i64 = 5;
+
+/// `POST /oauth/device/code` success body (RFC 8628 §3.2).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OAuthDeviceCodeResponse {
+    pub device_code: String,
+    /// Human-typable `XXXX-XXXX` code the user enters on the verify page.
+    pub user_code: String,
+    pub verification_uri: String,
+    /// verification_uri with `user_code` prefilled — what the CLI opens/prints.
+    pub verification_uri_complete: String,
+    pub expires_in: i64,
+    pub interval: i64,
+}
+
+/// `oauth.deviceInfo` input — the approval page's lookup.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OAuthDeviceInfoRequest {
+    /// User code as typed (dashes/case-insensitive — normalized server-side).
+    pub user_code: String,
+}
+
+/// What the approval page renders for a pending code.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OAuthDeviceInfo {
+    /// Canonical `XXXX-XXXX` form.
+    pub user_code: String,
+    /// Classic-PAT scope names the resulting token will carry.
+    pub scopes: Vec<String>,
+    pub expires_at: String,
+}
+
+/// `oauth.deviceAuthorize` input — the approval decision.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OAuthDeviceAuthorizeRequest {
+    pub user_code: String,
+    pub approve: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
