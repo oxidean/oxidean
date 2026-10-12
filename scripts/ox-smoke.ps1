@@ -3,6 +3,10 @@
 param([Parameter(Mandatory = $true)][string]$Ox)
 $ErrorActionPreference = 'Stop'
 
+# dist/ keeps the canonical extension-less name (what /cli/bin/ serves) plus a
+# .exe twin for local exec — `&` refuses an extension-less path on Windows.
+if (Test-Path "$Ox.exe") { $Ox = "$Ox.exe" }
+
 $out = & $Ox --version
 if ($out -notmatch '^ox \d+\.\d+\.\d+') { throw "bad --version: $out" }
 
