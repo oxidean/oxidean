@@ -1,10 +1,10 @@
 import { useState } from "octane";
+import { Toggle } from "@octanejs/base-ui/toggle";
+import { ToggleGroup } from "@octanejs/base-ui/toggle-group";
 import { Check, ChevronDown } from "@octanejs/lucide";
 import { CodeSnippet } from "@/components/code-snippet";
 import { CopyCommand } from "@/components/settings/copy-command";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import {
   SelectIcon,
   SelectItem,
@@ -43,8 +43,11 @@ export function McpHarnessBlocks(props: { endpoint: string }) @{
     }
   }
 
+  const segItem =
+    "inline-flex h-9 items-center justify-center rounded-sm px-3 text-[13px] font-medium text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring data-[pressed]:bg-accent data-[pressed]:text-foreground data-[pressed]:shadow-sm";
+
   <div className="flex flex-col gap-3">
-    <div className="flex flex-wrap items-end gap-4">
+    <div className="flex flex-wrap items-center gap-3">
       <SelectRoot
         value={current.id}
         onValueChange={(next) => {
@@ -84,54 +87,68 @@ export function McpHarnessBlocks(props: { endpoint: string }) @{
         </SelectPortal>
       </SelectRoot>
 
-      <RadioGroup
-        value={mode}
-        onValueChange={(next) => {
+      <ToggleGroup
+        value={[mode]}
+        onValueChange={(values) => {
+          // Single-select: Base UI can emit an empty array on deselect — keep
+          // the current mode instead of clearing it.
+          const next = values[values.length - 1];
           if (next === "token" || next === "oauth") {
             setMode(next);
             setCopied(false);
           }
         }}
-        className="flex-row gap-4 pb-1"
+        className="inline-flex h-11 items-center gap-1 rounded-md border border-input bg-card p-1"
         aria-label="Auth mode"
       >
-        <div className="flex items-center gap-2">
-          <RadioGroupItem value="token" id="mcp-auth-token" data-testid="mcp-auth-token" />
-          <Label htmlFor="mcp-auth-token" className="text-[13px] font-medium">
-            Token
-          </Label>
-        </div>
-        <div className="flex items-center gap-2">
-          <RadioGroupItem value="oauth" id="mcp-auth-oauth" data-testid="mcp-auth-oauth" />
-          <Label htmlFor="mcp-auth-oauth" className="text-[13px] font-medium">
-            OAuth
-          </Label>
-        </div>
-      </RadioGroup>
+        <Toggle
+          value="token"
+          data-testid="mcp-auth-token"
+          className={segItem}
+          aria-label="Token auth"
+        >
+          Token
+        </Toggle>
+        <Toggle
+          value="oauth"
+          data-testid="mcp-auth-oauth"
+          className={segItem}
+          aria-label="OAuth auth"
+        >
+          OAuth
+        </Toggle>
+      </ToggleGroup>
     </div>
 
-    <div className="flex items-center justify-between gap-3">
-      <p className="font-mono text-[13px] text-muted-foreground" data-testid="mcp-snippet-file">
-        {current.file as string}
-      </p>
-      <Button
-        type="button"
-        variant="outline"
-        className="shrink-0"
-        aria-label={`Copy ${current.label} config`}
-        onClick={() => void copy()}
-      >
-        {(copied ? "Copied" : "Copy") as string}
-      </Button>
-    </div>
     <div
-      className="rounded-md border border-border bg-card p-3"
+      className="overflow-hidden rounded-md border border-border bg-card"
       data-testid="mcp-snippet-block"
       data-harness={current.id}
       data-auth={mode}
     >
-      <CodeSnippet code={block.code} path={current.file} />
+      <div className="flex items-center justify-between gap-3 border-b border-border bg-muted/40 px-3 py-1.5">
+        <p
+          className="truncate font-mono text-[13px] text-muted-foreground"
+          data-testid="mcp-snippet-file"
+        >
+          {current.file as string}
+        </p>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="-mr-2 shrink-0"
+          aria-label={`Copy ${current.label} config`}
+          onClick={() => void copy()}
+        >
+          {(copied ? "Copied" : "Copy") as string}
+        </Button>
+      </div>
+      <div className="p-3">
+        <CodeSnippet code={block.code} path={current.file} />
+      </div>
     </div>
+
     @if (block.command) {
       <>
         <p
