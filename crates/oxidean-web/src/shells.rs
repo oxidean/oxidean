@@ -72,6 +72,7 @@ static SHELLS: &[Shell] = &[
     Shell { pattern: &[L("settings"), L("emails")], file: "settings/emails/index.html", title: None, protected: true, redirect: None },
     Shell { pattern: &[L("settings"), L("ssh-keys")], file: "settings/ssh-keys/index.html", title: None, protected: true, redirect: None },
     Shell { pattern: &[L("settings"), L("cli")], file: "settings/cli/index.html", title: None, protected: true, redirect: None },
+    Shell { pattern: &[L("settings"), L("ai")], file: "settings/ai/index.html", title: None, protected: true, redirect: None },
     Shell { pattern: &[L("settings"), L("applications")], file: "settings/applications/index.html", title: None, protected: true, redirect: None },
     Shell { pattern: &[L("settings"), L("tokens")], file: "settings/tokens/index.html", title: None, protected: true, redirect: None },
     Shell { pattern: &[L("settings"), L("tokens"), L("new")], file: "settings/tokens/new/index.html", title: None, protected: true, redirect: None },

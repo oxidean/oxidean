@@ -1,48 +1,11 @@
 import { useQuery } from "@octanejs/tanstack-query";
-import { useState } from "octane";
 import { AppPage } from "@/components/app-page";
 import { AccountSettingsLayout } from "@/components/settings/settings-shell";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { CopyCommand } from "@/components/settings/copy-command";
 import { PageHeader } from "@/components/ui/page-header";
 import { usePageRedirect } from "@/lib/nav.tsrx";
 import { resolvePublicOriginClient } from "@/lib/public-origin";
 import { authSessionQueryOptions } from "@/lib/session-queries";
-
-function CopyCommand(props: { command: string; ariaLabel: string }) @{
-  const [copied, setCopied] = useState(false);
-
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(props.command);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2000);
-    } catch {
-      /* manual copy via focus-select */
-    }
-  }
-
-  <div className="flex flex-col gap-3 sm:flex-row">
-    <Input
-      readOnly
-      value={props.command as string}
-      aria-label={props.ariaLabel as string}
-      className="min-w-0 flex-1 font-mono text-[13px]"
-      onFocus={(e) => {
-        (e.currentTarget as HTMLInputElement).select();
-      }}
-    />
-    <Button
-      type="button"
-      variant="outline"
-      className="shrink-0"
-      aria-label={props.ariaLabel as string}
-      onClick={() => void copy()}
-    >
-      {(copied ? "Copied" : "Copy") as string}
-    </Button>
-  </div>;
-}
 
 /** `/settings/cli` — ox CLI install + sign-in (title/meta via shell). */
 export function CliSettingsPage() @{
