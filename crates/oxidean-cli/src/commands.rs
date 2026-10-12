@@ -2917,7 +2917,8 @@ fn login_token(flag: Option<&str>, token_stdin: bool) -> Result<String, CliError
     use std::io::IsTerminal;
     if !token_stdin && std::io::stdin().is_terminal() {
         return Err(CliError::Usage(
-            "no token — pass --token, set OXIDEAN_TOKEN, or pipe a token on stdin".to_string(),
+            "no token — pass --token, --web, set OXIDEAN_TOKEN, or pipe a token on stdin"
+                .to_string(),
         ));
     }
     let mut buf = String::new();

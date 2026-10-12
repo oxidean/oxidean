@@ -93,6 +93,15 @@ pub async fn request(instance: &str, scopes: &str) -> Result<DeviceCodeResponse,
         .await
         .map_err(|e| CliError::Transport(format!("device code response: {e}")))?;
     if !status.is_success() {
+        // Older instances (and deployments whose web proxy predates the
+        // device endpoint) answer HTML 404s — translate that into an
+        // actionable hint instead of dumping markup.
+        if status == reqwest::StatusCode::NOT_FOUND {
+            return Err(CliError::Usage(format!(
+                "browser sign-in is not available on {instance} — the instance\n\
+                 may be an older release. Use `ox auth login --instance {instance} --token <pat>`."
+            )));
+        }
         return Err(CliError::Transport(format!(
             "device code request failed ({status}): {}",
             body.chars().take(300).collect::<String>()

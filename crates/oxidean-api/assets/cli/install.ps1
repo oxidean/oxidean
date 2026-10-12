@@ -61,4 +61,5 @@ if (-not (($userPath -split ';') -contains $Dest)) {
     Write-Host "note: $Dest is not on your PATH — add it for your user with:"
     Write-Host "  [Environment]::SetEnvironmentVariable('Path', `"`$env:Path;$Dest`", 'User')"
 }
-Write-Host "next: ox auth login --instance $Base --token <pat>"
+Write-Host "next: ox auth login --instance $Base --web"
+Write-Host "  or: ox auth login --instance $Base --token <pat>"

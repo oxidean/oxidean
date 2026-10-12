@@ -22,10 +22,12 @@ const API_PREFIXES: &[&str] = &[
     "/generic",
     // CLI distribution (install.sh + ox binaries).
     "/cli",
-    // OAuth2 endpoints (API-03). `/oauth/consent` stays a SPA route.
+    // OAuth2 endpoints (API-03). `/oauth/consent` and the `/oauth/device`
+    // approval page stay SPA routes; device-code creation is API-owned.
     "/oauth/authorize",
     "/oauth/token",
     "/oauth/userinfo",
+    "/oauth/device/code",
 ];
 
 /// Hop-by-hop headers never cross a proxy hop. `connection`/`upgrade` are
@@ -243,8 +245,13 @@ mod tests {
         assert!(is_api_prefix("/uploads/avatars/x.png"));
         assert!(is_api_prefix("/v2/oxidean/app/blobs/sha256:ab"));
         assert!(is_api_prefix("/oauth/authorize"));
+        assert!(is_api_prefix("/oauth/device/code"));
         assert!(!is_api_prefix("/v2x"));
         assert!(!is_api_prefix("/oauth/consent"));
+        // `/oauth/device` (approval page) is a SPA route — the segment-aware
+        // match must not let `/oauth/device/code` swallow it.
+        assert!(!is_api_prefix("/oauth/device"));
+        assert!(!is_api_prefix("/oauth/device/"));
         assert!(!is_api_prefix("/apiary"));
         assert!(!is_api_prefix("/jesse/app"));
     }

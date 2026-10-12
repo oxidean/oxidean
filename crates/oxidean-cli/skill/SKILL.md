@@ -36,7 +36,8 @@ pacman (`.deb`, `.rpm`, `.apk`, `.pkg.tar.zst`).
 ## Authenticate
 
 ```sh
-ox auth login --instance https://forge.example.com        # paste a PAT (TTY)
+ox auth login --instance https://forge.example.com --web  # browser device grant
+ox auth login --instance https://forge.example.com --token <pat>
 printenv OXIDEAN_TOKEN | ox auth login --instance <url> --token-stdin   # CI
 ox auth status                                            # who am I
 ox auth token                                             # print token (scripts)

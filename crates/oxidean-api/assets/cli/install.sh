@@ -98,4 +98,5 @@ case ":$PATH:" in
     *":$DEST:"*) ;;
     *) echo "note: $DEST is not on your PATH" ;;
 esac
-echo "next: ox auth login --instance $BASE --token <pat>"
+echo "next: ox auth login --instance $BASE --web"
+echo "  or: ox auth login --instance $BASE --token <pat>"
