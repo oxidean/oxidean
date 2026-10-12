@@ -13,7 +13,7 @@
 
 export type McpAuthVariant = "token" | "oauth";
 
-export type McpHarnessVariantBlock = {
+type McpHarnessVariantBlock = {
   /** Full file content to paste. */
   code: string;
   /** Extra copyable command rendered under the block (e.g. `claude mcp add`). */
