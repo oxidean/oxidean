@@ -43,6 +43,7 @@ export type ManifestCapabilities = {
   mcp: boolean;
   rest: boolean;
   oauth: boolean;
+  cli_dist: boolean;
 };
 
 export type ManifestResponse = {

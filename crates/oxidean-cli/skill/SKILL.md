@@ -136,7 +136,17 @@ marked and `d` selects them all — and project/global scope. `--detected`
 non-interactively selects every harness whose config dir or PATH binary is
 present; combined with `--harness` it intersects. `--upgrade` rewrites only
 `ox/SKILL.md` files that already exist — it never prompts and never creates
-new installs; `--project`/`--global`/`--harness` narrow the sweep.
+new installs; `--project`/`--global`/`--harness` narrow the sweep. The same
+sweep runs automatically after `ox self-update` (opt out with
+`--no-skill-refresh`).
+
+The harness registry follows the vercel-labs/skills table (~70 rows —
+`claude`, `cursor`, `codex`, `copilot`, `gemini`, `opencode`, `continue`,
+`trae`, `qwen`, `grok`, `junie`, `amp`, `devin`, `windsurf`, `kiro`, and
+more). Harnesses that share a skills dir (many read `.agents/skills`) write
+it once; `generic` covers any other `.agents/skills` consumer. Run
+`ox skill install --help` for the full id list — pass `--harness <id>` to
+skip the picker.
 
 ## Notes for agents
 

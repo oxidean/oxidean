@@ -132,7 +132,7 @@ pub fn apply_binary(exe: &Path, bytes: &[u8]) -> Result<PathBuf, CliError> {
     }
 }
 
-pub async fn run(global: &Global, rt: &Runtime) -> Result<Out, CliError> {
+pub async fn run(global: &Global, rt: &Runtime, no_skill_refresh: bool) -> Result<Out, CliError> {
     let instance = crate::commands::resolve_instance(global, &rt.config)?;
     let http = reqwest::Client::new();
     let latest = fetch_latest(&http, &instance).await?;
@@ -166,17 +166,37 @@ pub async fn run(global: &Global, rt: &Runtime) -> Result<Out, CliError> {
         .map_err(|e| CliError::Transport(format!("cannot locate current executable: {e}")))?;
     apply_binary(&exe, &bytes)?;
 
+    // Refresh installed `ox` skills to the new embedded copy — the skill
+    // rides with the binary. Best-effort: a write failure warns, never
+    // fails the update.
+    let skills = if no_skill_refresh {
+        None
+    } else {
+        match crate::skill::refresh_installed() {
+            Ok(n) => Some(n),
+            Err(e) => {
+                eprintln!("warning: skill refresh failed: {e}");
+                Some(0)
+            }
+        }
+    };
+
+    let mut text = format!(
+        "updated ox {current} → {} ({})",
+        latest.version,
+        exe.display()
+    );
+    if let Some(n) = skills.filter(|n| *n > 0) {
+        text.push_str(&format!("\nrefreshed {n} installed ox skill(s)"));
+    }
     Ok(Out::Report {
-        text: format!(
-            "updated ox {current} → {} ({})",
-            latest.version,
-            exe.display()
-        ),
+        text,
         json: json!({"ok": true, "data": {
             "from": current,
             "to": latest.version,
             "path": exe,
             "updated": true,
+            "skills_refreshed": skills,
         }}),
     })
 }

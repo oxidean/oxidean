@@ -32,7 +32,7 @@ fn manifest_body(procedures: Value) -> Value {
             "protocol_version": 1,
             "server_version": "9.9.9-test",
             "procedures": procedures,
-            "capabilities": {"mcp": false, "rest": false, "oauth": false},
+            "capabilities": {"mcp": true, "rest": true, "oauth": true, "cli_dist": true},
             "min_cli_version": "0.1.0"
         }
     })

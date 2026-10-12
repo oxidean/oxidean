@@ -74,6 +74,12 @@ to the running build, downloads `ox-{your-target}` and its `.sha256`, verifies
 the checksum, and swaps the executable in place. When the instance has no
 artifact for your platform it says so and points at the installer instead.
 
+After a successful swap, `ox` refreshes any installed agent skills — every
+existing `ox/SKILL.md` it finds under project or global harness dirs is
+rewritten from the new binary's embedded copy (the same sweep as
+`ox skill install --upgrade`; no new installs are created and refresh
+failures only warn). Pass `--no-skill-refresh` to skip that step.
+
 ### For operators: serving binaries
 
 The API serves every `ox-{rust-target-triple}` file found in
@@ -94,6 +100,11 @@ dist dir:
 `GET /cli/latest` reports the version (the API package version) and the
 sha256/size of every target found; `/cli/bin/{file}` serves artifacts and
 digests unauthenticated so installs work before `ox auth login` exists.
+
+> **Distribution polish backlog:** macOS binaries ship unsigned today —
+> Gatekeeper will flag them on first run (`xattr -d com.apple.quarantine` or
+> System Settings → Privacy & Security → Open Anyway). Apple signing +
+> notarization is tracked as a follow-up.
 
 ## Authentication
 
@@ -122,6 +133,9 @@ subsequent commands.
 
 ```bash
 ox auth status    # resolves auth.me — instance + username, exit 3 if unauthenticated
+ox auth switch    # pick a different default instance (picker, or pass the URL)
+ox auth logout    # drop the stored token for the resolved instance
+ox auth token     # print the resolved token (for scripts)
 ```
 
 > **Instance requirement:** `/api/rpc` accepts `Authorization: Bearer <pat>`
@@ -139,7 +153,40 @@ Every command resolves the target instance in this order:
 3. `default_instance` in the config file (set by `ox auth login`)
 
 The token is resolved separately: `OXIDEAN_TOKEN` env, then the stored token
-for the resolved instance.
+for the resolved instance. `ox config` exposes the local file:
+
+```bash
+ox config list                                   # config file + instances (tokens redacted)
+ox config get default_instance
+ox config set default_instance https://forge.example.com   # must be logged in
+ox config set instances.https://forge.example.com.token oxidean_pat_…
+```
+
+`config get`/`list` never print stored tokens — they report `set`/`unset`.
+
+## Agent skill
+
+`ox` embeds the consumer-facing agent `SKILL.md` and installs it into agent
+harness skill dirs. The registry follows the vercel-labs/skills table (~70
+harnesses — `claude`, `cursor`, `codex`, `copilot`, `gemini`, `opencode`,
+`continue`, `trae`, `qwen`, `grok`, `junie`, …) plus `generic`, which covers
+any harness that reads `.agents/skills`:
+
+```bash
+ox skill print                                  # write SKILL.md to stdout
+ox skill install                                # TTY picker (detected harnesses first)
+ox skill install --harness claude,cursor --project
+ox skill install --harness all --global
+ox skill install --detected --project           # only harnesses found installed
+ox skill install --upgrade                      # rewrite existing installs only
+```
+
+Install targets `<skills-dir>/ox/SKILL.md` per harness, deduplicating shared
+dirs (many harnesses read `.agents/skills`). `--detected` selects by config
+dirs, project markers, and binaries on `PATH`; combined with `--harness` it
+intersects. `--upgrade` never creates installs and never prompts — sweep all
+harnesses, or narrow with `--harness`/`--detected`/`--project`/`--global`.
+The same document is served by the instance at `/cli/skill.md`.
 
 ## Commands
 
@@ -184,6 +231,7 @@ ox pr comment|ready|update-branch|close|reopen|checkout o/n <n>
 # Actions
 ox run list o/n [--status s --event e --branch b --workflow w --limit n]
 ox run view o/n <run-id> [--log] [--job <id>]
+ox run watch o/n <run-id> [--interval s] [--timeout s] [--exit-status]
 ox run rerun|cancel o/n <run-id> [--failed-only]
 ox workflow list|view|run o/n [<workflow-id>] [--ref r]
 ox secret list|set|delete o/n [<NAME>]  # set: --body v | --file path | stdin
@@ -215,11 +263,18 @@ ox invite accept --token <t>
 ox admin users list|ban|unban|delete|set-role|sessions|revoke-sessions|access|activity
 ox admin invites list|create|link|revoke
 ox admin runners | ox admin runner-token
-ox admin lfs|git|mcp [set …] | ox admin templates list|enable|disable|delete
+ox admin lfs|git|mcp|auth [set …] | ox admin templates list|enable|disable|delete
+ox admin auth set --provider-mode local|workos|oidc --allow-signup  # merges over current
 ox admin repos gc
 
-# Maintenance
+# Maintenance & local
 ox self-update                          # swap this binary for the instance's build
+                                        #   (--no-skill-refresh skips the skill sweep)
+ox skill print|install                  # embedded agent SKILL.md → harness dirs
+ox config list|get|set                  # local config file (tokens redacted)
+ox completion bash|zsh|fish|pwsh        # static shell completion script
+ox search <query> [--type repos|issues|pulls|users|orgs|commits|code]
+ox browse [<o/n>] [--print]             # open the repo (or instance) in a browser
 
 # Escape hatch — any procedure, raw input fields
 ox api repo.get -f owner=octo -f name=demo
@@ -242,7 +297,8 @@ Before running an RPC-backed command — including `auth status` — `ox` fetche
 `system.manifest` from the instance (public, like `system.health`) with a short
 timeout. The manifest is the server's compatibility contract: which procedures
 its dispatch table knows, its protocol and server versions, optional
-capabilities (`mcp`, `rest`, `oauth`), and the oldest supported CLI version.
+capabilities (`mcp`, `rest`, `oauth`, `cli_dist`), and the oldest supported
+CLI version.
 
 - A procedure missing from `procedures` fails fast:
   `command not supported by instance (missing <procedure>)`, exit code 2 —
