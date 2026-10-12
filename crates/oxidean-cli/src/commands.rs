@@ -2573,7 +2573,9 @@ pub async fn dispatch(inv: &Invocation, rt: &Runtime) -> Result<Out, CliError> {
             harnesses,
             project,
             global,
-        } => crate::skill::install(g, rt, harnesses, *project, *global),
+            upgrade,
+            detected,
+        } => crate::skill::install(g, rt, harnesses, *project, *global, *upgrade, *detected),
         Command::SelfUpdate => crate::self_update::run(g, rt).await,
         Command::Api { procedure, input } => {
             invoke(g, rt, procedure, input.clone(), |data| {

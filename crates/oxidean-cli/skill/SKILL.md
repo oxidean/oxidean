@@ -126,10 +126,17 @@ ox release upload o/n v1.2.0 dist/*.tar.gz
 ox skill print                                   # raw SKILL.md to stdout
 ox skill install --harness claude,cursor --project   # repo-local skill dirs
 ox skill install --harness devin --global        # user-level
+ox skill install --detected --project            # every harness found on this machine
+ox skill install --upgrade                       # refresh existing installs only (both scopes)
 curl -fsSL <instance>/cli/skill.md               # fetched copy, versioned with the server
 ```
 
-On a TTY, `ox skill install` prompts for harness(es) and project/global scope.
+On a TTY, `ox skill install` prompts for harness(es) — detected ones are
+marked and `d` selects them all — and project/global scope. `--detected`
+non-interactively selects every harness whose config dir or PATH binary is
+present; combined with `--harness` it intersects. `--upgrade` rewrites only
+`ox/SKILL.md` files that already exist — it never prompts and never creates
+new installs; `--project`/`--global`/`--harness` narrow the sweep.
 
 ## Notes for agents
 

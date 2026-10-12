@@ -196,7 +196,7 @@ const HELP: &[(&str, &str)] = &[
     ("self-update", "ox self-update\n\nDownloads the ox build for this platform the configured instance\nserves, verifies the published sha256, and swaps this executable."),
     ("skill", "ox skill — the consumer-facing agent SKILL.md\n\n  ox skill print     write SKILL.md to stdout\n  ox skill install   write SKILL.md into harness skill dirs\n\nThe document is embedded in this binary and also served by the\ninstance at /cli/skill.md."),
     ("skill print", "ox skill print\n\nPrints the embedded SKILL.md verbatim — `ox skill print > SKILL.md`\nor pipe into `ox skill install`-style tooling."),
-    ("skill install", "ox skill install [--harness <id,...> | --harness all] [--project | --global]\n\nWrites the embedded SKILL.md to <skills-dir>/ox/SKILL.md for each\nharness. On a TTY it prompts for harnesses (project dirs that already\nexist are marked) and scope. Non-interactive requires --harness and a\nscope flag.\n\nHarness ids: claude cursor codex copilot gemini opencode amp devin\nwindsurf kiro roo goose cline openclaw generic"),
+    ("skill install", "ox skill install [--harness <id,...> | --harness all] [--detected]\n                 [--upgrade] [--project | --global]\n\nWrites the embedded SKILL.md to <skills-dir>/ox/SKILL.md for each\nharness. --detected selects only harnesses found installed on this\nmachine (config dirs, PATH binaries); combined with --harness it\nintersects. On a TTY it prompts for harnesses (detected ones marked,\n'd' selects them all) and scope. Non-interactive requires --harness\nor --detected, plus a scope flag.\n\n--upgrade rewrites only ox/SKILL.md files that already exist — it\ncreates no new installs and never prompts. Bare --upgrade sweeps all\nharnesses at both scopes; --harness/--detected/scope flags narrow it.\n\nHarness ids: claude cursor codex copilot gemini opencode amp devin\nwindsurf kiro roo goose cline openclaw generic"),
     ("api", "ox api <procedure> [-f field=value]... [-F field=<json>]...\n\nRaw RPC escape hatch. -f values are strings; -F parses JSON."),
 ];
 
@@ -916,6 +916,8 @@ pub enum Command {
         harnesses: Vec<String>,
         project: bool,
         global: bool,
+        upgrade: bool,
+        detected: bool,
     },
     SelfUpdate,
     Api {
@@ -3143,7 +3145,12 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
             Command::SkillPrint
         }
         ("skill", "install", "") => {
-            let f = scan(tail, &[], &["--project", "--global"], &["--harness"])?;
+            let f = scan(
+                tail,
+                &[],
+                &["--project", "--global", "--upgrade", "--detected"],
+                &["--harness"],
+            )?;
             expect_no_positionals(&f, "skill install")?;
             Command::SkillInstall {
                 harnesses: f
@@ -3154,6 +3161,8 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
                     .collect(),
                 project: f.bools.contains("--project"),
                 global: f.bools.contains("--global"),
+                upgrade: f.bools.contains("--upgrade"),
+                detected: f.bools.contains("--detected"),
             }
         }
         ("self-update", "", "") => {

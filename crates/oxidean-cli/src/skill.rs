@@ -31,6 +31,19 @@ enum GlobalDir {
     Env(&'static str, &'static str),
 }
 
+/// Evidence that a harness is installed/used — `--detected` and the prompt's
+/// `d` select harnesses where any marker hits.
+enum Detect {
+    /// Repo-relative marker (dir or file) exists.
+    Project(&'static str),
+    /// `$HOME`-relative marker exists.
+    Home(&'static str),
+    /// `$XDG_CONFIG_HOME`-relative marker exists.
+    Xdg(&'static str),
+    /// Executable found on `PATH`.
+    Bin(&'static str),
+}
+
 struct Harness {
     /// `--harness <id>` selector.
     id: &'static str,
@@ -38,27 +51,44 @@ struct Harness {
     /// Repo-relative dir, `None` = global-scope only.
     project: Option<&'static str>,
     global: GlobalDir,
+    /// Installed-harness markers; first hit wins.
+    detect: &'static [Detect],
 }
 
 /// Curated table matching the vercel-labs/skills registry for the common
 /// harnesses; unknown harnesses can still consume `.agents/skills` via the
 /// `generic` entry.
 const HARNESSES: &[Harness] = &[
-    Harness { id: "claude",   label: "Claude Code",      project: Some(".claude/skills"),   global: GlobalDir::Env("CLAUDE_CONFIG_DIR", ".claude/skills") },
-    Harness { id: "cursor",   label: "Cursor",           project: Some(".agents/skills"),   global: GlobalDir::Home(".cursor/skills") },
-    Harness { id: "codex",    label: "Codex",            project: Some(".agents/skills"),   global: GlobalDir::Home(".agents/skills") },
-    Harness { id: "copilot",  label: "GitHub Copilot",   project: Some(".agents/skills"),   global: GlobalDir::Home(".copilot/skills") },
-    Harness { id: "gemini",   label: "Gemini CLI",       project: Some(".agents/skills"),   global: GlobalDir::Home(".gemini/skills") },
-    Harness { id: "opencode", label: "OpenCode",         project: Some(".agents/skills"),   global: GlobalDir::Xdg("opencode/skills") },
-    Harness { id: "amp",      label: "Amp",              project: Some(".agents/skills"),   global: GlobalDir::Xdg("agents/skills") },
-    Harness { id: "devin",    label: "Devin",            project: Some(".devin/skills"),    global: GlobalDir::Xdg("devin/skills") },
-    Harness { id: "windsurf", label: "Windsurf",         project: Some(".windsurf/skills"), global: GlobalDir::Home(".codeium/windsurf/skills") },
-    Harness { id: "kiro",     label: "Kiro CLI",         project: Some(".kiro/skills"),     global: GlobalDir::Home(".kiro/skills") },
-    Harness { id: "roo",      label: "Roo Code",         project: Some(".roo/skills"),      global: GlobalDir::Home(".roo/skills") },
-    Harness { id: "goose",    label: "Goose",            project: Some(".goose/skills"),    global: GlobalDir::Xdg("goose/skills") },
-    Harness { id: "cline",    label: "Cline",            project: Some(".agents/skills"),   global: GlobalDir::Home(".agents/skills") },
-    Harness { id: "openclaw", label: "OpenClaw",         project: Some("skills"),           global: GlobalDir::Home(".openclaw/skills") },
-    Harness { id: "generic",  label: "Any `.agents/skills` harness", project: Some(".agents/skills"), global: GlobalDir::Home(".agents/skills") },
+    Harness { id: "claude",   label: "Claude Code",      project: Some(".claude/skills"),   global: GlobalDir::Env("CLAUDE_CONFIG_DIR", ".claude/skills"),
+        detect: &[Detect::Project(".claude"), Detect::Home(".claude"), Detect::Bin("claude")] },
+    Harness { id: "cursor",   label: "Cursor",           project: Some(".agents/skills"),   global: GlobalDir::Home(".cursor/skills"),
+        detect: &[Detect::Project(".cursor"), Detect::Home(".cursor"), Detect::Bin("cursor-agent"), Detect::Bin("agent")] },
+    Harness { id: "codex",    label: "Codex",            project: Some(".agents/skills"),   global: GlobalDir::Home(".agents/skills"),
+        detect: &[Detect::Project(".codex"), Detect::Home(".codex"), Detect::Bin("codex")] },
+    Harness { id: "copilot",  label: "GitHub Copilot",   project: Some(".agents/skills"),   global: GlobalDir::Home(".copilot/skills"),
+        detect: &[Detect::Project(".copilot"), Detect::Home(".copilot"), Detect::Bin("copilot")] },
+    Harness { id: "gemini",   label: "Gemini CLI",       project: Some(".agents/skills"),   global: GlobalDir::Home(".gemini/skills"),
+        detect: &[Detect::Project(".gemini"), Detect::Home(".gemini"), Detect::Bin("gemini")] },
+    Harness { id: "opencode", label: "OpenCode",         project: Some(".agents/skills"),   global: GlobalDir::Xdg("opencode/skills"),
+        detect: &[Detect::Project(".opencode"), Detect::Xdg("opencode"), Detect::Bin("opencode")] },
+    Harness { id: "amp",      label: "Amp",              project: Some(".agents/skills"),   global: GlobalDir::Xdg("agents/skills"),
+        detect: &[Detect::Project(".amp"), Detect::Xdg("amp"), Detect::Bin("amp")] },
+    Harness { id: "devin",    label: "Devin",            project: Some(".devin/skills"),    global: GlobalDir::Xdg("devin/skills"),
+        detect: &[Detect::Project(".devin"), Detect::Xdg("devin"), Detect::Bin("devin")] },
+    Harness { id: "windsurf", label: "Windsurf",         project: Some(".windsurf/skills"), global: GlobalDir::Home(".codeium/windsurf/skills"),
+        detect: &[Detect::Project(".windsurf"), Detect::Home(".codeium/windsurf"), Detect::Bin("windsurf")] },
+    Harness { id: "kiro",     label: "Kiro CLI",         project: Some(".kiro/skills"),     global: GlobalDir::Home(".kiro/skills"),
+        detect: &[Detect::Project(".kiro"), Detect::Home(".kiro"), Detect::Bin("kiro"), Detect::Bin("kiro-cli")] },
+    Harness { id: "roo",      label: "Roo Code",         project: Some(".roo/skills"),      global: GlobalDir::Home(".roo/skills"),
+        detect: &[Detect::Project(".roo"), Detect::Home(".roo")] },
+    Harness { id: "goose",    label: "Goose",            project: Some(".goose/skills"),    global: GlobalDir::Xdg("goose/skills"),
+        detect: &[Detect::Project(".goose"), Detect::Xdg("goose"), Detect::Bin("goose")] },
+    Harness { id: "cline",    label: "Cline",            project: Some(".agents/skills"),   global: GlobalDir::Home(".agents/skills"),
+        detect: &[Detect::Project(".cline"), Detect::Home(".cline"), Detect::Bin("cline")] },
+    Harness { id: "openclaw", label: "OpenClaw",         project: Some("skills"),           global: GlobalDir::Home(".openclaw/skills"),
+        detect: &[Detect::Project(".openclaw"), Detect::Home(".openclaw"), Detect::Bin("openclaw")] },
+    Harness { id: "generic",  label: "Any `.agents/skills` harness", project: Some(".agents/skills"), global: GlobalDir::Home(".agents/skills"),
+        detect: &[Detect::Project(".agents"), Detect::Home(".agents")] },
 ];
 
 fn home() -> Option<PathBuf> {
@@ -105,6 +135,106 @@ fn harness_by_id(id: &str) -> Result<&'static Harness, CliError> {
         })
 }
 
+/// Does this harness look installed/used? Any marker hit counts.
+fn detected_at(root: &std::path::Path, h: &Harness) -> bool {
+    h.detect.iter().any(|d| match d {
+        Detect::Project(p) => {
+            if root.as_os_str().is_empty() {
+                PathBuf::from(p).exists()
+            } else {
+                root.join(p).exists()
+            }
+        }
+        Detect::Home(p) => home().map(|h| h.join(p).exists()).unwrap_or(false),
+        Detect::Xdg(p) => xdg_config().join(p).exists(),
+        Detect::Bin(b) => on_path(b),
+    })
+}
+
+/// Executable search on `PATH` — existence plus exec bit (PATHEXT-style
+/// extensions on Windows), no process spawning.
+fn on_path(bin: &str) -> bool {
+    let Some(paths) = std::env::var_os("PATH") else {
+        return false;
+    };
+    #[cfg(windows)]
+    let names: Vec<String> = std::iter::once(bin.to_string())
+        .chain(["exe", "cmd", "bat", "ps1"].iter().map(|e| format!("{bin}.{e}")))
+        .collect();
+    #[cfg(not(windows))]
+    let names = [bin];
+    std::env::split_paths(&paths)
+        .any(|dir| names.iter().any(|n| executable(&dir.join(n))))
+}
+
+#[cfg(unix)]
+fn executable(p: &std::path::Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    p.metadata()
+        .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false)
+}
+
+#[cfg(not(unix))]
+fn executable(p: &std::path::Path) -> bool {
+    p.is_file()
+}
+
+/// `--harness <id,...>` / `all` → harness list (deduped, table order).
+fn parse_harness_flags(flags: &[String]) -> Result<Vec<&'static Harness>, CliError> {
+    let mut out = Vec::new();
+    for spec in flags {
+        for id in spec.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+            if id == "all" {
+                for h in HARNESSES {
+                    if !out.iter().any(|x: &&Harness| x.id == h.id) {
+                        out.push(h);
+                    }
+                }
+                continue;
+            }
+            let h = harness_by_id(id)?;
+            if !out.iter().any(|x: &&Harness| x.id == h.id) {
+                out.push(h);
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Harness list from `--harness`/`--detected`; `detected_only` intersects the
+/// flagged set, or means "all detected" when no flags were given.
+fn select_harnesses(
+    root: &std::path::Path,
+    harness_flags: &[String],
+    detected_only: bool,
+) -> Result<Vec<&'static Harness>, CliError> {
+    let selected: Vec<&'static Harness> = if harness_flags.is_empty() {
+        if detected_only {
+            HARNESSES
+                .iter()
+                .filter(|h| detected_at(root, h))
+                .collect()
+        } else {
+            Vec::new()
+        }
+    } else {
+        let mut out = parse_harness_flags(harness_flags)?;
+        if detected_only {
+            out.retain(|h| detected_at(root, h));
+        }
+        out
+    };
+    if selected.is_empty() {
+        return Err(CliError::Usage(if detected_only {
+            "no detected harnesses".into()
+        } else {
+            "no harnesses selected".into()
+        }));
+    }
+    Ok(selected)
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum Scope {
     Project,
@@ -120,38 +250,25 @@ pub fn print_skill() -> Out {
 
 /// Resolve scope + harness list from flags, prompting on a TTY when unset.
 fn resolve_targets(
+    root: &std::path::Path,
     harness_flags: &[String],
+    detected_only: bool,
     project: bool,
     global: bool,
 ) -> Result<(Scope, Vec<&'static Harness>), CliError> {
     let tty = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
 
-    let selected: Vec<&'static Harness> = if harness_flags.is_empty() {
+    let selected: Vec<&'static Harness> = if harness_flags.is_empty() && !detected_only {
         if !tty {
             return Err(CliError::Usage(
-                "non-interactive: pass --harness <id,...> and --project|--global".into(),
+                "non-interactive: pass --harness <id,...> or --detected, plus --project|--global"
+                    .into(),
             ));
         }
         prompt_harnesses()?
     } else {
-        let mut out = Vec::new();
-        for spec in harness_flags {
-            for id in spec.split(',').map(str::trim).filter(|s| !s.is_empty()) {
-                if id == "all" {
-                    out.extend(HARNESSES.iter());
-                    continue;
-                }
-                let h = harness_by_id(id)?;
-                if !out.iter().any(|x: &&Harness| x.id == h.id) {
-                    out.push(h);
-                }
-            }
-        }
-        out
+        select_harnesses(root, harness_flags, detected_only)?
     };
-    if selected.is_empty() {
-        return Err(CliError::Usage("no harnesses selected".into()));
-    }
 
     let scope = match (project, global) {
         (true, false) => Scope::Project,
@@ -162,7 +279,8 @@ fn resolve_targets(
         (false, false) => {
             if !tty {
                 return Err(CliError::Usage(
-                    "non-interactive: pass --harness <id,...> and --project|--global".into(),
+                    "non-interactive: pass --harness <id,...> or --detected, plus --project|--global"
+                        .into(),
                 ));
             }
             prompt_scope()?
@@ -187,18 +305,14 @@ fn prompt_scope() -> Result<Scope, CliError> {
 fn prompt_harnesses() -> Result<Vec<&'static Harness>, CliError> {
     eprintln!("Install the ox skill for which harness(es)?");
     for (i, h) in HARNESSES.iter().enumerate() {
-        let marker = if h
-            .project
-            .map(|d| PathBuf::from(d).exists())
-            .unwrap_or(false)
-        {
+        let marker = if detected_at(std::path::Path::new(""), h) {
             " (detected)"
         } else {
             ""
         };
         eprintln!("  {:2}. {}{}", i + 1, h.label, marker);
     }
-    eprintln!("numbers comma-separated, or 'a' for all:");
+    eprintln!("numbers comma-separated, 'd' for detected, or 'a' for all:");
     let mut line = String::new();
     std::io::stdin()
         .read_line(&mut line)
@@ -206,6 +320,9 @@ fn prompt_harnesses() -> Result<Vec<&'static Harness>, CliError> {
     let line = line.trim();
     if line == "a" || line == "all" {
         return Ok(HARNESSES.iter().collect());
+    }
+    if line == "d" || line == "detected" {
+        return select_harnesses(std::path::Path::new(""), &[], true);
     }
     let mut out = Vec::new();
     for tok in line.split(',').map(str::trim).filter(|s| !s.is_empty()) {
@@ -222,33 +339,62 @@ fn prompt_harnesses() -> Result<Vec<&'static Harness>, CliError> {
     Ok(out)
 }
 
+/// Where `<dir>` lands for a harness at a given scope — `Err(reason)` when
+/// the harness has no project dir or the global dir can't resolve (skipped).
+fn target_base(root: &std::path::Path, h: &Harness, scope: Scope) -> Result<PathBuf, String> {
+    match scope {
+        Scope::Project => h
+            .project
+            .map(|d| {
+                if root.as_os_str().is_empty() {
+                    PathBuf::from(d)
+                } else {
+                    root.join(d)
+                }
+            })
+            .ok_or_else(|| "no project dir".to_string()),
+        Scope::Global => global_dir(h).map_err(|e| e.to_string()),
+    }
+}
+
 pub fn install(
     _global: &Global,
     _rt: &Runtime,
     harness_flags: &[String],
     project: bool,
     global: bool,
+    upgrade: bool,
+    detected: bool,
 ) -> Result<Out, CliError> {
-    let (scope, harnesses) = resolve_targets(harness_flags, project, global)?;
+    let root = std::path::Path::new("");
+    if upgrade {
+        return upgrade_at(root, harness_flags, detected, project, global);
+    }
+    install_at(root, harness_flags, detected, project, global)
+}
+
+fn install_at(
+    root: &std::path::Path,
+    harness_flags: &[String],
+    detected_only: bool,
+    project: bool,
+    global: bool,
+) -> Result<Out, CliError> {
+    let (scope, harnesses) = resolve_targets(root, harness_flags, detected_only, project, global)?;
     let mut written = Vec::new();
     let mut skipped = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
     for h in harnesses {
-        let base = match scope {
-            Scope::Project => match h.project {
-                Some(d) => PathBuf::from(d),
-                None => {
-                    skipped.push(format!("{} (no project dir)", h.label));
-                    continue;
-                }
-            },
-            Scope::Global => match global_dir(h) {
-                Ok(d) => d,
-                Err(e) => {
-                    skipped.push(format!("{} ({e})", h.label));
-                    continue;
-                }
-            },
+        let base = match target_base(root, h, scope) {
+            Ok(b) => b,
+            Err(reason) => {
+                skipped.push(format!("{} ({reason})", h.label));
+                continue;
+            }
         };
+        if !seen.insert(base.clone()) {
+            continue;
+        }
         let dir = base.join("ox");
         std::fs::create_dir_all(&dir)
             .map_err(|e| CliError::Usage(format!("create {}: {e}", dir.display())))?;
@@ -278,6 +424,73 @@ pub fn install(
     })
 }
 
+/// `--upgrade` — rewrite `ox/SKILL.md` only where it already exists. Never
+/// prompts, never creates dirs; bare invocation sweeps all harnesses at both
+/// scopes, `--harness`/`--detected`/scope flags narrow it.
+fn upgrade_at(
+    root: &std::path::Path,
+    harness_flags: &[String],
+    detected_only: bool,
+    project: bool,
+    global: bool,
+) -> Result<Out, CliError> {
+    let scopes: &[Scope] = match (project, global) {
+        (true, false) => &[Scope::Project],
+        (false, true) => &[Scope::Global],
+        (true, true) => {
+            return Err(CliError::Usage("--project and --global are exclusive".into()));
+        }
+        (false, false) => &[Scope::Project, Scope::Global],
+    };
+    let harnesses = if harness_flags.is_empty() && !detected_only {
+        HARNESSES.iter().collect::<Vec<_>>()
+    } else {
+        select_harnesses(root, harness_flags, detected_only)?
+    };
+
+    let mut upgraded = Vec::new();
+    let mut current = Vec::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for h in harnesses {
+        for &scope in scopes {
+            let Ok(base) = target_base(root, h, scope) else {
+                continue;
+            };
+            let path = base.join("ox").join("SKILL.md");
+            if !path.exists() || !seen.insert(path.clone()) {
+                continue;
+            }
+            let stale = std::fs::read_to_string(&path)
+                .map(|s| s != SKILL_MD)
+                .unwrap_or(true);
+            if stale {
+                std::fs::write(&path, SKILL_MD)
+                    .map_err(|e| CliError::Usage(format!("write {}: {e}", path.display())))?;
+                upgraded.push(path.display().to_string());
+            } else {
+                current.push(path.display().to_string());
+            }
+        }
+    }
+
+    let mut text = String::new();
+    for w in &upgraded {
+        text.push_str(&format!("upgraded {w}\n"));
+    }
+    for c in &current {
+        text.push_str(&format!("up-to-date {c}\n"));
+    }
+    if upgraded.is_empty() && current.is_empty() {
+        text.push_str("no ox skill installs found\n");
+    }
+    let upgraded_v: Vec<Value> = upgraded.iter().map(|w| json!(w)).collect();
+    let current_v: Vec<Value> = current.iter().map(|w| json!(w)).collect();
+    Ok(Out::Report {
+        text: text.trim_end().to_string(),
+        json: json!({"ok": true, "data": {"upgraded": upgraded_v, "current": current_v}}),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -295,27 +508,27 @@ mod tests {
         for h in HARNESSES {
             assert!(seen.insert(h.id), "dup {}" , h.id);
             assert!(!h.id.contains(' '));
+            assert!(!h.detect.is_empty());
         }
+    }
+
+    fn test_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("ox-skill-{name}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
     }
 
     #[test]
     fn flags_parse_and_install() {
-        let dir = std::env::temp_dir().join(format!("ox-skill-test-{}", std::process::id()));
-        std::env::set_current_dir(&dir).ok();
-        std::fs::create_dir_all(&dir).unwrap();
-        std::env::set_current_dir(&dir).unwrap();
-        let g = crate::args::Global {
-            instance: None,
-            json: false,
-            help: false,
-            version: false,
-        };
-        let rt = Runtime {
-            config: crate::config::Config::default(),
-            config_path: dir.join("config.json"),
-        };
-        let out = install(&g, &rt, &["claude".to_string(), "codex".to_string()], true, false)
-            .unwrap();
+        let dir = test_dir("install");
+        let out = install_at(
+            &dir,
+            &["claude".to_string(), "codex".to_string()],
+            false,
+            true,
+            false,
+        )
+        .unwrap();
         match out {
             Out::Report { text, .. } => assert!(text.contains(".claude/skills/ox/SKILL.md")),
             _ => panic!(),
@@ -325,5 +538,124 @@ mod tests {
             SKILL_MD
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn upgrade_rewrites_only_existing() {
+        let dir = test_dir("upgrade-stale");
+        let stale = dir.join(".claude/skills/ox");
+        std::fs::create_dir_all(&stale).unwrap();
+        std::fs::write(stale.join("SKILL.md"), "stale").unwrap();
+        let out = upgrade_at(&dir, &[], false, true, false).unwrap();
+        match out {
+            Out::Report { text, .. } => assert!(text.contains("upgraded ")),
+            _ => panic!(),
+        }
+        assert_eq!(
+            std::fs::read_to_string(stale.join("SKILL.md")).unwrap(),
+            SKILL_MD
+        );
+        assert!(!dir.join(".kiro/skills/ox").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn upgrade_reports_up_to_date() {
+        let dir = test_dir("upgrade-current");
+        let fresh = dir.join(".agents/skills/ox");
+        std::fs::create_dir_all(&fresh).unwrap();
+        std::fs::write(fresh.join("SKILL.md"), SKILL_MD).unwrap();
+        let out = upgrade_at(&dir, &["codex".to_string()], false, true, false).unwrap();
+        match out {
+            Out::Report { text, .. } => {
+                assert!(text.contains("up-to-date "));
+                assert!(!text.contains("upgraded "));
+            }
+            _ => panic!(),
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn upgrade_empty_reports_none() {
+        let dir = test_dir("upgrade-empty");
+        let out = upgrade_at(&dir, &[], false, true, false).unwrap();
+        match out {
+            Out::Report { text, .. } => assert!(text.contains("no ox skill installs")),
+            _ => panic!(),
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn detected_marks_installed_harness() {
+        let dir = test_dir("detect");
+        std::fs::create_dir_all(dir.join(".claude")).unwrap();
+        let claude = harness_by_id("claude").unwrap();
+        assert!(detected_at(&dir, claude));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn detected_selection_subset() {
+        let dir = test_dir("detect-subset");
+        for h in select_harnesses(&dir, &[], true).unwrap_or_default() {
+            assert!(detected_at(&dir, h), "{} not detected", h.id);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn detected_intersects_flagged_harnesses() {
+        let dir = test_dir("detect-intersect");
+        std::fs::create_dir_all(dir.join(".claude")).unwrap();
+        let flags = vec!["claude".to_string(), "roo".to_string(), "goose".to_string()];
+        let sel = select_harnesses(&dir, &flags, true).unwrap();
+        assert!(sel.iter().any(|h| h.id == "claude"));
+        for h in &sel {
+            assert!(detected_at(&dir, h), "{} not detected", h.id);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn harness_flags_all_dedup_and_unknown() {
+        let all = parse_harness_flags(&["all".to_string(), "claude".to_string()]).unwrap();
+        assert_eq!(all.len(), HARNESSES.len());
+        let one = parse_harness_flags(&["claude, claude ,cursor".to_string()]).unwrap();
+        assert_eq!(one.iter().map(|h| h.id).collect::<Vec<_>>(), ["claude", "cursor"]);
+        assert!(parse_harness_flags(&["nope".to_string()]).is_err());
+    }
+
+    #[test]
+    fn install_dedupes_shared_agents_dir() {
+        let dir = test_dir("install-dedup");
+        let out = install_at(
+            &dir,
+            &["codex".to_string(), "copilot".to_string(), "generic".to_string()],
+            false,
+            true,
+            false,
+        )
+        .unwrap();
+        match out {
+            Out::Report { text, .. } => {
+                assert_eq!(text.matches(".agents/skills/ox/SKILL.md").count(), 1);
+            }
+            _ => panic!(),
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn upgrade_rejects_both_scopes() {
+        let dir = test_dir("upgrade-excl");
+        assert!(upgrade_at(&dir, &[], false, true, true).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn on_path_misses_unknown_binary() {
+        assert!(!on_path("ox-skill-test-not-a-real-binary"));
     }
 }
