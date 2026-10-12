@@ -112,6 +112,7 @@ jobs:
           # to the destination name, which would publish ox-<target>.exe and
           # 404 the installers' canonical /cli/bin/ox-<target> path.
           cat "$src" > "dist/ox-${{ matrix.target }}"
+          chmod +x "dist/ox-${{ matrix.target }}"
           # Local exec twin — pwsh resolves `& ./foo` to `./foo.exe`.
           case "$src" in *.exe) cat "$src" > "dist/ox-${{ matrix.target }}.exe";; esac
           (cd dist && sha256sum "ox-${{ matrix.target }}" > "ox-${{ matrix.target }}.sha256")
