@@ -303,13 +303,27 @@ jobs:
           Copy-Item artifacts/ox-* www/cli/bin/
           Remove-Item www/cli/bin/*.deb,www/cli/bin/*.rpm,www/cli/bin/*.apk,`
             www/cli/bin/*.zst -ErrorAction SilentlyContinue
-          Start-Process python -ArgumentList '-m','http.server',$env:FIXTURE_PORT `
-            -WorkingDirectory "$PWD\www" -WindowStyle Hidden
-          Start-Sleep 2
+          # Fixed sleeps race the listener bind on loaded runners — poll the
+          # port instead, and fail fast if the server process died (e.g.
+          # python missing from PATH) rather than timing out blind.
+          $proc = Start-Process python -ArgumentList '-m','http.server',$env:FIXTURE_PORT `
+            -WorkingDirectory "$PWD\www" -WindowStyle Hidden -PassThru
+          $r = $null
+          for ($i = 0; $i -lt 40; $i++) {
+            if ($proc.HasExited) {
+              throw "fixture http.server exited immediately (code $($proc.ExitCode)) — is python on PATH?"
+            }
+            try {
+              $r = Invoke-WebRequest "http://127.0.0.1:$env:FIXTURE_PORT/cli/install.ps1" `
+                -UseBasicParsing
+              break
+            } catch {
+              Start-Sleep -Milliseconds 500
+            }
+          }
+          if (-not $r) { throw "fixture http.server never bound :$env:FIXTURE_PORT (20s)" }
           # python's http.server guesses .ps1 as application/octet-stream, so
           # .Content arrives as byte[] — decode before treating it as text.
-          $r = Invoke-WebRequest "http://127.0.0.1:$env:FIXTURE_PORT/cli/install.ps1" `
-            -UseBasicParsing
           $script = if ($r.Content -is [byte[]]) {
             [System.Text.Encoding]::UTF8.GetString($r.Content)
           } else { $r.Content }
