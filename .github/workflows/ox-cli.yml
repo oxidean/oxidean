@@ -304,14 +304,24 @@ jobs:
           Start-Process python -ArgumentList '-m','http.server',$env:FIXTURE_PORT `
             -WorkingDirectory "$PWD\www" -WindowStyle Hidden
           Start-Sleep 2
-          (Invoke-WebRequest "http://127.0.0.1:$env:FIXTURE_PORT/cli/install.ps1" `
-            -UseBasicParsing).Content.Split("`n")[0]
+          # python's http.server guesses .ps1 as application/octet-stream, so
+          # .Content arrives as byte[] — decode before treating it as text.
+          $r = Invoke-WebRequest "http://127.0.0.1:$env:FIXTURE_PORT/cli/install.ps1" `
+            -UseBasicParsing
+          $script = if ($r.Content -is [byte[]]) {
+            [System.Text.Encoding]::UTF8.GetString($r.Content)
+          } else { $r.Content }
+          $script.Split("`n")[0]
       - name: irm | iex install + smoke
         shell: pwsh
         run: |
           $env:OXIDEAN_INSTALL_DIR = "$PWD\ox-bin"
-          Invoke-Expression (Invoke-WebRequest `
-            "http://127.0.0.1:$env:FIXTURE_PORT/cli/install.ps1" -UseBasicParsing).Content
+          $r = Invoke-WebRequest `
+            "http://127.0.0.1:$env:FIXTURE_PORT/cli/install.ps1" -UseBasicParsing
+          $script = if ($r.Content -is [byte[]]) {
+            [System.Text.Encoding]::UTF8.GetString($r.Content)
+          } else { $r.Content }
+          Invoke-Expression $script
           & "$env:OXIDEAN_INSTALL_DIR\ox.exe" --version
 
   # ── native packages (nfpm) + install-test legs ──────────────────────────
