@@ -1698,7 +1698,12 @@ mod tests {
         assert_eq!(m.procedures.len(), PROCEDURES.len());
         assert_eq!(m.procedures.get("repo.listMine"), Some(&true));
         assert_eq!(m.procedures.get("system.manifest"), Some(&true));
-        assert!(!m.capabilities.mcp && !m.capabilities.rest && !m.capabilities.oauth);
+        assert!(
+            m.capabilities.mcp
+                && m.capabilities.rest
+                && m.capabilities.oauth
+                && m.capabilities.cli_dist
+        );
         let v = serde_json::to_value(&m).unwrap();
         for key in [
             "protocol_version",
