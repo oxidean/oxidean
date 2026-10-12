@@ -302,5 +302,6 @@ session cookie, and a `<link rel="webmcp">` tag points at
 {"jsonrpc": "2.0", "id": 1, "error": {"code": -32601, "message": "method not found: bogus/method"}}
 ```
 
-HTTP `401` responses include `WWW-Authenticate: Bearer realm="Oxidean MCP"`;
+HTTP `401` responses include `WWW-Authenticate: Bearer realm="Oxidean MCP",
+resource_metadata="<origin>/.well-known/oauth-protected-resource"`;
 rate-limited auth attempts return `429` with `Retry-After`.
