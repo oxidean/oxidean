@@ -108,7 +108,12 @@ jobs:
           mkdir -p dist
           src="target/${{ matrix.target }}/release/ox"
           [ -f "$src" ] || src="$src.exe"
-          cp "$src" "dist/ox-${{ matrix.target }}"
+          # Write via redirection: Git Bash `cp ox.exe dest` auto-appends .exe
+          # to the destination name, which would publish ox-<target>.exe and
+          # 404 the installers' canonical /cli/bin/ox-<target> path.
+          cat "$src" > "dist/ox-${{ matrix.target }}"
+          # Local exec twin — pwsh resolves `& ./foo` to `./foo.exe`.
+          case "$src" in *.exe) cat "$src" > "dist/ox-${{ matrix.target }}.exe";; esac
           (cd dist && sha256sum "ox-${{ matrix.target }}" > "ox-${{ matrix.target }}.sha256")
           ls -lh dist/
       - name: qemu binfmt for foreign-arch exec
@@ -404,7 +409,7 @@ jobs:
         run: |
           set -euo pipefail
           for f in assets/ox-*; do
-            case "$f" in *.sha256|*.deb|*.rpm|*.apk|*.zst) continue ;; esac
+            case "$f" in *.sha256|*.exe|*.deb|*.rpm|*.apk|*.zst) continue ;; esac
             basename "$f" | sed 's|^ox-||'
           done | sort > assets/ox-targets.txt
           cat assets/ox-targets.txt
