@@ -1,8 +1,35 @@
 ---
 import AppShell from "@/layouts/AppShell.astro";
 import { AiSettingsPage } from "@/routes/settings/ai.tsrx";
+import { mcpHarnessSnippets } from "@/lib/mcp-harness-snippets";
+import { highlightCode, languageIdForPath, type HighlightTheme } from "@/lib/highlight";
+import { resolvePublicOriginFromEnv } from "@/lib/public-origin";
+import { resolveDocumentHighlightTheme } from "@/lib/theme";
+
+/**
+ * Pre-highlight the default MCP snippet (first harness, token mode) so the
+ * first paint ships styled markup — hydration reuses it via the
+ * `highlightedHtml`/`highlightTheme` props. The endpoint is the build
+ * placeholder; oxidean-web rewrites `http://localhost` per request.
+ */
+const mcpEndpoint = `${resolvePublicOriginFromEnv() ?? "http://localhost"}/api/mcp`;
+const defaultBlock = mcpHarnessSnippets(mcpEndpoint)[0];
+const mcpInitialTheme: HighlightTheme = resolveDocumentHighlightTheme();
+let mcpInitialHtml: string | null = null;
+try {
+	mcpInitialHtml = await highlightCode(defaultBlock.token.code, {
+		lang: languageIdForPath(defaultBlock.file),
+		theme: mcpInitialTheme,
+	});
+} catch {
+	mcpInitialHtml = null;
+}
 ---
 
 <AppShell title="AI agents · Oxidean">
-	<AiSettingsPage client:load />
+	<AiSettingsPage
+		client:load
+		mcpInitialHtml={mcpInitialHtml}
+		mcpInitialTheme={mcpInitialTheme}
+	/>
 </AppShell>

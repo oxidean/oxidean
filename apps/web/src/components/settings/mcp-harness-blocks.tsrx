@@ -19,19 +19,29 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { mcpHarnessSnippets, type McpAuthVariant } from "@/lib/mcp-harness-snippets";
+import type { HighlightTheme } from "@/lib/highlight";
 
 /**
  * Per-harness MCP config block — pick a client and an auth mode (static token
  * header or client-driven OAuth), get the highlighted file content to paste
  * (JSON, or TOML for Codex). The bearer stays a `<pat>` placeholder.
+ * `initialHtml`/`initialTheme` are the SSR-highlighted markup for the default
+ * view (first harness + token mode) so first paint ships styled, not plain.
  */
-export function McpHarnessBlocks(props: { endpoint: string }) @{
+export function McpHarnessBlocks(props: {
+  endpoint: string;
+  initialHtml?: string | null;
+  initialTheme?: HighlightTheme | null;
+}) @{
   const snippets = mcpHarnessSnippets(props.endpoint);
   const [id, setId] = useState(snippets[0]?.id ?? "");
   const [mode, setMode] = useState<McpAuthVariant>("token");
   const [copied, setCopied] = useState(false);
   const current = snippets.find((s) => s.id === id) ?? snippets[0];
   const block = mode === "oauth" ? current.oauth : current.token;
+  // The SSR markup matches exactly one block — the first harness in token
+  // mode; everything else highlights client-side once the engine is warm.
+  const isInitialBlock = current.id === snippets[0]?.id && mode === "token";
 
   async function copy() {
     try {
@@ -145,7 +155,12 @@ export function McpHarnessBlocks(props: { endpoint: string }) @{
         </Button>
       </div>
       <div className="p-3">
-        <CodeSnippet code={block.code} path={current.file} />
+        <CodeSnippet
+          code={block.code}
+          path={current.file}
+          highlightedHtml={isInitialBlock ? (props.initialHtml ?? null) : null}
+          highlightTheme={isInitialBlock ? (props.initialTheme ?? null) : null}
+        />
       </div>
     </div>
 

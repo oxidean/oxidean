@@ -1,6 +1,7 @@
 import { useEffect, useState } from "octane";
 import {
   clientHighlightTheme,
+  getHighlighter,
   highlightCode,
   highlightCodeSync,
   languageIdForPath,
@@ -85,6 +86,10 @@ export function CodeSnippet({
 
     async function run() {
       const theme = clientHighlightTheme();
+      // Warm the singleton even when SSR markup already matches — later prop
+      // swaps (auth-mode toggles) take the synchronous highlightCodeSync path
+      // and would otherwise paint a plain-text frame on a cold engine.
+      await getHighlighter().catch(() => null);
       if (appliedTheme === theme) return;
       try {
         const out = await highlightCode(code, {

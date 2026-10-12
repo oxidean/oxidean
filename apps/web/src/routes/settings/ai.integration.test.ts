@@ -159,6 +159,26 @@ describe("/settings/ai", () => {
     );
   });
 
+  it("happy: SSR-highlighted default snippet renders styled on first paint", async () => {
+    window.history.pushState({}, "", "/settings/ai");
+    meMock.mockResolvedValue({ ok: true, data: user });
+    renderWithQueryClient(AiSettingsPage, {
+      props: {
+        mcpInitialHtml:
+          '<pre data-language="json" class="shiki"><code><span class="line">ssr-markup</span></code></pre>',
+        mcpInitialTheme: "oxidean-light",
+      },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "MCP server" })).toBeInTheDocument();
+    });
+    const block = screen.getByTestId("mcp-snippet-block");
+    expect(block.getAttribute("data-harness")).toBe("claude");
+    expect(block.querySelector("pre[data-language]")).toBeTruthy();
+    expect(block.textContent).toContain("ssr-markup");
+  });
+
   it("unhappy: unauthenticated sessions redirect to login", async () => {
     window.history.pushState({}, "", "/settings/ai");
     meMock.mockResolvedValue({
