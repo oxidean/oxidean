@@ -170,6 +170,15 @@ export const routeCoverageManifest: RouteCoverageEntry[] = [
     ],
   },
   {
+    route: "settings/ai.tsrx",
+    coverage: [
+      {
+        kind: "happy-dom",
+        test: "apps/web/src/routes/settings/ai.integration.test.ts",
+      },
+    ],
+  },
+  {
     route: "oauth.consent.tsrx",
     coverage: [
       {
