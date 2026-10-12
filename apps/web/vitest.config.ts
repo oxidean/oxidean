@@ -86,6 +86,9 @@ export default defineConfig({
       "class-variance-authority",
       "clsx",
       "tailwind-merge",
+      // Highlighter pulled by CodeSnippet consumers mid-suite.
+      "shiki",
+      "shiki/engine/javascript",
       // Markdown chain pulled by ReadmePanel/markdown components mid-suite.
       "rehype-sanitize",
       "rehype-stringify",

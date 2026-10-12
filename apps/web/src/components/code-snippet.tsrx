@@ -52,18 +52,30 @@ export function CodeSnippet({
 
     if (appliedTheme && highlightedHtml) {
       setHtml((prev) => (prev === highlightedHtml ? prev : highlightedHtml));
+    } else {
+      // Prop change (code/path) — reflect the new content synchronously so a
+      // slow or failed highlight never leaves the previous snippet on screen.
+      // SSR markup still beats plain text when it exists, even off-theme.
+      setHtml((prev) => {
+        const next = highlightedHtml ?? plainHtml(code);
+        return prev === next ? prev : next;
+      });
     }
 
     async function run() {
       const theme = clientHighlightTheme();
       if (appliedTheme === theme) return;
-      const out = await highlightCode(code, {
-        lang: languageIdForPath(path),
-        theme,
-      });
-      if (cancelled) return;
-      appliedTheme = theme;
-      setHtml((prev) => (prev === out ? prev : out));
+      try {
+        const out = await highlightCode(code, {
+          lang: languageIdForPath(path),
+          theme,
+        });
+        if (cancelled) return;
+        appliedTheme = theme;
+        setHtml((prev) => (prev === out ? prev : out));
+      } catch {
+        /* highlighter unavailable — plainHtml fallback already rendered */
+      }
     }
 
     void run();

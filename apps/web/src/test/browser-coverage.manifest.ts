@@ -53,6 +53,7 @@ const ACTIONS_RERUN_BROWSER = "apps/web/src/components/repo/actions-rerun-menu.b
 const ACTIONS_FILTERS_BROWSER = "apps/web/src/components/repo/actions-filters.browser.test.tsx";
 const FEATURES_BROWSER = "apps/web/src/components/repo/repo-features-panel.browser.test.tsx";
 const CLONE_BOX_BROWSER = "apps/web/src/components/repo/clone-box.browser.test.tsx";
+const MCP_HARNESS_BROWSER = "apps/web/src/components/settings/mcp-harness-blocks.browser.test.tsx";
 
 const AUTH_UI = "apps/web/e2e/stack-browser/auth-ui.stack.browser.test.tsx";
 const FORGE_ADMIN = "apps/web/e2e/stack-browser/forge-admin.stack.browser.test.tsx";
@@ -138,6 +139,10 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
       { kind: "browser", test: SSH_BROWSER, subject: "ssh-key-add-form" },
       { kind: "stack-browser", test: FORGE_SSH, subject: "SSH" },
     ],
+  },
+  {
+    surface: "components/settings/mcp-harness-blocks.tsrx",
+    coverage: [{ kind: "browser", test: MCP_HARNESS_BROWSER, subject: "mcp-harness-blocks" }],
   },
   {
     surface: "components/settings/gpg-key-add-form.tsrx",
