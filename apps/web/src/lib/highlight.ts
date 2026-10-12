@@ -270,6 +270,7 @@ const TABLE_LANGS = [
 ];
 
 let highlighterPromise: Promise<Highlighter> | null = null;
+let resolvedHighlighter: Highlighter | null = null;
 
 /**
  * Singleton Shiki highlighter with the shared-table langs + in-repo
@@ -284,6 +285,12 @@ export async function getHighlighter(): Promise<Highlighter> {
       langs: [...TABLE_LANGS, "plaintext", tsrxLang, rippleLang],
       engine: createJavaScriptRegexEngine({ forgiving: true }),
     });
+    highlighterPromise.then(
+      (h) => {
+        resolvedHighlighter = h;
+      },
+      () => {},
+    );
   }
   return highlighterPromise;
 }
@@ -312,6 +319,14 @@ export async function highlightCode(
   options: { lang: string; theme?: HighlightTheme },
 ): Promise<string> {
   const highlighter = await getHighlighter();
+  return renderHighlighted(highlighter, code, options);
+}
+
+function renderHighlighted(
+  highlighter: Highlighter,
+  code: string,
+  options: { lang: string; theme?: HighlightTheme },
+): string {
   const theme = options.theme ?? THEMES.dark;
   const loaded = highlighter.getLoadedLanguages();
   const lang = loaded.includes(options.lang) ? options.lang : "plaintext";
@@ -320,6 +335,24 @@ export async function highlightCode(
   const html = highlighter.codeToHtml(display, { lang, theme });
   // Annotate language id for callers/tests — Shiki HTML may omit the lang name.
   return html.replace(/<pre(\s)/, `<pre data-language="${lang}"$1`);
+}
+
+/**
+ * Highlight synchronously once the singleton engine has resolved — null while
+ * it is still loading (callers then take the async `highlightCode` path).
+ * Lets prop changes render styled markup in the same commit instead of
+ * flashing a plain-text intermediate frame.
+ */
+export function highlightCodeSync(
+  code: string,
+  options: { lang: string; theme?: HighlightTheme },
+): string | null {
+  if (!resolvedHighlighter) return null;
+  try {
+    return renderHighlighted(resolvedHighlighter, code, options);
+  } catch {
+    return null;
+  }
 }
 
 /** Drop a single trailing newline so line numbers match highlighted rows. */

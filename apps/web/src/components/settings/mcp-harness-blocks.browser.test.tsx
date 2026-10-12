@@ -4,6 +4,7 @@
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { McpHarnessBlocks } from "@/components/settings/mcp-harness-blocks";
+import { getHighlighter } from "@/lib/highlight";
 import {
   cleanupBrowserMount,
   debugBody,
@@ -48,7 +49,9 @@ describe("mcp-harness-blocks browser DOM races", () => {
       );
 
       // Auth-mode radio swaps the block to the OAuth variant (no header) and
-      // mounts the note — sibling @if toggles are the DOM-race surface.
+      // mounts the note — sibling @if toggles are the DOM-race surface. Warm
+      // the highlighter so the swap takes the synchronous styled path.
+      await getHighlighter();
       const oauthRadio = document.querySelector(
         '[data-testid="mcp-auth-oauth"]',
       ) as HTMLElement | null;
@@ -58,6 +61,8 @@ describe("mcp-harness-blocks browser DOM races", () => {
       expect(swapped?.getAttribute("data-auth")).toBe("oauth");
       expect(swapped?.getAttribute("data-harness")).toBe("codex");
       expect(swapped?.textContent).not.toContain("bearer_token_env_var");
+      // Styled markup must already be painted — no unstyled flash frame.
+      expect(swapped?.querySelector("pre[data-language]")).toBeTruthy();
       expect(document.querySelector('[data-testid="mcp-snippet-note"]')?.textContent).toContain(
         "codex mcp login",
       );

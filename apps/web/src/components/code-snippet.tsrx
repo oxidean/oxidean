@@ -2,6 +2,7 @@ import { useEffect, useState } from "octane";
 import {
   clientHighlightTheme,
   highlightCode,
+  highlightCodeSync,
   languageIdForPath,
   stripTrailingNewline,
   type HighlightTheme,
@@ -39,7 +40,15 @@ export function CodeSnippet({
   highlightedHtml = null,
   highlightTheme = null,
 }: CodeSnippetProps) @{
-  const [html, setHtml] = useState<string>(() => highlightedHtml ?? plainHtml(code));
+  const [html, setHtml] = useState<string>(
+    () =>
+      highlightedHtml ??
+      highlightCodeSync(code, {
+        lang: languageIdForPath(path),
+        theme: clientHighlightTheme(),
+      }) ??
+      plainHtml(code),
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -53,13 +62,25 @@ export function CodeSnippet({
     if (appliedTheme && highlightedHtml) {
       setHtml((prev) => (prev === highlightedHtml ? prev : highlightedHtml));
     } else {
-      // Prop change (code/path) — reflect the new content synchronously so a
-      // slow or failed highlight never leaves the previous snippet on screen.
-      // SSR markup still beats plain text when it exists, even off-theme.
-      setHtml((prev) => {
-        const next = highlightedHtml ?? plainHtml(code);
-        return prev === next ? prev : next;
+      // Prop change (code/path) — when the highlighter is already resolved,
+      // render styled markup synchronously so prop swaps (auth-mode toggles,
+      // search-hit pages) never paint a plain-text intermediate frame.
+      const sync = highlightCodeSync(code, {
+        lang: languageIdForPath(path),
+        theme: clientHighlightTheme(),
       });
+      if (sync !== null) {
+        appliedTheme = clientHighlightTheme();
+        setHtml((prev) => (prev === sync ? prev : sync));
+      } else {
+        // Engine still loading — reflect the new content synchronously so a
+        // slow or failed highlight never leaves the previous snippet on
+        // screen. SSR markup still beats plain text when it exists.
+        setHtml((prev) => {
+          const next = highlightedHtml ?? plainHtml(code);
+          return prev === next ? prev : next;
+        });
+      }
     }
 
     async function run() {

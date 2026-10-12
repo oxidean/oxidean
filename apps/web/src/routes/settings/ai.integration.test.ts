@@ -5,6 +5,7 @@ import { cleanup, screen, waitFor } from "@octanejs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderWithQueryClient } from "@/test/render-with-query";
 import { mcpHarnessSnippets } from "@/lib/mcp-harness-snippets";
+import { getHighlighter } from "@/lib/highlight";
 
 const meMock = vi.fn();
 
@@ -120,13 +121,20 @@ describe("/settings/ai", () => {
     );
 
     // Token/OAuth mode toggle — OAuth variant drops the static header and
-    // shows the per-harness note.
+    // shows the per-harness note. Warm the highlighter first so the swap
+    // exercises the synchronous (no unstyled frame) path.
+    await getHighlighter();
     const oauth = screen.getByTestId("mcp-auth-oauth");
     oauth.click();
     await waitFor(() => {
       expect(screen.getByTestId("mcp-snippet-block").getAttribute("data-auth")).toBe("oauth");
     });
     expect(screen.getByTestId("mcp-snippet-block").textContent).not.toContain("Bearer");
+    // The swap renders styled markup in the same commit — plainHtml has no
+    // data-language marker, so this would catch an unstyled flash frame.
+    expect(
+      screen.getByTestId("mcp-snippet-block").querySelector("pre[data-language]"),
+    ).toBeTruthy();
     expect(screen.getByTestId("mcp-snippet-note").textContent).toContain("OAuth");
     expect(screen.getByRole("textbox", { name: "Copy Claude Code MCP add command" })).toHaveValue(
       "claude mcp add --transport http oxidean https://forge.example/api/mcp",
