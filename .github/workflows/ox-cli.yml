@@ -264,19 +264,21 @@ jobs:
           pattern: ox-*
           path: artifacts
           merge-multiple: true
-      - name: serve fixture + curl | sh install + smoke
+      # file:// fixture — macOS's Application Firewall drops a python
+      # http.server listener on loopback (75s SYN timeout, no prompt).
+      # curl|sh's fetch path is identical for file:// URLs, so the installer's
+      # arch detection + checksum + exec are still exercised end to end.
+      - name: file:// fixture + curl | sh install + smoke
         run: |
           set -euo pipefail
           mkdir -p www/cli/bin
-          sed "s|@OXIDEAN_ORIGIN@|http://127.0.0.1:${FIXTURE_PORT}|g" \
+          sed "s|@OXIDEAN_ORIGIN@|file://$PWD/www|g" \
             crates/oxidean-api/assets/cli/install.sh > www/cli/install.sh
           cp artifacts/ox-* www/cli/bin/
           rm -f www/cli/bin/*.deb www/cli/bin/*.rpm www/cli/bin/*.apk www/cli/bin/*.zst
-          (cd www && nohup python3 -m http.server "$FIXTURE_PORT" >/dev/null 2>&1 &)
-          sleep 1
-          curl -fsS "http://127.0.0.1:$FIXTURE_PORT/cli/install.sh" | head -3
+          head -3 www/cli/install.sh
           export OXIDEAN_INSTALL_DIR="$PWD/ox-bin"
-          curl -fsSL "http://127.0.0.1:$FIXTURE_PORT/cli/install.sh" | sh | tee /tmp/install.log
+          sh www/cli/install.sh | tee /tmp/install.log
           grep -q "installing ox for aarch64-apple-darwin" /tmp/install.log
           "$OXIDEAN_INSTALL_DIR/ox" --version
 
