@@ -93,6 +93,8 @@ jobs:
         with:
           tool: cross
       - name: build ox
+        # windows runners default to pwsh — this step is POSIX shell.
+        shell: bash
         run: |
           if [ "${{ matrix.method }}" = "cross" ]; then
             cross build --release -p oxidean-cli --bin ox --target ${{ matrix.target }}
