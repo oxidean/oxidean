@@ -33,8 +33,6 @@ function AiSettingsContent() @{
   const mcpDetectedCmd = "ox mcp install --detected --project";
   const mcpUpgradeCmd = "ox mcp install --upgrade";
   const mcpStatusCmd = "ox mcp status";
-  const mcpClaudeCmd = `claude mcp add --transport http oxidean ${mcpEndpoint} --header "Authorization: Bearer <pat>"`;
-  const mcpRemoteCmd = `npx mcp-remote ${mcpEndpoint} --header "Authorization: Bearer <pat>"`;
 
   <AccountSettingsLayout active="ai" data-testid="settings-ai-page">
     <PageHeader
@@ -90,7 +88,8 @@ function AiSettingsContent() @{
       This instance serves a Model Context Protocol endpoint at{" "}
       <code className="font-mono">{mcpEndpoint}</code> — streamable HTTP, JSON-RPC 2.0. It exposes
       repository, issue, pull request, Actions, and package tools so MCP-capable agents can work the
-      forge directly. Private data needs a bearer credential — mint a PAT under{" "}
+      forge directly. Private data needs a credential — either OAuth, where the client opens this
+      instance's browser flow itself, or a bearer token minted under{" "}
       <AppLink href="/settings/tokens" className="text-foreground underline underline-offset-2">
         Personal access tokens
       </AppLink>{" "}
@@ -144,23 +143,11 @@ function AiSettingsContent() @{
     </p>
 
     <p className="mt-4 text-[13px] font-medium text-foreground">
-      By hand — pick your client, paste the block into its config file (replace{" "}
-      <code className="font-mono">&lt;pat&gt;</code>)
+      By hand — pick your client and auth mode, paste the block into its config file (replace{" "}
+      <code className="font-mono">&lt;pat&gt;</code> when using a token)
     </p>
     <div className="mt-2">
       <McpHarnessBlocks endpoint={mcpEndpoint} />
-    </div>
-    <p className="mt-3 text-[13px] text-muted-foreground">
-      Claude Code also has its own add command:
-    </p>
-    <div className="mt-2">
-      <CopyCommand command={mcpClaudeCmd} ariaLabel="Copy Claude Code MCP add command" />
-    </div>
-    <p className="mt-3 text-[13px] text-muted-foreground">
-      Stdio-only clients — bridge through <code className="font-mono">mcp-remote</code>:
-    </p>
-    <div className="mt-2">
-      <CopyCommand command={mcpRemoteCmd} ariaLabel="Copy mcp-remote bridge command" />
     </div>
   </AccountSettingsLayout>;
 }

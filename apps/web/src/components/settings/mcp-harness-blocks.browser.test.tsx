@@ -47,6 +47,21 @@ describe("mcp-harness-blocks browser DOM races", () => {
         "mcp_servers.oxidean",
       );
 
+      // Auth-mode radio swaps the block to the OAuth variant (no header) and
+      // mounts the note — sibling @if toggles are the DOM-race surface.
+      const oauthRadio = document.querySelector(
+        '[data-testid="mcp-auth-oauth"]',
+      ) as HTMLElement | null;
+      oauthRadio?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 50));
+      const swapped = document.querySelector('[data-testid="mcp-snippet-block"]');
+      expect(swapped?.getAttribute("data-auth")).toBe("oauth");
+      expect(swapped?.getAttribute("data-harness")).toBe("codex");
+      expect(swapped?.textContent).not.toContain("bearer_token_env_var");
+      expect(document.querySelector('[data-testid="mcp-snippet-note"]')?.textContent).toContain(
+        "codex mcp login",
+      );
+
       tracker.expectNoDomRaces();
       expectNoOctaneOverlayInDocument();
     } finally {

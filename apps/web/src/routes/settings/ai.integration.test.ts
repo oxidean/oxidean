@@ -4,6 +4,7 @@
 import { cleanup, screen, waitFor } from "@octanejs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderWithQueryClient } from "@/test/render-with-query";
+import { mcpHarnessSnippets } from "@/lib/mcp-harness-snippets";
 
 const meMock = vi.fn();
 
@@ -108,14 +109,37 @@ describe("/settings/ai", () => {
     expect(screen.getByTestId("mcp-snippet-file").textContent).toContain(".mcp.json");
     expect(screen.getByRole("button", { name: "Copy Claude Code config" })).toBeTruthy();
 
+    // The Claude add command is folded into the claude/token variant block —
+    // same aria label, still no real token.
+    expect(screen.getByTestId("mcp-snippet-command-label").textContent).toContain(
+      "Claude Code also has its own add command",
+    );
     const claude = screen.getByRole("textbox", { name: "Copy Claude Code MCP add command" });
     expect(claude).toHaveValue(
       'claude mcp add --transport http oxidean https://forge.example/api/mcp --header "Authorization: Bearer <pat>"',
     );
-    const remote = screen.getByRole("textbox", { name: "Copy mcp-remote bridge command" });
-    expect(remote).toHaveValue(
+
+    // Token/OAuth mode toggle — OAuth variant drops the static header and
+    // shows the per-harness note.
+    const oauth = screen.getByTestId("mcp-auth-oauth");
+    oauth.click();
+    await waitFor(() => {
+      expect(screen.getByTestId("mcp-snippet-block").getAttribute("data-auth")).toBe("oauth");
+    });
+    expect(screen.getByTestId("mcp-snippet-block").textContent).not.toContain("Bearer");
+    expect(screen.getByTestId("mcp-snippet-note").textContent).toContain("OAuth");
+    expect(screen.getByRole("textbox", { name: "Copy Claude Code MCP add command" })).toHaveValue(
+      "claude mcp add --transport http oxidean https://forge.example/api/mcp",
+    );
+
+    // mcp-remote bridging lives under the generic tab (both auth modes).
+    const generic = mcpHarnessSnippets("https://forge.example/api/mcp").find(
+      (s) => s.id === "generic",
+    );
+    expect(generic?.token.command?.cmd).toBe(
       'npx mcp-remote https://forge.example/api/mcp --header "Authorization: Bearer <pat>"',
     );
+    expect(generic?.oauth.command?.cmd).toBe("npx mcp-remote https://forge.example/api/mcp");
 
     // Guidance links — PAT minting and the admin gate. ("Personal access
     // tokens" also appears in the settings nav, so match by href.)

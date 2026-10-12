@@ -1944,3 +1944,367 @@ async fn mcp_fg_write_scope_allows_write() {
     assert_eq!(status, StatusCode::OK, "{v}");
     assert_eq!(v["result"]["isError"], true, "{v}");
 }
+
+// ---------------------------------------------------------------------------
+// OAuth bearer (oxidean_oat_) — resolves through the provider's token table;
+// OAuth scopes land in the synthetic PAT so the Access gates apply unchanged.
+// ---------------------------------------------------------------------------
+
+fn oauth_expiry_in(secs: i64) -> String {
+    (chrono::Utc::now() + chrono::Duration::seconds(secs))
+        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+}
+
+async fn seed_oauth_app(db: &Database, app_id: &str, user_id: &str) {
+    db.insert_oauth_app(
+        app_id,
+        user_id,
+        "mcp client",
+        &format!("oxidean_client_{app_id}"),
+        "hash",
+        "oxidean_cs_",
+        "[]",
+    )
+    .await
+    .expect("insert oauth app");
+}
+
+async fn seed_oauth_token(
+    db: &Database,
+    tok_id: &str,
+    app_id: &str,
+    user_id: &str,
+    raw: &str,
+    scopes: &str,
+    expires_at: &str,
+) {
+    db.insert_oauth_token(
+        tok_id,
+        app_id,
+        user_id,
+        &raw[..20],
+        &sha256_hex(raw.as_bytes()),
+        scopes,
+        expires_at,
+    )
+    .await
+    .expect("insert oauth token");
+}
+
+#[tokio::test]
+async fn mcp_oauth_access_token_repo_scope() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!("sqlite:{}", dir.path().join("mcp_oat.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone()).await;
+
+    let (_cookie, login_v) = signup_and_login(&app, "oat@ex.com", "oatuser").await;
+    let user_id = login_v["data"]["id"].as_str().expect("id").to_string();
+    verify_user(&db, &user_id).await;
+    db.insert_repository("r-oat-1", &user_id, "user", "demo", "private", "", "main")
+        .await
+        .expect("insert repo");
+    seed_oauth_app(&db, "app-a", &user_id).await;
+    let raw = "oxidean_oat_mcp_repo_scoped";
+    seed_oauth_token(
+        &db,
+        "tok-1",
+        "app-a",
+        &user_id,
+        raw,
+        "repo",
+        &oauth_expiry_in(3600),
+    )
+    .await;
+
+    // initialize — same handshake as PAT.
+    let (status, v) = mcp_json(
+        &app,
+        mcp_req_bearer(
+            &rpc_call(
+                1,
+                "initialize",
+                serde_json::json!({
+                    "protocolVersion": "2025-06-18",
+                    "capabilities": {},
+                    "clientInfo": {"name": "test", "version": "0"},
+                }),
+            ),
+            raw,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["result"]["protocolVersion"], "2025-06-18");
+
+    // repo_get on own private repo — `repo` scope covers RepoRead.
+    let (status, v) = mcp_json(
+        &app,
+        mcp_req_bearer(
+            &tool_call(
+                2,
+                "repo_get",
+                serde_json::json!({"owner": "oatuser", "name": "demo"}),
+            ),
+            raw,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["result"]["isError"], false, "{v}");
+    assert_eq!(v["result"]["structuredContent"]["name"], "demo");
+
+    // issue_create — write path covered by the same `repo` scope.
+    let (status, v) = mcp_json(
+        &app,
+        mcp_req_bearer(
+            &tool_call(
+                3,
+                "issue_create",
+                serde_json::json!({"owner": "oatuser", "name": "demo", "title": "via oat"}),
+            ),
+            raw,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["result"]["isError"], false, "{v}");
+}
+
+#[tokio::test]
+async fn mcp_oauth_scope_denied() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!("sqlite:{}", dir.path().join("mcp_oat_scope.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone()).await;
+
+    let (_cookie, login_v) = signup_and_login(&app, "ro@ex.com", "rouser").await;
+    let user_id = login_v["data"]["id"].as_str().expect("id").to_string();
+    verify_user(&db, &user_id).await;
+    db.insert_repository("r-ro-1", &user_id, "user", "demo", "private", "", "main")
+        .await
+        .expect("insert repo");
+    seed_oauth_app(&db, "app-b", &user_id).await;
+    let raw = "oxidean_oat_readuser_only";
+    seed_oauth_token(
+        &db,
+        "tok-2",
+        "app-b",
+        &user_id,
+        raw,
+        "read:user",
+        &oauth_expiry_in(3600),
+    )
+    .await;
+
+    // initialize passes (identity-level access), repo_get is scope-denied.
+    let (status, _v) = mcp_json(
+        &app,
+        mcp_req_bearer(
+            &rpc_call(
+                1,
+                "initialize",
+                serde_json::json!({
+                    "protocolVersion": "2025-06-18",
+                    "capabilities": {},
+                    "clientInfo": {"name": "test", "version": "0"},
+                }),
+            ),
+            raw,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{_v}");
+    let (status, v) = mcp_json(
+        &app,
+        mcp_req_bearer(
+            &tool_call(
+                2,
+                "repo_get",
+                serde_json::json!({"owner": "rouser", "name": "demo"}),
+            ),
+            raw,
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["result"]["isError"], true, "{v}");
+    let text = v["result"]["content"][0]["text"].as_str().expect("text");
+    assert!(text.contains("insufficient_scope"), "{text}");
+}
+
+#[tokio::test]
+async fn mcp_oauth_rejected_states() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!("sqlite:{}", dir.path().join("mcp_oat_rej.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone()).await;
+
+    let (_cookie, login_v) = signup_and_login(&app, "rej@ex.com", "rejuser").await;
+    let user_id = login_v["data"]["id"].as_str().expect("id").to_string();
+    verify_user(&db, &user_id).await;
+
+    let init = rpc_call(
+        1,
+        "initialize",
+        serde_json::json!({
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": {"name": "test", "version": "0"},
+        }),
+    );
+
+    // Unknown OAT → 401 + RFC 9728 resource_metadata pointer.
+    let res = app
+        .clone()
+        .oneshot(mcp_req_bearer(&init, "oxidean_oat_no_such_token"))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    let challenge = res
+        .headers()
+        .get("www-authenticate")
+        .expect("challenge")
+        .to_str()
+        .unwrap();
+    assert!(challenge.contains("resource_metadata="), "{challenge}");
+    assert!(
+        challenge.contains("/.well-known/oauth-protected-resource"),
+        "{challenge}"
+    );
+
+    // Expired OAT → 401.
+    seed_oauth_app(&db, "app-c", &user_id).await;
+    let expired = "oxidean_oat_expired_tok";
+    seed_oauth_token(
+        &db,
+        "tok-3",
+        "app-c",
+        &user_id,
+        expired,
+        "repo",
+        &oauth_expiry_in(-60),
+    )
+    .await;
+    let res = app
+        .clone()
+        .oneshot(mcp_req_bearer(&init, expired))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+
+    // Revoked OAT → 401 (revoke all the user's tokens for the app).
+    let revoked = "oxidean_oat_revoked_tok";
+    seed_oauth_token(
+        &db,
+        "tok-4",
+        "app-c",
+        &user_id,
+        revoked,
+        "repo",
+        &oauth_expiry_in(3600),
+    )
+    .await;
+    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    db.revoke_oauth_tokens_for_user_app(&user_id, "app-c", &now)
+        .await
+        .expect("revoke");
+    let res = app
+        .clone()
+        .oneshot(mcp_req_bearer(&init, revoked))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+
+    // Banned owner → 401.
+    let banned = "oxidean_oat_banned_tok";
+    seed_oauth_app(&db, "app-d", &user_id).await;
+    seed_oauth_token(
+        &db,
+        "tok-5",
+        "app-d",
+        &user_id,
+        banned,
+        "repo",
+        &oauth_expiry_in(3600),
+    )
+    .await;
+    db.set_user_banned_at(&user_id, &now).await.expect("ban");
+    let res = app
+        .clone()
+        .oneshot(mcp_req_bearer(&init, banned))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+}
+
+/// RFC 8414 + RFC 9728 discovery docs — MCP clients resolve the authorization
+/// server from the protected-resource pointer on the 401 challenge.
+#[tokio::test]
+async fn mcp_oauth_discovery_metadata() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!("sqlite:{}", dir.path().join("mcp_disc.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    let app = test_app(db).await;
+
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/.well-known/oauth-protected-resource")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let resource = v["resource"].as_str().expect("resource");
+    assert!(resource.ends_with("/api/mcp"), "{resource}");
+    assert_eq!(
+        v["authorization_servers"]
+            .as_array()
+            .expect("as list")
+            .len(),
+        1
+    );
+    assert_eq!(v["bearer_methods_supported"], serde_json::json!(["header"]));
+
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/.well-known/oauth-authorization-server")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let issuer = v["issuer"].as_str().expect("issuer");
+    assert_eq!(
+        v["authorization_endpoint"],
+        format!("{issuer}/oauth/authorize")
+    );
+    assert_eq!(v["token_endpoint"], format!("{issuer}/oauth/token"));
+    assert!(v["grant_types_supported"]
+        .as_array()
+        .expect("grants")
+        .iter()
+        .any(|g| g == "authorization_code"));
+    assert!(v["scopes_supported"]
+        .as_array()
+        .expect("scopes")
+        .iter()
+        .any(|s| s == "repo"));
+}

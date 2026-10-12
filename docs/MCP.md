@@ -60,7 +60,7 @@ curl -s https://forge.example.com/api/mcp \
 | Session cookie | `Cookie: oxidean_session=…` | Browser-grade access; full ACL — local dev needs nothing else |
 | Classic PAT | `Authorization: Bearer oxidean_pat_…` | Requires the `repo` scope for repo tools; `package:read`/`package:write` for `packages_list` |
 | Fine-grained PAT | `Authorization: Bearer oxidean_fg_…` | `contents:read`/`contents:write` + repository selection gate repo tools; `package:read`/`package:write` for packages |
-| OAuth access token | `Authorization: Bearer oxidean_oat_…` | Reserved prefix for OAuth apps (API-03). Not resolvable yet — returns `401` like any unknown credential until the OAuth provider ships |
+| OAuth access token | `Authorization: Bearer oxidean_oat_…` | Issued by the instance's OAuth provider (API-03); scopes map onto the same gates as classic PATs (`repo`, `package:read`, `package:write`) |
 
 Send the token as a **Bearer** header — never as a URL parameter or RPC input.
 Mint tokens under **Settings → Personal access tokens**.
@@ -72,8 +72,27 @@ as anonymous: public data stays reachable, while tools that need a user or a
 private repository return `isError` content instead of failing the protocol.
 
 Bearer prefixes dispatch to disjoint resolvers: `oxidean_pat_…` and
-`oxidean_fg_…` resolve against the PAT tables today, while `oxidean_oat_…`
-routes to the OAuth seam that the provider work (API-03) will implement.
+`oxidean_fg_…` resolve against the PAT tables, and `oxidean_oat_…` resolves
+through the OAuth token table (`authenticate_oauth_token` — hash lookup,
+expiry, revocation, banned-owner checks; `last_used_at` is touched on success).
+
+### OAuth discovery
+
+OAuth-capable MCP clients can find the provider without configuration:
+
+- `GET /.well-known/oauth-protected-resource` (RFC 9728) — published on every
+  401 via `WWW-Authenticate: Bearer realm="Oxidean MCP",
+  resource_metadata="<origin>/.well-known/oauth-protected-resource"`; names
+  `/api/mcp` as the resource and the instance origin as its authorization
+  server.
+- `GET /.well-known/oauth-authorization-server` (RFC 8414) — authorization,
+  token, userinfo, and device endpoints plus supported scopes.
+
+Both are proxied by the web tier (`oxidean-web` `API_PREFIXES`). Clients that
+complete the authorization-code flow receive an `oxidean_oat_…` token usable
+as a Bearer credential; note the provider does not yet implement PKCE, public
+clients, RFC 7591 dynamic client registration, or the RFC 8707 `resource`
+parameter — confidential-server-side clients only today.
 
 ### Scope mapping for fine-grained tokens
 
