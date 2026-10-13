@@ -9,8 +9,9 @@
 # - Native packages (.deb/.rpm/.apk/.pkg.tar.zst) are produced with nfpm and
 #   test-installed in their matching distro container.
 # - Pushes to main (and v*.*.* tags) refresh the rolling GitHub Release
-#   `ox-dist` (`ox-targets.txt` + `ox-{triple}` + `.sha256`). API images
-#   stage that set via OXIDEAN_CLI_DIST_URL (Dockerfile default + Cloud IaC).
+#   `ox-dist` (`ox-targets.txt` + `ox-{triple}` + `.sha256` + SOURCE_COMMIT).
+#   API images stage that set via OXIDEAN_CLI_DIST_URL (Dockerfile default +
+#   Cloud IaC); OXIDEAN_CLI_DIST_BUST busts the fetch layer on staging redeploy.
 # - Tag pushes (v*.*.*) also create a semver GitHub Release with installers
 #   and packages for standalone GitHub installs.
 #
@@ -468,7 +469,6 @@ jobs:
           fi
           gh release upload ox-dist dist/* --clobber
       - name: redeploy staging api (heal /cli matrix)
-        continue-on-error: true
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
           RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
@@ -547,14 +547,26 @@ jobs:
           tags: oxidean-api:ox-matrix
           build-args: |
             OXIDEAN_CLI_DIST_URL=https://github.com/${{ github.repository }}/releases/download/ox-dist
+            OXIDEAN_CLI_DIST_BUST=${{ github.sha }}
           cache-from: type=gha,scope=oxidean-api
           cache-to: type=gha,mode=max,scope=oxidean-api
-      - name: every shipped target is staged in the image
+      - name: every shipped target is staged with matching digests
         run: |
+          set -euo pipefail
+          BASE="https://github.com/${{ github.repository }}/releases/download/ox-dist"
           docker run --rm --entrypoint ls oxidean-api:ox-matrix \
             -1 /usr/local/share/oxidean-cli | tee /tmp/staged.txt
-          curl -fsSL "https://github.com/${{ github.repository }}/releases/download/ox-dist/ox-targets.txt" \
-            | while read -r t; do
-                [ -z "$t" ] && continue
-                grep -q "ox-$t" /tmp/staged.txt
-              done
+          grep -qx 'SOURCE_COMMIT' /tmp/staged.txt
+          staged_commit="$(docker run --rm --entrypoint cat oxidean-api:ox-matrix \
+            /usr/local/share/oxidean-cli/SOURCE_COMMIT | tr -d '[:space:]')"
+          test "$staged_commit" = "${{ github.sha }}"
+          mkdir -p /tmp/ox-dist-check
+          curl -fsSL "$BASE/ox-targets.txt" -o /tmp/ox-dist-check/ox-targets.txt
+          while read -r t; do
+            [ -z "$t" ] && continue
+            grep -qx "ox-$t" /tmp/staged.txt
+            curl -fsSL "$BASE/ox-$t.sha256" -o "/tmp/ox-dist-check/ox-$t.sha256"
+            docker run --rm --entrypoint cat oxidean-api:ox-matrix \
+              "/usr/local/share/oxidean-cli/ox-$t" > "/tmp/ox-dist-check/ox-$t"
+            (cd /tmp/ox-dist-check && sha256sum -c "ox-$t.sha256")
+          done < /tmp/ox-dist-check/ox-targets.txt

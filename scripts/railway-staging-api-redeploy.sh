@@ -2,6 +2,10 @@
 # Redeploy the Oxidean Cloud staging `api` service at a git commit SHA so the
 # image rebuild picks up a freshly published ox-dist matrix (issue #125).
 #
+# Before deploy, upserts service variable OXIDEAN_CLI_DIST_BUST=<sha> with
+# skipDeploys so the Dockerfile cache-bust ARG changes and the ox-dist fetch
+# layer re-runs even when the commit SHA (and OXIDEAN_CLI_DIST_URL) are unchanged.
+#
 # Usage:
 #   RAILWAY_API_TOKEN=… scripts/railway-staging-api-redeploy.sh <sha> [--dry-run]
 #   RAILWAY_TOKEN=…     # project token scoped to *staging* (not production)
@@ -106,6 +110,35 @@ resolve_staging_environment_id() {
   printf '%s' "$id"
 }
 
+# Invalidate the Dockerfile ox-dist fetch layer when redeploying the same
+# commit SHA after a fresh ox-dist publish (URL alone does not bust cache).
+upsert_cli_dist_bust() {
+  local sha="$1"
+  local env_id="$2"
+  echo "staging api: upsert OXIDEAN_CLI_DIST_BUST=${sha} (skipDeploys)"
+  if [[ "$DRY_RUN" == "1" ]]; then
+    echo "dry-run: would call variableUpsert OXIDEAN_CLI_DIST_BUST"
+    return 0
+  fi
+  gql '
+    mutation($input: VariableUpsertInput!) {
+      variableUpsert(input: $input)
+    }
+  ' "$(jq -n \
+    --arg projectId "$PROJECT_ID" \
+    --arg environmentId "$env_id" \
+    --arg serviceId "$SERVICE_API_ID" \
+    --arg value "$sha" \
+    '{input:{
+      projectId:$projectId,
+      environmentId:$environmentId,
+      serviceId:$serviceId,
+      name:"OXIDEAN_CLI_DIST_BUST",
+      value:$value,
+      skipDeploys:true
+    }}')" >/dev/null
+}
+
 promote_api() {
   local sha="$1"
   local env_id="$2"
@@ -164,6 +197,7 @@ main() {
   fi
   local env_id
   env_id="$(resolve_staging_environment_id)"
+  upsert_cli_dist_bust "$sha" "$env_id"
   promote_api "$sha" "$env_id"
 }
 

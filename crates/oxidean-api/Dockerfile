@@ -32,12 +32,19 @@ RUN cargo build --release -p oxidean-api --bin oxidean-api --bin oxidean-protect
 # `ox-dist` release so Cloud / Railway PR envs get darwin/windows without a
 # manual IaC apply. Compose and CI pass an empty build-arg for host-only.
 # Self-hosts that must not pull upstream should set OXIDEAN_CLI_DIST_URL=.
-# Fetch is fail-soft: retries then warn and continue host-only.
+# When the URL is set, fetch is fail-closed (retries, then fail the build).
+# Split from the matrix fetch so OXIDEAN_CLI_DIST_BUST can invalidate only
+# the download layer (same URL, refreshed ox-dist assets).
 ARG OXIDEAN_CLI_DIST_URL=https://github.com/oxidean/oxidean/releases/download/ox-dist
 RUN cargo build --release -p oxidean-cli --bin ox \
   && mkdir -p /usr/local/share/oxidean-cli \
   && target=$(rustc -vV | awk '/^host:/ {print $2}') \
-  && cp /app/target/release/ox "/usr/local/share/oxidean-cli/ox-$target" \
+  && cp /app/target/release/ox "/usr/local/share/oxidean-cli/ox-$target"
+# Bump OXIDEAN_CLI_DIST_BUST (e.g. git SHA) to re-fetch ox-dist without
+# rebuilding the host `ox` binary. Staging redeploy sets this before deploy.
+ARG OXIDEAN_CLI_DIST_BUST=
+RUN target=$(rustc -vV | awk '/^host:/ {print $2}') \
+  && echo "ox-dist bust=${OXIDEAN_CLI_DIST_BUST:-none}" \
   && if [ -n "$OXIDEAN_CLI_DIST_URL" ]; then \
        echo "staging full ox matrix from $OXIDEAN_CLI_DIST_URL"; \
        ok=0; \
@@ -52,25 +59,28 @@ RUN cargo build --release -p oxidean-cli --bin ox \
          sleep 15; \
        done; \
        if [ "$ok" != 1 ]; then \
-         echo "WARNING: could not fetch ox-targets.txt from $OXIDEAN_CLI_DIST_URL; continuing with host-only ox-$target"; \
-       else \
-         while read -r t || [ -n "$t" ]; do \
-           [ -z "$t" ] && continue; \
-           [ "$t" = "$target" ] && continue; \
-           if curl -fsSL "$OXIDEAN_CLI_DIST_URL/ox-$t" -o "/usr/local/share/oxidean-cli/ox-$t" \
-             && curl -fsSL "$OXIDEAN_CLI_DIST_URL/ox-$t.sha256" -o "/tmp/ox-$t.sha256" \
-             && (cd /usr/local/share/oxidean-cli && sha256sum -c "/tmp/ox-$t.sha256"); then \
-             :; \
-           else \
-             echo "WARNING: failed to stage ox-$t from $OXIDEAN_CLI_DIST_URL; skipping that target"; \
-             rm -f "/usr/local/share/oxidean-cli/ox-$t"; \
-           fi; \
-         done < /tmp/ox-targets.txt; \
-         curl -fsSL "$OXIDEAN_CLI_DIST_URL/SOURCE_COMMIT" \
-           -o /usr/local/share/oxidean-cli/SOURCE_COMMIT \
-           || echo "WARNING: no SOURCE_COMMIT at $OXIDEAN_CLI_DIST_URL (optional)"; \
-         ls -lh /usr/local/share/oxidean-cli; \
+         echo "ERROR: could not fetch ox-targets.txt from $OXIDEAN_CLI_DIST_URL" >&2; \
+         exit 1; \
        fi; \
+       while read -r t || [ -n "$t" ]; do \
+         [ -z "$t" ] && continue; \
+         [ "$t" = "$target" ] && continue; \
+         if curl -fsSL "$OXIDEAN_CLI_DIST_URL/ox-$t" -o "/usr/local/share/oxidean-cli/ox-$t" \
+           && curl -fsSL "$OXIDEAN_CLI_DIST_URL/ox-$t.sha256" -o "/tmp/ox-$t.sha256" \
+           && (cd /usr/local/share/oxidean-cli && sha256sum -c "/tmp/ox-$t.sha256"); then \
+           :; \
+         else \
+           echo "ERROR: failed to stage ox-$t from $OXIDEAN_CLI_DIST_URL" >&2; \
+           rm -f "/usr/local/share/oxidean-cli/ox-$t"; \
+           exit 1; \
+         fi; \
+       done < /tmp/ox-targets.txt; \
+       if ! curl -fsSL "$OXIDEAN_CLI_DIST_URL/SOURCE_COMMIT" \
+         -o /usr/local/share/oxidean-cli/SOURCE_COMMIT; then \
+         echo "ERROR: SOURCE_COMMIT missing at $OXIDEAN_CLI_DIST_URL" >&2; \
+         exit 1; \
+       fi; \
+       ls -lh /usr/local/share/oxidean-cli; \
      fi
 
 FROM debian:bookworm-slim
