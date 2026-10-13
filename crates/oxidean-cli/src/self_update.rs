@@ -1,11 +1,12 @@
 //! `ox self-update` — pull the latest `ox` binary the configured instance
 //! serves under `/cli/*` and replace the running executable in place.
 //!
-//! Flow: `GET {instance}/cli/latest` → compare `version` to the build version
-//! → `GET /cli/bin/ox-{target}` (+ published `.sha256`) → verify → atomic swap
-//! next to `current_exe`. Update locksteps the CLI to the instance it talks
-//! to; when the instance has no binary for this platform the command reports
-//! where to get one instead of guessing.
+//! Flow: `GET {instance}/cli/latest` → compare advertised `version` **and**
+//! the platform target's `sha256` to the running binary → if either differs,
+//! `GET /cli/bin/ox-{target}` → verify → atomic swap next to `current_exe`.
+//! That keeps the CLI locked to **this instance's staged build**, not merely
+//! matching workspace semver strings. When the instance has no binary for
+//! this platform the command reports where to get one instead of guessing.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -41,6 +42,18 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
         s.push_str(&format!("{b:02x}"));
     }
     s
+}
+
+/// True when the installed CLI should be replaced with the instance's staged
+/// binary — either the advertised semver moved, or the bytes for this target
+/// differ (same version string, rebuilt matrix).
+pub fn needs_binary_update(
+    current_version: &str,
+    latest_version: &str,
+    local_sha256: &str,
+    expected_sha256: &str,
+) -> bool {
+    current_version != latest_version || local_sha256 != expected_sha256
 }
 
 struct Latest {
@@ -142,21 +155,31 @@ pub async fn run(
     let http = reqwest::Client::new();
     let latest = fetch_latest(&http, &instance).await?;
     let current = env!("CARGO_PKG_VERSION");
-
-    if latest.version == current {
-        return Ok(Out::Report {
-            text: format!("ox {current} is up to date ({instance})"),
-            json: json!({"ok": true, "data": {"version": current, "updated": false}}),
-        });
-    }
-
     let target = current_target();
+
     let Some((_, expected_sha)) = latest.targets.iter().find(|(t, _)| *t == target) else {
         return Err(CliError::Transport(format!(
             "instance has no ox binary for {target} — update via \
              `curl -fsSL {instance}/cli/install.sh | sh` or `cargo install`"
         )));
     };
+
+    let exe = std::env::current_exe()
+        .map_err(|e| CliError::Transport(format!("cannot locate current executable: {e}")))?;
+    let local_bytes = fs::read(&exe)
+        .map_err(|e| CliError::Transport(format!("reading {}: {e}", exe.display())))?;
+    let local_sha = sha256_hex(&local_bytes);
+
+    if !needs_binary_update(current, &latest.version, &local_sha, expected_sha) {
+        return Ok(Out::Report {
+            text: format!("ox {current} is up to date ({instance})"),
+            json: json!({"ok": true, "data": {
+                "version": current,
+                "sha256": local_sha,
+                "updated": false,
+            }}),
+        });
+    }
 
     let url = format!("{instance}/cli/bin/ox-{target}");
     let bytes = get_bytes(&http, &url).await?;
@@ -167,8 +190,6 @@ pub async fn run(
         )));
     }
 
-    let exe = std::env::current_exe()
-        .map_err(|e| CliError::Transport(format!("cannot locate current executable: {e}")))?;
     apply_binary(&exe, &bytes)?;
 
     // Refresh installed `ox` skills to the new embedded copy — the skill
@@ -199,11 +220,18 @@ pub async fn run(
         }
     };
 
-    let mut text = format!(
-        "updated ox {current} → {} ({})",
-        latest.version,
-        exe.display()
-    );
+    let mut text = if current == latest.version {
+        format!(
+            "updated ox {current} binary to match instance ({})",
+            exe.display()
+        )
+    } else {
+        format!(
+            "updated ox {current} → {} ({})",
+            latest.version,
+            exe.display()
+        )
+    };
     if let Some(n) = skills.filter(|n| *n > 0) {
         text.push_str(&format!("\nrefreshed {n} installed ox skill(s)"));
     }
@@ -215,6 +243,7 @@ pub async fn run(
         json: json!({"ok": true, "data": {
             "from": current,
             "to": latest.version,
+            "sha256": actual,
             "path": exe,
             "updated": true,
             "skills_refreshed": skills,
@@ -249,5 +278,20 @@ mod tests {
             sha256_hex(b""),
             "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         );
+    }
+
+    #[test]
+    fn needs_update_when_version_differs() {
+        assert!(needs_binary_update("0.1.0", "0.2.0", "aaa", "aaa"));
+    }
+
+    #[test]
+    fn needs_update_when_sha_differs_same_version() {
+        assert!(needs_binary_update("0.1.0", "0.1.0", "aaa", "bbb"));
+    }
+
+    #[test]
+    fn no_update_when_version_and_sha_match() {
+        assert!(!needs_binary_update("0.1.0", "0.1.0", "abc", "abc"));
     }
 }
