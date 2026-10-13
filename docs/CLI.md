@@ -93,18 +93,21 @@ The API serves every `ox-{rust-target-triple}` file found in
 build time the Dockerfile always stages the server's own platform (built from
 the same commit as the API). When `OXIDEAN_CLI_DIST_URL` is **non-empty**, it
 also fetches a flat matrix (`ox-targets.txt` + per-target binaries /
-`.sha256`, plus optional `SOURCE_COMMIT`). The Dockerfile **defaults** to
-this product's rolling `ox-dist` URL so Cloud/Railway images (including PR
+`.sha256`, plus `SOURCE_COMMIT`). The Dockerfile **defaults** to this
+product's rolling `ox-dist` URL so Cloud/Railway images (including PR
 environments) stage the matrix without a manual apply; Compose and CI pass
-an empty build-arg for host-only. Fetch is fail-soft (retries, then warn and
-keep host-only). Extra targets can be dropped into the dist dir by hand:
+an empty build-arg for host-only. When the URL is set, fetch is **fail-closed**
+(retries, then fail the image build). `OXIDEAN_CLI_DIST_BUST` is a Docker
+build-arg that invalidates only the matrix-fetch layer so staging can re-pull
+`ox-dist` after a same-commit redeploy. Extra targets can be dropped into the
+dist dir by hand:
 
 ```text
 /usr/local/share/oxidean-cli/
   ox-x86_64-unknown-linux-gnu
   ox-aarch64-apple-darwin
   ox-x86_64-pc-windows-msvc
-  SOURCE_COMMIT          # optional provenance (git SHA of the matrix feed)
+  SOURCE_COMMIT          # git SHA of the matrix feed (required when URL is set)
 ```
 
 `GET /cli/latest` reports the API package `version`, each target’s
@@ -120,8 +123,9 @@ image stages the full matrix automatically:
 
 1. `.github/workflows/ox-cli.yml` refreshes **`ox-dist`** on every successful
    run on `main` (and on `v*` tags), including `SOURCE_COMMIT`.
-2. The job redeploys staging `api`
-   (`scripts/railway-staging-api-redeploy.sh`).
+2. The job upserts `OXIDEAN_CLI_DIST_BUST=<sha>` on staging `api`, then
+   redeploys (`scripts/railway-staging-api-redeploy.sh`) so the fetch layer
+   re-runs even when the git SHA is unchanged.
 3. Production promote rebuilds `api` with the same Cloud build-arg.
 
 Confirm with `GET /cli/latest` (darwin/windows listed) before asking users to

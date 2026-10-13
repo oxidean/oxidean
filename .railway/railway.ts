@@ -80,8 +80,10 @@ export default defineRailway((ctx) => {
       OXIDEAN_CORS_ORIGINS: "https://${{gateway.RAILWAY_PUBLIC_DOMAIN}}",
       // Cloud-only build-arg: stage the full ox matrix from this product's
       // rolling `ox-dist` GitHub Release (refreshed on main by ox-cli.yml).
-      // Dockerfile default is empty (self-host host-only); Railway matches
-      // ARG OXIDEAN_CLI_DIST_URL. Fetch fail-softs if assets are missing.
+      // Dockerfile defaults to the same URL; Compose/CI pass empty for
+      // host-only. When set, image build fail-closes if the matrix cannot
+      // be fetched. OXIDEAN_CLI_DIST_BUST is set by staging redeploy (not
+      // IaC) to bust the Docker fetch layer after ox-dist refreshes.
       // See docs/CLI.md § Cloud / self-host and issue #125.
       OXIDEAN_CLI_DIST_URL:
         "https://github.com/oxidean/oxidean/releases/download/ox-dist",
