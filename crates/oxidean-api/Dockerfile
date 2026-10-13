@@ -26,15 +26,14 @@ COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 RUN cargo build --release -p oxidean-api --bin oxidean-api --bin oxidean-protection-hook \
   && cp /app/target/release/oxidean-api /app/target/release/oxidean-protection-hook /usr/local/bin/
-# CLI distribution (D-CLI-DIST): the api serves /cli/bin/ox-{target} — stage the
-# companion `ox` build under the server's own target triple, then layer the
-# full matrix from OXIDEAN_CLI_DIST_URL (ox-targets.txt + ox-{target} +
-# .sha256). Default points at the rolling GitHub Release `ox-dist` so Cloud
-# and networked self-host builds pick up macOS/Windows/etc. without a
-# per-deploy ritual. Pass `--build-arg OXIDEAN_CLI_DIST_URL=` (empty) for
-# airgapped / host-only staging. Fetch is fail-soft: retries then warn and
-# continue with host-only so a missing release never bricks the image build.
-ARG OXIDEAN_CLI_DIST_URL=https://github.com/oxidean/oxidean/releases/download/ox-dist
+# CLI distribution (D-CLI-DIST): stage the companion `ox` under the server's
+# own target triple. When OXIDEAN_CLI_DIST_URL is set (Cloud IaC points at the
+# rolling `ox-dist` release), layer the full multi-arch matrix from that flat
+# URL (ox-targets.txt + ox-{target} + .sha256 + optional SOURCE_COMMIT).
+# Default is empty — self-host/Compose stay host-only unless operators opt in
+# with their own artifact feed (not a hardcoded upstream URL). Fetch is
+# fail-soft: retries then warn and continue host-only.
+ARG OXIDEAN_CLI_DIST_URL=""
 RUN cargo build --release -p oxidean-cli --bin ox \
   && mkdir -p /usr/local/share/oxidean-cli \
   && target=$(rustc -vV | awk '/^host:/ {print $2}') \
@@ -67,6 +66,9 @@ RUN cargo build --release -p oxidean-cli --bin ox \
              rm -f "/usr/local/share/oxidean-cli/ox-$t"; \
            fi; \
          done < /tmp/ox-targets.txt; \
+         curl -fsSL "$OXIDEAN_CLI_DIST_URL/SOURCE_COMMIT" \
+           -o /usr/local/share/oxidean-cli/SOURCE_COMMIT \
+           || echo "WARNING: no SOURCE_COMMIT at $OXIDEAN_CLI_DIST_URL (optional)"; \
          ls -lh /usr/local/share/oxidean-cli; \
        fi; \
      fi

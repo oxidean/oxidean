@@ -24,6 +24,12 @@ fn dist() -> &'static tempfile::TempDir {
         std::fs::write(dir.path().join("ox-aarch64-apple-darwin"), b"darwin-binary").unwrap();
         // Not served — wrong name shape.
         std::fs::write(dir.path().join("README.txt"), b"ignore me").unwrap();
+        // Provenance only — exposed on /cli/latest as dist_commit, not /cli/bin.
+        std::fs::write(
+            dir.path().join("SOURCE_COMMIT"),
+            "abcdef0123456789abcdef0123456789abcdef01\n",
+        )
+        .unwrap();
         std::env::set_var("OXIDEAN_CLI_DIST_DIR", dir.path());
         std::env::set_var("OXIDEAN_PUBLIC_ORIGIN", "https://forge.example.com");
         dir
@@ -115,6 +121,10 @@ async fn latest_lists_targets_with_digests() {
     let json: serde_json::Value = serde_json::from_str(&body).unwrap();
     assert_eq!(json["ok"], true);
     assert!(json["version"].as_str().unwrap().len() >= 3);
+    assert_eq!(
+        json["dist_commit"].as_str().unwrap(),
+        "abcdef0123456789abcdef0123456789abcdef01"
+    );
     let targets = json["targets"].as_array().unwrap();
     assert_eq!(targets.len(), 2, "{body}");
     let names: Vec<&str> = targets

@@ -449,6 +449,9 @@ jobs:
             cp "assets/ox-$t" "dist/ox-$t"
             cp "assets/ox-$t.sha256" "dist/ox-$t.sha256"
           done < dist/ox-targets.txt
+          # Git SHA of the matrix build — staged into API images and exposed
+          # on /cli/latest as dist_commit (lockstep provenance, not RPC compat).
+          printf '%s\n' "${{ github.sha }}" > dist/SOURCE_COMMIT
           ls -lh dist/
       - name: create or update ox-dist release
         env:
@@ -458,7 +461,7 @@ jobs:
           if ! gh release view ox-dist >/dev/null 2>&1; then
             gh release create ox-dist \
               --title "ox CLI distribution (rolling)" \
-              --notes "Rolling multi-arch ox binaries for API image staging (OXIDEAN_CLI_DIST_URL). Updated on every successful ox CLI run on main." \
+              --notes "Rolling multi-arch ox binaries for Oxidean Cloud API image staging (OXIDEAN_CLI_DIST_URL). Updated on every successful ox CLI run on main. Self-hosts should point at their own feed or leave the build-arg empty." \
               --target "${{ github.sha }}"
           fi
           gh release upload ox-dist dist/* --clobber

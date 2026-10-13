@@ -4,7 +4,8 @@
 //!   GET /cli/install.sh       POSIX installer with the public origin baked in
 //!   GET /cli/install.ps1      PowerShell installer (native Windows)
 //!   GET /cli/skill.md         consumer-facing agent skill (embedded single source)
-//!   GET /cli/latest           JSON { version, targets: [{ target, sha256, bytes }] }
+//!   GET /cli/latest           JSON { version, targets: [{ target, sha256, bytes }],
+//!                                   dist_commit? }
 //!   GET /cli/bin/{*file}      `ox-{target}` binary, or `ox-{target}.sha256` digest
 //!
 //! Binaries live in `OXIDEAN_CLI_DIST_DIR` (default `/usr/local/share/oxidean-cli`)
@@ -104,18 +105,41 @@ fn list_targets() -> Result<Vec<TargetEntry>, std::io::Error> {
     Ok(out)
 }
 
+/// Optional git SHA written by the ox-dist publisher / Dockerfile staging
+/// (`SOURCE_COMMIT` in the dist dir). Not an `ox-*` binary — provenance only.
+fn dist_commit() -> Option<String> {
+    let path = dist_dir().join("SOURCE_COMMIT");
+    let raw = std::fs::read_to_string(path).ok()?;
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed.len() > 64 {
+        return None;
+    }
+    if !trimmed
+        .chars()
+        .all(|c| c.is_ascii_hexdigit())
+    {
+        return None;
+    }
+    Some(trimmed.to_string())
+}
+
 pub async fn latest() -> Response {
     match list_targets() {
-        Ok(targets) => Json(serde_json::json!({
-            "ok": true,
-            "version": env!("CARGO_PKG_VERSION"),
-            "targets": targets.iter().map(|t| serde_json::json!({
-                "target": t.target,
-                "sha256": t.sha256,
-                "bytes": t.bytes,
-            })).collect::<Vec<_>>(),
-        }))
-        .into_response(),
+        Ok(targets) => {
+            let mut body = serde_json::json!({
+                "ok": true,
+                "version": env!("CARGO_PKG_VERSION"),
+                "targets": targets.iter().map(|t| serde_json::json!({
+                    "target": t.target,
+                    "sha256": t.sha256,
+                    "bytes": t.bytes,
+                })).collect::<Vec<_>>(),
+            });
+            if let Some(commit) = dist_commit() {
+                body["dist_commit"] = serde_json::json!(commit);
+            }
+            Json(body).into_response()
+        }
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({
