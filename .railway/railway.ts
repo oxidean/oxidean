@@ -79,12 +79,12 @@ export default defineRailway((ctx) => {
       OXIDEAN_PUBLIC_ORIGIN: "https://${{gateway.RAILWAY_PUBLIC_DOMAIN}}",
       OXIDEAN_CORS_ORIGINS: "https://${{gateway.RAILWAY_PUBLIC_DOMAIN}}",
       // Build-arg for crates/oxidean-api/Dockerfile: stage the full ox matrix from
-      // GitHub Releases into OXIDEAN_CLI_DIST_DIR (macOS/Windows/etc.). Railway
-      // matches ARG OXIDEAN_CLI_DIST_URL. Apply IaC only after a v* release exists
-      // with ox-targets.txt — otherwise the next API image build fails on curl.
+      // the rolling GitHub Release `ox-dist` (refreshed on every successful ox
+      // CLI run on main). Railway matches ARG OXIDEAN_CLI_DIST_URL. The
+      // Dockerfile defaults to the same URL and fail-softs if assets are missing.
       // See docs/CLI.md § Cloud operators and issue #125.
       OXIDEAN_CLI_DIST_URL:
-        "https://github.com/oxidean/oxidean/releases/latest/download",
+        "https://github.com/oxidean/oxidean/releases/download/ox-dist",
       OXIDEAN_ADMIN_EMAIL: preserve(),
       OXIDEAN_ADMIN_PASSWORD: preserve(),
       OXIDEAN_RESEND_API_KEY: preserve(),

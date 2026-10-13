@@ -83,12 +83,16 @@ failures only warn). Pass `--no-skill-refresh` to skip that step.
 ### For operators: serving binaries
 
 The API serves every `ox-{rust-target-triple}` file found in
-`OXIDEAN_CLI_DIST_DIR` (default `/usr/local/share/oxidean-cli`). Self-built
-images stage the server's own platform; the published release image is built
-with `OXIDEAN_CLI_DIST_URL` pointing at the GitHub release and stages the
-full matrix (fetched + sha256-verified at image-build time). To offer more
-targets yourself, build with that arg or drop additional binaries into the
-dist dir:
+`OXIDEAN_CLI_DIST_DIR` (default `/usr/local/share/oxidean-cli`). At image
+build time the Dockerfile stages the server's own platform, then — when
+`OXIDEAN_CLI_DIST_URL` is non-empty — fetches the full matrix
+(`ox-targets.txt` + per-target binaries and `.sha256` digests). The default
+URL is the rolling GitHub Release
+`https://github.com/oxidean/oxidean/releases/download/ox-dist`. Pass an empty
+build-arg (`OXIDEAN_CLI_DIST_URL=`) for airgapped / host-only images. Fetch
+is fail-soft (retries, then warn and keep host-only) so a missing release
+never fails the image build. Extra targets can always be dropped into the
+dist dir by hand:
 
 ```text
 /usr/local/share/oxidean-cli/
@@ -103,19 +107,20 @@ digests unauthenticated so installs work before `ox auth login` exists.
 
 #### Cloud operators (Railway / app.oxidean.dev)
 
-`install.sh` is not the bug when macOS/Windows installs 404: the live instance
-only serves whatever was staged into the API image. Oxidean Cloud IaC sets
-`OXIDEAN_CLI_DIST_URL` on the `api` service to
-`https://github.com/oxidean/oxidean/releases/latest/download` (Docker build-arg;
-see `.railway/railway.ts`). Sequence:
+The instance only serves what was staged into the API image. On Oxidean Cloud
+that is automatic:
 
-1. Publish a `v*` tag so `ox-cli.yml` uploads the matrix + `ox-targets.txt`.
-2. Apply Railway IaC / confirm the variable, then rebuild `api`.
-3. Check `/cli/latest` includes `aarch64-apple-darwin` (and other matrix targets)
-   before asking users to re-run the installer.
+1. `.github/workflows/ox-cli.yml` refreshes the rolling **`ox-dist`** release
+   on every successful run on `main` (and on `v*` tags).
+2. The same job redeploys staging `api` so `/cli` picks up the new matrix
+   (`scripts/railway-staging-api-redeploy.sh`).
+3. Railway IaC and the Dockerfile default both point
+   `OXIDEAN_CLI_DIST_URL` at
+   `https://github.com/oxidean/oxidean/releases/download/ox-dist`.
+4. Production promote rebuilds `api` with that URL — no separate tag ritual.
 
-Do not set the URL (or apply IaC that sets it) until the release assets exist —
-the Dockerfile build fails closed if `ox-targets.txt` cannot be fetched.
+Confirm with `GET /cli/latest` (should list `aarch64-apple-darwin` and the
+rest of the matrix) before asking users to re-run the installer.
 
 > **Distribution polish backlog:** macOS binaries ship unsigned today —
 > Gatekeeper will flag them on first run (`xattr -d com.apple.quarantine` or

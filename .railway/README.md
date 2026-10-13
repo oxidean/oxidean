@@ -118,21 +118,18 @@ IaC sets public browser/SSH advertise vars from the **gateway** domain (not `pre
 | `OXIDEAN_WEB_BEHIND_PROXY` (web) | `1` — the gateway sanitizes `X-Forwarded-*`, so `oxidean-web` trusts the edge's chain |
 | `OXIDEAN_AUTO_MIGRATE` | `true` on all environments (including production) |
 | `OXIDEAN_PROTECTION_HELPER` | `/usr/local/bin/oxidean-protection-hook` (API image) |
-| `OXIDEAN_CLI_DIST_URL` (api) | `https://github.com/oxidean/oxidean/releases/latest/download` — Docker **build-arg** (`ARG` in `crates/oxidean-api/Dockerfile`). Stages the full `ox-*` matrix into the image so `/cli/bin` serves macOS/Windows/etc., not only the Linux builder host. |
+| `OXIDEAN_CLI_DIST_URL` (api) | `https://github.com/oxidean/oxidean/releases/download/ox-dist` — Docker **build-arg** (`ARG` in `crates/oxidean-api/Dockerfile`, same default). Stages the full `ox-*` matrix from the rolling `ox-dist` GitHub Release so `/cli/bin` serves macOS/Windows/etc. |
 
 ### ox CLI multi-arch matrix (issue #125)
 
-Without `OXIDEAN_CLI_DIST_URL`, the API image only stages `ox-$(rustc host)` (Linux on Railway). `install.sh` on macOS arm correctly requests `ox-aarch64-apple-darwin` and gets 404.
+Steady state is automatic — no per-release tag or IaC ritual:
 
-**Order matters — do not apply this variable until a GitHub Release exists:**
+1. Every successful [`.github/workflows/ox-cli.yml`](../.github/workflows/ox-cli.yml) run on `main` refreshes the rolling GitHub Release **`ox-dist`** (`ox-targets.txt` + `ox-*` + `.sha256`).
+2. That job then redeploys staging `api` via [`scripts/railway-staging-api-redeploy.sh`](../scripts/railway-staging-api-redeploy.sh) (needs `RAILWAY_API_TOKEN` or a staging-scoped `RAILWAY_TOKEN` in repo secrets; skipped cleanly when absent).
+3. The API Dockerfile fetches `ox-dist` at image-build time (retries, then fail-soft to host-only if assets are missing). Production promote rebuilds with the same URL.
+4. Verify: `GET …/cli/latest` lists darwin/windows targets; macOS `curl -fsSL …/cli/install.sh | sh` succeeds.
 
-1. Push a `v*` tag (e.g. `v0.1.0`) so `.github/workflows/ox-cli.yml` `release` publishes `ox-targets.txt` + `ox-*` (+ `.sha256`) assets.
-2. Confirm `https://github.com/oxidean/oxidean/releases/latest/download/ox-targets.txt` returns 200 and lists `aarch64-apple-darwin`.
-3. `railway config apply` (this IaC) on each environment — materializes `OXIDEAN_CLI_DIST_URL` on `api`.
-4. Rebuild/redeploy `api` (staging autodeploy; production via **Production deploy** promote). The Dockerfile curls the release matrix at image-build time.
-5. Verify: `GET https://app.oxidean.dev/cli/latest` lists darwin/windows targets; macOS `curl -fsSL https://app.oxidean.dev/cli/install.sh | sh` succeeds.
-
-Applying the URL before any release makes the next API Docker build fail (`curl -fsSL` of `ox-targets.txt`). Details: [docs/CLI.md](../docs/CLI.md).
+Optional semver `v*` tags still create product GitHub Releases (installers + packages); they also refresh `ox-dist`. Airgapped builds: `--build-arg OXIDEAN_CLI_DIST_URL=`. Details: [docs/CLI.md](../docs/CLI.md).
 
 PR Environments inherit from `preview`; dynamic gateway refs and auto-migrate on every environment (including production) keep schema current and avoid stale preview origins. The API/web also replace a stale `*.up.railway.app` origin with `RAILWAY_SERVICE_GATEWAY_URL` / `RAILWAY_PUBLIC_DOMAIN` (custom domains are left alone).
 
