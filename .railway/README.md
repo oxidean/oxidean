@@ -118,7 +118,7 @@ IaC sets public browser/SSH advertise vars from the **gateway** domain (not `pre
 | `OXIDEAN_WEB_BEHIND_PROXY` (web) | `1` — the gateway sanitizes `X-Forwarded-*`, so `oxidean-web` trusts the edge's chain |
 | `OXIDEAN_AUTO_MIGRATE` | `true` on all environments (including production) |
 | `OXIDEAN_PROTECTION_HELPER` | `/usr/local/bin/oxidean-protection-hook` (API image) |
-| `OXIDEAN_CLI_DIST_URL` (api) | `https://github.com/oxidean/oxidean/releases/download/ox-dist` — Docker **build-arg** for **Cloud only**. Stages this product's rolling `ox-dist` matrix so `/cli/bin` serves macOS/Windows/etc. Dockerfile default is empty (self-host host-only). |
+| `OXIDEAN_CLI_DIST_URL` (api) | `https://github.com/oxidean/oxidean/releases/download/ox-dist` — Docker **build-arg** (same as Dockerfile default). Stages this product's rolling `ox-dist` matrix so `/cli/bin` serves macOS/Windows/etc. Compose/CI override empty for host-only. |
 
 ### ox CLI multi-arch matrix (issue #125)
 
