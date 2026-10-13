@@ -90,17 +90,18 @@ failures only warn). Pass `--no-skill-refresh` to skip that step.
 
 The API serves every `ox-{rust-target-triple}` file found in
 `OXIDEAN_CLI_DIST_DIR` (default `/usr/local/share/oxidean-cli`). At image
-build time the Dockerfile always stages the server's own platform (built from
-the same commit as the API). When `OXIDEAN_CLI_DIST_URL` is **non-empty**, it
-also fetches a flat matrix (`ox-targets.txt` + per-target binaries /
-`.sha256`, plus `SOURCE_COMMIT`). The Dockerfile **defaults** to this
-product's rolling `ox-dist` URL so Cloud/Railway images (including PR
-environments) stage the matrix without a manual apply; Compose and CI pass
-an empty build-arg for host-only. When the URL is set, fetch is **fail-closed**
-(retries, then fail the image build). `OXIDEAN_CLI_DIST_BUST` is a Docker
-build-arg that invalidates only the matrix-fetch layer so staging can re-pull
-`ox-dist` after a same-commit redeploy. Extra targets can be dropped into the
-dist dir by hand:
+build time the Dockerfile always cargo-builds the server's own platform as a
+host-only fallback. When `OXIDEAN_CLI_DIST_URL` is **non-empty**, it fetches
+the full flat matrix (`ox-targets.txt` + every `ox-{triple}` + `.sha256`,
+plus `SOURCE_COMMIT`) and **overwrites** the host triple from that feed so
+staged digests match the release (required by the ox CLI image-matrix job).
+The Dockerfile **defaults** to this product's rolling `ox-dist` URL so
+Cloud/Railway images (including PR environments) stage the matrix without a
+manual apply; Compose and CI pass an empty build-arg for host-only. When the
+URL is set, fetch is **fail-closed** (retries, then fail the image build).
+`OXIDEAN_CLI_DIST_BUST` is a Docker build-arg that invalidates only the
+matrix-fetch layer so staging can re-pull `ox-dist` after a same-commit
+redeploy. Extra targets can be dropped into the dist dir by hand:
 
 ```text
 /usr/local/share/oxidean-cli/

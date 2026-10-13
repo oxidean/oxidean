@@ -26,25 +26,25 @@ COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 RUN cargo build --release -p oxidean-api --bin oxidean-api --bin oxidean-protection-hook \
   && cp /app/target/release/oxidean-api /app/target/release/oxidean-protection-hook /usr/local/bin/
-# CLI distribution (D-CLI-DIST): stage the companion `ox` under the server's
-# own target triple, then (when OXIDEAN_CLI_DIST_URL is non-empty) layer the
-# full multi-arch matrix from that flat URL. Default is this product's rolling
-# `ox-dist` release so Cloud / Railway PR envs get darwin/windows without a
-# manual IaC apply. Compose and CI pass an empty build-arg for host-only.
-# Self-hosts that must not pull upstream should set OXIDEAN_CLI_DIST_URL=.
-# When the URL is set, fetch is fail-closed (retries, then fail the build).
-# Split from the matrix fetch so OXIDEAN_CLI_DIST_BUST can invalidate only
-# the download layer (same URL, refreshed ox-dist assets).
+# CLI distribution (D-CLI-DIST): stage a cargo-built host `ox` first (host-only
+# / empty-URL path). When OXIDEAN_CLI_DIST_URL is non-empty, fetch every triple
+# listed in ox-targets.txt — including the host — so staged digests match the
+# feed (CI's image-matrix job sha256sum-checks every target against ox-dist).
+# Default URL is this product's rolling ox-dist release so Cloud / Railway PR
+# envs get darwin/windows without a manual IaC apply. Compose and CI pass an
+# empty build-arg for host-only. Self-hosts that must not pull upstream should
+# set OXIDEAN_CLI_DIST_URL=. When the URL is set, fetch is fail-closed
+# (retries, then fail the build). Split from cargo build so
+# OXIDEAN_CLI_DIST_BUST can invalidate only the download layer.
 ARG OXIDEAN_CLI_DIST_URL=https://github.com/oxidean/oxidean/releases/download/ox-dist
 RUN cargo build --release -p oxidean-cli --bin ox \
   && mkdir -p /usr/local/share/oxidean-cli \
   && target=$(rustc -vV | awk '/^host:/ {print $2}') \
   && cp /app/target/release/ox "/usr/local/share/oxidean-cli/ox-$target"
 # Bump OXIDEAN_CLI_DIST_BUST (e.g. git SHA) to re-fetch ox-dist without
-# rebuilding the host `ox` binary. Staging redeploy sets this before deploy.
+# re-running cargo build. Staging redeploy sets this before deploy.
 ARG OXIDEAN_CLI_DIST_BUST=
-RUN target=$(rustc -vV | awk '/^host:/ {print $2}') \
-  && echo "ox-dist bust=${OXIDEAN_CLI_DIST_BUST:-none}" \
+RUN echo "ox-dist bust=${OXIDEAN_CLI_DIST_BUST:-none}" \
   && if [ -n "$OXIDEAN_CLI_DIST_URL" ]; then \
        echo "staging full ox matrix from $OXIDEAN_CLI_DIST_URL"; \
        ok=0; \
@@ -64,7 +64,6 @@ RUN target=$(rustc -vV | awk '/^host:/ {print $2}') \
        fi; \
        while read -r t || [ -n "$t" ]; do \
          [ -z "$t" ] && continue; \
-         [ "$t" = "$target" ] && continue; \
          if curl -fsSL "$OXIDEAN_CLI_DIST_URL/ox-$t" -o "/usr/local/share/oxidean-cli/ox-$t" \
            && curl -fsSL "$OXIDEAN_CLI_DIST_URL/ox-$t.sha256" -o "/tmp/ox-$t.sha256" \
            && (cd /usr/local/share/oxidean-cli && sha256sum -c "/tmp/ox-$t.sha256"); then \
