@@ -2,7 +2,7 @@
 name: ox
 description: >
   Use the `ox` CLI to work with an Oxidean forge instance — repositories, issues,
-  pull requests, actions runs, releases, packages, notifications, and admin tasks —
+  pull requests, actions runs, releases, packages, and notifications —
   from the shell. Use this skill when: (1) you need to create, review, merge, or
   inspect issues/PRs/repos on an Oxidean instance, (2) CI scripts must talk to
   Oxidean without a browser, (3) you need --json/jq pipelines or the `ox api`
@@ -57,13 +57,13 @@ instance PAT policy — `auth refresh` renews them.
 
 | Area | Commands |
 |---|---|
-| repos | `repo list\|view\|create\|fork\|sync\|clone`, `repo edit\|rename\|archive\|unarchive\|delete\|transfer`, `repo star\|unstar\|watch\|unwatch`, `repo deploy-key`, `collaborator(s)`, `invites`, `branch-protection`, `tag-protection`, `mirror`, `merge-settings`, `lfs`, `quota` |
+| repos | `repo list\|view\|create\|templates\|fork\|sync\|clone`, `repo edit\|rename\|archive\|unarchive\|delete\|transfer`, `repo star\|unstar\|watch\|unwatch`, `repo deploy-key`, `collaborator(s)`, `invites`, `branch-protection`, `tag-protection`, `mirror`, `merge-settings`, `lfs`, `quota` |
 | issues | `issue list\|view\|create\|edit\|close\|reopen\|delete\|comment` |
 | prs | `pr list\|view\|create\|merge\|diff\|files\|review\|comment\|ready\|update-branch\|checks\|close\|reopen\|checkout` |
 | actions | `run list\|view [--log]\|rerun\|cancel`, `workflow list\|view\|run`, `secret list\|set\|delete`, `status create` |
 | releases | `release list\|view\|create\|edit\|delete`, `release upload\|download\|delete-asset` |
 | mcp | `mcp print\|install\|status\|remove` — wire the instance's `/api/mcp` endpoint into agent-harness MCP configs |
-| everything else | `search`, `browse`, `pkg list`, `org …`, `user …`, `notification …`, `label …`, `webhook …`, `ssh-key`, `gpg-key`, `email`, `invite accept`, `admin …` |
+| everything else | `search`, `browse`, `pkg list`, `org …`, `user …`, `notification …`, `label …`, `webhook …`, `ssh-key`, `gpg-key`, `email` |
 
 `<o/n>` is the `owner/name` repo spec; `-R/--repo` supplies it as a flag.
 With neither, `OXIDEAN_REPO` is tried, then the git remotes of the current
@@ -71,7 +71,9 @@ directory (`upstream`, `origin`, `fork`) — inside a clone the repo argument
 can usually be omitted. PAT management lives in the web UI
 (`/settings/tokens`); the CLI manages only its own credential via
 `auth status|refresh|revoke`. `ox <group> <sub> --help` prints per-command
-usage.
+usage. There is deliberately no `ox admin`/`ox pat`/`ox invite` — admin
+(`admin.*`) and invite-acceptance RPCs are session-cookie only, so
+PAT-authenticated `ox` cannot serve them; use the web UI.
 
 ## Scripting: `--json` and exit codes
 
@@ -121,7 +123,7 @@ ox pr checks o/n 34 --json | jq '.data.statuses[] | select(.state != "success")'
 ox pr review o/n 34 --approve
 ox pr merge o/n 34 --squash
 
-# Create a repo and push initial code
+# Create a repo and push initial code (templates: ox repo templates; --template <ref>)
 ox repo create my-lib --visibility private
 ox repo clone o/my-lib
 

@@ -53,10 +53,6 @@ PEOPLE & ORGS
 ACCOUNT
   ox ssh-key|gpg-key list|add|delete
   ox email list|add|remove|set-primary|resend
-  ox invite accept --token <t>
-
-INSTANCE ADMIN
-  ox admin users …|invites …|runners|lfs|git|mcp|pat|auth|templates
 
 MAINTENANCE
   ox self-update     replace this binary with the build the instance serves
@@ -112,10 +108,11 @@ const HELP: &[(&str, &str)] = &[
     ("config get", "ox config get <key>\n\n  default_instance            prints the configured default instance URL\n  instances.<url>.token       prints 'set' or 'unset' (never the secret)"),
     ("config set", "ox config set <key> <value>\n\n  default_instance <url>      must name a logged-in instance\n  instances.<url>.token <t>   stores the token (600 config file)"),
     ("completion", "ox completion <bash|zsh|fish|pwsh>\n\nPrints a static completion script for the shell — command and\nsubcommand names (per-leaf flags are not completed).\n\n  bash:  ox completion bash | sudo tee /etc/bash_completion.d/ox\n         or per-shell: source <(ox completion bash)\n  zsh:   save as _ox in a directory on $fpath, then compinit\n  fish:  ox completion fish > ~/.config/fish/completions/ox.fish\n  pwsh:  add to $PROFILE: ox completion pwsh | Out-String | Invoke-Expression"),
-    ("repo", "ox repo — repositories\n\n  list|view|create|fork|sync|clone|edit|rename|archive|unarchive\n  delete|transfer|star|unstar|watch|unwatch\n  deploy-key list|add|delete · collaborator list|add|set-role|remove\n  invites list|create|link|revoke\n  branch-protection list|set|delete · tag-protection list|set|delete\n  mirror get|set|sync|delete|gen-key|rotate-secret\n  merge-settings [get|set] · lfs [--usage|--objects|--enable|--disable]\n  quota [--set <bytes>]"),
+    ("repo", "ox repo — repositories\n\n  list|view|create|fork|sync|clone|templates|edit|rename|archive|unarchive\n  delete|transfer|star|unstar|watch|unwatch\n  deploy-key list|add|delete · collaborator list|add|set-role|remove\n  invites list|create|link|revoke\n  branch-protection list|set|delete · tag-protection list|set|delete\n  mirror get|set|sync|delete|gen-key|rotate-secret\n  merge-settings [get|set] · lfs [--usage|--objects|--enable|--disable]\n  quota [--set <bytes>]"),
     ("repo list", "ox repo list [--owner <user|org>]\n\n`--owner` → repo.listByOwner; bare → repo.listMine."),
     ("repo view", "ox repo view <owner/name>"),
-    ("repo create", "ox repo create <name> [--org <slug>] [--description <d>]\n                [--visibility public|private] [--license <spdx>]\n                [--gitignore <id>]\n\nOwner defaults to your user; --org creates under that org."),
+    ("repo create", "ox repo create [<name>] [--org <slug>] [--description <d>]\n                [--visibility public|private] [--license <spdx>]\n                [--gitignore <id>] [--template <ref>]\n\nOwner defaults to your user; --org creates under that org.\n--template accepts a template ref from `ox repo templates` — a builtin\nstack id, an instance pack slug, or owner/name of a template repo.\nWith no name on a TTY, an interactive wizard walks name, owner,\ntemplate, and visibility; non-interactive use still requires <name>."),
+    ("repo templates", "ox repo templates\n\nList the repository templates the connected instance offers — builtin\nstack presets, admin-provided instance packs, and template repos you\ncan read — plus the gitignore catalog and default visibility."),
     ("repo fork", "ox repo fork <owner/name> [--into-owner <o>] [--into-name <n>]"),
     ("repo sync", "ox repo sync <owner/name>\n\nSync a fork with its upstream (repo.forkStatus + repo.syncFork)."),
     ("repo clone", "ox repo clone <owner/name> [<dir>]\n\nRuns `git clone <instance>/<owner>/<name>.git` locally."),
@@ -196,19 +193,8 @@ const HELP: &[(&str, &str)] = &[
     ("ssh-key", "ox ssh-key list · add --title <t> --key-file <path> [--no-auth|--no-sign]\n           delete --id <id>      (key-file '-' = stdin)"),
     ("gpg-key", "ox gpg-key list · add --title <t> --key-file <path> · delete --id <id>"),
     ("email", "ox email list · add <addr> · remove --id <id> · set-primary --id <id>\n         resend --id <id>"),
-    ("admin pat", "ox admin pat                            show PAT expiry policy\n  ox admin pat set [--default-ttl-days n] [--max-ttl-days n]\n      [--allow-never-expire on|off] [--clear]\n\nThe instance policy all PAT creation resolves through: default TTL when\nexpiry is omitted, maximum TTL cap, and whether \"never\" is accepted."),
     ("label", "ox label list <o/n>|--org <slug>\n  ox label create <o/n>|--org <slug> --name <n> --color <hex> [--description <d>]\n  ox label edit <o/n>|--org <slug> --id <id> [--name][--color][--description][--hidden]\n  ox label delete <o/n>|--org <slug> --id <id>"),
     ("webhook", "ox webhook list|create|edit|delete|ping <o/n>\n  create --url <u> --secret <s> --events push,pull_request [--name <n>]\n         [--description <d>] [--inactive]\n  edit --id <id> [--url][--secret][--events][--name][--description][--inactive|--active]\n  ping --id <id> · deliveries <o/n> --id <id> [--limit n]\n  redeliver <o/n> --id <id> --delivery <delivery-id>"),
-    ("invite", "ox invite accept --token <t> [--email <e>] [--username <u>] [--password <p>]\n\nAccept a repo/org invite link."),
-    ("admin", "ox admin — instance administration\n\n  users list|ban|unban|delete|set-role|sessions|revoke-sessions|access|activity\n  invites list|create|link|revoke\n  runners · runner-token\n  lfs|git|mcp|pat|auth (settings get/set) · templates list|enable|disable|delete\n  repos gc"),
-    ("admin auth", "ox admin auth            show instance auth settings\n  ox admin auth set [--provider-mode local|workos|oidc]\n      [--email-provider log|smtp|resend] [--from-address <addr>]\n      [--oidc-issuer <url>] [--oidc-client-id <id>] [--workos-client-id <id>]\n      [--allow-signup | --no-signup] [--default-visibility public|private]\n\nset merges flags over current settings server-side."),
-    ("admin users", "ox admin users list [--query q] [--limit n] [--offset n]\n  ox admin users ban|unban --id <user-id>\n  ox admin users delete --id <id> --confirm <email-or-username> [--delete-orgs]\n  ox admin users set-role --id <id> --role user|admin|sys-admin\n  ox admin users sessions|revoke-sessions|access|activity --id <id>\n      [--source audit|repository] [--event-type <t>] [--limit n]"),
-    ("admin invites", "ox admin invites list\n  ox admin invites create --emails a@x,b@y\n  ox admin invites link [--expires <iso>] [--max-uses <n>]\n  ox admin invites revoke --id <invite-id>"),
-    ("admin runners", "ox admin runners          list registered action runners\n  ox admin runner-token     mint a runner registration token"),
-    ("admin lfs", "ox admin lfs                            show LFS settings + usage\n  ox admin lfs set [--max-object-bytes n] [--quota-repo-bytes n]\n                   [--quota-user-bytes n] [--clear]"),
-    ("admin git", "ox admin git                            show git settings\n  ox admin git set [--repo-quota-bytes n] [--clear]"),
-    ("admin mcp", "ox admin mcp                            show MCP settings\n  ox admin mcp set [--enable|--disable|--clear]"),
-    ("admin templates", "ox admin templates list\n  ox admin templates enable|disable --id <pack-id>\n  ox admin templates delete --id <pack-id>"),
     ("self-update", "ox self-update [--no-skill-refresh] [--no-mcp-refresh]\n\nDownloads the ox build for this platform the configured instance\nserves, verifies the published sha256, and swaps this executable.\nAfter a successful swap, existing `ox skill` installs and `oxidean`\nMCP config entries are refreshed to the new binary's shape (same\nsweeps as `ox skill install --upgrade` / `ox mcp install --upgrade`,\npreserving each entry's endpoint and credential);\n--no-skill-refresh / --no-mcp-refresh skip those steps."),
     ("skill", "ox skill — the consumer-facing agent SKILL.md\n\n  ox skill print     write SKILL.md to stdout\n  ox skill install   write SKILL.md into harness skill dirs\n\nThe document is embedded in this binary and also served by the\ninstance at /cli/skill.md."),
     ("skill print", "ox skill print\n\nPrints the embedded SKILL.md verbatim — `ox skill print > SKILL.md`\nor pipe into `ox skill install`-style tooling."),
@@ -325,13 +311,15 @@ pub enum Command {
         repo: String,
     },
     RepoCreate {
-        name: String,
+        name: Option<String>,
         owner: Option<String>,
         description: Option<String>,
         visibility: Option<String>,
         license: Option<String>,
         gitignore: Option<String>,
+        template: Option<String>,
     },
+    RepoTemplates,
     RepoFork {
         repo: String,
         into_owner: Option<String>,
@@ -424,12 +412,6 @@ pub enum Command {
     RepoInviteRevoke {
         repo: String,
         id: String,
-    },
-    InviteAccept {
-        token: String,
-        email: Option<String>,
-        username: Option<String>,
-        password: Option<String>,
     },
     BranchProtectionList {
         repo: String,
@@ -888,96 +870,6 @@ pub enum Command {
         hook_id: String,
         delivery_id: String,
     },
-    AdminUsersList {
-        query: Option<String>,
-        limit: Option<u64>,
-        offset: Option<u64>,
-    },
-    AdminUserBan {
-        id: String,
-        ban: bool,
-    },
-    AdminUserDelete {
-        id: String,
-        confirm: String,
-        delete_orgs: bool,
-    },
-    AdminUserRole {
-        id: String,
-        role: String,
-    },
-    AdminUserSessions {
-        id: String,
-    },
-    AdminUserRevokeSessions {
-        id: String,
-    },
-    AdminUserAccess {
-        id: String,
-    },
-    AdminUserActivity {
-        id: String,
-        source: Option<String>,
-        event_type: Option<String>,
-        limit: Option<u64>,
-    },
-    AdminInviteList,
-    AdminInviteCreate {
-        emails: Vec<String>,
-    },
-    AdminInviteLink {
-        expires_at: Option<String>,
-        max_uses: Option<u64>,
-    },
-    AdminInviteRevoke {
-        id: String,
-    },
-    AdminRunners,
-    AdminRunnerToken,
-    AdminLfs {
-        set: bool,
-        max_object_bytes: Option<u64>,
-        quota_repo_bytes: Option<u64>,
-        quota_user_bytes: Option<u64>,
-        clear: bool,
-    },
-    AdminGit {
-        set: bool,
-        repo_quota_bytes: Option<u64>,
-        clear: bool,
-    },
-    AdminMcp {
-        set: bool,
-        enable: Option<bool>,
-        clear: bool,
-    },
-    AdminPat {
-        set: bool,
-        default_ttl_days: Option<u64>,
-        max_ttl_days: Option<u64>,
-        allow_never_expire: Option<bool>,
-        clear: bool,
-    },
-    AdminAuth {
-        set: bool,
-        provider_mode: Option<String>,
-        email_provider: Option<String>,
-        from_address: Option<String>,
-        oidc_issuer: Option<String>,
-        oidc_client_id: Option<String>,
-        workos_client_id: Option<String>,
-        allow_signup: Option<bool>,
-        default_visibility: Option<String>,
-    },
-    AdminTemplatesList,
-    AdminTemplatesSetEnabled {
-        id: String,
-        enabled: bool,
-    },
-    AdminTemplatesDelete {
-        id: String,
-    },
-    AdminReposGc,
     PkgList {
         owner: Option<String>,
     },
@@ -1200,9 +1092,7 @@ pub fn remote_url_spec(url: &str) -> Option<String> {
     let path = path.trim_end_matches('/').trim_end_matches(".git");
     let mut it = path.split('/');
     match (it.next(), it.next(), it.next()) {
-        (Some(o), Some(n), None) if !o.is_empty() && !n.is_empty() => {
-            Some(format!("{o}/{n}"))
-        }
+        (Some(o), Some(n), None) if !o.is_empty() && !n.is_empty() => Some(format!("{o}/{n}")),
         _ => None,
     }
 }
@@ -1434,41 +1324,6 @@ const NESTED: &[(&str, &str, &[&str], Option<&str>)] = &[
         "webhook",
         "deliveries",
         &["list", "get", "view", "redeliver"],
-        Some("list"),
-    ),
-    (
-        "admin",
-        "users",
-        &[
-            "list",
-            "ban",
-            "unban",
-            "delete",
-            "set-role",
-            "sessions",
-            "revoke-sessions",
-            "access",
-            "activity",
-        ],
-        None,
-    ),
-    (
-        "admin",
-        "invites",
-        &["list", "create", "link", "revoke"],
-        Some("list"),
-    ),
-    ("admin", "actions", &["runners", "runner-token"], None),
-    ("admin", "repos", &["gc"], None),
-    ("admin", "lfs", &["get", "set"], Some("get")),
-    ("admin", "git", &["get", "set"], Some("get")),
-    ("admin", "mcp", &["get", "set"], Some("get")),
-    ("admin", "pat", &["get", "set"], Some("get")),
-    ("admin", "auth", &["get", "set"], Some("get")),
-    (
-        "admin",
-        "templates",
-        &["list", "enable", "disable", "delete"],
         Some("list"),
     ),
 ];
@@ -1732,15 +1587,12 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
                     "--visibility",
                     "--license",
                     "--gitignore",
+                    "--template",
                 ],
                 &[],
                 &[],
             )?;
-            let name = f
-                .positionals
-                .first()
-                .cloned()
-                .ok_or_else(|| usage("usage: ox repo create <name>"))?;
+            let name = f.positionals.first().cloned();
             if f.positionals.len() > 1 {
                 return Err(usage(format!(
                     "ox repo create: unexpected argument '{}'",
@@ -1759,7 +1611,13 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
                 visibility: f.values.get("--visibility").cloned(),
                 license: f.values.get("--license").cloned(),
                 gitignore: f.values.get("--gitignore").cloned(),
+                template: f.values.get("--template").cloned(),
             }
+        }
+        ("repo", "templates", "") => {
+            let f = scan(tail, &[], &[], &[])?;
+            expect_no_positionals(&f, "repo templates")?;
+            Command::RepoTemplates
         }
         ("repo", "fork", "") => {
             let f = scan(
@@ -2001,21 +1859,6 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
             Command::RepoInviteRevoke {
                 repo: repo_spec(&f, "repo invites revoke")?,
                 id: req_id(&f, "repo invites revoke")?,
-            }
-        }
-        ("invite", "accept", "") => {
-            let f = scan(
-                tail,
-                &["--token", "--email", "--username", "--password"],
-                &[],
-                &[],
-            )?;
-            expect_no_positionals(&f, "invite accept")?;
-            Command::InviteAccept {
-                token: req(&f, "--token", "invite accept")?,
-                email: f.values.get("--email").cloned(),
-                username: f.values.get("--username").cloned(),
-                password: f.values.get("--password").cloned(),
             }
         }
         ("repo", "branch-protection", "list") => {
@@ -3258,313 +3101,6 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
             }
         }
 
-        ("admin", "users", "list") => {
-            let f = scan(tail, &["--query", "--limit", "--offset"], &[], &[])?;
-            expect_no_positionals(&f, "admin users list")?;
-            Command::AdminUsersList {
-                query: f.values.get("--query").cloned(),
-                limit: opt_u64(&f, "--limit")?,
-                offset: opt_u64(&f, "--offset")?,
-            }
-        }
-        ("admin", "users", "ban") | ("admin", "users", "unban") => {
-            let f = scan(tail, &["--id"], &[], &[])?;
-            expect_no_positionals(&f, "admin users ban")?;
-            Command::AdminUserBan {
-                id: req_id(&f, "admin users ban")?,
-                ban: leaf == "ban",
-            }
-        }
-        ("admin", "users", "delete") => {
-            let f = scan(tail, &["--id", "--confirm"], &["--delete-orgs"], &[])?;
-            expect_no_positionals(&f, "admin users delete")?;
-            Command::AdminUserDelete {
-                id: req_id(&f, "admin users delete")?,
-                confirm: req(&f, "--confirm", "admin users delete")?,
-                delete_orgs: f.bools.contains("--delete-orgs"),
-            }
-        }
-        ("admin", "users", "set-role") => {
-            let f = scan(tail, &["--id", "--role"], &[], &[])?;
-            expect_no_positionals(&f, "admin users set-role")?;
-            check_choice(
-                &f,
-                "--role",
-                &["user", "admin", "sys-admin"],
-                "admin users set-role",
-            )?;
-            Command::AdminUserRole {
-                id: req_id(&f, "admin users set-role")?,
-                role: req(&f, "--role", "admin users set-role")?,
-            }
-        }
-        ("admin", "users", "sessions") => {
-            let f = scan(tail, &["--id"], &[], &[])?;
-            Command::AdminUserSessions {
-                id: req_id(&f, "admin users sessions")?,
-            }
-        }
-        ("admin", "users", "revoke-sessions") => {
-            let f = scan(tail, &["--id"], &[], &[])?;
-            Command::AdminUserRevokeSessions {
-                id: req_id(&f, "admin users revoke-sessions")?,
-            }
-        }
-        ("admin", "users", "access") => {
-            let f = scan(tail, &["--id"], &[], &[])?;
-            Command::AdminUserAccess {
-                id: req_id(&f, "admin users access")?,
-            }
-        }
-        ("admin", "users", "activity") => {
-            let f = scan(
-                tail,
-                &["--id", "--source", "--event-type", "--limit"],
-                &[],
-                &[],
-            )?;
-            Command::AdminUserActivity {
-                id: req_id(&f, "admin users activity")?,
-                source: f.values.get("--source").cloned(),
-                event_type: f.values.get("--event-type").cloned(),
-                limit: opt_u64(&f, "--limit")?,
-            }
-        }
-        ("admin", "invites", "list") | ("admin", "invites", "") => {
-            let f = scan(tail, &[], &[], &[])?;
-            expect_no_positionals(&f, "admin invites list")?;
-            Command::AdminInviteList
-        }
-        ("admin", "invites", "create") => {
-            let f = scan(tail, &["--emails"], &[], &[])?;
-            expect_no_positionals(&f, "admin invites create")?;
-            Command::AdminInviteCreate {
-                emails: csv(&req(&f, "--emails", "admin invites create")?),
-            }
-        }
-        ("admin", "invites", "link") => {
-            let f = scan(tail, &["--expires", "--max-uses"], &[], &[])?;
-            expect_no_positionals(&f, "admin invites link")?;
-            Command::AdminInviteLink {
-                expires_at: f.values.get("--expires").cloned(),
-                max_uses: opt_u64(&f, "--max-uses")?,
-            }
-        }
-        ("admin", "invites", "revoke") => {
-            let f = scan(tail, &["--id"], &[], &[])?;
-            expect_no_positionals(&f, "admin invites revoke")?;
-            Command::AdminInviteRevoke {
-                id: req_id(&f, "admin invites revoke")?,
-            }
-        }
-        ("admin", "runners", "") | ("admin", "actions", "runners") => {
-            let f = scan(tail, &[], &[], &[])?;
-            expect_no_positionals(&f, "admin runners")?;
-            Command::AdminRunners
-        }
-        ("admin", "runner-token", "") | ("admin", "actions", "runner-token") => {
-            let f = scan(tail, &[], &[], &[])?;
-            expect_no_positionals(&f, "admin runner-token")?;
-            Command::AdminRunnerToken
-        }
-        ("admin", "repos", "gc") => {
-            let f = scan(tail, &[], &[], &[])?;
-            expect_no_positionals(&f, "admin repos gc")?;
-            Command::AdminReposGc
-        }
-        ("admin", "lfs", "") | ("admin", "lfs", "get") => {
-            let f = scan(tail, &[], &[], &[])?;
-            expect_no_positionals(&f, "admin lfs")?;
-            Command::AdminLfs {
-                set: false,
-                max_object_bytes: None,
-                quota_repo_bytes: None,
-                quota_user_bytes: None,
-                clear: false,
-            }
-        }
-        ("admin", "lfs", "set") => {
-            let f = scan(
-                tail,
-                &[
-                    "--max-object-bytes",
-                    "--quota-repo-bytes",
-                    "--quota-user-bytes",
-                ],
-                &["--clear"],
-                &[],
-            )?;
-            expect_no_positionals(&f, "admin lfs set")?;
-            Command::AdminLfs {
-                set: true,
-                max_object_bytes: opt_u64(&f, "--max-object-bytes")?,
-                quota_repo_bytes: opt_u64(&f, "--quota-repo-bytes")?,
-                quota_user_bytes: opt_u64(&f, "--quota-user-bytes")?,
-                clear: f.bools.contains("--clear"),
-            }
-        }
-        ("admin", "git", "") | ("admin", "git", "get") => {
-            let f = scan(tail, &[], &[], &[])?;
-            expect_no_positionals(&f, "admin git")?;
-            Command::AdminGit {
-                set: false,
-                repo_quota_bytes: None,
-                clear: false,
-            }
-        }
-        ("admin", "git", "set") => {
-            let f = scan(tail, &["--repo-quota-bytes"], &["--clear"], &[])?;
-            expect_no_positionals(&f, "admin git set")?;
-            Command::AdminGit {
-                set: true,
-                repo_quota_bytes: opt_u64(&f, "--repo-quota-bytes")?,
-                clear: f.bools.contains("--clear"),
-            }
-        }
-        ("admin", "mcp", "") | ("admin", "mcp", "get") => {
-            let f = scan(tail, &[], &[], &[])?;
-            expect_no_positionals(&f, "admin mcp")?;
-            Command::AdminMcp {
-                set: false,
-                enable: None,
-                clear: false,
-            }
-        }
-        ("admin", "mcp", "set") => {
-            let f = scan(tail, &[], &["--enable", "--disable", "--clear"], &[])?;
-            expect_no_positionals(&f, "admin mcp set")?;
-            Command::AdminMcp {
-                set: true,
-                enable: match (f.bools.contains("--enable"), f.bools.contains("--disable")) {
-                    (true, _) => Some(true),
-                    (false, true) => Some(false),
-                    _ => None,
-                },
-                clear: f.bools.contains("--clear"),
-            }
-        }
-        ("admin", "pat", "") | ("admin", "pat", "get") => {
-            let f = scan(tail, &[], &[], &[])?;
-            expect_no_positionals(&f, "admin pat")?;
-            Command::AdminPat {
-                set: false,
-                default_ttl_days: None,
-                max_ttl_days: None,
-                allow_never_expire: None,
-                clear: false,
-            }
-        }
-        ("admin", "pat", "set") => {
-            let f = scan(
-                tail,
-                &[
-                    "--default-ttl-days",
-                    "--max-ttl-days",
-                    "--allow-never-expire",
-                ],
-                &["--clear"],
-                &[],
-            )?;
-            expect_no_positionals(&f, "admin pat set")?;
-            Command::AdminPat {
-                set: true,
-                default_ttl_days: opt_u64(&f, "--default-ttl-days")?,
-                max_ttl_days: opt_u64(&f, "--max-ttl-days")?,
-                allow_never_expire: onoff(&f, "--allow-never-expire")?,
-                clear: f.bools.contains("--clear"),
-            }
-        }
-        ("admin", "auth", "") | ("admin", "auth", "get") => {
-            let f = scan(tail, &[], &[], &[])?;
-            expect_no_positionals(&f, "admin auth")?;
-            Command::AdminAuth {
-                set: false,
-                provider_mode: None,
-                email_provider: None,
-                from_address: None,
-                oidc_issuer: None,
-                oidc_client_id: None,
-                workos_client_id: None,
-                allow_signup: None,
-                default_visibility: None,
-            }
-        }
-        ("admin", "auth", "set") => {
-            let f = scan(
-                tail,
-                &[
-                    "--provider-mode",
-                    "--email-provider",
-                    "--from-address",
-                    "--oidc-issuer",
-                    "--oidc-client-id",
-                    "--workos-client-id",
-                    "--default-visibility",
-                ],
-                &["--allow-signup", "--no-signup"],
-                &[],
-            )?;
-            expect_no_positionals(&f, "admin auth set")?;
-            check_choice(
-                &f,
-                "--provider-mode",
-                &["local", "workos", "oidc"],
-                "admin auth set",
-            )?;
-            check_choice(
-                &f,
-                "--email-provider",
-                &["log", "smtp", "resend"],
-                "admin auth set",
-            )?;
-            check_choice(
-                &f,
-                "--default-visibility",
-                &["public", "private"],
-                "admin auth set",
-            )?;
-            if f.bools.contains("--allow-signup") && f.bools.contains("--no-signup") {
-                return Err(usage("--allow-signup and --no-signup are exclusive"));
-            }
-            Command::AdminAuth {
-                set: true,
-                provider_mode: f.values.get("--provider-mode").cloned(),
-                email_provider: f.values.get("--email-provider").cloned(),
-                from_address: f.values.get("--from-address").cloned(),
-                oidc_issuer: f.values.get("--oidc-issuer").cloned(),
-                oidc_client_id: f.values.get("--oidc-client-id").cloned(),
-                workos_client_id: f.values.get("--workos-client-id").cloned(),
-                allow_signup: if f.bools.contains("--allow-signup") {
-                    Some(true)
-                } else if f.bools.contains("--no-signup") {
-                    Some(false)
-                } else {
-                    None
-                },
-                default_visibility: f.values.get("--default-visibility").cloned(),
-            }
-        }
-        ("admin", "templates", "list") | ("admin", "templates", "") => {
-            let f = scan(tail, &[], &[], &[])?;
-            expect_no_positionals(&f, "admin templates list")?;
-            Command::AdminTemplatesList
-        }
-        ("admin", "templates", "enable") | ("admin", "templates", "disable") => {
-            let f = scan(tail, &["--id"], &[], &[])?;
-            expect_no_positionals(&f, "admin templates enable")?;
-            Command::AdminTemplatesSetEnabled {
-                id: req_id(&f, "admin templates enable")?,
-                enabled: leaf == "enable",
-            }
-        }
-        ("admin", "templates", "delete") => {
-            let f = scan(tail, &["--id"], &[], &[])?;
-            expect_no_positionals(&f, "admin templates delete")?;
-            Command::AdminTemplatesDelete {
-                id: req_id(&f, "admin templates delete")?,
-            }
-        }
-
         ("pkg", "list", "") => {
             let f = scan(tail, &["--owner"], &[], &[])?;
             expect_no_positionals(&f, "pkg list")?;
@@ -3729,8 +3265,6 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
                 "email",
                 "label",
                 "webhook",
-                "invite",
-                "admin",
                 "self-update",
                 "skill",
                 "mcp",
@@ -4061,11 +3595,8 @@ mod tests {
     fn nested_third_level() {
         let inv = parse(&argv(&["repo", "deploy-key", "list", "o/n"])).unwrap();
         assert!(matches!(inv.command, Command::DeployKeyList { .. }));
-        let inv = parse(&argv(&["admin", "users", "ban", "--id", "u1"])).unwrap();
-        assert!(matches!(
-            inv.command,
-            Command::AdminUserBan { ref id, ban: true } if id == "u1"
-        ));
+        let inv = parse(&argv(&["org", "members", "add", "eng", "alice"])).unwrap();
+        assert!(matches!(inv.command, Command::OrgMemberAdd { .. }));
     }
 
     #[test]
@@ -4165,46 +3696,6 @@ mod tests {
         }
         assert!(parse(&argv(&["completion", "tcsh"])).is_err());
         assert!(parse(&argv(&["completion"])).is_err());
-    }
-
-    #[test]
-    fn admin_auth_parses() {
-        match parse(&argv(&["admin", "auth"])).unwrap().command {
-            Command::AdminAuth { set, .. } => assert!(!set),
-            other => panic!("{other:?}"),
-        }
-        match parse(&argv(&[
-            "admin",
-            "auth",
-            "set",
-            "--provider-mode",
-            "oidc",
-            "--no-signup",
-        ]))
-        .unwrap()
-        .command
-        {
-            Command::AdminAuth {
-                set,
-                provider_mode,
-                allow_signup,
-                ..
-            } => {
-                assert!(set);
-                assert_eq!(provider_mode.as_deref(), Some("oidc"));
-                assert_eq!(allow_signup, Some(false));
-            }
-            other => panic!("{other:?}"),
-        }
-        assert!(parse(&argv(&["admin", "auth", "set", "--provider-mode", "bogus"])).is_err());
-        assert!(parse(&argv(&[
-            "admin",
-            "auth",
-            "set",
-            "--allow-signup",
-            "--no-signup"
-        ]))
-        .is_err());
     }
 
     #[test]

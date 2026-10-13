@@ -38,8 +38,13 @@ pub const CLASSIC_SCOPES: &[ScopeMeta] = &[
         scope: S::Repo,
         group: "Repository",
         description: "Full control of private repositories",
-        hint: "Required for git clone, fetch, and push over HTTPS.",
-        implies: &[],
+        hint: "Includes public_repo, repo:status, repo:invite, and security_events. Required for git clone, fetch, and push over HTTPS.",
+        implies: &[
+            S::PublicRepo,
+            S::RepoStatus,
+            S::RepoInvite,
+            S::SecurityEvents,
+        ],
     },
     ScopeMeta {
         scope: S::PublicRepo,
@@ -545,6 +550,11 @@ mod tests {
         assert!(classic_scope_satisfies(S::AdminPublicKey, S::WritePublicKey));
         assert!(classic_scope_satisfies(S::AdminGpgKey, S::ReadGpgKey));
         assert!(classic_scope_satisfies(S::PackageWrite, S::PackageRead));
+        // `repo` is the umbrella: GitHub parity for its sub-scopes.
+        assert!(classic_scope_satisfies(S::Repo, S::PublicRepo));
+        assert!(classic_scope_satisfies(S::Repo, S::RepoStatus));
+        assert!(classic_scope_satisfies(S::Repo, S::RepoInvite));
+        assert!(classic_scope_satisfies(S::Repo, S::SecurityEvents));
         // Deliberate non-implications (GitHub parity).
         assert!(!classic_scope_satisfies(S::Repo, S::DeleteRepo));
         assert!(!classic_scope_satisfies(S::PackageWrite, S::PackageDelete));

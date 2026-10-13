@@ -140,6 +140,57 @@ fn repo_input(spec: &str) -> Result<Value, CliError> {
     Ok(json!({ "owner": owner, "name": name }))
 }
 
+/// Resolve a `--template <ref>` to the `stack_id` value `repo.create` wants:
+/// a builtin stack id, `instance:<uuid>` / `repo:<uuid>` picker id, an
+/// instance-pack slug, or `owner/name` of a template repo. Matching `id` is
+/// exact; `source_label` is case-insensitive.
+async fn resolve_template_ref(g: &Global, rt: &Runtime, tref: &str) -> Result<String, CliError> {
+    let defaults = call(g, rt, "repo.createDefaults", json!({})).await?;
+    let stacks = defaults["stacks"].as_array().cloned().unwrap_or_default();
+    let lower = tref.to_lowercase();
+    let hit = stacks.iter().find(|s| {
+        s["id"].as_str() == Some(tref)
+            || s["source_label"]
+                .as_str()
+                .is_some_and(|l| l.to_lowercase() == lower)
+    });
+    match hit {
+        Some(s) => Ok(s["id"].as_str().unwrap_or_default().to_string()),
+        None => {
+            let mut refs: Vec<String> = stacks
+                .iter()
+                .map(|s| {
+                    s["source_label"]
+                        .as_str()
+                        .unwrap_or_else(|| s["id"].as_str().unwrap_or("?"))
+                        .to_string()
+                })
+                .collect();
+            refs.sort();
+            Err(CliError::Usage(format!(
+                "ox repo create: unknown template '{tref}' — valid refs: {}",
+                if refs.is_empty() {
+                    "(none available on this instance)".into()
+                } else {
+                    refs.join(", ")
+                }
+            )))
+        }
+    }
+}
+
+/// One-line picker label for a stack option: `ref — label: description`.
+fn template_label(opt_: &Value, ref_: &str) -> String {
+    let label = opt_["label"].as_str().unwrap_or("");
+    let desc = opt_["description"].as_str().unwrap_or("");
+    match (label.is_empty(), desc.is_empty()) {
+        (true, true) => ref_.to_string(),
+        (false, true) => format!("{ref_} — {label}"),
+        (true, false) => format!("{ref_} — {desc}"),
+        (false, false) => format!("{ref_} — {label}: {desc}"),
+    }
+}
+
 /// `issue.list` / `pull.list` request body — filters omitted unless set
 /// (`--state all` passes through; the server treats it as "no filter").
 fn list_input(spec: &str, filters: &ListFilters) -> Result<Value, CliError> {
@@ -450,7 +501,15 @@ fn required_procedures(cmd: &Command) -> Vec<String> {
         }
         .into()],
         Command::RepoView { .. } => one("repo.get"),
-        Command::RepoCreate { .. } => one("repo.create"),
+        // createDefaults is needed to resolve --template or run the wizard.
+        Command::RepoCreate { name, template, .. } => {
+            if name.is_none() || template.is_some() {
+                vec!["repo.create".into(), "repo.createDefaults".into()]
+            } else {
+                vec!["repo.create".into()]
+            }
+        }
+        Command::RepoTemplates => one("repo.createDefaults"),
         Command::RepoFork { .. } => one("repo.fork"),
         Command::RepoSync { .. } => vec!["repo.forkStatus".into(), "repo.syncFork".into()],
         Command::RepoClone { .. } => vec![], // git only
@@ -483,7 +542,7 @@ fn required_procedures(cmd: &Command) -> Vec<String> {
         Command::RepoInviteCreate { .. } => one("repo.invites.create"),
         Command::RepoInviteLink { .. } => one("repo.invites.createLink"),
         Command::RepoInviteRevoke { .. } => one("repo.invites.revoke"),
-        Command::InviteAccept { .. } => one("invites.accept"),
+
         Command::BranchProtectionList { .. } => one("repo.branchProtection.list"),
         Command::BranchProtectionSet { .. } => one("repo.branchProtection.create"),
         Command::BranchProtectionDelete { .. } => one("repo.branchProtection.delete"),
@@ -688,11 +747,6 @@ fn required_procedures(cmd: &Command) -> Vec<String> {
         Command::EmailRemove { .. } => one("email.remove"),
         Command::EmailSetPrimary { .. } => one("email.setPrimary"),
         Command::EmailResend { .. } => one("email.resendVerify"),
-        Command::AdminPat { set, .. } => one(if *set {
-            "admin.pat.updateSettings"
-        } else {
-            "admin.pat.getSettings"
-        }),
         Command::AuthRevoke => vec!["pat.self".into(), "pat.revoke".into()],
         Command::AuthRefresh { .. } => vec!["pat.self".into(), "pat.revoke".into()],
         Command::LabelList { org, .. } => one(if org.is_some() {
@@ -714,53 +768,6 @@ fn required_procedures(cmd: &Command) -> Vec<String> {
         Command::WebhookDeliveries { .. } => one("webhook.deliveries.list"),
         Command::WebhookDelivery { .. } => one("webhook.deliveries.get"),
         Command::WebhookRedeliver { .. } => one("webhook.redeliver"),
-        Command::AdminUsersList { .. } => one("admin.users.list"),
-        Command::AdminUserBan { ban, .. } => one(if *ban {
-            "admin.users.ban"
-        } else {
-            "admin.users.unban"
-        }),
-        Command::AdminUserDelete { .. } => one("admin.users.delete"),
-        Command::AdminUserRole { .. } => one("admin.users.updateRole"),
-        Command::AdminUserSessions { .. } => one("admin.users.listSessions"),
-        Command::AdminUserRevokeSessions { .. } => one("admin.users.revokeSessions"),
-        Command::AdminUserAccess { .. } => one("admin.users.getAccess"),
-        Command::AdminUserActivity { .. } => one("admin.users.getActivity"),
-        Command::AdminInviteList => one("admin.invites.list"),
-        Command::AdminInviteCreate { .. } => one("admin.invites.create"),
-        Command::AdminInviteLink { .. } => one("admin.invites.createLink"),
-        Command::AdminInviteRevoke { .. } => one("admin.invites.revoke"),
-        Command::AdminRunners => one("admin.actions.listRunners"),
-        Command::AdminRunnerToken => one("admin.actions.createRegistrationToken"),
-        Command::AdminReposGc => one("admin.repos.gc"),
-        Command::AdminLfs { set, .. } => one(if *set {
-            "admin.lfs.updateSettings"
-        } else {
-            "admin.lfs.getSettings"
-        }),
-        Command::AdminGit { set, .. } => one(if *set {
-            "admin.git.updateSettings"
-        } else {
-            "admin.git.getSettings"
-        }),
-        Command::AdminMcp { set, .. } => one(if *set {
-            "admin.mcp.updateSettings"
-        } else {
-            "admin.mcp.getSettings"
-        }),
-        Command::AdminAuth { set, .. } => {
-            if *set {
-                vec![
-                    "admin.auth.get_settings".into(),
-                    "admin.auth.update_settings".into(),
-                ]
-            } else {
-                one("admin.auth.get_settings")
-            }
-        }
-        Command::AdminTemplatesList => one("admin.templates.list"),
-        Command::AdminTemplatesSetEnabled { .. } => one("admin.templates.setEnabled"),
-        Command::AdminTemplatesDelete { .. } => one("admin.templates.delete"),
         Command::PkgList { .. } => one("packages.list"),
         Command::Api { procedure, .. } => vec![procedure.clone()],
         // self-update talks to /cli/* HTTP, not /api/rpc — no manifest gate.
@@ -873,7 +880,94 @@ pub async fn dispatch(inv: &Invocation, rt: &Runtime) -> Result<Out, CliError> {
             visibility,
             license,
             gitignore,
+            template,
         } => {
+            let mut name = name.clone();
+            let mut owner = owner.clone();
+            let mut visibility = visibility.clone();
+            let mut stack_id: Option<String> = None;
+
+            if let Some(tref) = template {
+                stack_id = Some(resolve_template_ref(g, rt, &tref).await?);
+            } else if name.is_none() {
+                // Interactive wizard — TTY only; non-TTY keeps the usage error.
+                if !crate::term::can_prompt() {
+                    return Err(CliError::Usage("usage: ox repo create <name>".into()));
+                }
+                let defaults = call(g, rt, "repo.createDefaults", json!({})).await?;
+                let stacks = defaults["stacks"].as_array().cloned().unwrap_or_default();
+
+                name = Some(
+                    crate::prompt::input("Repository name")
+                        .map_err(|e| CliError::Transport(e.to_string()))?
+                        .trim()
+                        .to_string(),
+                );
+                if name.as_deref().is_none_or(|n| n.is_empty()) {
+                    return Err(CliError::Usage(
+                        "ox repo create: name cannot be empty".into(),
+                    ));
+                }
+
+                if owner.is_none() {
+                    let mut owners = vec!["(your user account)".to_string()];
+                    let orgs = call(g, rt, "org.listMine", json!({}))
+                        .await
+                        .ok()
+                        .and_then(|d| d.as_array().cloned())
+                        .unwrap_or_default();
+                    for o in &orgs {
+                        if let Some(s) = o["slug"].as_str() {
+                            owners.push(s.to_string());
+                        }
+                    }
+                    let pick = crate::prompt::select("Owner", &owners)
+                        .map_err(|e| CliError::Transport(e.to_string()))?;
+                    if pick > 0 {
+                        owner = Some(owners[pick].clone());
+                    }
+                }
+
+                let mut items = vec!["none — empty repository".to_string()];
+                for s in &stacks {
+                    let label = s["source_label"]
+                        .as_str()
+                        .unwrap_or_else(|| s["id"].as_str().unwrap_or("?"));
+                    items.push(template_label(s, label));
+                }
+                let pick = crate::prompt::select("Template", &items)
+                    .map_err(|e| CliError::Transport(e.to_string()))?;
+                if pick > 0 {
+                    stack_id = stacks[pick - 1]["id"].as_str().map(|s| s.to_string());
+                }
+
+                if visibility.is_none() {
+                    let default_v = defaults["default_visibility"].as_str().unwrap_or("private");
+                    let items = vec![
+                        format!(
+                            "private{}",
+                            if default_v == "private" {
+                                " (default)"
+                            } else {
+                                ""
+                            }
+                        ),
+                        format!(
+                            "public{}",
+                            if default_v == "public" {
+                                " (default)"
+                            } else {
+                                ""
+                            }
+                        ),
+                    ];
+                    let pick = crate::prompt::select("Visibility", &items)
+                        .map_err(|e| CliError::Transport(e.to_string()))?;
+                    visibility = Some(if pick == 0 { "private" } else { "public" }.to_string());
+                }
+            }
+
+            let name = name.expect("name resolved by wizard or flag");
             let mut input = json!({ "name": name });
             let m = input.as_object_mut().unwrap();
             opt(m, "owner", owner.clone());
@@ -881,7 +975,18 @@ pub async fn dispatch(inv: &Invocation, rt: &Runtime) -> Result<Out, CliError> {
             opt(m, "visibility", visibility.clone());
             opt(m, "license_id", license.clone());
             opt(m, "gitignore_id", gitignore.clone());
+            opt(m, "stack_id", stack_id.clone());
             invoke(g, rt, "repo.create", input, output::repo_view).await
+        }
+        Command::RepoTemplates => {
+            invoke(
+                g,
+                rt,
+                "repo.createDefaults",
+                json!({}),
+                output::repo_templates,
+            )
+            .await
         }
         Command::RepoFork {
             repo,
@@ -1130,19 +1235,6 @@ pub async fn dispatch(inv: &Invocation, rt: &Runtime) -> Result<Out, CliError> {
                 .unwrap()
                 .insert("invite_id".into(), json!(id));
             invoke(g, rt, "repo.invites.revoke", input, output::generic).await
-        }
-        Command::InviteAccept {
-            token,
-            email,
-            username,
-            password,
-        } => {
-            let mut input = json!({ "token": token });
-            let m = input.as_object_mut().unwrap();
-            opt(m, "email", email.clone());
-            opt(m, "username", username.clone());
-            opt(m, "password", password.clone());
-            invoke(g, rt, "invites.accept", input, output::generic).await
         }
         Command::BranchProtectionList { repo } => {
             invoke(
@@ -2471,293 +2563,6 @@ pub async fn dispatch(inv: &Invocation, rt: &Runtime) -> Result<Out, CliError> {
             invoke(g, rt, "webhook.redeliver", input, output::generic).await
         }
 
-        // ── instance admin ──────────────────────────────────────────
-        Command::AdminUsersList {
-            query,
-            limit,
-            offset,
-        } => {
-            let mut input = json!({});
-            let m = input.as_object_mut().unwrap();
-            opt(m, "query", query.clone());
-            opt(m, "limit", *limit);
-            opt(m, "offset", *offset);
-            invoke(g, rt, "admin.users.list", input, output::admin_users).await
-        }
-        Command::AdminUserBan { id, ban } => {
-            invoke(
-                g,
-                rt,
-                if *ban {
-                    "admin.users.ban"
-                } else {
-                    "admin.users.unban"
-                },
-                json!({ "user_id": id }),
-                output::generic,
-            )
-            .await
-        }
-        Command::AdminUserDelete {
-            id,
-            confirm,
-            delete_orgs,
-        } => {
-            invoke(
-                g,
-                rt,
-                "admin.users.delete",
-                json!({
-                    "user_id": id,
-                    "confirmation": confirm,
-                    "delete_orgs": delete_orgs,
-                }),
-                output::generic,
-            )
-            .await
-        }
-        Command::AdminUserRole { id, role } => {
-            invoke(
-                g,
-                rt,
-                "admin.users.updateRole",
-                json!({ "user_id": id, "role": role }),
-                output::generic,
-            )
-            .await
-        }
-        Command::AdminUserSessions { id } => {
-            invoke(
-                g,
-                rt,
-                "admin.users.listSessions",
-                json!({ "user_id": id }),
-                output::admin_sessions,
-            )
-            .await
-        }
-        Command::AdminUserRevokeSessions { id } => {
-            invoke(
-                g,
-                rt,
-                "admin.users.revokeSessions",
-                json!({ "user_id": id }),
-                output::generic,
-            )
-            .await
-        }
-        Command::AdminUserAccess { id } => {
-            invoke(
-                g,
-                rt,
-                "admin.users.getAccess",
-                json!({ "user_id": id }),
-                output::admin_access,
-            )
-            .await
-        }
-        Command::AdminUserActivity {
-            id,
-            source,
-            event_type,
-            limit,
-        } => {
-            let mut input = json!({ "user_id": id });
-            let m = input.as_object_mut().unwrap();
-            opt(m, "source", source.clone());
-            opt(m, "event_type", event_type.clone());
-            opt(m, "limit", *limit);
-            invoke(
-                g,
-                rt,
-                "admin.users.getActivity",
-                input,
-                output::admin_activity,
-            )
-            .await
-        }
-        Command::AdminInviteList => {
-            invoke(g, rt, "admin.invites.list", json!({}), output::invite_list).await
-        }
-        Command::AdminInviteCreate { emails } => {
-            invoke(
-                g,
-                rt,
-                "admin.invites.create",
-                json!({ "emails": emails }),
-                output::invite_create_result,
-            )
-            .await
-        }
-        Command::AdminInviteLink {
-            expires_at,
-            max_uses,
-        } => {
-            let mut input = json!({});
-            let m = input.as_object_mut().unwrap();
-            opt(m, "expires_at", expires_at.clone());
-            opt(m, "max_uses", *max_uses);
-            invoke(
-                g,
-                rt,
-                "admin.invites.createLink",
-                input,
-                output::invite_link_result,
-            )
-            .await
-        }
-        Command::AdminInviteRevoke { id } => {
-            invoke(
-                g,
-                rt,
-                "admin.invites.revoke",
-                json!({ "invite_id": id }),
-                output::generic,
-            )
-            .await
-        }
-        Command::AdminRunners => {
-            invoke(
-                g,
-                rt,
-                "admin.actions.listRunners",
-                json!({}),
-                output::runner_list,
-            )
-            .await
-        }
-        Command::AdminRunnerToken => {
-            invoke(
-                g,
-                rt,
-                "admin.actions.createRegistrationToken",
-                json!({}),
-                output::generic,
-            )
-            .await
-        }
-        Command::AdminReposGc => invoke(g, rt, "admin.repos.gc", json!({}), output::generic).await,
-        Command::AdminLfs {
-            set,
-            max_object_bytes,
-            quota_repo_bytes,
-            quota_user_bytes,
-            clear,
-        } => {
-            if !*set {
-                return invoke(g, rt, "admin.lfs.getSettings", json!({}), output::generic).await;
-            }
-            let mut input = json!({});
-            let m = input.as_object_mut().unwrap();
-            opt(m, "max_object_bytes", *max_object_bytes);
-            opt(m, "quota_repo_bytes", *quota_repo_bytes);
-            opt(m, "quota_user_bytes", *quota_user_bytes);
-            if *clear {
-                m.insert("clear_overrides".into(), json!(true));
-            }
-            invoke(g, rt, "admin.lfs.updateSettings", input, output::generic).await
-        }
-        Command::AdminGit {
-            set,
-            repo_quota_bytes,
-            clear,
-        } => {
-            if !*set {
-                return invoke(g, rt, "admin.git.getSettings", json!({}), output::generic).await;
-            }
-            let mut input = json!({});
-            let m = input.as_object_mut().unwrap();
-            opt(m, "repo_quota_bytes", *repo_quota_bytes);
-            if *clear {
-                m.insert("clear_overrides".into(), json!(true));
-            }
-            invoke(g, rt, "admin.git.updateSettings", input, output::generic).await
-        }
-        Command::AdminMcp { set, enable, clear } => {
-            if !*set {
-                return invoke(g, rt, "admin.mcp.getSettings", json!({}), output::generic).await;
-            }
-            let mut input = json!({});
-            let m = input.as_object_mut().unwrap();
-            opt(m, "enabled", *enable);
-            if *clear {
-                m.insert("clear_overrides".into(), json!(true));
-            }
-            invoke(g, rt, "admin.mcp.updateSettings", input, output::generic).await
-        }
-        Command::AdminPat {
-            set,
-            default_ttl_days,
-            max_ttl_days,
-            allow_never_expire,
-            clear,
-        } => {
-            if !*set {
-                return invoke(g, rt, "admin.pat.getSettings", json!({}), output::generic).await;
-            }
-            let mut input = json!({});
-            let m = input.as_object_mut().unwrap();
-            opt(m, "default_ttl_days", *default_ttl_days);
-            opt(m, "max_ttl_days", *max_ttl_days);
-            opt(m, "allow_never_expire", *allow_never_expire);
-            if *clear {
-                m.insert("clear_overrides".into(), json!(true));
-            }
-            invoke(g, rt, "admin.pat.updateSettings", input, output::generic).await
-        }
-        Command::AdminAuth {
-            set,
-            provider_mode,
-            email_provider,
-            from_address,
-            oidc_issuer,
-            oidc_client_id,
-            workos_client_id,
-            allow_signup,
-            default_visibility,
-        } => {
-            if !*set {
-                return invoke(g, rt, "admin.auth.get_settings", json!({}), output::generic).await;
-            }
-            // update_settings takes the full settings object — fetch current,
-            // overlay the flag values, send the merged payload back.
-            let cur = call(g, rt, "admin.auth.get_settings", json!({})).await?;
-            let mut input = cur;
-            let m = input.as_object_mut().unwrap();
-            opt(m, "provider_mode", provider_mode.clone());
-            opt(m, "email_provider", email_provider.clone());
-            opt(m, "from_address", from_address.clone());
-            opt(m, "oidc_issuer", oidc_issuer.clone());
-            opt(m, "oidc_client_id", oidc_client_id.clone());
-            opt(m, "workos_client_id", workos_client_id.clone());
-            opt(m, "allow_signup", *allow_signup);
-            opt(m, "default_visibility", default_visibility.clone());
-            invoke(g, rt, "admin.auth.update_settings", input, output::generic).await
-        }
-        Command::AdminTemplatesList => {
-            invoke(g, rt, "admin.templates.list", json!({}), output::generic).await
-        }
-        Command::AdminTemplatesSetEnabled { id, enabled } => {
-            invoke(
-                g,
-                rt,
-                "admin.templates.setEnabled",
-                json!({ "id": id, "enabled": enabled }),
-                output::generic,
-            )
-            .await
-        }
-        Command::AdminTemplatesDelete { id } => {
-            invoke(
-                g,
-                rt,
-                "admin.templates.delete",
-                json!({ "id": id }),
-                output::generic,
-            )
-            .await
-        }
-
         Command::SkillPrint => Ok(crate::skill::print_skill()),
         Command::SkillInstall {
             harnesses,
@@ -2953,8 +2758,8 @@ async fn release_download(
 /// `--web` login and `auth refresh` mint. Deliberately broad (gh's CLI tokens
 /// are similarly broad); `--scopes` narrows.
 pub const CLI_DEFAULT_SCOPES: &str = concat!(
-    "repo workflow notifications user read:org delete_repo ",
-    "package:read package:write admin:repo_hook admin:public_key admin:gpg_key"
+    "repo workflow notifications user write:org delete_repo ",
+    "package:read package:write package:delete admin:repo_hook admin:public_key admin:gpg_key"
 );
 
 /// Normalize a `--scopes` value into a space-delimited, validated scope
@@ -3536,7 +3341,12 @@ async fn auth_refresh(
             .as_ref()
             .and_then(|i| i.get("scopes"))
             .and_then(Value::as_array)
-            .map(|a| a.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(" "))
+            .map(|a| {
+                a.iter()
+                    .filter_map(Value::as_str)
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| CLI_DEFAULT_SCOPES.to_string()),
     };
@@ -3559,9 +3369,7 @@ async fn auth_refresh(
     // self-revocation, so this must run under the old credential).
     let revoked = if let Some(id) = old_info.as_ref().and_then(|i| output::s(i, "id")) {
         matches!(
-            old_client
-                .call("pat.revoke", json!({ "id": id }))
-                .await,
+            old_client.call("pat.revoke", json!({ "id": id })).await,
             Ok(RpcResponse::Ok { .. })
         )
     } else {
@@ -3601,9 +3409,8 @@ async fn auth_revoke(global: &Global, rt: &Runtime) -> Result<Out, CliError> {
         Ok(RpcResponse::Err { error, .. }) => return Err(CliError::Api(error)),
         Err(e) => return Err(CliError::from(e)),
     };
-    let id = output::s(&info, "id").ok_or_else(|| {
-        CliError::Transport("pat.self returned no id".to_string())
-    })?;
+    let id = output::s(&info, "id")
+        .ok_or_else(|| CliError::Transport("pat.self returned no id".to_string()))?;
     match c.call("pat.revoke", json!({ "id": id })).await {
         Ok(RpcResponse::Ok { .. }) => {}
         Ok(RpcResponse::Err { error, .. }) => return Err(CliError::Api(error)),

@@ -71,7 +71,7 @@ surface and fails when an `implemented`/`partial` row drifts.
 | `release download` | `release download` | implemented | |
 | `release delete-asset` | `release delete-asset` | implemented | |
 | `release verify` / `verify-asset` | — | planned | checksum/signature surface |
-| `repo create` | `repo create` | implemented | |
+| `repo create` | `repo create` | implemented | `--template <ref>` maps builtin stack ids, instance-pack slugs, and `owner/name` template repos onto `stack_id`; bare on a TTY runs a wizard |
 | `repo list` | `repo list` | implemented | |
 | `repo view` | `repo view` | implemented | |
 | `repo fork` | `repo fork` | implemented | |
@@ -84,7 +84,7 @@ surface and fails when an `implemented`/`partial` row drifts.
 | `repo deploy-key` | `repo deploy-key` | implemented | |
 | `repo set-default` | — | planned | |
 | `repo autolink` | — | planned | needs autolink API |
-| `repo gitignore` / `license` | — | planned | template surface |
+| `repo gitignore` / `license` | — | partial | `ox repo templates` lists the gitignore catalog + stacks; dedicated list subs planned |
 | `repo read-dir` / `read-file` | — | planned | via `ox api` today |
 | — | `repo transfer` | ox-only | |
 | — | `repo star|unstar|watch|unwatch` | ox-only | gh shells out to API instead |
@@ -122,8 +122,7 @@ surface and fails when an `implemented`/`partial` row drifts.
 | — | `notification list|read|unread` | ox-only | gh has no notification group |
 | — | `webhook …` (7 subs) | ox-only | |
 | — | `email …` (5 subs) | ox-only | |
-| — | `invite accept` | ox-only | |
-| — | `admin …` (users/invites/runners/lfs/git/mcp/pat/auth/templates/repos) | ox-only | instance administration |
+| — | `repo templates` | ox-only | template catalog (builtin packs, instance packs, template repos) |
 | — | `self-update` | ox-only | instance-served upgrades |
 | — | `skill print|install`, `mcp …` | ox-only | agent/harness integration |
 | — | `status create` | ox-only | commit status API |
@@ -152,11 +151,15 @@ surface and fails when an `implemented`/`partial` row drifts.
   `admin.pat.*` RPCs. The CLI manages only its own credential:
   `auth status`/`refresh`/`revoke`. Deliberate: a token should not mint or
   list tokens other than itself.
+- **No `ox admin` group** — `admin.*` RPCs are session-cookie only, so a
+  PAT-authenticated CLI cannot call them at all; administration lives in
+  the web UI (**Admin → …**). Same for `ox invite accept` — invite
+  acceptance is a web signup flow.
 - **`ox api` calls typed RPC** — `ox api repo.get -f owner=o -f name=n`, not
   REST paths. `-f` sends strings, `-F` sends typed JSON values.
 - **Repo detection** — positional `<owner/name>` → `-R/--repo` →
   `OXIDEAN_REPO` → git remote (`upstream`, `origin`, `fork`; HTTPS, SCP-like,
   and `ssh://` URLs).
 - **Token expiry** — `auth login --web` tokens expire per instance policy
-  (`OXIDEAN_PAT_*` env / `ox admin pat`), unlike gh's non-expiring OAuth
-  token. `auth refresh` is the renewal path.
+  (`OXIDEAN_PAT_*` env / **Admin → Auth settings**), unlike gh's
+  non-expiring OAuth token. `auth refresh` is the renewal path.

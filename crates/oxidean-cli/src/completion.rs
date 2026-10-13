@@ -15,36 +15,6 @@ type Subs = &'static [(&'static str, &'static [&'static str])];
 /// group → subs. Empty `subs` means the group takes data positionals
 /// (search/browse/api/self-update) — nothing to complete.
 pub const COMMAND_TREE: &[(&str, Subs)] = &[
-    (
-        "admin",
-        &[
-            (
-                "users",
-                &[
-                    "list",
-                    "ban",
-                    "unban",
-                    "delete",
-                    "set-role",
-                    "sessions",
-                    "revoke-sessions",
-                    "access",
-                    "activity",
-                ],
-            ),
-            ("invites", &["list", "create", "link", "revoke"]),
-            ("actions", &["runners", "runner-token"]),
-            ("runners", &[]),
-            ("runner-token", &[]),
-            ("repos", &["gc"]),
-            ("lfs", &["get", "set"]),
-            ("git", &["get", "set"]),
-            ("mcp", &["get", "set"]),
-            ("pat", &["get", "set"]),
-            ("auth", &["get", "set"]),
-            ("templates", &["list", "enable", "disable", "delete"]),
-        ],
-    ),
     ("api", &[]),
     (
         "auth",
@@ -77,7 +47,6 @@ pub const COMMAND_TREE: &[(&str, Subs)] = &[
         ],
     ),
     ("gpg-key", &[("list", &[]), ("add", &[]), ("delete", &[])]),
-    ("invite", &[("accept", &[])]),
     (
         "issue",
         &[
@@ -158,6 +127,7 @@ pub const COMMAND_TREE: &[(&str, Subs)] = &[
             ("list", &[]),
             ("view", &[]),
             ("create", &[]),
+            ("templates", &[]),
             ("fork", &[]),
             ("sync", &[]),
             ("clone", &[]),

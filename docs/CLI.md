@@ -201,10 +201,10 @@ refreshed or revoked here — manage those where they were issued.
 > **Token expiry:** CLI-minted tokens follow the instance PAT policy
 > (`OXIDEAN_PAT_DEFAULT_TTL_DAYS` / `OXIDEAN_PAT_MAX_TTL_DAYS` /
 > `OXIDEAN_PAT_ALLOW_NO_EXPIRY` env, overridable per-instance under
-> **Admin → Auth settings → Personal access token policy** or
-> `ox admin pat`). Expired or revoked tokens fail with distinct
-> `auth.token_expired` / `auth.token_revoked` errors — `ox` prints the
-> recovery hint (`auth refresh`, or `auth login` again).
+> **Admin → Auth settings → Personal access token policy**). Expired or
+> revoked tokens fail with distinct `auth.token_expired` /
+> `auth.token_revoked` errors — `ox` prints the recovery hint
+> (`auth refresh`, or `auth login` again).
 
 > **Instance requirement:** `/api/rpc` accepts `Authorization: Bearer <pat>`
 > on API-02-era servers and later. On older instances that only resolve
@@ -310,6 +310,10 @@ list exact flags. The full surface, roughly `gh`-shaped:
 ox repo list [--owner someorg]          # yours, or an owner's
 ox repo view|fork octo/demo             # fork: [--into-owner o] [--into-name n]
 ox repo create <name> [--org o] [--visibility public|private]
+                                      #   --template <ref>: builtin stack id, instance
+                                      #   pack slug, or owner/name template repo
+                                      #   bare on a TTY → wizard (name, owner, template, visibility)
+ox repo templates                     # template catalog the instance offers
 ox repo sync|clone octo/demo            # clone runs `git clone` locally
 ox repo edit o/n [--description d] [--topics a,b] [--visibility v]
 ox repo rename|archive|unarchive octo/demo
@@ -365,19 +369,11 @@ ox webhook list|create|edit|delete|ping <o/n> | ox webhook deliveries|redeliver
 # Account
 ox ssh-key|gpg-key list|add|delete      # add: --title t --key-file path|- 
 ox email list|add|remove|set-primary|resend
-ox invite accept --token <t>
 # PATs are minted/listed in the web UI (Settings → Personal access tokens);
 # the CLI manages only its own credential — `auth status|refresh|revoke`.
-
-# Instance admin (admin.* is session-only — not callable with PAT auth)
-ox admin users list|ban|unban|delete|set-role|sessions|revoke-sessions|access|activity
-ox admin invites list|create|link|revoke
-ox admin runners | ox admin runner-token
-ox admin lfs|git|mcp|auth [set …] | ox admin templates list|enable|disable|delete
-ox admin pat [set --default-ttl-days n --max-ttl-days n --allow-never-expire on|off]
-                                        #   --clear reverts all overrides to env defaults
-ox admin auth set --provider-mode local|workos|oidc --allow-signup  # merges over current
-ox admin repos gc
+# Instance admin lives in the web UI (admin.* RPCs are session-only and
+# can't be called with PAT auth) — or via `ox api admin.<proc>` if you
+# authenticate another way.
 
 # Maintenance & local
 ox self-update                          # swap this binary for the instance's build
