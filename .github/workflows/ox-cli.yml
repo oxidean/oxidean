@@ -425,7 +425,9 @@ jobs:
   publish-dist:
     name: publish ox-dist rolling release
     needs: [build, build-freebsd, install-linux, install-macos, install-windows, packages]
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')))
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -525,7 +527,9 @@ jobs:
   image-matrix:
     name: api image stages ox-dist matrix
     needs: [publish-dist]
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

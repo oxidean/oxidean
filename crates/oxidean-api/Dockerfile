@@ -27,13 +27,13 @@ COPY crates ./crates
 RUN cargo build --release -p oxidean-api --bin oxidean-api --bin oxidean-protection-hook \
   && cp /app/target/release/oxidean-api /app/target/release/oxidean-protection-hook /usr/local/bin/
 # CLI distribution (D-CLI-DIST): stage the companion `ox` under the server's
-# own target triple. When OXIDEAN_CLI_DIST_URL is set (Cloud IaC points at the
-# rolling `ox-dist` release), layer the full multi-arch matrix from that flat
-# URL (ox-targets.txt + ox-{target} + .sha256 + optional SOURCE_COMMIT).
-# Default is empty — self-host/Compose stay host-only unless operators opt in
-# with their own artifact feed (not a hardcoded upstream URL). Fetch is
-# fail-soft: retries then warn and continue host-only.
-ARG OXIDEAN_CLI_DIST_URL=""
+# own target triple, then (when OXIDEAN_CLI_DIST_URL is non-empty) layer the
+# full multi-arch matrix from that flat URL. Default is this product's rolling
+# `ox-dist` release so Cloud / Railway PR envs get darwin/windows without a
+# manual IaC apply. Compose and CI pass an empty build-arg for host-only.
+# Self-hosts that must not pull upstream should set OXIDEAN_CLI_DIST_URL=.
+# Fetch is fail-soft: retries then warn and continue host-only.
+ARG OXIDEAN_CLI_DIST_URL=https://github.com/oxidean/oxidean/releases/download/ox-dist
 RUN cargo build --release -p oxidean-cli --bin ox \
   && mkdir -p /usr/local/share/oxidean-cli \
   && target=$(rustc -vV | awk '/^host:/ {print $2}') \

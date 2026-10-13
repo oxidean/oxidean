@@ -93,9 +93,11 @@ The API serves every `ox-{rust-target-triple}` file found in
 build time the Dockerfile always stages the server's own platform (built from
 the same commit as the API). When `OXIDEAN_CLI_DIST_URL` is **non-empty**, it
 also fetches a flat matrix (`ox-targets.txt` + per-target binaries /
-`.sha256`, plus optional `SOURCE_COMMIT`). The build-arg **defaults to
-empty** (host-only). Fetch is fail-soft (retries, then warn and keep
-host-only). Extra targets can be dropped into the dist dir by hand:
+`.sha256`, plus optional `SOURCE_COMMIT`). The Dockerfile **defaults** to
+this product's rolling `ox-dist` URL so Cloud/Railway images (including PR
+environments) stage the matrix without a manual apply; Compose and CI pass
+an empty build-arg for host-only. Fetch is fail-soft (retries, then warn and
+keep host-only). Extra targets can be dropped into the dist dir by hand:
 
 ```text
 /usr/local/share/oxidean-cli/
@@ -127,11 +129,11 @@ re-run the installer.
 
 #### Self-hosted
 
-Leave `OXIDEAN_CLI_DIST_URL` empty (Compose default) for host-only staging, or
-point it at **your** flat artifact feed (same layout as `ox-dist`) if you
-publish a multi-arch matrix for your fork/deployment. Do not point a private
-fork at upstream Oxidean’s `ox-dist` unless you intentionally want those
-binaries. Dropping files into `OXIDEAN_CLI_DIST_DIR` at runtime also works.
+Compose passes an empty build-arg (host-only). For a bare `docker build`,
+pass `--build-arg OXIDEAN_CLI_DIST_URL=` to skip the upstream default, or
+point the arg at **your** flat artifact feed (same layout as `ox-dist`) if
+you publish a multi-arch matrix for your fork/deployment. Dropping files
+into `OXIDEAN_CLI_DIST_DIR` at runtime also works.
 
 > **Distribution polish backlog:** macOS binaries ship unsigned today —
 > Gatekeeper will flag them on first run (`xattr -d com.apple.quarantine` or
