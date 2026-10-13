@@ -33,8 +33,10 @@
 		reverse_proxy {$API_HOST:api.railway.internal}:{$API_PORT:8080}
 	}
 
-	# Priority ≈ Traefik 100 — API surface
-	@api path /api/* /uploads/* /health /api /uploads
+	# Priority ≈ Traefik 100 — API surface. The two OAuth discovery docs are
+	# named literally (plus /* for RFC 9728 path-suffixed resource variants) so
+	# /.well-known/acme-challenge/* stays on the web tier.
+	@api path /api/* /uploads/* /health /api /uploads /.well-known/oauth-authorization-server /.well-known/oauth-authorization-server/* /.well-known/oauth-protected-resource /.well-known/oauth-protected-resource/*
 	handle @api {
 		reverse_proxy {$API_HOST:api.railway.internal}:{$API_PORT:8080}
 	}
