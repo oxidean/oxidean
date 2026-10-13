@@ -151,6 +151,20 @@ pub async fn run(
     no_skill_refresh: bool,
     no_mcp_refresh: bool,
 ) -> Result<Out, CliError> {
+    let exe = std::env::current_exe()
+        .map_err(|e| CliError::Transport(format!("cannot locate current executable: {e}")))?;
+    run_with_exe(global, rt, &exe, no_skill_refresh, no_mcp_refresh).await
+}
+
+/// Same as [`run`], but replaces `exe` instead of `std::env::current_exe`.
+/// Used by HTTP integration tests so the test runner binary is never swapped.
+pub async fn run_with_exe(
+    global: &Global,
+    rt: &Runtime,
+    exe: &Path,
+    no_skill_refresh: bool,
+    no_mcp_refresh: bool,
+) -> Result<Out, CliError> {
     let instance = crate::commands::resolve_instance(global, &rt.config)?;
     let http = reqwest::Client::new();
     let latest = fetch_latest(&http, &instance).await?;
@@ -164,9 +178,7 @@ pub async fn run(
         )));
     };
 
-    let exe = std::env::current_exe()
-        .map_err(|e| CliError::Transport(format!("cannot locate current executable: {e}")))?;
-    let local_bytes = fs::read(&exe)
+    let local_bytes = fs::read(exe)
         .map_err(|e| CliError::Transport(format!("reading {}: {e}", exe.display())))?;
     let local_sha = sha256_hex(&local_bytes);
 
@@ -190,7 +202,7 @@ pub async fn run(
         )));
     }
 
-    apply_binary(&exe, &bytes)?;
+    apply_binary(exe, &bytes)?;
 
     // Refresh installed `ox` skills to the new embedded copy — the skill
     // rides with the binary. Best-effort: a write failure warns, never
