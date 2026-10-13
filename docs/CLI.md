@@ -101,6 +101,22 @@ dist dir:
 sha256/size of every target found; `/cli/bin/{file}` serves artifacts and
 digests unauthenticated so installs work before `ox auth login` exists.
 
+#### Cloud operators (Railway / app.oxidean.dev)
+
+`install.sh` is not the bug when macOS/Windows installs 404: the live instance
+only serves whatever was staged into the API image. Oxidean Cloud IaC sets
+`OXIDEAN_CLI_DIST_URL` on the `api` service to
+`https://github.com/oxidean/oxidean/releases/latest/download` (Docker build-arg;
+see `.railway/railway.ts`). Sequence:
+
+1. Publish a `v*` tag so `ox-cli.yml` uploads the matrix + `ox-targets.txt`.
+2. Apply Railway IaC / confirm the variable, then rebuild `api`.
+3. Check `/cli/latest` includes `aarch64-apple-darwin` (and other matrix targets)
+   before asking users to re-run the installer.
+
+Do not set the URL (or apply IaC that sets it) until the release assets exist —
+the Dockerfile build fails closed if `ox-targets.txt` cannot be fetched.
+
 > **Distribution polish backlog:** macOS binaries ship unsigned today —
 > Gatekeeper will flag them on first run (`xattr -d com.apple.quarantine` or
 > System Settings → Privacy & Security → Open Anyway). Apple signing +
