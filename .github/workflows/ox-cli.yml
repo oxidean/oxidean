@@ -570,3 +570,89 @@ jobs:
               "/usr/local/share/oxidean-cli/ox-$t" > "/tmp/ox-dist-check/ox-$t"
             (cd /tmp/ox-dist-check && sha256sum -c "ox-$t.sha256")
           done < /tmp/ox-dist-check/ox-targets.txt
+
+  # ── PRs: same digest lockstep against this run's artifacts (no release) ─
+  image-matrix-pr:
+    name: api image stages matrix (PR fixture)
+    needs: [build, build-freebsd]
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    env:
+      FIXTURE_NAME: oxdist-pr
+      NET_NAME: oxdist-pr-net
+    steps:
+      - uses: actions/checkout@v4
+      - name: free disk for api image build
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /usr/local/share/boost /usr/share/swift || true
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ox-*
+          path: artifacts
+          merge-multiple: true
+      - name: assemble fixture feed (ox-targets layout)
+        run: |
+          set -euo pipefail
+          mkdir -p www
+          for f in artifacts/ox-*; do
+            case "$f" in *.sha256|*.exe|*.deb|*.rpm|*.apk|*.zst) continue ;; esac
+            basename "$f" | sed 's|^ox-||'
+          done | sort > www/ox-targets.txt
+          while read -r t || [ -n "$t" ]; do
+            [ -z "$t" ] && continue
+            cp "artifacts/ox-$t" "www/ox-$t"
+            cp "artifacts/ox-$t.sha256" "www/ox-$t.sha256"
+          done < www/ox-targets.txt
+          printf '%s\n' "${{ github.sha }}" > www/SOURCE_COMMIT
+          cat www/ox-targets.txt
+      - name: serve fixture (busybox httpd on loopback)
+        run: |
+          set -euo pipefail
+          docker rm -f "$FIXTURE_NAME" >/dev/null 2>&1 || true
+          # Publish on the host so (1) buildx `--network=host` fetch and
+          # (2) the post-build digest check both hit the same feed.
+          docker run -d --name "$FIXTURE_NAME" \
+            -p "127.0.0.1:${FIXTURE_PORT}:${FIXTURE_PORT}" \
+            -v "$PWD/www:/www:ro" busybox httpd -f -p "$FIXTURE_PORT" -h /www
+          for i in $(seq 1 40); do
+            if curl -fsS "http://127.0.0.1:$FIXTURE_PORT/ox-targets.txt" >/dev/null; then
+              break
+            fi
+            sleep 0.5
+          done
+          curl -fsS "http://127.0.0.1:$FIXTURE_PORT/ox-targets.txt" | head -5
+      - uses: docker/setup-buildx-action@v3
+      - name: build api image against PR fixture
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: crates/oxidean-api/Dockerfile
+          load: true
+          tags: oxidean-api:ox-matrix-pr
+          network: host
+          build-args: |
+            OXIDEAN_CLI_DIST_URL=http://127.0.0.1:${{ env.FIXTURE_PORT }}
+            OXIDEAN_CLI_DIST_BUST=${{ github.sha }}
+          cache-from: type=gha,scope=oxidean-api
+          cache-to: type=gha,mode=max,scope=oxidean-api
+      - name: every shipped target is staged with matching digests
+        run: |
+          set -euo pipefail
+          BASE="http://127.0.0.1:$FIXTURE_PORT"
+          docker run --rm --entrypoint ls oxidean-api:ox-matrix-pr \
+            -1 /usr/local/share/oxidean-cli | tee /tmp/staged.txt
+          grep -qx 'SOURCE_COMMIT' /tmp/staged.txt
+          staged_commit="$(docker run --rm --entrypoint cat oxidean-api:ox-matrix-pr \
+            /usr/local/share/oxidean-cli/SOURCE_COMMIT | tr -d '[:space:]')"
+          test "$staged_commit" = "${{ github.sha }}"
+          mkdir -p /tmp/ox-dist-check
+          curl -fsSL "$BASE/ox-targets.txt" -o /tmp/ox-dist-check/ox-targets.txt
+          while read -r t; do
+            [ -z "$t" ] && continue
+            grep -qx "ox-$t" /tmp/staged.txt
+            curl -fsSL "$BASE/ox-$t.sha256" -o "/tmp/ox-dist-check/ox-$t.sha256"
+            docker run --rm --entrypoint cat oxidean-api:ox-matrix-pr \
+              "/usr/local/share/oxidean-cli/ox-$t" > "/tmp/ox-dist-check/ox-$t"
+            (cd /tmp/ox-dist-check && sha256sum -c "ox-$t.sha256")
+          done < /tmp/ox-dist-check/ox-targets.txt
