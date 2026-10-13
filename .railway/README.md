@@ -42,7 +42,7 @@ Ephemeral PR environments clone `preview` (services, networking, variables) when
 
 | Service | Watch paths |
 |---------|-------------|
-| `api` | `crates/oxidean-api/**`, `crates/oxidean-core/**`, `crates/oxidean-db/**`, `packages/api-client/**` |
+| `api` | `crates/oxidean-api/**`, `crates/oxidean-cli/**`, `crates/oxidean-core/**`, `crates/oxidean-db/**`, `packages/api-client/**` |
 | `web` | `apps/web/**`, `packages/**` |
 | `runner` | `docker/oxidean-runner/**`, `crates/oxidean-runner/**`, `Cargo.lock` |
 | `gateway` | `deploy/cloud/**` |
@@ -118,6 +118,19 @@ IaC sets public browser/SSH advertise vars from the **gateway** domain (not `pre
 | `OXIDEAN_WEB_BEHIND_PROXY` (web) | `1` — the gateway sanitizes `X-Forwarded-*`, so `oxidean-web` trusts the edge's chain |
 | `OXIDEAN_AUTO_MIGRATE` | `true` on all environments (including production) |
 | `OXIDEAN_PROTECTION_HELPER` | `/usr/local/bin/oxidean-protection-hook` (API image) |
+| `OXIDEAN_CLI_DIST_URL` (api) | `https://github.com/oxidean/oxidean/releases/download/ox-dist` — Docker **build-arg** (same as Dockerfile default). Stages this product's rolling `ox-dist` matrix so `/cli/bin` serves macOS/Windows/etc. Compose/CI override empty for host-only. When set, image build fail-closes if the matrix cannot be fetched. |
+| `OXIDEAN_CLI_DIST_BUST` (api) | Set by `scripts/railway-staging-api-redeploy.sh` (not IaC). Docker **build-arg** that busts the ox-dist fetch layer after rolling-release refresh. |
+
+### ox CLI multi-arch matrix (issue #125)
+
+Cloud steady state is automatic — no per-release tag ritual:
+
+1. Every successful [`.github/workflows/ox-cli.yml`](../.github/workflows/ox-cli.yml) run on `main` refreshes the rolling GitHub Release **`ox-dist`** (`ox-targets.txt` + `ox-*` + `.sha256` + `SOURCE_COMMIT`).
+2. That job redeploys staging `api` via [`scripts/railway-staging-api-redeploy.sh`](../scripts/railway-staging-api-redeploy.sh) (`RAILWAY_API_TOKEN` or staging-scoped `RAILWAY_TOKEN`; skipped when absent).
+3. Cloud IaC sets `OXIDEAN_CLI_DIST_URL` → `ox-dist`. The Dockerfile fetches at image-build time (retries, fail-closed when URL is set). Staging redeploy upserts `OXIDEAN_CLI_DIST_BUST` then redeploys so the fetch layer refreshes. Production promote rebuilds with the same URL.
+4. Verify: `GET …/cli/latest` lists darwin/windows (and may include `dist_commit`); macOS `install.sh` succeeds.
+
+Self-hosted images leave the build-arg empty (Compose default) or point at **their** artifact feed — never require upstream Oxidean's `ox-dist`. Optional `v*` tags still create product releases. Details: [docs/CLI.md](../docs/CLI.md).
 
 PR Environments inherit from `preview`; dynamic gateway refs and auto-migrate on every environment (including production) keep schema current and avoid stale preview origins. The API/web also replace a stale `*.up.railway.app` origin with `RAILWAY_SERVICE_GATEWAY_URL` / `RAILWAY_PUBLIC_DOMAIN` (custom domains are left alone).
 

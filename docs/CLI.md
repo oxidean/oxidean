@@ -62,17 +62,23 @@ cargo install --path crates/oxidean-cli   # optional: installs `ox`
 
 ## Updating
 
-`ox` can replace itself with the binary the configured instance serves — the
-CLI version tracks the server version, so updating keeps them in lockstep:
+`ox self-update` replaces this binary with **the build the configured
+instance currently stages** under `/cli/bin` — not a global channel:
 
 ```bash
 ox self-update
 ```
 
-The command fetches `{instance}/cli/latest`, compares the advertised version
-to the running build, downloads `ox-{your-target}` and its `.sha256`, verifies
-the checksum, and swaps the executable in place. When the instance has no
-artifact for your platform it says so and points at the installer instead.
+It fetches `{instance}/cli/latest`, compares the advertised workspace
+`version` **and** the sha256 for your platform to the running executable,
+downloads `ox-{your-target}` when either differs, verifies the checksum, and
+swaps in place. Same semver with a rebuilt matrix still refreshes the binary.
+When the instance has no artifact for your platform it says so and points at
+the installer instead.
+
+RPC compatibility is separate: `system.manifest` (`min_cli_version`,
+procedures, protocol) — see [Instance compatibility](#instance-compatibility-capability-manifest)
+below. Dist lockstep is “match this instance’s staged bytes.”
 
 After a successful swap, `ox` refreshes any installed agent skills — every
 existing `ox/SKILL.md` it finds under project or global harness dirs is
@@ -83,23 +89,55 @@ failures only warn). Pass `--no-skill-refresh` to skip that step.
 ### For operators: serving binaries
 
 The API serves every `ox-{rust-target-triple}` file found in
-`OXIDEAN_CLI_DIST_DIR` (default `/usr/local/share/oxidean-cli`). Self-built
-images stage the server's own platform; the published release image is built
-with `OXIDEAN_CLI_DIST_URL` pointing at the GitHub release and stages the
-full matrix (fetched + sha256-verified at image-build time). To offer more
-targets yourself, build with that arg or drop additional binaries into the
-dist dir:
+`OXIDEAN_CLI_DIST_DIR` (default `/usr/local/share/oxidean-cli`). At image
+build time the Dockerfile always stages the server's own platform (built from
+the same commit as the API). When `OXIDEAN_CLI_DIST_URL` is **non-empty**, it
+also fetches a flat matrix (`ox-targets.txt` + per-target binaries /
+`.sha256`, plus `SOURCE_COMMIT`). The Dockerfile **defaults** to this
+product's rolling `ox-dist` URL so Cloud/Railway images (including PR
+environments) stage the matrix without a manual apply; Compose and CI pass
+an empty build-arg for host-only. When the URL is set, fetch is **fail-closed**
+(retries, then fail the image build). `OXIDEAN_CLI_DIST_BUST` is a Docker
+build-arg that invalidates only the matrix-fetch layer so staging can re-pull
+`ox-dist` after a same-commit redeploy. Extra targets can be dropped into the
+dist dir by hand:
 
 ```text
 /usr/local/share/oxidean-cli/
   ox-x86_64-unknown-linux-gnu
   ox-aarch64-apple-darwin
   ox-x86_64-pc-windows-msvc
+  SOURCE_COMMIT          # git SHA of the matrix feed (required when URL is set)
 ```
 
-`GET /cli/latest` reports the version (the API package version) and the
-sha256/size of every target found; `/cli/bin/{file}` serves artifacts and
-digests unauthenticated so installs work before `ox auth login` exists.
+`GET /cli/latest` reports the API package `version`, each target’s
+sha256/size, and `dist_commit` when `SOURCE_COMMIT` is present.
+`/cli/bin/{file}` serves artifacts unauthenticated so installs work before
+`ox auth login` exists.
+
+#### Oxidean Cloud (Railway / app.oxidean.dev)
+
+Cloud IaC sets `OXIDEAN_CLI_DIST_URL` to this product’s rolling release
+`https://github.com/oxidean/oxidean/releases/download/ox-dist` so the API
+image stages the full matrix automatically:
+
+1. `.github/workflows/ox-cli.yml` refreshes **`ox-dist`** on every successful
+   run on `main` (and on `v*` tags), including `SOURCE_COMMIT`.
+2. The job upserts `OXIDEAN_CLI_DIST_BUST=<sha>` on staging `api`, then
+   redeploys (`scripts/railway-staging-api-redeploy.sh`) so the fetch layer
+   re-runs even when the git SHA is unchanged.
+3. Production promote rebuilds `api` with the same Cloud build-arg.
+
+Confirm with `GET /cli/latest` (darwin/windows listed) before asking users to
+re-run the installer.
+
+#### Self-hosted
+
+Compose passes an empty build-arg (host-only). For a bare `docker build`,
+pass `--build-arg OXIDEAN_CLI_DIST_URL=` to skip the upstream default, or
+point the arg at **your** flat artifact feed (same layout as `ox-dist`) if
+you publish a multi-arch matrix for your fork/deployment. Dropping files
+into `OXIDEAN_CLI_DIST_DIR` at runtime also works.
 
 > **Distribution polish backlog:** macOS binaries ship unsigned today —
 > Gatekeeper will flag them on first run (`xattr -d com.apple.quarantine` or
@@ -329,10 +367,11 @@ GETs `/api/releases/assets/{id}` — both accept `Authorization: Bearer <pat>`.
 
 Before running an RPC-backed command — including `auth status` — `ox` fetches
 `system.manifest` from the instance (public, like `system.health`) with a short
-timeout. The manifest is the server's compatibility contract: which procedures
-its dispatch table knows, its protocol and server versions, optional
+timeout. The manifest is the server's **RPC** compatibility contract: which
+procedures its dispatch table knows, its protocol and server versions, optional
 capabilities (`mcp`, `rest`, `oauth`, `cli_dist`), and the oldest supported
-CLI version.
+CLI version. It does not replace install/`self-update` lockstep to the
+instance's staged `/cli/bin` bytes (see [Updating](#updating)).
 
 - A procedure missing from `procedures` fails fast:
   `command not supported by instance (missing <procedure>)`, exit code 2 —

@@ -41,6 +41,7 @@ export default defineRailway((ctx) => {
       dockerfilePath: "crates/oxidean-api/Dockerfile",
       watchPatterns: [
         "crates/oxidean-api/**",
+        "crates/oxidean-cli/**",
         "crates/oxidean-core/**",
         "crates/oxidean-db/**",
         "crates/oxidean-git/**",
@@ -77,6 +78,15 @@ export default defineRailway((ctx) => {
       // Track gateway public domain (PR Environments get unique hosts; do not preserve).
       OXIDEAN_PUBLIC_ORIGIN: "https://${{gateway.RAILWAY_PUBLIC_DOMAIN}}",
       OXIDEAN_CORS_ORIGINS: "https://${{gateway.RAILWAY_PUBLIC_DOMAIN}}",
+      // Cloud-only build-arg: stage the full ox matrix from this product's
+      // rolling `ox-dist` GitHub Release (refreshed on main by ox-cli.yml).
+      // Dockerfile defaults to the same URL; Compose/CI pass empty for
+      // host-only. When set, image build fail-closes if the matrix cannot
+      // be fetched. OXIDEAN_CLI_DIST_BUST is set by staging redeploy (not
+      // IaC) to bust the Docker fetch layer after ox-dist refreshes.
+      // See docs/CLI.md § Cloud / self-host and issue #125.
+      OXIDEAN_CLI_DIST_URL:
+        "https://github.com/oxidean/oxidean/releases/download/ox-dist",
       OXIDEAN_ADMIN_EMAIL: preserve(),
       OXIDEAN_ADMIN_PASSWORD: preserve(),
       OXIDEAN_RESEND_API_KEY: preserve(),

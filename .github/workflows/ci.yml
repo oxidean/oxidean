@@ -389,6 +389,9 @@ jobs:
           file: crates/oxidean-api/Dockerfile
           load: true
           tags: oxidean-api:ci
+          # Host-only staging — matrix path is covered by ox-cli image-matrix.
+          build-args: |
+            OXIDEAN_CLI_DIST_URL=
           cache-from: type=gha,scope=oxidean-api
           cache-to: type=gha,mode=max,scope=oxidean-api
       - name: build runner image (compile gate)
