@@ -23,6 +23,7 @@ fn global(instance: &str) -> Global {
     Global {
         instance: Some(instance.to_string()),
         json: true,
+        jq: None,
         help: false,
         version: false,
     }
