@@ -43,6 +43,11 @@ services:
     build:
       context: .
       dockerfile: crates/oxidean-api/Dockerfile
+      # Host-only ox staging for Compose; Cloud uses the rolling ox-dist URL
+      # (Dockerfile default / Railway OXIDEAN_CLI_DIST_URL). Override to fetch
+      # the full matrix: OXIDEAN_CLI_DIST_URL=https://github.com/oxidean/oxidean/releases/download/ox-dist
+      args:
+        OXIDEAN_CLI_DIST_URL: ${OXIDEAN_CLI_DIST_URL:-}
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgres://oxidean:oxidean@postgres:5432/oxidean}
       OXIDEAN_ENV: ${OXIDEAN_ENV:-compose}
