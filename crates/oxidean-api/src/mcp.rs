@@ -14,10 +14,11 @@
 //! protocol-level failure (same `repo.not_found` anti-enumeration shape as the
 //! RPC layer).
 //!
-//! `oxidean_oat_…` OAuth access tokens are dispatched to [`resolve_oat_bearer`]
-//! — the documented seam where the OAuth provider work (API-03) plugs in token
-//! resolution. Until that lands they are rejected like any other invalid
-//! credential; prefix dispatch keeps the three token families disjoint.
+//! `oxidean_oat_…` OAuth access tokens (authorization-code grants from
+//! `/oauth/token`) resolve through `crate::oauth::authenticate_oauth_token`
+//! and land in a synthetic classic-PAT row — granted OAuth scopes map onto the
+//! same `Access` gates PATs face. Prefix dispatch keeps the three token
+//! families disjoint.
 //!
 //! Instance gate (AGT-03): the endpoint only serves while MCP is enabled —
 //! `instance_mcp_settings.enabled` (admin override) falling back to the
@@ -37,8 +38,8 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use chrono::Utc;
 use oxidean_core::{
-    AppError, ClassicPatScope, ContentsPerm, FgRepoAccess, PatKind, RpcRequest, RpcResponse,
-    CLASSIC_PAT_PREFIX, FINE_GRAINED_PAT_PREFIX,
+    oauth_types::OAUTH_ACCESS_TOKEN_PREFIX, AppError, ClassicPatScope, ContentsPerm, FgRepoAccess,
+    PatKind, RpcRequest, RpcResponse, CLASSIC_PAT_PREFIX, FINE_GRAINED_PAT_PREFIX,
 };
 use oxidean_db::PatRow;
 use serde_json::{json, Map, Value};
@@ -57,6 +58,18 @@ use crate::rpc::{self, ClientMeta};
 const PROTOCOL_VERSIONS: &[&str] = &["2024-11-05", "2025-03-26", "2025-06-18"];
 
 const WWW_AUTH: &str = r#"Bearer realm="Oxidean MCP""#;
+
+/// `WWW-Authenticate` challenge — carries the RFC 9728 `resource_metadata`
+/// pointer so OAuth-capable MCP clients can discover the authorization server
+/// off a bare 401. Falls back to the bare realm when the resolved origin can't
+/// form a header value.
+fn www_authenticate() -> HeaderValue {
+    let challenge = format!(
+        r#"Bearer realm="Oxidean MCP", resource_metadata="{}/.well-known/oauth-protected-resource""#,
+        crate::public_origin::resolve_public_origin().trim_end_matches('/'),
+    );
+    HeaderValue::from_str(&challenge).unwrap_or_else(|_| HeaderValue::from_static(WWW_AUTH))
+}
 
 // JSON-RPC 2.0 error codes.
 const PARSE_ERROR: i64 = -32700;
@@ -105,7 +118,7 @@ fn json_error_status(
 fn unauthorized() -> Response {
     (
         StatusCode::UNAUTHORIZED,
-        [(header::WWW_AUTHENTICATE, WWW_AUTH)],
+        [(header::WWW_AUTHENTICATE, www_authenticate())],
         Json(json!({
             "jsonrpc": "2.0",
             "id": null,
@@ -152,12 +165,14 @@ fn internal_error_response() -> Response {
 /// `OXIDEAN_MCP_ENABLED` parse — same truthy semantics as
 /// `OXIDEAN_ACTIONS_ENABLED`: unset or anything but `0`/`false`/`no`/`off`/`""`
 /// means on. Default **on** so self-host/local dev needs zero configuration.
+fn mcp_env_truthy(raw: &str) -> bool {
+    let t = raw.trim().to_ascii_lowercase();
+    !(t.is_empty() || t == "0" || t == "false" || t == "no" || t == "off")
+}
+
 pub(crate) fn env_mcp_enabled() -> bool {
     std::env::var("OXIDEAN_MCP_ENABLED")
-        .map(|v| {
-            let t = v.trim().to_ascii_lowercase();
-            !(t.is_empty() || t == "0" || t == "false" || t == "no" || t == "off")
-        })
+        .map(|v| mcp_env_truthy(&v))
         .unwrap_or(true)
 }
 
@@ -338,18 +353,13 @@ fn limiter_lock(
         .unwrap_or_else(|e| e.into_inner())
 }
 
-/// `oxidean_oat_…` OAuth access-token prefix (API-03). Declared here so bearer
-/// dispatch is stable ahead of the OAuth provider; switch to the canonical
-/// constant once that stack lands.
-const OAT_PREFIX: &str = "oxidean_oat_";
-
 /// Bearer credential families recognized at this endpoint. Prefix dispatch is
 /// the single point that routes a token to its resolver — `oxidean_pat_`,
 /// `oxidean_fg_`, and `oxidean_oat_` stay disjoint by construction.
 enum BearerToken<'a> {
     /// `oxidean_pat_…` / `oxidean_fg_…` — resolved against the PAT tables.
     Pat(&'a str),
-    /// `oxidean_oat_…` — OAuth2 access token minted by this instance (API-03).
+    /// `oxidean_oat_…` — OAuth2 access token minted by this instance.
     Oat(&'a str),
     /// Unrecognized prefix — failed auth.
     Unknown,
@@ -358,7 +368,7 @@ enum BearerToken<'a> {
 fn classify_bearer(token: &str) -> BearerToken<'_> {
     if token.starts_with(CLASSIC_PAT_PREFIX) || token.starts_with(FINE_GRAINED_PAT_PREFIX) {
         BearerToken::Pat(token)
-    } else if token.starts_with(OAT_PREFIX) {
+    } else if token.starts_with(OAUTH_ACCESS_TOKEN_PREFIX) {
         BearerToken::Oat(token)
     } else {
         BearerToken::Unknown
@@ -379,6 +389,17 @@ async fn touch_last_used(state: &AppState, pat_id: &str, ip: Option<&str>) {
     let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
     if let Err(e) = state.db.touch_pat_last_used(pat_id, &now, ip).await {
         tracing::warn!(error = %e, pat_id, "touch_pat_last_used failed");
+    }
+}
+
+async fn touch_oauth_last_used(state: &AppState, token_id: &str, ip: Option<&str>) {
+    let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    if let Err(e) = state
+        .db
+        .touch_oauth_token_last_used(token_id, &now, ip)
+        .await
+    {
+        tracing::warn!(error = %e, token_id, "touch_oauth_token_last_used failed");
     }
 }
 
@@ -432,26 +453,43 @@ async fn resolve_bearer_identity(
 }
 
 #[allow(clippy::result_large_err)]
-/// OAuth access-token (`oxidean_oat_…`) resolution seam.
-///
-/// TODO(API-03): once the OAuth provider stack lands, look the token up by
-/// SHA-256 hash in the OAuth access-token tables, enforce expiry and
-/// revocation, load the granted user, and translate granted OAuth scopes onto
-/// the `Access` gates this module applies to PATs (read ≈ `Access::RepoRead`,
-/// write ≈ `Access::RepoWrite`) — synthesizing a `pat:`-style session like
-/// [`authenticate_pat`] does. Until then OAT credentials fail closed: recorded
-/// and `401`, never silently accepted.
+/// OAuth access-token (`oxidean_oat_…`) resolution — same hash lookup, expiry,
+/// revocation, and banned-owner checks the packages/git-HTTP paths get via
+/// [`crate::oauth::authenticate_oauth_token`]. The OAuth scopes land in the
+/// synthetic classic-PAT row (`synthetic_pat` keeps the `repo` /
+/// `package:read` / `package:write` scope strings), so the `Access` gates
+/// below apply unchanged.
 async fn resolve_oat_bearer(
     state: &AppState,
     client: &ClientMeta,
-    _token: &str,
+    token: &str,
 ) -> Result<McpAuth, Response> {
     let ip = client
         .ip_address
         .clone()
         .unwrap_or_else(|| "unknown".into());
-    limiter_lock(state).record_ip(&ip);
-    Err(unauthorized())
+    let ident = match crate::oauth::authenticate_oauth_token(&state.db, token).await {
+        Ok(Some(i)) => i,
+        Ok(None) => {
+            limiter_lock(state).record_ip(&ip);
+            return Err(unauthorized());
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "mcp oauth token lookup failed");
+            return Err(internal_error_response());
+        }
+    };
+    touch_oauth_last_used(state, &ident.token.id, client.ip_address.as_deref()).await;
+    let session = ResolvedSession {
+        session_id: format!("oat:{}", ident.token.id),
+        user_id: ident.user.id.clone(),
+        remember_me: false,
+        expires_at: Utc::now() + chrono::Duration::hours(24),
+    };
+    Ok(McpAuth {
+        session: Some(session),
+        pat: Some(ident.synthetic_pat()),
+    })
 }
 
 #[allow(clippy::result_large_err)]
@@ -837,6 +875,15 @@ fn build_rpc_input(tool: &ToolDef, args: &Value) -> Result<(String, Value), (i64
                 _ => "code",
             };
             input["type"] = json!(kind);
+            Ok((tool.procedure.into(), input))
+        }
+        // The tool schema advertises `ref` as optional (empty → default branch),
+        // while `repo.tree` requires the field — default it here.
+        "repo_tree" => {
+            let mut input = args.clone();
+            if input.get("ref").is_none() {
+                input["ref"] = json!("");
+            }
             Ok((tool.procedure.into(), input))
         }
         _ => Ok((tool.procedure.into(), args.clone())),
@@ -1306,4 +1353,374 @@ async fn read_doc_resource(
     Ok(json!({
         "contents": [{"uri": uri, "mimeType": "text/markdown", "text": text}],
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // -- env flag parsing ---------------------------------------------------
+
+    #[test]
+    fn mcp_env_truthy_values() {
+        for v in ["", "0", "false", "no", "off", " FALSE ", "Off", "0 "] {
+            assert!(!mcp_env_truthy(v), "{v:?} must be falsy");
+        }
+        for v in ["1", "true", "yes", "on", "anything", " enabled "] {
+            assert!(mcp_env_truthy(v), "{v:?} must be truthy");
+        }
+    }
+
+    // -- percent decoding ----------------------------------------------------
+
+    #[test]
+    fn pct_decode_basics() {
+        assert_eq!(pct_decode("plain"), "plain");
+        assert_eq!(pct_decode("a%20b"), "a b");
+        assert_eq!(pct_decode("dir%2Ffile"), "dir/file");
+        assert_eq!(pct_decode("%E2%82%AC"), "\u{20ac}");
+        // Truncated / invalid escapes pass through literally.
+        assert_eq!(pct_decode("x%4"), "x%4");
+        assert_eq!(pct_decode("x%zz"), "x%zz");
+        assert_eq!(pct_decode("100%"), "100%");
+    }
+
+    // -- resource URI parsing ------------------------------------------------
+
+    #[test]
+    fn parse_resource_uri_blob() {
+        let (owner, name, target) =
+            parse_resource_uri("oxidean://repo/octo/demo/blob/src/main.rs?ref=dev").unwrap();
+        assert_eq!(owner, "octo");
+        assert_eq!(name, "demo");
+        match target {
+            ResourceTarget::Blob { path, ref_name } => {
+                assert_eq!(path, "src/main.rs");
+                assert_eq!(ref_name, "dev");
+            }
+            _ => panic!("expected blob"),
+        }
+    }
+
+    #[test]
+    fn parse_resource_uri_blob_defaults_and_decoding() {
+        let (owner, name, target) =
+            parse_resource_uri("oxidean://repo/o%20x/d%2Fe/blob/README.md").unwrap();
+        assert_eq!(owner, "o x");
+        assert_eq!(name, "d/e");
+        match target {
+            ResourceTarget::Blob { path, ref_name } => {
+                assert_eq!(path, "README.md");
+                assert_eq!(ref_name, "");
+            }
+            _ => panic!("expected blob"),
+        }
+        // Percent-decoded path segments rejoin with '/'.
+        let (_, _, target) =
+            parse_resource_uri("oxidean://repo/o/n/blob/a%20b/c?ref=main&other=1").unwrap();
+        match target {
+            ResourceTarget::Blob { path, ref_name } => {
+                assert_eq!(path, "a b/c");
+                assert_eq!(ref_name, "main");
+            }
+            _ => panic!("expected blob"),
+        }
+    }
+
+    #[test]
+    fn parse_resource_uri_issue_pull() {
+        let (_, _, target) = parse_resource_uri("oxidean://repo/o/n/issue/7").unwrap();
+        assert!(matches!(target, ResourceTarget::Issue { number: 7 }));
+        let (_, _, target) = parse_resource_uri("oxidean://repo/o/n/pull/42").unwrap();
+        assert!(matches!(target, ResourceTarget::Pull { number: 42 }));
+    }
+
+    #[test]
+    fn parse_resource_uri_rejects_bad_shapes() {
+        for uri in [
+            "https://example.com/x",
+            "oxidean://org/o/n",
+            "oxidean://repo/o",
+            "oxidean://repo//n/issue/1",
+            "oxidean://repo/o/n/issue",
+            "oxidean://repo/o/n/issue/abc",
+            "oxidean://repo/o/n/issue/1/extra",
+            "oxidean://repo/o/n/pull/xyz",
+            "oxidean://repo/o/n/blob",
+            "oxidean://repo/o/n/unknown/1",
+        ] {
+            match parse_resource_uri(uri) {
+                Err((code, _)) => assert_eq!(code, INVALID_PARAMS, "{uri}"),
+                Ok(_) => panic!("{uri} must not parse"),
+            }
+        }
+    }
+
+    // -- bearer classification ----------------------------------------------
+
+    #[test]
+    fn classify_bearer_families() {
+        assert!(matches!(
+            classify_bearer("oxidean_pat_abcdef"),
+            BearerToken::Pat(_)
+        ));
+        assert!(matches!(
+            classify_bearer("oxidean_fg_abcdef"),
+            BearerToken::Pat(_)
+        ));
+        assert!(matches!(
+            classify_bearer("oxidean_oat_abcdef"),
+            BearerToken::Oat(_)
+        ));
+        assert!(matches!(classify_bearer("ghp_abc"), BearerToken::Unknown));
+        assert!(matches!(classify_bearer(""), BearerToken::Unknown));
+        assert!(matches!(
+            classify_bearer("oxidean_zzz_abcdef"),
+            BearerToken::Unknown
+        ));
+    }
+
+    // -- PAT expiry ----------------------------------------------------------
+
+    #[test]
+    fn pat_expired_cases() {
+        assert!(!pat_expired(&None));
+        let past = (Utc::now() - chrono::Duration::hours(1))
+            .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        assert!(pat_expired(&Some(past)));
+        let future = (Utc::now() + chrono::Duration::hours(1))
+            .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        assert!(!pat_expired(&Some(future)));
+        // Unparseable timestamps fail closed.
+        assert!(pat_expired(&Some("not-a-date".into())));
+    }
+
+    // -- initialize negotiation ----------------------------------------------
+
+    #[test]
+    fn initialize_negotiates_protocol_version() {
+        for v in PROTOCOL_VERSIONS {
+            let out = initialize_result(&json!({"protocolVersion": v}));
+            assert_eq!(out["protocolVersion"], *v);
+        }
+        for params in [
+            json!({"protocolVersion": "1999-01-01"}),
+            json!({}),
+            json!({"protocolVersion": 42}),
+        ] {
+            let out = initialize_result(&params);
+            assert_eq!(
+                out["protocolVersion"],
+                *PROTOCOL_VERSIONS.last().unwrap(),
+                "{params}"
+            );
+        }
+        let out = initialize_result(&json!({}));
+        assert_eq!(out["serverInfo"]["name"], "oxidean");
+        assert!(out["capabilities"]["tools"].is_object());
+        assert!(out["capabilities"]["resources"].is_object());
+        assert!(out["capabilities"]["prompts"].is_object());
+        assert!(out["instructions"]
+            .as_str()
+            .unwrap()
+            .contains("oxidean_pat_"));
+    }
+
+    // -- tool surface invariants ---------------------------------------------
+
+    #[test]
+    fn tool_defs_are_well_formed() {
+        let defs = tool_defs();
+        assert!(defs.len() >= 16, "tool registry shrank: {}", defs.len());
+        let mut names = std::collections::HashSet::new();
+        for t in &defs {
+            assert!(names.insert(t.name), "duplicate tool {}", t.name);
+            assert!(!t.description.is_empty(), "{} missing description", t.name);
+            assert_eq!(t.input_schema["type"], "object", "{} schema", t.name);
+            let props = t.input_schema["properties"].as_object();
+            let required: Vec<&str> = t
+                .input_schema
+                .get("required")
+                .and_then(|r| r.as_array())
+                .map(|a| a.iter().filter_map(|v| v.as_str()).collect())
+                .unwrap_or_default();
+            if let Some(props) = props {
+                for r in required {
+                    assert!(props.contains_key(r), "{} requires unknown {r}", t.name);
+                }
+            } else {
+                assert!(required.is_empty(), "{} has required but no props", t.name);
+            }
+        }
+        for expected in [
+            "repo_list",
+            "repo_get",
+            "repo_tree",
+            "issue_list",
+            "issue_get",
+            "issue_create",
+            "issue_comment",
+            "issue_list_comments",
+            "pull_list",
+            "pull_get",
+            "actions_list_runs",
+            "actions_get_run",
+            "packages_list",
+            "search_repos",
+            "search_issues",
+            "search_pulls",
+            "search_code",
+        ] {
+            assert!(names.contains(expected), "missing tool {expected}");
+        }
+    }
+
+    // -- tool → RPC input mapping --------------------------------------------
+
+    #[test]
+    fn build_rpc_input_repo_list() {
+        let defs = tool_defs();
+        let repo_list = defs.iter().find(|t| t.name == "repo_list").unwrap();
+        let (proc, input) = build_rpc_input(repo_list, &json!({})).unwrap();
+        assert_eq!(proc, "repo.listMine");
+        assert_eq!(input, json!({}));
+        for args in [json!({"owner": "octo"}), json!({"owner": "  octo  "})] {
+            let (proc, input) = build_rpc_input(repo_list, &args).unwrap();
+            assert_eq!(proc, "repo.listByOwner");
+            assert_eq!(input["owner"], "octo");
+        }
+        // Blank owner falls back to listMine.
+        let (proc, _) = build_rpc_input(repo_list, &json!({"owner": "   "})).unwrap();
+        assert_eq!(proc, "repo.listMine");
+    }
+
+    #[test]
+    fn build_rpc_input_search_kinds() {
+        let defs = tool_defs();
+        let cases = [
+            ("search_issues", "issues"),
+            ("search_pulls", "pulls"),
+            ("search_code", "code"),
+        ];
+        for (name, kind) in cases {
+            let tool = defs.iter().find(|t| t.name == name).unwrap();
+            let (proc, input) = build_rpc_input(
+                tool,
+                &json!({"owner": "o", "name": "n", "q": "x", "limit": 5}),
+            )
+            .unwrap();
+            assert_eq!(proc, "repo.search", "{name}");
+            assert_eq!(input["type"], kind, "{name}");
+            assert_eq!(input["q"], "x");
+        }
+    }
+
+    #[test]
+    fn build_rpc_input_passthrough() {
+        let defs = tool_defs();
+        let tool = defs.iter().find(|t| t.name == "issue_get").unwrap();
+        let args = json!({"owner": "o", "name": "n", "number": 3});
+        let (proc, input) = build_rpc_input(tool, &args).unwrap();
+        assert_eq!(proc, "issue.get");
+        assert_eq!(input, args);
+    }
+
+    #[test]
+    fn build_rpc_input_repo_tree_ref_default() {
+        let defs = tool_defs();
+        let tool = defs.iter().find(|t| t.name == "repo_tree").unwrap();
+        // Omitted → "" so the required `repo.tree` field falls back to the
+        // default branch; an explicit ref passes through untouched.
+        let (_, input) = build_rpc_input(tool, &json!({"owner": "o", "name": "n"})).unwrap();
+        assert_eq!(input["ref"], "");
+        let (_, input) = build_rpc_input(
+            tool,
+            &json!({"owner": "o", "name": "n", "ref": "dev", "path": "src"}),
+        )
+        .unwrap();
+        assert_eq!(input["ref"], "dev");
+        assert_eq!(input["path"], "src");
+    }
+
+    // -- tool result envelopes -------------------------------------------------
+
+    #[test]
+    fn tool_ok_envelope() {
+        let out = tool_ok(json!({"name": "demo", "n": 1}));
+        assert_eq!(out["isError"], false);
+        assert_eq!(out["structuredContent"]["name"], "demo");
+        let text = out["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("\"demo\""), "{text}");
+        // Non-object payload: text content only, no structuredContent.
+        let out = tool_ok(json!(["a", "b"]));
+        assert_eq!(out["isError"], false);
+        assert!(out.get("structuredContent").is_none());
+        assert_eq!(out["content"][0]["text"], "[\"a\",\"b\"]");
+    }
+
+    #[test]
+    fn tool_error_envelope() {
+        let e = AppError::new("repo.not_found", "repository not found");
+        let out = tool_error(&e);
+        assert_eq!(out["isError"], true);
+        let text = out["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("repo.not_found"), "{text}");
+        assert!(text.contains("repository not found"), "{text}");
+    }
+
+    // -- resource templates ----------------------------------------------------
+
+    #[test]
+    fn resource_templates_shape() {
+        let tpls = resource_templates();
+        let arr = tpls.as_array().unwrap();
+        assert_eq!(arr.len(), 3);
+        for t in arr {
+            assert!(t["uriTemplate"]
+                .as_str()
+                .unwrap()
+                .starts_with("oxidean://repo/"));
+            assert!(t["name"].is_string());
+            assert!(t["mimeType"].is_string());
+        }
+    }
+
+    // -- scope helpers -----------------------------------------------------------
+
+    #[test]
+    fn pat_helpers() {
+        let pat_row = |scopes_json: Option<&str>| PatRow {
+            id: "p1".into(),
+            user_id: "u1".into(),
+            kind: PatKind::Classic.as_str().into(),
+            name: "t".into(),
+            token_prefix: String::new(),
+            token_hash: String::new(),
+            scopes_json: scopes_json.map(str::to_string),
+            contents_perm: None,
+            perms_json: None,
+            repo_access: None,
+            expires_at: None,
+            revoked_at: None,
+            last_used_at: None,
+            last_used_ip: None,
+            created_at: String::new(),
+            repository_ids: vec![],
+        };
+        assert!(pat_has_package_read(&pat_row(Some(
+            r#"["repo","package:read"]"#
+        ))));
+        assert!(
+            pat_has_package_read(&pat_row(Some(r#"["package:write"]"#))),
+            "write implies read"
+        );
+        assert!(!pat_has_package_read(&pat_row(Some(r#"["repo"]"#))));
+        assert!(
+            pat_scopes(&pat_row(Some("not json"))).is_empty(),
+            "bad scopes_json → empty"
+        );
+        let e = scope_denied("repo");
+        assert_eq!(e.code, "mcp.insufficient_scope");
+        assert!(e.message.contains("repo"));
+    }
 }

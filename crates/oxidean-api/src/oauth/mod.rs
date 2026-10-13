@@ -1600,3 +1600,52 @@ pub async fn device_authorize(
     .await;
     Ok(serde_json::json!({ "ok": true }))
 }
+
+// ---------------------------------------------------------------------------
+// Discovery metadata — RFC 8414 (authorization server) + RFC 9728 (protected
+// resource). MCP clients resolve these from the 401 `resource_metadata`
+// pointer; PKCE / public clients / RFC 7591 dynamic registration are not
+// advertised until they land.
+// ---------------------------------------------------------------------------
+
+/// `GET /.well-known/oauth-authorization-server` — RFC 8414 AS metadata.
+pub async fn authorization_server_metadata() -> Json<serde_json::Value> {
+    let origin = crate::public_origin::resolve_public_origin();
+    Json(serde_json::json!({
+        "issuer": origin,
+        "authorization_endpoint": format!("{origin}/oauth/authorize"),
+        "token_endpoint": format!("{origin}/oauth/token"),
+        "userinfo_endpoint": format!("{origin}/oauth/userinfo"),
+        "device_authorization_endpoint": format!("{origin}/oauth/device/code"),
+        "response_types_supported": ["code"],
+        "grant_types_supported": [
+            "authorization_code",
+            "urn:ietf:params:oauth:grant-type:device_code",
+        ],
+        "token_endpoint_auth_methods_supported": [
+            "client_secret_basic",
+            "client_secret_post",
+        ],
+        "scopes_supported": OAuthScope::ALL.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+    }))
+}
+
+/// `GET /.well-known/oauth-protected-resource` — RFC 9728 resource metadata
+/// for the MCP endpoint (`resource` names what clients will pass as
+/// `resource=` once RFC 8707 support lands on authorize/token).
+pub async fn protected_resource_metadata() -> Json<serde_json::Value> {
+    let origin = crate::public_origin::resolve_public_origin();
+    Json(serde_json::json!({
+        "resource": format!("{origin}/api/mcp"),
+        "authorization_servers": [origin],
+        "bearer_methods_supported": ["header"],
+        "scopes_supported": [
+            "repo",
+            "package:read",
+            "package:write",
+            "read:user",
+            "user:email",
+        ],
+        "resource_name": "Oxidean MCP",
+    }))
+}

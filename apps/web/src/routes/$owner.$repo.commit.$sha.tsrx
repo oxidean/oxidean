@@ -14,7 +14,6 @@ import { RepoNotFound } from "@/components/repo/repo-not-found";
 import { AppLink } from "@/components/ui/app-link";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { HighlightTheme } from "@/lib/highlight";
 import type { HighlightedDiffLine } from "@/lib/highlight-diff";
 import { formatRelativeUpdated } from "@/lib/relative-time";
 import { ssrHighlightDiffFiles } from "@/lib/ssr-diff-highlight";
@@ -29,7 +28,6 @@ type CommitLoaderData =
       commit: RepoCommitResponse;
       /** Pre-highlighted diff rows by path (SSR). */
       highlightedByPath: Record<string, HighlightedDiffLine[]>;
-      highlightTheme: HighlightTheme | null;
     };
 
 type Phase = { kind: "loading" } | CommitLoaderData;
@@ -65,7 +63,6 @@ async function loadCommitPage(
     repo: got.data,
     commit: detail.data,
     highlightedByPath: hl.byPath,
-    highlightTheme: hl.theme,
   };
 }
 
@@ -271,7 +268,6 @@ function RepoCommitPageContent() @{
               status={f.status as string}
               patch={f.patch as string}
               initialRows={phase.highlightedByPath[f.path] ?? null}
-              highlightTheme={phase.highlightTheme}
             />;
           }
         </div>;

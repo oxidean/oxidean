@@ -55,6 +55,7 @@ import { AdminMcpPage } from "./mcp";
 describe("/admin/mcp", () => {
   afterEach(() => {
     cleanup();
+    vi.unstubAllGlobals();
   });
 
   beforeEach(() => {
@@ -117,6 +118,30 @@ describe("/admin/mcp", () => {
     expect(nav.querySelector('a[href="/admin/mcp"]')).toBeTruthy();
     expect(screen.queryByTestId("admin-mcp-clear-override")).toBeNull();
     expect(screen.queryByText("Loading…")).toBeNull();
+
+    // Endpoint URL row + pointer to the user-facing MCP setup page.
+    const endpoint = screen.getByRole("textbox", { name: "Copy MCP endpoint URL" });
+    expect((endpoint as HTMLInputElement).value).toMatch(/\/api\/mcp$/);
+    expect(screen.getAllByRole("link").some((l) => l.getAttribute("href") === "/settings/ai")).toBe(
+      true,
+    );
+  });
+
+  it("oxidean:public-origin meta overrides the location-derived endpoint URL", async () => {
+    const meta = document.createElement("meta");
+    meta.setAttribute("name", "oxidean:public-origin");
+    meta.setAttribute("content", "https://forge.example");
+    document.head.appendChild(meta);
+
+    try {
+      renderWithQueryClient(AdminMcpPage);
+      await waitFor(() => {
+        const endpoint = screen.getByRole("textbox", { name: "Copy MCP endpoint URL" });
+        expect((endpoint as HTMLInputElement).value).toBe("https://forge.example/api/mcp");
+      });
+    } finally {
+      meta.remove();
+    }
   });
 
   it("toggling the Switch calls updateSettings with the new enabled value", async () => {
@@ -130,6 +155,69 @@ describe("/admin/mcp", () => {
 
     await waitFor(() => {
       expect(updateSettingsMock).toHaveBeenCalledWith({ enabled: false });
+    });
+  });
+
+  it("probe POSTs initialize to /api/mcp and reports the handshake", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        jsonrpc: "2.0",
+        id: "admin-mcp-probe",
+        result: {
+          protocolVersion: "2025-06-18",
+          capabilities: {},
+          serverInfo: { name: "oxidean", version: "1.2.3" },
+        },
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderWithQueryClient(AdminMcpPage);
+    await waitFor(() => {
+      expect(screen.getByTestId("admin-mcp-probe")).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByTestId("admin-mcp-probe"));
+
+    await waitFor(() => {
+      const out = screen.getByTestId("admin-mcp-probe-result");
+      expect(out.getAttribute("data-probe-kind")).toBe("up");
+      expect(out.textContent).toMatch(/Up — oxidean 1\.2\.3/);
+      expect(out.textContent).toMatch(/protocol 2025-06-18/);
+    });
+    expect(fetchMock).toHaveBeenCalledWith("/api/mcp", expect.objectContaining({ method: "POST" }));
+  });
+
+  it("probe reports mcp.disabled when the endpoint is off", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 404,
+        json: async () => ({
+          jsonrpc: "2.0",
+          id: null,
+          error: {
+            code: -32000,
+            message: "mcp.disabled: the MCP endpoint is disabled on this instance",
+          },
+        }),
+      }),
+    );
+
+    renderWithQueryClient(AdminMcpPage);
+    await waitFor(() => {
+      expect(screen.getByTestId("admin-mcp-probe")).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByTestId("admin-mcp-probe"));
+
+    await waitFor(() => {
+      const out = screen.getByTestId("admin-mcp-probe-result");
+      expect(out.getAttribute("data-probe-kind")).toBe("down");
+      expect(out.textContent).toMatch(/mcp\.disabled/);
     });
   });
 

@@ -82,7 +82,7 @@ fn bucket_commit_times(
 }
 
 /// `repo.insights.contributors` — top committers on the default branch with
-/// account mapping (exact email / forge noreply via [`resolve_author_emails`]).
+/// account mapping (exact email / forge noreply via `resolve_author_emails`).
 pub async fn contributors(
     ctx: &RpcCtx,
     input: serde_json::Value,

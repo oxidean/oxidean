@@ -7,7 +7,7 @@
 //!
 //! Commits/code have no cross-repo index — the handler fans out to
 //! `git log --grep` / `git grep -n` over the most recently-updated
-//! [`SCAN_REPO_CAP`] visible repos. Their `total` only counts hits inside that
+//! `SCAN_REPO_CAP` visible repos. Their `total` only counts hits inside that
 //! window and `truncated` reports partial coverage. SRCH-01 replaces this with
 //! a real index.
 

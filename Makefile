@@ -48,7 +48,7 @@ help:
 	@echo "  make coverage-contract - aggregator contract self-test"
 	@echo "  make route-coverage-check / browser-coverage-check - page + high-risk UI coverage gates"
 	@echo "  make web-lint / web-format-check / test-web-browser - oxlint, oxfmt, Chromium DOM races"
-	@echo "  make dead-code-check - knip (TS/.tsrx/.astro) + cargo machete + clippy -D warnings"
+	@echo "  make dead-code-check / docs-check - knip + machete + clippy -D warnings, rustdoc -D warnings"
 	@echo "  make smoke-actions  - Actions/runner Compose smoke (ACT-04/05; skip-ok without Docker)"
 	@echo "  make smoke          - compose bring-up smoke (PLAT-01)"
 	@echo "  make smoke-protection - ORG-06 helper + HTTPS/SSH protected-push denial (D-PKG-03)"
@@ -339,6 +339,11 @@ dead-code-check:
 	bunx knip
 	cargo machete
 	cargo clippy --workspace --all-targets -- -D warnings
+
+# Rustdoc gate: intra-doc-link / HTML-tag lints are warnings-only by default —
+# keep them denied so dead links don't accumulate between docs builds.
+docs-check:
+	RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 
 test-web-browser:
 	bun run --filter @oxidean/web test:browser

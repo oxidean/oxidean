@@ -63,8 +63,16 @@ export function resolvePublicOriginFromEnv(env: NodeJS.ProcessEnv = process.env)
   return null;
 }
 
-/** Client-safe fallback when store/loader origin is missing (tests / edge). */
+/**
+ * Browser-facing origin: the `oxidean:public-origin` meta oxidean-web injects
+ * (canonical `OXIDEAN_PUBLIC_ORIGIN`, else request-derived) wins over
+ * `window.location.origin` — an operator may browse via an internal host while
+ * the advertised origin is the public domain clients should use. Build-time
+ * renders and tests fall back through env to `http://localhost`.
+ */
 export function resolvePublicOriginClient(): string {
+  const meta = advertiseMeta("oxidean:public-origin");
+  if (meta) return meta.replace(/\/$/, "");
   if (typeof window !== "undefined" && window.location?.origin) {
     return window.location.origin.replace(/\/$/, "");
   }

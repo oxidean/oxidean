@@ -62,6 +62,7 @@ INSTANCE ADMIN
 MAINTENANCE
   ox self-update     replace this binary with the build the instance serves
   ox skill print|install                             agent skill: emit or install SKILL.md
+  ox mcp print|install|status|remove                 wire the MCP endpoint into harnesses
 
 ESCAPE HATCH
   ox api <procedure> [-f field=value]... [-F field=<json>]...
@@ -202,10 +203,15 @@ const HELP: &[(&str, &str)] = &[
     ("admin git", "ox admin git                            show git settings\n  ox admin git set [--repo-quota-bytes n] [--clear]"),
     ("admin mcp", "ox admin mcp                            show MCP settings\n  ox admin mcp set [--enable|--disable|--clear]"),
     ("admin templates", "ox admin templates list\n  ox admin templates enable|disable --id <pack-id>\n  ox admin templates delete --id <pack-id>"),
-    ("self-update", "ox self-update [--no-skill-refresh]\n\nDownloads the ox build for this platform the configured instance\nserves, verifies the published sha256, and swaps this executable.\nAfter a successful swap, existing `ox skill` installs are refreshed to\nthe new embedded copy (same sweep as `ox skill install --upgrade`);\n--no-skill-refresh skips that step."),
+    ("self-update", "ox self-update [--no-skill-refresh] [--no-mcp-refresh]\n\nDownloads the ox build for this platform the configured instance\nserves, verifies the published sha256, and swaps this executable.\nAfter a successful swap, existing `ox skill` installs and `oxidean`\nMCP config entries are refreshed to the new binary's shape (same\nsweeps as `ox skill install --upgrade` / `ox mcp install --upgrade`,\npreserving each entry's endpoint and credential);\n--no-skill-refresh / --no-mcp-refresh skip those steps."),
     ("skill", "ox skill — the consumer-facing agent SKILL.md\n\n  ox skill print     write SKILL.md to stdout\n  ox skill install   write SKILL.md into harness skill dirs\n\nThe document is embedded in this binary and also served by the\ninstance at /cli/skill.md."),
     ("skill print", "ox skill print\n\nPrints the embedded SKILL.md verbatim — `ox skill print > SKILL.md`\nor pipe into `ox skill install`-style tooling."),
     ("skill install", "ox skill install [--harness <id,...> | --harness all] [--detected]\n                 [--upgrade] [--project | --global]\n\nWrites the embedded SKILL.md to <skills-dir>/ox/SKILL.md for each\nharness. --detected selects only harnesses found installed on this\nmachine (config dirs, PATH binaries); combined with --harness it\nintersects. On a TTY it prompts for harnesses (detected ones marked,\n'd' selects them all) and scope. Non-interactive requires --harness\nor --detected, plus a scope flag.\n\n--upgrade rewrites only ox/SKILL.md files that already exist — it\ncreates no new installs and never prompts. Bare --upgrade sweeps all\nharnesses at both scopes; --harness/--detected/scope flags narrow it.\n\nHarness ids follow the vercel-labs/skills registry (~70 rows: claude,\ncursor, codex, copilot, gemini, opencode, amp, devin, windsurf, kiro,\nroo, goose, cline, openclaw, continue, trae, qwen, grok, …) — `generic`\ncovers any other `.agents/skills` consumer"),
+    ("mcp", "ox mcp — wire the instance MCP endpoint into agent harnesses\n\n  ox mcp print     emit the config block to paste by hand\n  ox mcp install   merge an `oxidean` entry into harness MCP configs\n  ox mcp status    show what's configured + probe the endpoint\n  ox mcp remove    strip the `oxidean` entry again\n\nThe endpoint is POST {instance}/api/mcp (streamable HTTP, JSON-RPC 2.0).\nHarnesses: claude, cursor, vscode, windsurf, gemini, codex, kiro,\nopencode, zed — `generic` covers any `mcpServers`-shaped config."),
+    ("mcp print", "ox mcp print [--harness <id>]\n\nPrints the JSON block (or Codex TOML section) for manual pasting.\nThe bearer is a `<token>` placeholder — substitute a PAT from\n{instance}/settings/tokens or `ox pat create`."),
+    ("mcp install", "ox mcp install [--harness <id,...> | --harness all] [--detected]\n               [--project | --global] [--upgrade]\n               [--token <pat> | --token-stdin | --web | --anonymous]\n\nMerges an `oxidean` server entry into each harness's MCP config file\n— existing servers and unrelated keys are preserved, and the\n`oxidean` entry is replaced in place on re-runs (idempotent update).\nFiles are written 0600 since they may embed the bearer.\n\n--upgrade refreshes only files that already carry an `oxidean` entry\n— never prompts, never creates files; bare invocation sweeps every\nharness at both scopes. Entries keep their existing credential\nunless an explicit auth flag is passed, so\n`ox mcp install --upgrade --token-stdin` rotates tokens everywhere.\n\nAuth resolution: --token/--token-stdin use that PAT; --web runs the\nRFC 8628 device grant (browser sign-in, stored like `ox auth login`);\nwith no auth flag the stored `ox` credential for the instance is\nused; --anonymous writes no auth header (public repos only).\n\n--detected selects only harnesses found installed (config dirs, PATH\nbinaries); combined with --harness it intersects. On a TTY it prompts\nfor harnesses and scope; non-interactive requires --harness or\n--detected plus a scope flag.\n\nCodex writes `bearer_token_env_var = \"OXIDEAN_TOKEN\"` instead of the\ntoken itself — export that env var for the harness to pick it up."),
+    ("mcp status", "ox mcp status\n\nLists every harness MCP config file found on this machine — whether\nit has an `oxidean` entry, which endpoint it points at, and its auth\nkind (never the token itself) — then POSTs `initialize` + `tools/list`\nat the resolved endpoint to report reachable/disabled/401."),
+    ("mcp remove", "ox mcp remove [--harness <id,...> | --harness all] [--detected]\n              [--project | --global]\n\nDeletes only the `oxidean` server entry from each config file — other\nservers and keys are untouched, and files without an entry report\n`skipped (no entry)`."),
     ("api", "ox api <procedure> [-f field=value]... [-F field=<json>]...\n\nRaw RPC escape hatch. -f values are strings; -F parses JSON."),
 ];
 
@@ -960,9 +966,33 @@ pub enum Command {
         upgrade: bool,
         detected: bool,
     },
+    McpPrint {
+        harness: Option<String>,
+    },
+    McpInstall {
+        harnesses: Vec<String>,
+        project: bool,
+        global: bool,
+        detected: bool,
+        token: Option<String>,
+        token_stdin: bool,
+        web: bool,
+        anonymous: bool,
+        /// Refresh existing `oxidean` entries only — never prompts or creates.
+        upgrade: bool,
+    },
+    McpStatus,
+    McpRemove {
+        harnesses: Vec<String>,
+        project: bool,
+        global: bool,
+        detected: bool,
+    },
     SelfUpdate {
         /// Skip the post-update `skill install --upgrade` sweep.
         no_skill_refresh: bool,
+        /// Skip the post-update `mcp install --upgrade` sweep.
+        no_mcp_refresh: bool,
     },
     Api {
         procedure: String,
@@ -1234,7 +1264,12 @@ const BODY_FLAGS: &[&str] = &["--body", "--body-file"];
 const PERMS: &[&str] = &["read", "write", "admin"];
 const ROLES: &[&str] = &["owner", "admin", "member"];
 
-fn check_choice(f: &Flags, name: &str, choices: &[&str], usage_str: &str) -> Result<(), UsageError> {
+fn check_choice(
+    f: &Flags,
+    name: &str,
+    choices: &[&str],
+    usage_str: &str,
+) -> Result<(), UsageError> {
     if let Some(v) = f.values.get(name) {
         if !choices.contains(&v.as_str()) {
             return Err(usage(format!(
@@ -1251,24 +1286,97 @@ fn check_choice(f: &Flags, name: &str, choices: &[&str], usage_str: &str) -> Res
 /// a repo spec) and `default` decides the leaf op.
 const NESTED: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("repo", "deploy-key", &["list", "add", "delete"], None),
-    ("repo", "collaborator", &["list", "add", "set-role", "remove"], Some("list")),
-    ("repo", "collaborators", &["list", "add", "set-role", "remove"], Some("list")),
-    ("repo", "invites", &["list", "create", "link", "revoke"], Some("list")),
-    ("repo", "branch-protection", &["list", "set", "delete"], None),
+    (
+        "repo",
+        "collaborator",
+        &["list", "add", "set-role", "remove"],
+        Some("list"),
+    ),
+    (
+        "repo",
+        "collaborators",
+        &["list", "add", "set-role", "remove"],
+        Some("list"),
+    ),
+    (
+        "repo",
+        "invites",
+        &["list", "create", "link", "revoke"],
+        Some("list"),
+    ),
+    (
+        "repo",
+        "branch-protection",
+        &["list", "set", "delete"],
+        None,
+    ),
     ("repo", "tag-protection", &["list", "set", "delete"], None),
-    ("repo", "mirror", &["get", "set", "upsert", "sync", "delete", "gen-key", "rotate-secret"], Some("get")),
-    ("org", "members", &["list", "add", "remove", "set-role"], Some("list")),
-    ("org", "invites", &["list", "create", "link", "revoke"], Some("list")),
-    ("webhook", "deliveries", &["list", "get", "view", "redeliver"], Some("list")),
-    ("admin", "users", &["list", "ban", "unban", "delete", "set-role", "sessions", "revoke-sessions", "access", "activity"], None),
-    ("admin", "invites", &["list", "create", "link", "revoke"], Some("list")),
+    (
+        "repo",
+        "mirror",
+        &[
+            "get",
+            "set",
+            "upsert",
+            "sync",
+            "delete",
+            "gen-key",
+            "rotate-secret",
+        ],
+        Some("get"),
+    ),
+    (
+        "org",
+        "members",
+        &["list", "add", "remove", "set-role"],
+        Some("list"),
+    ),
+    (
+        "org",
+        "invites",
+        &["list", "create", "link", "revoke"],
+        Some("list"),
+    ),
+    (
+        "webhook",
+        "deliveries",
+        &["list", "get", "view", "redeliver"],
+        Some("list"),
+    ),
+    (
+        "admin",
+        "users",
+        &[
+            "list",
+            "ban",
+            "unban",
+            "delete",
+            "set-role",
+            "sessions",
+            "revoke-sessions",
+            "access",
+            "activity",
+        ],
+        None,
+    ),
+    (
+        "admin",
+        "invites",
+        &["list", "create", "link", "revoke"],
+        Some("list"),
+    ),
     ("admin", "actions", &["runners", "runner-token"], None),
     ("admin", "repos", &["gc"], None),
     ("admin", "lfs", &["get", "set"], Some("get")),
     ("admin", "git", &["get", "set"], Some("get")),
     ("admin", "mcp", &["get", "set"], Some("get")),
     ("admin", "auth", &["get", "set"], Some("get")),
-    ("admin", "templates", &["list", "enable", "disable", "delete"], Some("list")),
+    (
+        "admin",
+        "templates",
+        &["list", "enable", "disable", "delete"],
+        Some("list"),
+    ),
 ];
 
 /// Split argv into globals + command. Global flags may appear anywhere;
@@ -1355,9 +1463,7 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
     // groups above replace it with the resolved op word.
     let mut leaf = "";
     let mut tail: &[String] = &rest[rest.len().min(2)..];
-    if let Some((_, _, ops, default)) =
-        NESTED.iter().find(|(g, s, ..)| *g == group && *s == sub)
-    {
+    if let Some((_, _, ops, default)) = NESTED.iter().find(|(g, s, ..)| *g == group && *s == sub) {
         match rest.get(2).map(String::as_str) {
             Some(op) if ops.contains(&op) => {
                 leaf = op;
@@ -1372,12 +1478,7 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
 
     let command = match (group, sub, leaf) {
         ("auth", "login", "") => {
-            let f = scan(
-                tail,
-                &["--token"],
-                &["--token-stdin", "--web"],
-                &[],
-            )?;
+            let f = scan(tail, &["--token"], &["--token-stdin", "--web"], &[])?;
             expect_no_positionals(&f, "auth login")?;
             if f.bools.contains("--web")
                 && (f.values.contains_key("--token") || f.bools.contains("--token-stdin"))
@@ -1504,7 +1605,12 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
             }
         }
         ("repo", "fork", "") => {
-            let f = scan(tail, &["-R", "--repo", "--into-owner", "--into-name"], &[], &[])?;
+            let f = scan(
+                tail,
+                &["-R", "--repo", "--into-owner", "--into-name"],
+                &[],
+                &[],
+            )?;
             Command::RepoFork {
                 repo: repo_spec(&f, "repo fork")?,
                 into_owner: f.values.get("--into-owner").cloned(),
@@ -1520,10 +1626,7 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
         ("repo", "clone", "") => {
             let f = scan(tail, REPO_FLAGS, &[], &[])?;
             let (repo, dir) = if f.values.contains_key("-R") || f.values.contains_key("--repo") {
-                (
-                    repo_spec(&f, "repo clone")?,
-                    f.positionals.first().cloned(),
-                )
+                (repo_spec(&f, "repo clone")?, f.positionals.first().cloned())
             } else {
                 let repo = f
                     .positionals
@@ -1584,12 +1687,7 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
             }
         }
         ("repo", "transfer", "") => {
-            let f = scan(
-                tail,
-                &["-R", "--repo", "--type", "--confirm"],
-                &[],
-                &[],
-            )?;
+            let f = scan(tail, &["-R", "--repo", "--type", "--confirm"], &[], &[])?;
             let (repo, dest_owner) = repo_and_arg(&f, "repo transfer", "dest-owner")?;
             check_choice(&f, "--type", &["user", "org"], "repo transfer")?;
             Command::RepoTransfer {
@@ -1705,7 +1803,12 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
             }
         }
         ("repo", "invites", "create") => {
-            let f = scan(tail, &["-R", "--repo", "--emails", "--permission"], &[], &[])?;
+            let f = scan(
+                tail,
+                &["-R", "--repo", "--emails", "--permission"],
+                &[],
+                &[],
+            )?;
             check_choice(&f, "--permission", PERMS, "repo invites create")?;
             Command::RepoInviteCreate {
                 repo: repo_spec(&f, "repo invites create")?,
@@ -1794,7 +1897,10 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
             let bool_map = [
                 ("--reviews", "require_reviews"),
                 ("--dismiss-stale", "dismiss_stale_reviews"),
-                ("--conversation-resolution", "require_conversation_resolution"),
+                (
+                    "--conversation-resolution",
+                    "require_conversation_resolution",
+                ),
                 ("--last-push-approval", "require_last_push_approval"),
                 ("--strict-status", "strict_status_checks"),
                 ("--force-pushes", "allow_force_pushes"),
@@ -2084,7 +2190,15 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
             Command::PrChecks { repo, number }
         }
         ("pr", "create", "") => {
-            let mut vf = vec!["-R", "--repo", "--title", "--base", "--head", "--head-owner", "--head-name"];
+            let mut vf = vec![
+                "-R",
+                "--repo",
+                "--title",
+                "--base",
+                "--head",
+                "--head-owner",
+                "--head-name",
+            ];
             vf.extend(BODY_FLAGS);
             let f = scan(tail, &vf, &["--draft"], &[])?;
             Command::PrCreate {
@@ -2160,12 +2274,7 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
             let f = scan(
                 tail,
                 &vf,
-                &[
-                    "--approve",
-                    "--request-changes",
-                    "--comment",
-                    "--list",
-                ],
+                &["--approve", "--request-changes", "--comment", "--list"],
                 &[],
             )?;
             let (repo, number) = repo_and_number(&f, "pr review")?;
@@ -2395,12 +2504,10 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
                 &[],
             )?;
             let (repo, tag) = repo_and_arg(&f, "release edit", "tag")?;
-            let tri = |yes: &str, no: &str| {
-                match (f.bools.contains(yes), f.bools.contains(no)) {
-                    (true, _) => Some(true),
-                    (false, true) => Some(false),
-                    _ => None,
-                }
+            let tri = |yes: &str, no: &str| match (f.bools.contains(yes), f.bools.contains(no)) {
+                (true, _) => Some(true),
+                (false, true) => Some(false),
+                _ => None,
             };
             Command::ReleaseEdit {
                 repo,
@@ -2421,15 +2528,14 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
             let (repo, tag) = repo_and_arg(&f, "release upload", "tag")?;
             // files are the positionals after the tag — or all positionals
             // when -R carried the repo spec.
-            let files: Vec<String> = if f.values.contains_key("-R") || f.values.contains_key("--repo") {
-                f.positionals[1..].to_vec()
-            } else {
-                f.positionals[2..].to_vec()
-            };
+            let files: Vec<String> =
+                if f.values.contains_key("-R") || f.values.contains_key("--repo") {
+                    f.positionals[1..].to_vec()
+                } else {
+                    f.positionals[2..].to_vec()
+                };
             if files.is_empty() {
-                return Err(usage(
-                    "usage: ox release upload <o/n> <tag> <file>...",
-                ));
+                return Err(usage("usage: ox release upload <o/n> <tag> <file>..."));
             }
             Command::ReleaseUpload { repo, tag, files }
         }
@@ -2883,7 +2989,14 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
         ("label", "create", "") => {
             let f = scan(
                 tail,
-                &["-R", "--repo", "--org", "--name", "--color", "--description"],
+                &[
+                    "-R",
+                    "--repo",
+                    "--org",
+                    "--name",
+                    "--color",
+                    "--description",
+                ],
                 &[],
                 &[],
             )?;
@@ -2898,7 +3011,15 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
         ("label", "edit", "") => {
             let f = scan(
                 tail,
-                &["-R", "--repo", "--org", "--id", "--name", "--color", "--description"],
+                &[
+                    "-R",
+                    "--repo",
+                    "--org",
+                    "--id",
+                    "--name",
+                    "--color",
+                    "--description",
+                ],
                 &["--hidden", "--visible"],
                 &[],
             )?;
@@ -3006,12 +3127,7 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
             }
         }
         ("webhook", "deliveries", "get") | ("webhook", "deliveries", "view") => {
-            let f = scan(
-                tail,
-                &["-R", "--repo", "--id", "--delivery"],
-                &[],
-                &[],
-            )?;
+            let f = scan(tail, &["-R", "--repo", "--id", "--delivery"], &[], &[])?;
             Command::WebhookDelivery {
                 repo: repo_spec(&f, "webhook deliveries get")?,
                 hook_id: req_id(&f, "webhook deliveries get")?,
@@ -3019,12 +3135,7 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
             }
         }
         ("webhook", "deliveries", "redeliver") | ("webhook", "redeliver", "") => {
-            let f = scan(
-                tail,
-                &["-R", "--repo", "--id", "--delivery"],
-                &[],
-                &[],
-            )?;
+            let f = scan(tail, &["-R", "--repo", "--id", "--delivery"], &[], &[])?;
             Command::WebhookRedeliver {
                 repo: repo_spec(&f, "webhook redeliver")?,
                 hook_id: req_id(&f, "webhook redeliver")?,
@@ -3050,12 +3161,7 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
             }
         }
         ("admin", "users", "delete") => {
-            let f = scan(
-                tail,
-                &["--id", "--confirm"],
-                &["--delete-orgs"],
-                &[],
-            )?;
+            let f = scan(tail, &["--id", "--confirm"], &["--delete-orgs"], &[])?;
             expect_no_positionals(&f, "admin users delete")?;
             Command::AdminUserDelete {
                 id: req_id(&f, "admin users delete")?,
@@ -3165,7 +3271,11 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
         ("admin", "lfs", "set") => {
             let f = scan(
                 tail,
-                &["--max-object-bytes", "--quota-repo-bytes", "--quota-user-bytes"],
+                &[
+                    "--max-object-bytes",
+                    "--quota-repo-bytes",
+                    "--quota-user-bytes",
+                ],
                 &["--clear"],
                 &[],
             )?;
@@ -3342,12 +3452,92 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
                 detected: f.bools.contains("--detected"),
             }
         }
+        ("mcp", "print", "") => {
+            let f = scan(tail, &["--harness"], &[], &[])?;
+            expect_no_positionals(&f, "mcp print")?;
+            Command::McpPrint {
+                harness: f.values.get("--harness").cloned(),
+            }
+        }
+        ("mcp", "install", "") => {
+            let f = scan(
+                tail,
+                &["--token"],
+                &[
+                    "--token-stdin",
+                    "--web",
+                    "--anonymous",
+                    "--upgrade",
+                    "--project",
+                    "--global",
+                    "--detected",
+                ],
+                &["--harness"],
+            )?;
+            expect_no_positionals(&f, "mcp install")?;
+            let auth_flags = f.values.contains_key("--token") as usize
+                + f.bools.contains("--token-stdin") as usize
+                + f.bools.contains("--web") as usize
+                + f.bools.contains("--anonymous") as usize;
+            if auth_flags > 1 {
+                return Err(usage(
+                    "--token, --token-stdin, --web, and --anonymous are exclusive",
+                ));
+            }
+            Command::McpInstall {
+                harnesses: f
+                    .multi
+                    .iter()
+                    .filter(|(k, _)| k == "--harness")
+                    .map(|(_, v)| v.clone())
+                    .collect(),
+                project: f.bools.contains("--project"),
+                global: f.bools.contains("--global"),
+                detected: f.bools.contains("--detected"),
+                token: f.values.get("--token").cloned(),
+                token_stdin: f.bools.contains("--token-stdin"),
+                web: f.bools.contains("--web"),
+                anonymous: f.bools.contains("--anonymous"),
+                upgrade: f.bools.contains("--upgrade"),
+            }
+        }
+        ("mcp", "status", "") => {
+            let f = scan(tail, &[], &[], &[])?;
+            expect_no_positionals(&f, "mcp status")?;
+            Command::McpStatus
+        }
+        ("mcp", "remove", "") => {
+            let f = scan(
+                tail,
+                &[],
+                &["--project", "--global", "--detected"],
+                &["--harness"],
+            )?;
+            expect_no_positionals(&f, "mcp remove")?;
+            Command::McpRemove {
+                harnesses: f
+                    .multi
+                    .iter()
+                    .filter(|(k, _)| k == "--harness")
+                    .map(|(_, v)| v.clone())
+                    .collect(),
+                project: f.bools.contains("--project"),
+                global: f.bools.contains("--global"),
+                detected: f.bools.contains("--detected"),
+            }
+        }
         ("self-update", _, _) => {
             // flags sit at the `sub` position — rescan rest[1..] like browse.
-            let f = scan(&rest[1..], &[], &["--no-skill-refresh"], &[])?;
+            let f = scan(
+                &rest[1..],
+                &[],
+                &["--no-skill-refresh", "--no-mcp-refresh"],
+                &[],
+            )?;
             expect_no_positionals(&f, "self-update")?;
             Command::SelfUpdate {
                 no_skill_refresh: f.bools.contains("--no-skill-refresh"),
+                no_mcp_refresh: f.bools.contains("--no-mcp-refresh"),
             }
         }
         ("api", proc, _) if !proc.is_empty() => {
@@ -3372,10 +3562,35 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
         }
         (_, "", "") => {
             const GROUPS: &[&str] = &[
-                "auth", "config", "repo", "issue", "pr", "run", "workflow", "secret",
-                "release", "pkg", "search", "browse", "status", "org", "notification",
-                "user", "ssh-key", "gpg-key", "email", "pat", "label", "webhook",
-                "invite", "admin", "self-update", "skill", "api", "completion",
+                "auth",
+                "config",
+                "repo",
+                "issue",
+                "pr",
+                "run",
+                "workflow",
+                "secret",
+                "release",
+                "pkg",
+                "search",
+                "browse",
+                "status",
+                "org",
+                "notification",
+                "user",
+                "ssh-key",
+                "gpg-key",
+                "email",
+                "pat",
+                "label",
+                "webhook",
+                "invite",
+                "admin",
+                "self-update",
+                "skill",
+                "mcp",
+                "api",
+                "completion",
             ];
             if GROUPS.contains(&group) {
                 return Err(usage(format!(
@@ -3448,18 +3663,139 @@ mod tests {
         assert_eq!(
             inv.command,
             Command::SelfUpdate {
-                no_skill_refresh: false
+                no_skill_refresh: false,
+                no_mcp_refresh: false,
             }
         );
         let inv = parse(&argv(&["self-update", "--no-skill-refresh"])).unwrap();
         assert_eq!(
             inv.command,
             Command::SelfUpdate {
-                no_skill_refresh: true
+                no_skill_refresh: true,
+                no_mcp_refresh: false,
+            }
+        );
+        let inv = parse(&argv(&[
+            "self-update",
+            "--no-skill-refresh",
+            "--no-mcp-refresh",
+        ]))
+        .unwrap();
+        assert_eq!(
+            inv.command,
+            Command::SelfUpdate {
+                no_skill_refresh: true,
+                no_mcp_refresh: true,
             }
         );
         let err = parse(&argv(&["self-update", "extra"])).unwrap_err();
         assert!(err.0.contains("unexpected argument"), "{err}");
+    }
+
+    #[test]
+    fn mcp_subcommands_parse() {
+        let inv = parse(&argv(&["mcp", "print"])).unwrap();
+        assert_eq!(inv.command, Command::McpPrint { harness: None });
+        let inv = parse(&argv(&["mcp", "print", "--harness", "codex"])).unwrap();
+        assert_eq!(
+            inv.command,
+            Command::McpPrint {
+                harness: Some("codex".into())
+            }
+        );
+
+        let inv = parse(&argv(&["mcp", "status"])).unwrap();
+        assert_eq!(inv.command, Command::McpStatus);
+        let err = parse(&argv(&["mcp", "status", "extra"])).unwrap_err();
+        assert!(err.0.contains("unexpected argument"), "{err}");
+
+        let inv = parse(&argv(&["mcp", "install", "--detected", "--project"])).unwrap();
+        assert_eq!(
+            inv.command,
+            Command::McpInstall {
+                harnesses: vec![],
+                project: true,
+                global: false,
+                detected: true,
+                token: None,
+                token_stdin: false,
+                web: false,
+                anonymous: false,
+                upgrade: false,
+            }
+        );
+        let inv = parse(&argv(&[
+            "mcp",
+            "install",
+            "--upgrade",
+            "--harness",
+            "cursor",
+        ]))
+        .unwrap();
+        assert_eq!(
+            inv.command,
+            Command::McpInstall {
+                harnesses: vec!["cursor".into()],
+                project: false,
+                global: false,
+                detected: false,
+                token: None,
+                token_stdin: false,
+                web: false,
+                anonymous: false,
+                upgrade: true,
+            }
+        );
+        let inv = parse(&argv(&[
+            "mcp",
+            "install",
+            "--harness",
+            "cursor",
+            "--harness",
+            "claude",
+            "--global",
+            "--token",
+            "pat_x",
+        ]))
+        .unwrap();
+        assert_eq!(
+            inv.command,
+            Command::McpInstall {
+                harnesses: vec!["cursor".into(), "claude".into()],
+                project: false,
+                global: true,
+                detected: false,
+                token: Some("pat_x".into()),
+                token_stdin: false,
+                web: false,
+                anonymous: false,
+                upgrade: false,
+            }
+        );
+        // auth modes are exclusive.
+        for args in [
+            vec!["mcp", "install", "--token", "x", "--web"],
+            vec!["mcp", "install", "--token-stdin", "--anonymous"],
+            vec!["mcp", "install", "--web", "--anonymous"],
+        ] {
+            let err = parse(&argv(&args)).unwrap_err();
+            assert!(err.0.contains("are exclusive"), "{err}");
+        }
+
+        let inv = parse(&argv(&["mcp", "remove", "--harness", "all", "--global"])).unwrap();
+        assert_eq!(
+            inv.command,
+            Command::McpRemove {
+                harnesses: vec!["all".into()],
+                project: false,
+                global: true,
+                detected: false,
+            }
+        );
+
+        // bare `ox mcp` is a group — missing-subcommand hint, not unknown.
+        let err = parse(&argv(&["mcp"])).unwrap_err();
+        assert!(err.0.contains("missing subcommand"), "{err}");
     }
 
     #[test]
@@ -3471,10 +3807,7 @@ mod tests {
     #[test]
     fn help_attaches_to_command_path() {
         let inv = parse(&argv(&["issue", "create", "--help"])).unwrap();
-        assert_eq!(
-            inv.command,
-            Command::HelpTopic("issue create".into())
-        );
+        assert_eq!(inv.command, Command::HelpTopic("issue create".into()));
         let inv = parse(&argv(&["issue", "--help"])).unwrap();
         assert_eq!(inv.command, Command::HelpTopic("issue".into()));
         assert!(parse(&argv(&["frob", "--help"])).is_err());
@@ -3547,7 +3880,14 @@ mod tests {
     #[test]
     fn issue_edit_collects_multi() {
         let inv = parse(&argv(&[
-            "issue", "edit", "o/n", "4", "--label", "bug,ui", "--assignee", "octo",
+            "issue",
+            "edit",
+            "o/n",
+            "4",
+            "--label",
+            "bug,ui",
+            "--assignee",
+            "octo",
         ]))
         .unwrap();
         match inv.command {
@@ -3598,7 +3938,12 @@ mod tests {
     #[test]
     fn api_input_flag_modes() {
         let inv = parse(&argv(&[
-            "api", "issue.list", "-f", "owner=o", "-F", "limit=3",
+            "api",
+            "issue.list",
+            "-f",
+            "owner=o",
+            "-F",
+            "limit=3",
         ]))
         .unwrap();
         match inv.command {
@@ -3648,7 +3993,14 @@ mod tests {
     #[test]
     fn run_watch_parses() {
         let inv = parse(&argv(&[
-            "run", "watch", "o/n", "r1", "--interval", "2", "--timeout", "60",
+            "run",
+            "watch",
+            "o/n",
+            "r1",
+            "--interval",
+            "2",
+            "--timeout",
+            "60",
             "--exit-status",
         ]))
         .unwrap();
@@ -3728,9 +4080,7 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
-        assert!(
-            parse(&argv(&["admin", "auth", "set", "--provider-mode", "bogus"])).is_err()
-        );
+        assert!(parse(&argv(&["admin", "auth", "set", "--provider-mode", "bogus"])).is_err());
         assert!(parse(&argv(&[
             "admin",
             "auth",

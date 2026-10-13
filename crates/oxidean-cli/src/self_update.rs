@@ -10,7 +10,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 use crate::args::Global;
@@ -132,7 +132,12 @@ pub fn apply_binary(exe: &Path, bytes: &[u8]) -> Result<PathBuf, CliError> {
     }
 }
 
-pub async fn run(global: &Global, rt: &Runtime, no_skill_refresh: bool) -> Result<Out, CliError> {
+pub async fn run(
+    global: &Global,
+    rt: &Runtime,
+    no_skill_refresh: bool,
+    no_mcp_refresh: bool,
+) -> Result<Out, CliError> {
     let instance = crate::commands::resolve_instance(global, &rt.config)?;
     let http = reqwest::Client::new();
     let latest = fetch_latest(&http, &instance).await?;
@@ -180,6 +185,19 @@ pub async fn run(global: &Global, rt: &Runtime, no_skill_refresh: bool) -> Resul
             }
         }
     };
+    // Same sweep for `oxidean` MCP config entries — re-rendered to this
+    // binary's canonical shape, endpoint + credential preserved per entry.
+    let mcp = if no_mcp_refresh {
+        None
+    } else {
+        match crate::mcp::refresh_installed() {
+            Ok(n) => Some(n),
+            Err(e) => {
+                eprintln!("warning: MCP config refresh failed: {e}");
+                Some(0)
+            }
+        }
+    };
 
     let mut text = format!(
         "updated ox {current} → {} ({})",
@@ -189,6 +207,9 @@ pub async fn run(global: &Global, rt: &Runtime, no_skill_refresh: bool) -> Resul
     if let Some(n) = skills.filter(|n| *n > 0) {
         text.push_str(&format!("\nrefreshed {n} installed ox skill(s)"));
     }
+    if let Some(n) = mcp.filter(|n| *n > 0) {
+        text.push_str(&format!("\nrefreshed {n} MCP server config(s)"));
+    }
     Ok(Out::Report {
         text,
         json: json!({"ok": true, "data": {
@@ -197,6 +218,7 @@ pub async fn run(global: &Global, rt: &Runtime, no_skill_refresh: bool) -> Resul
             "path": exe,
             "updated": true,
             "skills_refreshed": skills,
+            "mcp_refreshed": mcp,
         }}),
     })
 }

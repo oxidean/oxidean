@@ -10,10 +10,9 @@ import { BlobViewer } from "@/components/repo/blob-viewer";
 import { PathBreadcrumb } from "@/components/repo/path-breadcrumb";
 import { RefSelect } from "@/components/repo/ref-select";
 import { RepoNotFound } from "@/components/repo/repo-not-found";
-import { highlightCode, languageIdForPath, type HighlightTheme } from "@/lib/highlight";
+import { highlightCode, languageIdForPath } from "@/lib/highlight";
 import { isMarkdownPath, renderGfm } from "@/lib/markdown";
 import { parseRefAndPath, shortRefName } from "@/lib/repo-browse";
-import { resolveDocumentHighlightTheme } from "@/lib/theme";
 import { fetchRepoBlob, fetchRepoGet, fetchRepoRefs } from "@/lib/ssr-repo";
 
 type BlobLoaderData =
@@ -26,9 +25,8 @@ type BlobLoaderData =
       path: string;
       blob: RepoBlobResponse;
       refs: RepoRefEntry[];
-      /** Pre-rendered Shiki HTML (SSR). */
+      /** Pre-rendered Shiki HTML — dual-theme `light-dark()` markup. */
       highlightedHtml: string | null;
-      highlightTheme: HighlightTheme | null;
       /** Pre-rendered GFM HTML for markdown paths. */
       markdownHtml: string | null;
     };
@@ -36,18 +34,6 @@ type BlobLoaderData =
 type Phase = { kind: "loading" } | BlobLoaderData;
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
-
-async function highlightBlob(
-  path: string,
-  content: string,
-): Promise<{ html: string; theme: HighlightTheme }> {
-  const theme = resolveDocumentHighlightTheme();
-  const html = await highlightCode(content, {
-    lang: languageIdForPath(path),
-    theme,
-  });
-  return { html, theme };
-}
 
 async function loadBlobPage(
   owner: string,
@@ -100,7 +86,6 @@ async function loadBlobPage(
   }
 
   let highlightedHtml: string | null = null;
-  let highlightTheme: HighlightTheme | null = null;
   let markdownHtml: string | null = null;
   const blob = blobRes.data;
   const pathForRender = blob.path || parsed.path;
@@ -116,12 +101,11 @@ async function loadBlobPage(
       }
     }
     try {
-      const hl = await highlightBlob(pathForRender, blob.content);
-      highlightedHtml = hl.html;
-      highlightTheme = hl.theme;
+      highlightedHtml = await highlightCode(blob.content, {
+        lang: languageIdForPath(pathForRender),
+      });
     } catch {
       highlightedHtml = null;
-      highlightTheme = null;
     }
   }
 
@@ -133,7 +117,6 @@ async function loadBlobPage(
     blob,
     refs,
     highlightedHtml,
-    highlightTheme,
     markdownHtml,
   };
 }
@@ -230,7 +213,6 @@ function RepoBlobPageContent() @{
         blob={phase.blob}
         canWrite={!!phase.repo.can_write}
         highlightedHtml={phase.highlightedHtml}
-        highlightTheme={phase.highlightTheme}
         markdownHtml={phase.markdownHtml}
       />
     </>;

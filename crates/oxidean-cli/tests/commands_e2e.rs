@@ -584,3 +584,92 @@ async fn auth_switch_rejects_unknown_and_noninteractive() {
         .err().unwrap();
     assert!(format!("{err}").contains("no logged-in instances"), "{err}");
 }
+
+/// `mcp status` probes `POST /api/mcp` directly (initialize + tools/list) —
+/// the file-scan half is environment-dependent, so these assert only the
+/// live-probe fields.
+#[tokio::test]
+async fn mcp_status_pings_endpoint() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/mcp"))
+        .and(body_json(json!({
+            "jsonrpc": "2.0", "id": 1, "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": {"name": "ox", "version": env!("CARGO_PKG_VERSION")},
+            },
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "jsonrpc": "2.0", "id": 1,
+            "result": {"protocolVersion": "2025-06-18", "capabilities": {},
+                       "serverInfo": {"name": "oxidean", "version": "1.0.0"}},
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/api/mcp"))
+        .and(body_json(
+            json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}),
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "jsonrpc": "2.0", "id": 2,
+            "result": {"tools": [{"name": "a"}, {"name": "b"}]},
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let inv = invocation(&server, &["mcp", "status"]);
+    let out = commands::dispatch(&inv, &runtime()).await.unwrap();
+    match out {
+        Out::Report { json, .. } => {
+            assert_eq!(json["data"]["probe"]["state"], "reachable");
+            assert_eq!(json["data"]["probe"]["server"], "oxidean");
+            assert_eq!(json["data"]["probe"]["tools"], 2);
+        }
+        _ => panic!("expected report"),
+    }
+}
+
+#[tokio::test]
+async fn mcp_status_reports_disabled_endpoint() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/mcp"))
+        .respond_with(ResponseTemplate::new(404).set_body_json(json!({
+            "error": {"code": "mcp.disabled", "message": "MCP is disabled"},
+        })))
+        .mount(&server)
+        .await;
+
+    let inv = invocation(&server, &["mcp", "status"]);
+    let out = commands::dispatch(&inv, &runtime()).await.unwrap();
+    match out {
+        Out::Report { json, .. } => {
+            assert_eq!(json["data"]["probe"]["state"], "disabled")
+        }
+        _ => panic!("expected report"),
+    }
+}
+
+#[tokio::test]
+async fn mcp_status_reports_auth_rejected() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/mcp"))
+        .respond_with(ResponseTemplate::new(401))
+        .mount(&server)
+        .await;
+
+    let inv = invocation(&server, &["mcp", "status"]);
+    let out = commands::dispatch(&inv, &runtime()).await.unwrap();
+    match out {
+        Out::Report { json, .. } => {
+            assert_eq!(json["data"]["probe"]["state"], "auth-rejected")
+        }
+        _ => panic!("expected report"),
+    }
+}

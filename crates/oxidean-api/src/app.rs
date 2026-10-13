@@ -291,6 +291,17 @@ pub fn router_with_state(state: AppState, cors: CorsLayer) -> Router {
         .route("/oauth/token", post(crate::oauth::token))
         .route("/oauth/userinfo", get(crate::oauth::userinfo))
         .route("/oauth/device/code", post(crate::oauth::device_code))
+        // RFC 8414 + RFC 9728 discovery — OAuth/MCP clients resolve these via
+        // the `resource_metadata` pointer on /api/mcp 401s. Edge proxies must
+        // forward `/.well-known/oauth*` alongside the OAuth routes.
+        .route(
+            "/.well-known/oauth-authorization-server",
+            get(crate::oauth::authorization_server_metadata),
+        )
+        .route(
+            "/.well-known/oauth-protected-resource",
+            get(crate::oauth::protected_resource_metadata),
+        )
         .route(
             "/api/user/avatar",
             post(avatar::upload_avatar)

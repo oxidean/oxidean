@@ -117,6 +117,8 @@ jobs:
         run: |
           cargo machete
           cargo clippy --workspace --all-targets -- -D warnings
+      - name: rustdoc warnings
+        run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 
   # Chromium component tests for Octane insertBefore races (happy-dom cannot catch).
   web-browser:

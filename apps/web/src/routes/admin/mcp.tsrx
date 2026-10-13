@@ -2,12 +2,14 @@ import { queryOptions, useQuery, useQueryClient } from "@octanejs/tanstack-query
 import { AppPage } from "@/components/app-page";
 import type { AdminMcpSettingsPublic, UserPublic } from "@oxidean/api-client";
 import { useEffect, useState } from "octane";
+import { CopyCommand } from "@/components/settings/copy-command";
 import { AdminSettingsLayout, SettingsShell } from "@/components/settings/settings-shell";
 import { AppLink } from "@/components/ui/app-link";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { apiClient } from "@/lib/api-client";
+import { resolvePublicOriginClient } from "@/lib/public-origin";
 import { authSessionQueryOptions, setAuthMeCache } from "@/lib/session-queries";
 import { fetchAdminMcpSettings, fetchSessionMe } from "@/lib/ssr-auth";
 import { toastError, toastSuccess } from "@/lib/toast";
@@ -150,6 +152,68 @@ export function AdminMcpContent() @{
     }
   }
 
+  const [probe, setProbe] = useState<{ kind: "running" | "up" | "down"; detail: string } | null>(
+    null,
+  );
+
+  /** POST a JSON-RPC `initialize` same-origin — the same handshake MCP clients send. */
+  async function probeEndpoint() {
+    const started = performance.now();
+    setProbe({ kind: "running", detail: "Sending initialize…" });
+    try {
+      const res = await fetch("/api/mcp", {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: "admin-mcp-probe",
+          method: "initialize",
+          params: {
+            protocolVersion: "2025-06-18",
+            capabilities: {},
+            clientInfo: { name: "oxidean-admin", version: "0" },
+          },
+        }),
+      });
+      const ms = Math.round(performance.now() - started);
+      const body = (await res.json().catch(() => null)) as {
+        result?: {
+          protocolVersion?: string;
+          serverInfo?: { name?: string; version?: string };
+        };
+        error?: { code?: number; message?: string };
+      } | null;
+      const rpcError = body?.error;
+      if (res.ok && body?.result) {
+        const info = body.result.serverInfo ?? {};
+        const version = info.version ? ` ${info.version}` : "";
+        const proto = body.result.protocolVersion
+          ? `, protocol ${body.result.protocolVersion}`
+          : "";
+        setProbe({
+          kind: "up",
+          detail: `Up — ${info.name ?? "oxidean"}${version}${proto} (${ms} ms)`,
+        });
+      } else if (rpcError?.message?.includes("mcp.disabled")) {
+        setProbe({ kind: "down", detail: `Disabled — ${rpcError.message}` });
+      } else if (res.status === 401 || res.status === 403) {
+        setProbe({
+          kind: "down",
+          detail: `Unauthorized — HTTP ${res.status}; the admin session cookie was rejected`,
+        });
+      } else if (rpcError) {
+        setProbe({
+          kind: "down",
+          detail: `JSON-RPC error ${rpcError.code}: ${rpcError.message}`,
+        });
+      } else {
+        setProbe({ kind: "down", detail: `Unexpected response — HTTP ${res.status}` });
+      }
+    } catch {
+      setProbe({ kind: "down", detail: "Unreachable — the request failed before a response" });
+    }
+  }
+
   useEffect(() => {
     if (loaderData) return;
     if (me.isPending) return;
@@ -213,11 +277,14 @@ export function AdminMcpContent() @{
               MCP endpoint
             </h1>
             <p className="mt-2 text-[16px] text-muted-foreground">
-              The instance Model Context Protocol endpoint (<code>POST /api/mcp</code>) lets MCP
-              clients — agentic editors, CLIs, orchestrators — work with repositories, issues, pull
-              requests, Actions runs, and packages. Callers authenticate with a personal access
-              token (<code>oxidean_pat_…</code> / <code>oxidean_fg_…</code>) or the signed-in
-              session cookie; anonymous callers see public data only.
+              The instance Model Context Protocol endpoint lets MCP clients — agentic editors, CLIs,
+              orchestrators — work with repositories, issues, pull requests, Actions runs, and
+              packages. This page gates the endpoint instance-wide; per-user client setup lives
+              under{" "}
+              <AppLink href="/settings/ai" className="text-foreground underline underline-offset-2">
+                Settings → AI agents
+              </AppLink>
+              .
             </p>
 
             <section className="mt-8 flex flex-col gap-4" aria-labelledby="mcp-toggle-heading">
@@ -259,18 +326,74 @@ export function AdminMcpContent() @{
               }
             </section>
 
-            <section className="mt-10 flex flex-col gap-3" aria-labelledby="mcp-connect-heading">
-              <h2 id="mcp-connect-heading" className="text-[18px] font-semibold">
-                Connecting clients
+            <section
+              className="mt-10 flex flex-col gap-3"
+              aria-labelledby="mcp-endpoint-url-heading"
+            >
+              <h2 id="mcp-endpoint-url-heading" className="text-[18px] font-semibold">
+                Endpoint URL
               </h2>
               <p className="text-[14px] leading-[1.5] text-muted-foreground">
-                Point an MCP-capable client at <code>POST /api/mcp</code> on this instance with an{" "}
-                <code>Authorization: Bearer</code> personal access token — mint one under Settings →
-                Personal access tokens. Classic tokens need the
-                <code> repo</code> scope for repository tools (<code>package:read</code>/
-                <code>package:write</code> for packages); fine-grained tokens need
-                <code> contents</code> permission plus repository selection. Full client setup
-                (Claude Code, Cursor, stdio bridges) is documented in <code>docs/MCP.md</code>.
+                Streamable HTTP in JSON mode — one JSON-RPC 2.0 message per <code>POST</code>. This
+                is the address users paste into MCP clients (or hand to <code>ox mcp install</code>
+                ).
+              </p>
+              <CopyCommand
+                command={`${resolvePublicOriginClient()}/api/mcp`}
+                ariaLabel="Copy MCP endpoint URL"
+              />
+              <div className="flex items-center gap-3">
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={probe?.kind === "running"}
+                  data-testid="admin-mcp-probe"
+                  onClick={() => void probeEndpoint()}
+                >
+                  {(probe?.kind === "running" ? "Testing…" : "Test endpoint") as string}
+                </Button>
+                @if (probe !== null && probe.kind !== "running") {
+                  <p
+                    role="status"
+                    aria-live="polite"
+                    data-testid="admin-mcp-probe-result"
+                    data-probe-kind={probe.kind}
+                    className={
+                      probe.kind === "up"
+                        ? "text-[13px] text-success"
+                        : "text-[13px] text-destructive"
+                    }
+                  >
+                    {probe.detail as string}
+                  </p>;
+                }
+              </div>
+            </section>
+
+            <section className="mt-10 flex flex-col gap-3" aria-labelledby="mcp-user-setup-heading">
+              <h2 id="mcp-user-setup-heading" className="text-[18px] font-semibold">
+                User-facing client setup
+              </h2>
+              <p className="text-[14px] leading-[1.5] text-muted-foreground">
+                Per-user MCP configuration — the endpoint URL, <code>ox mcp</code> commands, and
+                ready-to-paste config blocks for Claude Code, Cursor, VS Code, and other clients —
+                lives under{" "}
+                <AppLink
+                  href="/settings/ai"
+                  className="text-foreground underline underline-offset-2"
+                >
+                  Settings → AI agents
+                </AppLink>
+                . Point users there instead of writing config by hand.
+              </p>
+              <p className="text-[14px] leading-[1.5] text-muted-foreground">
+                Callers authenticate with a personal access token (<code>oxidean_pat_…</code> /{" "}
+                <code>oxidean_fg_…</code>) minted under Settings → Personal access tokens — classic
+                tokens need
+                <code> repo</code> (<code>package:read</code>/<code>package:write</code> for
+                packages); fine-grained tokens need <code> contents</code> plus repository
+                selection. The signed-in session cookie works too; anonymous callers see public data
+                only.
               </p>
             </section>
           </AdminSettingsLayout>;

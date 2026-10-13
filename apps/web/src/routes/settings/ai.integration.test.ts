@@ -1,9 +1,11 @@
 /**
- * Account /settings/ai — agent skills install + upgrade commands.
+ * Account /settings/ai — agent skill installs + MCP server wiring.
  */
 import { cleanup, screen, waitFor } from "@octanejs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderWithQueryClient } from "@/test/render-with-query";
+import { mcpHarnessSnippets } from "@/lib/mcp-harness-snippets";
+import { getHighlighter } from "@/lib/highlight";
 
 const meMock = vi.fn();
 
@@ -74,6 +76,113 @@ describe("/settings/ai", () => {
 
     const nav = screen.getByRole("navigation", { name: "Account settings" });
     expect(nav.querySelector('a[href="/settings/ai"]')).toBeTruthy();
+  });
+
+  it("happy: renders the MCP section — endpoint, CLI commands, client snippets", async () => {
+    window.history.pushState({}, "", "/settings/ai");
+    meMock.mockResolvedValue({ ok: true, data: user });
+    renderWithQueryClient(AiSettingsPage);
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "MCP server" })).toBeInTheDocument();
+    });
+
+    const endpoint = screen.getByRole("textbox", { name: "Copy MCP endpoint URL" });
+    expect(endpoint).toHaveValue("https://forge.example/api/mcp");
+    const install = screen.getByRole("textbox", { name: "Copy MCP install command" });
+    expect(install).toHaveValue("ox mcp install");
+    const detected = screen.getByRole("textbox", { name: "Copy detected MCP install command" });
+    expect(detected).toHaveValue("ox mcp install --detected --project");
+    const upgrade = screen.getByRole("textbox", { name: "Copy MCP upgrade command" });
+    expect(upgrade).toHaveValue("ox mcp install --upgrade");
+    const status = screen.getByRole("textbox", { name: "Copy MCP status command" });
+    expect(status).toHaveValue("ox mcp status");
+
+    // Per-harness picker — defaults to Claude Code, renders a real JSON block
+    // (never a live token) and names the file it belongs in.
+    expect(screen.getByTestId("mcp-harness-select")).toBeTruthy();
+    const block = screen.getByTestId("mcp-snippet-block");
+    expect(block.getAttribute("data-harness")).toBe("claude");
+    expect(block.textContent).toContain('"mcpServers"');
+    expect(block.textContent).toContain('"oxidean"');
+    expect(block.textContent).toContain('"https://forge.example/api/mcp"');
+    expect(block.textContent).toContain('"Bearer <pat>"');
+    expect(screen.getByTestId("mcp-snippet-file").textContent).toContain(".mcp.json");
+    expect(screen.getByRole("button", { name: "Copy Claude Code config" })).toBeTruthy();
+
+    // The Claude add command is folded into the claude/token variant block —
+    // same aria label, still no real token.
+    expect(screen.getByTestId("mcp-snippet-command-label-token").textContent).toContain(
+      "Claude Code also has its own add command",
+    );
+    const claudeCmd = screen
+      .getByTestId("mcp-extras-token")
+      .querySelector('input[aria-label="Copy Claude Code MCP add command"]');
+    expect(claudeCmd).toHaveValue(
+      'claude mcp add --transport http oxidean https://forge.example/api/mcp --header "Authorization: Bearer <pat>"',
+    );
+
+    // Token/OAuth mode toggle — both variants stay mounted (visibility swap,
+    // no DOM churn); OAuth variant drops the static header and shows the
+    // per-harness note. Warm the highlighter so both variants' markup is
+    // styled before the toggle.
+    await getHighlighter();
+    const oauth = screen.getByTestId("mcp-auth-oauth");
+    oauth.click();
+    await waitFor(() => {
+      expect(screen.getByTestId("mcp-snippet-block").getAttribute("data-auth")).toBe("oauth");
+    });
+    const oauthVariant = screen.getByTestId("mcp-variant-oauth");
+    expect(oauthVariant.textContent).not.toContain("Bearer");
+    expect(oauthVariant.querySelector("pre[data-language]")).toBeTruthy();
+    // Token variant stays mounted but hidden — no remount on toggle.
+    const tokenVariant = screen.getByTestId("mcp-variant-token");
+    expect(tokenVariant.querySelector("pre[data-language]")).toBeTruthy();
+    expect(tokenVariant.className).toContain("invisible");
+    expect(oauthVariant.className).not.toContain("invisible");
+    expect(screen.getByTestId("mcp-snippet-note-oauth").textContent).toContain("OAuth");
+    expect(
+      screen
+        .getByTestId("mcp-extras-oauth")
+        .querySelector('input[aria-label="Copy Claude Code MCP add command"]'),
+    ).toHaveValue("claude mcp add --transport http oxidean https://forge.example/api/mcp");
+
+    // mcp-remote bridging lives under the generic tab (both auth modes).
+    const generic = mcpHarnessSnippets("https://forge.example/api/mcp").find(
+      (s) => s.id === "generic",
+    );
+    expect(generic?.token.command?.cmd).toBe(
+      'npx mcp-remote https://forge.example/api/mcp --header "Authorization: Bearer <pat>"',
+    );
+    expect(generic?.oauth.command?.cmd).toBe("npx mcp-remote https://forge.example/api/mcp");
+
+    // Guidance links — PAT minting and the admin gate. ("Personal access
+    // tokens" also appears in the settings nav, so match by href.)
+    expect(
+      screen.getAllByRole("link").some((l) => l.getAttribute("href") === "/settings/tokens"),
+    ).toBe(true);
+    expect(screen.getAllByRole("link").some((l) => l.getAttribute("href") === "/admin/mcp")).toBe(
+      true,
+    );
+  });
+
+  it("happy: SSR-highlighted default snippet renders styled on first paint", async () => {
+    window.history.pushState({}, "", "/settings/ai");
+    meMock.mockResolvedValue({ ok: true, data: user });
+    renderWithQueryClient(AiSettingsPage, {
+      props: {
+        mcpInitialHtml:
+          '<pre data-language="json" class="shiki"><code><span class="line">ssr-markup</span></code></pre>',
+      },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "MCP server" })).toBeInTheDocument();
+    });
+    const block = screen.getByTestId("mcp-snippet-block");
+    expect(block.getAttribute("data-harness")).toBe("claude");
+    expect(block.querySelector("pre[data-language]")).toBeTruthy();
+    expect(block.textContent).toContain("ssr-markup");
   });
 
   it("unhappy: unauthenticated sessions redirect to login", async () => {

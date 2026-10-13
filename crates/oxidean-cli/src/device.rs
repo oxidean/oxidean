@@ -8,6 +8,7 @@
 //! / `expired_token`). A successful exchange returns a classic PAT — stored by
 //! the caller exactly like a pasted token.
 
+use std::io::IsTerminal;
 use std::time::Duration;
 
 use serde::Deserialize;
@@ -163,6 +164,46 @@ pub async fn poll(instance: &str, device_code: &str, interval: i64) -> Result<Po
         }
         None => Poll::Failed(format!("device poll failed ({status})")),
     })
+}
+
+/// Run the full device grant: request a code, print it + the approval URL,
+/// open the browser on a TTY, and poll until approval/denial/expiry.
+/// Returns the minted token (a classic PAT on this instance).
+pub async fn run_grant(instance: &str, scopes: &str) -> Result<String, CliError> {
+    let grant = request(instance, scopes).await?;
+    let url = grant
+        .verification_uri_complete
+        .clone()
+        .unwrap_or(grant.verification_uri.clone());
+    eprintln!("! First copy your one-time code: {}", grant.user_code);
+    let tty = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
+    if tty {
+        eprintln!("Press Enter to open {url} in your browser…");
+        let mut line = String::new();
+        let _ = std::io::stdin().read_line(&mut line);
+        open_browser(&url);
+    } else {
+        eprintln!("Open {url} in your browser to approve this sign-in.");
+    }
+    eprintln!("Waiting for approval…");
+
+    let deadline = std::time::Instant::now()
+        + std::time::Duration::from_secs(grant.expires_in.max(60) as u64);
+    let mut interval = grant.interval.max(1) as u64;
+    loop {
+        if std::time::Instant::now() >= deadline {
+            return Err(CliError::Auth(
+                "device code expired before approval".into(),
+            ));
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(interval)).await;
+        match poll(instance, &grant.device_code, interval as i64).await? {
+            Poll::Pending => {}
+            Poll::SlowDown(next) => interval = next.max(1) as u64,
+            Poll::Failed(msg) => return Err(CliError::Auth(msg)),
+            Poll::Token(t) => return Ok(t),
+        }
+    }
 }
 
 /// Best-effort browser open — silent no-op headless (the printed URL carries

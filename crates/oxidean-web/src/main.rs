@@ -1,6 +1,6 @@
 //! oxidean-web — the production web tier: serves the statically-built Octane
 //! SPA shells and assets, applies per-request middleware (theme class, route
-//! <title>, SSH advertise metas, anonymous→login gate, header-gated /health,
+//! `<title>`, SSH advertise metas, anonymous→login gate, header-gated /health,
 //! well-known discovery docs), and reverse-proxies API prefixes when
 //! OXIDEAN_API_ORIGIN is set (dev parity — Compose Traefik splits them
 //! upstream instead).
@@ -85,6 +85,14 @@ async fn main() {
             ssh_port: std::env::var("OXIDEAN_SSH_PORT")
                 .ok()
                 .and_then(|p| p.parse().ok()),
+            // Canonical browser-facing origin — also rewrites the build-time
+            // http://localhost placeholder in prerendered shells. Unset falls
+            // back to the request Host (+ X-Forwarded-* when behind a proxy).
+            public_origin: std::env::var("OXIDEAN_PUBLIC_ORIGIN")
+                .ok()
+                .map(|s| s.trim_end_matches('/').to_string())
+                .filter(|s| !s.is_empty()),
+            behind_proxy,
         },
         proxy: api_origin.as_deref().map(|o| {
             tracing::info!("proxying API prefixes to {o} (behind_proxy={behind_proxy})");
@@ -543,10 +551,7 @@ mod tests {
     fn shared(dist: PathBuf) -> Arc<Shared> {
         Arc::new(Shared {
             dist,
-            meta: inject::AdvertiseMeta {
-                ssh_host: None,
-                ssh_port: None,
-            },
+            meta: inject::AdvertiseMeta::default(),
             proxy: None,
             sessions: None,
         })
@@ -671,10 +676,7 @@ mod tests {
         let dist = dist_with("git-proxy", &[("_/_/index.html", "<html>repo</html>")]).await;
         let st = Arc::new(Shared {
             dist,
-            meta: inject::AdvertiseMeta {
-                ssh_host: None,
-                ssh_port: None,
-            },
+            meta: inject::AdvertiseMeta::default(),
             proxy: Some(proxy::ApiProxy::new("http://127.0.0.1:1", false)),
             sessions: None,
         });
@@ -765,10 +767,7 @@ mod tests {
 
         let st = Arc::new(Shared {
             dist: PathBuf::from("."),
-            meta: inject::AdvertiseMeta {
-                ssh_host: None,
-                ssh_port: None,
-            },
+            meta: inject::AdvertiseMeta::default(),
             proxy: Some(proxy::ApiProxy::new(
                 &format!("http://127.0.0.1:{up_port}"),
                 true,

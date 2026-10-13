@@ -128,7 +128,9 @@ services:
       - traefik.http.routers.api-packages.entrypoints=web
       - traefik.http.routers.api-packages.priority=110
       - traefik.http.routers.api-packages.service=api
-      - traefik.http.routers.api.rule=Host(`localhost`) && (PathPrefix(`/api`) || PathPrefix(`/uploads`) || Path(`/health`))
+      # RFC 8414/9728 OAuth discovery docs ride the api router (narrow
+      # `/.well-known/oauth` prefix — ACME challenges stay on the web tier).
+      - traefik.http.routers.api.rule=Host(`localhost`) && (PathPrefix(`/api`) || PathPrefix(`/uploads`) || PathPrefix(`/.well-known/oauth`) || Path(`/health`))
       - traefik.http.routers.api.entrypoints=web
       - traefik.http.routers.api.priority=100
       - traefik.http.services.api.loadbalancer.server.port=8080

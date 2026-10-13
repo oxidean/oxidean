@@ -15,7 +15,6 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { PageHeader } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { HighlightTheme } from "@/lib/highlight";
 import type { HighlightedDiffLine } from "@/lib/highlight-diff";
 import { compareHref, shortRefName } from "@/lib/repo-browse";
 import { ssrHighlightDiffFiles } from "@/lib/ssr-diff-highlight";
@@ -34,7 +33,6 @@ export type CompareLoaderData =
       compare: RepoCompareResponse | null;
       /** Pre-highlighted diff rows by path (SSR). */
       highlightedByPath: Record<string, HighlightedDiffLine[]>;
-      highlightTheme: HighlightTheme | null;
     };
 
 type Phase = { kind: "loading" } | CompareLoaderData;
@@ -85,7 +83,6 @@ async function loadComparePage(
       head,
       compare: null,
       highlightedByPath: {},
-      highlightTheme: null,
     };
   }
 
@@ -112,7 +109,6 @@ async function loadComparePage(
     head,
     compare: cmp.data,
     highlightedByPath: hl.byPath,
-    highlightTheme: hl.theme,
   };
 }
 
@@ -307,7 +303,6 @@ function RepoComparePageContent() @{
                 status={f.status as string}
                 patch={f.patch as string}
                 initialRows={phase.highlightedByPath[f.path] ?? null}
-                highlightTheme={phase.highlightTheme}
               />;
             }
           </div>

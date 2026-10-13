@@ -1,5 +1,5 @@
-import type { ThemedToken } from "shiki";
-import { getHighlighter, languageIdForPath, THEMES, type HighlightTheme } from "@/lib/highlight";
+import type { ThemedTokenWithVariants } from "shiki";
+import { getHighlighter, languageIdForPath, THEMES } from "@/lib/highlight";
 import type { DiffLine, DiffLineKind } from "@/lib/parse-unified-diff";
 
 /** Skip Shiki when reconstructed sides exceed this (keep first paint snappy). */
@@ -81,17 +81,28 @@ export function plainHighlightedDiffLines(lines: DiffLine[]): HighlightedDiffLin
   });
 }
 
-/** Convert Shiki tokens for one line into inline spans (no pre/code wrapper). */
-export function tokensToInlineHtml(tokens: ThemedToken[]): string {
+/**
+ * Convert dual-theme Shiki tokens for one line into inline spans (no pre/code
+ * wrapper). Colors are `light-dark()` pairs resolving off `color-scheme`;
+ * font styles are identical across our themes — taken from the light variant.
+ */
+export function tokensToInlineHtml(tokens: ThemedTokenWithVariants[]): string {
   return tokens
     .map((t) => {
       const body = escapeHtml(t.content);
-      if (!t.color) return body;
-      const parts = [`color:${t.color}`];
+      const light = t.variants?.light;
+      const dark = t.variants?.dark;
+      const color =
+        light?.color && dark?.color
+          ? `light-dark(${light.color},${dark.color})`
+          : (light?.color ?? dark?.color);
+      if (!color) return body;
+      const parts = [`color:${color}`];
+      const fontStyle = light?.fontStyle ?? dark?.fontStyle ?? 0;
       // FontStyle bitflags from vscode-textmate / Shiki.
-      if (t.fontStyle & 1) parts.push("font-style:italic");
-      if (t.fontStyle & 2) parts.push("font-weight:bold");
-      if (t.fontStyle & 4) parts.push("text-decoration:underline");
+      if (fontStyle & 1) parts.push("font-style:italic");
+      if (fontStyle & 2) parts.push("font-weight:bold");
+      if (fontStyle & 4) parts.push("text-decoration:underline");
       return `<span style="${parts.join(";")}">${body}</span>`;
     })
     .join("");
@@ -126,20 +137,16 @@ function buildSides(lines: DiffLine[]): SideBuild {
   return { oldParts, newParts, map };
 }
 
-async function highlightSideLines(
-  parts: string[],
-  lang: string,
-  theme: HighlightTheme,
-): Promise<string[]> {
+async function highlightSideLines(parts: string[], lang: string): Promise<string[]> {
   if (parts.length === 0) return [];
   const highlighter = await getHighlighter();
   const loaded = highlighter.getLoadedLanguages();
   const resolved = loaded.includes(lang) ? lang : "plaintext";
-  const { tokens } = highlighter.codeToTokens(parts.join("\n"), {
+  const tokens = highlighter.codeToTokensWithThemes(parts.join("\n"), {
     lang: resolved,
-    theme,
+    themes: { light: THEMES.light, dark: THEMES.dark },
   });
-  // codeToTokens yields one token row per input line (including empty).
+  // codeToTokensWithThemes yields one token row per input line (including empty).
   return parts.map((_, i) => tokensToInlineHtml(tokens[i] ?? []));
 }
 
@@ -152,7 +159,7 @@ async function highlightSideLines(
  */
 export async function highlightDiffLines(
   lines: DiffLine[],
-  options: { path: string; theme?: HighlightTheme },
+  options: { path: string },
 ): Promise<HighlightedDiffLine[]> {
   const plain = plainHighlightedDiffLines(lines);
   if (lines.length === 0) return plain;
@@ -169,10 +176,9 @@ export async function highlightDiffLines(
     return plain;
   }
 
-  const theme = options.theme ?? THEMES.dark;
   const [oldHtml, newHtml] = await Promise.all([
-    highlightSideLines(oldParts, lang, theme),
-    highlightSideLines(newParts, lang, theme),
+    highlightSideLines(oldParts, lang),
+    highlightSideLines(newParts, lang),
   ]);
 
   return lines.map((line, i) => {

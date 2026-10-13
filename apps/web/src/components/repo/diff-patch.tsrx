@@ -7,7 +7,6 @@ import {
   plainHighlightedDiffLines,
   type HighlightedDiffLine,
 } from "@/lib/highlight-diff";
-import { clientHighlightTheme, type HighlightTheme } from "@/lib/highlight";
 import { cn } from "@/lib/utils";
 
 type DiffPatchProps = {
@@ -16,8 +15,6 @@ type DiffPatchProps = {
   patch: string;
   /** Pre-highlighted rows from SSR loader (first paint). */
   initialRows?: HighlightedDiffLine[] | null;
-  /** Theme used for `initialRows` — skip client re-highlight when it matches. */
-  highlightTheme?: HighlightTheme | null;
 };
 
 function lineClass(kind: DiffLineKind): string {
@@ -57,13 +54,7 @@ function initialRowsOrPlain(
 }
 
 /** Unified-diff file block: path header + colorized hunk lines (commit / compare / PR). */
-export function DiffPatch({
-  path,
-  status,
-  patch,
-  initialRows = null,
-  highlightTheme = null,
-}: DiffPatchProps) @{
+export function DiffPatch({ path, status, patch, initialRows = null }: DiffPatchProps) @{
   const [rows, setRows] = useState<HighlightedDiffLine[]>(() =>
     initialRowsOrPlain(patch, initialRows),
   );
@@ -72,52 +63,29 @@ export function DiffPatch({
     const lines = parseUnifiedDiffLines(patch);
     let cancelled = false;
 
-    // When SSR rows already match the live document theme, treat them as applied
-    // so hydrate does not re-run Shiki or setState (array-ref churn flickers).
-    let appliedTheme: HighlightTheme | null =
-      initialRows &&
-      initialRows.length > 0 &&
-      highlightTheme &&
-      clientHighlightTheme() === highlightTheme
-        ? highlightTheme
-        : null;
-
-    if (appliedTheme && initialRows) {
+    // SSR rows are dual-theme (`light-dark()`) — already correct for either
+    // scheme; take them as-is and skip the re-highlight pass.
+    if (initialRows && initialRows.length > 0) {
       setRows((prev) => (highlightedDiffRowsEqual(prev, initialRows) ? prev : initialRows));
-    } else if (!initialRows || initialRows.length === 0) {
-      setRows(plainHighlightedDiffLines(lines));
-    }
-
-    async function run() {
-      const theme = clientHighlightTheme();
-      if (appliedTheme === theme) return;
-      const next = await highlightDiffLines(lines, { path, theme });
-      if (cancelled) return;
-      appliedTheme = theme;
-      setRows((prev) => (highlightedDiffRowsEqual(prev, next) ? prev : next));
-    }
-
-    void run();
-
-    if (typeof document === "undefined") {
       return () => {
         cancelled = true;
       };
     }
 
-    const mo = new MutationObserver(() => {
-      void run();
-    });
-    mo.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["class"],
-    });
+    setRows(plainHighlightedDiffLines(lines));
+
+    async function run() {
+      const next = await highlightDiffLines(lines, { path });
+      if (cancelled) return;
+      setRows((prev) => (highlightedDiffRowsEqual(prev, next) ? prev : next));
+    }
+
+    void run();
 
     return () => {
       cancelled = true;
-      mo.disconnect();
     };
-  }, [patch, path, initialRows, highlightTheme]);
+  }, [patch, path, initialRows]);
 
   // Old/new line numbers from hunk headers — GitHub's two gutter columns.
   let oldN = 0;

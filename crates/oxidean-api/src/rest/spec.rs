@@ -54,7 +54,7 @@ pub struct RouteDef {
     pub operation_id: &'static str,
     /// Doc-line; convention: ends with the backing `proc.name` in parens.
     pub summary: &'static str,
-    /// Primary RPC procedure — asserted against [`rpc::PROCEDURES`] in tests.
+    /// Primary RPC procedure — asserted against [`crate::rpc::PROCEDURES`] in tests.
     pub procedure: &'static str,
     pub ok: StatusCode,
     /// Callable with no credentials at all (e.g. health, public reads).

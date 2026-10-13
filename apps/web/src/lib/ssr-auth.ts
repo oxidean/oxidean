@@ -1,10 +1,5 @@
 import { type RepoPublic } from "@oxidean/api-client";
 import { apiClient } from "@/lib/api-client";
-import {
-  resolveThemeForSsr,
-  themePreferenceFromCookieHeader,
-  resolvedColorSchemeFromCookieHeader,
-} from "@/lib/theme";
 
 /** auth.bootstrap_status. */
 export async function fetchBootstrapStatus() {
@@ -133,24 +128,6 @@ export async function fetchAdminInvitesList() {
 /** system.health (status page). */
 export async function fetchSystemHealth() {
   return apiClient.system.health();
-}
-
-function documentCookie(): string {
-  return typeof document !== "undefined" ? document.cookie : "";
-}
-
-/**
- * Resolved Shiki theme from theme cookies — mirrors the cookie/resolved-scheme
- * chain the serving middleware applies to `<html>`.
- */
-export function resolveClientHighlightTheme(): "oxidean-light" | "oxidean-dark" {
-  const cookie = documentCookie();
-  const resolved = resolveThemeForSsr(
-    themePreferenceFromCookieHeader(cookie),
-    null,
-    resolvedColorSchemeFromCookieHeader(cookie),
-  );
-  return resolved === "dark" ? "oxidean-dark" : "oxidean-light";
 }
 
 export type AppAccessRedirectInput = {

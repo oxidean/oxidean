@@ -15,73 +15,229 @@ type Subs = &'static [(&'static str, &'static [&'static str])];
 /// group → subs. Empty `subs` means the group takes data positionals
 /// (search/browse/api/self-update) — nothing to complete.
 pub const COMMAND_TREE: &[(&str, Subs)] = &[
-    ("admin", &[
-        ("users", &["list", "ban", "unban", "delete", "set-role", "sessions", "revoke-sessions", "access", "activity"]),
-        ("invites", &["list", "create", "link", "revoke"]),
-        ("actions", &["runners", "runner-token"]),
-        ("runners", &[]),
-        ("runner-token", &[]),
-        ("repos", &["gc"]),
-        ("lfs", &["get", "set"]),
-        ("git", &["get", "set"]),
-        ("mcp", &["get", "set"]),
-        ("auth", &["get", "set"]),
-        ("templates", &["list", "enable", "disable", "delete"]),
-    ]),
+    (
+        "admin",
+        &[
+            (
+                "users",
+                &[
+                    "list",
+                    "ban",
+                    "unban",
+                    "delete",
+                    "set-role",
+                    "sessions",
+                    "revoke-sessions",
+                    "access",
+                    "activity",
+                ],
+            ),
+            ("invites", &["list", "create", "link", "revoke"]),
+            ("actions", &["runners", "runner-token"]),
+            ("runners", &[]),
+            ("runner-token", &[]),
+            ("repos", &["gc"]),
+            ("lfs", &["get", "set"]),
+            ("git", &["get", "set"]),
+            ("mcp", &["get", "set"]),
+            ("auth", &["get", "set"]),
+            ("templates", &["list", "enable", "disable", "delete"]),
+        ],
+    ),
     ("api", &[]),
-    ("auth", &[("login", &[]), ("status", &[]), ("switch", &[]), ("logout", &[]), ("token", &[])]),
+    (
+        "auth",
+        &[
+            ("login", &[]),
+            ("status", &[]),
+            ("switch", &[]),
+            ("logout", &[]),
+            ("token", &[]),
+        ],
+    ),
     ("browse", &[]),
-    ("completion", &[("bash", &[]), ("zsh", &[]), ("fish", &[]), ("pwsh", &[])]),
+    (
+        "completion",
+        &[("bash", &[]), ("zsh", &[]), ("fish", &[]), ("pwsh", &[])],
+    ),
     ("config", &[("list", &[]), ("get", &[]), ("set", &[])]),
-    ("email", &[("list", &[]), ("add", &[]), ("remove", &[]), ("resend", &[]), ("set-primary", &[])]),
+    (
+        "email",
+        &[
+            ("list", &[]),
+            ("add", &[]),
+            ("remove", &[]),
+            ("resend", &[]),
+            ("set-primary", &[]),
+        ],
+    ),
     ("gpg-key", &[("list", &[]), ("add", &[]), ("delete", &[])]),
     ("invite", &[("accept", &[])]),
-    ("issue", &[("list", &[]), ("view", &[]), ("create", &[]), ("edit", &[]), ("close", &[]), ("reopen", &[]), ("delete", &[]), ("comment", &[])]),
-    ("label", &[("list", &[]), ("create", &[]), ("edit", &[]), ("delete", &[])]),
-    ("notification", &[("list", &[]), ("read", &[]), ("unread", &[]), ("unread-count", &[])]),
-    ("org", &[
-        ("list", &[]),
-        ("view", &[]),
-        ("create", &[]),
-        ("members", &["list", "add", "remove", "set-role"]),
-        ("invites", &["list", "create", "link", "revoke"]),
-    ]),
+    (
+        "issue",
+        &[
+            ("list", &[]),
+            ("view", &[]),
+            ("create", &[]),
+            ("edit", &[]),
+            ("close", &[]),
+            ("reopen", &[]),
+            ("delete", &[]),
+            ("comment", &[]),
+        ],
+    ),
+    (
+        "label",
+        &[
+            ("list", &[]),
+            ("create", &[]),
+            ("edit", &[]),
+            ("delete", &[]),
+        ],
+    ),
+    (
+        "notification",
+        &[
+            ("list", &[]),
+            ("read", &[]),
+            ("unread", &[]),
+            ("unread-count", &[]),
+        ],
+    ),
+    (
+        "org",
+        &[
+            ("list", &[]),
+            ("view", &[]),
+            ("create", &[]),
+            ("members", &["list", "add", "remove", "set-role"]),
+            ("invites", &["list", "create", "link", "revoke"]),
+        ],
+    ),
     ("pat", &[("list", &[]), ("create", &[]), ("revoke", &[])]),
     ("pkg", &[("list", &[])]),
-    ("pr", &[
-        ("list", &[]), ("view", &[]), ("create", &[]), ("merge", &[]),
-        ("diff", &[]), ("files", &[]), ("review", &[]), ("comment", &[]),
-        ("ready", &[]), ("update-branch", &[]), ("checks", &[]),
-        ("close", &[]), ("reopen", &[]), ("checkout", &[]),
-    ]),
-    ("release", &[("list", &[]), ("view", &[]), ("create", &[]), ("edit", &[]), ("delete", &[]), ("upload", &[]), ("download", &[]), ("delete-asset", &[])]),
-    ("repo", &[
-        ("list", &[]), ("view", &[]), ("create", &[]), ("fork", &[]),
-        ("sync", &[]), ("clone", &[]), ("edit", &[]), ("rename", &[]),
-        ("archive", &[]), ("unarchive", &[]), ("delete", &[]), ("transfer", &[]),
-        ("star", &[]), ("unstar", &[]), ("watch", &[]), ("unwatch", &[]),
-        ("lfs", &[]), ("quota", &[]), ("merge-settings", &[]),
-        ("deploy-key", &["list", "add", "delete"]),
-        ("collaborator", &["list", "add", "set-role", "remove"]),
-        ("collaborators", &["list", "add", "set-role", "remove"]),
-        ("invites", &["list", "create", "link", "revoke"]),
-        ("branch-protection", &["list", "set", "delete"]),
-        ("tag-protection", &["list", "set", "delete"]),
-        ("mirror", &["get", "set", "upsert", "sync", "delete", "gen-key", "rotate-secret"]),
-    ]),
-    ("run", &[("list", &[]), ("view", &[]), ("watch", &[]), ("rerun", &[]), ("cancel", &[])]),
+    (
+        "pr",
+        &[
+            ("list", &[]),
+            ("view", &[]),
+            ("create", &[]),
+            ("merge", &[]),
+            ("diff", &[]),
+            ("files", &[]),
+            ("review", &[]),
+            ("comment", &[]),
+            ("ready", &[]),
+            ("update-branch", &[]),
+            ("checks", &[]),
+            ("close", &[]),
+            ("reopen", &[]),
+            ("checkout", &[]),
+        ],
+    ),
+    (
+        "release",
+        &[
+            ("list", &[]),
+            ("view", &[]),
+            ("create", &[]),
+            ("edit", &[]),
+            ("delete", &[]),
+            ("upload", &[]),
+            ("download", &[]),
+            ("delete-asset", &[]),
+        ],
+    ),
+    (
+        "repo",
+        &[
+            ("list", &[]),
+            ("view", &[]),
+            ("create", &[]),
+            ("fork", &[]),
+            ("sync", &[]),
+            ("clone", &[]),
+            ("edit", &[]),
+            ("rename", &[]),
+            ("archive", &[]),
+            ("unarchive", &[]),
+            ("delete", &[]),
+            ("transfer", &[]),
+            ("star", &[]),
+            ("unstar", &[]),
+            ("watch", &[]),
+            ("unwatch", &[]),
+            ("lfs", &[]),
+            ("quota", &[]),
+            ("merge-settings", &[]),
+            ("deploy-key", &["list", "add", "delete"]),
+            ("collaborator", &["list", "add", "set-role", "remove"]),
+            ("collaborators", &["list", "add", "set-role", "remove"]),
+            ("invites", &["list", "create", "link", "revoke"]),
+            ("branch-protection", &["list", "set", "delete"]),
+            ("tag-protection", &["list", "set", "delete"]),
+            (
+                "mirror",
+                &[
+                    "get",
+                    "set",
+                    "upsert",
+                    "sync",
+                    "delete",
+                    "gen-key",
+                    "rotate-secret",
+                ],
+            ),
+        ],
+    ),
+    (
+        "run",
+        &[
+            ("list", &[]),
+            ("view", &[]),
+            ("watch", &[]),
+            ("rerun", &[]),
+            ("cancel", &[]),
+        ],
+    ),
     ("search", &[]),
     ("secret", &[("list", &[]), ("set", &[]), ("delete", &[])]),
     ("self-update", &[]),
     ("skill", &[("print", &[]), ("install", &[])]),
+    (
+        "mcp",
+        &[
+            ("print", &[]),
+            ("install", &[]),
+            ("status", &[]),
+            ("remove", &[]),
+        ],
+    ),
     ("ssh-key", &[("list", &[]), ("add", &[]), ("delete", &[])]),
     ("status", &[("create", &[])]),
-    ("user", &[("view", &[]), ("lookup", &[]), ("follow", &[]), ("unfollow", &[]), ("starred", &[]), ("watched", &[])]),
-    ("webhook", &[
-        ("list", &[]), ("create", &[]), ("edit", &[]), ("delete", &[]),
-        ("ping", &[]), ("redeliver", &[]),
-        ("deliveries", &["list", "get", "view", "redeliver"]),
-    ]),
+    (
+        "user",
+        &[
+            ("view", &[]),
+            ("lookup", &[]),
+            ("follow", &[]),
+            ("unfollow", &[]),
+            ("starred", &[]),
+            ("watched", &[]),
+        ],
+    ),
+    (
+        "webhook",
+        &[
+            ("list", &[]),
+            ("create", &[]),
+            ("edit", &[]),
+            ("delete", &[]),
+            ("ping", &[]),
+            ("redeliver", &[]),
+            ("deliveries", &["list", "get", "view", "redeliver"]),
+        ],
+    ),
     ("workflow", &[("list", &[]), ("view", &[]), ("run", &[])]),
 ];
 
@@ -262,18 +418,12 @@ fn pwsh() -> String {
             continue;
         }
         let words: Vec<&str> = subs.iter().map(|(s, _)| *s).collect();
-        subs_map.push_str(&format!(
-            "    '{group}' = '{}'\n",
-            words.join(" ")
-        ));
+        subs_map.push_str(&format!("    '{group}' = '{}'\n", words.join(" ")));
         for (sub, ops) in *subs {
             if ops.is_empty() {
                 continue;
             }
-            deep_map.push_str(&format!(
-                "    '{group} {sub}' = '{}'\n",
-                ops.join(" ")
-            ));
+            deep_map.push_str(&format!("    '{group} {sub}' = '{}'\n", ops.join(" ")));
         }
     }
     format!(

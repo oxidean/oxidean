@@ -14,7 +14,6 @@ import type {
   RepoRefEntry,
   RepoTreeEntry,
 } from "@oxidean/api-client";
-import { useEffect, useState } from "octane";
 import { FileTree } from "@/components/repo/file-tree";
 import { RepoAboutSidebar } from "@/components/repo/repo-about-sidebar";
 import { RepoBrowseToolbar } from "@/components/repo/repo-browse-toolbar";
@@ -22,7 +21,6 @@ import { RepoLastCommitBar } from "@/components/repo/repo-last-commit-bar";
 import { RepoNotFound } from "@/components/repo/repo-not-found";
 import { ReadmePanel } from "@/components/repo/readme-panel";
 import { Skeleton } from "@/components/ui/skeleton";
-import { apiClient } from "@/lib/api-client";
 import {
   findReadmeName,
   joinRepoPath,
@@ -268,45 +266,8 @@ function RepoTreePageContent() @{
   };
   const owner = params.owner ?? "";
   const repoName = params.repo ?? "";
-  const splat = params._splat;
   const loaderData = useQuery(repoTreeQueryOptions(params, searchStr)).data;
-
-  const [phase, setPhase] = useState<Phase>(() => loaderData ?? { kind: "loading" });
-
-  useEffect(() => {
-    if (loaderData) {
-      setPhase(loaderData);
-      return;
-    }
-    let cancelled = false;
-    void (async () => {
-      setPhase({ kind: "loading" });
-      try {
-        const next = await loadTreePage(
-          owner,
-          repoName,
-          splat,
-          async ({ data }) => apiClient.repo.get(data) as never,
-          async ({ data }) => apiClient.repo.tree(data) as never,
-          async ({ data }) => apiClient.repo.refs(data) as never,
-          async ({ data }) => apiClient.repo.blob(data) as never,
-          async ({ data }) => apiClient.repo.commits(data) as never,
-          async ({ data }) => apiClient.repo.pathLastCommits(data) as never,
-          async ({ data }) => apiClient.repo.commitCount(data) as never,
-          async ({ data }) => apiClient.release.list(data) as never,
-          async ({ data }) => apiClient.packages.list(data) as never,
-          async ({ data }) => apiClient.repo.contributorsList(data) as never,
-          async ({ data }) => apiClient.repo.languages(data) as never,
-        );
-        if (!cancelled) setPhase(next);
-      } catch {
-        if (!cancelled) setPhase({ kind: "error", message: NETWORK_ERROR });
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [owner, repoName, splat, loaderData]);
+  const phase: Phase = loaderData ?? { kind: "loading" };
 
   @if (phase.kind === "not_found") {
     <RepoNotFound />;

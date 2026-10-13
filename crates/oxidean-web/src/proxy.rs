@@ -28,6 +28,9 @@ const API_PREFIXES: &[&str] = &[
     "/oauth/token",
     "/oauth/userinfo",
     "/oauth/device/code",
+    // RFC 8414/9728 discovery docs (narrow prefix — `/.well-known/acme-*` stays
+    // on the web tier for TLS challenges).
+    "/.well-known/oauth",
 ];
 
 /// Hop-by-hop headers never cross a proxy hop. `connection`/`upgrade` are

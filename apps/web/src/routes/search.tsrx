@@ -25,9 +25,8 @@ import {
 } from "@octanejs/lucide";
 import { CodeSnippet } from "@/components/code-snippet";
 import { apiClient } from "@/lib/api-client";
-import { highlightCode, languageIdForPath, type HighlightTheme } from "@/lib/highlight";
+import { highlightCode, languageIdForPath } from "@/lib/highlight";
 import { useSearchString } from "@/lib/pathname.tsrx";
-import { resolveDocumentHighlightTheme } from "@/lib/theme";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -76,8 +75,6 @@ type SearchLoaderData = {
   type: TabId;
   offset: number;
   results: SearchResults | null;
-  /** Theme used for SSR-highlighted code hits (null → not highlighted server-side). */
-  highlightTheme: HighlightTheme | null;
   error: string | null;
   signedIn: boolean;
 };
@@ -97,7 +94,7 @@ function searchQueryOptions(qRaw: string, typeRaw: string, offsetRaw: number) {
       const signedIn = me.ok;
 
       if (!q) {
-        return { q, type, offset, results: null, highlightTheme: null, error: null, signedIn };
+        return { q, type, offset, results: null, error: null, signedIn };
       }
 
       const res = await apiClient.search.global({
@@ -114,7 +111,6 @@ function searchQueryOptions(qRaw: string, typeRaw: string, offsetRaw: number) {
           type,
           offset,
           results: null,
-          highlightTheme: null,
           error: res.error.message,
           signedIn,
         };
@@ -127,21 +123,17 @@ function searchQueryOptions(qRaw: string, typeRaw: string, offsetRaw: number) {
           type,
           offset,
           results: res.data,
-          highlightTheme: null,
           error: null,
           signedIn,
         };
       }
       const hits = codeHits.map((hit): HighlightedCodeHit => ({ ...hit }));
-      let highlightTheme: HighlightTheme | null = null;
       try {
-        const theme = resolveDocumentHighlightTheme();
         const htmls = await Promise.all(
           hits.map(async (hit) => {
             try {
               return await highlightCode(hit.content, {
                 lang: languageIdForPath(hit.path),
-                theme,
               });
             } catch {
               return undefined;
@@ -151,15 +143,14 @@ function searchQueryOptions(qRaw: string, typeRaw: string, offsetRaw: number) {
         hits.forEach((hit, i) => {
           hit.html = htmls[i];
         });
-        highlightTheme = theme;
       } catch {
-        highlightTheme = null;
+        /* highlighter unavailable — hits render as plain text */
       }
       const results: SearchResults = {
         ...res.data,
         code: { ...res.data.code, hits },
       };
-      return { q, type, offset, results, highlightTheme, error: null, signedIn };
+      return { q, type, offset, results, error: null, signedIn };
     },
     retry: false,
     staleTime: 30_000,
@@ -382,13 +373,7 @@ function CommitRow({ hit }: { hit: GlobalSearchCommitHit }) @{
   </ListRow>;
 }
 
-function CodeRow({
-  hit,
-  highlightTheme,
-}: {
-  hit: HighlightedCodeHit;
-  highlightTheme: HighlightTheme | null;
-}) @{
+function CodeRow({ hit }: { hit: HighlightedCodeHit }) @{
   <ListRow className="block px-4 py-3">
     <AppLink
       href={("/" + hit.repo_owner + "/" + hit.repo_name + "/blob/" + hit.path) as string}
@@ -399,12 +384,7 @@ function CodeRow({
     <span className="font-mono text-[13px] text-muted-foreground">
       {(":" + hit.line) as string}
     </span>
-    <CodeSnippet
-      code={hit.content}
-      path={hit.path}
-      highlightedHtml={hit.html ?? null}
-      highlightTheme={highlightTheme}
-    />
+    <CodeSnippet code={hit.content} path={hit.path} highlightedHtml={hit.html ?? null} />
   </ListRow>;
 }
 
@@ -654,10 +634,7 @@ export function SearchContent() @{
                 />
                 <List className="mt-2">
                   @for (const hit of codeG.hits; key codeKey(hit)) {
-                    <CodeRow
-                      hit={hit}
-                      highlightTheme={data?.highlightTheme ?? null}
-                    />;
+                    <CodeRow hit={hit} />;
                   }
                 </List>
                 <p className="mt-2 text-[12px] text-muted-foreground">
@@ -764,10 +741,7 @@ export function SearchContent() @{
                 }
                 @if (type === "code") {
                   @for (const hit of codeG?.hits ?? []; key codeKey(hit)) {
-                    <CodeRow
-                      hit={hit}
-                      highlightTheme={data?.highlightTheme ?? null}
-                    />;
+                    <CodeRow hit={hit} />;
                   }
                 }
                 @if (type === "users") {

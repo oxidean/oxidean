@@ -66,10 +66,7 @@ describe("DiffPatch", { timeout: 60_000 }, () => {
     const patch = ["@@ -1 +1 @@", "-const a = 1;", "+const b = 2;"].join("\n");
     const initialRows = await highlightDiffLines(parseUnifiedDiffLines(patch), {
       path: "util.ts",
-      theme: "oxidean-light",
     });
-
-    document.documentElement.classList.remove("dark");
 
     render(DiffPatch, {
       props: {
@@ -77,7 +74,6 @@ describe("DiffPatch", { timeout: 60_000 }, () => {
         status: "modified",
         patch,
         initialRows,
-        highlightTheme: "oxidean-light",
       },
     });
 
@@ -86,7 +82,7 @@ describe("DiffPatch", { timeout: 60_000 }, () => {
     const firstHtml = add?.innerHTML ?? "";
     expect(add?.querySelector('span[style*="color"]')).toBeTruthy();
 
-    // Hydrate must keep SSR HTML when document theme matches (no flicker).
+    // Hydrate keeps dual-theme SSR rows verbatim — no re-highlight pass.
     await new Promise((r) => setTimeout(r, 50));
     expect(document.querySelector('[data-diff-kind="add"]')?.innerHTML).toBe(firstHtml);
   });

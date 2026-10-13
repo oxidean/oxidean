@@ -8,9 +8,6 @@ import {
   applyTheme,
   readThemePreference,
   resolveTheme,
-  resolveThemeForSsr,
-  resolvedColorSchemeFromCookieHeader,
-  themePreferenceFromCookieHeader,
 } from "./theme";
 
 describe("theme helpers", () => {
@@ -85,20 +82,6 @@ describe("theme helpers", () => {
     applyTheme("system");
     expect(readThemePreference()).toBe("system");
     expect(THEME_OPTIONS).toEqual(["system", "light", "dark"]);
-  });
-
-  it("parses theme cookie and resolves SSR highlight theme", () => {
-    expect(themePreferenceFromCookieHeader("oxidean-theme=dark")).toBe("dark");
-    expect(themePreferenceFromCookieHeader("a=1; oxidean-theme=system; b=2")).toBe("system");
-    expect(themePreferenceFromCookieHeader(undefined)).toBeNull();
-    expect(resolvedColorSchemeFromCookieHeader("oxidean-color-scheme=dark")).toBe("dark");
-    expect(resolvedColorSchemeFromCookieHeader(undefined)).toBeNull();
-
-    expect(resolveThemeForSsr("dark")).toBe("dark");
-    expect(resolveThemeForSsr("system", "dark")).toBe("dark");
-    expect(resolveThemeForSsr("system", null, "dark")).toBe("dark");
-    expect(resolveThemeForSsr(null, null, "dark")).toBe("dark");
-    expect(resolveThemeForSsr(null, null)).toBe("light");
   });
 
   it("THEME_BOOT_SCRIPT is a static FOUC boot that reads oxidean-theme (D-12)", () => {

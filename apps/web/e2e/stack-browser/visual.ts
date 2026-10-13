@@ -72,10 +72,22 @@ export async function assertVisualBaseline(
   const file = `${safeName(name)}.png`;
   const baselinePath = path.join(baselineDir, file);
   // SSR renders text before webfonts finish loading — wait or the screenshot
-  // races the font swap and every text row ghosts vs the baseline.
+  // races the font swap and every text row ghosts vs the baseline. Scrollbar
+  // metrics are also normalized away: classic-metric engines reserve layout
+  // width for the app's scrollbar-gutter while overlay engines reserve none,
+  // so an unmodified capture is platform-dependent and can't match one
+  // committed baseline everywhere.
   if (page.evaluate) {
     try {
-      await page.evaluate(() => document.fonts.ready.then(() => undefined));
+      await page.evaluate(() => {
+        const style = document.createElement("style");
+        style.textContent =
+          "html{scrollbar-gutter:auto !important;overflow-y:auto !important}" +
+          "::-webkit-scrollbar{display:none !important}" +
+          "*{scrollbar-width:none !important}";
+        document.head.appendChild(style);
+        return document.fonts.ready.then(() => undefined);
+      });
     } catch {
       // Non-Playwright page implementations may not support evaluate.
     }
