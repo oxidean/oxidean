@@ -31,8 +31,13 @@ pub const OAUTH_TOKEN_TTL_SECS: i64 = 8 * 3600;
 /// `OAuthScope` is an alias so existing call sites keep reading naturally.
 pub type OAuthScope = ClassicPatScope;
 
-/// Scope set used when the client omits `scope` (identity-only default).
-pub const OAUTH_DEFAULT_SCOPES: &[OAuthScope] = &[ClassicPatScope::ReadUser];
+/// Scope set used when the client omits `scope` — the shared first-party set
+/// (`crate::scope_catalog::FIRST_PARTY_SCOPES`). The consent screen is where
+/// the grant gets narrowed, so the *resolved* default is broad and the user
+/// trims before approving.
+pub fn oauth_default_scopes() -> Vec<OAuthScope> {
+    crate::first_party_scopes()
+}
 
 /// Parse a space-delimited scope string into a deduplicated scope list.
 /// Every classic catalog name is a valid OAuth scope.
@@ -57,11 +62,11 @@ pub fn format_oauth_scopes(scopes: &[OAuthScope]) -> String {
 }
 
 /// Parse the stored/requested scope string, defaulting to
-/// [`OAUTH_DEFAULT_SCOPES`] when empty.
+/// [`oauth_default_scopes`] when empty.
 pub fn oauth_scopes_or_default(raw: Option<&str>) -> Result<Vec<OAuthScope>, String> {
     match raw.map(str::trim).filter(|s| !s.is_empty()) {
         Some(v) => parse_oauth_scopes(v),
-        None => Ok(OAUTH_DEFAULT_SCOPES.to_vec()),
+        None => Ok(oauth_default_scopes()),
     }
 }
 
@@ -152,8 +157,13 @@ pub struct OAuthAuthorizeInfo {
 pub struct OAuthAuthorizeRequest {
     pub client_id: String,
     pub redirect_uri: String,
+    /// Requested scope set (from the authorize URL) — resolves defaults.
     #[serde(default)]
     pub scope: Option<String>,
+    /// Consent-screen narrowing: the scopes the user actually kept checked.
+    /// Must be a non-empty subset of the resolved requested set.
+    #[serde(default)]
+    pub granted_scope: Option<String>,
     #[serde(default)]
     pub state: Option<String>,
     pub approve: bool,
@@ -238,6 +248,10 @@ pub struct OAuthDeviceInfo {
 pub struct OAuthDeviceAuthorizeRequest {
     pub user_code: String,
     pub approve: bool,
+    /// Approval-page narrowing: scopes the user kept checked. Must be a
+    /// non-empty subset of the grant's requested set.
+    #[serde(default)]
+    pub granted_scope: Option<String>,
 }
 
 #[cfg(test)]
@@ -255,13 +269,15 @@ mod tests {
             parse_oauth_scopes("admin:repo_hook delete_repo").unwrap(),
             vec![OAuthScope::AdminRepoHook, OAuthScope::DeleteRepo]
         );
+        // Omitted scope resolves to the first-party set — the consent screen
+        // is where the grant gets narrowed.
         assert_eq!(
             oauth_scopes_or_default(None).unwrap(),
-            vec![OAuthScope::ReadUser]
+            crate::first_party_scopes()
         );
         assert_eq!(
             oauth_scopes_or_default(Some("  ")).unwrap(),
-            vec![OAuthScope::ReadUser]
+            crate::first_party_scopes()
         );
     }
 }

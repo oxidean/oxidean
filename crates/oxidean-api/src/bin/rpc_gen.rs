@@ -2543,6 +2543,8 @@ export type OAuthAuthorizeRequest = {
   client_id: string;
   redirect_uri: string;
   scope?: string;
+  /** Consent narrowing — non-empty subset of the requested scopes. */
+  granted_scope?: string;
   state?: string;
   approve: boolean;
 };
@@ -2569,6 +2571,8 @@ export type OAuthDeviceInfo = {
 export type OAuthDeviceAuthorizeRequest = {
   user_code: string;
   approve: boolean;
+  /** Approval narrowing — non-empty subset of the grant's requested scopes. */
+  granted_scope?: string;
 };
 
 /** `sshKey.add` input — OpenSSH one-line public key (not a private key). */

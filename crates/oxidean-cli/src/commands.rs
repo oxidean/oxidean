@@ -738,10 +738,10 @@ fn required_procedures(cmd: &Command) -> Vec<String> {
         Command::UserWatched => one("user.listWatched"),
         Command::SshKeyList => one("sshKey.list"),
         Command::SshKeyAdd { .. } => one("sshKey.add"),
-        Command::SshKeyDelete { .. } => one("sshKey.delete"),
+        Command::SshKeyDelete { .. } => one("sshKey.revoke"),
         Command::GpgKeyList => one("gpgKey.list"),
         Command::GpgKeyAdd { .. } => one("gpgKey.add"),
-        Command::GpgKeyDelete { .. } => one("gpgKey.delete"),
+        Command::GpgKeyDelete { .. } => one("gpgKey.revoke"),
         Command::EmailList => one("email.list"),
         Command::EmailAdd { .. } => one("email.add"),
         Command::EmailRemove { .. } => one("email.remove"),
@@ -850,9 +850,8 @@ pub async fn dispatch(inv: &Invocation, rt: &Runtime) -> Result<Out, CliError> {
         Command::AuthLogout => auth_logout(g, rt),
         Command::AuthToken => auth_token(g, rt),
         Command::AuthRefresh {
-            scopes,
-            reset_scopes,
-        } => auth_refresh(g, rt, scopes.as_deref(), *reset_scopes).await,
+            scopes, keep_scopes,
+        } => auth_refresh(g, rt, scopes.as_deref(), *keep_scopes).await,
         Command::AuthRevoke => auth_revoke(g, rt).await,
         Command::AuthSetupGit => auth_setup_git(g, rt),
         Command::AuthGitCredential { op } => auth_git_credential(g, rt, op),
@@ -888,7 +887,7 @@ pub async fn dispatch(inv: &Invocation, rt: &Runtime) -> Result<Out, CliError> {
             let mut stack_id: Option<String> = None;
 
             if let Some(tref) = template {
-                stack_id = Some(resolve_template_ref(g, rt, &tref).await?);
+                stack_id = Some(resolve_template_ref(g, rt, tref).await?);
             } else if name.is_none() {
                 // Interactive wizard — TTY only; non-TTY keeps the usage error.
                 if !crate::term::can_prompt() {
@@ -2346,7 +2345,7 @@ pub async fn dispatch(inv: &Invocation, rt: &Runtime) -> Result<Out, CliError> {
             .await
         }
         Command::SshKeyDelete { id } => {
-            invoke(g, rt, "sshKey.delete", json!({ "id": id }), output::generic).await
+            invoke(g, rt, "sshKey.revoke", json!({ "id": id }), output::generic).await
         }
         Command::GpgKeyList => invoke(g, rt, "gpgKey.list", json!({}), output::gpg_key_list).await,
         Command::GpgKeyAdd { title, key_file } => {
@@ -2361,7 +2360,7 @@ pub async fn dispatch(inv: &Invocation, rt: &Runtime) -> Result<Out, CliError> {
             .await
         }
         Command::GpgKeyDelete { id } => {
-            invoke(g, rt, "gpgKey.delete", json!({ "id": id }), output::generic).await
+            invoke(g, rt, "gpgKey.revoke", json!({ "id": id }), output::generic).await
         }
         Command::EmailList => invoke(g, rt, "email.list", json!({}), output::email_list).await,
         Command::EmailAdd { email } => {
@@ -2754,13 +2753,217 @@ async fn release_download(
     })
 }
 
-/// Classic scopes covering the full `ox` command surface — the default set
-/// `--web` login and `auth refresh` mint. Deliberately broad (gh's CLI tokens
-/// are similarly broad); `--scopes` narrows.
-pub const CLI_DEFAULT_SCOPES: &str = concat!(
-    "repo workflow notifications user write:org delete_repo ",
-    "package:read package:write package:delete admin:repo_hook admin:public_key admin:gpg_key"
-);
+/// Classic scopes covering the full `ox` + MCP command surface — the default
+/// set `--web` login, `auth refresh`, and `mcp install --web` mint. The
+/// canonical definition lives in `oxidean_core::FIRST_PARTY_SCOPES` (shared
+/// with the server's OAuth/PRM surfaces); deliberately broad — gh's CLI
+/// tokens are similarly broad — `--scopes` and the consent screen narrow.
+pub const CLI_DEFAULT_SCOPES: &str = oxidean_core::FIRST_PARTY_SCOPES;
+
+/// Every RPC procedure the `ox` command surface can dispatch — the
+/// scope-coverage audit list. Adding a command? Register its procedures in
+/// `required_procedures` *and* here; the coverage test fails closed on
+/// drifted/renamed names (`SessionOnly` classification counts as uncovered).
+/// `ox api` is excluded — arbitrary user-supplied procs are allowed to hit
+/// session-only surfaces on purpose.
+const CLI_PROCS: &[&str] = &[
+    "auth.me",
+    "repo.listByOwner",
+    "repo.listMine",
+    "repo.get",
+    "repo.create",
+    "repo.createDefaults",
+    "repo.fork",
+    "repo.forkStatus",
+    "repo.syncFork",
+    "repo.updateMetadata",
+    "repo.updateVisibility",
+    "repo.rename",
+    "repo.setArchived",
+    "repo.softDelete",
+    "repo.transfer",
+    "repo.star",
+    "repo.unstar",
+    "repo.watch",
+    "repo.unwatch",
+    "repo.deployKey.list",
+    "repo.deployKey.create",
+    "repo.deployKey.delete",
+    "repo.collaborators.list",
+    "repo.collaborators.add",
+    "repo.collaborators.update",
+    "repo.collaborators.remove",
+    "repo.invites.list",
+    "repo.invites.create",
+    "repo.invites.createLink",
+    "repo.invites.revoke",
+    "repo.branchProtection.list",
+    "repo.branchProtection.create",
+    "repo.branchProtection.delete",
+    "repo.tagProtection.list",
+    "repo.tagProtection.create",
+    "repo.tagProtection.delete",
+    "repo.mirror.get",
+    "repo.mirror.upsert",
+    "repo.mirror.syncNow",
+    "repo.mirror.delete",
+    "repo.mirror.generateSshKey",
+    "repo.mirror.rotateWebhookSecret",
+    "repo.mergeSettings.get",
+    "repo.mergeSettings.update",
+    "repo.lfs.setEnabled",
+    "repo.lfs.getUsage",
+    "repo.lfs.listObjects",
+    "repo.lfs.getStatus",
+    "repo.quota.set",
+    "repo.quota.get",
+    "issue.list",
+    "issue.get",
+    "issue.create",
+    "issue.update",
+    "issue.close",
+    "issue.reopen",
+    "issue.delete",
+    "issue.comments.create",
+    "issue.labels.set",
+    "issue.assigneeCandidates",
+    "issue.assignees.set",
+    "label.listForRepo",
+    "pull.list",
+    "pull.get",
+    "pull.create",
+    "pull.merge",
+    "pull.files",
+    "pull.update",
+    "pull.close",
+    "pull.reopen",
+    "pull.branchStatus",
+    "pull.updateBranch",
+    "pull.comments.create",
+    "pull.reviews.list",
+    "pull.reviews.submit",
+    "pull.reviews.dismiss",
+    "pull.reviewRequests.add",
+    "pull.reviewRequests.remove",
+    "repo.actions.listRuns",
+    "repo.actions.getRun",
+    "repo.actions.getJobLog",
+    "repo.actions.listWorkflows",
+    "repo.actions.dispatchWorkflow",
+    "repo.actions.rerunRun",
+    "repo.actions.cancelRun",
+    "repo.actions.secrets.list",
+    "repo.actions.secrets.put",
+    "repo.actions.secrets.delete",
+    "repo.commitStatus.list",
+    "repo.commitStatus.create",
+    "repo.blob",
+    "release.list",
+    "release.get",
+    "release.create",
+    "release.update",
+    "release.delete",
+    "release.deleteAsset",
+    "search.global",
+    "org.listMine",
+    "org.get",
+    "org.create",
+    "org.members.list",
+    "org.members.add",
+    "org.members.remove",
+    "org.members.updateRole",
+    "org.invites.list",
+    "org.invites.create",
+    "org.invites.createLink",
+    "org.invites.revoke",
+    "notification.list",
+    "notification.markRead",
+    "notification.markAllRead",
+    "notification.unreadCount",
+    "user.getPublicProfile",
+    "user.lookup",
+    "user.follow",
+    "user.unfollow",
+    "user.listStarred",
+    "user.listWatched",
+    "sshKey.list",
+    "sshKey.add",
+    "sshKey.revoke",
+    "gpgKey.list",
+    "gpgKey.add",
+    "gpgKey.revoke",
+    "email.list",
+    "email.add",
+    "email.remove",
+    "email.setPrimary",
+    "email.resendVerify",
+    "pat.self",
+    "pat.revoke",
+    "label.listForOrg",
+    "label.create",
+    "webhook.list",
+    "webhook.create",
+    "webhook.update",
+    "webhook.delete",
+    "webhook.ping",
+    "webhook.deliveries.list",
+    "webhook.deliveries.get",
+    "webhook.redeliver",
+    "packages.list",
+];
+
+/// Procedures the MCP server dispatches on a token's behalf
+/// (`oxidean-api::mcp` tool surface) — audited against the same scope set.
+const MCP_PROCS: &[&str] = &[
+    "issue.comments.create",
+    "issue.comments.list",
+    "issue.create",
+    "issue.get",
+    "issue.list",
+    "packages.list",
+    "pull.get",
+    "pull.list",
+    "repo.actions.getRun",
+    "repo.actions.listRuns",
+    "repo.blob",
+    "repo.explore",
+    "repo.get",
+    "repo.listByOwner",
+    "repo.listMine",
+    "repo.search",
+    "repo.tree",
+];
+
+/// Classic-scope names that would unlock uncovered procedures — the
+/// actionable piece `auth status`/`auth refresh` surface on narrow tokens.
+/// `SessionOnly` procedures are skipped (never token-callable).
+fn uncovered_scope_names(held: &[oxidean_core::ClassicPatScope]) -> Vec<&'static str> {
+    use std::collections::BTreeSet;
+    let mut missing = BTreeSet::new();
+    for proc in CLI_PROCS.iter().chain(MCP_PROCS) {
+        let class = oxidean_core::classify_pat_proc(proc);
+        if matches!(
+            class,
+            oxidean_core::PatProc::SessionOnly
+                | oxidean_core::PatProc::Open
+                | oxidean_core::PatProc::Identity
+                | oxidean_core::PatProc::PatSelfManage
+        ) {
+            continue;
+        }
+        if !oxidean_core::proc_covered_by_scopes(proc, held) {
+            missing.extend(oxidean_core::required_scope_names(class));
+        }
+    }
+    missing.into_iter().collect()
+}
+
+/// Parse stored scope names (`pat.self` payload) for coverage checks.
+fn parse_scope_names(raw: &[String]) -> Vec<oxidean_core::ClassicPatScope> {
+    raw.iter()
+        .filter_map(|s| oxidean_core::ClassicPatScope::parse(s).ok())
+        .collect()
+}
 
 /// Normalize a `--scopes` value into a space-delimited, validated scope
 /// string. Comma and whitespace both split; unknown names are rejected here
@@ -2969,6 +3172,23 @@ async fn auth_status(global: &Global, rt: &Runtime) -> Result<Out, CliError> {
                 if !scopes.is_empty() {
                     let names: Vec<&str> = scopes.iter().filter_map(Value::as_str).collect();
                     out.push_str(&format!("\n  scopes: {}", names.join(" ")));
+                    // Coverage check is classic-scope only — FG tokens gate on
+                    // `perms` families instead.
+                    if kind == "classic" {
+                        let held = parse_scope_names(
+                            &names.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+                        );
+                        let missing = uncovered_scope_names(&held);
+                        if !missing.is_empty() {
+                            out.push_str(&format!(
+                                "\n  note: token scopes don't cover the full CLI/MCP surface — missing: {}",
+                                missing.join(", ")
+                            ));
+                            out.push_str(
+                                "\n  hint: `ox auth refresh` mints the full set (`--keep-scopes` preserves this set)",
+                            );
+                        }
+                    }
                 }
             }
         } else {
@@ -3312,14 +3532,15 @@ fn stored_token(rt: &Runtime, instance: &str) -> Result<String, CliError> {
 }
 
 /// `auth refresh` — mint a fresh CLI token through the device grant and
-/// self-revoke the old one. Scopes: `--scopes` wins, `--reset-scopes` returns
-/// to `CLI_DEFAULT_SCOPES`, otherwise the old token's own scopes carry over
-/// (read via `pat.self` before the swap).
+/// self-revoke the old one. Scopes: `--scopes` wins outright; `--keep-scopes`
+/// carries the old token's own scopes over (read via `pat.self` before the
+/// swap); the default mints the full `CLI_DEFAULT_SCOPES` set so stale narrow
+/// tokens heal on refresh.
 async fn auth_refresh(
     global: &Global,
     rt: &Runtime,
     scopes: Option<&str>,
-    reset_scopes: bool,
+    keep_scopes: bool,
 ) -> Result<Out, CliError> {
     let instance = resolve_instance(global, &rt.config)?;
     let old_token = stored_token(rt, &instance)?;
@@ -3334,10 +3555,9 @@ async fn auth_refresh(
         Err(e) => return Err(CliError::from(e)),
     };
 
-    let scopes = match (scopes, reset_scopes) {
+    let scopes = match (scopes, keep_scopes) {
         (Some(raw), _) => scope_list(raw)?,
-        (None, true) => CLI_DEFAULT_SCOPES.to_string(),
-        (None, false) => old_info
+        (None, true) => old_info
             .as_ref()
             .and_then(|i| i.get("scopes"))
             .and_then(Value::as_array)
@@ -3349,6 +3569,16 @@ async fn auth_refresh(
             })
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| CLI_DEFAULT_SCOPES.to_string()),
+        (None, false) => CLI_DEFAULT_SCOPES.to_string(),
+    };
+    // `--keep-scopes` on an under-scoped token keeps the gap — name it.
+    let keep_warn = if keep_scopes && scopes != CLI_DEFAULT_SCOPES {
+        let missing = uncovered_scope_names(&parse_scope_names(
+            &scopes.split_whitespace().map(str::to_string).collect::<Vec<_>>(),
+        ));
+        (!missing.is_empty()).then(|| missing.join(", "))
+    } else {
+        None
     };
 
     // Mint → verify → persist (atomic swap: the old credential is only
@@ -3381,6 +3611,11 @@ async fn auth_refresh(
         text.push_str(&format!(" as {user}"));
     }
     text.push_str(&format!(" — scopes: {scopes}"));
+    if let Some(missing) = &keep_warn {
+        text.push_str(&format!(
+            "\nnote: kept scopes don't cover the full CLI/MCP surface — missing: {missing}"
+        ));
+    }
     if !revoked {
         text.push_str("\n(old token could not be revoked — it may already be expired/revoked)");
     }
@@ -3661,5 +3896,50 @@ mod tests {
                 "issue.labels.set".to_string()
             ]
         );
+    }
+
+    #[test]
+    fn cli_mcp_procs_covered_by_first_party_scopes() {
+        use oxidean_core::PatProc;
+        let held = oxidean_core::first_party_scopes();
+        for proc in CLI_PROCS.iter().chain(MCP_PROCS) {
+            let class = oxidean_core::classify_pat_proc(proc);
+            assert_ne!(
+                class,
+                PatProc::SessionOnly,
+                "{proc} classifies session-only — stale name or a command the                  token surface can't serve (drop the command or register the proc)"
+            );
+            assert!(
+                oxidean_core::proc_covered_by_scopes(proc, &held),
+                "{proc} not covered by FIRST_PARTY_SCOPES (class {class:?} wants: {})",
+                oxidean_core::required_scope_names(class).join(" | ")
+            );
+        }
+    }
+
+    #[test]
+    fn uncovered_scope_names_flags_narrow_tokens() {
+        // The full set leaves nothing uncovered.
+        assert!(uncovered_scope_names(&oxidean_core::first_party_scopes()).is_empty());
+        // The pre-widening MCP set misses org writes, deletes, user surface…
+        let narrow = parse_scope_names(&[
+            "repo".to_string(),
+            "package:read".to_string(),
+            "package:write".to_string(),
+        ]);
+        let missing = uncovered_scope_names(&narrow);
+        assert!(missing.contains(&"delete_repo"), "{missing:?}");
+        assert!(missing.contains(&"write:org"), "{missing:?}");
+        assert!(missing.contains(&"user"), "{missing:?}");
+        // `repo` is the umbrella alternative — workflow/notifications/key
+        // admin are covered through it, never reported as missing.
+        assert!(!missing.contains(&"notifications"), "{missing:?}");
+        assert!(!missing.contains(&"workflow"), "{missing:?}");
+        // Empty token reports every gated family's covering scope.
+        let all_missing = uncovered_scope_names(&[]);
+        assert!(all_missing.contains(&"repo"));
+        assert!(all_missing.contains(&"workflow"));
+        // SessionOnly procs never reach the list — they contribute nothing.
+        assert!(!all_missing.iter().any(|n| n.is_empty()));
     }
 }

@@ -37,9 +37,10 @@ const SERVER_NAME: &str = "oxidean";
 /// `config.toml` never carries the literal token.
 const CODEX_TOKEN_ENV: &str = "OXIDEAN_TOKEN";
 
-/// Scopes the `--web` device grant asks for — repo domain + registries, the
-/// same set `ox auth login` requests (the MCP tools span both).
-const DEVICE_SCOPES: &str = "repo package:read package:write";
+/// Scopes the `--web` device grant asks for — the shared first-party set
+/// (`oxidean_core::FIRST_PARTY_SCOPES`), the same set `ox auth login`
+/// requests. MCP tools span the repo/issue/pull/actions/packages surface.
+const DEVICE_SCOPES: &str = oxidean_core::FIRST_PARTY_SCOPES;
 
 /// How the `oxidean` server entry is serialized into a config file.
 enum Format {

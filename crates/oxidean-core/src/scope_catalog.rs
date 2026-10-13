@@ -408,6 +408,25 @@ pub fn classic_has_scope(held: &[ClassicPatScope], required: ClassicPatScope) ->
     held.iter().any(|s| classic_scope_satisfies(*s, required))
 }
 
+/// The scope set first-party flows mint by default — `ox auth login --web`,
+/// `ox mcp install --web`, and OAuth authorize requests that omit `scope`.
+/// Deliberately broad (gh's CLI tokens are similarly broad): covers every
+/// procedure the CLI and MCP server can reach — see `proc_classes` coverage
+/// tests. Clients narrow via `--scopes` or the consent screen.
+pub const FIRST_PARTY_SCOPES: &str = concat!(
+    "repo workflow notifications user write:org delete_repo ",
+    "package:read package:write package:delete admin:repo_hook admin:public_key admin:gpg_key"
+);
+
+/// `FIRST_PARTY_SCOPES` parsed — panics-free by construction (every name is a
+/// catalog row; the test below asserts that).
+pub fn first_party_scopes() -> Vec<ClassicPatScope> {
+    FIRST_PARTY_SCOPES
+        .split_whitespace()
+        .map(|s| ClassicPatScope::parse(s).expect("FIRST_PARTY_SCOPES holds catalog names"))
+        .collect()
+}
+
 // ---------------------------------------------------------------------------
 // Public (serializable) catalog DTOs — `pat.catalog` + OAuth `scope_details`.
 // ---------------------------------------------------------------------------
@@ -559,6 +578,24 @@ mod tests {
         assert!(!classic_scope_satisfies(S::Repo, S::DeleteRepo));
         assert!(!classic_scope_satisfies(S::PackageWrite, S::PackageDelete));
         assert!(!classic_scope_satisfies(S::ReadUser, S::UserEmail));
+    }
+
+    #[test]
+    fn first_party_scopes_are_valid() {
+        // Every name in the default set parses and lands in the catalog.
+        let parsed = first_party_scopes();
+        assert_eq!(
+            parsed.len(),
+            FIRST_PARTY_SCOPES.split_whitespace().count()
+        );
+        for s in &parsed {
+            scope_meta(*s);
+        }
+        // The set must cover its own umbrella gaps — e.g. `repo` does not
+        // imply `delete_repo`, so it must be listed explicitly.
+        assert!(parsed.contains(&S::DeleteRepo));
+        assert!(parsed.contains(&S::WriteOrg));
+        assert!(parsed.contains(&S::PackageDelete));
     }
 
     #[test]

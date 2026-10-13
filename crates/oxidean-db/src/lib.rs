@@ -2963,13 +2963,17 @@ impl Database {
     }
 
     /// Single-claim approve — false when the code was not pending.
+    /// `granted_scopes` replaces the stored scope string when `Some`
+    /// (consent-screen narrowing — caller validates ⊆ requested).
     pub async fn approve_oauth_device_code(
         &self,
         id: &str,
         user_id: &str,
         approved_at: &str,
+        granted_scopes: Option<&str>,
     ) -> Result<bool, String> {
-        oauth::approve_device_code(self.require_pool()?, id, user_id, approved_at).await
+        oauth::approve_device_code(self.require_pool()?, id, user_id, approved_at, granted_scopes)
+            .await
     }
 
     /// Single-claim deny — false when the code was not pending.

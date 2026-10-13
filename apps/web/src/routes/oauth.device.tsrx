@@ -2,8 +2,8 @@ import { queryOptions, useQuery } from "@octanejs/tanstack-query";
 import { SCOPE_CATALOG, type OAuthDeviceInfo, type OAuthScopeDetail } from "@oxidean/api-client";
 import { useEffect, useState } from "octane";
 import { AppPage } from "@/components/app-page";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { apiClient } from "@/lib/api-client";
 import { useSearchString } from "@/lib/pathname.tsrx";
@@ -75,6 +75,17 @@ function OAuthDeviceContent() @{
   const [step, setStep] = useState<Step>({ kind: "enter" });
   const [code, setCode] = useState(search.user_code ?? "");
   const [pending, setPending] = useState<"approve" | "deny" | "lookup" | null>(null);
+  // Scopes the user unchecked — default is the full requested set.
+  const [unchecked, setUnchecked] = useState<Set<string>>(new Set());
+
+  function toggleScope(scope: string, checked: boolean) {
+    setUnchecked((prev) => {
+      const next = new Set(prev);
+      if (checked) next.delete(scope);
+      else next.add(scope);
+      return next;
+    });
+  }
 
   useEffect(() => {
     if (loaderData?.kind === "unauthenticated") {
@@ -112,11 +123,13 @@ function OAuthDeviceContent() @{
 
   async function decide(approve: boolean) {
     if (pending || step.kind !== "ready") return;
+    const granted = step.info.scopes.filter((s) => !unchecked.has(s));
     setPending(approve ? "approve" : "deny");
     try {
       const res = await apiClient.oauth.deviceAuthorize({
         user_code: step.info.user_code,
         approve,
+        granted_scope: approve ? granted.join(" ") : undefined,
       });
       if (!res.ok) {
         setStep({
@@ -172,18 +185,47 @@ function OAuthDeviceContent() @{
               </p>
               <ul className="mt-2 flex flex-col gap-2">
                 @for (const scope of step.info.scopes; key scope) {
-                  <li className="flex items-center gap-2 text-[14px] text-foreground">
-                    <Badge variant="outline">{scope as string}</Badge>
-                    <span>
-                      {scopeDescription(step.info.scope_details, scope) as string}
-                    </span>
+                  <li className="flex items-start gap-3 text-[14px] text-foreground">
+                    <label className="flex cursor-pointer items-start gap-3">
+                      <Checkbox
+                        checked={!unchecked.has(scope)}
+                        disabled={pending !== null}
+                        aria-label={scope as string}
+                        data-testid={"oauth-scope-" + scope}
+                        onCheckedChange={(checked) =>
+                          toggleScope(scope, checked === true)
+                        }
+                      />
+                      <span className="flex flex-col gap-0.5">
+                        <span className="font-mono text-[13px]">
+                          {scope as string}
+                        </span>
+                        <span className="text-[13px] text-muted-foreground">
+                          {
+                            scopeDescription(
+                              step.info.scope_details,
+                              scope,
+                            ) as string
+                          }
+                        </span>
+                      </span>
+                    </label>
                   </li>;
                 }
               </ul>
+              @if (
+                step.info.scopes.every((s) => unchecked.has(s))
+              ) {
+                <p className="mt-3 text-[13px] text-muted-foreground">
+                  Select at least one scope, or deny the request.
+                </p>;
+              }
               <div className="mt-6 flex flex-wrap gap-3">
                 <Button
                   type="button"
-                  disabled={pending !== null}
+                  disabled={
+                    pending !== null || step.info.scopes.every((s) => unchecked.has(s))
+                  }
                   onClick={() => void decide(true)}
                   data-testid="oauth-device-approve"
                 >

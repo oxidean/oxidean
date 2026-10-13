@@ -5,7 +5,7 @@ import type { FgPermPublic, PatScopePublic } from "./index";
 
 /** Every classic scope `pat.createClassic` accepts, in UI order. */
 export const SCOPE_CATALOG: PatScopePublic[] = [
-  { name: "repo", group: "Repository", description: "Full control of private repositories", hint: "Required for git clone, fetch, and push over HTTPS.", implies: [] },
+  { name: "repo", group: "Repository", description: "Full control of private repositories", hint: "Includes public_repo, repo:status, repo:invite, and security_events. Required for git clone, fetch, and push over HTTPS.", implies: ["public_repo", "repo:invite", "repo:status", "security_events"] },
   { name: "public_repo", group: "Repository", description: "Public repositories only", hint: "Read and collaborate on public repositories; no private access.", implies: [] },
   { name: "repo:status", group: "Repository", description: "Commit statuses", hint: "Read and create commit status checks.", implies: [] },
   { name: "repo:invite", group: "Repository", description: "Repository invitations", hint: "Invite collaborators and manage repository invites.", implies: [] },

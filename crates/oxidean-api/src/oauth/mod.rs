@@ -260,6 +260,9 @@ pub struct AuthorizeQuery {
     pub response_type: Option<String>,
     pub scope: Option<String>,
     pub state: Option<String>,
+    /// RFC 8707 resource indicator — currently advisory: echoed into the
+    /// consent hop so the UI can name the audience (e.g. `…/api/mcp`).
+    pub resource: Option<String>,
 }
 
 fn oauth_json_error(status: StatusCode, error: &str, description: &str) -> Response {
@@ -398,6 +401,9 @@ fn serde_plain_query(q: &AuthorizeQuery) -> String {
     }
     if let Some(v) = &q.state {
         ser.append_pair("state", v);
+    }
+    if let Some(v) = &q.resource {
+        ser.append_pair("resource", v);
     }
     ser.finish()
 }
@@ -1154,7 +1160,7 @@ pub async fn authorize_rpc(
             ));
         }
     }
-    let (app, uri, scopes) = resolve_authorize_request(
+    let (app, uri, requested) = resolve_authorize_request(
         &ctx.db,
         req.client_id.trim(),
         Some(req.redirect_uri.as_str()),
@@ -1171,6 +1177,40 @@ pub async fn authorize_rpc(
             redirect_to: build_redirect(&uri, &pairs),
         });
     }
+
+    // Consent-screen narrowing: the user may grant a subset of the requested
+    // set (e.g. an MCP grant without `delete_repo`). Granted ⊆ requested —
+    // never a superset — and non-empty.
+    let scopes = match req
+        .granted_scope
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        Some(raw) => {
+            let granted = parse_oauth_scopes(raw)
+                .map_err(|e| AppError::new("oauth.invalid_scope", e))?;
+            if let Some(extra) = granted.iter().find(|g| !requested.contains(g)) {
+                return Err(AppError::new(
+                    "oauth.invalid_scope",
+                    format!(
+                        "granted scope \"{}\" was not requested by the application",
+                        extra.as_str()
+                    ),
+                ));
+            }
+            granted
+        }
+        None => {
+            if req.granted_scope.is_some() {
+                return Err(AppError::new(
+                    "rpc.bad_input",
+                    "select at least one scope to grant",
+                ));
+            }
+            requested
+        }
+    };
 
     let code_id = Uuid::new_v4().to_string();
     let (code, code_hash, _prefix) = mint_secret(OAUTH_CODE_PREFIX);
@@ -1257,8 +1297,10 @@ fn display_user_code(normalized: &str) -> String {
 }
 
 /// `POST /oauth/device/code` — RFC 8628 §3.1/3.2. Accepts `scope` as a
-/// space-delimited list of classic PAT scope names (default `repo`); the
-/// approved grant mints a classic PAT with exactly those scopes.
+/// space-delimited list of classic PAT scope names (scope-less requests
+/// resolve to the first-party set, which the approver can narrow on the
+/// `/oauth/device` page); the approved grant mints a classic PAT with exactly
+/// the approved scopes.
 pub async fn device_code(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -1308,7 +1350,7 @@ pub async fn device_code(
             }
             parsed
         }
-        None => vec![ClassicPatScope::Repo],
+        None => oxidean_core::first_party_scopes(),
     };
     if scopes.is_empty() {
         return token_error(StatusCode::BAD_REQUEST, "invalid_scope", "scope is required");
@@ -1629,9 +1671,50 @@ pub async fn device_authorize(
             AppError::new("oauth.device_code_not_found", "no pending device code")
         })?;
 
+    // Approval-page narrowing: granted ⊆ the grant's requested set, non-empty.
+    let granted_scopes = if req.approve {
+        match req
+            .granted_scope
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            Some(raw) => {
+                let requested: Vec<ClassicPatScope> = row
+                    .scopes
+                    .split_whitespace()
+                    .filter_map(|s| ClassicPatScope::parse(s).ok())
+                    .collect();
+                let granted =
+                    parse_oauth_scopes(raw).map_err(|e| AppError::new("oauth.invalid_scope", e))?;
+                if let Some(extra) = granted.iter().find(|g| !requested.contains(g)) {
+                    return Err(AppError::new(
+                        "oauth.invalid_scope",
+                        format!(
+                            "granted scope \"{}\" was not requested by the application",
+                            extra.as_str()
+                        ),
+                    ));
+                }
+                Some(format_oauth_scopes(&granted))
+            }
+            None => {
+                if req.granted_scope.is_some() {
+                    return Err(AppError::new(
+                        "rpc.bad_input",
+                        "select at least one scope to grant",
+                    ));
+                }
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     let ok = if req.approve {
         ctx.db
-            .approve_oauth_device_code(&row.id, &user.id, &now_rfc3339())
+            .approve_oauth_device_code(&row.id, &user.id, &now_rfc3339(), granted_scopes.as_deref())
             .await
             .map_err(db_err)?
     } else {
@@ -1690,21 +1773,16 @@ pub async fn authorization_server_metadata() -> Json<serde_json::Value> {
 }
 
 /// `GET /.well-known/oauth-protected-resource` — RFC 9728 resource metadata
-/// for the MCP endpoint (`resource` names what clients will pass as
-/// `resource=` once RFC 8707 support lands on authorize/token).
+/// for the MCP endpoint. `scopes_supported` advertises the first-party set —
+/// clients that omit `scope` resolve to it anyway (see `oauth_default_scopes`).
 pub async fn protected_resource_metadata() -> Json<serde_json::Value> {
     let origin = crate::public_origin::resolve_public_origin();
+    let scopes: Vec<&str> = oxidean_core::FIRST_PARTY_SCOPES.split_whitespace().collect();
     Json(serde_json::json!({
         "resource": format!("{origin}/api/mcp"),
         "authorization_servers": [origin],
         "bearer_methods_supported": ["header"],
-        "scopes_supported": [
-            "repo",
-            "package:read",
-            "package:write",
-            "read:user",
-            "user:email",
-        ],
+        "scopes_supported": scopes,
         "resource_name": "Oxidean MCP",
     }))
 }

@@ -631,3 +631,87 @@ async fn oauth_authorize_requires_verified_user() {
     assert_eq!(v["error"]["code"], "auth.email_unverified");
     let _ = status;
 }
+
+#[tokio::test]
+async fn oauth_consent_scope_narrowing() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!("sqlite:{}", dir.path().join("oauth_narrow.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone()).await;
+
+    let (dev_cookie, _d) = signup_login_verify(&app, &db, "dev@ex.com", "devuser").await;
+    let (user_cookie, _u) = signup_login_verify(&app, &db, "u@ex.com", "uuser").await;
+    let (_id, client_id, secret) = create_app(&app, &dev_cookie).await;
+
+    let authorize = |granted: Option<&str>, approve: bool| {
+        let granted_json = granted
+            .map(|g| format!(r#""granted_scope":"{g}","#))
+            .unwrap_or_default();
+        format!(
+            r#"{{"procedure":"oauthApp.authorize","input":{{"client_id":"{client_id}","redirect_uri":"https://app.example/callback","scope":"repo read:user",{granted_json}"state":"st","approve":{approve}}}}}"#
+        )
+    };
+
+    // Deny short-circuits — granted_scope is never validated on denial.
+    let (status, v) = rpc_json(&app, &authorize(Some("bogus-scope"), false), &user_cookie).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["ok"], true, "{v}");
+    let to = v["data"]["redirect_to"].as_str().unwrap();
+    assert_eq!(query_param(to, "error").as_deref(), Some("access_denied"));
+
+    // Granted subset mints a token carrying only the kept scopes.
+    let (status, v) = rpc_json(&app, &authorize(Some("repo"), true), &user_cookie).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["ok"], true, "{v}");
+    let to = v["data"]["redirect_to"].as_str().unwrap();
+    let code = query_param(to, "code").expect("code");
+    let (status, v) = exchange_code(&app, &code, &client_id, &secret).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["scope"], "repo", "{v}");
+
+    // Superset (scope not requested) → oauth.invalid_scope.
+    let (_s, v) = rpc_json(&app, &authorize(Some("repo workflow"), true), &user_cookie).await;
+    assert_eq!(v["ok"], false, "{v}");
+    assert_eq!(v["error"]["code"], "oauth.invalid_scope", "{v}");
+
+    // Unknown scope name → oauth.invalid_scope.
+    let (_s, v) = rpc_json(&app, &authorize(Some("bogus-scope"), true), &user_cookie).await;
+    assert_eq!(v["ok"], false, "{v}");
+    assert_eq!(v["error"]["code"], "oauth.invalid_scope", "{v}");
+
+    // Explicitly empty grant → rpc.bad_input.
+    let (_s, v) = rpc_json(&app, &authorize(Some(""), true), &user_cookie).await;
+    assert_eq!(v["ok"], false, "{v}");
+    assert_eq!(v["error"]["code"], "rpc.bad_input", "{v}");
+
+    // No granted_scope → full requested set (backward compat).
+    let (_s, v) = rpc_json(&app, &authorize(None, true), &user_cookie).await;
+    assert_eq!(v["ok"], true, "{v}");
+    let to = v["data"]["redirect_to"].as_str().unwrap();
+    let code = query_param(to, "code").expect("code");
+    let (status, v) = exchange_code(&app, &code, &client_id, &secret).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["scope"], "repo read:user", "{v}");
+
+    // Scope-less authorize resolves to the full first-party set.
+    let (status, v) = rpc_json(
+        &app,
+        &format!(
+            r#"{{"procedure":"oauthApp.authorizeInfo","input":{{"client_id":"{client_id}","redirect_uri":"https://app.example/callback"}}}}"#
+        ),
+        &user_cookie,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    let scopes = v["data"]["scopes"].as_array().unwrap();
+    assert!(
+        scopes.len() >= 10,
+        "scope-less authorize should resolve the first-party set — {scopes:?}"
+    );
+    let names: Vec<&str> = scopes.iter().filter_map(|s| s.as_str()).collect();
+    for want in ["repo", "workflow", "delete_repo", "package:write"] {
+        assert!(names.contains(&want), "missing {want} in {names:?}");
+    }
+}

@@ -7,8 +7,8 @@ import {
 } from "@oxidean/api-client";
 import { useEffect, useState } from "octane";
 import { AppPage } from "@/components/app-page";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { apiClient } from "@/lib/api-client";
 import { useSearchString } from "@/lib/pathname.tsrx";
 import { fetchOAuthAuthorizeInfo, fetchSessionMe } from "@/lib/ssr-auth";
@@ -21,6 +21,7 @@ type ConsentSearch = {
   response_type?: string;
   scope?: string;
   state?: string;
+  resource?: string;
 };
 
 export type ConsentLoaderData =
@@ -48,6 +49,7 @@ function parseConsentSearch(params: URLSearchParams): ConsentSearch {
     response_type: s("response_type"),
     scope: s("scope"),
     state: s("state"),
+    resource: s("resource"),
   };
 }
 
@@ -99,6 +101,8 @@ function OAuthConsentContent() @{
   const loaderData = consentQ.data;
   const [pending, setPending] = useState<"approve" | "deny" | null>(null);
   const [error, setError] = useState("");
+  // Scopes the user unchecked — default is the full requested set.
+  const [unchecked, setUnchecked] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (loaderData?.kind === "unauthenticated") {
@@ -106,8 +110,18 @@ function OAuthConsentContent() @{
     }
   }, [loaderData]);
 
+  function toggleScope(scope: string, checked: boolean) {
+    setUnchecked((prev) => {
+      const next = new Set(prev);
+      if (checked) next.delete(scope);
+      else next.add(scope);
+      return next;
+    });
+  }
+
   async function decide(approve: boolean) {
     if (pending || loaderData?.kind !== "ready") return;
+    const granted = loaderData.info.scopes.filter((s) => !unchecked.has(s));
     setError("");
     setPending(approve ? "approve" : "deny");
     try {
@@ -115,6 +129,7 @@ function OAuthConsentContent() @{
         client_id: loaderData.info.client_id,
         redirect_uri: loaderData.info.redirect_uri,
         scope: search.scope,
+        granted_scope: approve ? granted.join(" ") : undefined,
         state: search.state,
         approve,
       });
@@ -156,19 +171,50 @@ function OAuthConsentContent() @{
                   : loaderData.info.app_name + " wants to act on your behalf.") as string
               }
             </p>
+            @if (search.resource?.endsWith("/api/mcp")) {
+              <p className="mt-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-[13px] text-muted-foreground">
+                This grant targets the Oxidean MCP endpoint — uncheck any capability the
+                integration shouldn't have.
+              </p>;
+            }
             <p className="mt-4 text-[13px] font-semibold uppercase tracking-wide text-muted-foreground">
               This application will be able to
             </p>
             <ul className="mt-2 flex flex-col gap-2">
               @for (const scope of loaderData.info.scopes; key scope) {
-                <li className="flex items-center gap-2 text-[14px] text-foreground">
-                  <Badge variant="outline">{scope as string}</Badge>
-                  <span>
-                    {scopeDescription(loaderData.info.scope_details, scope) as string}
-                  </span>
+                <li className="flex items-start gap-3 text-[14px] text-foreground">
+                  <label className="flex cursor-pointer items-start gap-3">
+                    <Checkbox
+                      checked={!unchecked.has(scope)}
+                      disabled={pending !== null}
+                      aria-label={scope as string}
+                      data-testid={"oauth-scope-" + scope}
+                      onCheckedChange={(checked) =>
+                        toggleScope(scope, checked === true)
+                      }
+                    />
+                    <span className="flex flex-col gap-0.5">
+                      <span className="font-mono text-[13px]">{scope as string}</span>
+                      <span className="text-[13px] text-muted-foreground">
+                        {
+                          scopeDescription(
+                            loaderData.info.scope_details,
+                            scope,
+                          ) as string
+                        }
+                      </span>
+                    </span>
+                  </label>
                 </li>;
               }
             </ul>
+            @if (
+              loaderData.info.scopes.every((s) => unchecked.has(s))
+            ) {
+              <p className="mt-3 text-[13px] text-muted-foreground">
+                Select at least one scope, or deny the request.
+              </p>;
+            }
             <p className="mt-4 break-all font-mono text-[12px] text-muted-foreground">
               {"Redirecting to " + loaderData.info.redirect_uri}
             </p>
@@ -180,7 +226,9 @@ function OAuthConsentContent() @{
             <div className="mt-6 flex flex-wrap gap-3">
               <Button
                 type="button"
-                disabled={pending !== null}
+                disabled={
+                  pending !== null || loaderData.info.scopes.every((s) => unchecked.has(s))
+                }
                 onClick={() => void decide(true)}
                 data-testid="oauth-consent-approve"
               >

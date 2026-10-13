@@ -90,25 +90,29 @@ failures only warn). Pass `--no-skill-refresh` to skip that step.
 
 The API serves every `ox-{rust-target-triple}` file found in
 `OXIDEAN_CLI_DIST_DIR` (default `/usr/local/share/oxidean-cli`). At image
-build time the Dockerfile always cargo-builds the server's own platform as a
-host-only fallback. When `OXIDEAN_CLI_DIST_URL` is **non-empty**, it fetches
-the full flat matrix (`ox-targets.txt` + every `ox-{triple}` + `.sha256`,
-plus `SOURCE_COMMIT`) and **overwrites** the host triple from that feed so
-staged digests match the release (required by the ox CLI image-matrix job).
-The Dockerfile **defaults** to this product's rolling `ox-dist` URL so
-Cloud/Railway images (including PR environments) stage the matrix without a
-manual apply; Compose and CI pass an empty build-arg for host-only. When the
-URL is set, fetch is **fail-closed** (retries, then fail the image build).
+build time the Dockerfile always cargo-builds the server's own platform —
+with the default **empty** `OXIDEAN_CLI_DIST_URL`, that host binary is all a
+deploy serves, and it is always the same commit the image was built from.
+When `OXIDEAN_CLI_DIST_URL` is **non-empty**, the build fetches the full flat
+matrix (`ox-targets.txt` + every `ox-{triple}` + `.sha256`, plus
+`SOURCE_COMMIT`) and **overwrites** the host triple from that feed so staged
+digests match the release (required by the ox CLI image-matrix job); the
+fetch is **fail-closed** (retries, then fail the image build).
 `OXIDEAN_CLI_DIST_BUST` is a Docker build-arg that invalidates only the
 matrix-fetch layer so staging can re-pull `ox-dist` after a same-commit
-redeploy. Extra targets can be dropped into the dist dir by hand:
+redeploy. `OXIDEAN_SOURCE_COMMIT` records the built commit into
+`SOURCE_COMMIT` on host-only builds — Railway injects
+`RAILWAY_GIT_COMMIT_SHA` automatically, Compose/self-hosts can pass
+`OXIDEAN_SOURCE_COMMIT=$(git rev-parse HEAD)`. Extra targets can be dropped
+into the dist dir by hand:
 
 ```text
 /usr/local/share/oxidean-cli/
   ox-x86_64-unknown-linux-gnu
   ox-aarch64-apple-darwin
   ox-x86_64-pc-windows-msvc
-  SOURCE_COMMIT          # git SHA of the matrix feed (required when URL is set)
+  SOURCE_COMMIT          # git SHA (feed's when URL set; OXIDEAN_SOURCE_COMMIT
+                         # or RAILWAY_GIT_COMMIT_SHA on host-only builds)
 ```
 
 `GET /cli/latest` reports the API package `version`, each target’s
@@ -119,8 +123,8 @@ sha256/size, and `dist_commit` when `SOURCE_COMMIT` is present.
 #### Oxidean Cloud (Railway / app.oxidean.dev)
 
 Cloud IaC sets `OXIDEAN_CLI_DIST_URL` to this product’s rolling release
-`https://github.com/oxidean/oxidean/releases/download/ox-dist` so the API
-image stages the full matrix automatically:
+`https://github.com/oxidean/oxidean/releases/download/ox-dist` on **staging
+and production only**, so those API images stage the full matrix:
 
 1. `.github/workflows/ox-cli.yml` refreshes **`ox-dist`** on every successful
    run on `main` (and on `v*` tags), including `SOURCE_COMMIT`.
@@ -129,16 +133,22 @@ image stages the full matrix automatically:
    re-runs even when the git SHA is unchanged.
 3. Production promote rebuilds `api` with the same Cloud build-arg.
 
+**Preview / PR environments leave `OXIDEAN_CLI_DIST_URL` unset** — they stage
+the just-built host `ox`, so a PR's `/cli/bin` serves that PR's own CLI and
+`GET /cli/latest` reports the built commit (`RAILWAY_GIT_COMMIT_SHA` →
+`SOURCE_COMMIT`). Trade-off: preview serves linux-amd64 only; verify
+darwin/windows binaries against staging or the `ox-dist` release.
+
 Confirm with `GET /cli/latest` (darwin/windows listed) before asking users to
 re-run the installer.
 
 #### Self-hosted
 
-Compose passes an empty build-arg (host-only). For a bare `docker build`,
-pass `--build-arg OXIDEAN_CLI_DIST_URL=` to skip the upstream default, or
-point the arg at **your** flat artifact feed (same layout as `ox-dist`) if
-you publish a multi-arch matrix for your fork/deployment. Dropping files
-into `OXIDEAN_CLI_DIST_DIR` at runtime also works.
+Compose passes an empty build-arg (host-only, same as the Dockerfile
+default). Point `--build-arg OXIDEAN_CLI_DIST_URL=` at **your** flat artifact
+feed (same layout as `ox-dist`) if you publish a multi-arch matrix for your
+fork/deployment. Dropping files into `OXIDEAN_CLI_DIST_DIR` at runtime also
+works.
 
 > **Distribution polish backlog:** macOS binaries ship unsigned today —
 > Gatekeeper will flag them on first run (`xattr -d com.apple.quarantine` or

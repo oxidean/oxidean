@@ -61,12 +61,14 @@ const WWW_AUTH: &str = r#"Bearer realm="Oxidean MCP""#;
 
 /// `WWW-Authenticate` challenge — carries the RFC 9728 `resource_metadata`
 /// pointer so OAuth-capable MCP clients can discover the authorization server
-/// off a bare 401. Falls back to the bare realm when the resolved origin can't
-/// form a header value.
+/// off a bare 401, plus the RFC 6750 `scope` hint naming the token's needed
+/// capability set for clients that retry with an explicit scope. Falls back
+/// to the bare realm when the resolved origin can't form a header value.
 fn www_authenticate() -> HeaderValue {
     let challenge = format!(
-        r#"Bearer realm="Oxidean MCP", resource_metadata="{}/.well-known/oauth-protected-resource""#,
+        r#"Bearer realm="Oxidean MCP", resource_metadata="{}/.well-known/oauth-protected-resource", scope="{}""#,
         crate::public_origin::resolve_public_origin().trim_end_matches('/'),
+        oxidean_core::FIRST_PARTY_SCOPES,
     );
     HeaderValue::from_str(&challenge).unwrap_or_else(|_| HeaderValue::from_static(WWW_AUTH))
 }

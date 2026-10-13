@@ -323,7 +323,106 @@ async fn device_code_scope_validation() {
     let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(v["error"], "invalid_scope");
 
-    // Empty scope → default repo.
+    // Empty scope → first-party set (approver can narrow on the device page).
     let grant = request_grant(&app, "").await;
     assert!(grant["device_code"].as_str().unwrap().len() > 8);
+    let (cookie, _uid) =
+        signup_login_verify(&app, &db, "scopes@ex.com", "scopeuser").await;
+    let user_code = grant["user_code"].as_str().unwrap();
+    let (status, v) = rpc_json(
+        &app,
+        &format!(
+            r#"{{"procedure":"oauth.deviceInfo","input":{{"user_code":"{user_code}"}}}}"#
+        ),
+        &cookie,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    let scopes = v["data"]["scopes"].as_array().unwrap();
+    assert!(
+        scopes.len() >= 10,
+        "scope-less grant should resolve the first-party set — {scopes:?}"
+    );
+}
+
+#[tokio::test]
+async fn device_approval_scope_narrowing() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!("sqlite:{}", dir.path().join("oauth_device_narrow.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone()).await;
+    let (cookie, _uid) = signup_login_verify(&app, &db, "dev@ex.com", "devuser").await;
+
+    let device_authorize = |user_code: &str, granted: Option<&str>, approve: bool| {
+        let granted_json = granted
+            .map(|g| format!(r#""granted_scope":"{g}","#))
+            .unwrap_or_default();
+        format!(
+            r#"{{"procedure":"oauth.deviceAuthorize","input":{{"user_code":"{user_code}",{granted_json}"approve":{approve}}}}}"#
+        )
+    };
+
+    // Approver keeps a subset → minted PAT carries only the kept scopes.
+    let grant = request_grant(&app, "repo workflow delete_repo").await;
+    let device_code = grant["device_code"].as_str().unwrap().to_string();
+    let user_code = grant["user_code"].as_str().unwrap().to_string();
+    let (status, v) = rpc_json(
+        &app,
+        &device_authorize(&user_code, Some("repo workflow"), true),
+        &cookie,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["ok"], true, "{v}");
+    let (status, v) = poll(&app, &device_code).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["scope"], "repo workflow", "{v}");
+
+    // Superset (scope not in the grant's request) → oauth.invalid_scope.
+    let grant = request_grant(&app, "repo").await;
+    let user_code = grant["user_code"].as_str().unwrap().to_string();
+    let (_s, v) = rpc_json(
+        &app,
+        &device_authorize(&user_code, Some("repo workflow"), true),
+        &cookie,
+    )
+    .await;
+    assert_eq!(v["ok"], false, "{v}");
+    assert_eq!(v["error"]["code"], "oauth.invalid_scope", "{v}");
+
+    // Unknown scope name → oauth.invalid_scope.
+    let (_s, v) = rpc_json(
+        &app,
+        &device_authorize(&user_code, Some("bogus-scope"), true),
+        &cookie,
+    )
+    .await;
+    assert_eq!(v["ok"], false, "{v}");
+    assert_eq!(v["error"]["code"], "oauth.invalid_scope", "{v}");
+
+    // Empty granted string → rpc.bad_input.
+    let (_s, v) = rpc_json(&app, &device_authorize(&user_code, Some(""), true), &cookie).await;
+    assert_eq!(v["ok"], false, "{v}");
+    assert_eq!(v["error"]["code"], "rpc.bad_input", "{v}");
+
+    // Deny ignores granted_scope entirely (bad value does not block denial).
+    let (_s, v) = rpc_json(
+        &app,
+        &device_authorize(&user_code, Some("bogus-scope"), false),
+        &cookie,
+    )
+    .await;
+    assert_eq!(v["ok"], true, "{v}");
+
+    // Un-narrowed approve keeps the requested set.
+    let grant = request_grant(&app, "repo package:read").await;
+    let device_code = grant["device_code"].as_str().unwrap().to_string();
+    let user_code = grant["user_code"].as_str().unwrap().to_string();
+    let (_s, v) = rpc_json(&app, &device_authorize(&user_code, None, true), &cookie).await;
+    assert_eq!(v["ok"], true, "{v}");
+    let (status, v) = poll(&app, &device_code).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert_eq!(v["scope"], "repo package:read", "{v}");
 }

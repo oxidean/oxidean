@@ -118,7 +118,7 @@ IaC sets public browser/SSH advertise vars from the **gateway** domain (not `pre
 | `OXIDEAN_WEB_BEHIND_PROXY` (web) | `1` — the gateway sanitizes `X-Forwarded-*`, so `oxidean-web` trusts the edge's chain |
 | `OXIDEAN_AUTO_MIGRATE` | `true` on all environments (including production) |
 | `OXIDEAN_PROTECTION_HELPER` | `/usr/local/bin/oxidean-protection-hook` (API image) |
-| `OXIDEAN_CLI_DIST_URL` (api) | `https://github.com/oxidean/oxidean/releases/download/ox-dist` — Docker **build-arg** (same as Dockerfile default). Stages this product's rolling `ox-dist` matrix so `/cli/bin` serves macOS/Windows/etc. Compose/CI override empty for host-only. When set, image build fail-closes if the matrix cannot be fetched. |
+| `OXIDEAN_CLI_DIST_URL` (api) | `https://github.com/oxidean/oxidean/releases/download/ox-dist` on **staging/production only** — Docker **build-arg** (Dockerfile default is empty). Stages this product's rolling `ox-dist` matrix so `/cli/bin` serves macOS/Windows/etc. Preview / PR envs leave it unset → same-commit host `ox` only, with `RAILWAY_GIT_COMMIT_SHA` written to `SOURCE_COMMIT` for a truthful `dist_commit`. When set, image build fail-closes if the matrix cannot be fetched. |
 | `OXIDEAN_CLI_DIST_BUST` (api) | Set by `scripts/railway-staging-api-redeploy.sh` (not IaC). Docker **build-arg** that busts the ox-dist fetch layer after rolling-release refresh. |
 
 ### ox CLI multi-arch matrix (issue #125)
@@ -127,7 +127,7 @@ Cloud steady state is automatic — no per-release tag ritual:
 
 1. Every successful [`.github/workflows/ox-cli.yml`](../.github/workflows/ox-cli.yml) run on `main` refreshes the rolling GitHub Release **`ox-dist`** (`ox-targets.txt` + `ox-*` + `.sha256` + `SOURCE_COMMIT`).
 2. That job redeploys staging `api` via [`scripts/railway-staging-api-redeploy.sh`](../scripts/railway-staging-api-redeploy.sh) (`RAILWAY_API_TOKEN` or staging-scoped `RAILWAY_TOKEN`; skipped when absent).
-3. Cloud IaC sets `OXIDEAN_CLI_DIST_URL` → `ox-dist`. The Dockerfile fetches at image-build time (retries, fail-closed when URL is set). Staging redeploy upserts `OXIDEAN_CLI_DIST_BUST` then redeploys so the fetch layer refreshes. Production promote rebuilds with the same URL.
+3. Cloud IaC sets `OXIDEAN_CLI_DIST_URL` → `ox-dist` on **staging/production** only. The Dockerfile fetches at image-build time (retries, fail-closed when URL is set). Staging redeploy upserts `OXIDEAN_CLI_DIST_BUST` then redeploys so the fetch layer refreshes. Production promote rebuilds with the same URL. Preview / PR envs keep the arg unset → they serve the same-commit host `ox` (linux-amd64 only).
 4. Verify: `GET …/cli/latest` lists darwin/windows (and may include `dist_commit`); macOS `install.sh` succeeds.
 
 Self-hosted images leave the build-arg empty (Compose default) or point at **their** artifact feed — never require upstream Oxidean's `ox-dist`. Optional `v*` tags still create product releases. Details: [docs/CLI.md](../docs/CLI.md).

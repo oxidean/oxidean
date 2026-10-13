@@ -99,7 +99,7 @@ const HELP: &[(&str, &str)] = &[
     ("auth switch", "ox auth switch [<instance-url>]\n\nChanges the default instance used when neither --instance nor\nOXIDEAN_INSTANCE is set. With no argument, lists logged-in instances and\nprompts for one (TTY only)."),
     ("auth login", "ox auth login --instance <url> [--web [--scopes <list>] | --token <pat> | --token-stdin]\n\n--web runs the RFC 8628 device flow: prints a one-time code, opens the\ninstance's /oauth/device page, and polls until you approve or deny.\n--scopes <list> (comma or space separated) picks the scopes the minted\ntoken carries; the default covers the full CLI surface. With no token\nflag and no --web, a piped stdin is used as the token; on a TTY an\ninteractive picker offers browser or token sign-in. The token lives in\nthe OS keyring when one is available (config.json fallback), and the\ninstance becomes the default."),
     ("auth status", "ox auth status\n\nCalls auth.me on the resolved instance and prints the login; when the\ncredential is a PAT it also shows the token's name, scopes, expiry,\nand where it's stored (keyring or config file)."),
-    ("auth refresh", "ox auth refresh [--scopes <list>] [--reset-scopes]\n\nMints a fresh CLI token through the browser device grant and self-\nrevokes the old one. With no flags the new token keeps the current\nscopes; --reset-scopes returns to the CLI default set. Only refreshes\nstored logins — a token supplied via OXIDEAN_TOKEN is env-owned and\ncannot be refreshed here."),
+    ("auth refresh", "ox auth refresh [--scopes <list>] [--keep-scopes]\n\nMints a fresh CLI token through the browser device grant and self-\nrevokes the old one. With no flags the new token gets the full\nfirst-party scope set; --keep-scopes carries the current token's\nscopes forward (--reset-scopes is accepted as a no-op alias for the\ndefault). Only refreshes stored logins — a token supplied via\nOXIDEAN_TOKEN is env-owned and cannot be refreshed here."),
     ("auth revoke", "ox auth revoke\n\nRevokes the current PAT on the server (self-revoke) and removes the\nlocal credential. Equivalent to deleting the token at\n{instance}/settings/tokens for the token you're logged in with."),
     ("auth setup-git", "ox auth setup-git\n\nRegisters `ox` as the git credential helper for the resolved instance\nhost: git config credential.https://<host>.helper '!ox auth\ngit-credential'. After this, `git clone`/`fetch`/`push` over HTTPS\nauthenticate with your stored ox token."),
     ("auth logout", "ox auth logout\n\nDrops the stored token for the resolved instance (config file edit —\nno network call)."),
@@ -273,11 +273,12 @@ pub enum Command {
     /// `auth refresh` — mint a fresh CLI token through the device grant and
     /// self-revoke the old one (gh `auth refresh` analog).
     AuthRefresh {
-        /// `--scopes <list>` — scopes for the new token; default keeps the
-        /// current token's scopes.
+        /// `--scopes <list>` — scopes for the new token.
         scopes: Option<String>,
-        /// `--reset-scopes` — drop stored scopes back to the CLI default set.
-        reset_scopes: bool,
+        /// `--keep-scopes` — carry the current token's scopes forward
+        /// instead of minting the full first-party set. `--reset-scopes`
+        /// is also accepted (reset is the default — compat no-op).
+        keep_scopes: bool,
     },
     /// `auth revoke` — revoke the current stored token server-side and drop
     /// the local credential.
@@ -1466,14 +1467,23 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
             }
         }
         ("auth", "refresh", "") => {
-            let f = scan(tail, &["--scopes"], &["--reset-scopes"], &[])?;
+            // `--reset-scopes` stays accepted for compat — reset is now the
+            // default, so the flag is a no-op alias.
+            let f = scan(tail, &["--scopes"], &["--reset-scopes", "--keep-scopes"], &[])?;
             expect_no_positionals(&f, "auth refresh")?;
-            if f.values.contains_key("--scopes") && f.bools.contains("--reset-scopes") {
-                return Err(usage("--scopes and --reset-scopes are exclusive"));
+            if f.values.contains_key("--scopes")
+                && (f.bools.contains("--reset-scopes") || f.bools.contains("--keep-scopes"))
+            {
+                return Err(usage(
+                    "--scopes is exclusive with --keep-scopes/--reset-scopes",
+                ));
+            }
+            if f.bools.contains("--keep-scopes") && f.bools.contains("--reset-scopes") {
+                return Err(usage("--keep-scopes and --reset-scopes are exclusive"));
             }
             Command::AuthRefresh {
                 scopes: f.values.get("--scopes").cloned(),
-                reset_scopes: f.bools.contains("--reset-scopes"),
+                keep_scopes: f.bools.contains("--keep-scopes"),
             }
         }
         ("auth", "revoke", "") => {
