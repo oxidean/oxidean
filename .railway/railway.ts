@@ -78,11 +78,11 @@ export default defineRailway((ctx) => {
       // Track gateway public domain (PR Environments get unique hosts; do not preserve).
       OXIDEAN_PUBLIC_ORIGIN: "https://${{gateway.RAILWAY_PUBLIC_DOMAIN}}",
       OXIDEAN_CORS_ORIGINS: "https://${{gateway.RAILWAY_PUBLIC_DOMAIN}}",
-      // Build-arg for crates/oxidean-api/Dockerfile: stage the full ox matrix from
-      // the rolling GitHub Release `ox-dist` (refreshed on every successful ox
-      // CLI run on main). Railway matches ARG OXIDEAN_CLI_DIST_URL. The
-      // Dockerfile defaults to the same URL and fail-softs if assets are missing.
-      // See docs/CLI.md § Cloud operators and issue #125.
+      // Cloud-only build-arg: stage the full ox matrix from this product's
+      // rolling `ox-dist` GitHub Release (refreshed on main by ox-cli.yml).
+      // Dockerfile default is empty (self-host host-only); Railway matches
+      // ARG OXIDEAN_CLI_DIST_URL. Fetch fail-softs if assets are missing.
+      // See docs/CLI.md § Cloud / self-host and issue #125.
       OXIDEAN_CLI_DIST_URL:
         "https://github.com/oxidean/oxidean/releases/download/ox-dist",
       OXIDEAN_ADMIN_EMAIL: preserve(),

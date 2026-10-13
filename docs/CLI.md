@@ -62,17 +62,23 @@ cargo install --path crates/oxidean-cli   # optional: installs `ox`
 
 ## Updating
 
-`ox` can replace itself with the binary the configured instance serves — the
-CLI version tracks the server version, so updating keeps them in lockstep:
+`ox self-update` replaces this binary with **the build the configured
+instance currently stages** under `/cli/bin` — not a global channel:
 
 ```bash
 ox self-update
 ```
 
-The command fetches `{instance}/cli/latest`, compares the advertised version
-to the running build, downloads `ox-{your-target}` and its `.sha256`, verifies
-the checksum, and swaps the executable in place. When the instance has no
-artifact for your platform it says so and points at the installer instead.
+It fetches `{instance}/cli/latest`, compares the advertised workspace
+`version` **and** the sha256 for your platform to the running executable,
+downloads `ox-{your-target}` when either differs, verifies the checksum, and
+swaps in place. Same semver with a rebuilt matrix still refreshes the binary.
+When the instance has no artifact for your platform it says so and points at
+the installer instead.
+
+RPC compatibility is separate: `system.manifest` (`min_cli_version`,
+procedures, protocol) — see [Instance compatibility](#instance-compatibility-capability-manifest)
+below. Dist lockstep is “match this instance’s staged bytes.”
 
 After a successful swap, `ox` refreshes any installed agent skills — every
 existing `ox/SKILL.md` it finds under project or global harness dirs is
@@ -84,43 +90,48 @@ failures only warn). Pass `--no-skill-refresh` to skip that step.
 
 The API serves every `ox-{rust-target-triple}` file found in
 `OXIDEAN_CLI_DIST_DIR` (default `/usr/local/share/oxidean-cli`). At image
-build time the Dockerfile stages the server's own platform, then — when
-`OXIDEAN_CLI_DIST_URL` is non-empty — fetches the full matrix
-(`ox-targets.txt` + per-target binaries and `.sha256` digests). The default
-URL is the rolling GitHub Release
-`https://github.com/oxidean/oxidean/releases/download/ox-dist`. Pass an empty
-build-arg (`OXIDEAN_CLI_DIST_URL=`) for airgapped / host-only images. Fetch
-is fail-soft (retries, then warn and keep host-only) so a missing release
-never fails the image build. Extra targets can always be dropped into the
-dist dir by hand:
+build time the Dockerfile always stages the server's own platform (built from
+the same commit as the API). When `OXIDEAN_CLI_DIST_URL` is **non-empty**, it
+also fetches a flat matrix (`ox-targets.txt` + per-target binaries /
+`.sha256`, plus optional `SOURCE_COMMIT`). The build-arg **defaults to
+empty** (host-only). Fetch is fail-soft (retries, then warn and keep
+host-only). Extra targets can be dropped into the dist dir by hand:
 
 ```text
 /usr/local/share/oxidean-cli/
   ox-x86_64-unknown-linux-gnu
   ox-aarch64-apple-darwin
   ox-x86_64-pc-windows-msvc
+  SOURCE_COMMIT          # optional provenance (git SHA of the matrix feed)
 ```
 
-`GET /cli/latest` reports the version (the API package version) and the
-sha256/size of every target found; `/cli/bin/{file}` serves artifacts and
-digests unauthenticated so installs work before `ox auth login` exists.
+`GET /cli/latest` reports the API package `version`, each target’s
+sha256/size, and `dist_commit` when `SOURCE_COMMIT` is present.
+`/cli/bin/{file}` serves artifacts unauthenticated so installs work before
+`ox auth login` exists.
 
-#### Cloud operators (Railway / app.oxidean.dev)
+#### Oxidean Cloud (Railway / app.oxidean.dev)
 
-The instance only serves what was staged into the API image. On Oxidean Cloud
-that is automatic:
+Cloud IaC sets `OXIDEAN_CLI_DIST_URL` to this product’s rolling release
+`https://github.com/oxidean/oxidean/releases/download/ox-dist` so the API
+image stages the full matrix automatically:
 
-1. `.github/workflows/ox-cli.yml` refreshes the rolling **`ox-dist`** release
-   on every successful run on `main` (and on `v*` tags).
-2. The same job redeploys staging `api` so `/cli` picks up the new matrix
+1. `.github/workflows/ox-cli.yml` refreshes **`ox-dist`** on every successful
+   run on `main` (and on `v*` tags), including `SOURCE_COMMIT`.
+2. The job redeploys staging `api`
    (`scripts/railway-staging-api-redeploy.sh`).
-3. Railway IaC and the Dockerfile default both point
-   `OXIDEAN_CLI_DIST_URL` at
-   `https://github.com/oxidean/oxidean/releases/download/ox-dist`.
-4. Production promote rebuilds `api` with that URL — no separate tag ritual.
+3. Production promote rebuilds `api` with the same Cloud build-arg.
 
-Confirm with `GET /cli/latest` (should list `aarch64-apple-darwin` and the
-rest of the matrix) before asking users to re-run the installer.
+Confirm with `GET /cli/latest` (darwin/windows listed) before asking users to
+re-run the installer.
+
+#### Self-hosted
+
+Leave `OXIDEAN_CLI_DIST_URL` empty (Compose default) for host-only staging, or
+point it at **your** flat artifact feed (same layout as `ox-dist`) if you
+publish a multi-arch matrix for your fork/deployment. Do not point a private
+fork at upstream Oxidean’s `ox-dist` unless you intentionally want those
+binaries. Dropping files into `OXIDEAN_CLI_DIST_DIR` at runtime also works.
 
 > **Distribution polish backlog:** macOS binaries ship unsigned today —
 > Gatekeeper will flag them on first run (`xattr -d com.apple.quarantine` or
@@ -350,10 +361,11 @@ GETs `/api/releases/assets/{id}` — both accept `Authorization: Bearer <pat>`.
 
 Before running an RPC-backed command — including `auth status` — `ox` fetches
 `system.manifest` from the instance (public, like `system.health`) with a short
-timeout. The manifest is the server's compatibility contract: which procedures
-its dispatch table knows, its protocol and server versions, optional
+timeout. The manifest is the server's **RPC** compatibility contract: which
+procedures its dispatch table knows, its protocol and server versions, optional
 capabilities (`mcp`, `rest`, `oauth`, `cli_dist`), and the oldest supported
-CLI version.
+CLI version. It does not replace install/`self-update` lockstep to the
+instance's staged `/cli/bin` bytes (see [Updating](#updating)).
 
 - A procedure missing from `procedures` fails fast:
   `command not supported by instance (missing <procedure>)`, exit code 2 —

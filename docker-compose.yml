@@ -43,9 +43,9 @@ services:
     build:
       context: .
       dockerfile: crates/oxidean-api/Dockerfile
-      # Host-only ox staging for Compose; Cloud uses the rolling ox-dist URL
-      # (Dockerfile default / Railway OXIDEAN_CLI_DIST_URL). Override to fetch
-      # the full matrix: OXIDEAN_CLI_DIST_URL=https://github.com/oxidean/oxidean/releases/download/ox-dist
+      # Host-only by default (matches Dockerfile empty ARG). Self-hosts that
+      # publish their own matrix can set OXIDEAN_CLI_DIST_URL to that feed.
+      # Oxidean Cloud sets the product ox-dist URL via Railway IaC only.
       args:
         OXIDEAN_CLI_DIST_URL: ${OXIDEAN_CLI_DIST_URL:-}
     environment:
