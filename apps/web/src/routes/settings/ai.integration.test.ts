@@ -166,7 +166,6 @@ describe("/settings/ai", () => {
       props: {
         mcpInitialHtml:
           '<pre data-language="json" class="shiki"><code><span class="line">ssr-markup</span></code></pre>',
-        mcpInitialTheme: "oxidean-light",
       },
     });
 

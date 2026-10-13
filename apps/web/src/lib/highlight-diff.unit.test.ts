@@ -53,12 +53,28 @@ describe("plainHighlightedDiffLines", () => {
 });
 
 describe("tokensToInlineHtml", () => {
-  it("wraps colored tokens and escapes content", () => {
+  it("emits light-dark() pairs for dual-theme tokens and escapes content", () => {
     const html = tokensToInlineHtml([
-      { content: "<b>", offset: 0, color: "#ff0000", fontStyle: 0 },
-      { content: "x", offset: 3, fontStyle: 0 },
+      {
+        content: "<b>",
+        offset: 0,
+        variants: {
+          light: { color: "#ff0000", fontStyle: 2 },
+          dark: { color: "#00ff00", fontStyle: 2 },
+        },
+      },
+      { content: "x", offset: 3, variants: { light: {}, dark: {} } },
     ]);
-    expect(html).toBe('<span style="color:#ff0000">&lt;b&gt;</span>x');
+    expect(html).toBe(
+      '<span style="color:light-dark(#ff0000,#00ff00);font-weight:bold">&lt;b&gt;</span>x',
+    );
+  });
+
+  it("falls back to the single available variant color", () => {
+    const html = tokensToInlineHtml([
+      { content: "a", offset: 0, variants: { light: { color: "#123456" } } },
+    ]);
+    expect(html).toBe('<span style="color:#123456">a</span>');
   });
 });
 
@@ -68,15 +84,14 @@ describe("highlightDiffLines", { timeout: 60_000 }, () => {
     const lines = parseUnifiedDiffLines(patch);
     const rows = await highlightDiffLines(lines, {
       path: "src/util.ts",
-      theme: "oxidean-dark",
     });
 
     const del = rows.find((r) => r.kind === "del");
     const add = rows.find((r) => r.kind === "add");
     expect(del?.prefix).toBe("-");
     expect(add?.prefix).toBe("+");
-    expect(del?.contentHtml).toMatch(/style="color:/);
-    expect(add?.contentHtml).toMatch(/style="color:/);
+    expect(del?.contentHtml).toMatch(/style="color:light-dark\(/);
+    expect(add?.contentHtml).toMatch(/style="color:light-dark\(/);
     expect(del?.contentHtml).toMatch(/const/);
     expect(add?.contentHtml).not.toMatch(/^\+/);
     // Marker stays outside highlighted HTML.
@@ -87,7 +102,6 @@ describe("highlightDiffLines", { timeout: 60_000 }, () => {
     const lines = parseUnifiedDiffLines("+hello world\n");
     const rows = await highlightDiffLines(lines, {
       path: "notes.txt",
-      theme: "oxidean-light",
     });
     expect(rows[0]?.contentHtml).toBe("hello world");
     expect(rows[0]?.contentHtml).not.toMatch(/style=/);
@@ -98,7 +112,6 @@ describe("highlightDiffLines", { timeout: 60_000 }, () => {
     const lines = parseUnifiedDiffLines(`+${big}\n-${big}\n`);
     const rows = await highlightDiffLines(lines, {
       path: "big.ts",
-      theme: "oxidean-dark",
     });
     expect(rows[0]?.contentHtml).toBe(escapeHtml(big));
     expect(rows[0]?.contentHtml).not.toMatch(/style=/);

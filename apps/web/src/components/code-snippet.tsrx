@@ -1,12 +1,10 @@
 import { useEffect, useState } from "octane";
 import {
-  clientHighlightTheme,
   getHighlighter,
   highlightCode,
   highlightCodeSync,
   languageIdForPath,
   stripTrailingNewline,
-  type HighlightTheme,
 } from "@/lib/highlight";
 
 function escapeHtml(s: string): string {
@@ -24,80 +22,55 @@ function plainHtml(code: string): string {
 type CodeSnippetProps = {
   code: string;
   path: string;
-  /** Pre-rendered Shiki HTML (SSR) — used as-is while it matches the client theme. */
+  /** Pre-rendered Shiki HTML (SSR) — theme-complete markup, used as-is. */
   highlightedHtml?: string | null;
-  /** Theme used for `highlightedHtml` — skip client re-highlight when it matches. */
-  highlightTheme?: HighlightTheme | null;
 };
 
 /**
  * Short code excerpt (e.g. a search hit line) rendered as escaped text — or
- * pre-rendered Shiki HTML — on SSR and upgraded on the client only when the
- * theme mismatches or flips (same MutationObserver approach as BlobViewer).
+ * pre-rendered Shiki HTML — on SSR and upgraded on the client only while the
+ * highlighter is still loading. Highlighted markup is dual-theme via
+ * `light-dark()`, so theme flips need no re-highlight pass.
  */
-export function CodeSnippet({
-  code,
-  path,
-  highlightedHtml = null,
-  highlightTheme = null,
-}: CodeSnippetProps) @{
+export function CodeSnippet({ code, path, highlightedHtml = null }: CodeSnippetProps) @{
   const [html, setHtml] = useState<string>(
     () =>
       highlightedHtml ??
-      highlightCodeSync(code, {
-        lang: languageIdForPath(path),
-        theme: clientHighlightTheme(),
-      }) ??
+      highlightCodeSync(code, { lang: languageIdForPath(path) }) ??
       plainHtml(code),
   );
 
   useEffect(() => {
     let cancelled = false;
-    // Skip the (expensive, all-grammar) client highlighter entirely when the
-    // SSR markup already matches the resolved client theme.
-    let appliedTheme: HighlightTheme | null =
-      highlightedHtml && highlightTheme && clientHighlightTheme() === highlightTheme
-        ? highlightTheme
-        : null;
 
-    if (appliedTheme && highlightedHtml) {
+    if (highlightedHtml) {
       setHtml((prev) => (prev === highlightedHtml ? prev : highlightedHtml));
     } else {
       // Prop change (code/path) — when the highlighter is already resolved,
       // render styled markup synchronously so prop swaps (auth-mode toggles,
       // search-hit pages) never paint a plain-text intermediate frame.
-      const sync = highlightCodeSync(code, {
-        lang: languageIdForPath(path),
-        theme: clientHighlightTheme(),
-      });
+      const sync = highlightCodeSync(code, { lang: languageIdForPath(path) });
       if (sync !== null) {
-        appliedTheme = clientHighlightTheme();
         setHtml((prev) => (prev === sync ? prev : sync));
       } else {
         // Engine still loading — reflect the new content synchronously so a
         // slow or failed highlight never leaves the previous snippet on
-        // screen. SSR markup still beats plain text when it exists.
+        // screen.
         setHtml((prev) => {
-          const next = highlightedHtml ?? plainHtml(code);
+          const next = plainHtml(code);
           return prev === next ? prev : next;
         });
       }
     }
 
     async function run() {
-      const theme = clientHighlightTheme();
-      // Warm the singleton even when SSR markup already matches — later prop
-      // swaps (auth-mode toggles) take the synchronous highlightCodeSync path
-      // and would otherwise paint a plain-text frame on a cold engine.
+      // Warm the singleton even when SSR markup is in place — later prop
+      // swaps take the synchronous highlightCodeSync path.
       await getHighlighter().catch(() => null);
-      if (appliedTheme === theme) return;
+      if (cancelled || highlightedHtml) return;
       try {
-        const out = await highlightCode(code, {
-          lang: languageIdForPath(path),
-          theme,
-        });
+        const out = await highlightCode(code, { lang: languageIdForPath(path) });
         if (cancelled) return;
-        appliedTheme = theme;
         setHtml((prev) => (prev === out ? prev : out));
       } catch {
         /* highlighter unavailable — plainHtml fallback already rendered */
@@ -105,18 +78,10 @@ export function CodeSnippet({
     }
 
     void run();
-    const mo = new MutationObserver(() => {
-      void run();
-    });
-    mo.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["class"],
-    });
     return () => {
       cancelled = true;
-      mo.disconnect();
     };
-  }, [code, path, highlightedHtml, highlightTheme]);
+  }, [code, path, highlightedHtml]);
 
   <div
     className="mt-1 overflow-x-auto font-mono text-[13px] leading-5 text-foreground [&_code]:font-mono [&_pre]:m-0 [&_pre]:bg-transparent! [&_pre]:p-0"

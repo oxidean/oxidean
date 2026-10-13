@@ -4,12 +4,12 @@ import type { RepoBlobResponse } from "@oxidean/api-client";
 import { MarkdownHtml } from "@/components/repo/markdown-body";
 import { buttonVariants } from "@/components/ui/button";
 import {
-  clientHighlightTheme,
   countCodeLines,
+  getHighlighter,
   highlightCode,
+  highlightCodeSync,
   languageIdForPath,
   stripTrailingNewline,
-  type HighlightTheme,
 } from "@/lib/highlight";
 import { isMarkdownPath } from "@/lib/markdown";
 import {
@@ -34,10 +34,8 @@ type BlobViewerProps = {
   blob: RepoBlobResponse;
   /** Write+ on the repo — shows Edit (text files) and Delete (GIT-19). */
   canWrite?: boolean;
-  /** SSR Shiki HTML when available. */
+  /** SSR Shiki HTML when available — theme-complete `light-dark()` markup. */
   highlightedHtml?: string | null;
-  /** Theme used for `highlightedHtml` — skip client re-highlight when it matches. */
-  highlightTheme?: HighlightTheme;
   /** SSR GFM HTML for markdown paths (Preview tab). */
   markdownHtml?: string | null;
 };
@@ -70,7 +68,6 @@ export function BlobViewer({
   blob,
   canWrite = false,
   highlightedHtml = null,
-  highlightTheme = null,
   markdownHtml = null,
 }: BlobViewerProps) @{
   const text = !blob.is_binary && blob.encoding === "utf-8" && blob.content ? blob.content : "";
@@ -79,7 +76,11 @@ export function BlobViewer({
     !!markdownHtml || (!blob.is_binary && blob.encoding === "utf-8" && isMarkdownPath(blob.path));
   const [view, setView] = useState<"preview" | "code">(() => (isMd ? "preview" : "code"));
   const [hl, setHl] = useState<string | null>(
-    () => highlightedHtml ?? (text ? plainCodeHtml(text) : null),
+    () =>
+      highlightedHtml ??
+      (text
+        ? (highlightCodeSync(text, { lang: languageIdForPath(blob.path) }) ?? plainCodeHtml(text))
+        : null),
   );
   const [range, setRange] = useState<{ start: number; end: number } | null>(null);
   const [copied, setCopied] = useState(false);
@@ -113,50 +114,48 @@ export function BlobViewer({
     }
 
     let cancelled = false;
-    let appliedTheme: HighlightTheme | null =
-      highlightedHtml && highlightTheme && clientHighlightTheme() === highlightTheme
-        ? highlightTheme
-        : null;
+    const lang = languageIdForPath(blob.path);
 
-    if (appliedTheme && highlightedHtml) {
+    if (highlightedHtml) {
+      // SSR markup is dual-theme — already correct; keep the engine warm for
+      // later prop swaps and skip the re-highlight pass.
       setHl((prev) => (prev === highlightedHtml ? prev : highlightedHtml));
+      void getHighlighter().catch(() => null);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const sync = highlightCodeSync(blob.content, { lang });
+    if (sync !== null) {
+      setHl((prev) => (prev === sync ? prev : sync));
+    } else {
+      setHl((prev) => {
+        const next = plainCodeHtml(blob.content ?? "");
+        return prev === next ? prev : next;
+      });
     }
 
     async function run() {
-      const theme = clientHighlightTheme();
-      if (appliedTheme === theme) return;
-      const out = await highlightCode(blob.content ?? "", {
-        lang: languageIdForPath(blob.path),
-        theme,
-      });
-      if (cancelled) return;
-      appliedTheme = theme;
-      setHl((prev) => (prev === out ? prev : out));
+      if (sync !== null) {
+        await getHighlighter().catch(() => null);
+        return;
+      }
+      try {
+        const out = await highlightCode(blob.content ?? "", { lang });
+        if (cancelled) return;
+        setHl((prev) => (prev === out ? prev : out));
+      } catch {
+        /* highlighter unavailable — plain fallback already rendered */
+      }
     }
 
     void run();
 
-    const mo = new MutationObserver(() => {
-      void run();
-    });
-    mo.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["class"],
-    });
-
     return () => {
       cancelled = true;
-      mo.disconnect();
     };
-  }, [
-    blob.content,
-    blob.path,
-    blob.is_binary,
-    blob.truncated,
-    blob.encoding,
-    highlightedHtml,
-    highlightTheme,
-  ]);
+  }, [blob.content, blob.path, blob.is_binary, blob.truncated, blob.encoding, highlightedHtml]);
 
   useEffect(() => {
     if (!range || typeof document === "undefined") return;

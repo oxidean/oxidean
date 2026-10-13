@@ -1,19 +1,11 @@
-/**
- * Resolved app theme in-document — client-side replacement for the retired
- * `ssrResolvedTheme` server fn (same localStorage + media-query chain; the
- * middleware now stamps `<html class>` from cookies).
- */
-function resolveDocumentTheme(): "light" | "dark" {
-  return resolveTheme(readThemePreference());
-}
 export type ThemePreference = "system" | "light" | "dark";
 
 export const THEME_STORAGE_KEY = "oxidean-theme";
-/** Cookie mirrors localStorage so SSR can pick oxidean-light vs oxidean-dark. */
+/** Cookie mirrors localStorage so `oxidean-web` can stamp `<html class>`. */
 export const THEME_COOKIE_KEY = "oxidean-theme";
 /**
  * Resolved light/dark after system preference — set by the FOUC boot script so
- * SSR highlighting matches `html.dark` on the next request (and hydrate).
+ * `oxidean-web` stamps `html.dark` correctly on the next request.
  */
 export const THEME_RESOLVED_COOKIE_KEY = "oxidean-color-scheme";
 
@@ -28,53 +20,6 @@ export function resolveTheme(pref: ThemePreference): "light" | "dark" {
   if (pref === "light" || pref === "dark") return pref;
   if (typeof window === "undefined") return "light";
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-}
-
-/**
- * Resolved app theme in-document — client-side replacement for the retired
- * `ssrResolvedTheme` server fn (same localStorage + media-query chain; the
- * middleware now stamps `<html class>` from cookies).
- */
-
-/** Shiki theme matching the document theme (was `resolveSsrHighlightTheme`). */
-export function resolveDocumentHighlightTheme(): "oxidean-light" | "oxidean-dark" {
-  return resolveDocumentTheme() === "dark" ? "oxidean-dark" : "oxidean-light";
-}
-
-/** Parse `oxidean-theme` from a Cookie header (SSR). */
-export function themePreferenceFromCookieHeader(
-  cookieHeader: string | undefined | null,
-): ThemePreference | null {
-  if (!cookieHeader) return null;
-  const match = /(?:^|;\s*)oxidean-theme=(light|dark|system)(?:;|$)/.exec(cookieHeader);
-  return match ? (match[1] as ThemePreference) : null;
-}
-
-/** Parse resolved `oxidean-color-scheme` cookie (SSR highlight alignment). */
-export function resolvedColorSchemeFromCookieHeader(
-  cookieHeader: string | undefined | null,
-): "light" | "dark" | null {
-  if (!cookieHeader) return null;
-  const match = /(?:^|;\s*)oxidean-color-scheme=(light|dark)(?:;|$)/.exec(cookieHeader);
-  return match ? (match[1] as "light" | "dark") : null;
-}
-
-/**
- * Resolve light/dark for SSR highlighting.
- * Order: explicit preference cookie → resolved scheme cookie (from boot) →
- * Sec-CH-Prefers-Color-Scheme → light.
- */
-export function resolveThemeForSsr(
-  pref: ThemePreference | null,
-  prefersColorScheme?: string | null,
-  resolvedFromBoot?: "light" | "dark" | null,
-): "light" | "dark" {
-  if (pref === "light" || pref === "dark") return pref;
-  if (resolvedFromBoot === "light" || resolvedFromBoot === "dark") return resolvedFromBoot;
-  const ch = prefersColorScheme?.trim().toLowerCase();
-  if (ch === "dark") return "dark";
-  if (ch === "light") return "light";
-  return "light";
 }
 
 function persistThemeCookie(pref: ThemePreference) {
@@ -95,8 +40,8 @@ export const THEME_OPTIONS: readonly ThemePreference[] = ["system", "light", "da
 
 // Runs in <head> before first paint (D-12). Static literal — never interpolate
 // request data or storage values into this string (T-03-04).
-// Mirrors preference + resolved scheme into cookies so the next SSR request
-// highlights with the same theme hydrate will use (`html.dark`).
+// Mirrors preference + resolved scheme into cookies so `oxidean-web` stamps
+// `html.dark` correctly on the next request.
 export const THEME_BOOT_SCRIPT =
   '(function(){try{var v=localStorage.getItem("oxidean-theme");' +
   'var p=(v==="light"||v==="dark"||v==="system")?v:"system";' +

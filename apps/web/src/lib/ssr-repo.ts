@@ -4,8 +4,7 @@ import {
   type RepoSearchType,
 } from "@oxidean/api-client";
 import { apiClient } from "@/lib/api-client";
-import { highlightCode, languageIdForPath, type HighlightTheme } from "@/lib/highlight";
-import { resolveClientHighlightTheme } from "@/lib/ssr-auth";
+import { highlightCode, languageIdForPath } from "@/lib/highlight";
 import {
   resolvePublicOriginClient,
   resolveSshAdvertiseHost,
@@ -293,13 +292,13 @@ export type SsrRepoSearchResult =
   | {
       ok: true;
       data: Omit<RepoSearchResponse, "hits"> & { hits: SsrRepoSearchHit[] };
-      highlightTheme: HighlightTheme | null;
     }
   | { ok: false; error: { code?: string; message?: string } };
 
 /**
  * `repo.search` + client-side Shiki for code hits — keeps the "highlighted on
- * first paint" behavior without a server pass.
+ * first paint" behavior without a server pass. Markup is dual-theme
+ * (`light-dark()`), so no per-theme tracking is needed.
  */
 export async function fetchRepoSearch(
   data: OwnerName & { type?: string; q?: string },
@@ -314,14 +313,12 @@ export async function fetchRepoSearch(
     return { ok: false, error: res.error };
   }
   try {
-    const theme = resolveClientHighlightTheme();
     const hits = await Promise.all(
       res.data.hits.map(async (hit): Promise<SsrRepoSearchHit> => {
         if (hit.kind !== "code" || !hit.content) return { ...hit };
         try {
           const html = await highlightCode(hit.content, {
             lang: languageIdForPath(hit.path),
-            theme,
           });
           return { ...hit, html };
         } catch {
@@ -329,9 +326,9 @@ export async function fetchRepoSearch(
         }
       }),
     );
-    return { ok: true, data: { ...res.data, hits }, highlightTheme: theme };
+    return { ok: true, data: { ...res.data, hits } };
   } catch {
-    return { ok: true, data: { ...res.data }, highlightTheme: null };
+    return { ok: true, data: { ...res.data } };
   }
 }
 

@@ -3,7 +3,6 @@ import type { PullDiffFile } from "@oxidean/api-client";
 import { useEffect, useState } from "octane";
 import { DiffPatch } from "@/components/repo/diff-patch";
 import { apiClient } from "@/lib/api-client";
-import { clientHighlightTheme } from "@/lib/highlight";
 import {
   highlightDiffLines,
   highlightedDiffRowsEqual,
@@ -37,39 +36,17 @@ function SplitDiff(props: { path: string; status: string; patch: string }) @{
     setRows(plainHighlightedDiffLines(lines));
 
     let cancelled = false;
-    let appliedTheme: ReturnType<typeof clientHighlightTheme> | null = null;
 
     async function run() {
-      const theme = clientHighlightTheme();
-      if (appliedTheme === theme) return;
-      const next = await highlightDiffLines(lines, {
-        path: props.path,
-        theme,
-      });
+      const next = await highlightDiffLines(lines, { path: props.path });
       if (cancelled) return;
-      appliedTheme = theme;
       setRows((prev) => (highlightedDiffRowsEqual(prev, next) ? prev : next));
     }
 
     void run();
 
-    if (typeof document === "undefined") {
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    const mo = new MutationObserver(() => {
-      void run();
-    });
-    mo.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["class"],
-    });
-
     return () => {
       cancelled = true;
-      mo.disconnect();
     };
   }, [props.patch, props.path]);
 

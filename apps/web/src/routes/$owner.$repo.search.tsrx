@@ -7,7 +7,6 @@ import { RepoLayout } from "@/routes/$owner.$repo.tsrx";
 import { AppPage } from "@/components/app-page";
 import { useState } from "octane";
 import type { RepoSearchType } from "@oxidean/api-client";
-import type { HighlightTheme } from "@/lib/highlight";
 import { fetchRepoSearch, type SsrRepoSearchHit } from "@/lib/ssr-repo";
 import { CodeSnippet } from "@/components/code-snippet";
 import { AppLink } from "@/components/ui/app-link";
@@ -98,7 +97,6 @@ function RepoSearchPageContent() @{
 
   const hits: SsrRepoSearchHit[] = searchQ.data?.data?.hits ?? [];
   const truncated = searchQ.data?.data?.truncated ?? false;
-  const highlightTheme: HighlightTheme | null = searchQ.data?.highlightTheme ?? null;
 
   function go(next: { q?: string; type?: RepoSearchType }) {
     void navigate(
@@ -212,7 +210,6 @@ function RepoSearchPageContent() @{
                         code={hit.content}
                         path={hit.path}
                         highlightedHtml={hit.html ?? null}
-                        highlightTheme={highlightTheme}
                       />
                     </>;
                   }

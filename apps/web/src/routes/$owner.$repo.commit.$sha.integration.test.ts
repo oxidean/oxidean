@@ -26,7 +26,7 @@ vi.mock("@/lib/api-client", () => ({
 
 // Keep the mount in happy-dom: the real helper lazily loads Shiki.
 vi.mock("@/lib/ssr-diff-highlight", () => ({
-  ssrHighlightDiffFiles: vi.fn(async () => ({ theme: null, byPath: {} })),
+  ssrHighlightDiffFiles: vi.fn(async () => ({ byPath: {} })),
 }));
 
 const SHA = "0123456789abcdef0123456789abcdef01234567";

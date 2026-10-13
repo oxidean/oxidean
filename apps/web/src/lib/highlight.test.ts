@@ -22,10 +22,19 @@ describe("highlight", { timeout: 60_000 }, () => {
     expect(themes).toContain("oxidean-dark");
   });
 
+  it("emits both themes as light-dark() pairs — one markup for either scheme", async () => {
+    const html = await highlightCode("const x = 1;", {
+      lang: "typescript",
+    });
+    expect(html).toMatch(/shiki/i);
+    expect(html).toMatch(/data-language="typescript"/);
+    // Keyword `const`: oxidean-light #cf222e / oxidean-dark #ff7b72.
+    expect(html).toMatch(/light-dark\(\s*#cf222e\s*,\s*#ff7b72\s*\)/i);
+  });
+
   it("highlights tsrx source with registered language id", async () => {
     const html = await highlightCode('@if (true) { "ok" }', {
       lang: "tsrx",
-      theme: "oxidean-dark",
     });
     expect(html).toMatch(/shiki/i);
     expect(html).toMatch(/data-language="tsrx"/);
@@ -40,12 +49,12 @@ describe("highlight", { timeout: 60_000 }, () => {
 `;
     const html = await highlightCode(sample, {
       lang: "tsrx",
-      theme: "oxidean-dark",
     });
     expect(html).toMatch(/data-language="tsrx"/);
-    // Tag names are colored distinctly from punctuation (oxidean-dark purple).
-    expect(html).toMatch(/color:#D2A8FF[^"]*">main</);
-    expect(html).toMatch(/color:#D2A8FF[^"]*">h1</);
+    // Tag names are colored distinctly from punctuation — dual-theme purple
+    // pair (light #8250df / dark #d2a8ff).
+    expect(html).toMatch(/color:light-dark\([^)]*#d2a8ff[^)]*\)[^"]*">main</i);
+    expect(html).toMatch(/color:light-dark\([^)]*#d2a8ff[^)]*\)[^"]*">h1</i);
     // @{ statement container is a keyword-colored token.
     expect(html).toMatch(/@\{/);
   });
@@ -54,7 +63,6 @@ describe("highlight", { timeout: 60_000 }, () => {
     expect(languageIdForPath("src/util.ts")).toBe("typescript");
     const html = await highlightCode("const x: number = 1;", {
       lang: languageIdForPath("src/util.ts"),
-      theme: "oxidean-dark",
     });
     expect(html).toMatch(/shiki/i);
     expect(html).toMatch(/language-typescript|typescript/i);
@@ -144,7 +152,7 @@ describe("highlight", { timeout: 60_000 }, () => {
     for (const lang of ["ruby", "go", "kotlin", "terraform"]) {
       expect(loaded, lang).toContain(lang);
     }
-    const html = await highlightCode("puts 1", { lang: "ruby", theme: "oxidean-light" });
+    const html = await highlightCode("puts 1", { lang: "ruby" });
     expect(html).toMatch(/data-language="ruby"/);
   });
 
@@ -156,11 +164,9 @@ describe("highlight", { timeout: 60_000 }, () => {
 
     const withNl = await highlightCode("const x = 1;\n", {
       lang: "typescript",
-      theme: "oxidean-light",
     });
     const withoutNl = await highlightCode("const x = 1;", {
       lang: "typescript",
-      theme: "oxidean-light",
     });
     expect(withNl).toBe(withoutNl);
   });

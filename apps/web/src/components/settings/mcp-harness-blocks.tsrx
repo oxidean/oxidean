@@ -19,19 +19,18 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { mcpHarnessSnippets, type McpAuthVariant } from "@/lib/mcp-harness-snippets";
-import type { HighlightTheme } from "@/lib/highlight";
 
 /**
  * Per-harness MCP config block — pick a client and an auth mode (static token
  * header or client-driven OAuth), get the highlighted file content to paste
  * (JSON, or TOML for Codex). The bearer stays a `<pat>` placeholder.
- * `initialHtml`/`initialTheme` are the SSR-highlighted markup for the default
- * view (first harness + token mode) so first paint ships styled, not plain.
+ * `initialHtml` is the SSR-highlighted markup for the default view (first
+ * harness + token mode) so first paint ships styled, not plain; the markup
+ * is dual-theme `light-dark()`, correct under either color scheme.
  */
 export function McpHarnessBlocks(props: {
   endpoint: string;
   initialHtml?: string | null;
-  initialTheme?: HighlightTheme | null;
 }) @{
   const snippets = mcpHarnessSnippets(props.endpoint);
   const [id, setId] = useState(snippets[0]?.id ?? "");
@@ -159,7 +158,6 @@ export function McpHarnessBlocks(props: {
           code={block.code}
           path={current.file}
           highlightedHtml={isInitialBlock ? (props.initialHtml ?? null) : null}
-          highlightTheme={isInitialBlock ? (props.initialTheme ?? null) : null}
         />
       </div>
     </div>

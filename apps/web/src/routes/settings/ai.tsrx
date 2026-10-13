@@ -8,26 +8,18 @@ import { PageHeader } from "@/components/ui/page-header";
 import { usePageRedirect } from "@/lib/nav.tsrx";
 import { resolvePublicOriginClient } from "@/lib/public-origin";
 import { authSessionQueryOptions } from "@/lib/session-queries";
-import type { HighlightTheme } from "@/lib/highlight";
 
 /** `/settings/ai` — agent-facing integrations: ox skill installs + MCP wiring. */
 export function AiSettingsPage(props: {
   /** SSR-highlighted default MCP snippet (astro frontmatter) — first paint styled. */
   mcpInitialHtml?: string | null;
-  mcpInitialTheme?: HighlightTheme | null;
 }) @{
   <AppPage>
-    <AiSettingsContent
-      mcpInitialHtml={props.mcpInitialHtml ?? null}
-      mcpInitialTheme={props.mcpInitialTheme ?? null}
-    />
+    <AiSettingsContent mcpInitialHtml={props.mcpInitialHtml ?? null} />
   </AppPage>;
 }
 
-function AiSettingsContent(props: {
-  mcpInitialHtml: string | null;
-  mcpInitialTheme: HighlightTheme | null;
-}) @{
+function AiSettingsContent(props: { mcpInitialHtml: string | null }) @{
   const meQ = useQuery(authSessionQueryOptions());
   // Auth gate (formerly loader): anonymous → login.
   usePageRedirect(meQ.data === null || meQ.isError ? "/login?returnTo=/settings/ai" : null);
@@ -158,11 +150,7 @@ function AiSettingsContent(props: {
       <code className="font-mono">&lt;pat&gt;</code> when using a token)
     </p>
     <div className="mt-2">
-      <McpHarnessBlocks
-        endpoint={mcpEndpoint}
-        initialHtml={props.mcpInitialHtml}
-        initialTheme={props.mcpInitialTheme}
-      />
+      <McpHarnessBlocks endpoint={mcpEndpoint} initialHtml={props.mcpInitialHtml} />
     </div>
   </AccountSettingsLayout>;
 }

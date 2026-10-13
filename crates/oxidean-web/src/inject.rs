@@ -7,9 +7,9 @@ use axum::http::HeaderMap;
 
 use crate::session::SessionSignal;
 
-/// `"light"`/`"dark"` after applying the same chain the FOUC boot script +
-/// `resolveThemeForSsr` use: explicit `oxidean-theme` cookie → resolved
-/// `oxidean-color-scheme` cookie → `Sec-CH-Prefers-Color-Site` header → light.
+/// `"light"`/`"dark"` after applying the same chain the FOUC boot script
+/// mirrors into cookies: explicit `oxidean-theme` cookie → resolved
+/// `oxidean-color-scheme` cookie → `Sec-CH-Prefers-Color-Scheme` header → light.
 pub fn resolve_theme(cookie: Option<&str>, sec_ch: Option<&str>) -> &'static str {
     if let Some(c) = cookie {
         if let Some(m) = find_cookie(c, "oxidean-theme") {

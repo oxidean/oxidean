@@ -31,6 +31,9 @@ import { getQueryClient } from "@/lib/query-client";
 
 afterEach(() => {
   cleanup();
+  // Cached query data must not bleed into the next test — the suite mutates
+  // location + mocks per test.
+  getQueryClient().clear();
   searchMock.mockReset();
   repoGetMock.mockReset();
   authMeMock.mockReset();
@@ -73,7 +76,6 @@ beforeEach(() => {
         },
       ],
     },
-    highlightTheme: "oxidean-light",
   });
 });
 
@@ -111,7 +113,12 @@ describe("repo search route (GIT-18 / D-SRCH-02 / D-SRCH-15)", () => {
 
   it("renders empty and truncated states", async () => {
     renderWithQueryClient(RepoSearchPage);
-    expect(await screen.findByTestId("search-truncated")).toBeTruthy();
+    // The Shiki engine loads in the background from earlier mounts — give the
+    // query + render enough budget under CPU pressure.
+    await screen.findByTestId("repo-search-page", undefined, { timeout: 10_000 });
+    expect(
+      await screen.findByTestId("search-truncated", undefined, { timeout: 10_000 }),
+    ).toBeTruthy();
 
     searchMock.mockResolvedValueOnce({
       ok: true,
@@ -123,7 +130,6 @@ describe("repo search route (GIT-18 / D-SRCH-02 / D-SRCH-15)", () => {
         limit: 30,
         hits: [],
       },
-      highlightTheme: "oxidean-light",
     });
     cleanup();
     getQueryClient().clear();
@@ -146,7 +152,6 @@ describe("repo search route (GIT-18 / D-SRCH-02 / D-SRCH-15)", () => {
           { kind: "code", path: "crates/lib.rs", line: 0, content: "" },
         ],
       },
-      highlightTheme: "oxidean-light",
     });
     renderWithQueryClient(RepoSearchPage);
     const link = await screen.findByText("src/main.rs");

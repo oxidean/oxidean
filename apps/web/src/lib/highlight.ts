@@ -1,7 +1,6 @@
 import { LANGUAGES } from "@oxidean/api-client";
 import { createHighlighter, type Highlighter, type ThemeRegistration } from "shiki";
 import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
-import { readThemePreference, resolveTheme } from "@/lib/theme";
 import tsrxGrammar from "./grammars/tsrx.tmLanguage.json";
 import rippleGrammar from "./grammars/ripple.tmLanguage.json";
 
@@ -218,24 +217,11 @@ const oxideanDarkTheme: ThemeRegistration = {
   ],
 };
 
+/** Registered theme names — both emitted in `light-dark()` pairs per token. */
 export const THEMES = {
   light: "oxidean-light",
   dark: "oxidean-dark",
 } as const;
-
-export type HighlightTheme = (typeof THEMES)[keyof typeof THEMES];
-
-/**
- * Resolve oxidean-light / oxidean-dark for client highlighting.
- * Prefer `html.dark` (set by the FOUC boot script) so we match SSR + first paint
- * instead of re-deriving from localStorage/matchMedia and causing a flicker.
- */
-export function clientHighlightTheme(): HighlightTheme {
-  if (typeof document !== "undefined") {
-    return document.documentElement.classList.contains("dark") ? THEMES.dark : THEMES.light;
-  }
-  return resolveTheme(readThemePreference()) === "dark" ? THEMES.dark : THEMES.light;
-}
 
 /** Official TSRX grammar + Shiki embedded langs (oxc-tsrx / tsrx-org pattern). */
 const tsrxLang = {
@@ -314,25 +300,30 @@ export function languageIdForPath(filePath: string): string {
   return "plaintext";
 }
 
-export async function highlightCode(
-  code: string,
-  options: { lang: string; theme?: HighlightTheme },
-): Promise<string> {
+export async function highlightCode(code: string, options: { lang: string }): Promise<string> {
   const highlighter = await getHighlighter();
   return renderHighlighted(highlighter, code, options);
 }
 
+/**
+ * Both themes per token via `light-dark()` — resolves off `color-scheme`
+ * (`:root` light / `.dark` dark), so markup is correct for either theme with
+ * no re-highlight pass and no theme plumbing through props.
+ */
 function renderHighlighted(
   highlighter: Highlighter,
   code: string,
-  options: { lang: string; theme?: HighlightTheme },
+  options: { lang: string },
 ): string {
-  const theme = options.theme ?? THEMES.dark;
   const loaded = highlighter.getLoadedLanguages();
   const lang = loaded.includes(options.lang) ? options.lang : "plaintext";
   // Trailing newline would render as an empty last line without a line number.
   const display = stripTrailingNewline(code);
-  const html = highlighter.codeToHtml(display, { lang, theme });
+  const html = highlighter.codeToHtml(display, {
+    lang,
+    themes: { light: THEMES.light, dark: THEMES.dark },
+    defaultColor: "light-dark()",
+  });
   // Annotate language id for callers/tests — Shiki HTML may omit the lang name.
   return html.replace(/<pre(\s)/, `<pre data-language="${lang}"$1`);
 }
@@ -343,10 +334,7 @@ function renderHighlighted(
  * Lets prop changes render styled markup in the same commit instead of
  * flashing a plain-text intermediate frame.
  */
-export function highlightCodeSync(
-  code: string,
-  options: { lang: string; theme?: HighlightTheme },
-): string | null {
+export function highlightCodeSync(code: string, options: { lang: string }): string | null {
   if (!resolvedHighlighter) return null;
   try {
     return renderHighlighted(resolvedHighlighter, code, options);
