@@ -11,15 +11,22 @@ import { authSessionQueryOptions } from "@/lib/session-queries";
 
 /** `/settings/ai` — agent-facing integrations: ox skill installs + MCP wiring. */
 export function AiSettingsPage(props: {
-  /** SSR-highlighted default MCP snippet (astro frontmatter) — first paint styled. */
+  /** SSR-highlighted default MCP snippets (astro frontmatter) — both auth variants. */
   mcpInitialHtml?: string | null;
+  mcpInitialOauthHtml?: string | null;
 }) @{
   <AppPage>
-    <AiSettingsContent mcpInitialHtml={props.mcpInitialHtml ?? null} />
+    <AiSettingsContent
+      mcpInitialHtml={props.mcpInitialHtml ?? null}
+      mcpInitialOauthHtml={props.mcpInitialOauthHtml ?? null}
+    />
   </AppPage>;
 }
 
-function AiSettingsContent(props: { mcpInitialHtml: string | null }) @{
+function AiSettingsContent(props: {
+  mcpInitialHtml: string | null;
+  mcpInitialOauthHtml: string | null;
+}) @{
   const meQ = useQuery(authSessionQueryOptions());
   // Auth gate (formerly loader): anonymous → login.
   usePageRedirect(meQ.data === null || meQ.isError ? "/login?returnTo=/settings/ai" : null);
@@ -150,7 +157,11 @@ function AiSettingsContent(props: { mcpInitialHtml: string | null }) @{
       <code className="font-mono">&lt;pat&gt;</code> when using a token)
     </p>
     <div className="mt-2">
-      <McpHarnessBlocks endpoint={mcpEndpoint} initialHtml={props.mcpInitialHtml} />
+      <McpHarnessBlocks
+        endpoint={mcpEndpoint}
+        initialHtml={props.mcpInitialHtml}
+        initialOauthHtml={props.mcpInitialOauthHtml}
+      />
     </div>
   </AccountSettingsLayout>;
 }

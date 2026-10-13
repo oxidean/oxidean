@@ -48,24 +48,56 @@ describe("mcp-harness-blocks browser DOM races", () => {
         "mcp_servers.oxidean",
       );
 
-      // Auth-mode radio swaps the block to the OAuth variant (no header) and
-      // mounts the note — sibling @if toggles are the DOM-race surface. Warm
-      // the highlighter so the swap takes the synchronous styled path.
+      // Auth-mode toggle flips visibility between the two permanently mounted
+      // variant stacks — no <pre> replacement, no mount/unmount, no height or
+      // scroll change (the scrolled-to-bottom flicker regression). Warm the
+      // highlighter so both variants' markup is styled.
       await getHighlighter();
-      const oauthRadio = document.querySelector(
+      // Both variants highlight async on mount — wait for styled markup before
+      // capturing nodes, or the pending upgrade would replace the pre and the
+      // identity assertion would race it.
+      {
+        const deadline = Date.now() + 5_000;
+        while (Date.now() < deadline) {
+          const t = document.querySelector('[data-testid="mcp-variant-token"] pre[data-language]');
+          const o = document.querySelector('[data-testid="mcp-variant-oauth"] pre[data-language]');
+          if (t && o) break;
+          await new Promise((r) => setTimeout(r, 25));
+        }
+      }
+      const tokenPre = document.querySelector('[data-testid="mcp-variant-token"] pre');
+      const oauthPre = document.querySelector('[data-testid="mcp-variant-oauth"] pre');
+      const heightBefore = document
+        .querySelector('[data-testid="mcp-snippet-block"]')
+        ?.getBoundingClientRect().height;
+      const scrollBefore = window.scrollY;
+
+      const oauthToggle = document.querySelector(
         '[data-testid="mcp-auth-oauth"]',
       ) as HTMLElement | null;
-      oauthRadio?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      oauthToggle?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
       await new Promise((r) => setTimeout(r, 50));
+
       const swapped = document.querySelector('[data-testid="mcp-snippet-block"]');
       expect(swapped?.getAttribute("data-auth")).toBe("oauth");
       expect(swapped?.getAttribute("data-harness")).toBe("codex");
-      expect(swapped?.textContent).not.toContain("bearer_token_env_var");
-      // Styled markup must already be painted — no unstyled flash frame.
-      expect(swapped?.querySelector("pre[data-language]")).toBeTruthy();
-      expect(document.querySelector('[data-testid="mcp-snippet-note"]')?.textContent).toContain(
-        "codex mcp login",
-      );
+
+      // Regression: the same <pre> nodes survive the toggle — no structural
+      // DOM mutation — and the card height + scroll position are unchanged.
+      expect(document.querySelector('[data-testid="mcp-variant-token"] pre')).toBe(tokenPre);
+      expect(document.querySelector('[data-testid="mcp-variant-oauth"] pre')).toBe(oauthPre);
+      expect(swapped?.getBoundingClientRect().height).toBe(heightBefore);
+      expect(window.scrollY).toBe(scrollBefore);
+
+      const oauthVariant = document.querySelector('[data-testid="mcp-variant-oauth"]');
+      expect(oauthVariant?.classList.contains("invisible")).toBe(false);
+      expect(oauthVariant?.textContent).not.toContain("bearer_token_env_var");
+      expect(oauthVariant?.querySelector("pre[data-language]")).toBeTruthy();
+      const tokenVariant = document.querySelector('[data-testid="mcp-variant-token"]');
+      expect(tokenVariant?.classList.contains("invisible")).toBe(true);
+      expect(
+        document.querySelector('[data-testid="mcp-snippet-note-oauth"]')?.textContent,
+      ).toContain("codex mcp login");
 
       tracker.expectNoDomRaces();
       expectNoOctaneOverlayInDocument();

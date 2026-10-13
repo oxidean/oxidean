@@ -112,33 +112,40 @@ describe("/settings/ai", () => {
 
     // The Claude add command is folded into the claude/token variant block —
     // same aria label, still no real token.
-    expect(screen.getByTestId("mcp-snippet-command-label").textContent).toContain(
+    expect(screen.getByTestId("mcp-snippet-command-label-token").textContent).toContain(
       "Claude Code also has its own add command",
     );
-    const claude = screen.getByRole("textbox", { name: "Copy Claude Code MCP add command" });
-    expect(claude).toHaveValue(
+    const claudeCmd = screen
+      .getByTestId("mcp-extras-token")
+      .querySelector('input[aria-label="Copy Claude Code MCP add command"]');
+    expect(claudeCmd).toHaveValue(
       'claude mcp add --transport http oxidean https://forge.example/api/mcp --header "Authorization: Bearer <pat>"',
     );
 
-    // Token/OAuth mode toggle — OAuth variant drops the static header and
-    // shows the per-harness note. Warm the highlighter first so the swap
-    // exercises the synchronous (no unstyled frame) path.
+    // Token/OAuth mode toggle — both variants stay mounted (visibility swap,
+    // no DOM churn); OAuth variant drops the static header and shows the
+    // per-harness note. Warm the highlighter so both variants' markup is
+    // styled before the toggle.
     await getHighlighter();
     const oauth = screen.getByTestId("mcp-auth-oauth");
     oauth.click();
     await waitFor(() => {
       expect(screen.getByTestId("mcp-snippet-block").getAttribute("data-auth")).toBe("oauth");
     });
-    expect(screen.getByTestId("mcp-snippet-block").textContent).not.toContain("Bearer");
-    // The swap renders styled markup in the same commit — plainHtml has no
-    // data-language marker, so this would catch an unstyled flash frame.
+    const oauthVariant = screen.getByTestId("mcp-variant-oauth");
+    expect(oauthVariant.textContent).not.toContain("Bearer");
+    expect(oauthVariant.querySelector("pre[data-language]")).toBeTruthy();
+    // Token variant stays mounted but hidden — no remount on toggle.
+    const tokenVariant = screen.getByTestId("mcp-variant-token");
+    expect(tokenVariant.querySelector("pre[data-language]")).toBeTruthy();
+    expect(tokenVariant.className).toContain("invisible");
+    expect(oauthVariant.className).not.toContain("invisible");
+    expect(screen.getByTestId("mcp-snippet-note-oauth").textContent).toContain("OAuth");
     expect(
-      screen.getByTestId("mcp-snippet-block").querySelector("pre[data-language]"),
-    ).toBeTruthy();
-    expect(screen.getByTestId("mcp-snippet-note").textContent).toContain("OAuth");
-    expect(screen.getByRole("textbox", { name: "Copy Claude Code MCP add command" })).toHaveValue(
-      "claude mcp add --transport http oxidean https://forge.example/api/mcp",
-    );
+      screen
+        .getByTestId("mcp-extras-oauth")
+        .querySelector('input[aria-label="Copy Claude Code MCP add command"]'),
+    ).toHaveValue("claude mcp add --transport http oxidean https://forge.example/api/mcp");
 
     // mcp-remote bridging lives under the generic tab (both auth modes).
     const generic = mcpHarnessSnippets("https://forge.example/api/mcp").find(

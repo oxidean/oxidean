@@ -19,18 +19,21 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { mcpHarnessSnippets, type McpAuthVariant } from "@/lib/mcp-harness-snippets";
+import { cn } from "@/lib/utils";
 
 /**
  * Per-harness MCP config block — pick a client and an auth mode (static token
  * header or client-driven OAuth), get the highlighted file content to paste
  * (JSON, or TOML for Codex). The bearer stays a `<pat>` placeholder.
- * `initialHtml` is the SSR-highlighted markup for the default view (first
- * harness + token mode) so first paint ships styled, not plain; the markup
- * is dual-theme `light-dark()`, correct under either color scheme.
+ * `initialHtml`/`initialOauthHtml` are the SSR-highlighted markup for the
+ * default harness's token/oauth variants — both stay mounted (visibility
+ * toggled), so first paint ships styled under either mode; the markup is
+ * dual-theme `light-dark()`, correct under either color scheme.
  */
 export function McpHarnessBlocks(props: {
   endpoint: string;
   initialHtml?: string | null;
+  initialOauthHtml?: string | null;
 }) @{
   const snippets = mcpHarnessSnippets(props.endpoint);
   const [id, setId] = useState(snippets[0]?.id ?? "");
@@ -38,9 +41,10 @@ export function McpHarnessBlocks(props: {
   const [copied, setCopied] = useState(false);
   const current = snippets.find((s) => s.id === id) ?? snippets[0];
   const block = mode === "oauth" ? current.oauth : current.token;
-  // The SSR markup matches exactly one block — the first harness in token
-  // mode; everything else highlights client-side once the engine is warm.
-  const isInitialBlock = current.id === snippets[0]?.id && mode === "token";
+  // The SSR markup matches exactly the first harness — both auth variants
+  // get their pre-rendered block; other harnesses highlight client-side once
+  // the engine is warm.
+  const isInitialHarness = current.id === snippets[0]?.id;
 
   async function copy() {
     try {
@@ -153,30 +157,100 @@ export function McpHarnessBlocks(props: {
           {(copied ? "Copied" : "Copy") as string}
         </Button>
       </div>
-      <div className="p-3">
-        <CodeSnippet
-          code={block.code}
-          path={current.file}
-          highlightedHtml={isInitialBlock ? (props.initialHtml ?? null) : null}
-        />
+      {/*
+        Both auth variants stay mounted, stacked in one grid cell; the
+        inactive one is `invisible` (visibility:hidden keeps layout space, so
+        the card and extras below it never change height on toggle). Flipping
+        modes touches only class/data attributes — no <pre> is destroyed or
+        rebuilt, nothing mounts/unmounts, and scroll anchoring keeps its
+        nodes — the scrolled-to-bottom flicker came from the old @if swap
+        tearing the snippet subtree down and changing page height.
+      */}
+      <div className="grid p-3">
+        <div
+          className={cn("col-start-1 row-start-1 min-w-0", mode !== "token" && "invisible")}
+          data-testid="mcp-variant-token"
+        >
+          <CodeSnippet
+            code={current.token.code}
+            path={current.file}
+            highlightedHtml={isInitialHarness ? (props.initialHtml ?? null) : null}
+          />
+        </div>
+        <div
+          className={cn("col-start-1 row-start-1 min-w-0", mode !== "oauth" && "invisible")}
+          data-testid="mcp-variant-oauth"
+        >
+          <CodeSnippet
+            code={current.oauth.code}
+            path={current.file}
+            highlightedHtml={isInitialHarness ? (props.initialOauthHtml ?? null) : null}
+          />
+        </div>
       </div>
     </div>
 
-    @if (block.command) {
-      <>
-        <p
-          className="text-[13px] text-muted-foreground"
-          data-testid="mcp-snippet-command-label"
-        >
-          {block.command.label as string}
-        </p>
-        <CopyCommand command={block.command.cmd} ariaLabel={block.command.aria} />
-      </>;
-    }
-    @if (block.note) {
-      <p className="text-[13px] text-muted-foreground" data-testid="mcp-snippet-note">
-        {block.note as string}
-      </p>;
-    }
+    <div className="grid">
+      <div
+        className={cn(
+          "col-start-1 row-start-1 flex min-w-0 flex-col gap-3",
+          mode !== "token" && "invisible",
+        )}
+        data-testid="mcp-extras-token"
+      >
+        @if (current.token.command) {
+          <>
+            <p
+              className="text-[13px] text-muted-foreground"
+              data-testid="mcp-snippet-command-label-token"
+            >
+              {current.token.command.label as string}
+            </p>
+            <CopyCommand
+              command={current.token.command.cmd}
+              ariaLabel={current.token.command.aria}
+            />
+          </>;
+        }
+        @if (current.token.note) {
+          <p
+            className="text-[13px] text-muted-foreground"
+            data-testid="mcp-snippet-note-token"
+          >
+            {current.token.note as string}
+          </p>;
+        }
+      </div>
+      <div
+        className={cn(
+          "col-start-1 row-start-1 flex min-w-0 flex-col gap-3",
+          mode !== "oauth" && "invisible",
+        )}
+        data-testid="mcp-extras-oauth"
+      >
+        @if (current.oauth.command) {
+          <>
+            <p
+              className="text-[13px] text-muted-foreground"
+              data-testid="mcp-snippet-command-label-oauth"
+            >
+              {current.oauth.command.label as string}
+            </p>
+            <CopyCommand
+              command={current.oauth.command.cmd}
+              ariaLabel={current.oauth.command.aria}
+            />
+          </>;
+        }
+        @if (current.oauth.note) {
+          <p
+            className="text-[13px] text-muted-foreground"
+            data-testid="mcp-snippet-note-oauth"
+          >
+            {current.oauth.note as string}
+          </p>;
+        }
+      </div>
+    </div>
   </div>;
 }

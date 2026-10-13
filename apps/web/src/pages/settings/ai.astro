@@ -6,24 +6,31 @@ import { highlightCode, languageIdForPath } from "@/lib/highlight";
 import { resolvePublicOriginFromEnv } from "@/lib/public-origin";
 
 /**
- * Pre-highlight the default MCP snippet (first harness, token mode) so the
- * first paint ships styled markup — hydration reuses it via the
- * `highlightedHtml` prop. The markup is dual-theme (`light-dark()`), correct
- * under either color scheme. The endpoint is the build placeholder;
- * oxidean-web rewrites `http://localhost` per request.
+ * Pre-highlight the default MCP snippets (first harness, both auth variants —
+ * they stay mounted and toggle via `visibility`) so the first paint ships
+ * styled markup — hydration reuses it via the `highlightedHtml` props. The
+ * markup is dual-theme (`light-dark()`), correct under either color scheme.
+ * The endpoint is the build placeholder; oxidean-web rewrites
+ * `http://localhost` per request.
  */
 const mcpEndpoint = `${resolvePublicOriginFromEnv() ?? "http://localhost"}/api/mcp`;
 const defaultBlock = mcpHarnessSnippets(mcpEndpoint)[0];
+const lang = languageIdForPath(defaultBlock.file);
 let mcpInitialHtml: string | null = null;
+let mcpInitialOauthHtml: string | null = null;
 try {
-	mcpInitialHtml = await highlightCode(defaultBlock.token.code, {
-		lang: languageIdForPath(defaultBlock.file),
-	});
+	mcpInitialHtml = await highlightCode(defaultBlock.token.code, { lang });
+	mcpInitialOauthHtml = await highlightCode(defaultBlock.oauth.code, { lang });
 } catch {
 	mcpInitialHtml = null;
+	mcpInitialOauthHtml = null;
 }
 ---
 
 <AppShell title="AI agents · Oxidean">
-	<AiSettingsPage client:load mcpInitialHtml={mcpInitialHtml} />
+	<AiSettingsPage
+		client:load
+		mcpInitialHtml={mcpInitialHtml}
+		mcpInitialOauthHtml={mcpInitialOauthHtml}
+	/>
 </AppShell>
