@@ -193,9 +193,10 @@ records which store holds each instance's token. The instance becomes the
 default for all subsequent commands.
 
 ```bash
-ox auth status    # instance + username + token name/scopes/expiry (pat.self), exit 3 if unauthenticated
+ox auth status    # instance + username + token name/scopes/expiry (pat.self); warns when the
+                  #   token's scopes leave procedures uncovered (exit 3 if unauthenticated)
 ox auth refresh   # mint a fresh token via the device grant and self-revoke the old one
-                  #   [--scopes list] [--reset-scopes]
+                  #   [--scopes list] [--keep-scopes] [--reset-scopes]
 ox auth revoke    # revoke the stored token on the server and log out
 ox auth switch    # pick a different default instance (picker, or pass the URL)
 ox auth setup-git # register `ox auth git-credential` as the git credential helper
@@ -203,10 +204,13 @@ ox auth logout    # drop the stored token for the resolved instance
 ox auth token     # print the resolved token (for scripts)
 ```
 
-`refresh` reuses the old token's scopes unless `--scopes`/`--reset-scopes`
-overrides them, persists the new credential only after it verifies, and
-self-revokes the old one. `OXIDEAN_TOKEN`-supplied credentials can't be
-refreshed or revoked here — manage those where they were issued.
+`refresh` mints the full first-party scope set by default — `--keep-scopes`
+carries the stored set forward (warning when it leaves procedures
+uncovered), `--scopes` overrides explicitly, and `--reset-scopes` is
+accepted as a compatibility no-op. It persists the new credential only
+after it verifies, and self-revokes the old one. `OXIDEAN_TOKEN`-supplied
+credentials can't be refreshed or revoked here — manage those where they
+were issued.
 
 > **Token expiry:** CLI-minted tokens follow the instance PAT policy
 > (`OXIDEAN_PAT_DEFAULT_TTL_DAYS` / `OXIDEAN_PAT_MAX_TTL_DAYS` /

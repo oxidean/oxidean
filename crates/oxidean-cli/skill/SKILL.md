@@ -40,8 +40,8 @@ ox auth login --instance https://forge.example.com --web  # browser device grant
 ox auth login --instance https://forge.example.com --web --scopes "repo workflow"
 ox auth login --instance https://forge.example.com --token <pat>
 printenv OXIDEAN_TOKEN | ox auth login --instance <url> --token-stdin   # CI
-ox auth status                                            # who am I + token scopes/expiry
-ox auth refresh                                           # rotate the stored token (same scopes unless --scopes/--reset-scopes)
+ox auth status                                            # who am I + token scopes/expiry; warns when scopes leave procedures uncovered
+ox auth refresh                                           # rotate the stored token (full first-party scopes by default; --keep-scopes preserves)
 ox auth revoke                                            # revoke stored token on the server + logout
 ox auth token                                             # print token (scripts)
 ox auth logout                                            # drop stored token

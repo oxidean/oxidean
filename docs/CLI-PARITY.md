@@ -21,9 +21,9 @@ surface and fails when an `implemented`/`partial` row drifts.
 |---|---|---|---|
 | `auth login` | `auth login` (+`--web`, `--scopes`) | implemented | ox adds `--scopes` scope picker |
 | `auth logout` | `auth logout` | implemented | |
-| `auth refresh` | `auth refresh` (`--scopes`, `--reset-scopes`) | implemented | ox mints via device grant + self-revokes old token |
+| `auth refresh` | `auth refresh` (`--scopes`, `--keep-scopes`, `--reset-scopes`) | implemented | ox mints via device grant + self-revokes old token; defaults to the full first-party scope set |
 | `auth setup-git` | `auth setup-git` (+`git-credential`) | implemented | |
-| `auth status` | `auth status` | implemented | shows token name/scopes/expiry via `pat.self` |
+| `auth status` | `auth status` | implemented | shows token name/scopes/expiry via `pat.self`; warns when scopes leave procedures uncovered |
 | `auth switch` | `auth switch` | implemented | |
 | `auth token` | `auth token` | implemented | |
 | — | `auth revoke` | ox-only | self-revoke current PAT + logout |
