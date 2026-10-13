@@ -71,8 +71,8 @@ directory (`upstream`, `origin`, `fork`) — inside a clone the repo argument
 can usually be omitted. PAT management lives in the web UI
 (`/settings/tokens`); the CLI manages only its own credential via
 `auth status|refresh|revoke`. `ox <group> <sub> --help` prints per-command
-usage. There is deliberately no `ox admin`/`ox pat`/`ox invite` — admin
-(`admin.*`) and invite-acceptance RPCs are session-cookie only, so
+usage. There is deliberately no `admin`/`pat`/`invite` command group —
+admin (`admin.*`) and invite-acceptance RPCs are session-cookie only, so
 PAT-authenticated `ox` cannot serve them; use the web UI.
 
 ## Scripting: `--json` and exit codes
@@ -129,10 +129,10 @@ ox repo clone o/my-lib
 
 # Run a workflow and watch it
 ox workflow run o/n ci.yml --ref main
-ox run view o/n --id <run-id> --json | jq '.data.run.status'
+ox run view o/n <run-id> --json | jq '.data.run.status'
 
 # Publish a release with artifacts
-ox release create o/n v1.2.0 --title "v1.2.0" --notes-file CHANGELOG.md
+ox release create o/n v1.2.0 --title "v1.2.0" --body-file CHANGELOG.md
 ox release upload o/n v1.2.0 dist/*.tar.gz
 ```
 

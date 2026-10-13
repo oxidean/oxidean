@@ -217,6 +217,9 @@ pub const COMMAND_TREE: &[(&str, Subs)] = &[
 
 pub fn run(shell: &str) -> Result<Out, CliError> {
     let script = match shell {
+        // Hidden pseudo-shell: emits the parser-verified command surface as
+        // `group[ sub[ op]]` lines for drift guards (check-skill-sync.sh).
+        "commands" => command_paths(),
         "bash" => bash(),
         "zsh" => zsh(),
         "fish" => fish(),
@@ -235,6 +238,30 @@ pub fn run(shell: &str) -> Result<Out, CliError> {
 
 fn word_list(words: &[&str]) -> String {
     words.join(" ")
+}
+
+/// `group`, `group sub`, and `group sub op` — one path per line.
+fn command_paths() -> String {
+    let mut out = String::new();
+    for (group, subs) in COMMAND_TREE {
+        out.push_str(group);
+        out.push('\n');
+        for (sub, ops) in *subs {
+            out.push_str(group);
+            out.push(' ');
+            out.push_str(sub);
+            out.push('\n');
+            for op in *ops {
+                out.push_str(group);
+                out.push(' ');
+                out.push_str(sub);
+                out.push(' ');
+                out.push_str(op);
+                out.push('\n');
+            }
+        }
+    }
+    out
 }
 
 fn bash() -> String {

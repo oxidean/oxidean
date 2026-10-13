@@ -350,6 +350,11 @@ jobs:
           CARGO_INCREMENTAL: "0"
           RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
         run: make openapi-sync-check
+      - name: check-skill-sync
+        env:
+          CARGO_INCREMENTAL: "0"
+          RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
+        run: make skill-sync-check
 
   compose:
     name: compose

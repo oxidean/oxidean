@@ -145,7 +145,7 @@ const HELP: &[(&str, &str)] = &[
     ("pr list", "ox pr list <o/n> [--state <s>] [--author <u>] [--assignee <u>]\n            [--label <l>] [--search <q>] [--limit <n>]"),
     ("pr view", "ox pr view <o/n> <number>"),
     ("pr create", "ox pr create <o/n> --title <t> --base <branch> --head <branch>\n              [--body <b>] [--draft] [--head-owner <o> --head-name <n>]"),
-    ("pr merge", "ox pr merge <o/n> <number> [--method merge|squash|rebase]\n            [--commit-title <t>] [--commit-message <m>] [--delete-branch]\n\nWith no --method the first strategy the repo allows is used\n(merge-commit → squash → rebase, via repo.mergeSettings.get)."),
+    ("pr merge", "ox pr merge <o/n> <number> [--method merge|squash|rebase | --merge | --squash | --rebase]\n            [--commit-title <t>] [--commit-message <m>] [--delete-branch]\n\nWith no method the first strategy the repo allows is used\n(merge-commit → squash → rebase, via repo.mergeSettings.get)."),
     ("pr diff", "ox pr diff <o/n> <number>     print unified patches for changed files"),
     ("pr files", "ox pr files <o/n> <number>    list changed files + status"),
     ("pr review", "ox pr review <o/n> <number> --approve|--request-changes|--comment [--body <b>]\n               --list | --dismiss <review-id> [--reason <r>]\n               --request <user> | --unrequest <user>"),
@@ -173,8 +173,8 @@ const HELP: &[(&str, &str)] = &[
     ("release", "ox release — releases\n\n  list|view|create|edit|delete|upload|download|delete-asset"),
     ("release list", "ox release list <o/n>"),
     ("release view", "ox release view <o/n> <tag>"),
-    ("release create", "ox release create <o/n> <tag> [--title <t>] [--body <b>]\n                 [--draft] [--prerelease]"),
-    ("release edit", "ox release edit <o/n> <tag> [--title <t>] [--body <b>]\n               [--draft|--publish] [--prerelease|--no-prerelease]"),
+    ("release create", "ox release create <o/n> <tag> [--title <t>] [--body <b> | --body-file <p>]\n                 [--draft] [--prerelease]"),
+    ("release edit", "ox release edit <o/n> <tag> [--title <t>] [--body <b> | --body-file <p>]\n               [--draft|--publish] [--prerelease|--no-prerelease]"),
     ("release delete", "ox release delete <o/n> <tag>"),
     ("release upload", "ox release upload <o/n> <tag> <file>...\n\nUploads each file as a release asset (multipart POST)."),
     ("release download", "ox release download <o/n> <tag> [--pattern <glob>] [--dir <d>] [--clobber]"),
@@ -1567,9 +1567,11 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
             let f = scan(tail, &[], &[], &[])?;
             expect_no_positionals(&f, "completion")?;
             match sh {
-                "bash" | "zsh" | "fish" | "pwsh" | "powershell" => Command::Completion {
-                    shell: sh.to_string(),
-                },
+                "bash" | "zsh" | "fish" | "pwsh" | "powershell" | "commands" => {
+                    Command::Completion {
+                        shell: sh.to_string(),
+                    }
+                }
                 _ => return Err(usage("usage: ox completion <bash|zsh|fish|pwsh>")),
             }
         }
