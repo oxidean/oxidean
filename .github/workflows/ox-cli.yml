@@ -579,7 +579,6 @@ jobs:
     runs-on: ubuntu-latest
     env:
       FIXTURE_NAME: oxdist-pr
-      NET_NAME: oxdist-pr-net
     steps:
       - uses: actions/checkout@v4
       - name: free disk for api image build
@@ -606,14 +605,16 @@ jobs:
           done < www/ox-targets.txt
           printf '%s\n' "${{ github.sha }}" > www/SOURCE_COMMIT
           cat www/ox-targets.txt
-      - name: serve fixture (busybox httpd on loopback)
+      - name: serve fixture (busybox httpd on host)
         run: |
           set -euo pipefail
           docker rm -f "$FIXTURE_NAME" >/dev/null 2>&1 || true
-          # Publish on the host so (1) buildx `--network=host` fetch and
-          # (2) the post-build digest check both hit the same feed.
+          # Bind on all interfaces: classic `docker build --network=host` RUN
+          # steps share the runner netns, so curl to 127.0.0.1 reaches this.
+          # (buildx's docker-container driver keeps its own localhost — that
+          # path failed with curl (7) against 127.0.0.1:8901.)
           docker run -d --name "$FIXTURE_NAME" \
-            -p "127.0.0.1:${FIXTURE_PORT}:${FIXTURE_PORT}" \
+            -p "${FIXTURE_PORT}:${FIXTURE_PORT}" \
             -v "$PWD/www:/www:ro" busybox httpd -f -p "$FIXTURE_PORT" -h /www
           for i in $(seq 1 40); do
             if curl -fsS "http://127.0.0.1:$FIXTURE_PORT/ox-targets.txt" >/dev/null; then
@@ -622,20 +623,16 @@ jobs:
             sleep 0.5
           done
           curl -fsS "http://127.0.0.1:$FIXTURE_PORT/ox-targets.txt" | head -5
-      - uses: docker/setup-buildx-action@v3
+      # Classic builder + --network=host (not buildx): BuildKit's container
+      # driver cannot see the runner's published fixture port on 127.0.0.1.
       - name: build api image against PR fixture
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: crates/oxidean-api/Dockerfile
-          load: true
-          tags: oxidean-api:ox-matrix-pr
-          network: host
-          build-args: |
-            OXIDEAN_CLI_DIST_URL=http://127.0.0.1:${{ env.FIXTURE_PORT }}
-            OXIDEAN_CLI_DIST_BUST=${{ github.sha }}
-          cache-from: type=gha,scope=oxidean-api
-          cache-to: type=gha,mode=max,scope=oxidean-api
+        run: |
+          set -euo pipefail
+          docker build --network=host \
+            --build-arg "OXIDEAN_CLI_DIST_URL=http://127.0.0.1:${FIXTURE_PORT}" \
+            --build-arg "OXIDEAN_CLI_DIST_BUST=${{ github.sha }}" \
+            -f crates/oxidean-api/Dockerfile \
+            -t oxidean-api:ox-matrix-pr .
       - name: every shipped target is staged with matching digests
         run: |
           set -euo pipefail
