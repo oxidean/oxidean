@@ -8,9 +8,11 @@
 #   curl|sh path — including musl detection — is exercised end to end.
 # - Native packages (.deb/.rpm/.apk/.pkg.tar.zst) are produced with nfpm and
 #   test-installed in their matching distro container.
-# - Tag pushes (v*.*.*) publish everything as GitHub release assets —
-#   `ox-targets.txt` is the manifest the release Dockerfile fetches via
-#   OXIDEAN_CLI_DIST_URL.
+# - Pushes to main (and v*.*.* tags) refresh the rolling GitHub Release
+#   `ox-dist` (`ox-targets.txt` + `ox-{triple}` + `.sha256`). API images
+#   stage that set via OXIDEAN_CLI_DIST_URL (Dockerfile default + Cloud IaC).
+# - Tag pushes (v*.*.*) also create a semver GitHub Release with installers
+#   and packages for standalone GitHub installs.
 #
 # FreeBSD is build+package only: GitHub has no FreeBSD executor (Cirrus CI
 # is the follow-up if exec coverage there is ever needed).
@@ -419,7 +421,64 @@ jobs:
           name: ox-pkg-${{ matrix.fmt }}-${{ matrix.arch }}
           path: pkg/
 
-  # ── tags: publish the full matrix + packages as release assets ──────────
+  # ── main + tags: refresh rolling ox-dist release (Cloud / Dockerfile channel)
+  publish-dist:
+    name: publish ox-dist rolling release
+    needs: [build, build-freebsd, install-linux, install-macos, install-windows, packages]
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+      - name: assemble ox-dist assets
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          for f in assets/ox-*; do
+            case "$f" in *.sha256|*.exe|*.deb|*.rpm|*.apk|*.zst) continue ;; esac
+            basename "$f" | sed 's|^ox-||'
+          done | sort > dist/ox-targets.txt
+          cat dist/ox-targets.txt
+          while read -r t || [ -n "$t" ]; do
+            [ -z "$t" ] && continue
+            cp "assets/ox-$t" "dist/ox-$t"
+            cp "assets/ox-$t.sha256" "dist/ox-$t.sha256"
+          done < dist/ox-targets.txt
+          ls -lh dist/
+      - name: create or update ox-dist release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if ! gh release view ox-dist >/dev/null 2>&1; then
+            gh release create ox-dist \
+              --title "ox CLI distribution (rolling)" \
+              --notes "Rolling multi-arch ox binaries for API image staging (OXIDEAN_CLI_DIST_URL). Updated on every successful ox CLI run on main." \
+              --target "${{ github.sha }}"
+          fi
+          gh release upload ox-dist dist/* --clobber
+      - name: redeploy staging api (heal /cli matrix)
+        continue-on-error: true
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
+          RAILWAY_PROJECT_ID: cec803d0-289b-4078-80cf-7291c16fc5ec
+          RAILWAY_SERVICE_API_ID: 19bf0a47-2fdf-4130-b6b0-858de92cb858
+        run: |
+          set -euo pipefail
+          if [[ -z "${RAILWAY_TOKEN:-}" && -z "${RAILWAY_API_TOKEN:-}" ]]; then
+            echo "No RAILWAY_TOKEN / RAILWAY_API_TOKEN — skip staging api redeploy (fork or secret not configured)."
+            exit 0
+          fi
+          sudo apt-get update -qq && sudo apt-get install -y -qq jq
+          scripts/railway-staging-api-redeploy.sh "${{ github.sha }}"
+
+  # ── tags: publish the full matrix + packages as semver release assets ───
   release:
     name: publish ox release assets
     needs: [build, build-freebsd, install-linux, install-macos, install-windows, packages]
@@ -459,11 +518,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "${{ github.ref_name }}" assets/* --title "ox ${{ github.ref_name }}" --generate-notes
 
-  # ── tags: prove the release image stages + serves the full matrix ───────
+  # ── prove API image stages the rolling ox-dist matrix ───────────────────
   image-matrix:
-    name: release image serves all targets
-    needs: [release]
-    if: startsWith(github.ref, 'refs/tags/v')
+    name: api image stages ox-dist matrix
+    needs: [publish-dist]
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -472,7 +531,7 @@ jobs:
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
             /usr/local/share/boost /usr/share/swift || true
       - uses: docker/setup-buildx-action@v3
-      - name: build api image with dist URL
+      - name: build api image with ox-dist URL
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -480,12 +539,15 @@ jobs:
           load: true
           tags: oxidean-api:ox-matrix
           build-args: |
-            OXIDEAN_CLI_DIST_URL=https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}
+            OXIDEAN_CLI_DIST_URL=https://github.com/${{ github.repository }}/releases/download/ox-dist
           cache-from: type=gha,scope=oxidean-api
           cache-to: type=gha,mode=max,scope=oxidean-api
       - name: every shipped target is staged in the image
         run: |
           docker run --rm --entrypoint ls oxidean-api:ox-matrix \
             -1 /usr/local/share/oxidean-cli | tee /tmp/staged.txt
-          curl -fsSL "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/ox-targets.txt" \
-            | while read -r t; do grep -q "ox-$t" /tmp/staged.txt; done
+          curl -fsSL "https://github.com/${{ github.repository }}/releases/download/ox-dist/ox-targets.txt" \
+            | while read -r t; do
+                [ -z "$t" ] && continue
+                grep -q "ox-$t" /tmp/staged.txt
+              done
