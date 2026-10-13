@@ -40,6 +40,7 @@ pub const COMMAND_TREE: &[(&str, Subs)] = &[
             ("lfs", &["get", "set"]),
             ("git", &["get", "set"]),
             ("mcp", &["get", "set"]),
+            ("pat", &["get", "set"]),
             ("auth", &["get", "set"]),
             ("templates", &["list", "enable", "disable", "delete"]),
         ],
@@ -50,7 +51,11 @@ pub const COMMAND_TREE: &[(&str, Subs)] = &[
         &[
             ("login", &[]),
             ("status", &[]),
+            ("refresh", &[]),
+            ("revoke", &[]),
             ("switch", &[]),
+            ("setup-git", &[]),
+            ("git-credential", &["get", "store", "erase"]),
             ("logout", &[]),
             ("token", &[]),
         ],
@@ -114,7 +119,6 @@ pub const COMMAND_TREE: &[(&str, Subs)] = &[
             ("invites", &["list", "create", "link", "revoke"]),
         ],
     ),
-    ("pat", &[("list", &[]), ("create", &[]), ("revoke", &[])]),
     ("pkg", &[("list", &[])]),
     (
         "pr",

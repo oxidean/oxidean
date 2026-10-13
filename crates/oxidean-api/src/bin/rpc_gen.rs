@@ -1581,6 +1581,25 @@ export type AdminMcpUpdateSettingsRequest = {
   /** When true, clear the override so the env default applies again. */
   clear_overrides?: boolean;
 };
+
+/** `admin.pat.getSettings` — effective PAT expiration policy + override flags. */
+export type AdminPatSettingsPublic = {
+  default_ttl_days: number;
+  default_ttl_days_overridden: boolean;
+  max_ttl_days: number;
+  max_ttl_days_overridden: boolean;
+  allow_never_expire: boolean;
+  allow_never_expire_overridden: boolean;
+};
+
+export type AdminPatUpdateSettingsRequest = {
+  /** Omitted fields keep the stored override. */
+  default_ttl_days?: number | null;
+  max_ttl_days?: number | null;
+  allow_never_expire?: boolean | null;
+  /** When true, clear all overrides so the OXIDEAN_PAT_* env defaults apply. */
+  clear_overrides?: boolean;
+};
 export type RepoRenameRequest = {
   owner: string;
   name: string;
@@ -2398,15 +2417,67 @@ export type RevokePatRequest = {
   id: string;
 };
 
+/** `pat.self` — introspection of the bearer PAT making the call. */
+export type PatSelfInfo = {
+  id: string;
+  name: string;
+  /** Display fingerprint (`oxidean_pat_xxxxxxxx` prefix — never the secret). */
+  token_prefix: string;
+  /** `classic` | `fine_grained`. */
+  kind: string;
+  /** Classic scope names carried by the token (empty for fine-grained). */
+  scopes: string[];
+  /** RFC3339 expiry, `null` for non-expiring tokens. */
+  expires_at?: string | null;
+  last_used_at?: string | null;
+  created_at: string;
+};
+
+/** `pat.policy` — the instance's effective PAT expiration policy. */
+export type PatPolicyPublic = {
+  /** Lifetime applied when a create request omits `expires_at` (days). */
+  default_ttl_days: number;
+  /** Upper bound for an explicit `expires_at` (days from creation). */
+  max_ttl_days: number;
+  /** Whether `"never"` is an accepted `expires_at` on this instance. */
+  allow_never_expire: boolean;
+};
+
+/** One classic scope, presentation-ready (`pat.catalog` row). */
+export type PatScopePublic = {
+  name: string;
+  group: string;
+  description: string;
+  hint: string;
+  /** Scope names this scope satisfies (transitively flattened). */
+  implies: string[];
+};
+
+/** One fine-grained permission family, presentation-ready. */
+export type FgPermPublic = {
+  family: string;
+  /** `true` = account-level (no repository binding); `false` = repo-bound. */
+  account_level: boolean;
+  label: string;
+  hint: string;
+};
+
+/** `pat.catalog` — the authoritative mintable capability surface. */
+export type PatCatalogPublic = {
+  classic_scopes: PatScopePublic[];
+  fg_perms: FgPermPublic[];
+};
+
 // --- OAuth2 provider (API-03) ---
 
-/** `read:user` | `user:email` | `repo` | `package:read` | `package:write` */
-export type OAuthScope =
-  | "read:user"
-  | "user:email"
-  | "repo"
-  | "package:read"
-  | "package:write";
+/** OAuth scopes share the classic-PAT scope vocabulary (one catalog). */
+export type OAuthScope = ClassicPatScope;
+
+/** Compact scope descriptor for OAuth consent screens (`scope_details`). */
+export type OAuthScopeDetail = {
+  name: string;
+  description: string;
+};
 
 /** Registered OAuth app — never carries a plaintext `client_secret`. */
 export type OAuthAppPublic = {
@@ -2462,6 +2533,8 @@ export type OAuthAuthorizeInfo = {
   client_id: string;
   redirect_uri: string;
   scopes: string[];
+  /** Catalog descriptions per scope (absent on older servers). */
+  scope_details?: OAuthScopeDetail[];
   owner_username: string;
 };
 
@@ -2487,6 +2560,8 @@ export type OAuthDeviceInfoRequest = {
 export type OAuthDeviceInfo = {
   user_code: string;
   scopes: string[];
+  /** Catalog descriptions per scope (absent on older servers). */
+  scope_details?: OAuthScopeDetail[];
   expires_at: string;
 };
 
@@ -3908,6 +3983,9 @@ export function createClient(opts: CreateClientOptions) {
       list: () => rpcCall<PatListItem[]>(opts, "pat.list", {}),
       revoke: (input: RevokePatRequest) =>
         rpcCall<{ ok: boolean }>(opts, "pat.revoke", input),
+      self: () => rpcCall<PatSelfInfo>(opts, "pat.self", {}),
+      policy: () => rpcCall<PatPolicyPublic>(opts, "pat.policy", {}),
+      catalog: () => rpcCall<PatCatalogPublic>(opts, "pat.catalog", {}),
     },
     oauthApp: {
       create: (input: CreateOAuthAppRequest) =>
@@ -3994,6 +4072,12 @@ export function createClient(opts: CreateClientOptions) {
           rpcCall<AdminMcpSettingsPublic>(opts, "admin.mcp.getSettings", {}),
         updateSettings: (input: AdminMcpUpdateSettingsRequest) =>
           rpcCall<AdminMcpSettingsPublic>(opts, "admin.mcp.updateSettings", input),
+      },
+      pat: {
+        getSettings: () =>
+          rpcCall<AdminPatSettingsPublic>(opts, "admin.pat.getSettings", {}),
+        updateSettings: (input: AdminPatUpdateSettingsRequest) =>
+          rpcCall<AdminPatSettingsPublic>(opts, "admin.pat.updateSettings", input),
       },
       templates: {
         list: () => rpcCall<AdminTemplatesListResponse>(opts, "admin.templates.list", {}),
@@ -5346,6 +5430,7 @@ export const mutationOptions = {
 };
 
 export * from "./languages";
+export * from "./scope-catalog";
 "#;
 
     let path = out_dir.join("index.ts");
@@ -5355,6 +5440,10 @@ export * from "./languages";
     let lang_path = out_dir.join("languages.ts");
     std::fs::write(&lang_path, languages_ts()).expect("write languages.ts");
     println!("wrote {}", lang_path.display());
+
+    let catalog_path = out_dir.join("scope-catalog.ts");
+    std::fs::write(&catalog_path, scope_catalog_ts()).expect("write scope-catalog.ts");
+    println!("wrote {}", catalog_path.display());
 }
 
 /// Emit the shared language taxonomy (`oxidean_core::languages::LANGUAGES`) as a
@@ -5417,6 +5506,68 @@ fn languages_ts() -> String {
             l.stats,
         )
         .expect("write language row");
+    }
+    s.push_str("];\n");
+    s
+}
+
+/// Emit the authoritative scope catalog (`oxidean_core::scope_catalog`) as a
+/// typed TS module — the web PAT form and OAuth consent screens consume the
+/// same metadata the server validates, instead of hand-maintained copies.
+fn scope_catalog_ts() -> String {
+    use std::fmt::Write;
+
+    fn list(items: &[String]) -> String {
+        format!(
+            "[{}]",
+            items
+                .iter()
+                .map(|i| format!("{i:?}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    }
+
+    let mut s = String::new();
+    s.push_str(
+        "/** AUTO-GENERATED by `cargo run -p oxidean-api --bin rpc-gen` — do not edit by hand.\n\
+         Source of truth: crates/oxidean-core/src/scope_catalog.rs */\n\n",
+    );
+    s.push_str(
+        "import type { FgPermPublic, PatScopePublic } from \"./index\";\n\n\
+         /** Every classic scope `pat.createClassic` accepts, in UI order. */\n\
+         export const SCOPE_CATALOG: PatScopePublic[] = [\n",
+    );
+    for m in oxidean_core::CLASSIC_SCOPES {
+        let mut implies: Vec<String> = oxidean_core::classic_scope_implies(m.scope)
+            .iter()
+            .map(|s| s.as_str().to_string())
+            .collect();
+        implies.sort();
+        writeln!(
+            s,
+            "  {{ name: {:?}, group: {:?}, description: {:?}, hint: {:?}, implies: {} }},",
+            m.scope.as_str(),
+            m.group,
+            m.description,
+            m.hint,
+            list(&implies),
+        )
+        .expect("write scope row");
+    }
+    s.push_str("];\n\n");
+    s.push_str(
+        "/** Every `perms` family `pat.createFineGrained` accepts. `contents`\n\
+         and `packages` are dedicated request fields, not `perms` families. */\n\
+         export const FG_PERM_CATALOG: FgPermPublic[] = [\n",
+    );
+    for m in oxidean_core::FG_PERMS {
+        writeln!(
+            s,
+            "  {{ family: {:?}, account_level: {:?}, label: {:?}, hint: {:?} }},",
+            m.family, m.account_level, m.label, m.hint,
+        )
+        .expect("write fg perm row");
     }
     s.push_str("];\n");
     s

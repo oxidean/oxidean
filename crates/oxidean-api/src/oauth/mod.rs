@@ -668,14 +668,17 @@ impl OAuthTokenIdentity {
         parse_oauth_scopes(&self.token.scopes).unwrap_or_default()
     }
 
+    /// Scope check honoring catalog implication (`user` satisfies
+    /// `read:user`, `package:write` satisfies `package:read`, …).
     pub fn has_scope(&self, scope: OAuthScope) -> bool {
-        self.scopes().contains(&scope)
+        self.scopes()
+            .iter()
+            .any(|held| oxidean_core::classic_scope_satisfies(*held, scope))
     }
 
     /// Synthesize a classic-PAT-shaped row so existing ACL helpers
     /// (`pat_allows_operation`, `pat_allows_packages`) apply unchanged.
-    /// OAuth scope names intentionally equal the classic scope strings
-    /// (`repo`, `package:read`, `package:write`).
+    /// OAuth scopes are the classic scope vocabulary (one shared catalog).
     pub fn synthetic_pat(&self) -> PatRow {
         let scopes_json =
             serde_json::to_string(&self.scopes().iter().map(|s| s.as_str()).collect::<Vec<_>>())
@@ -701,29 +704,60 @@ impl OAuthTokenIdentity {
     }
 }
 
+/// Why an `oxidean_oat_` credential failed — mirrors the PAT taxonomy for the
+/// HTTP surfaces that can surface a reason (git smart HTTP hints).
+#[derive(Debug)]
+pub enum OAuthAuthStatus {
+    Ok(Box<OAuthTokenIdentity>),
+    /// Unknown token or vanished owner — indistinguishable from "never existed".
+    Invalid,
+    Revoked,
+    Expired,
+    Banned,
+}
+
 /// Resolve an `oxidean_oat_` bearer/password to its owner.
 /// `None` when the token is unknown, revoked, expired, or the owner vanished.
 pub async fn authenticate_oauth_token(
     db: &oxidean_db::Database,
     raw_token: &str,
 ) -> Result<Option<OAuthTokenIdentity>, String> {
+    match authenticate_oauth_token_status(db, raw_token).await? {
+        OAuthAuthStatus::Ok(ident) => Ok(Some(*ident)),
+        _ => Ok(None),
+    }
+}
+
+/// Status-returning variant of [`authenticate_oauth_token`] — same revoked-
+/// inclusive lookup as the PAT path so callers that can surface a reason get
+/// `Revoked`/`Expired`/`Banned` instead of a flat `None`.
+pub async fn authenticate_oauth_token_status(
+    db: &oxidean_db::Database,
+    raw_token: &str,
+) -> Result<OAuthAuthStatus, String> {
     if !raw_token.starts_with(OAUTH_ACCESS_TOKEN_PREFIX) {
-        return Ok(None);
+        return Ok(OAuthAuthStatus::Invalid);
     }
     let hash = sha256_hex(raw_token.as_bytes());
-    let Some(token) = db.find_oauth_token_by_hash(&hash).await? else {
-        return Ok(None);
+    let Some(token) = db.find_oauth_token_by_hash_including_revoked(&hash).await? else {
+        return Ok(OAuthAuthStatus::Invalid);
     };
+    if token.revoked_at.is_some() {
+        return Ok(OAuthAuthStatus::Revoked);
+    }
     if rfc3339_expired(&token.expires_at) {
-        return Ok(None);
+        return Ok(OAuthAuthStatus::Expired);
     }
     let Some(user) = db.find_user_by_id(&token.user_id).await? else {
-        return Ok(None);
+        return Ok(OAuthAuthStatus::Invalid);
     };
     if user.banned_at.is_some() {
-        return Ok(None);
+        return Ok(OAuthAuthStatus::Banned);
     }
-    Ok(Some(OAuthTokenIdentity { token, user }))
+    Ok(OAuthAuthStatus::Ok(Box::new(OAuthTokenIdentity {
+        token,
+        user,
+    })))
 }
 
 // ---------------------------------------------------------------------------
@@ -1089,6 +1123,7 @@ pub async fn authorize_info(
         client_id: app.client_id.clone(),
         redirect_uri: uri,
         scopes: scopes.iter().map(|s| s.as_str().to_string()).collect(),
+        scope_details: oxidean_core::scope_details(&scopes),
         owner_username,
     })
 }
@@ -1439,8 +1474,30 @@ async fn device_token_exchange(
                 "ox cli — device login {}",
                 Utc::now().format("%Y-%m-%d")
             );
+            // Instance expiration policy applies: the minted PAT expires after
+            // `default_ttl_days` (never non-expiring — device logins are
+            // refreshable via `ox auth refresh`).
+            let pat_expiry = {
+                let p = crate::pat::policy::effective_policy(&state.db).await;
+                match crate::pat::policy::resolve_expires_at(&p, None) {
+                    Ok(e) => e,
+                    Err(e) => {
+                        tracing::error!(error = %e.message, "oauth device poll: expiry policy failed");
+                        return token_error(
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "server_error",
+                            "internal error",
+                        );
+                    }
+                }
+            };
+            let expires_in = crate::pat::policy::secs_until(pat_expiry.as_deref());
             let (_id, pat) = match crate::pat::mint_classic_pat(
-                &state.db, user_id, &name, &scopes, None,
+                &state.db,
+                user_id,
+                &name,
+                &scopes,
+                pat_expiry.as_deref(),
             )
             .await
             {
@@ -1468,8 +1525,8 @@ async fn device_token_exchange(
             let body = OAuthTokenResponse {
                 access_token: pat,
                 token_type: "bearer".into(),
-                // PATs minted here carry no expiry.
-                expires_in: 0,
+                // Seconds until the minted PAT expires (default TTL).
+                expires_in,
                 scope: row.scopes.clone(),
             };
             let mut res = Json(body).into_response();
@@ -1536,6 +1593,7 @@ pub async fn device_info(
         .ok_or_else(|| {
             AppError::new("oauth.device_code_not_found", "no pending device code")
         })?;
+    let parsed = parse_oauth_scopes(&row.scopes).unwrap_or_default();
     Ok(OAuthDeviceInfo {
         user_code: display_user_code(&row.user_code),
         scopes: row
@@ -1543,6 +1601,7 @@ pub async fn device_info(
             .split_whitespace()
             .map(|s| s.to_string())
             .collect(),
+        scope_details: oxidean_core::scope_details(&parsed),
         expires_at: row.expires_at.clone(),
     })
 }
@@ -1626,7 +1685,7 @@ pub async fn authorization_server_metadata() -> Json<serde_json::Value> {
             "client_secret_basic",
             "client_secret_post",
         ],
-        "scopes_supported": OAuthScope::ALL.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+        "scopes_supported": oxidean_core::CLASSIC_SCOPES.iter().map(|m| m.scope.as_str()).collect::<Vec<_>>(),
     }))
 }
 

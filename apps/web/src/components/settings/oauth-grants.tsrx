@@ -1,4 +1,4 @@
-import type { OAuthGrantPublic } from "@oxidean/api-client";
+import { SCOPE_CATALOG, type OAuthGrantPublic } from "@oxidean/api-client";
 import { useState } from "octane";
 import { KeyRound } from "@octanejs/lucide";
 import { Badge } from "@/components/ui/badge";
@@ -8,13 +8,10 @@ import { List, ListRow } from "@/components/ui/list";
 import { apiClient } from "@/lib/api-client";
 import { formatRelative } from "@/lib/relative-time";
 
-const SCOPE_LABELS: Record<string, string> = {
-  "read:user": "Read your profile",
-  "user:email": "View your email address",
-  repo: "Read and write repositories over HTTPS",
-  "package:read": "Download packages",
-  "package:write": "Publish and delete packages",
-};
+/** Granted-scope labels from the generated catalog; raw name as fallback. */
+function scopeLabel(scope: string): string {
+  return SCOPE_CATALOG.find((s) => s.name === scope)?.description ?? scope;
+}
 
 type OAuthGrantsProps = {
   grants: OAuthGrantPublic[];
@@ -76,9 +73,7 @@ export function OAuthGrants({ grants, onRevoked }: OAuthGrantsProps) @{
               </p>
               <div className="mt-2 flex flex-wrap gap-1.5">
                 @for (const scope of grant.scopes; key scope) {
-                  <Badge variant="outline">
-                    {(SCOPE_LABELS[scope] ?? scope) as string}
-                  </Badge>;
+                  <Badge variant="outline">{scopeLabel(scope) as string}</Badge>;
                 }
               </div>
               <p className="mt-2 text-[13px] text-muted-foreground">

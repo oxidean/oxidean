@@ -175,6 +175,14 @@ Bare `/{owner}/{repo}` (no `.git` suffix) stays on the web UI. Self-hosted rever
 
 **PAT prefixes (redacted examples only):** classic `oxidean_pat_REDACTED`, fine-grained `oxidean_fg_REDACTED`. Mint via Settings → Tokens (RPC `pat.*` with session cookie). PATs authenticate Smart HTTP over HTTPS via HTTP Basic (password = token), the package registries, and typed `/api/rpc` via `Authorization: Bearer <pat>` when no session cookie is sent — the scope model is in [API.md](API.md#pat-bearer-authentication).
 
+**PAT expiration policy:** all minting paths — `pat.createClassic`, `pat.createFineGrained`, and the OAuth device grant (`ox auth login --web`) — resolve `expires_at` through one policy. Env defaults are the floor; sys-admins override per instance under **Admin → Auth settings** or `admin.pat.updateSettings` (`clear_overrides` reverts). `pat.policy` exposes the effective values to any client.
+
+| Variable | Required | Default | Purpose |
+| --- | --- | --- | --- |
+| `OXIDEAN_PAT_DEFAULT_TTL_DAYS` | Optional | `90` | Expiry applied when a create request omits `expires_at`. Clamped to the max. |
+| `OXIDEAN_PAT_MAX_TTL_DAYS` | Optional | `365` | Furthest expiry a request may set. |
+| `OXIDEAN_PAT_ALLOW_NO_EXPIRY` | Optional | `false` | Allow `expires_at: "never"`. Rejected with `rpc.bad_input` when off. |
+
 **Failed-auth rate limit (single replica):** Failed Basic/PAT attempts (including RPC `Bearer` auth on `/api/rpc`) are limited **in-process** (20 failures per client IP and 10 per username per 15 minutes → HTTP `429` + `Retry-After`). Client IP is taken from the **rightmost** `X-Forwarded-For` hop (the address appended by the trusted reverse proxy). **Do not expose the API directly to the internet without a proxy that overwrites or sanitizes forwarded headers** — otherwise clients can spoof leftmost XFF hops and bypass the per-IP window. Counters are **not** shared across API replicas — multi-replica deployments need an external / shared limiter or sticky single replica for this control.
 
 ## Git over SSH

@@ -770,10 +770,11 @@ async fn pat_bearer_expired_token_unauthenticated() {
     let (status, _, v) =
         rpc_json_bearer(&app, r#"{"procedure":"auth.me","input":{}}"#, &token).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "{v}");
-    assert_eq!(v["error"]["code"], "auth.unauthenticated", "{v}");
+    assert_eq!(v["error"]["code"], "auth.token_expired", "{v}");
 }
 
-/// API-02: revoked PAT → 401 `auth.unauthenticated` (revoked rows never match).
+/// Revoked PAT → 401 `auth.token_revoked` — distinct from a missing token so
+/// clients can offer the right recovery.
 #[tokio::test]
 async fn pat_bearer_revoked_token_unauthenticated() {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -797,7 +798,7 @@ async fn pat_bearer_revoked_token_unauthenticated() {
     let (status, _, v) =
         rpc_json_bearer(&app, r#"{"procedure":"auth.me","input":{}}"#, &token).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "{v}");
-    assert_eq!(v["error"]["code"], "auth.unauthenticated", "{v}");
+    assert_eq!(v["error"]["code"], "auth.token_revoked", "{v}");
 }
 
 /// API-02: scope denial is not an auth failure — a classic `repo` token cannot
@@ -918,7 +919,7 @@ async fn pat_bearer_session_only_denied() {
     .await;
 
     for procedure in [
-        r#"{"procedure":"pat.list","input":{}}"#,
+        r#"{"procedure":"pat.createClassic","input":{"name":"x","scopes":["repo"]}}"#,
         r#"{"procedure":"sshKey.list","input":{}}"#,
         r#"{"procedure":"auth.logout","input":{}}"#,
         r#"{"procedure":"org.create","input":{"slug":"x","display_name":"x"}}"#,
@@ -1368,7 +1369,10 @@ async fn pat_bearer_family_scope_gates() {
     assert_eq!(status, StatusCode::OK, "write implies read — {v}");
 }
 
-/// A PAT can never mint or revoke tokens — even with every scope.
+/// A PAT can never mint tokens or touch OAuth/token-management surfaces —
+/// even with every scope. `pat.list`/`pat.revoke` are the exception: a token
+/// may see its owner's rows and revoke only itself (foreign ids →
+/// `auth.pat_scope`).
 #[tokio::test]
 async fn pat_bearer_cannot_manage_pats() {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -1388,8 +1392,8 @@ async fn pat_bearer_cannot_manage_pats() {
     .await;
 
     for procedure in [
-        r#"{"procedure":"pat.list","input":{}}"#,
         r#"{"procedure":"pat.createClassic","input":{"name":"x","scopes":["repo"]}}"#,
+        r#"{"procedure":"pat.createFineGrained","input":{"name":"x","repo_access":"all"}}"#,
         r#"{"procedure":"pat.revoke","input":{"id":"whatever"}}"#,
         r#"{"procedure":"oauthApp.list","input":{}}"#,
         r#"{"procedure":"oauth.deviceAuthorize","input":{"user_code":"ABCD-EFGH","approve":true}}"#,
@@ -1398,6 +1402,12 @@ async fn pat_bearer_cannot_manage_pats() {
         assert_eq!(status, StatusCode::FORBIDDEN, "{procedure} — {v}");
         assert_eq!(v["error"]["code"], "auth.pat_scope", "{procedure} — {v}");
     }
+
+    // `pat.list` is allowed — it returns only the caller's own rows.
+    let (status, _, v) =
+        rpc_json_bearer(&app, r#"{"procedure":"pat.list","input":{}}"#, &token).await;
+    assert_eq!(status, StatusCode::OK, "{v}");
+    assert!(v["data"].is_array(), "{v}");
 }
 
 // --- Fine-grained permission families (S7) ---

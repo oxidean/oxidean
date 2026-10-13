@@ -9,8 +9,9 @@ use oxidean_core::{AppError, RpcResponse};
 use serde_json::{json, Value};
 
 use crate::args::{parse_repo, BodyArg, Command, Global, Invocation, ListFilters, ReviewAction};
-use crate::config::{self, Config, InstanceEntry};
+use crate::config::{self, Config};
 use crate::device;
+use crate::keystore;
 use crate::manifest;
 use crate::output;
 use crate::rpc::{self, CallError, Client};
@@ -172,54 +173,6 @@ fn opt(map: &mut serde_json::Map<String, Value>, key: &str, v: Option<impl Into<
     if let Some(v) = v {
         map.insert(key.into(), v.into());
     }
-}
-
-/// Valid `pat create --fine-grained --perms` families (mirrors `FgPerms`).
-const FG_PERM_FAMILIES: &[&str] = &[
-    "issues",
-    "pull_requests",
-    "actions",
-    "commit_statuses",
-    "secrets",
-    "variables",
-    "environments",
-    "deployments",
-    "webhooks",
-    "administration",
-    "metadata",
-    "pages",
-    "releases",
-    "emails",
-    "notifications",
-    "profile",
-    "ssh_keys",
-    "gpg_keys",
-    "starring",
-    "watching",
-    "followers",
-];
-
-/// Parse `--perms issues=write,pull_requests=read` into the RPC `perms` object.
-fn parse_fg_perms(pairs: &[String]) -> Result<Value, CliError> {
-    let mut out = serde_json::Map::new();
-    for pair in pairs {
-        let (key, level) = pair.split_once('=').ok_or_else(|| {
-            CliError::Usage(format!("--perms entries need family=level, got `{pair}`"))
-        })?;
-        if !FG_PERM_FAMILIES.contains(&key) {
-            return Err(CliError::Usage(format!(
-                "unknown permission family `{key}` (one of: {})",
-                FG_PERM_FAMILIES.join(", ")
-            )));
-        }
-        if level != "read" && level != "write" {
-            return Err(CliError::Usage(format!(
-                "permission level for `{key}` must be read or write, got `{level}`"
-            )));
-        }
-        out.insert(key.to_string(), json!(level));
-    }
-    Ok(Value::Object(out))
 }
 
 /// Run one RPC and render `data` for text mode. The full envelope is kept so
@@ -481,10 +434,14 @@ fn required_procedures(cmd: &Command) -> Vec<String> {
         | Command::AuthToken
         | Command::AuthLogout
         | Command::AuthSwitch { .. }
+        | Command::AuthSetupGit
+        | Command::AuthGitCredential { .. }
         | Command::ConfigList
         | Command::ConfigGet { .. }
         | Command::ConfigSet { .. }
         | Command::Completion { .. } => vec![],
+        // `pat.self` rides along best-effort (older servers lack it) — only
+        // `auth.me` is strictly required.
         Command::AuthStatus => one("auth.me"),
         Command::RepoList { owner } => vec![if owner.is_some() {
             "repo.listByOwner"
@@ -731,13 +688,13 @@ fn required_procedures(cmd: &Command) -> Vec<String> {
         Command::EmailRemove { .. } => one("email.remove"),
         Command::EmailSetPrimary { .. } => one("email.setPrimary"),
         Command::EmailResend { .. } => one("email.resendVerify"),
-        Command::PatList => one("pat.list"),
-        Command::PatCreate { fine_grained, .. } => one(if *fine_grained {
-            "pat.createFineGrained"
+        Command::AdminPat { set, .. } => one(if *set {
+            "admin.pat.updateSettings"
         } else {
-            "pat.createClassic"
+            "admin.pat.getSettings"
         }),
-        Command::PatRevoke { .. } => one("pat.revoke"),
+        Command::AuthRevoke => vec!["pat.self".into(), "pat.revoke".into()],
+        Command::AuthRefresh { .. } => vec!["pat.self".into(), "pat.revoke".into()],
         Command::LabelList { org, .. } => one(if org.is_some() {
             "label.listForOrg"
         } else {
@@ -874,9 +831,10 @@ pub async fn dispatch(inv: &Invocation, rt: &Runtime) -> Result<Out, CliError> {
             token,
             token_stdin,
             web,
+            scopes,
         } => {
             if *web {
-                auth_login_web(g, rt).await
+                auth_login_web(g, rt, scopes.as_deref()).await
             } else {
                 auth_login(g, rt, token.as_deref(), *token_stdin).await
             }
@@ -884,6 +842,13 @@ pub async fn dispatch(inv: &Invocation, rt: &Runtime) -> Result<Out, CliError> {
         Command::AuthStatus => auth_status(g, rt).await,
         Command::AuthLogout => auth_logout(g, rt),
         Command::AuthToken => auth_token(g, rt),
+        Command::AuthRefresh {
+            scopes,
+            reset_scopes,
+        } => auth_refresh(g, rt, scopes.as_deref(), *reset_scopes).await,
+        Command::AuthRevoke => auth_revoke(g, rt).await,
+        Command::AuthSetupGit => auth_setup_git(g, rt),
+        Command::AuthGitCredential { op } => auth_git_credential(g, rt, op),
         Command::AuthSwitch { instance } => auth_switch(rt, instance.as_deref()),
         Command::ConfigList => config_list(rt),
         Command::ConfigGet { key } => config_get(rt, key),
@@ -2340,62 +2305,6 @@ pub async fn dispatch(inv: &Invocation, rt: &Runtime) -> Result<Out, CliError> {
             )
             .await
         }
-        Command::PatList => invoke(g, rt, "pat.list", json!({}), output::pat_list).await,
-        Command::PatCreate {
-            name,
-            scopes,
-            fine_grained,
-            contents,
-            repo_access,
-            repo_ids,
-            perms,
-            expires_at,
-        } => {
-            let input = if *fine_grained {
-                let mut i = json!({
-                    "name": name,
-                    "contents": contents.clone().unwrap_or_else(|| "read".to_string()),
-                });
-                let m = i.as_object_mut().unwrap();
-                opt(m, "repo_access", repo_access.clone());
-                if !repo_ids.is_empty() {
-                    m.insert(
-                        "repository_ids".into(),
-                        Value::Array(repo_ids.iter().cloned().map(Value::String).collect()),
-                    );
-                }
-                if !perms.is_empty() {
-                    m.insert("perms".into(), parse_fg_perms(perms)?);
-                }
-                opt(m, "expires_at", expires_at.clone());
-                i
-            } else {
-                if !perms.is_empty() {
-                    return Err(CliError::Usage(
-                        "--perms only applies to --fine-grained tokens".into(),
-                    ));
-                }
-                if scopes.is_empty() {
-                    return Err(CliError::Usage(
-                        "pat create needs --scopes repo[,package:read,...] or --fine-grained"
-                            .into(),
-                    ));
-                }
-                let mut i = json!({ "name": name, "scopes": scopes });
-                opt(i.as_object_mut().unwrap(), "expires_at", expires_at.clone());
-                i
-            };
-            let proc = if *fine_grained {
-                "pat.createFineGrained"
-            } else {
-                "pat.createClassic"
-            };
-            invoke(g, rt, proc, input, output::pat_created).await
-        }
-        Command::PatRevoke { id } => {
-            invoke(g, rt, "pat.revoke", json!({ "id": id }), output::generic).await
-        }
-
         // ── labels / webhooks ───────────────────────────────────────
         Command::LabelList {
             repo,
@@ -2776,6 +2685,26 @@ pub async fn dispatch(inv: &Invocation, rt: &Runtime) -> Result<Out, CliError> {
             }
             invoke(g, rt, "admin.mcp.updateSettings", input, output::generic).await
         }
+        Command::AdminPat {
+            set,
+            default_ttl_days,
+            max_ttl_days,
+            allow_never_expire,
+            clear,
+        } => {
+            if !*set {
+                return invoke(g, rt, "admin.pat.getSettings", json!({}), output::generic).await;
+            }
+            let mut input = json!({});
+            let m = input.as_object_mut().unwrap();
+            opt(m, "default_ttl_days", *default_ttl_days);
+            opt(m, "max_ttl_days", *max_ttl_days);
+            opt(m, "allow_never_expire", *allow_never_expire);
+            if *clear {
+                m.insert("clear_overrides".into(), json!(true));
+            }
+            invoke(g, rt, "admin.pat.updateSettings", input, output::generic).await
+        }
         Command::AdminAuth {
             set,
             provider_mode,
@@ -3020,9 +2949,45 @@ async fn release_download(
     })
 }
 
+/// Classic scopes covering the full `ox` command surface — the default set
+/// `--web` login and `auth refresh` mint. Deliberately broad (gh's CLI tokens
+/// are similarly broad); `--scopes` narrows.
+pub const CLI_DEFAULT_SCOPES: &str = concat!(
+    "repo workflow notifications user read:org delete_repo ",
+    "package:read package:write admin:repo_hook admin:public_key admin:gpg_key"
+);
+
+/// Normalize a `--scopes` value into a space-delimited, validated scope
+/// string. Comma and whitespace both split; unknown names are rejected here
+/// (the server validates again, but failing before the browser opens is the
+/// better error).
+fn scope_list(raw: &str) -> Result<String, CliError> {
+    let mut out = Vec::new();
+    for part in raw.split([',', ' ', '\t']).filter(|s| !s.is_empty()) {
+        match oxidean_core::ClassicPatScope::parse(part) {
+            Ok(_) => out.push(part.to_string()),
+            Err(_) => {
+                let valid = oxidean_core::CLASSIC_SCOPES
+                    .iter()
+                    .map(|m| m.scope.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                return Err(CliError::Usage(format!(
+                    "unknown scope '{part}' — valid scopes: {valid}"
+                )));
+            }
+        }
+    }
+    if out.is_empty() {
+        return Err(CliError::Usage("empty --scopes list".into()));
+    }
+    Ok(out.join(" "))
+}
+
 /// `auth login` — verify reachability, store the token, mark the instance
 /// default. `--token` → `OXIDEAN_TOKEN` → stdin (explicit `--token-stdin`, or
-/// implicitly when stdin is a pipe — the CI path).
+/// implicitly when stdin is a pipe — the CI path). Bare on a TTY: interactive
+/// picker between browser sign-in and pasting a token (gh parity).
 async fn auth_login(
     global: &Global,
     rt: &Runtime,
@@ -3030,7 +2995,42 @@ async fn auth_login(
     token_stdin: bool,
 ) -> Result<Out, CliError> {
     let instance = resolve_instance(global, &rt.config)?;
+
+    // Interactive picker — no auth flags and nothing piped in.
+    if token_flag.is_none()
+        && !token_stdin
+        && config::env_token().is_none()
+        && crate::term::can_prompt()
+    {
+        let choice = crate::prompt::select(
+            "How do you want to sign in?",
+            &[
+                "Sign in via browser (device flow)".to_string(),
+                "Paste a personal access token".to_string(),
+            ],
+        )
+        .map_err(|e| CliError::Usage(format!("prompt failed: {e}")))?;
+        if choice == 0 {
+            return auth_login_web(global, rt, None).await;
+        }
+        let token = crate::prompt::password("Personal access token")
+            .map_err(|e| CliError::Usage(format!("prompt failed: {e}")))?;
+        return auth_login_with_token(global, rt, &instance, token.trim()).await;
+    }
+
     let token = login_token(token_flag, token_stdin)?;
+    auth_login_with_token(global, rt, &instance, &token).await
+}
+
+/// Shared tail of `auth login` once a token exists: probe, verify, persist.
+async fn auth_login_with_token(
+    _global: &Global,
+    rt: &Runtime,
+    instance: &str,
+    token: &str,
+) -> Result<Out, CliError> {
+    let instance = instance.to_string();
+    let token = token.to_string();
 
     // Reachability: system.health is unauthenticated and allowed pre-bootstrap.
     let probe = Client::new(&instance, None);
@@ -3054,9 +3054,9 @@ async fn auth_login(
         _ => None,
     };
 
+    let entry = keystore::persist(&instance, &token);
     let mut cfg = rt.config.clone();
-    cfg.instances
-        .insert(instance.clone(), InstanceEntry { token: Some(token) });
+    cfg.instances.insert(instance.clone(), entry);
     cfg.default_instance = Some(instance.clone());
     config::save(&rt.config_path, &cfg).map_err(CliError::Config)?;
 
@@ -3079,8 +3079,16 @@ async fn auth_login(
 /// `auth login --web` — RFC 8628 device grant: request a code, show it, open
 /// the approval page, poll until the user approves/denies, then store the
 /// minted PAT exactly like a pasted token.
-async fn auth_login_web(global: &Global, rt: &Runtime) -> Result<Out, CliError> {
+async fn auth_login_web(
+    global: &Global,
+    rt: &Runtime,
+    scopes: Option<&str>,
+) -> Result<Out, CliError> {
     let instance = resolve_instance(global, &rt.config)?;
+    let scopes = match scopes {
+        Some(raw) => scope_list(raw)?,
+        None => CLI_DEFAULT_SCOPES.to_string(),
+    };
 
     // Same reachability probe as token login.
     let probe = Client::new(&instance, None);
@@ -3095,8 +3103,7 @@ async fn auth_login_web(global: &Global, rt: &Runtime) -> Result<Out, CliError> 
         Err(e) => return Err(CliError::Transport(format!("cannot reach {instance}: {e}"))),
     }
 
-    // Classic scopes covering the full CLI surface (repo domain + registries).
-    let token = device::run_grant(&instance, "repo package:read package:write").await?;
+    let token = device::run_grant(&instance, &scopes).await?;
 
     // Verify + store, mirroring auth_login.
     let authed = Client::new(&instance, Some(token.clone()));
@@ -3104,9 +3111,9 @@ async fn auth_login_web(global: &Global, rt: &Runtime) -> Result<Out, CliError> 
         Ok(RpcResponse::Ok { data, .. }) => output::s(&data, "username").map(str::to_string),
         _ => None,
     };
+    let entry = keystore::persist(&instance, &token);
     let mut cfg = rt.config.clone();
-    cfg.instances
-        .insert(instance.clone(), InstanceEntry { token: Some(token) });
+    cfg.instances.insert(instance.clone(), entry);
     cfg.default_instance = Some(instance.clone());
     config::save(&rt.config_path, &cfg).map_err(CliError::Config)?;
 
@@ -3124,10 +3131,60 @@ async fn auth_login_web(global: &Global, rt: &Runtime) -> Result<Out, CliError> 
 
 async fn auth_status(global: &Global, rt: &Runtime) -> Result<Out, CliError> {
     let instance = resolve_instance(global, &rt.config)?;
-    invoke(global, rt, "auth.me", json!({}), move |data| {
-        output::auth_status(data, &instance)
+    let me = call(global, rt, "auth.me", json!({})).await?;
+
+    // Best-effort PAT introspection — session-authed calls and older servers
+    // simply skip the token block.
+    let pat_info = match client(global, rt)?.call("pat.self", json!({})).await {
+        Ok(RpcResponse::Ok { data, .. }) => Some(data),
+        _ => None,
+    };
+
+    let store_label = rt
+        .config
+        .instances
+        .get(&instance)
+        .and_then(|e| e.secret_store.clone())
+        .unwrap_or_else(|| "none".to_string());
+    let env_token = config::env_token().is_some();
+
+    let text = {
+        let mut out = output::auth_status(&me, &instance);
+        if env_token {
+            out.push_str("\n  token: OXIDEAN_TOKEN (env)");
+        } else if let Some(pat) = &pat_info {
+            let name = output::s(pat, "name").unwrap_or("token");
+            let prefix = output::s(pat, "token_prefix").unwrap_or("");
+            let kind = output::s(pat, "kind").unwrap_or("");
+            let expiry = output::s(pat, "expires_at").unwrap_or("never");
+            out.push_str(&format!(
+                "\n  token: {name} ({prefix}) {kind} · expires {expiry} · stored: {store_label}"
+            ));
+            if let Some(scopes) = pat.get("scopes").and_then(Value::as_array) {
+                if !scopes.is_empty() {
+                    let names: Vec<&str> = scopes.iter().filter_map(Value::as_str).collect();
+                    out.push_str(&format!("\n  scopes: {}", names.join(" ")));
+                }
+            }
+        } else {
+            out.push_str(&format!("\n  token: stored: {store_label}"));
+        }
+        out
+    };
+
+    Ok(Out::Report {
+        text,
+        json: json!({
+            "ok": true,
+            "data": {
+                "instance": instance,
+                "user": me,
+                "token": pat_info.unwrap_or(Value::Null),
+                "token_source": if env_token { "env" } else { "stored" },
+                "secret_store": store_label,
+            }
+        }),
     })
-    .await
 }
 
 /// `auth switch` — change the default instance; arg or TTY picker over the
@@ -3317,9 +3374,11 @@ fn config_set(rt: &Runtime, key: &str, value: &str) -> Result<Out, CliError> {
     }
 }
 
-/// `auth logout` — drop the stored token for the resolved instance.
+/// `auth logout` — drop the stored token for the resolved instance (keyring
+/// copy first, then the config entry).
 fn auth_logout(global: &Global, rt: &Runtime) -> Result<Out, CliError> {
     let instance = resolve_instance(global, &rt.config)?;
+    keystore::remove(&instance);
     let mut cfg = rt.config.clone();
     let had = cfg.instances.remove(&instance).is_some();
     if !had {
@@ -3424,6 +3483,239 @@ fn label_scope_input(
     }
 }
 
+/// Stored credential only — `auth refresh`/`revoke` manage the login's own
+/// token, never an `OXIDEAN_TOKEN` env override (env credentials are owned by
+/// the caller's shell, refreshing them would leak a swapped secret into the
+/// config).
+fn stored_token(rt: &Runtime, instance: &str) -> Result<String, CliError> {
+    if config::env_token().is_some() {
+        return Err(CliError::Usage(
+            "OXIDEAN_TOKEN is set — env-supplied tokens can't be refreshed or \
+             revoked here; manage that token at {instance}/settings/tokens"
+                .replace("{instance}", instance),
+        ));
+    }
+    rt.config
+        .instances
+        .get(instance)
+        .and_then(|e| crate::keystore::resolve(instance, e))
+        .ok_or_else(|| {
+            CliError::Auth(format!(
+                "no stored token for {instance} — run `ox auth login`"
+            ))
+        })
+}
+
+/// `auth refresh` — mint a fresh CLI token through the device grant and
+/// self-revoke the old one. Scopes: `--scopes` wins, `--reset-scopes` returns
+/// to `CLI_DEFAULT_SCOPES`, otherwise the old token's own scopes carry over
+/// (read via `pat.self` before the swap).
+async fn auth_refresh(
+    global: &Global,
+    rt: &Runtime,
+    scopes: Option<&str>,
+    reset_scopes: bool,
+) -> Result<Out, CliError> {
+    let instance = resolve_instance(global, &rt.config)?;
+    let old_token = stored_token(rt, &instance)?;
+
+    // What the old token carries — id for self-revoke, scopes for the default.
+    let old_client = Client::new(&instance, Some(old_token.clone()));
+    let old_info = match old_client.call("pat.self", json!({})).await {
+        Ok(RpcResponse::Ok { data, .. }) => Some(data),
+        Ok(RpcResponse::Err { error, .. }) => {
+            return Err(CliError::Api(error));
+        }
+        Err(e) => return Err(CliError::from(e)),
+    };
+
+    let scopes = match (scopes, reset_scopes) {
+        (Some(raw), _) => scope_list(raw)?,
+        (None, true) => CLI_DEFAULT_SCOPES.to_string(),
+        (None, false) => old_info
+            .as_ref()
+            .and_then(|i| i.get("scopes"))
+            .and_then(Value::as_array)
+            .map(|a| a.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(" "))
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| CLI_DEFAULT_SCOPES.to_string()),
+    };
+
+    // Mint → verify → persist (atomic swap: the old credential is only
+    // replaced once the new one is proven usable).
+    let new_token = device::run_grant(&instance, &scopes).await?;
+    let authed = Client::new(&instance, Some(new_token.clone()));
+    let username = match authed.call("auth.me", json!({})).await {
+        Ok(RpcResponse::Ok { data, .. }) => output::s(&data, "username").map(str::to_string),
+        Ok(RpcResponse::Err { error, .. }) => return Err(CliError::Api(error)),
+        Err(e) => return Err(CliError::from(e)),
+    };
+    let entry = keystore::persist(&instance, &new_token);
+    let mut cfg = rt.config.clone();
+    cfg.instances.insert(instance.clone(), entry);
+    config::save(&rt.config_path, &cfg).map_err(CliError::Config)?;
+
+    // Best-effort self-revoke of the old token (server rejects anything but
+    // self-revocation, so this must run under the old credential).
+    let revoked = if let Some(id) = old_info.as_ref().and_then(|i| output::s(i, "id")) {
+        matches!(
+            old_client
+                .call("pat.revoke", json!({ "id": id }))
+                .await,
+            Ok(RpcResponse::Ok { .. })
+        )
+    } else {
+        false
+    };
+
+    let mut text = format!("Refreshed token on {instance}");
+    if let Some(user) = &username {
+        text.push_str(&format!(" as {user}"));
+    }
+    text.push_str(&format!(" — scopes: {scopes}"));
+    if !revoked {
+        text.push_str("\n(old token could not be revoked — it may already be expired/revoked)");
+    }
+    Ok(Out::Report {
+        text,
+        json: json!({
+            "ok": true,
+            "data": {
+                "instance": instance,
+                "authenticated_as": username,
+                "scopes": scopes,
+                "old_token_revoked": revoked,
+            }
+        }),
+    })
+}
+
+/// `auth revoke` — self-revoke the stored token server-side, then drop the
+/// local credential (keyring + config entry).
+async fn auth_revoke(global: &Global, rt: &Runtime) -> Result<Out, CliError> {
+    let instance = resolve_instance(global, &rt.config)?;
+    let token = stored_token(rt, &instance)?;
+    let c = Client::new(&instance, Some(token));
+    let info = match c.call("pat.self", json!({})).await {
+        Ok(RpcResponse::Ok { data, .. }) => data,
+        Ok(RpcResponse::Err { error, .. }) => return Err(CliError::Api(error)),
+        Err(e) => return Err(CliError::from(e)),
+    };
+    let id = output::s(&info, "id").ok_or_else(|| {
+        CliError::Transport("pat.self returned no id".to_string())
+    })?;
+    match c.call("pat.revoke", json!({ "id": id })).await {
+        Ok(RpcResponse::Ok { .. }) => {}
+        Ok(RpcResponse::Err { error, .. }) => return Err(CliError::Api(error)),
+        Err(e) => return Err(CliError::from(e)),
+    }
+    keystore::remove(&instance);
+    let mut cfg = rt.config.clone();
+    cfg.instances.remove(&instance);
+    if cfg.default_instance.as_deref() == Some(instance.as_str()) {
+        cfg.default_instance = cfg.instances.keys().next().cloned();
+    }
+    config::save(&rt.config_path, &cfg).map_err(CliError::Config)?;
+    Ok(Out::Report {
+        text: format!("Revoked token {id} on {instance} and logged out"),
+        json: json!({"ok": true, "data": {"instance": instance, "revoked": id}}),
+    })
+}
+
+/// `auth setup-git` — register `ox` as the git credential helper for the
+/// resolved instance's host (gh `auth setup-git` shape).
+fn auth_setup_git(global: &Global, rt: &Runtime) -> Result<Out, CliError> {
+    let instance = resolve_instance(global, &rt.config)?;
+    let host = instance
+        .trim_start_matches("https://")
+        .trim_start_matches("http://")
+        .trim_end_matches('/');
+    let key = format!("credential.https://{host}.helper");
+    // gh-style: clear any existing helpers for the host, then register ours.
+    let _ = std::process::Command::new("git")
+        .args(["config", "--global", "--unset-all", &key])
+        .status();
+    let status = std::process::Command::new("git")
+        .args(["config", "--global", &key, "!ox auth git-credential"])
+        .status()
+        .map_err(|e| CliError::Transport(format!("cannot run git config: {e}")))?;
+    if !status.success() {
+        return Err(CliError::Transport("git config failed".into()));
+    }
+    Ok(Out::Report {
+        text: format!("git credential helper registered for {host} (`ox auth git-credential`)"),
+        json: json!({"ok": true, "data": {"host": host, "helper": "ox auth git-credential"}}),
+    })
+}
+
+/// `auth git-credential` — git credential-helper protocol on stdio:
+/// `get` answers with the stored token when the request targets this
+/// instance's host; `store`/`erase` update the stored credential.
+fn auth_git_credential(global: &Global, rt: &Runtime, op: &str) -> Result<Out, CliError> {
+    use std::io::Read;
+    let mut buf = String::new();
+    std::io::stdin()
+        .read_to_string(&mut buf)
+        .map_err(|e| CliError::Transport(format!("reading credential request: {e}")))?;
+    let mut kv = std::collections::BTreeMap::new();
+    for line in buf.lines() {
+        if let Some((k, v)) = line.split_once('=') {
+            kv.insert(k.trim().to_string(), v.trim().to_string());
+        }
+    }
+    let instance = resolve_instance(global, &rt.config)?;
+    let req_host = kv.get("host").cloned().unwrap_or_default();
+    let instance_host = instance
+        .trim_start_matches("https://")
+        .trim_start_matches("http://")
+        .trim_end_matches('/')
+        .to_string();
+
+    let empty = Out::Report {
+        text: String::new(),
+        json: json!({"ok": true, "data": {}}),
+    };
+
+    match op {
+        "get" => {
+            if req_host.eq_ignore_ascii_case(&instance_host) {
+                if let Some(t) =
+                    config::resolve_token(config::env_token().as_deref(), &rt.config, &instance)
+                {
+                    print!("username=oxidean\npassword={t}\n\n");
+                }
+            }
+            Ok(empty)
+        }
+        "store" => {
+            if req_host.eq_ignore_ascii_case(&instance_host) {
+                if let Some(password) = kv.get("password") {
+                    let entry = keystore::persist(&instance, password);
+                    let mut cfg = rt.config.clone();
+                    cfg.instances.insert(instance.clone(), entry);
+                    config::save(&rt.config_path, &cfg).map_err(CliError::Config)?;
+                }
+            }
+            Ok(empty)
+        }
+        "erase" => {
+            if req_host.eq_ignore_ascii_case(&instance_host) {
+                keystore::remove(&instance);
+                let mut cfg = rt.config.clone();
+                cfg.instances.remove(&instance);
+                if cfg.default_instance.as_deref() == Some(instance.as_str()) {
+                    cfg.default_instance = cfg.instances.keys().next().cloned();
+                }
+                config::save(&rt.config_path, &cfg).map_err(CliError::Config)?;
+            }
+            Ok(empty)
+        }
+        _ => Err(CliError::Usage(format!(
+            "unknown git-credential operation '{op}' — get|store|erase"
+        ))),
+    }
+}
+
 /// label.create/update/delete take `{scope, owner, repo?, …}`.
 fn label_write_input(repo: Option<&str>, org: Option<&str>) -> Result<Value, CliError> {
     match (repo, org) {
@@ -3444,16 +3736,6 @@ fn label_write_input(repo: Option<&str>, org: Option<&str>) -> Result<Value, Cli
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn parse_fg_perms_validates_family_and_level() {
-        let v = parse_fg_perms(&["issues=write".to_string(), "pull_requests=read".to_string()])
-            .unwrap();
-        assert_eq!(v, json!({"issues": "write", "pull_requests": "read"}));
-        assert!(parse_fg_perms(&["bogus=read".to_string()]).is_err());
-        assert!(parse_fg_perms(&["issues=admin".to_string()]).is_err());
-        assert!(parse_fg_perms(&["issues".to_string()]).is_err());
-    }
 
     #[test]
     fn list_input_omits_unset_filters() {

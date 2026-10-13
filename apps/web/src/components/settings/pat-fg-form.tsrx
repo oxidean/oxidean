@@ -21,6 +21,9 @@ import {
 } from "@/components/ui/select";
 import { PatExpiryFields } from "@/components/settings/pat-expiry-field";
 import {
+  defaultPresetForPolicy,
+  expiryOptionsForPolicy,
+  maxCustomDate,
   resolveExpiresAt,
   tomorrowDateValue,
   type PatExpiryPreset,
@@ -34,11 +37,14 @@ import {
   type FgPermValues,
 } from "@/components/settings/pat-scopes";
 import { apiClient } from "@/lib/api-client";
+import type { PatPolicyPublic } from "@oxidean/api-client";
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
 
 type PatFgFormProps = {
   onCreated: (token: string) => void;
+  /** Effective `pat.policy` — `null` before load keeps permissive defaults. */
+  policy: PatPolicyPublic | null;
 };
 
 type ContentsChoice = "read" | "write";
@@ -59,7 +65,7 @@ function packagesLabel(v: PackagesChoice): string {
 }
 
 /** Fine-grained PAT create form — keep panels mounted; narrow Field/Subscribe. */
-export function PatFgForm({ onCreated }: PatFgFormProps) @{
+export function PatFgForm({ onCreated, policy }: PatFgFormProps) @{
   const [noteError, setNoteError] = useState("");
   const [repoError, setRepoError] = useState("");
   const [formError, setFormError] = useState("");
@@ -67,6 +73,8 @@ export function PatFgForm({ onCreated }: PatFgFormProps) @{
   const [repos, setRepos] = useState<RepoPublic[] | null>(null);
   const [reposError, setReposError] = useState("");
   const [repoFilter, setRepoFilter] = useState("");
+  const expiryOptions = expiryOptionsForPolicy(policy);
+  const expiryMaxDate = maxCustomDate(policy);
 
   const form = useForm({
     defaultValues: {
@@ -76,7 +84,7 @@ export function PatFgForm({ onCreated }: PatFgFormProps) @{
       contents: "read" as ContentsChoice,
       packagesPerm: "none" as PackagesChoice,
       perms: {} as FgPermValues,
-      expiryPreset: "30" as PatExpiryPreset,
+      expiryPreset: defaultPresetForPolicy(policy) as PatExpiryPreset,
       expiryDate: tomorrowDateValue(),
     },
     onSubmit: async ({ value }) => {
@@ -108,6 +116,8 @@ export function PatFgForm({ onCreated }: PatFgFormProps) @{
             setFormError("Verify your email before creating a personal access token.");
           } else if (res.error.code === "pat.note_required") {
             setNoteError("Note is required.");
+          } else if (res.error.code === "pat.expiry_forbidden") {
+            setFormError(res.error.message || "This instance requires tokens to expire.");
           } else if (res.error.code === "pat.repos_required") {
             setRepoError("Select at least one repository.");
           } else {
@@ -412,6 +422,8 @@ export function PatFgForm({ onCreated }: PatFgFormProps) @{
 
     <PatExpiryFields
       form={form}
+      options={expiryOptions}
+      maxDate={expiryMaxDate}
       disabled={pending}
       noneHint="This token will never expire. GitHub fine-grained tokens require an expiration; Oxidean still allows none for self-host flexibility."
     />

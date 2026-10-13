@@ -1,6 +1,6 @@
 import { queryOptions, useQuery } from "@octanejs/tanstack-query";
 import { AppPage } from "@/components/app-page";
-import type { UserPublic } from "@oxidean/api-client";
+import type { PatPolicyPublic, UserPublic } from "@oxidean/api-client";
 import { useEffect, useState } from "octane";
 import { AuthShell } from "@/components/auth-shell";
 import { AccountSettingsLayout, SettingsShell } from "@/components/settings/settings-shell";
@@ -15,9 +15,19 @@ import { AppLink } from "@/components/ui/app-link";
 type TokensNewLoaderData =
   | { kind: "unauthenticated" }
   | { kind: "error"; message: string }
-  | { kind: "ready"; user: UserPublic };
+  | { kind: "ready"; user: UserPublic; policy: PatPolicyPublic | null };
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
+
+/** Instance PAT expiration policy — null when the call fails (older server). */
+async function fetchPatPolicy(): Promise<PatPolicyPublic | null> {
+  try {
+    const res = await apiClient.pat.policy();
+    return res.ok ? res.data : null;
+  } catch {
+    return null;
+  }
+}
 
 function settingsTokensNewQueryOptions() {
   return queryOptions({
@@ -34,7 +44,8 @@ function settingsTokensNewQueryOptions() {
             message: res.error.message || "Could not load session.",
           };
         }
-        return { kind: "ready", user: res.data };
+        const policy = await fetchPatPolicy();
+        return { kind: "ready", user: res.data, policy };
       } catch {
         return { kind: "error", message: NETWORK_ERROR };
       }
@@ -46,7 +57,7 @@ function settingsTokensNewQueryOptions() {
 
 type Phase =
   | { kind: "loading" }
-  | { kind: "ready"; user: UserPublic }
+  | { kind: "ready"; user: UserPublic; policy: PatPolicyPublic | null }
   | { kind: "error"; message: string };
 
 /** Exported for tokens.integration.test.ts (GIT-11 / D-05 / D-15 / D-25). */
@@ -67,7 +78,7 @@ function TokensNewContent() @{
 
   const [phase, setPhase] = useState<Phase>(() => {
     if (loaderData?.kind === "ready") {
-      return { kind: "ready", user: loaderData.user };
+      return { kind: "ready", user: loaderData.user, policy: loaderData.policy };
     }
     if (loaderData?.kind === "error") {
       return { kind: "error", message: loaderData.message };
@@ -83,7 +94,7 @@ function TokensNewContent() @{
   useEffect(() => {
     if (!loaderData) return;
     if (loaderData.kind === "ready") {
-      setPhase({ kind: "ready", user: loaderData.user });
+      setPhase({ kind: "ready", user: loaderData.user, policy: loaderData.policy });
       return;
     }
     if (loaderData.kind === "error") {
@@ -102,7 +113,8 @@ function TokensNewContent() @{
           window.location.assign("/login?returnTo=/settings/tokens/new");
           return;
         }
-        setPhase({ kind: "ready", user: res.data });
+        const policy = await fetchPatPolicy();
+        setPhase({ kind: "ready", user: res.data, policy });
       } catch {
         if (cancelled) return;
         setPhase({ kind: "error", message: NETWORK_ERROR });
@@ -153,6 +165,7 @@ function TokensNewContent() @{
                 New classic token
               </h1>
               <PatClassicForm
+                policy={phase.kind === "ready" ? phase.policy : null}
                 onCreated={(token) => {
                   setPlaintext(token);
                 }}

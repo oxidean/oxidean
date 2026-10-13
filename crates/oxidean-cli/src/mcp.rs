@@ -26,7 +26,7 @@ use oxidean_core::RpcResponse;
 
 use crate::args::Global;
 use crate::commands::{resolve_instance, CliError, Out, Runtime};
-use crate::config::{self, InstanceEntry};
+use crate::config::{self};
 use crate::harness::{self, Detect, Dirs, HarnessRow, Scope};
 use crate::rpc::Client;
 
@@ -622,9 +622,7 @@ async fn device_grant_login(rt: &Runtime, instance: &str) -> Result<String, CliE
     let mut cfg = rt.config.clone();
     cfg.instances.insert(
         instance.to_string(),
-        InstanceEntry {
-            token: Some(token.clone()),
-        },
+        crate::keystore::persist(instance, &token),
     );
     cfg.default_instance = Some(instance.to_string());
     config::save(&rt.config_path, &cfg).map_err(CliError::Config)?;

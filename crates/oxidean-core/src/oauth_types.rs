@@ -8,6 +8,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::pat_types::ClassicPatScope;
+
 /// `client_id` minted for registered apps (brand prefix, D-08 style).
 pub const OAUTH_CLIENT_ID_PREFIX: &str = "oxidean_oc_";
 /// One-time `client_secret` plaintext prefix; only the SHA-256 hash is stored.
@@ -24,65 +26,20 @@ pub const OAUTH_CODE_TTL_SECS: i64 = 600;
 /// Access token lifetime returned as `expires_in` (8 hours).
 pub const OAUTH_TOKEN_TTL_SECS: i64 = 8 * 3600;
 
-/// Scopes an OAuth grant may carry. Space-delimited on the wire and at rest.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-pub enum OAuthScope {
-    /// Identity: read the user's profile via `/oauth/userinfo`.
-    #[serde(rename = "read:user")]
-    ReadUser,
-    /// Identity: reveal the user's primary email via `/oauth/userinfo`.
-    #[serde(rename = "user:email")]
-    UserEmail,
-    /// Git smart HTTP read/write — equivalent to a classic PAT `repo` scope.
-    #[serde(rename = "repo")]
-    Repo,
-    /// Package registry pull — equivalent to classic PAT `package:read`.
-    #[serde(rename = "package:read")]
-    PackageRead,
-    /// Package registry push/delete — equivalent to classic PAT `package:write`.
-    #[serde(rename = "package:write")]
-    PackageWrite,
-}
-
-impl OAuthScope {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::ReadUser => "read:user",
-            Self::UserEmail => "user:email",
-            Self::Repo => "repo",
-            Self::PackageRead => "package:read",
-            Self::PackageWrite => "package:write",
-        }
-    }
-
-    pub fn parse(s: &str) -> Result<Self, String> {
-        match s.trim() {
-            "read:user" => Ok(Self::ReadUser),
-            "user:email" => Ok(Self::UserEmail),
-            "repo" => Ok(Self::Repo),
-            "package:read" => Ok(Self::PackageRead),
-            "package:write" => Ok(Self::PackageWrite),
-            other => Err(format!("invalid scope: {other}")),
-        }
-    }
-
-    pub const ALL: [OAuthScope; 5] = [
-        Self::ReadUser,
-        Self::UserEmail,
-        Self::Repo,
-        Self::PackageRead,
-        Self::PackageWrite,
-    ];
-}
+/// Scopes an OAuth grant may carry, space-delimited on the wire and at rest.
+/// OAuth scopes share the classic-PAT catalog (`crate::scope_catalog`) —
+/// `OAuthScope` is an alias so existing call sites keep reading naturally.
+pub type OAuthScope = ClassicPatScope;
 
 /// Scope set used when the client omits `scope` (identity-only default).
-pub const OAUTH_DEFAULT_SCOPES: &[OAuthScope] = &[OAuthScope::ReadUser];
+pub const OAUTH_DEFAULT_SCOPES: &[OAuthScope] = &[ClassicPatScope::ReadUser];
 
 /// Parse a space-delimited scope string into a deduplicated scope list.
+/// Every classic catalog name is a valid OAuth scope.
 pub fn parse_oauth_scopes(raw: &str) -> Result<Vec<OAuthScope>, String> {
     let mut out: Vec<OAuthScope> = Vec::new();
     for part in raw.split_whitespace() {
-        let scope = OAuthScope::parse(part)?;
+        let scope = ClassicPatScope::parse(part).map_err(|e| e.replace("classic ", ""))?;
         if !out.contains(&scope) {
             out.push(scope);
         }
@@ -183,6 +140,9 @@ pub struct OAuthAuthorizeInfo {
     pub client_id: String,
     pub redirect_uri: String,
     pub scopes: Vec<String>,
+    /// Catalog descriptions per scope (added post-v1 — absent on older servers).
+    #[serde(default)]
+    pub scope_details: Vec<crate::scope_catalog::OAuthScopeDetail>,
     /// Username of the app owner ("developed by X").
     pub owner_username: String,
 }
@@ -267,6 +227,9 @@ pub struct OAuthDeviceInfo {
     pub user_code: String,
     /// Classic-PAT scope names the resulting token will carry.
     pub scopes: Vec<String>,
+    /// Catalog descriptions per scope (added post-v1 — absent on older servers).
+    #[serde(default)]
+    pub scope_details: Vec<crate::scope_catalog::OAuthScopeDetail>,
     pub expires_at: String,
 }
 
@@ -286,7 +249,12 @@ mod tests {
         let scopes = parse_oauth_scopes("repo read:user repo").unwrap();
         assert_eq!(scopes, vec![OAuthScope::Repo, OAuthScope::ReadUser]);
         assert_eq!(format_oauth_scopes(&scopes), "repo read:user");
-        assert!(parse_oauth_scopes("admin").is_err());
+        assert!(parse_oauth_scopes("bogus").is_err());
+        // The unified catalog accepts every classic scope name.
+        assert_eq!(
+            parse_oauth_scopes("admin:repo_hook delete_repo").unwrap(),
+            vec![OAuthScope::AdminRepoHook, OAuthScope::DeleteRepo]
+        );
         assert_eq!(
             oauth_scopes_or_default(None).unwrap(),
             vec![OAuthScope::ReadUser]

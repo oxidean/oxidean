@@ -433,6 +433,7 @@ fn runtime_with(
             u.to_string(),
             oxidean_cli::config::InstanceEntry {
                 token: Some("secret-pat-value".into()),
+                secret_store: None,
             },
         );
     }

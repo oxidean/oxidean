@@ -103,7 +103,12 @@ pub async fn authenticate_registry(
             return Ok(None);
         }
         let hash = sha256_hex(token.as_bytes());
-        let Some(pat) = db.find_pat_by_token_hash(&hash).await? else {
+        // Revoked-inclusive lookup — the explicit `revoked_at` check below is
+        // what rejects them (kept visible rather than hidden in the query).
+        let Some(pat) = db
+            .find_pat_by_token_hash_including_revoked(&hash)
+            .await?
+        else {
             return Ok(None);
         };
         pat

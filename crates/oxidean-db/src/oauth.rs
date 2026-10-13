@@ -832,10 +832,32 @@ pub async fn find_token_by_hash(
     pool: &DbPool,
     token_hash: &str,
 ) -> Result<Option<OAuthTokenRow>, String> {
+    find_token_by_hash_impl(pool, token_hash, false).await
+}
+
+/// Same as [`find_token_by_hash`] including soft-revoked rows — lets auth
+/// surfaces tell revoked apart from unknown.
+pub async fn find_token_by_hash_including_revoked(
+    pool: &DbPool,
+    token_hash: &str,
+) -> Result<Option<OAuthTokenRow>, String> {
+    find_token_by_hash_impl(pool, token_hash, true).await
+}
+
+async fn find_token_by_hash_impl(
+    pool: &DbPool,
+    token_hash: &str,
+    include_revoked: bool,
+) -> Result<Option<OAuthTokenRow>, String> {
+    let revoked_clause = if include_revoked {
+        ""
+    } else {
+        " AND revoked_at IS NULL"
+    };
     match pool {
         DbPool::Postgres(p) => {
             let row = sqlx::query(sqlx::AssertSqlSafe(format!(
-                "{TOKEN_SELECT_PG} WHERE token_hash = $1 AND revoked_at IS NULL"
+                "{TOKEN_SELECT_PG} WHERE token_hash = $1{revoked_clause}"
             )))
             .bind(token_hash)
             .fetch_optional(p)
@@ -848,7 +870,7 @@ pub async fn find_token_by_hash(
         }
         DbPool::MySql(p) => {
             let row = sqlx::query(sqlx::AssertSqlSafe(format!(
-                "{TOKEN_SELECT_MYSQL} WHERE token_hash = ? AND revoked_at IS NULL"
+                "{TOKEN_SELECT_MYSQL} WHERE token_hash = ?{revoked_clause}"
             )))
             .bind(token_hash)
             .fetch_optional(p)
@@ -861,7 +883,7 @@ pub async fn find_token_by_hash(
         }
         DbPool::Sqlite(p) => {
             let row = sqlx::query(sqlx::AssertSqlSafe(format!(
-                "{TOKEN_SELECT_SQLITE} WHERE token_hash = ?1 AND revoked_at IS NULL"
+                "{TOKEN_SELECT_SQLITE} WHERE token_hash = ?1{revoked_clause}"
             )))
             .bind(token_hash)
             .fetch_optional(p)

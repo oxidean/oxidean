@@ -17,8 +17,9 @@ raw `ox api` escape hatch over the typed `/api/rpc` surface.
   and `Oxidean-RPC-Version` header as `@oxidean/api-client`
 - Authenticates with `Authorization: Bearer <pat>` (PAT on RPC lands with
   API-02; cookie-only instances return `auth.unauthenticated`)
-- Stores instance URL + token under `~/.config/ox/config.json`
-  (`$OXIDEAN_CONFIG_DIR` / `$XDG_CONFIG_HOME` honored)
+- Stores instance URL + token in the OS keyring when a backend is available,
+  else `~/.config/ox/config.json` (`$OXIDEAN_CONFIG_DIR` /
+  `$XDG_CONFIG_HOME` honored)
 - Depends on [`oxidean-core`](../oxidean-core/README.md) for the shared
   envelope types — no server-side crates
 

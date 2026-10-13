@@ -185,13 +185,18 @@ pub async fn run_grant(instance: &str, scopes: &str) -> Result<String, CliError>
     } else {
         eprintln!("Open {url} in your browser to approve this sign-in.");
     }
-    eprintln!("Waiting for approval…");
+
+    let spinner = crate::spinner::Spinner::new("Waiting for approval…");
+    if !crate::term::stderr_tty() {
+        eprintln!("Waiting for approval…");
+    }
 
     let deadline = std::time::Instant::now()
         + std::time::Duration::from_secs(grant.expires_in.max(60) as u64);
     let mut interval = grant.interval.max(1) as u64;
     loop {
         if std::time::Instant::now() >= deadline {
+            spinner.finish();
             return Err(CliError::Auth(
                 "device code expired before approval".into(),
             ));
@@ -200,8 +205,14 @@ pub async fn run_grant(instance: &str, scopes: &str) -> Result<String, CliError>
         match poll(instance, &grant.device_code, interval as i64).await? {
             Poll::Pending => {}
             Poll::SlowDown(next) => interval = next.max(1) as u64,
-            Poll::Failed(msg) => return Err(CliError::Auth(msg)),
-            Poll::Token(t) => return Ok(t),
+            Poll::Failed(msg) => {
+                spinner.finish();
+                return Err(CliError::Auth(msg));
+            }
+            Poll::Token(t) => {
+                spinner.finish();
+                return Ok(t);
+            }
         }
     }
 }

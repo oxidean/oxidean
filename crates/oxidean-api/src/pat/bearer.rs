@@ -32,10 +32,14 @@
 //!   Public repos stay readable. Org mutations are unreachable for FG
 //!   tokens (repo-bound credentials).
 //! - Admin (`admin.*`, `packages.admin*`), session lifecycle (`auth.*` other
-//!   than `me`/`provider_config`/`bootstrap_status`), PAT management
-//!   (`pat.*` — a token must never mint tokens), OAuth app/device-grant
-//!   procedures, and invite accepts are never callable with a PAT —
-//!   fail-closed default for new procedures.
+//!   than `me`/`provider_config`/`bootstrap_status`), PAT minting
+//!   (`pat.createClassic`/`createFineGrained` — a token must never mint
+//!   tokens), OAuth app/device-grant procedures, and invite accepts are
+//!   never callable with a PAT — fail-closed default for new procedures.
+//!   The only `pat.*` procedures a PAT may call are introspection
+//!   (`pat.self`/`pat.policy`/`pat.catalog`), `pat.list` (its owner's
+//!   tokens), and self-revocation (`pat.revoke` on its own id — the
+//!   handler enforces that last part).
 //! - Bearer responses never carry `Set-Cookie` and never mint sessions.
 
 use std::sync::Mutex;
@@ -59,12 +63,21 @@ use crate::rpc::RpcCtx;
 /// Parsed PAT identity carried on `RpcCtx` for dispatch-level scope checks.
 #[derive(Debug, Clone)]
 pub struct PatIdentity {
-    /// `personal_access_tokens.id` — used for `last_used` bookkeeping and as
-    /// the synthesized session id (rate-limit key for `user.lookup`).
+    /// `personal_access_tokens.id` — used for `last_used` bookkeeping, as the
+    /// synthesized session id, and as the `pat.self` / self-revoke target.
     pub token_id: String,
     /// Token owner's user id (PAT acts on the owner's behalf).
     pub user_id: String,
     pub kind: PatKind,
+    /// Token note — surfaced by `pat.self`.
+    pub name: String,
+    /// Display fingerprint (never the secret) — surfaced by `pat.self`.
+    pub token_prefix: String,
+    /// RFC3339 expiry on the row (`None` = non-expiring) — surfaced by
+    /// `pat.self`.
+    pub expires_at_raw: Option<String>,
+    pub last_used_at: Option<String>,
+    pub created_at: String,
     /// Classic scope names, or FG package perms (`package:read`/`package:write`
     /// are stored in `scopes_json` for both kinds — see `pat::row_to_list_item`).
     pub scopes: Vec<ClassicPatScope>,
@@ -91,6 +104,16 @@ impl BearerRejection {
     fn unauthenticated(message: &str) -> Self {
         Self {
             error: AppError::new("auth.unauthenticated", message),
+            retry_after: None,
+        }
+    }
+
+    /// Distinct auth-failure codes so clients (`ox`) can pick a recovery path:
+    /// `auth.token_expired`/`auth.token_revoked`/`auth.banned` are all still
+    /// HTTP 401 — only the RPC `error.code` differentiates them.
+    fn coded(code: &str, message: &str) -> Self {
+        Self {
+            error: AppError::new(code, message),
             retry_after: None,
         }
     }
@@ -173,7 +196,9 @@ pub async fn resolve_bearer(
     }
 
     let token_hash = sha256_hex(token.as_bytes());
-    let pat = match db.find_pat_by_token_hash(&token_hash).await {
+    // Revoked rows must reach this classification — filtering them at the DB
+    // layer makes a revoked token indistinguishable from a nonexistent one.
+    let pat = match db.find_pat_by_token_hash_including_revoked(&token_hash).await {
         Ok(Some(p)) => p,
         Ok(None) => {
             lock(limiter).record_ip(ip);
@@ -195,9 +220,17 @@ pub async fn resolve_bearer(
         lim.record_user(&pat.user_id);
     };
 
+    if pat.revoked_at.is_some() {
+        fail_all(&pat);
+        return Err(BearerRejection::coded(
+            "auth.token_revoked",
+            "personal access token has been revoked",
+        ));
+    }
     if pat_expired(&pat.expires_at) {
         fail_all(&pat);
-        return Err(BearerRejection::unauthenticated(
+        return Err(BearerRejection::coded(
+            "auth.token_expired",
             "personal access token expired",
         ));
     }
@@ -214,7 +247,8 @@ pub async fn resolve_bearer(
     };
     if owner.banned_at.is_some() {
         fail_all(&pat);
-        return Err(BearerRejection::unauthenticated(
+        return Err(BearerRejection::coded(
+            "auth.banned",
             "This account has been suspended.",
         ));
     }
@@ -236,6 +270,11 @@ pub async fn resolve_bearer(
         token_id: pat.id.clone(),
         user_id: owner.id.clone(),
         kind,
+        name: pat.name.clone(),
+        token_prefix: pat.token_prefix.clone(),
+        expires_at_raw: pat.expires_at.clone(),
+        last_used_at: pat.last_used_at.clone(),
+        created_at: pat.created_at.clone(),
         scopes: parse_scopes(pat.scopes_json.as_deref()),
         contents: pat
             .contents_perm
@@ -378,6 +417,10 @@ enum PatProc {
     /// `packages.deleteVersion` — `package:delete` (held back from
     /// `package:write`, GitHub parity); FG denied (no repository target).
     PackageDelete,
+    /// `pat.list` / `pat.revoke` — callable with any valid PAT. `pat.revoke`
+    /// additionally enforces self-only at the handler (a token may revoke
+    /// itself — `ox auth refresh` — never another token).
+    PatSelfManage,
     /// Session-cookie only — never callable with a PAT.
     SessionOnly,
 }
@@ -397,8 +440,14 @@ fn classify(procedure: &str) -> PatProc {
         | "repo.explore"
         | "invites.get" => Open,
 
-        // Own-identity reads.
-        "auth.me" | "user.get_profile" | "user.lookup" => Identity,
+        // Own-identity reads. `pat.self`/`pat.policy`/`pat.catalog` are
+        // introspection surfaces — any valid credential may call them.
+        "auth.me"
+        | "user.get_profile"
+        | "user.lookup"
+        | "pat.self"
+        | "pat.policy"
+        | "pat.catalog" => Identity,
 
         // Contents/metadata reads (`{owner,name}` repo target where present;
         // account-scoped reads like repo.listMine have no target — classic
@@ -609,11 +658,16 @@ fn classify(procedure: &str) -> PatProc {
         "packages.list" => PackageRead,
         "packages.deleteVersion" => PackageDelete,
 
+        // Narrow self-management: a token may list its owner's tokens and
+        // revoke itself (handler enforces `id == self`). `pat.create*` stays
+        // SessionOnly — a token must never mint tokens.
+        "pat.list" | "pat.revoke" => PatSelfManage,
+
         // Everything else is session-only: auth lifecycle (`auth.login`,
-        // `auth.logout`, verify/reset/bootstrap…), PAT management (`pat.*` —
-        // a token must never mint tokens), `admin.*` and `packages.admin*`,
-        // invite accepts, OAuth app + device-grant procedures. Unknown
-        // procedures fall here too — fail closed.
+        // `auth.logout`, verify/reset/bootstrap…), PAT minting
+        // (`pat.createClassic`/`createFineGrained`), `admin.*` and
+        // `packages.admin*`, invite accepts, OAuth app + device-grant
+        // procedures. Unknown procedures fall here too — fail closed.
         _ => SessionOnly,
     }
 }
@@ -622,24 +676,12 @@ fn pat_scope_err(procedure: &str, message: &str) -> AppError {
     AppError::new("auth.pat_scope", format!("{procedure}: {message}"))
 }
 
-/// Scope implication (GitHub parity): `user` ⊃ `read:user`/`user:email`/
-/// `user:follow`; `write:org` ⊃ `read:org`; `admin:`/`write:` key scopes
-/// imply their `read:` tier; `package:write` ⊃ `package:read`.
+/// Scope implication lives in the shared catalog
+/// (`oxidean_core::classic_scope_satisfies`) — `user` ⊃ `read:user`/
+/// `user:email`/`user:follow`, `write:org` ⊃ `read:org`, key tiers
+/// admin ⊃ write ⊃ read, `package:write` ⊃ `package:read` (GitHub parity).
 fn scope_satisfies(held: ClassicPatScope, required: ClassicPatScope) -> bool {
-    use ClassicPatScope::*;
-    if held == required {
-        return true;
-    }
-    match required {
-        ReadUser | UserEmail | UserFollow => held == User,
-        ReadOrg => held == WriteOrg,
-        ReadPublicKey => matches!(held, WritePublicKey | AdminPublicKey),
-        WritePublicKey => held == AdminPublicKey,
-        ReadGpgKey => matches!(held, WriteGpgKey | AdminGpgKey),
-        WriteGpgKey => held == AdminGpgKey,
-        PackageRead => held == PackageWrite,
-        _ => false,
-    }
+    oxidean_core::classic_scope_satisfies(held, required)
 }
 
 fn has_scope(scopes: &[ClassicPatScope], required: ClassicPatScope) -> bool {
@@ -700,8 +742,46 @@ fn classic_scopes_for(class: PatProc) -> &'static [ClassicPatScope] {
         PackageRead => &[S::PackageRead],
         PackageWrite => &[S::PackageWrite],
         PackageDelete => &[S::PackageDelete],
-        Open | Identity | SessionOnly => &[],
+        Open | Identity | PatSelfManage | SessionOnly => &[],
     }
+}
+
+/// Scope names `class` accepts, for denial messages that can name what the
+/// caller is missing (`requires scope "repo" (or "workflow")`).
+fn required_scope_names(class: PatProc) -> Vec<&'static str> {
+    let mut names: Vec<&'static str> = classic_scopes_for(class)
+        .iter()
+        .map(|s| s.as_str())
+        .collect();
+    if public_repo_covers(class) {
+        names.push(ClassicPatScope::PublicRepo.as_str());
+    }
+    names
+}
+
+/// The FG `perms` family a class maps to — for scoped denial messages.
+fn fg_family_name(class: PatProc) -> Option<&'static str> {
+    use PatProc::*;
+    Some(match class {
+        RepoRead | RepoWrite => "contents",
+        IssuesRead | IssuesWrite => "issues",
+        PullsRead | PullsWrite => "pull_requests",
+        ActionsRead | ActionsWrite => "actions",
+        StatusesRead | StatusesWrite => "commit_statuses",
+        SecretsRead | SecretsWrite => "secrets",
+        ReleasesRead | ReleasesWrite => "releases",
+        WebhooksRead | WebhooksWrite => "webhooks",
+        RepoAdminRead | RepoAdminWrite | RepoInvite | RepoDelete => "administration",
+        NotificationsRead | NotificationsWrite => "notifications",
+        EmailRead | EmailWrite => "emails",
+        ProfileWrite => "profile",
+        FollowWrite | FollowRead => "followers",
+        StarringRead | StarringWrite => "starring",
+        WatchingRead | WatchingWrite => "watching",
+        SshKeyRead | SshKeyWrite => "ssh_keys",
+        GpgKeyRead | GpgKeyWrite => "gpg_keys",
+        _ => return None,
+    })
 }
 
 /// Classic-token scope check: umbrella `repo` covers the repo domain;
@@ -733,9 +813,12 @@ async fn authorize_classic(
             return Err(not_found());
         }
     }
+    let names = required_scope_names(class).join("\", \"");
     Err(pat_scope_err(
         procedure,
-        "personal access token scope does not allow this procedure",
+        &format!(
+            "insufficient scope — this procedure requires one of: \"{names}\""
+        ),
     ))
 }
 
@@ -899,7 +982,10 @@ async fn authorize_fine_grained(
             Some(level) if level.meets(need) => Ok(()),
             _ => Err(pat_scope_err(
                 procedure,
-                "fine-grained token permission does not allow this procedure",
+                &format!(
+                    "insufficient scope — this procedure requires the \"{}\" permission",
+                    fg_family_name(class).unwrap_or("unknown")
+                ),
             )),
         };
     }
@@ -910,7 +996,10 @@ async fn authorize_fine_grained(
         if !perm_ok {
             return Err(pat_scope_err(
                 procedure,
-                "fine-grained token permission does not allow this procedure",
+                &format!(
+                    "insufficient scope — this procedure requires the \"{}\" permission",
+                    fg_family_name(class).unwrap_or("unknown")
+                ),
             ));
         }
         let write = need == FgPermLevel::Write;
@@ -994,9 +1083,12 @@ pub(crate) async fn authorize_pat_on_repo(
                 }
                 return Err(not_found());
             }
+            let names = required_scope_names(class).join("\", \"");
             Err(pat_scope_err(
                 procedure,
-                "personal access token scope does not allow this procedure",
+                &format!(
+                    "insufficient scope — this procedure requires one of: \"{names}\""
+                ),
             ))
         }
         PatKind::FineGrained => {
@@ -1034,7 +1126,7 @@ pub async fn authorize_rpc(
         return Ok(());
     };
     match classify(procedure) {
-        PatProc::Open | PatProc::Identity => Ok(()),
+        PatProc::Open | PatProc::Identity | PatProc::PatSelfManage => Ok(()),
         PatProc::SessionOnly => Err(pat_scope_err(
             procedure,
             "procedure requires a session cookie (not callable with a personal access token)",
@@ -1062,8 +1154,8 @@ mod tests {
             "auth.logout",
             "auth.signup",
             "auth.verify",
-            "pat.list",
             "pat.createClassic",
+            "pat.createFineGrained",
             "invites.accept",
             "org.invites.accept",
             "oauthApp.authorize",

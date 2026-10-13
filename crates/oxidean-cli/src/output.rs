@@ -164,7 +164,7 @@ pub fn issue_view(data: &Value) -> String {
     out.push(meta.join(" · "));
     if let Some(body) = s(data, "body").filter(|x| !x.is_empty()) {
         out.push(String::new());
-        out.push(body.to_string());
+        out.push(crate::markdown::render(body));
     }
     out.join("\n")
 }
@@ -216,7 +216,7 @@ pub fn pull_view(data: &Value) -> String {
     }
     if let Some(body) = s(data, "body").filter(|x| !x.is_empty()) {
         out.push(String::new());
-        out.push(body.to_string());
+        out.push(crate::markdown::render(body));
     }
     out.join("\n")
 }
@@ -695,7 +695,7 @@ pub fn release_view(data: &Value) -> String {
     }
     if let Some(body) = s(data, "body").filter(|b| !b.is_empty()) {
         out.push(String::new());
-        out.push(body.to_string());
+        out.push(crate::markdown::render(body));
     }
     out.join("\n")
 }
@@ -870,30 +870,6 @@ pub fn email_list(data: &Value) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
-}
-
-/// `pat.list` — `data.pats[]` (never prints token material).
-pub fn pat_list(data: &Value) -> String {
-    arr(data, "pats")
-        .iter()
-        .map(|p| {
-            join_nonempty(vec![
-                s(p, "id").unwrap_or_default().to_string(),
-                s(p, "name").unwrap_or_default().to_string(),
-                s(p, "kind").unwrap_or_default().to_string(),
-                s(p, "expires_at").unwrap_or_default().to_string(),
-            ])
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-/// `pat.create*` — the minted token prints once, clearly marked.
-pub fn pat_created(data: &Value) -> String {
-    if let Some(t) = s(data, "token") {
-        return format!("{t}\n(stored nowhere — save it now)");
-    }
-    generic(data)
 }
 
 /// `label.list*` — `data.labels[]`.

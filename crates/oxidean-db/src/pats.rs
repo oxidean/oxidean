@@ -301,10 +301,33 @@ VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
 
 /// Lookup by SHA-256 hex. Returns `None` when missing or soft-revoked.
 pub async fn find_by_token_hash(pool: &DbPool, token_hash: &str) -> Result<Option<PatRow>, String> {
+    find_by_token_hash_impl(pool, token_hash, false).await
+}
+
+/// Lookup by SHA-256 hex including soft-revoked rows. The bearer-auth path uses
+/// this so a revoked token can be reported as `auth.token_revoked` instead of
+/// looking identical to a token that never existed.
+pub async fn find_by_token_hash_including_revoked(
+    pool: &DbPool,
+    token_hash: &str,
+) -> Result<Option<PatRow>, String> {
+    find_by_token_hash_impl(pool, token_hash, true).await
+}
+
+async fn find_by_token_hash_impl(
+    pool: &DbPool,
+    token_hash: &str,
+    include_revoked: bool,
+) -> Result<Option<PatRow>, String> {
+    let revoked_clause = if include_revoked {
+        ""
+    } else {
+        " AND revoked_at IS NULL"
+    };
     let mut pat = match pool {
         DbPool::Postgres(p) => {
             let row = sqlx::query(sqlx::AssertSqlSafe(format!(
-                "{PAT_SELECT_PG} WHERE token_hash = $1 AND revoked_at IS NULL"
+                "{PAT_SELECT_PG} WHERE token_hash = $1{revoked_clause}"
             )))
             .bind(token_hash)
             .fetch_optional(p)
@@ -317,7 +340,7 @@ pub async fn find_by_token_hash(pool: &DbPool, token_hash: &str) -> Result<Optio
         }
         DbPool::MySql(p) => {
             let row = sqlx::query(sqlx::AssertSqlSafe(format!(
-                "{PAT_SELECT_MYSQL} WHERE token_hash = ? AND revoked_at IS NULL"
+                "{PAT_SELECT_MYSQL} WHERE token_hash = ?{revoked_clause}"
             )))
             .bind(token_hash)
             .fetch_optional(p)
@@ -330,7 +353,7 @@ pub async fn find_by_token_hash(pool: &DbPool, token_hash: &str) -> Result<Optio
         }
         DbPool::Sqlite(p) => {
             let row = sqlx::query(sqlx::AssertSqlSafe(format!(
-                "{PAT_SELECT_SQLITE} WHERE token_hash = ?1 AND revoked_at IS NULL"
+                "{PAT_SELECT_SQLITE} WHERE token_hash = ?1{revoked_clause}"
             )))
             .bind(token_hash)
             .fetch_optional(p)

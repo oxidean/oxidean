@@ -163,19 +163,48 @@ echo "$TOKEN" | ox auth login --instance https://forge.example.com --token-stdin
 # approves in the browser at /oauth/device, polls until approved — the
 # resulting PAT is stored like a --token login.
 ox auth login --instance https://forge.example.com --web
+
+# Pick the scopes the minted token carries (comma- or space-separated; the
+# default covers the full CLI surface). Scopes come from the same catalog
+# the web token form and `pat.catalog` expose.
+ox auth login --web --scopes "repo workflow read:org"
 ```
 
-Login writes `config.json` under the config directory
+On a TTY with no flags, `auth login` asks whether to use the browser flow or
+paste a token — flag-free scripts still need `--token`, `--token-stdin`,
+piped stdin, or `OXIDEAN_TOKEN`.
+
+Credentials are stored through the OS keyring when a backend is available
+(secret-service on Linux, Keychain on macOS, Credential Manager on Windows),
+falling back to `config.json` under the config directory
 (`$OXIDEAN_CONFIG_DIR`, else `$XDG_CONFIG_HOME/ox`, else `~/.config/ox`),
-recorded with `0600` permissions. The instance becomes the default for all
-subsequent commands.
+recorded with `0600` permissions. The config entry's `secret_store` field
+records which store holds each instance's token. The instance becomes the
+default for all subsequent commands.
 
 ```bash
-ox auth status    # resolves auth.me — instance + username, exit 3 if unauthenticated
+ox auth status    # instance + username + token name/scopes/expiry (pat.self), exit 3 if unauthenticated
+ox auth refresh   # mint a fresh token via the device grant and self-revoke the old one
+                  #   [--scopes list] [--reset-scopes]
+ox auth revoke    # revoke the stored token on the server and log out
 ox auth switch    # pick a different default instance (picker, or pass the URL)
+ox auth setup-git # register `ox auth git-credential` as the git credential helper
 ox auth logout    # drop the stored token for the resolved instance
 ox auth token     # print the resolved token (for scripts)
 ```
+
+`refresh` reuses the old token's scopes unless `--scopes`/`--reset-scopes`
+overrides them, persists the new credential only after it verifies, and
+self-revokes the old one. `OXIDEAN_TOKEN`-supplied credentials can't be
+refreshed or revoked here — manage those where they were issued.
+
+> **Token expiry:** CLI-minted tokens follow the instance PAT policy
+> (`OXIDEAN_PAT_DEFAULT_TTL_DAYS` / `OXIDEAN_PAT_MAX_TTL_DAYS` /
+> `OXIDEAN_PAT_ALLOW_NO_EXPIRY` env, overridable per-instance under
+> **Admin → Auth settings → Personal access token policy** or
+> `ox admin pat`). Expired or revoked tokens fail with distinct
+> `auth.token_expired` / `auth.token_revoked` errors — `ox` prints the
+> recovery hint (`auth refresh`, or `auth login` again).
 
 > **Instance requirement:** `/api/rpc` accepts `Authorization: Bearer <pat>`
 > on API-02-era servers and later. On older instances that only resolve
@@ -191,8 +220,9 @@ Every command resolves the target instance in this order:
 2. `OXIDEAN_INSTANCE` environment variable
 3. `default_instance` in the config file (set by `ox auth login`)
 
-The token is resolved separately: `OXIDEAN_TOKEN` env, then the stored token
-for the resolved instance. `ox config` exposes the local file:
+The token is resolved separately: `OXIDEAN_TOKEN` env, then the keyring or
+config-stored token for the resolved instance. `ox config` exposes the local
+file:
 
 ```bash
 ox config list                                   # config file + instances (tokens redacted)
@@ -202,6 +232,18 @@ ox config set instances.https://forge.example.com.token oxidean_pat_…
 ```
 
 `config get`/`list` never print stored tokens — they report `set`/`unset`.
+
+### Repository resolution
+
+Commands that take `<owner/name>` resolve it in this order:
+
+1. positional `<owner/name>` argument
+2. `-R`/`--repo <owner/name>`
+3. `OXIDEAN_REPO` environment variable
+4. the git remotes in the current directory — `upstream`, then `origin`,
+   then `fork` (HTTPS, `git@host:owner/name`, and `ssh://` URLs all parse)
+
+Inside a clone, `ox issue list` with no arguments just works.
 
 ## Agent skill
 
@@ -323,17 +365,17 @@ ox webhook list|create|edit|delete|ping <o/n> | ox webhook deliveries|redeliver
 # Account
 ox ssh-key|gpg-key list|add|delete      # add: --title t --key-file path|- 
 ox email list|add|remove|set-primary|resend
-ox pat list|create|revoke               # classic: --scopes repo,workflow,…
-                                        # fine-grained: --fine-grained --contents read|write
-                                        #   [--repo-access all|selected] [--repos id,id]
-                                        #   [--perms issues=write,pull_requests=read,…]
 ox invite accept --token <t>
+# PATs are minted/listed in the web UI (Settings → Personal access tokens);
+# the CLI manages only its own credential — `auth status|refresh|revoke`.
 
 # Instance admin (admin.* is session-only — not callable with PAT auth)
 ox admin users list|ban|unban|delete|set-role|sessions|revoke-sessions|access|activity
 ox admin invites list|create|link|revoke
 ox admin runners | ox admin runner-token
 ox admin lfs|git|mcp|auth [set …] | ox admin templates list|enable|disable|delete
+ox admin pat [set --default-ttl-days n --max-ttl-days n --allow-never-expire on|off]
+                                        #   --clear reverts all overrides to env defaults
 ox admin auth set --provider-mode local|workos|oidc --allow-signup  # merges over current
 ox admin repos gc
 
@@ -356,7 +398,8 @@ ox api issue.get -f owner=octo -f name=demo -F number=12
 
 `-f` sends the value as a string; `-F` parses the value as JSON (use it for
 numbers, booleans, arrays, objects). `owner/name` positionals may be replaced
-with `-R owner/name` anywhere a repo is expected. Content flags follow `gh`:
+with `-R owner/name` anywhere a repo is expected (see
+[Repository resolution](#repository-resolution)). Content flags follow `gh`:
 `--body` inline, `--body-file <path>` or `-` for stdin, and piped stdin fills
 in automatically on verbs like `issue comment` and `secret set`.
 
@@ -389,16 +432,28 @@ instance's staged `/cli/bin` bytes (see [Updating](#updating)).
 
 ## Output and scripting
 
-Default output is human-readable text. `--json` prints the raw RPC envelope
-verbatim — `{ "ok": true, "data": … }` on success, `{ "ok": false, "error":
-{ "code", "message" } }` on failure — ready for `jq`:
+Default output is human-readable text. On a terminal, long output pages
+through `$OXIDEAN_PAGER`/`$PAGER` (default `less -FRX`), issue/PR/release
+bodies render as markdown, and links are clickable. `--json` prints the raw
+RPC envelope verbatim — `{ "ok": true, "data": … }` on success,
+`{ "ok": false, "error": { "code", "message" } }` on failure — ready for
+`jq`. The built-in `--jq <filter>` (jaq) applies a jq filter to `data`
+directly, printing each result — strings bare, like `jq -r`:
 
 ```bash
 ox repo list --json | jq '.data.repos[].name'
 ox issue list octo/demo --state open --json \
   | jq -r '.data.issues[] | "\(.number)\t\(.title)"'
 ox api repo.explore -F limit=5 --json | jq '.data'
+
+# same result without an external jq:
+ox repo list --jq '.repos[].name'
+ox issue list octo/demo --jq '.issues[] | "\(.number)\t\(.title)"'
 ```
+
+Terminal honors `NO_COLOR`/`CLICOLOR`/`CLICOLOR_FORCE`, with
+`OXIDEAN_FORCE_TTY` to force TTY behavior; progress indicators write to
+stderr only, so piped stdout stays byte-clean.
 
 Exit codes:
 
@@ -407,7 +462,11 @@ Exit codes:
 | 0 | success |
 | 1 | API or transport error (any `{ok:false}` envelope, unreachable host) |
 | 2 | usage error (bad flags, missing arguments, no instance configured, command unsupported by the instance manifest) |
-| 3 | auth error (`auth.unauthenticated`, HTTP 401/403, missing token) |
+| 3 | auth error (`auth.unauthenticated`, `auth.token_expired`, `auth.token_revoked`, `auth.pat_scope`, HTTP 401/403, missing token) |
+
+Auth failures print a recovery hint on stderr — expired/revoked tokens point
+at `ox auth refresh`, missing scopes point at `ox auth status` and
+`auth login --web --scopes`.
 
 ## Environment
 
@@ -416,3 +475,13 @@ Exit codes:
 | `OXIDEAN_INSTANCE` | Default instance URL when `--instance` is absent |
 | `OXIDEAN_TOKEN` | Token override for any command (wins over the stored token) |
 | `OXIDEAN_CONFIG_DIR` | Config directory override (default `~/.config/ox`) |
+| `OXIDEAN_REPO` | Default `<owner/name>` when no positional or `-R` is given |
+| `OXIDEAN_PAGER` | Pager for long output (falls back to `PAGER`, then `less -FRX`) |
+| `OXIDEAN_FORCE_TTY` | Force terminal behavior (color, links, pager) even when piped |
+
+## Parity with `gh`
+
+`ox` tracks the GitHub CLI's command surface where the Oxidean API can back
+it — see [CLI-PARITY.md](CLI-PARITY.md) for the versioned matrix
+(`gh` 2.96.0) and the documented divergences. `make cli-parity-check` is the
+drift guard.

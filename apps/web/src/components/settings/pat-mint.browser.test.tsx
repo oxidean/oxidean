@@ -25,6 +25,13 @@ const createClassicMock = vi.fn();
 const createFgMock = vi.fn();
 const listMineMock = vi.fn();
 
+/** Permissive test policy — exercises the never-expire option. */
+const TEST_POLICY = {
+  default_ttl_days: 30,
+  max_ttl_days: 365,
+  allow_never_expire: true,
+};
+
 vi.mock("@/lib/api-client", () => ({
   apiClient: {
     pat: {
@@ -78,7 +85,7 @@ describe("PAT mint browser DOM races", () => {
   it("classic: toggling scope checkboxes does not throw insertBefore / overlay", async () => {
     const tracker = trackDomErrors();
     try {
-      await mountComponent(PatClassicForm, { onCreated: () => {} });
+      await mountComponent(PatClassicForm, { onCreated: () => {}, policy: TEST_POLICY });
 
       const form = document.querySelector('[data-testid="pat-classic-form"]');
       if (!form) {
@@ -101,7 +108,7 @@ describe("PAT mint browser DOM races", () => {
   it("classic: expiry Select custom/none commits without insertBefore / overlay", async () => {
     const tracker = trackDomErrors();
     try {
-      await mountComponent(PatClassicForm, { onCreated: () => {} });
+      await mountComponent(PatClassicForm, { onCreated: () => {}, policy: TEST_POLICY });
 
       await pickSelectOptionByTestId("pat-expiry-preset", "pat-expiry-option-custom");
       const custom = document.querySelector('[data-testid="pat-expiry-custom"]');
@@ -126,7 +133,7 @@ describe("PAT mint browser DOM races", () => {
   it("fine-grained: toggling repo access and repo checkboxes does not throw insertBefore", async () => {
     const tracker = trackDomErrors();
     try {
-      await mountComponent(PatFgForm, { onCreated: () => {} });
+      await mountComponent(PatFgForm, { onCreated: () => {}, policy: TEST_POLICY });
 
       const form = document.querySelector('[data-testid="pat-fg-form"]');
       if (!form) {

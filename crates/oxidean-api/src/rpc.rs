@@ -163,6 +163,8 @@ pub const PROCEDURES: &[&str] = &[
     "admin.git.updateSettings",
     "admin.mcp.getSettings",
     "admin.mcp.updateSettings",
+    "admin.pat.getSettings",
+    "admin.pat.updateSettings",
     "admin.templates.list",
     "admin.templates.update",
     "admin.templates.setEnabled",
@@ -381,6 +383,9 @@ pub const PROCEDURES: &[&str] = &[
     "pat.createFineGrained",
     "pat.list",
     "pat.revoke",
+    "pat.self",
+    "pat.policy",
+    "pat.catalog",
     "oauthApp.create",
     "oauthApp.list",
     "oauthApp.update",
@@ -642,6 +647,14 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Err(e) => RpcResponse::err(e),
         },
         "admin.mcp.updateSettings" => match auth_admin::mcp_update_settings(ctx, req.input).await {
+            Ok(s) => RpcResponse::ok(s),
+            Err(e) => RpcResponse::err(e),
+        },
+        "admin.pat.getSettings" => match auth_admin::pat_get_settings(ctx).await {
+            Ok(s) => RpcResponse::ok(s),
+            Err(e) => RpcResponse::err(e),
+        },
+        "admin.pat.updateSettings" => match auth_admin::pat_update_settings(ctx, req.input).await {
             Ok(s) => RpcResponse::ok(s),
             Err(e) => RpcResponse::err(e),
         },
@@ -1552,6 +1565,18 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Err(e) => RpcResponse::err(e),
         },
         "pat.revoke" => match pat::revoke(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "pat.self" => match pat::self_info(ctx) {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "pat.policy" => match pat::effective_policy(ctx).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "pat.catalog" => match pat::catalog(ctx) {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },

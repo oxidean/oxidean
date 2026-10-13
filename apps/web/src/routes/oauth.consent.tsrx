@@ -1,5 +1,10 @@
 import { queryOptions, useQuery } from "@octanejs/tanstack-query";
-import type { OAuthAuthorizeInfo, UserPublic } from "@oxidean/api-client";
+import {
+  SCOPE_CATALOG,
+  type OAuthAuthorizeInfo,
+  type OAuthScopeDetail,
+  type UserPublic,
+} from "@oxidean/api-client";
 import { useEffect, useState } from "octane";
 import { AppPage } from "@/components/app-page";
 import { Badge } from "@/components/ui/badge";
@@ -23,13 +28,17 @@ export type ConsentLoaderData =
   | { kind: "error"; message: string }
   | { kind: "ready"; user: UserPublic; info: OAuthAuthorizeInfo };
 
-const SCOPE_LABELS: Record<string, string> = {
-  "read:user": "Read your profile",
-  "user:email": "View your email address",
-  repo: "Read and write your repositories over HTTPS",
-  "package:read": "Download packages you can access",
-  "package:write": "Publish and delete packages as you",
-};
+/**
+ * Scope description for the consent list — server-supplied `scope_details`
+ * first, then the generated catalog (same source), then a generic fallback.
+ */
+function scopeDescription(details: OAuthScopeDetail[] | undefined, scope: string): string {
+  return (
+    details?.find((d) => d.name === scope)?.description ??
+    SCOPE_CATALOG.find((s) => s.name === scope)?.description ??
+    "Use this permission"
+  );
+}
 
 function parseConsentSearch(params: URLSearchParams): ConsentSearch {
   const s = (k: string) => params.get(k) ?? undefined;
@@ -155,7 +164,7 @@ function OAuthConsentContent() @{
                 <li className="flex items-center gap-2 text-[14px] text-foreground">
                   <Badge variant="outline">{scope as string}</Badge>
                   <span>
-                    {(SCOPE_LABELS[scope] ?? "Use this permission") as string}
+                    {scopeDescription(loaderData.info.scope_details, scope) as string}
                   </span>
                 </li>;
               }

@@ -1,5 +1,5 @@
 import { queryOptions, useQuery } from "@octanejs/tanstack-query";
-import type { OAuthDeviceInfo } from "@oxidean/api-client";
+import { SCOPE_CATALOG, type OAuthDeviceInfo, type OAuthScopeDetail } from "@oxidean/api-client";
 import { useEffect, useState } from "octane";
 import { AppPage } from "@/components/app-page";
 import { Badge } from "@/components/ui/badge";
@@ -17,14 +17,17 @@ type DeviceSearch = {
 
 export type DeviceLoaderData = { kind: "unauthenticated"; returnTo: string } | { kind: "ready" };
 
-const SCOPE_LABELS: Record<string, string> = {
-  "read:user": "Read your profile",
-  "user:email": "View your email address",
-  repo: "Read and write your repositories over HTTPS",
-  "package:read": "Download packages you can access",
-  "package:write": "Publish packages as you",
-  "package:delete": "Delete packages as you",
-};
+/**
+ * Scope description for the approval list — server-supplied `scope_details`
+ * first, then the generated catalog (same source), then a generic fallback.
+ */
+function scopeDescription(details: OAuthScopeDetail[] | undefined, scope: string): string {
+  return (
+    details?.find((d) => d.name === scope)?.description ??
+    SCOPE_CATALOG.find((s) => s.name === scope)?.description ??
+    "Use this permission"
+  );
+}
 
 function parseDeviceSearch(params: URLSearchParams): DeviceSearch {
   return { user_code: params.get("user_code") ?? undefined };
@@ -172,7 +175,7 @@ function OAuthDeviceContent() @{
                   <li className="flex items-center gap-2 text-[14px] text-foreground">
                     <Badge variant="outline">{scope as string}</Badge>
                     <span>
-                      {(SCOPE_LABELS[scope] ?? "Use this permission") as string}
+                      {scopeDescription(step.info.scope_details, scope) as string}
                     </span>
                   </li>;
                 }
