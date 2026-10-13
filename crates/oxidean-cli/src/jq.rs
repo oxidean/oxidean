@@ -44,7 +44,15 @@ pub fn apply(filter: &str, input: &Value) -> Result<Vec<Value>, String> {
     for v in compiled.id.run((ctx, x)) {
         match v {
             Ok(v) => out.push(val_to_json(&v)?),
-            Err(e) => return Err(format!("--jq failed: {e:?}")),
+            Err(e) => match e.get_err() {
+                Ok(e) => {
+                    return Err(format!(
+                        "--jq failed: {}",
+                        crate::output::truncate(&e.to_string(), 200)
+                    ))
+                }
+                Err(e) => return Err(format!("--jq failed: {e:?}")),
+            },
         }
     }
     Ok(out)

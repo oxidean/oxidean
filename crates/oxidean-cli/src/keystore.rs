@@ -78,6 +78,24 @@ pub fn resolve(instance: &str, entry_cfg: &InstanceEntry) -> Option<String> {
     }
 }
 
+/// Which store `resolve` would draw from for this entry. Mirrors `resolve`'s
+/// priority so `auth status` reports where the credential actually lives —
+/// legacy entries (no marker) probe the keyring, else the file field.
+pub fn store_used(instance: &str, entry_cfg: &InstanceEntry) -> &'static str {
+    match entry_cfg.secret_store.as_deref().map(Store::parse) {
+        Some(s) => s.label(),
+        None => {
+            if get(instance).is_some() {
+                Store::Keyring.label()
+            } else if entry_cfg.token.is_some() {
+                Store::File.label()
+            } else {
+                "none"
+            }
+        }
+    }
+}
+
 /// Persist `token` for `instance`, returning the store actually used and an
 /// updated `InstanceEntry` for the config file. Keyring first; file fallback
 /// keeps headless-Linux logins working unchanged.

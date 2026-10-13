@@ -3144,7 +3144,7 @@ async fn auth_status(global: &Global, rt: &Runtime) -> Result<Out, CliError> {
         .config
         .instances
         .get(&instance)
-        .and_then(|e| e.secret_store.clone())
+        .map(|e| keystore::store_used(&instance, e).to_string())
         .unwrap_or_else(|| "none".to_string());
     let env_token = config::env_token().is_some();
 
