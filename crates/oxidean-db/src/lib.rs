@@ -2712,7 +2712,7 @@ impl Database {
         pats::find_by_token_hash(self.require_pool()?, token_hash).await
     }
 
-    /// Same as [`find_pat_by_token_hash`] but returns soft-revoked rows too —
+    /// Same as [`Self::find_pat_by_token_hash`] but returns soft-revoked rows too —
     /// the bearer-auth taxonomy needs this to tell revoked apart from unknown.
     pub async fn find_pat_by_token_hash_including_revoked(
         &self,
@@ -2880,7 +2880,7 @@ impl Database {
         .await
     }
 
-    /// Same as [`find_oauth_token_by_hash`] including revoked rows — the auth
+    /// Same as [`Self::find_oauth_token_by_hash`] including revoked rows — the auth
     /// taxonomy needs it to distinguish revoked from unknown.
     pub async fn find_oauth_token_by_hash_including_revoked(
         &self,
