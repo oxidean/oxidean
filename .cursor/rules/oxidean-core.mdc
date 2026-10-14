@@ -16,3 +16,4 @@ alwaysApply: true
 - Scratch/temp files go under gitignored [`tmp/`](../../tmp/README.md) (never the repo root).
 - Prefer extending existing patterns (Query session helpers, auth gates, Make targets) over new frameworks.
 - No AI co-author / tooling attribution on commits or PRs — see [no-ai-attribution.mdc](no-ai-attribution.mdc).
+- Commit subjects are SemVer-prefixed (`type(scope): subject`) and enforced by the `commit-msg` hook (`make setup`) and CI `commit-lint` — see [`docs/VERSIONING.md`](../../docs/VERSIONING.md) and skill `semver-conventions`.

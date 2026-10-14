@@ -199,13 +199,14 @@ The Docker builds use [cargo-chef](https://github.com/LukeMathWalker/cargo-chef)
 
 Default branch: `main` (CI runs on push to `main` and on all pull requests).
 
-Recent work uses descriptive prefixes such as `cursor/…` and conventional-commit style subjects (`feat(…)`, `fix(…)`, `docs(…)`, `ci:`, `test:`). Prefer short topic branches off `main` with a clear purpose.
+Recent work uses descriptive prefixes such as `cursor/…`. Commit **subjects** follow the enforced SemVer-prefix grammar `type(scope): subject` (`feat`, `fix`, `docs`, `ci`, `test`, …) — `make setup` installs the `commit-msg` hook and `make commit-check` lints locally; CI `commit-lint` gates the same grammar on PRs. See [docs/VERSIONING.md](VERSIONING.md) for types, scopes, and what induces a bump. Prefer short topic branches off `main` with a clear purpose.
 
 ## PR process
 
 See [CONTRIBUTING.md](../CONTRIBUTING.md) for PR conventions and `.github/pull_request_template.md` for the checklist GitHub pre-fills. The gates below are what CI (`.github/workflows/ci.yml`) enforces:
 
 - Open a PR against `main`; all workflow jobs must pass.
+- **commit-lint** — `versioning commit-check` on the PR commit range + PR title, plus `versioning check` registry completeness
 - **api-rust** — `cargo nextest run --workspace --profile ci`
 - **web-octane** — `bun install --frozen-lockfile`, `bun run --filter @oxidean/web lint`, `format:check`, `bun run test`, `turbo run build --filter=@oxidean/web`
 - **e2e-stack** — `make test-e2e-stack` (API + Mailpit/OIDC/stubs + web)
