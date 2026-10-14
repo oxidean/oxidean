@@ -3,8 +3,9 @@
 # Push of any `<component>-v<semver>` tag creates a GitHub Release whose notes
 # are the tag's annotation (the component's changelog section, written by
 # `release-tags`). `ox-v*` owns its own lane in ox-cli.yml (binary matrix) and
-# is excluded here; `oxidean-runner-v*` publishes its GHCR image in
-# publish-runner.yml and still gets its Release from this lane.
+# is excluded here; image-bearing components (`oxidean-api-v*`, `web-v*`,
+# `oxidean-web-v*`, `oxidean-runner-v*`) publish their GHCR image tag via
+# images.yml and still get their Release from this lane.
 #
 # Prerelease tags (`-alpha.N`, `-beta.N`, `-nightly.N`, any `x.y.z-*`) create
 # prerelease-marked Releases and NEVER write latest.json (C5).
@@ -142,5 +143,5 @@ jobs:
             git push origin "$t"
           done
       # No gh-release step here: the pushed tags trigger the push lanes above
-      # (generic lane / ox-cli.yml / publish-runner.yml) — that is exactly what
+      # (generic lane / ox-cli.yml / images.yml) — that is exactly what
       # RELEASE_TOKEN is for. Prerelease marking happens in those lanes.

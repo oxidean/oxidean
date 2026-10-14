@@ -101,10 +101,18 @@ CLI image-matrix job); binary/digest/`SOURCE_COMMIT` fetches are
 **fail-closed** (retries, then fail the image build) while `latest.json` is
 optional — prerelease feeds may not carry one. `OXIDEAN_SOURCE_COMMIT`
 records the built commit into
-`SOURCE_COMMIT` on host-only builds — Railway injects
-`RAILWAY_GIT_COMMIT_SHA` automatically, Compose/self-hosts can pass
-`OXIDEAN_SOURCE_COMMIT=$(git rev-parse HEAD)`. Extra targets can be dropped
+`SOURCE_COMMIT` on host-only builds — Compose/self-hosts can pass
+`OXIDEAN_SOURCE_COMMIT=$(git rev-parse HEAD)`; image builds pass the built
+sha explicitly. Extra targets can be dropped
 into the dist dir by hand:
+
+The same `OXIDEAN_CLI_DIST_URL` name doubles as a **runtime** variable on
+Oxidean Cloud: the image's `docker-entrypoint.sh` fetches the feed at
+container boot into a URL-keyed cache dir on the forge volume and exports
+`OXIDEAN_CLI_DIST_DIR` to it — same curl + `sha256sum -c` + retry contract,
+fail-closed before the API listens (the previous replica stays on a bad
+feed). Self-host images leave the runtime var unset; the build-arg path is
+theirs.
 
 ```text
 /usr/local/share/oxidean-cli/
@@ -112,7 +120,7 @@ into the dist dir by hand:
   ox-aarch64-apple-darwin
   ox-x86_64-pc-windows-msvc
   SOURCE_COMMIT          # git SHA (feed's when URL set; OXIDEAN_SOURCE_COMMIT
-                         # or RAILWAY_GIT_COMMIT_SHA on host-only builds)
+                         # build-arg on host-only/image builds)
 ```
 
 `GET /cli/latest` reports the published `ox` `version` — read from the
@@ -125,23 +133,28 @@ sha256/size, and `dist_commit` when `SOURCE_COMMIT` is present.
 #### Oxidean Cloud (Railway / app.oxidean.dev)
 
 Cloud deploys **pin `OXIDEAN_CLI_DIST_URL` to the `ox-v*` tag release on the
-deployed commit** (`https://github.com/oxidean/oxidean/releases/download/ox-v<ver>`),
-so staging/production API images stage the full matrix for that exact release:
+deployed commit** (`https://github.com/oxidean/oxidean/releases/download/ox-v<ver>`)
+as a **runtime env var** — the api container's entrypoint fetches and
+verifies the matrix at boot (cached per-URL on the `forge-data` volume), so
+images stay immutable across `ox-v*` releases:
 
 1. `.github/workflows/ox-cli.yml` publishes the `ox-v*` tag release with the
    full matrix (`ox-targets.txt`, `ox-{triple}` + `.sha256`, `SOURCE_COMMIT`,
    installers/packages) plus `latest.json` on stable cuts.
-2. `scripts/railway-staging-api-redeploy.sh <sha>` resolves the `ox-v*` tag on
-   that commit, upserts `OXIDEAN_CLI_DIST_URL` to the tag's download URL, and
-   redeploys staging `api`. Untagged commits pin the URL empty → host-only.
+2. `images.yml`'s **staging-cli-feed** job (on ox-cli completing) runs
+   `scripts/railway-staging-api-redeploy.sh <sha>` — it resolves the `ox-v*`
+   tag on that commit, upserts `OXIDEAN_CLI_DIST_URL` to the tag's download
+   URL, and `serviceInstanceRedeploy`s staging `api` so the boot fetch picks
+   up the new feed. Untagged commits pin the URL empty → host-only.
 3. `scripts/railway-production-deploy.sh promote <sha>` does the same pin on
-   production `api` before deploying.
+   production `api` before the image deploy, so the new replica's boot fetch
+   serves the promoted release.
 
 **Preview / PR environments leave `OXIDEAN_CLI_DIST_URL` unset** — they stage
-the just-built host `ox`, so a PR's `/cli/bin` serves that PR's own CLI and
-`GET /cli/latest` reports the built commit (`RAILWAY_GIT_COMMIT_SHA` →
-`SOURCE_COMMIT`). Trade-off: preview serves linux-amd64 only; verify
-darwin/windows binaries against staging or the `ox-v*` release assets.
+the just-built host `ox` (baked at image build with `SOURCE_COMMIT` set to
+the built sha), so a PR's `/cli/bin` serves that PR's own CLI and
+`GET /cli/latest` reports it. Trade-off: preview serves linux-amd64 only;
+verify darwin/windows binaries against staging or the `ox-v*` release assets.
 
 Confirm with `GET /cli/latest` (darwin/windows listed) before asking users to
 re-run the installer.

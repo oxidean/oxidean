@@ -31,22 +31,26 @@ RUN cargo build --release -p oxidean-api --bin oxidean-api --bin oxidean-protect
 # preview deployments included). When OXIDEAN_CLI_DIST_URL is non-empty, fetch
 # every triple listed in ox-targets.txt — including the host — so staged
 # digests match the feed (CI's image-matrix job sha256sum-checks every target
-# against the tag release assets). The URL is empty by default: deploy tooling
-# pins it to the `ox-v*` tag release matching the deployed commit for the full
-# target matrix; self-host builds stay host-only unless they set it. When the
-# URL is set, binary/digest/SOURCE_COMMIT fetch is fail-closed (retries, then
-# fail the build); latest.json is best-effort — prerelease feeds may not carry
-# one and /cli/latest tolerates its absence.
+# against the tag release assets). The URL is empty by default — the
+# self-host build-arg path; Oxidean Cloud instead pins the URL as a runtime
+# env var and docker-entrypoint.sh fetches the feed at boot (see header
+# comment in that script). When the URL is set, binary/digest/SOURCE_COMMIT
+# fetch is fail-closed (retries, then fail the build); latest.json is
+# best-effort — prerelease feeds may not carry one and /cli/latest tolerates
+# its absence.
 # OXIDEAN_SOURCE_COMMIT records provenance for /cli/latest's dist_commit on
-# host-only builds; Railway injects RAILWAY_GIT_COMMIT_SHA automatically.
-ARG OXIDEAN_CLI_DIST_URL=
-ARG OXIDEAN_SOURCE_COMMIT=
-ARG RAILWAY_GIT_COMMIT_SHA=
+# host-only builds — images.yml passes it explicitly; the RAILWAY_GIT_COMMIT_SHA
+# ARG is a vestige of repo-sourced builds, kept harmless.
 RUN cargo build --release -p oxidean-cli --bin ox \
   && mkdir -p /usr/local/share/oxidean-cli \
   && target=$(rustc -vV | awk '/^host:/ {print $2}') \
-  && cp /app/target/release/ox "/usr/local/share/oxidean-cli/ox-$target" \
-  && commit="${OXIDEAN_SOURCE_COMMIT:-$RAILWAY_GIT_COMMIT_SHA}" \
+  && cp /app/target/release/ox "/usr/local/share/oxidean-cli/ox-$target"
+# Per-commit metadata writes live in their own cheap layer — an ARG change
+# must never bust the cargo compile layer above.
+ARG OXIDEAN_CLI_DIST_URL=
+ARG OXIDEAN_SOURCE_COMMIT=
+ARG RAILWAY_GIT_COMMIT_SHA=
+RUN commit="${OXIDEAN_SOURCE_COMMIT:-$RAILWAY_GIT_COMMIT_SHA}" \
   && if [ -n "$commit" ]; then echo "$commit" > /usr/local/share/oxidean-cli/SOURCE_COMMIT; fi
 RUN if [ -n "$OXIDEAN_CLI_DIST_URL" ]; then \
        echo "staging full ox matrix from $OXIDEAN_CLI_DIST_URL"; \
@@ -98,8 +102,19 @@ RUN apt-get update \
 COPY --from=builder /usr/local/bin/oxidean-api /usr/local/bin/oxidean-api
 COPY --from=builder /usr/local/bin/oxidean-protection-hook /usr/local/bin/oxidean-protection-hook
 COPY --from=builder /usr/local/share/oxidean-cli /usr/local/share/oxidean-cli
+COPY crates/oxidean-api/docker-entrypoint.sh /usr/local/bin/oxidean-api-entrypoint.sh
+# Serving version (crates/oxidean-api/src/version.rs): the VERSION file wins
+# over the binary's compile-time manifest version, so a chore(release) bump
+# commit can ship as a layer on the previous image instead of a rebuild
+# (see docker/Dockerfile.release-layer + images.yml). Empty → no file →
+# env!("CARGO_PKG_VERSION") fallback (self-host/Compose default).
+ARG VERSION=
+RUN chmod 0755 /usr/local/bin/oxidean-api-entrypoint.sh \
+  && mkdir -p /usr/local/share/oxidean \
+  && if [ -n "$VERSION" ]; then printf '%s\n' "$VERSION" > /usr/local/share/oxidean/VERSION; fi
 ENV API_BIND=0.0.0.0:8080
 EXPOSE 8080
 HEALTHCHECK --interval=5s --timeout=5s --retries=12 \
   CMD curl -fsS http://127.0.0.1:8080/health || exit 1
+ENTRYPOINT ["oxidean-api-entrypoint.sh"]
 CMD ["oxidean-api"]

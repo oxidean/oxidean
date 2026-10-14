@@ -1,6 +1,8 @@
-# Manual promote / rollback for Railway production (api, web, gateway).
-# Does not Sync environments or mutate variables — deploys a commit SHA or
-# rolls back to the previous canRollback deployment per service.
+# Manual promote / rollback for Railway production (api, web, runner,
+# gateway). Deploys pin each service's source.image to the GHCR sha-<sha>
+# tag set built by images.yml — Railway pulls images, never builds. Does not
+# Sync environments or mutate variables except the api CLI-feed pin; rollback
+# restores the previous canRollback deployment (and its image ref) per service.
 #
 # Setup (once per repo):
 #   1. Reuse GitHub Environment `Oxidean / production` (or create it)
@@ -47,6 +49,7 @@ concurrency:
 permissions:
   contents: write # the stable cut pushes the bump commit + tags via RELEASE_TOKEN
   actions: read
+  packages: write # promote moves the :production channel tag on GHCR
 
 jobs:
   deploy:
@@ -60,6 +63,7 @@ jobs:
       RAILWAY_ENVIRONMENT_ID: b1c33c22-90ce-433b-99f6-864656512115
       RAILWAY_SERVICE_API_ID: 19bf0a47-2fdf-4130-b6b0-858de92cb858
       RAILWAY_SERVICE_WEB_ID: 26b7e1b6-6cfa-4c7e-942a-bed8e5ce12a2
+      RAILWAY_SERVICE_RUNNER_ID: 36f9b50a-738a-419a-9171-49f56c902e6a
       RAILWAY_SERVICE_GATEWAY_ID: 864fa81c-6e5d-4939-b33b-85eb435365ac
       OXIDEAN_PRODUCTION_HEALTH_URL: https://app.oxidean.dev/health
     steps:
@@ -236,8 +240,8 @@ jobs:
         run: |
           set -euo pipefail
           # A stable ox-v* tag was just pushed — its ox-cli.yml matrix must land
-          # the release assets before the api image's OXIDEAN_CLI_DIST_URL
-          # fetch runs, or the Railway build 404s.
+          # the release assets before the api container's boot-time
+          # OXIDEAN_CLI_DIST_URL fetch runs, or the new replica fails closed.
           for i in $(seq 1 90); do
             status="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${SHA}&per_page=50" \
               --jq '[.workflow_runs[] | select(.path | endswith("ox-cli.yml"))][0].status // "queued"')"
@@ -256,6 +260,27 @@ jobs:
           done
           echo "::error::timed out (45m) waiting for ox-cli release assets"
           exit 1
+
+      - name: Wait for GHCR image tags
+        if: inputs.action == 'promote' && !inputs.dry_run
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.deploy.outputs.sha }}
+        run: |
+          set -euo pipefail
+          # images.yml publishes the all-or-nothing sha-<sha> set on every
+          # main push — including the stable cut's `chore(release):` bump
+          # commit (a seconds-long release-layer retag there, a full build
+          # otherwise). Bounded wait covers both.
+          scripts/ghcr-images.sh wait "sha-${SHA}" --timeout 2700
+
+      - name: login to GHCR (production channel retag)
+        if: inputs.action == 'promote' && !inputs.dry_run
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Promote
         if: inputs.action == 'promote'

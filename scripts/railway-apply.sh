@@ -106,11 +106,13 @@ railway config apply
 cat <<'EOF'
 
 Applied. IaC cannot set the following — finish them in the dashboard:
-  - Deploy triggers: staging = autodeploy on main + Wait for CI;
-    preview/production = GitHub connected, autodeploy OFF.
-    Production verify: make cloud-production-autodeploy-check
+  - Deploy triggers: none — services are image-sourced (images.yml GHCR),
+    so there is no Autodeploy to configure. Guard stays:
+    make cloud-production-autodeploy-check
   - preserve() variables per environment: OXIDEAN_ENV, OXIDEAN_ACTIONS_SECRETS_KEY,
     OXIDEAN_VITE_ALLOWED_HOSTS (web), OXIDEAN_RUNNER_REGISTRATION_TOKEN (api+runner),
     email/SSO keys — see .railway/README.md
   - Public domain on the gateway service (advertise vars reference its domain)
+  - GHCR packages public (one-time): oxidean-{api,web,runner,gateway} —
+    else attach per-service registry credentials (see .railway/README.md)
 EOF

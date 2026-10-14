@@ -35,6 +35,7 @@ pub mod ssh;
 pub mod ssh_keys;
 pub mod templates;
 pub mod user;
+pub mod version;
 pub mod webhook;
 
 pub use app::{router, router_with_state, AppState};

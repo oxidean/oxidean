@@ -428,7 +428,7 @@ pub fn manifest_response() -> ManifestResponse {
     ManifestResponse {
         protocol_version: RPC_PROTOCOL_VERSION,
         wire_version: WIRE_VERSION.into(),
-        server_version: env!("CARGO_PKG_VERSION").into(),
+        server_version: crate::version::version().into(),
         procedures: PROCEDURES.iter().map(|p| ((*p).to_string(), true)).collect(),
         capabilities: ManifestCapabilities {
             // All mounted unconditionally in app.rs: /api/mcp, /api/v1,
@@ -479,7 +479,7 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             let database = ctx.db.ping().await.to_string();
             RpcResponse::ok(HealthResponse {
                 status: "ok".into(),
-                version: env!("CARGO_PKG_VERSION").into(),
+                version: crate::version::version().into(),
                 database,
             })
         }
@@ -1733,7 +1733,7 @@ mod tests {
         let m = manifest_response();
         assert_eq!(m.protocol_version, RPC_PROTOCOL_VERSION);
         assert_eq!(m.wire_version, WIRE_VERSION);
-        assert_eq!(m.server_version, env!("CARGO_PKG_VERSION"));
+        assert_eq!(m.server_version, crate::version::version());
         assert_eq!(m.min_cli_version, MIN_CLI_VERSION);
         assert_eq!(m.procedures.len(), PROCEDURES.len());
         assert_eq!(m.procedures.get("repo.listMine"), Some(&true));

@@ -1,0 +1,500 @@
+# Build every Oxidean Cloud service image in GitHub Actions, gate pushes to
+# GHCR until all four build green, and deploy the all-or-nothing sha-<sha>
+# set to Railway — Railway pulls images instead of building from the repo
+# (oxidean#124).
+#
+# Events:
+#   push to main           → build+push :sha-<sha> + :main for all four
+#                            services, then deploy the sha tag set to staging
+#   push <component>-v*    → retag the commit's :sha-<sha> image to :<semver>
+#                            (+:latest on stable) for the mapped component's
+#                            image — oxidean-api-v*→api, web-v*/oxidean-web-v*
+#                            →web (frontend app + Rust serving crate share the
+#                            image), oxidean-runner-v*→runner (builds once as
+#                            a fallback when the sha tag is missing)
+#   pull_request (same repo) → build+push :pr-<n> + :pr-<n>-sha-<sha>, then
+#                            bind the PR's ephemeral Railway environment to
+#                            the pr image tag. Fork PRs skip (GITHUB_TOKEN is
+#                            read-only — nothing is published or deployed).
+#   chore(release):* main pushes (the promote's stable-cut bump commit) →
+#                            release-layer mode: sha-<bump> is the parent
+#                            sha's image plus an updated /usr/local/share/
+#                            oxidean/VERSION file (api) or a pure retag —
+#                            no rebuild for a version-only diff.
+#   ox-cli workflow_run    → an ox-v* tag landed → repin staging api's
+#                            OXIDEAN_CLI_DIST_URL + re-pull so the container
+#                            entrypoint fetches the new release feed.
+#   workflow_dispatch      → same as a main push.
+#
+# Image namespaces (public GHCR packages — Railway pulls unauthenticated):
+#   ghcr.io/<owner>/oxidean-{api,web,runner,gateway}
+#
+# Secrets: RAILWAY_TOKEN or RAILWAY_API_TOKEN for staging deploys / PR-env
+# binds / feed repins (repo secrets — production keeps its environment-scoped
+# RAILWAY_TOKEN in production-deploy.yml).
+
+name: Images
+
+on:
+  push:
+    branches: [main]
+    tags: ["oxidean-api-v*.*.*", "web-v*.*.*", "oxidean-web-v*.*.*", "oxidean-runner-v*.*.*"]
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, closed]
+  workflow_run:
+    workflows: ["ox CLI"]
+    types: [completed]
+  workflow_dispatch:
+
+concurrency:
+  group: images-${{ github.ref }}
+  cancel-in-progress: false # never cancel mid-publish or mid-deploy
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE_NS: ghcr.io/${{ github.repository_owner }}
+
+jobs:
+  # Resolve per-event context: which services publish, with what tags, via
+  # which publish mechanism (build | retag | release-layer).
+  meta:
+    name: meta
+    runs-on: ubuntu-latest
+    outputs:
+      services: ${{ steps.m.outputs.services }}
+      mode: ${{ steps.m.outputs.mode }}
+      sha: ${{ steps.m.outputs.sha }}
+      parent_sha: ${{ steps.m.outputs.parent_sha }}
+      api_version: ${{ steps.m.outputs.api_version }}
+      pr: ${{ steps.m.outputs.pr }}
+      tags_json: ${{ steps.m.outputs.tags_json }}
+    steps:
+      - name: Install jq
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq jq
+      - uses: actions/checkout@v7
+        # Fork PRs never check out (untrusted code + packages:write token);
+        # closed PRs don't need a repo (cleanup is tag deletes via gh api).
+        if: |
+          github.event_name != 'pull_request' ||
+          (github.event.pull_request.head.repo.full_name == github.repository &&
+           github.event.action != 'closed')
+        with:
+          fetch-depth: 0
+          # PR builds publish the head commit — not the synthetic merge ref.
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || '' }}
+      - name: resolve event context
+        id: m
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          NS="${IMAGE_NS}"
+          ALL='["api","web","runner","gateway"]'
+          T_api=""; T_web=""; T_runner=""; T_gateway=""; services="[]"
+          set_tags() {
+            case "$1" in
+              api) T_api="$2" ;;
+              web) T_web="$2" ;;
+              runner) T_runner="$2" ;;
+              gateway) T_gateway="$2" ;;
+            esac
+          }
+
+          case "${{ github.event_name }}" in
+            pull_request)
+              pr="${{ github.event.pull_request.number }}"
+              echo "pr=${pr}" >> "$GITHUB_OUTPUT"
+              if [[ "${{ github.event.pull_request.head.repo.full_name }}" != "${{ github.repository }}" ]]; then
+                echo "mode=build" >> "$GITHUB_OUTPUT"; echo "fork PR — nothing to publish"
+              elif [[ "${{ github.event.action }}" == "closed" ]]; then
+                echo "mode=build" >> "$GITHUB_OUTPUT"; echo "PR closed — cleanup only"
+              else
+                sha="${{ github.event.pull_request.head.sha }}"
+                echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+                services="$ALL"
+                echo "mode=build" >> "$GITHUB_OUTPUT"
+                for s in api web runner gateway; do
+                  set_tags "$s" "${NS}/oxidean-${s}:pr-${pr},${NS}/oxidean-${s}:pr-${pr}-sha-${sha}"
+                done
+              fi
+              ;;
+            push|workflow_dispatch)
+              sha="$(git rev-parse "${GITHUB_SHA}^{commit}")"
+              echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+              api_version="$(sed -n 's/^version = "\(.*\)"/\1/p' crates/oxidean-api/Cargo.toml | head -n1)"
+              echo "api_version=${api_version}" >> "$GITHUB_OUTPUT"
+
+              if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+                tagname="${GITHUB_REF_NAME}"
+                case "$tagname" in
+                  oxidean-api-v*) svc=api; semver="${tagname#oxidean-api-v}" ;;
+                  web-v*) svc=web; semver="${tagname#web-v}" ;;
+                  # oxidean-web-v* is the Rust serving crate; web-v* the
+                  # frontend app — both version into the same web image.
+                  oxidean-web-v*) svc=web; semver="${tagname#oxidean-web-v}" ;;
+                  oxidean-runner-v*) svc=runner; semver="${tagname#oxidean-runner-v}" ;;
+                  *) echo "unmapped tag prefix: ${tagname}" >&2; exit 1 ;;
+                esac
+                tags="${NS}/oxidean-${svc}:${semver}"
+                if [[ "$semver" != *-* ]]; then
+                  tags="${tags},${NS}/oxidean-${svc}:latest"
+                fi
+                set_tags "$svc" "$tags"
+                services="[\"${svc}\"]"
+                # Retag the existing sha image when there is one; fall back to
+                # a real build when the tag points at a commit images.yml
+                # never built (e.g. a hand-cut tag on an old commit).
+                if scripts/ghcr-images.sh check "sha-${sha}" --services "$svc" >/dev/null 2>&1; then
+                  echo "mode=retag" >> "$GITHUB_OUTPUT"
+                else
+                  echo "sha-${sha} missing on GHCR — building ${svc} instead of retagging"
+                  echo "mode=build" >> "$GITHUB_OUTPUT"
+                fi
+              else
+                # main push (or dispatch): full sha set (+ :main on main).
+                mode=build; parent=""
+                subject="$(git log -1 --format=%s "$sha")"
+                # release-layer eligibility: chore(release) subject + parent
+                # exists + diff is version-manifest-only (the machine bump
+                # touches manifests, changelogs, WIRE_VERSION, and generated
+                # clients — anything else falls back to a real build).
+                if [[ "$subject" == chore\(release\)* ]] \
+                  && git rev-parse --verify "${sha}^" >/dev/null 2>&1 \
+                  && [[ -z "$(git diff --name-only "${sha}^" "$sha" | grep -vE \
+                    '^(versioning\.toml|Cargo\.toml|Cargo\.lock|bun\.lock|crates/[^/]+/Cargo\.toml|crates/oxidean-core/src/lib\.rs|CHANGELOG\.md|crates/[^/]+/CHANGELOG\.md|packages/[^/]+/CHANGELOG\.md|apps/[^/]+/CHANGELOG\.md|docs/[^/]*CHANGELOG[^/]*\.md|packages/api-client/|packages/[^/]+/package\.json|apps/[^/]+/package\.json|docs/openapi\.yaml)$' \
+                    || true)" ]]; then
+                  parent="$(git rev-parse "${sha}^")"
+                  if scripts/ghcr-images.sh check "sha-${parent}" >/dev/null 2>&1; then
+                    mode=release-layer
+                  else
+                    echo "release commit but sha-${parent} images missing — full build"
+                  fi
+                fi
+                echo "mode=${mode}" >> "$GITHUB_OUTPUT"
+                echo "parent_sha=${parent}" >> "$GITHUB_OUTPUT"
+                services="$ALL"
+                for s in api web runner gateway; do
+                  t="${NS}/oxidean-${s}:sha-${sha}"
+                  if [[ "${GITHUB_REF_NAME}" == "main" ]]; then
+                    t="${t},${NS}/oxidean-${s}:main"
+                  fi
+                  set_tags "$s" "$t"
+                done
+              fi
+              ;;
+            *)
+              # workflow_run etc. — nothing to publish (staging-cli-feed
+              # handles the event).
+              echo "mode=build" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+
+          echo "services=${services}" >> "$GITHUB_OUTPUT"
+          jq -n \
+            --arg api "$T_api" --arg web "$T_web" \
+            --arg runner "$T_runner" --arg gateway "$T_gateway" \
+            '{api:$api,web:$web,runner:$runner,gateway:$gateway}' > /tmp/tags.json
+          echo "tags_json=$(jq -c . /tmp/tags.json)" >> "$GITHUB_OUTPUT"
+          jq . /tmp/tags.json
+      - name: summary
+        run: |
+          {
+            echo "| key | value |"; echo "|---|---|"
+            echo "| mode | ${{ steps.m.outputs.mode }} |"
+            echo "| sha | ${{ steps.m.outputs.sha }} |"
+            echo "| services | ${{ steps.m.outputs.services }} |"
+            echo "| tags | \`${{ steps.m.outputs.tags_json }}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Build every needed image push:false, warming the shared gha cache scopes
+  # ci.yml already uses. Nothing reaches GHCR here — publish is the gate.
+  build:
+    name: build ${{ matrix.svc }}
+    needs: meta
+    if: needs.meta.outputs.mode == 'build'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        svc: ${{ fromJSON(needs.meta.outputs.services) }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.meta.outputs.sha }}
+      - name: free disk for image builds
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /usr/local/share/boost /usr/share/swift || true
+      - uses: docker/setup-buildx-action@v4
+      - name: build ${{ matrix.svc }} image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ${{ matrix.svc == 'api' && 'crates/oxidean-api/Dockerfile' || matrix.svc == 'web' && 'apps/web/Dockerfile' || matrix.svc == 'runner' && 'docker/oxidean-runner/Dockerfile' || 'deploy/cloud/Dockerfile' }}
+          push: false
+          # api: host-only ox + commit provenance + manifest version file.
+          # The CLI feed is a runtime fetch (docker-entrypoint.sh), never a
+          # build input — sha tags stay immutable across ox-v* releases.
+          # web: the SHA bakes the service-worker cache id (any of the three
+          # arg names satisfies it; unused args on other images just warn).
+          build-args: |
+            OXIDEAN_CLI_DIST_URL=
+            OXIDEAN_SOURCE_COMMIT=${{ needs.meta.outputs.sha }}
+            GITHUB_SHA=${{ needs.meta.outputs.sha }}
+            SOURCE_COMMIT=${{ needs.meta.outputs.sha }}
+            RAILWAY_GIT_COMMIT_SHA=${{ needs.meta.outputs.sha }}
+            VERSION=${{ needs.meta.outputs.api_version }}
+          cache-from: type=gha,scope=oxidean-${{ matrix.svc }}
+          cache-to: type=gha,mode=max,scope=oxidean-${{ matrix.svc }}
+
+  # The all-or-nothing gate: every build leg must be green before anything is
+  # pushed, so a sha-<sha> tag set on GHCR is always complete.
+  publish:
+    name: publish ${{ matrix.svc }}
+    needs: [meta, build]
+    if: |
+      always() &&
+      needs.meta.result == 'success' &&
+      (needs.build.result == 'success' || needs.build.result == 'skipped')
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        svc: ${{ fromJSON(needs.meta.outputs.services) }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.meta.outputs.sha }}
+      - uses: docker/setup-buildx-action@v4
+      - name: free disk for cold-cache rebuilds
+        # The build job already proved these compile; a gha-cache eviction
+        # between jobs could still force a full rebuild here — keep the same
+        # headroom it gets.
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /usr/local/share/boost /usr/share/swift || true
+      - name: login to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: build + push ${{ matrix.svc }} (mode=build)
+        if: needs.meta.outputs.mode == 'build'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ${{ matrix.svc == 'api' && 'crates/oxidean-api/Dockerfile' || matrix.svc == 'web' && 'apps/web/Dockerfile' || matrix.svc == 'runner' && 'docker/oxidean-runner/Dockerfile' || 'deploy/cloud/Dockerfile' }}
+          push: true
+          tags: ${{ fromJSON(needs.meta.outputs.tags_json)[matrix.svc] }}
+          build-args: |
+            OXIDEAN_CLI_DIST_URL=
+            OXIDEAN_SOURCE_COMMIT=${{ needs.meta.outputs.sha }}
+            GITHUB_SHA=${{ needs.meta.outputs.sha }}
+            SOURCE_COMMIT=${{ needs.meta.outputs.sha }}
+            RAILWAY_GIT_COMMIT_SHA=${{ needs.meta.outputs.sha }}
+            VERSION=${{ needs.meta.outputs.api_version }}
+          cache-from: type=gha,scope=oxidean-${{ matrix.svc }}
+          cache-to: type=gha,mode=max,scope=oxidean-${{ matrix.svc }}
+      - name: api version layer (mode=release-layer)
+        if: needs.meta.outputs.mode == 'release-layer' && matrix.svc == 'api'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/Dockerfile.release-layer
+          push: true
+          tags: ${{ fromJSON(needs.meta.outputs.tags_json).api }}
+          build-args: |
+            BASE_IMAGE=${{ env.IMAGE_NS }}/oxidean-api:sha-${{ needs.meta.outputs.parent_sha }}
+            VERSION=${{ needs.meta.outputs.api_version }}
+      - name: retag ${{ matrix.svc }} (mode=release-layer, non-api)
+        if: needs.meta.outputs.mode == 'release-layer' && matrix.svc != 'api'
+        env:
+          TAGS: ${{ fromJSON(needs.meta.outputs.tags_json)[matrix.svc] }}
+        run: |
+          set -euo pipefail
+          args=()
+          IFS=',' read -r -a tags <<< "$TAGS"
+          for t in "${tags[@]}"; do args+=(-t "$t"); done
+          docker buildx imagetools create "${args[@]}" \
+            "${IMAGE_NS}/oxidean-${{ matrix.svc }}:sha-${{ needs.meta.outputs.parent_sha }}"
+      - name: retag ${{ matrix.svc }} (mode=retag)
+        if: needs.meta.outputs.mode == 'retag'
+        env:
+          TAGS: ${{ fromJSON(needs.meta.outputs.tags_json)[matrix.svc] }}
+        run: |
+          set -euo pipefail
+          args=()
+          IFS=',' read -r -a tags <<< "$TAGS"
+          for t in "${tags[@]}"; do args+=(-t "$t"); done
+          docker buildx imagetools create "${args[@]}" \
+            "${IMAGE_NS}/oxidean-${{ matrix.svc }}:sha-${{ needs.meta.outputs.sha }}"
+
+  # Deploy the freshly published sha tag set to staging (main pushes + manual
+  # dispatch). Staging tracks main-tip; production promotes via
+  # production-deploy.yml.
+  deploy-staging:
+    name: deploy staging
+    needs: [meta, publish]
+    if: |
+      github.ref_name == 'main' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      needs.publish.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.meta.outputs.sha }}
+      - name: Install jq
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq jq
+      - name: login to GHCR (channel retag)
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: deploy sha-${{ needs.meta.outputs.sha }} to staging
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
+          RAILWAY_PROJECT_ID: cec803d0-289b-4078-80cf-7291c16fc5ec
+          RAILWAY_SERVICE_API_ID: 19bf0a47-2fdf-4130-b6b0-858de92cb858
+          RAILWAY_SERVICE_WEB_ID: 26b7e1b6-6cfa-4c7e-942a-bed8e5ce12a2
+          RAILWAY_SERVICE_RUNNER_ID: 36f9b50a-738a-419a-9171-49f56c902e6a
+          RAILWAY_SERVICE_GATEWAY_ID: 864fa81c-6e5d-4939-b33b-85eb435365ac
+        run: |
+          set -euo pipefail
+          if [[ -z "${RAILWAY_TOKEN:-}" && -z "${RAILWAY_API_TOKEN:-}" ]]; then
+            echo "No Railway credential configured — skipping staging deploy (images are still published)."
+            exit 0
+          fi
+          # --environment-id (staging) works with env-scoped project tokens;
+          # name resolution needs an account token that can list environments.
+          scripts/railway-image-deploy.sh \
+            --environment-id 56e886c1-83f4-4db4-8e41-d427dc3d3039 \
+            --tag "sha-${{ needs.meta.outputs.sha }}" \
+            --channel-tag staging
+
+  # Bind the PR's ephemeral Railway environment (created from preview) to the
+  # PR image tag once it exists. The env initially clones preview's :main
+  # source — a brief unavoidable window — then converges to the pr image on
+  # every push.
+  bind-pr-env:
+    name: bind PR environment
+    needs: [meta, publish]
+    if: |
+      github.event_name == 'pull_request' &&
+      github.event.action != 'closed' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      needs.publish.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.meta.outputs.sha }}
+      - name: Install jq
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq jq
+      - name: point PR environment at pr image tag
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
+          RAILWAY_PROJECT_ID: cec803d0-289b-4078-80cf-7291c16fc5ec
+          RAILWAY_SERVICE_API_ID: 19bf0a47-2fdf-4130-b6b0-858de92cb858
+          RAILWAY_SERVICE_WEB_ID: 26b7e1b6-6cfa-4c7e-942a-bed8e5ce12a2
+          RAILWAY_SERVICE_RUNNER_ID: 36f9b50a-738a-419a-9171-49f56c902e6a
+          RAILWAY_SERVICE_GATEWAY_ID: 864fa81c-6e5d-4939-b33b-85eb435365ac
+        run: |
+          set -euo pipefail
+          if [[ -z "${RAILWAY_TOKEN:-}" && -z "${RAILWAY_API_TOKEN:-}" ]]; then
+            echo "No Railway credential configured — skipping PR env bind."
+            exit 0
+          fi
+          if [[ -n "${RAILWAY_API_TOKEN:-}" ]]; then
+            # PR-env lookup enumerates project.environments — prefer the
+            # account/workspace token; an env-scoped project token cannot
+            # list environments.
+            unset RAILWAY_TOKEN
+          fi
+          scripts/railway-image-deploy.sh \
+            --pr "${{ needs.meta.outputs.pr }}" \
+            --tag "pr-${{ needs.meta.outputs.pr }}-sha-${{ needs.meta.outputs.sha }}"
+
+  # GC the PR's GHCR tags when the PR closes (best-effort — tag deletion
+  # needs package admin; failures are logged, not fatal).
+  cleanup-pr:
+    name: cleanup pr-${{ needs.meta.outputs.pr }} tags
+    needs: meta
+    if: |
+      github.event_name == 'pull_request' &&
+      github.event.action == 'closed' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: delete pr-${{ needs.meta.outputs.pr }} GHCR tags
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ needs.meta.outputs.pr }}
+        run: |
+          set -uo pipefail
+          for svc in api web runner gateway; do
+            pkg="oxidean-${svc}"
+            ids="$(gh api "orgs/${{ github.repository_owner }}/packages/container/${pkg}/versions?per_page=100" \
+              --jq ".[] | select(.metadata.container.tags[]? | test(\"^pr-${PR}(-|\$)\")) | .id" 2>/dev/null || true)"
+            for id in $ids; do
+              gh api -X DELETE "orgs/${{ github.repository_owner }}/packages/container/${pkg}/versions/${id}" \
+                && echo "deleted ${pkg} version ${id}" || echo "warn: delete failed for ${pkg} ${id}"
+            done
+          done
+
+  # An ox-v* tag's release lane finished → the tag's assets are live. Repin
+  # staging api's OXIDEAN_CLI_DIST_URL and re-pull so the container entrypoint
+  # fetches the new feed (runtime fetch — no rebuild, no retag).
+  staging-cli-feed:
+    name: repin staging cli feed
+    if: |
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Install jq
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq jq
+      - name: resolve ox-v* tag at the run's commit
+        id: ox
+        env:
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          git fetch --tags --force origin >/dev/null 2>&1 || true
+          tag="$(git tag --points-at "$SHA" --list 'ox-v*.*.*' \
+            | grep -v -e '-alpha' -e '-beta' -e '-nightly' | sort -V | tail -n1)"
+          if [[ -z "$tag" ]]; then
+            echo "run completed at ${SHA} has no stable ox-v* tag — nothing to repin"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          fi
+      - name: repin staging api feed
+        if: steps.ox.outputs.skip != 'true'
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
+          RAILWAY_PROJECT_ID: cec803d0-289b-4078-80cf-7291c16fc5ec
+          # staging — explicit id: env-scoped project tokens cannot resolve
+          # environments by name.
+          RAILWAY_ENVIRONMENT_ID: 56e886c1-83f4-4db4-8e41-d427dc3d3039
+          RAILWAY_SERVICE_API_ID: 19bf0a47-2fdf-4130-b6b0-858de92cb858
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${RAILWAY_TOKEN:-}" && -z "${RAILWAY_API_TOKEN:-}" ]]; then
+            echo "No Railway credential configured — skipping staging api feed repin."
+            exit 0
+          fi
+          scripts/railway-staging-api-redeploy.sh "$SHA"
