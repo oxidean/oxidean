@@ -5,7 +5,9 @@
 //!   GET /cli/install.ps1      PowerShell installer (native Windows)
 //!   GET /cli/skill.md         consumer-facing agent skill (embedded single source)
 //!   GET /cli/latest           JSON { version, targets: [{ target, sha256, bytes }],
-//!                                   dist_commit? }
+//!                                   dist_commit? } — served from the release-written
+//!                                   `latest.json`; `{version: null, targets: []}`
+//!                                   when no release has published one.
 //!   GET /cli/bin/{*file}      `ox-{target}` binary, or `ox-{target}.sha256` digest
 //!
 //! Binaries live in `OXIDEAN_CLI_DIST_DIR` (default `/usr/local/share/oxidean-cli`)
@@ -69,42 +71,6 @@ fn not_found(msg: &str) -> Response {
         .into_response()
 }
 
-struct TargetEntry {
-    target: String,
-    sha256: String,
-    bytes: u64,
-}
-
-/// `ox-{target}` files present in the dist dir (sorted for stable output).
-fn list_targets() -> Result<Vec<TargetEntry>, std::io::Error> {
-    let dir = dist_dir();
-    let mut out = Vec::new();
-    let entries = match std::fs::read_dir(&dir) {
-        Ok(e) => e,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(out),
-        Err(e) => return Err(e),
-    };
-    for entry in entries.flatten() {
-        let name = entry.file_name();
-        let Some(name) = name.to_str() else { continue };
-        if !valid_binary_name(name) {
-            continue;
-        }
-        let meta = entry.metadata()?;
-        if !meta.is_file() || meta.len() > MAX_BINARY_BYTES {
-            continue;
-        }
-        let bytes = std::fs::read(entry.path())?;
-        out.push(TargetEntry {
-            target: name[BINARY_PREFIX.len()..].to_string(),
-            sha256: bytes_to_hex(&Sha256::digest(&bytes)),
-            bytes: meta.len(),
-        });
-    }
-    out.sort_by(|a, b| a.target.cmp(&b.target));
-    Ok(out)
-}
-
 /// Optional git SHA written by the ox-dist publisher / Dockerfile staging
 /// (`SOURCE_COMMIT` in the dist dir). Not an `ox-*` binary — provenance only.
 fn dist_commit() -> Option<String> {
@@ -123,32 +89,81 @@ fn dist_commit() -> Option<String> {
     Some(trimmed.to_string())
 }
 
-pub async fn latest() -> Response {
-    match list_targets() {
-        Ok(targets) => {
-            let mut body = serde_json::json!({
-                "ok": true,
-                "version": env!("CARGO_PKG_VERSION"),
-                "targets": targets.iter().map(|t| serde_json::json!({
-                    "target": t.target,
-                    "sha256": t.sha256,
-                    "bytes": t.bytes,
-                })).collect::<Vec<_>>(),
-            });
-            if let Some(commit) = dist_commit() {
-                body["dist_commit"] = serde_json::json!(commit);
+/// `latest.json` as written by the `ox-v*` release lane (C5): the published
+/// CLI component version, the commit the dist matrix was built from, and one
+/// record per shipped target.
+#[derive(serde::Deserialize)]
+struct LatestManifest {
+    schema_version: Option<u64>,
+    version: serde_json::Value,
+    dist_commit: Option<String>,
+    targets: Option<Vec<LatestTarget>>,
+}
+
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
+struct LatestTarget {
+    target: String,
+    sha256: String,
+    bytes: u64,
+}
+
+fn manifest_is_valid(m: &LatestManifest) -> bool {
+    // schema_version is the C5 marker: absent tolerates hand-written files,
+    // anything but 1 is a format this handler doesn't know how to read.
+    m.version.as_str().is_some_and(|v| !v.is_empty())
+        && m.targets.is_some()
+        && m.schema_version.is_none_or(|v| v == 1)
+}
+
+/// Reads and validates `<dir>/latest.json`. `None` covers every unpublished
+/// shape — absent, unreadable, malformed JSON, or missing `version`/`targets`.
+fn load_latest_manifest(dir: &std::path::Path) -> Option<LatestManifest> {
+    let manifest_path = dir.join("latest.json");
+    match std::fs::read_to_string(&manifest_path) {
+        Ok(text) => match serde_json::from_str::<LatestManifest>(&text) {
+            Ok(m) if manifest_is_valid(&m) => Some(m),
+            Ok(_) => {
+                tracing::warn!(path = %manifest_path.display(), "latest.json missing version/targets — reporting unpublished");
+                None
             }
-            Json(body).into_response()
+            Err(e) => {
+                tracing::warn!(path = %manifest_path.display(), error = %e, "latest.json is corrupt — reporting unpublished");
+                None
+            }
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => {
+            tracing::warn!(path = %manifest_path.display(), error = %e, "cannot read latest.json — reporting unpublished");
+            None
         }
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({
-                "ok": false,
-                "error": { "code": "cli.dist_unavailable", "message": format!("cannot read CLI dist dir: {e}") }
-            })),
-        )
-            .into_response(),
     }
+}
+
+/// `/cli/latest` reads the release-owned `latest.json` — the published `ox`
+/// version is distribution state, never the API crate version (BR6.5).
+/// Absent or corrupt manifests answer with the unpublished marker so
+/// `ox self-update` fails honestly instead of chasing a server version.
+pub async fn latest() -> Response {
+    let manifest = load_latest_manifest(&dist_dir());
+
+    let mut body = serde_json::json!({
+        "ok": true,
+        "version": manifest.as_ref().map(|m| &m.version).cloned().unwrap_or(serde_json::Value::Null),
+        "targets": manifest.as_ref().and_then(|m| m.targets.clone()).map(|targets| {
+            targets.iter().map(|t| serde_json::json!({
+                "target": t.target,
+                "sha256": t.sha256,
+                "bytes": t.bytes,
+            })).collect::<Vec<_>>()
+        }).unwrap_or_default(),
+    });
+    let commit = manifest
+        .and_then(|m| m.dist_commit.filter(|c| !c.is_empty()))
+        .or_else(dist_commit);
+    if let Some(commit) = commit {
+        body["dist_commit"] = serde_json::json!(commit);
+    }
+    Json(body).into_response()
 }
 
 /// `/cli/bin/ox-x86_64-unknown-linux-gnu` or `….sha256` (sha256sum-format text,
@@ -304,5 +319,55 @@ mod tests {
         assert!(!out.contains("@OXIDEAN_ORIGIN@"));
         assert!(out.contains("pc-windows-msvc"));
         assert!(out.contains("Get-FileHash"));
+    }
+
+    #[test]
+    fn latest_manifest_absent_is_unpublished() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(load_latest_manifest(dir.path()).is_none());
+    }
+
+    #[test]
+    fn latest_manifest_corrupt_is_unpublished() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("latest.json"), b"{not json").unwrap();
+        assert!(load_latest_manifest(dir.path()).is_none());
+    }
+
+    #[test]
+    fn latest_manifest_missing_version_is_unpublished() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("latest.json"),
+            r#"{"schema_version": 1, "targets": []}"#,
+        )
+        .unwrap();
+        assert!(load_latest_manifest(dir.path()).is_none());
+    }
+
+    #[test]
+    fn latest_manifest_valid_reads_version_and_targets() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("latest.json"),
+            r#"{
+                "schema_version": 1,
+                "version": "0.2.3",
+                "dist_commit": "0123456789abcdef0123456789abcdef01234567",
+                "targets": [
+                    {"target": "x86_64-unknown-linux-gnu", "sha256": "ab", "bytes": 12}
+                ]
+            }"#,
+        )
+        .unwrap();
+        let m = load_latest_manifest(dir.path()).unwrap();
+        assert_eq!(m.version, "0.2.3");
+        let targets = m.targets.unwrap();
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].target, "x86_64-unknown-linux-gnu");
+        assert_eq!(
+            m.dist_commit.as_deref(),
+            Some("0123456789abcdef0123456789abcdef01234567")
+        );
     }
 }

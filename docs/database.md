@@ -43,7 +43,7 @@ RPC `system.db_probe` upserts and reads back that row (unauthenticated in this p
 ```bash
 curl -fsS \
   -H 'Content-Type: application/json' \
-  -H 'Oxidean-RPC-Version: 1' \
+  -H 'Oxidean-RPC-Version: 0.1.0' \
   -d '{"procedure":"system.db_probe","input":{}}' \
   http://localhost/api/rpc
 ```

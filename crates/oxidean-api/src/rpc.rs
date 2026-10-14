@@ -4,7 +4,8 @@ use std::sync::{Arc, Mutex, RwLock};
 use cookie::Cookie;
 use oxidean_core::{
     AppError, EchoRequest, EchoResponse, HealthResponse, ManifestCapabilities, ManifestResponse,
-    RpcRequest, RpcResponse, ECHO_MAX_BYTES, RPC_PROTOCOL_VERSION,
+    wire_compatible, RpcRequest, RpcResponse, ECHO_MAX_BYTES, LEGACY_WIRE_VERSION,
+    RPC_PROTOCOL_VERSION, WIRE_VERSION,
 };
 use oxidean_db::Database;
 use oxidean_git::GitBackend;
@@ -102,17 +103,29 @@ pub struct RpcCtx {
     pub search_max_files: u32,
 }
 
+/// Wire-compat gate for `Oxidean-RPC-Version` (BR6.2). During the 0.x window
+/// the legacy ordinal `"1"` is accepted as the `LEGACY_WIRE_VERSION` contract;
+/// otherwise the header must be a SemVer compatible with `WIRE_VERSION` under
+/// `wire_compatible`. The `"1"` alias disappears automatically when
+/// `WIRE_VERSION` reaches `1.0.0` (a `1.x` wire is not 0.x-compatible).
 pub fn check_version_header(value: Option<&str>) -> Result<(), AppError> {
-    match value {
-        Some(v) if v.trim() == RPC_PROTOCOL_VERSION.to_string() => Ok(()),
-        Some(v) => Err(AppError::new(
+    let compatible = match value.map(str::trim) {
+        Some(v) if v == RPC_PROTOCOL_VERSION.to_string() => {
+            wire_compatible(LEGACY_WIRE_VERSION, WIRE_VERSION)
+        }
+        Some(v) => wire_compatible(v, WIRE_VERSION),
+        None => false,
+    };
+    if compatible {
+        Ok(())
+    } else {
+        Err(AppError::new(
             "rpc.version_mismatch",
-            format!("expected Oxidean-RPC-Version {RPC_PROTOCOL_VERSION}, got {v}"),
-        )),
-        None => Err(AppError::new(
-            "rpc.version_mismatch",
-            format!("missing Oxidean-RPC-Version header (expected {RPC_PROTOCOL_VERSION})"),
-        )),
+            match value {
+                Some(v) => format!("expected Oxidean-RPC-Version {WIRE_VERSION}, got {v}"),
+                None => format!("missing Oxidean-RPC-Version header (expected {WIRE_VERSION})"),
+            },
+        ))
     }
 }
 
@@ -414,6 +427,7 @@ pub const PROCEDURES: &[&str] = &[
 pub fn manifest_response() -> ManifestResponse {
     ManifestResponse {
         protocol_version: RPC_PROTOCOL_VERSION,
+        wire_version: WIRE_VERSION.into(),
         server_version: env!("CARGO_PKG_VERSION").into(),
         procedures: PROCEDURES.iter().map(|p| ((*p).to_string(), true)).collect(),
         capabilities: ManifestCapabilities {
@@ -1718,6 +1732,7 @@ mod tests {
     fn manifest_shape() {
         let m = manifest_response();
         assert_eq!(m.protocol_version, RPC_PROTOCOL_VERSION);
+        assert_eq!(m.wire_version, WIRE_VERSION);
         assert_eq!(m.server_version, env!("CARGO_PKG_VERSION"));
         assert_eq!(m.min_cli_version, MIN_CLI_VERSION);
         assert_eq!(m.procedures.len(), PROCEDURES.len());
@@ -1732,6 +1747,7 @@ mod tests {
         let v = serde_json::to_value(&m).unwrap();
         for key in [
             "protocol_version",
+            "wire_version",
             "server_version",
             "procedures",
             "capabilities",
@@ -1739,5 +1755,40 @@ mod tests {
         ] {
             assert!(v.get(key).is_some(), "manifest missing `{key}`");
         }
+    }
+
+    /// Dual-accept transition matrix (BR6.2): while `WIRE_VERSION` is `0.1.x`,
+    /// both the legacy `"1"` ordinal and any `0.1.*` SemVer are accepted.
+    #[test]
+    fn version_header_dual_accept() {
+        assert!(check_version_header(Some("1")).is_ok());
+        assert!(check_version_header(Some(" 1 ")).is_ok());
+        assert!(check_version_header(Some("0.1.0")).is_ok());
+        assert!(check_version_header(Some("0.1.9")).is_ok());
+        assert!(check_version_header(Some("0.1.0-rc.1")).is_ok());
+    }
+
+    #[test]
+    fn version_header_rejects() {
+        for bad in [
+            None,
+            Some(""),
+            Some("0.2.0"),
+            Some("1.0.0"),
+            Some("2"),
+            Some("garbage"),
+            Some("0.1"),
+        ] {
+            let err = check_version_header(bad).unwrap_err();
+            assert_eq!(err.code, "rpc.version_mismatch");
+        }
+    }
+
+    /// The `"1"` alias must die with the 0.x line: `wire_compatible` itself
+    /// refuses `LEGACY_WIRE_VERSION` ↔ a `1.x` wire.
+    #[test]
+    fn legacy_alias_expires_at_1_0() {
+        assert!(wire_compatible(LEGACY_WIRE_VERSION, WIRE_VERSION));
+        assert!(!wire_compatible(LEGACY_WIRE_VERSION, "1.0.0"));
     }
 }

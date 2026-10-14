@@ -2,7 +2,7 @@
 openapi: 3.0.3
 info:
   title: Oxidean REST API
-  version: '1'
+  version: 0.1.0
   description: Public REST API for Oxidean — a companion to the typed JSON RPC at `POST /api/rpc`. Each route dispatches to the same internal procedure the RPC layer uses, so ACLs, PAT scope gates, and side effects are identical. Generated from the route table — this document cannot drift from the served surface.
 servers:
 - url: /api/v1

@@ -60,7 +60,6 @@ services:
       # OXIDEAN_PUBLIC_ORIGIN=http://localhost:3000 in `.env` does not leak in.
       OXIDEAN_PUBLIC_ORIGIN: ${OXIDEAN_COMPOSE_PUBLIC_ORIGIN:-http://localhost}
       API_BIND: 0.0.0.0:8080
-      OXIDEAN_RPC_VERSION: ${OXIDEAN_RPC_VERSION:-1}
       RUST_LOG: ${RUST_LOG:-info}
       # Absolute path required: API CWD is `/`; relative var/repos breaks seed push from /tmp worktrees.
       OXIDEAN_REPOS_DIR: /var/repos

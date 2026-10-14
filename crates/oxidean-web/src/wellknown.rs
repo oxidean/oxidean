@@ -7,12 +7,11 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde_json::json;
 
+use oxidean_core::MCP_PROTOCOL_VERSIONS;
+
 pub const WEBMCP_PATH: &str = "/.well-known/webmcp";
 pub const MCP_PATH: &str = "/.well-known/mcp";
 const MCP_ENDPOINT_PATH: &str = "/api/mcp";
-/// Keep in sync with `MCP_PROTOCOL_VERSIONS` in `apps/web/src/lib/webmcp.ts`
-/// and the API's `mcp.rs`.
-const MCP_PROTOCOL_VERSIONS: &[&str] = &["2024-11-05", "2025-03-26", "2025-06-18"];
 
 fn mcp_document() -> serde_json::Value {
     json!({

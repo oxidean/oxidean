@@ -12,7 +12,7 @@ async fn call_posts_envelope_with_bearer() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/api/rpc"))
-        .and(header("oxidean-rpc-version", "1"))
+        .and(header("oxidean-rpc-version", oxidean_core::WIRE_VERSION))
         .and(header("authorization", "Bearer oxidean_pat_test"))
         .and(body_json(
             json!({"procedure": "system.health", "input": {}}),

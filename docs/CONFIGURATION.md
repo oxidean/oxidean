@@ -14,7 +14,6 @@ Related docs: [database.md](database.md), [dev-auth.md](dev-auth.md).
 | `OXIDEAN_ENV` | Optional | `development` | Runtime mode. Affects CORS, session cookie `Secure`, and whether `OXIDEAN_OIDC_ALLOW_INSECURE` is honored. Common values: `development`, `dev`, `compose`, `production`. |
 | `OXIDEAN_CORS_ORIGINS` | Conditional | _(none)_ | Comma-separated browser origins. **Required** when `OXIDEAN_ENV` is not `development` or `dev` (e.g. `compose`). Ignored for CORS allowlisting in `development`/`dev` (request origin is mirrored). |
 | `API_BIND` | Optional | `0.0.0.0:8080` | Listen address for `oxidean-api`. Host `make` workflows often use `127.0.0.1:8080`. |
-| `OXIDEAN_RPC_VERSION` | Optional | `1` (Compose) | Documented / passed through Compose. The generated TS client embeds `RPC_VERSION = 1` and sends header `Oxidean-RPC-Version`. |
 | `RUST_LOG` | Optional | `info` (Compose) | `tracing` / `EnvFilter` log directives. |
 | `OXIDEAN_PUBLIC_ORIGIN` | Optional | `http://localhost:8080` (API fallback when unset); on the **web** tier, request-derived `Host`/`X-Forwarded-*` when unset | Browser-facing origin for **verify/reset magic links**, **invite URLs** (`{origin}/invites/{token}` — emailed and shareable links), SSO redirect URIs, and **HTTPS git clone URLs** (`{origin}/{owner}/{repo}.git`, D-19). `oxidean-web` also reads it: injected as the `oxidean:public-origin` `<meta>` (client-side `resolvePublicOriginClient` prefers it over `location.origin`) and used to rewrite the `http://localhost` placeholder prerendered shells carry. Trailing slash is stripped. Compose defaults to `http://localhost` via `OXIDEAN_COMPOSE_PUBLIC_ORIGIN` so a host value (`http://localhost:3000`) in `.env` does not poison container mail. |
 | `OXIDEAN_API_ORIGIN` | Required (web) | _(unset → no proxy, presence-fallback gate)_ | Origin the **web** tier (`oxidean-web`) reverse-proxies API-owned prefixes to (`/api/`, `/v2`, `/npm`, `/generic`, `/cli`, `/uploads`, `/oauth/authorize|token|userinfo`) and probes `/api/auth/session-check` against for the protected-route gate and session stamp. On Railway set to the private API, e.g. `http://api.railway.internal:8080`. Unset in dev → the web tier serves static shells only and falls back to cookie-presence for the gate. |
@@ -252,7 +251,6 @@ OXIDEAN_AUTO_MIGRATE=true
 OXIDEAN_ENV=compose
 OXIDEAN_CORS_ORIGINS=http://localhost,http://127.0.0.1
 API_BIND=0.0.0.0:8080
-OXIDEAN_RPC_VERSION=1
 ```
 
 Auth settings that are **not** secrets (provider mode, from-address preference) are stored in the database and edited via Admin → Auth (`sys-admin` only). Secrets stay ENV-only.

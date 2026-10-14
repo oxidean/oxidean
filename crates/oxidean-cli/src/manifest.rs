@@ -11,7 +11,9 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use oxidean_core::{RpcResponse, RPC_PROTOCOL_VERSION};
+use oxidean_core::{
+    wire_compatible, LEGACY_WIRE_VERSION, RPC_PROTOCOL_VERSION, RpcResponse, WIRE_VERSION,
+};
 use serde::Deserialize;
 use serde_json::json;
 
@@ -25,8 +27,13 @@ const FETCH_TIMEOUT: Duration = Duration::from_secs(3);
 /// payload without it isn't a manifest and is treated as fail-open.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Manifest {
+    /// Legacy wire ordinal — `1` on every pre-SemVer-wire server.
     #[serde(default)]
     pub protocol_version: u32,
+    /// SemVer wire contract (`WIRE_VERSION`). Absent on pre-wire manifests —
+    /// `protocol_version: 1` then means the legacy `0.1.x` contract (BR6.4).
+    #[serde(default)]
+    pub wire_version: Option<String>,
     #[serde(default)]
     pub server_version: String,
     /// Required — the whole point of the contract.
@@ -98,12 +105,34 @@ pub fn compat_notices(manifest: &Manifest, cli_version: &str) -> Vec<String> {
             ));
         }
     }
-    if manifest.protocol_version > RPC_PROTOCOL_VERSION {
-        out.push(format!(
-            "warning: instance speaks RPC protocol {} (installed ox understands \
-             {RPC_PROTOCOL_VERSION}) — upgrade ox",
-            manifest.protocol_version
-        ));
+    // Wire compatibility (BR6.4): `wire_version` when the server advertises
+    // it; a bare `protocol_version: 1` means the legacy 0.1.x contract; both
+    // absent → compatibility is unknown, warn only.
+    match &manifest.wire_version {
+        Some(v) => {
+            if !wire_compatible(v, WIRE_VERSION) {
+                out.push(format!(
+                    "warning: instance wire version {v} is incompatible with \
+                     installed ox (wire {WIRE_VERSION}) — upgrade ox"
+                ));
+            }
+        }
+        None if manifest.protocol_version == RPC_PROTOCOL_VERSION => {
+            if !wire_compatible(LEGACY_WIRE_VERSION, WIRE_VERSION) {
+                out.push(format!(
+                    "warning: instance speaks the legacy wire contract \
+                     ({LEGACY_WIRE_VERSION}), installed ox uses wire \
+                     {WIRE_VERSION} — upgrade ox"
+                ));
+            }
+        }
+        None => {
+            out.push(
+                "note: instance did not advertise a wire version — \
+                 compatibility unchecked"
+                    .into(),
+            );
+        }
     }
     out
 }
@@ -130,6 +159,7 @@ mod tests {
     fn manifest(procs: &[(&str, bool)], min_cli: &str) -> Manifest {
         Manifest {
             protocol_version: 1,
+            wire_version: Some(WIRE_VERSION.into()),
             server_version: "9.9.9".into(),
             procedures: procs.iter().map(|(k, v)| (k.to_string(), *v)).collect(),
             min_cli_version: min_cli.into(),
@@ -179,12 +209,34 @@ mod tests {
     }
 
     #[test]
-    fn notices_for_newer_protocol() {
+    fn notices_for_incompatible_wire() {
         let mut m = manifest(&[], "0.1.0");
-        m.protocol_version = RPC_PROTOCOL_VERSION + 1;
-        assert_eq!(compat_notices(&m, "0.1.0").len(), 1);
-        m.protocol_version = RPC_PROTOCOL_VERSION;
+        m.wire_version = Some("0.2.0".into());
+        let notices = compat_notices(&m, "0.1.0");
+        assert_eq!(notices.len(), 1);
+        assert!(notices[0].contains("0.2.0"), "{notices:?}");
+        m.wire_version = Some(WIRE_VERSION.into());
         assert!(compat_notices(&m, "0.1.0").is_empty());
+    }
+
+    /// BR6.4: a manifest with no `wire_version` but `protocol_version: 1` is
+    /// the legacy 0.1.x contract — compatible while `WIRE_VERSION` is 0.1.x.
+    #[test]
+    fn legacy_manifest_is_compatible() {
+        let mut m = manifest(&[], "0.1.0");
+        m.wire_version = None;
+        assert!(compat_notices(&m, "0.1.0").is_empty());
+    }
+
+    /// BR6.4: neither field → warn-and-continue, never a hard refusal.
+    #[test]
+    fn wireless_manifest_warns_only() {
+        let mut m = manifest(&[], "0.1.0");
+        m.wire_version = None;
+        m.protocol_version = 0;
+        let notices = compat_notices(&m, "0.1.0");
+        assert_eq!(notices.len(), 1);
+        assert!(notices[0].starts_with("note:"), "{notices:?}");
     }
 
     #[test]

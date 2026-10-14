@@ -31,9 +31,12 @@ Session auth uses an **opaque HttpOnly cookie** named `oxidean_session` (not JWT
 **RPC version gate** — every `/api/rpc` and `/api/rpc/ws` request must send:
 
 ```http
-Oxidean-RPC-Version: 1
+Oxidean-RPC-Version: 0.1.0
 ```
 
+The value is the server's SemVer wire version (`oxidean_core::WIRE_VERSION`);
+compatibility is caret-style — any `0.1.*` matches a `0.1.x` server. The
+legacy ordinal `1` is accepted as the `0.1.x` contract while the wire is 0.x.
 Missing or mismatched value → error `rpc.version_mismatch` (HTTP 400).
 
 ## Endpoints overview
@@ -334,7 +337,7 @@ Optional `error.data` may appear on some errors.
 ```bash
 curl -sS http://127.0.0.1:8080/api/rpc \
   -H 'content-type: application/json' \
-  -H 'Oxidean-RPC-Version: 1' \
+  -H 'Oxidean-RPC-Version: 0.1.0' \
   -d '{"procedure":"system.health","input":{}}'
 ```
 
@@ -343,14 +346,14 @@ Authenticated call (after login/signup returned `Set-Cookie`):
 ```bash
 curl -sS http://127.0.0.1:8080/api/rpc \
   -H 'content-type: application/json' \
-  -H 'Oxidean-RPC-Version: 1' \
+  -H 'Oxidean-RPC-Version: 0.1.0' \
   -H 'Cookie: oxidean_session=…' \
   -d '{"procedure":"auth.me","input":{}}'
 ```
 
 ### WebSocket `/api/rpc/ws`
 
-1. Upgrade with `Oxidean-RPC-Version: 1` (and optional `Cookie` for session).
+1. Upgrade with `Oxidean-RPC-Version: 0.1.0` (and optional `Cookie` for session).
 2. Send text frames: same JSON as HTTP `RpcRequest`.
 3. Receive text frames: same JSON as `RpcResponse`.
 4. Invalid JSON frame → `rpc.bad_input`. Cookie `Set-Cookie` is HTTP-only; WS handlers do not attach cookies on responses.
@@ -477,7 +480,7 @@ Non-browser clients (CLI, MCP, agents, scripts) call `/api/rpc` and `/api/rpc/ws
 ```bash
 curl -s https://oxidean.example.com/api/rpc \
   -H 'content-type: application/json' \
-  -H 'Oxidean-RPC-Version: 1' \
+  -H 'Oxidean-RPC-Version: 0.1.0' \
   -H 'Authorization: Bearer oxidean_pat_…' \
   -d '{"procedure":"auth.me","input":{}}'
 ```

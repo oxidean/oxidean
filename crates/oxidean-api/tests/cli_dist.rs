@@ -30,6 +30,28 @@ fn dist() -> &'static tempfile::TempDir {
             "abcdef0123456789abcdef0123456789abcdef01\n",
         )
         .unwrap();
+        // The release lane's manifest — /cli/latest serves this verbatim
+        // (version + targets), never the API crate version.
+        std::fs::write(
+            dir.path().join("latest.json"),
+            r#"{
+                "schema_version": 1,
+                "version": "0.1.0",
+                "targets": [
+                    {
+                        "target": "x86_64-unknown-linux-gnu",
+                        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                        "bytes": 24
+                    },
+                    {
+                        "target": "aarch64-apple-darwin",
+                        "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                        "bytes": 14
+                    }
+                ]
+            }"#,
+        )
+        .unwrap();
         std::env::set_var("OXIDEAN_CLI_DIST_DIR", dir.path());
         std::env::set_var("OXIDEAN_PUBLIC_ORIGIN", "https://forge.example.com");
         dir
@@ -120,7 +142,8 @@ async fn latest_lists_targets_with_digests() {
     assert_eq!(status, StatusCode::OK);
     let json: serde_json::Value = serde_json::from_str(&body).unwrap();
     assert_eq!(json["ok"], true);
-    assert!(json["version"].as_str().unwrap().len() >= 3);
+    // Version comes from the release manifest, not the API crate version.
+    assert_eq!(json["version"].as_str().unwrap(), "0.1.0");
     assert_eq!(
         json["dist_commit"].as_str().unwrap(),
         "abcdef0123456789abcdef0123456789abcdef01"
@@ -133,8 +156,6 @@ async fn latest_lists_targets_with_digests() {
         .collect();
     assert!(names.contains(&"x86_64-unknown-linux-gnu"));
     assert!(names.contains(&"aarch64-apple-darwin"));
-    // README.txt was excluded by the name filter.
-    assert!(!names.contains(&"README.txt"));
     for t in targets {
         assert_eq!(t["sha256"].as_str().unwrap().len(), 64);
         assert!(t["bytes"].as_u64().unwrap() > 0);

@@ -40,6 +40,7 @@ use chrono::Utc;
 use oxidean_core::{
     oauth_types::OAUTH_ACCESS_TOKEN_PREFIX, AppError, ClassicPatScope, ContentsPerm, FgRepoAccess,
     PatKind, RpcRequest, RpcResponse, CLASSIC_PAT_PREFIX, FINE_GRAINED_PAT_PREFIX,
+    MCP_PROTOCOL_VERSIONS,
 };
 use oxidean_db::PatRow;
 use serde_json::{json, Map, Value};
@@ -54,8 +55,9 @@ use crate::repo::{
 };
 use crate::rpc::{self, ClientMeta};
 
-/// Protocol versions this endpoint understands (newest last = advertised default).
-const PROTOCOL_VERSIONS: &[&str] = &["2024-11-05", "2025-03-26", "2025-06-18"];
+/// Protocol versions this endpoint understands (newest last = advertised
+/// default) — canonical list lives in `oxidean_core::MCP_PROTOCOL_VERSIONS`.
+const PROTOCOL_VERSIONS: &[&str] = MCP_PROTOCOL_VERSIONS;
 
 const WWW_AUTH: &str = r#"Bearer realm="Oxidean MCP""#;
 

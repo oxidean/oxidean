@@ -1,5 +1,6 @@
-/** Protocol versions the endpoint negotiates — keep in sync with mcp.rs. */
-const MCP_PROTOCOL_VERSIONS = ["2024-11-05", "2025-03-26", "2025-06-18"];
+/** Protocol versions the endpoint negotiates — canonical list is
+ *  `oxidean_core::MCP_PROTOCOL_VERSIONS`, re-emitted by `make rpc-gen`. */
+import { MCP_PROTOCOL_VERSIONS } from "@oxidean/api-client";
 /**
  * WebMCP surface (AGT-02): advertise the instance MCP endpoint to browser-side
  * agents and bridge the tools a page registers to `POST /api/mcp`.
