@@ -9,7 +9,7 @@
 //! A resolved PAT produces a *session-equivalent* identity: `RpcCtx.session`
 //! carries the token owner's `user_id` so existing capability/ACL gates apply
 //! unchanged, while `RpcCtx.pat` carries the parsed token permissions that
-//! [`authorize_rpc`] enforces at dispatch time (see `classify`).
+//! [`authorize_rpc`] enforces at dispatch time (see `proc_classes::classify_pat_proc`).
 //!
 //! Scope model (docs/API.md):
 //! - Classic `repo` → all repo-domain procedures (read, write, administration
@@ -32,10 +32,14 @@
 //!   Public repos stay readable. Org mutations are unreachable for FG
 //!   tokens (repo-bound credentials).
 //! - Admin (`admin.*`, `packages.admin*`), session lifecycle (`auth.*` other
-//!   than `me`/`provider_config`/`bootstrap_status`), PAT management
-//!   (`pat.*` — a token must never mint tokens), OAuth app/device-grant
-//!   procedures, and invite accepts are never callable with a PAT —
-//!   fail-closed default for new procedures.
+//!   than `me`/`provider_config`/`bootstrap_status`), PAT minting
+//!   (`pat.createClassic`/`createFineGrained` — a token must never mint
+//!   tokens), OAuth app/device-grant procedures, and invite accepts are
+//!   never callable with a PAT — fail-closed default for new procedures.
+//!   The only `pat.*` procedures a PAT may call are introspection
+//!   (`pat.self`/`pat.policy`/`pat.catalog`), `pat.list` (its owner's
+//!   tokens), and self-revocation (`pat.revoke` on its own id — the
+//!   handler enforces that last part).
 //! - Bearer responses never carry `Set-Cookie` and never mint sessions.
 
 use std::sync::Mutex;
@@ -59,12 +63,21 @@ use crate::rpc::RpcCtx;
 /// Parsed PAT identity carried on `RpcCtx` for dispatch-level scope checks.
 #[derive(Debug, Clone)]
 pub struct PatIdentity {
-    /// `personal_access_tokens.id` — used for `last_used` bookkeeping and as
-    /// the synthesized session id (rate-limit key for `user.lookup`).
+    /// `personal_access_tokens.id` — used for `last_used` bookkeeping, as the
+    /// synthesized session id, and as the `pat.self` / self-revoke target.
     pub token_id: String,
     /// Token owner's user id (PAT acts on the owner's behalf).
     pub user_id: String,
     pub kind: PatKind,
+    /// Token note — surfaced by `pat.self`.
+    pub name: String,
+    /// Display fingerprint (never the secret) — surfaced by `pat.self`.
+    pub token_prefix: String,
+    /// RFC3339 expiry on the row (`None` = non-expiring) — surfaced by
+    /// `pat.self`.
+    pub expires_at_raw: Option<String>,
+    pub last_used_at: Option<String>,
+    pub created_at: String,
     /// Classic scope names, or FG package perms (`package:read`/`package:write`
     /// are stored in `scopes_json` for both kinds — see `pat::row_to_list_item`).
     pub scopes: Vec<ClassicPatScope>,
@@ -91,6 +104,16 @@ impl BearerRejection {
     fn unauthenticated(message: &str) -> Self {
         Self {
             error: AppError::new("auth.unauthenticated", message),
+            retry_after: None,
+        }
+    }
+
+    /// Distinct auth-failure codes so clients (`ox`) can pick a recovery path:
+    /// `auth.token_expired`/`auth.token_revoked`/`auth.banned` are all still
+    /// HTTP 401 — only the RPC `error.code` differentiates them.
+    fn coded(code: &str, message: &str) -> Self {
+        Self {
+            error: AppError::new(code, message),
             retry_after: None,
         }
     }
@@ -173,7 +196,9 @@ pub async fn resolve_bearer(
     }
 
     let token_hash = sha256_hex(token.as_bytes());
-    let pat = match db.find_pat_by_token_hash(&token_hash).await {
+    // Revoked rows must reach this classification — filtering them at the DB
+    // layer makes a revoked token indistinguishable from a nonexistent one.
+    let pat = match db.find_pat_by_token_hash_including_revoked(&token_hash).await {
         Ok(Some(p)) => p,
         Ok(None) => {
             lock(limiter).record_ip(ip);
@@ -195,9 +220,17 @@ pub async fn resolve_bearer(
         lim.record_user(&pat.user_id);
     };
 
+    if pat.revoked_at.is_some() {
+        fail_all(&pat);
+        return Err(BearerRejection::coded(
+            "auth.token_revoked",
+            "personal access token has been revoked",
+        ));
+    }
     if pat_expired(&pat.expires_at) {
         fail_all(&pat);
-        return Err(BearerRejection::unauthenticated(
+        return Err(BearerRejection::coded(
+            "auth.token_expired",
             "personal access token expired",
         ));
     }
@@ -214,7 +247,8 @@ pub async fn resolve_bearer(
     };
     if owner.banned_at.is_some() {
         fail_all(&pat);
-        return Err(BearerRejection::unauthenticated(
+        return Err(BearerRejection::coded(
+            "auth.banned",
             "This account has been suspended.",
         ));
     }
@@ -236,6 +270,11 @@ pub async fn resolve_bearer(
         token_id: pat.id.clone(),
         user_id: owner.id.clone(),
         kind,
+        name: pat.name.clone(),
+        token_prefix: pat.token_prefix.clone(),
+        expires_at_raw: pat.expires_at.clone(),
+        last_used_at: pat.last_used_at.clone(),
+        created_at: pat.created_at.clone(),
         scopes: parse_scopes(pat.scopes_json.as_deref()),
         contents: pat
             .contents_perm
@@ -269,439 +308,29 @@ pub async fn touch_last_used(db: &Database, pat_id: &str, ip: Option<&str>) {
     }
 }
 
-/// Procedure classification for PAT callers (fail-closed: unlisted →
-/// `SessionOnly`). Applied only when `ctx.pat` is set — cookie sessions are
-/// unaffected. Each variant maps to a classic-scope requirement and a
-/// fine-grained permission family — see `authorize_classic` /
-/// `authorize_fine_grained`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PatProc {
-    /// Anonymous-safe procedures — callable by any valid PAT.
-    Open,
-    /// Own-identity read (`auth.me`, `user.get_profile`) — any valid PAT.
-    Identity,
-
-    // ---- repo-targeted domain classes ({owner,name}|repository_id input) ----
-    /// Repo contents/metadata reads. Classic `repo` | `public_repo` (public
-    /// targets only); FG `contents:read` or `metadata` on a covered repo.
-    RepoRead,
-    /// Repo contents writes + create/fork. Classic `repo` | `public_repo`;
-    /// FG `contents:write` on a covered repo.
-    RepoWrite,
-    /// Issues read/write. Classic `repo`|`public_repo`; FG `issues` perm.
-    IssuesRead,
-    IssuesWrite,
-    /// Pull requests read/write. Classic `repo`|`public_repo`; FG
-    /// `pull_requests` perm.
-    PullsRead,
-    PullsWrite,
-    /// Actions run/workflow reads. Classic `repo`|`public_repo`; FG
-    /// `actions:read`.
-    ActionsRead,
-    /// Workflow dispatch/rerun/cancel. Classic `workflow`|`repo`|
-    /// `public_repo`; FG `actions:write`.
-    ActionsWrite,
-    /// Commit statuses. Classic `repo:status`|`repo`|`public_repo`; FG
-    /// `commit_statuses` perm.
-    StatusesRead,
-    StatusesWrite,
-    /// Actions secrets. Classic `repo`; FG `secrets` perm.
-    SecretsRead,
-    SecretsWrite,
-    /// Releases. Classic `repo`|`public_repo`; FG `releases` perm (reads also
-    /// satisfied by `contents:read`).
-    ReleasesRead,
-    ReleasesWrite,
-    /// Repository webhooks. Classic `admin:repo_hook`|`repo`; FG `webhooks`.
-    WebhooksRead,
-    WebhooksWrite,
-    /// Repo administration reads (collaborator/protection/mirror/deploy-key
-    /// listings). Classic `repo`; FG `administration:read`.
-    RepoAdminRead,
-    /// Repo administration writes. Classic `repo`; FG `administration:write`.
-    RepoAdminWrite,
-    /// Repository invitations. Classic `repo:invite`|`repo`; FG
-    /// `administration:write`.
-    RepoInvite,
-    /// `repo.softDelete` — classic `delete_repo` only (`repo` does NOT imply
-    /// delete, GitHub parity); FG `administration:write`.
-    RepoDelete,
-
-    // ---- account-level classes (no repo target) ----
-    /// `notification.list`/`unreadCount`. Classic `notifications`|`repo`
-    /// (legacy umbrella); FG `notifications` account perm.
-    NotificationsRead,
-    /// `notification.markRead`/`markAllRead`.
-    NotificationsWrite,
-    /// `email.list`. Classic `user:email` (implied by `user`); FG `emails`.
-    EmailRead,
-    /// `email.add`/`remove`/`setPrimary`/`resendVerify`. Classic `user`;
-    /// FG `emails:write`.
-    EmailWrite,
-    /// `user.update_profile`. Classic `user`; FG `profile:write`.
-    ProfileWrite,
-    /// `user.follow`/`unfollow`. Classic `user:follow`|`user`; FG `followers`.
-    FollowWrite,
-    /// `user.followers.list`/`user.following.list`. Classic `read:user`+; FG
-    /// `followers` read.
-    FollowRead,
-    /// `user.listStarred`. Classic `repo`|`read:user`; FG `starring` read.
-    StarringRead,
-    /// `user.listWatched`. Classic `repo`|`read:user`; FG `watching` read.
-    WatchingRead,
-    /// `repo.star`/`unstar` — repo-targeted. Classic `repo`|`public_repo`;
-    /// FG `starring:write` (account perm — no coverage needed).
-    StarringWrite,
-    /// `repo.watch`/`unwatch` — repo-targeted. Classic `repo`|`public_repo`;
-    /// FG `watching:write`.
-    WatchingWrite,
-    /// `sshKey.list`. Classic `read:public_key`+implications; FG `ssh_keys`.
-    SshKeyRead,
-    /// `sshKey.add`/`revoke`. Classic `write:public_key`+`admin:public_key`.
-    SshKeyWrite,
-    /// `gpgKey.list` / `gpgKey.add`/`revoke` — `*:gpg_key` scopes.
-    GpgKeyRead,
-    GpgKeyWrite,
-    /// Org profile/membership reads (`org.listMine`, `org.members.list`,
-    /// `org.invites.list`). Classic `read:org`|`write:org`|`repo` (legacy);
-    /// FG tokens are repo-bound — denied.
-    OrgRead,
-    /// Org creation/settings/membership/invite writes. Classic `write:org`
-    /// only; FG denied.
-    OrgWrite,
-
-    /// `packages.list` — `package:read`|`package:write`; FG also requires a
-    /// covered `repository_id` in the input.
-    PackageRead,
-    /// Package writes (reserved — no write procedures exist yet).
-    PackageWrite,
-    /// `packages.deleteVersion` — `package:delete` (held back from
-    /// `package:write`, GitHub parity); FG denied (no repository target).
-    PackageDelete,
-    /// Session-cookie only — never callable with a PAT.
-    SessionOnly,
-}
-
-fn classify(procedure: &str) -> PatProc {
-    use PatProc::*;
-    match procedure {
-        // Public / anonymous-safe.
-        "system.health"
-        | "system.manifest"
-        | "system.echo"
-        | "system.db_probe"
-        | "auth.provider_config"
-        | "auth.bootstrap_status"
-        | "user.getPublicProfile"
-        | "org.get"
-        | "repo.explore"
-        | "invites.get" => Open,
-
-        // Own-identity reads.
-        "auth.me" | "user.get_profile" | "user.lookup" => Identity,
-
-        // Contents/metadata reads (`{owner,name}` repo target where present;
-        // account-scoped reads like repo.listMine have no target — classic
-        // `repo` only, FG denied).
-        "repo.get"
-        | "repo.tree"
-        | "repo.blob"
-        | "repo.refs"
-        | "repo.commits"
-        | "repo.pathLastCommits"
-        | "repo.commitCount"
-        | "repo.contributors.list"
-        | "repo.languages"
-        | "repo.activity.list"
-        | "repo.compare"
-        | "repo.blame"
-        | "repo.search"
-        | "repo.stargazers.list"
-        | "repo.watchers.list"
-        | "repo.forks.list"
-        | "repo.lfs.getEnabled"
-        | "repo.lfs.getStatus"
-        | "repo.lfs.getUsage"
-        | "repo.lfs.listObjects"
-        | "repo.lfs.download"
-        | "repo.templates.getEnabled"
-        | "repo.actions.getEnabled"
-        | "repo.mergeSettings.get"
-        | "repo.quota.get"
-        | "repo.createDefaults"
-        | "repo.topicsSuggest"
-        | "repo.forkStatus"
-        | "repo.file.commitPolicy"
-        | "repo.insights.commitActivity"
-        | "repo.insights.contributors"
-        | "repo.insights.forkNetwork"
-        | "repo.issues.getEnabled"
-        | "repo.pulls.getEnabled"
-        | "repo.templates.list"
-        | "repo.listMine"
-        | "repo.listByOwner"
-        | "search.global" => RepoRead,
-
-        // Contents writes + create/fork (the `repo.file.*` editor ops all
-        // commit through the contents domain).
-        "repo.create"
-        | "repo.fork"
-        | "repo.commit"
-        | "repo.branchCreate"
-        | "repo.branchRename"
-        | "repo.branchDelete"
-        | "repo.syncFork"
-        | "repo.file.create"
-        | "repo.file.delete"
-        | "repo.file.mkdir"
-        | "repo.file.rename"
-        | "repo.file.update"
-        | "repo.file.upload" => RepoWrite,
-
-        "issue.get"
-        | "issue.list"
-        | "issue.history"
-        | "issue.comments.list"
-        | "issue.comments.history"
-        | "issue.links.list"
-        | "issue.assigneeCandidates"
-        | "label.listForRepo" => IssuesRead,
-
-        "issue.create"
-        | "issue.update"
-        | "issue.close"
-        | "issue.reopen"
-        | "issue.comments.create"
-        | "issue.comments.update"
-        | "issue.comments.delete"
-        | "issue.labels.set"
-        | "issue.assignees.set"
-        | "issue.reactions.toggle"
-        | "issue.links.add"
-        | "issue.links.remove"
-        | "label.create"
-        | "label.update"
-        | "label.delete" => IssuesWrite,
-
-        "pull.get"
-        | "pull.list"
-        | "pull.files"
-        | "pull.commits"
-        | "pull.comments.list"
-        | "pull.comments.history"
-        | "pull.reviews.list"
-        | "pull.reviewRequests.list"
-        | "pull.branchStatus" => PullsRead,
-
-        "pull.create"
-        | "pull.update"
-        | "pull.close"
-        | "pull.reopen"
-        | "pull.comments.create"
-        | "pull.comments.update"
-        | "pull.comments.delete"
-        | "pull.comments.resolve"
-        | "pull.reviews.submit"
-        | "pull.reviews.dismiss"
-        | "pull.reviewRequests.add"
-        | "pull.reviewRequests.remove"
-        | "pull.merge"
-        | "pull.updateBranch" => PullsWrite,
-
-        "repo.actions.listRuns"
-        | "repo.actions.getRun"
-        | "repo.actions.getJobLog"
-        | "repo.actions.listWorkflows" => ActionsRead,
-
-        "repo.actions.dispatchWorkflow" | "repo.actions.rerunRun" | "repo.actions.cancelRun" => {
-            ActionsWrite
-        }
-
-        "repo.commitStatus.list" => StatusesRead,
-        "repo.commitStatus.create" => StatusesWrite,
-
-        "repo.actions.secrets.list" => SecretsRead,
-        "repo.actions.secrets.put" | "repo.actions.secrets.delete" => SecretsWrite,
-
-        "release.list" | "release.get" => ReleasesRead,
-        "release.create" | "release.update" | "release.delete" | "release.deleteAsset" => {
-            ReleasesWrite
-        }
-
-        "webhook.list" | "webhook.get" | "webhook.deliveries.list" | "webhook.deliveries.get" => {
-            WebhooksRead
-        }
-        "webhook.create" | "webhook.update" | "webhook.delete" | "webhook.ping"
-        | "webhook.redeliver" => WebhooksWrite,
-
-        "repo.collaborators.list"
-        | "repo.branchProtection.list"
-        | "repo.tagProtection.list"
-        | "repo.mirror.get"
-        | "repo.deployKey.list" => RepoAdminRead,
-
-        "repo.updateMetadata"
-        | "repo.updateVisibility"
-        | "repo.rename"
-        | "repo.transfer"
-        | "repo.setArchived"
-        | "repo.collaborators.add"
-        | "repo.collaborators.update"
-        | "repo.collaborators.remove"
-        | "repo.branchProtection.create"
-        | "repo.branchProtection.update"
-        | "repo.branchProtection.delete"
-        | "repo.tagProtection.create"
-        | "repo.tagProtection.update"
-        | "repo.tagProtection.delete"
-        | "repo.issues.setEnabled"
-        | "repo.pulls.setEnabled"
-        | "repo.mirror.upsert"
-        | "repo.mirror.delete"
-        | "repo.mirror.syncNow"
-        | "repo.mirror.generateSshKey"
-        | "repo.mirror.rotateWebhookSecret"
-        | "repo.mirror.fetchHostKey"
-        | "repo.deployKey.create"
-        | "repo.deployKey.delete"
-        | "repo.actions.setEnabled"
-        | "repo.lfs.setEnabled"
-        | "repo.templates.setEnabled"
-        | "repo.mergeSettings.update"
-        | "repo.quota.set"
-        | "issue.delete" => RepoAdminWrite,
-
-        "repo.invites.list" | "repo.invites.create" | "repo.invites.createLink"
-        | "repo.invites.revoke" => RepoInvite,
-
-        "repo.softDelete" => RepoDelete,
-
-        "repo.star" | "repo.unstar" => StarringWrite,
-        "repo.watch" | "repo.unwatch" => WatchingWrite,
-
-        "notification.list" | "notification.unreadCount" => NotificationsRead,
-        "notification.markRead" | "notification.markAllRead" => NotificationsWrite,
-
-        "email.list" => EmailRead,
-        "email.add" | "email.remove" | "email.setPrimary" | "email.resendVerify" => EmailWrite,
-
-        "user.update_profile" => ProfileWrite,
-        "user.follow" | "user.unfollow" => FollowWrite,
-        "user.followers.list" | "user.following.list" => FollowRead,
-        "user.listStarred" => StarringRead,
-        "user.listWatched" => WatchingRead,
-
-        "sshKey.list" => SshKeyRead,
-        "sshKey.add" | "sshKey.revoke" => SshKeyWrite,
-        "gpgKey.list" => GpgKeyRead,
-        "gpgKey.add" | "gpgKey.revoke" => GpgKeyWrite,
-
-        "label.listForOrg" | "org.listMine" | "org.members.list" | "org.invites.list" => OrgRead,
-        "org.create"
-        | "org.updateSettings"
-        | "org.members.add"
-        | "org.members.remove"
-        | "org.members.updateRole"
-        | "org.invites.create"
-        | "org.invites.createLink"
-        | "org.invites.revoke" => OrgWrite,
-
-        "packages.list" => PackageRead,
-        "packages.deleteVersion" => PackageDelete,
-
-        // Everything else is session-only: auth lifecycle (`auth.login`,
-        // `auth.logout`, verify/reset/bootstrap…), PAT management (`pat.*` —
-        // a token must never mint tokens), `admin.*` and `packages.admin*`,
-        // invite accepts, OAuth app + device-grant procedures. Unknown
-        // procedures fall here too — fail closed.
-        _ => SessionOnly,
-    }
-}
+/// Procedure → scope-class mapping lives in `oxidean_core::proc_classes` —
+/// shared with first-party clients (`ox` coverage audits, `auth status`).
+/// This module keeps only the db/context-dependent half: `repo_target`
+/// resolution, FG `repo_access`/perm evaluation, and the authorize fns.
+use oxidean_core::proc_classes::{
+    classify_pat_proc as classify, classic_scopes_for, fg_family_name, public_repo_covers,
+    required_scope_names, PatProc,
+};
 
 fn pat_scope_err(procedure: &str, message: &str) -> AppError {
     AppError::new("auth.pat_scope", format!("{procedure}: {message}"))
 }
 
-/// Scope implication (GitHub parity): `user` ⊃ `read:user`/`user:email`/
-/// `user:follow`; `write:org` ⊃ `read:org`; `admin:`/`write:` key scopes
-/// imply their `read:` tier; `package:write` ⊃ `package:read`.
+/// Scope implication lives in the shared catalog
+/// (`oxidean_core::classic_scope_satisfies`) — `user` ⊃ `read:user`/
+/// `user:email`/`user:follow`, `write:org` ⊃ `read:org`, key tiers
+/// admin ⊃ write ⊃ read, `package:write` ⊃ `package:read` (GitHub parity).
 fn scope_satisfies(held: ClassicPatScope, required: ClassicPatScope) -> bool {
-    use ClassicPatScope::*;
-    if held == required {
-        return true;
-    }
-    match required {
-        ReadUser | UserEmail | UserFollow => held == User,
-        ReadOrg => held == WriteOrg,
-        ReadPublicKey => matches!(held, WritePublicKey | AdminPublicKey),
-        WritePublicKey => held == AdminPublicKey,
-        ReadGpgKey => matches!(held, WriteGpgKey | AdminGpgKey),
-        WriteGpgKey => held == AdminGpgKey,
-        PackageRead => held == PackageWrite,
-        _ => false,
-    }
+    oxidean_core::classic_scope_satisfies(held, required)
 }
 
 fn has_scope(scopes: &[ClassicPatScope], required: ClassicPatScope) -> bool {
     scopes.iter().any(|s| scope_satisfies(*s, required))
-}
-
-/// Whether `public_repo` (held instead of `repo`) may satisfy `class` —
-/// public-repo collaboration only, never the admin/credential surface.
-fn public_repo_covers(class: PatProc) -> bool {
-    use PatProc::*;
-    matches!(
-        class,
-        RepoRead
-            | RepoWrite
-            | IssuesRead
-            | IssuesWrite
-            | PullsRead
-            | PullsWrite
-            | ActionsRead
-            | ActionsWrite
-            | StatusesRead
-            | StatusesWrite
-            | ReleasesRead
-            | ReleasesWrite
-            | StarringWrite
-            | WatchingWrite
-    )
-}
-
-/// Classic scopes that satisfy `class` when `public_repo` doesn't apply.
-/// Account-level and admin classes are listed here; repo-domain classes get
-/// `repo` plus their narrower alternatives.
-fn classic_scopes_for(class: PatProc) -> &'static [ClassicPatScope] {
-    use ClassicPatScope as S;
-    use PatProc::*;
-    match class {
-        // `repo` umbrella classes (narrower scopes add on below).
-        RepoRead | RepoWrite | IssuesRead | IssuesWrite | PullsRead | PullsWrite | ActionsRead
-        | SecretsRead | SecretsWrite | ReleasesRead | ReleasesWrite | RepoAdminRead
-        | RepoAdminWrite => &[S::Repo],
-        ActionsWrite => &[S::Repo, S::Workflow],
-        StatusesRead | StatusesWrite => &[S::Repo, S::RepoStatus],
-        WebhooksRead | WebhooksWrite => &[S::Repo, S::AdminRepoHook],
-        RepoInvite => &[S::Repo, S::RepoInvite],
-        RepoDelete => &[S::DeleteRepo],
-        StarringRead | WatchingRead | StarringWrite | WatchingWrite => &[S::Repo, S::ReadUser],
-        NotificationsRead | NotificationsWrite => &[S::Repo, S::Notifications],
-        EmailRead => &[S::UserEmail],
-        EmailWrite | ProfileWrite => &[S::User],
-        FollowWrite => &[S::UserFollow],
-        FollowRead => &[S::ReadUser],
-        SshKeyRead => &[S::ReadPublicKey],
-        SshKeyWrite => &[S::WritePublicKey],
-        GpgKeyRead => &[S::ReadGpgKey],
-        GpgKeyWrite => &[S::WriteGpgKey],
-        OrgRead => &[S::ReadOrg, S::Repo],
-        OrgWrite => &[S::WriteOrg],
-        PackageRead => &[S::PackageRead],
-        PackageWrite => &[S::PackageWrite],
-        PackageDelete => &[S::PackageDelete],
-        Open | Identity | SessionOnly => &[],
-    }
 }
 
 /// Classic-token scope check: umbrella `repo` covers the repo domain;
@@ -733,9 +362,12 @@ async fn authorize_classic(
             return Err(not_found());
         }
     }
+    let names = required_scope_names(class).join("\", \"");
     Err(pat_scope_err(
         procedure,
-        "personal access token scope does not allow this procedure",
+        &format!(
+            "insufficient scope — this procedure requires one of: \"{names}\""
+        ),
     ))
 }
 
@@ -899,7 +531,10 @@ async fn authorize_fine_grained(
             Some(level) if level.meets(need) => Ok(()),
             _ => Err(pat_scope_err(
                 procedure,
-                "fine-grained token permission does not allow this procedure",
+                &format!(
+                    "insufficient scope — this procedure requires the \"{}\" permission",
+                    fg_family_name(class).unwrap_or("unknown")
+                ),
             )),
         };
     }
@@ -910,7 +545,10 @@ async fn authorize_fine_grained(
         if !perm_ok {
             return Err(pat_scope_err(
                 procedure,
-                "fine-grained token permission does not allow this procedure",
+                &format!(
+                    "insufficient scope — this procedure requires the \"{}\" permission",
+                    fg_family_name(class).unwrap_or("unknown")
+                ),
             ));
         }
         let write = need == FgPermLevel::Write;
@@ -994,9 +632,12 @@ pub(crate) async fn authorize_pat_on_repo(
                 }
                 return Err(not_found());
             }
+            let names = required_scope_names(class).join("\", \"");
             Err(pat_scope_err(
                 procedure,
-                "personal access token scope does not allow this procedure",
+                &format!(
+                    "insufficient scope — this procedure requires one of: \"{names}\""
+                ),
             ))
         }
         PatKind::FineGrained => {
@@ -1034,7 +675,7 @@ pub async fn authorize_rpc(
         return Ok(());
     };
     match classify(procedure) {
-        PatProc::Open | PatProc::Identity => Ok(()),
+        PatProc::Open | PatProc::Identity | PatProc::PatSelfManage => Ok(()),
         PatProc::SessionOnly => Err(pat_scope_err(
             procedure,
             "procedure requires a session cookie (not callable with a personal access token)",
@@ -1043,117 +684,5 @@ pub async fn authorize_rpc(
             PatKind::Classic => authorize_classic(ctx, pat, class, procedure, input).await,
             PatKind::FineGrained => authorize_fine_grained(ctx, pat, class, procedure, input).await,
         },
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn session_only_classification() {
-        for p in [
-            "admin.users.list",
-            "admin.auth.get_settings",
-            "admin.actions.listRunners",
-            "packages.adminUsage",
-            "packages.adminSetQuota",
-            "auth.login",
-            "auth.logout",
-            "auth.signup",
-            "auth.verify",
-            "pat.list",
-            "pat.createClassic",
-            "invites.accept",
-            "org.invites.accept",
-            "oauthApp.authorize",
-            "oauth.deviceInfo",
-            "oauth.deviceAuthorize",
-            "does.not.exist",
-        ] {
-            assert_eq!(classify(p), PatProc::SessionOnly, "{p}");
-        }
-    }
-
-    #[test]
-    fn open_and_identity_classification() {
-        for p in [
-            "system.health",
-            "system.manifest",
-            "system.echo",
-            "system.db_probe",
-            "auth.provider_config",
-            "auth.bootstrap_status",
-            "user.getPublicProfile",
-            "org.get",
-            "repo.explore",
-            "invites.get",
-        ] {
-            assert_eq!(classify(p), PatProc::Open, "{p}");
-        }
-        assert_eq!(classify("auth.me"), PatProc::Identity);
-        assert_eq!(classify("user.get_profile"), PatProc::Identity);
-        assert_eq!(classify("user.lookup"), PatProc::Identity);
-    }
-
-    #[test]
-    fn repo_domain_classification_samples() {
-        assert_eq!(classify("repo.get"), PatProc::RepoRead);
-        assert_eq!(classify("repo.commit"), PatProc::RepoWrite);
-        assert_eq!(classify("issue.get"), PatProc::IssuesRead);
-        assert_eq!(classify("issue.assigneeCandidates"), PatProc::IssuesRead);
-        assert_eq!(classify("issue.create"), PatProc::IssuesWrite);
-        assert_eq!(classify("issue.delete"), PatProc::RepoAdminWrite);
-        assert_eq!(classify("pull.merge"), PatProc::PullsWrite);
-        assert_eq!(classify("pull.reviews.submit"), PatProc::PullsWrite);
-        assert_eq!(classify("repo.commitStatus.create"), PatProc::StatusesWrite);
-        assert_eq!(classify("repo.listMine"), PatProc::RepoRead);
-        assert_eq!(classify("repo.actions.dispatchWorkflow"), PatProc::ActionsWrite);
-        assert_eq!(classify("repo.actions.getRun"), PatProc::ActionsRead);
-        assert_eq!(classify("repo.actions.secrets.list"), PatProc::SecretsRead);
-        assert_eq!(classify("webhook.create"), PatProc::WebhooksWrite);
-        assert_eq!(classify("webhook.deliveries.list"), PatProc::WebhooksRead);
-        assert_eq!(classify("repo.collaborators.add"), PatProc::RepoAdminWrite);
-        assert_eq!(classify("repo.collaborators.list"), PatProc::RepoAdminRead);
-        assert_eq!(classify("repo.invites.create"), PatProc::RepoInvite);
-        assert_eq!(classify("repo.softDelete"), PatProc::RepoDelete);
-        assert_eq!(classify("repo.star"), PatProc::StarringWrite);
-        assert_eq!(classify("user.listStarred"), PatProc::StarringRead);
-        assert_eq!(classify("notification.list"), PatProc::NotificationsRead);
-        assert_eq!(classify("notification.markRead"), PatProc::NotificationsWrite);
-        assert_eq!(classify("email.list"), PatProc::EmailRead);
-        assert_eq!(classify("email.add"), PatProc::EmailWrite);
-        assert_eq!(classify("user.update_profile"), PatProc::ProfileWrite);
-        assert_eq!(classify("user.follow"), PatProc::FollowWrite);
-        assert_eq!(classify("sshKey.list"), PatProc::SshKeyRead);
-        assert_eq!(classify("sshKey.add"), PatProc::SshKeyWrite);
-        assert_eq!(classify("gpgKey.add"), PatProc::GpgKeyWrite);
-        assert_eq!(classify("org.members.list"), PatProc::OrgRead);
-        assert_eq!(classify("org.create"), PatProc::OrgWrite);
-        assert_eq!(classify("packages.list"), PatProc::PackageRead);
-        assert_eq!(classify("packages.deleteVersion"), PatProc::PackageDelete);
-    }
-
-    #[test]
-    fn classic_scope_implications() {
-        use ClassicPatScope as S;
-        // `user` umbrella implies the read:user/user:email/user:follow family.
-        assert!(scope_satisfies(S::User, S::ReadUser));
-        assert!(scope_satisfies(S::User, S::UserEmail));
-        assert!(scope_satisfies(S::User, S::UserFollow));
-        assert!(!scope_satisfies(S::ReadUser, S::User));
-        // Key tiers: admin ⊃ write ⊃ read.
-        assert!(scope_satisfies(S::AdminPublicKey, S::ReadPublicKey));
-        assert!(scope_satisfies(S::AdminPublicKey, S::WritePublicKey));
-        assert!(scope_satisfies(S::WritePublicKey, S::ReadPublicKey));
-        assert!(!scope_satisfies(S::ReadPublicKey, S::WritePublicKey));
-        assert!(scope_satisfies(S::AdminGpgKey, S::WriteGpgKey));
-        // write:org ⊃ read:org; package:write ⊃ package:read.
-        assert!(scope_satisfies(S::WriteOrg, S::ReadOrg));
-        assert!(scope_satisfies(S::PackageWrite, S::PackageRead));
-        assert!(!scope_satisfies(S::PackageRead, S::PackageWrite));
-        // delete_repo and package:delete are standalone (GH parity).
-        assert!(!scope_satisfies(S::Repo, S::DeleteRepo));
-        assert!(!scope_satisfies(S::PackageWrite, S::PackageDelete));
     }
 }

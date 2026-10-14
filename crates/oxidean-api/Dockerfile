@@ -26,21 +26,27 @@ COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 RUN cargo build --release -p oxidean-api --bin oxidean-api --bin oxidean-protection-hook \
   && cp /app/target/release/oxidean-api /app/target/release/oxidean-protection-hook /usr/local/bin/
-# CLI distribution (D-CLI-DIST): stage a cargo-built host `ox` first (host-only
-# / empty-URL path). When OXIDEAN_CLI_DIST_URL is non-empty, fetch every triple
-# listed in ox-targets.txt — including the host — so staged digests match the
-# feed (CI's image-matrix job sha256sum-checks every target against ox-dist).
-# Default URL is this product's rolling ox-dist release so Cloud / Railway PR
-# envs get darwin/windows without a manual IaC apply. Compose and CI pass an
-# empty build-arg for host-only. Self-hosts that must not pull upstream should
-# set OXIDEAN_CLI_DIST_URL=. When the URL is set, fetch is fail-closed
+# CLI distribution (D-CLI-DIST): stage the cargo-built host `ox` first — the
+# honest default, so a built image always serves the same commit's CLI (PR /
+# preview deployments included). When OXIDEAN_CLI_DIST_URL is non-empty, fetch
+# every triple listed in ox-targets.txt — including the host — so staged
+# digests match the feed (CI's image-matrix job sha256sum-checks every target
+# against ox-dist). The URL is empty by default: staging/production IaC opt in
+# to the rolling ox-dist feed for the full target matrix; self-host builds
+# stay host-only unless they set it. When the URL is set, fetch is fail-closed
 # (retries, then fail the build). Split from cargo build so
 # OXIDEAN_CLI_DIST_BUST can invalidate only the download layer.
-ARG OXIDEAN_CLI_DIST_URL=https://github.com/oxidean/oxidean/releases/download/ox-dist
+# OXIDEAN_SOURCE_COMMIT records provenance for /cli/latest's dist_commit on
+# host-only builds; Railway injects RAILWAY_GIT_COMMIT_SHA automatically.
+ARG OXIDEAN_CLI_DIST_URL=
+ARG OXIDEAN_SOURCE_COMMIT=
+ARG RAILWAY_GIT_COMMIT_SHA=
 RUN cargo build --release -p oxidean-cli --bin ox \
   && mkdir -p /usr/local/share/oxidean-cli \
   && target=$(rustc -vV | awk '/^host:/ {print $2}') \
-  && cp /app/target/release/ox "/usr/local/share/oxidean-cli/ox-$target"
+  && cp /app/target/release/ox "/usr/local/share/oxidean-cli/ox-$target" \
+  && commit="${OXIDEAN_SOURCE_COMMIT:-$RAILWAY_GIT_COMMIT_SHA}" \
+  && if [ -n "$commit" ]; then echo "$commit" > /usr/local/share/oxidean-cli/SOURCE_COMMIT; fi
 # Bump OXIDEAN_CLI_DIST_BUST (e.g. git SHA) to re-fetch ox-dist without
 # re-running cargo build. Staging redeploy sets this before deploy.
 ARG OXIDEAN_CLI_DIST_BUST=

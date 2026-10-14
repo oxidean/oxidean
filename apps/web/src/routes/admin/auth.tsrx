@@ -2,6 +2,7 @@ import { Check, ChevronDown } from "@octanejs/lucide";
 import { queryOptions, useQuery, useQueryClient } from "@octanejs/tanstack-query";
 import { AppPage } from "@/components/app-page";
 import type {
+  AdminPatSettingsPublic,
   AuthSettingsPublic,
   EmailProviderKind,
   ProviderMode,
@@ -572,10 +573,197 @@ export function AdminAuthContent() @{
               }}
             </form.Subscribe>
 
+            <PatPolicySection />
+
             <FactoryResetSection />
           </AdminSettingsLayout>;
         }
       }
+    }
+  }
+}
+
+function patPolicyQueryOptions() {
+  return queryOptions({
+    queryKey: ["admin", "patPolicy"],
+    queryFn: async (): Promise<AdminPatSettingsPublic | null> => {
+      try {
+        const res = await apiClient.admin.pat.getSettings();
+        return res.ok ? res.data : null;
+      } catch {
+        return null;
+      }
+    },
+    retry: false,
+    staleTime: 30_000,
+  });
+}
+
+/** "from environment" badge for a non-overridden policy field. */
+function EnvSourceBadge({ overridden }: { overridden: boolean }) @{
+  @if (!overridden) {
+    <span className="text-[13px] text-muted-foreground">(from environment)</span>;
+  }
+}
+
+/**
+ * PAT expiration policy — `admin.pat.*` overrides layered over the
+ * `OXIDEAN_PAT_*` env defaults. Fields left unset keep their stored override.
+ */
+function PatPolicySection() @{
+  const queryClient = useQueryClient();
+  const policyQ = useQuery(patPolicyQueryOptions());
+  const policy = policyQ.data;
+  const [defaultTtl, setDefaultTtl] = useState("");
+  const [maxTtl, setMaxTtl] = useState("");
+  const [allowNever, setAllowNever] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState("");
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    if (loaded || !policy) return;
+    setDefaultTtl(String(policy.default_ttl_days));
+    setMaxTtl(String(policy.max_ttl_days));
+    setAllowNever(policy.allow_never_expire === true);
+    setLoaded(true);
+  }, [policy, loaded]);
+
+  function applySettings(next: AdminPatSettingsPublic) {
+    setDefaultTtl(String(next.default_ttl_days));
+    setMaxTtl(String(next.max_ttl_days));
+    setAllowNever(next.allow_never_expire === true);
+    queryClient.setQueryData(["admin", "patPolicy"], next);
+  }
+
+  async function save() {
+    setError("");
+    setPending(true);
+    try {
+      const res = await apiClient.admin.pat.updateSettings({
+        default_ttl_days: Number(defaultTtl) || undefined,
+        max_ttl_days: Number(maxTtl) || undefined,
+        allow_never_expire: allowNever,
+      });
+      if (!res.ok) {
+        setError(res.error.message || "Could not save the token policy.");
+        setPending(false);
+        return;
+      }
+      applySettings(res.data);
+      toastSuccess("Token policy saved.");
+      setPending(false);
+    } catch {
+      setError(NETWORK_ERROR);
+      setPending(false);
+    }
+  }
+
+  async function resetToEnv() {
+    setError("");
+    setPending(true);
+    try {
+      const res = await apiClient.admin.pat.updateSettings({ clear_overrides: true });
+      if (!res.ok) {
+        setError(res.error.message || "Could not reset the token policy.");
+        setPending(false);
+        return;
+      }
+      applySettings(res.data);
+      toastSuccess("Token policy reset to environment defaults.");
+      setPending(false);
+    } catch {
+      setError(NETWORK_ERROR);
+      setPending(false);
+    }
+  }
+
+  @if (policyQ.isPending) {
+    <></>;
+  } @else {
+    @if (!policy) {
+      <></>;
+    } @else {
+      <div className="mt-12 flex flex-col gap-4 rounded-md border border-border p-4">
+        <h2 className="font-[family-name:var(--font-display)] text-[18px] font-semibold text-foreground">
+          Personal access token policy
+        </h2>
+        <p className="text-[14px] leading-[1.4] text-muted-foreground">
+          Expiration rules for new tokens — the token form, CLI sign-in, and OAuth device flow all
+          follow these. Unset fields fall back to OXIDEAN_PAT_* environment values.
+        </p>
+
+        <div className="grid max-w-lg grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="pat-default-ttl">Default lifetime (days)</Label>
+            <Input
+              id="pat-default-ttl"
+              value={defaultTtl}
+              onInput={(e) => setDefaultTtl((e.currentTarget as HTMLInputElement).value)}
+              autoComplete="off"
+              inputMode="numeric"
+              disabled={pending}
+              data-testid="pat-default-ttl"
+            />
+            <EnvSourceBadge overridden={policy.default_ttl_days_overridden === true} />
+          </div>
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="pat-max-ttl">Maximum lifetime (days)</Label>
+            <Input
+              id="pat-max-ttl"
+              value={maxTtl}
+              onInput={(e) => setMaxTtl((e.currentTarget as HTMLInputElement).value)}
+              autoComplete="off"
+              inputMode="numeric"
+              disabled={pending}
+              data-testid="pat-max-ttl"
+            />
+            <EnvSourceBadge overridden={policy.max_ttl_days_overridden === true} />
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <div className="flex min-h-11 items-center gap-2">
+            <Switch
+              id="pat-allow-never"
+              checked={allowNever}
+              disabled={pending}
+              onCheckedChange={(checked) => setAllowNever(checked === true)}
+              data-testid="pat-allow-never"
+            />
+            <Label htmlFor="pat-allow-never">Allow tokens that never expire</Label>
+          </div>
+          <EnvSourceBadge overridden={policy.allow_never_expire_overridden === true} />
+        </div>
+
+        @if (error) {
+          <p role="alert" className="text-[14px] text-destructive">
+            {error as string}
+          </p>;
+        }
+
+        <div className="flex flex-wrap gap-3">
+          <Button
+            type="button"
+            disabled={pending}
+            className="w-full sm:w-auto"
+            onClick={() => void save()}
+            data-testid="pat-policy-save"
+          >
+            {(pending ? "Working…" : "Save token policy") as string}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={pending}
+            className="w-full sm:w-auto"
+            onClick={() => void resetToEnv()}
+            data-testid="pat-policy-reset"
+          >
+            Reset to environment defaults
+          </Button>
+        </div>
+      </div>;
     }
   }
 }

@@ -26,7 +26,7 @@ use oxidean_core::RpcResponse;
 
 use crate::args::Global;
 use crate::commands::{resolve_instance, CliError, Out, Runtime};
-use crate::config::{self, InstanceEntry};
+use crate::config::{self};
 use crate::harness::{self, Detect, Dirs, HarnessRow, Scope};
 use crate::rpc::Client;
 
@@ -37,9 +37,10 @@ const SERVER_NAME: &str = "oxidean";
 /// `config.toml` never carries the literal token.
 const CODEX_TOKEN_ENV: &str = "OXIDEAN_TOKEN";
 
-/// Scopes the `--web` device grant asks for — repo domain + registries, the
-/// same set `ox auth login` requests (the MCP tools span both).
-const DEVICE_SCOPES: &str = "repo package:read package:write";
+/// Scopes the `--web` device grant asks for — the shared first-party set
+/// (`oxidean_core::FIRST_PARTY_SCOPES`), the same set `ox auth login`
+/// requests. MCP tools span the repo/issue/pull/actions/packages surface.
+const DEVICE_SCOPES: &str = oxidean_core::FIRST_PARTY_SCOPES;
 
 /// How the `oxidean` server entry is serialized into a config file.
 enum Format {
@@ -622,9 +623,7 @@ async fn device_grant_login(rt: &Runtime, instance: &str) -> Result<String, CliE
     let mut cfg = rt.config.clone();
     cfg.instances.insert(
         instance.to_string(),
-        InstanceEntry {
-            token: Some(token.clone()),
-        },
+        crate::keystore::persist(instance, &token),
     );
     cfg.default_instance = Some(instance.to_string());
     config::save(&rt.config_path, &cfg).map_err(CliError::Config)?;

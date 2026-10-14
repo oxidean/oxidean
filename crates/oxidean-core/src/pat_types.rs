@@ -427,6 +427,65 @@ pub struct CreatePatResponse {
     pub item: PatListItem,
 }
 
+/// `pat.self` — introspection of the bearer PAT making the call. Lets `ox`
+/// show token metadata (expiry, scopes, origin) without a session cookie.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PatSelfInfo {
+    /// `personal_access_tokens.id` of the presented token.
+    pub id: String,
+    pub name: String,
+    /// Display fingerprint (`oxidean_pat_xxxxxxxx` prefix — never the secret).
+    pub token_prefix: String,
+    /// `classic` | `fine_grained`.
+    pub kind: String,
+    /// Classic scope names carried by the token (empty for fine-grained).
+    pub scopes: Vec<String>,
+    /// RFC3339 expiry, `null` for non-expiring tokens.
+    pub expires_at: Option<String>,
+    pub last_used_at: Option<String>,
+    pub created_at: String,
+}
+
+/// `pat.policy` — the instance's effective PAT expiration policy. Public data
+/// (defaults + bounds), safe to expose to any authenticated caller so token
+/// forms and `ox` can render/validate expiry choices.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct PatPolicyPublic {
+    /// Lifetime applied when a create request omits `expires_at` (days).
+    pub default_ttl_days: u32,
+    /// Upper bound for an explicit `expires_at` (days from creation).
+    pub max_ttl_days: u32,
+    /// Whether `"never"` is an accepted `expires_at` value on this instance.
+    pub allow_never_expire: bool,
+}
+
+/// `admin.pat.getSettings` — effective values plus per-field override flags
+/// (same env-default/override split as `admin.lfs.*` / `admin.mcp.*`).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct AdminPatSettingsPublic {
+    pub default_ttl_days: u32,
+    pub default_ttl_days_overridden: bool,
+    pub max_ttl_days: u32,
+    pub max_ttl_days_overridden: bool,
+    pub allow_never_expire: bool,
+    pub allow_never_expire_overridden: bool,
+}
+
+/// `admin.pat.updateSettings` — omitted fields keep the stored override;
+/// `clear_overrides` reverts all three to the env defaults.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct AdminPatUpdateSettingsRequest {
+    #[serde(default)]
+    pub default_ttl_days: Option<u32>,
+    #[serde(default)]
+    pub max_ttl_days: Option<u32>,
+    #[serde(default)]
+    pub allow_never_expire: Option<bool>,
+    /// When true, clear all stored overrides so env defaults apply again.
+    #[serde(default)]
+    pub clear_overrides: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

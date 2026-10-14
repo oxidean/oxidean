@@ -65,6 +65,7 @@ const FORGE_BRANCHES = "apps/web/e2e/stack-browser/forge-branches.stack.browser.
 const CHROME_MENUS = "apps/web/e2e/stack-browser/chrome-menus.stack.browser.test.tsx";
 const PAT_STACK = "apps/web/e2e/stack-browser/pat-mint.stack.browser.test.tsx";
 const SETTINGS_AVATAR = "apps/web/e2e/stack-browser/settings-profile-avatar.stack.browser.test.tsx";
+const OAUTH_SCOPES_BROWSER = "apps/web/src/routes/oauth-consent.browser.test.tsx";
 
 export const browserCoverageManifest: BrowserCoverageEntry[] = [
   // --- primitives ---
@@ -426,5 +427,13 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
   {
     surface: "routes/settings/tokens.index.tsrx",
     coverage: [{ kind: "stack-browser", test: SETTINGS_AVATAR, subject: "tokens" }],
+  },
+  {
+    surface: "routes/oauth.consent.tsrx",
+    coverage: [{ kind: "browser", test: OAUTH_SCOPES_BROWSER, subject: "oauth-consent-approve" }],
+  },
+  {
+    surface: "routes/oauth.device.tsrx",
+    coverage: [{ kind: "browser", test: OAUTH_SCOPES_BROWSER, subject: "oauth-device-approve" }],
   },
 ];

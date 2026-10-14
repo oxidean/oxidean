@@ -125,6 +125,9 @@ export OXIDEAN_LFS_DIR="$ROOT/var/e2e/lfs"
 export OXIDEAN_RELEASE_ASSETS_DIR="$ROOT/var/e2e/release-assets"
 export OXIDEAN_PACKAGES_DIR="$ROOT/var/e2e/packages"
 export OXIDEAN_TEMPLATE_PACKS_DIR="$ROOT/var/e2e/template-packs"
+# PAT expiry UI coverage: the "No expiration" option is policy-gated off by
+# default — enable it here so the none-warning panel stays exercisable.
+export OXIDEAN_PAT_ALLOW_NO_EXPIRY=true
 # Bootstrap runner registration so the bundled oxidean-runner can self-register.
 export OXIDEAN_RUNNER_REGISTRATION_TOKEN="e2e-runner-registration-token"
 export RUST_LOG="${RUST_LOG:-info,oxidean=debug}"

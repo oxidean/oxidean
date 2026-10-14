@@ -91,6 +91,12 @@ openapi-sync-check:
 rpc-sync-check:
 	@./scripts/check-rpc-sync.sh
 
+cli-parity-check:
+	@./scripts/check-cli-parity.sh
+
+skill-sync-check:
+	@./scripts/check-skill-sync.sh
+
 makefile-lint:
 	@./scripts/check-makefile.sh
 

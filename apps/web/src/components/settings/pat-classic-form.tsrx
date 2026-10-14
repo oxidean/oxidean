@@ -6,31 +6,39 @@ import { Label } from "@/components/ui/label";
 import { ClassicScopeGroups } from "@/components/settings/pat-classic-scopes";
 import { PatExpiryFields } from "@/components/settings/pat-expiry-field";
 import {
+  defaultPresetForPolicy,
+  expiryOptionsForPolicy,
+  maxCustomDate,
   resolveExpiresAt,
   tomorrowDateValue,
   type PatExpiryPreset,
 } from "@/components/settings/pat-expiry";
 import { selectedScopes, type ClassicScopeValues } from "@/components/settings/pat-scopes";
 import { apiClient } from "@/lib/api-client";
+import type { PatPolicyPublic } from "@oxidean/api-client";
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
 
 type PatClassicFormProps = {
   onCreated: (token: string) => void;
+  /** Effective `pat.policy` — `null` before load keeps permissive defaults. */
+  policy: PatPolicyPublic | null;
 };
 
 /** Classic PAT create form — per-field Fields; no `@if` inside Subscribe trees. */
-export function PatClassicForm({ onCreated }: PatClassicFormProps) @{
+export function PatClassicForm({ onCreated, policy }: PatClassicFormProps) @{
   const [noteError, setNoteError] = useState("");
   const [scopeError, setScopeError] = useState("");
   const [formError, setFormError] = useState("");
   const [pending, setPending] = useState(false);
+  const expiryOptions = expiryOptionsForPolicy(policy);
+  const expiryMaxDate = maxCustomDate(policy);
 
   const form = useForm({
     defaultValues: {
       note: "",
       scopes: { repo: true } as ClassicScopeValues,
-      expiryPreset: "30" as PatExpiryPreset,
+      expiryPreset: defaultPresetForPolicy(policy) as PatExpiryPreset,
       expiryDate: tomorrowDateValue(),
     },
     onSubmit: async ({ value }) => {
@@ -57,6 +65,8 @@ export function PatClassicForm({ onCreated }: PatClassicFormProps) @{
         if (!res.ok) {
           if (res.error.code === "auth.email_unverified") {
             setFormError("Verify your email before creating a personal access token.");
+          } else if (res.error.code === "pat.expiry_forbidden") {
+            setFormError(res.error.message || "This instance requires tokens to expire.");
           } else if (res.error.code === "pat.note_required") {
             setNoteError("Note is required.");
           } else {
@@ -130,7 +140,12 @@ export function PatClassicForm({ onCreated }: PatClassicFormProps) @{
       {(scopeError || "") as string}
     </p>
 
-    <PatExpiryFields form={form} disabled={pending} />
+    <PatExpiryFields
+      form={form}
+      options={expiryOptions}
+      maxDate={expiryMaxDate}
+      disabled={pending}
+    />
 
     <form.Subscribe
       selector={(s) => ({

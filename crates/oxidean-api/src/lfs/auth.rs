@@ -29,11 +29,16 @@ fn lfs_json_headers() -> [(header::HeaderName, HeaderValue); 1] {
 }
 
 pub fn unauthorized_lfs() -> Response {
+    unauthorized_lfs_reason("Credentials needed to access LFS")
+}
+
+/// 401 with a reason-specific LFS error body (revoked/expired/banned).
+fn unauthorized_lfs_reason(message: &str) -> Response {
     let mut res = (
         StatusCode::UNAUTHORIZED,
         lfs_json_headers(),
         Json(LfsErrorBody {
-            message: "Credentials needed to access LFS".into(),
+            message: message.into(),
             request_id: None,
         }),
     )
@@ -156,16 +161,28 @@ pub async fn authenticate_pat(
         return Err(unauthorized_lfs());
     }
     let token_hash = sha256_hex(password.as_bytes());
-    let pat = match state.db.find_pat_by_token_hash(&token_hash).await {
-        Ok(Some(p)) if p.revoked_at.is_none() => p,
-        Ok(_) => return Err(unauthorized_lfs()),
+    let pat = match state
+        .db
+        .find_pat_by_token_hash_including_revoked(&token_hash)
+        .await
+    {
+        Ok(Some(p)) => p,
+        Ok(None) => return Err(unauthorized_lfs()),
         Err(e) => {
             tracing::error!(error = %e, "find_pat_by_token_hash");
             return Err(StatusCode::INTERNAL_SERVER_ERROR.into_response());
         }
     };
+    // Distinct messages so `git lfs` stderr tells users *why* auth failed.
+    if pat.revoked_at.is_some() {
+        return Err(unauthorized_lfs_reason(
+            "personal access token has been revoked — create a new one in Settings → Personal access tokens",
+        ));
+    }
     if pat_expired(&pat.expires_at) {
-        return Err(unauthorized_lfs());
+        return Err(unauthorized_lfs_reason(
+            "personal access token has expired — run `ox auth refresh` or `ox auth login` again",
+        ));
     }
     let owner = match state.db.find_user_by_id(&pat.user_id).await {
         Ok(Some(u)) => u,
@@ -176,7 +193,7 @@ pub async fn authenticate_pat(
         }
     };
     if owner.banned_at.is_some() {
-        return Err(unauthorized_lfs());
+        return Err(unauthorized_lfs_reason("this account has been suspended"));
     }
     let user_ok = USERNAME_ALIASES
         .iter()

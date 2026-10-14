@@ -28,9 +28,12 @@ const API_PREFIXES: &[&str] = &[
     "/oauth/token",
     "/oauth/userinfo",
     "/oauth/device/code",
-    // RFC 8414/9728 discovery docs (narrow prefix — `/.well-known/acme-*` stays
-    // on the web tier for TLS challenges).
-    "/.well-known/oauth",
+    // RFC 8414/9728 discovery docs. Named literally rather than as a
+    // `/.well-known/oauth` prefix: the boundary check below is segment-aware,
+    // so that prefix would not match `oauth-protected-resource` (`-` is not
+    // `/`). `/.well-known/acme-*` stays on the web tier for TLS challenges.
+    "/.well-known/oauth-authorization-server",
+    "/.well-known/oauth-protected-resource",
 ];
 
 /// Hop-by-hop headers never cross a proxy hop. `connection`/`upgrade` are
@@ -255,6 +258,15 @@ mod tests {
         // match must not let `/oauth/device/code` swallow it.
         assert!(!is_api_prefix("/oauth/device"));
         assert!(!is_api_prefix("/oauth/device/"));
+        // RFC 8414/9728 discovery endpoints proxy to the API; ACME stays here.
+        assert!(is_api_prefix("/.well-known/oauth-authorization-server"));
+        assert!(is_api_prefix("/.well-known/oauth-protected-resource"));
+        // …including path-suffixed protected-resource variants (RFC 9728 §3.1).
+        assert!(is_api_prefix(
+            "/.well-known/oauth-protected-resource/api/mcp"
+        ));
+        assert!(!is_api_prefix("/.well-known/acme-challenge/tok"));
+        assert!(!is_api_prefix("/.well-known/oauthx"));
         assert!(!is_api_prefix("/apiary"));
         assert!(!is_api_prefix("/jesse/app"));
     }

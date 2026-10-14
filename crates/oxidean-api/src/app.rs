@@ -639,10 +639,16 @@ fn rpc_status(resp: &RpcResponse) -> StatusCode {
         RpcResponse::Err { error, .. } if error.code == "rpc.unknown_procedure" => {
             StatusCode::NOT_FOUND
         }
-        RpcResponse::Err { error, .. } if error.code == "auth.unauthenticated" => {
+        RpcResponse::Err { error, .. }
+            if matches!(
+                error.code.as_str(),
+                "auth.unauthenticated" | "auth.token_expired" | "auth.token_revoked"
+            ) =>
+        {
             StatusCode::UNAUTHORIZED
         }
         RpcResponse::Err { error, .. } if error.code == "admin.forbidden" => StatusCode::FORBIDDEN,
+        RpcResponse::Err { error, .. } if error.code == "auth.banned" => StatusCode::FORBIDDEN,
         RpcResponse::Err { error, .. } if error.code == "auth.email_unverified" => {
             StatusCode::FORBIDDEN
         }

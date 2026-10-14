@@ -2,7 +2,7 @@
 //! this and prints the raw `{ok, data|error}` envelope instead, so renderers
 //! only ever see success payloads.
 
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 /// Field access helpers — payloads are dynamic (`serde_json::Value`) because
 /// the CLI doesn't mirror the generated DTO types.
@@ -127,6 +127,57 @@ pub fn repo_view(data: &Value) -> String {
     out.join("\n")
 }
 
+/// `repo.createDefaults` — template catalog grouped by `group`, then the
+/// gitignore catalog and the instance default visibility. Stack ids are the
+/// refs `--template` accepts.
+pub fn repo_templates(data: &Value) -> String {
+    let mut out: Vec<String> = Vec::new();
+    let stacks = arr(data, "stacks");
+    if stacks.is_empty() {
+        out.push("No templates on this instance.".into());
+    } else {
+        let mut groups: Vec<(String, Vec<&Value>)> = Vec::new();
+        for t in stacks {
+            let g = s(t, "group").unwrap_or("Other").to_string();
+            match groups.iter_mut().find(|(name, _)| *name == g) {
+                Some((_, items)) => items.push(t),
+                None => groups.push((g, vec![t])),
+            }
+        }
+        out.push("Templates:".into());
+        for (g, items) in groups {
+            out.push(format!("  {g}"));
+            for t in items {
+                let ref_ = s(t, "source_label").or_else(|| s(t, "id")).unwrap_or("?");
+                let prov = s(t, "provenance").unwrap_or("builtin");
+                let desc = s(t, "description").unwrap_or_default();
+                let label = s(t, "label").unwrap_or_default();
+                let title = if label.is_empty() || label == ref_ {
+                    ref_.to_string()
+                } else {
+                    format!("{ref_} — {label}")
+                };
+                out.push(join_nonempty(vec![
+                    format!("    {title}"),
+                    format!("[{prov}]"),
+                    desc.to_string(),
+                ]));
+            }
+        }
+    }
+    let gitignores = arr(data, "gitignores")
+        .iter()
+        .filter_map(|g| s(g, "id"))
+        .collect::<Vec<_>>();
+    if !gitignores.is_empty() {
+        out.push(format!("Gitignores: {}", gitignores.join(", ")));
+    }
+    if let Some(v) = s(data, "default_visibility") {
+        out.push(format!("Default visibility: {v}"));
+    }
+    out.join("\n")
+}
+
 /// Shared row for `issue.list` / `pull.list` items (numbers + titles).
 fn numbered_row(item: &Value) -> String {
     join_nonempty(vec![
@@ -164,7 +215,7 @@ pub fn issue_view(data: &Value) -> String {
     out.push(meta.join(" · "));
     if let Some(body) = s(data, "body").filter(|x| !x.is_empty()) {
         out.push(String::new());
-        out.push(body.to_string());
+        out.push(crate::markdown::render(body));
     }
     out.join("\n")
 }
@@ -216,7 +267,7 @@ pub fn pull_view(data: &Value) -> String {
     }
     if let Some(body) = s(data, "body").filter(|x| !x.is_empty()) {
         out.push(String::new());
-        out.push(body.to_string());
+        out.push(crate::markdown::render(body));
     }
     out.join("\n")
 }
@@ -512,7 +563,10 @@ pub fn mirror(data: &Value) -> String {
 
 /// `repo.mergeSettings.get`/`update` — allowed merge strategies.
 pub fn merge_settings(data: &Value) -> String {
-    let m = data.get("settings").cloned().unwrap_or_else(|| data.clone());
+    let m = data
+        .get("settings")
+        .cloned()
+        .unwrap_or_else(|| data.clone());
     let mut on = Vec::new();
     for (k, label) in [
         ("allow_merge_commit", "merge"),
@@ -695,7 +749,7 @@ pub fn release_view(data: &Value) -> String {
     }
     if let Some(body) = s(data, "body").filter(|b| !b.is_empty()) {
         out.push(String::new());
-        out.push(body.to_string());
+        out.push(crate::markdown::render(body));
     }
     out.join("\n")
 }
@@ -865,35 +919,16 @@ pub fn email_list(data: &Value) -> String {
             join_nonempty(vec![
                 s(e, "email").unwrap_or_default().to_string(),
                 if b(e, "primary") { "primary" } else { "" }.to_string(),
-                if b(e, "verified") { "verified" } else { "unverified" }.to_string(),
+                if b(e, "verified") {
+                    "verified"
+                } else {
+                    "unverified"
+                }
+                .to_string(),
             ])
         })
         .collect::<Vec<_>>()
         .join("\n")
-}
-
-/// `pat.list` — `data.pats[]` (never prints token material).
-pub fn pat_list(data: &Value) -> String {
-    arr(data, "pats")
-        .iter()
-        .map(|p| {
-            join_nonempty(vec![
-                s(p, "id").unwrap_or_default().to_string(),
-                s(p, "name").unwrap_or_default().to_string(),
-                s(p, "kind").unwrap_or_default().to_string(),
-                s(p, "expires_at").unwrap_or_default().to_string(),
-            ])
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-/// `pat.create*` — the minted token prints once, clearly marked.
-pub fn pat_created(data: &Value) -> String {
-    if let Some(t) = s(data, "token") {
-        return format!("{t}\n(stored nowhere — save it now)");
-    }
-    generic(data)
 }
 
 /// `label.list*` — `data.labels[]`.
@@ -948,104 +983,6 @@ pub fn delivery_list(data: &Value) -> String {
                     .or_else(|| s(d, "created_at"))
                     .unwrap_or_default()
                     .to_string(),
-            ])
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-/// `admin.users.list` — `data.users[]`.
-pub fn admin_users(data: &Value) -> String {
-    arr(data, "users")
-        .iter()
-        .map(|u| {
-            join_nonempty(vec![
-                s(u, "id").unwrap_or_default().to_string(),
-                s(u, "username").unwrap_or_default().to_string(),
-                s(u, "email").unwrap_or_default().to_string(),
-                s(u, "role").unwrap_or_default().to_string(),
-                if b(u, "banned") { "banned" } else { "" }.to_string(),
-            ])
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-/// `admin.users.listSessions` — `data.sessions[]`.
-pub fn admin_sessions(data: &Value) -> String {
-    arr(data, "sessions")
-        .iter()
-        .map(|sess| {
-            join_nonempty(vec![
-                s(sess, "id").unwrap_or_default().to_string(),
-                s(sess, "created_at").unwrap_or_default().to_string(),
-                s(sess, "ip").unwrap_or_default().to_string(),
-                s(sess, "user_agent").unwrap_or_default().to_string(),
-            ])
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-/// `admin.users.getAccess` — `data.repos[]` / `data.orgs[]`.
-pub fn admin_access(data: &Value) -> String {
-    let mut out = Vec::new();
-    for r in arr(data, "repos") {
-        out.push(join_nonempty(vec![
-            s(r, "full_name")
-                .or_else(|| s(r, "name"))
-                .unwrap_or_default()
-                .to_string(),
-            s(r, "permission").unwrap_or_default().to_string(),
-        ]));
-    }
-    for o in arr(data, "orgs") {
-        out.push(join_nonempty(vec![
-            format!("org:{}", s(o, "slug").unwrap_or("?")),
-            s(o, "role").unwrap_or_default().to_string(),
-        ]));
-    }
-    if out.is_empty() {
-        return generic(data);
-    }
-    out.join("\n")
-}
-
-/// `admin.users.getActivity` — `data.events[]`.
-pub fn admin_activity(data: &Value) -> String {
-    arr(data, "events")
-        .iter()
-        .map(|e| {
-            join_nonempty(vec![
-                s(e, "created_at").unwrap_or_default().to_string(),
-                s(e, "event_type")
-                    .or_else(|| s(e, "action"))
-                    .unwrap_or_default()
-                    .to_string(),
-                s(e, "summary")
-                    .or_else(|| s(e, "detail"))
-                    .unwrap_or_default()
-                    .to_string(),
-            ])
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-/// `admin.actions.listRunners` — `data.runners[]`.
-pub fn runner_list(data: &Value) -> String {
-    arr(data, "runners")
-        .iter()
-        .map(|r| {
-            join_nonempty(vec![
-                s(r, "id").unwrap_or_default().to_string(),
-                s(r, "name").unwrap_or_default().to_string(),
-                s(r, "status").unwrap_or_default().to_string(),
-                arr(r, "labels")
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .collect::<Vec<_>>()
-                    .join(","),
             ])
         })
         .collect::<Vec<_>>()

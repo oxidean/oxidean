@@ -53,11 +53,6 @@ PEOPLE & ORGS
 ACCOUNT
   ox ssh-key|gpg-key list|add|delete
   ox email list|add|remove|set-primary|resend
-  ox pat list|create|revoke
-  ox invite accept --token <t>
-
-INSTANCE ADMIN
-  ox admin users …|invites …|runners|lfs|git|mcp|auth|templates
 
 MAINTENANCE
   ox self-update     replace this binary with the build the instance serves
@@ -71,6 +66,7 @@ ESCAPE HATCH
 GLOBAL FLAGS
   --instance <url>   instance base URL (else $OXIDEAN_INSTANCE, else login default)
   --json             print the raw {ok, data|error} RPC envelope
+  --jq <filter>      run a jq expression over the envelope's data field
   -R, --repo <o/n>   repository in owner/name form (alternative to positional)
   -h, --help         help for `ox` or the command it's attached to
   --version          show version
@@ -80,6 +76,9 @@ ENVIRONMENT
   OXIDEAN_TOKEN       token override for any command
   OXIDEAN_CONFIG_DIR  config directory override (default: ~/.config/ox,
                       %APPDATA%\\ox on Windows)
+  OXIDEAN_PAGER       pager for long output (else $PAGER, else `less -FRX`)
+  OXIDEAN_FORCE_TTY   force interactive output (color, pager, prompts)
+  NO_COLOR            disable color; CLICOLOR_FORCE forces it when piped
 
 EXIT CODES
   0 ok · 1 api error · 2 usage · 3 auth";
@@ -96,20 +95,24 @@ pub fn help_topic(group: &str, sub: &str) -> Option<&'static str> {
 
 /// `(command-path, help text)`. Every leaf lists its own flags.
 const HELP: &[(&str, &str)] = &[
-    ("auth", "ox auth — sign-in state\n\n  ox auth login --instance <url> [--web | --token <pat> | --token-stdin]\n  ox auth status      show who you're logged in as\n  ox auth switch      change the default instance (picker, or pass the URL)\n  ox auth logout      remove the stored token for the instance\n  ox auth token       print the resolved token (for scripts)"),
+    ("auth", "ox auth — sign-in state\n\n  ox auth login --instance <url> [--web [--scopes <list>] | --token <pat> | --token-stdin]\n  ox auth status      show who you're logged in as + token scopes/expiry\n  ox auth refresh     mint a fresh CLI token (device grant), self-revoke the old one\n  ox auth revoke      revoke the current token on the server and log out\n  ox auth switch      change the default instance (picker, or pass the URL)\n  ox auth setup-git   register ox as a git credential helper\n  ox auth logout      remove the stored token for the instance\n  ox auth token       print the resolved token (for scripts)"),
     ("auth switch", "ox auth switch [<instance-url>]\n\nChanges the default instance used when neither --instance nor\nOXIDEAN_INSTANCE is set. With no argument, lists logged-in instances and\nprompts for one (TTY only)."),
-    ("auth login", "ox auth login --instance <url> [--web | --token <pat> | --token-stdin]\n\n--web runs the RFC 8628 device flow: prints a one-time code, opens the\ninstance's /oauth/device page, and polls until you approve or deny.\nWith no token flag and no --web, a piped stdin is used as the token; on\na TTY the command fails instead of hanging. Stores the token under the\ninstance in ~/.config/ox/config.json and makes it the default."),
-    ("auth status", "ox auth status\n\nCalls auth.me on the resolved instance and prints the login."),
+    ("auth login", "ox auth login --instance <url> [--web [--scopes <list>] | --token <pat> | --token-stdin]\n\n--web runs the RFC 8628 device flow: prints a one-time code, opens the\ninstance's /oauth/device page, and polls until you approve or deny.\n--scopes <list> (comma or space separated) picks the scopes the minted\ntoken carries; the default covers the full CLI surface. With no token\nflag and no --web, a piped stdin is used as the token; on a TTY an\ninteractive picker offers browser or token sign-in. The token lives in\nthe OS keyring when one is available (config.json fallback), and the\ninstance becomes the default."),
+    ("auth status", "ox auth status\n\nCalls auth.me on the resolved instance and prints the login; when the\ncredential is a PAT it also shows the token's name, scopes, expiry,\nand where it's stored (keyring or config file)."),
+    ("auth refresh", "ox auth refresh [--scopes <list>] [--keep-scopes]\n\nMints a fresh CLI token through the browser device grant and self-\nrevokes the old one. With no flags the new token gets the full\nfirst-party scope set; --keep-scopes carries the current token's\nscopes forward (--reset-scopes is accepted as a no-op alias for the\ndefault). Only refreshes stored logins — a token supplied via\nOXIDEAN_TOKEN is env-owned and cannot be refreshed here."),
+    ("auth revoke", "ox auth revoke\n\nRevokes the current PAT on the server (self-revoke) and removes the\nlocal credential. Equivalent to deleting the token at\n{instance}/settings/tokens for the token you're logged in with."),
+    ("auth setup-git", "ox auth setup-git\n\nRegisters `ox` as the git credential helper for the resolved instance\nhost: git config credential.https://<host>.helper '!ox auth\ngit-credential'. After this, `git clone`/`fetch`/`push` over HTTPS\nauthenticate with your stored ox token."),
     ("auth logout", "ox auth logout\n\nDrops the stored token for the resolved instance (config file edit —\nno network call)."),
     ("auth token", "ox auth token\n\nPrints the token that would be sent (OXIDEAN_TOKEN wins over the\nstored credential). For scripts: TOKEN=$(ox auth token)."),
     ("config", "ox config — local config file\n\n  list|get|set\n\nKeys: default_instance · instances.<url>.token\nStored tokens are never printed — they report as set/unset."),
     ("config get", "ox config get <key>\n\n  default_instance            prints the configured default instance URL\n  instances.<url>.token       prints 'set' or 'unset' (never the secret)"),
     ("config set", "ox config set <key> <value>\n\n  default_instance <url>      must name a logged-in instance\n  instances.<url>.token <t>   stores the token (600 config file)"),
     ("completion", "ox completion <bash|zsh|fish|pwsh>\n\nPrints a static completion script for the shell — command and\nsubcommand names (per-leaf flags are not completed).\n\n  bash:  ox completion bash | sudo tee /etc/bash_completion.d/ox\n         or per-shell: source <(ox completion bash)\n  zsh:   save as _ox in a directory on $fpath, then compinit\n  fish:  ox completion fish > ~/.config/fish/completions/ox.fish\n  pwsh:  add to $PROFILE: ox completion pwsh | Out-String | Invoke-Expression"),
-    ("repo", "ox repo — repositories\n\n  list|view|create|fork|sync|clone|edit|rename|archive|unarchive\n  delete|transfer|star|unstar|watch|unwatch\n  deploy-key list|add|delete · collaborator list|add|set-role|remove\n  invites list|create|link|revoke\n  branch-protection list|set|delete · tag-protection list|set|delete\n  mirror get|set|sync|delete|gen-key|rotate-secret\n  merge-settings [get|set] · lfs [--usage|--objects|--enable|--disable]\n  quota [--set <bytes>]"),
+    ("repo", "ox repo — repositories\n\n  list|view|create|fork|sync|clone|templates|edit|rename|archive|unarchive\n  delete|transfer|star|unstar|watch|unwatch\n  deploy-key list|add|delete · collaborator list|add|set-role|remove\n  invites list|create|link|revoke\n  branch-protection list|set|delete · tag-protection list|set|delete\n  mirror get|set|sync|delete|gen-key|rotate-secret\n  merge-settings [get|set] · lfs [--usage|--objects|--enable|--disable]\n  quota [--set <bytes>]"),
     ("repo list", "ox repo list [--owner <user|org>]\n\n`--owner` → repo.listByOwner; bare → repo.listMine."),
     ("repo view", "ox repo view <owner/name>"),
-    ("repo create", "ox repo create <name> [--org <slug>] [--description <d>]\n                [--visibility public|private] [--license <spdx>]\n                [--gitignore <id>]\n\nOwner defaults to your user; --org creates under that org."),
+    ("repo create", "ox repo create [<name>] [--org <slug>] [--description <d>]\n                [--visibility public|private] [--license <spdx>]\n                [--gitignore <id>] [--template <ref>]\n\nOwner defaults to your user; --org creates under that org.\n--template accepts a template ref from `ox repo templates` — a builtin\nstack id, an instance pack slug, or owner/name of a template repo.\nWith no name on a TTY, an interactive wizard walks name, owner,\ntemplate, and visibility; non-interactive use still requires <name>."),
+    ("repo templates", "ox repo templates\n\nList the repository templates the connected instance offers — builtin\nstack presets, admin-provided instance packs, and template repos you\ncan read — plus the gitignore catalog and default visibility."),
     ("repo fork", "ox repo fork <owner/name> [--into-owner <o>] [--into-name <n>]"),
     ("repo sync", "ox repo sync <owner/name>\n\nSync a fork with its upstream (repo.forkStatus + repo.syncFork)."),
     ("repo clone", "ox repo clone <owner/name> [<dir>]\n\nRuns `git clone <instance>/<owner>/<name>.git` locally."),
@@ -142,7 +145,7 @@ const HELP: &[(&str, &str)] = &[
     ("pr list", "ox pr list <o/n> [--state <s>] [--author <u>] [--assignee <u>]\n            [--label <l>] [--search <q>] [--limit <n>]"),
     ("pr view", "ox pr view <o/n> <number>"),
     ("pr create", "ox pr create <o/n> --title <t> --base <branch> --head <branch>\n              [--body <b>] [--draft] [--head-owner <o> --head-name <n>]"),
-    ("pr merge", "ox pr merge <o/n> <number> [--method merge|squash|rebase]\n            [--commit-title <t>] [--commit-message <m>] [--delete-branch]\n\nWith no --method the first strategy the repo allows is used\n(merge-commit → squash → rebase, via repo.mergeSettings.get)."),
+    ("pr merge", "ox pr merge <o/n> <number> [--method merge|squash|rebase | --merge | --squash | --rebase]\n            [--commit-title <t>] [--commit-message <m>] [--delete-branch]\n\nWith no method the first strategy the repo allows is used\n(merge-commit → squash → rebase, via repo.mergeSettings.get)."),
     ("pr diff", "ox pr diff <o/n> <number>     print unified patches for changed files"),
     ("pr files", "ox pr files <o/n> <number>    list changed files + status"),
     ("pr review", "ox pr review <o/n> <number> --approve|--request-changes|--comment [--body <b>]\n               --list | --dismiss <review-id> [--reason <r>]\n               --request <user> | --unrequest <user>"),
@@ -170,8 +173,8 @@ const HELP: &[(&str, &str)] = &[
     ("release", "ox release — releases\n\n  list|view|create|edit|delete|upload|download|delete-asset"),
     ("release list", "ox release list <o/n>"),
     ("release view", "ox release view <o/n> <tag>"),
-    ("release create", "ox release create <o/n> <tag> [--title <t>] [--body <b>]\n                 [--draft] [--prerelease]"),
-    ("release edit", "ox release edit <o/n> <tag> [--title <t>] [--body <b>]\n               [--draft|--publish] [--prerelease|--no-prerelease]"),
+    ("release create", "ox release create <o/n> <tag> [--title <t>] [--body <b> | --body-file <p>]\n                 [--draft] [--prerelease]"),
+    ("release edit", "ox release edit <o/n> <tag> [--title <t>] [--body <b> | --body-file <p>]\n               [--draft|--publish] [--prerelease|--no-prerelease]"),
     ("release delete", "ox release delete <o/n> <tag>"),
     ("release upload", "ox release upload <o/n> <tag> <file>...\n\nUploads each file as a release asset (multipart POST)."),
     ("release download", "ox release download <o/n> <tag> [--pattern <glob>] [--dir <d>] [--clobber]"),
@@ -190,25 +193,14 @@ const HELP: &[(&str, &str)] = &[
     ("ssh-key", "ox ssh-key list · add --title <t> --key-file <path> [--no-auth|--no-sign]\n           delete --id <id>      (key-file '-' = stdin)"),
     ("gpg-key", "ox gpg-key list · add --title <t> --key-file <path> · delete --id <id>"),
     ("email", "ox email list · add <addr> · remove --id <id> · set-primary --id <id>\n         resend --id <id>"),
-    ("pat", "ox pat — personal access tokens\n\n  list\n  create --name <n> --scopes repo,package:read,... [--expires <iso>]\n  create --name <n> --fine-grained --contents read|write\n      [--repo-access all|selected] [--repos <id,id>]\n      [--perms issues=write,pull_requests=read,...] [--expires <iso>]\n  revoke --id <id>\n\nThe minted token is printed once — store it somewhere safe."),
     ("label", "ox label list <o/n>|--org <slug>\n  ox label create <o/n>|--org <slug> --name <n> --color <hex> [--description <d>]\n  ox label edit <o/n>|--org <slug> --id <id> [--name][--color][--description][--hidden]\n  ox label delete <o/n>|--org <slug> --id <id>"),
     ("webhook", "ox webhook list|create|edit|delete|ping <o/n>\n  create --url <u> --secret <s> --events push,pull_request [--name <n>]\n         [--description <d>] [--inactive]\n  edit --id <id> [--url][--secret][--events][--name][--description][--inactive|--active]\n  ping --id <id> · deliveries <o/n> --id <id> [--limit n]\n  redeliver <o/n> --id <id> --delivery <delivery-id>"),
-    ("invite", "ox invite accept --token <t> [--email <e>] [--username <u>] [--password <p>]\n\nAccept a repo/org invite link."),
-    ("admin", "ox admin — instance administration\n\n  users list|ban|unban|delete|set-role|sessions|revoke-sessions|access|activity\n  invites list|create|link|revoke\n  runners · runner-token\n  lfs|git|mcp|auth (settings get/set) · templates list|enable|disable|delete\n  repos gc"),
-    ("admin auth", "ox admin auth            show instance auth settings\n  ox admin auth set [--provider-mode local|workos|oidc]\n      [--email-provider log|smtp|resend] [--from-address <addr>]\n      [--oidc-issuer <url>] [--oidc-client-id <id>] [--workos-client-id <id>]\n      [--allow-signup | --no-signup] [--default-visibility public|private]\n\nset merges flags over current settings server-side."),
-    ("admin users", "ox admin users list [--query q] [--limit n] [--offset n]\n  ox admin users ban|unban --id <user-id>\n  ox admin users delete --id <id> --confirm <email-or-username> [--delete-orgs]\n  ox admin users set-role --id <id> --role user|admin|sys-admin\n  ox admin users sessions|revoke-sessions|access|activity --id <id>\n      [--source audit|repository] [--event-type <t>] [--limit n]"),
-    ("admin invites", "ox admin invites list\n  ox admin invites create --emails a@x,b@y\n  ox admin invites link [--expires <iso>] [--max-uses <n>]\n  ox admin invites revoke --id <invite-id>"),
-    ("admin runners", "ox admin runners          list registered action runners\n  ox admin runner-token     mint a runner registration token"),
-    ("admin lfs", "ox admin lfs                            show LFS settings + usage\n  ox admin lfs set [--max-object-bytes n] [--quota-repo-bytes n]\n                   [--quota-user-bytes n] [--clear]"),
-    ("admin git", "ox admin git                            show git settings\n  ox admin git set [--repo-quota-bytes n] [--clear]"),
-    ("admin mcp", "ox admin mcp                            show MCP settings\n  ox admin mcp set [--enable|--disable|--clear]"),
-    ("admin templates", "ox admin templates list\n  ox admin templates enable|disable --id <pack-id>\n  ox admin templates delete --id <pack-id>"),
     ("self-update", "ox self-update [--no-skill-refresh] [--no-mcp-refresh]\n\nDownloads the ox build for this platform the configured instance\nserves, verifies the published sha256, and swaps this executable.\nAfter a successful swap, existing `ox skill` installs and `oxidean`\nMCP config entries are refreshed to the new binary's shape (same\nsweeps as `ox skill install --upgrade` / `ox mcp install --upgrade`,\npreserving each entry's endpoint and credential);\n--no-skill-refresh / --no-mcp-refresh skip those steps."),
     ("skill", "ox skill — the consumer-facing agent SKILL.md\n\n  ox skill print     write SKILL.md to stdout\n  ox skill install   write SKILL.md into harness skill dirs\n\nThe document is embedded in this binary and also served by the\ninstance at /cli/skill.md."),
     ("skill print", "ox skill print\n\nPrints the embedded SKILL.md verbatim — `ox skill print > SKILL.md`\nor pipe into `ox skill install`-style tooling."),
     ("skill install", "ox skill install [--harness <id,...> | --harness all] [--detected]\n                 [--upgrade] [--project | --global]\n\nWrites the embedded SKILL.md to <skills-dir>/ox/SKILL.md for each\nharness. --detected selects only harnesses found installed on this\nmachine (config dirs, PATH binaries); combined with --harness it\nintersects. On a TTY it prompts for harnesses (detected ones marked,\n'd' selects them all) and scope. Non-interactive requires --harness\nor --detected, plus a scope flag.\n\n--upgrade rewrites only ox/SKILL.md files that already exist — it\ncreates no new installs and never prompts. Bare --upgrade sweeps all\nharnesses at both scopes; --harness/--detected/scope flags narrow it.\n\nHarness ids follow the vercel-labs/skills registry (~70 rows: claude,\ncursor, codex, copilot, gemini, opencode, amp, devin, windsurf, kiro,\nroo, goose, cline, openclaw, continue, trae, qwen, grok, …) — `generic`\ncovers any other `.agents/skills` consumer"),
     ("mcp", "ox mcp — wire the instance MCP endpoint into agent harnesses\n\n  ox mcp print     emit the config block to paste by hand\n  ox mcp install   merge an `oxidean` entry into harness MCP configs\n  ox mcp status    show what's configured + probe the endpoint\n  ox mcp remove    strip the `oxidean` entry again\n\nThe endpoint is POST {instance}/api/mcp (streamable HTTP, JSON-RPC 2.0).\nHarnesses: claude, cursor, vscode, windsurf, gemini, codex, kiro,\nopencode, zed — `generic` covers any `mcpServers`-shaped config."),
-    ("mcp print", "ox mcp print [--harness <id>]\n\nPrints the JSON block (or Codex TOML section) for manual pasting.\nThe bearer is a `<token>` placeholder — substitute a PAT from\n{instance}/settings/tokens or `ox pat create`."),
+    ("mcp print", "ox mcp print [--harness <id>]\n\nPrints the JSON block (or Codex TOML section) for manual pasting.\nThe bearer is a `<token>` placeholder — substitute a PAT from\n{instance}/settings/tokens."),
     ("mcp install", "ox mcp install [--harness <id,...> | --harness all] [--detected]\n               [--project | --global] [--upgrade]\n               [--token <pat> | --token-stdin | --web | --anonymous]\n\nMerges an `oxidean` server entry into each harness's MCP config file\n— existing servers and unrelated keys are preserved, and the\n`oxidean` entry is replaced in place on re-runs (idempotent update).\nFiles are written 0600 since they may embed the bearer.\n\n--upgrade refreshes only files that already carry an `oxidean` entry\n— never prompts, never creates files; bare invocation sweeps every\nharness at both scopes. Entries keep their existing credential\nunless an explicit auth flag is passed, so\n`ox mcp install --upgrade --token-stdin` rotates tokens everywhere.\n\nAuth resolution: --token/--token-stdin use that PAT; --web runs the\nRFC 8628 device grant (browser sign-in, stored like `ox auth login`);\nwith no auth flag the stored `ox` credential for the instance is\nused; --anonymous writes no auth header (public repos only).\n\n--detected selects only harnesses found installed (config dirs, PATH\nbinaries); combined with --harness it intersects. On a TTY it prompts\nfor harnesses and scope; non-interactive requires --harness or\n--detected plus a scope flag.\n\nCodex writes `bearer_token_env_var = \"OXIDEAN_TOKEN\"` instead of the\ntoken itself — export that env var for the harness to pick it up."),
     ("mcp status", "ox mcp status\n\nLists every harness MCP config file found on this machine — whether\nit has an `oxidean` entry, which endpoint it points at, and its auth\nkind (never the token itself) — then POSTs `initialize` + `tools/list`\nat the resolved endpoint to report reachable/disabled/401."),
     ("mcp remove", "ox mcp remove [--harness <id,...> | --harness all] [--detected]\n              [--project | --global]\n\nDeletes only the `oxidean` server entry from each config file — other\nservers and keys are untouched, and files without an entry report\n`skipped (no entry)`."),
@@ -231,6 +223,8 @@ pub struct Global {
     pub instance: Option<String>,
     /// `--json` — emit the raw RPC response envelope.
     pub json: bool,
+    /// `--jq <filter>` — run a jq expression over the envelope `data`.
+    pub jq: Option<String>,
     /// `-h` / `--help`.
     pub help: bool,
     /// `--version`.
@@ -269,10 +263,34 @@ pub enum Command {
         token_stdin: bool,
         /// `--web` — RFC 8628 device authorization grant (browser sign-in).
         web: bool,
+        /// `--scopes <list>` — requested scopes for `--web` (comma/space
+        /// separated classic scope names).
+        scopes: Option<String>,
     },
     AuthStatus,
     AuthLogout,
     AuthToken,
+    /// `auth refresh` — mint a fresh CLI token through the device grant and
+    /// self-revoke the old one (gh `auth refresh` analog).
+    AuthRefresh {
+        /// `--scopes <list>` — scopes for the new token.
+        scopes: Option<String>,
+        /// `--keep-scopes` — carry the current token's scopes forward
+        /// instead of minting the full first-party set. `--reset-scopes`
+        /// is also accepted (reset is the default — compat no-op).
+        keep_scopes: bool,
+    },
+    /// `auth revoke` — revoke the current stored token server-side and drop
+    /// the local credential.
+    AuthRevoke,
+    /// `auth setup-git` — register `ox` as a git credential helper for the
+    /// resolved instance host.
+    AuthSetupGit,
+    /// `auth git-credential <get|store|erase>` — git credential-helper
+    /// protocol on stdin/stdout (wired by `auth setup-git`).
+    AuthGitCredential {
+        op: String,
+    },
     AuthSwitch {
         instance: Option<String>,
     },
@@ -294,13 +312,15 @@ pub enum Command {
         repo: String,
     },
     RepoCreate {
-        name: String,
+        name: Option<String>,
         owner: Option<String>,
         description: Option<String>,
         visibility: Option<String>,
         license: Option<String>,
         gitignore: Option<String>,
+        template: Option<String>,
     },
+    RepoTemplates,
     RepoFork {
         repo: String,
         into_owner: Option<String>,
@@ -393,12 +413,6 @@ pub enum Command {
     RepoInviteRevoke {
         repo: String,
         id: String,
-    },
-    InviteAccept {
-        token: String,
-        email: Option<String>,
-        username: Option<String>,
-        password: Option<String>,
     },
     BranchProtectionList {
         repo: String,
@@ -788,21 +802,6 @@ pub enum Command {
     EmailResend {
         id: String,
     },
-    PatList,
-    PatCreate {
-        name: String,
-        scopes: Vec<String>,
-        fine_grained: bool,
-        contents: Option<String>,
-        repo_access: Option<String>,
-        repo_ids: Vec<String>,
-        /// `--perms issues=write,pull_requests=read` (fine-grained only).
-        perms: Vec<String>,
-        expires_at: Option<String>,
-    },
-    PatRevoke {
-        id: String,
-    },
     LabelList {
         repo: Option<String>,
         org: Option<String>,
@@ -872,89 +871,6 @@ pub enum Command {
         hook_id: String,
         delivery_id: String,
     },
-    AdminUsersList {
-        query: Option<String>,
-        limit: Option<u64>,
-        offset: Option<u64>,
-    },
-    AdminUserBan {
-        id: String,
-        ban: bool,
-    },
-    AdminUserDelete {
-        id: String,
-        confirm: String,
-        delete_orgs: bool,
-    },
-    AdminUserRole {
-        id: String,
-        role: String,
-    },
-    AdminUserSessions {
-        id: String,
-    },
-    AdminUserRevokeSessions {
-        id: String,
-    },
-    AdminUserAccess {
-        id: String,
-    },
-    AdminUserActivity {
-        id: String,
-        source: Option<String>,
-        event_type: Option<String>,
-        limit: Option<u64>,
-    },
-    AdminInviteList,
-    AdminInviteCreate {
-        emails: Vec<String>,
-    },
-    AdminInviteLink {
-        expires_at: Option<String>,
-        max_uses: Option<u64>,
-    },
-    AdminInviteRevoke {
-        id: String,
-    },
-    AdminRunners,
-    AdminRunnerToken,
-    AdminLfs {
-        set: bool,
-        max_object_bytes: Option<u64>,
-        quota_repo_bytes: Option<u64>,
-        quota_user_bytes: Option<u64>,
-        clear: bool,
-    },
-    AdminGit {
-        set: bool,
-        repo_quota_bytes: Option<u64>,
-        clear: bool,
-    },
-    AdminMcp {
-        set: bool,
-        enable: Option<bool>,
-        clear: bool,
-    },
-    AdminAuth {
-        set: bool,
-        provider_mode: Option<String>,
-        email_provider: Option<String>,
-        from_address: Option<String>,
-        oidc_issuer: Option<String>,
-        oidc_client_id: Option<String>,
-        workos_client_id: Option<String>,
-        allow_signup: Option<bool>,
-        default_visibility: Option<String>,
-    },
-    AdminTemplatesList,
-    AdminTemplatesSetEnabled {
-        id: String,
-        enabled: bool,
-    },
-    AdminTemplatesDelete {
-        id: String,
-    },
-    AdminReposGc,
     PkgList {
         owner: Option<String>,
     },
@@ -1113,20 +1029,78 @@ pub fn parse_repo(spec: &str) -> Result<(String, String), UsageError> {
     Ok((owner.to_string(), name.to_string()))
 }
 
-/// `<owner/name>` from the first positional or `-R`/`--repo`.
+/// `<owner/name>` from the first positional, `-R`/`--repo`, `OXIDEAN_REPO`,
+/// or the git remote in the current directory (`upstream`, then `origin`,
+/// then `fork` — gh's remote priority).
 fn repo_spec(f: &Flags, usage_str: &str) -> Result<String, UsageError> {
     let raw = f
         .positionals
         .first()
         .or_else(|| f.values.get("-R"))
         .or_else(|| f.values.get("--repo"))
+        .cloned()
+        .or_else(detected_repo)
         .ok_or_else(|| usage(format!("usage: ox {usage_str} <owner/name>")))?;
-    parse_repo(raw)?;
-    Ok(raw.clone())
+    parse_repo(&raw)?;
+    Ok(raw)
+}
+
+/// `OXIDEAN_REPO` → git remote URL (`upstream`/`origin`/`fork`).
+fn detected_repo() -> Option<String> {
+    if let Ok(v) = std::env::var("OXIDEAN_REPO") {
+        let v = v.trim().to_string();
+        if !v.is_empty() {
+            return Some(v);
+        }
+    }
+    repo_from_git_remote()
+}
+
+fn repo_from_git_remote() -> Option<String> {
+    for remote in ["upstream", "origin", "fork"] {
+        let out = std::process::Command::new("git")
+            .args(["remote", "get-url", remote])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .output()
+            .ok()?;
+        if out.status.success() {
+            let url = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if let Some(spec) = remote_url_spec(&url) {
+                return Some(spec);
+            }
+        }
+    }
+    None
+}
+
+/// `https://host/o/n(.git)` | `git@host:o/n(.git)` | `ssh://git@host/o/n`
+/// → `owner/name`. Non-repo-shaped URLs return `None`.
+pub fn remote_url_spec(url: &str) -> Option<String> {
+    let path = if let Some((_, rest)) = url.split_once("://") {
+        // scheme://authority/path — strip the authority.
+        match rest.split_once('/') {
+            Some((_, p)) => p.to_string(),
+            None => return None,
+        }
+    } else if let Some((_, p)) = url.split_once(':') {
+        // scp-like `git@host:o/n`.
+        p.to_string()
+    } else {
+        url.to_string()
+    };
+    let path = path.trim_end_matches('/').trim_end_matches(".git");
+    let mut it = path.split('/');
+    match (it.next(), it.next(), it.next()) {
+        (Some(o), Some(n), None) if !o.is_empty() && !n.is_empty() => Some(format!("{o}/{n}")),
+        _ => None,
+    }
 }
 
 /// Repo spec plus one trailing positional (issue number, run id, …). When
-/// `-R`/`--repo` supplies the repo, positionals[0] is the trailing arg.
+/// `-R`/`--repo` supplies the repo, positionals[0] is the trailing arg; a
+/// single positional with a detected repo is likewise the trailing arg.
 fn repo_and_arg(
     f: &Flags,
     usage_str: &str,
@@ -1136,12 +1110,22 @@ fn repo_and_arg(
     if f.values.contains_key("-R") || f.values.contains_key("--repo") {
         let repo = repo_spec(f, usage_str)?;
         let arg = f.positionals.first().ok_or_else(want)?;
-        Ok((repo, arg.clone()))
-    } else {
-        let repo = f.positionals.first().ok_or_else(want)?;
-        parse_repo(repo)?;
-        let arg = f.positionals.get(1).ok_or_else(want)?;
-        Ok((repo.clone(), arg.clone()))
+        return Ok((repo, arg.clone()));
+    }
+    match f.positionals.len() {
+        0 => Err(want()),
+        1 => {
+            let arg = f.positionals[0].clone();
+            let repo = detected_repo().ok_or_else(want)?;
+            parse_repo(&repo)?;
+            Ok((repo, arg))
+        }
+        _ => {
+            let repo = f.positionals.first().ok_or_else(want)?;
+            parse_repo(repo)?;
+            let arg = f.positionals.get(1).ok_or_else(want)?;
+            Ok((repo.clone(), arg.clone()))
+        }
     }
 }
 
@@ -1343,40 +1327,6 @@ const NESTED: &[(&str, &str, &[&str], Option<&str>)] = &[
         &["list", "get", "view", "redeliver"],
         Some("list"),
     ),
-    (
-        "admin",
-        "users",
-        &[
-            "list",
-            "ban",
-            "unban",
-            "delete",
-            "set-role",
-            "sessions",
-            "revoke-sessions",
-            "access",
-            "activity",
-        ],
-        None,
-    ),
-    (
-        "admin",
-        "invites",
-        &["list", "create", "link", "revoke"],
-        Some("list"),
-    ),
-    ("admin", "actions", &["runners", "runner-token"], None),
-    ("admin", "repos", &["gc"], None),
-    ("admin", "lfs", &["get", "set"], Some("get")),
-    ("admin", "git", &["get", "set"], Some("get")),
-    ("admin", "mcp", &["get", "set"], Some("get")),
-    ("admin", "auth", &["get", "set"], Some("get")),
-    (
-        "admin",
-        "templates",
-        &["list", "enable", "disable", "delete"],
-        Some("list"),
-    ),
 ];
 
 /// Split argv into globals + command. Global flags may appear anywhere;
@@ -1416,12 +1366,28 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
                     i += 2;
                     continue;
                 }
+                "--jq" => {
+                    let v = argv
+                        .get(i + 1)
+                        .ok_or_else(|| usage("--jq requires a filter"))?;
+                    global.jq = Some(v.clone());
+                    i += 2;
+                    continue;
+                }
                 _ => {
                     if let Some(v) = arg.strip_prefix("--instance=") {
                         if v.is_empty() {
                             return Err(usage("--instance requires a value"));
                         }
                         global.instance = Some(v.to_string());
+                        i += 1;
+                        continue;
+                    }
+                    if let Some(v) = arg.strip_prefix("--jq=") {
+                        if v.is_empty() {
+                            return Err(usage("--jq requires a filter"));
+                        }
+                        global.jq = Some(v.to_string());
                         i += 1;
                         continue;
                     }
@@ -1478,18 +1444,74 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
 
     let command = match (group, sub, leaf) {
         ("auth", "login", "") => {
-            let f = scan(tail, &["--token"], &["--token-stdin", "--web"], &[])?;
+            let f = scan(
+                tail,
+                &["--token", "--scopes"],
+                &["--token-stdin", "--web"],
+                &[],
+            )?;
             expect_no_positionals(&f, "auth login")?;
             if f.bools.contains("--web")
                 && (f.values.contains_key("--token") || f.bools.contains("--token-stdin"))
             {
                 return Err(usage("--web cannot be combined with --token/--token-stdin"));
             }
+            if f.values.contains_key("--scopes") && !f.bools.contains("--web") {
+                return Err(usage("--scopes only applies to --web sign-in"));
+            }
             Command::AuthLogin {
                 token: f.values.get("--token").cloned(),
                 token_stdin: f.bools.contains("--token-stdin"),
                 web: f.bools.contains("--web"),
+                scopes: f.values.get("--scopes").cloned(),
             }
+        }
+        ("auth", "refresh", "") => {
+            // `--reset-scopes` stays accepted for compat — reset is now the
+            // default, so the flag is a no-op alias.
+            let f = scan(tail, &["--scopes"], &["--reset-scopes", "--keep-scopes"], &[])?;
+            expect_no_positionals(&f, "auth refresh")?;
+            if f.values.contains_key("--scopes")
+                && (f.bools.contains("--reset-scopes") || f.bools.contains("--keep-scopes"))
+            {
+                return Err(usage(
+                    "--scopes is exclusive with --keep-scopes/--reset-scopes",
+                ));
+            }
+            if f.bools.contains("--keep-scopes") && f.bools.contains("--reset-scopes") {
+                return Err(usage("--keep-scopes and --reset-scopes are exclusive"));
+            }
+            Command::AuthRefresh {
+                scopes: f.values.get("--scopes").cloned(),
+                keep_scopes: f.bools.contains("--keep-scopes"),
+            }
+        }
+        ("auth", "revoke", "") => {
+            let f = scan(tail, &[], &[], &[])?;
+            expect_no_positionals(&f, "auth revoke")?;
+            Command::AuthRevoke
+        }
+        ("auth", "setup-git", "") => {
+            let f = scan(tail, &[], &[], &[])?;
+            expect_no_positionals(&f, "auth setup-git")?;
+            Command::AuthSetupGit
+        }
+        ("auth", "git-credential", "") => {
+            let f = scan(tail, &[], &[], &[])?;
+            let op = f
+                .positionals
+                .first()
+                .cloned()
+                .ok_or_else(|| usage("usage: ox auth git-credential <get|store|erase>"))?;
+            if f.positionals.len() > 1 {
+                return Err(usage("usage: ox auth git-credential <get|store|erase>"));
+            }
+            if !["get", "store", "erase"].contains(&op.as_str()) {
+                return Err(usage(format!(
+                    "unknown git-credential operation '{op}' — get|store|erase"
+                )));
+            }
+            Command::AuthGitCredential { op }
         }
         ("auth", "status", "") => {
             let f = scan(tail, &[], &[], &[])?;
@@ -1545,9 +1567,11 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
             let f = scan(tail, &[], &[], &[])?;
             expect_no_positionals(&f, "completion")?;
             match sh {
-                "bash" | "zsh" | "fish" | "pwsh" | "powershell" => Command::Completion {
-                    shell: sh.to_string(),
-                },
+                "bash" | "zsh" | "fish" | "pwsh" | "powershell" | "commands" => {
+                    Command::Completion {
+                        shell: sh.to_string(),
+                    }
+                }
                 _ => return Err(usage("usage: ox completion <bash|zsh|fish|pwsh>")),
             }
         }
@@ -1575,15 +1599,12 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
                     "--visibility",
                     "--license",
                     "--gitignore",
+                    "--template",
                 ],
                 &[],
                 &[],
             )?;
-            let name = f
-                .positionals
-                .first()
-                .cloned()
-                .ok_or_else(|| usage("usage: ox repo create <name>"))?;
+            let name = f.positionals.first().cloned();
             if f.positionals.len() > 1 {
                 return Err(usage(format!(
                     "ox repo create: unexpected argument '{}'",
@@ -1602,7 +1623,13 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
                 visibility: f.values.get("--visibility").cloned(),
                 license: f.values.get("--license").cloned(),
                 gitignore: f.values.get("--gitignore").cloned(),
+                template: f.values.get("--template").cloned(),
             }
+        }
+        ("repo", "templates", "") => {
+            let f = scan(tail, &[], &[], &[])?;
+            expect_no_positionals(&f, "repo templates")?;
+            Command::RepoTemplates
         }
         ("repo", "fork", "") => {
             let f = scan(
@@ -1844,21 +1871,6 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
             Command::RepoInviteRevoke {
                 repo: repo_spec(&f, "repo invites revoke")?,
                 id: req_id(&f, "repo invites revoke")?,
-            }
-        }
-        ("invite", "accept", "") => {
-            let f = scan(
-                tail,
-                &["--token", "--email", "--username", "--password"],
-                &[],
-                &[],
-            )?;
-            expect_no_positionals(&f, "invite accept")?;
-            Command::InviteAccept {
-                token: req(&f, "--token", "invite accept")?,
-                email: f.values.get("--email").cloned(),
-                username: f.values.get("--username").cloned(),
-                password: f.values.get("--password").cloned(),
             }
         }
         ("repo", "branch-protection", "list") => {
@@ -2936,48 +2948,6 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
             }
         }
 
-        ("pat", "list", "") => {
-            let f = scan(tail, &[], &[], &[])?;
-            expect_no_positionals(&f, "pat list")?;
-            Command::PatList
-        }
-        ("pat", "create", "") => {
-            let f = scan(
-                tail,
-                &[
-                    "--name",
-                    "--scopes",
-                    "--contents",
-                    "--repo-access",
-                    "--repos",
-                    "--perms",
-                    "--expires",
-                ],
-                &["--fine-grained", "--fg", "--classic"],
-                &[],
-            )?;
-            expect_no_positionals(&f, "pat create")?;
-            check_choice(&f, "--contents", &["read", "write"], "pat create")?;
-            check_choice(&f, "--repo-access", &["all", "selected"], "pat create")?;
-            Command::PatCreate {
-                name: req(&f, "--name", "pat create")?,
-                scopes: f.values.get("--scopes").map(|s| csv(s)).unwrap_or_default(),
-                fine_grained: f.bools.contains("--fine-grained") || f.bools.contains("--fg"),
-                contents: f.values.get("--contents").cloned(),
-                repo_access: f.values.get("--repo-access").cloned(),
-                repo_ids: f.values.get("--repos").map(|s| csv(s)).unwrap_or_default(),
-                perms: f.values.get("--perms").map(|s| csv(s)).unwrap_or_default(),
-                expires_at: f.values.get("--expires").cloned(),
-            }
-        }
-        ("pat", "revoke", "") => {
-            let f = scan(tail, &["--id"], &[], &[])?;
-            expect_no_positionals(&f, "pat revoke")?;
-            Command::PatRevoke {
-                id: req_id(&f, "pat revoke")?,
-            }
-        }
-
         ("label", "list", "") => {
             let f = scan(tail, &["-R", "--repo", "--org"], &["--hidden"], &[])?;
             Command::LabelList {
@@ -3143,282 +3113,6 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
             }
         }
 
-        ("admin", "users", "list") => {
-            let f = scan(tail, &["--query", "--limit", "--offset"], &[], &[])?;
-            expect_no_positionals(&f, "admin users list")?;
-            Command::AdminUsersList {
-                query: f.values.get("--query").cloned(),
-                limit: opt_u64(&f, "--limit")?,
-                offset: opt_u64(&f, "--offset")?,
-            }
-        }
-        ("admin", "users", "ban") | ("admin", "users", "unban") => {
-            let f = scan(tail, &["--id"], &[], &[])?;
-            expect_no_positionals(&f, "admin users ban")?;
-            Command::AdminUserBan {
-                id: req_id(&f, "admin users ban")?,
-                ban: leaf == "ban",
-            }
-        }
-        ("admin", "users", "delete") => {
-            let f = scan(tail, &["--id", "--confirm"], &["--delete-orgs"], &[])?;
-            expect_no_positionals(&f, "admin users delete")?;
-            Command::AdminUserDelete {
-                id: req_id(&f, "admin users delete")?,
-                confirm: req(&f, "--confirm", "admin users delete")?,
-                delete_orgs: f.bools.contains("--delete-orgs"),
-            }
-        }
-        ("admin", "users", "set-role") => {
-            let f = scan(tail, &["--id", "--role"], &[], &[])?;
-            expect_no_positionals(&f, "admin users set-role")?;
-            check_choice(
-                &f,
-                "--role",
-                &["user", "admin", "sys-admin"],
-                "admin users set-role",
-            )?;
-            Command::AdminUserRole {
-                id: req_id(&f, "admin users set-role")?,
-                role: req(&f, "--role", "admin users set-role")?,
-            }
-        }
-        ("admin", "users", "sessions") => {
-            let f = scan(tail, &["--id"], &[], &[])?;
-            Command::AdminUserSessions {
-                id: req_id(&f, "admin users sessions")?,
-            }
-        }
-        ("admin", "users", "revoke-sessions") => {
-            let f = scan(tail, &["--id"], &[], &[])?;
-            Command::AdminUserRevokeSessions {
-                id: req_id(&f, "admin users revoke-sessions")?,
-            }
-        }
-        ("admin", "users", "access") => {
-            let f = scan(tail, &["--id"], &[], &[])?;
-            Command::AdminUserAccess {
-                id: req_id(&f, "admin users access")?,
-            }
-        }
-        ("admin", "users", "activity") => {
-            let f = scan(
-                tail,
-                &["--id", "--source", "--event-type", "--limit"],
-                &[],
-                &[],
-            )?;
-            Command::AdminUserActivity {
-                id: req_id(&f, "admin users activity")?,
-                source: f.values.get("--source").cloned(),
-                event_type: f.values.get("--event-type").cloned(),
-                limit: opt_u64(&f, "--limit")?,
-            }
-        }
-        ("admin", "invites", "list") | ("admin", "invites", "") => {
-            let f = scan(tail, &[], &[], &[])?;
-            expect_no_positionals(&f, "admin invites list")?;
-            Command::AdminInviteList
-        }
-        ("admin", "invites", "create") => {
-            let f = scan(tail, &["--emails"], &[], &[])?;
-            expect_no_positionals(&f, "admin invites create")?;
-            Command::AdminInviteCreate {
-                emails: csv(&req(&f, "--emails", "admin invites create")?),
-            }
-        }
-        ("admin", "invites", "link") => {
-            let f = scan(tail, &["--expires", "--max-uses"], &[], &[])?;
-            expect_no_positionals(&f, "admin invites link")?;
-            Command::AdminInviteLink {
-                expires_at: f.values.get("--expires").cloned(),
-                max_uses: opt_u64(&f, "--max-uses")?,
-            }
-        }
-        ("admin", "invites", "revoke") => {
-            let f = scan(tail, &["--id"], &[], &[])?;
-            expect_no_positionals(&f, "admin invites revoke")?;
-            Command::AdminInviteRevoke {
-                id: req_id(&f, "admin invites revoke")?,
-            }
-        }
-        ("admin", "runners", "") | ("admin", "actions", "runners") => {
-            let f = scan(tail, &[], &[], &[])?;
-            expect_no_positionals(&f, "admin runners")?;
-            Command::AdminRunners
-        }
-        ("admin", "runner-token", "") | ("admin", "actions", "runner-token") => {
-            let f = scan(tail, &[], &[], &[])?;
-            expect_no_positionals(&f, "admin runner-token")?;
-            Command::AdminRunnerToken
-        }
-        ("admin", "repos", "gc") => {
-            let f = scan(tail, &[], &[], &[])?;
-            expect_no_positionals(&f, "admin repos gc")?;
-            Command::AdminReposGc
-        }
-        ("admin", "lfs", "") | ("admin", "lfs", "get") => {
-            let f = scan(tail, &[], &[], &[])?;
-            expect_no_positionals(&f, "admin lfs")?;
-            Command::AdminLfs {
-                set: false,
-                max_object_bytes: None,
-                quota_repo_bytes: None,
-                quota_user_bytes: None,
-                clear: false,
-            }
-        }
-        ("admin", "lfs", "set") => {
-            let f = scan(
-                tail,
-                &[
-                    "--max-object-bytes",
-                    "--quota-repo-bytes",
-                    "--quota-user-bytes",
-                ],
-                &["--clear"],
-                &[],
-            )?;
-            expect_no_positionals(&f, "admin lfs set")?;
-            Command::AdminLfs {
-                set: true,
-                max_object_bytes: opt_u64(&f, "--max-object-bytes")?,
-                quota_repo_bytes: opt_u64(&f, "--quota-repo-bytes")?,
-                quota_user_bytes: opt_u64(&f, "--quota-user-bytes")?,
-                clear: f.bools.contains("--clear"),
-            }
-        }
-        ("admin", "git", "") | ("admin", "git", "get") => {
-            let f = scan(tail, &[], &[], &[])?;
-            expect_no_positionals(&f, "admin git")?;
-            Command::AdminGit {
-                set: false,
-                repo_quota_bytes: None,
-                clear: false,
-            }
-        }
-        ("admin", "git", "set") => {
-            let f = scan(tail, &["--repo-quota-bytes"], &["--clear"], &[])?;
-            expect_no_positionals(&f, "admin git set")?;
-            Command::AdminGit {
-                set: true,
-                repo_quota_bytes: opt_u64(&f, "--repo-quota-bytes")?,
-                clear: f.bools.contains("--clear"),
-            }
-        }
-        ("admin", "mcp", "") | ("admin", "mcp", "get") => {
-            let f = scan(tail, &[], &[], &[])?;
-            expect_no_positionals(&f, "admin mcp")?;
-            Command::AdminMcp {
-                set: false,
-                enable: None,
-                clear: false,
-            }
-        }
-        ("admin", "mcp", "set") => {
-            let f = scan(tail, &[], &["--enable", "--disable", "--clear"], &[])?;
-            expect_no_positionals(&f, "admin mcp set")?;
-            Command::AdminMcp {
-                set: true,
-                enable: match (f.bools.contains("--enable"), f.bools.contains("--disable")) {
-                    (true, _) => Some(true),
-                    (false, true) => Some(false),
-                    _ => None,
-                },
-                clear: f.bools.contains("--clear"),
-            }
-        }
-        ("admin", "auth", "") | ("admin", "auth", "get") => {
-            let f = scan(tail, &[], &[], &[])?;
-            expect_no_positionals(&f, "admin auth")?;
-            Command::AdminAuth {
-                set: false,
-                provider_mode: None,
-                email_provider: None,
-                from_address: None,
-                oidc_issuer: None,
-                oidc_client_id: None,
-                workos_client_id: None,
-                allow_signup: None,
-                default_visibility: None,
-            }
-        }
-        ("admin", "auth", "set") => {
-            let f = scan(
-                tail,
-                &[
-                    "--provider-mode",
-                    "--email-provider",
-                    "--from-address",
-                    "--oidc-issuer",
-                    "--oidc-client-id",
-                    "--workos-client-id",
-                    "--default-visibility",
-                ],
-                &["--allow-signup", "--no-signup"],
-                &[],
-            )?;
-            expect_no_positionals(&f, "admin auth set")?;
-            check_choice(
-                &f,
-                "--provider-mode",
-                &["local", "workos", "oidc"],
-                "admin auth set",
-            )?;
-            check_choice(
-                &f,
-                "--email-provider",
-                &["log", "smtp", "resend"],
-                "admin auth set",
-            )?;
-            check_choice(
-                &f,
-                "--default-visibility",
-                &["public", "private"],
-                "admin auth set",
-            )?;
-            if f.bools.contains("--allow-signup") && f.bools.contains("--no-signup") {
-                return Err(usage("--allow-signup and --no-signup are exclusive"));
-            }
-            Command::AdminAuth {
-                set: true,
-                provider_mode: f.values.get("--provider-mode").cloned(),
-                email_provider: f.values.get("--email-provider").cloned(),
-                from_address: f.values.get("--from-address").cloned(),
-                oidc_issuer: f.values.get("--oidc-issuer").cloned(),
-                oidc_client_id: f.values.get("--oidc-client-id").cloned(),
-                workos_client_id: f.values.get("--workos-client-id").cloned(),
-                allow_signup: if f.bools.contains("--allow-signup") {
-                    Some(true)
-                } else if f.bools.contains("--no-signup") {
-                    Some(false)
-                } else {
-                    None
-                },
-                default_visibility: f.values.get("--default-visibility").cloned(),
-            }
-        }
-        ("admin", "templates", "list") | ("admin", "templates", "") => {
-            let f = scan(tail, &[], &[], &[])?;
-            expect_no_positionals(&f, "admin templates list")?;
-            Command::AdminTemplatesList
-        }
-        ("admin", "templates", "enable") | ("admin", "templates", "disable") => {
-            let f = scan(tail, &["--id"], &[], &[])?;
-            expect_no_positionals(&f, "admin templates enable")?;
-            Command::AdminTemplatesSetEnabled {
-                id: req_id(&f, "admin templates enable")?,
-                enabled: leaf == "enable",
-            }
-        }
-        ("admin", "templates", "delete") => {
-            let f = scan(tail, &["--id"], &[], &[])?;
-            expect_no_positionals(&f, "admin templates delete")?;
-            Command::AdminTemplatesDelete {
-                id: req_id(&f, "admin templates delete")?,
-            }
-        }
-
         ("pkg", "list", "") => {
             let f = scan(tail, &["--owner"], &[], &[])?;
             expect_no_positionals(&f, "pkg list")?;
@@ -3581,11 +3275,8 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
                 "ssh-key",
                 "gpg-key",
                 "email",
-                "pat",
                 "label",
                 "webhook",
-                "invite",
-                "admin",
                 "self-update",
                 "skill",
                 "mcp",
@@ -3916,11 +3607,8 @@ mod tests {
     fn nested_third_level() {
         let inv = parse(&argv(&["repo", "deploy-key", "list", "o/n"])).unwrap();
         assert!(matches!(inv.command, Command::DeployKeyList { .. }));
-        let inv = parse(&argv(&["admin", "users", "ban", "--id", "u1"])).unwrap();
-        assert!(matches!(
-            inv.command,
-            Command::AdminUserBan { ref id, ban: true } if id == "u1"
-        ));
+        let inv = parse(&argv(&["org", "members", "add", "eng", "alice"])).unwrap();
+        assert!(matches!(inv.command, Command::OrgMemberAdd { .. }));
     }
 
     #[test]
@@ -3962,35 +3650,6 @@ mod tests {
     }
 
     #[test]
-    fn pat_create_fine_grained_perms() {
-        let inv = parse(&argv(&[
-            "pat",
-            "create",
-            "--name",
-            "ci",
-            "--fine-grained",
-            "--contents",
-            "write",
-            "--perms",
-            "issues=write,pull_requests=read",
-        ]))
-        .unwrap();
-        match inv.command {
-            Command::PatCreate {
-                fine_grained,
-                contents,
-                perms,
-                ..
-            } => {
-                assert!(fine_grained);
-                assert_eq!(contents.as_deref(), Some("write"));
-                assert_eq!(perms, vec!["issues=write", "pull_requests=read"]);
-            }
-            other => panic!("{other:?}"),
-        }
-    }
-
-    #[test]
     fn run_watch_parses() {
         let inv = parse(&argv(&[
             "run",
@@ -4020,7 +3679,7 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
-        assert!(parse(&argv(&["run", "watch", "o/n"])).is_err());
+        assert!(parse(&argv(&["run", "watch"])).is_err());
     }
 
     #[test]
@@ -4049,46 +3708,6 @@ mod tests {
         }
         assert!(parse(&argv(&["completion", "tcsh"])).is_err());
         assert!(parse(&argv(&["completion"])).is_err());
-    }
-
-    #[test]
-    fn admin_auth_parses() {
-        match parse(&argv(&["admin", "auth"])).unwrap().command {
-            Command::AdminAuth { set, .. } => assert!(!set),
-            other => panic!("{other:?}"),
-        }
-        match parse(&argv(&[
-            "admin",
-            "auth",
-            "set",
-            "--provider-mode",
-            "oidc",
-            "--no-signup",
-        ]))
-        .unwrap()
-        .command
-        {
-            Command::AdminAuth {
-                set,
-                provider_mode,
-                allow_signup,
-                ..
-            } => {
-                assert!(set);
-                assert_eq!(provider_mode.as_deref(), Some("oidc"));
-                assert_eq!(allow_signup, Some(false));
-            }
-            other => panic!("{other:?}"),
-        }
-        assert!(parse(&argv(&["admin", "auth", "set", "--provider-mode", "bogus"])).is_err());
-        assert!(parse(&argv(&[
-            "admin",
-            "auth",
-            "set",
-            "--allow-signup",
-            "--no-signup"
-        ]))
-        .is_err());
     }
 
     #[test]

@@ -1,4 +1,5 @@
 import { cleanup, screen, waitFor } from "@octanejs/testing-library";
+import { act } from "octane";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithQueryClient } from "@/test/render-with-query";
 
@@ -100,11 +101,72 @@ describe("/oauth/device", () => {
       expect(deviceAuthorizeMock).toHaveBeenCalledWith({
         user_code: "WDJB-MJHT",
         approve: true,
+        granted_scope: "repo package:read",
       });
     });
     await waitFor(() => {
       expect(document.body.textContent).toContain("CLI sign-in authorized");
     });
+  }, 30_000);
+
+  it("unchecking a scope narrows granted_scope on approve", async () => {
+    deviceInfoMock.mockResolvedValue({ ok: true, data: info });
+    deviceAuthorizeMock.mockResolvedValue({ ok: true, data: { ok: true } });
+    setLocation(`/oauth/device?user_code=${info.user_code}`);
+    const mod = await loadModule();
+    const Page = (mod.OAuthDevicePage ?? mod.default) as unknown;
+    renderWithQueryClient(Page);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("oauth-scope-repo")).toBeInTheDocument();
+    });
+    // Base UI forwards root clicks to its hidden input; jsdom doesn't run the
+    // synthetic span handler, so drive the input's change directly.
+    const input = screen
+      .getByTestId("oauth-scope-repo")
+      .closest("label")
+      ?.querySelector("input[type=checkbox]") as HTMLInputElement;
+    await act(async () => {
+      input.click();
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("oauth-scope-repo")).toHaveAttribute("aria-checked", "false");
+    });
+    screen.getByRole("button", { name: "Authorize ox" }).click();
+
+    await waitFor(() => {
+      expect(deviceAuthorizeMock).toHaveBeenCalledWith({
+        user_code: "WDJB-MJHT",
+        approve: true,
+        granted_scope: "package:read",
+      });
+    });
+  }, 30_000);
+
+  it("unchecking every scope disables approve; deny stays live", async () => {
+    deviceInfoMock.mockResolvedValue({ ok: true, data: info });
+    setLocation(`/oauth/device?user_code=${info.user_code}`);
+    const mod = await loadModule();
+    const Page = (mod.OAuthDevicePage ?? mod.default) as unknown;
+    renderWithQueryClient(Page);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("oauth-scope-repo")).toBeInTheDocument();
+    });
+    const uncheck = (testid: string) =>
+      screen
+        .getByTestId(testid)
+        .closest("label")
+        ?.querySelector("input[type=checkbox]") as HTMLInputElement;
+    await act(async () => {
+      uncheck("oauth-scope-repo").click();
+      uncheck("oauth-scope-package:read").click();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Authorize ox" })).toBeDisabled();
+    });
+    expect(screen.getByRole("button", { name: "Deny" })).toBeEnabled();
   }, 30_000);
 
   it("deny calls deviceAuthorize with approve:false", async () => {

@@ -173,9 +173,13 @@ fn respond(resp: RpcResponse, ok_status: StatusCode) -> Response {
 fn status_for_error(err: &AppError) -> StatusCode {
     let code = err.code.as_str();
     match code {
-        "auth.unauthenticated" => StatusCode::UNAUTHORIZED,
+        "auth.unauthenticated" | "auth.token_expired" | "auth.token_revoked" => {
+            StatusCode::UNAUTHORIZED
+        }
         "auth.rate_limited" => StatusCode::TOO_MANY_REQUESTS,
-        "auth.setup_required" | "auth.email_unverified" | "auth.pat_scope" => StatusCode::FORBIDDEN,
+        "auth.setup_required" | "auth.email_unverified" | "auth.pat_scope" | "auth.banned" => {
+            StatusCode::FORBIDDEN
+        }
         "db.not_configured" => StatusCode::SERVICE_UNAVAILABLE,
         "rpc.payload_too_large" => StatusCode::PAYLOAD_TOO_LARGE,
         "pull.merge_conflict" | "release.tag_taken" | "auth.taken" | "email.taken" => {

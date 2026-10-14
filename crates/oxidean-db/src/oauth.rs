@@ -832,10 +832,32 @@ pub async fn find_token_by_hash(
     pool: &DbPool,
     token_hash: &str,
 ) -> Result<Option<OAuthTokenRow>, String> {
+    find_token_by_hash_impl(pool, token_hash, false).await
+}
+
+/// Same as [`find_token_by_hash`] including soft-revoked rows — lets auth
+/// surfaces tell revoked apart from unknown.
+pub async fn find_token_by_hash_including_revoked(
+    pool: &DbPool,
+    token_hash: &str,
+) -> Result<Option<OAuthTokenRow>, String> {
+    find_token_by_hash_impl(pool, token_hash, true).await
+}
+
+async fn find_token_by_hash_impl(
+    pool: &DbPool,
+    token_hash: &str,
+    include_revoked: bool,
+) -> Result<Option<OAuthTokenRow>, String> {
+    let revoked_clause = if include_revoked {
+        ""
+    } else {
+        " AND revoked_at IS NULL"
+    };
     match pool {
         DbPool::Postgres(p) => {
             let row = sqlx::query(sqlx::AssertSqlSafe(format!(
-                "{TOKEN_SELECT_PG} WHERE token_hash = $1 AND revoked_at IS NULL"
+                "{TOKEN_SELECT_PG} WHERE token_hash = $1{revoked_clause}"
             )))
             .bind(token_hash)
             .fetch_optional(p)
@@ -848,7 +870,7 @@ pub async fn find_token_by_hash(
         }
         DbPool::MySql(p) => {
             let row = sqlx::query(sqlx::AssertSqlSafe(format!(
-                "{TOKEN_SELECT_MYSQL} WHERE token_hash = ? AND revoked_at IS NULL"
+                "{TOKEN_SELECT_MYSQL} WHERE token_hash = ?{revoked_clause}"
             )))
             .bind(token_hash)
             .fetch_optional(p)
@@ -861,7 +883,7 @@ pub async fn find_token_by_hash(
         }
         DbPool::Sqlite(p) => {
             let row = sqlx::query(sqlx::AssertSqlSafe(format!(
-                "{TOKEN_SELECT_SQLITE} WHERE token_hash = ?1 AND revoked_at IS NULL"
+                "{TOKEN_SELECT_SQLITE} WHERE token_hash = ?1{revoked_clause}"
             )))
             .bind(token_hash)
             .fetch_optional(p)
@@ -1253,24 +1275,30 @@ pub async fn find_device_code_by_user_code(
     }
 }
 
-/// Approve a pending code (records approver). Returns false if the row was not
-/// pending — the approval is a single-claim update so races resolve to one side.
+/// Approve a pending code (records approver). `granted_scopes` — when
+/// `Some`, replaces the stored scope string (consent-screen narrowing;
+/// validated ⊆ requested by the caller). Returns false if the row was not
+/// pending — the approval is a single-claim update so races resolve to one
+/// side.
 pub async fn approve_device_code(
     pool: &DbPool,
     id: &str,
     user_id: &str,
     approved_at: &str,
+    granted_scopes: Option<&str>,
 ) -> Result<bool, String> {
     match pool {
         DbPool::Postgres(p) => {
             let n = sqlx::query(
                 "UPDATE oauth_device_codes
-SET status = 'approved', user_id = $2, approved_at = $3::timestamptz
+SET status = 'approved', user_id = $2, approved_at = $3::timestamptz,
+    scopes = COALESCE($4, scopes)
 WHERE id = $1 AND status = 'pending'",
             )
             .bind(id)
             .bind(user_id)
             .bind(approved_at)
+            .bind(granted_scopes)
             .execute(p)
             .await
             .map_err(|e| format!("approve oauth device code failed: {e}"))?
@@ -1280,11 +1308,13 @@ WHERE id = $1 AND status = 'pending'",
         DbPool::MySql(p) => {
             let n = sqlx::query(
                 "UPDATE oauth_device_codes
-SET status = 'approved', user_id = ?, approved_at = ?
+SET status = 'approved', user_id = ?, approved_at = ?,
+    scopes = COALESCE(?, scopes)
 WHERE id = ? AND status = 'pending'",
             )
             .bind(user_id)
             .bind(approved_at)
+            .bind(granted_scopes)
             .bind(id)
             .execute(p)
             .await
@@ -1295,12 +1325,14 @@ WHERE id = ? AND status = 'pending'",
         DbPool::Sqlite(p) => {
             let n = sqlx::query(
                 "UPDATE oauth_device_codes
-SET status = 'approved', user_id = ?2, approved_at = ?3
+SET status = 'approved', user_id = ?2, approved_at = ?3,
+    scopes = COALESCE(?4, scopes)
 WHERE id = ?1 AND status = 'pending'",
             )
             .bind(id)
             .bind(user_id)
             .bind(approved_at)
+            .bind(granted_scopes)
             .execute(p)
             .await
             .map_err(|e| format!("approve oauth device code failed: {e}"))?

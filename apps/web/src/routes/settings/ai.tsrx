@@ -99,13 +99,16 @@ function AiSettingsContent(props: {
       <code className="font-mono">{mcpEndpoint}</code> — streamable HTTP, JSON-RPC 2.0. It exposes
       repository, issue, pull request, Actions, and package tools so MCP-capable agents can work the
       forge directly. Private data needs a credential — either OAuth, where the client opens this
-      instance's browser flow itself, or a bearer token minted under{" "}
+      instance's browser flow itself (the scope set defaults to the full first-party set; trim it on
+      the consent screen), or a bearer token minted under{" "}
       <AppLink href="/settings/tokens" className="text-foreground underline underline-offset-2">
         Personal access tokens
       </AppLink>{" "}
-      (<code className="font-mono">repo</code>, plus <code className="font-mono">package:*</code>{" "}
-      for the registry tools); the token lives in your harness config, never in this page. Anonymous
-      access sees public repositories only. Instance admins can disable the endpoint under{" "}
+      (<code className="font-mono">repo</code>, <code className="font-mono">workflow</code>,{" "}
+      <code className="font-mono">notifications</code>, and{" "}
+      <code className="font-mono">package:*</code> cover every tool); the token lives in your
+      harness config, never in this page. Anonymous access sees public repositories only. Instance
+      admins can disable the endpoint under{" "}
       <AppLink href="/admin/mcp" className="text-foreground underline underline-offset-2">
         Site administration
       </AppLink>

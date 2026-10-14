@@ -1,12 +1,14 @@
-//! Personal access token RPC (`pat.createClassic` / `createFineGrained` / `list` / `revoke`).
+//! Personal access token RPC (`pat.createClassic` / `createFineGrained` / `list` / `revoke`
+//! plus the bearer-callable `pat.self` / `pat.policy` introspection surface).
 
 pub mod bearer;
+pub mod policy;
 pub mod rate_limit;
 
 use oxidean_core::{
     AppError, ClassicPatScope, ContentsPerm, CreateClassicPatRequest, CreateFineGrainedPatRequest,
-    CreatePatResponse, FgPerms, FgRepoAccess, PatKind, PatListItem, CLASSIC_PAT_PREFIX,
-    FINE_GRAINED_PAT_PREFIX,
+    CreatePatResponse, FgPerms, FgRepoAccess, PatKind, PatListItem, PatPolicyPublic, PatSelfInfo,
+    CLASSIC_PAT_PREFIX, FINE_GRAINED_PAT_PREFIX,
 };
 use serde::Deserialize;
 use uuid::Uuid;
@@ -30,24 +32,14 @@ fn db_err(e: String) -> AppError {
     }
 }
 
-/// Reject missing/blank as `None`; otherwise require RFC3339 and a future instant.
-fn validate_expires_at(expires_at: Option<&str>) -> Result<Option<&str>, AppError> {
-    let Some(raw) = expires_at.map(str::trim).filter(|s| !s.is_empty()) else {
-        return Ok(None);
-    };
-    let dt = chrono::DateTime::parse_from_rfc3339(raw).map_err(|_| {
-        AppError::new(
-            "rpc.bad_input",
-            "expires_at must be a valid RFC3339 timestamp",
-        )
-    })?;
-    if dt.with_timezone(&chrono::Utc) <= chrono::Utc::now() {
-        return Err(AppError::new(
-            "rpc.bad_input",
-            "expires_at must be in the future",
-        ));
-    }
-    Ok(Some(raw))
+/// Apply the instance expiration policy to a create request's `expires_at`
+/// (omitted → default TTL; `"never"` gated by policy; explicit → capped).
+async fn resolve_expires_at_db(
+    db: &oxidean_db::Database,
+    expires_at: Option<&str>,
+) -> Result<Option<String>, AppError> {
+    let policy = policy::effective_policy(db).await;
+    policy::resolve_expires_at(&policy, expires_at)
 }
 
 fn require_session_user_id(ctx: &RpcCtx) -> Result<&str, AppError> {
@@ -202,9 +194,15 @@ pub async fn create_classic(
         ));
     }
 
-    let expires_at = validate_expires_at(req.expires_at.as_deref())?;
-    let (id, plaintext) =
-        mint_classic_pat(&ctx.db, &user.id, req.name.trim(), &req.scopes, expires_at).await?;
+    let expires_at = resolve_expires_at_db(&ctx.db, req.expires_at.as_deref()).await?;
+    let (id, plaintext) = mint_classic_pat(
+        &ctx.db,
+        &user.id,
+        req.name.trim(),
+        &req.scopes,
+        expires_at.as_deref(),
+    )
+    .await?;
 
     let row = ctx
         .db
@@ -315,7 +313,7 @@ pub async fn create_fine_grained(
     // Display fingerprint: brand prefix + first 8 hex of secret (not the hash).
     let token_prefix = format!("{FINE_GRAINED_PAT_PREFIX}{}", &secret_hex[..8]);
 
-    let expires_at = validate_expires_at(req.expires_at.as_deref())?;
+    let expires_at = resolve_expires_at_db(&ctx.db, req.expires_at.as_deref()).await?;
 
     let scopes_json = match req.packages {
         Some(oxidean_core::PackagesPerm::Read) => Some(
@@ -352,7 +350,7 @@ pub async fn create_fine_grained(
             Some(req.contents.as_str()),
             perms_json.as_deref(),
             Some(req.repo_access.as_str()),
-            expires_at,
+            expires_at.as_deref(),
             &repository_ids,
         )
         .await
@@ -389,7 +387,9 @@ struct RevokePatRequest {
     id: String,
 }
 
-/// Soft-revoke a PAT owned by the signed-in user.
+/// Soft-revoke a PAT owned by the signed-in user. Bearer-authenticated callers
+/// may only revoke *their own* token (`pat.revoke {id: self}` — the
+/// self-revoke `ox auth refresh` relies on); sessions revoke any owned token.
 pub async fn revoke(ctx: &RpcCtx, input: serde_json::Value) -> Result<serde_json::Value, AppError> {
     let user_id = require_session_user_id(ctx)?;
     let req: RevokePatRequest = serde_json::from_value(input)
@@ -400,6 +400,16 @@ pub async fn revoke(ctx: &RpcCtx, input: serde_json::Value) -> Result<serde_json
             "pat.not_found",
             "personal access token not found",
         ));
+    }
+
+    // A PAT may never manage tokens other than itself.
+    if let Some(pat) = ctx.pat.as_ref() {
+        if pat.token_id != id {
+            return Err(AppError::new(
+                "auth.pat_scope",
+                "pat.revoke: a personal access token may only revoke itself",
+            ));
+        }
     }
 
     let owned = ctx
@@ -419,4 +429,45 @@ pub async fn revoke(ctx: &RpcCtx, input: serde_json::Value) -> Result<serde_json
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
     ctx.db.revoke_pat(id, &now).await.map_err(db_err)?;
     Ok(serde_json::json!({ "ok": true }))
+}
+
+/// `pat.self` — describe the bearer PAT making this call. Bearer-only: a
+/// session cookie has no token to introspect (the web settings page lists
+/// tokens via `pat.list` instead).
+pub fn self_info(ctx: &RpcCtx) -> Result<PatSelfInfo, AppError> {
+    let pat = ctx.pat.as_ref().ok_or_else(|| {
+        AppError::new(
+            "auth.pat_scope",
+            "pat.self requires a personal access token",
+        )
+    })?;
+    Ok(PatSelfInfo {
+        id: pat.token_id.clone(),
+        name: pat.name.clone(),
+        token_prefix: pat.token_prefix.clone(),
+        kind: pat.kind.as_str().to_string(),
+        scopes: pat.scopes.iter().map(|s| s.as_str().to_string()).collect(),
+        expires_at: pat.expires_at_raw.clone(),
+        last_used_at: pat.last_used_at.clone(),
+        created_at: pat.created_at.clone(),
+    })
+}
+
+/// `pat.policy` — the effective expiration policy so token forms and `ox` can
+/// render/validate expiry choices. Any authenticated caller (session or PAT).
+pub async fn effective_policy(ctx: &RpcCtx) -> Result<PatPolicyPublic, AppError> {
+    require_session_user_id(ctx)?;
+    let p = policy::effective_policy(&ctx.db).await;
+    Ok(PatPolicyPublic {
+        default_ttl_days: p.default_ttl_days,
+        max_ttl_days: p.max_ttl_days,
+        allow_never_expire: p.allow_never_expire,
+    })
+}
+
+/// `pat.catalog` — the authoritative scope/permission catalog for pickers and
+/// consent screens. Any authenticated caller (session or PAT).
+pub fn catalog(ctx: &RpcCtx) -> Result<oxidean_core::PatCatalogPublic, AppError> {
+    require_session_user_id(ctx)?;
+    Ok(oxidean_core::public_catalog())
 }

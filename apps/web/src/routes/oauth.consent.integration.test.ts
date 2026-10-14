@@ -1,4 +1,5 @@
 import { cleanup, screen, waitFor } from "@octanejs/testing-library";
+import { act } from "octane";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithQueryClient } from "@/test/render-with-query";
 
@@ -118,6 +119,67 @@ describe("/oauth/consent (API-03)", () => {
         "https://app.example/callback?code=oxidean_oac_x&state=xyz",
       );
     });
+  }, 30_000);
+
+  it("unchecking a scope narrows granted_scope on approve", async () => {
+    authorizeMock.mockResolvedValue({
+      ok: true,
+      data: { redirect_to: "https://app.example/callback?code=oxidean_oac_x&state=xyz" },
+    });
+    const mod = await loadModule();
+    const Page = (mod.OAuthConsentPage ?? mod.default) as unknown;
+    renderWithQueryClient(Page);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("oauth-scope-repo")).toBeInTheDocument();
+    });
+    // Base UI forwards root clicks to its hidden input; jsdom doesn't run the
+    // synthetic span handler, so drive the input's change directly.
+    const checkbox = screen
+      .getByTestId("oauth-scope-repo")
+      .closest("label")
+      ?.querySelector("input[type=checkbox]") as HTMLInputElement;
+    expect(checkbox).not.toBeNull();
+    await act(async () => {
+      checkbox.click();
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("oauth-scope-repo")).toHaveAttribute("aria-checked", "false");
+    });
+    screen.getByRole("button", { name: "Authorize" }).click();
+
+    await waitFor(() => {
+      expect(authorizeMock).toHaveBeenCalledOnce();
+    });
+    const input = authorizeMock.mock.calls[0]![0] as Record<string, unknown>;
+    expect(input.approve).toBe(true);
+    expect(input.granted_scope).toBe("read:user");
+  }, 30_000);
+
+  it("unchecking every scope disables approve and shows the hint", async () => {
+    const mod = await loadModule();
+    const Page = (mod.OAuthConsentPage ?? mod.default) as unknown;
+    renderWithQueryClient(Page);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("oauth-scope-repo")).toBeInTheDocument();
+    });
+    const uncheck = (testid: string) =>
+      screen
+        .getByTestId(testid)
+        .closest("label")
+        ?.querySelector("input[type=checkbox]") as HTMLInputElement;
+    await act(async () => {
+      uncheck("oauth-scope-repo").click();
+      uncheck("oauth-scope-read:user").click();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Authorize" })).toBeDisabled();
+    });
+    expect(document.body.textContent).toContain("Select at least one scope");
+    // Deny stays available regardless of the checkbox state.
+    expect(screen.getByRole("button", { name: "Deny" })).toBeEnabled();
   }, 30_000);
 
   it("deny submits approve:false and redirects with access_denied", async () => {

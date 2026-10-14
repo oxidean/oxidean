@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use oxidean_cli::args;
 use oxidean_cli::commands::{self, Out, Runtime};
 use oxidean_cli::config::Config;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use wiremock::matchers::{body_json, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -49,7 +49,9 @@ async fn mount_manifest(server: &MockServer, procs: &[&str]) {
         .into();
     Mock::given(method("POST"))
         .and(path("/api/rpc"))
-        .and(body_json(json!({"procedure": "system.manifest", "input": {}})))
+        .and(body_json(
+            json!({"procedure": "system.manifest", "input": {}}),
+        ))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "ok": true,
             "data": {"procedures": procedures, "protocol_version": 1,
@@ -181,13 +183,7 @@ async fn release_upload_posts_multipart() {
     std::fs::write(&tmp, "hello").unwrap();
     let inv = invocation(
         &server,
-        &[
-            "release",
-            "upload",
-            "o/n",
-            "v1",
-            tmp.to_str().unwrap(),
-        ],
+        &["release", "upload", "o/n", "v1", tmp.to_str().unwrap()],
     );
     let out = commands::dispatch(&inv, &runtime()).await.unwrap();
     match out {
@@ -230,7 +226,14 @@ async fn release_download_writes_files() {
     let dir = std::env::temp_dir().join(format!("ox-e2e-dl-{}", std::process::id()));
     let inv = invocation(
         &server,
-        &["release", "download", "o/n", "v1", "--dir", dir.to_str().unwrap()],
+        &[
+            "release",
+            "download",
+            "o/n",
+            "v1",
+            "--dir",
+            dir.to_str().unwrap(),
+        ],
     );
     let out = commands::dispatch(&inv, &runtime()).await.unwrap();
     match out {
@@ -257,81 +260,6 @@ async fn notification_read_all_hits_mark_all() {
         .await;
 
     let inv = invocation(&server, &["notification", "read", "--all"]);
-    commands::dispatch(&inv, &runtime()).await.unwrap();
-    server.verify().await;
-}
-
-// ── admin auth ─────────────────────────────────────────────────────
-
-fn auth_settings(allow_signup: bool) -> Value {
-    json!({
-        "provider_mode": "local",
-        "email_provider": "log",
-        "from_address": null,
-        "oidc_issuer": null,
-        "oidc_client_id": null,
-        "workos_client_id": null,
-        "allow_signup": allow_signup,
-        "default_visibility": "public"
-    })
-}
-
-#[tokio::test]
-async fn admin_auth_get_calls_get_settings() {
-    let server = MockServer::start().await;
-    mount_manifest(&server, &["admin.auth.get_settings"]).await;
-    Mock::given(method("POST"))
-        .and(path("/api/rpc"))
-        .and(body_json(
-            json!({"procedure": "admin.auth.get_settings", "input": {}}),
-        ))
-        .respond_with(ResponseTemplate::new(200).set_body_json(
-            json!({"ok": true, "data": auth_settings(true)}),
-        ))
-        .expect(1)
-        .mount(&server)
-        .await;
-
-    let inv = invocation(&server, &["admin", "auth"]);
-    let out = commands::dispatch(&inv, &runtime()).await.unwrap();
-    assert!(matches!(out, Out::Rpc { .. }));
-    server.verify().await;
-}
-
-#[tokio::test]
-async fn admin_auth_set_merges_flags_over_current() {
-    let server = MockServer::start().await;
-    mount_manifest(
-        &server,
-        &["admin.auth.get_settings", "admin.auth.update_settings"],
-    )
-    .await;
-    Mock::given(method("POST"))
-        .and(path("/api/rpc"))
-        .and(body_json(
-            json!({"procedure": "admin.auth.get_settings", "input": {}}),
-        ))
-        .respond_with(ResponseTemplate::new(200).set_body_json(
-            json!({"ok": true, "data": auth_settings(true)}),
-        ))
-        .expect(1)
-        .mount(&server)
-        .await;
-    // The update payload is the full settings object — only --no-signup
-    // flips; every other field carries the server's current values over.
-    let mut merged = auth_settings(true);
-    merged["allow_signup"] = json!(false);
-    Mock::given(method("POST"))
-        .and(path("/api/rpc"))
-        .and(body_json(
-            json!({"procedure": "admin.auth.update_settings", "input": merged}),
-        ))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"ok": true, "data": {}})))
-        .expect(1)
-        .mount(&server)
-        .await;
-
-    let inv = invocation(&server, &["admin", "auth", "set", "--no-signup"]);
     commands::dispatch(&inv, &runtime()).await.unwrap();
     server.verify().await;
 }
@@ -394,7 +322,16 @@ async fn run_watch_timeout_is_usage_error() {
 
     let inv = invocation(
         &server,
-        &["run", "watch", "o/n", "r1", "--interval", "1", "--timeout", "1"],
+        &[
+            "run",
+            "watch",
+            "o/n",
+            "r1",
+            "--interval",
+            "1",
+            "--timeout",
+            "1",
+        ],
     );
     let err = commands::dispatch(&inv, &runtime()).await.err().unwrap();
     assert!(format!("{err}").contains("timed out"), "{err}");
@@ -422,17 +359,14 @@ fn parse_argv(argv: &[&str]) -> args::Invocation {
     args::parse(&full).unwrap()
 }
 
-fn runtime_with(
-    dir: &tempfile::TempDir,
-    instances: &[&str],
-    default: Option<&str>,
-) -> Runtime {
+fn runtime_with(dir: &tempfile::TempDir, instances: &[&str], default: Option<&str>) -> Runtime {
     let mut map = std::collections::BTreeMap::new();
     for u in instances {
         map.insert(
             u.to_string(),
             oxidean_cli::config::InstanceEntry {
                 token: Some("secret-pat-value".into()),
+                secret_store: None,
             },
         );
     }
@@ -467,7 +401,11 @@ async fn config_set_get_list_roundtrip() {
         Some("https://a.example.com") // normalized: trailing slash stripped
     );
 
-    let rt = runtime_with(&dir, &["https://a.example.com"], Some("https://a.example.com"));
+    let rt = runtime_with(
+        &dir,
+        &["https://a.example.com"],
+        Some("https://a.example.com"),
+    );
     match commands::dispatch(&parse_argv(&["config", "get", "default_instance"]), &rt)
         .await
         .unwrap()
@@ -530,14 +468,12 @@ async fn config_token_get_reports_state_not_secret() {
             .await
             .is_err()
     );
-    assert!(
-        commands::dispatch(
-            &parse_argv(&["config", "set", "instances.no-scheme.token", "x"]),
-            &rt,
-        )
-        .await
-        .is_err()
-    );
+    assert!(commands::dispatch(
+        &parse_argv(&["config", "set", "instances.no-scheme.token", "x"]),
+        &rt,
+    )
+    .await
+    .is_err());
 }
 
 #[tokio::test]
@@ -570,18 +506,21 @@ async fn auth_switch_rejects_unknown_and_noninteractive() {
         &rt,
     )
     .await
-    .err().unwrap();
+    .err()
+    .unwrap();
     assert!(format!("{err}").contains("not logged in"), "{err}");
     // stdin isn't a TTY in tests — no-arg switch is a usage error
     let err = commands::dispatch(&parse_argv(&["auth", "switch"]), &rt)
         .await
-        .err().unwrap();
+        .err()
+        .unwrap();
     assert!(format!("{err}").contains("non-interactive"), "{err}");
     // empty instance store gets the login pointer instead
     let rt = runtime_with(&dir, &[], None);
     let err = commands::dispatch(&parse_argv(&["auth", "switch"]), &rt)
         .await
-        .err().unwrap();
+        .err()
+        .unwrap();
     assert!(format!("{err}").contains("no logged-in instances"), "{err}");
 }
 
@@ -672,4 +611,144 @@ async fn mcp_status_reports_auth_rejected() {
         }
         _ => panic!("expected report"),
     }
+}
+
+// ── repo templates + create --template ────────────────────────────
+
+fn create_defaults_body() -> ResponseTemplate {
+    ResponseTemplate::new(200).set_body_json(json!({
+        "ok": true,
+        "data": {
+            "default_visibility": "private",
+            "gitignores": [{"id": "rust", "label": "Rust", "group": "Language",
+                            "description": "Rust ignores", "provenance": "builtin"}],
+            "stacks": [
+                {"id": "go-service", "label": "Go service", "group": "Language",
+                 "description": "Go microservice layout", "provenance": "builtin"},
+                {"id": "instance:pack-1", "label": "Company base", "group": "Ops",
+                 "description": "admin pack", "provenance": "instance",
+                 "source_label": "company-base"},
+                {"id": "repo:t1", "label": "starter", "group": "From template",
+                 "description": "user template", "provenance": "user",
+                 "source_label": "alice/starter"},
+            ]
+        }
+    }))
+}
+
+async fn mount_create_defaults(server: &MockServer) {
+    Mock::given(method("POST"))
+        .and(path("/api/rpc"))
+        .and(body_json(
+            json!({"procedure": "repo.createDefaults", "input": {}}),
+        ))
+        .respond_with(create_defaults_body())
+        .mount(server)
+        .await;
+}
+
+#[tokio::test]
+async fn repo_templates_lists_catalog() {
+    let server = MockServer::start().await;
+    mount_manifest(&server, &["repo.createDefaults"]).await;
+    mount_create_defaults(&server).await;
+
+    let inv = invocation(&server, &["repo", "templates"]);
+    let out = commands::dispatch(&inv, &runtime()).await.unwrap();
+    match out {
+        Out::Rpc { pretty, .. } => {
+            assert!(pretty.contains("go-service"), "{pretty}");
+            assert!(pretty.contains("company-base"), "{pretty}");
+            assert!(pretty.contains("alice/starter"), "{pretty}");
+            assert!(pretty.contains("[instance]"), "{pretty}");
+            assert!(pretty.contains("Default visibility: private"), "{pretty}");
+        }
+        _ => panic!("expected rpc"),
+    }
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn repo_create_template_ref_resolves_to_stack_id() {
+    let server = MockServer::start().await;
+    mount_manifest(&server, &["repo.create", "repo.createDefaults"]).await;
+    mount_create_defaults(&server).await;
+    Mock::given(method("POST"))
+        .and(path("/api/rpc"))
+        .and(body_json(json!({
+            "procedure": "repo.create",
+            "input": {"name": "svc", "stack_id": "instance:pack-1"}
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "ok": true, "data": {"owner_username": "me", "name": "svc",
+                                 "visibility": "private"}
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    // Friendly ref (pack slug) resolves to the prefixed picker id.
+    let inv = invocation(
+        &server,
+        &["repo", "create", "svc", "--template", "Company-Base"],
+    );
+    commands::dispatch(&inv, &runtime()).await.unwrap();
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn repo_create_template_by_repo_source_label() {
+    let server = MockServer::start().await;
+    mount_manifest(&server, &["repo.create", "repo.createDefaults"]).await;
+    mount_create_defaults(&server).await;
+    Mock::given(method("POST"))
+        .and(path("/api/rpc"))
+        .and(body_json(json!({
+            "procedure": "repo.create",
+            "input": {"name": "svc", "stack_id": "repo:t1"}
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "ok": true, "data": {"owner_username": "me", "name": "svc",
+                                 "visibility": "private"}
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let inv = invocation(
+        &server,
+        &["repo", "create", "svc", "--template", "alice/starter"],
+    );
+    commands::dispatch(&inv, &runtime()).await.unwrap();
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn repo_create_unknown_template_lists_valid_refs() {
+    let server = MockServer::start().await;
+    mount_manifest(&server, &["repo.create", "repo.createDefaults"]).await;
+    mount_create_defaults(&server).await;
+
+    let inv = invocation(&server, &["repo", "create", "svc", "--template", "bogus"]);
+    let err = commands::dispatch(&inv, &runtime()).await.err().unwrap();
+    let msg = format!("{err}");
+    assert!(msg.contains("unknown template 'bogus'"), "{msg}");
+    assert!(msg.contains("company-base"), "{msg}");
+    assert!(msg.contains("alice/starter"), "{msg}");
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn repo_create_no_name_non_tty_is_usage_error() {
+    let server = MockServer::start().await;
+    mount_manifest(&server, &["repo.create", "repo.createDefaults"]).await;
+
+    // stdin/stdout aren't TTYs under the test harness — bare `repo create`
+    // must keep the pre-wizard usage error instead of prompting.
+    let inv = invocation(&server, &["repo", "create"]);
+    let err = commands::dispatch(&inv, &runtime()).await.err().unwrap();
+    assert!(
+        format!("{err}").contains("usage: ox repo create <name>"),
+        "{err}"
+    );
 }

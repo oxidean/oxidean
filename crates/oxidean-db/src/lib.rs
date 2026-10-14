@@ -25,6 +25,7 @@ pub mod org_invites;
 pub mod org_members;
 pub mod organizations;
 pub mod packages;
+pub mod pat_settings;
 pub mod pats;
 pub mod pool;
 pub mod probe;
@@ -2711,6 +2712,15 @@ impl Database {
         pats::find_by_token_hash(self.require_pool()?, token_hash).await
     }
 
+    /// Same as [`Self::find_pat_by_token_hash`] but returns soft-revoked rows too —
+    /// the bearer-auth taxonomy needs this to tell revoked apart from unknown.
+    pub async fn find_pat_by_token_hash_including_revoked(
+        &self,
+        token_hash: &str,
+    ) -> Result<Option<pats::PatRow>, String> {
+        pats::find_by_token_hash_including_revoked(self.require_pool()?, token_hash).await
+    }
+
     pub async fn list_pats_for_user(&self, user_id: &str) -> Result<Vec<pats::PatRow>, String> {
         pats::list_for_user(self.require_pool()?, user_id).await
     }
@@ -2870,6 +2880,15 @@ impl Database {
         .await
     }
 
+    /// Same as [`Self::find_oauth_token_by_hash`] including revoked rows — the auth
+    /// taxonomy needs it to distinguish revoked from unknown.
+    pub async fn find_oauth_token_by_hash_including_revoked(
+        &self,
+        token_hash: &str,
+    ) -> Result<Option<oauth::OAuthTokenRow>, String> {
+        oauth::find_token_by_hash_including_revoked(self.require_pool()?, token_hash).await
+    }
+
     /// Lookup by SHA-256 hex — `None` when missing or revoked.
     pub async fn find_oauth_token_by_hash(
         &self,
@@ -2944,13 +2963,17 @@ impl Database {
     }
 
     /// Single-claim approve — false when the code was not pending.
+    /// `granted_scopes` replaces the stored scope string when `Some`
+    /// (consent-screen narrowing — caller validates ⊆ requested).
     pub async fn approve_oauth_device_code(
         &self,
         id: &str,
         user_id: &str,
         approved_at: &str,
+        granted_scopes: Option<&str>,
     ) -> Result<bool, String> {
-        oauth::approve_device_code(self.require_pool()?, id, user_id, approved_at).await
+        oauth::approve_device_code(self.require_pool()?, id, user_id, approved_at, granted_scopes)
+            .await
     }
 
     /// Single-claim deny — false when the code was not pending.
@@ -3949,6 +3972,30 @@ impl Database {
         enabled: Option<bool>,
     ) -> Result<mcp_settings::McpSettingsRow, String> {
         mcp_settings::update_mcp_settings(self.require_pool()?, enabled).await
+    }
+
+    // --- instance PAT expiration policy (PAT-01) ---
+
+    pub async fn get_pat_settings(&self) -> Result<pat_settings::PatSettingsRow, String> {
+        pat_settings::get_pat_settings(self.require_pool()?).await
+    }
+
+    /// Write the full override triple in one UPDATE — `None` clears that column
+    /// back to "env default". Partial updates merge with the stored row first
+    /// (the API layer does this).
+    pub async fn update_pat_settings(
+        &self,
+        default_ttl_days: Option<i64>,
+        max_ttl_days: Option<i64>,
+        allow_never_expire: Option<bool>,
+    ) -> Result<pat_settings::PatSettingsRow, String> {
+        pat_settings::update_pat_settings(
+            self.require_pool()?,
+            default_ttl_days,
+            max_ttl_days,
+            allow_never_expire,
+        )
+        .await
     }
 
     /// Wipe tenant + auth data so the instance returns to empty-setup (`needs_setup`).

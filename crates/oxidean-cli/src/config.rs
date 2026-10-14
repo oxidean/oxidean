@@ -31,8 +31,14 @@ pub struct Config {
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct InstanceEntry {
+    /// Token stored in this file (0600) — `None` when the credential lives
+    /// in the OS keyring (`secret_store: "keyring"`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub token: Option<String>,
+    /// Where the credential actually lives: `"keyring"` | `"file"`. Absent
+    /// on entries written before keyring support — treated as file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret_store: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -163,10 +169,14 @@ pub fn resolve_instance(
     Ok(cfg.default_instance.clone())
 }
 
-/// `OXIDEAN_TOKEN` env → stored per-instance token.
+/// `OXIDEAN_TOKEN` env → stored per-instance token (keyring or file —
+/// `crate::keystore::resolve` picks the store the entry records).
 pub fn resolve_token(env: Option<&str>, cfg: &Config, instance: &str) -> Option<String> {
-    env.map(str::to_string)
-        .or_else(|| cfg.instances.get(instance).and_then(|e| e.token.clone()))
+    env.map(str::to_string).or_else(|| {
+        cfg.instances
+            .get(instance)
+            .and_then(|e| crate::keystore::resolve(instance, e))
+    })
 }
 
 /// Read `OXIDEAN_INSTANCE` / `OXIDEAN_TOKEN` for callers (kept thin so the
@@ -189,6 +199,7 @@ mod tests {
             "https://cfg.example.com".to_string(),
             InstanceEntry {
                 token: Some("stored-token".to_string()),
+                secret_store: Some("file".to_string()),
             },
         );
         Config {

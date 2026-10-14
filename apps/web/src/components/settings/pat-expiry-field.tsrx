@@ -15,8 +15,8 @@ import {
 } from "@/components/ui/select";
 import {
   expiryPresetLabel,
-  PAT_EXPIRY_PRESETS,
   tomorrowDateValue,
+  type PatExpiryOption,
   type PatExpiryPreset,
 } from "@/components/settings/pat-expiry";
 import { cn } from "@/lib/utils";
@@ -24,6 +24,8 @@ import { cn } from "@/lib/utils";
 type PatExpiryFieldProps = {
   preset: PatExpiryPreset;
   customDate: string;
+  options: PatExpiryOption[];
+  maxDate?: string;
   disabled?: boolean;
   onPresetChange: (preset: PatExpiryPreset) => void;
   onCustomDateChange: (date: string) => void;
@@ -43,6 +45,8 @@ export function PatExpiryFields(props: {
   form: {
     Field: (props: { name: string; children?: unknown }) => unknown;
   };
+  options: PatExpiryOption[];
+  maxDate?: string;
   disabled?: boolean;
   noneHint?: string;
 }) @{
@@ -51,6 +55,8 @@ export function PatExpiryFields(props: {
       <PatExpiryDateInner
         form={props.form}
         presetField={presetField}
+        options={props.options}
+        maxDate={props.maxDate}
         disabled={props.disabled}
         noneHint={props.noneHint}
       />
@@ -66,6 +72,8 @@ function PatExpiryDateInner(props: {
     state: { value: PatExpiryPreset };
     handleChange: (v: PatExpiryPreset) => void;
   };
+  options: PatExpiryOption[];
+  maxDate?: string;
   disabled?: boolean;
   noneHint?: string;
 }) @{
@@ -74,6 +82,8 @@ function PatExpiryDateInner(props: {
       <PatExpiryField
         preset={props.presetField.state.value}
         customDate={dateField.state.value as string}
+        options={props.options}
+        maxDate={props.maxDate}
         disabled={props.disabled}
         onPresetChange={(p) => props.presetField.handleChange(p)}
         onCustomDateChange={(d) => dateField.handleChange(d)}
@@ -87,6 +97,8 @@ function PatExpiryDateInner(props: {
 function PatExpiryField({
   preset,
   customDate,
+  options,
+  maxDate,
   disabled,
   onPresetChange,
   onCustomDateChange,
@@ -101,7 +113,7 @@ function PatExpiryField({
       value={preset}
       onValueChange={(next) => {
         if (typeof next !== "string") return;
-        if (PAT_EXPIRY_PRESETS.some((p) => p.value === next)) {
+        if (options.some((p) => p.value === next)) {
           onPresetChange(next as PatExpiryPreset);
         }
       }}
@@ -112,7 +124,7 @@ function PatExpiryField({
         disabled={disabled}
         data-testid="pat-expiry-preset"
       >
-        <SelectValue>{expiryPresetLabel(preset) as string}</SelectValue>
+        <SelectValue>{expiryPresetLabel(options, preset) as string}</SelectValue>
         <SelectIcon>
           <ChevronDown aria-hidden size={16} />
         </SelectIcon>
@@ -123,7 +135,7 @@ function PatExpiryField({
         <SelectPositioner sideOffset={4}>
           <SelectPopup>
             <SelectList>
-              @for (const opt of PAT_EXPIRY_PRESETS; key opt.value) {
+              @for (const opt of options; key opt.value) {
                 <SelectItem value={opt.value} data-testid={`pat-expiry-option-${opt.value}`}>
                   <SelectItemIndicator>
                     <Check aria-hidden size={16} className="text-primary" />
@@ -146,6 +158,7 @@ function PatExpiryField({
         type="date"
         value={customDate}
         min={tomorrowDateValue() as string}
+        max={maxDate as string | undefined}
         aria-label="Expiration date"
         disabled={disabled || !showCustom}
         className="max-w-xs"

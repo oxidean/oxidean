@@ -151,6 +151,7 @@ SSO start routes redirect to the IdP when configured. If WorkOS/OIDC ENV is miss
 | `admin.auth.update_settings` | Update provider/email/`allow_signup`; rebuild email sender | Admin session |
 | `admin.instance.factory_reset` | Wipe users, orgs, repos + issue domain (DB); optional disk wipe via `scope` | Sys-admin |
 | `admin.mcp.getSettings` / `updateSettings` | Instance MCP endpoint gate — `enabled` env-default vs stored override; `clear_overrides` reverts | Sys-admin |
+| `admin.pat.getSettings` / `updateSettings` | PAT expiration policy — env defaults vs stored overrides (`default_ttl_days`, `max_ttl_days`, `allow_never_expire`); `clear_overrides` reverts | Sys-admin |
 | `issue.create` / `get` / `list` / `update` / `close` / `reopen` / `history` / `delete` | Per-repo issues (`#N`); create/comment/react = verified + Read; edit/close/reopen = author or Write+ | Session (+ capability) |
 | `issue.comments.*` | Comment CRUD + history; author or Write+ moderate-delete | Session (+ capability) |
 | `issue.labels.set` / `assignees.set` / `assigneeCandidates` | Assign labels / assignees (Write+; assignees must have Read+) | Session (+ capability) |
@@ -174,8 +175,9 @@ SSO start routes redirect to the IdP when configured. If WorkOS/OIDC ENV is miss
 | `label.listForRepo` / `listForOrg` / `create` / `update` / `delete` | Org/repo label definitions (Admin for defs) | Session (+ capability) |
 | `pat.createClassic` | Mint classic PAT (`oxidean_pat_…`); one-time plaintext in response. Classic scopes include optional `package:read` / `package:write` (repo scope does **not** imply packages) | Session + verified email |
 | `pat.createFineGrained` | Mint fine-grained PAT (`oxidean_fg_…`); optional Packages Read/Write | Session + verified email |
-| `pat.list` | List active PATs for the signed-in user (no secrets) | Session |
-| `pat.revoke` | Soft-revoke a PAT by `id` | Session |
+| `pat.list` | List active PATs for the calling user (no secrets) | Session or PAT |
+| `pat.revoke` | Soft-revoke a PAT by `id`; bearer callers limited to their own id | Session or owning PAT |
+| `pat.self` / `pat.policy` / `pat.catalog` | Token introspection, effective expiry policy, scope catalog | Session or PAT |
 | `packages.list` | List packages for an owner login or `repository_id` (ACL-filtered) | Session + verified |
 | `packages.deleteVersion` | Delete a version; `confirm` must equal `{name}@{version}` | Session + owner Admin capability |
 | `packages.adminUsage` | Per-owner storage usage + format/package breakdown | Sys-admin |
@@ -433,6 +435,8 @@ Manage tokens with the session cookie via RPC (or `@oxidean/api-client`). Token 
 { "name": "laptop", "scopes": ["repo"], "expires_at": null }
 ```
 
+**Expiration policy** applies to `pat.createClassic`, `pat.createFineGrained`, and device-grant-minted PATs alike: `expires_at` omitted/null → `now + default_ttl_days`; `"never"` → no expiry, only when `allow_never_expire` is on (`rpc.bad_input` otherwise); an explicit RFC3339 timestamp must be future and within `max_ttl_days`. Defaults come from `OXIDEAN_PAT_DEFAULT_TTL_DAYS` (90), `OXIDEAN_PAT_MAX_TTL_DAYS` (365), `OXIDEAN_PAT_ALLOW_NO_EXPIRY` (false); sys-admins override per instance via `admin.pat.getSettings` / `admin.pat.updateSettings` (`clear_overrides` reverts to env). The effective policy is readable by any client through `pat.policy`.
+
 Classic catalog (GitHub-classic parity): `repo`, `repo:status`, `repo:invite`, `public_repo`, `security_events`, `workflow`, `package:read`, `package:write`, `package:delete`, `notifications`, `read:user`, `user`, `user:email`, `user:follow`, `read:org`, `write:org`, `admin:repo_hook`, `read:public_key`, `write:public_key`, `admin:public_key`, `read:gpg_key`, `write:gpg_key`, `admin:gpg_key`, `delete_repo`, `project`, `read:project`. Scope implications follow GitHub: `user` ⊃ `read:user`/`user:email`/`user:follow`; `write:org` ⊃ `read:org`; `admin:`/`write:` key scopes imply their `read:` tier; `package:write` ⊃ `package:read`. `delete_repo` and `package:delete` are standalone — never implied.
 
 `pat.createFineGrained` input:
@@ -452,6 +456,16 @@ Classic catalog (GitHub-classic parity): `repo`, `repo:status`, `repo:invite`, `
 `perms` families — repo-bound (require a covered repository): `issues`, `pull_requests`, `actions`, `commit_statuses`, `secrets`, `variables`, `environments`, `deployments`, `webhooks`, `administration`, `metadata`, `pages`, `releases`. Account-level (act on the token owner): `emails`, `notifications`, `profile`, `ssh_keys`, `gpg_keys`, `starring`, `watching`, `followers`. Each takes `"read"` or `"write"`; `write` implies `read`. `metadata` satisfies repo-metadata reads in place of `contents`; `releases:read` also accepts `contents`.
 
 Create responses include a one-time plaintext `token` (store it immediately) plus a metadata `item` **without** the secret. `pat.list` / list items never return the secret — only `token_prefix`, scopes/permissions, `last_used_at` / `last_used_ip`, etc. `pat.revoke` input: `{ "id": "…" }`.
+
+Additional procedures:
+
+| Procedure | Purpose | Auth |
+| --- | --- | --- |
+| `pat.self` | Identity of the calling token — id, name, prefix, kind, scopes/perms, `expires_at`, `created_at`, `last_used_at` | Any PAT (or session) |
+| `pat.policy` | Effective expiration policy `{ default_ttl_days, max_ttl_days, allow_never_expire }` | Any PAT (or session) |
+| `pat.catalog` | Scope catalog — classic scopes (description, UI group, implication edges) + fine-grained permission families | Any PAT (or session) |
+| `pat.revoke` | Bearer callers may revoke **only their own** id; sessions may revoke any owned token | Session or owning PAT |
+| `admin.pat.getSettings` / `updateSettings` | Env-default vs stored-override PAT expiration policy; `clear_overrides` reverts | Sys-admin session |
 
 Minting requires a verified email (`auth.email_unverified` otherwise). Empty note/name → `pat.note_required`. Selected fine-grained with no repositories → `pat.repos_required`. Invalid classic scopes or foreign/empty-id fine-grained `selected` repos → `pat.invalid_scope`. Unknown or non-owned revoke id → `pat.not_found`.
 
@@ -473,7 +487,7 @@ Rules:
 - The `oxidean_session` cookie always wins — if it is present, `Authorization` is ignored for session resolution.
 - Bearer-authenticated calls resolve the **token owner** as the request identity; repository ACL checks behave exactly as if the owner were signed in.
 - Bearer responses never carry `Set-Cookie`, and PAT calls never create, refresh, or clear sessions.
-- Bad, revoked, or expired tokens → `auth.unauthenticated` (HTTP 401 with `WWW-Authenticate: Bearer`; an RPC error frame on WebSocket). A Bearer header is an explicit credential — invalid tokens are never silently treated as anonymous.
+- Bad tokens → `auth.unauthenticated` (HTTP 401 with `WWW-Authenticate: Bearer`; an RPC error frame on WebSocket). Revoked and expired tokens are distinct — `auth.token_revoked` and `auth.token_expired` (also 401) so clients can offer the right recovery instead of treating them as missing credentials. A Bearer header is an explicit credential — invalid tokens are never silently treated as anonymous.
 - Failed-auth rate limiting is shared with Git Smart HTTP PAT auth (per-IP and per-user windows); a tripped limiter → `auth.rate_limited` (HTTP 429 with `Retry-After`).
 
 **Scope model.** Procedures are classified at dispatch; insufficient scope → `auth.pat_scope` (HTTP 403).
@@ -501,7 +515,9 @@ Rules:
 
 Fine-grained coverage = `repo_access` `selected` ids, or `all` (personal-owned plus org Owner/Admin repositories — same rule as Git Smart HTTP). Public repositories stay readable with any valid fine-grained token; denied reads on private repositories return `repo.not_found` rather than a scope error, matching the anti-enumeration rule for anonymous callers. Account-level FG families need no repository binding.
 
-**Never callable with a PAT** (session cookie required, `auth.pat_scope` otherwise): `admin.*` and `packages.admin*` (instance administration), auth lifecycle (`auth.login`/`signup`/`logout`/verify/reset/setup), PAT management (`pat.*` — a token never mints or revokes tokens), OAuth app + device-grant procedures (`oauthApp.*`, `oauth.*`), invite accepts, and any procedure not in the allowed classes above. Unrecognized procedures fail closed.
+**Never callable with a PAT** (session cookie required, `auth.pat_scope` otherwise): `admin.*` and `packages.admin*` (instance administration), auth lifecycle (`auth.login`/`signup`/`logout`/verify/reset/setup), PAT minting (`pat.createClassic`/`createFineGrained` — a token never mints tokens), OAuth app + device-grant procedures (`oauthApp.*`, `oauth.*`), invite accepts, and any procedure not in the allowed classes above. Unrecognized procedures fail closed.
+
+A PAT **may** call `pat.self` / `pat.policy` / `pat.catalog` (introspection, any valid token) and `pat.list` / `pat.revoke` — the revoke handler enforces `id == self` for bearer callers, so a token can introspect and self-revoke but can never list or revoke anything beyond its own row set.
 
 WebSocket: send the `Authorization` header on the upgrade request. The credential is re-validated per RPC frame, so revoking or expiring a token takes effect on the next frame.
 
@@ -577,9 +593,15 @@ max 10 per app.
 2. On approve, the browser redirects to `redirect_uri?code=…&state=…`; deny yields `error=access_denied`. Codes are single-use and expire after 10 minutes.
 3. Exchange the code at `POST /oauth/token` (form-encoded, or JSON; HTTP Basic `client_id:client_secret` also accepted): `grant_type=authorization_code&code=…&redirect_uri=…&client_id=…&client_secret=…` → `{ "access_token": "oxidean_oat_…", "token_type": "bearer", "expires_in": 28800, "scope": "…" }`. Wrong secret → `invalid_client`; used/expired/mismatched code → `invalid_grant`.
 
-**Scopes** (space-delimited): `read:user` (default; identity via
-`/oauth/userinfo`), `user:email` (adds `email` to userinfo), `repo` (git smart
-HTTP), `package:read` / `package:write` (package registries).
+**Scopes** (space-delimited) are validated against the same catalog
+`pat.catalog` exposes (see `pat.createClassic` above), so OAuth apps can
+request any classic scope the instance supports. `read:user` (default;
+identity via `/oauth/userinfo`), `user:email` (adds `email` to userinfo),
+`repo` (git smart HTTP), `package:read` / `package:write` (package
+registries) remain the common set. `oauthApp.authorizeInfo` and
+`oauth.deviceInfo` return `scope_details` — parsed scope names with
+catalog descriptions — so consent screens render human-readable labels
+without a hard-coded map.
 
 **Using the token:** `GET /oauth/userinfo` with `Authorization: Bearer
 oxidean_oat_…` returns `{ id, username, display_name, avatar_url?, email? }`.
@@ -616,6 +638,9 @@ auth). Pending polls return `authorization_pending` (keep polling at
 and `expired_token`. On approval the endpoint mints a classic PAT
 (`oxidean_pat_…`) with the requested scopes — returned as `access_token` —
 so device sign-ins land on the same Bearer credential `--token` logins use.
+The minted PAT carries the instance expiration policy's default TTL (see
+[Personal access tokens](#personal-access-tokens-pat)) — CLI tokens expire
+like any other PAT and are renewed with `ox auth refresh`.
 
 ### Organizations (`org.*`) & collaborators
 

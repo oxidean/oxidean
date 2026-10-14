@@ -47,12 +47,15 @@ impl std::fmt::Display for CallError {
 
 impl std::error::Error for CallError {}
 
-/// Exit code for a `{ok:false}` envelope: auth failures → 3, else 1.
+/// Exit code for a `{ok:false}` envelope: credential/authorization failures
+/// → 3 (mirrors the server's 401/403 mapping), anything else → 1.
 pub fn error_exit_code(error: &AppError) -> u8 {
-    if error.code == "auth.unauthenticated" {
-        3
-    } else {
-        1
+    match error.code.as_str() {
+        "auth.unauthenticated" | "auth.token_invalid" | "auth.token_expired"
+        | "auth.token_revoked" | "auth.pat_scope" | "auth.banned"
+        | "auth.email_unverified" | "auth.forbidden" | "admin.forbidden"
+        | "auth.setup_required" => 3,
+        _ => 1,
     }
 }
 
@@ -176,6 +179,18 @@ mod tests {
             error_exit_code(&AppError::new("auth.unauthenticated", "nope")),
             3
         );
+        for code in [
+            "auth.token_expired",
+            "auth.token_revoked",
+            "auth.pat_scope",
+            "auth.banned",
+            "admin.forbidden",
+        ] {
+            assert_eq!(error_exit_code(&AppError::new(code, "nope")), 3, "{code}");
+        }
         assert_eq!(error_exit_code(&AppError::new("repo.not_found", "nope")), 1);
+        // auth.* business errors are not credential failures
+        assert_eq!(error_exit_code(&AppError::new("auth.taken", "nope")), 1);
+        assert_eq!(error_exit_code(&AppError::new("auth.rate_limited", "nope")), 1);
     }
 }

@@ -29,6 +29,11 @@ use crate::repo::{
 const WWW_AUTHENTICATE: &str = r#"Basic realm="Oxidean Git""#;
 const PAT_HINT: &str =
     "Authentication failed. Use a personal access token as the password (not your account password). Create one in Settings → Personal access tokens.";
+const PAT_HINT_REVOKED: &str =
+    "Authentication failed. This personal access token has been revoked. Create a new one in Settings → Personal access tokens or run `ox auth login` again.";
+const PAT_HINT_EXPIRED: &str =
+    "Authentication failed. This personal access token has expired. Create a new one in Settings → Personal access tokens or run `ox auth refresh`/`ox auth login` again.";
+const PAT_HINT_BANNED: &str = "Authentication failed. This account has been suspended.";
 
 /// Username aliases accepted for Basic auth (identity still comes from the PAT) — D-10.
 /// 401 responses set `WWW-Authenticate: Basic realm="Oxidean Git"`.
@@ -40,13 +45,19 @@ pub struct InfoRefsQuery {
 }
 
 fn unauthorized_pat_hint() -> Response {
+    unauthorized_pat_hint_reason(PAT_HINT)
+}
+
+/// 401 with a reason-specific hint body — revoked/expired/banned get their own
+/// text so `git` stderr and browsers show an actionable message.
+fn unauthorized_pat_hint_reason(reason: &str) -> Response {
     (
         StatusCode::UNAUTHORIZED,
         [
             (header::WWW_AUTHENTICATE, WWW_AUTHENTICATE),
             (header::CONTENT_TYPE, "text/plain; charset=utf-8"),
         ],
-        PAT_HINT.to_string(),
+        reason.to_string(),
     )
         .into_response()
 }
@@ -228,9 +239,21 @@ async fn authenticate_pat(
         // API-03: OAuth access tokens authenticate like classic PATs.
         // The synthesized row carries `repo`/`package:*` scopes so
         // `pat_allows_operation` applies unchanged downstream.
-        match crate::oauth::authenticate_oauth_token(&state.db, &password).await {
-            Ok(Some(ident)) => (ident.synthetic_pat(), true),
-            Ok(None) => {
+        match crate::oauth::authenticate_oauth_token_status(&state.db, &password).await {
+            Ok(crate::oauth::OAuthAuthStatus::Ok(ident)) => (ident.synthetic_pat(), true),
+            Ok(crate::oauth::OAuthAuthStatus::Revoked) => {
+                record_failed_auth(state, headers, Some(&username)).await;
+                return Err(unauthorized_pat_hint_reason(PAT_HINT_REVOKED));
+            }
+            Ok(crate::oauth::OAuthAuthStatus::Expired) => {
+                record_failed_auth(state, headers, Some(&username)).await;
+                return Err(unauthorized_pat_hint_reason(PAT_HINT_EXPIRED));
+            }
+            Ok(crate::oauth::OAuthAuthStatus::Banned) => {
+                record_failed_auth(state, headers, Some(&username)).await;
+                return Err(unauthorized_pat_hint_reason(PAT_HINT_BANNED));
+            }
+            Ok(crate::oauth::OAuthAuthStatus::Invalid) => {
                 record_failed_auth(state, headers, Some(&username)).await;
                 return Err(unauthorized_pat_hint());
             }
@@ -241,7 +264,13 @@ async fn authenticate_pat(
         }
     } else {
         let token_hash = sha256_hex(password.as_bytes());
-        let pat = match state.db.find_pat_by_token_hash(&token_hash).await {
+        // Revoked-inclusive lookup so a revoked PAT reads distinctly from a
+        // nonexistent one.
+        let pat = match state
+            .db
+            .find_pat_by_token_hash_including_revoked(&token_hash)
+            .await
+        {
             Ok(Some(p)) => p,
             Ok(None) => {
                 record_failed_auth(state, headers, Some(&username)).await;
@@ -254,9 +283,13 @@ async fn authenticate_pat(
         };
         (pat, false)
     };
+    if pat.revoked_at.is_some() {
+        record_failed_auth(state, headers, Some(&username)).await;
+        return Err(unauthorized_pat_hint_reason(PAT_HINT_REVOKED));
+    }
     if pat_expired(&pat.expires_at) {
         record_failed_auth(state, headers, Some(&username)).await;
-        return Err(unauthorized_pat_hint());
+        return Err(unauthorized_pat_hint_reason(PAT_HINT_EXPIRED));
     }
     let owner = match state.db.find_user_by_id(&pat.user_id).await {
         Ok(Some(u)) => u,
@@ -271,7 +304,7 @@ async fn authenticate_pat(
     };
     if owner.banned_at.is_some() {
         record_failed_auth(state, headers, Some(&username)).await;
-        return Err(unauthorized_pat_hint());
+        return Err(unauthorized_pat_hint_reason(PAT_HINT_BANNED));
     }
     let user_ok = USERNAME_ALIASES
         .iter()

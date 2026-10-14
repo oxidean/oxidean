@@ -7,9 +7,10 @@ use std::path::Path;
 use oxidean_core::{
     AdminGitSettingsPublic, AdminGitUpdateSettingsRequest, AdminLfsSettingsPublic,
     AdminLfsUpdateSettingsRequest, AdminLfsUsageResponse, AdminLfsOwnerUsageEntry,
-    AdminLfsRepoUsageEntry, AdminMcpSettingsPublic, AdminMcpUpdateSettingsRequest, AppError,
-    AuthSettingsPublic, EmailProviderKind, FactoryResetRequest, FactoryResetResponse,
-    FactoryResetScope, ProviderMode, RepoVisibility, UpdateAuthSettingsRequest,
+    AdminLfsRepoUsageEntry, AdminMcpSettingsPublic, AdminMcpUpdateSettingsRequest,
+    AdminPatSettingsPublic, AdminPatUpdateSettingsRequest, AppError, AuthSettingsPublic,
+    EmailProviderKind, FactoryResetRequest, FactoryResetResponse, FactoryResetScope,
+    ProviderMode, RepoVisibility, UpdateAuthSettingsRequest,
 };
 use oxidean_db::AuthSettingsRow;
 
@@ -570,6 +571,79 @@ pub async fn mcp_update_settings(
             .map_err(db_err)?;
     }
     mcp_get_settings(ctx).await
+}
+
+/// `admin.pat.getSettings` — effective PAT expiration policy + per-field
+/// override flags (env `OXIDEAN_PAT_*` defaults underneath, PAT-01).
+pub async fn pat_get_settings(ctx: &RpcCtx) -> Result<AdminPatSettingsPublic, AppError> {
+    require_admin(ctx).await?;
+    let env = crate::pat::policy::env_policy();
+    let row = ctx.db.get_pat_settings().await.map_err(db_err)?;
+    let default_ttl_days = row
+        .default_ttl_days
+        .filter(|v| *v > 0)
+        .map(|v| v as u32)
+        .unwrap_or(env.default_ttl_days);
+    let max_ttl_days = row
+        .max_ttl_days
+        .filter(|v| *v > 0)
+        .map(|v| v as u32)
+        .unwrap_or(env.max_ttl_days);
+    Ok(AdminPatSettingsPublic {
+        default_ttl_days: default_ttl_days.min(max_ttl_days),
+        default_ttl_days_overridden: row.default_ttl_days.is_some(),
+        max_ttl_days,
+        max_ttl_days_overridden: row.max_ttl_days.is_some(),
+        allow_never_expire: row.allow_never_expire.unwrap_or(env.allow_never_expire),
+        allow_never_expire_overridden: row.allow_never_expire.is_some(),
+    })
+}
+
+/// `admin.pat.updateSettings` — persist or clear expiration-policy overrides.
+/// Omitted fields keep their stored override; `clear_overrides` reverts all
+/// three to the env defaults. Validation: values must be positive and
+/// `default ≤ max` after the merge (clamped the same way effective policy is).
+pub async fn pat_update_settings(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<AdminPatSettingsPublic, AppError> {
+    require_admin(ctx).await?;
+    let req: AdminPatUpdateSettingsRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid admin.pat.updateSettings input: {e}"),
+        )
+    })?;
+    for (name, v) in [
+        ("default_ttl_days", req.default_ttl_days),
+        ("max_ttl_days", req.max_ttl_days),
+    ] {
+        if matches!(v, Some(0)) {
+            return Err(AppError::new(
+                "rpc.bad_input",
+                format!("{name} must be a positive number of days"),
+            ));
+        }
+    }
+    if req.clear_overrides {
+        ctx.db
+            .update_pat_settings(None, None, None)
+            .await
+            .map_err(db_err)?;
+    } else {
+        let current = ctx.db.get_pat_settings().await.map_err(db_err)?;
+        ctx.db
+            .update_pat_settings(
+                req.default_ttl_days
+                    .map(i64::from)
+                    .or(current.default_ttl_days),
+                req.max_ttl_days.map(i64::from).or(current.max_ttl_days),
+                req.allow_never_expire.or(current.allow_never_expire),
+            )
+            .await
+            .map_err(db_err)?;
+    }
+    pat_get_settings(ctx).await
 }
 
 fn path_is_under(path: &Path, root: &Path) -> bool {

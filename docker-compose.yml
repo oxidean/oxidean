@@ -46,8 +46,11 @@ services:
       # Host-only by default (matches Dockerfile empty ARG). Self-hosts that
       # publish their own matrix can set OXIDEAN_CLI_DIST_URL to that feed.
       # Oxidean Cloud sets the product ox-dist URL via Railway IaC only.
+      # OXIDEAN_SOURCE_COMMIT records provenance for /cli/latest dist_commit
+      # on host-only builds (e.g. `OXIDEAN_SOURCE_COMMIT=$(git rev-parse HEAD)`).
       args:
         OXIDEAN_CLI_DIST_URL: ${OXIDEAN_CLI_DIST_URL:-}
+        OXIDEAN_SOURCE_COMMIT: ${OXIDEAN_SOURCE_COMMIT:-}
     environment:
       DATABASE_URL: ${DATABASE_URL:-postgres://oxidean:oxidean@postgres:5432/oxidean}
       OXIDEAN_ENV: ${OXIDEAN_ENV:-compose}

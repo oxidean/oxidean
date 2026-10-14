@@ -15,42 +15,17 @@ type Subs = &'static [(&'static str, &'static [&'static str])];
 /// group → subs. Empty `subs` means the group takes data positionals
 /// (search/browse/api/self-update) — nothing to complete.
 pub const COMMAND_TREE: &[(&str, Subs)] = &[
-    (
-        "admin",
-        &[
-            (
-                "users",
-                &[
-                    "list",
-                    "ban",
-                    "unban",
-                    "delete",
-                    "set-role",
-                    "sessions",
-                    "revoke-sessions",
-                    "access",
-                    "activity",
-                ],
-            ),
-            ("invites", &["list", "create", "link", "revoke"]),
-            ("actions", &["runners", "runner-token"]),
-            ("runners", &[]),
-            ("runner-token", &[]),
-            ("repos", &["gc"]),
-            ("lfs", &["get", "set"]),
-            ("git", &["get", "set"]),
-            ("mcp", &["get", "set"]),
-            ("auth", &["get", "set"]),
-            ("templates", &["list", "enable", "disable", "delete"]),
-        ],
-    ),
     ("api", &[]),
     (
         "auth",
         &[
             ("login", &[]),
             ("status", &[]),
+            ("refresh", &[]),
+            ("revoke", &[]),
             ("switch", &[]),
+            ("setup-git", &[]),
+            ("git-credential", &["get", "store", "erase"]),
             ("logout", &[]),
             ("token", &[]),
         ],
@@ -72,7 +47,6 @@ pub const COMMAND_TREE: &[(&str, Subs)] = &[
         ],
     ),
     ("gpg-key", &[("list", &[]), ("add", &[]), ("delete", &[])]),
-    ("invite", &[("accept", &[])]),
     (
         "issue",
         &[
@@ -114,7 +88,6 @@ pub const COMMAND_TREE: &[(&str, Subs)] = &[
             ("invites", &["list", "create", "link", "revoke"]),
         ],
     ),
-    ("pat", &[("list", &[]), ("create", &[]), ("revoke", &[])]),
     ("pkg", &[("list", &[])]),
     (
         "pr",
@@ -154,6 +127,7 @@ pub const COMMAND_TREE: &[(&str, Subs)] = &[
             ("list", &[]),
             ("view", &[]),
             ("create", &[]),
+            ("templates", &[]),
             ("fork", &[]),
             ("sync", &[]),
             ("clone", &[]),
@@ -243,6 +217,9 @@ pub const COMMAND_TREE: &[(&str, Subs)] = &[
 
 pub fn run(shell: &str) -> Result<Out, CliError> {
     let script = match shell {
+        // Hidden pseudo-shell: emits the parser-verified command surface as
+        // `group[ sub[ op]]` lines for drift guards (check-skill-sync.sh).
+        "commands" => command_paths(),
         "bash" => bash(),
         "zsh" => zsh(),
         "fish" => fish(),
@@ -261,6 +238,30 @@ pub fn run(shell: &str) -> Result<Out, CliError> {
 
 fn word_list(words: &[&str]) -> String {
     words.join(" ")
+}
+
+/// `group`, `group sub`, and `group sub op` — one path per line.
+fn command_paths() -> String {
+    let mut out = String::new();
+    for (group, subs) in COMMAND_TREE {
+        out.push_str(group);
+        out.push('\n');
+        for (sub, ops) in *subs {
+            out.push_str(group);
+            out.push(' ');
+            out.push_str(sub);
+            out.push('\n');
+            for op in *ops {
+                out.push_str(group);
+                out.push(' ');
+                out.push_str(sub);
+                out.push(' ');
+                out.push_str(op);
+                out.push('\n');
+            }
+        }
+    }
+    out
 }
 
 fn bash() -> String {

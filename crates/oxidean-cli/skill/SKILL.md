@@ -2,7 +2,7 @@
 name: ox
 description: >
   Use the `ox` CLI to work with an Oxidean forge instance — repositories, issues,
-  pull requests, actions runs, releases, packages, notifications, and admin tasks —
+  pull requests, actions runs, releases, packages, and notifications —
   from the shell. Use this skill when: (1) you need to create, review, merge, or
   inspect issues/PRs/repos on an Oxidean instance, (2) CI scripts must talk to
   Oxidean without a browser, (3) you need --json/jq pipelines or the `ox api`
@@ -37,31 +37,43 @@ pacman (`.deb`, `.rpm`, `.apk`, `.pkg.tar.zst`).
 
 ```sh
 ox auth login --instance https://forge.example.com --web  # browser device grant
+ox auth login --instance https://forge.example.com --web --scopes "repo workflow"
 ox auth login --instance https://forge.example.com --token <pat>
 printenv OXIDEAN_TOKEN | ox auth login --instance <url> --token-stdin   # CI
-ox auth status                                            # who am I
+ox auth status                                            # who am I + token scopes/expiry; warns when scopes leave procedures uncovered
+ox auth refresh                                           # rotate the stored token (full first-party scopes by default; --keep-scopes preserves)
+ox auth revoke                                            # revoke stored token on the server + logout
 ox auth token                                             # print token (scripts)
 ox auth logout                                            # drop stored token
 ```
 
 Non-interactive environments: set `OXIDEAN_INSTANCE` + `OXIDEAN_TOKEN` and skip
-`auth login` entirely. Config lives in `~/.config/ox/config.json`
-(`OXIDEAN_CONFIG_DIR` overrides); multi-instance storage is keyed by URL.
+`auth login` entirely. Credentials live in the OS keyring when a backend is
+available, else `~/.config/ox/config.json` (`OXIDEAN_CONFIG_DIR` overrides);
+multi-instance storage is keyed by URL. `--web`-minted tokens expire per the
+instance PAT policy — `auth refresh` renews them.
 
 ## Command cheat sheet
 
 | Area | Commands |
 |---|---|
-| repos | `repo list\|view\|create\|fork\|sync\|clone`, `repo edit\|rename\|archive\|unarchive\|delete\|transfer`, `repo star\|unstar\|watch\|unwatch`, `repo deploy-key`, `collaborator(s)`, `invites`, `branch-protection`, `tag-protection`, `mirror`, `merge-settings`, `lfs`, `quota` |
+| repos | `repo list\|view\|create\|templates\|fork\|sync\|clone`, `repo edit\|rename\|archive\|unarchive\|delete\|transfer`, `repo star\|unstar\|watch\|unwatch`, `repo deploy-key`, `collaborator(s)`, `invites`, `branch-protection`, `tag-protection`, `mirror`, `merge-settings`, `lfs`, `quota` |
 | issues | `issue list\|view\|create\|edit\|close\|reopen\|delete\|comment` |
 | prs | `pr list\|view\|create\|merge\|diff\|files\|review\|comment\|ready\|update-branch\|checks\|close\|reopen\|checkout` |
 | actions | `run list\|view [--log]\|rerun\|cancel`, `workflow list\|view\|run`, `secret list\|set\|delete`, `status create` |
 | releases | `release list\|view\|create\|edit\|delete`, `release upload\|download\|delete-asset` |
 | mcp | `mcp print\|install\|status\|remove` — wire the instance's `/api/mcp` endpoint into agent-harness MCP configs |
-| everything else | `search`, `browse`, `pkg list`, `org …`, `user …`, `notification …`, `label …`, `webhook …`, `ssh-key`, `gpg-key`, `email`, `pat …`, `invite accept`, `admin …` |
+| everything else | `search`, `browse`, `pkg list`, `org …`, `user …`, `notification …`, `label …`, `webhook …`, `ssh-key`, `gpg-key`, `email` |
 
 `<o/n>` is the `owner/name` repo spec; `-R/--repo` supplies it as a flag.
-`ox <group> <sub> --help` prints per-command usage.
+With neither, `OXIDEAN_REPO` is tried, then the git remotes of the current
+directory (`upstream`, `origin`, `fork`) — inside a clone the repo argument
+can usually be omitted. PAT management lives in the web UI
+(`/settings/tokens`); the CLI manages only its own credential via
+`auth status|refresh|revoke`. `ox <group> <sub> --help` prints per-command
+usage. There is deliberately no `admin`/`pat`/`invite` command group —
+admin (`admin.*`) and invite-acceptance RPCs are session-cookie only, so
+PAT-authenticated `ox` cannot serve them; use the web UI.
 
 ## Scripting: `--json` and exit codes
 
@@ -71,6 +83,9 @@ lossless, stable, and the right input for `jq`:
 ```sh
 ox issue list o/n --json | jq -r '.data.issues[].title'
 ox api repo.get -f owner=o -f name=n --json | jq '.data.default_branch'
+
+# or the built-in jaq filter applied to `data` (strings print bare, like jq -r):
+ox issue list o/n --jq '.issues[].title'
 ```
 
 Exit codes: `0` ok · `1` API/transport error · `2` usage error or unsupported
@@ -108,16 +123,16 @@ ox pr checks o/n 34 --json | jq '.data.statuses[] | select(.state != "success")'
 ox pr review o/n 34 --approve
 ox pr merge o/n 34 --squash
 
-# Create a repo and push initial code
+# Create a repo and push initial code (templates: ox repo templates; --template <ref>)
 ox repo create my-lib --visibility private
 ox repo clone o/my-lib
 
 # Run a workflow and watch it
 ox workflow run o/n ci.yml --ref main
-ox run view o/n --id <run-id> --json | jq '.data.run.status'
+ox run view o/n <run-id> --json | jq '.data.run.status'
 
 # Publish a release with artifacts
-ox release create o/n v1.2.0 --title "v1.2.0" --notes-file CHANGELOG.md
+ox release create o/n v1.2.0 --title "v1.2.0" --body-file CHANGELOG.md
 ox release upload o/n v1.2.0 dist/*.tar.gz
 ```
 
@@ -164,8 +179,8 @@ ox mcp remove --harness cursor --project
 ```
 
 Auth precedence: `--token` / `--token-stdin` → `--web` (device grant) →
-stored `ox` login → `--anonymous` (public data only). Mint a PAT via
-`ox pat create` or `/settings/tokens`; token-bearing configs land `0600`.
+stored `ox` login → `--anonymous` (public data only). Mint a PAT at
+`/settings/tokens`; token-bearing configs land `0600`.
 Harness ids: `claude`, `cursor`, `vscode`, `windsurf`, `gemini`, `codex`,
 `kiro`, `opencode`, `zed` (via `mcp-remote`), `generic`. Codex stores
 `bearer_token_env_var = "OXIDEAN_TOKEN"` — export it. Re-running `install`
