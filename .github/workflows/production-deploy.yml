@@ -302,7 +302,7 @@ jobs:
             # same signal the env's git-triggered history had.
             dep_id="$(scripts/github-deployment.sh create \
               --ref "$SHA" --environment "Oxidean / production" \
-              --url "https://app.oxidean.dev" \
+              --production \
               --description "promote sha-${SHA}")"
             scripts/github-deployment.sh status "$dep_id" in_progress \
               --url "https://app.oxidean.dev" --description "promoting sha-${SHA}"

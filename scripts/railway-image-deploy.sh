@@ -17,9 +17,9 @@
 #                                       GHCR (keeps the IaC channel seed — e.g.
 #                                       :staging / :production — pointing at
 #                                       the environment's live image)
-#   --wait                              after pinning, poll until each bound
-#                                       service's new deployment reaches a
-#                                       terminal state (SUCCESS/SKIPPED ok;
+#   --wait                              after pinning + rolling, poll the
+#                                       triggered deployments until all reach
+#                                       a terminal state (SUCCESS/SKIPPED ok;
 #                                       FAILED/CRASHED/REMOVED fail) — makes
 #                                       "redeploy done" observable instead of
 #                                       returning at mutation-accepted
@@ -76,7 +76,7 @@ wait_for_pr_environment() {
   local pr="$1" timeout="$2"
   local deadline=$((SECONDS + timeout)) env_id=""
   while (( SECONDS < deadline )); do
-    env_id="$(railway_find_pr_environment_id "$PROJECT_ID" "$pr")"
+    env_id="$(railway_find_pr_environment_id "$PROJECT_ID" "$pr" 2>/dev/null || true)"
     if [[ -n "$env_id" && "$env_id" != "null" ]]; then
       printf '%s' "$env_id"
       return 0
@@ -118,81 +118,61 @@ retag_channel() {
   fi
 }
 
-# Poll the environment's deployments until every bound service's newest
-# deployment created after $3 (pin epoch) reaches a terminal state. Prints a
-# status line whenever a service's state changes. Dies on failure or timeout.
+# Poll the deployments this run triggered (exact ids from
+# serviceInstanceDeployV2) until all reach a terminal state. Prints a status
+# line whenever one changes. Dies on failure or timeout. Transient query
+# failures count as pending — a network blip must not fail a healthy deploy.
 wait_for_deployments() {
-  local env_id="$1" services_csv="$2" since_epoch="$3" timeout="$4"
+  local env_id="$1" ids_csv="$2" timeout="$3"
   local deadline=$((SECONDS + timeout))
-
-  # map service names → ids for the bound set
-  local want_ids="" name sid
-  while read -r name sid; do
-    [[ -z "$name" ]] && continue
-    case ",${services_csv}," in *",${name},"*) want_ids+="\"${sid}\"," ;; esac
-  done < <(service_pairs)
-  local want_json="[${want_ids%,}]"
+  local ids_json
+  ids_json="$(jq -nc --arg csv "$ids_csv" '$csv | split(",") | map(select(length > 0))')"
 
   declare -A last_seen=()
   while (( SECONDS < deadline )); do
     local raw
-    raw="$(
+    if ! raw="$(
       railway_gql '
         query($id: String!) {
           environment(id: $id) {
-            deployments(first: 50) {
-              edges { node { serviceId status createdAt } }
+            deployments(first: 100) {
+              edges { node { id status } }
             }
           }
         }
-      ' "$(jq -n --arg id "$env_id" '{id:$id}')"
-    )"
+      ' "$(jq -n --arg id "$env_id" '{id:$id}')" 2>/dev/null
+    )"; then
+      echo "  wait: Railway query failed — retrying" >&2
+      sleep 15
+      continue
+    fi
     local pending=0 failed=0
-    local state
-    state="$(echo "$raw" | jq -r --argjson want "$want_json" '
-      [.data.environment.deployments.edges[].node
-        | select(.serviceId as $s | ($want | index($s)))]
-      | group_by(.serviceId)[] | max_by(.createdAt)
-      | "\(.serviceId)\t\(.status)\t\(.createdAt)"
-    ')"
-    while read -r sid; do
-      [[ -z "$sid" ]] && continue
-      local row status created st dep_epoch
-      row="$(echo "$state" | awk -F'\t' -v s="$sid" '$1==s')"
-      if [[ -z "$row" ]]; then
-        st="missing"
-      else
-        status="$(cut -f2 <<<"$row")"
-        created="$(cut -f3 <<<"$row")"
-        dep_epoch="$(date -d "$created" +%s 2>/dev/null || echo 0)"
-        # Same-second creations count as new — a pre-pin deployment is never
-        # seconds old.
-        if (( dep_epoch < since_epoch )); then
-          st="stale"      # pre-pin deployment still newest — Railway hasn't
-                          # created the new one yet
-        elif [[ "$status" == "SUCCESS" || "$status" == "SKIPPED" ]]; then
-          st="ok"
-        elif [[ "$status" == "FAILED" || "$status" == "CRASHED" || "$status" == "REMOVED" ]]; then
-          st="failed:${status}"
-        else
-          st="$status"    # QUEUED/BUILDING/DEPLOYING/INITIALIZING/WAITING…
-        fi
-      fi
-      if [[ "${last_seen[$sid]:-}" != "$st" ]]; then
-        echo "  wait: ${sid:0:8}… ${st}"
-        last_seen[$sid]="$st"
+    local dep_id status st
+    for dep_id in ${ids_csv//,/ }; do
+      status="$(echo "$raw" | jq -r --arg id "$dep_id" --argjson want "$ids_json" '
+        [.data.environment.deployments.edges[].node | select(.id == $id)]
+        | first | .status // "missing"
+      ' 2>/dev/null || echo "missing")"
+      case "$status" in
+        SUCCESS | SKIPPED) st="ok" ;;
+        FAILED | CRASHED | REMOVED) st="failed:${status}" ;;
+        *) st="$status" ;;  # QUEUED/BUILDING/DEPLOYING/INITIALIZING/missing…
+      esac
+      if [[ "${last_seen[$dep_id]:-}" != "$st" ]]; then
+        echo "  wait: deployment ${dep_id:0:8}… ${st}"
+        last_seen[$dep_id]="$st"
       fi
       case "$st" in
         ok) ;;
-        failed:*) failed=$((failed+1)) ;;
-        *) pending=$((pending+1)) ;;
+        failed:*) failed=$((failed + 1)) ;;
+        *) pending=$((pending + 1)) ;;
       esac
-    done < <(service_pairs | awk -v csv="$services_csv" '{split(csv,a,","); for(i in a) if($1==a[i]) print $2}')
+    done
     if (( failed > 0 )); then
       die "deploy failed in environment ${env_id} (see Railway logs)"
     fi
     if (( pending == 0 )); then
-      echo "wait: all bound services reached a terminal deployment state"
+      echo "wait: all triggered deployments reached a terminal state"
       return 0
     fi
     sleep 15
@@ -202,7 +182,7 @@ wait_for_deployments() {
 
 update_service_image() {
   local env_id="$1" name="$2" sid="$3" ref="$4"
-  echo "deploy ${name}: ${ref}"
+  echo "pin ${name}: ${ref}"
   if [[ "$DRY_RUN" == "1" ]]; then
     echo "  dry-run: would call serviceInstanceUpdate source.image=${ref}"
     return 0
@@ -224,7 +204,35 @@ update_service_image() {
       '{environmentId:$environmentId,serviceId:$serviceId,input:{source:{image:$image}}}')"
   )"
   ok="$(echo "$raw" | jq -r '.data.serviceInstanceUpdate')"
-  [[ "$ok" == "true" ]] || die "deploy ${name}: serviceInstanceUpdate returned ${ok}"
+  [[ "$ok" == "true" ]] || die "pin ${name}: serviceInstanceUpdate returned ${ok}"
+}
+
+# serviceInstanceUpdate only stages the source change — nothing rolls until a
+# deploy is triggered. serviceInstanceDeployV2 rolls the service's current
+# config (no commitSha for image sources) and returns the new deployment id,
+# which --wait then tracks directly. Progress goes to stderr so the caller can
+# capture the id on stdout.
+deploy_service() {
+  local env_id="$1" name="$2" sid="$3"
+  if [[ "$DRY_RUN" == "1" ]]; then
+    echo "  dry-run: would call serviceInstanceDeployV2 for ${name}" >&2
+    return 0
+  fi
+  local raw dep_id
+  raw="$(
+    railway_gql '
+      mutation($environmentId: String!, $serviceId: String!) {
+        serviceInstanceDeployV2(environmentId: $environmentId, serviceId: $serviceId)
+      }
+    ' "$(jq -n --arg environmentId "$env_id" --arg serviceId "$sid" \
+      '{environmentId:$environmentId, serviceId:$serviceId}')"
+  )"
+  dep_id="$(echo "$raw" | jq -r '.data.serviceInstanceDeployV2 // empty')"
+  if [[ -z "$dep_id" || "$dep_id" == "null" ]]; then
+    die "deploy ${name}: serviceInstanceDeployV2 returned ${raw}"
+  fi
+  echo "  roll ${name}: deployment ${dep_id:0:8}…" >&2
+  printf '%s' "$dep_id"
 }
 
 usage() {
@@ -290,21 +298,48 @@ main() {
     fi
   fi
 
-  # Deploy in canonical order (the --services list filters, never reorders).
-  local want=" ${services//,/ } " name sid pin_started_at
-  pin_started_at="$(date -u +%s)"
+  # Validate --services up front — a typo'd name must fail loudly, not deploy
+  # a partial set.
+  local want=" ${services//,/ } " name sid known=" " valid=""
+  while read -r name sid; do
+    [[ -z "$name" ]] && continue
+    known+="${name} "
+    [[ "$want" == *" $name "* ]] && valid+="${name} "
+  done < <(service_pairs)
+  local s
+  for s in ${services//,/ }; do
+    [[ "$known" == *" $s "* ]] || die "unknown service '${s}' (known:${known})"
+  done
+  [[ -n "$valid" ]] || die "--services matched nothing (known:${known})"
+
+  # Phase 1: pin every bound service's image source (config only — nothing
+  # rolls yet). Phase 2 then triggers one deploy per service, so every pin
+  # settles before any roll and a mid-loop failure never leaves a half-rolled
+  # mixed-revision set on new pins.
   while read -r name sid; do
     [[ -z "$name" ]] && continue
     [[ "$want" == *" $name "* ]] || continue
     update_service_image "$env_id" "$name" "$sid" "${IMAGE_BASE}/oxidean-${name}:${tag}"
   done < <(service_pairs)
 
-  if [[ -n "$channel_tag" ]]; then
-    retag_channel "$tag" "$channel_tag" "$services"
+  local dep_ids="" dep_id
+  while read -r name sid; do
+    [[ -z "$name" ]] && continue
+    [[ "$want" == *" $name "* ]] || continue
+    dep_id="$(deploy_service "$env_id" "$name" "$sid")"
+    [[ -n "$dep_id" ]] && dep_ids+="${dep_id},"
+  done < <(service_pairs)
+  dep_ids="${dep_ids%,}"
+
+  # Wait before moving the channel tag: on failure the die above means
+  # :staging / :production keep pointing at the env's last healthy image, so
+  # a `railway config apply` never redeploys a broken sha.
+  if [[ "$wait" == "1" && "$DRY_RUN" != "1" && -n "$dep_ids" ]]; then
+    wait_for_deployments "$env_id" "$dep_ids" "$timeout"
   fi
 
-  if [[ "$wait" == "1" && "$DRY_RUN" != "1" ]]; then
-    wait_for_deployments "$env_id" "$services" "$pin_started_at" "$timeout"
+  if [[ -n "$channel_tag" ]]; then
+    retag_channel "$tag" "$channel_tag" "$services"
   fi
   echo "done: ${tag} deployed to environment ${env_id}"
 }

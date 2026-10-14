@@ -3,12 +3,16 @@
 # visible on the PR/commit under the environment Railway already posts to
 # ("Oxidean / oxidean-pr-<n>", "Oxidean / staging", "Oxidean / production").
 # Railway only posts Deployments for git-triggered builds — API-triggered
-# serviceInstanceUpdate image repins would otherwise be invisible on the PR.
+# image repins (serviceInstanceUpdate + serviceInstanceDeployV2) would
+# otherwise be invisible on the PR.
 #
 # Usage:
 #   GH_TOKEN=… scripts/github-deployment.sh create --ref <sha> \
 #     --environment "<env name>" [--url <env_url>] [--description <text>]
+#     [--transient] [--production]
 #       → prints the deployment id (empty on failure — caller may continue)
+#       --transient marks an ephemeral env (PR previews); --production marks
+#       the deployment as production for GitHub's environment tracking
 #   GH_TOKEN=… scripts/github-deployment.sh status <id> <state> \
 #     [--url <env_url>] [--log-url <url>] [--description <text>]
 #       → <state>: queued|in_progress|pending|success|failure|error|inactive
@@ -27,13 +31,15 @@ cmd="${1:-}"; shift || true
 
 case "$cmd" in
   create)
-    ref="" environment="" url="" desc=""
+    ref="" environment="" url="" desc="" transient=false production=false
     while [[ $# -gt 0 ]]; do
       case "$1" in
         --ref) ref="$2"; shift ;;
         --environment) environment="$2"; shift ;;
         --url) url="$2"; shift ;;
         --description) desc="$2"; shift ;;
+        --transient) transient=true ;;
+        --production) production=true ;;
         *) die "unexpected argument: $1" ;;
       esac
       shift
@@ -42,8 +48,9 @@ case "$cmd" in
     # required_contexts must be explicit []: the default would gate deployment
     # creation on the in-flight workflow's own checks (a deadlock).
     id="$(jq -n --arg ref "$ref" --arg env "$environment" --arg desc "${desc:-image deploy}" \
-      '{ref:$ref, environment:$env, auto_merge:false, transient_environment:true,
-        production_environment:false, required_contexts:[], description:$desc}' \
+      --argjson transient "$transient" --argjson production "$production" \
+      '{ref:$ref, environment:$env, auto_merge:false, transient_environment:$transient,
+        production_environment:$production, required_contexts:[], description:$desc}' \
       | gh api -X POST "repos/${repo}/deployments" --input - --jq '.id' 2>/dev/null || true)"
     printf '%s' "$id"
     ;;

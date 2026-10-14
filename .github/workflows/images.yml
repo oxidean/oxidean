@@ -384,7 +384,7 @@ jobs:
             --environment "Oxidean / staging" \
             --description "image deploy sha-${SHA}")"
           scripts/github-deployment.sh status "$dep_id" in_progress \
-            --description "pinning staging services to sha-${SHA}"
+            --description "deploying sha-${SHA} to staging"
           # --environment-id (staging) works with env-scoped project tokens;
           # name resolution needs an account token that can list environments.
           if scripts/railway-image-deploy.sh \
@@ -462,7 +462,8 @@ jobs:
             exit 0
           fi
 
-          # Public URL for the deployment record — the gateway's service domain.
+          # Public URL for the deployment record — the gateway's service
+          # domain. Cosmetic: a lookup failure must never sink the bind.
           env_url="$(railway_gql '
             query($id: String!, $svc: String!) {
               environment(id: $id) {
@@ -475,17 +476,17 @@ jobs:
                 [.data.environment.serviceInstances.edges[].node
                   | select(.serviceId == $svc)
                   | .domains.serviceDomains[]?.domain] | first // ""' \
-            | sed 's/^/https:\/\//' | sed 's/^https:\/\/$//')"
+            | sed 's/^/https:\/\//' | sed 's/^https:\/\/$//' || true)"
 
           # First-class PR signal: a GitHub Deployment in the env Railway's
           # own records use — in_progress while images pull and services boot.
           dep_id="$(scripts/github-deployment.sh create \
             --ref "$SHA" \
             --environment "Oxidean / oxidean-pr-${PR}" \
-            --url "$env_url" \
+            --transient \
             --description "image deploy ${TAG}")"
           scripts/github-deployment.sh status "$dep_id" in_progress \
-            --url "$env_url" --description "pinning services to ${TAG}"
+            --url "$env_url" --description "deploying ${TAG} to the PR environment"
 
           if scripts/railway-image-deploy.sh --environment-id "$env_id" --tag "$TAG" --wait; then
             scripts/github-deployment.sh status "$dep_id" success \
@@ -572,6 +573,9 @@ jobs:
       github.event_name == 'workflow_run' &&
       github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      deployments: write
     steps:
       - uses: actions/checkout@v7
         with:
@@ -604,10 +608,27 @@ jobs:
           RAILWAY_ENVIRONMENT_ID: 56e886c1-83f4-4db4-8e41-d427dc3d3039
           RAILWAY_SERVICE_API_ID: 19bf0a47-2fdf-4130-b6b0-858de92cb858
           SHA: ${{ github.event.workflow_run.head_sha }}
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.ox.outputs.tag }}
         run: |
           set -euo pipefail
           if [[ -z "${RAILWAY_TOKEN:-}" && -z "${RAILWAY_API_TOKEN:-}" ]]; then
             echo "No Railway credential configured — skipping staging api feed repin."
             exit 0
           fi
-          scripts/railway-staging-api-redeploy.sh "$SHA"
+          # The repin redeploys staging api (feed refetch at boot) — Railway
+          # posts no Deployment for API-triggered rolls, so record our own.
+          dep_id="$(scripts/github-deployment.sh create \
+            --ref "$SHA" \
+            --environment "Oxidean / staging" \
+            --description "cli feed repin ${TAG}")"
+          scripts/github-deployment.sh status "$dep_id" in_progress \
+            --description "repinning staging api cli feed to ${TAG}"
+          if scripts/railway-staging-api-redeploy.sh "$SHA"; then
+            scripts/github-deployment.sh status "$dep_id" success \
+              --description "staging api redeployed with ${TAG} feed"
+          else
+            scripts/github-deployment.sh status "$dep_id" failure \
+              --description "cli feed repin ${TAG} failed"
+            exit 1
+          fi
