@@ -43,6 +43,13 @@ Auth stubs without cloud secrets: [docs/dev-auth.md](docs/dev-auth.md).
 
 ## Pull requests
 
+**Commit convention** — all commits use the enforced SemVer-prefix grammar
+`type(optional-scope): subject` (`feat`, `fix`, `docs`, `chore`, …). A
+`commit-msg` hook checks them locally (`make setup` installs it); CI's
+`commit-lint` job checks the PR range and PR title. Full rules — allowed
+types, scopes, breaking markers, exemptions, and what induces a version
+bump — live in [docs/VERSIONING.md](docs/VERSIONING.md).
+
 1. Prefer small, focused PRs that match an existing roadmap phase or a clear bugfix.
 2. Include tests for behavior changes (see [docs/TESTING.md](docs/TESTING.md)).
 3. After changing RPC procedures or shared types: run `make rpc-gen` and commit `@oxidean/api-client` updates together.
@@ -71,6 +78,7 @@ By contributing, you agree that your contributions are licensed under the [MIT L
 | [docs/guides/stack-presets.md](docs/guides/stack-presets.md) | In-repo `/new` stack presets |
 | [docs/guides/administration.md](docs/guides/administration.md) | Sys-admins / scoped admins — users, sessions, activity, invites |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Contributors — local API + web dev, monorepo layout |
+| [docs/VERSIONING.md](docs/VERSIONING.md) | Contributors + maintainers — SemVer components, commit grammar, release flow |
 | [docs/TESTING.md](docs/TESTING.md) | Test layers |
 | [docs/dev-auth.md](docs/dev-auth.md) | Local auth/email stubs |
 | [docs/CODE_PRACTICES.md](docs/CODE_PRACTICES.md) | Humans + agents — conventions |

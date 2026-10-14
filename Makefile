@@ -1,7 +1,7 @@
 # One target per .PHONY line group — checkmake does not parse backslash-continued
 # .PHONY lists, so keep each declaration on a single physical line.
 .PHONY: help makefile-lint
-.PHONY: dev rpc-gen openapi-gen openapi-sync-check rpc-sync-check check-stack-presets sync-stack-presets
+.PHONY: dev rpc-gen openapi-gen openapi-sync-check rpc-sync-check cli-parity-check skill-sync-check check-stack-presets sync-stack-presets
 .PHONY: up down logs test smoke smoke-git-https smoke-git-ssh
 .PHONY: smoke-git-lfs
 .PHONY: smoke-packages
@@ -16,6 +16,9 @@
 .PHONY: route-coverage-check browser-coverage-check ui-coverage-change-contract
 .PHONY: route-coverage-check-pr browser-coverage-check-pr
 .PHONY: web-lint web-format-check test-web-browser
+.PHONY: dead-code-check docs-check
+.PHONY: version-check commit-check setup
+.PHONY: release-plan changelog release-tags
 
 COMPOSE ?= docker compose
 COMPOSE_FILE ?= docker-compose.yml
@@ -28,6 +31,12 @@ help:
 	@echo "  make openapi-gen    - regenerate docs/openapi.yaml from the REST route table"
 	@echo "  make rpc-sync-check - fail if generated client is out of sync"
 	@echo "  make check-stack-presets - validate stack-presets catalog + size budget"
+	@echo "  make version-check   - validate versioning.toml registry + workspace completeness"
+	@echo "  make commit-check    - lint recent commits against the SemVer prefix grammar"
+	@echo "  make release-plan    - print the SemVer bump plan (--channel/--since/--json via ARGS)"
+	@echo "  make changelog       - write Keep-a-Changelog sections for the plan"
+	@echo "  make release-tags    - create annotated <component>-v<ver> tags (--all for baseline)"
+	@echo "  make setup           - install the opt-in commit-msg hook (core.hooksPath=.githooks)"
 	@echo "  make sync-stack-presets - stamp/refresh stack-presets metadata"
 	@echo "  make up             - docker compose up (Traefik on :80)"
 	@echo "  make up-mysql       - compose up with the MySQL profile (D-07)"
@@ -103,6 +112,32 @@ makefile-lint:
 check-stack-presets:
 	@./scripts/check-stack-presets.sh
 
+version-check:
+	@bun scripts/versioning/cli.ts check
+
+commit-check:
+	@bun scripts/versioning/cli.ts commit-check --range HEAD~10..HEAD
+
+release-plan:
+	@bun scripts/versioning/cli.ts plan $(ARGS)
+
+changelog:
+	@bun scripts/versioning/cli.ts changelog $(ARGS)
+
+release-tags:
+	@bun scripts/versioning/cli.ts release-tags $(ARGS)
+
+# Install the opt-in commit-msg hook (BR5.2). Warns before replacing a foreign
+# hooksPath; bypass any single commit with `git commit --no-verify`; uninstall
+# with `git config --unset core.hooksPath`.
+setup:
+	@existing=$$(git config --get core.hooksPath || true); \
+	if [ -n "$$existing" ] && [ "$$existing" != ".githooks" ]; then \
+		echo "warning: replacing core.hooksPath '$$existing' with '.githooks'" >&2; \
+	fi; \
+	git config core.hooksPath .githooks; \
+	echo "hooksPath -> .githooks (commit-msg grammar enforcement active)"
+
 sync-stack-presets:
 	@bun scripts/sync-stack-presets.mjs --stamp
 
@@ -119,13 +154,19 @@ up-sqlite:
 	$(COMPOSE) --env-file .env.sqlite -f docker-compose.yml -f docker-compose.sqlite.yml up --build -d
 
 down:
-	$(COMPOSE) -f $(COMPOSE_FILE) down --remove-orphans
+	@echo "==> docker compose down ($(COMPOSE_FILE))"
+	@$(COMPOSE) -f $(COMPOSE_FILE) down --remove-orphans
+	@echo "==> stack stopped"
 
 down-mysql:
-	$(COMPOSE) -f docker-compose.yml -f docker-compose.mysql.yml down --remove-orphans
+	@echo "==> docker compose down (mysql overlay)"
+	@$(COMPOSE) -f docker-compose.yml -f docker-compose.mysql.yml down --remove-orphans
+	@echo "==> stack stopped"
 
 down-sqlite:
-	$(COMPOSE) -f docker-compose.yml -f docker-compose.sqlite.yml down --remove-orphans
+	@echo "==> docker compose down (sqlite overlay)"
+	@$(COMPOSE) -f docker-compose.yml -f docker-compose.sqlite.yml down --remove-orphans
+	@echo "==> stack stopped"
 
 up-dev-auth:
 	@bash -c 'source ./scripts/docker-wsl-creds.sh; $(COMPOSE) -f docker-compose.dev-auth.yml --profile dev-auth up --build -d'
@@ -154,14 +195,18 @@ up-with-dev-auth:
 	@echo "==> Docs: docs/dev-auth.md"
 
 down-dev-auth:
+	@echo "==> stopping dev-auth stubs"
 	@bash -c 'source ./scripts/docker-wsl-creds.sh; $(COMPOSE) -f docker-compose.dev-auth.yml --profile dev-auth down --remove-orphans'
+	@echo "==> dev-auth stubs stopped"
 
 down-with-dev-auth:
+	@echo "==> tearing down full dev-auth stack"
 	@bash -c 'source ./scripts/docker-wsl-creds.sh; \
 	  $(COMPOSE) -f docker-compose.yml \
 	    -f docker-compose.dev-auth.yml \
 	    -f docker-compose.dev-auth-attach.yml \
 	    --profile dev-auth --profile actions down --remove-orphans'
+	@echo "==> stack stopped"
 
 test-e2e-stack:
 	./scripts/dev-auth/run-stack-e2e.sh

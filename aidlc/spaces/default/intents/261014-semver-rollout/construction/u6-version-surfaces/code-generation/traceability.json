@@ -1,0 +1,110 @@
+{
+  "stage": "code-generation",
+  "unit": "u6-version-surfaces",
+  "upstream_ids": [
+    "FR6",
+    "FR6.1",
+    "FR6.2",
+    "FR6.3",
+    "FR6.4",
+    "FR6.5",
+    "FR6.6",
+    "BR6.1",
+    "BR6.2",
+    "BR6.3",
+    "BR6.4",
+    "BR6.5",
+    "BR6.6",
+    "BR6.7",
+    "BR6.8",
+    "C5",
+    "C6"
+  ],
+  "coverage": [
+    {
+      "id": "FR6",
+      "status": "OK",
+      "target": "crates/oxidean-core/src/lib.rs"
+    },
+    {
+      "id": "FR6.1",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/rpc.rs"
+    },
+    {
+      "id": "FR6.2",
+      "status": "OK",
+      "target": "crates/oxidean-api/src/rpc.rs"
+    },
+    {
+      "id": "FR6.3",
+      "status": "OK",
+      "target": "crates/oxidean-api/src/routes/cli_dist.rs"
+    },
+    {
+      "id": "FR6.4",
+      "status": "OK",
+      "target": "crates/oxidean-core/src/lib.rs"
+    },
+    {
+      "id": "FR6.5",
+      "status": "OK",
+      "target": ".env.example"
+    },
+    {
+      "id": "FR6.6",
+      "status": "OK",
+      "target": "crates/oxidean-api/src/bin/rpc_gen.rs"
+    },
+    {
+      "id": "BR6.1",
+      "status": "OK",
+      "target": "crates/oxidean-core/src/lib.rs"
+    },
+    {
+      "id": "BR6.2",
+      "status": "OK",
+      "target": "crates/oxidean-api/src/rpc.rs"
+    },
+    {
+      "id": "BR6.3",
+      "status": "OK",
+      "target": "crates/oxidean-core/src/lib.rs"
+    },
+    {
+      "id": "BR6.4",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/manifest.rs"
+    },
+    {
+      "id": "BR6.5",
+      "status": "OK",
+      "target": "crates/oxidean-api/src/routes/cli_dist.rs"
+    },
+    {
+      "id": "BR6.6",
+      "status": "OK",
+      "target": "crates/oxidean-cli/src/manifest.rs"
+    },
+    {
+      "id": "BR6.7",
+      "status": "OK",
+      "target": "crates/oxidean-core/src/lib.rs"
+    },
+    {
+      "id": "BR6.8",
+      "status": "OK",
+      "target": "docker-compose.yml"
+    },
+    {
+      "id": "C5",
+      "status": "OK",
+      "target": "crates/oxidean-api/src/routes/cli_dist.rs"
+    },
+    {
+      "id": "C6",
+      "status": "OK",
+      "target": "crates/oxidean-api/src/bin/rpc_gen.rs"
+    }
+  ]
+}

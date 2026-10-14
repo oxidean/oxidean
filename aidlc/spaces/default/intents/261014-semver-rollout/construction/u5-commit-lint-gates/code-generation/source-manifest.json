@@ -1,0 +1,11 @@
+{
+  "stage": "code-generation",
+  "unit": "u5-commit-lint-gates",
+  "version": 1,
+  "writes": [
+    { "path": ".githooks/commit-msg" },
+    { "path": "Makefile" },
+    { "path": ".github/workflows/ci.yml" },
+    { "path": "scripts/versioning/hook.test.ts" }
+  ]
+}

@@ -41,7 +41,7 @@ Before editing UI under `apps/web`:
 
 ## In-repo skills (always)
 
-When a task matches a skill under [`.agents/skills/`](.agents/skills/), **read and follow that skill** before inventing a workflow. Cursor rule: [`.cursor/rules/use-in-repo-skills.mdc`](.cursor/rules/use-in-repo-skills.mdc). Claude Code loads the same trees via [`.claude/skills/`](.claude/skills/) symlinks. Examples: Octane UI → `octane`; Railway/deploy → `use-railway`; Rust async → `rust-async-patterns`; prose finalize → `clean-user-facing-text`; watermark strip → `remove-ai-marks`.
+When a task matches a skill under [`.agents/skills/`](.agents/skills/), **read and follow that skill** before inventing a workflow. Cursor rule: [`.cursor/rules/use-in-repo-skills.mdc`](.cursor/rules/use-in-repo-skills.mdc). Claude Code loads the same trees via [`.claude/skills/`](.claude/skills/) symlinks. Examples: Octane UI → `octane`; Railway/deploy → `use-railway`; Rust async → `rust-async-patterns`; prose finalize → `clean-user-facing-text`; watermark strip → `remove-ai-marks`; commit subjects/version bumps → `semver-conventions`.
 
 ## AI watermarks / provenance hygiene
 
@@ -100,6 +100,8 @@ Use repo-root [`tmp/`](tmp/README.md) for agent and local scratch (screenshots, 
 ## Contribution standards
 
 Follow [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/CODE_PRACTICES.md](docs/CODE_PRACTICES.md). Cursor rules under `.cursor/rules/` encode the same expectations for agents.
+
+**Commits are SemVer-prefixed and enforced**: every commit subject must match `type(optional-scope): subject` (`feat`, `fix`, `docs`, `chore`, …). A `commit-msg` hook checks locally (`make setup` installs it — `--no-verify` bypasses, but CI `commit-lint` still checks the PR range + title). Subjects drive per-component SemVer bumps and changelogs — pick accurate types/scopes. Full grammar, bump semantics, and release flow: [docs/VERSIONING.md](docs/VERSIONING.md); agent checklist: [`.agents/skills/semver-conventions/SKILL.md`](.agents/skills/semver-conventions/SKILL.md).
 
 <!-- BEGIN AI-DLC:agents -->
 This project uses AI-DLC (AI-Driven Development Life Cycle) for structured development. Harness-specific setup, commands, and prerequisites live in each harness's own onboarding file (see Harness onboarding below).

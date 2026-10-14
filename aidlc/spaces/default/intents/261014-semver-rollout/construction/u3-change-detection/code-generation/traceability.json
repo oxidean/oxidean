@@ -1,0 +1,23 @@
+{
+  "stage": "code-generation",
+  "unit": "u3-change-detection",
+  "upstream_ids": ["FR3", "FR3.1", "FR3.2", "FR3.3", "FR3.5", "FR8.3", "NFR3", "BR3.1", "BR3.2", "BR3.3", "BR3.4", "BR3.5", "BR3.6", "BR3.7", "BR3.8", "C3"],
+  "coverage": [
+    { "id": "FR3", "status": "OK", "target": "scripts/versioning/lib/plan.ts" },
+    { "id": "FR3.1", "status": "OK", "target": "scripts/versioning/lib/semver.ts" },
+    { "id": "FR3.2", "status": "OK", "target": "scripts/versioning/lib/plan.ts" },
+    { "id": "FR3.3", "status": "OK", "target": "scripts/versioning/commands/bump.ts" },
+    { "id": "FR3.5", "status": "OK", "target": "scripts/versioning/lib/plan.ts" },
+    { "id": "FR8.3", "status": "OK", "target": "scripts/versioning/lib/semver.ts" },
+    { "id": "NFR3", "status": "OK", "target": "scripts/versioning/lib/plan.ts" },
+    { "id": "BR3.1", "status": "OK", "target": "scripts/versioning/lib/plan.ts" },
+    { "id": "BR3.2", "status": "OK", "target": "scripts/versioning/lib/plan.ts" },
+    { "id": "BR3.3", "status": "OK", "target": "scripts/versioning/lib/plan.ts" },
+    { "id": "BR3.4", "status": "OK", "target": "scripts/versioning/lib/semver.ts" },
+    { "id": "BR3.5", "status": "OK", "target": "scripts/versioning/lib/plan.ts" },
+    { "id": "BR3.6", "status": "OK", "target": "scripts/versioning/lib/semver.ts" },
+    { "id": "BR3.7", "status": "OK", "target": "scripts/versioning/commands/bump.ts" },
+    { "id": "BR3.8", "status": "OK", "target": "scripts/versioning/lib/plan.ts" },
+    { "id": "C3", "status": "OK", "target": "scripts/versioning/commands/plan.ts" }
+  ]
+}

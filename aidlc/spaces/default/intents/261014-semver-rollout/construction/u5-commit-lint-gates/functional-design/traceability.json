@@ -1,0 +1,13 @@
+{
+  "stage": "functional-design",
+  "unit": "u5-commit-lint-gates",
+  "upstream_ids": ["FR1.1", "FR1.2", "FR8.1"],
+  "coverage": [
+    {"id": "FR1.1", "status": "OK", "target": "BR5.1, BR5.2"},
+    {"id": "FR1.2", "status": "OK", "target": "BR5.3, BR5.4, BR5.5"},
+    {"id": "FR8.1", "status": "OK", "target": "BR5.4"}
+  ],
+  "technical_rules": [
+    {"id": "BR5.6", "status": "N/A", "reason": "Least-privilege CI permissions — security hardening, no FR source"}
+  ]
+}

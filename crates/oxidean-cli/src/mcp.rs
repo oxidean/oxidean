@@ -22,7 +22,7 @@ use std::time::Duration;
 
 use serde_json::{json, Map, Value};
 
-use oxidean_core::RpcResponse;
+use oxidean_core::{MCP_PROTOCOL_VERSIONS, RpcResponse};
 
 use crate::args::Global;
 use crate::commands::{resolve_instance, CliError, Out, Runtime};
@@ -1268,7 +1268,7 @@ async fn ping_endpoint(endpoint: &str, token: Option<&str>) -> EndpointState {
     let init = json!({
         "jsonrpc": "2.0", "id": 1, "method": "initialize",
         "params": {
-            "protocolVersion": "2025-06-18",
+            "protocolVersion": MCP_PROTOCOL_VERSIONS.last().copied().expect("MCP_PROTOCOL_VERSIONS is non-empty"),
             "capabilities": {},
             "clientInfo": {"name": "ox", "version": env!("CARGO_PKG_VERSION")},
         },

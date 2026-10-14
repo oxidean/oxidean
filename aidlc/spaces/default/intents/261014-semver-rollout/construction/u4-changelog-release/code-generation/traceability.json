@@ -1,0 +1,140 @@
+{
+  "stage": "code-generation",
+  "unit": "u4-changelog-release",
+  "upstream_ids": [
+    "FR2.5",
+    "FR3.4",
+    "FR4",
+    "FR4.1",
+    "FR4.2",
+    "FR4.3",
+    "FR4.4",
+    "FR5",
+    "FR5.1",
+    "FR5.2",
+    "FR5.3",
+    "FR5.4",
+    "FR5.5",
+    "FR5.6",
+    "FR8.2",
+    "FR8.4",
+    "C3",
+    "C4",
+    "C5",
+    "FR8",
+    "NFR2",
+    "NFR6"
+  ],
+  "coverage": [
+    {
+      "id": "FR2.5",
+      "status": "OK",
+      "target": "scripts/versioning/commands/release-tags.ts"
+    },
+    {
+      "id": "FR3.4",
+      "status": "OK",
+      "target": ".github/workflows/release.yml"
+    },
+    {
+      "id": "FR4",
+      "status": "OK",
+      "target": "scripts/versioning/commands/changelog.ts"
+    },
+    {
+      "id": "FR4.1",
+      "status": "OK",
+      "target": "CHANGELOG.md"
+    },
+    {
+      "id": "FR4.2",
+      "status": "OK",
+      "target": "scripts/versioning/lib/changelog.ts"
+    },
+    {
+      "id": "FR4.3",
+      "status": "OK",
+      "target": "docs/WIRE-CHANGELOG.md"
+    },
+    {
+      "id": "FR4.4",
+      "status": "OK",
+      "target": "scripts/versioning/lib/changelog.ts"
+    },
+    {
+      "id": "FR5.1",
+      "status": "OK",
+      "target": ".github/workflows/ox-cli.yml"
+    },
+    {
+      "id": "FR5.2",
+      "status": "OK",
+      "target": ".github/workflows/publish-runner.yml"
+    },
+    {
+      "id": "FR5.3",
+      "status": "OK",
+      "target": ".github/workflows/release.yml"
+    },
+    {
+      "id": "FR5.4",
+      "status": "OK",
+      "target": ".github/workflows/release.yml"
+    },
+    {
+      "id": "FR5.5",
+      "status": "OK",
+      "target": ".github/workflows/release.yml"
+    },
+    {
+      "id": "FR5.6",
+      "status": "OK",
+      "target": ".github/workflows/ox-cli.yml"
+    },
+    {
+      "id": "FR8.2",
+      "status": "OK",
+      "target": ".github/workflows/release-pr.yml"
+    },
+    {
+      "id": "FR8.4",
+      "status": "OK",
+      "target": "scripts/versioning/commands/release-tags.ts"
+    },
+    {
+      "id": "C3",
+      "status": "OK",
+      "target": "scripts/versioning/commands/changelog.ts"
+    },
+    {
+      "id": "C4",
+      "status": "OK",
+      "target": ".github/workflows/release.yml"
+    },
+    {
+      "id": "C5",
+      "status": "OK",
+      "target": ".github/workflows/ox-cli.yml"
+    },
+    {
+      "id": "FR5",
+      "status": "OK",
+      "target": ".github/workflows/release.yml"
+    },
+    {
+      "id": "FR8",
+      "status": "OK",
+      "target": ".github/workflows/release-pr.yml"
+    },
+    {
+      "id": "NFR2",
+      "status": "OK",
+      "target": "scripts/versioning/lib/changelog.ts"
+    },
+    {
+      "id": "NFR6",
+      "status": "OK",
+      "target": ".github/workflows/ox-cli.yml"
+    }
+  ]
+}

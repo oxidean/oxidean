@@ -1,0 +1,17 @@
+{
+  "stage": "code-generation",
+  "unit": "u3-change-detection",
+  "version": 1,
+  "writes": [
+    { "path": "scripts/versioning/lib/semver.ts" },
+    { "path": "scripts/versioning/lib/semver.test.ts" },
+    { "path": "scripts/versioning/lib/git.ts" },
+    { "path": "scripts/versioning/lib/plan.ts" },
+    { "path": "scripts/versioning/lib/plan.test.ts" },
+    { "path": "scripts/versioning/commands/detect.ts" },
+    { "path": "scripts/versioning/commands/plan.ts" },
+    { "path": "scripts/versioning/commands/plan.test.ts" },
+    { "path": "scripts/versioning/commands/bump.ts" },
+    { "path": "scripts/versioning/cli.ts" }
+  ]
+}

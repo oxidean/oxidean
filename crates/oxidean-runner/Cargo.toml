@@ -3,7 +3,7 @@ name = "oxidean-runner"
 description = "Oxidean Actions self-hosted runner (custom JSON protocol)"
 edition.workspace = true
 license.workspace = true
-version.workspace = true
+version = "0.1.0"
 
 [[bin]]
 name = "oxidean-runner"

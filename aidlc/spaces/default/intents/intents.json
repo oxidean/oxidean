@@ -1,0 +1,9 @@
+[
+  {
+    "uuid": "01a137eb-9d2f-7a8a-9253-cb8da45040f6",
+    "slug": "semver-rollout",
+    "dirName": "261014-semver-rollout",
+    "scope": "semver-release-automation",
+    "status": "complete"
+  }
+]

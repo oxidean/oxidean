@@ -1,0 +1,14 @@
+{
+  "stage": "functional-design",
+  "unit": "u7-contributor-guidance",
+  "upstream_ids": ["FR7", "FR7.1", "FR7.2", "FR7.3"],
+  "coverage": [
+    {"id": "FR7",   "status": "OK", "target": "BR7.1, BR7.2"},
+    {"id": "FR7.1", "status": "OK", "target": "BR7.2"},
+    {"id": "FR7.2", "status": "OK", "target": "BR7.1, BR7.5"},
+    {"id": "FR7.3", "status": "OK", "target": "BR7.3"}
+  ],
+  "technical_rules": [
+    {"id": "BR7.4", "status": "N/A", "reason": "Dogfooding rule — this unit's own doc commits must not induce spurious bumps; process hygiene, no FR source"}
+  ]
+}

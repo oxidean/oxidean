@@ -1,0 +1,33 @@
+{
+  "stage": "code-generation",
+  "unit": "u6-version-surfaces",
+  "version": 1,
+  "writes": [
+    { "path": "crates/oxidean-core/src/lib.rs" },
+    { "path": "crates/oxidean-api/src/rpc.rs" },
+    { "path": "crates/oxidean-api/src/mcp.rs" },
+    { "path": "crates/oxidean-api/src/rest/spec.rs" },
+    { "path": "crates/oxidean-api/src/routes/cli_dist.rs" },
+    { "path": "crates/oxidean-api/src/bin/rpc_gen.rs" },
+    { "path": "crates/oxidean-api/tests/cli_dist.rs" },
+    { "path": "crates/oxidean-cli/src/rpc.rs" },
+    { "path": "crates/oxidean-cli/src/manifest.rs" },
+    { "path": "crates/oxidean-cli/src/mcp.rs" },
+    { "path": "crates/oxidean-cli/tests/rpc_http.rs" },
+    { "path": "crates/oxidean-web/src/wellknown.rs" },
+    { "path": "crates/oxidean-web/Cargo.toml" },
+    { "path": "Cargo.lock" },
+    { "path": "packages/api-client/src/index.ts" },
+    { "path": "packages/api-client/src/index.test.ts" },
+    { "path": "apps/web/src/lib/webmcp.ts" },
+    { "path": "apps/web/src/routes/admin/mcp.tsrx" },
+    { "path": "docs/openapi.yaml" },
+    { "path": "docs/API.md" },
+    { "path": "docs/CLI.md" },
+    { "path": "docs/ARCHITECTURE.md" },
+    { "path": "docs/database.md" },
+    { "path": "docs/CONFIGURATION.md" },
+    { "path": ".env.example" },
+    { "path": "docker-compose.yml" }
+  ]
+}

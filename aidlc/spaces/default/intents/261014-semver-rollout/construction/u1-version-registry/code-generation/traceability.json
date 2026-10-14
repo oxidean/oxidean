@@ -1,0 +1,116 @@
+{
+  "stage": "code-generation",
+  "unit": "u1-version-registry",
+  "upstream_ids": [
+    "BR1.1",
+    "BR1.2",
+    "BR1.3",
+    "BR1.4",
+    "BR1.5",
+    "BR1.6",
+    "BR1.7",
+    "BR1.8",
+    "FR2.1",
+    "FR2.2",
+    "FR2.3",
+    "FR2.4",
+    "FR2.5",
+    "NFR3",
+    "NFR4",
+    "FR1",
+    "FR2",
+    "NFR1"
+  ],
+  "coverage": [
+    {
+      "id": "BR1.1",
+      "status": "OK",
+      "target": "scripts/versioning/lib/registry.ts"
+    },
+    {
+      "id": "BR1.2",
+      "status": "OK",
+      "target": "scripts/versioning/commands/check.ts"
+    },
+    {
+      "id": "BR1.3",
+      "status": "OK",
+      "target": "scripts/versioning/lib/registry.ts"
+    },
+    {
+      "id": "BR1.4",
+      "status": "OK",
+      "target": "scripts/versioning/lib/registry.ts"
+    },
+    {
+      "id": "BR1.5",
+      "status": "OK",
+      "target": "scripts/versioning/lib/workspace.ts"
+    },
+    {
+      "id": "BR1.6",
+      "status": "OK",
+      "target": "scripts/versioning/commands/check.ts"
+    },
+    {
+      "id": "BR1.7",
+      "status": "OK",
+      "target": "scripts/versioning/lib/globs.ts"
+    },
+    {
+      "id": "BR1.8",
+      "status": "OK",
+      "target": "scripts/versioning/commands/check.ts"
+    },
+    {
+      "id": "FR2.1",
+      "status": "OK",
+      "target": "crates/oxidean-core/Cargo.toml"
+    },
+    {
+      "id": "FR2.2",
+      "status": "OK",
+      "target": "versioning.toml"
+    },
+    {
+      "id": "FR2.3",
+      "status": "OK",
+      "target": "crates/oxidean-core/src/lib.rs"
+    },
+    {
+      "id": "FR2.4",
+      "status": "OK",
+      "target": "scripts/versioning/lib/workspace.ts"
+    },
+    {
+      "id": "FR2.5",
+      "status": "OK",
+      "target": "versioning.toml"
+    },
+    {
+      "id": "NFR3",
+      "status": "OK",
+      "target": "versioning.toml"
+    },
+    {
+      "id": "NFR4",
+      "status": "OK",
+      "target": "scripts/versioning/lib/registry.test.ts"
+    },
+    {
+      "id": "FR1",
+      "status": "OK",
+      "target": "versioning.toml"
+    },
+    {
+      "id": "FR2",
+      "status": "OK",
+      "target": "versioning.toml"
+    },
+    {
+      "id": "NFR1",
+      "status": "OK",
+      "target": "scripts/versioning/cli.ts"
+    }
+  ]
+}

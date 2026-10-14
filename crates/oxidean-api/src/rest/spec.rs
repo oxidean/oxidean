@@ -12,6 +12,7 @@ use schemars::{Schema, SchemaGenerator};
 use serde_json::{json, Map, Value};
 
 use crate::app::AppState;
+use oxidean_core::WIRE_VERSION;
 
 use super::{admin, issues, orgs, pulls, releases, repos, statuses, users};
 
@@ -332,7 +333,7 @@ pub fn openapi_doc() -> Value {
         "openapi": "3.0.3",
         "info": {
             "title": "Oxidean REST API",
-            "version": "1",
+            "version": WIRE_VERSION,
             "description": "Public REST API for Oxidean — a companion to the typed JSON RPC at `POST /api/rpc`. Each route dispatches to the same internal procedure the RPC layer uses, so ACLs, PAT scope gates, and side effects are identical. Generated from the route table — this document cannot drift from the served surface.",
         },
         "servers": [{ "url": "/api/v1" }],

@@ -43,6 +43,10 @@ Integration-style Rust tests live under `crates/oxidean-api/tests/` and `crates/
 
 Package Vitest config: `packages/api-client/vitest.config.ts` (`environment: "node"`). Script: `vitest run`. Tests live next to sources (e.g. `src/index.test.ts`) and cover RPC protocol version headers and client fetch behavior with a mock `fetch`.
 
+### Versioning tooling (`scripts/versioning`)
+
+The SemVer machinery (registry loader, commit grammar, plan engine, changelog, release-tag helpers, hook, docs-shape guards) is Bun-tested: `bun test scripts/versioning` — run it with `make version-check` (registry completeness) and `make commit-check` (grammar lint) for the enforcement surfaces. See [docs/VERSIONING.md](VERSIONING.md).
+
 ## Running tests
 
 ### Default suite (`make test`)
@@ -250,6 +254,7 @@ Workflow: [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) (`name: CI`)
 
 | Job | What it runs |
 |-----|----------------|
+| `commit-lint` | `versioning commit-check` on the PR commit range + PR title; `versioning check` registry completeness |
 | `api-rust` | Install nextest → `cargo nextest run --workspace --profile ci` |
 | `web-octane` | `bun install --frozen-lockfile` → `bun run test` (api-client + web unit/integration) → Turbo build `@oxidean/web` |
 | `route-coverage` | `make route-coverage-check` — every user-facing `.tsrx` page has happy-dom, stack-browser, or documented skip (G-11.1-15); change-aware: touched routes cannot stay skip-only |

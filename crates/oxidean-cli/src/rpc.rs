@@ -1,8 +1,8 @@
 //! `/api/rpc` transport — matches the generated `@oxidean/api-client` shape:
-//! `POST {instance}/api/rpc` with `Oxidean-RPC-Version: 1`, a
+//! `POST {instance}/api/rpc` with `Oxidean-RPC-Version: <WIRE_VERSION>`, a
 //! `{procedure, input}` JSON body, and `Authorization: Bearer <pat>` auth.
 
-use oxidean_core::{AppError, RpcRequest, RpcResponse, RPC_PROTOCOL_VERSION};
+use oxidean_core::{AppError, RpcRequest, RpcResponse, WIRE_VERSION};
 use serde_json::Value;
 
 /// Version gate header (same constant the generated TS client emits).
@@ -108,7 +108,7 @@ impl Client {
         let mut req = self
             .http
             .post(&self.url)
-            .header(VERSION_HEADER, RPC_PROTOCOL_VERSION.to_string())
+            .header(VERSION_HEADER, WIRE_VERSION)
             .header("user-agent", concat!("ox/", env!("CARGO_PKG_VERSION")))
             .json(&body);
         if let Some(token) = &self.token {

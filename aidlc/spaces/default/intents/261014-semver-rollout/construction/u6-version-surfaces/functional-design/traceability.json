@@ -1,0 +1,14 @@
+{
+  "stage": "functional-design",
+  "unit": "u6-version-surfaces",
+  "upstream_ids": ["FR6", "FR6.1", "FR6.2", "FR6.3", "FR6.4", "FR6.5", "FR6.6"],
+  "coverage": [
+    {"id": "FR6",   "status": "OK", "target": "BR6.1, BR6.3"},
+    {"id": "FR6.1", "status": "OK", "target": "BR6.1, BR6.2, BR6.4"},
+    {"id": "FR6.2", "status": "OK", "target": "BR6.3"},
+    {"id": "FR6.3", "status": "OK", "target": "BR6.5"},
+    {"id": "FR6.4", "status": "OK", "target": "BR6.6, BR6.7"},
+    {"id": "FR6.5", "status": "OK", "target": "BR6.8"},
+    {"id": "FR6.6", "status": "OK", "target": "BR6.1, BR6.3"}
+  ]
+}

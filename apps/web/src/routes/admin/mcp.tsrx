@@ -1,6 +1,10 @@
 import { queryOptions, useQuery, useQueryClient } from "@octanejs/tanstack-query";
 import { AppPage } from "@/components/app-page";
-import type { AdminMcpSettingsPublic, UserPublic } from "@oxidean/api-client";
+import {
+  MCP_PROTOCOL_VERSIONS,
+  type AdminMcpSettingsPublic,
+  type UserPublic,
+} from "@oxidean/api-client";
 import { useEffect, useState } from "octane";
 import { CopyCommand } from "@/components/settings/copy-command";
 import { AdminSettingsLayout, SettingsShell } from "@/components/settings/settings-shell";
@@ -169,7 +173,7 @@ export function AdminMcpContent() @{
           id: "admin-mcp-probe",
           method: "initialize",
           params: {
-            protocolVersion: "2025-06-18",
+            protocolVersion: MCP_PROTOCOL_VERSIONS.at(-1),
             capabilities: {},
             clientInfo: { name: "oxidean-admin", version: "0" },
           },

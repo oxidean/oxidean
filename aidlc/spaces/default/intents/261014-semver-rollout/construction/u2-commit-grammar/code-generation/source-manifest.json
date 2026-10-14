@@ -1,0 +1,12 @@
+{
+  "stage": "code-generation",
+  "unit": "u2-commit-grammar",
+  "version": 1,
+  "writes": [
+    { "path": "scripts/versioning/lib/commit.ts" },
+    { "path": "scripts/versioning/lib/commit.test.ts" },
+    { "path": "scripts/versioning/commands/commit-check.ts" },
+    { "path": "scripts/versioning/commands/commit-check.test.ts" },
+    { "path": "scripts/versioning/cli.ts" }
+  ]
+}

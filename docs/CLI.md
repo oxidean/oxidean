@@ -69,7 +69,7 @@ instance currently stages** under `/cli/bin` — not a global channel:
 ox self-update
 ```
 
-It fetches `{instance}/cli/latest`, compares the advertised workspace
+It fetches `{instance}/cli/latest`, compares the advertised `ox`
 `version` **and** the sha256 for your platform to the running executable,
 downloads `ox-{your-target}` when either differs, verifies the checksum, and
 swaps in place. Same semver with a rebuilt matrix still refreshes the binary.
@@ -115,7 +115,9 @@ into the dist dir by hand:
                          # or RAILWAY_GIT_COMMIT_SHA on host-only builds)
 ```
 
-`GET /cli/latest` reports the API package `version`, each target’s
+`GET /cli/latest` reports the published `ox` `version` — read from the
+`latest.json` the `ox-v*` release lane writes (it reports `version: null`
+and no targets when no release has published one), each target’s
 sha256/size, and `dist_commit` when `SOURCE_COMMIT` is present.
 `/cli/bin/{file}` serves artifacts unauthenticated so installs work before
 `ox auth login` exists.
