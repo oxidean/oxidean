@@ -669,14 +669,17 @@ jobs:
           set -euo pipefail
           mkdir -p var
           probe() {
-            echo "==> dialect: $1"
-            DATABASE_URL="$2" OXIDEAN_DB_DIALECT="$1" \
+            local dialect="$1" url="$2"; shift 2
+            echo "==> dialect: $dialect"
+            DATABASE_URL="$url" OXIDEAN_DB_DIALECT="$dialect" \
               cargo nextest run --archive-file target/nextest-archive.tar.zst \
-                --profile ci -E 'binary_id(oxidean-db::dialect_probe)'
+                --profile ci -E 'binary_id(oxidean-db::dialect_probe)' "$@"
           }
           probe postgres postgres://oxidean:oxidean@localhost:5432/oxidean
           probe mysql mysql://oxidean:oxidean@127.0.0.1:3306/oxidean
-          probe sqlite sqlite:./var/oxidean.db
+          # sqlite serializes: the three probe tests share one database file
+          # and parallel migrations race (duplicate column on migration 6).
+          probe sqlite sqlite:./var/oxidean.db --test-threads=1
 
   # Release-build evidence: `cargo build --timings` HTML + binary size, so build
   # performance changes are measurable on the PR that makes them. Runs on pushes
