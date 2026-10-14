@@ -45,8 +45,18 @@ wait_http() {
   exit 1
 }
 
-echo "==> building oxidean-api + oxidean-runner"
-cargo build -q -p oxidean-api --bin oxidean-api -p oxidean-runner --bin oxidean-runner
+if [[ "${OXIDEAN_PREBUILT_BINS:-0}" == "1" ]]; then
+  echo "==> using prebuilt oxidean-api + oxidean-runner (rust-build artifact)"
+  for bin in oxidean-api oxidean-runner; do
+    [[ -x "$ROOT/target/debug/$bin" ]] || {
+      echo "error: prebuilt bin missing: target/debug/$bin" >&2
+      exit 1
+    }
+  done
+else
+  echo "==> building oxidean-api + oxidean-runner"
+  cargo build -q -p oxidean-api --bin oxidean-api -p oxidean-runner --bin oxidean-runner
+fi
 
 echo "==> starting API on :$API_PORT (sqlite, actions enabled)"
 export OXIDEAN_ENV=development

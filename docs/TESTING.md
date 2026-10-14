@@ -255,18 +255,20 @@ Workflow: [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) (`name: CI`)
 | Job | What it runs |
 |-----|----------------|
 | `commit-lint` | `versioning commit-check` on the PR commit range + PR title; `versioning check` registry completeness |
-| `api-rust` | Install nextest → `cargo nextest run --workspace --profile ci` |
+| `rust-build` | `cargo build --workspace --bins` + `cargo nextest archive --workspace` → uploads `rust-bins` + `nextest-archive` artifacts (same-run only; `rust-artifacts-cleanup` deletes them at run end) |
+| `api-rust` | 5-way matrix: download `nextest-archive` → `cargo nextest run --archive-file … --profile ci --partition count:N/5` (build happens once in `rust-build`) |
 | `web-octane` | `bun install --frozen-lockfile` → `bun run test` (api-client + web unit/integration) → Turbo build `@oxidean/web` |
 | `route-coverage` | `make route-coverage-check` — every user-facing `.tsrx` page has happy-dom, stack-browser, or documented skip (G-11.1-15); change-aware: touched routes cannot stay skip-only |
 | `web-browser` | `make test-web-browser` — Vitest Chromium component DOM-race suite (`*.browser.test.tsx`) |
 | `browser-coverage` | `make browser-coverage-check` + change contract — high-risk UI (Checkbox/Radio/Select/Switch/portals/Subscribe) Chromium proof; touched/new surfaces cannot stay skip-only |
 | `coverage-weighted` | Rust toolchain (llvm-tools-preview) + `cargo-llvm-cov`/`nextest` → Bun install → `make coverage-contract` → `make coverage-rust` → `make coverage-web` → e2e checklist → `scripts/coverage-weighted.sh` (floor `0.70`); uploads `var/coverage/rust-*` always, `var/coverage/` + `apps/web/coverage/` on failure |
-| `e2e-stack` | Rust + Bun + Playwright → `make test-e2e-stack`; on failure uploads `var/e2e/` as `e2e-stack-logs` |
-| `rpc-sync` | `make rpc-sync-check` |
+| `e2e-stack` | Bun + Playwright + prebuilt `rust-bins` (`OXIDEAN_PREBUILT_BINS=1` — `run-stack-e2e.sh` execs `target/debug/*` instead of `cargo run`) → `make test-e2e-stack`; on failure uploads `var/e2e/` as `e2e-stack-logs` |
+| `actions-e2e` | Prebuilt `rust-bins` → `./scripts/e2e-actions-pipeline.sh` (API sqlite + host runner + seeded workflow run) |
+| `rpc-sync` | Prebuilt `rust-bins` (`rpc-gen`/`openapi-gen`/`ox` exec direct) → `make rpc-sync-check` / `openapi-sync-check` / `skill-sync-check` |
 | `compose` | `docker compose … config` for base, MySQL/SQLite overlays, and `docker-compose.dev-auth.yml` (config-only; does not build/bring-up) |
 | `compose-smoke` | Matrix `postgres` / `sqlite` / `mysql`: `./scripts/ci-compose-smoke.sh` → `make smoke` / `smoke-sqlite` / `smoke-mysql` (**D-CI-01…04**); fail-closed under `CI` / `SMOKE_REQUIRE_STACK`; image proof via `compose up --build` (**D-CI-06**); uploads `/tmp/oxidean-smoke*.json` on failure. Complements config-only `compose` and stays separate from `smoke-protocol` (**D-CI-05**) |
 | `smoke-protocol` | Compose up → seeds verified owner + public repo + PAT + session cookie via RPC (**DEBT-11**), then `make smoke-git-https` + `smoke-git-ssh` + `smoke-git-lfs` + `smoke-packages` via `make smoke-protocol-ci` (**D-QH-04**), then `smoke-protection` — ORG-06/D-PKG-03 HTTPS protected-push denial on a fresh stack it re-ups itself (**DEBT-01**); fail-closed when Docker/stack absent (`CI` / `SMOKE_REQUIRE_STACK`); live `git ls-remote` + push over HTTPS **and** SSH by default (`SMOKE_SEED_FIXTURES=0` → routing/TCP-only, `SMOKE_SKIP_LS_REMOTE` defaults back to 1); `SMOKE_SKIP_LFS_CLIENT=1` (git-lfs binary transfer still opt-in) |
-| `db-matrix` | Matrix `postgres` / `mysql` / `sqlite`: `cargo test -p oxidean-db --test dialect_probe -- --nocapture` with matching `DATABASE_URL` / `OXIDEAN_DB_DIALECT` (dialect probe only — not a substitute for Compose bring-up) |
+| `db-dialects` | Single leg — Postgres + MySQL service containers + sqlite file: `cargo nextest run --archive-file … -E 'binary_id(dialect_probe)'` per dialect with matching `DATABASE_URL` / `OXIDEAN_DB_DIALECT` (dialect probe only — not a substitute for Compose bring-up) |
 
 Default `web-octane` stays fast (no Docker auth stubs). True auth/email path coverage is the separate `e2e-stack` job. The `coverage-weighted` job enforces D-QH-02 without reviving component Playwright. Compose dialect health (Traefik `/` + `/health` + `system.db_probe`) is the `compose-smoke` matrix — not folded into `smoke-protocol`. Forge protocol edges (Smart HTTP / SSH TCP / LFS batch / packages PathPrefix) plus ORG-06 protected-push denial are the `smoke-protocol` job — not happy-dom only.
 

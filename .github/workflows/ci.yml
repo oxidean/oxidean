@@ -69,20 +69,18 @@ jobs:
       - name: registry completeness
         run: bun scripts/versioning/cli.ts check
 
-  api-rust:
-    name: api-rust
+  # Single compile for the whole debug-profile Rust lane: workspace bins plus
+  # a nextest archive feed api-rust shards, db-dialects, and the e2e/sync jobs —
+  # none of them pay a second compile. Artifacts are same-run only (the
+  # rust-artifacts-cleanup job deletes them once consumers finish;
+  # retention-days:1 is just the platform floor/fallback).
+  rust-build:
+    name: rust-build
     needs: [makefile-lint]
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      # The suite is ~1650s of cumulative test time — more than the compile.
-      # Partition across 3 runners so wall time tracks one third of it.
-      matrix:
-        shard: ["1", "2", "3"]
     steps:
       - uses: actions/checkout@v7
-      - name: free disk for Rust link
-        # ubuntu-latest fills quickly linking many debug integration binaries.
+      - name: free disk for Rust build
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
             /usr/local/share/boost /usr/share/swift || true
@@ -95,20 +93,79 @@ jobs:
         with:
           tool: nextest
       - name: install mold linker + protoc
-        # protobuf-compiler: prost-build for crates/oxidean-api/proto/runner.proto (Phase 19).
+        # protobuf-compiler: prost-build for crates/oxidean-api/proto/runner.proto.
         run: sudo apt-get update -qq && sudo apt-get install -y -qq mold protobuf-compiler
-      - name: cargo nextest (shard ${{ matrix.shard }}/3)
-        # Full-workspace debug link has hit lld bus errors (signal 7) on GHA.
-        # mold + thin debuginfo (dev profile in Cargo.toml) keeps link stable/disk-safe;
-        # retry once on flake.
+      - name: cargo build bins + nextest archive
+        # Same link/disk env the per-job builds used — consumers run the exact
+        # artifacts this produces.
         env:
           CARGO_INCREMENTAL: "0"
           RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
         run: |
-          cargo nextest run --workspace --profile ci \
-            --partition count:${{ matrix.shard }}/3 \
-            || cargo nextest run --workspace --profile ci \
-              --partition count:${{ matrix.shard }}/3
+          set -euo pipefail
+          cargo build --workspace --bins
+          cargo nextest archive --workspace \
+            --archive-file target/nextest-archive.tar.zst
+          ls -lh target/nextest-archive.tar.zst
+      - name: upload rust-bins (same-run)
+        uses: actions/upload-artifact@v7
+        with:
+          name: rust-bins
+          overwrite: true
+          retention-days: 1
+          path: |
+            target/debug/oxidean-api
+            target/debug/oxidean-web
+            target/debug/oxidean-runner
+            target/debug/oxidean-protection-hook
+            target/debug/ox
+            target/debug/rpc-gen
+            target/debug/openapi-gen
+          if-no-files-found: error
+      - name: upload nextest archive (same-run)
+        uses: actions/upload-artifact@v7
+        with:
+          name: nextest-archive
+          overwrite: true
+          retention-days: 1
+          path: target/nextest-archive.tar.zst
+          if-no-files-found: error
+
+  api-rust:
+    name: api-rust
+    needs: [rust-build]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      # rust-build compiles once; shards only execute. The suite is ~1650s of
+      # cumulative test time — 5-way split keeps wall time at suite/5 + download.
+      matrix:
+        shard: ["1", "2", "3", "4", "5"]
+    steps:
+      - uses: actions/checkout@v7
+      - name: free disk for test binaries
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /usr/local/share/boost /usr/share/swift || true
+          df -h /
+      # Toolchain stays installed so any test shelling out to cargo/rustc still
+      # works; no compile is expected on shards (no mold/protoc/rust-cache).
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: nextest
+      - name: download nextest archive
+        uses: actions/download-artifact@v8
+        with:
+          name: nextest-archive
+          path: target/
+      - name: cargo nextest (shard ${{ matrix.shard }}/5)
+        # Retry once on flake (the build is deterministic; flakes are run-side).
+        run: |
+          cargo nextest run --archive-file target/nextest-archive.tar.zst \
+            --profile ci --partition count:${{ matrix.shard }}/5 \
+            || cargo nextest run --archive-file target/nextest-archive.tar.zst \
+              --profile ci --partition count:${{ matrix.shard }}/5
 
   web-octane:
     name: web-octane
@@ -151,10 +208,10 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: "rust-debug"
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-machete
+          # clippy/doc check artifacts are a different fingerprint family than
+          # the rust-debug build outputs — a separate key stops them evicting
+          # each other's entries.
+          shared-key: "rust-check"
       - name: install protoc
         run: sudo apt-get update -qq && sudo apt-get install -y -qq protobuf-compiler
       - name: rust dead code + unused deps
@@ -310,16 +367,22 @@ jobs:
 
   e2e-stack:
     name: e2e-stack
-    needs: [makefile-lint]
+    needs: [rust-build]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      # Toolchain + apt deps stay as fallback insurance: if a script path ever
+      # misses the OXIDEAN_PREBUILT_BINS gate it compiles instead of failing.
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: "rust-debug"
       - name: install protoc + mold
         run: sudo apt-get update -qq && sudo apt-get install -y -qq protobuf-compiler mold
+      - name: download prebuilt rust bins
+        uses: actions/download-artifact@v8
+        with:
+          name: rust-bins
+          path: target/debug
+      - name: mark bins executable
+        run: chmod +x target/debug/*
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.4.0"
@@ -330,6 +393,7 @@ jobs:
         run: cd apps/web && bunx playwright install --with-deps chromium
       - name: stack e2e (API + Mailpit/OIDC/stubs + web)
         env:
+          OXIDEAN_PREBUILT_BINS: "1"
           CARGO_INCREMENTAL: "0"
           RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
         run: make test-e2e-stack
@@ -347,7 +411,7 @@ jobs:
   # no Docker) + seeded push-triggered workflow → green run with log marker.
   actions-e2e:
     name: actions-e2e
-    needs: [makefile-lint]
+    needs: [rust-build]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -356,48 +420,52 @@ jobs:
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
             /usr/local/share/boost /usr/share/swift || true
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: "rust-debug"
       - name: install protoc + mold
         run: sudo apt-get update -qq && sudo apt-get install -y -qq protobuf-compiler mold jq
+      - name: download prebuilt rust bins
+        uses: actions/download-artifact@v8
+        with:
+          name: rust-bins
+          path: target/debug
+      - name: mark bins executable
+        run: chmod +x target/debug/*
       - name: pipeline e2e
         env:
+          OXIDEAN_PREBUILT_BINS: "1"
           CARGO_INCREMENTAL: "0"
           RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
         run: ./scripts/e2e-actions-pipeline.sh
 
   rpc-sync:
     name: rpc-sync
-    needs: [makefile-lint]
+    needs: [rust-build]
     runs-on: ubuntu-latest
+    env:
+      # Generators (rpc-gen/openapi-gen) and the `ox` used by skill-sync come
+      # from rust-build's artifact — Makefile/check scripts honor this flag.
+      OXIDEAN_PREBUILT_BINS: "1"
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: "rust-debug"
       - name: install protoc + mold
         run: sudo apt-get update -qq && sudo apt-get install -y -qq protobuf-compiler mold
+      - name: download prebuilt rust bins
+        uses: actions/download-artifact@v8
+        with:
+          name: rust-bins
+          path: target/debug
+      - name: mark bins executable
+        run: chmod +x target/debug/*
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.4.0"
       - name: bun install
         run: bun install --frozen-lockfile
       - name: check-rpc-sync
-        env:
-          CARGO_INCREMENTAL: "0"
-          RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
         run: make rpc-sync-check
       - name: check-openapi-sync
-        env:
-          CARGO_INCREMENTAL: "0"
-          RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
         run: make openapi-sync-check
       - name: check-skill-sync
-        env:
-          CARGO_INCREMENTAL: "0"
-          RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
         run: make skill-sync-check
 
   compose:
@@ -555,22 +623,13 @@ jobs:
             /tmp/oxidean-smoke*.json
           if-no-files-found: ignore
 
-  # Both Postgres and MySQL service containers boot on every matrix leg because
-  # GitHub Actions cannot condition `services:` on `matrix.*`. Accepted cost on the sqlite leg.
-  db-matrix:
-    name: db-${{ matrix.dialect }}
-    needs: [makefile-lint]
+  # One leg for all three dialects: services: can't key on matrix (Postgres +
+  # MySQL booted per leg anyway), and the probe now runs from the shared
+  # nextest archive — no per-dialect compile, one runner boot.
+  db-dialects:
+    name: db-dialects
+    needs: [rust-build]
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - dialect: postgres
-            database_url: postgres://oxidean:oxidean@localhost:5432/oxidean
-          - dialect: mysql
-            database_url: mysql://oxidean:oxidean@127.0.0.1:3306/oxidean
-          - dialect: sqlite
-            database_url: sqlite:./var/oxidean.db
     services:
       postgres:
         image: postgres:16-alpine
@@ -594,18 +653,27 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
         with:
-          shared-key: "rust-debug"
-      - name: install mold
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq mold
-      - name: migrate + probe (${{ matrix.dialect }})
-        env:
-          DATABASE_URL: ${{ matrix.database_url }}
-          OXIDEAN_DB_DIALECT: ${{ matrix.dialect }}
-          CARGO_INCREMENTAL: "0"
-          RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
-        run: cargo test -p oxidean-db --test dialect_probe -- --nocapture
+          tool: nextest
+      - name: download nextest archive
+        uses: actions/download-artifact@v8
+        with:
+          name: nextest-archive
+          path: target/
+      - name: migrate + probe (postgres / mysql / sqlite)
+        run: |
+          set -euo pipefail
+          mkdir -p var
+          probe() {
+            echo "==> dialect: $1"
+            DATABASE_URL="$2" OXIDEAN_DB_DIALECT="$1" \
+              cargo nextest run --archive-file target/nextest-archive.tar.zst \
+                --profile ci -E 'binary_id(oxidean-db::dialect_probe)'
+          }
+          probe postgres postgres://oxidean:oxidean@localhost:5432/oxidean
+          probe mysql mysql://oxidean:oxidean@127.0.0.1:3306/oxidean
+          probe sqlite sqlite:./var/oxidean.db
 
   # Release-build evidence: `cargo build --timings` HTML + binary size, so build
   # performance changes are measurable on the PR that makes them. Runs on pushes
@@ -684,3 +752,33 @@ jobs:
           name: cargo-timings
           path: target/cargo-timings/
           if-no-files-found: ignore
+
+  # Same-run artifacts are deleted once consumers finish — artifacts stay
+  # per-run, never accumulating repo-wide. Runs only when every consumer
+  # succeeded: on failure the artifacts are kept (1-day floor lapses them)
+  # so re-runs of failed jobs can still download the archive/bins.
+  rust-artifacts-cleanup:
+    name: rust-artifacts-cleanup
+    needs: [api-rust, db-dialects, e2e-stack, actions-e2e, rpc-sync]
+    # success() → all consumers done AND green; skipped needs → skip cleanup.
+    # Fork PRs get a read-only token → let the 1-day retention lapse instead.
+    if: success() && github.event.pull_request.head.repo.fork != true
+    runs-on: ubuntu-latest
+    # Cleanup is best-effort: a deletion failure must never fail the run —
+    # the 1-day retention floor collects anything missed.
+    continue-on-error: true
+    permissions:
+      actions: write
+    steps:
+      - name: delete same-run rust artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ids="$(gh api --paginate \
+            "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" \
+            --jq '.artifacts[] | select(.name == "rust-bins" or .name == "nextest-archive") | .id')"
+          for id in $ids; do
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$id"
+          done
+          echo "deleted same-run rust artifacts: ${ids:-none}"
