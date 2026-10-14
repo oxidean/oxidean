@@ -41,7 +41,7 @@ Image tags: `sha-<sha>` is the immutable deploy identity; `main` tracks main-tip
 
 PR Environments inherit from **`preview`** (Project Settings → Environments). Only authors who are Railway project members with GitHub linked get automatic PR deploys. Invite future collaborators as project **Viewer** (or higher) and have them link GitHub. Keep Bot PR Environments off unless you want Dependabot-style previews.
 
-Each PR environment initially clones preview's `:main` image seed; `images.yml`'s **bind-pr-env** job then repins every service to the PR's `pr-<n>-sha-<sha>` image once the build lands (the brief `:main` window is inherent — Railway clones preview instantly, the image takes a build; every subsequent push re-pins the new sha tag). Fork PRs publish nothing and are never bound.
+Each PR environment initially clones preview's `:main` image seed; `images.yml`'s **bind-pr-env** job then repins every service to the PR's `pr-<n>-sha-<sha>` image once the build lands (the brief `:main` window is inherent — Railway clones preview instantly, the image takes a build; every subsequent push re-pins the new sha tag). Fork PRs publish nothing and are never bound. On PR close, **cleanup-pr** deletes the Railway environment, the `Oxidean / oxidean-pr-<n>` GitHub Environment, and the `pr-<n>` GHCR tags — all best-effort.
 
 #### Operator steps (D-CLOUD-07 — human apply only)
 
