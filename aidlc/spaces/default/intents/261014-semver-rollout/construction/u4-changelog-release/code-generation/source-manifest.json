@@ -1,0 +1,29 @@
+{
+  "stage": "code-generation",
+  "unit": "u4-changelog-release",
+  "version": 1,
+  "writes": [
+    { "path": "scripts/versioning/lib/changelog.ts" },
+    { "path": "scripts/versioning/commands/changelog.ts" },
+    { "path": "scripts/versioning/commands/release-tags.ts" },
+    { "path": "scripts/versioning/lib/changelog.test.ts" },
+    { "path": "scripts/versioning/commands/changelog.test.ts" },
+    { "path": "scripts/versioning/commands/workflows.test.ts" },
+    { "path": "CHANGELOG.md" },
+    { "path": "crates/oxidean-core/CHANGELOG.md" },
+    { "path": "crates/oxidean-db/CHANGELOG.md" },
+    { "path": "crates/oxidean-git/CHANGELOG.md" },
+    { "path": "crates/oxidean-api/CHANGELOG.md" },
+    { "path": "crates/oxidean-runner/CHANGELOG.md" },
+    { "path": "crates/oxidean-web/CHANGELOG.md" },
+    { "path": "crates/oxidean-cli/CHANGELOG.md" },
+    { "path": "packages/api-client/CHANGELOG.md" },
+    { "path": "apps/web/CHANGELOG.md" },
+    { "path": "docs/WIRE-CHANGELOG.md" },
+    { "path": ".github/workflows/release.yml" },
+    { "path": ".github/workflows/release-pr.yml" },
+    { "path": ".github/workflows/ox-cli.yml" },
+    { "path": ".github/workflows/publish-runner.yml" },
+    { "path": "Makefile" }
+  ]
+}

@@ -1,0 +1,68 @@
+{
+  "stage": "code-generation",
+  "unit": "u2-commit-grammar",
+  "upstream_ids": [
+    "BR2.1",
+    "BR2.2",
+    "BR2.3",
+    "BR2.4",
+    "BR2.5",
+    "BR2.6",
+    "BR2.7",
+    "FR1.1",
+    "FR3.1",
+    "FR1.3"
+  ],
+  "coverage": [
+    {
+      "id": "BR2.1",
+      "status": "OK",
+      "target": "scripts/versioning/lib/commit.ts"
+    },
+    {
+      "id": "BR2.2",
+      "status": "OK",
+      "target": "scripts/versioning/lib/commit.ts"
+    },
+    {
+      "id": "BR2.3",
+      "status": "OK",
+      "target": "scripts/versioning/lib/commit.ts"
+    },
+    {
+      "id": "BR2.4",
+      "status": "OK",
+      "target": "scripts/versioning/lib/commit.ts"
+    },
+    {
+      "id": "BR2.5",
+      "status": "OK",
+      "target": "scripts/versioning/lib/commit.ts"
+    },
+    {
+      "id": "BR2.6",
+      "status": "OK",
+      "target": "scripts/versioning/commands/commit-check.ts"
+    },
+    {
+      "id": "BR2.7",
+      "status": "OK",
+      "target": "scripts/versioning/commands/commit-check.ts"
+    },
+    {
+      "id": "FR1.1",
+      "status": "OK",
+      "target": "scripts/versioning/lib/commit.ts"
+    },
+    {
+      "id": "FR3.1",
+      "status": "OK",
+      "target": "scripts/versioning/lib/commit.ts"
+    },
+    {
+      "id": "FR1.3",
+      "status": "OK",
+      "target": "scripts/versioning/lib/commit.ts"
+    }
+  ]
+}

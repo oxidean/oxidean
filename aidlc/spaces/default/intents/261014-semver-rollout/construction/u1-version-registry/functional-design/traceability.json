@@ -1,0 +1,17 @@
+{
+  "stage": "functional-design",
+  "unit": "u1-version-registry",
+  "upstream_ids": ["FR2", "FR2.1", "FR2.2", "FR2.3", "FR2.4"],
+  "coverage": [
+    {"id": "FR2",   "status": "OK", "target": "BR1.1, BR1.2, BR1.4, BR1.7"},
+    {"id": "FR2.1", "status": "OK", "target": "BR1.1"},
+    {"id": "FR2.2", "status": "OK", "target": "BR1.2, BR1.4, BR1.7"},
+    {"id": "FR2.3", "status": "OK", "target": "BR1.1"},
+    {"id": "FR2.4", "status": "OK", "target": "BR1.5"}
+  ],
+  "technical_rules": [
+    {"id": "BR1.3", "status": "N/A", "reason": "Strict-schema guard — internal quality rule from NFR3, no FR source"},
+    {"id": "BR1.6", "status": "OK", "target": "FR2.5@U4", "reason": "baseline_commit field is the registry-side anchor of FR2.5 (tag cut itself lives in U4)"},
+    {"id": "BR1.8", "status": "N/A", "reason": "Check output contract from C2/FR1.2 — cross-unit surface, formalised in contract-design"}
+  ]
+}

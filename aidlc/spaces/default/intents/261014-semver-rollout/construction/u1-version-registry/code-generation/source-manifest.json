@@ -1,0 +1,19 @@
+{
+  "stage": "code-generation",
+  "unit": "u1-version-registry",
+  "version": 1,
+  "writes": [
+    { "path": "versioning.toml" },
+    { "path": "scripts/versioning/" },
+    { "path": "Makefile" },
+    { "path": "Cargo.toml" },
+    { "path": "crates/oxidean-api/Cargo.toml" },
+    { "path": "crates/oxidean-cli/Cargo.toml" },
+    { "path": "crates/oxidean-core/Cargo.toml" },
+    { "path": "crates/oxidean-db/Cargo.toml" },
+    { "path": "crates/oxidean-git/Cargo.toml" },
+    { "path": "crates/oxidean-runner/Cargo.toml" },
+    { "path": "crates/oxidean-web/Cargo.toml" },
+    { "path": "crates/oxidean-core/src/lib.rs" }
+  ]
+}

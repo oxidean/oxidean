@@ -1,0 +1,16 @@
+{
+  "stage": "functional-design",
+  "unit": "u3-change-detection",
+  "upstream_ids": ["FR3", "FR3.1", "FR3.2", "FR3.3", "FR3.5", "FR8.3"],
+  "coverage": [
+    {"id": "FR3",   "status": "OK", "target": "BR3.2, BR3.3"},
+    {"id": "FR3.1", "status": "OK", "target": "BR3.4"},
+    {"id": "FR3.2", "status": "OK", "target": "BR3.5"},
+    {"id": "FR3.3", "status": "OK", "target": "BR3.7"},
+    {"id": "FR3.5", "status": "OK", "target": "BR3.1"},
+    {"id": "FR8.3", "status": "OK", "target": "BR3.6"}
+  ],
+  "technical_rules": [
+    {"id": "BR3.8", "status": "N/A", "reason": "Determinism constraint — internal quality rule supporting reproducible release plans, no direct FR"}
+  ]
+}

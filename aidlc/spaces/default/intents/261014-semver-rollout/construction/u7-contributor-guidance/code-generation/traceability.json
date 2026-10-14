@@ -1,0 +1,68 @@
+{
+  "stage": "code-generation",
+  "unit": "u7-contributor-guidance",
+  "upstream_ids": [
+    "BR3.4",
+    "FR7",
+    "FR7.1",
+    "FR7.2",
+    "FR7.3",
+    "BR7.1",
+    "BR7.2",
+    "BR7.3",
+    "BR7.4",
+    "BR7.5"
+  ],
+  "coverage": [
+    {
+      "id": "BR3.4",
+      "status": "OK",
+      "target": "scripts/versioning/docs.test.ts"
+    },
+    {
+      "id": "FR7",
+      "status": "OK",
+      "target": "docs/VERSIONING.md"
+    },
+    {
+      "id": "FR7.1",
+      "status": "OK",
+      "target": "docs/VERSIONING.md"
+    },
+    {
+      "id": "FR7.2",
+      "status": "OK",
+      "target": ".agents/skills/semver-conventions/SKILL.md"
+    },
+    {
+      "id": "FR7.3",
+      "status": "OK",
+      "target": "Makefile"
+    },
+    {
+      "id": "BR7.1",
+      "status": "OK",
+      "target": "docs/VERSIONING.md"
+    },
+    {
+      "id": "BR7.2",
+      "status": "OK",
+      "target": "AGENTS.md"
+    },
+    {
+      "id": "BR7.3",
+      "status": "OK",
+      "target": "docs/VERSIONING.md"
+    },
+    {
+      "id": "BR7.4",
+      "status": "OK",
+      "target": "aidlc/spaces/default/intents/261014-semver-rollout/construction/u7-contributor-guidance/code-generation/code-summary.md"
+    },
+    {
+      "id": "BR7.5",
+      "status": "OK",
+      "target": "docs/VERSIONING.md"
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+## Review
+
+**Verdict:** READY
+**Reviewer:** aidlc-product-lead-agent
+**Date:** 2026-10-14T03:34:57Z
+**Iteration:** 1
+
+### Findings
+
+| ID | Severity | Location | Finding | Required action | Status |
+|---|---|---|---|---|---|
+| R-01 | Major | aidlc/spaces/default/intents/261014-semver-rollout/inception/requirements-analysis/requirements.md > FR3.2 | "A component with direct commits receives `max(direct bump, patch)`" lacks the qualifier that a bumped internal dependency is also present. Read literally, any direct commit — including docs/chore-only commits that FR3.1 maps to "no bump" — forces a patch bump, making FR3.1's no-bump row unreachable for touched components. | Restate so `max(direct bump, patch)` applies only when a bump-relevant direct commit and a propagated dependency bump coincide, and state explicitly that no-bump-class direct commits alone produce no bump. | New |
+| R-02 | Major | aidlc/spaces/default/intents/261014-semver-rollout/inception/requirements-analysis/requirements.md > FR6.4 | The claim that MCP spec-revision dates are "pinned in four places" is verifiably incomplete: `apps/web/src/routes/admin/mcp.tsrx` (~line 172) hardcodes `protocolVersion: "2025-06-18"` in the admin MCP probe's initialize call — a fifth pin site. A dedupe implemented over the enumerated four leaves that literal behind, preserving the drift the requirement exists to eliminate. | Enumerate all five code pin sites (add `apps/web/src/routes/admin/mcp.tsrx`), sweep for any other literal spec dates (e.g. `2024-11-05`/`2025-03-26`/`2025-06-18`), and state how test fixtures are handled. | New |
+| R-03 | Minor | aidlc/spaces/default/intents/261014-semver-rollout/inception/requirements-analysis/requirements.md > FR5.5 | The generic `*-v*.*.*` tag trigger also matches `ox-v*` and `oxidean-runner-v*` tags, so the generic release job and the dedicated `ox-cli.yml` / `publish-runner.yml` flows would both fire on those tags and race on `gh release create` for the same release name. | State the exclusion mechanism — `tags-ignore` for the dedicated components or an in-job component allowlist — so each tag produces exactly one release path. | New |
+| R-04 | Minor | aidlc/spaces/default/intents/261014-semver-rollout/inception/requirements-analysis/requirements.md > FR3 | Whether path-glob fallback fires only when the conventional `scope` field is absent, or also when a present scope maps to no component (e.g. `chore(release):`), is unstated. A release commit touches every component's manifest and changelog; if unmapped scopes fall back to paths it attributes to the whole repo, causing changelog noise even though it carries no bump signal. | Specify that path-glob fallback applies only when the scope field is absent, or declare the `release` scope (and other unmapped scopes) terminal — resolved to the empty component set. | New |
+| R-05 | Minor | aidlc/spaces/default/intents/261014-semver-rollout/inception/requirements-analysis/requirements.md > FR2.3 | The wire entry's declared dependents (`oxidean-api`, `oxidean-cli`, `@oxidean/api-client`) omit `oxidean-web` and `@oxidean/web`, which host two of the MCP spec-date pin sites that FR6.4 folds under the wire entry's detection globs. If the deduped canonical source lands outside their own trees, edits to it bump the wire entry but may never propagate to the web components that serve it. | Record that every consumer of the canonical MCP-date source must be reachable through DAG edges or direct detection globs — or explicitly defer the dependent list to design once the source's home is chosen. | New |
+
+### Summary
+
+Fourth revision is internally consistent and factually grounded against the repo (component set, `[[bin]]` targets, `v*.*.*` triggers, `refs/tags/v` guards, dead `OXIDEAN_RPC_VERSION`, lockfile handling all check out). Two correctable defects remain — the FR3.2 propagation rule is missing its qualifier and FR6.4's pin-site enumeration misses `admin/mcp.tsrx` — plus three minor specification gaps; all are cheap fixes the human should weigh at the gate.

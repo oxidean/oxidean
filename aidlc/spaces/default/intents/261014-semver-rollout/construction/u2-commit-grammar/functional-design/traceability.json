@@ -1,0 +1,12 @@
+{
+  "stage": "functional-design",
+  "unit": "u2-commit-grammar",
+  "upstream_ids": ["FR1", "FR1.3"],
+  "coverage": [
+    {"id": "FR1",   "status": "OK", "target": "BR2.1, BR2.2, BR2.3, BR2.4"},
+    {"id": "FR1.3", "status": "OK", "target": "BR2.5, BR2.6"}
+  ],
+  "technical_rules": [
+    {"id": "BR2.7", "status": "OK", "target": "FR1.2@U5", "reason": "range-scan behaviour is defined here but enforced by U5's CI job — rule lives with the parser it constrains"}
+  ]
+}

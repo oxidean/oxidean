@@ -1,0 +1,15 @@
+{
+  "stage": "code-generation",
+  "unit": "u7-contributor-guidance",
+  "version": 1,
+  "writes": [
+    { "path": "docs/VERSIONING.md" },
+    { "path": "CONTRIBUTING.md" },
+    { "path": "docs/DEVELOPMENT.md" },
+    { "path": "docs/TESTING.md" },
+    { "path": "AGENTS.md" },
+    { "path": ".agents/skills/semver-conventions/SKILL.md" },
+    { "path": ".cursor/rules/oxidean-core.mdc" },
+    { "path": "scripts/versioning/docs.test.ts" }
+  ]
+}

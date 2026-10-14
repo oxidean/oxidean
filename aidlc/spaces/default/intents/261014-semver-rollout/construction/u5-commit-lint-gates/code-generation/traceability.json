@@ -1,0 +1,80 @@
+{
+  "stage": "code-generation",
+  "unit": "u5-commit-lint-gates",
+  "upstream_ids": [
+    "FR1.1",
+    "FR1.2",
+    "FR2.2",
+    "FR8.1",
+    "BR5.1",
+    "BR5.2",
+    "BR5.3",
+    "BR5.4",
+    "BR5.5",
+    "BR5.6",
+    "C2",
+    "NFR5"
+  ],
+  "coverage": [
+    {
+      "id": "FR1.1",
+      "status": "OK",
+      "target": ".githooks/commit-msg"
+    },
+    {
+      "id": "FR1.2",
+      "status": "OK",
+      "target": ".github/workflows/ci.yml"
+    },
+    {
+      "id": "FR2.2",
+      "status": "OK",
+      "target": ".github/workflows/ci.yml"
+    },
+    {
+      "id": "FR8.1",
+      "status": "OK",
+      "target": ".github/workflows/ci.yml"
+    },
+    {
+      "id": "BR5.1",
+      "status": "OK",
+      "target": ".githooks/commit-msg"
+    },
+    {
+      "id": "BR5.2",
+      "status": "OK",
+      "target": "Makefile"
+    },
+    {
+      "id": "BR5.3",
+      "status": "OK",
+      "target": ".github/workflows/ci.yml"
+    },
+    {
+      "id": "BR5.4",
+      "status": "OK",
+      "target": ".github/workflows/ci.yml"
+    },
+    {
+      "id": "BR5.5",
+      "status": "OK",
+      "target": ".github/workflows/ci.yml"
+    },
+    {
+      "id": "BR5.6",
+      "status": "OK",
+      "target": ".github/workflows/ci.yml"
+    },
+    {
+      "id": "C2",
+      "status": "OK",
+      "target": ".githooks/commit-msg"
+    },
+    {
+      "id": "NFR5",
+      "status": "OK",
+      "target": ".githooks/commit-msg"
+    }
+  ]
+}
