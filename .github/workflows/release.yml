@@ -1,0 +1,146 @@
+# Generic component release lane (C4 trigger matrix, FR5.3–FR5.5).
+#
+# Push of any `<component>-v<semver>` tag creates a GitHub Release whose notes
+# are the tag's annotation (the component's changelog section, written by
+# `release-tags`). `ox-v*` owns its own lane in ox-cli.yml (binary matrix) and
+# is excluded here; `oxidean-runner-v*` publishes its GHCR image in
+# publish-runner.yml and still gets its Release from this lane.
+#
+# Prerelease tags (`-alpha.N`, `-beta.N`, `-nightly.N`, any `x.y.z-*`) create
+# prerelease-marked Releases and NEVER write latest.json (C5).
+#
+# workflow_dispatch {component, channel} is the maintainer-driven prerelease
+# lane: it runs plan → bump → changelog on a release/* branch, tags the branch
+# head, and pushes both via RELEASE_TOKEN — never the default GITHUB_TOKEN
+# (FR3.4 — token-pushed tags do not re-trigger tag workflows).
+
+name: Component release
+
+on:
+  push:
+    tags: ["*-v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      component:
+        description: "Registry component id (e.g. oxidean-api, wire, ox)"
+        required: true
+      channel:
+        description: "Prerelease channel for this cut"
+        type: choice
+        options: [alpha, beta, nightly, stable]
+        default: alpha
+
+permissions:
+  contents: write
+
+jobs:
+  # ── tag push: GitHub Release from the annotated tag body ────────────────
+  release:
+    name: release ${{ github.ref_name }}
+    if: github.event_name == 'push' && !startsWith(github.ref_name, 'ox-v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: resolve component + semver
+        id: tag
+        run: |
+          set -euo pipefail
+          ref="${{ github.ref_name }}"
+          component="${ref%-v*}"
+          version="${ref##*-v}"
+          echo "component=$component" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          # SemVer prerelease iff a `-` follows the patch digits.
+          if [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+- ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: github release (notes = tag annotation)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git fetch --tags --force origin >/dev/null 2>&1 || true
+          notes="$(git tag -l --format='%(contents)' "${{ github.ref_name }}")"
+          args=(--title "${{ steps.tag.outputs.component }} ${{ github.ref_name }}")
+          if [ "${{ steps.tag.outputs.prerelease }}" = "true" ]; then
+            args+=(--prerelease)
+          fi
+          if [ -n "$notes" ]; then
+            gh release create "${{ github.ref_name }}" --notes "$notes" "${args[@]}"
+          else
+            gh release create "${{ github.ref_name }}" --generate-notes "${args[@]}"
+          fi
+
+  # ── dispatch: plan + bump + changelog + tag for one component ───────────
+  dispatch-release:
+    name: cut ${{ inputs.component }} (${{ inputs.channel }})
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # RELEASE_TOKEN (a maintainer PAT) is required: tag pushes made with
+          # the default GITHUB_TOKEN do not trigger downstream tag workflows.
+          token: ${{ secrets.RELEASE_TOKEN }}
+      - uses: oven-sh/setup-bun@v2
+      - name: RELEASE_TOKEN is configured
+        env:
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          if [ -z "${RELEASE_TOKEN:-}" ]; then
+            echo "::error::RELEASE_TOKEN secret is not set — tag pushes need a maintainer credential (FR3.4)"
+            exit 1
+          fi
+      - name: install workspace deps
+        run: bun install --frozen-lockfile
+      - name: compute release plan for ${{ inputs.component }}
+        id: plan
+        env:
+          COMPONENT: ${{ inputs.component }}
+          CHANNEL: ${{ inputs.channel }}
+        run: |
+          set -euo pipefail
+          bun scripts/versioning/cli.ts plan --channel "$CHANNEL" --json > /tmp/plan.json
+          ver="$(jq -r --arg c "$COMPONENT" \
+            '.entries[] | select(.component == $c) | .toVersion' /tmp/plan.json)"
+          from="$(jq -r --arg c "$COMPONENT" \
+            '.entries[] | select(.component == $c) | .fromVersion' /tmp/plan.json)"
+          if [ -z "$ver" ] || [ "$ver" = "$from" ]; then
+            echo "::error::plan yields no bump for $COMPONENT on channel $CHANNEL"
+            exit 1
+          fi
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+      - name: bump + changelog
+        env:
+          CHANNEL: ${{ inputs.channel }}
+        run: |
+          set -euo pipefail
+          bun scripts/versioning/cli.ts changelog --channel "$CHANNEL"
+          bun scripts/versioning/cli.ts bump --channel "$CHANNEL"
+      - name: commit + tag + push via RELEASE_TOKEN
+        env:
+          COMPONENT: ${{ inputs.component }}
+          VERSION: ${{ steps.plan.outputs.version }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          branch="release/${COMPONENT}-v${VERSION}"
+          git checkout -b "$branch"
+          git add -A
+          git commit -m "chore(release): ${COMPONENT} v${VERSION}"
+          git push origin "HEAD:$branch"
+          # Tag the cut, then push every new tag — the plan may bump the
+          # requested component's dependents too, and an unpushed tag orphans
+          # its release lane. RELEASE_TOKEN makes these pushes fire them.
+          remote_tags="$(git ls-remote --tags origin | awk '{print $2}' | sed 's|refs/tags/||' | sort)"
+          bun scripts/versioning/cli.ts release-tags
+          for t in $(comm -13 <(echo "$remote_tags") <(git tag -l | sort)); do
+            git push origin "$t"
+          done
+      # No gh-release step here: the pushed tags trigger the push lanes above
+      # (generic lane / ox-cli.yml / publish-runner.yml) — that is exactly what
+      # RELEASE_TOKEN is for. Prerelease marking happens in those lanes.

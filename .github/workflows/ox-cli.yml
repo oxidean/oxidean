@@ -8,12 +8,14 @@
 #   curl|sh path — including musl detection — is exercised end to end.
 # - Native packages (.deb/.rpm/.apk/.pkg.tar.zst) are produced with nfpm and
 #   test-installed in their matching distro container.
-# - Pushes to main (and v*.*.* tags) refresh the rolling GitHub Release
+# - Pushes to main (and ox-v*.*.* tags) refresh the rolling GitHub Release
 #   `ox-dist` (`ox-targets.txt` + `ox-{triple}` + `.sha256` + SOURCE_COMMIT).
 #   API images stage that set via OXIDEAN_CLI_DIST_URL (Dockerfile default +
 #   Cloud IaC); OXIDEAN_CLI_DIST_BUST busts the fetch layer on staging redeploy.
-# - Tag pushes (v*.*.*) also create a semver GitHub Release with installers
-#   and packages for standalone GitHub installs.
+#   Rolling refreshes never write latest.json — that is the stable cut's job.
+# - ox-v*.*.* tag pushes also create a semver GitHub Release with installers
+#   and packages for standalone GitHub installs, and write latest.json into
+#   the ox-dist payload (C5 — /cli/latest reads it; prerelease tags skip it).
 #
 # FreeBSD is build+package only: GitHub has no FreeBSD executor (Cirrus CI
 # is the follow-up if exec coverage there is ever needed).
@@ -25,6 +27,7 @@ on:
     branches: [main]
     paths:
       - crates/oxidean-cli/**
+      - crates/oxidean-core/**
       - crates/oxidean-api/src/routes/cli_dist.rs
       - crates/oxidean-api/assets/cli/**
       - crates/oxidean-api/Dockerfile
@@ -33,10 +36,11 @@ on:
       - Cargo.toml
       - Cargo.lock
       - .github/workflows/ox-cli.yml
-    tags: ["v*.*.*"]
+    tags: ["ox-v*.*.*"]
   pull_request:
     paths:
       - crates/oxidean-cli/**
+      - crates/oxidean-core/**
       - crates/oxidean-api/src/routes/cli_dist.rs
       - crates/oxidean-api/assets/cli/**
       - crates/oxidean-api/Dockerfile
@@ -368,8 +372,8 @@ jobs:
       - name: package version (tag → semver, else dev)
         id: ver
         run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF" == refs/tags/ox-v* ]]; then
+            echo "version=${GITHUB_REF_NAME#ox-v}" >> "$GITHUB_OUTPUT"
           else
             # no + or - in the version — apk pkgver and pacman pkgver reject them
             echo "version=0.0.0.dev.${GITHUB_RUN_ID:-0}" >> "$GITHUB_OUTPUT"
@@ -428,7 +432,7 @@ jobs:
     needs: [build, build-freebsd, install-linux, install-macos, install-windows, packages]
     if: >
       github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')))
+      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/ox-v')))
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -483,11 +487,13 @@ jobs:
           sudo apt-get update -qq && sudo apt-get install -y -qq jq
           scripts/railway-staging-api-redeploy.sh "${{ github.sha }}"
 
-  # ── tags: publish the full matrix + packages as semver release assets ───
+  # ── ox-v* tags: publish the full matrix + packages as semver release assets
   release:
     name: publish ox release assets
-    needs: [build, build-freebsd, install-linux, install-macos, install-windows, packages]
-    if: startsWith(github.ref, 'refs/tags/v')
+    # publish-dist refreshes (or creates) the rolling `ox-dist` release first —
+    # latest.json uploads into that payload below and would 404 without it.
+    needs: [build, build-freebsd, install-linux, install-macos, install-windows, packages, publish-dist]
+    if: startsWith(github.ref, 'refs/tags/ox-v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -518,10 +524,54 @@ jobs:
           sed -e "s|@OXIDEAN_ORIGIN@|$DL|g" \
               -e 's|"\$Base/cli/bin"|"$Base"|' \
               crates/oxidean-api/assets/cli/install.ps1 > assets/install.ps1
+      # latest.json (C5): written only on stable ox-v* cuts — prerelease tags
+      # (`x.y.z-*`) never touch it. Uploaded into the ox-dist payload so staged
+      # API images serve the component version on /cli/latest.
+      - name: write latest.json (stable cuts only)
+        id: latest
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#ox-v}"
+          if [[ "$version" == *-* ]]; then
+            echo "stable=false" >> "$GITHUB_OUTPUT"
+            echo "prerelease tag — skipping latest.json (C5)"
+            exit 0
+          fi
+          echo "stable=true" >> "$GITHUB_OUTPUT"
+          # fill targets from the staged binaries' published digests
+          tmp="$(mktemp)"
+          for t in $(cat assets/ox-targets.txt); do
+            digest="$(cut -d' ' -f1 "assets/ox-$t.sha256")"
+            bytes="$(stat -c%s "assets/ox-$t")"
+            jq -n --arg t "$t" --arg s "$digest" --argjson b "$bytes" \
+              '{target: $t, sha256: $s, bytes: $b}' >> "$tmp"
+          done
+          jq -n --arg v "$version" --arg c "${{ github.sha }}" \
+            --slurpfile ts <(jq -s '.' "$tmp") \
+            '{schema_version: 1, version: $v, dist_commit: $c, targets: $ts[0]}' \
+            > assets/latest.json
+          cat assets/latest.json
       - name: github release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ github.ref_name }}" assets/* --title "ox ${{ github.ref_name }}" --generate-notes
+        run: |
+          set -euo pipefail
+          args=(--title "ox ${{ github.ref_name }}")
+          if [[ "${GITHUB_REF_NAME#ox-v}" == *-* ]]; then
+            args+=(--prerelease)
+          fi
+          git fetch --tags --force origin >/dev/null 2>&1 || true
+          notes="$(git tag -l --format='%(contents)' "${{ github.ref_name }}" || true)"
+          if [ -n "$notes" ]; then
+            gh release create "${{ github.ref_name }}" assets/* --notes "$notes" "${args[@]}"
+          else
+            gh release create "${{ github.ref_name }}" assets/* --generate-notes "${args[@]}"
+          fi
+      - name: publish latest.json into ox-dist payload
+        if: steps.latest.outputs.stable == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload ox-dist assets/latest.json --clobber
 
   # ── prove API image stages the rolling ox-dist matrix ───────────────────
   image-matrix:
@@ -529,7 +579,7 @@ jobs:
     needs: [publish-dist]
     if: >
       github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')))
+      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/ox-v')))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
