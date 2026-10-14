@@ -31,11 +31,12 @@ RUN cargo build --release -p oxidean-api --bin oxidean-api --bin oxidean-protect
 # preview deployments included). When OXIDEAN_CLI_DIST_URL is non-empty, fetch
 # every triple listed in ox-targets.txt — including the host — so staged
 # digests match the feed (CI's image-matrix job sha256sum-checks every target
-# against ox-dist). The URL is empty by default: staging/production IaC opt in
-# to the rolling ox-dist feed for the full target matrix; self-host builds
-# stay host-only unless they set it. When the URL is set, fetch is fail-closed
-# (retries, then fail the build). Split from cargo build so
-# OXIDEAN_CLI_DIST_BUST can invalidate only the download layer.
+# against the tag release assets). The URL is empty by default: deploy tooling
+# pins it to the `ox-v*` tag release matching the deployed commit for the full
+# target matrix; self-host builds stay host-only unless they set it. When the
+# URL is set, binary/digest/SOURCE_COMMIT fetch is fail-closed (retries, then
+# fail the build); latest.json is best-effort — prerelease feeds may not carry
+# one and /cli/latest tolerates its absence.
 # OXIDEAN_SOURCE_COMMIT records provenance for /cli/latest's dist_commit on
 # host-only builds; Railway injects RAILWAY_GIT_COMMIT_SHA automatically.
 ARG OXIDEAN_CLI_DIST_URL=
@@ -47,11 +48,7 @@ RUN cargo build --release -p oxidean-cli --bin ox \
   && cp /app/target/release/ox "/usr/local/share/oxidean-cli/ox-$target" \
   && commit="${OXIDEAN_SOURCE_COMMIT:-$RAILWAY_GIT_COMMIT_SHA}" \
   && if [ -n "$commit" ]; then echo "$commit" > /usr/local/share/oxidean-cli/SOURCE_COMMIT; fi
-# Bump OXIDEAN_CLI_DIST_BUST (e.g. git SHA) to re-fetch ox-dist without
-# re-running cargo build. Staging redeploy sets this before deploy.
-ARG OXIDEAN_CLI_DIST_BUST=
-RUN echo "ox-dist bust=${OXIDEAN_CLI_DIST_BUST:-none}" \
-  && if [ -n "$OXIDEAN_CLI_DIST_URL" ]; then \
+RUN if [ -n "$OXIDEAN_CLI_DIST_URL" ]; then \
        echo "staging full ox matrix from $OXIDEAN_CLI_DIST_URL"; \
        ok=0; \
        i=1; \
@@ -84,6 +81,10 @@ RUN echo "ox-dist bust=${OXIDEAN_CLI_DIST_BUST:-none}" \
          -o /usr/local/share/oxidean-cli/SOURCE_COMMIT; then \
          echo "ERROR: SOURCE_COMMIT missing at $OXIDEAN_CLI_DIST_URL" >&2; \
          exit 1; \
+       fi; \
+       if ! curl -fsSL "$OXIDEAN_CLI_DIST_URL/latest.json" \
+         -o /usr/local/share/oxidean-cli/latest.json; then \
+         echo "no latest.json at $OXIDEAN_CLI_DIST_URL — /cli/latest reports unpublished"; \
        fi; \
        ls -lh /usr/local/share/oxidean-cli; \
      fi

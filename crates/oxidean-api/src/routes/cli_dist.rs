@@ -71,7 +71,7 @@ fn not_found(msg: &str) -> Response {
         .into_response()
 }
 
-/// Optional git SHA written by the ox-dist publisher / Dockerfile staging
+/// Optional git SHA written by the ox-v* release publisher / Dockerfile staging
 /// (`SOURCE_COMMIT` in the dist dir). Not an `ox-*` binary — provenance only.
 fn dist_commit() -> Option<String> {
     let path = dist_dir().join("SOURCE_COMMIT");

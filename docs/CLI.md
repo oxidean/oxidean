@@ -95,12 +95,12 @@ with the default **empty** `OXIDEAN_CLI_DIST_URL`, that host binary is all a
 deploy serves, and it is always the same commit the image was built from.
 When `OXIDEAN_CLI_DIST_URL` is **non-empty**, the build fetches the full flat
 matrix (`ox-targets.txt` + every `ox-{triple}` + `.sha256`, plus
-`SOURCE_COMMIT`) and **overwrites** the host triple from that feed so staged
-digests match the release (required by the ox CLI image-matrix job); the
-fetch is **fail-closed** (retries, then fail the image build).
-`OXIDEAN_CLI_DIST_BUST` is a Docker build-arg that invalidates only the
-matrix-fetch layer so staging can re-pull `ox-dist` after a same-commit
-redeploy. `OXIDEAN_SOURCE_COMMIT` records the built commit into
+`SOURCE_COMMIT` and a best-effort `latest.json`) and **overwrites** the host
+triple from that feed so staged digests match the release (required by the ox
+CLI image-matrix job); binary/digest/`SOURCE_COMMIT` fetches are
+**fail-closed** (retries, then fail the image build) while `latest.json` is
+optional — prerelease feeds may not carry one. `OXIDEAN_SOURCE_COMMIT`
+records the built commit into
 `SOURCE_COMMIT` on host-only builds — Railway injects
 `RAILWAY_GIT_COMMIT_SHA` automatically, Compose/self-hosts can pass
 `OXIDEAN_SOURCE_COMMIT=$(git rev-parse HEAD)`. Extra targets can be dropped
@@ -124,22 +124,24 @@ sha256/size, and `dist_commit` when `SOURCE_COMMIT` is present.
 
 #### Oxidean Cloud (Railway / app.oxidean.dev)
 
-Cloud IaC sets `OXIDEAN_CLI_DIST_URL` to this product’s rolling release
-`https://github.com/oxidean/oxidean/releases/download/ox-dist` on **staging
-and production only**, so those API images stage the full matrix:
+Cloud deploys **pin `OXIDEAN_CLI_DIST_URL` to the `ox-v*` tag release on the
+deployed commit** (`https://github.com/oxidean/oxidean/releases/download/ox-v<ver>`),
+so staging/production API images stage the full matrix for that exact release:
 
-1. `.github/workflows/ox-cli.yml` refreshes **`ox-dist`** on every successful
-   run on `main` (and on `v*` tags), including `SOURCE_COMMIT`.
-2. The job upserts `OXIDEAN_CLI_DIST_BUST=<sha>` on staging `api`, then
-   redeploys (`scripts/railway-staging-api-redeploy.sh`) so the fetch layer
-   re-runs even when the git SHA is unchanged.
-3. Production promote rebuilds `api` with the same Cloud build-arg.
+1. `.github/workflows/ox-cli.yml` publishes the `ox-v*` tag release with the
+   full matrix (`ox-targets.txt`, `ox-{triple}` + `.sha256`, `SOURCE_COMMIT`,
+   installers/packages) plus `latest.json` on stable cuts.
+2. `scripts/railway-staging-api-redeploy.sh <sha>` resolves the `ox-v*` tag on
+   that commit, upserts `OXIDEAN_CLI_DIST_URL` to the tag's download URL, and
+   redeploys staging `api`. Untagged commits pin the URL empty → host-only.
+3. `scripts/railway-production-deploy.sh promote <sha>` does the same pin on
+   production `api` before deploying.
 
 **Preview / PR environments leave `OXIDEAN_CLI_DIST_URL` unset** — they stage
 the just-built host `ox`, so a PR's `/cli/bin` serves that PR's own CLI and
 `GET /cli/latest` reports the built commit (`RAILWAY_GIT_COMMIT_SHA` →
 `SOURCE_COMMIT`). Trade-off: preview serves linux-amd64 only; verify
-darwin/windows binaries against staging or the `ox-dist` release.
+darwin/windows binaries against staging or the `ox-v*` release assets.
 
 Confirm with `GET /cli/latest` (darwin/windows listed) before asking users to
 re-run the installer.
@@ -148,9 +150,9 @@ re-run the installer.
 
 Compose passes an empty build-arg (host-only, same as the Dockerfile
 default). Point `--build-arg OXIDEAN_CLI_DIST_URL=` at **your** flat artifact
-feed (same layout as `ox-dist`) if you publish a multi-arch matrix for your
-fork/deployment. Dropping files into `OXIDEAN_CLI_DIST_DIR` at runtime also
-works.
+feed (same layout as an `ox-v*` release's download URL) if you publish a
+multi-arch matrix for your fork/deployment. Dropping files into
+`OXIDEAN_CLI_DIST_DIR` at runtime also works.
 
 > **Distribution polish backlog:** macOS binaries ship unsigned today —
 > Gatekeeper will flag them on first run (`xattr -d com.apple.quarantine` or

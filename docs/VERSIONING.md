@@ -145,8 +145,10 @@ fail loudly if `RELEASE_TOKEN` is unset.
 
 On a `*-v*.*.*` tag push, `.github/workflows/release.yml` turns the
 annotated tag body into a GitHub Release; `ox-v*` tags take the binary
-matrix lane in `.github/workflows/ox-cli.yml`, which also publishes
-`<dist-dir>/latest.json` consumed by `ox self-update` / `/cli/latest`.
+matrix lane in `.github/workflows/ox-cli.yml`, which ships `latest.json`
+on the tag's release assets — the distribution manifest consumed by
+`ox self-update` / `/cli/latest` (deploy tooling pins
+`OXIDEAN_CLI_DIST_URL` to that tag's download URL).
 
 ### Prerelease channels
 

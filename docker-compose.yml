@@ -45,7 +45,7 @@ services:
       dockerfile: crates/oxidean-api/Dockerfile
       # Host-only by default (matches Dockerfile empty ARG). Self-hosts that
       # publish their own matrix can set OXIDEAN_CLI_DIST_URL to that feed.
-      # Oxidean Cloud sets the product ox-dist URL via Railway IaC only.
+      # Oxidean Cloud pins the product's `ox-v*` tag feed via deploy tooling.
       # OXIDEAN_SOURCE_COMMIT records provenance for /cli/latest dist_commit
       # on host-only builds (e.g. `OXIDEAN_SOURCE_COMMIT=$(git rev-parse HEAD)`).
       args:
