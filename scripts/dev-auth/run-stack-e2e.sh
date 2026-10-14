@@ -33,6 +33,29 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# CI's rust-build job ships prebuilt bins (OXIDEAN_PREBUILT_BINS=1) — exec them
+# from target/debug directly. Default (local dev) builds via cargo as before.
+build_bin() { # $1 package, $2 bin name
+  if [[ "${OXIDEAN_PREBUILT_BINS:-0}" == "1" ]]; then
+    echo "==> using prebuilt $2 (rust-build artifact)"
+    [[ -x "$ROOT/target/debug/$2" ]] || {
+      echo "error: prebuilt bin missing: target/debug/$2" >&2
+      exit 1
+    }
+    return 0
+  fi
+  echo "==> building $2"
+  cargo build -q -p "$1" --bin "$2"
+}
+
+run_bin() { # $1 package, $2 bin name — build_bin runs first (existence check)
+  if [[ "${OXIDEAN_PREBUILT_BINS:-0}" == "1" ]]; then
+    "$ROOT/target/debug/$2"
+  else
+    cargo run -q -p "$1" --bin "$2"
+  fi
+}
+
 need_cmd() {
   command -v "$1" >/dev/null 2>&1 || {
     echo "error: required command not found: $1" >&2
@@ -94,8 +117,7 @@ wait_http "http://127.0.0.1:8025/api/v1/info" "Mailpit"
 wait_http "http://127.0.0.1:9092/health" "HTTP stubs"
 wait_http "http://127.0.0.1:9090/default/.well-known/openid-configuration" "OIDC mock"
 
-echo "==> building oxidean-api"
-cargo build -q -p oxidean-api --bin oxidean-api
+build_bin oxidean-api oxidean-api
 
 echo "==> starting API on :$API_PORT (sqlite)"
 export OXIDEAN_ENV=development
@@ -132,12 +154,11 @@ export OXIDEAN_PAT_ALLOW_NO_EXPIRY=true
 export OXIDEAN_RUNNER_REGISTRATION_TOKEN="e2e-runner-registration-token"
 export RUST_LOG="${RUST_LOG:-info,oxidean=debug}"
 
-cargo run -q -p oxidean-api --bin oxidean-api >"$ROOT/var/e2e/api.log" 2>&1 &
+run_bin oxidean-api oxidean-api >"$ROOT/var/e2e/api.log" 2>&1 &
 API_PID=$!
 wait_http "http://127.0.0.1:${API_PORT}/health" "oxidean-api" 90
 
-echo "==> building oxidean-runner"
-cargo build -q -p oxidean-runner --bin oxidean-runner
+build_bin oxidean-runner oxidean-runner
 
 echo "==> starting oxidean-runner (host exec, labels: ubuntu-latest,self-hosted)"
 rm -rf "$ROOT/var/e2e/runner-work" "$ROOT/var/e2e/runner-state.json"
@@ -149,7 +170,7 @@ OXIDEAN_RUNNER_NAME="e2e-runner" \
 OXIDEAN_RUNNER_LABELS="ubuntu-latest,self-hosted" \
 OXIDEAN_RUNNER_STATE="$ROOT/var/e2e/runner-state.json" \
 OXIDEAN_RUNNER_WORK_DIR="$ROOT/var/e2e/runner-work" \
-  cargo run -q -p oxidean-runner --bin oxidean-runner >"$ROOT/var/e2e/runner.log" 2>&1 &
+  run_bin oxidean-runner oxidean-runner >"$ROOT/var/e2e/runner.log" 2>&1 &
 RUNNER_PID=$!
 
 # Web tier is the Rust middleware (crates/oxidean-web) serving the prebuilt
@@ -176,7 +197,7 @@ OXIDEAN_API_ORIGIN="http://127.0.0.1:${API_PORT}" \
 OXIDEAN_PUBLIC_ORIGIN="http://127.0.0.1:${WEB_PORT}" \
 OXIDEAN_SSH_HOST="127.0.0.1" \
 OXIDEAN_SSH_PORT="2222" \
-  cargo run -q -p oxidean-web --bin oxidean-web >"$ROOT/var/e2e/web.log" 2>&1 &
+  run_bin oxidean-web oxidean-web >"$ROOT/var/e2e/web.log" 2>&1 &
 WEB_PID=$!
 wait_http "http://127.0.0.1:${WEB_PORT}/" "web" 90
 

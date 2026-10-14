@@ -88,14 +88,16 @@ dev:
 	@echo "  OXIDEAN_ENV=development API_BIND=127.0.0.1:8080 cargo run -p oxidean-api --bin oxidean-api"
 	@echo "  bun run --filter @oxidean/web dev"
 
+# CI sets OXIDEAN_PREBUILT_BINS=1 after downloading rust-build's bin artifact —
+# exec the generators directly instead of rebuilding via cargo.
 rpc-gen:
-	cargo run -q -p oxidean-api --bin rpc-gen
+	@if [ "$(OXIDEAN_PREBUILT_BINS)" = "1" ]; then target/debug/rpc-gen; else cargo run -q -p oxidean-api --bin rpc-gen; fi
 
 openapi-gen:
-	cargo run -q -p oxidean-api --bin openapi-gen
+	@if [ "$(OXIDEAN_PREBUILT_BINS)" = "1" ]; then target/debug/openapi-gen; else cargo run -q -p oxidean-api --bin openapi-gen; fi
 
 openapi-sync-check:
-	cargo run -q -p oxidean-api --bin openapi-gen -- --check
+	@if [ "$(OXIDEAN_PREBUILT_BINS)" = "1" ]; then target/debug/openapi-gen --check; else cargo run -q -p oxidean-api --bin openapi-gen -- --check; fi
 
 rpc-sync-check:
 	@./scripts/check-rpc-sync.sh

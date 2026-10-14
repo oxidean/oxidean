@@ -207,11 +207,12 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for PR conventions and `.github/pull_r
 
 - Open a PR against `main`; all workflow jobs must pass.
 - **commit-lint** — `versioning commit-check` on the PR commit range + PR title, plus `versioning check` registry completeness
-- **api-rust** — `cargo nextest run --workspace --profile ci`
+- **rust-build** — one shared compile: workspace bins + `cargo nextest archive` feed the Rust lane below
+- **api-rust** — `cargo nextest run --archive-file … --profile ci` partitioned 5 ways from the shared archive
 - **web-octane** — `bun install --frozen-lockfile`, `bun run --filter @oxidean/web lint`, `format:check`, `bun run test`, `turbo run build --filter=@oxidean/web`
 - **e2e-stack** — `make test-e2e-stack` (API + Mailpit/OIDC/stubs + web)
 - **rpc-sync** — `make rpc-sync-check` (commit regenerated `packages/api-client` if you changed RPC)
 - **compose** — `docker compose … config` for default, MySQL, SQLite, and dev-auth overlays
-- **db-matrix** — dialect probe for postgres / mysql / sqlite
+- **db-dialects** — dialect probe for postgres / mysql / sqlite in a single leg (shared nextest archive)
 
 Locally before push: `make rpc-sync-check`, `make test`, and when touching auth/email paths `make test-e2e-stack` or the relevant Compose smoke target.
