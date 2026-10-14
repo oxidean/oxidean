@@ -34,12 +34,18 @@ describe("ox-cli.yml retarget", () => {
     expect(yml).toContain("write latest.json (stable cuts only)");
     expect(yml).toContain('"$version" == *-*');
     expect(yml).toContain("schema_version: 1");
-    expect(yml).toContain("gh release upload ox-dist assets/latest.json");
   });
 
-  test("rolling ox-dist refresh does not write latest.json", () => {
-    const publishDist = yml.slice(yml.indexOf("publish-dist:"), yml.indexOf("release:"));
-    expect(publishDist).not.toContain("latest.json");
+  test("no rolling ox-dist feed — the tag release carries the matrix", () => {
+    expect(yml).not.toContain("releases/download/ox-dist");
+    expect(yml).not.toContain("gh release upload ox-dist");
+    expect(yml).not.toContain("gh release create ox-dist");
+    expect(yml).not.toContain("publish-dist");
+    // latest.json + SOURCE_COMMIT ship as assets on the tag's own release.
+    expect(yml).toContain('releases/download/${{ github.ref_name }}');
+    const release = yml.slice(yml.indexOf("  release:"));
+    expect(release).toContain("assets/SOURCE_COMMIT");
+    expect(release).toContain("gh release create");
   });
 });
 

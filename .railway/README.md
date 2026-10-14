@@ -118,19 +118,19 @@ IaC sets public browser/SSH advertise vars from the **gateway** domain (not `pre
 | `OXIDEAN_WEB_BEHIND_PROXY` (web) | `1` — the gateway sanitizes `X-Forwarded-*`, so `oxidean-web` trusts the edge's chain |
 | `OXIDEAN_AUTO_MIGRATE` | `true` on all environments (including production) |
 | `OXIDEAN_PROTECTION_HELPER` | `/usr/local/bin/oxidean-protection-hook` (API image) |
-| `OXIDEAN_CLI_DIST_URL` (api) | `https://github.com/oxidean/oxidean/releases/download/ox-dist` on **staging/production only** — Docker **build-arg** (Dockerfile default is empty). Stages this product's rolling `ox-dist` matrix so `/cli/bin` serves macOS/Windows/etc. Preview / PR envs leave it unset → same-commit host `ox` only, with `RAILWAY_GIT_COMMIT_SHA` written to `SOURCE_COMMIT` for a truthful `dist_commit`. When set, image build fail-closes if the matrix cannot be fetched. |
-| `OXIDEAN_CLI_DIST_BUST` (api) | Set by `scripts/railway-staging-api-redeploy.sh` (not IaC). Docker **build-arg** that busts the ox-dist fetch layer after rolling-release refresh. |
+| `OXIDEAN_CLI_DIST_URL` (api) | Owned by **deploy tooling**, not IaC — `scripts/railway-staging-api-redeploy.sh` and `scripts/railway-production-deploy.sh` upsert it (skipDeploys) to the `ox-v*` tag-release download URL matching the deployed commit, or empty on untagged commits. Docker **build-arg** (Dockerfile default empty → host-only `ox`). When set, image build fail-closes if the matrix cannot be fetched; `latest.json` is best-effort. Preview / PR envs leave it unset → same-commit host `ox` only, with `RAILWAY_GIT_COMMIT_SHA` written to `SOURCE_COMMIT` for a truthful `dist_commit`. |
 
-### ox CLI multi-arch matrix (issue #125)
+### ox CLI multi-arch matrix
 
-Cloud steady state is automatic — no per-release tag ritual:
+Cloud CLI distribution is **tag-pinned**: deploys fetch the matrix from the
+`ox-v*` release matching the deployed commit — there is no rolling feed.
 
-1. Every successful [`.github/workflows/ox-cli.yml`](../.github/workflows/ox-cli.yml) run on `main` refreshes the rolling GitHub Release **`ox-dist`** (`ox-targets.txt` + `ox-*` + `.sha256` + `SOURCE_COMMIT`).
-2. That job redeploys staging `api` via [`scripts/railway-staging-api-redeploy.sh`](../scripts/railway-staging-api-redeploy.sh) (`RAILWAY_API_TOKEN` or staging-scoped `RAILWAY_TOKEN`; skipped when absent).
-3. Cloud IaC sets `OXIDEAN_CLI_DIST_URL` → `ox-dist` on **staging/production** only. The Dockerfile fetches at image-build time (retries, fail-closed when URL is set). Staging redeploy upserts `OXIDEAN_CLI_DIST_BUST` then redeploys so the fetch layer refreshes. Production promote rebuilds with the same URL. Preview / PR envs keep the arg unset → they serve the same-commit host `ox` (linux-amd64 only).
+1. An `ox-v*.*.*` tag push runs [`.github/workflows/ox-cli.yml`](../.github/workflows/ox-cli.yml), which publishes the tag's GitHub Release with the full matrix (`ox-targets.txt` + `ox-*` + `.sha256` + `SOURCE_COMMIT` + installers/packages, plus `latest.json` on stable cuts).
+2. The same run redeploys staging `api` via [`scripts/railway-staging-api-redeploy.sh`](../scripts/railway-staging-api-redeploy.sh) (`RAILWAY_API_TOKEN` or staging-scoped `RAILWAY_TOKEN`; skipped when absent). The script resolves the `ox-v*` tag on that commit and upserts `OXIDEAN_CLI_DIST_URL` to the tag's download URL before redeploying.
+3. [`scripts/railway-production-deploy.sh`](../scripts/railway-production-deploy.sh) `promote` applies the same pin on production `api`. Preview / PR envs keep the arg unset → they serve the same-commit host `ox` (linux-amd64 only); untagged staging/production deploys likewise go host-only.
 4. Verify: `GET …/cli/latest` lists darwin/windows (and may include `dist_commit`); macOS `install.sh` succeeds.
 
-Self-hosted images leave the build-arg empty (Compose default) or point at **their** artifact feed — never require upstream Oxidean's `ox-dist`. Optional `v*` tags still create product releases. Details: [docs/CLI.md](../docs/CLI.md).
+Self-hosted images leave the build-arg empty (Compose default) or point at **their** artifact feed — never require upstream Oxidean's releases. Details: [docs/CLI.md](../docs/CLI.md).
 
 PR Environments inherit from `preview`; dynamic gateway refs and auto-migrate on every environment (including production) keep schema current and avoid stale preview origins. The API/web also replace a stale `*.up.railway.app` origin with `RAILWAY_SERVICE_GATEWAY_URL` / `RAILWAY_PUBLIC_DOMAIN` (custom domains are left alone).
 

@@ -99,6 +99,56 @@ service_pairs() {
   printf '%s %s\n' gateway "$SERVICE_GATEWAY_ID"
 }
 
+# Resolve the ox-v* release tag on a commit — prefer a stable cut when several
+# tags point at the same SHA. Empty result means the commit has no tag and the
+# api deploy should stage host-only ox (preview semantics).
+resolve_ox_dist_url() {
+  local sha="$1"
+  if command -v git >/dev/null 2>&1; then
+    git fetch --tags --force origin >/dev/null 2>&1 || true
+    local tag
+    tag="$(git tag --points-at "$sha" --list 'ox-v*.*.*' \
+      | grep -v -e '-alpha' -e '-beta' -e '-nightly' | sort -V | tail -n1)"
+    if [[ -z "$tag" ]]; then
+      tag="$(git tag --points-at "$sha" --list 'ox-v*' | sort -V | tail -n1)"
+    fi
+    if [[ -n "$tag" ]]; then
+      printf '%s' "https://github.com/${GITHUB_REPOSITORY:-oxidean/oxidean}/releases/download/${tag}"
+      return 0
+    fi
+  fi
+  printf ''
+}
+
+# Pin the api service's CLI feed to the promoted commit's ox-v* tag release
+# (empty URL = host-only). Per-tag URLs make the Docker fetch layer key on the
+# version — no separate bust variable needed.
+upsert_cli_dist_url() {
+  local url="$1"
+  echo "production api: upsert OXIDEAN_CLI_DIST_URL=${url:-<empty=host-only>} (skipDeploys)"
+  if [[ "$DRY_RUN" == "1" ]]; then
+    echo "  dry-run: would call variableUpsert OXIDEAN_CLI_DIST_URL"
+    return 0
+  fi
+  gql '
+    mutation($input: VariableUpsertInput!) {
+      variableUpsert(input: $input)
+    }
+  ' "$(jq -n \
+    --arg projectId "$PROJECT_ID" \
+    --arg environmentId "$ENVIRONMENT_ID" \
+    --arg serviceId "$SERVICE_API_ID" \
+    --arg value "$url" \
+    '{input:{
+      projectId:$projectId,
+      environmentId:$environmentId,
+      serviceId:$serviceId,
+      name:"OXIDEAN_CLI_DIST_URL",
+      value:$value,
+      skipDeploys:true
+    }}')" >/dev/null
+}
+
 health_check() {
   if [[ "${SKIP_HEALTH_CHECK:-0}" == "1" ]]; then
     echo "skip health check (SKIP_HEALTH_CHECK=1)"
@@ -183,6 +233,10 @@ cmd_promote() {
   if command -v git >/dev/null 2>&1 && git rev-parse --verify "${sha}^{commit}" >/dev/null 2>&1; then
     sha="$(git rev-parse "${sha}^{commit}")"
   fi
+
+  # Pin the api service's CLI dist feed to the ox-v* tag on this commit before
+  # deploying (empty URL on untagged commits = host-only ox in the image).
+  upsert_cli_dist_url "$(resolve_ox_dist_url "$sha")"
 
   while read -r name sid; do
     [[ -z "$name" ]] && continue

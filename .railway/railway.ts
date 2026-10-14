@@ -78,22 +78,13 @@ export default defineRailway((ctx) => {
       // Track gateway public domain (PR Environments get unique hosts; do not preserve).
       OXIDEAN_PUBLIC_ORIGIN: "https://${{gateway.RAILWAY_PUBLIC_DOMAIN}}",
       OXIDEAN_CORS_ORIGINS: "https://${{gateway.RAILWAY_PUBLIC_DOMAIN}}",
-      // Cloud-only build-arg: staging/production stage the full ox matrix
-      // from this product's rolling `ox-dist` GitHub Release (refreshed on
-      // main by ox-cli.yml). Preview / PR environments leave it unset so the
-      // Dockerfile stages the just-built host `ox` — preview then serves the
-      // same commit that was built (RAILWAY_GIT_COMMIT_SHA lands in
-      // SOURCE_COMMIT for a truthful /cli/latest dist_commit). When set, the
-      // image build fail-closes if the matrix cannot be fetched.
-      // OXIDEAN_CLI_DIST_BUST is set by staging redeploy (not IaC) to bust the
-      // Docker fetch layer after ox-dist refreshes.
-      // See docs/CLI.md § Cloud / self-host and issue #125.
-      ...(ctx.isEnvironment("staging") || ctx.isEnvironment("production")
-        ? {
-            OXIDEAN_CLI_DIST_URL:
-              "https://github.com/oxidean/oxidean/releases/download/ox-dist",
-          }
-        : {}),
+      // Cloud-only build-arg: OXIDEAN_CLI_DIST_URL is owned by deploy tooling
+      // (scripts/railway-staging-api-redeploy.sh and
+      // scripts/railway-production-deploy.sh) — each deploy pins it to the
+      // `ox-v*` tag release matching the deployed commit, or empties it for
+      // host-only staging on untagged commits. Not seeded here: a static URL
+      // would pin every deploy to one feed.
+      // See docs/CLI.md § Cloud / self-host.
       OXIDEAN_ADMIN_EMAIL: preserve(),
       OXIDEAN_ADMIN_PASSWORD: preserve(),
       OXIDEAN_RESEND_API_KEY: preserve(),
