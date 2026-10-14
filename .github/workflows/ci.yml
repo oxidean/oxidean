@@ -212,6 +212,9 @@ jobs:
           # the rust-debug build outputs — a separate key stops them evicting
           # each other's entries.
           shared-key: "rust-check"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-machete
       - name: install protoc
         run: sudo apt-get update -qq && sudo apt-get install -y -qq protobuf-compiler
       - name: rust dead code + unused deps
