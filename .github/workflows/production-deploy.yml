@@ -34,13 +34,18 @@ on:
         required: true
         type: boolean
         default: false
+      cut_release:
+        description: Cut the stable release on promote (changelog + bump + tags). Rollback never cuts.
+        required: false
+        type: boolean
+        default: true
 
 concurrency:
   group: production-deploy
   cancel-in-progress: false
 
 permissions:
-  contents: read
+  contents: write # the stable cut pushes the bump commit + tags via RELEASE_TOKEN
   actions: read
 
 jobs:
@@ -62,6 +67,10 @@ jobs:
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          # RELEASE_TOKEN (maintainer PAT): the stable cut pushes the bump
+          # commit to main and pushes the *-v* tags — GITHUB_TOKEN pushes are
+          # recursion-blocked and would never fire the release lanes.
+          token: ${{ secrets.RELEASE_TOKEN }}
 
       - name: Fetch main
         run: git fetch origin main:refs/remotes/origin/main
@@ -119,11 +128,137 @@ jobs:
           fi
           echo "CI success confirmed for ${SHA}"
 
+      # ── stable release cut: the promote is the release event ────────────
+      # main is the beta channel (release-beta.yml tags prereleases on every
+      # push). The stable version bump is created here, on the production
+      # deploy, so the shipped artifact self-reports its released version:
+      # plan → changelog → bump → `chore(release):` commit → tags → deploy the
+      # bump commit. First-ever cut (no stable *-vX.Y.Z tag anywhere) is the
+      # 0.1.0 baseline for every component instead.
+
+      - uses: oven-sh/setup-bun@v2
+        if: inputs.action == 'promote' && inputs.cut_release
+
+      - uses: dtolnay/rust-toolchain@stable
+        if: inputs.action == 'promote' && inputs.cut_release && !inputs.dry_run
+
+      - name: RELEASE_TOKEN is configured
+        if: inputs.action == 'promote' && inputs.cut_release && !inputs.dry_run
+        env:
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          if [ -z "${RELEASE_TOKEN:-}" ]; then
+            echo "::error::RELEASE_TOKEN secret is not set — the stable cut pushes commits + tags (FR3.4)"
+            exit 1
+          fi
+
+      - name: Compute stable release plan at the promoted SHA
+        id: cut
+        if: inputs.action == 'promote' && inputs.cut_release
+        env:
+          SHA: ${{ steps.sha.outputs.sha }}
+        run: |
+          set -euo pipefail
+          git fetch --tags --force origin
+          git checkout "$SHA"
+          bun install --frozen-lockfile
+          bun scripts/versioning/cli.ts plan --channel stable --json > /tmp/stable-plan.json
+          jq -r '.entries[] | "\(.component) \(.fromVersion) -> \(.toVersion) (\(.bump))"' /tmp/stable-plan.json
+          bumped="$(jq '[.entries[] | select(.fromVersion != .toVersion)] | length' /tmp/stable-plan.json)"
+          stable_tags="$(git tag -l | grep -cE -- '-v[0-9]+\.[0-9]+\.[0-9]+$' || true)"
+          echo "bumped=$bumped" >> "$GITHUB_OUTPUT"
+          echo "baseline=$([ "$stable_tags" = "0" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+      - name: Baseline cut — every component at its carrier version
+        id: baseline
+        if: inputs.action == 'promote' && inputs.cut_release && !inputs.dry_run && steps.cut.outputs.baseline == 'true'
+        run: |
+          set -euo pipefail
+          remote_tags="$(git ls-remote --tags origin | awk '{print $2}' | sed 's|refs/tags/||' | sort)"
+          bun scripts/versioning/cli.ts release-tags --all
+          NEW="$(comm -13 <(echo "$remote_tags") <(git tag -l | sort))"
+          for t in $NEW; do git push origin "$t"; done
+          if echo "$NEW" | grep -qE '^ox-v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "wait_ox=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Stable cut — changelog + bump + tags on the bump commit
+        id: bump
+        if: inputs.action == 'promote' && inputs.cut_release && !inputs.dry_run && steps.cut.outputs.baseline == 'false' && steps.cut.outputs.bumped != '0'
+        run: |
+          set -euo pipefail
+          # One plan drives the whole cut — re-running plan after bump would
+          # read the bumped carriers as fromVersion and double-bump.
+          bun scripts/versioning/cli.ts changelog --plan /tmp/stable-plan.json
+          bun scripts/versioning/cli.ts bump --plan /tmp/stable-plan.json
+          # WIRE_VERSION is embedded into the generated api-client + OpenAPI
+          # spec — regen so the bump commit doesn't fail rpc-sync on its own CI.
+          make rpc-gen openapi-gen
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore(release): cut stable release"
+          # Fast-forward only: if main moved since the promoted SHA, fail —
+          # the operator re-runs the promote (the plan is computed fresh).
+          git push origin "HEAD:main"
+          remote_tags="$(git ls-remote --tags origin | awk '{print $2}' | sed 's|refs/tags/||' | sort)"
+          bun scripts/versioning/cli.ts release-tags --plan /tmp/stable-plan.json
+          NEW="$(comm -13 <(echo "$remote_tags") <(git tag -l | sort))"
+          for t in $NEW; do git push origin "$t"; done
+          if echo "$NEW" | grep -qE '^ox-v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "wait_ox=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "deploy_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve deploy SHA
+        id: deploy
+        if: inputs.action == 'promote'
+        env:
+          PROMOTED: ${{ steps.sha.outputs.sha }}
+          BUMPED: ${{ steps.bump.outputs.deploy_sha }}
+          WAIT: ${{ steps.bump.outputs.wait_ox }}${{ steps.baseline.outputs.wait_ox }}
+        run: |
+          set -euo pipefail
+          echo "sha=${BUMPED:-$PROMOTED}" >> "$GITHUB_OUTPUT"
+          if [[ "$WAIT" == *true* ]]; then
+            echo "wait_ox=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Wait for ox release assets
+        if: inputs.action == 'promote' && steps.deploy.outputs.wait_ox == 'true' && !inputs.dry_run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ steps.deploy.outputs.sha }}
+        run: |
+          set -euo pipefail
+          # A stable ox-v* tag was just pushed — its ox-cli.yml matrix must land
+          # the release assets before the api image's OXIDEAN_CLI_DIST_URL
+          # fetch runs, or the Railway build 404s.
+          for i in $(seq 1 90); do
+            status="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${SHA}&per_page=50" \
+              --jq '[.workflow_runs[] | select(.path | endswith("ox-cli.yml"))][0].status // "queued"')"
+            if [ "$status" = "completed" ]; then
+              concl="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${SHA}&per_page=50" \
+                --jq '[.workflow_runs[] | select(.path | endswith("ox-cli.yml"))][0].conclusion // empty')"
+              if [ "$concl" = "success" ]; then
+                echo "ox-cli run succeeded — release assets are live"
+                exit 0
+              fi
+              echo "::error::ox-cli run concluded ${concl:-unknown} — refusing to deploy an api image that cannot fetch CLI assets"
+              exit 1
+            fi
+            echo "waiting for ox-cli asset matrix on ${SHA} (status: $status)"
+            sleep 30
+          done
+          echo "::error::timed out (45m) waiting for ox-cli release assets"
+          exit 1
+
       - name: Promote
         if: inputs.action == 'promote'
         env:
           DRY_RUN: ${{ inputs.dry_run }}
-          SHA: ${{ steps.sha.outputs.sha }}
+          # Deploy the bump commit when a stable cut ran, else the promoted SHA.
+          SHA: ${{ steps.deploy.outputs.sha || steps.sha.outputs.sha }}
         run: |
           set -euo pipefail
           args=(promote "$SHA")

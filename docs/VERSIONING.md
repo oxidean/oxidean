@@ -123,24 +123,28 @@ plan — never hand-edit generated sections; see *Release flow*.
 
 ## Release flow
 
-Version math lives in `scripts/versioning/` (`bun
-scripts/versioning/cli.ts <command>`):
+`main` is the **beta channel**; the production deploy is the **stable
+channel**. There are no release PRs and no manual tag pushes.
 
-| Step | Command |
-|---|---|
-| See pending bumps | `make release-plan` (`versioning plan --channel stable --json`) |
-| Write changelog sections | `versioning changelog` (per-component + root + wire) |
-| Apply version writes + lockfile regen | `versioning bump` (`--dry-run` first) |
-| Create annotated `<component>-v<ver>` tags | `make release-tags` (tag body carries the changelog section) |
-
-The **automated lane**: `.github/workflows/release-pr.yml` (weekly cron +
-`workflow_dispatch {channel}`) runs plan → changelog → bump and opens a
-`chore(release):` PR. Merging it and pushing the resulting `*-v*` tags
-with **`RELEASE_TOKEN`** cuts the releases.
+- **Beta (automatic)**: `.github/workflows/release-beta.yml` runs on every
+  push to `main` (plus a weekly catch-up cron and manual dispatch). When the
+  plan finds bumpable work it creates annotated `<component>-v<ver>-beta.N`
+  tags at the pushed commit and pushes them via `RELEASE_TOKEN`. Tag-only —
+  manifests on `main` always carry the last stable version; per-beta notes
+  live in the tag annotations / GitHub Releases.
+- **Stable (production deploy)**: `production-deploy.yml` `promote` resolves
+  the SHA, computes `plan --channel stable`, writes changelogs, applies the
+  bump, commits `chore(release): cut stable release` to `main`, pushes the
+  `*-vX.Y.Z` tags via `RELEASE_TOKEN`, waits for any fresh `ox-v*` release
+  assets, then deploys the **bump commit** — shipped binaries self-report the
+  released version. Pass `cut_release: false` to re-promote without cutting.
+  The very first promote on a tagless repo instead runs `release-tags --all`:
+  a `0.1.0` baseline for every component.
+- **Rollback** never touches versions or tags.
 
 Tag pushes must use the **`RELEASE_TOKEN`** secret (a maintainer PAT) —
 the default `GITHUB_TOKEN` does not re-trigger workflows, so tag pushes
-made with it would silently skip every release lane. The tag-push jobs
+made with it would silently skip every release lane. The tag-push lanes
 fail loudly if `RELEASE_TOKEN` is unset.
 
 On a `*-v*.*.*` tag push, `.github/workflows/release.yml` turns the
@@ -148,19 +152,37 @@ annotated tag body into a GitHub Release; `ox-v*` tags take the binary
 matrix lane in `.github/workflows/ox-cli.yml`, which ships `latest.json`
 on the tag's release assets — the distribution manifest consumed by
 `ox self-update` / `/cli/latest` (deploy tooling pins
-`OXIDEAN_CLI_DIST_URL` to that tag's download URL).
+`OXIDEAN_CLI_DIST_URL` to the newest `ox-v*` stable tag merged into the
+deployed commit).
 
 ### Prerelease channels
 
 Channels: `stable`, `alpha`, `beta`, `nightly`. Stable emits the bare
 SemVer; `alpha`/`beta` append `-<channel>.N` (per-base counter);
-`nightly` appends `-nightly.YYYYMMDDN`.
+`nightly` appends `-nightly.YYYYMMDDN`. Stable plans bound at the latest
+stable tag — prerelease tags never truncate the stable changelog range.
 
-- Automated prereleases: `release-pr.yml` dispatch with `channel`.
-- Single-component cuts: `release.yml` `workflow_dispatch` with
-  `{component, channel}` — computes the plan for one component, writes
-  its changelog, bumps, tags, and pushes via `RELEASE_TOKEN`, which fires
-  that component's normal tag lane.
+- `beta`: automated on `main` via `release-beta.yml`.
+- `alpha`/`nightly` (and ad-hoc per-component cuts on any channel):
+  `release.yml` `workflow_dispatch` with `{component, channel}` — computes
+  the plan, writes changelogs, bumps, tags, and pushes via `RELEASE_TOKEN`.
+
+### Local inspection
+
+Version math lives in `scripts/versioning/` (`bun
+scripts/versioning/cli.ts <command>`):
+
+| Step | Command |
+|---|---|
+| See pending bumps | `make release-plan` (`versioning plan --channel stable --json`) |
+| Preview a beta cut | `versioning plan --channel beta --json` |
+| Write changelog sections | `versioning changelog [--plan <file>]` |
+| Apply version writes + lockfile regen | `versioning bump [--plan <file>]` (`--dry-run` first) |
+| Create annotated `<component>-v<ver>` tags | `make release-tags` (tag body carries the changelog section) |
+
+`--plan <file>` reuses a `plan --json` payload so one plan drives the whole
+cut — recomputing after `bump` would read the bumped carriers as the base and
+double-bump the tag.
 
 ## For coding agents
 

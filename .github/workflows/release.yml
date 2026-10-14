@@ -114,12 +114,12 @@ jobs:
           fi
           echo "version=$ver" >> "$GITHUB_OUTPUT"
       - name: bump + changelog
-        env:
-          CHANNEL: ${{ inputs.channel }}
         run: |
           set -euo pipefail
-          bun scripts/versioning/cli.ts changelog --channel "$CHANNEL"
-          bun scripts/versioning/cli.ts bump --channel "$CHANNEL"
+          # --plan reuses the computed plan — a post-bump recompute would read
+          # the bumped carriers as fromVersion and double-bump the tag.
+          bun scripts/versioning/cli.ts changelog --plan /tmp/plan.json
+          bun scripts/versioning/cli.ts bump --plan /tmp/plan.json
       - name: commit + tag + push via RELEASE_TOKEN
         env:
           COMPONENT: ${{ inputs.component }}
@@ -137,7 +137,7 @@ jobs:
           # requested component's dependents too, and an unpushed tag orphans
           # its release lane. RELEASE_TOKEN makes these pushes fire them.
           remote_tags="$(git ls-remote --tags origin | awk '{print $2}' | sed 's|refs/tags/||' | sort)"
-          bun scripts/versioning/cli.ts release-tags
+          bun scripts/versioning/cli.ts release-tags --plan /tmp/plan.json
           for t in $(comm -13 <(echo "$remote_tags") <(git tag -l | sort)); do
             git push origin "$t"
           done

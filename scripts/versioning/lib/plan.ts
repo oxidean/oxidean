@@ -15,6 +15,7 @@ import {
   bumpForCommit,
   compareSemver,
   maxBump,
+  prereleaseOf,
   withChannel,
   type BumpLevel,
   type Channel,
@@ -267,6 +268,7 @@ export function collectRange(
   git: Git,
   registry: RegistryConfig,
   since?: string,
+  channel?: Channel,
 ): {
   commits: RangeCommit[];
   componentBounds: Map<string, Set<string>>;
@@ -289,6 +291,11 @@ export function collectRange(
     const tags = git
       .prefixedTags(e.tag_prefix)
       .filter((t) => isSemver(t.version))
+      // Stable plans bound at the latest *stable* tag only: a prerelease tag
+      // must not truncate the range, or the stable changelog would silently
+      // drop commits already shipped on beta/alpha/nightly cuts. Prerelease
+      // channels keep every tag so each cut's notes cover "since last cut".
+      .filter((t) => channel !== "stable" || prereleaseOf(t.version) === null)
       .sort((a, b) => compareSemver(a.version, b.version));
     if (tags.length === 0) continue;
     componentBounds.set(e.id, git.commitsSince(tags[tags.length - 1].tag));

@@ -3,6 +3,7 @@
  * Default prints a human table; `--json` emits the release-plan payload that
  * `changelog`/`tag` (U4) and the release-PR workflow consume.
  */
+import { readFileSync } from "node:fs";
 import { liveGit } from "../lib/git.ts";
 import { collectRange, computePlan, type BumpPlan } from "../lib/plan.ts";
 import type { RegistryConfig } from "../lib/registry.ts";
@@ -23,9 +24,32 @@ export function buildPlan(root: string, args: string[]):
   const registry = loadOrFail(root);
   if (registry === null) return { ok: false, code: 1 };
 
+  // --plan <file>: one computed plan drives changelog/bump/release-tags so a
+  // cut never drifts — recomputing after `bump` would read the already-bumped
+  // carriers as fromVersion and double-bump (0.1.1 -> 0.1.2).
+  if (flags.plan !== undefined) {
+    try {
+      const raw = JSON.parse(readFileSync(flags.plan, "utf-8")) as BumpPlan;
+      if (raw.schema !== "release-plan" || raw.version !== 1 || !Array.isArray(raw.entries)) {
+        throw new Error("not a release-plan v1 payload");
+      }
+      // C3 output strips advisory fields — restore defaults so consumers see
+      // a complete BumpPlan regardless of how the file was produced.
+      const plan: BumpPlan = {
+        ...raw,
+        channel: raw.channel ?? "stable",
+        warnings: raw.warnings ?? [],
+      };
+      return { ok: true, plan, registry, json: flags.json, dryRun: flags.dryRun };
+    } catch (e) {
+      process.stderr.write(`plan: cannot load ${flags.plan}: ${e instanceof Error ? e.message : String(e)}\n`);
+      return { ok: false, code: 2 };
+    }
+  }
+
   const git = liveGit(root);
   try {
-    const range = collectRange(root, git, registry, flags.since);
+    const range = collectRange(root, git, registry, flags.since, flags.channel);
     const plan = computePlan(registry, range.commits, {
       rootDir: root,
       git,

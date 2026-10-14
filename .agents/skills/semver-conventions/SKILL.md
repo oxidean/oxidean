@@ -63,10 +63,12 @@ Bumps propagate as patch floor through `depends_on` edges — a `wire` or
    prefix.
 6. Doc/guidance changes themselves are `docs:`-typed commits.
 
-## Releases (maintainers)
+## Releases (automated)
 
-`make release-plan` → `versioning changelog` → `versioning bump` →
-`make release-tags`; tag pushes need the `RELEASE_TOKEN` secret (never
-`GITHUB_TOKEN`). Prerelease channels `alpha`/`beta`/`nightly` via
-`release.yml` `workflow_dispatch`; the automated lane `release-pr.yml`
-opens `chore(release):` PRs. Details: `docs/VERSIONING.md`.
+`main` is the beta channel: `release-beta.yml` tags `<component>-v<ver>-beta.N`
+on every push that bumps something (tag-only — manifests keep the last stable
+version). The production deploy (`production-deploy.yml` promote) creates the
+stable bump — changelog + `chore(release):` commit + `*-vX.Y.Z` tags — then
+deploys the bump commit. Tag pushes ride `RELEASE_TOKEN` (never
+`GITHUB_TOKEN`); ad-hoc `alpha`/`nightly`/single-component cuts go through
+`release.yml` `workflow_dispatch`. Details: `docs/VERSIONING.md`.

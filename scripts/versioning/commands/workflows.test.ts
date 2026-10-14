@@ -82,15 +82,56 @@ describe("release.yml generic lane", () => {
   });
 });
 
-describe("release-pr.yml automated lane", () => {
-  const yml = wf("release-pr.yml");
+describe("release-beta.yml channel lane", () => {
+  const yml = wf("release-beta.yml");
 
-  test("runs plan/changelog/bump and opens a chore(release) PR", () => {
-    expect(yml).toContain("cli.ts plan");
-    expect(yml).toContain("cli.ts changelog");
-    expect(yml).toContain("cli.ts bump");
+  test("fires on every push to main — main is the beta channel", () => {
+    expect(yml).toContain("push:");
+    expect(yml).toContain("branches: [main]");
+    expect(yml).toContain("concurrency:");
+  });
+
+  test("tag-only cut: plan + release-tags on the beta channel, never bump/PR", () => {
+    expect(yml).toContain("cli.ts plan --channel beta --json");
+    expect(yml).toContain("cli.ts release-tags --channel beta");
+    expect(yml).not.toContain("cli.ts bump");
+    expect(yml).not.toContain("gh pr create");
+  });
+
+  test("tag pushes ride RELEASE_TOKEN so downstream lanes fire", () => {
+    expect(yml).toContain("secrets.RELEASE_TOKEN");
+    expect(yml).not.toContain("github.token");
+  });
+
+  test("fork-gated and pins the pushed SHA", () => {
+    expect(yml).toContain("github.repository == 'oxidean/oxidean'");
+    expect(yml).toContain("ref: ${{ github.sha }}");
+  });
+});
+
+describe("production-deploy.yml stable cut", () => {
+  const yml = wf("production-deploy.yml");
+
+  test("promote creates the stable release (changelog + bump + tags)", () => {
+    expect(yml).toContain("cli.ts plan --channel stable");
+    expect(yml).toContain("cli.ts changelog --plan");
+    expect(yml).toContain("cli.ts bump --plan");
+    expect(yml).toContain("cli.ts release-tags --plan");
     expect(yml).toContain("chore(release):");
-    expect(yml).toContain("release/");
-    expect(yml).toContain("gh pr create");
+  });
+
+  test("first cut on a tagless repo is the 0.1.0 baseline (--all)", () => {
+    expect(yml).toContain("release-tags --all");
+  });
+
+  test("cut writes via RELEASE_TOKEN and deploys the bump commit", () => {
+    expect(yml).toContain("secrets.RELEASE_TOKEN");
+    expect(yml).toContain("contents: write");
+    expect(yml).toContain("deploy_sha");
+  });
+
+  test("fresh ox-v* tag waits for its asset matrix before deploys", () => {
+    expect(yml).toContain("ox-cli");
+    expect(yml).toMatch(/wait.*ox|ox.*wait/i);
   });
 });

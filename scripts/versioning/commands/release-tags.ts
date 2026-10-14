@@ -15,7 +15,7 @@ import { carrierVersion } from "../lib/plan.ts";
 import { buildPlan } from "./plan.ts";
 
 export const usage =
-  "release-tags [--since <ref>] [--all] [--dry-run]\n" +
+  "release-tags [--since <ref>] [--channel <c>] [--plan <file>] [--all] [--dry-run]\n" +
   "                                create annotated <component>-v<semver> tags";
 
 interface TagTarget {

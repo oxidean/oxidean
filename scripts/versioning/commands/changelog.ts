@@ -13,7 +13,7 @@ import {
 import { buildPlan } from "./plan.ts";
 
 export const usage =
-  "changelog [--since <ref>] [--channel <c>] [--dry-run]\n" +
+  "changelog [--since <ref>] [--channel <c>] [--plan <file>] [--dry-run]\n" +
   "                                write Keep-a-Changelog sections for the plan";
 
 const ROOT_CHANGELOG = "CHANGELOG.md";
