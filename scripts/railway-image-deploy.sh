@@ -125,8 +125,6 @@ retag_channel() {
 wait_for_deployments() {
   local env_id="$1" ids_csv="$2" timeout="$3"
   local deadline=$((SECONDS + timeout))
-  local ids_json
-  ids_json="$(jq -nc --arg csv "$ids_csv" '$csv | split(",") | map(select(length > 0))')"
 
   declare -A last_seen=()
   while (( SECONDS < deadline )); do
@@ -149,7 +147,7 @@ wait_for_deployments() {
     local pending=0 failed=0
     local dep_id status st
     for dep_id in ${ids_csv//,/ }; do
-      status="$(echo "$raw" | jq -r --arg id "$dep_id" --argjson want "$ids_json" '
+      status="$(echo "$raw" | jq -r --arg id "$dep_id" '
         [.data.environment.deployments.edges[].node | select(.id == $id)]
         | first | .status // "missing"
       ' 2>/dev/null || echo "missing")"

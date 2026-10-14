@@ -465,13 +465,13 @@ jobs:
           # Public URL for the deployment record — the gateway's service
           # domain. Cosmetic: a lookup failure must never sink the bind.
           env_url="$(railway_gql '
-            query($id: String!, $svc: String!) {
+            query($id: String!) {
               environment(id: $id) {
                 serviceInstances { edges { node {
                   serviceId domains { serviceDomains { domain } }
                 } } }
               }
-            }' "$(jq -n --arg id "$env_id" --arg svc "$RAILWAY_SERVICE_GATEWAY_ID" '{id:$id, svc:$svc}')" \
+            }' "$(jq -n --arg id "$env_id" '{id:$id}')" \
             | jq -r --arg svc "$RAILWAY_SERVICE_GATEWAY_ID" '
                 [.data.environment.serviceInstances.edges[].node
                   | select(.serviceId == $svc)
