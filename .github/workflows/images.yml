@@ -348,6 +348,7 @@ jobs:
     permissions:
       contents: read
       deployments: write
+      packages: write # the post-deploy channel retag pushes :staging to GHCR
     steps:
       - uses: actions/checkout@v7
         with:
