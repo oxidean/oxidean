@@ -74,6 +74,10 @@ jobs:
             echo "::error::RELEASE_TOKEN secret is not set — tag pushes need a maintainer credential (FR3.4)"
             exit 1
           fi
+          # Annotated tags need a committer identity — this job makes no commits,
+          # so nothing else configures one.
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           remote_tags="$(git ls-remote --tags origin | awk '{print $2}' | sed 's|refs/tags/||' | sort)"
           bun scripts/versioning/cli.ts release-tags --channel beta
           for t in $(comm -13 <(echo "$remote_tags") <(git tag -l | sort)); do
