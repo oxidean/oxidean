@@ -1,0 +1,193 @@
+import { describe, expect, test } from "bun:test";
+import { loadRegistry, parseRegistry } from "./registry.ts";
+import { globsMayOverlap } from "./globs.ts";
+
+const VALID = `version = 1
+
+[baseline]
+commit = "pending"
+
+[grammar]
+allowed_types = ["feat", "fix"]
+reserved_scopes = ["release"]
+
+[[component]]
+id = "a"
+kind = "crate"
+manifest_path = "crates/a/Cargo.toml"
+tag_prefix = "a-v"
+changelog_path = "crates/a/CHANGELOG.md"
+globs = ["crates/a/**"]
+scopes = ["a"]
+depends_on = []
+
+[[component]]
+id = "b"
+kind = "bun"
+manifest_path = "apps/b/package.json"
+tag_prefix = "b-v"
+changelog_path = "apps/b/CHANGELOG.md"
+globs = ["apps/b/**"]
+scopes = ["b"]
+depends_on = ["a"]
+`;
+
+function withB(mutate: (text: string) => string): string {
+  return mutate(VALID);
+}
+
+describe("parseRegistry — happy path", () => {
+  test("valid registry parses to typed config", () => {
+    const r = parseRegistry(VALID);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.config.baseline_commit).toBe("pending");
+    expect(r.config.allowed_types).toEqual(["feat", "fix"]);
+    expect(r.config.entries.map((e) => e.id)).toEqual(["a", "b"]);
+    expect(r.config.entries[1].depends_on).toEqual(["a"]);
+  });
+});
+
+describe("parseRegistry — strict schema (BR1.3)", () => {
+  test("unknown top-level key → violation", () => {
+    const r = parseRegistry(withB((t) => t + '\nsurprise = 1\n'));
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.violations.some((v) => v.message.includes('"surprise"'))).toBe(true);
+  });
+
+  test("unknown component key → violation", () => {
+    const r = parseRegistry(
+      withB((t) => t.replace('tag_prefix = "a-v"', 'tag_prefix = "a-v"\nbogus = 1')),
+    );
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.violations.some((v) => v.message.includes('"bogus"'))).toBe(true);
+  });
+});
+
+describe("parseRegistry — kind/carrier (BR1.1)", () => {
+  test("crate without manifest_path → violation", () => {
+    const r = parseRegistry(
+      withB((t) => t.replace('manifest_path = "crates/a/Cargo.toml"\n', "")),
+    );
+    expect(r.ok).toBe(false);
+  });
+
+  test("contract with manifest_path → violation", () => {
+    const r = parseRegistry(
+      withB(
+        (t) =>
+          t +
+          `\n[[component]]\nid = "w"\nkind = "contract"\nmanifest_path = "x/Cargo.toml"\nconstant_path = "f.rs#V"\ntag_prefix = "w-v"\nchangelog_path = "c.md"\nglobs = []\nscopes = ["w"]\ndepends_on = []\n`,
+      ),
+    );
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.violations.some((v) => v.message.includes("must not carry manifest_path"))).toBe(true);
+  });
+
+  test("contract without constant_path → violation", () => {
+    const r = parseRegistry(
+      withB(
+        (t) =>
+          t +
+          `\n[[component]]\nid = "w"\nkind = "contract"\ntag_prefix = "w-v"\nchangelog_path = "c.md"\nglobs = []\nscopes = ["w"]\ndepends_on = []\n`,
+      ),
+    );
+    expect(r.ok).toBe(false);
+  });
+});
+
+describe("parseRegistry — uniqueness (BR1.7)", () => {
+  test("duplicate scope alias → violation", () => {
+    const r = parseRegistry(withB((t) => t.replace('scopes = ["b"]', 'scopes = ["a"]')));
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.violations.some((v) => v.message.includes('scope alias "a"'))).toBe(true);
+  });
+
+  test("duplicate tag_prefix → violation", () => {
+    const r = parseRegistry(withB((t) => t.replace('tag_prefix = "b-v"', 'tag_prefix = "a-v"')));
+    expect(r.ok).toBe(false);
+  });
+
+  test("reserved scope claimed → violation", () => {
+    const r = parseRegistry(withB((t) => t.replace('scopes = ["b"]', 'scopes = ["release"]')));
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.violations.some((v) => v.message.includes("reserved"))).toBe(true);
+  });
+});
+
+describe("globsMayOverlap (BR1.7)", () => {
+  test("parent ** vs child literal path → overlap", () => {
+    expect(globsMayOverlap("crates/**", "crates/oxidean-api/**")).toBe(true);
+  });
+  test("sibling dirs → disjoint", () => {
+    expect(globsMayOverlap("crates/a/**", "crates/b/**")).toBe(false);
+    expect(globsMayOverlap("apps/web/**", "packages/api-client/**")).toBe(false);
+  });
+  test("segment wildcard vs literal may collide → overlap", () => {
+    expect(globsMayOverlap("crates/*/Cargo.toml", "crates/x/**")).toBe(true);
+  });
+  test("distinct literal tails → disjoint", () => {
+    expect(globsMayOverlap("a/x.rs", "a/y.rs")).toBe(false);
+  });
+  test("registry parse flags overlapping globs across entries", () => {
+    const r = parseRegistry(withB((t) => t.replace('globs = ["apps/b/**"]', 'globs = ["crates/**"]')));
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.violations.some((v) => v.message.includes("overlap"))).toBe(true);
+  });
+});
+
+describe("parseRegistry — depends_on DAG (BR1.4)", () => {
+  test("unknown dep id → violation", () => {
+    const r = parseRegistry(withB((t) => t.replace('depends_on = ["a"]', 'depends_on = ["ghost"]')));
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.violations.some((v) => v.message.includes('unknown component "ghost"'))).toBe(true);
+  });
+
+  test("self-edge → violation", () => {
+    const r = parseRegistry(withB((t) => t.replace('depends_on = ["a"]', 'depends_on = ["b"]')));
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.violations.some((v) => v.message.includes("itself"))).toBe(true);
+  });
+
+  test("cycle → violation naming the cycle", () => {
+    const r = parseRegistry(
+      withB((t) => t.replace('depends_on = []', 'depends_on = ["b"]').replace('depends_on = ["a"]\n\n[[component]]\nid = "b"', 'depends_on = ["a"]\n\n[[component]]\nid = "b"')),
+    );
+    // a now depends on b, b depends on a → cycle
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.violations.some((v) => v.message.includes("cycle"))).toBe(true);
+  });
+});
+
+describe("parseRegistry — baseline (BR1.6)", () => {
+  test("missing baseline.commit → violation", () => {
+    const r = parseRegistry(withB((t) => t.replace('commit = "pending"\n', "")));
+    expect(r.ok).toBe(false);
+  });
+  test("non-sha40 commit → violation", () => {
+    const r = parseRegistry(withB((t) => t.replace('commit = "pending"', 'commit = "abc"')));
+    expect(r.ok).toBe(false);
+  });
+  test("sha40 commit → ok", () => {
+    const r = parseRegistry(withB((t) => t.replace('commit = "pending"', `commit = "${"a".repeat(40)}"`)));
+    expect(r.ok).toBe(true);
+  });
+});
+
+describe("loadRegistry — file states", () => {
+  test("missing file → registry not found violation", () => {
+    const r = loadRegistry("/nonexistent-dir-12345");
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.violations[0].message).toContain("registry not found");
+  });
+});

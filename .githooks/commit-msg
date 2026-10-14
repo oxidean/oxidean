@@ -1,0 +1,7 @@
+#!/bin/sh
+# commit-msg — SemVer-prefixed commit grammar enforcement (U5, BR5.1).
+# Opt-in: installed by `make setup` via core.hooksPath. Bypass: git commit --no-verify.
+set -eu
+
+ROOT=$(git rev-parse --show-toplevel)
+exec bun "$ROOT/scripts/versioning/cli.ts" commit-check --file "$1"

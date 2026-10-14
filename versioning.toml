@@ -1,0 +1,121 @@
+# Oxidean component registry — metadata for the versioned set.
+# Contract C1 (schema versioning-toml, version 1). Version NUMBERS live in the
+# per-component manifests/constants, never here. See docs/VERSIONING.md.
+
+version = 1
+
+[baseline]
+# sha40 lower bound for commit-range scans. "pending" until the post-merge
+# chore(release): commit records the merge sha (BR1.6).
+commit = "pending"
+
+[grammar]
+allowed_types = ["feat", "fix", "chore", "docs", "style", "refactor", "perf", "test", "build", "ci", "revert"]
+reserved_scopes = ["release"]
+breaking_markers = ["!", "BREAKING CHANGE:", "BREAKING-CHANGE:"]
+
+# --- Cargo crates ---------------------------------------------------------
+
+[[component]]
+id = "oxidean-core"
+kind = "crate"
+manifest_path = "crates/oxidean-core/Cargo.toml"
+tag_prefix = "oxidean-core-v"
+changelog_path = "crates/oxidean-core/CHANGELOG.md"
+globs = ["crates/oxidean-core/**"]
+scopes = ["core"]
+depends_on = []
+
+[[component]]
+id = "oxidean-db"
+kind = "crate"
+manifest_path = "crates/oxidean-db/Cargo.toml"
+tag_prefix = "oxidean-db-v"
+changelog_path = "crates/oxidean-db/CHANGELOG.md"
+globs = ["crates/oxidean-db/**"]
+scopes = ["db"]
+depends_on = ["oxidean-core"]
+
+[[component]]
+id = "oxidean-git"
+kind = "crate"
+manifest_path = "crates/oxidean-git/Cargo.toml"
+tag_prefix = "oxidean-git-v"
+changelog_path = "crates/oxidean-git/CHANGELOG.md"
+globs = ["crates/oxidean-git/**"]
+scopes = ["git"]
+depends_on = []
+
+[[component]]
+id = "oxidean-api"
+kind = "crate"
+manifest_path = "crates/oxidean-api/Cargo.toml"
+tag_prefix = "oxidean-api-v"
+changelog_path = "crates/oxidean-api/CHANGELOG.md"
+globs = ["crates/oxidean-api/**"]
+scopes = ["api"]
+depends_on = ["oxidean-core", "oxidean-db", "oxidean-git", "wire"]
+
+[[component]]
+id = "oxidean-runner"
+kind = "crate"
+manifest_path = "crates/oxidean-runner/Cargo.toml"
+tag_prefix = "oxidean-runner-v"
+changelog_path = "crates/oxidean-runner/CHANGELOG.md"
+globs = ["crates/oxidean-runner/**"]
+scopes = ["runner"]
+depends_on = []
+
+[[component]]
+id = "oxidean-web"
+kind = "crate"
+manifest_path = "crates/oxidean-web/Cargo.toml"
+tag_prefix = "oxidean-web-v"
+changelog_path = "crates/oxidean-web/CHANGELOG.md"
+globs = ["crates/oxidean-web/**"]
+scopes = ["web-server"]
+depends_on = ["wire"]
+
+[[component]]
+id = "ox"
+kind = "crate"
+manifest_path = "crates/oxidean-cli/Cargo.toml"
+tag_prefix = "ox-v"
+changelog_path = "crates/oxidean-cli/CHANGELOG.md"
+globs = ["crates/oxidean-cli/**", "packaging/**"]
+scopes = ["cli", "ox"]
+depends_on = ["oxidean-core", "wire"]
+
+# --- Bun workspaces --------------------------------------------------------
+
+[[component]]
+id = "api-client"
+kind = "bun"
+manifest_path = "packages/api-client/package.json"
+tag_prefix = "api-client-v"
+changelog_path = "packages/api-client/CHANGELOG.md"
+globs = ["packages/api-client/**"]
+scopes = ["api-client", "client"]
+depends_on = ["wire"]
+
+[[component]]
+id = "web"
+kind = "bun"
+manifest_path = "apps/web/package.json"
+tag_prefix = "web-v"
+changelog_path = "apps/web/CHANGELOG.md"
+globs = ["apps/web/**"]
+scopes = ["web", "webapp", "ui"]
+depends_on = ["api-client", "wire"]
+
+# --- Wire contract (manifest-less) ----------------------------------------
+
+[[component]]
+id = "wire"
+kind = "contract"
+constant_path = "crates/oxidean-core/src/lib.rs#WIRE_VERSION"
+tag_prefix = "wire-v"
+changelog_path = "docs/WIRE-CHANGELOG.md"
+globs = []
+scopes = ["wire", "rpc"]
+depends_on = []

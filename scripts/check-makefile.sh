@@ -49,6 +49,66 @@ if grep -F 'warning: undefined variable' "$warn_log" >/dev/null 2>&1; then
 fi
 echo "makefile-lint: GNU Make parse ok"
 
+# --- 1.5) Target wiring: .PHONY coverage, runnable recipes, script paths ---
+# This Makefile defines no file-producing targets: every target is a command,
+# so a recipe-bearing target missing from .PHONY silently stops running the
+# moment a file or directory with its name exists. Check both directions and
+# that every scripts/ path a recipe calls exists (and is executable for .sh).
+
+makefile_targets="$(awk '
+  /^[A-Za-z0-9][A-Za-z0-9_.-]*[ \t]*:/ {
+    rest = $0
+    sub(/^[A-Za-z0-9][A-Za-z0-9_.-]*[ \t]*:/, "", rest)
+    if (rest ~ /^:?=/) next
+    name = $0
+    sub(/[ \t]*:.*/, "", name)
+    print name
+  }' "$MAKEFILE" | sort -u)"
+
+phony_targets="$(awk '
+  /^\.PHONY:[ \t]*/ {
+    line = $0
+    sub(/^\.PHONY:[ \t]*/, "", line)
+    n = split(line, a, /[ \t]+/)
+    for (i = 1; i <= n; i++) if (a[i] != "") print a[i]
+  }' "$MAKEFILE" | sort -u)"
+
+wiring_bad=0
+while IFS= read -r t; do
+  [[ -n "$t" ]] || continue
+  if ! printf '%s\n' "$phony_targets" | grep -qxF "$t"; then
+    echo "error: target '$t' has a recipe but is not declared .PHONY" >&2
+    wiring_bad=1
+  fi
+done <<< "$makefile_targets"
+
+while IFS= read -r t; do
+  [[ -n "$t" ]] || continue
+  if ! printf '%s\n' "$makefile_targets" | grep -qxF "$t"; then
+    echo "error: .PHONY declares '$t' but no such target exists in $MAKEFILE" >&2
+    wiring_bad=1
+    continue
+  fi
+  if ! out="$(make -n -f "$MAKEFILE" "$t" 2>/dev/null)" || [[ -z "${out//[[:space:]]/}" ]]; then
+    echo "error: .PHONY target '$t' has no runnable recipe (make -n produced no commands)" >&2
+    wiring_bad=1
+  fi
+done <<< "$phony_targets"
+
+while IFS= read -r s; do
+  [[ -n "$s" ]] || continue
+  if [[ ! -f "$s" ]]; then
+    echo "error: recipe references missing script: $s" >&2
+    wiring_bad=1
+  elif [[ "$s" == *.sh && ! -x "$s" ]]; then
+    echo "error: recipe references non-executable script: $s" >&2
+    wiring_bad=1
+  fi
+done < <(grep -oE '(\./)?scripts/[A-Za-z0-9_/.-]+\.(sh|mjs|ts)' "$MAKEFILE" | sed 's|^\./||' | sort -u)
+
+[[ "$wiring_bad" -eq 0 ]] || exit 1
+echo "makefile-lint: target wiring ok"
+
 # --- 2) checkmake (pinned binary under tmp/) ---
 os="$(uname -s | tr '[:upper:]' '[:lower:]')"
 arch="$(uname -m)"

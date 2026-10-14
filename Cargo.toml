@@ -19,7 +19,6 @@ exclude = [
 [workspace.package]
 edition = "2021"
 license = "MIT"
-version = "0.1.0"
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }

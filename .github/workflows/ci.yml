@@ -25,6 +25,50 @@ jobs:
       - name: makefile lint (GNU Make parse + checkmake)
         run: make makefile-lint
 
+  # SemVer commit-grammar gate (U5, BR5.3–BR5.6): lints the PR/push commit range
+  # and the PR title, then validates the version registry against the workspace.
+  commit-lint:
+    name: commit-lint
+    needs: [makefile-lint]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.0"
+      - name: bun install
+        run: bun install --frozen-lockfile
+      - name: lint commit range
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.event.after }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            RANGE="$PR_BASE..$PR_HEAD"
+          else
+            # push events: skip range lint on branch creation (before = zeros)
+            if [ "$PUSH_BEFORE" = "0000000000000000000000000000000000000000" ]; then
+              echo "new branch push — no commit range to lint"
+              exit 0
+            fi
+            RANGE="$PUSH_BEFORE..$PUSH_AFTER"
+          fi
+          bun scripts/versioning/cli.ts commit-check --range "$RANGE"
+      - name: lint PR title
+        if: github.event_name == 'pull_request'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: bun scripts/versioning/cli.ts commit-check --pr-title "$PR_TITLE"
+      - name: registry completeness
+        run: bun scripts/versioning/cli.ts check
+
   api-rust:
     name: api-rust
     needs: [makefile-lint]
