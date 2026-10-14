@@ -15,17 +15,22 @@ export function parseCommonArgs(args: string[]): {
   channel: Channel;
   json: boolean;
   dryRun: boolean;
+  plan?: string;
   error?: string;
 } {
   let since: string | undefined;
   let channel: Channel = "stable";
   let json = false;
   let dryRun = false;
+  let plan: string | undefined;
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
     if (a === "--since") {
       since = args[++i];
       if (since === undefined) return { channel, json, dryRun, error: "--since requires a ref" };
+    } else if (a === "--plan") {
+      plan = args[++i];
+      if (plan === undefined) return { channel, json, dryRun, error: "--plan requires a path" };
     } else if (a === "--channel") {
       const c = args[++i];
       if (c !== "stable" && c !== "alpha" && c !== "beta" && c !== "nightly") {
@@ -40,7 +45,7 @@ export function parseCommonArgs(args: string[]): {
       return { channel, json, dryRun, error: `unknown argument "${a}"` };
     }
   }
-  return { since, channel, json, dryRun };
+  return { since, channel, json, dryRun, plan };
 }
 
 export function loadOrFail(root: string): RegistryConfig | null {

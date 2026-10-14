@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { parseCommit, type ConventionalCommit } from "./commit.ts";
-import { attributeCommit, computePlan, propagate, type RangeCommit } from "./plan.ts";
+import { attributeCommit, collectRange, computePlan, propagate, type RangeCommit } from "./plan.ts";
 import type { RegistryConfig, RegistryEntry } from "./registry.ts";
 import type { Git } from "./git.ts";
 
@@ -255,5 +255,40 @@ describe("computePlan", () => {
     expect(db.bump).toBe("patch");
     expect(db.commits[0].type).toBeUndefined();
     expect(plan.warnings.some((w) => w.includes("grammar-invalid"))).toBe(true);
+  });
+});
+
+// --- collectRange bounds ----------------------------------------------------
+
+describe("collectRange component bounds", () => {
+  const STABLE = { tag: "core-v0.1.0", version: "0.1.0", commit: "a".repeat(40) };
+  const BETA = { tag: "core-v0.2.0-beta.1", version: "0.2.0-beta.1", commit: "b".repeat(40) };
+
+  function gitWithTags() {
+    const boundFor = new Map<string, Set<string>>([
+      ["core-v0.1.0", new Set(["s".repeat(40)])],
+      ["core-v0.2.0-beta.1", new Set(["t".repeat(40)])],
+    ]);
+    const git: Git = {
+      ...FAKE_GIT,
+      prefixedTags: (p) => (p === "core-v" ? [STABLE, BETA] : []),
+      commitsSince: (tag) => boundFor.get(tag) ?? new Set(),
+    };
+    return git;
+  }
+
+  test("stable channel bounds at the latest stable tag, ignoring prereleases", () => {
+    const range = collectRange(ROOT, gitWithTags(), REGISTRY, undefined, "stable");
+    expect(range.componentBounds.get("core")).toEqual(new Set(["s".repeat(40)]));
+  });
+
+  test("beta channel bounds at the newest tag including prereleases", () => {
+    const range = collectRange(ROOT, gitWithTags(), REGISTRY, undefined, "beta");
+    expect(range.componentBounds.get("core")).toEqual(new Set(["t".repeat(40)]));
+  });
+
+  test("no channel (detect) keeps the newest tag regardless of prerelease", () => {
+    const range = collectRange(ROOT, gitWithTags(), REGISTRY);
+    expect(range.componentBounds.get("core")).toEqual(new Set(["t".repeat(40)]));
   });
 });

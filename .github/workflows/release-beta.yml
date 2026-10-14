@@ -1,0 +1,81 @@
+# Beta channel: every merge to main cuts prerelease tags.
+#
+# `main` is the beta channel — Railway staging already autodeploys it. This
+# lane is bookkeeping: on each push it computes the beta BumpPlan and, when
+# anything bumped, creates annotated `<component>-v<semver>-beta.N` tags at the
+# pushed SHA and pushes them via RELEASE_TOKEN (GITHUB_TOKEN tag pushes do
+# not re-trigger workflows — FR3.4).
+#
+# Tag-only: manifests on main always carry the last stable version. Pushed
+# beta tags fire the normal tag lanes — release.yml creates prerelease-marked
+# Releases, ox-cli.yml builds the full matrix for `ox-v*-beta.*` (never
+# latest.json — C5), publish-runner.yml ships prerelease runner images.
+#
+# Stable cuts do NOT live here — the Production deploy promote job creates
+# the stable version bump (changelog + bump + tags) before deploying.
+#
+# No recursion: the `chore(release):` bump commit pushed by the promote job
+# triggers this lane, but its beta plan is empty — the new stable tag is the
+# bound and the release commit is scope-exempt.
+
+name: Release beta
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: "0 9 * * 1" # Mondays 09:00 UTC — catch-up if a push lane was skipped
+
+concurrency:
+  group: release-beta
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  beta-tags:
+    name: cut beta tags
+    runs-on: ubuntu-latest
+    # Forks have no RELEASE_TOKEN and should never cut releases.
+    if: github.repository == 'oxidean/oxidean'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_TOKEN }}
+          # Tag the pushed/selected SHA, not wherever main happens to be when
+          # this serialized job starts.
+          ref: ${{ github.sha }}
+      - uses: oven-sh/setup-bun@v2
+      - name: install workspace deps
+        run: bun install --frozen-lockfile
+      - name: fetch tags (plan bounds + existing-tag dedup need them)
+        run: git fetch --tags --force origin
+      - name: compute beta plan
+        id: plan
+        run: |
+          set -euo pipefail
+          bun scripts/versioning/cli.ts plan --channel beta --json > /tmp/plan.json
+          jq -r '.entries[] | "\(.component) \(.fromVersion) -> \(.toVersion) (\(.bump))"' /tmp/plan.json
+          bumped="$(jq '[.entries[] | select(.fromVersion != .toVersion)] | length' /tmp/plan.json)"
+          echo "bumped=$bumped" >> "$GITHUB_OUTPUT"
+      - name: nothing to release
+        if: steps.plan.outputs.bumped == '0'
+        run: echo "beta plan is empty — no prerelease cut"
+      - name: tag + push beta cuts via RELEASE_TOKEN
+        if: steps.plan.outputs.bumped != '0'
+        env:
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${RELEASE_TOKEN:-}" ]; then
+            echo "::error::RELEASE_TOKEN secret is not set — tag pushes need a maintainer credential (FR3.4)"
+            exit 1
+          fi
+          remote_tags="$(git ls-remote --tags origin | awk '{print $2}' | sed 's|refs/tags/||' | sort)"
+          bun scripts/versioning/cli.ts release-tags --channel beta
+          for t in $(comm -13 <(echo "$remote_tags") <(git tag -l | sort)); do
+            git push origin "$t"
+          done

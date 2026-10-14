@@ -118,7 +118,7 @@ IaC sets public browser/SSH advertise vars from the **gateway** domain (not `pre
 | `OXIDEAN_WEB_BEHIND_PROXY` (web) | `1` — the gateway sanitizes `X-Forwarded-*`, so `oxidean-web` trusts the edge's chain |
 | `OXIDEAN_AUTO_MIGRATE` | `true` on all environments (including production) |
 | `OXIDEAN_PROTECTION_HELPER` | `/usr/local/bin/oxidean-protection-hook` (API image) |
-| `OXIDEAN_CLI_DIST_URL` (api) | Owned by **deploy tooling**, not IaC — `scripts/railway-staging-api-redeploy.sh` and `scripts/railway-production-deploy.sh` upsert it (skipDeploys) to the `ox-v*` tag-release download URL matching the deployed commit, or empty on untagged commits. Docker **build-arg** (Dockerfile default empty → host-only `ox`). When set, image build fail-closes if the matrix cannot be fetched; `latest.json` is best-effort. Preview / PR envs leave it unset → same-commit host `ox` only, with `RAILWAY_GIT_COMMIT_SHA` written to `SOURCE_COMMIT` for a truthful `dist_commit`. |
+| `OXIDEAN_CLI_DIST_URL` (api) | Owned by **deploy tooling**, not IaC — `scripts/railway-staging-api-redeploy.sh` and `scripts/railway-production-deploy.sh` upsert it (skipDeploys) to the `ox-v*` tag-release download URL for the deployed commit. Staging pins the tag **pointing at** that commit; production falls back to the newest stable `ox-v*` tag merged into it, so a stable-cut bump commit that didn't touch `ox` still serves the latest released CLI (empty = no released `ox` at all → host-only). Docker **build-arg** (Dockerfile default empty → host-only `ox`). When set, image build fail-closes if the matrix cannot be fetched; `latest.json` is best-effort. Preview / PR envs leave it unset → same-commit host `ox` only, with `RAILWAY_GIT_COMMIT_SHA` written to `SOURCE_COMMIT` for a truthful `dist_commit`. |
 
 ### ox CLI multi-arch matrix
 
@@ -127,7 +127,7 @@ Cloud CLI distribution is **tag-pinned**: deploys fetch the matrix from the
 
 1. An `ox-v*.*.*` tag push runs [`.github/workflows/ox-cli.yml`](../.github/workflows/ox-cli.yml), which publishes the tag's GitHub Release with the full matrix (`ox-targets.txt` + `ox-*` + `.sha256` + `SOURCE_COMMIT` + installers/packages, plus `latest.json` on stable cuts).
 2. The same run redeploys staging `api` via [`scripts/railway-staging-api-redeploy.sh`](../scripts/railway-staging-api-redeploy.sh) (`RAILWAY_API_TOKEN` or staging-scoped `RAILWAY_TOKEN`; skipped when absent). The script resolves the `ox-v*` tag on that commit and upserts `OXIDEAN_CLI_DIST_URL` to the tag's download URL before redeploying.
-3. [`scripts/railway-production-deploy.sh`](../scripts/railway-production-deploy.sh) `promote` applies the same pin on production `api`. Preview / PR envs keep the arg unset → they serve the same-commit host `ox` (linux-amd64 only); untagged staging/production deploys likewise go host-only.
+3. [`scripts/railway-production-deploy.sh`](../scripts/railway-production-deploy.sh) `promote` applies the pin on production `api`, falling back to the newest stable `ox-v*` tag merged into the deployed commit. Preview / PR envs keep the arg unset → they serve the same-commit host `ox` (linux-amd64 only); deploys with no released `ox` tag at all go host-only.
 4. Verify: `GET …/cli/latest` lists darwin/windows (and may include `dist_commit`); macOS `install.sh` succeeds.
 
 Self-hosted images leave the build-arg empty (Compose default) or point at **their** artifact feed — never require upstream Oxidean's releases. Details: [docs/CLI.md](../docs/CLI.md).
@@ -142,7 +142,7 @@ Do **not** rely on Environment Sync for promote: Sync includes variables and can
 
 1. Confirm the commit is healthy on **staging**.
 2. GitHub → **Actions** → **Production deploy** → Run workflow:
-   - **promote** — `serviceInstanceDeployV2` with `commitSha` for `api` / `web` / `gateway` (default: `main` HEAD). Gated on CI success for that SHA. Leaves production variables alone.
+   - **promote** — `serviceInstanceDeployV2` with `commitSha` for `api` / `web` / `gateway` (default: `main` HEAD). Gated on CI success for that SHA. Also **creates the stable release** (changelog + `chore(release):` bump commit + `*-vX.Y.Z` tags via `RELEASE_TOKEN`) and deploys the resulting bump commit; the first-ever promote tags the `0.1.0` baseline for every component. `cut_release: false` skips the cut (plain re-promote). When a fresh `ox-v*` tag was just cut, the job waits for the `ox-cli.yml` asset matrix before deploying. Leaves production variables alone.
    - **rollback** — `deploymentRollback` to the prior `canRollback` deployment on each of those services.
    - **dry_run** — toggle on to print the plan without mutating Railway (still needs `RAILWAY_TOKEN`/`RAILWAY_API_TOKEN` for rollback target lookup).
 3. Smoke `https://app.oxidean.dev/health` (skipped on dry-run).

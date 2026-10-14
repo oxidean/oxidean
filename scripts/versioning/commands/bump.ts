@@ -8,10 +8,11 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { RegistryEntry } from "../lib/registry.ts";
 import type { BumpPlan } from "../lib/plan.ts";
+import { carrierVersion } from "../lib/plan.ts";
 import { buildPlan, printPlanTable } from "./plan.ts";
 
 export const usage =
-  "bump [--since <ref>] [--channel <c>] [--dry-run]\n" +
+  "bump [--since <ref>] [--channel <c>] [--plan <file>] [--dry-run]\n" +
   "                                apply the plan: version writes + lockfile regen";
 
 export interface ManifestEdit {
@@ -142,6 +143,25 @@ export function bumpCommand(root: string, args: string[]): number {
   const byId = new Map(res.registry.entries.map((e) => [e.id, e]));
   const edits: ManifestEdit[] = [];
   const errors: string[] = [];
+  // Stale-plan guard: with --plan the plan predates this process; refuse to
+  // write when a carrier no longer reads the plan's fromVersion — otherwise a
+  // post-bump recompute would silently apply a second bump.
+  if (args.includes("--plan")) {
+    for (const e of plan.entries) {
+      const reg = byId.get(e.component);
+      if (!reg) continue;
+      const current = carrierVersion(root, reg);
+      if (current !== e.fromVersion) {
+        errors.push(
+          `${e.component}: carrier reads ${current}, plan expects ${e.fromVersion} — stale plan`,
+        );
+      }
+    }
+    if (errors.length > 0) {
+      for (const er of errors) process.stderr.write(`bump: ${er}\n`);
+      return 1;
+    }
+  }
   for (const e of plan.entries) {
     const reg = byId.get(e.component);
     if (!reg) {

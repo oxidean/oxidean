@@ -99,9 +99,11 @@ service_pairs() {
   printf '%s %s\n' gateway "$SERVICE_GATEWAY_ID"
 }
 
-# Resolve the ox-v* release tag on a commit — prefer a stable cut when several
-# tags point at the same SHA. Empty result means the commit has no tag and the
-# api deploy should stage host-only ox (preview semantics).
+# Resolve the ox-v* release tag for a commit — prefer a stable cut pointing at
+# the SHA; when none does (e.g. a stable-cut bump commit on a promote that did
+# not bump ox), fall back to the newest stable ox tag merged into the commit so
+# production keeps serving the latest released CLI instead of going host-only.
+# Empty result = no released ox at all → host-only ox in the image.
 resolve_ox_dist_url() {
   local sha="$1"
   if command -v git >/dev/null 2>&1; then
@@ -109,6 +111,10 @@ resolve_ox_dist_url() {
     local tag
     tag="$(git tag --points-at "$sha" --list 'ox-v*.*.*' \
       | grep -v -e '-alpha' -e '-beta' -e '-nightly' | sort -V | tail -n1)"
+    if [[ -z "$tag" ]]; then
+      tag="$(git tag --merged "$sha" --list 'ox-v*.*.*' \
+        | grep -v -e '-alpha' -e '-beta' -e '-nightly' | sort -V | tail -n1)"
+    fi
     if [[ -z "$tag" ]]; then
       tag="$(git tag --points-at "$sha" --list 'ox-v*' | sort -V | tail -n1)"
     fi
