@@ -168,7 +168,9 @@ cmd_promote() {
 
   # Atomic image deploy: all four services pin ghcr.io/oxidean/oxidean-<svc>:
   # sha-<sha>, then the :production channel tag follows the deployed bits.
-  local args=(--environment-id "$ENVIRONMENT_ID" --tag "sha-${sha}" --channel-tag production)
+  # --wait makes the call return only once every service's new deployment is
+  # terminal (dry-run skips it).
+  local args=(--environment-id "$ENVIRONMENT_ID" --tag "sha-${sha}" --channel-tag production --wait)
   if [[ "$DRY_RUN" == "1" ]]; then
     args+=(--dry-run)
   fi

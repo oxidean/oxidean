@@ -50,6 +50,7 @@ permissions:
   contents: write # the stable cut pushes the bump commit + tags via RELEASE_TOKEN
   actions: read
   packages: write # promote moves the :production channel tag on GHCR
+  deployments: write # image deploys post GitHub Deployment records (Railway only posts git-triggered ones)
 
 jobs:
   deploy:
@@ -288,14 +289,32 @@ jobs:
           DRY_RUN: ${{ inputs.dry_run }}
           # Deploy the bump commit when a stable cut ran, else the promoted SHA.
           SHA: ${{ steps.deploy.outputs.sha || steps.sha.outputs.sha }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           args=(promote "$SHA")
+          dep_id=""
           if [[ "$DRY_RUN" == "true" ]]; then
             args+=(--dry-run)
             echo "dry_run=true — no Railway mutations"
+          else
+            # Railway posts no Deployment record for image repins — keep the
+            # same signal the env's git-triggered history had.
+            dep_id="$(scripts/github-deployment.sh create \
+              --ref "$SHA" --environment "Oxidean / production" \
+              --url "https://app.oxidean.dev" \
+              --description "promote sha-${SHA}")"
+            scripts/github-deployment.sh status "$dep_id" in_progress \
+              --url "https://app.oxidean.dev" --description "promoting sha-${SHA}"
           fi
-          bash scripts/railway-production-deploy.sh "${args[@]}"
+          if bash scripts/railway-production-deploy.sh "${args[@]}"; then
+            scripts/github-deployment.sh status "${dep_id:-}" success \
+              --url "https://app.oxidean.dev" --description "deployed sha-${SHA}"
+          else
+            scripts/github-deployment.sh status "${dep_id:-}" failure \
+              --url "https://app.oxidean.dev" --description "promote sha-${SHA} failed"
+            exit 1
+          fi
 
       - name: Rollback
         if: inputs.action == 'rollback'

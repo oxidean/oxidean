@@ -345,6 +345,9 @@ jobs:
       (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
       needs.publish.result == 'success'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      deployments: write
     steps:
       - uses: actions/checkout@v7
         with:
@@ -366,18 +369,35 @@ jobs:
           RAILWAY_SERVICE_WEB_ID: 26b7e1b6-6cfa-4c7e-942a-bed8e5ce12a2
           RAILWAY_SERVICE_RUNNER_ID: 36f9b50a-738a-419a-9171-49f56c902e6a
           RAILWAY_SERVICE_GATEWAY_ID: 864fa81c-6e5d-4939-b33b-85eb435365ac
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ needs.meta.outputs.sha }}
         run: |
           set -euo pipefail
           if [[ -z "${RAILWAY_TOKEN:-}" && -z "${RAILWAY_API_TOKEN:-}" ]]; then
             echo "No Railway credential configured — skipping staging deploy (images are still published)."
             exit 0
           fi
+          # Railway stops posting Deployments once services are image-sourced —
+          # keep the same first-class record on the commit via our own.
+          dep_id="$(scripts/github-deployment.sh create \
+            --ref "$SHA" \
+            --environment "Oxidean / staging" \
+            --description "image deploy sha-${SHA}")"
+          scripts/github-deployment.sh status "$dep_id" in_progress \
+            --description "pinning staging services to sha-${SHA}"
           # --environment-id (staging) works with env-scoped project tokens;
           # name resolution needs an account token that can list environments.
-          scripts/railway-image-deploy.sh \
+          if scripts/railway-image-deploy.sh \
             --environment-id 56e886c1-83f4-4db4-8e41-d427dc3d3039 \
-            --tag "sha-${{ needs.meta.outputs.sha }}" \
-            --channel-tag staging
+            --tag "sha-${SHA}" \
+            --channel-tag staging --wait; then
+            scripts/github-deployment.sh status "$dep_id" success \
+              --description "deployed sha-${SHA}"
+          else
+            scripts/github-deployment.sh status "$dep_id" failure \
+              --description "deploy sha-${SHA} failed"
+            exit 1
+          fi
 
   # Bind the PR's ephemeral Railway environment (created from preview) to the
   # PR image tag once it exists. The env initially clones preview's :main
@@ -392,6 +412,9 @@ jobs:
       github.event.pull_request.head.repo.full_name == github.repository &&
       needs.publish.result == 'success'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      deployments: write
     steps:
       - uses: actions/checkout@v7
         with:
@@ -407,8 +430,13 @@ jobs:
           RAILWAY_SERVICE_WEB_ID: 26b7e1b6-6cfa-4c7e-942a-bed8e5ce12a2
           RAILWAY_SERVICE_RUNNER_ID: 36f9b50a-738a-419a-9171-49f56c902e6a
           RAILWAY_SERVICE_GATEWAY_ID: 864fa81c-6e5d-4939-b33b-85eb435365ac
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ needs.meta.outputs.pr }}
+          TAG: pr-${{ needs.meta.outputs.pr }}-sha-${{ needs.meta.outputs.sha }}
+          SHA: ${{ needs.meta.outputs.sha }}
         run: |
           set -euo pipefail
+          source scripts/railway-gql.sh
           if [[ -z "${RAILWAY_TOKEN:-}" && -z "${RAILWAY_API_TOKEN:-}" ]]; then
             echo "No Railway credential configured — skipping PR env bind."
             exit 0
@@ -419,9 +447,54 @@ jobs:
             # list environments.
             unset RAILWAY_TOKEN
           fi
-          scripts/railway-image-deploy.sh \
-            --pr "${{ needs.meta.outputs.pr }}" \
-            --tag "pr-${{ needs.meta.outputs.pr }}-sha-${{ needs.meta.outputs.sha }}"
+
+          # Railway creates the ephemeral env on PR open; it usually exists by
+          # now but can lag — poll before posting anything to the PR.
+          env_id=""
+          for _ in $(seq 1 40); do
+            env_id="$(railway_find_pr_environment_id "$RAILWAY_PROJECT_ID" "$PR" || true)"
+            [[ -n "$env_id" ]] && break
+            echo "waiting for the PR #${PR} environment (sleep 15s)"
+            sleep 15
+          done
+          if [[ -z "$env_id" ]]; then
+            echo "warning: no Railway environment for PR #${PR} after 600s — a later push retries"
+            exit 0
+          fi
+
+          # Public URL for the deployment record — the gateway's service domain.
+          env_url="$(railway_gql '
+            query($id: String!, $svc: String!) {
+              environment(id: $id) {
+                serviceInstances { edges { node {
+                  serviceId domains { serviceDomains { domain } }
+                } } }
+              }
+            }' "$(jq -n --arg id "$env_id" --arg svc "$RAILWAY_SERVICE_GATEWAY_ID" '{id:$id, svc:$svc}')" \
+            | jq -r --arg svc "$RAILWAY_SERVICE_GATEWAY_ID" '
+                [.data.environment.serviceInstances.edges[].node
+                  | select(.serviceId == $svc)
+                  | .domains.serviceDomains[]?.domain] | first // ""' \
+            | sed 's/^/https:\/\//' | sed 's/^https:\/\/$//')"
+
+          # First-class PR signal: a GitHub Deployment in the env Railway's
+          # own records use — in_progress while images pull and services boot.
+          dep_id="$(scripts/github-deployment.sh create \
+            --ref "$SHA" \
+            --environment "Oxidean / oxidean-pr-${PR}" \
+            --url "$env_url" \
+            --description "image deploy ${TAG}")"
+          scripts/github-deployment.sh status "$dep_id" in_progress \
+            --url "$env_url" --description "pinning services to ${TAG}"
+
+          if scripts/railway-image-deploy.sh --environment-id "$env_id" --tag "$TAG" --wait; then
+            scripts/github-deployment.sh status "$dep_id" success \
+              --url "$env_url" --description "deployed ${TAG}"
+          else
+            scripts/github-deployment.sh status "$dep_id" failure \
+              --url "$env_url" --description "deploy ${TAG} failed"
+            exit 1
+          fi
 
   # Tear a closed (merged or abandoned) PR down: GHCR pr-* tags, the
   # ephemeral Railway environment, and the GitHub Environment that Railway's
