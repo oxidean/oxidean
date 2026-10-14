@@ -7,7 +7,7 @@ version = 1
 [baseline]
 # sha40 lower bound for commit-range scans. "pending" until the post-merge
 # chore(release): commit records the merge sha (BR1.6).
-commit = "pending"
+commit = "f1e51829d1940570569a3e80bf852089b75fb16f"
 
 [grammar]
 allowed_types = ["feat", "fix", "chore", "docs", "style", "refactor", "perf", "test", "build", "ci", "revert"]
