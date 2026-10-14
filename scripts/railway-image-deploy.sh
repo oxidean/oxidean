@@ -144,16 +144,20 @@ wait_for_deployments() {
       sleep 15
       continue
     fi
-    local pending=0 failed=0
+    local pending=0 hard_failed=0 soft_failed=0
     local dep_id status st
     for dep_id in ${ids_csv//,/ }; do
       status="$(echo "$raw" | jq -r --arg id "$dep_id" '
         [.data.environment.deployments.edges[].node | select(.id == $id)]
         | first | .status // "missing"
       ' 2>/dev/null || echo "missing")"
+      # CRASHED is soft: restart policies can flap a deployment back to
+      # DEPLOYING — only fail once every tracked id is terminal. FAILED and
+      # REMOVED never recover — die immediately.
       case "$status" in
         SUCCESS | SKIPPED) st="ok" ;;
-        FAILED | CRASHED | REMOVED) st="failed:${status}" ;;
+        FAILED | REMOVED) st="failed:${status}" ;;
+        CRASHED) st="crashed" ;;
         *) st="$status" ;;  # QUEUED/BUILDING/DEPLOYING/INITIALIZING/missing…
       esac
       if [[ "${last_seen[$dep_id]:-}" != "$st" ]]; then
@@ -162,14 +166,18 @@ wait_for_deployments() {
       fi
       case "$st" in
         ok) ;;
-        failed:*) failed=$((failed + 1)) ;;
+        failed:*) hard_failed=$((hard_failed + 1)) ;;
+        crashed) soft_failed=$((soft_failed + 1)) ;;
         *) pending=$((pending + 1)) ;;
       esac
     done
-    if (( failed > 0 )); then
+    if (( hard_failed > 0 )); then
       die "deploy failed in environment ${env_id} (see Railway logs)"
     fi
     if (( pending == 0 )); then
+      if (( soft_failed > 0 )); then
+        die "deployments crashed in environment ${env_id} (see Railway logs)"
+      fi
       echo "wait: all triggered deployments reached a terminal state"
       return 0
     fi
