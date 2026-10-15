@@ -106,12 +106,13 @@ describe("chrome pending account cluster", () => {
     });
 
     // Resolved cluster = CreateMenu (size-9) + NotificationsBell (size-9) +
-    // AccountMenu (size-7 avatar squircle + @username inside an h-9 trigger).
-    // The skeleton must carry a square per square-shaped element — the avatar
-    // was collapsed into a single pill (issue #120).
+    // AccountMenu — ONE h-9 trigger holding the size-7 avatar squircle and
+    // the @username label. The skeleton must carry a square per icon button
+    // plus a single box for the whole trigger (the avatar+name are one
+    // control — an extra bar read as a phantom fourth control).
     const authed = document.querySelector("[data-header-skeleton-authed]")!;
-    expect(authed.querySelectorAll(".oct-skeleton.size-9").length).toBe(3);
-    expect(authed.querySelectorAll(".oct-skeleton").length).toBe(4);
+    expect(authed.querySelectorAll(".oct-skeleton.size-9").length).toBe(2);
+    expect(authed.querySelectorAll(".oct-skeleton").length).toBe(3);
 
     resolveMe({ ok: false, error: { code: "auth.unauthenticated", message: "n" } });
     await waitFor(() => {
