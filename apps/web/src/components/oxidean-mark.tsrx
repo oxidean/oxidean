@@ -1,6 +1,7 @@
+import { memo } from "octane";
 import { cn } from "@/lib/utils";
 
-export function OxideanMark({
+function OxideanMarkImpl({
   size = 32,
   className,
 }: {
@@ -16,3 +17,4 @@ export function OxideanMark({
     style={{ width: `${size}px`, height: `${size}px` }}
   />;
 }
+export const OxideanMark = memo(OxideanMarkImpl);

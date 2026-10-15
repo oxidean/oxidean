@@ -1,5 +1,5 @@
 import { Check, Monitor, Moon, Sun } from "@octanejs/lucide";
-import { useEffect, useEffectEvent, useState } from "octane";
+import { memo, useEffect, useEffectEvent, useState } from "octane";
 import { applyTheme, readThemePreference, type ThemePreference } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 
@@ -20,11 +20,7 @@ type ThemeSelectProps = {
  * Theme control: compact header trigger, or inline panel for mobile menus.
  * Avoids Base UI Select (body scroll-lock).
  */
-export function ThemeSelect({
-  layout = "compact",
-  className,
-  onChosen,
-}: ThemeSelectProps) @{
+function ThemeSelectImpl({ layout = "compact", className, onChosen }: ThemeSelectProps) @{
   const [theme, setTheme] = useState<ThemePreference>("system");
   const [open, setOpen] = useState(false);
 
@@ -154,3 +150,4 @@ export function ThemeSelect({
     </div>;
   }
 }
+export const ThemeSelect = memo(ThemeSelectImpl);
