@@ -19,7 +19,7 @@ import {
 
 const NETWORK_ERROR = networkErrorMessage();
 
-export type TwoFactorChallengeProps = {
+type TwoFactorChallengeProps = {
   /** Explicit challenge id; null falls back to the `oxidean_2fa` cookie. */
   challengeId: string | null;
   returnTo: string;
