@@ -141,14 +141,17 @@ images stay immutable across `ox-v*` releases:
 1. `.github/workflows/ox-cli.yml` publishes the `ox-v*` tag release with the
    full matrix (`ox-targets.txt`, `ox-{triple}` + `.sha256`, `SOURCE_COMMIT`,
    installers/packages) plus `latest.json` on stable cuts.
-2. `images.yml`'s **staging-cli-feed** job (on ox-cli completing) runs
-   `scripts/railway-staging-api-redeploy.sh <sha>` — it resolves the `ox-v*`
-   tag on that commit, upserts `OXIDEAN_CLI_DIST_URL` to the tag's download
-   URL, and `serviceInstanceRedeploy`s staging `api` so the boot fetch picks
-   up the new feed. Untagged commits pin the URL empty → host-only.
+2. `images.yml`'s **staging-cli-feed** job (on ox-cli completing for an
+   `ox-v*` tag) runs `scripts/railway-staging-api-redeploy.sh <sha>` — it
+   resolves the `ox-v*` tag via `scripts/ox-dist-tag.sh`, upserts
+   `OXIDEAN_CLI_DIST_URL` to the tag's download URL, and
+   `serviceInstanceRedeploy`s staging `api` so the boot fetch picks up the
+   new feed. PR / path-filter ox-cli completions are ignored; untagged
+   commits pin the URL empty → host-only.
 3. `scripts/railway-production-deploy.sh promote <sha>` does the same pin on
-   production `api` before the image deploy, so the new replica's boot fetch
-   serves the promoted release.
+   production `api` before the image deploy (with a `--merged-fallback` to
+   the newest stable `ox-v*` ancestor when the promote SHA itself is
+   untagged), so the new replica's boot fetch serves the promoted release.
 
 **Preview / PR environments leave `OXIDEAN_CLI_DIST_URL` unset** — they stage
 the just-built host `ox` (baked at image build with `SOURCE_COMMIT` set to
