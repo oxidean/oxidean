@@ -4,8 +4,8 @@ use oxidean_core::{ClassicPatScope, PackagesPerm};
 use oxidean_db::{Database, PackageRow, RepositoryRow};
 
 use crate::repo::{
-    coalesce, effective_capability, meets, owner_ref_for_repo, Capability, MemberBasePermission,
-    OrgRole,
+    coalesce, effective_capability, meets, org_member_capability_sources, owner_ref_for_repo,
+    Capability, MemberBasePermission,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -104,25 +104,10 @@ pub async fn owner_capability(
         ));
     }
 
-    // org-owned unlinked
-    let mut org_role = None;
-    if let Some(role) = db.find_org_member_role(&package.owner_id, uid).await? {
-        org_role = match role.as_str() {
-            "owner" => Some(OrgRole::Owner),
-            "admin" => Some(OrgRole::Admin),
-            "member" => Some(OrgRole::Member),
-            _ => None,
-        };
-    }
-    let member_base = match db
-        .find_org_member_base_permission(&package.owner_id)
-        .await?
-        .as_deref()
-    {
-        Some("read") => MemberBasePermission::Read,
-        Some("write") => MemberBasePermission::Write,
-        _ => MemberBasePermission::None,
-    };
+    // org-owned unlinked — org 2FA lockout (#130) suppresses grants for
+    // members without a confirmed factor (same rule as `org::require_org_role`).
+    let (org_role, member_base, _locked) =
+        org_member_capability_sources(db, &package.owner_id, uid).await?;
     let public = is_public(&package.visibility);
     Ok(coalesce(false, org_role, member_base, None, public))
 }
