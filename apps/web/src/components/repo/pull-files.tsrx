@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@octanejs/tanstack-query";
 import type { PullDiffFile } from "@oxidean/api-client";
-import { useState } from "octane";
+import { useId, useState } from "octane";
 import { DiffFileHeader, DiffLargeGate } from "@/components/repo/diff-file-header";
 import { DiffPatch } from "@/components/repo/diff-patch";
 import { apiClient } from "@/lib/api-client";
@@ -30,6 +30,7 @@ function splitLineClass(kind: string): string {
  */
 function SplitDiff(props: { path: string; status: string; patch: string }) @{
   const large = props.patch.length > DIFF_LARGE_PATCH_CHARS;
+  const bodyId = useId();
   const [loadLarge, setLoadLarge] = useState(false);
   const [expanded, setExpanded] = useState(true);
   const gated = large && !loadLarge;
@@ -50,80 +51,83 @@ function SplitDiff(props: { path: string; status: string; patch: string }) @{
       patch={props.patch}
       open={bodyOpen}
       onToggle={() => setExpanded(!expanded)}
+      controlsId={bodyId}
     />
-    @if (gated) {
-      <DiffLargeGate
-        onLoad={() => {
-          setLoadLarge(true);
-          setExpanded(true);
-        }}
-      />;
-    } @else {
-      @if (expanded) {
-        @if (keyed.length === 0) {
-          @if (props.patch.trim().length === 0) {
-            <p className="px-3 py-3 text-[14px] text-muted-foreground">
-              No textual patch for this file.
-            </p>;
-          } @else {
-            <p className="px-3 py-3 text-[14px] text-muted-foreground">Rendering diff…</p>;
-          }
-        } @else {
-          <div className="diff-code overflow-x-auto font-mono text-[14px] leading-[1.45]">
-            @for (const line of keyed; key line.index) {
-              <div
-                className={cn(
-                  "grid grid-cols-2 whitespace-pre border-b border-border/40",
-                  splitLineClass(line.kind) as string,
-                )}
-                data-diff-kind={line.kind as string}
-              >
-                <div className="flex border-r border-border/50 px-2 py-0.5 text-muted-foreground">
-                  @if (line.kind !== "add") {
-                    <>
-                      @if (line.prefix) {
-                        <span
-                          className="shrink-0 select-none"
-                          aria-hidden="true"
-                        >
-                          {line.prefix as string}
-                        </span>;
-                      }
-                      <span
-                        className="min-w-0 grow"
-                        dangerouslySetInnerHTML={{
-                          __html: line.contentHtml as string,
-                        }}
-                      />
-                    </>;
-                  }
-                </div>
-                <div className="flex px-2 py-0.5">
-                  @if (line.kind !== "del") {
-                    <>
-                      @if (line.prefix) {
-                        <span
-                          className="shrink-0 select-none"
-                          aria-hidden="true"
-                        >
-                          {line.prefix as string}
-                        </span>;
-                      }
-                      <span
-                        className="min-w-0 grow"
-                        dangerouslySetInnerHTML={{
-                          __html: line.contentHtml as string,
-                        }}
-                      />
-                    </>;
-                  }
-                </div>
-              </div>;
+    <div id={bodyId}>
+      @if (gated) {
+        <DiffLargeGate
+          onLoad={() => {
+            setLoadLarge(true);
+            setExpanded(true);
+          }}
+        />;
+      } @else {
+        @if (expanded) {
+          @if (keyed.length === 0) {
+            @if (props.patch.trim().length === 0) {
+              <p className="px-3 py-3 text-[14px] text-muted-foreground">
+                No textual patch for this file.
+              </p>;
+            } @else {
+              <p className="px-3 py-3 text-[14px] text-muted-foreground">Rendering diff…</p>;
             }
-          </div>;
+          } @else {
+            <div className="diff-code overflow-x-auto font-mono text-[14px] leading-[1.45]">
+              @for (const line of keyed; key line.index) {
+                <div
+                  className={cn(
+                    "grid grid-cols-2 whitespace-pre border-b border-border/40",
+                    splitLineClass(line.kind) as string,
+                  )}
+                  data-diff-kind={line.kind as string}
+                >
+                  <div className="flex border-r border-border/50 px-2 py-0.5 text-muted-foreground">
+                    @if (line.kind !== "add") {
+                      <>
+                        @if (line.prefix) {
+                          <span
+                            className="shrink-0 select-none"
+                            aria-hidden="true"
+                          >
+                            {line.prefix as string}
+                          </span>;
+                        }
+                        <span
+                          className="min-w-0 grow"
+                          dangerouslySetInnerHTML={{
+                            __html: line.contentHtml as string,
+                          }}
+                        />
+                      </>;
+                    }
+                  </div>
+                  <div className="flex px-2 py-0.5">
+                    @if (line.kind !== "del") {
+                      <>
+                        @if (line.prefix) {
+                          <span
+                            className="shrink-0 select-none"
+                            aria-hidden="true"
+                          >
+                            {line.prefix as string}
+                          </span>;
+                        }
+                        <span
+                          className="min-w-0 grow"
+                          dangerouslySetInnerHTML={{
+                            __html: line.contentHtml as string,
+                          }}
+                        />
+                      </>;
+                    }
+                  </div>
+                </div>;
+              }
+            </div>;
+          }
         }
       }
-    }
+    </div>
   </section>;
 }
 

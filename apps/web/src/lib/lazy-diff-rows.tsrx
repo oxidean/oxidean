@@ -49,7 +49,15 @@ export function useLazyDiffRows(options: {
   });
   const rootRef = useRef<HTMLElement | null>(null);
   const [nearViewport, setNearViewport] = useState(false);
-  const highlightedRef = useRef(false);
+  // Latch on the diff *source* (patch + path + provided rows), not a plain
+  // boolean: a refetched patch for the same mounted file (e.g. PR files
+  // refreshed after a push, keyed `key path`) must re-parse and re-highlight
+  // instead of freezing on the first source forever.
+  const doneSourceRef = useRef<{
+    patch: string;
+    path: string;
+    initialRows: HighlightedDiffLine[] | null;
+  } | null>(null);
 
   useEffect(() => {
     const el = rootRef.current;
@@ -82,13 +90,17 @@ export function useLazyDiffRows(options: {
   }, []);
 
   useEffect(() => {
-    if (!open || !nearViewport || highlightedRef.current) return;
+    if (!open || !nearViewport) return;
+    const done = doneSourceRef.current;
+    if (done && done.patch === patch && done.path === path && done.initialRows === initialRows) {
+      return;
+    }
     let cancelled = false;
 
     // SSR / loader rows are dual-theme (`light-dark()`) — already correct for
     // either scheme; take them as-is and skip the re-highlight pass.
     if (initialRows && initialRows.length > 0) {
-      highlightedRef.current = true;
+      doneSourceRef.current = { patch, path, initialRows };
       setRows((prev) => (highlightedDiffRowsEqual(prev, initialRows) ? prev : initialRows));
       return;
     }
@@ -103,7 +115,7 @@ export function useLazyDiffRows(options: {
       try {
         const next = await highlightDiffLines(lines, { path });
         if (cancelled) return;
-        highlightedRef.current = true;
+        doneSourceRef.current = { patch, path, initialRows };
         setRows((prev) => (highlightedDiffRowsEqual(prev, next) ? prev : next));
       } catch {
         /* highlighter unavailable — plain rows already rendered */

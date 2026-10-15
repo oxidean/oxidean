@@ -1,4 +1,4 @@
-import { useState } from "octane";
+import { useId, useState } from "octane";
 import { DiffFileHeader, DiffLargeGate } from "@/components/repo/diff-file-header";
 import { DIFF_LARGE_PATCH_CHARS } from "@/lib/diff-budget";
 import type { HighlightedDiffLine } from "@/lib/highlight-diff";
@@ -49,6 +49,7 @@ function prefixClass(kind: DiffLineKind): string {
  */
 export function DiffPatch({ path, status, patch, initialRows = null }: DiffPatchProps) @{
   const large = patch.length > DIFF_LARGE_PATCH_CHARS;
+  const bodyId = useId();
   const [loadLarge, setLoadLarge] = useState(false);
   const [expanded, setExpanded] = useState(true);
   const gated = large && !loadLarge;
@@ -91,76 +92,79 @@ export function DiffPatch({ path, status, patch, initialRows = null }: DiffPatch
       patch={patch}
       open={bodyOpen}
       onToggle={() => setExpanded(!expanded)}
+      controlsId={bodyId}
     />
-    @if (gated) {
-      <DiffLargeGate
-        onLoad={() => {
-          setLoadLarge(true);
-          setExpanded(true);
-        }}
-      />;
-    } @else {
-      @if (expanded) {
-        @if (keyed.length === 0) {
-          @if (patch.trim().length === 0) {
-            <p className="px-3 py-3 text-[14px] text-muted-foreground">
-              No textual patch for this file.
-            </p>;
-          } @else {
-            <p className="px-3 py-3 text-[14px] text-muted-foreground">Rendering diff…</p>;
-          }
-        } @else {
-          <div
-            className="diff-code overflow-x-auto font-mono text-[14px] leading-[1.45]"
-            role="table"
-            aria-label={`Diff for ${path}`}
-          >
-            @for (const line of keyed; key line.index) {
-              <div
-                className={cn(
-                  "flex whitespace-pre py-0.5",
-                  lineClass(line.kind) as string,
-                )}
-                role="row"
-                data-diff-kind={line.kind as string}
-              >
-                <span
-                  aria-hidden="true"
-                  className="w-10 shrink-0 select-none pr-2 text-right text-muted-foreground/60"
-                >
-                  {(line.oldNo ?? "") as number | string}
-                </span>
-                <span
-                  aria-hidden="true"
-                  className="w-10 shrink-0 select-none border-r border-border/60 pr-2 text-right text-muted-foreground/60"
-                >
-                  {(line.newNo ?? "") as number | string}
-                </span>
-                @if (line.prefix) {
-                  <span
-                    className={cn(
-                      "shrink-0 select-none pl-3",
-                      prefixClass(line.kind) as string,
-                    )}
-                    aria-hidden="true"
-                  >
-                    {line.prefix as string}
-                  </span>;
-                } @else {
-                  <span
-                    aria-hidden="true"
-                    className="shrink-0 select-none pl-3"
-                  />;
-                }
-                <span
-                  className="min-w-0 grow pr-3"
-                  dangerouslySetInnerHTML={{ __html: line.contentHtml as string }}
-                />
-              </div>;
+    <div id={bodyId}>
+      @if (gated) {
+        <DiffLargeGate
+          onLoad={() => {
+            setLoadLarge(true);
+            setExpanded(true);
+          }}
+        />;
+      } @else {
+        @if (expanded) {
+          @if (keyed.length === 0) {
+            @if (patch.trim().length === 0) {
+              <p className="px-3 py-3 text-[14px] text-muted-foreground">
+                No textual patch for this file.
+              </p>;
+            } @else {
+              <p className="px-3 py-3 text-[14px] text-muted-foreground">Rendering diff…</p>;
             }
-          </div>;
+          } @else {
+            <div
+              className="diff-code overflow-x-auto font-mono text-[14px] leading-[1.45]"
+              role="table"
+              aria-label={`Diff for ${path}`}
+            >
+              @for (const line of keyed; key line.index) {
+                <div
+                  className={cn(
+                    "flex whitespace-pre py-0.5",
+                    lineClass(line.kind) as string,
+                  )}
+                  role="row"
+                  data-diff-kind={line.kind as string}
+                >
+                  <span
+                    aria-hidden="true"
+                    className="w-10 shrink-0 select-none pr-2 text-right text-muted-foreground/60"
+                  >
+                    {(line.oldNo ?? "") as number | string}
+                  </span>
+                  <span
+                    aria-hidden="true"
+                    className="w-10 shrink-0 select-none border-r border-border/60 pr-2 text-right text-muted-foreground/60"
+                  >
+                    {(line.newNo ?? "") as number | string}
+                  </span>
+                  @if (line.prefix) {
+                    <span
+                      className={cn(
+                        "shrink-0 select-none pl-3",
+                        prefixClass(line.kind) as string,
+                      )}
+                      aria-hidden="true"
+                    >
+                      {line.prefix as string}
+                    </span>;
+                  } @else {
+                    <span
+                      aria-hidden="true"
+                      className="shrink-0 select-none pl-3"
+                    />;
+                  }
+                  <span
+                    className="min-w-0 grow pr-3"
+                    dangerouslySetInnerHTML={{ __html: line.contentHtml as string }}
+                  />
+                </div>;
+              }
+            </div>;
+          }
         }
       }
-    }
+    </div>
   </section>;
 }

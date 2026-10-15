@@ -126,7 +126,13 @@ describe("DiffPatch — issue #110 mobile budgets", () => {
     expect(await screen.findByText("a.ts")).toBeInTheDocument();
     expect(document.querySelector('[data-diff-kind="add"]')).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: "Toggle diff for a.ts" }));
+    // aria-controls resolves to the mounted collapsible region.
+    const toggle = screen.getByRole("button", { name: "Toggle diff for a.ts" });
+    const controlsId = toggle.getAttribute("aria-controls");
+    expect(controlsId).toBeTruthy();
+    expect(document.getElementById(controlsId!)).toBeTruthy();
+
+    fireEvent.click(toggle);
     await waitFor(() => {
       expect(document.querySelector('[data-diff-kind="add"]')).toBeNull();
     });
@@ -151,5 +157,39 @@ describe("DiffPatch — issue #110 mobile budgets", () => {
 
     expect(await screen.findByText("+2")).toBeInTheDocument();
     expect(screen.getByText("−1")).toBeInTheDocument();
+  });
+
+  it("re-renders rows when the patch prop changes on a mounted file", async () => {
+    const { rerender } = render(DiffPatch, {
+      props: {
+        path: "a.ts",
+        status: "modified",
+        patch: ["@@ -1 +1 @@", "-const a = 1;", "+const first = 1;"].join("\n"),
+      },
+    });
+
+    // Wait for the lazy highlight pass to land so the done-latch has engaged —
+    // a stale latch is what freezes rows on a refetched patch (PR file lists
+    // refetch after a push while the component stays mounted on `key path`).
+    await waitFor(
+      () => {
+        const add = document.querySelector('[data-diff-kind="add"]');
+        expect(add?.querySelector('span[style*="color"]')).toBeTruthy();
+      },
+      { timeout: 30_000 },
+    );
+
+    rerender({
+      props: {
+        path: "a.ts",
+        status: "modified",
+        patch: ["@@ -1 +1 @@", "-const a = 1;", "+const second = 2;"].join("\n"),
+      },
+    });
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-diff-kind="add"]')?.textContent).toContain("second");
+    });
+    expect(document.querySelector('[data-diff-kind="add"]')?.textContent).not.toContain("first");
   });
 });

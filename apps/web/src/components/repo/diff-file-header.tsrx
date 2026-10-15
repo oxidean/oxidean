@@ -1,3 +1,4 @@
+import { useMemo } from "octane";
 import { ChevronDown, ChevronRight } from "@octanejs/lucide";
 import { diffPatchStatCounts } from "@/lib/parse-unified-diff";
 
@@ -11,14 +12,19 @@ export function DiffFileHeader(props: {
   patch: string;
   open: boolean;
   onToggle: () => void;
+  /** id of the collapsible diff-body region (`aria-controls`). */
+  controlsId: string;
 }) @{
-  const [adds, dels] = diffPatchStatCounts(props.patch);
+  // O(patch size) scan — memoize so header re-renders don't re-scan a gated
+  // 1 MiB patch on every parent update / toggle.
+  const [adds, dels] = useMemo(() => diffPatchStatCounts(props.patch), [props.patch]);
 
   <div className="flex items-center gap-2 border-b border-border bg-muted/40 px-3 py-2">
     <button
       type="button"
       className="inline-flex shrink-0 items-center text-muted-foreground hover:text-foreground"
       aria-expanded={props.open}
+      aria-controls={props.controlsId}
       aria-label={`Toggle diff for ${props.path}`}
       onClick={() => props.onToggle()}
     >
