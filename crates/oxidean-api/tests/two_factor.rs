@@ -329,17 +329,27 @@ async fn instance_policy_enroll_challenge_completes_via_totp() {
     .expect("enable local 2fa policy");
 
     let (app, _mail) = test_app(db.clone()).await;
-    signup(&app, "carol@example.com", "carol").await;
-    let user_id = find_user_id(&db, "carol").await;
-    verify_user(&db, &user_id).await;
 
-    // Factorless login → enroll-kind challenge (no session).
-    let (_, v, cookies) = rpc(&app, &login_body("carol@example.com"), None).await;
+    // Signup under the policy opens the enroll challenge directly — the new
+    // account cannot mint a session until a factor is enrolled.
+    let body = r#"{"procedure":"auth.signup","input":{"email":"carol@example.com","username":"carol","password":"password1"}}"#;
+    let (_, v, cookies) = rpc(&app, body, None).await;
     assert_eq!(v["ok"], false, "{v}");
     assert_eq!(v["error"]["code"], "auth.two_factor_required", "{v}");
     assert_eq!(v["error"]["data"]["kind"], "enroll", "{v}");
     assert!(cookie_named(&cookies, "oxidean_session").is_none());
     let chal = cookie_named(&cookies, "oxidean_2fa").unwrap().to_string();
+
+    let user_id = find_user_id(&db, "carol").await;
+    verify_user(&db, &user_id).await;
+
+    // A factorless password login hits the same enroll challenge.
+    let (_, v, cookies) = rpc(&app, &login_body("carol@example.com"), None).await;
+    assert_eq!(v["ok"], false, "{v}");
+    assert_eq!(v["error"]["code"], "auth.two_factor_required", "{v}");
+    assert_eq!(v["error"]["data"]["kind"], "enroll", "{v}");
+    assert!(cookie_named(&cookies, "oxidean_session").is_none());
+    assert!(cookie_named(&cookies, "oxidean_2fa").is_some());
 
     // Enroll TOTP inside the challenge → codes + session minted.
     let (_, v, _) = rpc(

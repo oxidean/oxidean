@@ -229,9 +229,6 @@ pub async fn signup(ctx: &mut RpcCtx, input: serde_json::Value) -> Result<UserPu
         .await
         .map_err(db_err)?;
 
-    let cookie = issue_session(ctx, &row.id, false).await?;
-    ctx.set_cookie = Some(CookieChange::Set(cookie));
-
     crate::audit::record(
         ctx,
         Some((&row.id, &row.username)),
@@ -257,6 +254,23 @@ pub async fn signup(ctx: &mut RpcCtx, input: serde_json::Value) -> Result<UserPu
     if let Err(e) = verify_reset::issue_and_send_verify(ctx, &row.id, &email, &username).await {
         tracing::error!(code = %e.code, "signup verify email issue failed");
     }
+
+    // Two-factor gate (#130): signup is a sign-in — when policy requires a
+    // factor, the account gets an enroll challenge instead of a session.
+    let gate = crate::auth::two_factor::flags::login_gate(
+        &ctx.db,
+        &row,
+        crate::auth::two_factor::LoginChannel::Local,
+    )
+    .await?;
+    if gate.has_factor || gate.enroll_required {
+        return Err(crate::auth::two_factor::open_challenge(
+            ctx, &gate, &row.id, false,
+        ));
+    }
+
+    let cookie = issue_session(ctx, &row.id, false).await?;
+    ctx.set_cookie = Some(CookieChange::Set(cookie));
 
     Ok(user_to_public(&ctx.db, &row).await)
 }

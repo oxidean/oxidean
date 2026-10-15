@@ -726,6 +726,22 @@ pub async fn reset_password(
         .revoke_all(&ctx.db, &user.id)
         .await
         .map_err(session_err)?;
+
+    // Two-factor gate (#130): a reset token proves inbox control, not the
+    // enrolled factor — open a challenge instead of minting when the account
+    // has a factor or a policy requires enrollment.
+    let gate = crate::auth::two_factor::flags::login_gate(
+        &ctx.db,
+        &user,
+        crate::auth::two_factor::LoginChannel::Local,
+    )
+    .await?;
+    if gate.has_factor || gate.enroll_required {
+        return Err(crate::auth::two_factor::open_challenge(
+            ctx, &gate, &user.id, false,
+        ));
+    }
+
     let (_tok, cookie) = ctx
         .sessions
         .create(
