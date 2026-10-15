@@ -177,13 +177,19 @@ function InviteAcceptContent() @{
         return;
       }
       setPhase({ kind: "done", accept: res.data });
-      if (res.data.kind === "org") {
-        window.location.assign(`/${res.data.org.slug}`);
-      } else if (res.data.kind === "repo") {
-        window.location.assign(`/${res.data.owner}/${res.data.name}`);
-      } else {
-        window.location.assign("/");
-      }
+      const dest =
+        res.data.kind === "org"
+          ? `/${res.data.org.slug}`
+          : res.data.kind === "repo"
+            ? `/${res.data.owner}/${res.data.name}`
+            : "/";
+      // Enroll-required accepts skip the session mint (#130) — route through
+      // login (which opens the 2FA challenge) instead of bouncing off a
+      // protected page.
+      const signedIn = document.cookie
+        .split(";")
+        .some((c) => c.trim().startsWith("oxidean_signed_in=1"));
+      window.location.assign(signedIn ? dest : `/login?returnTo=${encodeURIComponent(dest)}`);
     } catch {
       setError(NETWORK_ERROR);
     }
