@@ -82,6 +82,17 @@ describe("images.yml image lane", () => {
   test("prerelease tags never get :latest", () => {
     expect(yml).toContain('"$semver" != *-*');
   });
+
+  test("staging-cli-feed only runs for ox-v* ox-cli completions", () => {
+    // PR / path-filter main ox-cli runs have no release assets — gating on
+    // head_branch prevents the pipefail empty-grep crash that failed Images
+    // on every successful PR ox-cli run (workflow_run).
+    expect(yml).toContain("staging-cli-feed:");
+    expect(yml).toContain(
+      "startsWith(github.event.workflow_run.head_branch, 'ox-v')",
+    );
+    expect(yml).toContain("scripts/ox-dist-tag.sh tag");
+  });
 });
 
 describe("release.yml generic lane", () => {

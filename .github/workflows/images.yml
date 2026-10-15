@@ -568,11 +568,15 @@ jobs:
   # An ox-v* tag's release lane finished → the tag's assets are live. Repin
   # staging api's OXIDEAN_CLI_DIST_URL and re-pull so the container entrypoint
   # fetches the new feed (runtime fetch — no rebuild, no retag).
+  # Gate on the triggering ox-cli run's head_branch: for tag pushes that is
+  # the tag name (ox-v*). PR / path-filter main completions must not enter
+  # this job — they have no release assets to repin.
   staging-cli-feed:
     name: repin staging cli feed
     if: |
       github.event_name == 'workflow_run' &&
-      github.event.workflow_run.conclusion == 'success'
+      github.event.workflow_run.conclusion == 'success' &&
+      startsWith(github.event.workflow_run.head_branch, 'ox-v')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -587,13 +591,21 @@ jobs:
         id: ox
         env:
           SHA: ${{ github.event.workflow_run.head_sha }}
+          # Tag pushes expose the tag as head_branch on the triggering run.
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
         run: |
           set -euo pipefail
+          # Prefer the triggering ref when it is already an ox-v* tag (avoids
+          # a race where fetch --tags has not seen the just-pushed tag).
+          if [[ "$HEAD_BRANCH" == ox-v*.*.* ]]; then
+            echo "tag=${HEAD_BRANCH}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           git fetch --tags --force origin >/dev/null 2>&1 || true
-          tag="$(git tag --points-at "$SHA" --list 'ox-v*.*.*' \
-            | grep -v -e '-alpha' -e '-beta' -e '-nightly' | sort -V | tail -n1)"
+          # pipefail-safe: empty grep must not fail the step (scripts/ox-dist-tag.sh).
+          tag="$(scripts/ox-dist-tag.sh tag "$SHA")"
           if [[ -z "$tag" ]]; then
-            echo "run completed at ${SHA} has no stable ox-v* tag — nothing to repin"
+            echo "run completed at ${SHA} (branch=${HEAD_BRANCH}) has no ox-v* tag — nothing to repin"
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "tag=${tag}" >> "$GITHUB_OUTPUT"

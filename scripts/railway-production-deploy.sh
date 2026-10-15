@@ -33,6 +33,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd -P)"
 # shellcheck source=scripts/railway-gql.sh
 source "${SCRIPT_DIR}/railway-gql.sh"
+# shellcheck source=scripts/ox-dist-tag.sh
+source "${SCRIPT_DIR}/ox-dist-tag.sh"
 
 PROJECT_ID="${RAILWAY_PROJECT_ID:-cec803d0-289b-4078-80cf-7291c16fc5ec}"
 ENVIRONMENT_ID="${RAILWAY_ENVIRONMENT_ID:-b1c33c22-90ce-433b-99f6-864656512115}"
@@ -61,20 +63,8 @@ resolve_ox_dist_url() {
   local sha="$1"
   if command -v git >/dev/null 2>&1; then
     git fetch --tags --force origin >/dev/null 2>&1 || true
-    local tag
-    tag="$(git tag --points-at "$sha" --list 'ox-v*.*.*' \
-      | grep -v -e '-alpha' -e '-beta' -e '-nightly' | sort -V | tail -n1)"
-    if [[ -z "$tag" ]]; then
-      tag="$(git tag --merged "$sha" --list 'ox-v*.*.*' \
-        | grep -v -e '-alpha' -e '-beta' -e '-nightly' | sort -V | tail -n1)"
-    fi
-    if [[ -z "$tag" ]]; then
-      tag="$(git tag --points-at "$sha" --list 'ox-v*' | sort -V | tail -n1)"
-    fi
-    if [[ -n "$tag" ]]; then
-      printf '%s' "https://github.com/${GITHUB_REPOSITORY:-oxidean/oxidean}/releases/download/${tag}"
-      return 0
-    fi
+    ox_dist_url_for_sha "$sha" --merged-fallback
+    return 0
   fi
   printf ''
 }
