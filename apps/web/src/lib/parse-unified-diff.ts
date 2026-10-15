@@ -47,3 +47,36 @@ export function classifyDiffLine(line: string): DiffLineKind {
   if (line.startsWith(" ") || line === "") return "ctx";
   return "meta";
 }
+
+/**
+ * `+`/`-` line counts from unified-diff patch text. Hunk-header budgets
+ * (`@@ -a,b +c,d @@`) decide the `---`/`+++` header-vs-content ambiguity:
+ * a `--- ` line inside a hunk's remaining old-line budget is a real deletion
+ * (e.g. markdown `---` hr), while a header after the budget is exhausted is
+ * the next file's `--- a/path`.
+ */
+export function diffPatchStatCounts(patch: string): [number, number] {
+  let adds = 0;
+  let dels = 0;
+  let oldLeft = 0;
+  let newLeft = 0;
+  for (const line of patch.split("\n")) {
+    const hunk = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(line);
+    if (hunk) {
+      oldLeft = Number(hunk[2] ?? "1");
+      newLeft = Number(hunk[4] ?? "1");
+      continue;
+    }
+    if (line.startsWith("+") && newLeft > 0) {
+      adds++;
+      newLeft--;
+    } else if (line.startsWith("-") && oldLeft > 0) {
+      dels++;
+      oldLeft--;
+    } else if ((line.startsWith(" ") || line === "") && oldLeft > 0 && newLeft > 0) {
+      oldLeft--;
+      newLeft--;
+    }
+  }
+  return [adds, dels];
+}

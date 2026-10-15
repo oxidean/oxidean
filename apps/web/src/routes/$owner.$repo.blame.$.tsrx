@@ -9,6 +9,8 @@ import { useEffect, useState } from "octane";
 import { CommitAuthorLink } from "@/components/repo/commit-author-link";
 import { PathBreadcrumb } from "@/components/repo/path-breadcrumb";
 import { RepoNotFound } from "@/components/repo/repo-not-found";
+import { BLAME_LINES_PAGE_SIZE } from "@/lib/diff-budget";
+import { useIncrementalList } from "@/lib/incremental-list.tsrx";
 import { commitHref, parseRefAndPath, shortRefName } from "@/lib/repo-browse";
 import { formatRelativeUpdated } from "@/lib/relative-time";
 import { fetchRepoBlame, fetchRepoGet, fetchRepoRefs } from "@/lib/ssr-repo";
@@ -119,6 +121,75 @@ function shortSha(sha: string): string {
   return sha.slice(0, 7);
 }
 
+/**
+ * Blame table rows (issue #110): mounts {@link BLAME_LINES_PAGE_SIZE} rows,
+ * then appends batches via the tail sentinel / "Load more" — a 10k-line blame
+ * no longer mounts 10k `<tr>` in one pass on mobile.
+ */
+function BlameLinesTable(props: {
+  owner: string;
+  repoName: string;
+  lines: RepoBlameResponse["lines"];
+  resetKey: string;
+}) @{
+  const list = useIncrementalList(props.lines.length, BLAME_LINES_PAGE_SIZE, props.resetKey);
+  const shown = props.lines.slice(0, list.count);
+
+  <>
+    <div className="overflow-x-auto border border-border">
+      <table className="w-full border-collapse text-left text-[14px] leading-[1.45]">
+        <tbody>
+          @for (const line of shown; key line.line_number) {
+            <tr className="border-b border-border/60 align-top">
+              <td className="whitespace-nowrap bg-muted/30 px-2 py-0.5 font-mono text-[12px] text-muted-foreground">
+                <AppLink
+                  href={commitHref(props.owner, props.repoName, line.sha) as string}
+                  className="text-primary no-underline hover:underline"
+                  title={line.sha as string}
+                >
+                  {shortSha(line.sha) as string}
+                </AppLink>
+                <span className="ml-2 inline-flex items-center font-[family-name:var(--font-sans)] text-muted-foreground">
+                  <CommitAuthorLink
+                    name={line.author_name}
+                    username={line.author_username}
+                    avatarUrl={line.author_avatar_url}
+                  />
+                </span>
+                <time
+                  className="ml-2 text-muted-foreground"
+                  datetime={line.authored_at as string}
+                >
+                  {relativeCommitTime(line.authored_at) as string}
+                </time>
+              </td>
+              <td className="select-none px-2 py-0.5 font-mono text-[12px] text-muted-foreground">
+                {String(line.line_number) as string}
+              </td>
+              <td className="px-2 py-0.5 font-mono text-[14px] text-foreground">
+                <pre className="m-0 whitespace-pre-wrap font-mono">
+                  {line.content as string}
+                </pre>
+              </td>
+            </tr>;
+          }
+        </tbody>
+      </table>
+    </div>
+    @if (list.remaining > 0) {
+      <div ref={list.sentinelRef} className="mt-2 flex justify-center py-2">
+        <button
+          type="button"
+          className="rounded-md border border-border px-3 py-1.5 text-[14px] text-foreground hover:bg-muted"
+          onClick={() => list.showMore()}
+        >
+          {`Load more lines (${list.remaining} remaining)` as string}
+        </button>
+      </div>;
+    }
+  </>;
+}
+
 function relativeCommitTime(iso: string): string {
   return formatRelativeUpdated(iso).replace(/^Updated\s+/i, "");
 }
@@ -172,46 +243,12 @@ function RepoBlamePageContent() @{
       @if (phase.blame.truncated) {
         <p className="mb-2 text-[14px] text-muted-foreground">Blame truncated for size.</p>;
       }
-      <div className="overflow-x-auto border border-border">
-        <table className="w-full border-collapse text-left text-[14px] leading-[1.45]">
-          <tbody>
-            @for (const line of phase.blame.lines; key line.line_number) {
-              <tr className="border-b border-border/60 align-top">
-                <td className="whitespace-nowrap bg-muted/30 px-2 py-0.5 font-mono text-[12px] text-muted-foreground">
-                  <AppLink
-                    href={commitHref(owner, repoName, line.sha) as string}
-                    className="text-primary no-underline hover:underline"
-                    title={line.sha as string}
-                  >
-                    {shortSha(line.sha) as string}
-                  </AppLink>
-                  <span className="ml-2 inline-flex items-center font-[family-name:var(--font-sans)] text-muted-foreground">
-                    <CommitAuthorLink
-                      name={line.author_name}
-                      username={line.author_username}
-                      avatarUrl={line.author_avatar_url}
-                    />
-                  </span>
-                  <time
-                    className="ml-2 text-muted-foreground"
-                    datetime={line.authored_at as string}
-                  >
-                    {relativeCommitTime(line.authored_at) as string}
-                  </time>
-                </td>
-                <td className="select-none px-2 py-0.5 font-mono text-[12px] text-muted-foreground">
-                  {String(line.line_number) as string}
-                </td>
-                <td className="px-2 py-0.5 font-mono text-[14px] text-foreground">
-                  <pre className="m-0 whitespace-pre-wrap font-mono">
-                    {line.content as string}
-                  </pre>
-                </td>
-              </tr>;
-            }
-          </tbody>
-        </table>
-      </div>
+      <BlameLinesTable
+        owner={owner}
+        repoName={repoName}
+        lines={phase.blame.lines}
+        resetKey={`${phase.refName}:${phase.path}`}
+      />
     </>;
   }
 }

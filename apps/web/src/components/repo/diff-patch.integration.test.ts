@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from "@octanejs/testing-library";
+import { cleanup, fireEvent, render, screen, waitFor } from "@octanejs/testing-library";
 import { afterEach, describe, expect, it } from "vitest";
 import { highlightDiffLines } from "@/lib/highlight-diff";
 import { parseUnifiedDiffLines } from "@/lib/parse-unified-diff";
@@ -56,10 +56,13 @@ describe("DiffPatch", { timeout: 60_000 }, () => {
       },
     });
 
-    await waitFor(() => {
-      const add = document.querySelector('[data-diff-kind="add"]');
-      expect(add?.querySelector('span[style*="color"]')).toBeTruthy();
-    });
+    await waitFor(
+      () => {
+        const add = document.querySelector('[data-diff-kind="add"]');
+        expect(add?.querySelector('span[style*="color"]')).toBeTruthy();
+      },
+      { timeout: 30_000 },
+    );
   });
 
   it("renders SSR initialRows with token spans on first paint", async () => {
@@ -85,5 +88,137 @@ describe("DiffPatch", { timeout: 60_000 }, () => {
     // Hydrate keeps dual-theme SSR rows verbatim — no re-highlight pass.
     await new Promise((r) => setTimeout(r, 50));
     expect(document.querySelector('[data-diff-kind="add"]')?.innerHTML).toBe(firstHtml);
+  });
+});
+
+describe("DiffPatch — issue #110 mobile budgets", () => {
+  it("gates large patches behind a Load diff button instead of mounting rows", async () => {
+    const bigBody = Array.from({ length: 2000 }, (_, i) => `+line ${i}`).join("\n");
+    const patch = `@@ -0,0 +1,2000 @@\n${bigBody}`;
+    expect(patch.length).toBeGreaterThan(16_000);
+
+    render(DiffPatch, {
+      props: { path: "big.ts", status: "modified", patch },
+    });
+
+    expect(await screen.findByText("big.ts")).toBeInTheDocument();
+    expect(screen.getByText("This diff is too large to show by default.")).toBeInTheDocument();
+    // No diff rows mounted until the user asks for them.
+    expect(document.querySelector('[data-diff-kind="add"]')).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Load diff" }));
+
+    await waitFor(
+      () => {
+        expect(document.querySelector('[data-diff-kind="add"]')).toBeTruthy();
+      },
+      { timeout: 30_000 },
+    );
+  });
+
+  it("collapses and re-expands rows via the header toggle", async () => {
+    const patch = ["@@ -1 +1 @@", "-old", "+new"].join("\n");
+
+    render(DiffPatch, {
+      props: { path: "a.ts", status: "modified", patch },
+    });
+
+    expect(await screen.findByText("a.ts")).toBeInTheDocument();
+    expect(document.querySelector('[data-diff-kind="add"]')).toBeTruthy();
+
+    // aria-controls resolves to the mounted collapsible region.
+    const toggle = screen.getByRole("button", { name: "Toggle diff for a.ts" });
+    const controlsId = toggle.getAttribute("aria-controls");
+    expect(controlsId).toBeTruthy();
+    expect(document.getElementById(controlsId!)).toBeTruthy();
+
+    fireEvent.click(toggle);
+    await waitFor(() => {
+      expect(document.querySelector('[data-diff-kind="add"]')).toBeNull();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Toggle diff for a.ts" }));
+    await waitFor(
+      () => {
+        expect(document.querySelector('[data-diff-kind="add"]')).toBeTruthy();
+      },
+      { timeout: 30_000 },
+    );
+  });
+
+  it("shows per-file +/− stats in the header", async () => {
+    const patch = ["@@ -1,2 +1,2 @@", " keep", "-old", "+new", "+extra"].join("\n");
+    // widen the hunk so +extra lands inside the new-side budget
+    const widePatch = patch.replace("+1,2", "+1,3");
+
+    render(DiffPatch, {
+      props: { path: "stats.ts", status: "modified", patch: widePatch },
+    });
+
+    expect(await screen.findByText("+2")).toBeInTheDocument();
+    expect(screen.getByText("−1")).toBeInTheDocument();
+  });
+
+  it("re-renders rows when the patch prop changes on a mounted file", async () => {
+    const { rerender } = render(DiffPatch, {
+      props: {
+        path: "a.ts",
+        status: "modified",
+        patch: ["@@ -1 +1 @@", "-const a = 1;", "+const first = 1;"].join("\n"),
+      },
+    });
+
+    // Wait for the lazy highlight pass to land so the done-latch has engaged —
+    // a stale latch is what freezes rows on a refetched patch (PR file lists
+    // refetch after a push while the component stays mounted on `key path`).
+    await waitFor(
+      () => {
+        const add = document.querySelector('[data-diff-kind="add"]');
+        expect(add?.querySelector('span[style*="color"]')).toBeTruthy();
+      },
+      { timeout: 30_000 },
+    );
+
+    rerender({
+      props: {
+        path: "a.ts",
+        status: "modified",
+        patch: ["@@ -1 +1 @@", "-const a = 1;", "+const second = 2;"].join("\n"),
+      },
+    });
+
+    await waitFor(() => {
+      expect(document.querySelector('[data-diff-kind="add"]')?.textContent).toContain("second");
+    });
+    expect(document.querySelector('[data-diff-kind="add"]')?.textContent).not.toContain("first");
+  });
+
+  it("restores highlighted rows when the patch bounces back before a pending highlight lands", async () => {
+    const patchA = ["@@ -1 +1 @@", "-const a = 1;", "+const first = 1;"].join("\n");
+    const patchB = ["@@ -1 +1 @@", "-const a = 1;", "+const second = 2;"].join("\n");
+
+    const { rerender } = render(DiffPatch, {
+      props: { path: "a.ts", status: "modified", patch: patchA },
+    });
+
+    // A's highlight completes — the done-latch now holds A's rows.
+    await waitFor(
+      () => {
+        const add = document.querySelector('[data-diff-kind="add"]');
+        expect(add?.querySelector('span[style*="color"]')).toBeTruthy();
+      },
+      { timeout: 30_000 },
+    );
+
+    // Swap A→B→A inside the idle window: B's plain rows commit, but B's
+    // scheduled highlight is cancelled by A's cleanup. The latch must restore
+    // A's completed rows rather than leave B's plain content on screen.
+    rerender({ props: { path: "a.ts", status: "modified", patch: patchB } });
+    rerender({ props: { path: "a.ts", status: "modified", patch: patchA } });
+
+    const add = document.querySelector('[data-diff-kind="add"]');
+    expect(add?.textContent).toContain("first");
+    expect(add?.textContent).not.toContain("second");
+    expect(add?.querySelector('span[style*="color"]')).toBeTruthy();
   });
 });

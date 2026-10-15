@@ -8,7 +8,7 @@ import { RepoLayout } from "@/routes/$owner.$repo.tsrx";
 import { AppPage } from "@/components/app-page";
 import { useEffect, useState } from "octane";
 import { ArrowLeftRight, GitCompareArrows } from "@octanejs/lucide";
-import { DiffPatch } from "@/components/repo/diff-patch";
+import { DiffFileList } from "@/components/repo/diff-file-list";
 import { RepoNotFound } from "@/components/repo/repo-not-found";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -296,16 +296,10 @@ function RepoComparePageContent() @{
               Diff truncated for size.
             </p>;
           }
-          <div className="flex flex-col gap-6">
-            @for (const f of phase.compare.files; key f.path) {
-              <DiffPatch
-                path={f.path as string}
-                status={f.status as string}
-                patch={f.patch as string}
-                initialRows={phase.highlightedByPath[f.path] ?? null}
-              />;
-            }
-          </div>
+          <DiffFileList
+            files={phase.compare.files}
+            highlightedByPath={phase.highlightedByPath}
+          />
         </>;
       }
     </>;
