@@ -3630,8 +3630,8 @@ export function createClient(opts: CreateClientOptions) {
     twoFactor: {
       status: () =>
         rpcCall<TwoFactorStatusPublic>(opts, "auth.two_factor.status", {}),
-      totpBegin: () =>
-        rpcCall<TotpEnrollmentPublic>(opts, "auth.two_factor.totp_begin", {}),
+      totpBegin: (input: TwoFactorChallengeRequest) =>
+        rpcCall<TotpEnrollmentPublic>(opts, "auth.two_factor.totp_begin", input),
       totpConfirm: (input: TwoFactorCompleteRequest) =>
         rpcCall<RecoveryCodesPublic>(opts, "auth.two_factor.totp_confirm", input),
       totpDisable: () =>
@@ -4474,8 +4474,8 @@ export function twoFactorStatusQueryOptions(client: OxideanClient) {
 export function twoFactorTotpBeginMutationOptions(client: OxideanClient) {
   return {
     mutationKey: ["twoFactor", "totpBegin"] as const,
-    mutationFn: async () => {
-      const res = await client.twoFactor.totpBegin();
+    mutationFn: async (input: TwoFactorChallengeRequest) => {
+      const res = await client.twoFactor.totpBegin(input);
       if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
       return res.data;
     },

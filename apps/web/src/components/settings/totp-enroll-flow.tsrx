@@ -46,7 +46,9 @@ export function TotpEnrollFlow(props: TotpEnrollFlowProps) @{
     setEnroll(null);
     setQrUrl("");
     try {
-      const res = await apiClient.twoFactor.totpBegin();
+      const res = await apiClient.twoFactor.totpBegin({
+        challenge: props.challenge ?? null,
+      });
       if (!res.ok) {
         setLoadError(rpcErrorMessage(res.error));
         return;
