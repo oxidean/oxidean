@@ -67,7 +67,9 @@ need_cmd() {
 # shellcheck source=../docker-wsl-creds.sh
 source "${ROOT}/scripts/docker-wsl-creds.sh"
 
-need_cmd cargo
+# cargo is only needed when compiling bins — CI runs with
+# OXIDEAN_PREBUILT_BINS=1 inside the tools image, which has no toolchain.
+[[ "${OXIDEAN_PREBUILT_BINS:-0}" == "1" ]] || need_cmd cargo
 need_cmd bun
 if ! command -v docker >/dev/null 2>&1; then
   echo "error: docker is required for Mailpit / OIDC mock / stubs" >&2

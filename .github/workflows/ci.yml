@@ -1,5 +1,13 @@
 # Phase 1 quality gates — no production secrets (T-01-12).
 # Prefer Bun via oven-sh/setup-bun; pnpm+Corepack is a documented fallback if Bun setup fails.
+#
+# Rust/web lanes run inside self-owned CI images (ghcr.io/<owner>/oxidean-ci:<flavor>)
+# built by ci-base.yml from docker/ci-base/Dockerfile — toolchain, helper
+# binaries, and chef-cooked dependency artifacts are baked in. Every run
+# resolves the content tag to an @sha256 digest in the ci-image job, so all
+# legs see identical bits and no run's output feeds another's input. There is
+# deliberately no Swatinem/rust-cache: the image is the (immutable, read-only)
+# dep cache; workspace crates always compile from the fresh checkout.
 
 name: CI
 
@@ -25,21 +33,51 @@ jobs:
       - name: makefile lint (GNU Make parse + checkmake)
         run: make makefile-lint
 
+  # Resolve the four ci-base image flavors to digest-pinned refs for this run —
+  # <flavor>-<content-hash> first, <flavor>-latest fallback for lockfile-ahead
+  # PRs (stale lockfile still hits every unchanged dep fingerprint).
+  ci-image:
+    name: ci-image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      dev: ${{ steps.r.outputs.dev }}
+      release: ${{ steps.r.outputs.release }}
+      cov: ${{ steps.r.outputs.cov }}
+      tools: ${{ steps.r.outputs.tools }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: login to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: resolve ci images (tag → sha256 digest)
+        id: r
+        env:
+          CI_IMAGE_NS: ghcr.io/${{ github.repository_owner }}
+        run: ./scripts/ci-image-tag.sh resolve-all >> "$GITHUB_OUTPUT"
+
   # SemVer commit-grammar gate (U5, BR5.3–BR5.6): lints the PR/push commit range
   # and the PR title, then validates the version registry against the workspace.
   commit-lint:
     name: commit-lint
-    needs: [makefile-lint]
+    needs: [makefile-lint, ci-image]
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    container:
+      image: ${{ needs.ci-image.outputs.tools }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.4.0"
       - name: bun install
         run: bun install --frozen-lockfile
       - name: lint commit range
@@ -76,34 +114,28 @@ jobs:
   # retention-days:1 is just the platform floor/fallback).
   rust-build:
     name: rust-build
-    needs: [makefile-lint]
+    needs: [makefile-lint, ci-image]
     runs-on: ubuntu-latest
+    # ci-base dev image: toolchain + mold + protoc + nextest baked, every dep
+    # pre-cooked to /ci/target-dev — only workspace crates compile. Image ENV
+    # carries CARGO_INCREMENTAL=0 + mold RUSTFLAGS; they are dep-fingerprint
+    # inputs, so never override them per-step.
+    container:
+      image: ${{ needs.ci-image.outputs.dev }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v7
-      - name: free disk for Rust build
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
-            /usr/local/share/boost /usr/share/swift || true
-          df -h /
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: "rust-debug"
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: nextest
-      - name: install mold linker + protoc
-        # protobuf-compiler: prost-build for crates/oxidean-api/proto/runner.proto.
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq mold protobuf-compiler
       - name: cargo build bins + nextest archive
-        # Same link/disk env the per-job builds used — consumers run the exact
-        # artifacts this produces.
+        # Consumers run the exact artifacts this produces.
         env:
-          CARGO_INCREMENTAL: "0"
-          RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
+          CARGO_TARGET_DIR: /ci/target-dev
         run: |
           set -euo pipefail
+          df -h /
           cargo build --workspace --bins
+          mkdir -p target
           cargo nextest archive --workspace \
             --archive-file target/nextest-archive.tar.zst
           ls -lh target/nextest-archive.tar.zst
@@ -114,13 +146,13 @@ jobs:
           overwrite: true
           retention-days: 1
           path: |
-            target/debug/oxidean-api
-            target/debug/oxidean-web
-            target/debug/oxidean-runner
-            target/debug/oxidean-protection-hook
-            target/debug/ox
-            target/debug/rpc-gen
-            target/debug/openapi-gen
+            /ci/target-dev/debug/oxidean-api
+            /ci/target-dev/debug/oxidean-web
+            /ci/target-dev/debug/oxidean-runner
+            /ci/target-dev/debug/oxidean-protection-hook
+            /ci/target-dev/debug/ox
+            /ci/target-dev/debug/rpc-gen
+            /ci/target-dev/debug/openapi-gen
           if-no-files-found: error
       - name: upload nextest archive (same-run)
         uses: actions/upload-artifact@v7
@@ -151,9 +183,11 @@ jobs:
       # Toolchain stays installed so any test shelling out to cargo/rustc still
       # works; no compile is expected on shards (no mold/protoc/rust-cache).
       - uses: dtolnay/rust-toolchain@stable
+      # Pinned to the version baked in the ci-base images — archive format is
+      # produced by the same nextest that ran `cargo nextest archive`.
       - uses: taiki-e/install-action@v2
         with:
-          tool: nextest
+          tool: nextest@0.9.146
       - name: download nextest archive
         uses: actions/download-artifact@v8
         with:
@@ -169,13 +203,15 @@ jobs:
 
   web-octane:
     name: web-octane
-    needs: [makefile-lint]
+    needs: [makefile-lint, ci-image]
     runs-on: ubuntu-latest
+    container:
+      image: ${{ needs.ci-image.outputs.tools }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v7
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.4.0"
       - name: bun install
         run: bun install --frozen-lockfile
       - name: web lint (oxlint type-aware + octane checks + route sync)
@@ -192,31 +228,23 @@ jobs:
   # dead_code lint (denied only here) covers unused Rust items.
   dead-code:
     name: dead-code
-    needs: [makefile-lint]
+    needs: [makefile-lint, ci-image]
     runs-on: ubuntu-latest
+    # clippy check artifacts are cooked into /ci/target-dev alongside the build
+    # artifacts — no compile lane, no rust-cache.
+    container:
+      image: ${{ needs.ci-image.outputs.dev }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    env:
+      CARGO_TARGET_DIR: /ci/target-dev
     steps:
       - uses: actions/checkout@v7
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.4.0"
       - name: bun install
         run: bun install --frozen-lockfile
       - name: knip (TS/.tsrx/.astro dead code)
         run: bunx knip
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
-      - uses: Swatinem/rust-cache@v2
-        with:
-          # clippy/doc check artifacts are a different fingerprint family than
-          # the rust-debug build outputs — a separate key stops them evicting
-          # each other's entries.
-          shared-key: "rust-check"
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-machete
-      - name: install protoc
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq protobuf-compiler
       - name: rust dead code + unused deps
         run: |
           cargo machete
@@ -227,19 +255,22 @@ jobs:
   # Chromium component tests for Octane insertBefore races (happy-dom cannot catch).
   web-browser:
     name: web-browser
-    needs: [makefile-lint]
+    needs: [makefile-lint, ci-image]
     runs-on: ubuntu-latest
+    container:
+      image: ${{ needs.ci-image.outputs.tools }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v7
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.4.0"
       - name: bun install
         run: bun install --frozen-lockfile
       - name: Playwright Chromium
-        # Run inside apps/web so bunx resolves the declared playwright dep
-        # (root bunx would fetch latest → browser-build skew vs playwright-core).
-        run: cd apps/web && bunx playwright install --with-deps chromium
+        # Browsers + system deps are baked in the tools image at the repo's
+        # locked playwright version — this stays as a verify-only no-op
+        # (re-downloads only if the lockfile moved past the image).
+        run: cd apps/web && bunx playwright install chromium
       - name: vitest browser (Chromium component DOM races)
         run: make test-web-browser
 
@@ -248,15 +279,17 @@ jobs:
   # Change-aware: newly added / modified routes cannot stay skip-only.
   route-coverage:
     name: route-coverage
-    needs: [makefile-lint]
+    needs: [makefile-lint, ci-image]
     runs-on: ubuntu-latest
+    container:
+      image: ${{ needs.ci-image.outputs.tools }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.4.0"
       - name: route coverage gate (inventory + change-aware)
         env:
           # PR: compare to PR base. Push: origin/main (github.event.before breaks after force-push rewrites).
@@ -275,15 +308,17 @@ jobs:
   # high-risk surfaces cannot stay skip-only.
   browser-coverage:
     name: browser-coverage
-    needs: [makefile-lint]
+    needs: [makefile-lint, ci-image]
     runs-on: ubuntu-latest
+    container:
+      image: ${{ needs.ci-image.outputs.tools }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.4.0"
       - name: browser coverage gate (inventory + change-aware)
         env:
           # PR: compare to PR base. Push: origin/main (github.event.before breaks after force-push rewrites).
@@ -302,45 +337,33 @@ jobs:
   # web Vitest + interim e2e checklist drive the score.
   coverage-weighted:
     name: coverage-weighted
-    needs: [makefile-lint]
+    needs: [makefile-lint, ci-image]
     runs-on: ubuntu-latest
+    # ci-base cov image: llvm-cov + nextest + protoc/mold baked, instrumented
+    # dep artifacts cooked to /ci/target-cov. CARGO_LLVM_COV_TARGET_DIR must
+    # point at the baked dir so dep fingerprints match (RUSTFLAGS+incremental
+    # come from image env; llvm-cov composes its instrumentation flags over
+    # them identically at bake and run time).
+    container:
+      image: ${{ needs.ci-image.outputs.cov }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    env:
+      CARGO_LLVM_COV_TARGET_DIR: /ci/target-cov
+      NEXTEST_PROFILE: "ci"
     steps:
       - uses: actions/checkout@v7
-      - name: free disk for Rust coverage build
-        # Instrumented workspace build has the same disk pressure as api-rust.
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
-            /usr/local/share/boost /usr/share/swift || true
-          df -h /
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: llvm-tools-preview
-      - uses: Swatinem/rust-cache@v2
-        with:
-          # Instrumented artifacts differ from the debug-build jobs' — keep a
-          # separate cache entry so the two don't evict each other's fingerprints.
-          shared-key: "rust-cov"
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-llvm-cov,nextest
-      - name: install mold linker + protoc
-        # protobuf-compiler: prost-build for crates/oxidean-api/proto/runner.proto.
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq mold protobuf-compiler
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.4.0"
       - name: bun install
         run: bun install --frozen-lockfile
       - name: aggregator contract
         run: make coverage-contract
       - name: collect rust coverage (cargo-llvm-cov)
-        # Same link/disk stability env as api-rust. Collection only — the
-        # weighted gate composition (25/40/35) does not consume these numbers.
-        env:
-          CARGO_INCREMENTAL: "0"
-          NEXTEST_PROFILE: "ci"
-          RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
-        run: make coverage-rust
+        # Collection only — the weighted gate composition (25/40/35) does not
+        # consume these numbers.
+        run: |
+          df -h /
+          make coverage-rust
       - name: collect web coverage + weighted gate
         env:
           COVERAGE_WEIGHTED_FLOOR: "0.70"
@@ -370,15 +393,21 @@ jobs:
 
   e2e-stack:
     name: e2e-stack
-    needs: [rust-build]
+    needs: [rust-build, ci-image]
     runs-on: ubuntu-latest
+    # tools image supplies bun + docker CLI + Playwright chromium. The stack
+    # under test still runs on the HOST daemon: host networking + the daemon
+    # socket are wired in `options`, so published ports resolve on localhost
+    # for the scripts' probes. No Rust toolchain is installed — the scripts
+    # honor OXIDEAN_PREBUILT_BINS=1 and run rust-build's artifact bins.
+    container:
+      image: ${{ needs.ci-image.outputs.tools }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+      options: --network host -v /var/run/docker.sock:/var/run/docker.sock
     steps:
       - uses: actions/checkout@v7
-      # Toolchain + apt deps stay as fallback insurance: if a script path ever
-      # misses the OXIDEAN_PREBUILT_BINS gate it compiles instead of failing.
-      - uses: dtolnay/rust-toolchain@stable
-      - name: install protoc + mold
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq protobuf-compiler mold
       - name: download prebuilt rust bins
         uses: actions/download-artifact@v8
         with:
@@ -386,19 +415,13 @@ jobs:
           path: target/debug
       - name: mark bins executable
         run: chmod +x target/debug/*
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.4.0"
       - name: bun install
         run: bun install --frozen-lockfile
-      - name: Playwright Chromium (stack browser e2e)
-        # See web-browser job: run inside apps/web to use the locked version.
-        run: cd apps/web && bunx playwright install --with-deps chromium
+      - name: verify Playwright chromium (baked in image)
+        run: cd apps/web && bunx playwright install chromium
       - name: stack e2e (API + Mailpit/OIDC/stubs + web)
         env:
           OXIDEAN_PREBUILT_BINS: "1"
-          CARGO_INCREMENTAL: "0"
-          RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
         run: make test-e2e-stack
       - name: upload e2e logs on failure
         if: failure()
@@ -414,17 +437,17 @@ jobs:
   # no Docker) + seeded push-triggered workflow → green run with log marker.
   actions-e2e:
     name: actions-e2e
-    needs: [rust-build]
+    needs: [rust-build, ci-image]
     runs-on: ubuntu-latest
+    # No Rust toolchain in the tools image — e2e-actions-pipeline.sh only
+    # requires cargo when OXIDEAN_PREBUILT_BINS is unset.
+    container:
+      image: ${{ needs.ci-image.outputs.tools }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v7
-      - name: free disk for Rust link
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
-            /usr/local/share/boost /usr/share/swift || true
-      - uses: dtolnay/rust-toolchain@stable
-      - name: install protoc + mold
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq protobuf-compiler mold jq
       - name: download prebuilt rust bins
         uses: actions/download-artifact@v8
         with:
@@ -435,23 +458,23 @@ jobs:
       - name: pipeline e2e
         env:
           OXIDEAN_PREBUILT_BINS: "1"
-          CARGO_INCREMENTAL: "0"
-          RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
         run: ./scripts/e2e-actions-pipeline.sh
 
   rpc-sync:
     name: rpc-sync
-    needs: [rust-build]
+    needs: [rust-build, ci-image]
     runs-on: ubuntu-latest
+    container:
+      image: ${{ needs.ci-image.outputs.tools }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     env:
       # Generators (rpc-gen/openapi-gen) and the `ox` used by skill-sync come
       # from rust-build's artifact — Makefile/check scripts honor this flag.
       OXIDEAN_PREBUILT_BINS: "1"
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - name: install protoc + mold
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq protobuf-compiler mold
       - name: download prebuilt rust bins
         uses: actions/download-artifact@v8
         with:
@@ -459,9 +482,6 @@ jobs:
           path: target/debug
       - name: mark bins executable
         run: chmod +x target/debug/*
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: "1.4.0"
       - name: bun install
         run: bun install --frozen-lockfile
       - name: check-rpc-sync
@@ -656,9 +676,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+      # Pinned to the version baked in the ci-base images — archive format is
+      # produced by the same nextest that ran `cargo nextest archive`.
       - uses: taiki-e/install-action@v2
         with:
-          tool: nextest
+          tool: nextest@0.9.146
       - name: download nextest archive
         uses: actions/download-artifact@v8
         with:
@@ -686,8 +708,15 @@ jobs:
   # to main (baseline) and PRs that touch Rust-relevant files.
   build-metrics:
     name: build-metrics
-    needs: [makefile-lint]
+    needs: [makefile-lint, ci-image]
     runs-on: ubuntu-latest
+    # ci-base release image: release-profile deps pre-cooked to
+    # /ci/target-release — the metrics build only compiles workspace crates.
+    container:
+      image: ${{ needs.ci-image.outputs.release }}
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -712,27 +741,12 @@ jobs:
             echo "run=false" >> "$GITHUB_OUTPUT"
             echo "No Rust-affecting changes — skipping release metrics build."
           fi
-      - name: free disk for release build
-        if: steps.gate.outputs.run == 'true'
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
-            /usr/local/share/boost /usr/share/swift || true
-          df -h /
-      - uses: dtolnay/rust-toolchain@stable
-        if: steps.gate.outputs.run == 'true'
-      - uses: Swatinem/rust-cache@v2
-        if: steps.gate.outputs.run == 'true'
-        with:
-          shared-key: "rust-release"
-      - name: install mold + protoc + time
-        if: steps.gate.outputs.run == 'true'
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq mold protobuf-compiler time
       - name: cargo build --release --timings
         if: steps.gate.outputs.run == 'true'
         env:
-          CARGO_INCREMENTAL: "0"
-          RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
+          CARGO_TARGET_DIR: /ci/target-release
         run: |
+          df -h /
           /usr/bin/time -v cargo build --release --timings \
             -p oxidean-api --bin oxidean-api --bin oxidean-protection-hook 2>&1 \
             | grep -E "Elapsed|Maximum resident|Finished" || true
@@ -744,19 +758,19 @@ jobs:
           echo "| artifact | size |" >> "$GITHUB_STEP_SUMMARY"
           echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
           for bin in oxidean-api oxidean-protection-hook; do
-            BYTES=$(stat -c%s "target/release/$bin")
-            HUMAN=$(ls -lh "target/release/$bin" | awk '{print $5}')
+            BYTES=$(stat -c%s "/ci/target-release/release/$bin")
+            HUMAN=$(ls -lh "/ci/target-release/release/$bin" | awk '{print $5}')
             echo "| \`$bin\` | $HUMAN ($BYTES B) |" >> "$GITHUB_STEP_SUMMARY"
           done
           DEPS=$(cargo tree -p oxidean-api --prefix none 2>/dev/null | sort -u | wc -l)
           echo "| dep tree (oxidean-api) | $DEPS crates |" >> "$GITHUB_STEP_SUMMARY"
-          ls -lh target/release/oxidean-api target/release/oxidean-protection-hook
+          ls -lh /ci/target-release/release/oxidean-api /ci/target-release/release/oxidean-protection-hook
       - name: upload cargo timings
         if: steps.gate.outputs.run == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: cargo-timings
-          path: target/cargo-timings/
+          path: /ci/target-release/cargo-timings/
           if-no-files-found: ignore
 
   # Same-run artifacts are deleted once consumers finish — artifacts stay

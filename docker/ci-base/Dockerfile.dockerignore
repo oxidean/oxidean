@@ -1,0 +1,13 @@
+# Per-Dockerfile dockerignore for docker/ci-base/Dockerfile — BuildKit uses
+# this in place of the root .dockerignore for this build. The dep bake only
+# needs cargo manifests + crate sources (cargo-chef prepare scans them) and
+# the bun manifests for the install-cache layer.
+*
+!/Cargo.toml
+!/Cargo.lock
+!/crates/**
+!/package.json
+!/bun.lock
+!/turbo.json
+!/apps/web/package.json
+!/packages/api-client/package.json

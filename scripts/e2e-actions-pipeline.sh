@@ -3,7 +3,7 @@
 #   API (sqlite) + oxidean-runner (host mode) + seed demo workflow → green run.
 #
 # Usage: ./scripts/e2e-actions-pipeline.sh
-# Requires: cargo, git, curl, jq.
+# Requires: git, curl, jq (and cargo unless OXIDEAN_PREBUILT_BINS=1).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -30,7 +30,10 @@ trap cleanup EXIT
 need_cmd() {
   command -v "$1" >/dev/null 2>&1 || { echo "error: required command not found: $1" >&2; exit 1; }
 }
-need_cmd cargo; need_cmd git; need_cmd curl; need_cmd jq
+need_cmd git; need_cmd curl; need_cmd jq
+# cargo is only needed when compiling bins — CI runs with
+# OXIDEAN_PREBUILT_BINS=1 inside the tools image, which has no toolchain.
+[[ "${OXIDEAN_PREBUILT_BINS:-0}" == "1" ]] || need_cmd cargo
 
 wait_http() {
   local url="$1" name="$2" tries="${3:-60}"
