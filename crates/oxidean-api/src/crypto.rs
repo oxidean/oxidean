@@ -79,23 +79,25 @@ fn hex_decode(s: &str) -> Result<Vec<u8>, String> {
 mod tests {
     use super::*;
 
+    // Env is process-global — each test gets its own var so parallel runs in
+    // one binary can never observe the other's remove.
     #[test]
     fn encrypt_decrypt_roundtrip() {
-        std::env::set_var("OXIDEAN_TEST_SECRET_KEY", "crypto-unit-key");
-        let keys = &["OXIDEAN_TEST_SECRET_KEY"];
+        std::env::set_var("OXIDEAN_TEST_SECRET_KEY_ROUNDTRIP", "crypto-unit-key");
+        let keys = &["OXIDEAN_TEST_SECRET_KEY_ROUNDTRIP"];
         let ct = encrypt(keys, "plain").unwrap();
         assert!(!ct.contains("plain"));
         assert_eq!(decrypt(keys, &ct).unwrap(), "plain");
-        std::env::remove_var("OXIDEAN_TEST_SECRET_KEY");
+        std::env::remove_var("OXIDEAN_TEST_SECRET_KEY_ROUNDTRIP");
     }
 
     #[test]
     fn decrypt_rejects_tampered() {
-        std::env::set_var("OXIDEAN_TEST_SECRET_KEY", "crypto-unit-key");
-        let keys = &["OXIDEAN_TEST_SECRET_KEY"];
+        std::env::set_var("OXIDEAN_TEST_SECRET_KEY_TAMPER", "crypto-unit-key");
+        let keys = &["OXIDEAN_TEST_SECRET_KEY_TAMPER"];
         let mut ct = encrypt(keys, "data").unwrap();
         ct.replace_range(0..2, "ff");
         assert!(decrypt(keys, &ct).is_err());
-        std::env::remove_var("OXIDEAN_TEST_SECRET_KEY");
+        std::env::remove_var("OXIDEAN_TEST_SECRET_KEY_TAMPER");
     }
 }
