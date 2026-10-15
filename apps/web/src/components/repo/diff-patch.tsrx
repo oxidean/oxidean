@@ -1,19 +1,16 @@
-import { useEffect, useState } from "octane";
+import { useState } from "octane";
+import { DiffFileHeader, DiffLargeGate } from "@/components/repo/diff-file-header";
+import { DIFF_LARGE_PATCH_CHARS } from "@/lib/diff-budget";
+import type { HighlightedDiffLine } from "@/lib/highlight-diff";
+import { useLazyDiffRows } from "@/lib/lazy-diff-rows.tsrx";
 import type { DiffLineKind } from "@/lib/parse-unified-diff";
-import { parseUnifiedDiffLines } from "@/lib/parse-unified-diff";
-import {
-  highlightDiffLines,
-  highlightedDiffRowsEqual,
-  plainHighlightedDiffLines,
-  type HighlightedDiffLine,
-} from "@/lib/highlight-diff";
 import { cn } from "@/lib/utils";
 
 type DiffPatchProps = {
   path: string;
   status: string;
   patch: string;
-  /** Pre-highlighted rows from SSR loader (first paint). */
+  /** Pre-highlighted rows from the loader (first paint). */
   initialRows?: HighlightedDiffLine[] | null;
 };
 
@@ -45,47 +42,24 @@ function prefixClass(kind: DiffLineKind): string {
   }
 }
 
-function initialRowsOrPlain(
-  patch: string,
-  initialRows: HighlightedDiffLine[] | null | undefined,
-): HighlightedDiffLine[] {
-  if (initialRows && initialRows.length > 0) return initialRows;
-  return plainHighlightedDiffLines(parseUnifiedDiffLines(patch));
-}
-
-/** Unified-diff file block: path header + colorized hunk lines (commit / compare / PR). */
+/**
+ * Unified-diff file block (commit / compare / PR files, issue #110):
+ * collapsible header + per-file "Load diff" gate for large patches + rows
+ * highlighted lazily when the block nears the viewport.
+ */
 export function DiffPatch({ path, status, patch, initialRows = null }: DiffPatchProps) @{
-  const [rows, setRows] = useState<HighlightedDiffLine[]>(() =>
-    initialRowsOrPlain(patch, initialRows),
-  );
-
-  useEffect(() => {
-    const lines = parseUnifiedDiffLines(patch);
-    let cancelled = false;
-
-    // SSR rows are dual-theme (`light-dark()`) — already correct for either
-    // scheme; take them as-is and skip the re-highlight pass.
-    if (initialRows && initialRows.length > 0) {
-      setRows((prev) => (highlightedDiffRowsEqual(prev, initialRows) ? prev : initialRows));
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    setRows(plainHighlightedDiffLines(lines));
-
-    async function run() {
-      const next = await highlightDiffLines(lines, { path });
-      if (cancelled) return;
-      setRows((prev) => (highlightedDiffRowsEqual(prev, next) ? prev : next));
-    }
-
-    void run();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [patch, path, initialRows]);
+  const large = patch.length > DIFF_LARGE_PATCH_CHARS;
+  const [loadLarge, setLoadLarge] = useState(false);
+  const [expanded, setExpanded] = useState(true);
+  const gated = large && !loadLarge;
+  const bodyOpen = expanded && !gated;
+  const { rows, rootRef } = useLazyDiffRows({
+    patch,
+    path,
+    open: bodyOpen,
+    deferPlainRows: large,
+    initialRows,
+  });
 
   // Old/new line numbers from hunk headers — GitHub's two gutter columns.
   let oldN = 0;
@@ -110,58 +84,83 @@ export function DiffPatch({ path, status, patch, initialRows = null }: DiffPatch
     return { ...line, index, oldNo, newNo };
   });
 
-  <section className="overflow-hidden border border-border">
-    <h3 className="border-b border-border bg-muted/40 px-3 py-2 font-mono text-[14px] text-foreground">
-      {path as string} <span className="text-muted-foreground">({status as string})</span>
-    </h3>
-    @if (keyed.length === 0) {
-      <p className="px-3 py-3 text-[14px] text-muted-foreground">
-        No textual patch for this file.
-      </p>;
+  <section ref={rootRef} className="overflow-hidden border border-border">
+    <DiffFileHeader
+      path={path}
+      status={status}
+      patch={patch}
+      open={bodyOpen}
+      onToggle={() => setExpanded(!expanded)}
+    />
+    @if (gated) {
+      <DiffLargeGate
+        onLoad={() => {
+          setLoadLarge(true);
+          setExpanded(true);
+        }}
+      />;
     } @else {
-      <div
-        className="diff-code overflow-x-auto font-mono text-[14px] leading-[1.45]"
-        role="table"
-        aria-label={`Diff for ${path}`}
-      >
-        @for (const line of keyed; key line.index) {
+      @if (expanded) {
+        @if (keyed.length === 0) {
+          @if (patch.trim().length === 0) {
+            <p className="px-3 py-3 text-[14px] text-muted-foreground">
+              No textual patch for this file.
+            </p>;
+          } @else {
+            <p className="px-3 py-3 text-[14px] text-muted-foreground">Rendering diff…</p>;
+          }
+        } @else {
           <div
-            className={cn("flex whitespace-pre py-0.5", lineClass(line.kind) as string)}
-            role="row"
-            data-diff-kind={line.kind as string}
+            className="diff-code overflow-x-auto font-mono text-[14px] leading-[1.45]"
+            role="table"
+            aria-label={`Diff for ${path}`}
           >
-            <span
-              aria-hidden="true"
-              className="w-10 shrink-0 select-none pr-2 text-right text-muted-foreground/60"
-            >
-              {(line.oldNo ?? "") as number | string}
-            </span>
-            <span
-              aria-hidden="true"
-              className="w-10 shrink-0 select-none border-r border-border/60 pr-2 text-right text-muted-foreground/60"
-            >
-              {(line.newNo ?? "") as number | string}
-            </span>
-            @if (line.prefix) {
-              <span
+            @for (const line of keyed; key line.index) {
+              <div
                 className={cn(
-                  "shrink-0 select-none pl-3",
-                  prefixClass(line.kind) as string,
+                  "flex whitespace-pre py-0.5",
+                  lineClass(line.kind) as string,
                 )}
-                aria-hidden="true"
+                role="row"
+                data-diff-kind={line.kind as string}
               >
-                {line.prefix as string}
-              </span>;
-            } @else {
-              <span aria-hidden="true" className="shrink-0 select-none pl-3" />;
+                <span
+                  aria-hidden="true"
+                  className="w-10 shrink-0 select-none pr-2 text-right text-muted-foreground/60"
+                >
+                  {(line.oldNo ?? "") as number | string}
+                </span>
+                <span
+                  aria-hidden="true"
+                  className="w-10 shrink-0 select-none border-r border-border/60 pr-2 text-right text-muted-foreground/60"
+                >
+                  {(line.newNo ?? "") as number | string}
+                </span>
+                @if (line.prefix) {
+                  <span
+                    className={cn(
+                      "shrink-0 select-none pl-3",
+                      prefixClass(line.kind) as string,
+                    )}
+                    aria-hidden="true"
+                  >
+                    {line.prefix as string}
+                  </span>;
+                } @else {
+                  <span
+                    aria-hidden="true"
+                    className="shrink-0 select-none pl-3"
+                  />;
+                }
+                <span
+                  className="min-w-0 grow pr-3"
+                  dangerouslySetInnerHTML={{ __html: line.contentHtml as string }}
+                />
+              </div>;
             }
-            <span
-              className="min-w-0 grow pr-3"
-              dangerouslySetInnerHTML={{ __html: line.contentHtml as string }}
-            />
           </div>;
         }
-      </div>;
+      }
     }
   </section>;
 }

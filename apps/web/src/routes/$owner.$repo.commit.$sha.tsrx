@@ -9,13 +9,14 @@ import { useEffect, useState } from "octane";
 import { FileDiff } from "@octanejs/lucide";
 import { CommitAuthorLink } from "@/components/repo/commit-author-link";
 import { CommitVerifiedBadge } from "@/components/repo/commit-verified-badge";
-import { DiffPatch } from "@/components/repo/diff-patch";
+import { DiffFileList } from "@/components/repo/diff-file-list";
 import { RepoNotFound } from "@/components/repo/repo-not-found";
 import { AppLink } from "@/components/ui/app-link";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { HighlightedDiffLine } from "@/lib/highlight-diff";
 import { formatRelativeUpdated } from "@/lib/relative-time";
+import { diffPatchStatCounts } from "@/lib/parse-unified-diff";
 import { ssrHighlightDiffFiles } from "@/lib/ssr-diff-highlight";
 import { fetchRepoCommit, fetchRepoGet } from "@/lib/ssr-repo";
 
@@ -100,39 +101,6 @@ function relativeCommitTime(iso: string): string {
   return formatRelativeUpdated(iso).replace(/^Updated\s+/i, "");
 }
 
-/**
- * `+`/`-` line counts from unified-diff patch text. Hunk-header budgets
- * (`@@ -a,b +c,d @@`) decide the `---`/`+++` header-vs-content ambiguity:
- * a `--- ` line inside a hunk's remaining old-line budget is a real deletion
- * (e.g. markdown `---` hr), while a header after the budget is exhausted is
- * the next file's `--- a/path`.
- */
-function patchStatCounts(patch: string): [number, number] {
-  let adds = 0;
-  let dels = 0;
-  let oldLeft = 0;
-  let newLeft = 0;
-  for (const line of patch.split("\n")) {
-    const hunk = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(line);
-    if (hunk) {
-      oldLeft = Number(hunk[2] ?? "1");
-      newLeft = Number(hunk[4] ?? "1");
-      continue;
-    }
-    if (line.startsWith("+") && newLeft > 0) {
-      adds++;
-      newLeft--;
-    } else if (line.startsWith("-") && oldLeft > 0) {
-      dels++;
-      oldLeft--;
-    } else if ((line.startsWith(" ") || line === "") && oldLeft > 0 && newLeft > 0) {
-      oldLeft--;
-      newLeft--;
-    }
-  }
-  return [adds, dels];
-}
-
 function RepoCommitPageContent() @{
   const pathname = usePathname();
   const searchStr = useSearchString();
@@ -172,7 +140,7 @@ function RepoCommitPageContent() @{
   let commitDels = 0;
   if (phase.kind === "ready") {
     for (const f of phase.commit.files) {
-      const [a, d] = patchStatCounts(f.patch);
+      const [a, d] = diffPatchStatCounts(f.patch);
       commitAdds += a;
       commitDels += d;
     }
@@ -261,16 +229,10 @@ function RepoCommitPageContent() @{
           description="This commit doesn't touch any files (it may be an empty or merge commit)."
         />;
       } @else {
-        <div className="flex flex-col gap-6">
-          @for (const f of phase.commit.files; key f.path) {
-            <DiffPatch
-              path={f.path as string}
-              status={f.status as string}
-              patch={f.patch as string}
-              initialRows={phase.highlightedByPath[f.path] ?? null}
-            />;
-          }
-        </div>;
+        <DiffFileList
+          files={phase.commit.files}
+          highlightedByPath={phase.highlightedByPath}
+        />;
       }
     </>;
   }

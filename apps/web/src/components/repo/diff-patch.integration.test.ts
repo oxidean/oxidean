@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from "@octanejs/testing-library";
+import { cleanup, fireEvent, render, screen, waitFor } from "@octanejs/testing-library";
 import { afterEach, describe, expect, it } from "vitest";
 import { highlightDiffLines } from "@/lib/highlight-diff";
 import { parseUnifiedDiffLines } from "@/lib/parse-unified-diff";
@@ -56,10 +56,13 @@ describe("DiffPatch", { timeout: 60_000 }, () => {
       },
     });
 
-    await waitFor(() => {
-      const add = document.querySelector('[data-diff-kind="add"]');
-      expect(add?.querySelector('span[style*="color"]')).toBeTruthy();
-    });
+    await waitFor(
+      () => {
+        const add = document.querySelector('[data-diff-kind="add"]');
+        expect(add?.querySelector('span[style*="color"]')).toBeTruthy();
+      },
+      { timeout: 30_000 },
+    );
   });
 
   it("renders SSR initialRows with token spans on first paint", async () => {
@@ -85,5 +88,68 @@ describe("DiffPatch", { timeout: 60_000 }, () => {
     // Hydrate keeps dual-theme SSR rows verbatim — no re-highlight pass.
     await new Promise((r) => setTimeout(r, 50));
     expect(document.querySelector('[data-diff-kind="add"]')?.innerHTML).toBe(firstHtml);
+  });
+});
+
+describe("DiffPatch — issue #110 mobile budgets", () => {
+  it("gates large patches behind a Load diff button instead of mounting rows", async () => {
+    const bigBody = Array.from({ length: 2000 }, (_, i) => `+line ${i}`).join("\n");
+    const patch = `@@ -0,0 +1,2000 @@\n${bigBody}`;
+    expect(patch.length).toBeGreaterThan(16_000);
+
+    render(DiffPatch, {
+      props: { path: "big.ts", status: "modified", patch },
+    });
+
+    expect(await screen.findByText("big.ts")).toBeInTheDocument();
+    expect(screen.getByText("This diff is too large to show by default.")).toBeInTheDocument();
+    // No diff rows mounted until the user asks for them.
+    expect(document.querySelector('[data-diff-kind="add"]')).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Load diff" }));
+
+    await waitFor(
+      () => {
+        expect(document.querySelector('[data-diff-kind="add"]')).toBeTruthy();
+      },
+      { timeout: 30_000 },
+    );
+  });
+
+  it("collapses and re-expands rows via the header toggle", async () => {
+    const patch = ["@@ -1 +1 @@", "-old", "+new"].join("\n");
+
+    render(DiffPatch, {
+      props: { path: "a.ts", status: "modified", patch },
+    });
+
+    expect(await screen.findByText("a.ts")).toBeInTheDocument();
+    expect(document.querySelector('[data-diff-kind="add"]')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Toggle diff for a.ts" }));
+    await waitFor(() => {
+      expect(document.querySelector('[data-diff-kind="add"]')).toBeNull();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Toggle diff for a.ts" }));
+    await waitFor(
+      () => {
+        expect(document.querySelector('[data-diff-kind="add"]')).toBeTruthy();
+      },
+      { timeout: 30_000 },
+    );
+  });
+
+  it("shows per-file +/− stats in the header", async () => {
+    const patch = ["@@ -1,2 +1,2 @@", " keep", "-old", "+new", "+extra"].join("\n");
+    // widen the hunk so +extra lands inside the new-side budget
+    const widePatch = patch.replace("+1,2", "+1,3");
+
+    render(DiffPatch, {
+      props: { path: "stats.ts", status: "modified", patch: widePatch },
+    });
+
+    expect(await screen.findByText("+2")).toBeInTheDocument();
+    expect(screen.getByText("−1")).toBeInTheDocument();
   });
 });
