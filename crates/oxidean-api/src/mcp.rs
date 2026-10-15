@@ -331,7 +331,7 @@ fn initialize_result(params: &Value) -> Value {
             "resources": {"listChanged": false},
             "prompts": {"listChanged": false},
         },
-        "serverInfo": {"name": "oxidean", "version": env!("CARGO_PKG_VERSION")},
+        "serverInfo": {"name": "oxidean", "version": crate::version::version()},
         "instructions": "Oxidean forge MCP endpoint. Tools expose repositories, issues, pull requests, Actions runs, packages, and search. Send `Authorization: Bearer oxidean_pat_…` (or `oxidean_fg_…`) for private data and writes; anonymous callers get public data only.",
     })
 }

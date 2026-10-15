@@ -142,6 +142,31 @@ channel**. There are no release PRs and no manual tag pushes.
   a `0.1.0` baseline for every component.
 - **Rollback** never touches versions or tags.
 
+## Image lanes (deploy artifacts)
+
+[`.github/workflows/images.yml`](../.github/workflows/images.yml) builds the
+four Cloud service images (`oxidean-{api,web,runner,gateway}` on GHCR) and
+publishes the all-or-nothing `sha-<commit>` set on every `main` push —
+versioning does not define image components; images are artifacts of the
+existing components:
+
+- **Component tag → image retag**: `oxidean-api-v*` tags retag the commit's
+  `sha-<sha>` **api** image, `web-v*` and `oxidean-web-v*` retag the **web**
+  image (frontend app + Rust serving crate share it), `oxidean-runner-v*`
+  retags the **runner** image — to `:<semver>`, plus `:latest` on stable
+  (prerelease tags publish `:<semver>` only). The gateway rides `sha-*`
+  tags only. Retag is a manifest copy — no rebuild; a missing `sha` image
+  falls back to a real build.
+- **`chore(release):` bump commits** need no rebuild either: the version.rs
+  helper (`crates/oxidean-api/src/version.rs`) reads
+  `/usr/local/share/oxidean/VERSION` before `env!("CARGO_PKG_VERSION")`, so
+  `images.yml` makes `sha-<bump>` a layer on the parent sha's image
+  (api VERSION file) or a pure retag (other services) — the deployed
+  artifact still self-reports the released version.
+- **`ox-v*` tags never touch images**: the api fetches its CLI feed at
+  container boot from the runtime `OXIDEAN_CLI_DIST_URL` var (deploy tooling
+  repins it per environment) — `sha-*` tags stay immutable across ox releases.
+
 Tag pushes must use the **`RELEASE_TOKEN`** secret (a maintainer PAT) —
 the default `GITHUB_TOKEN` does not re-trigger workflows, so tag pushes
 made with it would silently skip every release lane. The tag-push lanes

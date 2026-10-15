@@ -17,6 +17,11 @@ Public Host is catch-all (suitable for Railway domains / custom DNS). TLS is exp
 
 ## Build
 
+Cloud deploys pull the published image — `.github/workflows/images.yml`
+builds `ghcr.io/oxidean/oxidean-gateway` (public GHCR, sha/main/semver tags)
+alongside the other service images; Railway never builds this Dockerfile.
+Local build only:
+
 ```bash
 docker build -f deploy/cloud/Dockerfile -t oxidean-gateway .
 ```

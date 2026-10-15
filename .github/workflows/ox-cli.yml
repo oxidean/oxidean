@@ -508,21 +508,10 @@ jobs:
           else
             gh release create "${{ github.ref_name }}" assets/* --generate-notes "${args[@]}"
           fi
-      - name: redeploy staging api (pin /cli feed to this tag)
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
-          RAILWAY_PROJECT_ID: cec803d0-289b-4078-80cf-7291c16fc5ec
-          RAILWAY_SERVICE_API_ID: 19bf0a47-2fdf-4130-b6b0-858de92cb858
-        run: |
-          set -euo pipefail
-          if [[ -z "${RAILWAY_TOKEN:-}" && -z "${RAILWAY_API_TOKEN:-}" ]]; then
-            echo "No RAILWAY_TOKEN / RAILWAY_API_TOKEN — skip staging api redeploy (fork or secret not configured)."
-            exit 0
-          fi
-          sudo apt-get update -qq && sudo apt-get install -y -qq jq
-          git fetch --tags --force origin >/dev/null 2>&1 || true
-          scripts/railway-staging-api-redeploy.sh "${{ github.sha }}"
+      # The staging api CLI-feed repin moved to images.yml's staging-cli-feed
+      # job (workflow_run trigger on this workflow completing): it upserts
+      # OXIDEAN_CLI_DIST_URL and re-pulls the api image so the container
+      # entrypoint fetches this tag's feed — no image rebuild needed.
 
   # ── prove API image stages this tag's release matrix ────────────────────
   image-matrix:

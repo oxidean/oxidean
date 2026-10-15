@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
-# Redeploy the Oxidean Cloud staging `api` service at a git commit SHA.
+# shellcheck disable=SC2016 # GraphQL literals stay single-quoted; $vars bind via jq --arg/--argjson
+# Repin the Oxidean Cloud staging `api` service's CLI feed and re-pull its
+# image so the api container's entrypoint fetches the new ox-v* release feed.
 #
-# Before deploy, pins the service's OXIDEAN_CLI_DIST_URL to the `ox-v*` release
-# tag on that commit (the tag's release assets are the CLI staging feed).
-# Untagged commits get an empty URL → the image stages host-only `ox`.
+# The service's OXIDEAN_CLI_DIST_URL is pinned to the `ox-v*` release tag on
+# the given commit (the tag's release assets are the CLI staging feed), then
+# serviceInstanceRedeploy re-pulls the service's current image — the boot
+# entrypoint re-fetches the feed. No image rebuild is involved.
+# Untagged commits get an empty URL → host-only `ox` from the image.
 #
 # Usage:
 #   RAILWAY_API_TOKEN=… scripts/railway-staging-api-redeploy.sh <sha> [--dry-run]
@@ -22,7 +26,10 @@
 
 set -euo pipefail
 
-API_URL="${RAILWAY_API_URL:-https://backboard.railway.com/graphql/v2}"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd -P)"
+# shellcheck source=scripts/railway-gql.sh
+source "${SCRIPT_DIR}/railway-gql.sh"
+
 PROJECT_ID="${RAILWAY_PROJECT_ID:-cec803d0-289b-4078-80cf-7291c16fc5ec}"
 ENVIRONMENT_ID="${RAILWAY_ENVIRONMENT_ID:-}"
 ENVIRONMENT_NAME="${RAILWAY_ENVIRONMENT_NAME:-staging}"
@@ -30,88 +37,9 @@ SERVICE_API_ID="${RAILWAY_SERVICE_API_ID:-19bf0a47-2fdf-4130-b6b0-858de92cb858}"
 
 DRY_RUN=0
 
-die() {
-  echo "error: $*" >&2
-  exit 1
-}
-
-need_jq() {
-  command -v jq >/dev/null 2>&1 || die "jq is required"
-}
-
-resolve_auth_header() {
-  if [[ -n "${RAILWAY_TOKEN:-}" ]]; then
-    printf 'header = "Project-Access-Token: %s"\n' "$RAILWAY_TOKEN"
-    return
-  fi
-  if [[ -n "${RAILWAY_API_TOKEN:-}" ]]; then
-    printf 'header = "Authorization: Bearer %s"\n' "$RAILWAY_API_TOKEN"
-    return
-  fi
-  local cfg="${HOME}/.railway/config.json"
-  if [[ -f "$cfg" ]]; then
-    local t
-    t="$(jq -r '.user.accessToken // .user.token // empty' "$cfg" 2>/dev/null || true)"
-    if [[ -n "$t" && "$t" != "null" ]]; then
-      printf 'header = "Authorization: Bearer %s"\n' "$t"
-      return
-    fi
-  fi
-  die "no Railway credential: set RAILWAY_TOKEN (staging project token) or RAILWAY_API_TOKEN, or run railway login"
-}
-
-gql() {
-  local query="$1"
-  local variables_json
-  if [[ $# -ge 2 && -n "${2}" ]]; then
-    variables_json="$2"
-  else
-    variables_json='{}'
-  fi
-  local auth_line payload raw
-  auth_line="$(resolve_auth_header)"
-  payload="$(jq -n --arg q "$query" --argjson v "$variables_json" '{query: $q, variables: $v}')"
-  raw="$(
-    printf '%s' "$payload" | curl -sS "$API_URL" \
-      -H "Content-Type: application/json" \
-      --config <(printf '%s' "$auth_line") \
-      -d @-
-  )" || die "Railway GraphQL request failed"
-  if echo "$raw" | jq -e '.errors? | select(length > 0)' >/dev/null 2>&1; then
-    echo "$raw" | jq '.' >&2
-    die "Railway GraphQL returned errors"
-  fi
-  printf '%s' "$raw"
-}
-
-resolve_staging_environment_id() {
-  if [[ -n "$ENVIRONMENT_ID" ]]; then
-    printf '%s' "$ENVIRONMENT_ID"
-    return
-  fi
-  local raw id
-  raw="$(
-    gql '
-      query($id: String!) {
-        project(id: $id) {
-          environments { edges { node { id name } } }
-        }
-      }
-    ' "$(jq -n --arg id "$PROJECT_ID" '{id:$id}')"
-  )"
-  id="$(echo "$raw" | jq -r --arg name "$ENVIRONMENT_NAME" '
-    .data.project.environments.edges[]?
-    | .node
-    | select(.name == $name)
-    | .id
-  ' | head -n1)"
-  [[ -n "$id" && "$id" != "null" ]] || die "environment named '${ENVIRONMENT_NAME}' not found in project ${PROJECT_ID}"
-  printf '%s' "$id"
-}
-
 # Resolve the ox-v* release tag on a commit — prefer a stable cut when several
 # tags point at the same SHA. Empty result means the commit has no tag and the
-# deploy should stage host-only ox.
+# deploy should serve host-only ox.
 resolve_ox_dist_url() {
   local sha="$1"
   if command -v git >/dev/null 2>&1; then
@@ -131,8 +59,8 @@ resolve_ox_dist_url() {
 }
 
 # Pin the api service's CLI feed to the tag's release download URL (or empty =
-# host-only). The Dockerfile fetch layer keys on the URL, so a per-tag pin busts
-# the cache naturally — no separate BUST variable.
+# host-only). The container entrypoint fetches this URL at boot and keys its
+# cache on it — a per-tag pin re-fetches naturally, no separate bust variable.
 upsert_cli_dist_url() {
   local url="$1"
   local env_id="$2"
@@ -141,7 +69,7 @@ upsert_cli_dist_url() {
     echo "dry-run: would call variableUpsert OXIDEAN_CLI_DIST_URL"
     return 0
   fi
-  gql '
+  railway_gql '
     mutation($input: VariableUpsertInput!) {
       variableUpsert(input: $input)
     }
@@ -160,33 +88,30 @@ upsert_cli_dist_url() {
     }}')" >/dev/null
 }
 
-promote_api() {
-  local sha="$1"
-  local env_id="$2"
-  echo "staging api redeploy: environment=${env_id} service=${SERVICE_API_ID} commit=${sha}"
+redeploy_api() {
+  local env_id="$1"
+  echo "staging api redeploy: environment=${env_id} service=${SERVICE_API_ID} (re-pull image → boot refetches feed)"
   if [[ "$DRY_RUN" == "1" ]]; then
-    echo "dry-run: would call serviceInstanceDeployV2"
+    echo "dry-run: would call serviceInstanceRedeploy"
     return 0
   fi
-  local raw dep_id
+  local raw ok
   raw="$(
-    gql '
-      mutation($environmentId: String!, $serviceId: String!, $commitSha: String!) {
-        serviceInstanceDeployV2(
+    railway_gql '
+      mutation($environmentId: String!, $serviceId: String!) {
+        serviceInstanceRedeploy(
           environmentId: $environmentId
           serviceId: $serviceId
-          commitSha: $commitSha
         )
       }
     ' "$(jq -n \
       --arg environmentId "$env_id" \
       --arg serviceId "$SERVICE_API_ID" \
-      --arg commitSha "$sha" \
-      '{environmentId:$environmentId,serviceId:$serviceId,commitSha:$commitSha}')"
+      '{environmentId:$environmentId,serviceId:$serviceId}')"
   )"
-  dep_id="$(echo "$raw" | jq -r '.data.serviceInstanceDeployV2 // empty')"
-  [[ -n "$dep_id" ]] || die "staging api redeploy: empty deployment id"
-  echo "deployment=${dep_id}"
+  ok="$(echo "$raw" | jq -r '.data.serviceInstanceRedeploy')"
+  [[ "$ok" == "true" ]] || die "staging api redeploy: serviceInstanceRedeploy returned ${ok}"
+  echo "ok"
 }
 
 main() {
@@ -197,7 +122,7 @@ main() {
     case "$arg" in
       --dry-run) DRY_RUN=1 ;;
       -h|--help)
-        sed -n '2,20p' "$0"
+        sed -n '2,25p' "$0"
         exit 0
         ;;
       *)
@@ -217,10 +142,14 @@ main() {
     sha="$(git rev-parse "${sha}^{commit}")"
   fi
   local env_id url
-  env_id="$(resolve_staging_environment_id)"
+  if [[ -n "$ENVIRONMENT_ID" ]]; then
+    env_id="$ENVIRONMENT_ID"
+  else
+    env_id="$(railway_resolve_environment_id "$PROJECT_ID" "$ENVIRONMENT_NAME")"
+  fi
   url="$(resolve_ox_dist_url "$sha")"
   upsert_cli_dist_url "$url" "$env_id"
-  promote_api "$sha" "$env_id"
+  redeploy_api "$env_id"
 }
 
 main "$@"

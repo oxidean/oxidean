@@ -6,19 +6,35 @@ TypeScript Infrastructure as Code for **Oxidean Cloud** on Railway (PLAT-02 / D-
 
 | File | Role |
 |------|------|
-| `railway.ts` | Desired topology: managed Postgres + `api` + `web` + `gateway` |
+| `railway.ts` | Desired topology: managed Postgres + `api` + `web` + `runner` + `gateway` |
 | `package.json` | Isolated npm env for the `railway` IaC SDK (not part of Bun workspaces) |
 
 **Do not** add deprecated `railway.json` / `railway.toml` (cutoff 2026-12-01).
 
-## Same images as Compose
+## Image-based services (oxidean#124)
 
-| Service | Builder | Dockerfile |
-|---------|---------|------------|
-| `api` | `DOCKERFILE` | `crates/oxidean-api/Dockerfile` (repo-root context) |
-| `web` | `DOCKERFILE` | `apps/web/Dockerfile` (repo-root context) |
-| `runner` | `DOCKERFILE` | `docker/oxidean-runner/Dockerfile` (repo-root context) |
-| `gateway` | `DOCKERFILE` | `deploy/cloud/Dockerfile` (Caddy file proxy) |
+Every service is an **image source** — [`.github/workflows/images.yml`](../.github/workflows/images.yml) builds all four images in GitHub Actions, gates pushes until every image is green, and publishes the all-or-nothing `sha-<commit>` tag set to GHCR (public `ghcr.io/oxidean/*` packages — Railway pulls unauthenticated). Railway never builds from the repo, so all four services deploy identical bits — no build skew, no duplicated build compute.
+
+| Service | Image | Built from |
+|---------|-------|------------|
+| `api` | `ghcr.io/oxidean/oxidean-api` | `crates/oxidean-api/Dockerfile` (repo-root context) |
+| `web` | `ghcr.io/oxidean/oxidean-web` | `apps/web/Dockerfile` (repo-root context) |
+| `runner` | `ghcr.io/oxidean/oxidean-runner` | `docker/oxidean-runner/Dockerfile` (repo-root context) |
+| `gateway` | `ghcr.io/oxidean/oxidean-gateway` | `deploy/cloud/Dockerfile` (Caddy file proxy) |
+
+Tag model:
+
+| Tag | Meaning |
+|-----|---------|
+| `sha-<sha>` | **Deploy identity** — the immutable, atomic unit deploys pin |
+| `main` | Moving tip of `main` |
+| `staging` / `production` | **Channel aliases** — deploy tooling retags the deployed `sha-*` image to the env's channel on every deploy |
+| `<semver>` (+`latest`) | Published on component tag lanes (`oxidean-api-v*`→api, `web-v*`→web, `oxidean-runner-v*`→runner; `latest` is stable-only) |
+| `pr-<n>` / `pr-<n>-sha-<sha>` | Same-repo PR builds |
+
+IaC seeds each environment with its **channel tag** (`:production`, `:staging`, `:main` elsewhere), so a `config apply` redeploys the exact bits the environment was already running — never whatever `main` happens to be.
+
+**One-time setup:** each `oxidean-{api,web,runner,gateway}` package exists on GHCR after the first `images.yml` run; flip each to **public** (Package settings → Change visibility → public, or link the package to this repo and keep the org default). Railway then pulls unauthenticated. If a package must stay private, attach registry credentials per service instead (service → Settings → Source → registry credentials — a GHCR PAT with `read:packages`); IaC does not manage them.
 
 Cloud default database is **managed Postgres** (`postgres()` helper). MySQL/SQLite remain self-host/CI dialects only (D-CLOUD-02).
 
@@ -26,32 +42,23 @@ Cloud default database is **managed Postgres** (`postgres()` helper). MySQL/SQLi
 
 | Environment | Role | Deploy trigger |
 |-------------|------|----------------|
-| `preview` | Persistent base for Railway **PR Environments** | Autodeploy off (IaC / manual only) |
-| `staging` | Always-on integration | Autodeploy from `main` + Wait for CI |
-| `production` | Live | Autodeploy **off**; promote only via GitHub Action |
+| `preview` | Persistent base for Railway **PR Environments** | Manual / IaC only; `:main` seed |
+| `staging` | Always-on integration | `images.yml` deploys the `sha-*` set on every main push |
+| `production` | Live | Promote only via GitHub Action (`production-deploy.yml`) |
 
-**Important:** TypeScript IaC (`github()` + `checkSuites`) does **not** disable Autodeploy. After `railway config apply` on production, open each of `api` / `web` / `gateway` → Settings → GitHub and click **Disable** (or delete `deploymentTriggers`), while leaving the repo connected for promote-by-SHA. Verify with `make cloud-production-autodeploy-check`.
+Image-sourced services cannot carry GitHub deployment triggers at all — there is no Autodeploy to disable. `make cloud-production-autodeploy-check` still guards against a repo source being re-added.
 
-Ephemeral PR environments clone `preview` (services, networking, variables) when a project member opens a PR. They are deleted when the PR merges or closes. Bot PR Environments stay off unless you explicitly enable them.
+Ephemeral PR environments clone `preview` (services, networking, variables) when a project member opens a PR — including the `:main` image seed. `images.yml`'s **bind-pr-env** job then finds the environment via `meta.prNumber` and repins every service to the PR's `pr-<n>-sha-<sha>` image once the build lands (a brief `:main` window is inherent — Railway clones preview instantly, the image takes a build). Every subsequent push re-pins to the new sha tag. Redeploy progress is visible on the PR as a **GitHub Deployment** in `Oxidean / oxidean-pr-<n>` (`in_progress` → `success`/`failure`, linking the env URL) — Railway only posts Deployment records for git-triggered builds, so the bind job posts its own (and waits for every service's new deployment to reach a terminal state before flipping success). Fork PRs publish nothing and are never bound. On PR close (merged or abandoned) the **cleanup-pr** job tears the lane down: deletes the Railway environment (`railway-pr-env-delete.sh`), deletes the GitHub Environment Railway's deployment statuses created (`Oxidean / oxidean-pr-<n>`), and garbage-collects the `pr-<n>`/`pr-<n>-sha-*` GHCR tags. All three are best-effort and logged, never fatal. Bot PR Environments stay off unless you explicitly enable them.
 
 **Collaborators:** invite people to the Railway **project** (Viewer is enough) and have them link their GitHub account. Repo collaborator status alone does not grant PR Environments.
 
-**Repo transfer or rename:** if the GitHub repo moves orgs or is renamed, the GitHub App installation changes and Railway's stored service connections go stale — `config apply` rewrites `source.repo` but does not rebind the connection, and all `deploymentTriggers` are lost. Symptoms: pushes and PRs produce no deploys and no PR environments, and `githubRepoUpdate` returns "Invalid source". Fix per service: `serviceConnect` (or Settings → Source → reconnect) with the new `owner/repo`, which rebinds to the live installation and re-creates `main` triggers on every environment — then delete the triggers on `preview` and `production` and keep `staging` on `main` + Wait for CI. If repo listing returns "Not Authorized", re-link GitHub in Railway account settings.
-
-**Focused PR Environments (recommended):** enable in Project Settings → Environments, then set watch paths on services, for example:
-
-| Service | Watch paths |
-|---------|-------------|
-| `api` | `crates/oxidean-api/**`, `crates/oxidean-cli/**`, `crates/oxidean-core/**`, `crates/oxidean-db/**`, `packages/api-client/**` |
-| `web` | `apps/web/**`, `packages/**` |
-| `runner` | `docker/oxidean-runner/**`, `crates/oxidean-runner/**`, `Cargo.lock` |
-| `gateway` | `deploy/cloud/**` |
+**Repo transfer or rename:** if the GitHub repo moves orgs or is renamed, update `IMAGES` in `railway.ts` if the GHCR namespace moved — image sources have no repo connection to rebind. Railway PR-environment creation keys off the repo integration; if PRs stop creating environments, re-check the GitHub App installation in Project Settings.
 
 **Volume size:** `forge-data` is **20480 MB** (20 GB) in IaC.
 
 ## Operator workflow (D-CLOUD-07)
 
-`railway config apply` runs from an **operator machine**, never from CI: no workflow invokes `config plan`/`config apply`, and apply credentials exist only as the operator's own `railway login` session or env vars — **tokens never enter CI or the repo**. The single CI-held Railway credential is the human-gated promote/rollback token on the `Oxidean / production` GitHub Environment, which deploys commits only and is never used for IaC apply.
+`railway config apply` runs from an **operator machine**, never from CI: no workflow invokes `config plan`/`config apply`, and apply credentials exist only as the operator's own `railway login` session or env vars — **apply tokens never enter CI or the repo**. CI-held Railway credentials are deploy-scoped only: repo secrets `RAILWAY_API_TOKEN`/`RAILWAY_TOKEN` for `images.yml`'s staging deploys, PR-environment binds, and CLI-feed repins, plus the human-gated promote/rollback token on the `Oxidean / production` GitHub Environment — none is ever used for IaC apply.
 
 ### Prerequisites
 
@@ -90,9 +97,9 @@ Apply the same topology to `preview`, `staging`, and `production` — relink and
 
 ### After apply — dashboard steps IaC cannot do
 
-1. **Deploy triggers:** `config apply` connects GitHub and may create `deploymentTriggers`. Per the [environments table](#environments): `staging` keeps `main` autodeploy + Wait for CI; `preview` and `production` get autodeploy **off** (service → Settings → GitHub → Disable). Verify with `make cloud-production-autodeploy-check`.
-2. **Per-environment `preserve()` secrets:** set in the dashboard on `api` / `web` / `runner` — see the secrets paragraph below (runner token pair, web-flow key, SSO/email keys).
-3. **Domain:** attach a Railway or custom domain to `gateway` — the advertise vars reference `${{gateway.RAILWAY_PUBLIC_DOMAIN}}`.
+1. **Per-environment `preserve()` secrets:** set in the dashboard on `api` / `web` / `runner` — see the secrets paragraph below (runner token pair, web-flow key, SSO/email keys).
+2. **Domain:** attach a Railway or custom domain to `gateway` — the advertise vars reference `${{gateway.RAILWAY_PUBLIC_DOMAIN}}`.
+3. **First deploy after switching to image sources:** the seeded channel tag must exist on GHCR (`:staging` / `:production` are moved by deploy tooling after the first deploy — `:main` exists after the first `images.yml` push). Until then a `config apply` redeploy pulls a missing tag — run `images.yml` first, or apply source changes together with the first image deploy.
 
 ### Verify and rollback
 
@@ -102,7 +109,7 @@ railway service list --json                    # api, web, runner, gateway, post
 railway variable list --service api --json     # IaC vars materialized; preserves intact
 ```
 
-Config apply mutates configuration, not running deployments — the next deploy picks it up (staging autodeploys; production promotes via the GitHub Action). Then `GET https://<domain>/health` must return 200.
+Config apply mutates configuration, not running deployments — the next deploy picks it up (staging tracks `images.yml` main-push deploys; production promotes via the GitHub Action). Then `GET https://<domain>/health` must return 200.
 
 There is no IaC undo. To revert config: check out the prior git revision of `.railway/railway.ts`, re-plan, review, re-apply. Destructive diffs (resource removal) require the CLI's `--confirm-destructive` — treat them as data-loss operations. To roll back a bad **deploy**, use the Production deploy action below — not a config re-apply.
 
@@ -118,7 +125,7 @@ IaC sets public browser/SSH advertise vars from the **gateway** domain (not `pre
 | `OXIDEAN_WEB_BEHIND_PROXY` (web) | `1` — the gateway sanitizes `X-Forwarded-*`, so `oxidean-web` trusts the edge's chain |
 | `OXIDEAN_AUTO_MIGRATE` | `true` on all environments (including production) |
 | `OXIDEAN_PROTECTION_HELPER` | `/usr/local/bin/oxidean-protection-hook` (API image) |
-| `OXIDEAN_CLI_DIST_URL` (api) | Owned by **deploy tooling**, not IaC — `scripts/railway-staging-api-redeploy.sh` and `scripts/railway-production-deploy.sh` upsert it (skipDeploys) to the `ox-v*` tag-release download URL for the deployed commit. Staging pins the tag **pointing at** that commit; production falls back to the newest stable `ox-v*` tag merged into it, so a stable-cut bump commit that didn't touch `ox` still serves the latest released CLI (empty = no released `ox` at all → host-only). Docker **build-arg** (Dockerfile default empty → host-only `ox`). When set, image build fail-closes if the matrix cannot be fetched; `latest.json` is best-effort. Preview / PR envs leave it unset → same-commit host `ox` only, with `RAILWAY_GIT_COMMIT_SHA` written to `SOURCE_COMMIT` for a truthful `dist_commit`. |
+| `OXIDEAN_CLI_DIST_URL` (api) | Owned by **deploy tooling**, not IaC — `scripts/railway-staging-api-redeploy.sh` and `scripts/railway-production-deploy.sh` upsert it (skipDeploys) to the `ox-v*` tag-release download URL for the deployed commit. Staging pins the tag **pointing at** that commit; production falls back to the newest stable `ox-v*` tag merged into it, so a stable-cut bump commit that didn't touch `ox` still serves the latest released CLI (empty = no released `ox` at all → host-only). **Runtime env var** on Cloud: the api container's entrypoint (`crates/oxidean-api/docker-entrypoint.sh`) fetches + verifies the matrix at boot into a URL-keyed dir on the `forge-data` volume and points `OXIDEAN_CLI_DIST_DIR` at it — feed unreachable or checksum mismatch → container never reports healthy → the previous replica stays. Self-host builds keep the **build-arg** path baked into the image (default empty → host-only `ox`). Preview / PR envs leave it unset → same-commit host `ox` only, with `SOURCE_COMMIT` baked at build time for a truthful `dist_commit`. |
 
 ### ox CLI multi-arch matrix
 
@@ -126,8 +133,8 @@ Cloud CLI distribution is **tag-pinned**: deploys fetch the matrix from the
 `ox-v*` release matching the deployed commit — there is no rolling feed.
 
 1. An `ox-v*.*.*` tag push runs [`.github/workflows/ox-cli.yml`](../.github/workflows/ox-cli.yml), which publishes the tag's GitHub Release with the full matrix (`ox-targets.txt` + `ox-*` + `.sha256` + `SOURCE_COMMIT` + installers/packages, plus `latest.json` on stable cuts).
-2. The same run redeploys staging `api` via [`scripts/railway-staging-api-redeploy.sh`](../scripts/railway-staging-api-redeploy.sh) (`RAILWAY_API_TOKEN` or staging-scoped `RAILWAY_TOKEN`; skipped when absent). The script resolves the `ox-v*` tag on that commit and upserts `OXIDEAN_CLI_DIST_URL` to the tag's download URL before redeploying.
-3. [`scripts/railway-production-deploy.sh`](../scripts/railway-production-deploy.sh) `promote` applies the pin on production `api`, falling back to the newest stable `ox-v*` tag merged into the deployed commit. Preview / PR envs keep the arg unset → they serve the same-commit host `ox` (linux-amd64 only); deploys with no released `ox` tag at all go host-only.
+2. `images.yml`'s **staging-cli-feed** job (workflow_run on ox-cli completing) invokes [`scripts/railway-staging-api-redeploy.sh`](../scripts/railway-staging-api-redeploy.sh) (`RAILWAY_API_TOKEN` or staging-scoped `RAILWAY_TOKEN`; skipped when absent). The script resolves the `ox-v*` tag on that commit, upserts `OXIDEAN_CLI_DIST_URL` to the tag's download URL, and `serviceInstanceRedeploy`s staging `api` — the container's boot fetch then serves the new matrix. No image rebuild or retag is involved.
+3. [`scripts/railway-production-deploy.sh`](../scripts/railway-production-deploy.sh) `promote` applies the pin on production `api` before the image deploy, falling back to the newest stable `ox-v*` tag merged into the deployed commit. Preview / PR envs keep the var unset → they serve the same-commit host `ox` (linux-amd64 only); deploys with no released `ox` tag at all go host-only.
 4. Verify: `GET …/cli/latest` lists darwin/windows (and may include `dist_commit`); macOS `install.sh` succeeds.
 
 Self-hosted images leave the build-arg empty (Compose default) or point at **their** artifact feed — never require upstream Oxidean's releases. Details: [docs/CLI.md](../docs/CLI.md).
@@ -142,12 +149,12 @@ Do **not** rely on Environment Sync for promote: Sync includes variables and can
 
 1. Confirm the commit is healthy on **staging**.
 2. GitHub → **Actions** → **Production deploy** → Run workflow:
-   - **promote** — `serviceInstanceDeployV2` with `commitSha` for `api` / `web` / `gateway` (default: `main` HEAD). Gated on CI success for that SHA. Also **creates the stable release** (changelog + `chore(release):` bump commit + `*-vX.Y.Z` tags via `RELEASE_TOKEN`) and deploys the resulting bump commit; the first-ever promote tags the `0.1.0` baseline for every component. `cut_release: false` skips the cut (plain re-promote). When a fresh `ox-v*` tag was just cut, the job waits for the `ox-cli.yml` asset matrix before deploying. Leaves production variables alone.
-   - **rollback** — `deploymentRollback` to the prior `canRollback` deployment on each of those services.
+   - **promote** — pins `source.image` to `ghcr.io/oxidean/oxidean-<svc>:sha-<sha>` for `api` / `web` / `runner` / `gateway` (default: `main` HEAD) via [`scripts/railway-image-deploy.sh`](../scripts/railway-image-deploy.sh), then moves the `:production` channel tag to the deployed images. Gated on CI success **and** all four `sha-*` manifests existing on GHCR — the stable cut's `chore(release):` bump commit gets its image set as a seconds-long release-layer retag by `images.yml`, so the wait is normally short. Also **creates the stable release** (changelog + `chore(release):` bump commit + `*-vX.Y.Z` tags via `RELEASE_TOKEN`) and deploys the resulting bump commit; the first-ever promote tags the `0.1.0` baseline for every component. `cut_release: false` skips the cut (plain re-promote). When a fresh `ox-v*` tag was just cut, the job waits for the `ox-cli.yml` asset matrix before deploying. Leaves production variables alone.
+   - **rollback** — `deploymentRollback` to the prior `canRollback` deployment on each of those services (restores the previous image refs).
    - **dry_run** — toggle on to print the plan without mutating Railway (still needs `RAILWAY_TOKEN`/`RAILWAY_API_TOKEN` for rollback target lookup).
 3. Smoke `https://app.oxidean.dev/health` (skipped on dry-run).
 
-Scripts: [`scripts/railway-production-deploy.sh`](../scripts/railway-production-deploy.sh), [`scripts/railway-production-autodeploy-check.sh`](../scripts/railway-production-autodeploy-check.sh) (`make cloud-production-autodeploy-check`). Workflow: [`.github/workflows/production-deploy.yml`](../.github/workflows/production-deploy.yml).
+Scripts: [`scripts/railway-production-deploy.sh`](../scripts/railway-production-deploy.sh), [`scripts/railway-image-deploy.sh`](../scripts/railway-image-deploy.sh), [`scripts/railway-production-autodeploy-check.sh`](../scripts/railway-production-autodeploy-check.sh) (`make cloud-production-autodeploy-check`). Workflows: [`.github/workflows/production-deploy.yml`](../.github/workflows/production-deploy.yml), [`.github/workflows/images.yml`](../.github/workflows/images.yml).
 
 **GitHub Environment `Oxidean / production`:** add `RAILWAY_TOKEN` (Railway project token scoped to the production environment — sent as `Project-Access-Token`, not Bearer; an account/workspace token in `RAILWAY_API_TOKEN` also works). Enable required reviewers if you want an approval gate on the button.
 

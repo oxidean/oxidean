@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2016 # GraphQL literals stay single-quoted; $vars bind via jq --arg/--argjson
 # Assert Oxidean Cloud production has no GitHub deployment triggers
 # (autodeploy off). Staging is expected to keep triggers — not checked here.
+#
+# Post image-migration (oxidean#124): services pull GHCR images instead of
+# building from GitHub, so image-sourced services cannot carry deployment
+# triggers at all — this check guards against re-adding a repo source or
+# manual Autodeploy flips.
 #
 # Usage:
 #   RAILWAY_TOKEN=… scripts/railway-production-autodeploy-check.sh
@@ -11,16 +17,21 @@
 # header), RAILWAY_API_TOKEN (account/workspace token → `Authorization:
 # Bearer`), or ~/.railway/config.json accessToken (Bearer).
 #
-# Exit 0 when production api/web/gateway have zero deploymentTriggers.
+# Exit 0 when production api/web/runner/gateway have zero deploymentTriggers.
 # Exit 1 if any trigger exists (autodeploy would fire on push to the branch).
 
 set -euo pipefail
 
-API_URL="${RAILWAY_API_URL:-https://backboard.railway.com/graphql/v2}"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd -P)"
+# shellcheck source=scripts/railway-gql.sh
+source "${SCRIPT_DIR}/railway-gql.sh"
+
+API_URL="$(railway_api_url)"
 PROJECT_ID="${RAILWAY_PROJECT_ID:-cec803d0-289b-4078-80cf-7291c16fc5ec}"
 ENVIRONMENT_ID="${RAILWAY_ENVIRONMENT_ID:-b1c33c22-90ce-433b-99f6-864656512115}"
 SERVICE_API_ID="${RAILWAY_SERVICE_API_ID:-19bf0a47-2fdf-4130-b6b0-858de92cb858}"
 SERVICE_WEB_ID="${RAILWAY_SERVICE_WEB_ID:-26b7e1b6-6cfa-4c7e-942a-bed8e5ce12a2}"
+SERVICE_RUNNER_ID="${RAILWAY_SERVICE_RUNNER_ID:-36f9b50a-738a-419a-9171-49f56c902e6a}"
 SERVICE_GATEWAY_ID="${RAILWAY_SERVICE_GATEWAY_ID:-864fa81c-6e5d-4939-b33b-85eb435365ac}"
 
 QUERY='query($projectId: String!, $environmentId: String!, $serviceId: String!) {
@@ -34,39 +45,6 @@ QUERY='query($projectId: String!, $environmentId: String!, $serviceId: String!) 
     }
   }
 }'
-
-die() {
-  echo "error: $*" >&2
-  exit 1
-}
-
-need_jq() {
-  command -v jq >/dev/null 2>&1 || die "jq is required"
-}
-
-# Prints one curl config-file line selecting the right auth header for the
-# available credential. Railway project tokens are NOT bearer tokens — they
-# only authenticate via the `Project-Access-Token` header.
-resolve_auth_header() {
-  if [[ -n "${RAILWAY_TOKEN:-}" ]]; then
-    printf 'header = "Project-Access-Token: %s"\n' "$RAILWAY_TOKEN"
-    return
-  fi
-  if [[ -n "${RAILWAY_API_TOKEN:-}" ]]; then
-    printf 'header = "Authorization: Bearer %s"\n' "$RAILWAY_API_TOKEN"
-    return
-  fi
-  local cfg="${HOME}/.railway/config.json"
-  if [[ -f "$cfg" ]]; then
-    local t
-    t="$(jq -r '.user.accessToken // .user.token // empty' "$cfg" 2>/dev/null || true)"
-    if [[ -n "$t" && "$t" != "null" ]]; then
-      printf 'header = "Authorization: Bearer %s"\n' "$t"
-      return
-    fi
-  fi
-  die "no Railway credential: set RAILWAY_TOKEN (project token) or RAILWAY_API_TOKEN (account/workspace token), or run railway login"
-}
 
 # Prints response JSON to stdout.
 fetch_triggers() {
@@ -82,7 +60,7 @@ fetch_triggers() {
     return
   fi
   local auth_line payload raw
-  auth_line="$(resolve_auth_header)"
+  auth_line="$(railway_auth_header)"
   payload="$(
     jq -n \
       --arg q "$QUERY" \
@@ -114,6 +92,7 @@ fetch_triggers() {
 service_pairs() {
   printf '%s %s\n' api "$SERVICE_API_ID"
   printf '%s %s\n' web "$SERVICE_WEB_ID"
+  printf '%s %s\n' runner "$SERVICE_RUNNER_ID"
   printf '%s %s\n' gateway "$SERVICE_GATEWAY_ID"
 }
 
@@ -141,9 +120,10 @@ main() {
   if [[ "$failed" -ne 0 ]]; then
     cat >&2 <<'EOF'
 
-Production must not autodeploy from GitHub. Disable Autodeploy in Railway
-service Settings (or delete the deploymentTriggers), keep the GitHub source
-connected for manual promote-by-SHA, then re-run this check.
+Production must not autodeploy. Services pull GHCR images pinned by deploy
+tooling — a GitHub deployment trigger means a repo source or Autodeploy was
+re-added. Remove the trigger (service Settings → disconnect repo source /
+disable Autodeploy), then re-run this check.
 
 Promote only via: Actions → Production deploy (workflow_dispatch).
 Docs: docs/DEPLOYMENT.md, .railway/README.md

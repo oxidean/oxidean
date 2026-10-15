@@ -13,38 +13,41 @@ Related docs: [CONFIGURATION.md](CONFIGURATION.md), [ARCHITECTURE.md](ARCHITECTU
 | SQLite overlay | `docker-compose.yml` + `docker-compose.sqlite.yml` | No DB container; file under `${OXIDEAN_SQLITE_HOST_DIR:-./var}` → `/app/var` (Compose v2.24+ for `!reset`) |
 | Dev-auth stubs (local only) | `docker-compose.dev-auth.yml` (`--profile dev-auth`) | Mailpit / OIDC mock / HTTP stubs — not a production stack |
 | API image | `crates/oxidean-api/Dockerfile` | Multi-stage Rust release binary `oxidean-api`, listens `0.0.0.0:8080` |
-| Web image | `apps/web/Dockerfile` | Bun build of `@oxidean/web`, runs `bun run preview` on `:3000` |
+| Web image | `apps/web/Dockerfile` | Bun build of `@oxidean/web`, served by `oxidean-web` (Rust) on `:3000` |
 | Traefik extras | `deploy/traefik/` | Optional static YAML notes; default routing is Compose labels + Traefik CLI flags |
-| Oxidean Cloud (Railway-class) | `.railway/railway.ts` + `deploy/cloud/` | Same api/web Dockerfiles; managed Postgres; Caddy file gateway (no Docker socket) |
+| Oxidean Cloud (Railway-class) | `.railway/railway.ts` + `deploy/cloud/` | GHCR images built by `images.yml`; managed Postgres; Caddy file gateway (no Docker socket) |
 
 ### Oxidean Cloud (Railway)
 
-Cloud deploys the **same** `crates/oxidean-api/Dockerfile` and `apps/web/Dockerfile` images as Compose (D-CLOUD-01). Default database is **managed Postgres** (D-CLOUD-02). HTTP ingress is a **file-configured Caddy** gateway under `deploy/cloud/` — not Traefik’s Docker provider (D-CLOUD-03).
+Cloud services pull **public GHCR images** — [`.github/workflows/images.yml`](../.github/workflows/images.yml) builds `oxidean-{api,web,runner,gateway}` in GitHub Actions from the same Dockerfiles Compose uses (D-CLOUD-01), gates pushes until every image is green, and publishes the all-or-nothing `sha-<commit>` tag set (oxidean#124). Railway never clones or builds the repo. Default database is **managed Postgres** (D-CLOUD-02). HTTP ingress is a **file-configured Caddy** gateway under `deploy/cloud/` — not Traefik’s Docker provider (D-CLOUD-03).
 
 | Railway service | Role |
 |-----------------|------|
 | `postgres` | Managed Postgres plugin |
-| `api` | Forge API + volumes under `/var/*` |
-| `web` | SPA (`bun run preview`) — private |
-| `gateway` | Public HTTPS edge (`deploy/cloud/Caddyfile`) |
+| `api` | Forge API + volumes under `/var/*` — `ghcr.io/oxidean/oxidean-api` |
+| `web` | `oxidean-web` serving the Astro `dist` — private — `ghcr.io/oxidean/oxidean-web` |
+| `runner` | Actions runner (host mode) — `ghcr.io/oxidean/oxidean-runner` |
+| `gateway` | Public HTTPS edge (`deploy/cloud/Caddyfile`) — `ghcr.io/oxidean/oxidean-gateway` |
+
+Image tags: `sha-<sha>` is the immutable deploy identity; `main` tracks main-tip; `staging`/`production` are channel aliases deploy tooling retags to each environment's live image (IaC seeds the env's channel tag, so `config apply` redeploys identical bits); `x.y.z`/`latest` are published on component tag lanes; `pr-<n>`/`pr-<n>-sha-<sha>` are same-repo PR builds.
 
 #### Environments
 
 | Environment | Role | Deploy trigger |
 |-------------|------|----------------|
-| `preview` | Base for Railway **PR Environments** (ephemeral per-PR copies) | Autodeploy off |
-| `staging` | Always-on integration | Autodeploy from `main` + Wait for CI |
-| `production` | Live | Autodeploy off; promote via GitHub Action |
+| `preview` | Base for Railway **PR Environments** (ephemeral per-PR copies) | Manual / IaC only |
+| `staging` | Always-on integration | `images.yml` deploys the `sha-*` set on every `main` push |
+| `production` | Live | Promote only via the **Production deploy** GitHub Action |
 
 PR Environments inherit from **`preview`** (Project Settings → Environments). Only authors who are Railway project members with GitHub linked get automatic PR deploys. Invite future collaborators as project **Viewer** (or higher) and have them link GitHub. Keep Bot PR Environments off unless you want Dependabot-style previews.
 
-Focused PR Environments (optional but recommended for this monorepo): enable in project settings, then set watch paths on `api` / `web` / `gateway` (see [`.railway/README.md`](../.railway/README.md)).
+Each PR environment initially clones preview's `:main` image seed; `images.yml`'s **bind-pr-env** job then repins every service to the PR's `pr-<n>-sha-<sha>` image once the build lands (the brief `:main` window is inherent — Railway clones preview instantly, the image takes a build; every subsequent push re-pins the new sha tag). Progress shows on the PR as a **Deployment** in `Oxidean / oxidean-pr-<n>` (`in_progress` → `success`/`failure` with the env URL); the same record is posted for staging deploys and production promotes since Railway only posts Deployments for git-triggered builds. Fork PRs publish nothing and are never bound. On PR close, **cleanup-pr** deletes the Railway environment, the `Oxidean / oxidean-pr-<n>` GitHub Environment, and the `pr-<n>` GHCR tags — all best-effort.
 
 #### Operator steps (D-CLOUD-07 — human apply only)
 
 Full runbook: [`.railway/README.md`](../.railway/README.md#operator-workflow-d-cloud-07). Summary:
 
-1. On your machine only, authenticate the Railway CLI: `railway login`, or export `RAILWAY_TOKEN` (project token scoped to the target environment — preferred) / `RAILWAY_API_TOKEN` (account/workspace token). **Tokens never enter CI or the repo** — no workflow runs `railway config plan`/`apply`, and fork-PR jobs see no Railway credential. The only CI-held Railway credential is the human-gated promote/rollback token on the `Oxidean / production` GitHub Environment (deploy scope, never IaC apply).
+1. On your machine only, authenticate the Railway CLI: `railway login`, or export `RAILWAY_TOKEN` (project token scoped to the target environment — preferred) / `RAILWAY_API_TOKEN` (account/workspace token). **Apply tokens never enter CI or the repo** — no workflow runs `railway config plan`/`apply`, and fork-PR jobs see no Railway credential. CI-held Railway credentials are deploy-scoped only: repo secrets `RAILWAY_API_TOKEN`/`RAILWAY_TOKEN` for `images.yml`'s staging deploys, PR-env binds, and CLI-feed repins, plus the human-gated promote/rollback token on the `Oxidean / production` GitHub Environment — never IaC apply.
 2. Install IaC SDK: `cd .railway && npm ci` (isolated from the Bun monorepo).
 3. For each of `preview`, `staging`, and `production`: `railway link --project <id> --environment <env>`, then preview with `scripts/railway-apply.sh --environment <env>` (or `make cloud-plan`). `config` commands take no `--project`/`--environment` flags — the link selects the target, and the script asserts it.
 4. In the Railway dashboard, set per-environment vars:
@@ -56,10 +59,7 @@ Full runbook: [`.railway/README.md`](../.railway/README.md#operator-workflow-d-c
    - IaC wires `OXIDEAN_PUBLIC_ORIGIN`, `OXIDEAN_CORS_ORIGINS`, and `OXIDEAN_SSH_HOST` from the **gateway** public domain (`https://${{gateway.RAILWAY_PUBLIC_DOMAIN}}`). Do not `preserve()` those on preview/PR copies — stale preview hosts break setup/CORS. Production custom domains still need the gateway service domain (or override) to match the browser URL. At runtime, a stale `*.up.railway.app` `OXIDEAN_PUBLIC_ORIGIN` is replaced with `RAILWAY_SERVICE_GATEWAY_URL` / `RAILWAY_PUBLIC_DOMAIN`; custom domains are not overridden.
 5. Attach a Railway-provided (or custom) domain to **`gateway`** in each environment (required so PR Environments get automatic preview URLs).
 6. Review the plan, then **only with explicit approval**: `scripts/railway-apply.sh --environment <env> --apply` (or `railway config apply` and answer the CLI confirmation prompt — the human-verify gate).
-7. **Deploy policy after apply (IaC does not set this):** `railway config apply` connects GitHub and may leave Autodeploy enabled. You must set triggers in the dashboard (or delete production `deploymentTriggers` via GraphQL) after every apply that recreates them:
-   - `staging`: GitHub branch `main`, **Autodeploy on**, **Wait for CI** on
-   - `preview` and `production`: GitHub **connected** (needed for promote-by-SHA), **Autodeploy off** (no deployment triggers). Production releases only via the manual **Production deploy** GitHub Action — never on merge to `main`.
-   - Verify: `make cloud-production-autodeploy-check` (expects zero production triggers for `api` / `web` / `gateway`).
+7. **Deploy policy after apply:** image-sourced services cannot carry GitHub deployment triggers — there is no Autodeploy to disable, and nothing to set post-apply. Production releases only via the manual **Production deploy** GitHub Action — never on merge to `main`. `make cloud-production-autodeploy-check` still guards against a repo source being re-added (expects zero production triggers for `api` / `web` / `runner` / `gateway`).
 8. **Migrations:** IaC sets `OXIDEAN_AUTO_MIGRATE=true` on **all** environments (preview, staging, production, and PR Environments). Promoting production deploys a new `api` image; on boot it applies pending sqlx migrations before listening. A failed migration exits before `/health` passes, so Railway keeps the previous replica.
 9. Confirm `GET https://<domain>/health` and browser `/`.
 
@@ -69,16 +69,16 @@ Do **not** use Railway Environment Sync to promote: Sync copies service **variab
 
 **Primary path — GitHub Action “Production deploy”** ([`.github/workflows/production-deploy.yml`](../.github/workflows/production-deploy.yml)):
 
-1. Validate the commit on **staging** (autodeploys from `main` + Wait for CI).
+1. Validate the commit on **staging** (`images.yml` deploys every `main` push).
 2. Repo → **Actions** → **Production deploy** → **Run workflow**:
-   - `action=promote` — deploys a commit SHA to production `api`, `web`, and `gateway` (default SHA = `main` HEAD; optional override). Requires a successful **CI** run on that SHA. Does not mutate Railway variables. New `api` containers run pending sqlx migrations on boot (`OXIDEAN_AUTO_MIGRATE=true`); a failed migration keeps the previous replica.
+   - `action=promote` — pins `ghcr.io/oxidean/oxidean-<svc>:sha-<sha>` on production `api`, `web`, `runner`, and `gateway` (default SHA = `main` HEAD; optional override) and moves the `:production` channel tag to the deployed images. Requires a successful **CI** run on that SHA, then waits for all four `sha-*` manifests on GHCR (the stable cut's `chore(release):` bump commit gets its image set as a seconds-long release-layer retag by `images.yml`). Does not mutate Railway variables beyond the api CLI-feed pin. New `api` containers run pending sqlx migrations on boot (`OXIDEAN_AUTO_MIGRATE=true`); a failed migration keeps the previous replica.
    - `action=rollback` — Railway `deploymentRollback` to the previous `canRollback` deployment on each of those services (restores that deployment’s image; Railway may also restore that deployment’s custom variables).
    - `dry_run=true` — resolves SHA / CI / rollback targets and prints the plan only (no deploys, rollbacks, or health probe).
 3. Confirm `GET https://app.oxidean.dev/health` (skipped when `dry_run=true`).
 
-**One-time GitHub setup:** On Environment [`Oxidean / production`](https://github.com/oxidean/oxidean/settings/environments/22303549290/edit), add secret `RAILWAY_TOKEN` — a Railway **project token** scoped to the *production* environment (project Settings → Tokens). The deploy script sends it via the `Project-Access-Token` header; a project token passed as a `Bearer` credential is rejected. An account/workspace token works instead via `RAILWAY_API_TOKEN` (`Authorization: Bearer`). Optionally enable required reviewers. Local dry-run: `scripts/railway-production-deploy.sh list` / `promote <sha> --dry-run` / `rollback --dry-run`. Confirm production Autodeploy stays off: `scripts/railway-production-autodeploy-check.sh` / `make cloud-production-autodeploy-check`.
+**One-time GitHub setup:** On Environment [`Oxidean / production`](https://github.com/oxidean/oxidean/settings/environments/22303549290/edit), add secret `RAILWAY_TOKEN` — a Railway **project token** scoped to the *production* environment (project Settings → Tokens). The deploy script sends it via the `Project-Access-Token` header; a project token passed as a `Bearer` credential is rejected. An account/workspace token works instead via `RAILWAY_API_TOKEN` (`Authorization: Bearer`). Optionally enable required reviewers. Local dry-run: `scripts/railway-production-deploy.sh list` / `promote <sha> --dry-run` / `rollback --dry-run`. Confirm production keeps zero deployment triggers: `scripts/railway-production-autodeploy-check.sh` / `make cloud-production-autodeploy-check`.
 
-**Avoid:** Sync staging → production unless you carefully reject variable diffs in staged changes. **Avoid:** re-enabling Autodeploy on production after an IaC apply.
+**Avoid:** Sync staging → production unless you carefully reject variable diffs in staged changes. **Avoid:** pointing any production service back at a repo source — image pins are the deploy identity; the autodeploy check fails on a re-added repo source.
 
 **Volumes (D-CLOUD-04):** `forge-data` mounts at `/var` on `api` (repos, lfs, packages, release-assets, uploads, ssh host keys as subdirs — same paths as Compose). Each environment has its own volume and database.
 
@@ -167,7 +167,7 @@ For **Oxidean Cloud**, path priorities are mirrored in [`deploy/cloud/Caddyfile`
 
 ## Build pipeline
 
-CI (`.github/workflows/ci.yml`, triggers: push to `main`, pull requests) **validates** Compose and builds/tests artifacts; it does **not** push images or deploy.
+CI (`.github/workflows/ci.yml`, triggers: push to `main`, pull requests) **validates** Compose and builds/tests artifacts. Image publish + deploy lives in [`images.yml`](../.github/workflows/images.yml) (GHCR push + staging deploy on `main`); CI itself does not deploy.
 
 1. `api-rust` — `cargo nextest run --workspace --profile ci`
 2. `web-octane` — `bun install --frozen-lockfile`, Vitest, `bunx turbo run build --filter=@oxidean/web`
@@ -176,7 +176,7 @@ CI (`.github/workflows/ci.yml`, triggers: push to `main`, pull requests) **valid
 5. `compose` — `docker compose … config` for default, MySQL, SQLite, and dev-auth files
 6. `db-matrix` — migrate + `dialect_probe` for postgres / mysql / sqlite
 
-Local image build happens on `docker compose … up --build` (or `make up` / `up-mysql` / `up-sqlite`). API Dockerfile: `cargo build --release -p oxidean-api --bin oxidean-api`. Web Dockerfile: `bun run --filter @oxidean/web build`, then `preview`. Cloud uses the same Dockerfiles via Railway `DOCKERFILE` builder (no mandatory registry publish in this phase).
+Local image build happens on `docker compose … up --build` (or `make up` / `up-mysql` / `up-sqlite`). API Dockerfile: `cargo build --release -p oxidean-api --bin oxidean-api`. Web Dockerfile: `bun run --filter @oxidean/web build`, then `oxidean-web`. Cloud pulls the same-Dockerfile artifacts from GHCR (`images.yml` publish); Railway never builds.
 
 ## Environment setup
 
@@ -223,7 +223,7 @@ No automated rollback is defined in CI or platform config files.
 2. Redeploy a known-good revision: check out the previous git tag/commit, then `make up` (or rebuild with the prior image tags if you publish images externally).
 3. Confirm with `make smoke` (or the dialect-specific smoke target) and `GET /health` / `system.health`.
 
-**Oxidean Cloud:** Redeploy the previous successful Railway deployment for `gateway` / `api` / `web`, or check out a known-good git revision and redeploy after `make cloud-plan` review. `railway config apply` has no undo and does not roll back deployments: revert the `.railway/railway.ts` edit in git, re-plan, and re-apply to restore configuration; use the **Production deploy** action (`action=rollback`) for deployment rollback.
+**Oxidean Cloud:** use the **Production deploy** action (`action=rollback` — `deploymentRollback` restores the previous deployment's image ref on `api` / `web` / `runner` / `gateway`), or re-promote a known-good `sha-*` tag after `make cloud-plan` review. `railway config apply` has no undo and does not roll back deployments: revert the `.railway/railway.ts` edit in git, re-plan, and re-apply to restore configuration.
 
 ## Monitoring
 

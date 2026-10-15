@@ -1,6 +1,7 @@
 # Beta channel: every merge to main cuts prerelease tags.
 #
-# `main` is the beta channel — Railway staging already autodeploys it. This
+# `main` is the beta channel — images.yml already deploys it to staging.
+# This
 # lane is bookkeeping: on each push it computes the beta BumpPlan and, when
 # anything bumped, creates annotated `<component>-v<semver>-beta.N` tags at the
 # pushed SHA and pushes them via RELEASE_TOKEN (GITHUB_TOKEN tag pushes do
@@ -9,7 +10,8 @@
 # Tag-only: manifests on main always carry the last stable version. Pushed
 # beta tags fire the normal tag lanes — release.yml creates prerelease-marked
 # Releases, ox-cli.yml builds the full matrix for `ox-v*-beta.*` (never
-# latest.json — C5), publish-runner.yml ships prerelease runner images.
+# latest.json — C5), images.yml ships prerelease service images (never
+# :latest).
 #
 # Stable cuts do NOT live here — the Production deploy promote job creates
 # the stable version bump (changelog + bump + tags) before deploying.

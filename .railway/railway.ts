@@ -1,16 +1,24 @@
 /**
  * Oxidean Cloud — Railway TypeScript IaC (D-CLOUD-01…07).
  *
- * Same Dockerfiles as Compose. Managed Postgres. File-configured Caddy gateway
- * (no Docker socket). Secrets use preserve() — never commit production tokens.
+ * Services pull GHCR images built by .github/workflows/images.yml — Railway
+ * never builds from the repo (oxidean#124). Managed Postgres. File-configured
+ * Caddy gateway (no Docker socket). Secrets use preserve() — never commit
+ * production tokens.
+ *
+ * Each environment seeds its channel tag — :production on production,
+ * :staging on staging, :main elsewhere (preview + PR-env bases). Deploy
+ * tooling (scripts/railway-image-deploy.sh) retags the channel to the
+ * environment's live image on every deploy, so a `config apply` redeploys
+ * the exact bits the environment already ran — no source drift.
  *
  * Operators: `railway config plan` then apply only with explicit approval.
  * See .railway/README.md and docs/DEPLOYMENT.md.
  */
 import {
   defineRailway,
-  github,
   group,
+  image,
   postgres,
   preserve,
   project,
@@ -18,8 +26,8 @@ import {
   volume,
 } from "railway/iac";
 
-/** GitHub source for DOCKERFILE builds (repo-root context). */
-const REPO = "oxidean/oxidean";
+/** GHCR image base — images.yml publishes one repo per service. */
+const IMAGES = "ghcr.io/oxidean";
 
 export default defineRailway((ctx) => {
   const db = postgres("postgres");
@@ -28,26 +36,16 @@ export default defineRailway((ctx) => {
   // Subdirs: repos, lfs, packages, release-assets, uploads, ssh.
   const forgeData = volume("forge-data", { sizeMB: 20480 });
 
-  // Wait for CI only on staging (autodeploy from main). Preview/production
-  // keep GitHub connected for promote-by-SHA, but Autodeploy must be disabled
-  // in the dashboard after apply — IaC cannot express "no deploymentTriggers".
-  // Verify: make cloud-production-autodeploy-check
-  const stagingWaitForCi = ctx.isEnvironment("staging");
+  // Channel tag seeded per environment — deploy tooling retags it to the
+  // live sha-* image on every deploy, so an apply redeploys identical bits.
+  const channel = ctx.isEnvironment("production")
+    ? "production"
+    : ctx.isEnvironment("staging")
+      ? "staging"
+      : "main";
 
   const api = service("api", {
-    source: github(REPO, { checkSuites: stagingWaitForCi || null }),
-    build: {
-      builder: "DOCKERFILE",
-      dockerfilePath: "crates/oxidean-api/Dockerfile",
-      watchPatterns: [
-        "crates/oxidean-api/**",
-        "crates/oxidean-cli/**",
-        "crates/oxidean-core/**",
-        "crates/oxidean-db/**",
-        "crates/oxidean-git/**",
-        "packages/api-client/**",
-      ],
-    },
+    source: image(`${IMAGES}/oxidean-api:${channel}`),
     healthcheck: "/health",
     // All environments migrate on API boot (including production promote). A
     // failed migration exits before listen so Railway keeps the previous replica.
@@ -78,12 +76,12 @@ export default defineRailway((ctx) => {
       // Track gateway public domain (PR Environments get unique hosts; do not preserve).
       OXIDEAN_PUBLIC_ORIGIN: "https://${{gateway.RAILWAY_PUBLIC_DOMAIN}}",
       OXIDEAN_CORS_ORIGINS: "https://${{gateway.RAILWAY_PUBLIC_DOMAIN}}",
-      // Cloud-only build-arg: OXIDEAN_CLI_DIST_URL is owned by deploy tooling
+      // OXIDEAN_CLI_DIST_URL is owned by deploy tooling
       // (scripts/railway-staging-api-redeploy.sh and
-      // scripts/railway-production-deploy.sh) — each deploy pins it to the
-      // `ox-v*` tag release matching the deployed commit, or empties it for
-      // host-only staging on untagged commits. Not seeded here: a static URL
-      // would pin every deploy to one feed.
+      // scripts/railway-production-deploy.sh) — a runtime env var the api
+      // container's entrypoint fetches at boot, pinned to the `ox-v*` tag
+      // release matching the deployed commit (empty = host-only). Not seeded
+      // here: a static URL would pin every environment to one feed.
       // See docs/CLI.md § Cloud / self-host.
       OXIDEAN_ADMIN_EMAIL: preserve(),
       OXIDEAN_ADMIN_PASSWORD: preserve(),
@@ -114,13 +112,7 @@ export default defineRailway((ctx) => {
   });
 
   const web = service("web", {
-    source: github(REPO, { checkSuites: stagingWaitForCi || null }),
-    build: {
-      builder: "DOCKERFILE",
-      dockerfilePath: "apps/web/Dockerfile",
-      // The image also compiles crates/oxidean-web (SPA server + API proxy).
-      watchPatterns: ["apps/web/**", "packages/**", "crates/oxidean-web/**", "Cargo.lock"],
-    },
+    source: image(`${IMAGES}/oxidean-web:${channel}`),
     // Private behind gateway; SPA `/` can 403 for bare probes. Rely on gateway + api checks.
     env: {
       // Pin listen port so gateway WEB_PORT=3000 stays correct on private net.
@@ -144,16 +136,7 @@ export default defineRailway((ctx) => {
   // host-mode. Registration state + workspaces persist on runner-data.
   const runnerData = volume("runner-data", { sizeMB: 5120 });
   const runner = service("runner", {
-    source: github(REPO, { checkSuites: stagingWaitForCi || null }),
-    build: {
-      builder: "DOCKERFILE",
-      dockerfilePath: "docker/oxidean-runner/Dockerfile",
-      watchPatterns: [
-        "docker/oxidean-runner/**",
-        "crates/oxidean-runner/**",
-        "Cargo.lock",
-      ],
-    },
+    source: image(`${IMAGES}/oxidean-runner:${channel}`),
     volumeMounts: {
       "/data": runnerData,
     },
@@ -173,12 +156,7 @@ export default defineRailway((ctx) => {
   });
 
   const gateway = service("gateway", {
-    source: github(REPO, { checkSuites: stagingWaitForCi || null }),
-    build: {
-      builder: "DOCKERFILE",
-      dockerfilePath: "deploy/cloud/Dockerfile",
-      watchPatterns: ["deploy/cloud/**"],
-    },
+    source: image(`${IMAGES}/oxidean-gateway:${channel}`),
     // Public HTTP(S) edge — attach custom domain in Railway dashboard.
     env: {
       API_HOST: api.env.RAILWAY_PRIVATE_DOMAIN,

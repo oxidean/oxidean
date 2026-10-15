@@ -49,16 +49,38 @@ describe("ox-cli.yml retarget", () => {
   });
 });
 
-describe("publish-runner.yml retarget", () => {
-  const yml = wf("publish-runner.yml");
+describe("images.yml image lane", () => {
+  const yml = wf("images.yml");
 
-  test("triggers on the oxidean-runner-v prefix only", () => {
-    expect(yml).toContain('tags: ["oxidean-runner-v*.*.*"]');
-    expect(yml).not.toContain('tags: ["v*.*.*"]');
+  test("component tag lanes map to their service image", () => {
+    // oxidean-api-v*→api, web-v*/oxidean-web-v*→web, oxidean-runner-v*→runner.
+    expect(yml).toContain(
+      'tags: ["oxidean-api-v*.*.*", "web-v*.*.*", "oxidean-web-v*.*.*", "oxidean-runner-v*.*.*"]',
+    );
+    expect(yml).toContain("oxidean-api-v*) svc=api");
+    expect(yml).toContain("web-v*) svc=web");
+    expect(yml).toContain("oxidean-web-v*) svc=web");
+    expect(yml).toContain("oxidean-runner-v*) svc=runner");
   });
 
   test("component prefix is stripped for the image tag", () => {
-    expect(yml).toContain("GITHUB_REF_NAME#oxidean-runner-v");
+    expect(yml).toContain('semver="${tagname#oxidean-api-v}"');
+    expect(yml).toContain('semver="${tagname#web-v}"');
+    expect(yml).toContain('semver="${tagname#oxidean-web-v}"');
+    expect(yml).toContain('semver="${tagname#oxidean-runner-v}"');
+  });
+
+  test("all four services publish as an all-or-nothing sha tag set", () => {
+    // Matrix legs build push:false; a separate publish job pushes after all
+    // are green — a sha-<sha> tag set on GHCR is always complete.
+    expect(yml).toContain('ALL=\'["api","web","runner","gateway"]\'');
+    expect(yml).toContain("push: false");
+    expect(yml).toContain("needs: [meta, build]");
+    expect(yml).toContain("sha-${sha}");
+  });
+
+  test("prerelease tags never get :latest", () => {
+    expect(yml).toContain('"$semver" != *-*');
   });
 });
 
