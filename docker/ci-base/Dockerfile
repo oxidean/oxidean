@@ -1,8 +1,9 @@
 # CI base images — self-owned, content-tagged, run-isolated.
 #
 # Published to ghcr.io/<owner>/oxidean-ci by .github/workflows/ci-base.yml as
-# <flavor>-<hash> (immutable content tag, hash via scripts/ci-image-tag.sh)
-# plus <flavor>-latest (moving fallback). ci.yml resolves every pull to an
+# <flavor>-<hash> (content tag, hash via scripts/ci-image-tag.sh — same-repo
+# PRs on hashed inputs may publish it too, but only matching content can ever
+# select it) plus <flavor>-latest (moving fallback, main-owned only). ci.yml resolves every pull to an
 # @sha256 digest so all jobs in a run see byte-identical bits.
 #
 # Why this exists: the CI lanes used to lean on Swatinem/rust-cache (a mutable

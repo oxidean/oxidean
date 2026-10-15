@@ -10,10 +10,15 @@
 #
 # Triggers:
 #   push to main on hashed inputs  → build + push <flavor>-<hash> + -latest
-#   pull_request on ci-base inputs → build-only gate (push:false — nothing is
-#                                    published; fork tokens are read-only)
-#   weekly cron                    → rebuild all flavors (rustc drift) even
-#                                    when the hash tag already exists
+#   pull_request on ci-base inputs → same-repo PRs push the <flavor>-<hash> tag
+#                                    only (content-keyed: a PR-built image can
+#                                    only be selected by runs whose inputs hash
+#                                    identically) — this is how the fleet
+#                                    bootstraps/updates. -latest stays
+#                                    main-owned; fork PRs build-only (their
+#                                    token is read-only).
+#   weekly cron                    → rebuild all flavors (base-image patch
+#                                    drift) even when the hash tag exists
 #   workflow_dispatch              → same as cron (manual refresh/bootstrap)
 #
 # The ci-image job in ci.yml resolves tags to @sha256 digests; a tag rewrite
@@ -86,8 +91,21 @@ jobs:
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
+      - name: resolve push tags
+        id: tags
+        if: steps.skip.outputs.skip != 'true'
+        run: |
+          {
+            echo "list<<EOF"
+            echo "${IMAGE_NS}/oxidean-ci:${{ steps.t.outputs.tag }}"
+            # -latest is main-owned: PR legs publish only the hash tag.
+            [ "${{ github.event_name }}" != "pull_request" ] && \
+              echo "${IMAGE_NS}/oxidean-ci:${{ matrix.flavor }}-latest"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
       - name: login to GHCR
-        if: github.event_name != 'pull_request' && steps.skip.outputs.skip != 'true'
+        # Fork PR tokens are read-only → skip login and push nothing.
+        if: (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork != true) && steps.skip.outputs.skip != 'true'
         uses: docker/login-action@v4
         with:
           registry: ghcr.io
@@ -100,10 +118,8 @@ jobs:
           context: .
           file: docker/ci-base/Dockerfile
           target: ${{ matrix.flavor }}
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: |
-            ${{ env.IMAGE_NS }}/oxidean-ci:${{ steps.t.outputs.tag }}
-            ${{ env.IMAGE_NS }}/oxidean-ci:${{ matrix.flavor }}-latest
+          push: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork != true }}
+          tags: ${{ steps.tags.outputs.list }}
           # The docker lane is the documented cross-run cache exception —
           # BuildKit layers are content-keyed inputs (a lockfile or source
           # move busts them), never mutable shared state a run writes into.
