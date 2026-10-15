@@ -17,8 +17,8 @@
     "test:coverage:unit": "vitest run --coverage --project unit --coverage.reportsDirectory=coverage/unit",
     "test:coverage:integration": "vitest run --coverage --project integration --coverage.reportsDirectory=coverage/integration",
     "lint": "oxlint --type-aware --deny-warnings . \"src/**/*.tsrx\"",
-    "format": "oxfmt --write . \"src/**/*.tsrx\"",
-    "format:check": "oxfmt --check . \"src/**/*.tsrx\""
+    "format": "oxfmt --write . \"src/**/*.tsrx\" && prettier --write \"src/**/*.astro\"",
+    "format:check": "oxfmt --check . \"src/**/*.tsrx\" && prettier --check \"src/**/*.astro\""
   },
   "dependencies": {
     "@octanejs/astro": "0.0.41",
@@ -60,6 +60,8 @@
     "pixelmatch": "8.0.0",
     "playwright": "^1.64.0",
     "pngjs": "7.0.0",
+    "prettier": "3.9.10",
+    "prettier-plugin-astro": "1.1.1",
     "tailwindcss": "^4.3.3",
     "typescript": "^7.0.2",
     "vite": "^8.3.4",

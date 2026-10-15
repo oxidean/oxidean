@@ -15,7 +15,7 @@
 .PHONY: coverage-web coverage-rust coverage-weighted coverage-contract
 .PHONY: route-coverage-check browser-coverage-check ui-coverage-change-contract
 .PHONY: route-coverage-check-pr browser-coverage-check-pr
-.PHONY: web-lint web-format-check test-web-browser
+.PHONY: web-lint web-format-check rust-fmt-check test-web-browser
 .PHONY: dead-code-check docs-check
 .PHONY: version-check commit-check setup
 .PHONY: release-plan changelog release-tags
@@ -56,7 +56,7 @@ help:
 	@echo "  make coverage-weighted - D-QH-02 weighted gate (25/40/35, floor 0.70)"
 	@echo "  make coverage-contract - aggregator contract self-test"
 	@echo "  make route-coverage-check / browser-coverage-check - page + high-risk UI coverage gates"
-	@echo "  make web-lint / web-format-check / test-web-browser - oxlint, oxfmt, Chromium DOM races"
+	@echo "  make web-lint / web-format-check / rust-fmt-check / test-web-browser - oxlint, oxfmt+prettier, rustfmt, Chromium DOM races"
 	@echo "  make dead-code-check / docs-check - knip + machete + clippy -D warnings, rustdoc -D warnings"
 	@echo "  make smoke-actions  - Actions/runner Compose smoke (ACT-04/05; skip-ok without Docker)"
 	@echo "  make smoke          - compose bring-up smoke (PLAT-01)"
@@ -383,6 +383,9 @@ web-lint:
 
 web-format-check:
 	bun run --filter @oxidean/web format:check
+
+rust-fmt-check:
+	cargo fmt --all -- --check
 
 # Dead-code gate: knip covers TS/Astro/.tsrx (files, exports, deps via custom
 # compilers in knip.ts); cargo-machete covers unused Cargo deps; clippy -D
