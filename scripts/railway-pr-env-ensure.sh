@@ -14,6 +14,17 @@
 # self-created envs are found by the conventional name oxidean-pr-<n>
 # (railway_find_pr_environment_id matches meta.prNumber OR the name).
 #
+# Support services: skipInitialDeploys keeps the four image-managed
+# services (api/web/runner/gateway) idle until the bind repins them, but
+# it also leaves forked support services (postgres) with no deployment
+# at all — an instance that exists yet never runs, so
+# postgres.railway.internal never resolves and api crash-loops to
+# FAILED. Worse, the fork copies no volumes — postgres cannot boot
+# without one. Every emit path therefore runs ensure_support_services:
+# an idempotent pass that recreates missing volume mounts and rolls
+# non-image services lacking a healthy deployment (which also heals
+# envs created before this step).
+#
 # Auth: environment enumeration/creation needs an account/workspace
 # credential — RAILWAY_API_TOKEN or a `railway login` config. Env-scoped
 # project tokens (RAILWAY_TOKEN) can neither list nor create environments
@@ -31,6 +42,8 @@
 #                               env before creating one (default 120)
 #   OXIDEAN_PR_ENV_FORK_TIMEOUT seconds to wait for the fork's service
 #                               instances to materialize (default 240)
+#   OXIDEAN_PR_ENV_BOOT_TIMEOUT seconds to wait for triggered support-service
+#                               deploys (postgres) to settle (default 180)
 #   OXIDEAN_PR_ENV_DRY_RUN=1    same as --dry-run: print the mutation that
 #                               would run, touch nothing
 
@@ -55,7 +68,12 @@ SERVICE_GATEWAY_ID="${RAILWAY_SERVICE_GATEWAY_ID:-864fa81c-6e5d-4939-b33b-85eb43
 
 FIND_TIMEOUT="${OXIDEAN_PR_ENV_FIND_TIMEOUT:-120}"
 FORK_TIMEOUT="${OXIDEAN_PR_ENV_FORK_TIMEOUT:-240}"
+BOOT_TIMEOUT="${OXIDEAN_PR_ENV_BOOT_TIMEOUT:-180}"
 DRY_RUN="${OXIDEAN_PR_ENV_DRY_RUN:-0}"
+
+# Services CI deploys by image pin — every other forked service is a
+# support service (postgres today) and needs its own first deploy.
+MANAGED_SERVICE_IDS=" ${SERVICE_API_ID} ${SERVICE_WEB_ID} ${SERVICE_RUNNER_ID} ${SERVICE_GATEWAY_ID} "
 
 log() { echo "$*" >&2; }
 
@@ -110,6 +128,165 @@ wait_for_service_instances() {
     sleep 10
   done
   return 1
+}
+
+SERVICE_INSTANCES_QUERY='
+  query($id: String!) {
+    environment(id: $id) {
+      serviceInstances {
+        edges { node { serviceId serviceName latestDeployment { status } } }
+      }
+    }
+  }
+'
+
+# Heal a forked env's data plane. environmentCreate's fork copies
+# service config but NOT volumes — preview mounts /var/lib/postgresql/
+# data (postgres), /data (runner), /var (api) while a fresh fork has
+# none, so the postgres template exits instantly and api/runner crash
+# on the missing postgres.railway.internal. This pass (a) creates any
+# volume the source env has that the target lacks, for every service
+# instance present, then (b) rolls every non-image service that has no
+# healthy deployment via serviceInstanceDeployV2 — the same roll the
+# bind uses. (environmentTriggersDeploy only fires registered deployment
+# triggers; image services have none, so it is a no-op here.)
+# Idempotent: existing volumes and healthy services are untouched —
+# Railway-provisioned envs arrive complete and this is a no-op — while
+# envs created before this step (or half-forked ones) get repaired.
+# Best-effort: failures warn but never abort, and the settle wait is
+# bounded so a slow postgres cannot stall the job.
+ensure_support_services() {
+  local env_id="$1" project_id="$2"
+  local raw vols_src vols_dst
+
+  # -- volumes: mirror the source env's mounts --------------------------
+  local src_id="${RAILWAY_PR_ENV_SOURCE_ID:-}"
+  if [[ -z "$src_id" ]]; then
+    src_id="$(railway_resolve_environment_id "$project_id" "$SOURCE_ENVIRONMENT_NAME" 2>/dev/null || true)"
+  fi
+  src_id="${src_id:-$PREVIEW_ENVIRONMENT_ID}"
+
+  vols_src="$(
+    railway_gql '
+      query($id: String!) {
+        environment(id: $id) {
+          volumeInstances { edges { node { serviceId mountPath } } }
+        }
+      }
+    ' "$(jq -n --arg id "$src_id" '{id:$id}')" 2>/dev/null \
+      | jq -r '.data.environment.volumeInstances.edges[]?.node
+               | "\(.serviceId)\t\(.mountPath)"' || true
+  )"
+  vols_dst="$(
+    railway_gql '
+      query($id: String!) {
+        environment(id: $id) {
+          volumeInstances { edges { node { serviceId mountPath } } }
+        }
+      }
+    ' "$(jq -n --arg id "$env_id" '{id:$id}')" 2>/dev/null \
+      | jq -r '.data.environment.volumeInstances.edges[]?.node
+               | "\(.serviceId)\t\(.mountPath)"' || true
+  )"
+  if [[ -n "$vols_src" ]]; then
+    local vsid vmp
+    while IFS=$'\t' read -r vsid vmp; do
+      [[ -n "$vsid" && -n "$vmp" ]] || continue
+      case "$vols_dst" in
+        *"$vsid"*) continue ;;  # service already has a volume here
+      esac
+      if railway_gql '
+          mutation($input: VolumeCreateInput!) {
+            volumeCreate(input: $input) { id }
+          }
+        ' "$(jq -n --arg e "$env_id" --arg p "$project_id" --arg s "$vsid" --arg m "$vmp" \
+             '{input:{environmentId:$e, projectId:$p, serviceId:$s, mountPath:$m}}')" \
+           >/dev/null 2>&1; then
+        log "environment ${env_id}: created volume ${vmp} for service ${vsid}"
+      else
+        log "warning: environment ${env_id}: could not create volume ${vmp} for service ${vsid}"
+      fi
+    done <<< "$vols_src"
+  fi
+
+  # -- support services: roll anything not healthy ----------------------
+  if ! raw="$(
+    railway_gql "$SERVICE_INSTANCES_QUERY" \
+      "$(jq -n --arg id "$env_id" '{id:$id}')" 2>/dev/null
+  )"; then
+    log "warning: ${env_id}: serviceInstances query failed — skipping support-service deploys"
+    return 0
+  fi
+  local pending
+  pending="$(echo "$raw" | jq -r --arg managed "$MANAGED_SERVICE_IDS" '
+    .data.environment.serviceInstances.edges[].node
+    | select((.latestDeployment.status // "none")
+             | IN("none", "FAILED", "CRASHED", "REMOVED"))
+    | . as $node
+    | select(($managed | contains(" " + $node.serviceId + " ")) | not)
+    | "\($node.serviceId)\t\($node.serviceName)"')"
+  [[ -n "$pending" ]] || return 0
+
+  local -a booted=()
+  local sid sname
+  while IFS=$'\t' read -r sid sname; do
+    [[ -n "$sid" ]] || continue
+    if railway_gql '
+        mutation($environmentId: String!, $serviceId: String!) {
+          serviceInstanceDeployV2(environmentId: $environmentId, serviceId: $serviceId)
+        }
+      ' "$(jq -n --arg e "$env_id" --arg s "$sid" \
+           '{environmentId:$e, serviceId:$s}')" >/dev/null; then
+      log "environment ${env_id}: rolled support service ${sname:-$sid}"
+      booted+=("$sid")
+    else
+      log "warning: environment ${env_id}: could not roll support service ${sname:-$sid}"
+    fi
+  done <<< "$pending"
+  (( ${#booted[@]} > 0 )) || return 0
+
+  # Give the deploys a head start before the bind rolls the apps — api
+  # retries its database connect, but a ready postgres avoids a needless
+  # crash-loop window. Non-fatal on timeout.
+  local deadline=$((SECONDS + BOOT_TIMEOUT)) settling st
+  while (( SECONDS < deadline )); do
+    if raw="$(
+      railway_gql "$SERVICE_INSTANCES_QUERY" \
+        "$(jq -n --arg id "$env_id" '{id:$id}')" 2>/dev/null
+    )"; then
+      settling=0
+      for sid in "${booted[@]}"; do
+        st="$(echo "$raw" | jq -r --arg s "$sid" '
+          [.data.environment.serviceInstances.edges[].node
+           | select(.serviceId == $s)
+           | .latestDeployment.status // "none"][0] // "none"')"
+        case "$st" in
+          QUEUED | INITIALIZING | BUILDING | DEPLOYING | none)
+            settling=$((settling + 1)) ;;
+        esac
+      done
+      if (( settling == 0 )); then
+        log "environment ${env_id}: support service deploy(s) settled"
+        return 0
+      fi
+      log "environment ${env_id}: waiting on ${settling} support deploy(s) (sleep 10s)"
+    else
+      log "environment ${env_id}: serviceInstances query failed — retrying (sleep 10s)"
+    fi
+    sleep 10
+  done
+  log "warning: environment ${env_id}: support deploys still settling after ${BOOT_TIMEOUT}s — continuing"
+  return 0
+}
+
+# Print the environment id after the idempotent support-service pass.
+# Skipped for --dry-run (a find may succeed but nothing may mutate).
+emit_env_id() {
+  local env_id="$1" project_id="$2"
+  if [[ "$DRY_RUN" != "1" ]]; then
+    ensure_support_services "$env_id" "$project_id"
+  fi
+  printf '%s' "$env_id"
 }
 
 usage() {
@@ -169,7 +346,7 @@ main() {
   fi
   if [[ -n "$env_id" ]]; then
     log "found environment ${env_id} for PR #${pr}"
-    printf '%s' "$env_id"
+    emit_env_id "$env_id" "$project_id"
     return 0
   fi
 
@@ -221,7 +398,7 @@ main() {
     env_id="$(find_pr_environment "$project_id" "$pr" 60)"
     if [[ -n "$env_id" ]]; then
       log "found environment ${env_id} for PR #${pr} after the create race"
-      printf '%s' "$env_id"
+      emit_env_id "$env_id" "$project_id"
       return 0
     fi
     die "environmentCreate failed and no ${env_name} environment appeared"
@@ -236,7 +413,7 @@ main() {
     # skip. A later push retries the whole flow either way.
     log "warning: ${env_name} service instances did not all materialize within ${FORK_TIMEOUT}s — returning the id anyway"
   fi
-  printf '%s' "$env_id"
+  emit_env_id "$env_id" "$project_id"
 }
 
 main "$@"
