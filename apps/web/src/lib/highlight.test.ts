@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   countCodeLines,
+  ensureLanguage,
   getHighlighter,
   highlightCode,
   languageIdForPath,
   stripTrailingNewline,
+  TABLE_LANGS,
 } from "./highlight";
 
 describe("highlight", { timeout: 60_000 }, () => {
@@ -13,6 +15,9 @@ describe("highlight", { timeout: 60_000 }, () => {
     expect(languageIdForPath("view.ripple")).toBe("ripple");
 
     const highlighter = await getHighlighter();
+    // Grammars load on demand — pull the in-repo pair in explicitly.
+    await ensureLanguage("tsrx");
+    await ensureLanguage("ripple");
     const langs = highlighter.getLoadedLanguages();
     expect(langs).toContain("tsrx");
     expect(langs).toContain("ripple");
@@ -145,11 +150,15 @@ describe("highlight", { timeout: 60_000 }, () => {
     expect(languageIdForPath("src/module.fth")).toBe("plaintext");
   });
 
-  it("every loaded table lang resolves to a real Shiki grammar", async () => {
+  it("every table lang id resolves to a real Shiki grammar", async () => {
     const highlighter = await getHighlighter();
+    // Grammars load on demand — iterate the whole table so a typo'd `shiki:`
+    // id throws here rather than silently rendering plaintext in production.
+    for (const lang of TABLE_LANGS) {
+      await ensureLanguage(lang);
+    }
     const loaded = highlighter.getLoadedLanguages();
-    // Spot-check the load path: a language added by this change highlights.
-    for (const lang of ["ruby", "go", "kotlin", "terraform"]) {
+    for (const lang of TABLE_LANGS) {
       expect(loaded, lang).toContain(lang);
     }
     const html = await highlightCode("puts 1", { lang: "ruby" });

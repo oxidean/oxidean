@@ -4,7 +4,7 @@
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { McpHarnessBlocks } from "@/components/settings/mcp-harness-blocks";
-import { getHighlighter } from "@/lib/highlight";
+import { ensureLanguage } from "@/lib/highlight";
 import {
   cleanupBrowserMount,
   debugBody,
@@ -51,8 +51,8 @@ describe("mcp-harness-blocks browser DOM races", () => {
       // Auth-mode toggle flips visibility between the two permanently mounted
       // variant stacks — no <pre> replacement, no mount/unmount, no height or
       // scroll change (the scrolled-to-bottom flicker regression). Warm the
-      // highlighter so both variants' markup is styled.
-      await getHighlighter();
+      // snippet grammars so both variants' markup is styled.
+      await Promise.all([ensureLanguage("json"), ensureLanguage("toml")]);
       // Both variants highlight async on mount — wait for styled markup before
       // capturing nodes, or the pending upgrade would replace the pre and the
       // identity assertion would race it.

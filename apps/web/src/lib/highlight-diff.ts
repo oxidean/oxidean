@@ -1,5 +1,5 @@
 import type { ThemedTokenWithVariants } from "shiki";
-import { getHighlighter, languageIdForPath, THEMES } from "@/lib/highlight";
+import { ensureLanguage, getHighlighter, languageIdForPath, THEMES } from "@/lib/highlight";
 import type { DiffLine, DiffLineKind } from "@/lib/parse-unified-diff";
 
 /** Skip Shiki when reconstructed sides exceed this (keep first paint snappy). */
@@ -140,6 +140,7 @@ function buildSides(lines: DiffLine[]): SideBuild {
 async function highlightSideLines(parts: string[], lang: string): Promise<string[]> {
   if (parts.length === 0) return [];
   const highlighter = await getHighlighter();
+  await ensureLanguage(lang).catch(() => {});
   const loaded = highlighter.getLoadedLanguages();
   const resolved = loaded.includes(lang) ? lang : "plaintext";
   const tokens = highlighter.codeToTokensWithThemes(parts.join("\n"), {

@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/lib/highlight", () => ({
   languageIdForPath: () => "javascript",
   getHighlighter: () => Promise.resolve({}),
+  ensureLanguage: () => Promise.resolve(),
   highlightCodeSync: () => null,
   countCodeLines: (code: string) => {
     if (!code) return 0;
