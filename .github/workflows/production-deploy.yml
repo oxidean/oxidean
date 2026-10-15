@@ -320,11 +320,29 @@ jobs:
         if: inputs.action == 'rollback'
         env:
           DRY_RUN: ${{ inputs.dry_run }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           args=(rollback)
+          dep_id=""
           if [[ "$DRY_RUN" == "true" ]]; then
             args+=(--dry-run)
             echo "dry_run=true — no Railway mutations"
+          else
+            # Same visibility as promote — deploymentRollback is API-triggered,
+            # so Railway posts no record of its own.
+            dep_id="$(scripts/github-deployment.sh create \
+              --ref "$GITHUB_SHA" --environment "Oxidean / production" \
+              --production \
+              --description "rollback to previous deployment")"
+            scripts/github-deployment.sh status "$dep_id" in_progress \
+              --url "https://app.oxidean.dev" --description "rolling production back"
           fi
-          bash scripts/railway-production-deploy.sh "${args[@]}"
+          if bash scripts/railway-production-deploy.sh "${args[@]}"; then
+            scripts/github-deployment.sh status "${dep_id:-}" success \
+              --url "https://app.oxidean.dev" --description "rollback complete"
+          else
+            scripts/github-deployment.sh status "${dep_id:-}" failure \
+              --url "https://app.oxidean.dev" --description "rollback failed"
+            exit 1
+          fi
