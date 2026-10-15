@@ -192,4 +192,33 @@ describe("DiffPatch — issue #110 mobile budgets", () => {
     });
     expect(document.querySelector('[data-diff-kind="add"]')?.textContent).not.toContain("first");
   });
+
+  it("restores highlighted rows when the patch bounces back before a pending highlight lands", async () => {
+    const patchA = ["@@ -1 +1 @@", "-const a = 1;", "+const first = 1;"].join("\n");
+    const patchB = ["@@ -1 +1 @@", "-const a = 1;", "+const second = 2;"].join("\n");
+
+    const { rerender } = render(DiffPatch, {
+      props: { path: "a.ts", status: "modified", patch: patchA },
+    });
+
+    // A's highlight completes — the done-latch now holds A's rows.
+    await waitFor(
+      () => {
+        const add = document.querySelector('[data-diff-kind="add"]');
+        expect(add?.querySelector('span[style*="color"]')).toBeTruthy();
+      },
+      { timeout: 30_000 },
+    );
+
+    // Swap A→B→A inside the idle window: B's plain rows commit, but B's
+    // scheduled highlight is cancelled by A's cleanup. The latch must restore
+    // A's completed rows rather than leave B's plain content on screen.
+    rerender({ props: { path: "a.ts", status: "modified", patch: patchB } });
+    rerender({ props: { path: "a.ts", status: "modified", patch: patchA } });
+
+    const add = document.querySelector('[data-diff-kind="add"]');
+    expect(add?.textContent).toContain("first");
+    expect(add?.textContent).not.toContain("second");
+    expect(add?.querySelector('span[style*="color"]')).toBeTruthy();
+  });
 });

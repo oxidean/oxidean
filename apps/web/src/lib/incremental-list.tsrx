@@ -21,19 +21,28 @@ export function useIncrementalList(
   sentinelRef: { current: HTMLDivElement | null };
   showMore: () => void;
 } {
-  const [count, setCount] = useState(pageSize);
+  const [paging, setPaging] = useState(() => ({ key: resetKey, count: pageSize }));
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
+  // Derive the armed count during render: a `resetKey` swap must show the
+  // first page immediately. A passive-effect reset would still commit one
+  // render at the stale grown count — mounting thousands of rows for a frame
+  // is the mobile crash this hook exists to prevent.
+  const count = paging.key === resetKey ? paging.count : pageSize;
   const shown = Math.min(count, total);
   const remaining = Math.max(total - shown, 0);
 
   function showMore() {
-    setCount((c) => c + pageSize);
+    setPaging((s) => ({
+      key: resetKey,
+      count: (s.key === resetKey ? s.count : pageSize) + pageSize,
+    }));
   }
 
-  // Re-arm the batch when the collection identity changes (new file / ref).
+  // Keep the latch synced to the collection identity (also drops the stale
+  // key reference); `count` above already renders page one without waiting.
   useEffect(() => {
-    setCount(pageSize);
+    setPaging((s) => (s.key === resetKey ? s : { key: resetKey, count: pageSize }));
   }, [resetKey]);
 
   // Auto-append the next batch once the tail sentinel nears the viewport.

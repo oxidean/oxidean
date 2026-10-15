@@ -1,4 +1,4 @@
-import { useId, useState } from "octane";
+import { useId, useMemo, useState } from "octane";
 import { DiffFileHeader, DiffLargeGate } from "@/components/repo/diff-file-header";
 import { DIFF_LARGE_PATCH_CHARS } from "@/lib/diff-budget";
 import type { HighlightedDiffLine } from "@/lib/highlight-diff";
@@ -63,27 +63,30 @@ export function DiffPatch({ path, status, patch, initialRows = null }: DiffPatch
   });
 
   // Old/new line numbers from hunk headers — GitHub's two gutter columns.
-  let oldN = 0;
-  let newN = 0;
-  const keyed = rows.map((line, index) => {
-    let oldNo: number | null = null;
-    let newNo: number | null = null;
-    if (line.kind === "hunk") {
-      const m = /@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line.text);
-      if (m) {
-        oldN = Number(m[1]);
-        newN = Number(m[2]);
+  // O(rows) — memoize so expand/collapse toggles don't re-derive row keys.
+  const keyed = useMemo(() => {
+    let oldN = 0;
+    let newN = 0;
+    return rows.map((line, index) => {
+      let oldNo: number | null = null;
+      let newNo: number | null = null;
+      if (line.kind === "hunk") {
+        const m = /@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line.text);
+        if (m) {
+          oldN = Number(m[1]);
+          newN = Number(m[2]);
+        }
+      } else if (line.kind === "del") {
+        oldNo = oldN++;
+      } else if (line.kind === "add") {
+        newNo = newN++;
+      } else if (line.kind === "ctx") {
+        oldNo = oldN++;
+        newNo = newN++;
       }
-    } else if (line.kind === "del") {
-      oldNo = oldN++;
-    } else if (line.kind === "add") {
-      newNo = newN++;
-    } else if (line.kind === "ctx") {
-      oldNo = oldN++;
-      newNo = newN++;
-    }
-    return { ...line, index, oldNo, newNo };
-  });
+      return { ...line, index, oldNo, newNo };
+    });
+  }, [rows]);
 
   <section ref={rootRef} className="overflow-hidden border border-border">
     <DiffFileHeader

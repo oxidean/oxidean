@@ -40,6 +40,33 @@ describe("DiffFileList", { timeout: 60_000 }, () => {
     expect(screen.queryByRole("button", { name: /Load more files/ })).toBeNull();
   });
 
+  it("re-arms the first page when the files collection identity changes", async () => {
+    const files = makeFiles(DIFF_FILES_PAGE_SIZE + 3);
+    const { rerender } = render(DiffFileList, { props: { files } });
+
+    fireEvent.click(screen.getByRole("button", { name: /Load more files/ }));
+    await waitFor(() => {
+      expect(screen.getByText(`src/file-${DIFF_FILES_PAGE_SIZE + 2}.ts`)).toBeInTheDocument();
+    });
+
+    // A swapped collection (loader refetch) resets to page one — the stale
+    // grown count must never reach the DOM, even for one commit.
+    const next = Array.from({ length: DIFF_FILES_PAGE_SIZE + 7 }, (_, i) => ({
+      path: `src/next-${i}.ts`,
+      status: "modified",
+      patch: `@@ -1 +1 @@\n-old\n+new-${i}`,
+    }));
+    rerender({ props: { files: next } });
+
+    await waitFor(() => {
+      expect(screen.getByText(`src/next-${DIFF_FILES_PAGE_SIZE - 1}.ts`)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(`src/next-${DIFF_FILES_PAGE_SIZE}.ts`)).toBeNull();
+    expect(screen.getByRole("button", { name: /Load more files/ }).textContent).toContain(
+      "7 remaining",
+    );
+  });
+
   it("mounts every file without a Load more control under the page size", async () => {
     const files = makeFiles(3);
 

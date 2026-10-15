@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@octanejs/tanstack-query";
 import type { PullDiffFile } from "@oxidean/api-client";
-import { useId, useState } from "octane";
+import { useId, useMemo, useState } from "octane";
 import { DiffFileHeader, DiffLargeGate } from "@/components/repo/diff-file-header";
 import { DiffPatch } from "@/components/repo/diff-patch";
 import { apiClient } from "@/lib/api-client";
@@ -42,7 +42,8 @@ function SplitDiff(props: { path: string; status: string; patch: string }) @{
     deferPlainRows: large,
   });
 
-  const keyed = rows.map((line, index) => ({ ...line, index }));
+  // O(rows) — memoize so expand/collapse toggles don't re-derive row keys.
+  const keyed = useMemo(() => rows.map((line, index) => ({ ...line, index })), [rows]);
 
   <section ref={rootRef} className="overflow-hidden border border-border">
     <DiffFileHeader

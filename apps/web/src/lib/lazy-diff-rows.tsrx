@@ -57,6 +57,8 @@ export function useLazyDiffRows(options: {
     patch: string;
     path: string;
     initialRows: HighlightedDiffLine[] | null;
+    /** Completed rows for this source — restored if the source bounces back. */
+    rows: HighlightedDiffLine[];
   } | null>(null);
 
   useEffect(() => {
@@ -93,6 +95,10 @@ export function useLazyDiffRows(options: {
     if (!open || !nearViewport) return;
     const done = doneSourceRef.current;
     if (done && done.patch === patch && done.path === path && done.initialRows === initialRows) {
+      // Source already highlighted — but it may have bounced A→B→A while B's
+      // plain rows were still showing (B's highlight cancelled mid-flight).
+      // Restore the completed rows instead of leaving stale content up.
+      setRows((prev) => (highlightedDiffRowsEqual(prev, done.rows) ? prev : done.rows));
       return;
     }
     let cancelled = false;
@@ -100,7 +106,7 @@ export function useLazyDiffRows(options: {
     // SSR / loader rows are dual-theme (`light-dark()`) — already correct for
     // either scheme; take them as-is and skip the re-highlight pass.
     if (initialRows && initialRows.length > 0) {
-      doneSourceRef.current = { patch, path, initialRows };
+      doneSourceRef.current = { patch, path, initialRows, rows: initialRows };
       setRows((prev) => (highlightedDiffRowsEqual(prev, initialRows) ? prev : initialRows));
       return;
     }
@@ -115,7 +121,7 @@ export function useLazyDiffRows(options: {
       try {
         const next = await highlightDiffLines(lines, { path });
         if (cancelled) return;
-        doneSourceRef.current = { patch, path, initialRows };
+        doneSourceRef.current = { patch, path, initialRows, rows: next };
         setRows((prev) => (highlightedDiffRowsEqual(prev, next) ? prev : next));
       } catch {
         /* highlighter unavailable — plain rows already rendered */
