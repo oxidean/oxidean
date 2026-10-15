@@ -55,7 +55,8 @@ case "$cmd" in
     printf '%s' "$id"
     ;;
   status)
-    id="${1:?status needs a deployment id}"; state="${2:?status needs a state}"; shift 2
+    id="${1:-}"; state="${2:?status needs a state}"; shift 2
+    [[ -n "$id" ]] || exit 0  # create failed earlier — nothing to update
     url="" log_url="" desc=""
     while [[ $# -gt 0 ]]; do
       case "$1" in
@@ -66,7 +67,6 @@ case "$cmd" in
       esac
       shift
     done
-    [[ -n "$id" ]] || exit 0  # create failed earlier — nothing to update
     jq -n --arg state "$state" --arg url "$url" --arg log "${log_url:-$run_url}" --arg desc "$desc" \
       '{state:$state, auto_inactive:true}
        + (if $url != "" then {environment_url:$url} else {} end)
