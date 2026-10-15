@@ -27,9 +27,10 @@
 #                                       (default 600)
 #   --dry-run                           print mutations without applying
 #
-# --pr resolves the ephemeral environment whose meta.prNumber matches, polling
-# until --timeout. No matching environment after the bound → warn + exit 0
-# (a later push retries; the env may simply not have been created).
+# --pr resolves the ephemeral environment whose meta.prNumber matches — or
+# the conventional oxidean-pr-<n> name for envs CI created itself
+# (railway-pr-env-ensure.sh) — polling until --timeout. No match after the
+# bound → warn + exit 0 (a later push retries; the env may not exist).
 #
 # Auth: same chain as railway-production-deploy.sh (RAILWAY_TOKEN project
 # token → Project-Access-Token; RAILWAY_API_TOKEN → Bearer; CLI login).
@@ -70,8 +71,9 @@ service_pairs() {
   printf '%s %s\n' gateway "$SERVICE_GATEWAY_ID"
 }
 
-# Poll for the ephemeral PR environment (Railway creates it asynchronously
-# when the PR opens). Prints the environment id; empty when the bound elapses.
+# Poll for the ephemeral PR environment (Railway may create it
+# asynchronously when the PR opens, or CI may have created it — either is
+# found). Prints the environment id; empty when the bound elapses.
 wait_for_pr_environment() {
   local pr="$1" timeout="$2"
   local deadline=$((SECONDS + timeout)) env_id=""
