@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiClient } from "@/lib/api-client";
+import { hasSessionPresenceHint } from "@/lib/session-hint";
 import { usePathname } from "@/lib/pathname.tsrx";
 import { matchPath } from "@/lib/route-params";
 import { AppLink } from "@/components/ui/app-link";
@@ -185,11 +186,11 @@ function InviteAcceptContent() @{
             : "/";
       // Enroll-required accepts skip the session mint (#130) — route through
       // login (which opens the 2FA challenge) instead of bouncing off a
-      // protected page.
-      const signedIn = document.cookie
-        .split(";")
-        .some((c) => c.trim().startsWith("oxidean_signed_in=1"));
-      window.location.assign(signedIn ? dest : `/login?returnTo=${encodeURIComponent(dest)}`);
+      // protected page. A sessioned response always pairs the presence
+      // cookie; its absence means the accept minted no session (#130).
+      window.location.assign(
+        hasSessionPresenceHint() ? dest : `/login?returnTo=${encodeURIComponent(dest)}`,
+      );
     } catch {
       setError(NETWORK_ERROR);
     }
