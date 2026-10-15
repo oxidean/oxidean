@@ -39,10 +39,24 @@ impl PendingKind {
 }
 
 /// One pending second-factor login/enrollment.
+///
+/// The `needs_*` flags are the outstanding sign-in requirements; the
+/// challenge may only mint a session once all are cleared (`satisfied()`).
+/// Identifier-first login (`auth.login_begin`) opens challenges with
+/// `needs_password = true`; post-primary-auth callers (one-shot `auth.login`,
+/// signup, reset, SSO callback) open them with `needs_password = false`.
+/// `needs_factor` and `needs_enroll` are mutually exclusive.
 pub struct PendingChallenge {
     pub user_id: String,
     pub remember_me: bool,
-    pub kind: PendingKind,
+    /// Prove an enrolled factor (TOTP / email OTP / recovery / passkey).
+    pub needs_factor: bool,
+    /// Policy requires enrolling a factor. Enroll legs reject while
+    /// `needs_password` is still set — a factor must never be plantable
+    /// on an account pre-auth.
+    pub needs_enroll: bool,
+    /// The local-password step is still owed.
+    pub needs_password: bool,
     /// Methods offered to the client (`totp`, `passkey`, `email`, `recovery`,
     /// and for enroll `totp`/`passkey`).
     pub methods: Vec<String>,
@@ -57,13 +71,58 @@ pub struct PendingChallenge {
     pub email_sends: u32,
 }
 
+impl PendingChallenge {
+    /// `Enroll` while enrollment is still owed, else `Verify`.
+    pub fn kind(&self) -> PendingKind {
+        if self.needs_enroll {
+            PendingKind::Enroll
+        } else {
+            PendingKind::Verify
+        }
+    }
+
+    /// All requirements cleared — safe to mint the session.
+    pub fn satisfied(&self) -> bool {
+        !self.needs_factor && !self.needs_enroll && !self.needs_password
+    }
+}
+
+/// Parameters for `TwoFactorStore::open` — the outstanding requirements the
+/// challenge starts with. `needs_factor` and `needs_enroll` are mutually
+/// exclusive; `needs_password` is `true` only for identifier-first
+/// `auth.login_begin` challenges (post-primary-auth callers pass `false`).
+pub struct OpenChallenge {
+    pub user_id: String,
+    pub remember_me: bool,
+    /// Prove an enrolled factor.
+    pub needs_factor: bool,
+    /// Enroll a factor — enrollment legs reject while `needs_password` holds.
+    pub needs_enroll: bool,
+    /// The local-password step is still owed.
+    pub needs_password: bool,
+    pub methods: Vec<String>,
+}
+
 /// Lightweight view for handlers (the heavy WebAuthn states stay inside).
 #[derive(Debug, Clone)]
 pub struct PendingInfo {
     pub user_id: String,
     pub remember_me: bool,
-    pub kind: PendingKind,
+    pub needs_factor: bool,
+    pub needs_enroll: bool,
+    pub needs_password: bool,
     pub methods: Vec<String>,
+}
+
+impl PendingInfo {
+    /// `Enroll` while enrollment is still owed, else `Verify`.
+    pub fn kind(&self) -> PendingKind {
+        if self.needs_enroll {
+            PendingKind::Enroll
+        } else {
+            PendingKind::Verify
+        }
+    }
 }
 
 /// Session-scoped (signed-in user) enrollment state — passkey registration
@@ -98,13 +157,7 @@ impl TwoFactorStore {
     }
 
     /// Open a new challenge; returns the opaque challenge id (32-byte CSPRNG hex).
-    pub fn open(
-        &self,
-        user_id: &str,
-        remember_me: bool,
-        kind: PendingKind,
-        methods: Vec<String>,
-    ) -> String {
+    pub fn open(&self, params: OpenChallenge) -> String {
         let mut bytes = [0u8; 32];
         rand::fill(&mut bytes);
         let id = crate::auth::session::bytes_to_hex(&bytes);
@@ -113,10 +166,12 @@ impl TwoFactorStore {
         inner.challenges.insert(
             id.clone(),
             PendingChallenge {
-                user_id: user_id.to_string(),
-                remember_me,
-                kind,
-                methods,
+                user_id: params.user_id,
+                remember_me: params.remember_me,
+                needs_factor: params.needs_factor,
+                needs_enroll: params.needs_enroll,
+                needs_password: params.needs_password,
+                methods: params.methods,
                 created_at: Instant::now(),
                 attempts: 0,
                 webauthn_assertion: None,
@@ -134,7 +189,9 @@ impl TwoFactorStore {
         inner.challenges.get(id).map(|p| PendingInfo {
             user_id: p.user_id.clone(),
             remember_me: p.remember_me,
-            kind: p.kind,
+            needs_factor: p.needs_factor,
+            needs_enroll: p.needs_enroll,
+            needs_password: p.needs_password,
             methods: p.methods.clone(),
         })
     }
@@ -209,11 +266,20 @@ mod tests {
     #[test]
     fn open_peek_take_roundtrip() {
         let store = TwoFactorStore::new();
-        let id = store.open("u1", true, PendingKind::Verify, vec!["totp".into()]);
+        let id = store.open(OpenChallenge {
+            user_id: "u1".into(),
+            remember_me: true,
+            needs_factor: true,
+            needs_enroll: false,
+            needs_password: false,
+            methods: vec!["totp".into()],
+        });
         let info = store.peek(&id).expect("peek");
         assert_eq!(info.user_id, "u1");
         assert!(info.remember_me);
-        assert_eq!(info.kind, PendingKind::Verify);
+        assert_eq!(info.kind(), PendingKind::Verify);
+        assert!(info.needs_factor);
+        assert!(!info.needs_password);
         assert_eq!(info.methods, vec!["totp".to_string()]);
         assert!(store.take(&id).is_some());
         assert!(store.peek(&id).is_none(), "consumed challenge must be gone");
@@ -222,7 +288,14 @@ mod tests {
     #[test]
     fn update_mutates_attempts() {
         let store = TwoFactorStore::new();
-        let id = store.open("u1", false, PendingKind::Enroll, vec![]);
+        let id = store.open(OpenChallenge {
+            user_id: "u1".into(),
+            remember_me: false,
+            needs_factor: false,
+            needs_enroll: true,
+            needs_password: false,
+            methods: vec![],
+        });
         let n = store.update(&id, |p| {
             p.attempts += 1;
             p.attempts

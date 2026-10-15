@@ -3,7 +3,9 @@
 use serde::{Deserialize, Serialize};
 
 /// Auth provider mode (D-05, D-06). Serialized as lowercase: `local` | `workos` | `oidc`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum ProviderMode {
     #[default]
@@ -22,7 +24,9 @@ pub enum EmailProviderKind {
 }
 
 /// Instance-level user role. Serialized as kebab-case: `user` | `admin` | `sys-admin`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum Role {
     #[default]
@@ -120,7 +124,9 @@ pub struct BootstrapSetupRequest {
 }
 
 /// Factory reset disk/DB scope (D-34). Default keeps repository files on disk.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum FactoryResetScope {
     /// Wipe users/sessions/auth; keep bare repos under `OXIDEAN_REPOS_DIR`.
@@ -171,11 +177,50 @@ pub struct SignupRequest {
 }
 
 /// Local login input (D-02). `identifier` is email or username.
+///
+/// Two shapes: a one-shot credential check (`challenge` absent — machine
+/// clients and the legacy path, `identifier` required), or the password step
+/// of an identifier-first flow (`challenge` set to the `auth.login_begin`
+/// challenge id). When a challenge is supplied the account binds to the
+/// challenge, not the identifier — so `identifier` may be omitted (e.g. a
+/// page reload resuming a pending challenge) and is verified to agree with
+/// the challenge when it is present.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct LoginRequest {
+    #[serde(default)]
     pub identifier: String,
     pub password: String,
     pub remember_me: bool,
+    #[serde(default)]
+    pub challenge: Option<String>,
+}
+
+/// `auth.login_begin` input — the identifier-first sign-in step (#130): the
+/// server resolves the account, opens an `oxidean_2fa` challenge, and reports
+/// which step comes next (`factor` or `password`).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct LoginBeginRequest {
+    /// Email or username.
+    pub identifier: String,
+    #[serde(default)]
+    pub remember_me: bool,
+}
+
+/// `auth.login_begin` output. `next` is `"factor"` when the account must
+/// prove a second factor before the password step, else `"password"`.
+/// `kind` mirrors the challenge kind (`"verify"` / `"enroll"`) when one
+/// applies. Unknown identifiers get an indistinguishable password-step
+/// response bound to a dead-end challenge (no account-existence leak).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct LoginBeginResponse {
+    /// Challenge id — also set as the `oxidean_2fa` HttpOnly cookie.
+    pub challenge: String,
+    /// `"factor"` or `"password"`.
+    pub next: String,
+    /// `"verify"` / `"enroll"` when a factor step is pending, else null.
+    pub kind: Option<String>,
+    /// Factor methods the pending challenge accepts.
+    pub methods: Vec<String>,
 }
 
 /// Public provider config for `auth.provider_config`.
@@ -801,7 +846,10 @@ mod tests {
             "allow_signup": true
         });
         let settings: AuthSettingsPublic = serde_json::from_value(pub_json).unwrap();
-        assert_eq!(serde_json::to_value(&settings).unwrap()["allow_signup"], true);
+        assert_eq!(
+            serde_json::to_value(&settings).unwrap()["allow_signup"],
+            true
+        );
 
         let upd_json = serde_json::json!({
             "provider_mode": "local",

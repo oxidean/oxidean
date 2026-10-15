@@ -12,9 +12,25 @@ vi.mock("@/lib/api-client", () => ({
         error: { code: "auth.unauthenticated", message: "n" },
       })),
       login: vi.fn(),
+      loginBegin: vi.fn(),
       providerConfig: vi.fn(async () => ({
         ok: true,
         data: { mode: "local", allow_signup: true },
+      })),
+    },
+    twoFactor: {
+      status: vi.fn(async () => ({
+        ok: true,
+        data: {
+          totp_enabled: false,
+          recovery_codes_remaining: 0,
+          passkeys: [],
+          challenge_pending: false,
+          challenge_kind: null,
+          challenge_methods: [],
+          challenge_next: null,
+          enroll_required: false,
+        },
       })),
     },
   },
@@ -33,14 +49,16 @@ describe("/login Wave 0 contracts (RESEARCH P1)", () => {
     expect(typeof LoginPage).toBe("function");
   });
 
-  it("renders local sign-in form fields", async () => {
+  it("renders the identifier-first sign-in step (#130)", async () => {
     render(LoginPage);
 
     await waitFor(() => {
       expect(screen.getByLabelText("Email or username")).toBeInTheDocument();
       expect(screen.getByText("Create an account")).toBeInTheDocument();
     });
-    expect(screen.getByLabelText("Password")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Sign in" })).toBeInTheDocument();
+    // Password is a later step — the identifier step has none.
+    expect(screen.queryByLabelText("Password")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Continue" })).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Remember me" })).toBeInTheDocument();
   });
 });

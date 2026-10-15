@@ -70,7 +70,15 @@ async fn rpc(
         .headers()
         .get_all("set-cookie")
         .iter()
-        .map(|v| v.to_str().unwrap().split(';').next().unwrap().trim().to_string())
+        .map(|v| {
+            v.to_str()
+                .unwrap()
+                .split(';')
+                .next()
+                .unwrap()
+                .trim()
+                .to_string()
+        })
         .collect();
     let bytes = res.into_body().collect().await.unwrap().to_bytes();
     let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
@@ -263,7 +271,9 @@ async fn recovery_code_is_single_use() {
 
     signup(&app, "bob@example.com", "bob").await;
     let (_, _v, cookies) = rpc(&app, &login_body("bob@example.com"), None).await;
-    let session = cookie_named(&cookies, "oxidean_session").unwrap().to_string();
+    let session = cookie_named(&cookies, "oxidean_session")
+        .unwrap()
+        .to_string();
     let user_id = find_user_id(&db, "bob").await;
     verify_user(&db, &user_id).await;
     let codes = enroll_totp(&app, &session).await;
@@ -281,7 +291,9 @@ async fn recovery_code_is_single_use() {
     )
     .await;
     assert_eq!(v["ok"], true, "first recovery use {v}");
-    let session2 = cookie_named(&cookies, "oxidean_session").unwrap().to_string();
+    let session2 = cookie_named(&cookies, "oxidean_session")
+        .unwrap()
+        .to_string();
 
     // Same code a second time → rejected.
     let (_, _v, cookies) = rpc(&app, &login_body("bob@example.com"), None).await;
@@ -394,7 +406,9 @@ async fn org_require_two_factor_forces_enroll() {
 
     signup(&app, "dave@example.com", "dave").await;
     let (_, _, cookies) = rpc(&app, &login_body("dave@example.com"), None).await;
-    let session = cookie_named(&cookies, "oxidean_session").unwrap().to_string();
+    let session = cookie_named(&cookies, "oxidean_session")
+        .unwrap()
+        .to_string();
     let user_id = find_user_id(&db, "dave").await;
     verify_user(&db, &user_id).await;
 
@@ -429,7 +443,9 @@ async fn email_otp_completes_verify_challenge() {
 
     signup(&app, "erin@example.com", "erin").await;
     let (_, _, cookies) = rpc(&app, &login_body("erin@example.com"), None).await;
-    let session = cookie_named(&cookies, "oxidean_session").unwrap().to_string();
+    let session = cookie_named(&cookies, "oxidean_session")
+        .unwrap()
+        .to_string();
     let user_id = find_user_id(&db, "erin").await;
     verify_user(&db, &user_id).await;
     enroll_totp(&app, &session).await;
@@ -461,10 +477,7 @@ async fn email_otp_completes_verify_challenge() {
 
     let (_, v, cookies) = rpc(
         &app,
-        &two_factor_req(
-            "auth.two_factor.complete",
-            serde_json::json!({"code": otp}),
-        ),
+        &two_factor_req("auth.two_factor.complete", serde_json::json!({"code": otp})),
         Some(&chal),
     )
     .await;
@@ -508,7 +521,9 @@ async fn admin_reset_clears_all_factors() {
 
     signup(&app, "fran@example.com", "fran").await;
     let (_, _, cookies) = rpc(&app, &login_body("fran@example.com"), None).await;
-    let session = cookie_named(&cookies, "oxidean_session").unwrap().to_string();
+    let session = cookie_named(&cookies, "oxidean_session")
+        .unwrap()
+        .to_string();
     let user_id = find_user_id(&db, "fran").await;
     verify_user(&db, &user_id).await;
     enroll_totp(&app, &session).await;
@@ -544,13 +559,15 @@ async fn passkey_register_then_login_completes_via_assertion() {
 
     signup(&app, "gwen@example.com", "gwen").await;
     let (_, _, cookies) = rpc(&app, &login_body("gwen@example.com"), None).await;
-    let session = cookie_named(&cookies, "oxidean_session").unwrap().to_string();
+    let session = cookie_named(&cookies, "oxidean_session")
+        .unwrap()
+        .to_string();
     let user_id = find_user_id(&db, "gwen").await;
     verify_user(&db, &user_id).await;
 
     // Register a platform passkey while signed in.
-    let origin = webauthn_authenticator_rs::prelude::Url::parse("http://localhost:8080")
-        .expect("origin");
+    let origin =
+        webauthn_authenticator_rs::prelude::Url::parse("http://localhost:8080").expect("origin");
     let mut authenticator = webauthn_authenticator_rs::prelude::WebauthnAuthenticator::new(
         webauthn_authenticator_rs::softpasskey::SoftPasskey::new(true),
     );
@@ -635,4 +652,430 @@ async fn passkey_register_then_login_completes_via_assertion() {
     assert_eq!(v["ok"], true, "passkey_complete {v}");
     assert!(cookie_named(&cookies, "oxidean_session").is_some());
     std::env::remove_var("OXIDEAN_PUBLIC_ORIGIN");
+}
+
+// ---------------------------------------------------------------------------
+// Identifier-first sign-in (issue #130 follow-up): `auth.login_begin` opens
+// the challenge before the password leg; factor→password and password→factor
+// orderings both mint; phantom challenges hide unknown/banned accounts.
+// ---------------------------------------------------------------------------
+
+fn login_begin_body(identifier: &str) -> String {
+    format!(
+        r#"{{"procedure":"auth.login_begin","input":{{"identifier":"{identifier}","remember_me":false}}}}"#
+    )
+}
+
+/// Password leg of a pending challenge — the challenge binds the account, so
+/// `identifier` is omitted (the reload-resume shape).
+fn challenge_login_body(challenge: &str, password: &str) -> String {
+    format!(
+        r#"{{"procedure":"auth.login","input":{{"password":"{password}","remember_me":false,"challenge":"{challenge}"}}}}"#
+    )
+}
+
+#[tokio::test]
+async fn identifier_first_password_only_account() {
+    let db = test_db("two_factor_flip_basic").await;
+    support::unlock_signup(&db).await;
+    let (app, _mail) = test_app(db.clone()).await;
+
+    signup(&app, "ivy@example.com", "ivy").await;
+
+    let (_, v, cookies) = rpc(&app, &login_begin_body("ivy@example.com"), None).await;
+    assert_eq!(v["ok"], true, "login_begin {v}");
+    assert_eq!(v["data"]["next"], "password", "{v}");
+    assert!(v["data"]["kind"].is_null(), "{v}");
+    let challenge = v["data"]["challenge"].as_str().unwrap().to_string();
+    let chal_cookie = cookie_named(&cookies, "oxidean_2fa")
+        .expect("challenge cookie")
+        .to_string();
+    assert!(cookie_named(&cookies, "oxidean_session").is_none());
+
+    // Status reports the outstanding step via the challenge cookie.
+    let (_, v, _) = rpc(
+        &app,
+        &two_factor_req("auth.two_factor.status", serde_json::json!({})),
+        Some(&chal_cookie),
+    )
+    .await;
+    assert_eq!(v["data"]["challenge_pending"], true, "{v}");
+    assert_eq!(v["data"]["challenge_next"], "password", "{v}");
+
+    // Password leg — no identifier needed; the challenge binds the account.
+    let (_, v, cookies) = rpc(&app, &challenge_login_body(&challenge, "password1"), None).await;
+    assert_eq!(v["ok"], true, "password leg {v}");
+    assert!(cookie_named(&cookies, "oxidean_session").is_some());
+}
+
+#[tokio::test]
+async fn identifier_first_factor_then_password() {
+    let db = test_db("two_factor_flip_factor").await;
+    support::unlock_signup(&db).await;
+    let (app, _mail) = test_app(db.clone()).await;
+
+    signup(&app, "jo@example.com", "jo").await;
+    let (_, _, cookies) = rpc(&app, &login_body("jo@example.com"), None).await;
+    let session = cookie_named(&cookies, "oxidean_session")
+        .unwrap()
+        .to_string();
+    let user_id = find_user_id(&db, "jo").await;
+    verify_user(&db, &user_id).await;
+    let codes = enroll_totp(&app, &session).await;
+
+    // Identifier-first: the factor step comes before the password step.
+    let (_, v, cookies) = rpc(&app, &login_begin_body("jo@example.com"), None).await;
+    assert_eq!(v["ok"], true, "login_begin {v}");
+    assert_eq!(v["data"]["next"], "factor", "{v}");
+    assert_eq!(v["data"]["kind"], "verify", "{v}");
+    let methods: Vec<String> = v["data"]["methods"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m.as_str().unwrap().to_string())
+        .collect();
+    for m in ["totp", "recovery", "email"] {
+        assert!(methods.contains(&m.to_string()), "methods {methods:?}");
+    }
+    let challenge = v["data"]["challenge"].as_str().unwrap().to_string();
+    let chal_cookie = cookie_named(&cookies, "oxidean_2fa").unwrap().to_string();
+
+    // Factor success advances to the password step — no session yet.
+    let (_, v, cookies) = rpc(
+        &app,
+        &two_factor_req(
+            "auth.two_factor.complete",
+            serde_json::json!({"code": codes[0]}),
+        ),
+        Some(&chal_cookie),
+    )
+    .await;
+    assert_eq!(v["ok"], true, "factor complete {v}");
+    assert_eq!(v["data"]["next"], "password", "{v}");
+    assert!(cookie_named(&cookies, "oxidean_session").is_none());
+
+    let (_, v, _) = rpc(
+        &app,
+        &two_factor_req("auth.two_factor.status", serde_json::json!({})),
+        Some(&chal_cookie),
+    )
+    .await;
+    assert_eq!(v["data"]["challenge_next"], "password", "{v}");
+
+    // A wrong password burns challenge attempts and keeps it alive.
+    let (_, v, _) = rpc(&app, &challenge_login_body(&challenge, "wrong-pass"), None).await;
+    assert_eq!(v["ok"], false, "{v}");
+    assert_eq!(v["error"]["code"], "auth.invalid_credentials", "{v}");
+
+    // Correct password mints the session.
+    let (_, v, cookies) = rpc(&app, &challenge_login_body(&challenge, "password1"), None).await;
+    assert_eq!(v["ok"], true, "password leg {v}");
+    assert!(cookie_named(&cookies, "oxidean_session").is_some());
+}
+
+#[tokio::test]
+async fn identifier_first_password_then_factor_also_works() {
+    let db = test_db("two_factor_flip_reverse").await;
+    support::unlock_signup(&db).await;
+    let (app, _mail) = test_app(db.clone()).await;
+
+    signup(&app, "kate@example.com", "kate").await;
+    let (_, _, cookies) = rpc(&app, &login_body("kate@example.com"), None).await;
+    let session = cookie_named(&cookies, "oxidean_session")
+        .unwrap()
+        .to_string();
+    let user_id = find_user_id(&db, "kate").await;
+    verify_user(&db, &user_id).await;
+    let codes = enroll_totp(&app, &session).await;
+
+    let (_, v, cookies) = rpc(&app, &login_begin_body("kate@example.com"), None).await;
+    assert_eq!(v["data"]["next"], "factor", "{v}");
+    let challenge = v["data"]["challenge"].as_str().unwrap().to_string();
+    let chal_cookie = cookie_named(&cookies, "oxidean_2fa").unwrap().to_string();
+
+    // The password leg before the factor re-surfaces the verify challenge.
+    let (_, v, _) = rpc(&app, &challenge_login_body(&challenge, "password1"), None).await;
+    assert_eq!(v["ok"], false, "{v}");
+    assert_eq!(v["error"]["code"], "auth.two_factor_required", "{v}");
+    assert_eq!(v["error"]["data"]["kind"], "verify", "{v}");
+
+    let (_, v, _) = rpc(
+        &app,
+        &two_factor_req("auth.two_factor.status", serde_json::json!({})),
+        Some(&chal_cookie),
+    )
+    .await;
+    assert_eq!(v["data"]["challenge_next"], "factor", "{v}");
+
+    // Factor completion now mints.
+    let (_, v, cookies) = rpc(
+        &app,
+        &two_factor_req(
+            "auth.two_factor.complete",
+            serde_json::json!({"code": codes[0]}),
+        ),
+        Some(&chal_cookie),
+    )
+    .await;
+    assert_eq!(v["ok"], true, "factor complete {v}");
+    assert_eq!(v["data"]["next"], "done", "{v}");
+    assert!(v["data"]["user"]["username"].as_str().is_some(), "{v}");
+    assert!(cookie_named(&cookies, "oxidean_session").is_some());
+}
+
+#[tokio::test]
+async fn identifier_first_passkey_completes_without_password() {
+    std::env::set_var("OXIDEAN_PUBLIC_ORIGIN", "http://localhost:8080");
+    let db = test_db("two_factor_flip_passkey").await;
+    support::unlock_signup(&db).await;
+    let (app, _mail) = test_app(db.clone()).await;
+
+    signup(&app, "leah@example.com", "leah").await;
+    let (_, _, cookies) = rpc(&app, &login_body("leah@example.com"), None).await;
+    let session = cookie_named(&cookies, "oxidean_session")
+        .unwrap()
+        .to_string();
+    let user_id = find_user_id(&db, "leah").await;
+    verify_user(&db, &user_id).await;
+
+    let origin =
+        webauthn_authenticator_rs::prelude::Url::parse("http://localhost:8080").expect("origin");
+    let mut authenticator = webauthn_authenticator_rs::prelude::WebauthnAuthenticator::new(
+        webauthn_authenticator_rs::softpasskey::SoftPasskey::new(true),
+    );
+    let (_, v, _) = rpc(
+        &app,
+        &two_factor_req(
+            "auth.two_factor.passkey_register_begin",
+            serde_json::json!({}),
+        ),
+        Some(&session),
+    )
+    .await;
+    let ccr: webauthn_authenticator_rs::prelude::CreationChallengeResponse =
+        serde_json::from_value(v["data"].clone()).expect("ccr json");
+    let attestation = authenticator
+        .do_registration(origin.clone(), ccr)
+        .expect("softpasskey attestation");
+    let (_, v, _) = rpc(
+        &app,
+        &two_factor_req(
+            "auth.two_factor.passkey_register_complete",
+            serde_json::json!({
+                "nickname": "Test SoftPasskey",
+                "attestation": serde_json::to_value(&attestation).unwrap(),
+            }),
+        ),
+        Some(&session),
+    )
+    .await;
+    assert_eq!(v["ok"], true, "register_complete {v}");
+
+    // Identifier-first: passkey assertion alone mints the session — the
+    // password step is skipped for user-verified assertions.
+    let (_, v, cookies) = rpc(&app, &login_begin_body("leah@example.com"), None).await;
+    assert_eq!(v["data"]["next"], "factor", "{v}");
+    let chal = cookie_named(&cookies, "oxidean_2fa").unwrap().to_string();
+
+    let (_, v, _) = rpc(
+        &app,
+        &two_factor_req("auth.two_factor.passkey_begin", serde_json::json!({})),
+        Some(&chal),
+    )
+    .await;
+    assert_eq!(v["ok"], true, "passkey_begin {v}");
+    let rcr: webauthn_authenticator_rs::prelude::RequestChallengeResponse =
+        serde_json::from_value(v["data"].clone()).expect("rcr json");
+    let assertion = authenticator
+        .do_authentication(origin, rcr)
+        .expect("softpasskey assertion");
+
+    let (_, v, cookies) = rpc(
+        &app,
+        &two_factor_req(
+            "auth.two_factor.passkey_complete",
+            serde_json::json!({
+                "assertion": serde_json::to_value(&assertion).unwrap(),
+            }),
+        ),
+        Some(&chal),
+    )
+    .await;
+    assert_eq!(v["ok"], true, "passkey_complete {v}");
+    assert!(cookie_named(&cookies, "oxidean_session").is_some());
+    std::env::remove_var("OXIDEAN_PUBLIC_ORIGIN");
+}
+
+#[tokio::test]
+async fn identifier_first_unknown_identifier_is_indistinguishable() {
+    let db = test_db("two_factor_flip_phantom").await;
+    support::unlock_signup(&db).await;
+    let (app, _mail) = test_app(db.clone()).await;
+
+    // Unknown identifier gets the same password-step response a real
+    // password-only account gets.
+    let (_, v, cookies) = rpc(&app, &login_begin_body("ghost@example.com"), None).await;
+    assert_eq!(v["ok"], true, "phantom login_begin {v}");
+    assert_eq!(v["data"]["next"], "password", "{v}");
+    assert!(v["data"]["kind"].is_null(), "{v}");
+    let challenge = v["data"]["challenge"].as_str().unwrap().to_string();
+    assert!(cookie_named(&cookies, "oxidean_2fa").is_some());
+
+    // The dead-end challenge fails exactly like a bad password.
+    let (_, v, cookies) = rpc(&app, &challenge_login_body(&challenge, "password1"), None).await;
+    assert_eq!(v["ok"], false, "{v}");
+    assert_eq!(v["error"]["code"], "auth.invalid_credentials", "{v}");
+    assert!(cookie_named(&cookies, "oxidean_session").is_none());
+}
+
+#[tokio::test]
+async fn identifier_first_banned_account_is_indistinguishable() {
+    let db = test_db("two_factor_flip_banned").await;
+    support::unlock_signup(&db).await;
+    let (app, _mail) = test_app(db.clone()).await;
+
+    signup(&app, "mia@example.com", "mia").await;
+    let user_id = find_user_id(&db, "mia").await;
+    let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    db.set_user_banned_at(&user_id, &now).await.expect("ban");
+
+    let (_, v, _) = rpc(&app, &login_begin_body("mia@example.com"), None).await;
+    assert_eq!(v["ok"], true, "banned login_begin {v}");
+    assert_eq!(v["data"]["next"], "password", "{v}");
+    let challenge = v["data"]["challenge"].as_str().unwrap().to_string();
+
+    let (_, v, _) = rpc(&app, &challenge_login_body(&challenge, "password1"), None).await;
+    assert_eq!(v["ok"], false, "{v}");
+    assert_eq!(v["error"]["code"], "auth.invalid_credentials", "{v}");
+}
+
+#[tokio::test]
+async fn identifier_first_challenge_binds_its_own_account() {
+    let db = test_db("two_factor_flip_binding").await;
+    support::unlock_signup(&db).await;
+    let (app, _mail) = test_app(db.clone()).await;
+
+    signup(&app, "nina@example.com", "nina").await;
+    signup(&app, "olga@example.com", "olga").await;
+
+    let (_, v, _) = rpc(&app, &login_begin_body("nina@example.com"), None).await;
+    assert_eq!(v["ok"], true, "{v}");
+    let challenge = v["data"]["challenge"].as_str().unwrap().to_string();
+
+    // Nina's challenge + Olga's identifier/password must not cross-bind.
+    let body = format!(
+        r#"{{"procedure":"auth.login","input":{{"identifier":"olga@example.com","password":"password1","remember_me":false,"challenge":"{challenge}"}}}}"#
+    );
+    let (_, v, cookies) = rpc(&app, &body, None).await;
+    assert_eq!(v["ok"], false, "{v}");
+    assert_eq!(v["error"]["code"], "auth.invalid_credentials", "{v}");
+    assert!(cookie_named(&cookies, "oxidean_session").is_none());
+
+    // A dead challenge id fails explicitly instead of guessing.
+    let (_, v, _) = rpc(&app, &challenge_login_body("deadbeef", "password1"), None).await;
+    assert_eq!(v["ok"], false, "{v}");
+    assert_eq!(v["error"]["code"], "auth.two_factor_expired", "{v}");
+}
+
+#[tokio::test]
+async fn identifier_first_enroll_required_runs_password_before_enroll() {
+    let db = test_db("two_factor_flip_enroll").await;
+    support::unlock_signup(&db).await;
+    let (app, _mail) = test_app(db.clone()).await;
+
+    // Sign up before the policy lands — the account has no factor yet.
+    signup(&app, "pete@example.com", "pete").await;
+    let user_id = find_user_id(&db, "pete").await;
+    verify_user(&db, &user_id).await;
+
+    let settings = db.get_auth_settings().await.expect("settings");
+    db.update_auth_settings(
+        &settings.provider_mode,
+        &settings.email_provider,
+        settings.from_address.as_deref(),
+        settings.oidc_issuer.as_deref(),
+        settings.oidc_client_id.as_deref(),
+        settings.workos_client_id.as_deref(),
+        settings.allow_signup,
+        &settings.default_visibility,
+        true,
+        settings.require_two_factor_external,
+    )
+    .await
+    .expect("enable local 2fa policy");
+
+    let (_, v, cookies) = rpc(&app, &login_begin_body("pete@example.com"), None).await;
+    assert_eq!(v["ok"], true, "{v}");
+    assert_eq!(v["data"]["next"], "password", "{v}");
+    assert_eq!(v["data"]["kind"], "enroll", "{v}");
+    let challenge = v["data"]["challenge"].as_str().unwrap().to_string();
+    let chal_cookie = cookie_named(&cookies, "oxidean_2fa").unwrap().to_string();
+
+    // Enrollment is not possible before the password leg — a factor must not
+    // be plantable on an account pre-auth.
+    let (_, v, _) = rpc(
+        &app,
+        &two_factor_req("auth.two_factor.totp_begin", serde_json::json!({})),
+        Some(&chal_cookie),
+    )
+    .await;
+    assert_eq!(v["ok"], false, "pre-password enroll must fail {v}");
+    assert_eq!(v["error"]["code"], "auth.two_factor_unavailable", "{v}");
+
+    // Password leg → enroll challenge resurfaces.
+    let (_, v, _) = rpc(&app, &challenge_login_body(&challenge, "password1"), None).await;
+    assert_eq!(v["ok"], false, "{v}");
+    assert_eq!(v["error"]["code"], "auth.two_factor_required", "{v}");
+    assert_eq!(v["error"]["data"]["kind"], "enroll", "{v}");
+
+    let (_, v, _) = rpc(
+        &app,
+        &two_factor_req("auth.two_factor.status", serde_json::json!({})),
+        Some(&chal_cookie),
+    )
+    .await;
+    assert_eq!(v["data"]["challenge_next"], "enroll", "{v}");
+
+    // Enroll now succeeds and mints the session.
+    let (_, v, _) = rpc(
+        &app,
+        &two_factor_req("auth.two_factor.totp_begin", serde_json::json!({})),
+        Some(&chal_cookie),
+    )
+    .await;
+    assert_eq!(v["ok"], true, "post-password totp_begin {v}");
+    let secret = v["data"]["secret"].as_str().unwrap().to_string();
+    let code = totp_code(&secret);
+    let (_, v, cookies) = rpc(
+        &app,
+        &two_factor_req(
+            "auth.two_factor.totp_confirm",
+            serde_json::json!({"code": code}),
+        ),
+        Some(&chal_cookie),
+    )
+    .await;
+    assert_eq!(v["ok"], true, "enroll confirm {v}");
+    assert!(cookie_named(&cookies, "oxidean_session").is_some());
+}
+
+#[tokio::test]
+async fn login_begin_is_rate_limited_per_identifier() {
+    let db = test_db("two_factor_flip_ratelimit").await;
+    support::unlock_signup(&db).await;
+    let (app, _mail) = test_app(db.clone()).await;
+
+    signup(&app, "quinn@example.com", "quinn").await;
+
+    for i in 0..10 {
+        let (_, v, _) = rpc(&app, &login_begin_body("quinn@example.com"), None).await;
+        assert_eq!(v["ok"], true, "begin {i} {v}");
+    }
+    let (_, v, _) = rpc(&app, &login_begin_body("quinn@example.com"), None).await;
+    assert_eq!(v["ok"], false, "{v}");
+    assert_eq!(v["error"]["code"], "auth.rate_limited", "{v}");
+
+    // A different identifier still works.
+    let (_, v, _) = rpc(&app, &login_begin_body("other@example.com"), None).await;
+    assert_eq!(v["ok"], true, "other identifier {v}");
 }

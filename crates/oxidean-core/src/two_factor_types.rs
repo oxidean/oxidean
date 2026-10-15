@@ -1,5 +1,6 @@
 //! Two-factor auth RPC types (#130) — enrollment, challenges, and policy flags.
 
+use crate::auth_types::UserPublic;
 use serde::{Deserialize, Serialize};
 
 /// One registered WebAuthn/passkey credential in status responses.
@@ -25,6 +26,12 @@ pub struct TwoFactorStatusPublic {
     pub challenge_kind: Option<String>,
     /// Methods the pending challenge accepts (`totp`, `passkey`, `email`, `recovery`).
     pub challenge_methods: Vec<String>,
+    /// The step the pending challenge is waiting on (identifier-first login,
+    /// #130 follow-up): `"factor"` first when a factor and the password are
+    /// both owed, `"password"` when only the password leg remains or must run
+    /// before enrollment, `"enroll"` when enrollment is the last step.
+    /// `null` when no step is outstanding (or no challenge is pending).
+    pub challenge_next: Option<String>,
     /// Instance/org policy requires this user to enroll a factor.
     pub enroll_required: bool,
 }
@@ -53,6 +60,17 @@ pub struct TwoFactorCompleteRequest {
     pub code: String,
     #[serde(default)]
     pub challenge: Option<String>,
+}
+
+/// `auth.two_factor.complete` output. `next` is `"done"` when the challenge
+/// minted a session (`user` set), or `"password"` when the identifier-first
+/// flow still owes the password step (`auth.login` with the challenge id).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct TwoFactorCompletePublic {
+    /// `"done"` or `"password"`.
+    pub next: String,
+    /// The signed-in user when `next == "done"`.
+    pub user: Option<UserPublic>,
 }
 
 /// `auth.two_factor.passkey_complete` input — browser assertion JSON.

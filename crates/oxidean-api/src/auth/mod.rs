@@ -5,6 +5,7 @@ pub mod bootstrap;
 pub mod external;
 pub mod gate;
 pub mod local;
+pub mod login_rate;
 pub mod oidc;
 pub mod password;
 pub mod pending;

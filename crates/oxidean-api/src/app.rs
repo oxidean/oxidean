@@ -64,6 +64,8 @@ pub struct AppState {
     pub pending: PendingAuthStore,
     /// Pending second-factor login challenges (issue #130) — per process.
     pub two_factor_store: crate::auth::two_factor::TwoFactorStore,
+    /// `auth.login_begin` counters (issue #130) — per process.
+    pub login_begin_limiter: Arc<Mutex<crate::auth::login_rate::LoginBeginLimiter>>,
     /// Smart HTTP failed Basic/PAT auth counters (D-26) — per process.
     pub git_auth_limiter: Arc<Mutex<FailedAuthLimiter>>,
     /// `user.lookup` per-session counters (T-10-03) — per process.
@@ -185,6 +187,9 @@ impl AppState {
             sessions: SessionService::new(env_name.clone()),
             pending: PendingAuthStore::new(),
             two_factor_store: crate::auth::two_factor::TwoFactorStore::new(),
+            login_begin_limiter: Arc::new(Mutex::new(
+                crate::auth::login_rate::LoginBeginLimiter::new(),
+            )),
             git_auth_limiter: Arc::new(Mutex::new(FailedAuthLimiter::new())),
             lookup_limiter: Arc::new(Mutex::new(LookupLimiter::new())),
             env_name,
@@ -525,6 +530,7 @@ pub(crate) fn build_rpc_ctx_with_session(
             store: state.two_factor_store.clone(),
             challenge_id: None,
         },
+        login_begin_limiter: state.login_begin_limiter.clone(),
         lookup_limiter: state.lookup_limiter.clone(),
         search_timeout_ms: state.search_timeout_ms,
         search_max_matches: state.search_max_matches,
@@ -625,6 +631,7 @@ pub(crate) async fn build_rpc_ctx(
             store: state.two_factor_store.clone(),
             challenge_id: two_factor_challenge,
         },
+        login_begin_limiter: state.login_begin_limiter.clone(),
         lookup_limiter: state.lookup_limiter.clone(),
         search_timeout_ms: state.search_timeout_ms,
         search_max_matches: state.search_max_matches,
@@ -778,9 +785,7 @@ async fn rpc_ws(
     let credential = edge_credential(&headers);
     let client = rpc::ClientMeta::from_headers(&headers);
     let challenge_id = two_factor_id_from_headers(&headers);
-    ws.on_upgrade(move |socket| {
-        handle_socket(socket, state, credential, client, challenge_id)
-    })
+    ws.on_upgrade(move |socket| handle_socket(socket, state, credential, client, challenge_id))
 }
 
 async fn handle_socket(
@@ -801,8 +806,13 @@ async fn handle_socket(
             Ok(req) => {
                 // Bearer tokens re-resolve per frame, matching session-cookie
                 // semantics (revocation/expiry takes effect on the next frame).
-                match build_rpc_ctx(&state, credential.clone(), client.clone(), challenge_id.clone())
-                    .await
+                match build_rpc_ctx(
+                    &state,
+                    credential.clone(),
+                    client.clone(),
+                    challenge_id.clone(),
+                )
+                .await
                 {
                     Ok(mut ctx) => rpc::dispatch(&mut ctx, req).await,
                     Err(rejection) => RpcResponse::err(rejection.error),

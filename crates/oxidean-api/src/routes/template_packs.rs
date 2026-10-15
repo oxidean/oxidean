@@ -71,6 +71,7 @@ async fn build_ctx(state: &AppState, headers: &HeaderMap) -> RpcCtx {
             store: state.two_factor_store.clone(),
             challenge_id: None,
         },
+        login_begin_limiter: state.login_begin_limiter.clone(),
         lookup_limiter: state.lookup_limiter.clone(),
         search_timeout_ms: state.search_timeout_ms,
         search_max_matches: state.search_max_matches,
@@ -162,7 +163,10 @@ pub async fn upload_pack(
     )
     .await
     {
-        Ok(pack) => (StatusCode::CREATED, Json(serde_json::json!({ "ok": true, "pack": pack })))
+        Ok(pack) => (
+            StatusCode::CREATED,
+            Json(serde_json::json!({ "ok": true, "pack": pack })),
+        )
             .into_response(),
         Err(e) => {
             let status = match e.code.as_str() {

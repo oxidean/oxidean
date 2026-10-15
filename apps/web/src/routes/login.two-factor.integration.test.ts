@@ -15,6 +15,7 @@ vi.mock("@/lib/api-client", () => ({
   apiClient: {
     auth: {
       me: (...args: unknown[]) => meMock(...args),
+      login: vi.fn(),
     },
     twoFactor: {
       status: (...args: unknown[]) => statusMock(...args),
@@ -46,6 +47,7 @@ function challenge(over: Record<string, unknown> = {}) {
       challenge_pending: true,
       challenge_kind: "verify",
       challenge_methods: ["totp", "recovery", "email"],
+      challenge_next: "factor",
       enroll_required: false,
       ...over,
     },
@@ -87,6 +89,7 @@ describe("/login/two-factor (#130)", () => {
       challenge({
         challenge_kind: "enroll",
         challenge_methods: ["totp", "passkey"],
+        challenge_next: "enroll",
         enroll_required: true,
       }),
     );

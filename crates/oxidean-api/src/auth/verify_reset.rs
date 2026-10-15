@@ -28,10 +28,7 @@ const RESET_SUBJECT: &str = "Reset your Oxidean password";
 
 /// Env allowlist for `auth.dev.privileged_ping` (D-10 / Open Q2 RESOLVED).
 pub fn privileged_ping_env_allowed(env_name: &str) -> bool {
-    matches!(
-        env_name,
-        "development" | "dev" | "test" | "compose"
-    ) || cfg!(test)
+    matches!(env_name, "development" | "dev" | "test" | "compose") || cfg!(test)
 }
 
 fn db_err(e: String) -> AppError {
@@ -92,31 +89,20 @@ fn parse_created_at(raw: &str) -> Result<chrono::DateTime<Utc>, AppError> {
         .or_else(|_| {
             chrono::NaiveDateTime::parse_from_str(raw, "%Y-%m-%d %H:%M:%S")
                 .map(|ndt| ndt.and_utc())
-                .map_err(|_| {
-                    AppError::new("auth.internal", "authentication failed")
-                })
+                .map_err(|_| AppError::new("auth.internal", "authentication failed"))
         })
 }
 
 fn rate_limited() -> AppError {
-    AppError::new(
-        "auth.rate_limited",
-        "too many emails; try again later",
-    )
+    AppError::new("auth.rate_limited", "too many emails; try again later")
 }
 
 fn invalid_token() -> AppError {
-    AppError::new(
-        "auth.invalid_token",
-        "invalid or expired verification code",
-    )
+    AppError::new("auth.invalid_token", "invalid or expired verification code")
 }
 
 fn invalid_reset_token() -> AppError {
-    AppError::new(
-        "auth.invalid_token",
-        "invalid or expired reset code",
-    )
+    AppError::new("auth.invalid_token", "invalid or expired reset code")
 }
 
 fn sso_only() -> AppError {
@@ -358,18 +344,18 @@ pub async fn request_password_reset(
     })?;
     let email = normalize_email(&req.email)?;
 
-    let user = ctx
-        .db
-        .find_user_by_email(&email)
-        .await
-        .map_err(db_err)?;
+    let user = ctx.db.find_user_by_email(&email).await.map_err(db_err)?;
 
     if let Some(user) = user {
         if user.password_hash.is_some() {
             match issue_token_inner(&ctx.db, &user.id, PURPOSE_RESET, "", true).await {
                 Ok(secrets) => {
-                    let msg =
-                        build_reset_email(&user.email, &user.username, &secrets.magic, &secrets.otp);
+                    let msg = build_reset_email(
+                        &user.email,
+                        &user.username,
+                        &secrets.magic,
+                        &secrets.otp,
+                    );
                     if let Err(e) = ctx.email.send(msg).await {
                         tracing::error!(error = %e, "reset email send failed");
                     }
@@ -390,10 +376,7 @@ pub async fn request_password_reset(
 
 async fn require_session_user(ctx: &RpcCtx) -> Result<oxidean_db::UserRow, AppError> {
     let Some(session) = &ctx.session else {
-        return Err(AppError::new(
-            "auth.unauthenticated",
-            "not authenticated",
-        ));
+        return Err(AppError::new("auth.unauthenticated", "not authenticated"));
     };
     ctx.db
         .find_user_by_id(&session.user_id)
@@ -425,21 +408,13 @@ pub struct VerifyRequest {
 /// Consume verify magic token or OTP while signed in as the target user (D-21).
 pub async fn verify(ctx: &RpcCtx, input: serde_json::Value) -> Result<UserPublic, AppError> {
     let Some(session) = &ctx.session else {
-        return Err(AppError::new(
-            "auth.unauthenticated",
-            "not authenticated",
-        ));
+        return Err(AppError::new("auth.unauthenticated", "not authenticated"));
     };
 
-    let req: VerifyRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid verify input: {e}"))
-    })?;
+    let req: VerifyRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid verify input: {e}")))?;
 
-    let code = req
-        .code
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty());
+    let code = req.code.as_deref().map(str::trim).filter(|s| !s.is_empty());
     let token = req
         .token
         .as_deref()
@@ -520,10 +495,7 @@ pub async fn verify(ctx: &RpcCtx, input: serde_json::Value) -> Result<UserPublic
         return Err(invalid_token());
     }
 
-    ctx.db
-        .delete_email_token(&row.id)
-        .await
-        .map_err(db_err)?;
+    ctx.db.delete_email_token(&row.id).await.map_err(db_err)?;
 
     let user = ctx
         .db
@@ -537,11 +509,7 @@ pub async fn verify(ctx: &RpcCtx, input: serde_json::Value) -> Result<UserPublic
 /// On OTP/magic miss, increment attempts on the session user's primary verify
 /// token (or legacy empty-target row) and invalidate at the cap.
 async fn bump_verify_attempt_on_miss(ctx: &RpcCtx, user_id: &str) -> Result<(), AppError> {
-    let user = ctx
-        .db
-        .find_user_by_id(user_id)
-        .await
-        .map_err(db_err)?;
+    let user = ctx.db.find_user_by_id(user_id).await.map_err(db_err)?;
     let Some(user) = user else {
         return Ok(());
     };
@@ -616,14 +584,13 @@ pub async fn reset_password(
     input: serde_json::Value,
 ) -> Result<UserPublic, AppError> {
     let req: ResetPasswordRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid reset_password input: {e}"))
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid reset_password input: {e}"),
+        )
     })?;
 
-    let code = req
-        .code
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty());
+    let code = req.code.as_deref().map(str::trim).filter(|s| !s.is_empty());
     let token = req
         .token
         .as_deref()
@@ -716,10 +683,7 @@ pub async fn reset_password(
         .set_password_hash(&user.id, &password_hash)
         .await
         .map_err(db_err)?;
-    ctx.db
-        .delete_email_token(&row.id)
-        .await
-        .map_err(db_err)?;
+    ctx.db.delete_email_token(&row.id).await.map_err(db_err)?;
 
     // D-27: revoke all existing sessions, then mint a fresh session on this device.
     ctx.sessions
@@ -738,7 +702,7 @@ pub async fn reset_password(
     .await?;
     if gate.has_factor || gate.enroll_required {
         return Err(crate::auth::two_factor::open_challenge(
-            ctx, &gate, &user.id, false,
+            ctx, &gate, &user.id, false, true,
         ));
     }
 
@@ -776,7 +740,10 @@ mod tests {
 
     async fn test_db() -> Database {
         let dir = tempfile::tempdir().expect("tempdir");
-        let url = format!("sqlite:{}", dir.path().join("verify_reset_clear.db").display());
+        let url = format!(
+            "sqlite:{}",
+            dir.path().join("verify_reset_clear.db").display()
+        );
         let db = Database::connect(&url).await.expect("connect");
         db.migrate().await.expect("migrate");
         std::mem::forget(dir);
@@ -808,6 +775,9 @@ mod tests {
             client: crate::rpc::ClientMeta::default(),
             set_cookie: None,
             two_factor: crate::auth::two_factor::TwoFactorCtx::default(),
+            login_begin_limiter: Arc::new(std::sync::Mutex::new(
+                crate::auth::login_rate::LoginBeginLimiter::new(),
+            )),
             lookup_limiter: Arc::new(std::sync::Mutex::new(
                 crate::user::rate_limit::LookupLimiter::new(),
             )),

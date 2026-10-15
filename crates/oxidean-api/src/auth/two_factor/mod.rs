@@ -4,11 +4,21 @@
 //! such as Face ID, Touch ID, fingerprint readers, and Windows Hello — plus
 //! roaming keys), single-use recovery codes, and a pre-session email OTP.
 //!
-//! Flow: primary auth (password or SSO callback) succeeds → a pending
-//! `TwoFactorStore` challenge is opened and its id set as an `oxidean_2fa`
-//! HttpOnly cookie → `auth.two_factor.complete` / `passkey_*` / `email_send` /
-//! enrollment RPCs verify or enroll a factor → only then is a real session
-//! minted via `issue_session` + `CookieChange::Set`.
+//! Flow: sign-in is identifier-first — `auth.login_begin` resolves the
+//! email/username and opens a pending `TwoFactorStore` challenge (its id set
+//! as an `oxidean_2fa` HttpOnly cookie). The challenge carries the
+//! outstanding requirements: prove a factor (`needs_factor`), enroll one
+//! (`needs_enroll`), and/or submit the account password (`needs_password`).
+//! `auth.two_factor.complete` / `passkey_*` / `email_send` satisfy the factor
+//! leg, `auth.login` with the challenge id satisfies the password leg, and a
+//! user-verified passkey assertion satisfies both at once. Only when nothing
+//! remains is a real session minted via `issue_session` + `CookieChange::Set`.
+//! One-shot `auth.login` (identifier + password, no challenge) keeps working
+//! for machine clients: it opens the same challenge post-password.
+//!
+//! Enrollment legs never run while `needs_password` is still set — a factor
+//! must not be plantable on an account pre-auth — so enroll-required users
+//! always take the password step first.
 //!
 //! Policy: `auth_settings.require_two_factor_local` / `_external` (instance)
 //! and `organizations.require_two_factor` (any membership) decide whether a
@@ -21,14 +31,14 @@ pub mod recovery;
 pub mod store;
 pub mod totp;
 
+use cookie::time::Duration as TimeDuration;
 use oxidean_core::{
     AdminResetTwoFactorRequest, AppError, PasskeyCompleteRequest, PasskeyDeleteRequest,
     PasskeyPublic, PasskeyRegisterCompleteRequest, PasskeyUpdateRequest, RecoveryCodesPublic,
-    TotpEnrollmentPublic, TwoFactorChallengeRequest, TwoFactorCompleteRequest,
-    TwoFactorStatusPublic, UserPublic,
+    TotpEnrollmentPublic, TwoFactorChallengeRequest, TwoFactorCompletePublic,
+    TwoFactorCompleteRequest, TwoFactorStatusPublic, UserPublic,
 };
-use oxidean_db::Database;
-use cookie::time::Duration as TimeDuration;
+use oxidean_db::{Database, UserRow};
 use url::Url;
 use uuid::Uuid;
 use webauthn_rs::prelude::*;
@@ -40,7 +50,7 @@ use crate::email::OutboundEmail;
 use crate::rpc::{CookieChange, RpcCtx};
 
 pub use flags::LoginChannel;
-pub use store::{PendingKind, TwoFactorStore};
+pub use store::{OpenChallenge, PendingKind, TwoFactorStore};
 
 /// Second-factor state cookie — HttpOnly, scoped to the challenge TTL.
 pub const TWO_FACTOR_COOKIE_NAME: &str = "oxidean_2fa";
@@ -81,7 +91,7 @@ fn invalid(msg: &str) -> AppError {
     AppError::new("auth.two_factor_invalid", msg)
 }
 
-fn expired(msg: &str) -> AppError {
+pub(crate) fn expired(msg: &str) -> AppError {
     AppError::new("auth.two_factor_expired", msg)
 }
 
@@ -142,19 +152,57 @@ pub fn cleared_challenge_cookie(env_name: &str) -> cookie::Cookie<'static> {
 // Challenge plumbing — shared by `auth.login` and the SSO callbacks.
 // ---------------------------------------------------------------------------
 
+/// Open a pending challenge and queue its `oxidean_2fa` cookie on the ctx;
+/// returns the challenge id. (The SSO callback sets the cookie on its
+/// redirect response directly via `challenge_cookie_header`.)
+pub fn open_and_cookie(ctx: &mut RpcCtx, params: OpenChallenge) -> String {
+    let id = ctx.two_factor.store.open(params);
+    ctx.set_cookie = Some(CookieChange::SetTwoFactor(challenge_cookie(
+        &ctx.env_name,
+        &id,
+    )));
+    id
+}
+
+/// `auth.two_factor_required` payload for a challenge that is still open —
+/// used by the stepped `auth.login` password leg when factor/enroll remains.
+pub fn pending_required_error(id: &str, pending: &store::PendingInfo) -> AppError {
+    AppError::new(
+        "auth.two_factor_required",
+        "two-factor authentication is required",
+    )
+    .with_data(serde_json::json!({
+        "challenge": id,
+        "kind": pending.kind().as_str(),
+        "methods": pending.methods,
+    }))
+}
+
 /// Open a pending challenge for `user` and return the
 /// `auth.two_factor_required` error `auth.login` / SSO callbacks surface.
 /// Also queues the `oxidean_2fa` cookie on the ctx (RPC path) — the SSO
 /// callback sets it on its redirect response directly via `challenge_cookie`.
+/// `password_satisfied` is true when a password-equivalent primary credential
+/// already passed (one-shot login, signup, reset, SSO identity).
 pub fn required_error(
     ctx: &mut RpcCtx,
     user_id: &str,
     remember_me: bool,
     kind: PendingKind,
     methods: Vec<String>,
+    password_satisfied: bool,
 ) -> AppError {
-    let id = ctx.two_factor.store.open(user_id, remember_me, kind, methods.clone());
-    ctx.set_cookie = Some(CookieChange::SetTwoFactor(challenge_cookie(&ctx.env_name, &id)));
+    let id = open_and_cookie(
+        ctx,
+        OpenChallenge {
+            user_id: user_id.to_string(),
+            remember_me,
+            needs_factor: kind == PendingKind::Verify,
+            needs_enroll: kind == PendingKind::Enroll,
+            needs_password: !password_satisfied,
+            methods: methods.clone(),
+        },
+    );
     AppError::new(
         "auth.two_factor_required",
         "two-factor authentication is required",
@@ -214,10 +262,18 @@ async fn enroll_actor(
     }
     if let Some(id) = challenge_id(ctx, explicit_challenge) {
         let pending = pending_or_err(ctx, &id)?;
-        if pending.kind != PendingKind::Enroll {
+        if !pending.needs_enroll {
             return Err(AppError::new(
                 "auth.two_factor_unavailable",
                 "this challenge expects verification, not enrollment",
+            ));
+        }
+        if pending.needs_password {
+            // Enroll legs never run pre-password — a factor must not be
+            // plantable on an account its owner has not authenticated into.
+            return Err(AppError::new(
+                "auth.two_factor_unavailable",
+                "finish the password step before enrolling a factor",
             ));
         }
         return Ok((pending.user_id, Some(id)));
@@ -253,19 +309,71 @@ async fn mint_session(
     Ok(user_to_public(&ctx.db, &user).await)
 }
 
-/// Open a challenge + queue its cookie — used by `auth.login`.
+/// Password leg of an identifier-first challenge (called by `auth.login`
+/// with `challenge` set): verify `password` against the challenge-bound
+/// `user`, clear `needs_password`, and mint only once every outstanding
+/// requirement is satisfied. Remaining factor/enroll debt surfaces as the
+/// same `auth.two_factor_required` payload the challenge opened with.
+pub(crate) async fn password_step(
+    ctx: &mut RpcCtx,
+    id: &str,
+    user: &UserRow,
+    password: &str,
+    remember_me: bool,
+) -> Result<UserPublic, AppError> {
+    let valid = match user.password_hash.as_deref() {
+        Some(hash) => crate::auth::password::verify_password(password.as_bytes(), hash),
+        None => false,
+    };
+    if !valid || user.banned_at.is_some() {
+        // Wrong passwords burn the same attempt budget as factor codes —
+        // when the cap trips, the challenge is dropped and that error wins.
+        bump_attempts(ctx, id)?;
+        return Err(AppError::new(
+            "auth.invalid_credentials",
+            "Incorrect email/username or password",
+        ));
+    }
+    let remaining = ctx.two_factor.store.update(id, |p| {
+        p.needs_password = false;
+        p.remember_me = remember_me;
+        (p.needs_factor, p.needs_enroll)
+    });
+    let Some((needs_factor, needs_enroll)) = remaining else {
+        return Err(expired("two-factor challenge expired — sign in again"));
+    };
+    if needs_factor || needs_enroll {
+        let pending = pending_or_err(ctx, id)?;
+        return Err(pending_required_error(id, &pending));
+    }
+    let Some(pending) = ctx.two_factor.store.take(id) else {
+        return Err(expired("two-factor challenge expired — sign in again"));
+    };
+    mint_session(ctx, pending, "password").await
+}
+
+/// Open a challenge + queue its cookie — used by `auth.login` and callers
+/// whose primary credential already passed (`password_satisfied: true`).
 pub fn open_challenge(
     ctx: &mut RpcCtx,
     gate: &flags::LoginGate,
     user_id: &str,
     remember_me: bool,
+    password_satisfied: bool,
 ) -> AppError {
     let kind = if gate.enroll_required && !gate.has_factor {
         PendingKind::Enroll
     } else {
         PendingKind::Verify
     };
-    required_error(ctx, user_id, remember_me, kind, gate.methods.clone())
+    required_error(
+        ctx,
+        user_id,
+        remember_me,
+        kind,
+        gate.methods.clone(),
+        password_satisfied,
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -332,9 +440,19 @@ pub async fn status(ctx: &mut RpcCtx) -> Result<TwoFactorStatusPublic, AppError>
                 recovery_codes_remaining: 0,
                 passkeys: vec![],
                 challenge_pending: true,
-                challenge_kind: Some(pending.kind.as_str().to_string()),
+                challenge_kind: Some(pending.kind().as_str().to_string()),
                 challenge_methods: pending.methods,
-                enroll_required: pending.kind == PendingKind::Enroll,
+                challenge_next: Some(
+                    if pending.needs_factor {
+                        "factor"
+                    } else if pending.needs_password {
+                        "password"
+                    } else {
+                        "enroll"
+                    }
+                    .to_string(),
+                ),
+                enroll_required: pending.needs_enroll,
             });
         }
     }
@@ -376,6 +494,7 @@ pub async fn status(ctx: &mut RpcCtx) -> Result<TwoFactorStatusPublic, AppError>
         challenge_pending: false,
         challenge_kind: None,
         challenge_methods: vec![],
+        challenge_next: None,
         enroll_required,
     })
 }
@@ -426,18 +545,13 @@ pub async fn totp_begin(
 
 /// Replace all recovery codes for `user_id` with a freshly generated set;
 /// returns the plaintext codes (shown once).
-async fn fresh_recovery_codes(
-    db: &Database,
-    user_id: &str,
-) -> Result<Vec<String>, AppError> {
+async fn fresh_recovery_codes(db: &Database, user_id: &str) -> Result<Vec<String>, AppError> {
     let codes = recovery::generate();
     let pairs: Vec<(String, String)> = codes
         .iter()
         .map(|c| (Uuid::new_v4().to_string(), recovery::hash(c)))
         .collect();
-    db.recovery_replace(user_id, &pairs)
-        .await
-        .map_err(db_err)?;
+    db.recovery_replace(user_id, &pairs).await.map_err(db_err)?;
     Ok(codes)
 }
 
@@ -550,9 +664,47 @@ pub async fn recovery_regenerate(ctx: &mut RpcCtx) -> Result<RecoveryCodesPublic
 // Challenge completion: TOTP / email OTP / recovery code
 // ---------------------------------------------------------------------------
 
-/// `auth.two_factor.complete` — finish a verify-kind challenge with a `code`:
-/// 6 digits → TOTP, 8 digits → email OTP, otherwise a recovery code.
-pub async fn complete(ctx: &mut RpcCtx, input: serde_json::Value) -> Result<UserPublic, AppError> {
+/// A verify-kind factor leg succeeded. When the challenge still owes the
+/// password step (identifier-first login) the challenge stays open and the
+/// client advances to it; otherwise the challenge is consumed and the
+/// session minted.
+async fn finish_factor(
+    ctx: &mut RpcCtx,
+    id: &str,
+    method_detail: &str,
+) -> Result<TwoFactorCompletePublic, AppError> {
+    let needs_password = ctx
+        .two_factor
+        .store
+        .update(id, |p| {
+            p.needs_factor = false;
+            p.needs_password
+        })
+        .ok_or_else(|| expired("two-factor challenge expired — sign in again"))?;
+    if needs_password {
+        return Ok(TwoFactorCompletePublic {
+            next: "password".into(),
+            user: None,
+        });
+    }
+    let Some(pending) = ctx.two_factor.store.take(id) else {
+        return Err(expired("two-factor challenge expired — sign in again"));
+    };
+    let user = mint_session(ctx, pending, method_detail).await?;
+    Ok(TwoFactorCompletePublic {
+        next: "done".into(),
+        user: Some(user),
+    })
+}
+
+/// `auth.two_factor.complete` — satisfy the factor leg of a verify challenge
+/// with a `code`: 6 digits → TOTP, 8 digits → email OTP, otherwise a
+/// recovery code. Returns `next: "password"` when the identifier-first flow
+/// still owes the password step, `"done"` + session when it does not.
+pub async fn complete(
+    ctx: &mut RpcCtx,
+    input: serde_json::Value,
+) -> Result<TwoFactorCompletePublic, AppError> {
     let req: TwoFactorCompleteRequest = serde_json::from_value(input).map_err(bad_input)?;
     let id = challenge_id(ctx, req.challenge.as_deref()).ok_or_else(|| {
         AppError::new(
@@ -561,10 +713,10 @@ pub async fn complete(ctx: &mut RpcCtx, input: serde_json::Value) -> Result<User
         )
     })?;
     let pending = pending_or_err(ctx, &id)?;
-    if pending.kind != PendingKind::Verify {
+    if !pending.needs_factor {
         return Err(AppError::new(
             "auth.two_factor_unavailable",
-            "enroll a factor to complete sign-in",
+            "this challenge is not waiting for a verification code",
         ));
     }
     let digits: String = req.code.chars().filter(|c| !c.is_whitespace()).collect();
@@ -589,10 +741,7 @@ pub async fn complete(ctx: &mut RpcCtx, input: serde_json::Value) -> Result<User
             return Err(invalid("that code did not match — try again"));
         }
         let _ = ctx.db.totp_touch_last_used(&pending.user_id).await;
-        let Some(pending) = ctx.two_factor.store.take(&id) else {
-            return Err(expired("two-factor challenge expired — sign in again"));
-        };
-        return mint_session(ctx, pending, "totp").await;
+        return finish_factor(ctx, &id, "totp").await;
     }
 
     // --- Email OTP (8 digits) ---
@@ -628,10 +777,7 @@ pub async fn complete(ctx: &mut RpcCtx, input: serde_json::Value) -> Result<User
             return Err(invalid("that sign-in code is wrong or expired"));
         }
         ctx.db.delete_email_token(&row.id).await.map_err(db_err)?;
-        let Some(pending) = ctx.two_factor.store.take(&id) else {
-            return Err(expired("two-factor challenge expired — sign in again"));
-        };
-        return mint_session(ctx, pending, "email").await;
+        return finish_factor(ctx, &id, "email").await;
     }
 
     // --- Recovery code ---
@@ -648,10 +794,7 @@ pub async fn complete(ctx: &mut RpcCtx, input: serde_json::Value) -> Result<User
             bump_attempts(ctx, &id)?;
             return Err(invalid("that recovery code is wrong or already used"));
         }
-        let Some(pending) = ctx.two_factor.store.take(&id) else {
-            return Err(expired("two-factor challenge expired — sign in again"));
-        };
-        return mint_session(ctx, pending, "recovery").await;
+        return finish_factor(ctx, &id, "recovery").await;
     }
 
     Err(invalid(
@@ -677,10 +820,10 @@ pub async fn passkey_begin(
         )
     })?;
     let pending = pending_or_err(ctx, &id)?;
-    if pending.kind != PendingKind::Verify {
+    if !pending.needs_factor {
         return Err(AppError::new(
             "auth.two_factor_unavailable",
-            "enroll a factor to complete sign-in",
+            "this challenge is not waiting for a verification",
         ));
     }
     if !pending.methods.iter().any(|m| m == "passkey") {
@@ -725,10 +868,10 @@ pub async fn passkey_complete(
         )
     })?;
     let pending = pending_or_err(ctx, &id)?;
-    if pending.kind != PendingKind::Verify {
+    if !pending.needs_factor {
         return Err(AppError::new(
             "auth.two_factor_unavailable",
-            "enroll a factor to complete sign-in",
+            "this challenge is not waiting for a verification",
         ));
     }
     let assertion: PublicKeyCredential =
@@ -755,10 +898,11 @@ pub async fn passkey_complete(
     // Update counter/backup flags + last_used on the matching credential.
     let cred_id = cred_id_str(result.cred_id())?;
     let mut passkeys = load_passkeys(&ctx.db, &pending.user_id).await?;
-    if let Some((row_id, pk, _)) = passkeys
-        .iter_mut()
-        .find(|(_, p, _)| cred_id_str(p.cred_id()).map(|s| s == cred_id).unwrap_or(false))
-    {
+    if let Some((row_id, pk, _)) = passkeys.iter_mut().find(|(_, p, _)| {
+        cred_id_str(p.cred_id())
+            .map(|s| s == cred_id)
+            .unwrap_or(false)
+    }) {
         pk.update_credential(&result);
         let json = serde_json::to_string(pk)
             .map_err(|_| AppError::new("internal.error", "passkey encode failed"))?;
@@ -767,6 +911,12 @@ pub async fn passkey_complete(
             .await
             .map_err(db_err)?;
     }
+    // A user-verified passkey assertion is multi-factor in one gesture — it
+    // clears the password step too (identifier-first flow, #130).
+    ctx.two_factor.store.update(&id, |p| {
+        p.needs_factor = false;
+        p.needs_password = false;
+    });
     let Some(pending) = ctx.two_factor.store.take(&id) else {
         return Err(expired("two-factor challenge expired — sign in again"));
     };
@@ -790,7 +940,10 @@ pub async fn passkey_register_begin(
     let uuid = Uuid::parse_str(&user.id)
         .map_err(|_| AppError::new("internal.error", "user id is not a uuid"))?;
     let existing = load_passkeys(&ctx.db, &user_id).await?;
-    let exclude: Vec<CredentialID> = existing.iter().map(|(_, p, _)| p.cred_id().clone()).collect();
+    let exclude: Vec<CredentialID> = existing
+        .iter()
+        .map(|(_, p, _)| p.cred_id().clone())
+        .collect();
     let (ccr, state) = make_webauthn()?
         .start_passkey_registration(uuid, &user.username, &user.display_name, Some(exclude))
         .map_err(|e| {
@@ -809,9 +962,7 @@ pub async fn passkey_register_begin(
             return Err(expired("two-factor challenge expired — sign in again"));
         }
     } else {
-        ctx.two_factor
-            .store
-            .stash_session_passkey(&user_id, state);
+        ctx.two_factor.store.stash_session_passkey(&user_id, state);
     }
     serde_json::to_value(&ccr)
         .map_err(|_| AppError::new("internal.error", "passkey challenge encode failed"))
@@ -823,8 +974,7 @@ pub async fn passkey_register_complete(
     ctx: &mut RpcCtx,
     input: serde_json::Value,
 ) -> Result<PasskeyPublic, AppError> {
-    let req: PasskeyRegisterCompleteRequest =
-        serde_json::from_value(input).map_err(bad_input)?;
+    let req: PasskeyRegisterCompleteRequest = serde_json::from_value(input).map_err(bad_input)?;
     let (user_id, challenge) = enroll_actor(ctx, req.challenge.as_deref()).await?;
     let nickname = {
         let n = req.nickname.trim();
@@ -848,9 +998,7 @@ pub async fn passkey_register_complete(
             .store
             .update(id, |p| p.passkey_registration.take())
             .flatten()
-            .ok_or_else(|| {
-                expired("no passkey ceremony in progress — request a new challenge")
-            })?,
+            .ok_or_else(|| expired("no passkey ceremony in progress — request a new challenge"))?,
         None => ctx
             .two_factor
             .store
@@ -977,10 +1125,10 @@ pub async fn email_send(
         )
     })?;
     let pending = pending_or_err(ctx, &id)?;
-    if pending.kind != PendingKind::Verify {
+    if !pending.needs_factor {
         return Err(AppError::new(
             "auth.two_factor_unavailable",
-            "enroll a factor to complete sign-in",
+            "this challenge is not waiting for a verification",
         ));
     }
     if !pending.methods.iter().any(|m| m == "email") {

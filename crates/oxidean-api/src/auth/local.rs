@@ -2,8 +2,8 @@
 
 use cookie::Cookie;
 use oxidean_core::{
-    is_reserved_username, validate_username, AppError, LoginRequest, ProviderMode, Role,
-    SignupRequest, UserPublic,
+    is_reserved_username, validate_username, AppError, LoginBeginRequest, LoginBeginResponse,
+    LoginRequest, ProviderMode, Role, SignupRequest, UserPublic,
 };
 use oxidean_db::{Database, UserRow};
 use uuid::Uuid;
@@ -71,6 +71,26 @@ pub(crate) fn normalize_email(raw: &str) -> Result<String, AppError> {
     Ok(email)
 }
 
+/// Resolve a login `identifier` — email when it contains `@`, else username.
+async fn resolve_login_identifier(
+    db: &Database,
+    identifier: &str,
+) -> Result<Option<UserRow>, AppError> {
+    if identifier.contains('@') {
+        let email = identifier.to_ascii_lowercase();
+        db.find_user_by_email(&email).await.map_err(db_err)
+    } else {
+        db.find_user_by_username(identifier).await.map_err(db_err)
+    }
+}
+
+fn invalid_credentials() -> AppError {
+    AppError::new(
+        "auth.invalid_credentials",
+        "Incorrect email/username or password",
+    )
+}
+
 async fn resolve_provider_mode(ctx: &RpcCtx) -> Result<ProviderMode, AppError> {
     match ctx.db.get_auth_settings().await {
         Ok(row) => match row.provider_mode.as_str() {
@@ -103,10 +123,7 @@ fn db_err(e: String) -> AppError {
             "no database configured for this instance",
         )
     } else if e.contains("UNIQUE") || e.contains("unique") || e.contains("Duplicate") {
-        AppError::new(
-            "auth.taken",
-            "email or username already taken",
-        )
+        AppError::new("auth.taken", "email or username already taken")
     } else {
         tracing::error!("auth db error: {e}");
         AppError::new("auth.internal", "authentication failed")
@@ -170,9 +187,8 @@ pub async fn signup(ctx: &mut RpcCtx, input: serde_json::Value) -> Result<UserPu
         ));
     }
 
-    let req: SignupRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid signup input: {e}"))
-    })?;
+    let req: SignupRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid signup input: {e}")))?;
 
     let email = normalize_email(&req.email)?;
     validate_username(&req.username).map_err(map_username_err)?;
@@ -265,7 +281,7 @@ pub async fn signup(ctx: &mut RpcCtx, input: serde_json::Value) -> Result<UserPu
     .await?;
     if gate.has_factor || gate.enroll_required {
         return Err(crate::auth::two_factor::open_challenge(
-            ctx, &gate, &row.id, false,
+            ctx, &gate, &row.id, false, true,
         ));
     }
 
@@ -275,60 +291,213 @@ pub async fn signup(ctx: &mut RpcCtx, input: serde_json::Value) -> Result<UserPu
     Ok(user_to_public(&ctx.db, &row).await)
 }
 
+/// `auth.login_begin` — identifier-first sign-in (#130): resolve the
+/// email/username, open an `oxidean_2fa` challenge, and report the next step
+/// (`"factor"` or `"password"`). Unknown, banned, or passwordless (SSO-only)
+/// identifiers get an indistinguishable password-step response bound to a
+/// dead-end challenge — the account reveals nothing.
+pub async fn login_begin(
+    ctx: &mut RpcCtx,
+    input: serde_json::Value,
+) -> Result<LoginBeginResponse, AppError> {
+    let mode = resolve_provider_mode(ctx).await?;
+    require_local(mode)?;
+
+    let req: LoginBeginRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid login_begin input: {e}")))?;
+    let identifier = req.identifier.trim();
+    if identifier.is_empty() {
+        return Err(AppError::new("rpc.bad_input", "identifier is required"));
+    }
+
+    // Each challenge resets the factor-attempt budget and can trigger OTP
+    // mail — bound challenge churn per client IP and per identifier.
+    {
+        let ip = ctx.client.ip_address.as_deref().unwrap_or("unknown");
+        let mut lim = ctx
+            .login_begin_limiter
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if !lim.check_and_record(ip, &identifier.to_ascii_lowercase()) {
+            return Err(AppError::new(
+                "auth.rate_limited",
+                "too many sign-in attempts — try again later",
+            ));
+        }
+    }
+
+    let user = resolve_login_identifier(&ctx.db, identifier).await?;
+    let usable = user.filter(|u| u.password_hash.is_some() && u.banned_at.is_none());
+    let Some(user) = usable else {
+        // Phantom challenge: a dead-end password step, indistinguishable
+        // from a real password-only account.
+        let id = crate::auth::two_factor::open_and_cookie(
+            ctx,
+            crate::auth::two_factor::OpenChallenge {
+                user_id: String::new(),
+                remember_me: req.remember_me,
+                needs_factor: false,
+                needs_enroll: false,
+                needs_password: true,
+                methods: vec![],
+            },
+        );
+        return Ok(LoginBeginResponse {
+            challenge: id,
+            next: "password".into(),
+            kind: None,
+            methods: vec![],
+        });
+    };
+
+    let gate = crate::auth::two_factor::flags::login_gate(
+        &ctx.db,
+        &user,
+        crate::auth::two_factor::LoginChannel::Local,
+    )
+    .await?;
+
+    if gate.has_factor {
+        let id = crate::auth::two_factor::open_and_cookie(
+            ctx,
+            crate::auth::two_factor::OpenChallenge {
+                user_id: user.id.clone(),
+                remember_me: req.remember_me,
+                needs_factor: true,
+                needs_enroll: false,
+                needs_password: true,
+                methods: gate.methods.clone(),
+            },
+        );
+        return Ok(LoginBeginResponse {
+            challenge: id,
+            next: "factor".into(),
+            kind: Some("verify".into()),
+            methods: gate.methods,
+        });
+    }
+
+    // Enroll-required and password-only accounts both run the password step
+    // first — a factor is never enrolled pre-auth.
+    let id = crate::auth::two_factor::open_and_cookie(
+        ctx,
+        crate::auth::two_factor::OpenChallenge {
+            user_id: user.id.clone(),
+            remember_me: req.remember_me,
+            needs_factor: false,
+            needs_enroll: gate.enroll_required,
+            needs_password: true,
+            methods: if gate.enroll_required {
+                vec!["totp".into(), "passkey".into()]
+            } else {
+                vec![]
+            },
+        },
+    );
+    Ok(LoginBeginResponse {
+        challenge: id,
+        next: "password".into(),
+        kind: gate.enroll_required.then(|| "enroll".to_string()),
+        methods: vec![],
+    })
+}
+
 /// Local login by email or username + password (D-02); generic invalid_credentials (T-04-11).
+///
+/// Two shapes: `challenge` absent runs the one-shot credential check
+/// (machine clients, legacy path) and opens the post-password 2FA gate as
+/// before; `challenge` set — or the `oxidean_2fa` cookie present — runs the
+/// password leg of the identifier-first flow. The challenge binds the
+/// account, so `identifier` may be omitted on resume; when supplied it must
+/// resolve to the same user.
 pub async fn login(ctx: &mut RpcCtx, input: serde_json::Value) -> Result<UserPublic, AppError> {
     let mode = resolve_provider_mode(ctx).await?;
     require_local(mode)?;
 
-    let req: LoginRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid login input: {e}"))
-    })?;
+    let req: LoginRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid login input: {e}")))?;
 
     let identifier = req.identifier.trim();
-    if identifier.is_empty() {
-        return Err(AppError::new(
-            "auth.invalid_credentials",
-            "Incorrect email/username or password",
-        ));
+
+    // Identifier-first path: an explicit challenge (or the `oxidean_2fa`
+    // cookie) binds this call to the `auth.login_begin` challenge.
+    let challenge = req
+        .challenge
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .or_else(|| ctx.two_factor.challenge_id.clone());
+    if let Some(id) = challenge {
+        match ctx.two_factor.store.peek(&id) {
+            Some(p) => {
+                // The challenge binds the account: resolve it directly when
+                // no identifier was sent (reload-resume), else require the
+                // identifier to agree with the binding. Phantom challenges
+                // carry no user and always dead-end here.
+                let bound = if identifier.is_empty() {
+                    if p.user_id.is_empty() {
+                        None
+                    } else {
+                        ctx.db.find_user_by_id(&p.user_id).await.map_err(db_err)?
+                    }
+                } else {
+                    match resolve_login_identifier(&ctx.db, identifier).await? {
+                        Some(u) if u.id == p.user_id => Some(u),
+                        _ => None,
+                    }
+                };
+                match bound {
+                    Some(u) => {
+                        return crate::auth::two_factor::password_step(
+                            ctx,
+                            &id,
+                            &u,
+                            &req.password,
+                            req.remember_me,
+                        )
+                        .await;
+                    }
+                    None => {
+                        if req.challenge.is_some() {
+                            // Bound to a different account (or a phantom) —
+                            // generic failure, same as a bad password.
+                            return Err(invalid_credentials());
+                        }
+                        // Cookie-only mismatch: stale challenge — ignore it.
+                    }
+                }
+            }
+            None => {
+                if req.challenge.is_some() {
+                    return Err(crate::auth::two_factor::expired(
+                        "sign-in challenge expired — start over",
+                    ));
+                }
+            }
+        }
     }
 
-    let user = if identifier.contains('@') {
-        let email = identifier.to_ascii_lowercase();
-        ctx.db.find_user_by_email(&email).await.map_err(db_err)?
-    } else {
-        ctx.db
-            .find_user_by_username(identifier)
-            .await
-            .map_err(db_err)?
-    };
+    if identifier.is_empty() {
+        return Err(invalid_credentials());
+    }
+    let user = resolve_login_identifier(&ctx.db, identifier).await?;
 
     let Some(user) = user else {
-        return Err(AppError::new(
-            "auth.invalid_credentials",
-            "Incorrect email/username or password",
-        ));
+        return Err(invalid_credentials());
     };
 
     let Some(ref hash) = user.password_hash else {
-        return Err(AppError::new(
-            "auth.invalid_credentials",
-            "Incorrect email/username or password",
-        ));
+        return Err(invalid_credentials());
     };
 
     if !verify_password(req.password.as_bytes(), hash) {
-        return Err(AppError::new(
-            "auth.invalid_credentials",
-            "Incorrect email/username or password",
-        ));
+        return Err(invalid_credentials());
     }
 
     if user.banned_at.is_some() {
         // Same generic message as bad password (no ban-status leak).
-        return Err(AppError::new(
-            "auth.invalid_credentials",
-            "Incorrect email/username or password",
-        ));
+        return Err(invalid_credentials());
     }
 
     // Two-factor gate (issue #130): a confirmed factor requires proof, and
@@ -346,6 +515,7 @@ pub async fn login(ctx: &mut RpcCtx, input: serde_json::Value) -> Result<UserPub
             &gate,
             &user.id,
             req.remember_me,
+            true,
         ));
     }
 
@@ -365,10 +535,7 @@ pub async fn login(ctx: &mut RpcCtx, input: serde_json::Value) -> Result<UserPub
 /// Log out current session only (D-13).
 pub async fn logout(ctx: &mut RpcCtx) -> Result<(), AppError> {
     let Some(session) = ctx.session.clone() else {
-        return Err(AppError::new(
-            "auth.unauthenticated",
-            "not authenticated",
-        ));
+        return Err(AppError::new("auth.unauthenticated", "not authenticated"));
     };
     ctx.sessions
         .revoke(&ctx.db, &session.session_id)
@@ -399,10 +566,7 @@ pub async fn logout(ctx: &mut RpcCtx) -> Result<(), AppError> {
 /// Revoke all sessions for the current user (D-13).
 pub async fn logout_all(ctx: &mut RpcCtx) -> Result<(), AppError> {
     let Some(session) = ctx.session.clone() else {
-        return Err(AppError::new(
-            "auth.unauthenticated",
-            "not authenticated",
-        ));
+        return Err(AppError::new("auth.unauthenticated", "not authenticated"));
     };
     ctx.sessions
         .revoke_all(&ctx.db, &session.user_id)
@@ -416,10 +580,7 @@ pub async fn logout_all(ctx: &mut RpcCtx) -> Result<(), AppError> {
 /// Current authenticated user, or `auth.unauthenticated`.
 pub async fn me(ctx: &RpcCtx) -> Result<UserPublic, AppError> {
     let Some(session) = &ctx.session else {
-        return Err(AppError::new(
-            "auth.unauthenticated",
-            "not authenticated",
-        ));
+        return Err(AppError::new("auth.unauthenticated", "not authenticated"));
     };
     let user = ctx
         .db
@@ -438,16 +599,15 @@ pub async fn me(ctx: &RpcCtx) -> Result<UserPublic, AppError> {
 
 /// Public provider mode for UI (D-14–D-16); no auth required.
 pub async fn provider_config(ctx: &RpcCtx) -> Result<oxidean_core::ProviderConfigPublic, AppError> {
-    let mode = resolve_provider_mode(ctx).await.unwrap_or(ProviderMode::Local);
+    let mode = resolve_provider_mode(ctx)
+        .await
+        .unwrap_or(ProviderMode::Local);
     // Fail closed: missing/error settings → allow_signup false (D-07 / T-06-01).
     let allow_signup = match ctx.db.get_auth_settings().await {
         Ok(s) => s.allow_signup,
         Err(_) => false,
     };
-    Ok(oxidean_core::ProviderConfigPublic {
-        mode,
-        allow_signup,
-    })
+    Ok(oxidean_core::ProviderConfigPublic { mode, allow_signup })
 }
 
 /// Clear-cookie helper for HTTP layer when CookieChange::Clear is set.

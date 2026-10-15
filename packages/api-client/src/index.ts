@@ -167,6 +167,10 @@ export type TwoFactorStatusPublic = {
   /** `"verify"` (prove a factor) or `"enroll"` (must add one) when pending. */
   challenge_kind?: "verify" | "enroll" | null;
   challenge_methods: string[];
+  /** The step the pending challenge waits on (#130): `"factor"` first when a
+   *  factor and the password are both owed, `"password"` when the password
+   *  leg remains or must precede enrollment, `"enroll"` last. */
+  challenge_next?: "factor" | "password" | "enroll" | null;
   /** Instance/org policy requires this user to enroll a factor. */
   enroll_required: boolean;
 };
@@ -190,6 +194,13 @@ export type RecoveryCodesPublic = {
 export type TwoFactorCompleteRequest = {
   code: string;
   challenge?: string | null;
+};
+
+/** `auth.two_factor.complete` output — `"password"` when the identifier-first
+ *  flow still owes the password step, `"done"` + user when a session minted. */
+export type TwoFactorCompletePublic = {
+  next: "password" | "done";
+  user?: UserPublic | null;
 };
 
 /** `auth.two_factor.passkey_complete` — browser assertion JSON. */
@@ -410,9 +421,32 @@ export type SignupRequest = {
 };
 
 export type LoginRequest = {
-  identifier: string;
+  /** Email or username — required for the one-shot check; omittable when
+   *  `challenge` is set (the challenge binds the account). */
+  identifier?: string;
   password: string;
   remember_me: boolean;
+  /** Identifier-first flow (#130): the `oxidean_2fa` challenge this password
+   *  leg answers. Omit for the one-shot credential check. */
+  challenge?: string | null;
+};
+
+/** `auth.login_begin` input — the identifier-first sign-in step (#130). */
+export type LoginBeginRequest = {
+  identifier: string;
+  remember_me?: boolean;
+};
+
+/** `auth.login_begin` output — which sign-in step comes next. */
+export type LoginBeginResponse = {
+  /** Challenge id — also set as the `oxidean_2fa` HttpOnly cookie. */
+  challenge: string;
+  /** `"factor"` when a second factor is owed first, else `"password"`. */
+  next: "factor" | "password";
+  /** `"verify"` / `"enroll"` when a factor step is pending, else null. */
+  kind?: "verify" | "enroll" | null;
+  /** Factor methods the pending challenge accepts. */
+  methods: string[];
 };
 
 export type VerifyRequest = {
@@ -3596,6 +3630,8 @@ export function createClient(opts: CreateClientOptions) {
     auth: {
       signup: (input: SignupRequest) => rpcCall<UserPublic>(opts, "auth.signup", input),
       login: (input: LoginRequest) => rpcCall<UserPublic>(opts, "auth.login", input),
+      loginBegin: (input: LoginBeginRequest) =>
+        rpcCall<LoginBeginResponse>(opts, "auth.login_begin", input),
       logout: () => rpcCall<{ ok: boolean }>(opts, "auth.logout", {}),
       logoutAll: () => rpcCall<{ ok: boolean }>(opts, "auth.logout_all", {}),
       me: () => rpcCall<UserPublic>(opts, "auth.me", {}),
@@ -3633,7 +3669,7 @@ export function createClient(opts: CreateClientOptions) {
           {},
         ),
       complete: (input: TwoFactorCompleteRequest) =>
-        rpcCall<UserPublic>(opts, "auth.two_factor.complete", input),
+        rpcCall<TwoFactorCompletePublic>(opts, "auth.two_factor.complete", input),
       passkeyBegin: (input: TwoFactorChallengeRequest) =>
         rpcCall<{ publicKey: unknown }>(opts, "auth.two_factor.passkey_begin", input),
       passkeyComplete: (input: PasskeyCompleteRequest) =>
@@ -4422,6 +4458,17 @@ export function authLoginMutationOptions(client: OxideanClient) {
     mutationKey: ["auth", "login"] as const,
     mutationFn: async (input: LoginRequest) => {
       const res = await client.auth.login(input);
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
+export function authLoginBeginMutationOptions(client: OxideanClient) {
+  return {
+    mutationKey: ["auth", "loginBegin"] as const,
+    mutationFn: async (input: LoginBeginRequest) => {
+      const res = await client.auth.loginBegin(input);
       if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
       return res.data;
     },
