@@ -90,6 +90,34 @@ describe("chrome pending account cluster", () => {
     expect(document.querySelector("[data-header-skeleton-anon]")).toBeNull();
     expect(document.querySelector("[data-header-skeleton-authed]")).toBeNull();
   });
+
+  it("authed candidate mirrors the signed-in cluster: three squares + name bar", async () => {
+    let resolveMe: (v: unknown) => void = () => {};
+    vi.mocked(apiClient.auth.me).mockReturnValueOnce(
+      new Promise((res) => {
+        resolveMe = res;
+      }) as never,
+    );
+
+    renderWithQueryClient(SiteHeader);
+
+    await waitFor(() => {
+      expect(document.querySelector("[data-header-skeleton-authed]")).toBeTruthy();
+    });
+
+    // Resolved cluster = CreateMenu (size-9) + NotificationsBell (size-9) +
+    // AccountMenu (size-7 avatar squircle + @username inside an h-9 trigger).
+    // The skeleton must carry a square per square-shaped element — the avatar
+    // was collapsed into a single pill (issue #120).
+    const authed = document.querySelector("[data-header-skeleton-authed]")!;
+    expect(authed.querySelectorAll(".oct-skeleton.size-9").length).toBe(3);
+    expect(authed.querySelectorAll(".oct-skeleton").length).toBe(4);
+
+    resolveMe({ ok: false, error: { code: "auth.unauthenticated", message: "n" } });
+    await waitFor(() => {
+      expect(screen.getByRole("link", { name: /sign in/i })).toBeInTheDocument();
+    });
+  });
 });
 
 describe("chrome Wave 0 (D-06 omit Sign up)", () => {

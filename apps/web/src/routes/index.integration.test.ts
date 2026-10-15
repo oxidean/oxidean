@@ -4,6 +4,7 @@ import { getQueryClient } from "@/lib/query-client";
 
 const meMock = vi.fn();
 const providerConfigMock = vi.fn();
+const repoListMineMock = vi.fn();
 
 vi.mock("@/lib/api-client", () => ({
   apiClient: {
@@ -12,7 +13,7 @@ vi.mock("@/lib/api-client", () => ({
       providerConfig: (...args: unknown[]) => providerConfigMock(...args),
     },
     repo: {
-      listMine: vi.fn(async () => ({ ok: true, data: [] })),
+      listMine: (...args: unknown[]) => repoListMineMock(...args),
     },
   },
 }));
@@ -80,6 +81,8 @@ describe("index pending dual-render", () => {
       ok: true,
       data: { mode: "local", allow_signup: true },
     });
+    repoListMineMock.mockReset();
+    repoListMineMock.mockResolvedValue({ ok: true, data: { repos: [] } });
     getQueryClient().clear();
   });
 
@@ -112,5 +115,90 @@ describe("index pending dual-render", () => {
       expect(document.querySelector("[data-anon-landing]")).toBeNull();
       expect(document.querySelector("[data-home-skeleton]")).toBeNull();
     });
+  });
+});
+
+/**
+ * Issue #120 — signed-in home must go skeleton → populated. While
+ * `repo.listMine` is still in flight `reposQ.data` is `undefined`; rendering
+ * `SignedInHome` with `repos=[]` flashed the "No repositories yet." empty
+ * state before the populated list arrived.
+ */
+describe("index signed-in repo loading (no empty-state flicker)", () => {
+  const user = {
+    id: "u1",
+    username: "ada",
+    email: "ada@example.com",
+    display_name: "Ada",
+    bio: "",
+    avatar_url: null,
+    role: "user",
+    profile_incomplete: false,
+    email_verified: true,
+    must_change_credentials: false,
+    default_branch: "main",
+  };
+
+  beforeEach(() => {
+    meMock.mockReset();
+    providerConfigMock.mockReset();
+    providerConfigMock.mockResolvedValue({
+      ok: true,
+      data: { mode: "local", allow_signup: true },
+    });
+    repoListMineMock.mockReset();
+    getQueryClient().clear();
+  });
+
+  afterEach(() => {
+    getQueryClient().clear();
+    cleanup();
+  });
+
+  it("keeps the skeleton while repo.listMine is pending, never flashes empty state", async () => {
+    const me = deferred<unknown>();
+    const repos = deferred<unknown>();
+    meMock.mockReturnValue(me.promise);
+    repoListMineMock.mockReturnValue(repos.promise);
+
+    render(HomePage, {});
+
+    me.resolve({ ok: true, data: user });
+
+    // Session resolved signed-in but the repo list is still in flight: the
+    // skeleton must stay up — the empty state must never render as a
+    // transient before the populated tree.
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-testid="signed-in-home"]')).toBeNull();
+      expect(document.querySelector("[data-home-skeleton]")).toBeNull();
+      expect(document.querySelector('[aria-busy="true"][aria-label="Loading"]')).toBeTruthy();
+    });
+    expect(document.body.textContent).not.toContain("No repositories yet.");
+    expect(document.body.textContent).not.toContain("Create your first repository");
+
+    repos.resolve({
+      ok: true,
+      data: {
+        repos: [
+          {
+            id: "r1",
+            owner_id: "u1",
+            owner_type: "user",
+            owner_username: "ada",
+            name: "hello",
+            description: "",
+            visibility: "public",
+            default_branch: "main",
+            updated_at: "2026-09-12T12:00:00Z",
+          },
+        ],
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-testid="signed-in-home"]')).toBeTruthy();
+    });
+    expect(document.body.textContent).toContain("ada/hello");
+    expect(document.body.textContent).not.toContain("No repositories yet.");
   });
 });
