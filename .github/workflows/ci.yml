@@ -39,6 +39,7 @@ jobs:
   ci-image:
     name: ci-image
     runs-on: ubuntu-latest
+    timeout-minutes: 50
     permissions:
       contents: read
       packages: read
@@ -59,7 +60,16 @@ jobs:
         id: r
         env:
           CI_IMAGE_NS: ghcr.io/${{ github.repository_owner }}
-        run: ./scripts/ci-image-tag.sh resolve-all >> "$GITHUB_OUTPUT"
+        run: |
+          # ci.yml and ci-base.yml start together; a PR that changes image
+          # inputs publishes its content tags a few minutes later. Wait for
+          # them — except on fork PRs, which can never publish: resolve the
+          # -latest fallback (or fail fast) instead of burning the budget.
+          wait_s=2400
+          if [ "${{ github.event_name }}" = pull_request ] && [ "${{ github.event.pull_request.head.repo.fork }}" = true ]; then
+            wait_s=0
+          fi
+          CI_IMAGE_WAIT_SECONDS=$wait_s ./scripts/ci-image-tag.sh resolve-all >> "$GITHUB_OUTPUT"
 
   # SemVer commit-grammar gate (U5, BR5.3–BR5.6): lints the PR/push commit range
   # and the PR title, then validates the version registry against the workspace.
