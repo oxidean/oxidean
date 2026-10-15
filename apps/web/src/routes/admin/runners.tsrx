@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { List, ListRow } from "@/components/ui/list";
 import { PageHeader } from "@/components/ui/page-header";
+import { Skeleton } from "@/components/ui/skeleton";
 import { apiClient } from "@/lib/api-client";
 import { authSessionQueryOptions, setAuthMeCache } from "@/lib/session-queries";
 import { fetchSessionMe } from "@/lib/ssr-auth";
@@ -192,7 +193,18 @@ export function AdminRunnersContent() @{
               <code className="rounded bg-muted px-1 py-0.5 font-mono text-[13px]">runs-on</code> in
               workflows for jobs to be claimed.
             </p>
-            @if (runnersQ.isError) {
+            {/* adminRunners enable-gate keeps the list query pending until the
+                gate resolves — skeleton instead of an empty-state flash (#120). */}
+            @if (runnersQ.isPending) {
+              <List className="mt-4" aria-busy="true" aria-label="Loading runners">
+                @for (const i of [0, 1, 2]; key i) {
+                  <ListRow className="items-center gap-2">
+                    <Skeleton className="size-4 shrink-0 rounded" />
+                    <Skeleton className="h-4 w-40" />
+                  </ListRow>;
+                }
+              </List>;
+            } @else if (runnersQ.isError) {
               <p className="mt-4 text-[14px] text-destructive" role="alert">
                 {(runnersQ.error as Error)?.message || "Could not load runners."}
               </p>;
