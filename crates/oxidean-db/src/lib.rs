@@ -2972,8 +2972,14 @@ impl Database {
         approved_at: &str,
         granted_scopes: Option<&str>,
     ) -> Result<bool, String> {
-        oauth::approve_device_code(self.require_pool()?, id, user_id, approved_at, granted_scopes)
-            .await
+        oauth::approve_device_code(
+            self.require_pool()?,
+            id,
+            user_id,
+            approved_at,
+            granted_scopes,
+        )
+        .await
     }
 
     /// Single-claim deny — false when the code was not pending.

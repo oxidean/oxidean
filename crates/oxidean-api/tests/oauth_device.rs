@@ -107,11 +107,7 @@ fn device_poll(device_code: &str) -> Request<Body> {
 }
 
 async fn request_grant(app: &axum::Router, scope: &str) -> serde_json::Value {
-    let res = app
-        .clone()
-        .oneshot(device_code_post(scope))
-        .await
-        .unwrap();
+    let res = app.clone().oneshot(device_code_post(scope)).await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
     let bytes = res.into_body().collect().await.unwrap().to_bytes();
     serde_json::from_slice(&bytes).unwrap()
@@ -145,13 +141,14 @@ async fn device_grant_full_flow() {
     );
     assert_eq!(user_code.len(), 9, "XXXX-XXXX — {user_code}");
     assert!(user_code.chars().nth(4) == Some('-'));
-    assert!(grant["verification_uri"].as_str().unwrap().ends_with("/oauth/device"));
-    assert!(
-        grant["verification_uri_complete"]
-            .as_str()
-            .unwrap()
-            .contains(&format!("user_code={user_code}"))
-    );
+    assert!(grant["verification_uri"]
+        .as_str()
+        .unwrap()
+        .ends_with("/oauth/device"));
+    assert!(grant["verification_uri_complete"]
+        .as_str()
+        .unwrap()
+        .contains(&format!("user_code={user_code}")));
     assert_eq!(grant["expires_in"], 900);
     assert_eq!(grant["interval"], 5);
 
@@ -168,18 +165,14 @@ async fn device_grant_full_flow() {
     // 4. deviceInfo needs a session; with one it returns the pending grant.
     let (status, v) = rpc_json(
         &app,
-        &format!(
-            r#"{{"procedure":"oauth.deviceInfo","input":{{"user_code":"{user_code}"}}}}"#
-        ),
+        &format!(r#"{{"procedure":"oauth.deviceInfo","input":{{"user_code":"{user_code}"}}}}"#),
         "",
     )
     .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED, "{v}");
     let (status, v) = rpc_json(
         &app,
-        &format!(
-            r#"{{"procedure":"oauth.deviceInfo","input":{{"user_code":"{user_code}"}}}}"#
-        ),
+        &format!(r#"{{"procedure":"oauth.deviceInfo","input":{{"user_code":"{user_code}"}}}}"#),
         &cookie,
     )
     .await;
@@ -250,7 +243,10 @@ async fn device_grant_full_flow() {
 #[tokio::test]
 async fn device_grant_denied_and_unknown() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let url = format!("sqlite:{}", dir.path().join("oauth_device_deny.db").display());
+    let url = format!(
+        "sqlite:{}",
+        dir.path().join("oauth_device_deny.db").display()
+    );
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
@@ -306,7 +302,10 @@ async fn device_grant_denied_and_unknown() {
 #[tokio::test]
 async fn device_code_scope_validation() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let url = format!("sqlite:{}", dir.path().join("oauth_device_scope.db").display());
+    let url = format!(
+        "sqlite:{}",
+        dir.path().join("oauth_device_scope.db").display()
+    );
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
@@ -326,14 +325,11 @@ async fn device_code_scope_validation() {
     // Empty scope → first-party set (approver can narrow on the device page).
     let grant = request_grant(&app, "").await;
     assert!(grant["device_code"].as_str().unwrap().len() > 8);
-    let (cookie, _uid) =
-        signup_login_verify(&app, &db, "scopes@ex.com", "scopeuser").await;
+    let (cookie, _uid) = signup_login_verify(&app, &db, "scopes@ex.com", "scopeuser").await;
     let user_code = grant["user_code"].as_str().unwrap();
     let (status, v) = rpc_json(
         &app,
-        &format!(
-            r#"{{"procedure":"oauth.deviceInfo","input":{{"user_code":"{user_code}"}}}}"#
-        ),
+        &format!(r#"{{"procedure":"oauth.deviceInfo","input":{{"user_code":"{user_code}"}}}}"#),
         &cookie,
     )
     .await;
@@ -348,7 +344,10 @@ async fn device_code_scope_validation() {
 #[tokio::test]
 async fn device_approval_scope_narrowing() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let url = format!("sqlite:{}", dir.path().join("oauth_device_narrow.db").display());
+    let url = format!(
+        "sqlite:{}",
+        dir.path().join("oauth_device_narrow.db").display()
+    );
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;

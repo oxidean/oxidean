@@ -21,9 +21,15 @@ use crate::webhook::dispatch;
 
 fn db_err(e: String) -> AppError {
     if e == "database not configured" {
-        AppError::new("db.not_configured", "no database configured for this instance")
+        AppError::new(
+            "db.not_configured",
+            "no database configured for this instance",
+        )
     } else if e.contains("UNIQUE") || e.contains("unique") || e.contains("Duplicate") {
-        AppError::new("release.tag_taken", "A release already exists for this tag.")
+        AppError::new(
+            "release.tag_taken",
+            "A release already exists for this tag.",
+        )
     } else if e == "release not found" {
         AppError::new("release.not_found", "Release not found")
     } else {
@@ -37,7 +43,10 @@ fn release_not_found() -> AppError {
 }
 
 fn tag_missing() -> AppError {
-    AppError::new("release.tag_missing", "Tag does not exist on this repository.")
+    AppError::new(
+        "release.tag_missing",
+        "Tag does not exist on this repository.",
+    )
 }
 
 fn asset_public(row: &ReleaseAssetRow) -> ReleaseAssetPublic {
@@ -87,20 +96,35 @@ fn can_see_drafts(accessible: &AccessibleRepo) -> bool {
     meets(accessible.capability, Capability::Write)
 }
 
-async fn tag_exists(ctx: &RpcCtx, accessible: &AccessibleRepo, tag_name: &str) -> Result<bool, AppError> {
-    let path = bare_repo_path(&ctx.repos_dir, &accessible.owner_username, &accessible.row.name)?;
+async fn tag_exists(
+    ctx: &RpcCtx,
+    accessible: &AccessibleRepo,
+    tag_name: &str,
+) -> Result<bool, AppError> {
+    let path = bare_repo_path(
+        &ctx.repos_dir,
+        &accessible.owner_username,
+        &accessible.row.name,
+    )?;
     let refs = ctx.git.list_refs(&path).await.map_err(|e| {
         tracing::error!(error = %e, "list_refs for release tag check");
         AppError::new("release.internal", "release operation failed")
     })?;
     let want_full = format!("refs/tags/{tag_name}");
-    Ok(refs.iter().any(|r| r.name == want_full || r.name == tag_name || r.name.strip_prefix("refs/tags/") == Some(tag_name)))
+    Ok(refs.iter().any(|r| {
+        r.name == want_full
+            || r.name == tag_name
+            || r.name.strip_prefix("refs/tags/") == Some(tag_name)
+    }))
 }
 
 pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<ReleasePublic, AppError> {
     let user = require_verified(ctx).await?;
     let req: CreateReleaseRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid release.create input: {e}"))
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid release.create input: {e}"),
+        )
     })?;
     let tag_name = req.tag_name.trim();
     if tag_name.is_empty() {
@@ -115,9 +139,26 @@ pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<ReleasePub
     if !tag_exists(ctx, &accessible, tag_name).await? {
         return Err(tag_missing());
     }
-    let title = if req.title.trim().is_empty() { tag_name.to_string() } else { req.title.trim().to_string() };
+    let title = if req.title.trim().is_empty() {
+        tag_name.to_string()
+    } else {
+        req.title.trim().to_string()
+    };
     let id = Uuid::new_v4().to_string();
-    let row = ctx.db.insert_release(&id, &accessible.row.id, tag_name, &title, &req.body, req.draft, req.prerelease, &user.id).await.map_err(db_err)?;
+    let row = ctx
+        .db
+        .insert_release(
+            &id,
+            &accessible.row.id,
+            tag_name,
+            &title,
+            &req.body,
+            req.draft,
+            req.prerelease,
+            &user.id,
+        )
+        .await
+        .map_err(db_err)?;
     // DEBT-06: publish fan-out through the watch matrix — `all` watchers are
     // notified; drafts stay silent until they publish.
     if !row.draft {
@@ -142,17 +183,28 @@ pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<ReleasePub
         &user.username,
         &user.id,
     );
-    dispatch::emit(&ctx.db, &accessible.row.id, "release", action, payload, &ctx.env_name).await;
+    dispatch::emit(
+        &ctx.db,
+        &accessible.row.id,
+        "release",
+        action,
+        payload,
+        &ctx.env_name,
+    )
+    .await;
     Ok(public)
 }
 
 pub async fn list(ctx: &RpcCtx, input: serde_json::Value) -> Result<ReleaseListResponse, AppError> {
-    let req: ReleaseListRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid release.list input: {e}"))
-    })?;
+    let req: ReleaseListRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid release.list input: {e}")))?;
     let accessible = resolve_repo_for_read(ctx, &req.owner, &req.name).await?;
     let include_drafts = can_see_drafts(&accessible);
-    let rows = ctx.db.list_releases_for_repo(&accessible.row.id, include_drafts).await.map_err(db_err)?;
+    let rows = ctx
+        .db
+        .list_releases_for_repo(&accessible.row.id, include_drafts)
+        .await
+        .map_err(db_err)?;
     let mut releases = Vec::with_capacity(rows.len());
     for row in rows {
         releases.push(to_public(ctx, &row).await?);
@@ -161,15 +213,19 @@ pub async fn list(ctx: &RpcCtx, input: serde_json::Value) -> Result<ReleaseListR
 }
 
 pub async fn get(ctx: &RpcCtx, input: serde_json::Value) -> Result<ReleasePublic, AppError> {
-    let req: ReleaseGetRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid release.get input: {e}"))
-    })?;
+    let req: ReleaseGetRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid release.get input: {e}")))?;
     let tag_name = req.tag_name.trim();
     if tag_name.is_empty() {
         return Err(AppError::new("rpc.bad_input", "tag_name is required"));
     }
     let accessible = resolve_repo_for_read(ctx, &req.owner, &req.name).await?;
-    let row = ctx.db.find_release_by_repo_tag(&accessible.row.id, tag_name).await.map_err(db_err)?.ok_or_else(release_not_found)?;
+    let row = ctx
+        .db
+        .find_release_by_repo_tag(&accessible.row.id, tag_name)
+        .await
+        .map_err(db_err)?
+        .ok_or_else(release_not_found)?;
     if row.draft && !can_see_drafts(&accessible) {
         return Err(release_not_found());
     }
@@ -179,7 +235,10 @@ pub async fn get(ctx: &RpcCtx, input: serde_json::Value) -> Result<ReleasePublic
 pub async fn update(ctx: &RpcCtx, input: serde_json::Value) -> Result<ReleasePublic, AppError> {
     let user = require_verified(ctx).await?;
     let req: UpdateReleaseRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid release.update input: {e}"))
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid release.update input: {e}"),
+        )
     })?;
     let tag_name = req.tag_name.trim();
     if tag_name.is_empty() {
@@ -188,16 +247,31 @@ pub async fn update(ctx: &RpcCtx, input: serde_json::Value) -> Result<ReleasePub
     let accessible = resolve_repo_for_read(ctx, &req.owner, &req.name).await?;
     // GIT-20: releases are content — frozen while archived.
     ensure_not_archived(&accessible)?;
-    let existing = ctx.db.find_release_by_repo_tag(&accessible.row.id, tag_name).await.map_err(db_err)?.ok_or_else(release_not_found)?;
+    let existing = ctx
+        .db
+        .find_release_by_repo_tag(&accessible.row.id, tag_name)
+        .await
+        .map_err(db_err)?
+        .ok_or_else(release_not_found)?;
     let is_author = existing.author_id == user.id;
     if !is_author && !meets(accessible.capability, Capability::Write) {
         return Err(not_found());
     }
-    let title = req.title.as_deref().map(str::trim).filter(|s| !s.is_empty()).unwrap_or(existing.title.as_str()).to_string();
+    let title = req
+        .title
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(existing.title.as_str())
+        .to_string();
     let body = req.body.clone().unwrap_or_else(|| existing.body.clone());
     let draft = req.draft.unwrap_or(existing.draft);
     let prerelease = req.prerelease.unwrap_or(existing.prerelease);
-    let row = ctx.db.update_release(&existing.id, &title, &body, draft, prerelease).await.map_err(db_err)?;
+    let row = ctx
+        .db
+        .update_release(&existing.id, &title, &body, draft, prerelease)
+        .await
+        .map_err(db_err)?;
     // DEBT-06: draft→non-draft is a publish; edits to a live release notify.
     // Draft edits stay invisible to watchers.
     let reason = if existing.draft && !row.draft {
@@ -236,14 +310,28 @@ pub async fn update(ctx: &RpcCtx, input: serde_json::Value) -> Result<ReleasePub
         &user.username,
         &user.id,
     );
-    dispatch::emit(&ctx.db, &accessible.row.id, "release", action, payload, &ctx.env_name).await;
+    dispatch::emit(
+        &ctx.db,
+        &accessible.row.id,
+        "release",
+        action,
+        payload,
+        &ctx.env_name,
+    )
+    .await;
     Ok(public)
 }
 
-pub async fn delete(ctx: &RpcCtx, input: serde_json::Value) -> Result<DeleteReleaseResponse, AppError> {
+pub async fn delete(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<DeleteReleaseResponse, AppError> {
     let user = require_verified(ctx).await?;
     let req: DeleteReleaseRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid release.delete input: {e}"))
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid release.delete input: {e}"),
+        )
     })?;
     let tag_name = req.tag_name.trim();
     if tag_name.is_empty() {
@@ -252,7 +340,12 @@ pub async fn delete(ctx: &RpcCtx, input: serde_json::Value) -> Result<DeleteRele
     let accessible = resolve_repo_for_admin(ctx, &req.owner, &req.name).await?;
     // GIT-20: releases are content — frozen while archived.
     ensure_not_archived(&accessible)?;
-    let existing = ctx.db.find_release_by_repo_tag(&accessible.row.id, tag_name).await.map_err(db_err)?.ok_or_else(release_not_found)?;
+    let existing = ctx
+        .db
+        .find_release_by_repo_tag(&accessible.row.id, tag_name)
+        .await
+        .map_err(db_err)?
+        .ok_or_else(release_not_found)?;
     let assets = ctx
         .db
         .list_assets_for_release(&existing.id)
@@ -291,7 +384,15 @@ pub async fn delete(ctx: &RpcCtx, input: serde_json::Value) -> Result<DeleteRele
         &user.username,
         &user.id,
     );
-    dispatch::emit(&ctx.db, &accessible.row.id, "release", "deleted", payload, &ctx.env_name).await;
+    dispatch::emit(
+        &ctx.db,
+        &accessible.row.id,
+        "release",
+        "deleted",
+        payload,
+        &ctx.env_name,
+    )
+    .await;
     Ok(DeleteReleaseResponse { ok: true })
 }
 

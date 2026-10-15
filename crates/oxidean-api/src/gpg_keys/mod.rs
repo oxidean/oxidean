@@ -116,7 +116,10 @@ async fn parse_armored_public_key(armor: &str) -> Result<ParsedGpgKey, AppError>
         let err = String::from_utf8_lossy(&output.stderr);
         return Err(AppError::new(
             "gpgKey.invalid_key",
-            format!("invalid OpenPGP public key ({})", err.lines().next().unwrap_or("gpg error")),
+            format!(
+                "invalid OpenPGP public key ({})",
+                err.lines().next().unwrap_or("gpg error")
+            ),
         ));
     }
 

@@ -1469,7 +1469,12 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
         ("auth", "refresh", "") => {
             // `--reset-scopes` stays accepted for compat — reset is now the
             // default, so the flag is a no-op alias.
-            let f = scan(tail, &["--scopes"], &["--reset-scopes", "--keep-scopes"], &[])?;
+            let f = scan(
+                tail,
+                &["--scopes"],
+                &["--reset-scopes", "--keep-scopes"],
+                &[],
+            )?;
             expect_no_positionals(&f, "auth refresh")?;
             if f.values.contains_key("--scopes")
                 && (f.bools.contains("--reset-scopes") || f.bools.contains("--keep-scopes"))

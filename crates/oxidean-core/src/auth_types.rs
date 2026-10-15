@@ -3,7 +3,9 @@
 use serde::{Deserialize, Serialize};
 
 /// Auth provider mode (D-05, D-06). Serialized as lowercase: `local` | `workos` | `oidc`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum ProviderMode {
     #[default]
@@ -22,7 +24,9 @@ pub enum EmailProviderKind {
 }
 
 /// Instance-level user role. Serialized as kebab-case: `user` | `admin` | `sys-admin`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum Role {
     #[default]
@@ -114,7 +118,9 @@ pub struct BootstrapSetupRequest {
 }
 
 /// Factory reset disk/DB scope (D-34). Default keeps repository files on disk.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum FactoryResetScope {
     /// Wipe users/sessions/auth; keep bare repos under `OXIDEAN_REPOS_DIR`.
@@ -785,7 +791,10 @@ mod tests {
             "allow_signup": true
         });
         let settings: AuthSettingsPublic = serde_json::from_value(pub_json).unwrap();
-        assert_eq!(serde_json::to_value(&settings).unwrap()["allow_signup"], true);
+        assert_eq!(
+            serde_json::to_value(&settings).unwrap()["allow_signup"],
+            true
+        );
 
         let upd_json = serde_json::json!({
             "provider_mode": "local",

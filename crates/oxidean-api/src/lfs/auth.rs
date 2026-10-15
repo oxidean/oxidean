@@ -8,7 +8,8 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use chrono::{DateTime, Utc};
 use oxidean_core::{
-    ClassicPatScope, ContentsPerm, FgRepoAccess, PatKind, CLASSIC_PAT_PREFIX, FINE_GRAINED_PAT_PREFIX,
+    ClassicPatScope, ContentsPerm, FgRepoAccess, PatKind, CLASSIC_PAT_PREFIX,
+    FINE_GRAINED_PAT_PREFIX,
 };
 use oxidean_db::{PatRow, RepositoryRow, UserRow};
 
@@ -220,11 +221,10 @@ pub async fn pat_allows_operation(
     };
     match kind {
         PatKind::Classic => {
-            let scopes: Vec<String> =
-                match pat.scopes_json.as_deref().map(serde_json::from_str) {
-                    Some(Ok(v)) => v,
-                    Some(Err(_)) | None => return Ok(false),
-                };
+            let scopes: Vec<String> = match pat.scopes_json.as_deref().map(serde_json::from_str) {
+                Some(Ok(v)) => v,
+                Some(Err(_)) | None => return Ok(false),
+            };
             let has = |want: ClassicPatScope| {
                 scopes
                     .iter()

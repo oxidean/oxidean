@@ -27,10 +27,7 @@ pub fn spawn_webhook_worker(db: Database, env_name: String) {
             }
         }
     });
-    tracing::info!(
-        secs = interval_secs,
-        "webhook delivery worker scheduled"
-    );
+    tracing::info!(secs = interval_secs, "webhook delivery worker scheduled");
 }
 
 async fn drain_once(db: &Database, env_name: &str) -> Result<(), String> {

@@ -45,7 +45,10 @@ async fn dialect_pulls_migrate_0016_schema_presence() {
             assert!(sql.contains(needle), "{label} 0016 must define {needle}");
         }
         assert!(
-            sql.contains("'pr'") || sql.contains("\"pr\"") || sql.contains(", 'pr'") || sql.contains("pr'"),
+            sql.contains("'pr'")
+                || sql.contains("\"pr\"")
+                || sql.contains(", 'pr'")
+                || sql.contains("pr'"),
             "{label} 0016 must expand issue_links kind to include pr"
         );
     }
@@ -96,18 +99,8 @@ async fn dialect_pulls_migrate_0016_schema_presence() {
         .expect("allocate shared #N");
     let pull = db
         .insert_pull(
-            "p-1",
-            &repo.id,
-            n,
-            "First PR",
-            "body",
-            &author.id,
-            "main",
-            "abc",
-            &repo.id,
-            "feature",
-            "def",
-            false,
+            "p-1", &repo.id, n, "First PR", "body", &author.id, "main", "abc", &repo.id, "feature",
+            "def", false,
         )
         .await
         .expect("insert pull");
@@ -280,12 +273,11 @@ async fn dialect_pulls_batch_enrichment() {
             .expect("label filter");
         assert_eq!(hit, vec![p1.id.clone()], "needle {needle}");
     }
-    assert!(
-        db.pull_ids_with_label(&pull_ids, "missing")
-            .await
-            .expect("no match")
-            .is_empty()
-    );
+    assert!(db
+        .pull_ids_with_label(&pull_ids, "missing")
+        .await
+        .expect("no match")
+        .is_empty());
 
     // Reviews batch.
     let reviews = db
@@ -351,22 +343,19 @@ async fn dialect_pulls_batch_enrichment() {
     assert_eq!(users.len(), 2);
 
     // Empty inputs must not error.
-    assert!(
-        db.list_pull_assignees_for_pulls(&[])
-            .await
-            .expect("empty assignees")
-            .is_empty()
-    );
-    assert!(
-        db.list_reviews_for_pulls(&[])
-            .await
-            .expect("empty reviews")
-            .is_empty()
-    );
-    assert!(
-        db.pull_ids_with_label(&[], "bug")
-            .await
-            .expect("empty labels")
-            .is_empty()
-    );
+    assert!(db
+        .list_pull_assignees_for_pulls(&[])
+        .await
+        .expect("empty assignees")
+        .is_empty());
+    assert!(db
+        .list_reviews_for_pulls(&[])
+        .await
+        .expect("empty reviews")
+        .is_empty());
+    assert!(db
+        .pull_ids_with_label(&[], "bug")
+        .await
+        .expect("empty labels")
+        .is_empty());
 }

@@ -30,9 +30,9 @@ fn db_err(e: String) -> AppError {
 }
 
 fn require_session(ctx: &RpcCtx) -> Result<&crate::auth::session::ResolvedSession, AppError> {
-    ctx.session.as_ref().ok_or_else(|| {
-        AppError::new("auth.unauthenticated", "not authenticated")
-    })
+    ctx.session
+        .as_ref()
+        .ok_or_else(|| AppError::new("auth.unauthenticated", "not authenticated"))
 }
 
 /// `user.get_profile` — current user's public profile.
@@ -60,20 +60,18 @@ pub(crate) async fn public_profile_for(
     user: &oxidean_db::UserRow,
     viewer_user_id: Option<&str>,
 ) -> Result<oxidean_core::PublicUserProfile, AppError> {
-    let follower_count = ctx
-        .db
-        .user_follower_count(&user.id)
-        .await
-        .map_err(db_err)?;
+    let follower_count = ctx.db.user_follower_count(&user.id).await.map_err(db_err)?;
     let following_count = ctx
         .db
         .user_following_count(&user.id)
         .await
         .map_err(db_err)?;
     let viewer_is_following = match viewer_user_id {
-        Some(uid) if uid != user.id => {
-            ctx.db.is_following_user(uid, &user.id).await.map_err(db_err)?
-        }
+        Some(uid) if uid != user.id => ctx
+            .db
+            .is_following_user(uid, &user.id)
+            .await
+            .map_err(db_err)?,
         _ => false,
     };
     Ok(oxidean_core::PublicUserProfile {
@@ -92,12 +90,13 @@ pub async fn get_public_profile(
     ctx: &RpcCtx,
     input: serde_json::Value,
 ) -> Result<oxidean_core::PublicUserProfile, AppError> {
-    let req: oxidean_core::GetPublicProfileRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new(
-            "rpc.bad_input",
-            format!("invalid user.getPublicProfile input: {e}"),
-        )
-    })?;
+    let req: oxidean_core::GetPublicProfileRequest =
+        serde_json::from_value(input).map_err(|e| {
+            AppError::new(
+                "rpc.bad_input",
+                format!("invalid user.getPublicProfile input: {e}"),
+            )
+        })?;
     let username = req.username.trim();
     if username.is_empty() {
         return Err(AppError::new("user.not_found", "User not found"));
@@ -122,7 +121,10 @@ pub async fn update_profile(
 ) -> Result<UserPublic, AppError> {
     let session = require_session(ctx)?;
     let req: UpdateProfileRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid update_profile input: {e}"))
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid update_profile input: {e}"),
+        )
     })?;
 
     let username = req.username.trim().to_string();

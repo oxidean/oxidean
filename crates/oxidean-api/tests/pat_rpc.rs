@@ -1176,12 +1176,24 @@ async fn pat_bearer_public_repo_scope() {
     )
     .await;
     db.insert_repository(
-        "r-pub-1", &user_id, "user", "publicrepo", "public", "", "main",
+        "r-pub-1",
+        &user_id,
+        "user",
+        "publicrepo",
+        "public",
+        "",
+        "main",
     )
     .await
     .expect("public repo");
     db.insert_repository(
-        "r-priv-1", &user_id, "user", "privaterepo", "private", "", "main",
+        "r-priv-1",
+        &user_id,
+        "user",
+        "privaterepo",
+        "private",
+        "",
+        "main",
     )
     .await
     .expect("private repo");
@@ -1235,17 +1247,14 @@ async fn pat_bearer_delete_repo_is_standalone() {
     support::unlock_signup(&db).await;
     let app = test_app(db.clone()).await;
 
-    let (user_id, _cookie, repo_token) = verified_user_with_classic_pat(
-        &app,
-        &db,
-        "delrepo@ex.com",
-        "delrepouser",
-        r#"["repo"]"#,
+    let (user_id, _cookie, repo_token) =
+        verified_user_with_classic_pat(&app, &db, "delrepo@ex.com", "delrepouser", r#"["repo"]"#)
+            .await;
+    db.insert_repository(
+        "r-del-1", &user_id, "user", "todelete", "private", "", "main",
     )
-    .await;
-    db.insert_repository("r-del-1", &user_id, "user", "todelete", "private", "", "main")
-        .await
-        .expect("repo");
+    .await
+    .expect("repo");
 
     let (status, _, v) = rpc_json_bearer(
         &app,
@@ -1269,14 +1278,8 @@ async fn pat_bearer_family_scope_gates() {
     support::unlock_signup(&db).await;
     let app = test_app(db.clone()).await;
 
-    let (user_id, _cookie, wf_token) = verified_user_with_classic_pat(
-        &app,
-        &db,
-        "wf@ex.com",
-        "wfuser",
-        r#"["workflow"]"#,
-    )
-    .await;
+    let (user_id, _cookie, wf_token) =
+        verified_user_with_classic_pat(&app, &db, "wf@ex.com", "wfuser", r#"["workflow"]"#).await;
     db.insert_repository("r-wf-1", &user_id, "user", "wfrepo", "private", "", "main")
         .await
         .expect("repo");
@@ -1302,14 +1305,9 @@ async fn pat_bearer_family_scope_gates() {
     assert_eq!(v["error"]["code"], "auth.pat_scope", "{v}");
 
     // write:org creates orgs; read:org cannot.
-    let (_uid2, _c2, write_org) = verified_user_with_classic_pat(
-        &app,
-        &db,
-        "worg@ex.com",
-        "worguser",
-        r#"["write:org"]"#,
-    )
-    .await;
+    let (_uid2, _c2, write_org) =
+        verified_user_with_classic_pat(&app, &db, "worg@ex.com", "worguser", r#"["write:org"]"#)
+            .await;
     let (status, _, v) = rpc_json_bearer(
         &app,
         r#"{"procedure":"org.create","input":{"slug":"wg","display_name":"WG"}}"#,
@@ -1318,14 +1316,9 @@ async fn pat_bearer_family_scope_gates() {
     .await;
     assert_eq!(status, StatusCode::OK, "{v}");
 
-    let (_uid3, _c3, read_org) = verified_user_with_classic_pat(
-        &app,
-        &db,
-        "rorg@ex.com",
-        "rorguser",
-        r#"["read:org"]"#,
-    )
-    .await;
+    let (_uid3, _c3, read_org) =
+        verified_user_with_classic_pat(&app, &db, "rorg@ex.com", "rorguser", r#"["read:org"]"#)
+            .await;
     let (status, _, v) = rpc_json_bearer(
         &app,
         r#"{"procedure":"org.create","input":{"slug":"rg","display_name":"RG"}}"#,
@@ -1413,11 +1406,7 @@ async fn pat_bearer_cannot_manage_pats() {
 // --- Fine-grained permission families (S7) ---
 
 /// Mint an FG token via `pat.createFineGrained` and return the plaintext.
-async fn mint_fg(
-    app: &axum::Router,
-    cookie: &str,
-    body: &str,
-) -> String {
+async fn mint_fg(app: &axum::Router, cookie: &str, body: &str) -> String {
     let (status, v) = rpc_json(
         app,
         &format!(r#"{{"procedure":"pat.createFineGrained","input":{body}}}"#),
@@ -1447,7 +1436,9 @@ async fn pat_bearer_fg_perm_families() {
         .await
         .expect("verify");
     let repo = db
-        .insert_repository("r-fgfam", &user_id, "user", "famrepo", "private", "", "main")
+        .insert_repository(
+            "r-fgfam", &user_id, "user", "famrepo", "private", "", "main",
+        )
         .await
         .expect("repo");
 
@@ -1553,7 +1544,9 @@ async fn pat_bearer_fg_account_perms() {
         .await
         .expect("verify");
     let repo = db
-        .insert_repository("r-fgacct", &user_id, "user", "acctrepo", "private", "", "main")
+        .insert_repository(
+            "r-fgacct", &user_id, "user", "acctrepo", "private", "", "main",
+        )
         .await
         .expect("repo");
 

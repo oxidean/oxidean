@@ -372,11 +372,10 @@ async fn pat_allows_operation(
     };
     match kind {
         PatKind::Classic => {
-            let scopes: Vec<String> =
-                match pat.scopes_json.as_deref().map(serde_json::from_str) {
-                    Some(Ok(v)) => v,
-                    Some(Err(_)) | None => return Ok(false),
-                };
+            let scopes: Vec<String> = match pat.scopes_json.as_deref().map(serde_json::from_str) {
+                Some(Ok(v)) => v,
+                Some(Err(_)) | None => return Ok(false),
+            };
             let has = |want: ClassicPatScope| {
                 scopes
                     .iter()
@@ -517,20 +516,16 @@ async fn authorize_and_cgi(
     let mut actor_capability_label = "read";
     if let Some(ref auth) = authed {
         let caller_id = auth.owner.id.as_str();
-        let capability = match effective_capability(
-            &state.db,
-            Some(caller_id),
-            &resolved.row,
-            &resolved.owner,
-        )
-        .await
-        {
-            Ok(c) => c,
-            Err(e) => {
-                tracing::error!(error = %e, "effective_capability");
-                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-            }
-        };
+        let capability =
+            match effective_capability(&state.db, Some(caller_id), &resolved.row, &resolved.owner)
+                .await
+            {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::error!(error = %e, "effective_capability");
+                    return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+                }
+            };
         actor_capability_label = match capability {
             Some(Capability::Admin) => "admin",
             Some(Capability::Write) => "write",
@@ -651,14 +646,11 @@ async fn authorize_and_cgi(
                         let updates_act = updates.clone();
                         let git_act = state.git.clone();
                         tokio::spawn(async move {
-                            let bare = repos_dir
-                                .join(&owner_slug)
-                                .join(format!("{repo_name}.git"));
+                            let bare = repos_dir.join(&owner_slug).join(format!("{repo_name}.git"));
                             // GIT-25: refresh cached size_bytes for UI/admin surfaces.
-                            if let Err(e) = crate::git::quota::refresh_repo_size_bytes(
-                                &db, &repo_id, &bare,
-                            )
-                            .await
+                            if let Err(e) =
+                                crate::git::quota::refresh_repo_size_bytes(&db, &repo_id, &bare)
+                                    .await
                             {
                                 tracing::warn!(error = %e, "refresh repo size_bytes failed");
                             }

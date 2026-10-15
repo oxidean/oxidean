@@ -361,7 +361,8 @@ async fn scan_code(
         let kw = keywords.to_string();
         let specs = pathspecs.to_vec();
         set.spawn(async move {
-            let res = tokio::time::timeout(timeout, git.grep(&path, &branch, &kw, &specs, fetch)).await;
+            let res =
+                tokio::time::timeout(timeout, git.grep(&path, &branch, &kw, &specs, fetch)).await;
             (idx, res)
         });
     }

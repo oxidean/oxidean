@@ -42,9 +42,7 @@ pub async fn append_job_log(
         .map_err(|e| format!("write log: {e}"))?;
     // Flush before drop so a following read_job_log in the same process
     // cannot observe an empty file (tokio File drop alone is racy under load).
-    f.flush()
-        .await
-        .map_err(|e| format!("flush log: {e}"))?;
+    f.flush().await.map_err(|e| format!("flush log: {e}"))?;
     Ok(())
 }
 

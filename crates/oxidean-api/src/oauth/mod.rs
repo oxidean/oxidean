@@ -495,9 +495,7 @@ pub async fn token(
 
     // RFC 8628 §3.4 — device_code grant is a public-client exchange: the
     // device_code itself is the credential, no client auth.
-    if form.grant_type.as_deref()
-        == Some("urn:ietf:params:oauth:grant-type:device_code")
-    {
+    if form.grant_type.as_deref() == Some("urn:ietf:params:oauth:grant-type:device_code") {
         return device_token_exchange(state, headers, form.device_code.as_deref()).await;
     }
 
@@ -1188,8 +1186,8 @@ pub async fn authorize_rpc(
         .filter(|s| !s.is_empty())
     {
         Some(raw) => {
-            let granted = parse_oauth_scopes(raw)
-                .map_err(|e| AppError::new("oauth.invalid_scope", e))?;
+            let granted =
+                parse_oauth_scopes(raw).map_err(|e| AppError::new("oauth.invalid_scope", e))?;
             if let Some(extra) = granted.iter().find(|g| !requested.contains(g)) {
                 return Err(AppError::new(
                     "oauth.invalid_scope",
@@ -1339,13 +1337,7 @@ pub async fn device_code(
                 match ClassicPatScope::parse(part) {
                     Ok(s) if !parsed.contains(&s) => parsed.push(s),
                     Ok(_) => {}
-                    Err(e) => {
-                        return token_error(
-                            StatusCode::BAD_REQUEST,
-                            "invalid_scope",
-                            &e,
-                        )
-                    }
+                    Err(e) => return token_error(StatusCode::BAD_REQUEST, "invalid_scope", &e),
                 }
             }
             parsed
@@ -1353,7 +1345,11 @@ pub async fn device_code(
         None => oxidean_core::first_party_scopes(),
     };
     if scopes.is_empty() {
-        return token_error(StatusCode::BAD_REQUEST, "invalid_scope", "scope is required");
+        return token_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_scope",
+            "scope is required",
+        );
     }
     let scopes_wire = scopes
         .iter()
@@ -1442,7 +1438,11 @@ async fn device_token_exchange(
     {
         Ok(Some(r)) => r,
         Ok(None) => {
-            return token_error(StatusCode::BAD_REQUEST, "invalid_grant", "unknown device_code")
+            return token_error(
+                StatusCode::BAD_REQUEST,
+                "invalid_grant",
+                "unknown device_code",
+            )
         }
         Err(e) => {
             tracing::error!(error = %e, "oauth device poll: lookup failed");
@@ -1512,10 +1512,7 @@ async fn device_token_exchange(
                 .split_whitespace()
                 .filter_map(|s| ClassicPatScope::parse(s).ok())
                 .collect();
-            let name = format!(
-                "ox cli — device login {}",
-                Utc::now().format("%Y-%m-%d")
-            );
+            let name = format!("ox cli — device login {}", Utc::now().format("%Y-%m-%d"));
             // Instance expiration policy applies: the minted PAT expires after
             // `default_ttl_days` (never non-expiring — device logins are
             // refreshable via `ox auth refresh`).
@@ -1632,9 +1629,7 @@ pub async fn device_info(
         .await
         .map_err(db_err)?
         .filter(|r| r.status == "pending" && !rfc3339_expired(&r.expires_at))
-        .ok_or_else(|| {
-            AppError::new("oauth.device_code_not_found", "no pending device code")
-        })?;
+        .ok_or_else(|| AppError::new("oauth.device_code_not_found", "no pending device code"))?;
     let parsed = parse_oauth_scopes(&row.scopes).unwrap_or_default();
     Ok(OAuthDeviceInfo {
         user_code: display_user_code(&row.user_code),
@@ -1667,9 +1662,7 @@ pub async fn device_authorize(
         .await
         .map_err(db_err)?
         .filter(|r| !rfc3339_expired(&r.expires_at))
-        .ok_or_else(|| {
-            AppError::new("oauth.device_code_not_found", "no pending device code")
-        })?;
+        .ok_or_else(|| AppError::new("oauth.device_code_not_found", "no pending device code"))?;
 
     // Approval-page narrowing: granted ⊆ the grant's requested set, non-empty.
     let granted_scopes = if req.approve {
@@ -1718,7 +1711,10 @@ pub async fn device_authorize(
             .await
             .map_err(db_err)?
     } else {
-        ctx.db.deny_oauth_device_code(&row.id).await.map_err(db_err)?
+        ctx.db
+            .deny_oauth_device_code(&row.id)
+            .await
+            .map_err(db_err)?
     };
     if !ok {
         return Err(AppError::new(
@@ -1777,7 +1773,9 @@ pub async fn authorization_server_metadata() -> Json<serde_json::Value> {
 /// clients that omit `scope` resolve to it anyway (see `oauth_default_scopes`).
 pub async fn protected_resource_metadata() -> Json<serde_json::Value> {
     let origin = crate::public_origin::resolve_public_origin();
-    let scopes: Vec<&str> = oxidean_core::FIRST_PARTY_SCOPES.split_whitespace().collect();
+    let scopes: Vec<&str> = oxidean_core::FIRST_PARTY_SCOPES
+        .split_whitespace()
+        .collect();
     Json(serde_json::json!({
         "resource": format!("{origin}/api/mcp"),
         "authorization_servers": [origin],

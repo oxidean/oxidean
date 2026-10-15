@@ -4,10 +4,10 @@
 use std::sync::Arc;
 
 use axum::body::Body;
-use axum::http::{Request, StatusCode, header};
+use axum::http::{header, Request, StatusCode};
 use http_body_util::BodyExt;
 use oxidean_api::email::{EmailSender, LogSink};
-use oxidean_api::{AppState, build_cors, router_with_state};
+use oxidean_api::{build_cors, router_with_state, AppState};
 use oxidean_db::Database;
 use tower::ServiceExt;
 

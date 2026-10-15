@@ -47,14 +47,7 @@ async fn dialect_releases_migrate_schema_presence() {
         .expect("repo");
     let release = db
         .insert_release(
-            "rel-1",
-            &repo.id,
-            "v1.0.0",
-            "First",
-            "notes",
-            false,
-            false,
-            &user.id,
+            "rel-1", &repo.id, "v1.0.0", "First", "notes", false, false, &user.id,
         )
         .await
         .expect("insert release");

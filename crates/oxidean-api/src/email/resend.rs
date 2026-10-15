@@ -73,9 +73,7 @@ impl EmailSender for ResendSender {
         if !response.status().is_success() {
             let status = response.status();
             // Avoid logging response bodies that might echo secrets; status only.
-            return Err(EmailError::Provider(format!(
-                "resend HTTP {status}"
-            )));
+            return Err(EmailError::Provider(format!("resend HTTP {status}")));
         }
         Ok(())
     }

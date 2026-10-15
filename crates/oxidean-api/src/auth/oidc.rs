@@ -41,7 +41,10 @@ pub struct OidcConfig {
 
 impl OidcConfig {
     pub fn from_env() -> Option<Self> {
-        let issuer = std::env::var("OXIDEAN_OIDC_ISSUER").ok()?.trim().to_string();
+        let issuer = std::env::var("OXIDEAN_OIDC_ISSUER")
+            .ok()?
+            .trim()
+            .to_string();
         let client_id = std::env::var("OXIDEAN_OIDC_CLIENT_ID")
             .ok()?
             .trim()
@@ -145,8 +148,8 @@ async fn build_core_client(
 ) -> Result<DiscoveredClient, ExternalAuthError> {
     validate_issuer_url(&cfg.issuer)?;
     let http = http_client()?;
-    let issuer = IssuerUrl::new(cfg.issuer.clone())
-        .map_err(|e| ExternalAuthError::Failed(e.to_string()))?;
+    let issuer =
+        IssuerUrl::new(cfg.issuer.clone()).map_err(|e| ExternalAuthError::Failed(e.to_string()))?;
     let metadata = CoreProviderMetadata::discover_async(issuer, &http)
         .await
         .map_err(|e| ExternalAuthError::Failed(format!("OIDC discovery failed: {e}")))?;

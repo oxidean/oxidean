@@ -35,7 +35,12 @@ fn assert_tag_protection_sql(dialect: &str, sql: &str) {
         sql.contains("pattern"),
         "{dialect}: rule must include tag pattern column"
     );
-    for col in ["allow_create", "allow_update", "allow_delete", "enforce_admins"] {
+    for col in [
+        "allow_create",
+        "allow_update",
+        "allow_delete",
+        "enforce_admins",
+    ] {
         assert!(sql.contains(col), "{dialect}: rule must include {col}");
     }
 }
@@ -55,9 +60,7 @@ async fn dialect_tag_protection_migrate_schema_presence() {
 
     let dir = tempfile::tempdir().expect("tempdir");
     let url = format!("sqlite:{}", dir.path().join("tp.db").display());
-    let db = oxidean_db::Database::connect(&url)
-        .await
-        .expect("connect");
+    let db = oxidean_db::Database::connect(&url).await.expect("connect");
     db.migrate()
         .await
         .expect("migrate must apply tag protection schema");

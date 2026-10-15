@@ -19,7 +19,9 @@ use axum::Json;
 use oxidean_core::AppError;
 use oxidean_db::RepoActivityRow;
 
-use crate::app::{build_rpc_ctx_with_session, resolve_session_token, session_token_from_headers, AppState};
+use crate::app::{
+    build_rpc_ctx_with_session, resolve_session_token, session_token_from_headers, AppState,
+};
 use crate::public_origin::resolve_public_origin;
 use crate::repo::{self, meets, Capability};
 use crate::rpc::{self, RpcCtx};

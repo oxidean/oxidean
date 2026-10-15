@@ -32,7 +32,9 @@ impl OrgRole {
 
 /// Default Member permission on org private repos (D-ORG-02b).
 /// Serialized lowercase: `none` | `read` | `write`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum MemberBasePermission {
     #[default]

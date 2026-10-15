@@ -94,10 +94,7 @@ fn db_err(e: String) -> AppError {
             "no database configured for this instance",
         )
     } else if e.contains("UNIQUE") || e.contains("unique") || e.contains("Duplicate") {
-        AppError::new(
-            "auth.taken",
-            "email or username already taken",
-        )
+        AppError::new("auth.taken", "email or username already taken")
     } else {
         tracing::error!("auth db error: {e}");
         AppError::new("auth.internal", "authentication failed")
@@ -161,9 +158,8 @@ pub async fn signup(ctx: &mut RpcCtx, input: serde_json::Value) -> Result<UserPu
         ));
     }
 
-    let req: SignupRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid signup input: {e}"))
-    })?;
+    let req: SignupRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid signup input: {e}")))?;
 
     let email = normalize_email(&req.email)?;
     validate_username(&req.username).map_err(map_username_err)?;
@@ -257,9 +253,8 @@ pub async fn login(ctx: &mut RpcCtx, input: serde_json::Value) -> Result<UserPub
     let mode = resolve_provider_mode(ctx).await?;
     require_local(mode)?;
 
-    let req: LoginRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid login input: {e}"))
-    })?;
+    let req: LoginRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid login input: {e}")))?;
 
     let identifier = req.identifier.trim();
     if identifier.is_empty() {
@@ -324,10 +319,7 @@ pub async fn login(ctx: &mut RpcCtx, input: serde_json::Value) -> Result<UserPub
 /// Log out current session only (D-13).
 pub async fn logout(ctx: &mut RpcCtx) -> Result<(), AppError> {
     let Some(session) = ctx.session.clone() else {
-        return Err(AppError::new(
-            "auth.unauthenticated",
-            "not authenticated",
-        ));
+        return Err(AppError::new("auth.unauthenticated", "not authenticated"));
     };
     ctx.sessions
         .revoke(&ctx.db, &session.session_id)
@@ -358,10 +350,7 @@ pub async fn logout(ctx: &mut RpcCtx) -> Result<(), AppError> {
 /// Revoke all sessions for the current user (D-13).
 pub async fn logout_all(ctx: &mut RpcCtx) -> Result<(), AppError> {
     let Some(session) = ctx.session.clone() else {
-        return Err(AppError::new(
-            "auth.unauthenticated",
-            "not authenticated",
-        ));
+        return Err(AppError::new("auth.unauthenticated", "not authenticated"));
     };
     ctx.sessions
         .revoke_all(&ctx.db, &session.user_id)
@@ -375,10 +364,7 @@ pub async fn logout_all(ctx: &mut RpcCtx) -> Result<(), AppError> {
 /// Current authenticated user, or `auth.unauthenticated`.
 pub async fn me(ctx: &RpcCtx) -> Result<UserPublic, AppError> {
     let Some(session) = &ctx.session else {
-        return Err(AppError::new(
-            "auth.unauthenticated",
-            "not authenticated",
-        ));
+        return Err(AppError::new("auth.unauthenticated", "not authenticated"));
     };
     let user = ctx
         .db
@@ -397,16 +383,15 @@ pub async fn me(ctx: &RpcCtx) -> Result<UserPublic, AppError> {
 
 /// Public provider mode for UI (D-14–D-16); no auth required.
 pub async fn provider_config(ctx: &RpcCtx) -> Result<oxidean_core::ProviderConfigPublic, AppError> {
-    let mode = resolve_provider_mode(ctx).await.unwrap_or(ProviderMode::Local);
+    let mode = resolve_provider_mode(ctx)
+        .await
+        .unwrap_or(ProviderMode::Local);
     // Fail closed: missing/error settings → allow_signup false (D-07 / T-06-01).
     let allow_signup = match ctx.db.get_auth_settings().await {
         Ok(s) => s.allow_signup,
         Err(_) => false,
     };
-    Ok(oxidean_core::ProviderConfigPublic {
-        mode,
-        allow_signup,
-    })
+    Ok(oxidean_core::ProviderConfigPublic { mode, allow_signup })
 }
 
 /// Clear-cookie helper for HTTP layer when CookieChange::Clear is set.

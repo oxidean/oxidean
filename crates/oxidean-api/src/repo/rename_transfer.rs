@@ -110,7 +110,10 @@ pub async fn resolve_repo_or_redirect(
         Ok(c) => c,
         Err(e) => {
             tracing::error!(error = %e, "effective_capability failed");
-            return Err(AppError::new("repo.internal", "repository operation failed"));
+            return Err(AppError::new(
+                "repo.internal",
+                "repository operation failed",
+            ));
         }
     };
     if !meets(capability, need) {
@@ -130,8 +133,8 @@ async fn insert_rename_redirect(
     repo_id: &str,
 ) -> Result<(), AppError> {
     let days = redirect_retention_days() as i64;
-    let expires = (Utc::now() + Duration::days(days))
-        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let expires =
+        (Utc::now() + Duration::days(days)).to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
     let id = Uuid::new_v4().to_string();
     let _ = ctx
         .db
@@ -269,7 +272,10 @@ async fn resolve_transfer_destination(
                 .await
                 .map_err(db_err)?
                 .ok_or_else(|| {
-                    AppError::new("repo.transfer_dest_not_found", "Destination organization not found")
+                    AppError::new(
+                        "repo.transfer_dest_not_found",
+                        "Destination organization not found",
+                    )
                 })?;
             let member = ctx
                 .db
@@ -350,7 +356,10 @@ pub async fn transfer(
     if let Some(parent) = new_path.parent() {
         tokio::fs::create_dir_all(parent).await.map_err(|e| {
             tracing::error!(error = %e, "create dest owner dir failed");
-            AppError::new("repo.transfer_failed", "failed to prepare destination storage")
+            AppError::new(
+                "repo.transfer_failed",
+                "failed to prepare destination storage",
+            )
         })?;
     }
 

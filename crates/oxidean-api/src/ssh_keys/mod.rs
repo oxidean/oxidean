@@ -55,7 +55,9 @@ fn row_to_list_item(row: &oxidean_db::SshKeyRow) -> SshKeyListItem {
 
 /// Normalize OpenSSH line and validate algorithm / RSA size (D-SSH-05).
 /// Shared with `deploy_keys` — error codes are `sshKey.*` by design.
-pub(crate) fn parse_accepted_public_key(line: &str) -> Result<(PublicKey, String, String), AppError> {
+pub(crate) fn parse_accepted_public_key(
+    line: &str,
+) -> Result<(PublicKey, String, String), AppError> {
     let trimmed = line.trim();
     if trimmed.is_empty() {
         return Err(AppError::new(
@@ -75,10 +77,7 @@ pub(crate) fn parse_accepted_public_key(line: &str) -> Result<(PublicKey, String
         Algorithm::Rsa { hash: _ } => {
             // ssh-key 0.7: RSA key length via encoded size / key data.
             let bits = rsa_bits(&key).ok_or_else(|| {
-                AppError::new(
-                    "sshKey.invalid_key",
-                    "could not determine RSA key size",
-                )
+                AppError::new("sshKey.invalid_key", "could not determine RSA key size")
             })?;
             if bits < 2048 {
                 return Err(AppError::new(
@@ -123,12 +122,8 @@ fn rsa_bits(key: &PublicKey) -> Option<usize> {
 /// Register an SSH public key for the verified session user (D-SSH-05).
 pub async fn add(ctx: &RpcCtx, input: serde_json::Value) -> Result<SshKeyListItem, AppError> {
     let user = require_verified(ctx).await?;
-    let req: AddSshKeyRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new(
-            "rpc.bad_input",
-            format!("invalid sshKey.add input: {e}"),
-        )
-    })?;
+    let req: AddSshKeyRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid sshKey.add input: {e}")))?;
 
     if req.title.trim().is_empty() {
         return Err(AppError::new(
@@ -234,12 +229,8 @@ struct RevokeSshKeyRequest {
 /// Hard-delete an SSH key owned by the signed-in user.
 pub async fn revoke(ctx: &RpcCtx, input: serde_json::Value) -> Result<serde_json::Value, AppError> {
     let user_id = require_session_user_id(ctx)?;
-    let req: RevokeSshKeyRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new(
-            "rpc.bad_input",
-            format!("invalid sshKey.revoke input: {e}"),
-        )
-    })?;
+    let req: RevokeSshKeyRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid sshKey.revoke input: {e}")))?;
     let id = req.id.trim();
     if id.is_empty() {
         return Err(AppError::new("sshKey.not_found", "SSH key not found"));

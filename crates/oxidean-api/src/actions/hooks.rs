@@ -23,18 +23,12 @@ mod harness {
     #[test]
     fn phase12_hook_symbols_are_invocable() {
         // Compile-time surface: Phase 12 imports these names from `actions::hooks`.
-        assert_eq!(
-            format!("{:?}", PullRequestAction::Opened),
-            "Opened"
-        );
+        assert_eq!(format!("{:?}", PullRequestAction::Opened), "Opened");
         assert_eq!(
             format!("{:?}", PullRequestAction::Synchronize),
             "Synchronize"
         );
-        assert_eq!(
-            format!("{:?}", PullRequestAction::Reopened),
-            "Reopened"
-        );
+        assert_eq!(format!("{:?}", PullRequestAction::Reopened), "Reopened");
         let _fn = dispatch_pull_request;
         let _fn2 = dispatch_pull_request_for_sha;
         let _ = std::mem::size_of_val(&_fn);

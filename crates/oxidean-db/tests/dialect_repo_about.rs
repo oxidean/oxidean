@@ -10,10 +10,7 @@ async fn dialect_repo_about_schema_presence() {
         "/migrations/sqlite/0023_repo_about.sql"
     );
     let sql = std::fs::read_to_string(migration_path).unwrap_or_default();
-    assert!(
-        !sql.is_empty(),
-        "0023_repo_about.sql must exist"
-    );
+    assert!(!sql.is_empty(), "0023_repo_about.sql must exist");
     assert!(sql.contains("homepage"), "must add repositories.homepage");
     assert!(
         sql.contains("watch_count"),
@@ -66,16 +63,10 @@ async fn dialect_repo_about_schema_presence() {
         .expect("insert repo");
     assert_eq!(repo.id, "r-about-1");
 
-    let homepage = db
-        .get_repo_homepage(&repo.id)
-        .await
-        .expect("homepage");
+    let homepage = db.get_repo_homepage(&repo.id).await.expect("homepage");
     assert_eq!(homepage, "");
 
-    let fork_count = db
-        .get_repo_fork_count(&repo.id)
-        .await
-        .expect("fork_count");
+    let fork_count = db.get_repo_fork_count(&repo.id).await.expect("fork_count");
     assert_eq!(fork_count, 0);
 
     let watch_count = db

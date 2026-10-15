@@ -137,7 +137,10 @@ pub async fn batch(
 
     // Prefer basic when client lists it (or lists nothing).
     let transfer = if req.transfers.is_empty()
-        || req.transfers.iter().any(|t| t.eq_ignore_ascii_case("basic"))
+        || req
+            .transfers
+            .iter()
+            .any(|t| t.eq_ignore_ascii_case("basic"))
     {
         "basic"
     } else {
@@ -479,10 +482,8 @@ pub async fn get_object(
                 header::CONTENT_RANGE,
                 HeaderValue::from_str(&content_range).unwrap(),
             );
-            res.headers_mut().insert(
-                header::ACCEPT_RANGES,
-                HeaderValue::from_static("bytes"),
-            );
+            res.headers_mut()
+                .insert(header::ACCEPT_RANGES, HeaderValue::from_static("bytes"));
             return res;
         }
     }
@@ -493,10 +494,8 @@ pub async fn get_object(
         bytes,
     )
         .into_response();
-    res.headers_mut().insert(
-        header::ACCEPT_RANGES,
-        HeaderValue::from_static("bytes"),
-    );
+    res.headers_mut()
+        .insert(header::ACCEPT_RANGES, HeaderValue::from_static("bytes"));
     res
 }
 

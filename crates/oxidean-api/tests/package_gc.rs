@@ -38,8 +38,12 @@ async fn package_gc_keeps_shared_blob_and_removes_unref() {
         .unwrap();
     db.upsert_package_blob(&digest, size as i64).await.unwrap();
     db.adjust_package_blob_refcount(&digest, 2).await.unwrap();
-    db.add_package_blob_ref(&v1, &digest, "layer").await.unwrap();
-    db.add_package_blob_ref(&v2, &digest, "layer").await.unwrap();
+    db.add_package_blob_ref(&v1, &digest, "layer")
+        .await
+        .unwrap();
+    db.add_package_blob_ref(&v2, &digest, "layer")
+        .await
+        .unwrap();
 
     // Drop one package version — shared blob must survive GC.
     let digests = db.list_package_version_blob_digests(&v1).await.unwrap();

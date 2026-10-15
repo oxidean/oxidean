@@ -26,7 +26,13 @@ pub fn apply(filter: &str, input: &Value) -> Result<Vec<Value>, String> {
         .chain(jaq_json::defs());
     let loader = Loader::new(defs);
     let modules = loader
-        .load(&arena, File { path: (), code: filter })
+        .load(
+            &arena,
+            File {
+                path: (),
+                code: filter,
+            },
+        )
         .map_err(|errs| format!("invalid --jq filter: {}", fmt_errs(&errs)))?;
     let funs = jaq_core::funs::<jaq_core::data::JustLut<jaq_json::Val>>()
         .chain(jaq_std::funs())
@@ -36,8 +42,8 @@ pub fn apply(filter: &str, input: &Value) -> Result<Vec<Value>, String> {
         .compile(modules)
         .map_err(|errs| format!("invalid --jq filter: {}", fmt_errs(&errs)))?;
 
-    let x: jaq_json::Val = serde_json::from_value(input.clone())
-        .map_err(|e| format!("--jq input conversion: {e}"))?;
+    let x: jaq_json::Val =
+        serde_json::from_value(input.clone()).map_err(|e| format!("--jq input conversion: {e}"))?;
     let ctx: jaq_core::Ctx<'_, jaq_core::data::JustLut<jaq_json::Val>> =
         jaq_core::Ctx::new(&compiled.lut, jaq_core::Vars::new([]));
     let mut out = Vec::new();
@@ -93,7 +99,10 @@ mod tests {
     #[test]
     fn iterate_and_transform() {
         let v = json!({"items": [{"n": 1}, {"n": 2}]});
-        assert_eq!(apply(".items[] | .n", &v).unwrap(), vec![json!(1), json!(2)]);
+        assert_eq!(
+            apply(".items[] | .n", &v).unwrap(),
+            vec![json!(1), json!(2)]
+        );
     }
 
     #[test]

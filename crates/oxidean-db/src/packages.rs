@@ -484,19 +484,23 @@ pub async fn list_version_blob_digests(
 ) -> Result<Vec<String>, String> {
     match pool {
         DbPool::Sqlite(p) => {
-            let rows = sqlx::query("SELECT blob_digest FROM package_blob_refs WHERE package_version_id = ?")
-                .bind(version_id)
-                .fetch_all(p)
-                .await
-                .map_err(|e| e.to_string())?;
+            let rows = sqlx::query(
+                "SELECT blob_digest FROM package_blob_refs WHERE package_version_id = ?",
+            )
+            .bind(version_id)
+            .fetch_all(p)
+            .await
+            .map_err(|e| e.to_string())?;
             Ok(rows.into_iter().map(|r| r.get("blob_digest")).collect())
         }
         DbPool::MySql(p) => {
-            let rows = sqlx::query("SELECT blob_digest FROM package_blob_refs WHERE package_version_id = ?")
-                .bind(version_id)
-                .fetch_all(p)
-                .await
-                .map_err(|e| e.to_string())?;
+            let rows = sqlx::query(
+                "SELECT blob_digest FROM package_blob_refs WHERE package_version_id = ?",
+            )
+            .bind(version_id)
+            .fetch_all(p)
+            .await
+            .map_err(|e| e.to_string())?;
             Ok(rows.into_iter().map(|r| r.get("blob_digest")).collect())
         }
         DbPool::Postgres(p) => {
@@ -677,8 +681,6 @@ pub async fn list_versions_for_package(
     }
 }
 
-
-
 pub async fn find_package_by_id(pool: &DbPool, id: &str) -> Result<Option<PackageRow>, String> {
     match pool {
         DbPool::Sqlite(p) => {
@@ -777,18 +779,21 @@ pub async fn list_packages_by_repository(
             .fetch_all(p)
             .await
             .map_err(|e| e.to_string())?;
-            Ok(rows.into_iter().map(|r| PackageRow {
-                id: r.get("id"),
-                owner_type: r.get("owner_type"),
-                owner_id: r.get("owner_id"),
-                name: r.get("name"),
-                format: r.get("format"),
-                visibility: r.get("visibility"),
-                repository_id: r.get("repository_id"),
-                description: r.get("description"),
-                created_at: r.get("created_at"),
-                updated_at: r.get("updated_at"),
-            }).collect())
+            Ok(rows
+                .into_iter()
+                .map(|r| PackageRow {
+                    id: r.get("id"),
+                    owner_type: r.get("owner_type"),
+                    owner_id: r.get("owner_id"),
+                    name: r.get("name"),
+                    format: r.get("format"),
+                    visibility: r.get("visibility"),
+                    repository_id: r.get("repository_id"),
+                    description: r.get("description"),
+                    created_at: r.get("created_at"),
+                    updated_at: r.get("updated_at"),
+                })
+                .collect())
         }
         DbPool::MySql(p) => {
             let rows = sqlx::query(
@@ -804,18 +809,21 @@ pub async fn list_packages_by_repository(
             .fetch_all(p)
             .await
             .map_err(|e| e.to_string())?;
-            Ok(rows.into_iter().map(|r| PackageRow {
-                id: r.get("id"),
-                owner_type: r.get("owner_type"),
-                owner_id: r.get("owner_id"),
-                name: r.get("name"),
-                format: r.get("format"),
-                visibility: r.get("visibility"),
-                repository_id: r.get("repository_id"),
-                description: r.get("description"),
-                created_at: r.get("created_at"),
-                updated_at: r.get("updated_at"),
-            }).collect())
+            Ok(rows
+                .into_iter()
+                .map(|r| PackageRow {
+                    id: r.get("id"),
+                    owner_type: r.get("owner_type"),
+                    owner_id: r.get("owner_id"),
+                    name: r.get("name"),
+                    format: r.get("format"),
+                    visibility: r.get("visibility"),
+                    repository_id: r.get("repository_id"),
+                    description: r.get("description"),
+                    created_at: r.get("created_at"),
+                    updated_at: r.get("updated_at"),
+                })
+                .collect())
         }
     }
 }
@@ -938,7 +946,6 @@ pub async fn update_package_description(
     }
     Ok(())
 }
-
 
 pub async fn find_package_quota_override(
     pool: &DbPool,
@@ -1188,7 +1195,10 @@ pub async fn list_package_usage_for_owner(
     }
 }
 
-pub async fn list_unref_package_blobs(pool: &DbPool, grace_secs: i64) -> Result<Vec<String>, String> {
+pub async fn list_unref_package_blobs(
+    pool: &DbPool,
+    grace_secs: i64,
+) -> Result<Vec<String>, String> {
     match pool {
         DbPool::Sqlite(p) => {
             let rows = sqlx::query(

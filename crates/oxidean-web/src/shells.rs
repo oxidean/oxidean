@@ -47,93 +47,543 @@ use Seg::{Lit as L, Param as P, Splat as S};
 /// The route corpus — one entry per URL shape the SPA serves.
 static SHELLS: &[Shell] = &[
     // ── Public + auth-adjacent statics ────────────────────────────────────
-    Shell { pattern: &[L("login")], file: "login/index.html", title: None, protected: false, redirect: None },
-    Shell { pattern: &[L("signup")], file: "signup/index.html", title: None, protected: false, redirect: None },
-    Shell { pattern: &[L("reset-password")], file: "reset-password/index.html", title: None, protected: false, redirect: None },
-    Shell { pattern: &[L("verify")], file: "verify/index.html", title: None, protected: false, redirect: None },
-    Shell { pattern: &[L("status")], file: "status/index.html", title: None, protected: false, redirect: None },
-    Shell { pattern: &[L("explore")], file: "explore/index.html", title: None, protected: false, redirect: None },
-    Shell { pattern: &[L("search")], file: "search/index.html", title: None, protected: false, redirect: None },
-    Shell { pattern: &[L("oauth"), L("consent")], file: "oauth/consent/index.html", title: None, protected: false, redirect: None },
+    Shell {
+        pattern: &[L("login")],
+        file: "login/index.html",
+        title: None,
+        protected: false,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[L("signup")],
+        file: "signup/index.html",
+        title: None,
+        protected: false,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[L("reset-password")],
+        file: "reset-password/index.html",
+        title: None,
+        protected: false,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[L("verify")],
+        file: "verify/index.html",
+        title: None,
+        protected: false,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[L("status")],
+        file: "status/index.html",
+        title: None,
+        protected: false,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[L("explore")],
+        file: "explore/index.html",
+        title: None,
+        protected: false,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[L("search")],
+        file: "search/index.html",
+        title: None,
+        protected: false,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[L("oauth"), L("consent")],
+        file: "oauth/consent/index.html",
+        title: None,
+        protected: false,
+        redirect: None,
+    },
     // RFC 8628 approval page — `protected: false` keeps `?user_code=` in the
     // client-side /login?returnTo= (a server 302 would drop the query).
-    Shell { pattern: &[L("oauth"), L("device")], file: "oauth/device/index.html", title: None, protected: false, redirect: None },
-    Shell { pattern: &[L("invites"), P("token")], file: "invites/_/index.html", title: Some("Accept invitation · Oxidean"), protected: false, redirect: None },
-    Shell { pattern: &[L("setup")], file: "setup/index.html", title: None, protected: false, redirect: None },
-    Shell { pattern: &[L("setup"), L("credentials")], file: "setup/credentials/index.html", title: None, protected: false, redirect: None },
+    Shell {
+        pattern: &[L("oauth"), L("device")],
+        file: "oauth/device/index.html",
+        title: None,
+        protected: false,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[L("invites"), P("token")],
+        file: "invites/_/index.html",
+        title: Some("Accept invitation · Oxidean"),
+        protected: false,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[L("setup")],
+        file: "setup/index.html",
+        title: None,
+        protected: false,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[L("setup"), L("credentials")],
+        file: "setup/credentials/index.html",
+        title: None,
+        protected: false,
+        redirect: None,
+    },
     // ── Session-required statics ──────────────────────────────────────────
-    Shell { pattern: &[L("notifications")], file: "notifications/index.html", title: None, protected: true, redirect: None },
-    Shell { pattern: &[L("new")], file: "new/index.html", title: None, protected: true, redirect: None },
-    Shell { pattern: &[L("orgs"), L("new")], file: "orgs/new/index.html", title: None, protected: true, redirect: None },
-    Shell { pattern: &[L("settings")], file: "settings/general/index.html", title: None, protected: true, redirect: None },
-    Shell { pattern: &[L("settings"), L("general")], file: "settings/general/index.html", title: None, protected: true, redirect: None },
-    Shell { pattern: &[L("settings"), L("profile")], file: "settings/profile/index.html", title: None, protected: true, redirect: None },
-    Shell { pattern: &[L("settings"), L("notifications")], file: "settings/notifications/index.html", title: None, protected: true, redirect: None },
-    Shell { pattern: &[L("settings"), L("emails")], file: "settings/emails/index.html", title: None, protected: true, redirect: None },
-    Shell { pattern: &[L("settings"), L("ssh-keys")], file: "settings/ssh-keys/index.html", title: None, protected: true, redirect: None },
-    Shell { pattern: &[L("settings"), L("cli")], file: "settings/cli/index.html", title: None, protected: true, redirect: None },
-    Shell { pattern: &[L("settings"), L("ai")], file: "settings/ai/index.html", title: None, protected: true, redirect: None },
-    Shell { pattern: &[L("settings"), L("applications")], file: "settings/applications/index.html", title: None, protected: true, redirect: None },
-    Shell { pattern: &[L("settings"), L("tokens")], file: "settings/tokens/index.html", title: None, protected: true, redirect: None },
-    Shell { pattern: &[L("settings"), L("tokens"), L("new")], file: "settings/tokens/new/index.html", title: None, protected: true, redirect: None },
-    Shell { pattern: &[L("settings"), L("tokens"), L("new"), L("fine-grained")], file: "settings/tokens/new/fine-grained/index.html", title: None, protected: true, redirect: None },
+    Shell {
+        pattern: &[L("notifications")],
+        file: "notifications/index.html",
+        title: None,
+        protected: true,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[L("new")],
+        file: "new/index.html",
+        title: None,
+        protected: true,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[L("orgs"), L("new")],
+        file: "orgs/new/index.html",
+        title: None,
+        protected: true,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[L("settings")],
+        file: "settings/general/index.html",
+        title: None,
+        protected: true,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[L("settings"), L("general")],
+        file: "settings/general/index.html",
+        title: None,
+        protected: true,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[L("settings"), L("profile")],
+        file: "settings/profile/index.html",
+        title: None,
+        protected: true,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[L("settings"), L("notifications")],
+        file: "settings/notifications/index.html",
+        title: None,
+        protected: true,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[L("settings"), L("emails")],
+        file: "settings/emails/index.html",
+        title: None,
+        protected: true,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[L("settings"), L("ssh-keys")],
+        file: "settings/ssh-keys/index.html",
+        title: None,
+        protected: true,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[L("settings"), L("cli")],
+        file: "settings/cli/index.html",
+        title: None,
+        protected: true,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[L("settings"), L("ai")],
+        file: "settings/ai/index.html",
+        title: None,
+        protected: true,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[L("settings"), L("applications")],
+        file: "settings/applications/index.html",
+        title: None,
+        protected: true,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[L("settings"), L("tokens")],
+        file: "settings/tokens/index.html",
+        title: None,
+        protected: true,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[L("settings"), L("tokens"), L("new")],
+        file: "settings/tokens/new/index.html",
+        title: None,
+        protected: true,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[L("settings"), L("tokens"), L("new"), L("fine-grained")],
+        file: "settings/tokens/new/fine-grained/index.html",
+        title: None,
+        protected: true,
+        redirect: None,
+    },
     // ── Admin (concrete shells; dispatch still applies the session gate) ───
-    Shell { pattern: &[L("admin"), L("auth")], file: "admin/auth/index.html", title: None, protected: true, redirect: None },
-    Shell { pattern: &[L("admin"), L("lfs")], file: "admin/lfs/index.html", title: None, protected: true, redirect: None },
-    Shell { pattern: &[L("admin"), L("mcp")], file: "admin/mcp/index.html", title: None, protected: true, redirect: None },
-    Shell { pattern: &[L("admin"), L("packages")], file: "admin/packages/index.html", title: None, protected: true, redirect: None },
-    Shell { pattern: &[L("admin"), L("runners")], file: "admin/runners/index.html", title: None, protected: true, redirect: None },
-    Shell { pattern: &[L("admin"), L("templates")], file: "admin/templates/index.html", title: None, protected: true, redirect: None },
-    Shell { pattern: &[L("admin"), L("users")], file: "admin/users/index.html", title: None, protected: true, redirect: None },
+    Shell {
+        pattern: &[L("admin"), L("auth")],
+        file: "admin/auth/index.html",
+        title: None,
+        protected: true,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[L("admin"), L("lfs")],
+        file: "admin/lfs/index.html",
+        title: None,
+        protected: true,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[L("admin"), L("mcp")],
+        file: "admin/mcp/index.html",
+        title: None,
+        protected: true,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[L("admin"), L("packages")],
+        file: "admin/packages/index.html",
+        title: None,
+        protected: true,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[L("admin"), L("runners")],
+        file: "admin/runners/index.html",
+        title: None,
+        protected: true,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[L("admin"), L("templates")],
+        file: "admin/templates/index.html",
+        title: None,
+        protected: true,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[L("admin"), L("users")],
+        file: "admin/users/index.html",
+        title: None,
+        protected: true,
+        redirect: None,
+    },
     // ── Owner (user/org) profiles ─────────────────────────────────────────
-    Shell { pattern: &[P("owner")], file: "_/index.html", title: Some("{owner} · Oxidean"), protected: false, redirect: None },
-    Shell { pattern: &[P("owner"), L("packages")], file: "_/packages/index.html", title: Some("{owner} · Packages · Oxidean"), protected: false, redirect: None },
-    Shell { pattern: &[P("owner"), L("settings")], file: "_/settings/index.html", title: Some("Settings · {owner} · Oxidean"), protected: true, redirect: None },
-    Shell { pattern: &[P("owner"), L("settings"), L("labels")], file: "_/settings/labels/index.html", title: Some("Labels · {owner} · Oxidean"), protected: true, redirect: None },
-    Shell { pattern: &[P("owner"), L("settings"), L("members")], file: "_/settings/members/index.html", title: Some("Members · {owner} · Oxidean"), protected: true, redirect: None },
+    Shell {
+        pattern: &[P("owner")],
+        file: "_/index.html",
+        title: Some("{owner} · Oxidean"),
+        protected: false,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[P("owner"), L("packages")],
+        file: "_/packages/index.html",
+        title: Some("{owner} · Packages · Oxidean"),
+        protected: false,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[P("owner"), L("settings")],
+        file: "_/settings/index.html",
+        title: Some("Settings · {owner} · Oxidean"),
+        protected: true,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[P("owner"), L("settings"), L("labels")],
+        file: "_/settings/labels/index.html",
+        title: Some("Labels · {owner} · Oxidean"),
+        protected: true,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[P("owner"), L("settings"), L("members")],
+        file: "_/settings/members/index.html",
+        title: Some("Members · {owner} · Oxidean"),
+        protected: true,
+        redirect: None,
+    },
     // ── Repository leaves — static second segments first, then params/splats
-    Shell { pattern: &[P("owner"), P("repo"), L("actions")], file: "_/_/actions/index.html", title: Some("Actions · {owner}/{repo} · Oxidean"), protected: false, redirect: None },
-    Shell { pattern: &[P("owner"), P("repo"), L("actions"), P("run")], file: "_/_/actions/_/index.html", title: Some("Run {run} · {owner}/{repo} · Oxidean"), protected: false, redirect: None },
-    Shell { pattern: &[P("owner"), P("repo"), L("activity")], file: "_/_/activity/index.html", title: Some("Activity · {owner}/{repo} · Oxidean"), protected: false, redirect: None },
-    Shell { pattern: &[P("owner"), P("repo"), L("branches")], file: "_/_/branches/index.html", title: Some("Branches · {owner}/{repo} · Oxidean"), protected: false, redirect: None },
-    Shell { pattern: &[P("owner"), P("repo"), L("forks")], file: "_/_/forks/index.html", title: Some("Forks · {owner}/{repo} · Oxidean"), protected: false, redirect: None },
-    Shell { pattern: &[P("owner"), P("repo"), L("insights")], file: "_/_/insights/index.html", title: Some("Insights · {owner}/{repo} · Oxidean"), protected: false, redirect: None },
-    Shell { pattern: &[P("owner"), P("repo"), L("packages")], file: "_/_/packages/index.html", title: Some("Packages · {owner}/{repo} · Oxidean"), protected: false, redirect: None },
-    Shell { pattern: &[P("owner"), P("repo"), L("search")], file: "_/_/search/index.html", title: Some("Search · {owner}/{repo} · Oxidean"), protected: false, redirect: None },
-    Shell { pattern: &[P("owner"), P("repo"), L("stargazers")], file: "_/_/stargazers/index.html", title: Some("Stargazers · {owner}/{repo} · Oxidean"), protected: false, redirect: None },
-    Shell { pattern: &[P("owner"), P("repo"), L("tags")], file: "_/_/tags/index.html", title: Some("Tags · {owner}/{repo} · Oxidean"), protected: false, redirect: None },
-    Shell { pattern: &[P("owner"), P("repo"), L("watchers")], file: "_/_/watchers/index.html", title: Some("Watchers · {owner}/{repo} · Oxidean"), protected: false, redirect: None },
-    Shell { pattern: &[P("owner"), P("repo"), L("issues")], file: "_/_/issues/index.html", title: Some("Issues · {owner}/{repo} · Oxidean"), protected: false, redirect: None },
-    Shell { pattern: &[P("owner"), P("repo"), L("issues"), L("labels")], file: "_/_/issues/labels/index.html", title: Some("Labels · {owner}/{repo} · Oxidean"), protected: false, redirect: None },
-    Shell { pattern: &[P("owner"), P("repo"), L("issues"), L("new")], file: "_/_/issues/new/index.html", title: Some("New issue · {owner}/{repo} · Oxidean"), protected: true, redirect: None },
-    Shell { pattern: &[P("owner"), P("repo"), L("issues"), P("n")], file: "_/_/issues/_/index.html", title: Some("Issue #{n} · {owner}/{repo} · Oxidean"), protected: false, redirect: None },
-    Shell { pattern: &[P("owner"), P("repo"), L("pulls")], file: "_/_/pulls/index.html", title: Some("Pulls · {owner}/{repo} · Oxidean"), protected: false, redirect: None },
-    Shell { pattern: &[P("owner"), P("repo"), L("pulls"), L("new")], file: "_/_/pulls/new/index.html", title: Some("New pull request · {owner}/{repo} · Oxidean"), protected: true, redirect: None },
-    Shell { pattern: &[P("owner"), P("repo"), L("pull"), P("n")], file: "_/_/pull/_/index.html", title: Some("Pull #{n} · {owner}/{repo} · Oxidean"), protected: false, redirect: None },
-    Shell { pattern: &[P("owner"), P("repo"), L("releases")], file: "_/_/releases/index.html", title: Some("Releases · {owner}/{repo} · Oxidean"), protected: false, redirect: None },
-    Shell { pattern: &[P("owner"), P("repo"), L("releases"), L("new")], file: "_/_/releases/new/index.html", title: Some("New release · {owner}/{repo} · Oxidean"), protected: true, redirect: None },
-    Shell { pattern: &[P("owner"), P("repo"), L("releases"), P("tag")], file: "_/_/releases/_/index.html", title: Some("Release {tag} · {owner}/{repo} · Oxidean"), protected: false, redirect: None },
-    Shell { pattern: &[P("owner"), P("repo"), L("commit"), P("sha")], file: "_/_/commit/_/index.html", title: Some("{sha} · {owner}/{repo} · Oxidean"), protected: false, redirect: None },
-    Shell { pattern: &[P("owner"), P("repo"), L("settings")], file: "_/_/settings/index.html", title: Some("Settings · {owner}/{repo} · Oxidean"), protected: true, redirect: None },
+    Shell {
+        pattern: &[P("owner"), P("repo"), L("actions")],
+        file: "_/_/actions/index.html",
+        title: Some("Actions · {owner}/{repo} · Oxidean"),
+        protected: false,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[P("owner"), P("repo"), L("actions"), P("run")],
+        file: "_/_/actions/_/index.html",
+        title: Some("Run {run} · {owner}/{repo} · Oxidean"),
+        protected: false,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[P("owner"), P("repo"), L("activity")],
+        file: "_/_/activity/index.html",
+        title: Some("Activity · {owner}/{repo} · Oxidean"),
+        protected: false,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[P("owner"), P("repo"), L("branches")],
+        file: "_/_/branches/index.html",
+        title: Some("Branches · {owner}/{repo} · Oxidean"),
+        protected: false,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[P("owner"), P("repo"), L("forks")],
+        file: "_/_/forks/index.html",
+        title: Some("Forks · {owner}/{repo} · Oxidean"),
+        protected: false,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[P("owner"), P("repo"), L("insights")],
+        file: "_/_/insights/index.html",
+        title: Some("Insights · {owner}/{repo} · Oxidean"),
+        protected: false,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[P("owner"), P("repo"), L("packages")],
+        file: "_/_/packages/index.html",
+        title: Some("Packages · {owner}/{repo} · Oxidean"),
+        protected: false,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[P("owner"), P("repo"), L("search")],
+        file: "_/_/search/index.html",
+        title: Some("Search · {owner}/{repo} · Oxidean"),
+        protected: false,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[P("owner"), P("repo"), L("stargazers")],
+        file: "_/_/stargazers/index.html",
+        title: Some("Stargazers · {owner}/{repo} · Oxidean"),
+        protected: false,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[P("owner"), P("repo"), L("tags")],
+        file: "_/_/tags/index.html",
+        title: Some("Tags · {owner}/{repo} · Oxidean"),
+        protected: false,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[P("owner"), P("repo"), L("watchers")],
+        file: "_/_/watchers/index.html",
+        title: Some("Watchers · {owner}/{repo} · Oxidean"),
+        protected: false,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[P("owner"), P("repo"), L("issues")],
+        file: "_/_/issues/index.html",
+        title: Some("Issues · {owner}/{repo} · Oxidean"),
+        protected: false,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[P("owner"), P("repo"), L("issues"), L("labels")],
+        file: "_/_/issues/labels/index.html",
+        title: Some("Labels · {owner}/{repo} · Oxidean"),
+        protected: false,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[P("owner"), P("repo"), L("issues"), L("new")],
+        file: "_/_/issues/new/index.html",
+        title: Some("New issue · {owner}/{repo} · Oxidean"),
+        protected: true,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[P("owner"), P("repo"), L("issues"), P("n")],
+        file: "_/_/issues/_/index.html",
+        title: Some("Issue #{n} · {owner}/{repo} · Oxidean"),
+        protected: false,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[P("owner"), P("repo"), L("pulls")],
+        file: "_/_/pulls/index.html",
+        title: Some("Pulls · {owner}/{repo} · Oxidean"),
+        protected: false,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[P("owner"), P("repo"), L("pulls"), L("new")],
+        file: "_/_/pulls/new/index.html",
+        title: Some("New pull request · {owner}/{repo} · Oxidean"),
+        protected: true,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[P("owner"), P("repo"), L("pull"), P("n")],
+        file: "_/_/pull/_/index.html",
+        title: Some("Pull #{n} · {owner}/{repo} · Oxidean"),
+        protected: false,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[P("owner"), P("repo"), L("releases")],
+        file: "_/_/releases/index.html",
+        title: Some("Releases · {owner}/{repo} · Oxidean"),
+        protected: false,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[P("owner"), P("repo"), L("releases"), L("new")],
+        file: "_/_/releases/new/index.html",
+        title: Some("New release · {owner}/{repo} · Oxidean"),
+        protected: true,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[P("owner"), P("repo"), L("releases"), P("tag")],
+        file: "_/_/releases/_/index.html",
+        title: Some("Release {tag} · {owner}/{repo} · Oxidean"),
+        protected: false,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[P("owner"), P("repo"), L("commit"), P("sha")],
+        file: "_/_/commit/_/index.html",
+        title: Some("{sha} · {owner}/{repo} · Oxidean"),
+        protected: false,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[P("owner"), P("repo"), L("settings")],
+        file: "_/_/settings/index.html",
+        title: Some("Settings · {owner}/{repo} · Oxidean"),
+        protected: true,
+        redirect: None,
+    },
     // Legacy alias — Actions settings moved to /{o}/{r}/settings#repo-settings-actions.
     // Real 302 (param-interpolated) so bots/no-JS follow too; the emitted shell
     // file remains as the no-JS fallback document.
-    Shell { pattern: &[P("owner"), P("repo"), L("settings"), L("actions")], file: "_/_/settings/actions/index.html", title: Some("Settings · {owner}/{repo} · Oxidean"), protected: true, redirect: Some("/{owner}/{repo}/settings#repo-settings-actions") },
+    Shell {
+        pattern: &[P("owner"), P("repo"), L("settings"), L("actions")],
+        file: "_/_/settings/actions/index.html",
+        title: Some("Settings · {owner}/{repo} · Oxidean"),
+        protected: true,
+        redirect: Some("/{owner}/{repo}/settings#repo-settings-actions"),
+    },
     // Auth-gated mutating leaves (splat tails are file paths, not params).
-    Shell { pattern: &[P("owner"), P("repo"), L("fork")], file: "_/_/fork/index.html", title: Some("Fork {owner}/{repo} · Oxidean"), protected: true, redirect: None },
-    Shell { pattern: &[P("owner"), P("repo"), L("new"), S("path")], file: "_/_/new/_/index.html", title: Some("New file · {owner}/{repo} · Oxidean"), protected: true, redirect: None },
-    Shell { pattern: &[P("owner"), P("repo"), L("edit"), S("path")], file: "_/_/edit/_/index.html", title: Some("Edit · {owner}/{repo} · Oxidean"), protected: true, redirect: None },
-    Shell { pattern: &[P("owner"), P("repo"), L("mkdir"), S("path")], file: "_/_/mkdir/_/index.html", title: Some("New directory · {owner}/{repo} · Oxidean"), protected: true, redirect: None },
-    Shell { pattern: &[P("owner"), P("repo"), L("delete"), S("path")], file: "_/_/delete/_/index.html", title: Some("Delete · {owner}/{repo} · Oxidean"), protected: true, redirect: None },
-    Shell { pattern: &[P("owner"), P("repo"), L("upload"), S("path")], file: "_/_/upload/_/index.html", title: Some("Upload files · {owner}/{repo} · Oxidean"), protected: true, redirect: None },
+    Shell {
+        pattern: &[P("owner"), P("repo"), L("fork")],
+        file: "_/_/fork/index.html",
+        title: Some("Fork {owner}/{repo} · Oxidean"),
+        protected: true,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[P("owner"), P("repo"), L("new"), S("path")],
+        file: "_/_/new/_/index.html",
+        title: Some("New file · {owner}/{repo} · Oxidean"),
+        protected: true,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[P("owner"), P("repo"), L("edit"), S("path")],
+        file: "_/_/edit/_/index.html",
+        title: Some("Edit · {owner}/{repo} · Oxidean"),
+        protected: true,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[P("owner"), P("repo"), L("mkdir"), S("path")],
+        file: "_/_/mkdir/_/index.html",
+        title: Some("New directory · {owner}/{repo} · Oxidean"),
+        protected: true,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[P("owner"), P("repo"), L("delete"), S("path")],
+        file: "_/_/delete/_/index.html",
+        title: Some("Delete · {owner}/{repo} · Oxidean"),
+        protected: true,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[P("owner"), P("repo"), L("upload"), S("path")],
+        file: "_/_/upload/_/index.html",
+        title: Some("Upload files · {owner}/{repo} · Oxidean"),
+        protected: true,
+        redirect: None,
+    },
     // Read-only splat leaves.
-    Shell { pattern: &[P("owner"), P("repo"), L("blame"), S("path")], file: "_/_/blame/_/index.html", title: Some("Blame · {owner}/{repo} · Oxidean"), protected: false, redirect: None },
-    Shell { pattern: &[P("owner"), P("repo"), L("blob"), S("path")], file: "_/_/blob/_/index.html", title: Some("{owner}/{repo} · Oxidean"), protected: false, redirect: None },
-    Shell { pattern: &[P("owner"), P("repo"), L("tree"), S("path")], file: "_/_/tree/_/index.html", title: Some("{owner}/{repo} · Oxidean"), protected: false, redirect: None },
-    Shell { pattern: &[P("owner"), P("repo"), L("commits"), S("ref")], file: "_/_/commits/_/index.html", title: Some("Commits · {owner}/{repo} · Oxidean"), protected: false, redirect: None },
-    Shell { pattern: &[P("owner"), P("repo"), L("compare"), S("range")], file: "_/_/compare/_/index.html", title: Some("Compare · {owner}/{repo} · Oxidean"), protected: false, redirect: None },
+    Shell {
+        pattern: &[P("owner"), P("repo"), L("blame"), S("path")],
+        file: "_/_/blame/_/index.html",
+        title: Some("Blame · {owner}/{repo} · Oxidean"),
+        protected: false,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[P("owner"), P("repo"), L("blob"), S("path")],
+        file: "_/_/blob/_/index.html",
+        title: Some("{owner}/{repo} · Oxidean"),
+        protected: false,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[P("owner"), P("repo"), L("tree"), S("path")],
+        file: "_/_/tree/_/index.html",
+        title: Some("{owner}/{repo} · Oxidean"),
+        protected: false,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[P("owner"), P("repo"), L("commits"), S("ref")],
+        file: "_/_/commits/_/index.html",
+        title: Some("Commits · {owner}/{repo} · Oxidean"),
+        protected: false,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[P("owner"), P("repo"), L("compare"), S("range")],
+        file: "_/_/compare/_/index.html",
+        title: Some("Compare · {owner}/{repo} · Oxidean"),
+        protected: false,
+        redirect: None,
+    },
     // The repo index is the catch-all two-segment route — keep it last.
-    Shell { pattern: &[P("owner"), P("repo")], file: "_/_/index.html", title: Some("{owner}/{repo} · Oxidean"), protected: false, redirect: None },
+    Shell {
+        pattern: &[P("owner"), P("repo")],
+        file: "_/_/index.html",
+        title: Some("{owner}/{repo} · Oxidean"),
+        protected: false,
+        redirect: None,
+    },
 ];
 
 /// The outcome of matching a request path against the table.
@@ -160,7 +610,13 @@ pub struct Match {
 pub fn dispatch(path: &str) -> Option<Match> {
     let trimmed = path.trim_matches('/');
     if trimmed.is_empty() {
-        return Some(Match { file: "index.html", title: None, protected: false, asset_overlap: false, redirect: None });
+        return Some(Match {
+            file: "index.html",
+            title: None,
+            protected: false,
+            asset_overlap: false,
+            redirect: None,
+        });
     }
     let segs: Vec<&str> = trimmed.split('/').collect();
 
@@ -197,11 +653,7 @@ pub fn dispatch(path: &str) -> Option<Match> {
         if i != segs.len() {
             continue;
         }
-        let lit = shell
-            .pattern
-            .iter()
-            .filter(|s| matches!(s, L(_)))
-            .count();
+        let lit = shell.pattern.iter().filter(|s| matches!(s, L(_))).count();
         let score = usize::MAX - lit; // smaller = better
         if best.is_none() || score < best_lit {
             best_lit = score;
@@ -297,7 +749,10 @@ mod tests {
         assert_eq!(file_of("/"), "index.html");
         assert_eq!(file_of("/login"), "login/index.html");
         assert_eq!(file_of("/login/"), "login/index.html");
-        assert_eq!(file_of("/settings/tokens/new"), "settings/tokens/new/index.html");
+        assert_eq!(
+            file_of("/settings/tokens/new"),
+            "settings/tokens/new/index.html"
+        );
     }
 
     #[test]
@@ -306,7 +761,10 @@ mod tests {
         assert_eq!(file_of("/jesse/app"), "_/_/index.html");
         assert_eq!(file_of("/jesse/app/issues/42"), "_/_/issues/_/index.html");
         assert_eq!(file_of("/jesse/app/tree/main/src"), "_/_/tree/_/index.html");
-        assert_eq!(file_of("/jesse/settings/members"), "_/settings/members/index.html");
+        assert_eq!(
+            file_of("/jesse/settings/members"),
+            "_/settings/members/index.html"
+        );
         assert_eq!(file_of("/invites/abc123"), "invites/_/index.html");
     }
 

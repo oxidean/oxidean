@@ -40,13 +40,19 @@ async fn upstream_for_fork(
         .map_err(super::db_err)?
         .filter(|r| r.deleted_at.is_none())
         .ok_or_else(|| {
-            AppError::new("repo.upstream_unavailable", "upstream repository is unavailable")
+            AppError::new(
+                "repo.upstream_unavailable",
+                "upstream repository is unavailable",
+            )
         })?;
     let owner = owner_ref_for_repo(&ctx.db, &parent)
         .await
         .map_err(super::db_err)?
         .ok_or_else(|| {
-            AppError::new("repo.upstream_unavailable", "upstream repository is unavailable")
+            AppError::new(
+                "repo.upstream_unavailable",
+                "upstream repository is unavailable",
+            )
         })?;
     Ok((parent, owner))
 }
@@ -156,7 +162,11 @@ pub async fn fork_status(
     let (parent, upstream_owner) = upstream_for_fork(ctx, &accessible).await?;
     let branch = sync_branch(req.branch.as_deref(), &accessible.row.default_branch)?;
 
-    let fork_bare = bare_repo_path(&ctx.repos_dir, &accessible.owner_username, &accessible.row.name)?;
+    let fork_bare = bare_repo_path(
+        &ctx.repos_dir,
+        &accessible.owner_username,
+        &accessible.row.name,
+    )?;
     let upstream_bare = bare_repo_path(&ctx.repos_dir, upstream_owner.slug(), &parent.name)?;
     let state = fork_sync_state(ctx, &fork_bare, &upstream_bare, &branch).await?;
 

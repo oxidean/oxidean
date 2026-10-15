@@ -224,10 +224,7 @@ pub async fn confirm_admin_credentials(
     input: serde_json::Value,
 ) -> Result<UserPublic, AppError> {
     let Some(session) = &ctx.session else {
-        return Err(AppError::new(
-            "auth.unauthenticated",
-            "not authenticated",
-        ));
+        return Err(AppError::new("auth.unauthenticated", "not authenticated"));
     };
 
     let req: ConfirmAdminCredentialsRequest = serde_json::from_value(input).map_err(|e| {
@@ -287,7 +284,12 @@ pub async fn confirm_admin_credentials(
         }
     }
 
-    let email = match req.email.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+    let email = match req
+        .email
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
         Some(e) => e.to_ascii_lowercase(),
         None => user.email.clone(),
     };

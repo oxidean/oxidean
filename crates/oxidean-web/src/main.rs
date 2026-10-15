@@ -37,8 +37,7 @@ const HEALTH_PROBE_VALUE: &str = "1";
 /// `Accept-CH` advertises the theme client hint — browsers only send
 /// `Sec-CH-Prefers-Color-Scheme` to origins that opt in. Not in the `http`
 /// crate's standard header set, hence a named constant.
-const ACCEPT_CH: axum::http::HeaderName =
-    axum::http::HeaderName::from_static("accept-ch");
+const ACCEPT_CH: axum::http::HeaderName = axum::http::HeaderName::from_static("accept-ch");
 
 struct Shared {
     dist: PathBuf,
@@ -306,21 +305,14 @@ async fn serve_shell(
     // Legacy-alias redirect (e.g. `/{o}/{r}/settings/actions`) — a real 302 so
     // bots/no-JS follow too. Params are already interpolated by dispatch.
     if let Some(target) = &m.redirect {
-        return (
-            StatusCode::FOUND,
-            [(header::LOCATION, target.clone())],
-        )
-            .into_response();
+        return (StatusCode::FOUND, [(header::LOCATION, target.clone())]).into_response();
     }
     match tokio::fs::read_to_string(st.dist.join(m.file)).await {
         Ok(html) => {
             // Static redirect stubs (Astro.redirect) become real 302s —
             // no visible "Redirecting…" interstitial.
             if let Some(target) = shells::redirect_stub_target(&html) {
-                return (
-                    StatusCode::FOUND,
-                    [(header::LOCATION, target.to_string())],
-                )
+                return (StatusCode::FOUND, [(header::LOCATION, target.to_string())])
                     .into_response();
             }
             let needs_setup = match &st.setup {
@@ -767,7 +759,11 @@ mod tests {
         let api_port = api_listener.local_addr().unwrap().port();
         tokio::spawn(async move { axum::serve(api_listener, api).await });
 
-        let dist = dist_with("setup-stamp", &[("index.html", "<html><body>app</body></html>")]).await;
+        let dist = dist_with(
+            "setup-stamp",
+            &[("index.html", "<html><body>app</body></html>")],
+        )
+        .await;
         let st = Arc::new(Shared {
             dist,
             meta: inject::AdvertiseMeta::default(),

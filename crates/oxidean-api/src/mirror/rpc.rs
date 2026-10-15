@@ -21,7 +21,10 @@ use crate::rpc::RpcCtx;
 
 fn db_err(e: String) -> AppError {
     if e == "database not configured" {
-        AppError::new("db.not_configured", "no database configured for this instance")
+        AppError::new(
+            "db.not_configured",
+            "no database configured for this instance",
+        )
     } else {
         tracing::error!(error = %e, "mirror db error");
         AppError::new("repo.mirror.internal", "mirror operation failed")
@@ -98,7 +101,10 @@ async fn to_public(
     })
 }
 
-pub async fn get(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoMirrorGetResponse, AppError> {
+pub async fn get(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<RepoMirrorGetResponse, AppError> {
     let req: RepoMirrorGetRequest = serde_json::from_value(input)
         .map_err(|e| AppError::new("rpc.bad_request", e.to_string()))?;
     let _user = require_verified(ctx).await?;
@@ -115,10 +121,7 @@ pub async fn get(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoMirrorGet
     Ok(RepoMirrorGetResponse { mirror })
 }
 
-pub async fn upsert(
-    ctx: &RpcCtx,
-    input: serde_json::Value,
-) -> Result<RepoMirrorPublic, AppError> {
+pub async fn upsert(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoMirrorPublic, AppError> {
     let req: RepoMirrorUpsertRequest = serde_json::from_value(input)
         .map_err(|e| AppError::new("rpc.bad_request", e.to_string()))?;
     let _user = require_verified(ctx).await?;
@@ -143,9 +146,13 @@ pub async fn upsert(
         .await
         .map_err(db_err)?;
 
-    let secret_ct = match req.secret.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-        Some(s) => encrypt_mirror_secret(s)
-            .map_err(|e| AppError::new("repo.mirror.secret", e))?,
+    let secret_ct = match req
+        .secret
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        Some(s) => encrypt_mirror_secret(s).map_err(|e| AppError::new("repo.mirror.secret", e))?,
         None => String::new(), // upsert keeps existing when empty
     };
     if existing.is_none() && secret_ct.is_empty() {
@@ -159,11 +166,7 @@ pub async fn upsert(
         }
     }
     if auth_kind == "ssh_key" {
-        let kh = req
-            .known_hosts
-            .as_deref()
-            .unwrap_or("")
-            .trim();
+        let kh = req.known_hosts.as_deref().unwrap_or("").trim();
         let has_kh = !kh.is_empty()
             || existing
                 .as_ref()
@@ -198,7 +201,12 @@ pub async fn upsert(
     let username = req.username.unwrap_or_default();
     let ssh_pub = req.ssh_public_key.unwrap_or_default();
     let known_hosts = req.known_hosts.unwrap_or_default();
-    let sync_mode = match req.sync_mode.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+    let sync_mode = match req
+        .sync_mode
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
         Some("exact") => "exact",
         Some("merge") => "merge",
         Some(_) => {

@@ -5519,7 +5519,8 @@ fn languages_ts() -> String {
     use std::fmt::Write;
 
     fn opt(v: Option<&'static str>) -> String {
-        v.map(|x| format!("{x:?}")).unwrap_or_else(|| "null".to_string())
+        v.map(|x| format!("{x:?}"))
+            .unwrap_or_else(|| "null".to_string())
     }
     fn list(items: &[&'static str]) -> String {
         format!(

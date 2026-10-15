@@ -9,12 +9,9 @@ use oxidean_git::{CliGitBackend, GitBackend};
 async fn actions_dispatch_policy_registered_runners_only() {
     // Jobs are only assigned via FetchTask on registered runners — enqueue leaves status queued.
     let dir = tempfile::tempdir().unwrap();
-    let db = Database::connect(&format!(
-        "sqlite:{}",
-        dir.path().join("p.db").display()
-    ))
-    .await
-    .unwrap();
+    let db = Database::connect(&format!("sqlite:{}", dir.path().join("p.db").display()))
+        .await
+        .unwrap();
     db.migrate().await.unwrap();
     let owner = db
         .create_user(
@@ -77,7 +74,10 @@ jobs:
     )
     .await
     .unwrap();
-    let runs = db.list_action_runs_for_repo(&repo.id, &Default::default(), 100, 0).await.unwrap();
+    let runs = db
+        .list_action_runs_for_repo(&repo.id, &Default::default(), 100, 0)
+        .await
+        .unwrap();
     let jobs = db.list_action_jobs_for_run(&runs[0].id).await.unwrap();
     assert!(jobs[0].runner_id.is_none());
     assert_eq!(jobs[0].status, "queued");
@@ -86,12 +86,9 @@ jobs:
 #[tokio::test]
 async fn actions_dispatch_policy_unmatched_labels_stay_queued() {
     let dir = tempfile::tempdir().unwrap();
-    let db = Database::connect(&format!(
-        "sqlite:{}",
-        dir.path().join("u.db").display()
-    ))
-    .await
-    .unwrap();
+    let db = Database::connect(&format!("sqlite:{}", dir.path().join("u.db").display()))
+        .await
+        .unwrap();
     db.migrate().await.unwrap();
     let owner = db
         .create_user(
@@ -165,7 +162,6 @@ async fn actions_dispatch_policy_no_in_process_execution() {
     assert!(!src.contains("std::process::Command"));
     assert!(!src.contains("tokio::process"));
 }
-
 
 #[test]
 fn actions_dispatch_policy_no_managed_executor_symbols() {

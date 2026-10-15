@@ -63,10 +63,16 @@ fn ensure_can_grant_role(caller_role: OrgRole, new_role: OrgRole) -> Result<(), 
 }
 
 /// `org.members.list` — any org member; usernames + roles, no emails.
-pub async fn list(ctx: &RpcCtx, input: serde_json::Value) -> Result<OrgMembersListResponse, AppError> {
+pub async fn list(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<OrgMembersListResponse, AppError> {
     let caller = require_verified(ctx).await?;
     let req: OrgSlugRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid org.members.list input: {e}"))
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid org.members.list input: {e}"),
+        )
     })?;
     let org = load_org_by_slug(ctx, &req.slug).await?;
     let _ = require_org_role(ctx, &org.id, &caller.id).await?;
@@ -83,7 +89,10 @@ pub async fn list(ctx: &RpcCtx, input: serde_json::Value) -> Result<OrgMembersLi
 pub async fn add(ctx: &RpcCtx, input: serde_json::Value) -> Result<OrgMemberPublic, AppError> {
     let caller = require_verified(ctx).await?;
     let req: OrgMembersAddRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid org.members.add input: {e}"))
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid org.members.add input: {e}"),
+        )
     })?;
     let org = load_org_by_slug(ctx, &req.slug).await?;
     let caller_role = require_admin_plus(ctx, &org, &caller).await?;

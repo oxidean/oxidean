@@ -39,8 +39,10 @@ fn mcp_document() -> serde_json::Value {
 
 fn json_doc(v: serde_json::Value) -> Response {
     let mut resp = Json(v).into_response();
-    resp.headers_mut()
-        .insert(header::CACHE_CONTROL, "public, max-age=300".parse().unwrap());
+    resp.headers_mut().insert(
+        header::CACHE_CONTROL,
+        "public, max-age=300".parse().unwrap(),
+    );
     resp
 }
 

@@ -153,7 +153,10 @@ pub async fn get_mirror_by_repo(
             .fetch_optional(p)
             .await
             .map_err(|e| e.to_string())?;
-            match row { Some(r) => Ok(Some(map_mirror!(r))), None => Ok(None) }
+            match row {
+                Some(r) => Ok(Some(map_mirror!(r))),
+                None => Ok(None),
+            }
         }
         DbPool::MySql(p) => {
             let row = sqlx::query(
@@ -166,7 +169,10 @@ pub async fn get_mirror_by_repo(
             .fetch_optional(p)
             .await
             .map_err(|e| e.to_string())?;
-            match row { Some(r) => Ok(Some(map_mirror!(r))), None => Ok(None) }
+            match row {
+                Some(r) => Ok(Some(map_mirror!(r))),
+                None => Ok(None),
+            }
         }
         DbPool::Sqlite(p) => {
             let row = sqlx::query(
@@ -179,7 +185,10 @@ pub async fn get_mirror_by_repo(
             .fetch_optional(p)
             .await
             .map_err(|e| e.to_string())?;
-            match row { Some(r) => Ok(Some(map_mirror!(r))), None => Ok(None) }
+            match row {
+                Some(r) => Ok(Some(map_mirror!(r))),
+                None => Ok(None),
+            }
         }
     }
 }
@@ -201,7 +210,10 @@ pub async fn get_mirror_by_id(
             .fetch_optional(p)
             .await
             .map_err(|e| e.to_string())?;
-            match row { Some(r) => Ok(Some(map_mirror!(r))), None => Ok(None) }
+            match row {
+                Some(r) => Ok(Some(map_mirror!(r))),
+                None => Ok(None),
+            }
         }
         DbPool::MySql(p) => {
             let row = sqlx::query(
@@ -214,7 +226,10 @@ pub async fn get_mirror_by_id(
             .fetch_optional(p)
             .await
             .map_err(|e| e.to_string())?;
-            match row { Some(r) => Ok(Some(map_mirror!(r))), None => Ok(None) }
+            match row {
+                Some(r) => Ok(Some(map_mirror!(r))),
+                None => Ok(None),
+            }
         }
         DbPool::Sqlite(p) => {
             let row = sqlx::query(
@@ -227,7 +242,10 @@ pub async fn get_mirror_by_id(
             .fetch_optional(p)
             .await
             .map_err(|e| e.to_string())?;
-            match row { Some(r) => Ok(Some(map_mirror!(r))), None => Ok(None) }
+            match row {
+                Some(r) => Ok(Some(map_mirror!(r))),
+                None => Ok(None),
+            }
         }
     }
 }
@@ -621,7 +639,6 @@ pub async fn set_webhook_secret(
     }
     Ok(())
 }
-
 
 pub async fn update_mirror_ref_snapshot(
     pool: &DbPool,

@@ -1109,7 +1109,8 @@ const DEVICE_SELECT_MYSQL: &str = "SELECT id, device_code_hash, user_code, user_
        DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at
 FROM oauth_device_codes";
 
-const DEVICE_SELECT_SQLITE: &str = "SELECT id, device_code_hash, user_code, user_id, scopes, status,
+const DEVICE_SELECT_SQLITE: &str =
+    "SELECT id, device_code_hash, user_code, user_id, scopes, status,
        interval_secs,
        strftime('%Y-%m-%dT%H:%M:%SZ', last_polled_at) AS last_polled_at,
        strftime('%Y-%m-%dT%H:%M:%SZ', expires_at) AS expires_at,
@@ -1189,10 +1190,10 @@ pub async fn find_device_code_by_hash(
             let row = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{DEVICE_SELECT_PG} WHERE device_code_hash = $1"
             )))
-                .bind(device_code_hash)
-                .fetch_optional(p)
-                .await
-                .map_err(|e| format!("find oauth device code failed: {e}"))?;
+            .bind(device_code_hash)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("find oauth device code failed: {e}"))?;
             match row {
                 Some(r) => Ok(Some(map_device_code!(&r))),
                 None => Ok(None),
@@ -1202,10 +1203,10 @@ pub async fn find_device_code_by_hash(
             let row = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{DEVICE_SELECT_MYSQL} WHERE device_code_hash = ?"
             )))
-                .bind(device_code_hash)
-                .fetch_optional(p)
-                .await
-                .map_err(|e| format!("find oauth device code failed: {e}"))?;
+            .bind(device_code_hash)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("find oauth device code failed: {e}"))?;
             match row {
                 Some(r) => Ok(Some(map_device_code!(&r))),
                 None => Ok(None),
@@ -1215,10 +1216,10 @@ pub async fn find_device_code_by_hash(
             let row = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{DEVICE_SELECT_SQLITE} WHERE device_code_hash = ?1"
             )))
-                .bind(device_code_hash)
-                .fetch_optional(p)
-                .await
-                .map_err(|e| format!("find oauth device code failed: {e}"))?;
+            .bind(device_code_hash)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("find oauth device code failed: {e}"))?;
             match row {
                 Some(r) => Ok(Some(map_device_code!(&r))),
                 None => Ok(None),
@@ -1237,10 +1238,10 @@ pub async fn find_device_code_by_user_code(
             let row = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{DEVICE_SELECT_PG} WHERE user_code = $1"
             )))
-                .bind(user_code)
-                .fetch_optional(p)
-                .await
-                .map_err(|e| format!("find oauth device code failed: {e}"))?;
+            .bind(user_code)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("find oauth device code failed: {e}"))?;
             match row {
                 Some(r) => Ok(Some(map_device_code!(&r))),
                 None => Ok(None),
@@ -1250,10 +1251,10 @@ pub async fn find_device_code_by_user_code(
             let row = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{DEVICE_SELECT_MYSQL} WHERE user_code = ?"
             )))
-                .bind(user_code)
-                .fetch_optional(p)
-                .await
-                .map_err(|e| format!("find oauth device code failed: {e}"))?;
+            .bind(user_code)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("find oauth device code failed: {e}"))?;
             match row {
                 Some(r) => Ok(Some(map_device_code!(&r))),
                 None => Ok(None),
@@ -1263,10 +1264,10 @@ pub async fn find_device_code_by_user_code(
             let row = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "{DEVICE_SELECT_SQLITE} WHERE user_code = ?1"
             )))
-                .bind(user_code)
-                .fetch_optional(p)
-                .await
-                .map_err(|e| format!("find oauth device code failed: {e}"))?;
+            .bind(user_code)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("find oauth device code failed: {e}"))?;
             match row {
                 Some(r) => Ok(Some(map_device_code!(&r))),
                 None => Ok(None),
@@ -1480,14 +1481,13 @@ WHERE id = ?1",
 pub async fn delete_expired_device_codes(pool: &DbPool, now: &str) -> Result<u64, String> {
     match pool {
         DbPool::Postgres(p) => {
-            let n = sqlx::query(
-                "DELETE FROM oauth_device_codes WHERE expires_at < $1::timestamptz",
-            )
-            .bind(now)
-            .execute(p)
-            .await
-            .map_err(|e| format!("gc oauth device codes failed: {e}"))?
-            .rows_affected();
+            let n =
+                sqlx::query("DELETE FROM oauth_device_codes WHERE expires_at < $1::timestamptz")
+                    .bind(now)
+                    .execute(p)
+                    .await
+                    .map_err(|e| format!("gc oauth device codes failed: {e}"))?
+                    .rows_affected();
             Ok(n)
         }
         DbPool::MySql(p) => {

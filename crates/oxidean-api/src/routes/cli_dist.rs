@@ -18,10 +18,10 @@
 
 use std::path::PathBuf;
 
-use axum::Json;
 use axum::extract::Path as AxumPath;
-use axum::http::{StatusCode, header};
+use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
+use axum::Json;
 use sha2::{Digest, Sha256};
 
 use crate::public_origin::resolve_public_origin;
@@ -80,10 +80,7 @@ fn dist_commit() -> Option<String> {
     if trimmed.is_empty() || trimmed.len() > 64 {
         return None;
     }
-    if !trimmed
-        .chars()
-        .all(|c| c.is_ascii_hexdigit())
-    {
+    if !trimmed.chars().all(|c| c.is_ascii_hexdigit()) {
         return None;
     }
     Some(trimmed.to_string())
@@ -255,10 +252,7 @@ pub async fn skill_md() -> Response {
     (
         [
             (header::CONTENT_TYPE, "text/markdown; charset=utf-8"),
-            (
-                header::CONTENT_DISPOSITION,
-                "inline; filename=\"SKILL.md\"",
-            ),
+            (header::CONTENT_DISPOSITION, "inline; filename=\"SKILL.md\""),
         ],
         SKILL_MD,
     )
@@ -301,7 +295,10 @@ mod tests {
             "armv7-unknown-linux-gnueabihf",
             "armv7-unknown-linux-musleabihf",
         ] {
-            assert!(INSTALL_SCRIPT.contains(needle), "install.sh missing {needle}");
+            assert!(
+                INSTALL_SCRIPT.contains(needle),
+                "install.sh missing {needle}"
+            );
         }
     }
 

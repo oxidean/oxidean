@@ -214,8 +214,7 @@ async fn checkout(
     // Token rides in http.extraHeader — never in the URL or ps-visible args.
     let mut args: Vec<String> = Vec::new();
     if let Some(token) = &config.git_token {
-        let creds =
-            base64::engine::general_purpose::STANDARD.encode(format!("oauth2:{token}"));
+        let creds = base64::engine::general_purpose::STANDARD.encode(format!("oauth2:{token}"));
         args.push("-c".into());
         args.push(format!("http.extraHeader=Authorization: Basic {creds}"));
     }

@@ -75,17 +75,11 @@ fn generate_magic() -> String {
 }
 
 fn rate_limited() -> AppError {
-    AppError::new(
-        "auth.rate_limited",
-        "too many emails; try again later",
-    )
+    AppError::new("auth.rate_limited", "too many emails; try again later")
 }
 
 fn invalid_invite() -> AppError {
-    AppError::new(
-        "org.invalid_invite",
-        "invalid or expired invitation",
-    )
+    AppError::new("org.invalid_invite", "invalid or expired invitation")
 }
 
 fn parse_created_at(raw: &str) -> Result<chrono::DateTime<Utc>, AppError> {
@@ -364,7 +358,10 @@ pub async fn create_link(
         Some((&caller.id, &caller.username)),
         "org.invite_link_create",
         Some(("org", &org.id)),
-        Some(serde_json::json!({ "org": org.slug, "role": req.role.as_str(), "max_uses": max_uses }).to_string()),
+        Some(
+            serde_json::json!({ "org": org.slug, "role": req.role.as_str(), "max_uses": max_uses })
+                .to_string(),
+        ),
     )
     .await;
 
@@ -375,7 +372,10 @@ pub async fn create_link(
 }
 
 /// `org.invites.list` — Admin+; pending only; no tokens.
-pub async fn list(ctx: &RpcCtx, input: serde_json::Value) -> Result<OrgInvitesListResponse, AppError> {
+pub async fn list(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<OrgInvitesListResponse, AppError> {
     let caller = require_verified(ctx).await?;
     let req: OrgSlugRequest = serde_json::from_value(input).map_err(|e| {
         AppError::new(

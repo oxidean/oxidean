@@ -566,7 +566,10 @@ mod tests {
         assert!(classic_scope_satisfies(S::WritePublicKey, S::ReadPublicKey));
         // Transitive: admin → write → read.
         assert!(classic_scope_satisfies(S::AdminPublicKey, S::ReadPublicKey));
-        assert!(classic_scope_satisfies(S::AdminPublicKey, S::WritePublicKey));
+        assert!(classic_scope_satisfies(
+            S::AdminPublicKey,
+            S::WritePublicKey
+        ));
         assert!(classic_scope_satisfies(S::AdminGpgKey, S::ReadGpgKey));
         assert!(classic_scope_satisfies(S::PackageWrite, S::PackageRead));
         // `repo` is the umbrella: GitHub parity for its sub-scopes.
@@ -584,10 +587,7 @@ mod tests {
     fn first_party_scopes_are_valid() {
         // Every name in the default set parses and lands in the catalog.
         let parsed = first_party_scopes();
-        assert_eq!(
-            parsed.len(),
-            FIRST_PARTY_SCOPES.split_whitespace().count()
-        );
+        assert_eq!(parsed.len(), FIRST_PARTY_SCOPES.split_whitespace().count());
         for s in &parsed {
             scope_meta(*s);
         }

@@ -315,7 +315,11 @@ async fn user_emails_backfill_uniqueness_and_primary_sync() {
         .expect("set primary");
     assert!(promoted.is_primary);
     assert_eq!(promoted.email, "alice-work@example.com");
-    let mirrored = db.find_user_by_id(&a.id).await.expect("find").expect("user");
+    let mirrored = db
+        .find_user_by_id(&a.id)
+        .await
+        .expect("find")
+        .expect("user");
     assert_eq!(mirrored.email, "alice-work@example.com");
     assert!(mirrored.email_verified_at.is_some());
 }

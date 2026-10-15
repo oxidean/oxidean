@@ -128,7 +128,10 @@ pub async fn admin_set_enabled(
 }
 
 /// `admin.templates.delete`
-pub async fn admin_delete(ctx: &RpcCtx, input: serde_json::Value) -> Result<serde_json::Value, AppError> {
+pub async fn admin_delete(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<serde_json::Value, AppError> {
     require_admin(ctx).await?;
     let req: AdminTemplateDeleteRequest = serde_json::from_value(input).map_err(|e| {
         AppError::new(

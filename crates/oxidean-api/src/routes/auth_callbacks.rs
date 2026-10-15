@@ -156,14 +156,14 @@ pub async fn workos_callback(
         return sso_error_redirect();
     };
 
-    let (identity, return_to) =
-        match workos::finish(&state.pending, &cfg, code, state_param).await {
-            Ok(v) => v,
-            Err(e) => {
-                log_sso_err(&e);
-                return sso_error_redirect();
-            }
-        };
+    let (identity, return_to) = match workos::finish(&state.pending, &cfg, code, state_param).await
+    {
+        Ok(v) => v,
+        Err(e) => {
+            log_sso_err(&e);
+            return sso_error_redirect();
+        }
+    };
 
     mint_session_and_redirect(&state, &identity, &return_to, &headers).await
 }
@@ -295,8 +295,7 @@ async fn mint_session_and_redirect(
 
     let path = sanitize_return_to(Some(return_to));
     let session_header = cookie.to_string();
-    let presence =
-        build_session_presence_cookie(SESSION_IDLE, &state.env_name).to_string();
+    let presence = build_session_presence_cookie(SESSION_IDLE, &state.env_name).to_string();
     debug_assert!(session_header.contains(SESSION_COOKIE_NAME));
     debug_assert!(presence.contains(SESSION_PRESENCE_COOKIE_NAME));
     redirect_with_cookies(&path, &[session_header, presence])

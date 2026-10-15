@@ -142,11 +142,7 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
 
         // Own-identity reads. `pat.self`/`pat.policy`/`pat.catalog` are
         // introspection surfaces — any valid credential may call them.
-        "auth.me"
-        | "user.get_profile"
-        | "user.lookup"
-        | "pat.self"
-        | "pat.policy"
+        "auth.me" | "user.get_profile" | "user.lookup" | "pat.self" | "pat.policy"
         | "pat.catalog" => Identity,
 
         // Contents/metadata reads (`{owner,name}` repo target where present;
@@ -193,19 +189,11 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
 
         // Contents writes + create/fork (the `repo.file.*` editor ops all
         // commit through the contents domain).
-        "repo.create"
-        | "repo.fork"
-        | "repo.commit"
-        | "repo.branchCreate"
-        | "repo.branchRename"
-        | "repo.branchDelete"
-        | "repo.syncFork"
-        | "repo.file.create"
-        | "repo.file.delete"
-        | "repo.file.mkdir"
-        | "repo.file.rename"
-        | "repo.file.update"
-        | "repo.file.upload" => RepoWrite,
+        "repo.create" | "repo.fork" | "repo.commit" | "repo.branchCreate" | "repo.branchRename"
+        | "repo.branchDelete" | "repo.syncFork" | "repo.file.create" | "repo.file.delete"
+        | "repo.file.mkdir" | "repo.file.rename" | "repo.file.update" | "repo.file.upload" => {
+            RepoWrite
+        }
 
         "issue.get"
         | "issue.list"
@@ -320,7 +308,9 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         | "repo.quota.set"
         | "issue.delete" => RepoAdminWrite,
 
-        "repo.invites.list" | "repo.invites.create" | "repo.invites.createLink"
+        "repo.invites.list"
+        | "repo.invites.create"
+        | "repo.invites.createLink"
         | "repo.invites.revoke" => RepoInvite,
 
         "repo.softDelete" => RepoDelete,
@@ -482,8 +472,7 @@ pub fn proc_covered_by_scopes(procedure: &str, held: &[ClassicPatScope]) -> bool
             classic_scopes_for(class)
                 .iter()
                 .any(|s| crate::classic_has_scope(held, *s))
-                || (public_repo_covers(class)
-                    && held.contains(&ClassicPatScope::PublicRepo))
+                || (public_repo_covers(class) && held.contains(&ClassicPatScope::PublicRepo))
         }
     }
 }
@@ -602,7 +591,10 @@ mod tests {
         );
         assert_eq!(classify_pat_proc("email.list"), PatProc::EmailRead);
         assert_eq!(classify_pat_proc("email.add"), PatProc::EmailWrite);
-        assert_eq!(classify_pat_proc("user.update_profile"), PatProc::ProfileWrite);
+        assert_eq!(
+            classify_pat_proc("user.update_profile"),
+            PatProc::ProfileWrite
+        );
         assert_eq!(classify_pat_proc("user.follow"), PatProc::FollowWrite);
         assert_eq!(classify_pat_proc("sshKey.list"), PatProc::SshKeyRead);
         assert_eq!(classify_pat_proc("sshKey.add"), PatProc::SshKeyWrite);

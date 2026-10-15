@@ -48,16 +48,14 @@ async fn dialect_lfs_migrate_schema_presence() {
     assert!(path.extension().is_some_and(|ext| ext == "sql"));
 
     for dialect in ["postgres", "mysql"] {
-        let (_p, dsql) =
-            find_lfs_migration(dialect).unwrap_or_else(|| panic!("missing {dialect} LFS migration"));
+        let (_p, dsql) = find_lfs_migration(dialect)
+            .unwrap_or_else(|| panic!("missing {dialect} LFS migration"));
         assert_lfs_sql(dialect, &dsql);
     }
 
     let dir = tempfile::tempdir().expect("tempdir");
     let url = format!("sqlite:{}", dir.path().join("lfs.db").display());
-    let db = oxidean_db::Database::connect(&url)
-        .await
-        .expect("connect");
+    let db = oxidean_db::Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate must apply LFS schema");
     // Smoke: enable flag + empty object lookup.
     assert!(!db.get_repo_lfs_enabled("missing").await.unwrap());

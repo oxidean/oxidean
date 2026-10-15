@@ -37,7 +37,9 @@ async fn readable_repo_ids_and_readers_of_repo() {
         .await
         .expect("public repo");
     let private_repo = db
-        .insert_repository("r-priv", &owner.id, "user", "privrepo", "private", "", "main")
+        .insert_repository(
+            "r-priv", &owner.id, "user", "privrepo", "private", "", "main",
+        )
         .await
         .expect("private repo");
 
@@ -149,13 +151,14 @@ async fn readable_repo_ids_and_readers_of_repo() {
     assert!(!readers.contains(&owner.id) && !readers.contains(&stranger.id));
 
     // Empty inputs short-circuit.
-    assert!(
-        db.readable_repo_ids(&owner.id, &[]).await.expect("empty").is_empty()
-    );
-    assert!(
-        db.readers_of_repo(&org_repo.id, &[])
-            .await
-            .expect("empty")
-            .is_empty()
-    );
+    assert!(db
+        .readable_repo_ids(&owner.id, &[])
+        .await
+        .expect("empty")
+        .is_empty());
+    assert!(db
+        .readers_of_repo(&org_repo.id, &[])
+        .await
+        .expect("empty")
+        .is_empty());
 }

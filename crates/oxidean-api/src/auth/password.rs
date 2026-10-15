@@ -69,7 +69,10 @@ mod tests {
     #[test]
     fn verify_garbage_hash_false() {
         assert!(!verify_password(b"anything", "not-a-valid-phc"));
-        assert!(!verify_password(b"anything", "$argon2id$v=19$m=65536,t=2,p=1$aaa$bbb"));
+        assert!(!verify_password(
+            b"anything",
+            "$argon2id$v=19$m=65536,t=2,p=1$aaa$bbb"
+        ));
     }
 
     #[test]

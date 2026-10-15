@@ -42,7 +42,10 @@ fn avatar_url(avatar_path: &Option<String>, user_id: &str) -> Option<String> {
     }
 }
 
-fn parse_follow_request(input: serde_json::Value, proc: &str) -> Result<UserFollowRequest, AppError> {
+fn parse_follow_request(
+    input: serde_json::Value,
+    proc: &str,
+) -> Result<UserFollowRequest, AppError> {
     serde_json::from_value(input)
         .map_err(|e| AppError::new("rpc.bad_input", format!("invalid {proc} input: {e}")))
 }
@@ -90,7 +93,10 @@ pub async fn follow(ctx: &RpcCtx, input: serde_json::Value) -> Result<PublicUser
 }
 
 /// `user.unfollow` — idempotent edge delete; returns the target's profile (DEBT-06).
-pub async fn unfollow(ctx: &RpcCtx, input: serde_json::Value) -> Result<PublicUserProfile, AppError> {
+pub async fn unfollow(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<PublicUserProfile, AppError> {
     let user = require_verified(ctx).await?;
     let req = parse_follow_request(input, "user.unfollow")?;
     let target = resolve_target(ctx, &req.username, true).await?;

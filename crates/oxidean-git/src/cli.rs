@@ -282,7 +282,10 @@ async fn run_git_stdout(args: &[&str]) -> Result<Vec<u8>, GitError> {
     run_git_stdout_env(args, &[]).await
 }
 
-async fn run_git_stdout_env(args: &[&str], extra_env: &[(&str, &str)]) -> Result<Vec<u8>, GitError> {
+async fn run_git_stdout_env(
+    args: &[&str],
+    extra_env: &[(&str, &str)],
+) -> Result<Vec<u8>, GitError> {
     // Tests / CI often have no global git identity; env overrides avoid
     // "Author identity unknown" without mutating the runner's ~/.gitconfig.
     let mut cmd = Command::new("git");
@@ -421,7 +424,9 @@ impl RemoteAuthFiles {
                 #[cfg(unix)]
                 {
                     use std::os::unix::fs::PermissionsExt;
-                    let mut perms = std::fs::metadata(&askpass).map_err(GitError::Io)?.permissions();
+                    let mut perms = std::fs::metadata(&askpass)
+                        .map_err(GitError::Io)?
+                        .permissions();
                     perms.set_mode(0o700);
                     std::fs::set_permissions(&askpass, perms).map_err(GitError::Io)?;
                 }
@@ -467,14 +472,8 @@ impl RemoteAuthFiles {
                     }
                     out
                 };
-                env.push((
-                    "GIT_CONFIG_COUNT".into(),
-                    "1".into(),
-                ));
-                env.push((
-                    "GIT_CONFIG_KEY_0".into(),
-                    "http.extraHeader".into(),
-                ));
+                env.push(("GIT_CONFIG_COUNT".into(), "1".into()));
+                env.push(("GIT_CONFIG_KEY_0".into(), "http.extraHeader".into()));
                 env.push((
                     "GIT_CONFIG_VALUE_0".into(),
                     format!("Authorization: Basic {auth_b64}"),
@@ -502,7 +501,9 @@ impl RemoteAuthFiles {
                 #[cfg(unix)]
                 {
                     use std::os::unix::fs::PermissionsExt;
-                    let mut perms = std::fs::metadata(&key_path).map_err(GitError::Io)?.permissions();
+                    let mut perms = std::fs::metadata(&key_path)
+                        .map_err(GitError::Io)?
+                        .permissions();
                     perms.set_mode(0o600);
                     std::fs::set_permissions(&key_path, perms).map_err(GitError::Io)?;
                 }
@@ -1467,10 +1468,8 @@ impl GitBackend for CliGitBackend {
             commit_args.push(message.to_string());
         }
         let commit_refs: Vec<&str> = commit_args.iter().map(String::as_str).collect();
-        let env_pairs: Vec<(&str, &str)> = commit_env
-            .iter()
-            .map(|(k, v)| (*k, v.as_str()))
-            .collect();
+        let env_pairs: Vec<(&str, &str)> =
+            commit_env.iter().map(|(k, v)| (*k, v.as_str())).collect();
         run_git_stdout_env(&commit_refs, &env_pairs).await?;
 
         run_git(&["-C", work_str, "remote", "add", "origin", bare_str]).await?;
@@ -1802,7 +1801,13 @@ impl GitBackend for CliGitBackend {
 
         // Unborn HEAD / empty repo: rev-parse fails → structured empty.
         let rev = Command::new("git")
-            .args(["-C", repo_str, "rev-parse", "--verify", &format!("{treeish}^{{commit}}")])
+            .args([
+                "-C",
+                repo_str,
+                "rev-parse",
+                "--verify",
+                &format!("{treeish}^{{commit}}"),
+            ])
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -2138,9 +2143,8 @@ impl GitBackend for CliGitBackend {
                 "--format=%H%x00%h%x00%s%x00%b%x00%an%x00%ae%x00%aI%x00%P%x00%ce%x00%G?".into(),
             );
         } else {
-            meta_args.push(
-                "--format=%H%x00%h%x00%s%x00%b%x00%an%x00%ae%x00%aI%x00%P%x00%ce".into(),
-            );
+            meta_args
+                .push("--format=%H%x00%h%x00%s%x00%b%x00%an%x00%ae%x00%aI%x00%P%x00%ce".into());
         }
         meta_args.push(sha.to_string());
         let meta_refs: Vec<&str> = meta_args.iter().map(String::as_str).collect();
@@ -2148,18 +2152,20 @@ impl GitBackend for CliGitBackend {
             .iter()
             .map(|(k, v)| (k.as_str(), v.as_str()))
             .collect();
-        let meta = run_git_stdout_env(&meta_refs, &env_refs).await.map_err(|e| {
-            let msg = e.to_string();
-            if msg.contains("unknown revision")
-                || msg.contains("bad object")
-                || msg.contains("invalid object")
-                || msg.contains("Not a valid object")
-            {
-                GitError::NotFound(format!("commit {sha}"))
-            } else {
-                e
-            }
-        })?;
+        let meta = run_git_stdout_env(&meta_refs, &env_refs)
+            .await
+            .map_err(|e| {
+                let msg = e.to_string();
+                if msg.contains("unknown revision")
+                    || msg.contains("bad object")
+                    || msg.contains("invalid object")
+                    || msg.contains("Not a valid object")
+                {
+                    GitError::NotFound(format!("commit {sha}"))
+                } else {
+                    e
+                }
+            })?;
         let meta_text = String::from_utf8_lossy(&meta);
         let meta_line = meta_text.trim();
         let parts: Vec<&str> = meta_line.split('\0').collect();
@@ -2265,7 +2271,13 @@ impl GitBackend for CliGitBackend {
         // Resolve both ends; identical trees → empty (not 500).
         for tip in [base, head] {
             let rev = Command::new("git")
-                .args(["-C", repo_s, "rev-parse", "--verify", &format!("{tip}^{{commit}}")])
+                .args([
+                    "-C",
+                    repo_s,
+                    "rev-parse",
+                    "--verify",
+                    &format!("{tip}^{{commit}}"),
+                ])
                 .stdin(Stdio::null())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
@@ -2423,10 +2435,17 @@ impl GitBackend for CliGitBackend {
         let repo_s = repo_str(repo)?;
         let prefix = prefix.trim().trim_matches('/');
         if prefix.is_empty() || prefix.contains('\0') || prefix.contains("..") {
-            return Err(GitError::InvalidArg(format!("invalid archive prefix: {prefix}")));
+            return Err(GitError::InvalidArg(format!(
+                "invalid archive prefix: {prefix}"
+            )));
         }
-        if prefix.chars().any(|c| matches!(c, ';' | '|' | '&' | '`' | '$' | '\n' | '\r')) {
-            return Err(GitError::InvalidArg(format!("invalid archive prefix: {prefix}")));
+        if prefix
+            .chars()
+            .any(|c| matches!(c, ';' | '|' | '&' | '`' | '$' | '\n' | '\r'))
+        {
+            return Err(GitError::InvalidArg(format!(
+                "invalid archive prefix: {prefix}"
+            )));
         }
         let prefix_arg = format!("--prefix={prefix}/");
         let format_arg = format!("--format={}", format.as_git_format());
@@ -2679,7 +2698,9 @@ impl GitBackend for CliGitBackend {
             return Ok(Vec::new());
         }
         if grep.is_some_and(|s| s.contains('\0')) || author.is_some_and(|s| s.contains('\0')) {
-            return Err(GitError::InvalidArg("log_search filter contains NUL".into()));
+            return Err(GitError::InvalidArg(
+                "log_search filter contains NUL".into(),
+            ));
         }
 
         let rev = Command::new("git")
@@ -2744,13 +2765,17 @@ impl GitBackend for CliGitBackend {
         let repo_s = repo_str(repo)?;
         let path = path.trim().trim_start_matches('/');
         if path.is_empty() || path.contains('\0') {
-            return Err(GitError::InvalidArg("log_path requires a non-empty path".into()));
+            return Err(GitError::InvalidArg(
+                "log_path requires a non-empty path".into(),
+            ));
         }
         if path
             .split('/')
             .any(|seg| seg.is_empty() || seg == "." || seg == "..")
         {
-            return Err(GitError::InvalidArg("log_path path has invalid segments".into()));
+            return Err(GitError::InvalidArg(
+                "log_path path has invalid segments".into(),
+            ));
         }
         let limit = limit.clamp(1, 100);
         let limit_s = limit.to_string();
@@ -2810,10 +2835,11 @@ impl GitBackend for CliGitBackend {
         entry_names: &[String],
     ) -> Result<std::collections::HashMap<String, CommitSummary>, GitError> {
         let refname = validate_treeish(refname)?;
-        let dir = dir_path.trim().trim_start_matches('/').trim_end_matches('/');
-        if dir.contains('\0')
-            || dir.split('/').any(|seg| seg == "." || seg == "..")
-        {
+        let dir = dir_path
+            .trim()
+            .trim_start_matches('/')
+            .trim_end_matches('/');
+        if dir.contains('\0') || dir.split('/').any(|seg| seg == "." || seg == "..") {
             return Err(GitError::InvalidArg(
                 "path_last_commits dir_path has invalid segments".into(),
             ));
@@ -3167,7 +3193,9 @@ impl GitBackend for CliGitBackend {
         let local_ref = validate_treeish(local_ref)?;
         let remote_ref = validate_treeish(remote_ref)?;
         if local_ref.contains(':') || remote_ref.contains(':') {
-            return Err(GitError::InvalidArg("ref names must not contain ':'".into()));
+            return Err(GitError::InvalidArg(
+                "ref names must not contain ':'".into(),
+            ));
         }
         let repo_abs = absolute_path(repo)?;
         let repo_s = repo_abs.to_str().ok_or_else(|| {
@@ -3190,7 +3218,9 @@ impl GitBackend for CliGitBackend {
         let url = validate_remote_url(url)?;
         let remote_ref = validate_treeish(remote_ref)?;
         if remote_ref.contains(':') {
-            return Err(GitError::InvalidArg("ref names must not contain ':'".into()));
+            return Err(GitError::InvalidArg(
+                "ref names must not contain ':'".into(),
+            ));
         }
         let refspec = if local_ref.is_empty() {
             // Delete remote ref.
@@ -3198,7 +3228,9 @@ impl GitBackend for CliGitBackend {
         } else {
             let local_ref = validate_treeish(local_ref)?;
             if local_ref.contains(':') {
-                return Err(GitError::InvalidArg("ref names must not contain ':'".into()));
+                return Err(GitError::InvalidArg(
+                    "ref names must not contain ':'".into(),
+                ));
             }
             format!("+{local_ref}:{remote_ref}")
         };
@@ -3378,8 +3410,14 @@ impl GitBackend for CliGitBackend {
         })?;
 
         // Ensure the object exists locally.
-        let _ = run_git_stdout(&["-C", bare_s, "cat-file", "-e", &format!("{target_sha}^{{commit}}")])
-            .await?;
+        let _ = run_git_stdout(&[
+            "-C",
+            bare_s,
+            "cat-file",
+            "-e",
+            &format!("{target_sha}^{{commit}}"),
+        ])
+        .await?;
 
         // Push through a worktree so hooks/update runs (same pattern as merge).
         let tmp = tempfile::tempdir().map_err(GitError::Io)?;
@@ -3527,16 +3565,8 @@ async fn merge_via_worktree(
 
     match mode {
         MergeMode::MergeCommit => {
-            if let Err(e) = run_git(&[
-                "-C",
-                work_s,
-                "merge",
-                "--no-ff",
-                "-m",
-                message,
-                head_sha,
-            ])
-            .await
+            if let Err(e) =
+                run_git(&["-C", work_s, "merge", "--no-ff", "-m", message, head_sha]).await
             {
                 let msg = e.to_string();
                 if msg.to_lowercase().contains("conflict") {
@@ -3556,8 +3586,15 @@ async fn merge_via_worktree(
             run_git(&["-C", work_s, "commit", "-m", message]).await?;
         }
         MergeMode::Rebase => {
-            run_git(&["-C", work_s, "checkout", "-B", "oxidean-rebase-head", head_sha])
-                .await?;
+            run_git(&[
+                "-C",
+                work_s,
+                "checkout",
+                "-B",
+                "oxidean-rebase-head",
+                head_sha,
+            ])
+            .await?;
             if let Err(e) = run_git(&["-C", work_s, "rebase", base_ref]).await {
                 let _ = run_git(&["-C", work_s, "rebase", "--abort"]).await;
                 let msg = e.to_string();
@@ -3684,12 +3721,23 @@ mod tests {
             .await
             .unwrap();
         let out = child.wait_with_output().await.unwrap();
-        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
-        run_git(&["-C", wt_s, "commit", "-m", "gitlink"]).await.unwrap();
-        run_git(&["-C", wt_s, "push", "origin", "HEAD:main"]).await.unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        run_git(&["-C", wt_s, "commit", "-m", "gitlink"])
+            .await
+            .unwrap();
+        run_git(&["-C", wt_s, "push", "origin", "HEAD:main"])
+            .await
+            .unwrap();
 
         let entries = git.ls_tree(&bare, "main", "").await.expect("ls_tree root");
-        let readme = entries.iter().find(|e| e.name == "README.md").expect("blob");
+        let readme = entries
+            .iter()
+            .find(|e| e.name == "README.md")
+            .expect("blob");
         assert_eq!(readme.mode, "100644");
         assert_eq!(readme.kind, TreeEntryKind::Blob);
         let src = entries.iter().find(|e| e.name == "src").expect("tree");
@@ -3732,7 +3780,10 @@ mod tests {
             &bare,
             "main",
             "c",
-            &[("src/a.txt".into(), b"alpha\nUNIQUE_GREP_TOKEN\nbeta\n".to_vec())],
+            &[(
+                "src/a.txt".into(),
+                b"alpha\nUNIQUE_GREP_TOKEN\nbeta\n".to_vec(),
+            )],
         )
         .await
         .unwrap();
@@ -3926,7 +3977,10 @@ mod tests {
             .await
             .unwrap();
 
-        let page = git.log(&bare, "main", 0, 10, None, None).await.expect("log");
+        let page = git
+            .log(&bare, "main", 0, 10, None, None)
+            .await
+            .expect("log");
         assert!(
             page.len() >= 2,
             "expected at least 2 commits, got {}",
@@ -3938,7 +3992,10 @@ mod tests {
         assert!(!page[0].author_name.is_empty());
         assert!(!page[0].authored_at.is_empty());
 
-        let skipped = git.log(&bare, "main", 1, 1, None, None).await.expect("log skip");
+        let skipped = git
+            .log(&bare, "main", 1, 1, None, None)
+            .await
+            .expect("log skip");
         assert_eq!(skipped.len(), 1);
         assert_eq!(skipped[0].subject, "first commit");
     }
@@ -3963,7 +4020,10 @@ mod tests {
             .unwrap();
         let sha = String::from_utf8_lossy(&sha_bytes).trim().to_string();
 
-        let detail = git.show_commit(&bare, &sha, None, None).await.expect("show_commit");
+        let detail = git
+            .show_commit(&bare, &sha, None, None)
+            .await
+            .expect("show_commit");
         assert_eq!(detail.sha, sha);
         assert_eq!(detail.subject, "seed subject");
         assert!(
@@ -3988,14 +4048,9 @@ mod tests {
         let bare = tmp.path().join("diff.git");
         let git = CliGitBackend::new();
         git.init_bare(&bare, "main").await.unwrap();
-        git.seed_commit(
-            &bare,
-            "main",
-            "only",
-            &[("x.txt".into(), b"x\n".to_vec())],
-        )
-        .await
-        .unwrap();
+        git.seed_commit(&bare, "main", "only", &[("x.txt".into(), b"x\n".to_vec())])
+            .await
+            .unwrap();
 
         let result = git
             .diff(&bare, "main", "main")
@@ -4262,8 +4317,15 @@ mod tests {
         )
         .await;
         // Advance main with conflicting content.
-        push_branch_with_file(&bare, "main", "main", "clash.txt", b"mainline\n", "main clash")
-            .await;
+        push_branch_with_file(
+            &bare,
+            "main",
+            "main",
+            "clash.txt",
+            b"mainline\n",
+            "main clash",
+        )
+        .await;
         let head = String::from_utf8_lossy(
             &run_git_stdout(&[
                 "-C",
@@ -4481,11 +4543,10 @@ mod tests {
         let local_tip = git.rev_parse(&local, "refs/heads/main").await.unwrap();
         // Fetch remote tip into local mirror namespace via path fetch.
         let remote_tip_before = git.rev_parse(&remote, "refs/heads/main").await.unwrap();
-        assert!(
-            git.is_ancestor(&local, &remote_tip_before, &local_tip)
-                .await
-                .unwrap()
-        );
+        assert!(git
+            .is_ancestor(&local, &remote_tip_before, &local_tip)
+            .await
+            .unwrap());
         // Push local → remote (path URL not allowed; use fetch_ref_from inverse:
         // clone objects by fetching from local into remote via path).
         let fetched = git
@@ -4502,40 +4563,22 @@ mod tests {
         );
 
         // Diverge both sides → merge_commit then FF both.
-        push_branch_with_file(
-            &local,
-            "main",
-            "main",
-            "l.txt",
-            b"L\n",
-            "local diverge",
-        )
-        .await;
-        push_branch_with_file(
-            &remote,
-            "main",
-            "main",
-            "r.txt",
-            b"R\n",
-            "remote diverge",
-        )
-        .await;
+        push_branch_with_file(&local, "main", "main", "l.txt", b"L\n", "local diverge").await;
+        push_branch_with_file(&remote, "main", "main", "r.txt", b"R\n", "remote diverge").await;
         let local_sha = git.rev_parse(&local, "refs/heads/main").await.unwrap();
         let remote_sha = git
             .fetch_ref_from(&local, &remote, "refs/heads/main")
             .await
             .unwrap();
         assert_ne!(local_sha, remote_sha);
-        assert!(
-            !git.is_ancestor(&local, &remote_sha, &local_sha)
-                .await
-                .unwrap()
-        );
-        assert!(
-            !git.is_ancestor(&local, &local_sha, &remote_sha)
-                .await
-                .unwrap()
-        );
+        assert!(!git
+            .is_ancestor(&local, &remote_sha, &local_sha)
+            .await
+            .unwrap());
+        assert!(!git
+            .is_ancestor(&local, &local_sha, &remote_sha)
+            .await
+            .unwrap());
         let merged = git
             .merge_commit(&local, "main", &remote_sha, "Mirror merge")
             .await
@@ -4615,14 +4658,9 @@ mod tests {
         let bare = tmp.path().join("force.git");
         let git = CliGitBackend::new();
         git.init_bare(&bare, "main").await.unwrap();
-        git.seed_commit(
-            &bare,
-            "main",
-            "first",
-            &[("a.txt".into(), b"1\n".to_vec())],
-        )
-        .await
-        .unwrap();
+        git.seed_commit(&bare, "main", "first", &[("a.txt".into(), b"1\n".to_vec())])
+            .await
+            .unwrap();
         let first = git.rev_parse(&bare, "refs/heads/main").await.unwrap();
         push_branch_with_file(&bare, "main", "main", "b.txt", b"2\n", "second").await;
         let second = git.rev_parse(&bare, "refs/heads/main").await.unwrap();
@@ -4816,25 +4854,21 @@ mod tests {
 
         let bare_s = bare.to_str().unwrap();
         let work_s = work.to_str().unwrap();
-        assert!(
-            std::process::Command::new("git")
-                .args(["clone", bare_s, work_s])
-                .status()
-                .unwrap()
-                .success()
-        );
+        assert!(std::process::Command::new("git")
+            .args(["clone", bare_s, work_s])
+            .status()
+            .unwrap()
+            .success());
         for (k, v) in [
             ("user.name", "GPG Signer"),
             ("user.email", email),
             ("commit.gpgsign", "true"),
         ] {
-            assert!(
-                std::process::Command::new("git")
-                    .args(["-C", work_s, "config", k, v])
-                    .status()
-                    .unwrap()
-                    .success()
-            );
+            assert!(std::process::Command::new("git")
+                .args(["-C", work_s, "config", k, v])
+                .status()
+                .unwrap()
+                .success());
         }
 
         // Resolve the freshly generated key id and pin signingkey so ambient
@@ -4857,22 +4891,18 @@ mod tests {
                 parts.nth(3).map(|s| s.to_string())
             })
             .expect("secret key id");
-        assert!(
-            std::process::Command::new("git")
-                .args(["-C", work_s, "config", "user.signingkey", &key_id])
-                .status()
-                .unwrap()
-                .success()
-        );
+        assert!(std::process::Command::new("git")
+            .args(["-C", work_s, "config", "user.signingkey", &key_id])
+            .status()
+            .unwrap()
+            .success());
 
         std::fs::write(work.join("README.md"), "gpg signed\n").unwrap();
-        assert!(
-            std::process::Command::new("git")
-                .args(["-C", work_s, "add", "README.md"])
-                .status()
-                .unwrap()
-                .success()
-        );
+        assert!(std::process::Command::new("git")
+            .args(["-C", work_s, "add", "README.md"])
+            .status()
+            .unwrap()
+            .success());
         let commit = std::process::Command::new("git")
             .args([
                 "-C",
@@ -4896,13 +4926,11 @@ mod tests {
             "signed commit failed: {}",
             String::from_utf8_lossy(&commit.stderr)
         );
-        assert!(
-            std::process::Command::new("git")
-                .args(["-C", work_s, "push", "origin", "main"])
-                .status()
-                .unwrap()
-                .success()
-        );
+        assert!(std::process::Command::new("git")
+            .args(["-C", work_s, "push", "origin", "main"])
+            .status()
+            .unwrap()
+            .success());
 
         let page = git
             .log(&bare, "main", 0, 1, None, Some(verify_home.as_path()))
@@ -4984,25 +5012,21 @@ mod tests {
         let work = tmp.path().join("work");
         let bare_s = bare.to_str().unwrap();
         let work_s = work.to_str().unwrap();
-        assert!(
-            std::process::Command::new("git")
-                .args(["clone", bare_s, work_s])
-                .status()
-                .unwrap()
-                .success()
-        );
+        assert!(std::process::Command::new("git")
+            .args(["clone", bare_s, work_s])
+            .status()
+            .unwrap()
+            .success());
         for (k, v) in [
             ("commit.gpgsign", "false"),
             ("user.email", "t@example.com"),
             ("user.name", "T"),
         ] {
-            assert!(
-                std::process::Command::new("git")
-                    .args(["-C", work_s, "config", k, v])
-                    .status()
-                    .unwrap()
-                    .success()
-            );
+            assert!(std::process::Command::new("git")
+                .args(["-C", work_s, "config", k, v])
+                .status()
+                .unwrap()
+                .success());
         }
         std::fs::write(work.join("b.txt"), "v2\n").unwrap();
         for args in [
@@ -5010,14 +5034,12 @@ mod tests {
             vec!["commit", "-qm", "unsigned follow-up"],
             vec!["push", "-q", "origin", "main"],
         ] {
-            assert!(
-                std::process::Command::new("git")
-                    .args(["-C", work_s])
-                    .args(&args)
-                    .status()
-                    .unwrap()
-                    .success()
-            );
+            assert!(std::process::Command::new("git")
+                .args(["-C", work_s])
+                .args(&args)
+                .status()
+                .unwrap()
+                .success());
         }
 
         let page = git
@@ -5245,15 +5267,9 @@ mod tests {
             .expect("unconfigured log");
         assert_eq!(page.len(), 1);
         // Whatever %G? itself reports must be mirrored.
-        let raw = run_git_stdout(&[
-            "-C",
-            bare.to_str().unwrap(),
-            "log",
-            "--format=%G?",
-            "main",
-        ])
-        .await
-        .unwrap();
+        let raw = run_git_stdout(&["-C", bare.to_str().unwrap(), "log", "--format=%G?", "main"])
+            .await
+            .unwrap();
         let want = map_signature_status(String::from_utf8_lossy(&raw).trim());
         assert_eq!(page[0].signature_status, want);
         if want == "none" {
@@ -5331,13 +5347,17 @@ mod tests {
         assert!(!sig_verify_impossible_env(repo_s, None, &env).await);
 
         // Repo-local gpg.* config → not provable even on an empty keyring.
-        assert!(
-            std::process::Command::new("git")
-                .args(["-C", repo_s, "config", "gpg.ssh.allowedSignersFile", "/tmp/x"])
-                .status()
-                .unwrap()
-                .success()
-        );
+        assert!(std::process::Command::new("git")
+            .args([
+                "-C",
+                repo_s,
+                "config",
+                "gpg.ssh.allowedSignersFile",
+                "/tmp/x"
+            ])
+            .status()
+            .unwrap()
+            .success());
         let env: Vec<(&str, &str)> = cfg_env
             .iter()
             .copied()
@@ -5367,13 +5387,11 @@ mod tests {
         let bare_s = bare.to_str().unwrap();
         let work = tmp.path().join("mixed-work");
         let work_s = work.to_str().unwrap();
-        assert!(
-            std::process::Command::new("git")
-                .args(["clone", bare_s, work_s])
-                .status()
-                .unwrap()
-                .success()
-        );
+        assert!(std::process::Command::new("git")
+            .args(["clone", bare_s, work_s])
+            .status()
+            .unwrap()
+            .success());
         std::fs::write(work.join("pgp.txt"), "pgp\n").unwrap();
         let env = [("GNUPGHOME", sign_home.to_str().unwrap())];
         for args in [

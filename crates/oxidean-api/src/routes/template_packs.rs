@@ -158,7 +158,10 @@ pub async fn upload_pack(
     )
     .await
     {
-        Ok(pack) => (StatusCode::CREATED, Json(serde_json::json!({ "ok": true, "pack": pack })))
+        Ok(pack) => (
+            StatusCode::CREATED,
+            Json(serde_json::json!({ "ok": true, "pack": pack })),
+        )
             .into_response(),
         Err(e) => {
             let status = match e.code.as_str() {

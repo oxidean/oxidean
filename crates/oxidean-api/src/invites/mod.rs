@@ -3,9 +3,9 @@
 
 use chrono::Utc;
 use oxidean_core::{
-    is_reserved_username, validate_username, AppError, CollaboratorPermission, InvitesAcceptRequest,
-    InvitesAcceptResponse, InvitesGetRequest, InvitesGetResponse, OrgMemberPublic, OrgPublic,
-    OrgRole, Role,
+    is_reserved_username, validate_username, AppError, CollaboratorPermission,
+    InvitesAcceptRequest, InvitesAcceptResponse, InvitesGetRequest, InvitesGetResponse,
+    OrgMemberPublic, OrgPublic, OrgRole, Role,
 };
 use oxidean_db::UserRow;
 use sha2::{Digest, Sha256};
@@ -33,10 +33,7 @@ fn bytes_to_hex(bytes: &[u8]) -> String {
 }
 
 fn invalid_invite() -> AppError {
-    AppError::new(
-        "invite.invalid",
-        "invalid or expired invitation",
-    )
+    AppError::new("invite.invalid", "invalid or expired invitation")
 }
 
 fn db_err(e: String) -> AppError {
@@ -76,8 +73,7 @@ fn parse_expires(raw: &str) -> Result<chrono::DateTime<Utc>, AppError> {
     chrono::DateTime::parse_from_rfc3339(raw)
         .map(|dt| dt.with_timezone(&Utc))
         .or_else(|_| {
-            chrono::NaiveDateTime::parse_from_str(raw, "%Y-%m-%d %H:%M:%S")
-                .map(|ndt| ndt.and_utc())
+            chrono::NaiveDateTime::parse_from_str(raw, "%Y-%m-%d %H:%M:%S").map(|ndt| ndt.and_utc())
         })
         .map_err(|_| invalid_invite())
 }
@@ -139,7 +135,10 @@ pub async fn resolve_or_provision_invitee(
         // Email-bound invites still enforce the recipient match; link invites
         // accept any signed-in user.
         if let Some(bound) = invite_email {
-            if session_user.email.eq_ignore_ascii_case(&normalize_email(bound)?) {
+            if session_user
+                .email
+                .eq_ignore_ascii_case(&normalize_email(bound)?)
+            {
                 return Ok(session_user);
             }
             return Err(AppError::new(
@@ -290,14 +289,8 @@ async fn accept_instance(
         return Err(invalid_invite());
     }
 
-    let user = resolve_or_provision_invitee(
-        ctx,
-        row.email.as_deref(),
-        email,
-        username,
-        password,
-    )
-    .await?;
+    let user =
+        resolve_or_provision_invitee(ctx, row.email.as_deref(), email, username, password).await?;
 
     let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
     ctx.db
@@ -351,9 +344,8 @@ async fn accept_org(
         return Err(invalid_invite());
     }
 
-    let invite_role = OrgRole::parse(&row.role).map_err(|_| {
-        AppError::new("org.internal", "organization operation failed")
-    })?;
+    let invite_role = OrgRole::parse(&row.role)
+        .map_err(|_| AppError::new("org.internal", "organization operation failed"))?;
 
     let org = ctx
         .db
@@ -362,14 +354,8 @@ async fn accept_org(
         .map_err(org_db_err)?
         .ok_or_else(invalid_invite)?;
 
-    let user = resolve_or_provision_invitee(
-        ctx,
-        row.email.as_deref(),
-        email,
-        username,
-        password,
-    )
-    .await?;
+    let user =
+        resolve_or_provision_invitee(ctx, row.email.as_deref(), email, username, password).await?;
 
     if ctx
         .db
@@ -450,9 +436,8 @@ async fn accept_repo(
         return Err(invalid_invite());
     }
 
-    let permission = CollaboratorPermission::parse(&row.permission).map_err(|_| {
-        AppError::new("repo.internal", "repository operation failed")
-    })?;
+    let permission = CollaboratorPermission::parse(&row.permission)
+        .map_err(|_| AppError::new("repo.internal", "repository operation failed"))?;
 
     let repo = ctx
         .db
@@ -480,14 +465,8 @@ async fn accept_repo(
             .ok_or_else(invalid_invite)?
     };
 
-    let user = resolve_or_provision_invitee(
-        ctx,
-        row.email.as_deref(),
-        email,
-        username,
-        password,
-    )
-    .await?;
+    let user =
+        resolve_or_provision_invitee(ctx, row.email.as_deref(), email, username, password).await?;
 
     if let Some(existing) = ctx
         .db
@@ -496,9 +475,8 @@ async fn accept_repo(
         .map_err(db_err)?
     {
         // Already has a grant — do not burn a link seat; keep existing permission.
-        let existing_perm = CollaboratorPermission::parse(&existing.permission).map_err(|_| {
-            AppError::new("repo.internal", "repository operation failed")
-        })?;
+        let existing_perm = CollaboratorPermission::parse(&existing.permission)
+            .map_err(|_| AppError::new("repo.internal", "repository operation failed"))?;
         return Ok(InvitesAcceptResponse::Repo {
             owner: owner_slug,
             name: repo.name,
@@ -538,7 +516,10 @@ async fn accept_repo(
         Some((&user.id, &user.username)),
         "invite.accept",
         Some(("invite", &row.id)),
-        Some(serde_json::json!({ "kind": "repo", "repo": format!("{owner_slug}/{}", repo.name) }).to_string()),
+        Some(
+            serde_json::json!({ "kind": "repo", "repo": format!("{owner_slug}/{}", repo.name) })
+                .to_string(),
+        ),
     )
     .await;
 
@@ -584,12 +565,8 @@ pub async fn get(
     ctx: &mut RpcCtx,
     input: serde_json::Value,
 ) -> Result<InvitesGetResponse, AppError> {
-    let req: InvitesGetRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new(
-            "rpc.bad_input",
-            format!("invalid invites.get input: {e}"),
-        )
-    })?;
+    let req: InvitesGetRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid invites.get input: {e}")))?;
     let token = req.token.trim();
     if token.is_empty() || token.len() != TOKEN_HEX_LEN {
         return Err(invalid_invite());

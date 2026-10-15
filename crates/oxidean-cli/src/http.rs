@@ -120,10 +120,7 @@ impl HttpClient {
                 .and_then(Value::as_str)
                 .map(str::to_string)
                 .unwrap_or_else(|| crate::output::truncate(&String::from_utf8_lossy(&bytes), 200));
-            return Err(CallError::Http {
-                status,
-                body: msg,
-            });
+            return Err(CallError::Http { status, body: msg });
         }
         Ok((filename, bytes.to_vec()))
     }

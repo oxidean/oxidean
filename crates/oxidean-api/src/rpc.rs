@@ -3,8 +3,8 @@ use std::sync::{Arc, Mutex, RwLock};
 
 use cookie::Cookie;
 use oxidean_core::{
-    AppError, EchoRequest, EchoResponse, HealthResponse, ManifestCapabilities, ManifestResponse,
-    wire_compatible, RpcRequest, RpcResponse, ECHO_MAX_BYTES, LEGACY_WIRE_VERSION,
+    wire_compatible, AppError, EchoRequest, EchoResponse, HealthResponse, ManifestCapabilities,
+    ManifestResponse, RpcRequest, RpcResponse, ECHO_MAX_BYTES, LEGACY_WIRE_VERSION,
     RPC_PROTOCOL_VERSION, WIRE_VERSION,
 };
 use oxidean_db::Database;
@@ -429,7 +429,10 @@ pub fn manifest_response() -> ManifestResponse {
         protocol_version: RPC_PROTOCOL_VERSION,
         wire_version: WIRE_VERSION.into(),
         server_version: crate::version::version().into(),
-        procedures: PROCEDURES.iter().map(|p| ((*p).to_string(), true)).collect(),
+        procedures: PROCEDURES
+            .iter()
+            .map(|p| ((*p).to_string(), true))
+            .collect(),
         capabilities: ManifestCapabilities {
             // All mounted unconditionally in app.rs: /api/mcp, /api/v1,
             // /oauth/*, /cli/*.

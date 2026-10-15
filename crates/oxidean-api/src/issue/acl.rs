@@ -61,10 +61,6 @@ pub fn can_edit_comment(user_id: &str, author_id: &str) -> bool {
 }
 
 /// Author **or** Write+ may delete a comment (D-ISS-09 / T-11-10).
-pub fn can_delete_comment(
-    user_id: &str,
-    author_id: &str,
-    capability: Option<Capability>,
-) -> bool {
+pub fn can_delete_comment(user_id: &str, author_id: &str, capability: Option<Capability>) -> bool {
     user_id == author_id || meets(capability, Capability::Write)
 }

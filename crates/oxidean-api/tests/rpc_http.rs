@@ -102,9 +102,7 @@ async fn system_manifest_shape() {
                 .uri("/api/rpc")
                 .header("content-type", "application/json")
                 .header("Oxidean-RPC-Version", "1")
-                .body(Body::from(
-                    r#"{"procedure":"system.manifest","input":{}}"#,
-                ))
+                .body(Body::from(r#"{"procedure":"system.manifest","input":{}}"#))
                 .unwrap(),
         )
         .await
@@ -131,7 +129,11 @@ async fn system_manifest_shape() {
         "pull.get",
         "packages.list",
     ] {
-        assert_eq!(procedures.get(proc), Some(&serde_json::json!(true)), "{proc}");
+        assert_eq!(
+            procedures.get(proc),
+            Some(&serde_json::json!(true)),
+            "{proc}"
+        );
     }
     assert!(procedures.values().all(|v| *v == serde_json::json!(true)));
     let caps = &data["capabilities"];
@@ -160,9 +162,7 @@ async fn system_manifest_allowed_during_needs_setup() {
                 .uri("/api/rpc")
                 .header("content-type", "application/json")
                 .header("Oxidean-RPC-Version", "1")
-                .body(Body::from(
-                    r#"{"procedure":"system.manifest","input":{}}"#,
-                ))
+                .body(Body::from(r#"{"procedure":"system.manifest","input":{}}"#))
                 .unwrap(),
         )
         .await
