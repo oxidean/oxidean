@@ -284,6 +284,10 @@ pub fn router_with_state(state: AppState, cors: CorsLayer) -> Router {
         // and gates protected shells on the result): read-only, one SELECT,
         // no session touch on the document path.
         .route("/api/auth/session-check", get(session_check))
+        // Web-tier setup probe (`oxidean-web` stamps `data-oxidean-setup`):
+        // read-only COUNT, deployment-global so no cookie is needed — the SPA
+        // drops its per-page auth.bootstrapStatus fetch in favor of the stamp.
+        .route("/api/auth/setup-check", get(setup_check))
         // OAuth2 provider surface (API-03). The consent screen itself is the
         // SPA route /oauth/consent; these three paths are API-owned and must be
         // routed to the API at the edge (Caddyfile / Traefik / vite proxy).
@@ -412,6 +416,24 @@ async fn session_check(State(state): State<AppState>, headers: HeaderMap) -> imp
         Ok(valid) => (no_store, Json(serde_json::json!({ "valid": valid }))).into_response(),
         Err(e) => {
             tracing::warn!(error = %e, "session-check probe failed");
+            (no_store, StatusCode::INTERNAL_SERVER_ERROR).into_response()
+        }
+    }
+}
+
+/// `GET /api/auth/setup-check` — reports whether the instance still needs
+/// first-run setup. Store failures surface as 500 so the web tier stamps
+/// nothing (fail-open) rather than pinning a dead-API instance into /setup.
+async fn setup_check(State(state): State<AppState>) -> impl IntoResponse {
+    let no_store = [(header::CACHE_CONTROL, "no-store")];
+    match crate::auth::bootstrap::needs_setup(&state.db).await {
+        Ok(needs_setup) => (
+            no_store,
+            Json(serde_json::json!({ "needs_setup": needs_setup })),
+        )
+            .into_response(),
+        Err(e) => {
+            tracing::warn!(error = ?e, "setup-check probe failed");
             (no_store, StatusCode::INTERNAL_SERVER_ERROR).into_response()
         }
     }

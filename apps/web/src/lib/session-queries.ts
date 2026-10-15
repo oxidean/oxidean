@@ -8,9 +8,10 @@ import type {
   UserPublic,
 } from "@oxidean/api-client";
 import { apiClient } from "@/lib/api-client";
+import { clearSetupStamp, stampedSetupVerdict } from "@/lib/setup-stamp";
 
 export const authMeQueryKey = ["auth", "me"] as const;
-const authBootstrapQueryKey = ["auth", "bootstrapStatus"] as const;
+export const authBootstrapQueryKey = ["auth", "bootstrapStatus"] as const;
 export const authProviderConfigQueryKey = ["auth", "providerConfig"] as const;
 export const adminAuthSettingsQueryKey = ["admin", "auth", "getSettings"] as const;
 const orgListMineQueryKey = ["org", "listMine"] as const;
@@ -38,7 +39,21 @@ export function authSessionQueryOptions() {
 export function authBootstrapQueryOptions() {
   return queryOptions({
     queryKey: authBootstrapQueryKey,
+    // Deployment-global truth stamped by the web tier on <html> — mounts the
+    // query already-resolved (no pending wave) on cold loads. Every consumer's
+    // pending DOM is also gated on auth.me / providerConfig, which are still
+    // pending at hydration, so seeding cannot diverge from the SSR'd cluster.
+    initialData: () => {
+      const stamped = stampedSetupVerdict();
+      return stamped === null ? undefined : { needs_setup: stamped };
+    },
     queryFn: async (): Promise<BootstrapStatus> => {
+      // Re-resolutions honor the freshest stamp before spending the RPC;
+      // an absent stamp (older tier / failed probe / tests) falls through.
+      const stamped = stampedSetupVerdict();
+      if (stamped !== null) {
+        return { needs_setup: stamped };
+      }
       const res = await apiClient.auth.bootstrapStatus();
       if (!res.ok) {
         throw new Error(`${res.error.code}: ${res.error.message}`);
@@ -139,6 +154,15 @@ export function clearSessionQueries(qc: QueryClient) {
   void qc.invalidateQueries({ queryKey: ["admin"] });
   void qc.invalidateQueries({ queryKey: ["org"] });
   void qc.invalidateQueries({ queryKey: ["notification"] });
+}
+
+/**
+ * First-run setup just completed — drop the `<html>` stamp and settle the
+ * shared bootstrap cache so mounted views stop treating needs_setup as live.
+ */
+export function markSetupComplete(qc: QueryClient) {
+  clearSetupStamp();
+  qc.setQueryData(authBootstrapQueryKey, { needs_setup: false });
 }
 
 /** Keep chrome in sync after profile/avatar updates without a full reload. */
