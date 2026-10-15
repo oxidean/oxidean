@@ -386,9 +386,17 @@ pub async fn status(ctx: &mut RpcCtx) -> Result<TwoFactorStatusPublic, AppError>
 
 /// `auth.two_factor.totp_begin` — create a pending secret; returns the
 /// `otpauth://` URI + base32 manual key. Never returns a confirmed secret.
-pub async fn totp_begin(ctx: &mut RpcCtx) -> Result<TotpEnrollmentPublic, AppError> {
+pub async fn totp_begin(
+    ctx: &mut RpcCtx,
+    input: serde_json::Value,
+) -> Result<TotpEnrollmentPublic, AppError> {
     let db = &ctx.db;
-    let (user_id, _) = enroll_actor(ctx, None).await?;
+    let req: TwoFactorChallengeRequest = if input.is_null() {
+        TwoFactorChallengeRequest { challenge: None }
+    } else {
+        serde_json::from_value(input).map_err(bad_input)?
+    };
+    let (user_id, _) = enroll_actor(ctx, req.challenge.as_deref()).await?;
     if let Some(t) = db.totp_find(&user_id).await.map_err(db_err)? {
         if t.is_confirmed() {
             return Err(AppError::new(
@@ -581,7 +589,9 @@ pub async fn complete(ctx: &mut RpcCtx, input: serde_json::Value) -> Result<User
             return Err(invalid("that code did not match — try again"));
         }
         let _ = ctx.db.totp_touch_last_used(&pending.user_id).await;
-        let pending = ctx.two_factor.store.take(&id).unwrap();
+        let Some(pending) = ctx.two_factor.store.take(&id) else {
+            return Err(expired("two-factor challenge expired — sign in again"));
+        };
         return mint_session(ctx, pending, "totp").await;
     }
 
@@ -618,7 +628,9 @@ pub async fn complete(ctx: &mut RpcCtx, input: serde_json::Value) -> Result<User
             return Err(invalid("that sign-in code is wrong or expired"));
         }
         ctx.db.delete_email_token(&row.id).await.map_err(db_err)?;
-        let pending = ctx.two_factor.store.take(&id).unwrap();
+        let Some(pending) = ctx.two_factor.store.take(&id) else {
+            return Err(expired("two-factor challenge expired — sign in again"));
+        };
         return mint_session(ctx, pending, "email").await;
     }
 
@@ -636,7 +648,9 @@ pub async fn complete(ctx: &mut RpcCtx, input: serde_json::Value) -> Result<User
             bump_attempts(ctx, &id)?;
             return Err(invalid("that recovery code is wrong or already used"));
         }
-        let pending = ctx.two_factor.store.take(&id).unwrap();
+        let Some(pending) = ctx.two_factor.store.take(&id) else {
+            return Err(expired("two-factor challenge expired — sign in again"));
+        };
         return mint_session(ctx, pending, "recovery").await;
     }
 
@@ -725,12 +739,14 @@ pub async fn passkey_complete(
         .update(&id, |p| p.webauthn_assertion.take())
         .flatten()
         .ok_or_else(|| expired("no passkey ceremony in progress — request a new challenge"))?;
-    let result = make_webauthn()?
-        .finish_passkey_authentication(&assertion, &state)
-        .map_err(|e| {
+    let result = match make_webauthn()?.finish_passkey_authentication(&assertion, &state) {
+        Ok(r) => r,
+        Err(e) => {
             tracing::info!("passkey assertion rejected: {e:?}");
-            invalid("passkey verification failed")
-        })?;
+            bump_attempts(ctx, &id)?;
+            return Err(invalid("passkey verification failed"));
+        }
+    };
     if !result.user_verified() {
         // A passkey assertion without UV is treated as a failed factor.
         bump_attempts(ctx, &id)?;
@@ -751,7 +767,9 @@ pub async fn passkey_complete(
             .await
             .map_err(db_err)?;
     }
-    let pending = ctx.two_factor.store.take(&id).unwrap();
+    let Some(pending) = ctx.two_factor.store.take(&id) else {
+        return Err(expired("two-factor challenge expired — sign in again"));
+    };
     mint_session(ctx, pending, "passkey").await
 }
 

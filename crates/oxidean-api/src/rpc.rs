@@ -613,10 +613,12 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },
-        "auth.two_factor.totp_begin" => match two_factor::totp_begin(ctx).await {
-            Ok(v) => RpcResponse::ok(v),
-            Err(e) => RpcResponse::err(e),
-        },
+        "auth.two_factor.totp_begin" => {
+            match two_factor::totp_begin(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
         "auth.two_factor.totp_confirm" => {
             match two_factor::totp_confirm(ctx, req.input).await {
                 Ok(v) => RpcResponse::ok(v),
