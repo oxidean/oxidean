@@ -306,6 +306,8 @@ pub async fn totp_delete(pool: &DbPool, user_id: &str) -> Result<(), String> {
 
 /// Replace all recovery codes for a user (issue-time regenerate).
 /// `codes` is `(row id, code_hash)` pairs — hashes only, never plaintext.
+/// Replace is atomic per dialect: a crash mid-rotation must not leave the
+/// account with zero usable recovery codes (#130).
 pub async fn recovery_replace(
     pool: &DbPool,
     user_id: &str,
@@ -313,9 +315,13 @@ pub async fn recovery_replace(
 ) -> Result<(), String> {
     match pool {
         DbPool::Postgres(p) => {
+            let mut tx = p
+                .begin()
+                .await
+                .map_err(|e| format!("begin recovery replace tx failed: {e}"))?;
             sqlx::query("DELETE FROM user_recovery_codes WHERE user_id = $1")
                 .bind(user_id)
-                .execute(p)
+                .execute(&mut *tx)
                 .await
                 .map_err(|e| format!("recovery clear failed: {e}"))?;
             for (id, hash) in codes {
@@ -325,15 +331,22 @@ pub async fn recovery_replace(
                 .bind(id)
                 .bind(user_id)
                 .bind(hash)
-                .execute(p)
+                .execute(&mut *tx)
                 .await
                 .map_err(|e| format!("recovery insert failed: {e}"))?;
             }
+            tx.commit()
+                .await
+                .map_err(|e| format!("commit recovery replace tx failed: {e}"))?;
         }
         DbPool::MySql(p) => {
+            let mut tx = p
+                .begin()
+                .await
+                .map_err(|e| format!("begin recovery replace tx failed: {e}"))?;
             sqlx::query("DELETE FROM user_recovery_codes WHERE user_id = ?")
                 .bind(user_id)
-                .execute(p)
+                .execute(&mut *tx)
                 .await
                 .map_err(|e| format!("recovery clear failed: {e}"))?;
             for (id, hash) in codes {
@@ -343,15 +356,22 @@ pub async fn recovery_replace(
                 .bind(id)
                 .bind(user_id)
                 .bind(hash)
-                .execute(p)
+                .execute(&mut *tx)
                 .await
                 .map_err(|e| format!("recovery insert failed: {e}"))?;
             }
+            tx.commit()
+                .await
+                .map_err(|e| format!("commit recovery replace tx failed: {e}"))?;
         }
         DbPool::Sqlite(p) => {
+            let mut tx = p
+                .begin()
+                .await
+                .map_err(|e| format!("begin recovery replace tx failed: {e}"))?;
             sqlx::query("DELETE FROM user_recovery_codes WHERE user_id = ?1")
                 .bind(user_id)
-                .execute(p)
+                .execute(&mut *tx)
                 .await
                 .map_err(|e| format!("recovery clear failed: {e}"))?;
             for (id, hash) in codes {
@@ -361,10 +381,13 @@ pub async fn recovery_replace(
                 .bind(id)
                 .bind(user_id)
                 .bind(hash)
-                .execute(p)
+                .execute(&mut *tx)
                 .await
                 .map_err(|e| format!("recovery insert failed: {e}"))?;
             }
+            tx.commit()
+                .await
+                .map_err(|e| format!("commit recovery replace tx failed: {e}"))?;
         }
     }
     Ok(())
