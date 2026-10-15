@@ -5,7 +5,7 @@ import { SiteFooter, SiteHeader } from "@/components/chrome";
 import { AppToaster } from "@/components/ui/toaster";
 import { VerifyBanner } from "@/components/verify-banner";
 import { getQueryClient } from "@/lib/query-client";
-import { usePathname } from "@/lib/pathname.tsrx";
+import { useLivePathname } from "@/lib/pathname.tsrx";
 import { resolveAppAccessRedirect } from "@/lib/ssr-auth";
 import { installEarlyNavBridge } from "@/lib/early-nav";
 import { authBootstrapQueryOptions, authSessionQueryOptions } from "@/lib/session-queries";
@@ -15,10 +15,10 @@ import { authBootstrapQueryOptions, authSessionQueryOptions } from "@/lib/sessio
  * must-change-credentials → /setup/credentials (the web tier handles the fast
  * anonymous→/login case for protected routes; this covers the rest). Runs in the
  * persisted chrome island, so it re-checks on every client navigation via
- * `usePathname()`.
+ * `useLivePathname()` (effect-only — no pathname-rendered DOM).
  */
 function AppAccessGate() @{
-  const pathname = usePathname();
+  const pathname = useLivePathname();
   const meQ = useQuery(authSessionQueryOptions());
   const bootQ = useQuery(authBootstrapQueryOptions());
 

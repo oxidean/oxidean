@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiClient } from "@/lib/api-client";
 import { usePageRedirect } from "@/lib/nav.tsrx";
+import { useMounted } from "@/lib/use-mounted.tsrx";
 import { authSessionQueryOptions } from "@/lib/session-queries";
 import { cn } from "@/lib/utils";
 import { AppLink } from "@/components/ui/app-link";
@@ -31,7 +32,10 @@ function OrgsNewContent() @{
   const meQ = useQuery(authSessionQueryOptions());
   usePageRedirect(meQ.data === null || meQ.isError ? "/login?returnTo=/orgs/new" : null);
   const user = meQ.data ?? undefined;
-  const showWall = !user || !user.email_verified;
+  // Same mounted gate as /new: prerender emits the wall, so hold the SSR
+  // branch until mounted even when a warm auth.me cache is already resolved.
+  const mounted = useMounted();
+  const showWall = !mounted || !user || !user.email_verified;
 
   const [slugError, setSlugError] = useState("");
   const [formError, setFormError] = useState("");

@@ -1,5 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@octanejs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { getQueryClient } from "@/lib/query-client";
+import { authMeQueryKey } from "@/lib/session-queries";
 
 /**
  * ORG-01 / D-ORG-01 / D-ORG-06: /orgs/new create UI (10-13 tracer).
@@ -44,6 +46,44 @@ import { OrgsNewPage } from "./orgs.new";
 afterEach(cleanup);
 
 describe("/orgs/new (ORG-01 / D-ORG-01 / D-ORG-06)", () => {
+  // Issue #143 regression — same wall/form mounted gate as /new: the first
+  // commit must match the prerendered wall even with a warm auth.me cache.
+  it("warm auth.me cache commits the SSR wall first, then swaps to the form", async () => {
+    const client = getQueryClient();
+    client.clear();
+    client.setQueryData(authMeQueryKey, { ...user, email_verified: true });
+
+    const wallText = "Verify your email";
+    const commits: string[] = [];
+    const observer = new MutationObserver((records) => {
+      for (const record of records) {
+        for (const node of record.addedNodes) {
+          if (node.textContent?.includes(wallText)) commits.push("wall-mounted");
+        }
+        for (const node of record.removedNodes) {
+          if (node.textContent?.includes(wallText)) commits.push("wall-removed");
+        }
+      }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    try {
+      render(OrgsNewPage);
+
+      await waitFor(() => {
+        expect(
+          screen.getByRole("heading", { name: "Create a new organization" }),
+        ).toBeInTheDocument();
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(commits[0]).toBe("wall-mounted");
+      expect(commits).toContain("wall-removed");
+    } finally {
+      observer.disconnect();
+      client.clear();
+    }
+  }, 20000);
+
   it("verified: Slug + optional Display name + Create organization CTA", async () => {
     user.email_verified = true;
     render(OrgsNewPage);
