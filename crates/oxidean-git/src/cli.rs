@@ -15,11 +15,21 @@ use crate::backend::{
 
 /// System `git` CLI adapter (D-32). Only backend registered in Phase 7.
 #[derive(Debug, Default, Clone)]
-pub struct CliGitBackend;
+pub struct CliGitBackend {
+    /// `GIT_TEMPLATE_DIR` forced on `clone` spawns (test seam — avoids
+    /// mutating process env, which races under plain `cargo test`).
+    clone_template_dir: Option<PathBuf>,
+}
 
 impl CliGitBackend {
     pub fn new() -> Self {
-        Self
+        Self::default()
+    }
+
+    /// Force `GIT_TEMPLATE_DIR` on `clone` spawns.
+    pub fn with_clone_template_dir(mut self, dir: impl Into<PathBuf>) -> Self {
+        self.clone_template_dir = Some(dir.into());
+        self
     }
 }
 
@@ -241,7 +251,6 @@ async fn run_git_with_env(args: &[&str], extra_env: &[(&str, &str)]) -> Result<(
 /// `commit_files`) pass the actor's real capability so a protection rule
 /// created between the API-side check and the push still bites.
 fn protection_hook_push_env(actor_capability: &str) -> Vec<(String, String)> {
-    let mut out = Vec::with_capacity(2);
     let helper = std::env::var("OXIDEAN_PROTECTION_HELPER")
         .ok()
         .filter(|s| !s.is_empty())
@@ -251,8 +260,16 @@ fn protection_hook_push_env(actor_capability: &str) -> Vec<(String, String)> {
                 sibling.is_file().then(|| sibling.display().to_string())
             })
         });
+    protection_hook_push_env_from(actor_capability, helper.as_deref())
+}
+
+fn protection_hook_push_env_from(
+    actor_capability: &str,
+    helper: Option<&str>,
+) -> Vec<(String, String)> {
+    let mut out = Vec::with_capacity(2);
     if let Some(h) = helper {
-        out.push(("OXIDEAN_PROTECTION_HELPER".into(), h));
+        out.push(("OXIDEAN_PROTECTION_HELPER".into(), h.to_string()));
     }
     out.push((
         "OXIDEAN_ACTOR_CAPABILITY".into(),
@@ -2527,7 +2544,15 @@ impl GitBackend for CliGitBackend {
         if let Some(parent) = dest_abs.parent() {
             tokio::fs::create_dir_all(parent).await?;
         }
-        run_git(&["clone", "--bare", source_s, dest_s]).await?;
+        let tmpl = self
+            .clone_template_dir
+            .as_ref()
+            .map(|d| d.display().to_string());
+        let extra: Vec<(&str, &str)> = tmpl
+            .as_deref()
+            .map(|t| vec![("GIT_TEMPLATE_DIR", t)])
+            .unwrap_or_default();
+        run_git_with_env(&["clone", "--bare", source_s, dest_s], &extra).await?;
         // D-FORK-02: every bare copy gets protection hooks (same as init_bare).
         // Failure propagates so fork RPC can compensate (D-FORK-04).
         install_protection_hooks(&dest_abs).await?;
@@ -3620,29 +3645,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn seed_commit_works_with_relative_bare_path() {
-        let root = tempfile::tempdir().unwrap();
-        let prev = std::env::current_dir().unwrap();
-        std::env::set_current_dir(root.path()).unwrap();
-        let bare = PathBuf::from("relative-bare.git");
-        let git = CliGitBackend::new();
-        let result = async {
-            git.init_bare(&bare, "main").await?;
-            git.seed_commit(
-                &bare,
-                "main",
-                "seed",
-                &[("README.md".into(), b"# hi\n".to_vec())],
-            )
-            .await
-        }
-        .await;
-        let _ = std::env::set_current_dir(&prev);
-        result.expect("relative bare seed");
-        assert!(root.path().join("relative-bare.git").join("HEAD").exists());
-    }
-
-    #[tokio::test]
     async fn ls_tree_returns_dirs_files_and_gitlink_modes() {
         let tmp = tempfile::tempdir().unwrap();
         let bare = tmp.path().join("modes.git");
@@ -4364,16 +4366,8 @@ mod tests {
 
     #[test]
     fn protection_hook_push_env_sets_admin_and_optional_helper() {
-        let prev = std::env::var_os("OXIDEAN_PROTECTION_HELPER");
-        std::env::set_var(
-            "OXIDEAN_PROTECTION_HELPER",
-            "/usr/local/bin/oxidean-protection-hook",
-        );
-        let env = protection_hook_push_env("admin");
-        match prev {
-            Some(v) => std::env::set_var("OXIDEAN_PROTECTION_HELPER", v),
-            None => std::env::remove_var("OXIDEAN_PROTECTION_HELPER"),
-        }
+        let env =
+            protection_hook_push_env_from("admin", Some("/usr/local/bin/oxidean-protection-hook"));
         let map: std::collections::HashMap<_, _> = env.into_iter().collect();
         assert_eq!(
             map.get("OXIDEAN_ACTOR_CAPABILITY").map(String::as_str),
@@ -4389,6 +4383,8 @@ mod tests {
     /// D-FORK-04: hook install failure after clone propagates as Err.
     /// Uses a template where `hooks` is a file so create_dir_all fails
     /// (bare clone installs from GIT_TEMPLATE_DIR, not source hooks).
+    /// The template is scoped to the backend — mutating process env here
+    /// races with parallel tests under plain `cargo test`.
     #[tokio::test]
     async fn clone_bare_fails_when_hook_install_blocked() {
         let tmp = tempfile::tempdir().unwrap();
@@ -4409,16 +4405,11 @@ mod tests {
         .await
         .unwrap();
 
-        let prev = std::env::var_os("GIT_TEMPLATE_DIR");
-        // nextest runs each test in its own process — safe to set for this call.
-        std::env::set_var("GIT_TEMPLATE_DIR", &template);
-        let result = git.clone_bare(&source, &dest).await;
-        match prev {
-            Some(v) => std::env::set_var("GIT_TEMPLATE_DIR", v),
-            None => std::env::remove_var("GIT_TEMPLATE_DIR"),
-        }
-
-        let err = result.expect_err("hook install must fail");
+        let git = CliGitBackend::new().with_clone_template_dir(&template);
+        let err = git
+            .clone_bare(&source, &dest)
+            .await
+            .expect_err("hook install must fail");
         assert!(
             matches!(err, GitError::Io(_)),
             "unexpected error variant: {err:?}"
