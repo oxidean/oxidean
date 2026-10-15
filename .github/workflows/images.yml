@@ -400,10 +400,13 @@ jobs:
             exit 1
           fi
 
-  # Bind the PR's ephemeral Railway environment (created from preview) to the
-  # PR image tag once it exists. The env initially clones preview's :main
-  # source — a brief unavoidable window — then converges to the pr image on
-  # every push.
+  # Bind the PR's ephemeral Railway environment (forked from preview) to the
+  # PR image tag once it exists. Image-sourced services have no repo
+  # triggers, so Railway's GitHub app cannot provision the env itself —
+  # railway-pr-env-ensure.sh polls briefly for a Railway-made env, then
+  # creates oxidean-pr-<n> as an ephemeral fork of preview when none
+  # appears. The fork seeds preview's :main image; the bind below converges
+  # it to the pr image on every push.
   bind-pr-env:
     name: bind PR environment
     needs: [meta, publish]
@@ -449,17 +452,13 @@ jobs:
             unset RAILWAY_TOKEN
           fi
 
-          # Railway creates the ephemeral env on PR open; it usually exists by
-          # now but can lag — poll before posting anything to the PR.
-          env_id=""
-          for _ in $(seq 1 40); do
-            env_id="$(railway_find_pr_environment_id "$RAILWAY_PROJECT_ID" "$PR" || true)"
-            [[ -n "$env_id" ]] && break
-            echo "waiting for the PR #${PR} environment (sleep 15s)"
-            sleep 15
-          done
+          # Find-or-create the PR environment: Railway's GitHub app never
+          # provisions one (image-sourced services have no repo triggers),
+          # so ensure polls briefly for a Railway-made env, then creates
+          # oxidean-pr-<n> as an ephemeral fork of preview itself.
+          env_id="$(scripts/railway-pr-env-ensure.sh "$PR" "$RAILWAY_PROJECT_ID" || true)"
           if [[ -z "$env_id" ]]; then
-            echo "warning: no Railway environment for PR #${PR} after 600s — a later push retries"
+            echo "warning: no Railway environment for PR #${PR} — a later push retries"
             exit 0
           fi
 

@@ -99,10 +99,12 @@ railway_resolve_environment_id() {
   printf '%s' "$id"
 }
 
-# Find the ephemeral environment id Railway created for a pull request
-# (Environment.meta.prNumber). Prints the id, or nothing when no such
-# environment exists yet.
-railway_find_pr_environment_id() {
+# Find the ephemeral environment ids for a pull request, one per line.
+# Railway-provisioned PR envs match Environment.meta.prNumber; envs this
+# repo's CI creates itself (scripts/railway-pr-env-ensure.sh) are found by
+# name — the public API offers no way to set meta.prNumber, so they carry
+# the conventional name oxidean-pr-<n> instead. Meta matches print first.
+railway_find_pr_environment_ids() {
   local project_id="$1" pr_number="$2"
   local raw
   raw="$(
@@ -116,10 +118,16 @@ railway_find_pr_environment_id() {
       }
     ' "$(jq -n --arg id "$project_id" '{id:$id}')"
   )"
-  echo "$raw" | jq -r --argjson pr "$pr_number" '
-    .data.project.environments.edges[]?
-    | .node
-    | select(.isEphemeral == true and .meta.prNumber == $pr)
-    | .id
-  ' | head -n1
+  echo "$raw" | jq -r --argjson pr "$pr_number" --arg name "oxidean-pr-${pr_number}" '
+    [.data.project.environments.edges[]?.node]
+    | ([.[] | select(.isEphemeral == true and .meta.prNumber == $pr)]
+       + [.[] | select(.name == $name)])
+    | unique_by(.id)[].id
+  '
+}
+
+# Singular form — prints the first matching id, or nothing when no PR
+# environment exists yet.
+railway_find_pr_environment_id() {
+  railway_find_pr_environment_ids "$1" "$2" | head -n1
 }
