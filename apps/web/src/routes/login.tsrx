@@ -54,6 +54,19 @@ function LoginContent() @{
           remember_me: value.rememberMe,
         });
         if (!res.ok) {
+          // Two-factor gate (#130): a pending challenge was opened and its
+          // cookie set — hand off to the challenge page, carrying the
+          // challenge id explicitly for cookie-less robustness.
+          if (res.error.code === "auth.two_factor_required") {
+            const data = res.error.data as { challenge?: string } | undefined;
+            const challenge = data?.challenge
+              ? `&challenge=${encodeURIComponent(data.challenge)}`
+              : "";
+            window.location.assign(
+              `/login/two-factor?returnTo=${encodeURIComponent(returnTo)}${challenge}`,
+            );
+            return;
+          }
           setError(LOGIN_ERROR);
           return;
         }

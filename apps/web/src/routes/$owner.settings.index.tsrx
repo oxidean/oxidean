@@ -6,6 +6,7 @@ import { useEffect, useState } from "octane";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import {
   SelectIcon,
   SelectItem,
@@ -69,6 +70,7 @@ function OrgSettingsContent() @{
     defaultValues: {
       display_name: org?.display_name ?? "",
       member_base: (org?.member_base_permission ?? "none") as MemberBasePermission,
+      require_two_factor: org?.require_two_factor === true,
     },
     onSubmit: async ({ value }) => {
       setPending(true);
@@ -77,6 +79,7 @@ function OrgSettingsContent() @{
           slug,
           display_name: value.display_name.trim() || null,
           member_base_permission: value.member_base,
+          require_two_factor: value.require_two_factor,
         });
         if (!res.ok) {
           if (res.error.code === "org.forbidden") {
@@ -89,6 +92,7 @@ function OrgSettingsContent() @{
         }
         form.setFieldValue("display_name", res.data.display_name ?? "");
         form.setFieldValue("member_base", res.data.member_base_permission);
+        form.setFieldValue("require_two_factor", res.data.require_two_factor === true);
         toastSuccess("Settings saved.");
         setPending(false);
       } catch {
@@ -103,6 +107,7 @@ function OrgSettingsContent() @{
     if (!org) return;
     form.setFieldValue("display_name", org.display_name ?? "");
     form.setFieldValue("member_base", org.member_base_permission ?? "none");
+    form.setFieldValue("require_two_factor", org.require_two_factor === true);
   }, [org?.slug]);
 
   @if (!org) {
@@ -190,6 +195,28 @@ function OrgSettingsContent() @{
               </div>
             );
           }}
+        </form.Subscribe>
+
+        <form.Subscribe selector={(s) => s.values.require_two_factor}>
+          {(requireTwoFactor) => (
+            <div className="flex flex-col gap-2">
+              <div className="flex min-h-11 items-center gap-2">
+                <Switch
+                  id="org-require-two-factor"
+                  checked={requireTwoFactor}
+                  onCheckedChange={(checked) =>
+                    form.setFieldValue("require_two_factor", checked === true)
+                  }
+                />
+                <Label htmlFor="org-require-two-factor">
+                  Require two-factor authentication for members
+                </Label>
+              </div>
+              <p className="text-[14px] font-normal leading-[1.4] text-muted-foreground">
+                Members must enroll an authenticator app or passkey to keep organization access.
+              </p>
+            </div>
+          )}
         </form.Subscribe>
 
         <Button type="submit" disabled={pending} className={cn("h-11")}>

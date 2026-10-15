@@ -80,6 +80,12 @@ pub struct UserPublic {
     /// Default branch name for new repositories (D-09); defaults to `main`.
     #[serde(default = "default_branch_main")]
     pub default_branch: String,
+    /// True when the account has at least one active 2FA factor (#130).
+    #[serde(default)]
+    pub two_factor_enabled: bool,
+    /// True when instance/org policy requires enrolling a factor (#130).
+    #[serde(default)]
+    pub two_factor_enroll_required: bool,
 }
 
 fn default_branch_main() -> String {
@@ -539,6 +545,12 @@ pub struct AuthSettingsPublic {
     /// Instance default visibility for new repos (D-08).
     #[serde(default = "default_visibility_public")]
     pub default_visibility: crate::RepoVisibility,
+    /// Require an enrolled 2FA factor for local (email/password) logins (#130).
+    #[serde(default)]
+    pub require_two_factor_local: bool,
+    /// Require an enrolled 2FA factor for external OIDC/WorkOS SSO logins (#130).
+    #[serde(default)]
+    pub require_two_factor_external: bool,
 }
 
 fn default_visibility_public() -> crate::RepoVisibility {
@@ -559,6 +571,10 @@ pub struct UpdateAuthSettingsRequest {
     /// Instance default visibility for new repos (D-08).
     #[serde(default = "default_visibility_public")]
     pub default_visibility: crate::RepoVisibility,
+    #[serde(default)]
+    pub require_two_factor_local: bool,
+    #[serde(default)]
+    pub require_two_factor_external: bool,
 }
 
 const RESERVED_USERNAMES: &[&str] = &[

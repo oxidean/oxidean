@@ -11,6 +11,7 @@ pub mod pending;
 pub mod profile;
 pub mod seed;
 pub mod session;
+pub mod two_factor;
 pub mod verify_reset;
 pub mod workos;
 

@@ -133,6 +133,8 @@ async fn close_signup(db: &Database) {
         settings.workos_client_id.as_deref(),
         false,
         &settings.default_visibility,
+        settings.require_two_factor_local,
+        settings.require_two_factor_external,
     )
     .await
     .expect("close allow_signup");

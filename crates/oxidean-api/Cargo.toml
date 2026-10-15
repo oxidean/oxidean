@@ -82,6 +82,9 @@ serde_yaml = "0.9"
 prost = "0.14"
 zip = { version = "8.6", default-features = false, features = ["deflate"] }
 sha1 = "0.11"
+hmac = "0.13"
+data-encoding = "2"
+webauthn-rs = "0.5.2"
 base64 = "0.23"
 schemars = { workspace = true }
 utoipa-swagger-ui = { version = "10", features = ["axum", "vendored"] }
@@ -92,6 +95,7 @@ tower = { version = "0.5", features = ["util"] }
 tokio-tungstenite = "0.30"
 tempfile = "3"
 wiremock = "0.6.5"
+webauthn-authenticator-rs = { version = "0.5.0", default-features = false, features = ["softpasskey"] }
 
 [build-dependencies]
 prost-build = "0.14"

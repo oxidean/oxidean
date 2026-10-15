@@ -48,6 +48,8 @@ use Seg::{Lit as L, Param as P, Splat as S};
 static SHELLS: &[Shell] = &[
     // ── Public + auth-adjacent statics ────────────────────────────────────
     Shell { pattern: &[L("login")], file: "login/index.html", title: None, protected: false, redirect: None },
+    // Pending 2FA challenge — anonymous until the factor mints the session.
+    Shell { pattern: &[L("login"), L("two-factor")], file: "login/two-factor/index.html", title: None, protected: false, redirect: None },
     Shell { pattern: &[L("signup")], file: "signup/index.html", title: None, protected: false, redirect: None },
     Shell { pattern: &[L("reset-password")], file: "reset-password/index.html", title: None, protected: false, redirect: None },
     Shell { pattern: &[L("verify")], file: "verify/index.html", title: None, protected: false, redirect: None },
@@ -71,6 +73,7 @@ static SHELLS: &[Shell] = &[
     Shell { pattern: &[L("settings"), L("notifications")], file: "settings/notifications/index.html", title: None, protected: true, redirect: None },
     Shell { pattern: &[L("settings"), L("emails")], file: "settings/emails/index.html", title: None, protected: true, redirect: None },
     Shell { pattern: &[L("settings"), L("ssh-keys")], file: "settings/ssh-keys/index.html", title: None, protected: true, redirect: None },
+    Shell { pattern: &[L("settings"), L("security")], file: "settings/security/index.html", title: None, protected: true, redirect: None },
     Shell { pattern: &[L("settings"), L("cli")], file: "settings/cli/index.html", title: None, protected: true, redirect: None },
     Shell { pattern: &[L("settings"), L("ai")], file: "settings/ai/index.html", title: None, protected: true, redirect: None },
     Shell { pattern: &[L("settings"), L("applications")], file: "settings/applications/index.html", title: None, protected: true, redirect: None },

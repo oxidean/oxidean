@@ -191,6 +191,8 @@ pub async fn bootstrap_setup(
             workos_client_id,
             req.allow_signup,
             &settings.default_visibility,
+            settings.require_two_factor_local,
+            settings.require_two_factor_external,
         )
         .await
         .map_err(db_err)?;
@@ -213,7 +215,7 @@ pub async fn bootstrap_setup(
         .await
         .map_err(db_err)?
         .ok_or_else(|| AppError::new("auth.internal", "bootstrap user missing after create"))?;
-    Ok(user_to_public(&row))
+    Ok(user_to_public(&ctx.db, &row).await)
 }
 
 /// Clear `must_change_credentials` after ENV seed forced-change (D-16/D-17).
@@ -384,5 +386,5 @@ pub async fn confirm_admin_credentials(
         "cleared must_change_credentials after ENV admin confirm (AUTH-06)"
     );
 
-    Ok(user_to_public(&updated))
+    Ok(user_to_public(&ctx.db, &updated).await)
 }

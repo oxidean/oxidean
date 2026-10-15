@@ -15,6 +15,8 @@ use crate::rpc::{CookieChange, RpcCtx};
 
 const PURPOSE_VERIFY: &str = "verify";
 const PURPOSE_RESET: &str = "reset";
+/// Pre-session login OTP issued inside a pending 2FA challenge (#130).
+pub const PURPOSE_LOGIN_2FA: &str = "login_2fa";
 const TOKEN_BYTES: usize = 32;
 const OTP_DIGITS: u32 = 100_000_000; // 8-digit numeric
 const TTL_SECS: i64 = 30 * 60;
@@ -256,6 +258,16 @@ pub async fn issue_reset(
     user_id: &str,
 ) -> Result<IssuedVerifySecrets, AppError> {
     issue_token_inner(db, user_id, PURPOSE_RESET, "", false).await
+}
+
+/// Issue an 8-digit sign-in OTP bound to `user_id` + primary email for an open
+/// 2FA login challenge (#130). Rate-limited like verify/reset issuance.
+pub(crate) async fn issue_2fa_token(
+    db: &oxidean_db::Database,
+    user_id: &str,
+    target_email: &str,
+) -> Result<IssuedVerifySecrets, AppError> {
+    issue_token_inner(db, user_id, PURPOSE_LOGIN_2FA, target_email, true).await
 }
 
 pub async fn issue_verify_inner(
@@ -519,7 +531,7 @@ pub async fn verify(ctx: &RpcCtx, input: serde_json::Value) -> Result<UserPublic
         .await
         .map_err(db_err)?
         .ok_or_else(|| AppError::new("auth.unauthenticated", "not authenticated"))?;
-    Ok(user_to_public(&user))
+    Ok(user_to_public(&ctx.db, &user).await)
 }
 
 /// On OTP/magic miss, increment attempts on the session user's primary verify
@@ -733,7 +745,7 @@ pub async fn reset_password(
         .await
         .map_err(db_err)?
         .ok_or_else(|| AppError::new("auth.internal", "authentication failed"))?;
-    Ok(user_to_public(&user))
+    Ok(user_to_public(&ctx.db, &user).await)
 }
 
 #[cfg(test)]
@@ -779,6 +791,7 @@ mod tests {
             pat: None,
             client: crate::rpc::ClientMeta::default(),
             set_cookie: None,
+            two_factor: crate::auth::two_factor::TwoFactorCtx::default(),
             lookup_limiter: Arc::new(std::sync::Mutex::new(
                 crate::user::rate_limit::LookupLimiter::new(),
             )),

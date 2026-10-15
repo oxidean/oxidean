@@ -263,6 +263,41 @@ async fn mint_session_and_redirect(
         }
     };
 
+    // Two-factor gate (issue #130): external logins follow the instance's
+    // external-channel policy — deployments trusting IdP MFA leave it off, and
+    // org require-2FA always applies. An open challenge redirects to the
+    // two-factor page instead of minting a session.
+    match crate::auth::two_factor::flags::login_gate(
+        &state.db,
+        &user,
+        crate::auth::two_factor::LoginChannel::External,
+    )
+    .await
+    {
+        Ok(gate) if gate.has_factor || gate.enroll_required => {
+            let kind = if gate.has_factor {
+                crate::auth::two_factor::PendingKind::Verify
+            } else {
+                crate::auth::two_factor::PendingKind::Enroll
+            };
+            let challenge = state
+                .two_factor_store
+                .open(&user.id, false, kind, gate.methods);
+            let cookie =
+                crate::auth::two_factor::challenge_cookie_header(&state.env_name, &challenge);
+            let path = format!(
+                "/login/two-factor?return={}",
+                sanitize_return_to(Some(return_to))
+            );
+            return redirect_with_cookies(&path, &[cookie]);
+        }
+        Ok(_) => {}
+        Err(e) => {
+            tracing::error!(code = %e.code, "two-factor gate failed after SSO");
+            return sso_error_redirect();
+        }
+    }
+
     let client = crate::rpc::ClientMeta::from_headers(headers);
     // SSO sessions: remember_me=false. Never use WorkOS sealed cookies (T-04-17).
     let (_token, cookie) = match state

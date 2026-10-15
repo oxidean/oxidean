@@ -5,7 +5,7 @@ use oxidean_core::{
     is_reserved_username, validate_username, AppError, LoginRequest, ProviderMode, Role,
     SignupRequest, UserPublic,
 };
-use oxidean_db::UserRow;
+use oxidean_db::{Database, UserRow};
 use uuid::Uuid;
 
 use crate::auth::external::is_placeholder_username;
@@ -16,7 +16,14 @@ use crate::email::OutboundEmail;
 use crate::rpc::{CookieChange, RpcCtx};
 
 /// Convert a DB user row to the public RPC DTO (never includes password_hash).
-pub fn user_to_public(row: &UserRow) -> UserPublic {
+///
+/// `two_factor_*` flags reflect current enrollment + policy (#130): a session
+/// user's required-state is computed from the org/instance policy plus whether
+/// the account has a local password (SSO-only accounts follow the external
+/// policy). Errors fail closed to `false` so a blip never claims "enrolled".
+pub async fn user_to_public(db: &Database, row: &UserRow) -> UserPublic {
+    let (two_factor_enabled, two_factor_enroll_required) =
+        crate::auth::two_factor::flags::for_user(db, row).await;
     UserPublic {
         id: row.id.clone(),
         email: row.email.clone(),
@@ -33,6 +40,8 @@ pub fn user_to_public(row: &UserRow) -> UserPublic {
         } else {
             row.default_branch.clone()
         },
+        two_factor_enabled,
+        two_factor_enroll_required,
     }
 }
 
@@ -249,7 +258,7 @@ pub async fn signup(ctx: &mut RpcCtx, input: serde_json::Value) -> Result<UserPu
         tracing::error!(code = %e.code, "signup verify email issue failed");
     }
 
-    Ok(user_to_public(&row))
+    Ok(user_to_public(&ctx.db, &row).await)
 }
 
 /// Local login by email or username + password (D-02); generic invalid_credentials (T-04-11).
@@ -308,6 +317,24 @@ pub async fn login(ctx: &mut RpcCtx, input: serde_json::Value) -> Result<UserPub
         ));
     }
 
+    // Two-factor gate (issue #130): a confirmed factor requires proof, and
+    // instance/org policy can require factor-less users to enroll — either way
+    // the session is only minted after `auth.two_factor.*` completes.
+    let gate = crate::auth::two_factor::flags::login_gate(
+        &ctx.db,
+        &user,
+        crate::auth::two_factor::LoginChannel::Local,
+    )
+    .await?;
+    if gate.has_factor || gate.enroll_required {
+        return Err(crate::auth::two_factor::open_challenge(
+            ctx,
+            &gate,
+            &user.id,
+            req.remember_me,
+        ));
+    }
+
     let cookie = issue_session(ctx, &user.id, req.remember_me).await?;
     ctx.set_cookie = Some(CookieChange::Set(cookie));
     crate::audit::record(
@@ -318,7 +345,7 @@ pub async fn login(ctx: &mut RpcCtx, input: serde_json::Value) -> Result<UserPub
         None,
     )
     .await;
-    Ok(user_to_public(&user))
+    Ok(user_to_public(&ctx.db, &user).await)
 }
 
 /// Log out current session only (D-13).
@@ -392,7 +419,7 @@ pub async fn me(ctx: &RpcCtx) -> Result<UserPublic, AppError> {
             "This account has been suspended.",
         ));
     }
-    Ok(user_to_public(&user))
+    Ok(user_to_public(&ctx.db, &user).await)
 }
 
 /// Public provider mode for UI (D-14–D-16); no auth required.

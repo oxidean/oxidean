@@ -62,6 +62,8 @@ pub struct AppState {
     pub git: Arc<dyn GitBackend>,
     pub sessions: SessionService,
     pub pending: PendingAuthStore,
+    /// Pending second-factor login challenges (issue #130) — per process.
+    pub two_factor_store: crate::auth::two_factor::TwoFactorStore,
     /// Smart HTTP failed Basic/PAT auth counters (D-26) — per process.
     pub git_auth_limiter: Arc<Mutex<FailedAuthLimiter>>,
     /// `user.lookup` per-session counters (T-10-03) — per process.
@@ -182,6 +184,7 @@ impl AppState {
             git: Arc::new(CliGitBackend::new()) as Arc<dyn GitBackend>,
             sessions: SessionService::new(env_name.clone()),
             pending: PendingAuthStore::new(),
+            two_factor_store: crate::auth::two_factor::TwoFactorStore::new(),
             git_auth_limiter: Arc::new(Mutex::new(FailedAuthLimiter::new())),
             lookup_limiter: Arc::new(Mutex::new(LookupLimiter::new())),
             env_name,
@@ -451,6 +454,21 @@ pub(crate) fn session_token_from_headers(headers: &HeaderMap) -> Option<String> 
     None
 }
 
+/// Parse the `oxidean_2fa` pending-challenge cookie (issue #130).
+pub(crate) fn two_factor_id_from_headers(headers: &HeaderMap) -> Option<String> {
+    let cookie_header = headers.get(header::COOKIE)?.to_str().ok()?;
+    for part in cookie_header.split(';') {
+        let part = part.trim();
+        let prefix = format!("{}=", crate::auth::two_factor::TWO_FACTOR_COOKIE_NAME);
+        if let Some(value) = part.strip_prefix(prefix.as_str()) {
+            if !value.is_empty() {
+                return Some(value.to_string());
+            }
+        }
+    }
+    None
+}
+
 /// Resolve a raw `oxidean_session` cookie token to a session (shared by RPC + MCP).
 pub(crate) async fn resolve_session_token(
     state: &AppState,
@@ -503,6 +521,10 @@ pub(crate) fn build_rpc_ctx_with_session(
         pat: None,
         client,
         set_cookie: None,
+        two_factor: crate::auth::two_factor::TwoFactorCtx {
+            store: state.two_factor_store.clone(),
+            challenge_id: None,
+        },
         lookup_limiter: state.lookup_limiter.clone(),
         search_timeout_ms: state.search_timeout_ms,
         search_max_matches: state.search_max_matches,
@@ -544,6 +566,7 @@ pub(crate) async fn build_rpc_ctx(
     state: &AppState,
     credential: RpcCredential,
     client: rpc::ClientMeta,
+    two_factor_challenge: Option<String>,
 ) -> Result<RpcCtx, BearerRejection> {
     let (session, pat) = match &credential {
         RpcCredential::Cookie(token) => {
@@ -598,6 +621,10 @@ pub(crate) async fn build_rpc_ctx(
         pat,
         client,
         set_cookie: None,
+        two_factor: crate::auth::two_factor::TwoFactorCtx {
+            store: state.two_factor_store.clone(),
+            challenge_id: two_factor_challenge,
+        },
         lookup_limiter: state.lookup_limiter.clone(),
         search_timeout_ms: state.search_timeout_ms,
         search_max_matches: state.search_max_matches,
@@ -646,10 +673,22 @@ fn attach_set_cookie(
                 .unwrap_or(SESSION_IDLE);
             append_set_cookie(&mut response, &c);
             append_set_cookie(&mut response, &build_session_presence_cookie(ttl, env_name));
+            // A real session satisfies any pending 2FA challenge (#130).
+            append_set_cookie(
+                &mut response,
+                &crate::auth::two_factor::cleared_challenge_cookie(env_name),
+            );
+        }
+        CookieChange::SetTwoFactor(c) => {
+            append_set_cookie(&mut response, &c);
         }
         CookieChange::Clear => {
             append_set_cookie(&mut response, &clear_session_cookie(env_name));
             append_set_cookie(&mut response, &clear_session_presence_cookie(env_name));
+            append_set_cookie(
+                &mut response,
+                &crate::auth::two_factor::cleared_challenge_cookie(env_name),
+            );
         }
     }
     response
@@ -702,11 +741,18 @@ async fn rpc_http(
 
     let credential = edge_credential(&headers);
     let bearer_auth = matches!(credential, RpcCredential::Bearer(_));
-    let mut ctx =
-        match build_rpc_ctx(&state, credential, rpc::ClientMeta::from_headers(&headers)).await {
-            Ok(ctx) => ctx,
-            Err(rejection) => return bearer_rejection_response(rejection),
-        };
+    let challenge_id = two_factor_id_from_headers(&headers);
+    let mut ctx = match build_rpc_ctx(
+        &state,
+        credential,
+        rpc::ClientMeta::from_headers(&headers),
+        challenge_id,
+    )
+    .await
+    {
+        Ok(ctx) => ctx,
+        Err(rejection) => return bearer_rejection_response(rejection),
+    };
     let resp = rpc::dispatch(&mut ctx, body).await;
     let status = rpc_status(&resp);
     // PAT Bearer calls never mint or mutate cookies (API-02).
@@ -731,7 +777,10 @@ async fn rpc_ws(
     }
     let credential = edge_credential(&headers);
     let client = rpc::ClientMeta::from_headers(&headers);
-    ws.on_upgrade(move |socket| handle_socket(socket, state, credential, client))
+    let challenge_id = two_factor_id_from_headers(&headers);
+    ws.on_upgrade(move |socket| {
+        handle_socket(socket, state, credential, client, challenge_id)
+    })
 }
 
 async fn handle_socket(
@@ -739,6 +788,7 @@ async fn handle_socket(
     state: AppState,
     credential: RpcCredential,
     client: rpc::ClientMeta,
+    challenge_id: Option<String>,
 ) {
     let (mut sender, mut receiver) = socket.split();
     while let Some(Ok(msg)) = receiver.next().await {
@@ -751,7 +801,9 @@ async fn handle_socket(
             Ok(req) => {
                 // Bearer tokens re-resolve per frame, matching session-cookie
                 // semantics (revocation/expiry takes effect on the next frame).
-                match build_rpc_ctx(&state, credential.clone(), client.clone()).await {
+                match build_rpc_ctx(&state, credential.clone(), client.clone(), challenge_id.clone())
+                    .await
+                {
                     Ok(mut ctx) => rpc::dispatch(&mut ctx, req).await,
                     Err(rejection) => RpcResponse::err(rejection.error),
                 }
