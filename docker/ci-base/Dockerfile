@@ -30,6 +30,7 @@
 ARG RUST_IMAGE=rust:1.99.0-bookworm
 ARG BUN_IMAGE=oven/bun:1.4.0-debian
 ARG DEBIAN_IMAGE=debian:bookworm-slim
+ARG NODE_IMAGE=node:22.20.0-bookworm-slim
 
 # Pinned tool versions — bump deliberately; the content tag covers this file.
 ARG CARGO_NEXTEST_VERSION=0.9.146
@@ -39,6 +40,11 @@ ARG CARGO_CHEF_VERSION=0.1.78
 ARG DOCKER_CLI_VERSION=29.9.0
 ARG DOCKER_COMPOSE_VERSION=2.40.3
 ARG DOCKER_BUILDX_VERSION=0.30.1
+
+# Real Node for shebang'd CLIs (vitest coverage teardown misbehaves under the
+# bun runtime); copied as a bare binary — npm/npx are not needed (bun covers
+# package management).
+FROM ${NODE_IMAGE} AS node
 
 # ── cargo tools ─────────────────────────────────────────────────────────────
 # cargo install --locked: deterministic, once per image build (never per run).
@@ -84,17 +90,19 @@ RUN apt-get update \
     # at bake time; build-script outputs are fingerprinted so runtime doesn't.
     && apt-get install -y --no-install-recommends \
       mold protobuf-compiler git curl ca-certificates jq time xz-utils \
-      cmake pkg-config \
+      cmake pkg-config make libstdc++6 \
     && rm -rf /var/lib/apt/lists/*
 ENV CARGO_INCREMENTAL=0 \
     RUSTFLAGS="-C link-arg=-fuse-ld=mold" \
     CARGO_TERM_COLOR=always
-# bun for jobs that mix rust + web tooling (knip, coverage-web). The node→bun
-# symlink mirrors the oven/bun image's own fallback: Playwright's browser
-# downloader spawns `node` out-of-process, and bun's node-compat mode serves
-# it (nothing in these lanes needs real V8 — everything else runs via bun).
+# bun for jobs that mix rust + web tooling (knip, coverage-web), plus real
+# node for CLIs whose `env node` shebang must land on V8 (vitest — its v8
+# coverage teardown stack-overflows under bun). safe.directory '*': container
+# jobs mount a checkout owned by the runner uid while we run as root — git
+# would otherwise refuse every op with "dubious ownership".
 COPY --from=bun-deps /usr/local/bin/bun /usr/local/bin/bunx /usr/local/bin/
-RUN ln -s /usr/local/bin/bun /usr/local/bin/node
+COPY --from=node /usr/local/bin/node /usr/local/bin/node
+RUN node --version && git config --system --add safe.directory '*'
 COPY --from=bun-deps /opt/bun-cache /opt/bun-cache
 ENV BUN_INSTALL_CACHE_DIR=/opt/bun-cache
 
@@ -165,7 +173,7 @@ FROM ${DEBIAN_IMAGE} AS tools
 ARG DOCKER_CLI_VERSION DOCKER_COMPOSE_VERSION DOCKER_BUILDX_VERSION
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-      git curl ca-certificates jq tar gzip xz-utils \
+      git curl ca-certificates jq tar gzip xz-utils make libstdc++6 \
     && rm -rf /var/lib/apt/lists/*
 # docker CLI only (no daemon) — jobs mount /var/run/docker.sock; compose v2
 # plugin for `docker compose` + buildx plugin (`docker compose up --build`
@@ -183,9 +191,11 @@ RUN curl -fsSL "https://download.docker.com/linux/static/stable/x86_64/docker-${
     && docker compose version \
     && docker buildx version
 COPY --from=bun-deps /usr/local/bin/bun /usr/local/bin/bunx /usr/local/bin/
-# node→bun symlink (same as oven/bun's fallback) — Playwright's installer
-# spawns `node` for its out-of-process browser download.
-RUN ln -s /usr/local/bin/bun /usr/local/bin/node
+# Real node (not the bun shim) — vitest's `env node` shebang and Playwright's
+# out-of-process downloader both want V8. safe.directory '*' as in rust-ci:
+# container jobs mount a checkout owned by the runner uid.
+COPY --from=node /usr/local/bin/node /usr/local/bin/node
+RUN node --version && git config --system --add safe.directory '*'
 ENV BUN_INSTALL_CACHE_DIR=/opt/bun-cache \
     PLAYWRIGHT_BROWSERS_PATH=/opt/pw
 COPY --from=bun-deps /opt/bun-cache /opt/bun-cache

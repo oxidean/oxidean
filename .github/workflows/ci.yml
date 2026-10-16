@@ -23,6 +23,13 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+defaults:
+  run:
+    # container: jobs otherwise fall back to `sh` (dash) — no pipefail there,
+    # and every lane script assumes bash. Host jobs are unaffected (ubuntu has
+    # bash either way).
+    shell: bash
+
 jobs:
   # Fast gate: broken Makefile should fail before expensive jobs start.
   makefile-lint:
