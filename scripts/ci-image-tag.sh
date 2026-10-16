@@ -11,8 +11,11 @@
 #
 # Hash inputs: Cargo.toml + Cargo.lock (dep tree + profile settings),
 # crates/*/Cargo.toml (feature changes alter dep fingerprints without moving
-# the lockfile), docker/ci-base/**, and this script. Any change → new tag →
-# ci-base.yml publishes it; nothing else reuses a stale tag.
+# the lockfile), the bun workspace manifests the Dockerfile COPYs into its
+# bun-deps/tools stages (package.json, bun.lock, turbo.json,
+# apps/web/package.json, packages/api-client/package.json),
+# docker/ci-base/**, and this script. Any change → new tag → ci-base.yml
+# publishes it; nothing else reuses a stale tag.
 #
 # Resolution order per flavor: <flavor>-<hash> → <flavor>-latest. The -latest
 # fallback covers lockfile-ahead PRs (a dep bump before the publisher lands):
@@ -21,9 +24,12 @@
 # with the bootstrap command.
 #
 # Env: CI_IMAGE_NS overrides the registry namespace (default ghcr.io/oxidean).
-# CI_IMAGE_WAIT_SECONDS — resolve-all only: seconds to poll for tags that
-# don't exist yet (a same-repo PR's ci-base run is still publishing). Fork PRs
-# can't publish → keep 0 (fail fast / -latest fallback). Default 0.
+# CI_IMAGE_WAIT_SECONDS — resolve-all only: seconds to poll for THIS run's
+# <flavor>-<hash> tag before resolving (a same-repo run's ci-base leg is
+# still publishing it; probing ref() first would return a stale -latest
+# without ever testing the tag that leg is publishing). At the deadline,
+# resolve via ref() anyway — exact → -latest → fail. Fork PRs can't publish
+# → keep 0 (single immediate resolve, same order). Default 0.
 # CI_IMAGE_POLL_SECONDS — poll interval, default 30.
 set -euo pipefail
 
@@ -44,6 +50,8 @@ content_hash() {
   # (observed: dev workstation vs ubuntu-latest runner).
   git ls-files -z -- \
       Cargo.toml Cargo.lock 'crates/*/Cargo.toml' \
+      package.json bun.lock turbo.json \
+      apps/web/package.json packages/api-client/package.json \
       docker/ci-base scripts/ci-image-tag.sh \
     | LC_ALL=C sort -z \
     | xargs -0 sha256sum \
@@ -79,21 +87,31 @@ ref() { # $1 = flavor → echoes image:tag@sha256:digest
   echo "${chosen}@sha256:$(digest_of "$chosen")"
 }
 
-# ref, but first poll for a tag that may still be publishing (bootstrap race:
-# ci.yml and ci-base.yml start together on the same event; the resolver would
-# otherwise fail before the publisher lands the content tag). The probe runs
-# ref quietly so its loud ::error:: guidance fires once, at the deadline.
+# When waiting is enabled (resolve-all with CI_IMAGE_WAIT_SECONDS > 0), poll
+# for THIS run's <flavor>-<hash> tag until RESOLVE_DEADLINE — the bootstrap
+# race: ci.yml and ci-base.yml start together on the same event and the
+# publisher lands the content tag a few minutes later. Probing ref() here
+# would return a stale -latest on the first pass and never test the tag this
+# run's own ci-base leg is publishing. At the deadline (or with no wait
+# budget — fork PRs can never publish), resolve once via ref: the loud
+# ::warning::/::error:: guidance fires there exactly once.
 ref_wait() { # $1 = flavor; RESOLVE_DEADLINE set by resolve-all
-  local f="$1" v
-  while ! v="$(ref "$f" 2>/dev/null)"; do
-    if [ "$(date +%s)" -ge "$RESOLVE_DEADLINE" ]; then
-      ref "$f" >/dev/null   # final attempt — emit the ::error:: guidance
-      return 1
-    fi
-    echo "ci-image: ${f} image not published yet — polling (${POLL_SECONDS}s interval)" >&2
-    sleep "$POLL_SECONDS"
-  done
-  echo "$v"
+  local f="$1" img="${IMAGE_NS}/${IMAGE_NAME}"
+  if [ "$WAIT_SECONDS" -gt 0 ]; then
+    local hash exact
+    # assignment on its own line — `local x=$(…)` would mask content_hash failure
+    hash="$(content_hash)"
+    exact="${img}:${f}-${hash}"
+    while ! tag_exists "$exact"; do
+      if [ "$(date +%s)" -ge "$RESOLVE_DEADLINE" ]; then
+        echo "ci-image: ${exact#${img}:} still unpublished after ${WAIT_SECONDS}s — resolving anyway" >&2
+        break
+      fi
+      echo "ci-image: ${exact#${img}:} not published yet — polling (${POLL_SECONDS}s interval)" >&2
+      sleep "$POLL_SECONDS"
+    done
+  fi
+  ref "$f"
 }
 
 case "${1:-}" in

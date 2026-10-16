@@ -23,6 +23,11 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Jobs that need more (packages:read on ci-image, actions:write on
+# rust-artifacts-cleanup) declare it themselves.
+permissions:
+  contents: read
+
 defaults:
   run:
     # container: jobs otherwise fall back to `sh` (dash) — no pipefail there,
@@ -57,6 +62,9 @@ jobs:
       tools: ${{ steps.r.outputs.tools }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          # The wait gate diffs the event's commits — needs the full history.
+          fetch-depth: 0
       - name: login to GHCR
         uses: docker/login-action@v4
         with:
@@ -67,14 +75,35 @@ jobs:
         id: r
         env:
           CI_IMAGE_NS: ghcr.io/${{ github.repository_owner }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.event.after }}
         run: |
-          # ci.yml and ci-base.yml start together; a PR that changes image
-          # inputs publishes its content tags a few minutes later. Wait for
-          # them — except on fork PRs, which can never publish: resolve the
-          # -latest fallback (or fail fast) instead of burning the budget.
-          wait_s=2400
+          # ci.yml and ci-base.yml start together; a run whose diff touches
+          # the paths a ci-base pull_request leg publishes (docker/ci-base/**,
+          # scripts/ci-image-tag.sh, ci-base.yml itself) sees its own content
+          # tags land a few minutes later — wait for them, otherwise a stale
+          # -latest resolves instantly and the lane tests the pre-change
+          # image. Fork PRs can never publish → resolve immediately (fail
+          # fast / -latest fallback) instead of burning the budget.
+          wait_s=0
           if [ "${{ github.event_name }}" = pull_request ] && [ "${{ github.event.pull_request.head.repo.fork }}" = true ]; then
-            wait_s=0
+            : # fork PR — its ci-base leg pushes nothing; don't wait
+          else
+            if [ "${{ github.event_name }}" = pull_request ]; then
+              CHANGED="$(git diff --name-only "$PR_BASE..$PR_HEAD")"
+            elif [ -z "$PUSH_BEFORE" ] || \
+                 [ "$PUSH_BEFORE" = "0000000000000000000000000000000000000000" ]; then
+              # branch creation / workflow_dispatch — no diff range to inspect
+              CHANGED=""
+            else
+              CHANGED="$(git diff --name-only "$PUSH_BEFORE..$PUSH_AFTER")"
+            fi
+            if printf '%s\n' "$CHANGED" \
+                | grep -qE '^(docker/ci-base/|scripts/ci-image-tag\.sh|\.github/workflows/ci-base\.yml)'; then
+              wait_s=2400
+            fi
           fi
           CI_IMAGE_WAIT_SECONDS=$wait_s ./scripts/ci-image-tag.sh resolve-all >> "$GITHUB_OUTPUT"
 
@@ -86,8 +115,10 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    # dev image, not tools: the registry-completeness step's `cli.ts check`
+    # shells out to `cargo metadata`, and tools ships no Rust toolchain.
     container:
-      image: ${{ needs.ci-image.outputs.tools }}
+      image: ${{ needs.ci-image.outputs.dev }}
       credentials:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}

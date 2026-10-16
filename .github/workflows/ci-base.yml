@@ -3,13 +3,18 @@
 # Images: ghcr.io/<owner>/oxidean-ci:{dev,release,cov,tools}-<hash> plus a
 # moving :{flavor}-latest fallback per flavor. The hash covers every input
 # that changes image content (Cargo.lock, Cargo.toml, crates/*/Cargo.toml,
-# docker/ci-base/**, scripts/ci-image-tag.sh — see ci-image-tag.sh), so a tag
-# only needs rebuilding when those paths move; rustc is pinned exactly in the
+# the bun workspace manifests COPYed into the bun-deps/tools stages —
+# package.json, bun.lock, turbo.json, apps/web/package.json,
+# packages/api-client/package.json — plus docker/ci-base/** and
+# scripts/ci-image-tag.sh; see ci-image-tag.sh), so a tag only needs
+# rebuilding when those paths move; rustc is pinned exactly in the
 # Dockerfile (bump = one-line PR) and the weekly cron rebuilds for Debian base
 # / apt patch drift — a deliberate refresh instead of per-run surprise.
 #
 # Triggers:
 #   push to main on hashed inputs  → build + push <flavor>-<hash> + -latest
+#                                    (skip + retag -latest when a PR leg
+#                                    already published the content tag)
 #   pull_request on ci-base inputs → same-repo PRs push the <flavor>-<hash> tag
 #                                    only (content-keyed: a PR-built image can
 #                                    only be selected by runs whose inputs hash
@@ -33,6 +38,11 @@ on:
       - Cargo.toml
       - Cargo.lock
       - 'crates/*/Cargo.toml'
+      - package.json
+      - bun.lock
+      - turbo.json
+      - apps/web/package.json
+      - packages/api-client/package.json
       - docker/ci-base/**
       - scripts/ci-image-tag.sh
       - .github/workflows/ci-base.yml
@@ -76,6 +86,16 @@ jobs:
             /usr/local/share/boost /usr/share/swift || true
           df -h /
       - uses: docker/setup-buildx-action@v4
+      - name: login to GHCR
+        # Fork PR tokens are read-only → skip login and push nothing. Must
+        # precede the skip check: unauthenticated `imagetools inspect` always
+        # fails on private packages, so the skip would never engage.
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork != true
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: skip check (content tag already published)
         id: skip
         # Scheduled/dispatched runs always rebuild — rustc freshness is the
@@ -91,6 +111,14 @@ jobs:
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
+      - name: retag -latest to the existing content tag
+        # A same-repo PR leg publishes the hash tag pre-merge; when the main
+        # push then skips the rebuild, -latest still has to move to it.
+        if: steps.skip.outputs.skip == 'true' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        run: |
+          docker buildx imagetools create \
+            -t "${IMAGE_NS}/oxidean-ci:${{ matrix.flavor }}-latest" \
+            "${IMAGE_NS}/oxidean-ci:${{ steps.t.outputs.tag }}"
       - name: resolve push tags
         id: tags
         if: steps.skip.outputs.skip != 'true'
@@ -98,19 +126,13 @@ jobs:
           {
             echo "list<<EOF"
             echo "${IMAGE_NS}/oxidean-ci:${{ steps.t.outputs.tag }}"
-            # -latest is main-owned: PR legs publish only the hash tag.
+            # -latest is main-owned: PR legs publish only the hash tag, and a
+            # workflow_dispatch on a branch must not move the main-owned tag.
             [ "${{ github.event_name }}" != "pull_request" ] && \
+              [ "${{ github.ref }}" = "refs/heads/main" ] && \
               echo "${IMAGE_NS}/oxidean-ci:${{ matrix.flavor }}-latest"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
-      - name: login to GHCR
-        # Fork PR tokens are read-only → skip login and push nothing.
-        if: (github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork != true) && steps.skip.outputs.skip != 'true'
-        uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
       - name: build ${{ matrix.flavor }}
         if: steps.skip.outputs.skip != 'true'
         uses: docker/build-push-action@v7
