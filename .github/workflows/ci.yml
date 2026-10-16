@@ -229,6 +229,11 @@ jobs:
         shard: ["1", "2", "3", "4", "5"]
     steps:
       - uses: actions/checkout@v7
+      # archive test binaries embed the build container's workspace root (env!("CARGO_MANIFEST_DIR")); the alias makes those paths resolve on the host.
+      - name: alias checkout at the archive's baked workspace root
+        run: |
+          sudo mkdir -p /__w/oxidean
+          sudo ln -sfn "${{ github.workspace }}" /__w/oxidean/oxidean
       - name: free disk for test binaries
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
