@@ -5,6 +5,7 @@ import { MarkdownHtml } from "@/components/repo/markdown-body";
 import { buttonVariants } from "@/components/ui/button";
 import {
   countCodeLines,
+  ensureLanguage,
   getHighlighter,
   highlightCode,
   highlightCodeSync,
@@ -117,10 +118,10 @@ export function BlobViewer({
     const lang = languageIdForPath(blob.path);
 
     if (highlightedHtml) {
-      // SSR markup is dual-theme — already correct; keep the engine warm for
-      // later prop swaps and skip the re-highlight pass.
+      // SSR markup is dual-theme — already correct; keep the engine + this
+      // grammar warm for later prop swaps and skip the re-highlight pass.
       setHl((prev) => (prev === highlightedHtml ? prev : highlightedHtml));
-      void getHighlighter().catch(() => null);
+      void ensureLanguage(lang).catch(() => null);
       return () => {
         cancelled = true;
       };

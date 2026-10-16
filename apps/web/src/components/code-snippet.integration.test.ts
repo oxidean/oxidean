@@ -7,14 +7,14 @@
 import { cleanup, render, waitFor } from "@octanejs/testing-library";
 import { afterEach, describe, expect, it } from "vitest";
 import { CodeSnippet } from "@/components/code-snippet";
-import { getHighlighter } from "@/lib/highlight";
+import { ensureLanguage } from "@/lib/highlight";
 
 afterEach(cleanup);
 
 describe("CodeSnippet", () => {
   it("code-prop swaps stay styled once the highlighter is warm", async () => {
-    // Cold engine legitimately uses the plain → async path; warm it first.
-    await getHighlighter();
+    // Cold engine/grammar legitimately uses the plain → async path; warm it.
+    await ensureLanguage("json");
 
     const { container, rerender } = render(CodeSnippet as never, {
       props: { code: '{"a":1}', path: "config.json" },
@@ -33,7 +33,7 @@ describe("CodeSnippet", () => {
   });
 
   it("seeds styled markup on mount once the highlighter is warm", async () => {
-    await getHighlighter();
+    await ensureLanguage("json");
     const { container } = render(CodeSnippet as never, {
       props: { code: '{"x":1}', path: "config.json" },
     });

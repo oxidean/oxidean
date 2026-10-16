@@ -319,7 +319,10 @@ function AccountClusterPending({ className }: { className?: string }) @{
     <div data-header-skeleton-authed className="items-center gap-1">
       <Skeleton className="size-9" />
       <Skeleton className="size-9" />
-      <Skeleton className="h-9 w-28" />
+      {/* AccountMenu trigger is ONE control — an h-9 px-2 box holding the
+          size-7 avatar squircle plus the @username label (hidden below
+          md). One skeleton box, width tracking the visible content. */}
+      <Skeleton className="h-9 w-11 md:w-28" />
     </div>
   </div>;
 }

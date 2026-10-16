@@ -8,6 +8,7 @@
 mod inject;
 mod proxy;
 mod session;
+mod setup;
 mod shells;
 mod wellknown;
 
@@ -44,6 +45,7 @@ struct Shared {
     meta: inject::AdvertiseMeta,
     proxy: Option<proxy::ApiProxy>,
     sessions: Option<session::SessionValidator>,
+    setup: Option<setup::SetupChecker>,
 }
 
 #[tokio::main]
@@ -99,6 +101,7 @@ async fn main() {
             proxy::ApiProxy::new(o, behind_proxy)
         }),
         sessions: api_origin.as_deref().map(session::SessionValidator::new),
+        setup: api_origin.as_deref().map(setup::SetupChecker::new),
         dist: {
             let canon = dist.canonicalize().unwrap_or(dist);
             tracing::info!("serving SPA shells from {}", canon.display());
@@ -320,7 +323,18 @@ async fn serve_shell(
                 )
                     .into_response();
             }
-            let out = inject::inject(&html, headers, m.title.as_deref(), &st.meta, signal);
+            let needs_setup = match &st.setup {
+                Some(c) => c.needs_setup().await,
+                None => None,
+            };
+            let out = inject::inject(
+                &html,
+                headers,
+                m.title.as_deref(),
+                &st.meta,
+                signal,
+                needs_setup,
+            );
             (
                 StatusCode::OK,
                 [
@@ -427,7 +441,7 @@ async fn not_found(
         } else {
             session::SessionSignal::Absent
         };
-        let out = inject::inject(&html, headers, None, meta, signal);
+        let out = inject::inject(&html, headers, None, meta, signal, None);
         return (
             StatusCode::NOT_FOUND,
             [
@@ -554,6 +568,7 @@ mod tests {
             meta: inject::AdvertiseMeta::default(),
             proxy: None,
             sessions: None,
+            setup: None,
         })
     }
 
@@ -679,6 +694,7 @@ mod tests {
             meta: inject::AdvertiseMeta::default(),
             proxy: Some(proxy::ApiProxy::new("http://127.0.0.1:1", false)),
             sessions: None,
+            setup: None,
         });
         // Dead upstream → 502 proves the request reached the proxy path
         // rather than falling through to a local 404.
@@ -728,6 +744,59 @@ mod tests {
     /// `spa` fallback → upstream that answers 101 and echoes. Asserts the
     /// handshake reaches the upstream, the 101 comes back, and bytes tunnel
     /// in both directions after the upgrade.
+    /// `data-oxidean-setup` end-to-end: a stub API verdict lands on <html>.
+    /// True verdicts must NOT cache (the /setup completion flip has to reach
+    /// shells live) — so this also fires two requests and counts two probes.
+    #[tokio::test]
+    async fn setup_stamp_flows_into_served_shells() {
+        use tokio::net::TcpListener;
+
+        let probes = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let probes2 = probes.clone();
+        let api = Router::new().route(
+            "/api/auth/setup-check",
+            axum::routing::get(move || {
+                let probes2 = probes2.clone();
+                async move {
+                    probes2.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    axum::Json(serde_json::json!({"needs_setup": true}))
+                }
+            }),
+        );
+        let api_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let api_port = api_listener.local_addr().unwrap().port();
+        tokio::spawn(async move { axum::serve(api_listener, api).await });
+
+        let dist = dist_with("setup-stamp", &[("index.html", "<html><body>app</body></html>")]).await;
+        let st = Arc::new(Shared {
+            dist,
+            meta: inject::AdvertiseMeta::default(),
+            proxy: None,
+            sessions: None,
+            setup: Some(setup::SetupChecker::new(&format!(
+                "http://127.0.0.1:{api_port}"
+            ))),
+        });
+
+        let resp = get(&st, "/", None).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), 1 << 20)
+            .await
+            .unwrap();
+        let body = String::from_utf8_lossy(&body);
+        assert!(
+            body.contains("data-oxidean-setup=\"1\""),
+            "setup verdict must stamp the shell: {body}"
+        );
+
+        let _ = get(&st, "/", None).await;
+        assert_eq!(
+            probes.load(std::sync::atomic::Ordering::SeqCst),
+            2,
+            "true verdicts must re-probe so the setup flip reaches shells"
+        );
+    }
+
     #[tokio::test]
     async fn websocket_upgrade_tunnels_bytes() {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -773,6 +842,7 @@ mod tests {
                 true,
             )),
             sessions: None,
+            setup: None,
         });
         let app = Router::new().fallback(spa).with_state(st);
         let web = TcpListener::bind("127.0.0.1:0").await.unwrap();

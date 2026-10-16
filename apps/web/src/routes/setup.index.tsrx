@@ -13,6 +13,8 @@ import { usePageRedirect } from "@/lib/nav.tsrx";
 import { networkErrorMessage, rpcErrorMessage } from "@/lib/rpc-error-message";
 import { syncSessionPresenceHint } from "@/lib/session-hint";
 import { fetchBootstrapStatus } from "@/lib/ssr-auth";
+import { getQueryClient } from "@/lib/query-client";
+import { markSetupComplete } from "@/lib/session-queries";
 
 function setupBootstrapQueryOptions() {
   return queryOptions({
@@ -103,6 +105,7 @@ function SetupContent() @{
           return;
         }
         syncSessionPresenceHint(true);
+        markSetupComplete(getQueryClient());
         window.location.assign("/");
       } catch {
         setError(NETWORK_ERROR);

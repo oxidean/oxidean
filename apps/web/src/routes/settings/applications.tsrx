@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { List } from "@/components/ui/list";
 import { PageHeader } from "@/components/ui/page-header";
+import { Skeleton } from "@/components/ui/skeleton";
 import { KeyRound } from "@octanejs/lucide";
 import { apiClient } from "@/lib/api-client";
 import { fetchOAuthAppList, fetchOAuthGrantList, fetchSessionMe } from "@/lib/ssr-auth";
@@ -92,7 +93,18 @@ export function ApplicationsContent() @{
     if (res.ok) setGrants(res.data);
   }
 
-  @if (loaderData?.kind === "error") {
+  // Loader data arrives async — pending must not paint the grants/apps empty
+  // states before the payload lands (issue #120).
+  @if (loaderData === undefined) {
+    <AccountSettingsLayout active="applications">
+      <div className="mt-8 flex flex-col gap-3" role="status" aria-busy="true" aria-label="Loading">
+        <Skeleton className="h-5 w-48" />
+        <Skeleton className="h-12 w-full rounded-md" />
+        <Skeleton className="mt-6 h-5 w-56" />
+        <Skeleton className="h-12 w-full rounded-md" />
+      </div>
+    </AccountSettingsLayout>;
+  } @else if (loaderData?.kind === "error") {
     <AccountSettingsLayout active="applications">
       <p role="alert" className="text-[16px] text-destructive">
         {loaderData.message as string}

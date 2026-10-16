@@ -1,6 +1,6 @@
 import { useEffect, useState } from "octane";
 import {
-  getHighlighter,
+  ensureLanguage,
   highlightCode,
   highlightCodeSync,
   languageIdForPath,
@@ -64,9 +64,9 @@ export function CodeSnippet({ code, path, highlightedHtml = null }: CodeSnippetP
     }
 
     async function run() {
-      // Warm the singleton even when SSR markup is in place — later prop
-      // swaps take the synchronous highlightCodeSync path.
-      await getHighlighter().catch(() => null);
+      // Warm the singleton + this grammar even when SSR markup is in place —
+      // later prop swaps take the synchronous highlightCodeSync path.
+      await ensureLanguage(languageIdForPath(path)).catch(() => null);
       if (cancelled || highlightedHtml) return;
       try {
         const out = await highlightCode(code, { lang: languageIdForPath(path) });

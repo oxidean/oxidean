@@ -127,12 +127,17 @@ fn rewrite_build_origin(html: &mut String, origin: &str) {
 /// `signal` is the resolved session state (`session::resolve_signal`): `Valid`
 /// stamps unconditionally, `Invalid`/`Absent` never stamp, and `Unknown` falls
 /// back to cookie presence so an API outage degrades to yesterday's behavior.
+/// `needs_setup` is the web tier's setup-check verdict: `Some` stamps
+/// `data-oxidean-setup="1"|"0"` so the SPA treats `auth.bootstrapStatus` as
+/// resolved at hydration; `None` (probe failed / older tier) stamps nothing
+/// and the SPA falls back to the RPC.
 pub fn inject(
     html: &str,
     headers: &HeaderMap,
     title: Option<&str>,
     meta: &AdvertiseMeta,
     signal: SessionSignal,
+    needs_setup: Option<bool>,
 ) -> String {
     let cookie = headers
         .get(axum::http::header::COOKIE)
@@ -167,6 +172,13 @@ pub fn inject(
     // one- vs two-button geometry on the next shell. Absent/`0` = closed.
     if cookie.is_some_and(|c| find_cookie(c, "oxidean_allow_signup") == Some("1")) {
         html_attrs.push_str(" data-oxidean-signup=\"1\"");
+    }
+    if let Some(v) = needs_setup {
+        html_attrs.push_str(if v {
+            " data-oxidean-setup=\"1\""
+        } else {
+            " data-oxidean-setup=\"0\""
+        });
     }
     if !html_attrs.is_empty() {
         if let Some(end) = html_tag_open_end(&out) {
@@ -336,6 +348,7 @@ mod tests {
                 ..Default::default()
             },
             SessionSignal::Absent,
+            None,
         );
         assert!(out.contains("<html lang=\"en\" class=\"dark\""));
         assert!(out.contains("content=\"dark\""));
@@ -351,22 +364,39 @@ mod tests {
         h.insert("cookie", HeaderValue::from_static("oxidean_session=abc"));
 
         // Upstream-validated → stamp regardless of what presence thinks.
-        let out = inject(html, &h, None, &meta, SessionSignal::Valid);
+        let out = inject(html, &h, None, &meta, SessionSignal::Valid, None);
         assert!(out.contains("data-oxidean-session=\"1\""));
 
         // Definitively invalid or absent → never stamp (hint included).
-        let out = inject(html, &h, None, &meta, SessionSignal::Invalid);
+        let out = inject(html, &h, None, &meta, SessionSignal::Invalid, None);
         assert!(!out.contains("data-oxidean-session"));
         let mut hint_only = HeaderMap::new();
         hint_only.insert("cookie", HeaderValue::from_static("oxidean_signed_in=1"));
-        let out = inject(html, &hint_only, None, &meta, SessionSignal::Absent);
+        let out = inject(html, &hint_only, None, &meta, SessionSignal::Absent, None);
         assert!(!out.contains("data-oxidean-session"));
 
         // Unknown (API unreachable/unconfigured) → presence fallback.
-        let out = inject(html, &h, None, &meta, SessionSignal::Unknown);
+        let out = inject(html, &h, None, &meta, SessionSignal::Unknown, None);
         assert!(out.contains("data-oxidean-session=\"1\""));
-        let out = inject(html, &HeaderMap::new(), None, &meta, SessionSignal::Unknown);
+        let out = inject(html, &HeaderMap::new(), None, &meta, SessionSignal::Unknown, None);
         assert!(!out.contains("data-oxidean-session"));
+    }
+
+    #[test]
+    fn setup_stamp() {
+        let html = r#"<html lang="en"><head><title>Oxidean</title></head>"#;
+        let meta = AdvertiseMeta::default();
+        let h = HeaderMap::new();
+
+        // Resolved verdicts stamp both ways — "0" is explicit, not absent.
+        let out = inject(html, &h, None, &meta, SessionSignal::Absent, Some(true));
+        assert!(out.contains("data-oxidean-setup=\"1\""));
+        let out = inject(html, &h, None, &meta, SessionSignal::Absent, Some(false));
+        assert!(out.contains("data-oxidean-setup=\"0\""));
+
+        // Unknown verdict (probe failed / older tier) stamps nothing.
+        let out = inject(html, &h, None, &meta, SessionSignal::Absent, None);
+        assert!(!out.contains("data-oxidean-setup"));
     }
 
     #[test]
@@ -380,7 +410,7 @@ mod tests {
             "cookie",
             HeaderValue::from_static("oxidean_allow_signup=1"),
         );
-        let out = inject(html, &open, None, &meta, SessionSignal::Absent);
+        let out = inject(html, &open, None, &meta, SessionSignal::Absent, None);
         assert!(out.contains("data-oxidean-signup=\"1\""));
 
         // Closed (`=0`) or never-resolved (absent) → no stamp.
@@ -389,9 +419,9 @@ mod tests {
             "cookie",
             HeaderValue::from_static("oxidean_allow_signup=0"),
         );
-        let out = inject(html, &closed, None, &meta, SessionSignal::Absent);
+        let out = inject(html, &closed, None, &meta, SessionSignal::Absent, None);
         assert!(!out.contains("data-oxidean-signup"));
-        let out = inject(html, &HeaderMap::new(), None, &meta, SessionSignal::Absent);
+        let out = inject(html, &HeaderMap::new(), None, &meta, SessionSignal::Absent, None);
         assert!(!out.contains("data-oxidean-signup"));
     }
 
@@ -409,7 +439,7 @@ mod tests {
             r#"<html class="a" lang="en"><head><meta content="light" name="color-scheme"></head>"#,
             r#"<html><head><meta name="color-scheme" content="light" media="x"></head>"#,
         ] {
-            let out = inject(html, &h, None, &meta, SessionSignal::Unknown);
+            let out = inject(html, &h, None, &meta, SessionSignal::Unknown, None);
             assert!(
                 out.contains("class=\"dark\"") || out.contains("class=\"a dark\""),
                 "dark class must be stamped into {html}: {out}"
@@ -424,6 +454,7 @@ mod tests {
             None,
             &meta,
             SessionSignal::Unknown,
+            None,
         );
         assert!(out.contains("<htmlx>") && !out.contains("data-oxidean-session"));
     }
@@ -447,7 +478,7 @@ mod tests {
         let mut h = HeaderMap::new();
         h.insert("host", HeaderValue::from_static("internal.lan:3000"));
 
-        let out = inject(html, &h, None, &meta, SessionSignal::Absent);
+        let out = inject(html, &h, None, &meta, SessionSignal::Absent, None);
 
         assert!(out.contains("oxidean:public-origin\" content=\"https://git.example.com\""));
         // Placeholder rewritten in attribute and text contexts alike.
@@ -467,7 +498,7 @@ mod tests {
         let mut h = HeaderMap::new();
         h.insert("host", HeaderValue::from_static("forge.internal:3000"));
 
-        let out = inject(html, &h, None, &meta, SessionSignal::Absent);
+        let out = inject(html, &h, None, &meta, SessionSignal::Absent, None);
         assert!(out.contains("oxidean:public-origin\" content=\"http://forge.internal:3000\""));
         assert!(out.contains("<body>http://forge.internal:3000/api/mcp</body>"));
 
@@ -475,7 +506,7 @@ mod tests {
         // ignored — Host alone derives the origin.
         h.insert("x-forwarded-host", HeaderValue::from_static("evil.example"));
         h.insert("x-forwarded-proto", HeaderValue::from_static("https"));
-        let out = inject(html, &h, None, &meta, SessionSignal::Absent);
+        let out = inject(html, &h, None, &meta, SessionSignal::Absent, None);
         assert!(out.contains("oxidean:public-origin\" content=\"http://forge.internal:3000\""));
 
         // Behind a sanitizing edge the forwarded pair wins.
@@ -483,7 +514,7 @@ mod tests {
             behind_proxy: true,
             ..Default::default()
         };
-        let out = inject(html, &h, None, &meta, SessionSignal::Absent);
+        let out = inject(html, &h, None, &meta, SessionSignal::Absent, None);
         assert!(out.contains("oxidean:public-origin\" content=\"https://evil.example\""));
     }
 
@@ -495,7 +526,7 @@ mod tests {
             public_origin: Some("http://localhost".into()),
             ..Default::default()
         };
-        let out = inject(html, &HeaderMap::new(), None, &meta, SessionSignal::Absent);
+        let out = inject(html, &HeaderMap::new(), None, &meta, SessionSignal::Absent, None);
         assert!(out.contains("oxidean:public-origin\" content=\"http://localhost\""));
         assert!(out.contains("<body>http://localhost/api/mcp</body>"));
     }
