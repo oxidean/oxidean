@@ -1,5 +1,11 @@
 import { LANGUAGES } from "@oxidean/api-client";
-import { createHighlighter, type Highlighter, type ThemeRegistration } from "shiki";
+import {
+  createHighlighter,
+  type BundledLanguage,
+  type Highlighter,
+  type LanguageInput,
+  type ThemeRegistration,
+} from "shiki";
 import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
 import tsrxGrammar from "./grammars/tsrx.tmLanguage.json";
 import rippleGrammar from "./grammars/ripple.tmLanguage.json";
@@ -242,33 +248,44 @@ const rippleLang = {
 /**
  * Every Shiki grammar id referenced by the shared language table
  * (`@oxidean/api-client` LANGUAGES — generated from
- * `crates/oxidean-core/src/languages.rs`) plus the in-repo tsrx/ripple
- * grammars. Rows with `shiki: null` render as plaintext and load nothing.
+ * `crates/oxidean-core/src/languages.rs`). Rows with `shiki: null` render as
+ * plaintext and load nothing; tsrx/ripple are excluded — the bare ids would
+ * look up Shiki's bundle and fail, they load via the grammar objects below.
+ * Exported for the table-load gate in `highlight.test.ts`.
  */
-const TABLE_LANGS = [
+export const TABLE_LANGS = [
   ...new Set(
-    LANGUAGES.map((l) => l.shiki).filter(
-      // tsrx/ripple resolve through the in-repo grammar objects below —
-      // passing the bare ids would look them up in Shiki's bundle and fail.
-      (s): s is string => !!s && s !== "tsrx" && s !== "ripple",
-    ),
+    LANGUAGES.map((l) => l.shiki).filter((s): s is string => !!s && s !== "tsrx" && s !== "ripple"),
   ),
 ];
 
+/**
+ * Load inputs per custom lang. An object grammar's `embeddedLangs` are not
+ * fetched from Shiki's bundle by `loadLanguage` — they must ride along in the
+ * same call or the load fails with missing-language errors.
+ */
+const CUSTOM_LANG_INPUTS: Record<string, LanguageInput[]> = {
+  tsrx: [tsrxLang as LanguageInput, "jsx", "tsx", "css"],
+  ripple: [rippleLang as LanguageInput, "jsx", "tsx", "css"],
+};
+
 let highlighterPromise: Promise<Highlighter> | null = null;
 let resolvedHighlighter: Highlighter | null = null;
+const pendingLangLoads = new Map<string, Promise<void>>();
 
 /**
- * Singleton Shiki highlighter with the shared-table langs + in-repo
- * tsrx/ripple grammars (D-19, issue #59). Custom langs are full TextMate
- * grammars — not TypeScript/JavaScript aliases. JS regex engine (forgiving)
- * matches official TSRX demo for large TM grammars.
+ * Singleton Shiki highlighter. Grammars load per language on first use via
+ * {@link ensureLanguage} — eagerly compiling the whole shared table costs
+ * ~2 s, so the engine starts with only `plaintext` and each render pays for
+ * the grammar it actually needs (single-digit ms). Custom langs are full
+ * TextMate grammars — not TypeScript/JavaScript aliases. JS regex engine
+ * (forgiving) matches official TSRX demo for large TM grammars.
  */
 export async function getHighlighter(): Promise<Highlighter> {
   if (!highlighterPromise) {
     highlighterPromise = createHighlighter({
       themes: [oxideanLightTheme, oxideanDarkTheme],
-      langs: [...TABLE_LANGS, "plaintext", tsrxLang, rippleLang],
+      langs: ["plaintext"],
       engine: createJavaScriptRegexEngine({ forgiving: true }),
     });
     highlighterPromise.then(
@@ -279,6 +296,25 @@ export async function getHighlighter(): Promise<Highlighter> {
     );
   }
   return highlighterPromise;
+}
+
+/**
+ * Ensure a grammar is loaded on the singleton. `plaintext` is built in; a
+ * rejection leaves the lang unloaded — callers fall back to plaintext through
+ * the loaded-languages check rather than throwing mid-render.
+ */
+export async function ensureLanguage(lang: string): Promise<void> {
+  if (lang === "plaintext") return;
+  const highlighter = await getHighlighter();
+  if (highlighter.getLoadedLanguages().includes(lang)) return;
+  let pending = pendingLangLoads.get(lang);
+  if (!pending) {
+    pending = highlighter
+      .loadLanguage(...(CUSTOM_LANG_INPUTS[lang] ?? [lang as BundledLanguage]))
+      .finally(() => pendingLangLoads.delete(lang));
+    pendingLangLoads.set(lang, pending);
+  }
+  return pending;
 }
 
 /**
@@ -302,6 +338,7 @@ export function languageIdForPath(filePath: string): string {
 
 export async function highlightCode(code: string, options: { lang: string }): Promise<string> {
   const highlighter = await getHighlighter();
+  await ensureLanguage(options.lang).catch(() => {});
   return renderHighlighted(highlighter, code, options);
 }
 
@@ -333,9 +370,19 @@ function renderHighlighted(
  * it is still loading (callers then take the async `highlightCode` path).
  * Lets prop changes render styled markup in the same commit instead of
  * flashing a plain-text intermediate frame.
+ *
+ * Also null while the requested grammar itself is still loading — returning
+ * plaintext here would strand callers on unhighlighted output instead of
+ * taking their async upgrade path.
  */
 export function highlightCodeSync(code: string, options: { lang: string }): string | null {
   if (!resolvedHighlighter) return null;
+  if (
+    options.lang !== "plaintext" &&
+    !resolvedHighlighter.getLoadedLanguages().includes(options.lang)
+  ) {
+    return null;
+  }
   try {
     return renderHighlighted(resolvedHighlighter, code, options);
   } catch {

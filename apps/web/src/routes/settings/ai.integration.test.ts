@@ -5,7 +5,7 @@ import { cleanup, screen, waitFor } from "@octanejs/testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderWithQueryClient } from "@/test/render-with-query";
 import { mcpHarnessSnippets } from "@/lib/mcp-harness-snippets";
-import { getHighlighter } from "@/lib/highlight";
+import { ensureLanguage } from "@/lib/highlight";
 
 const meMock = vi.fn();
 
@@ -124,9 +124,9 @@ describe("/settings/ai", () => {
 
     // Token/OAuth mode toggle — both variants stay mounted (visibility swap,
     // no DOM churn); OAuth variant drops the static header and shows the
-    // per-harness note. Warm the highlighter so both variants' markup is
+    // per-harness note. Warm the snippet grammar so both variants' markup is
     // styled before the toggle.
-    await getHighlighter();
+    await ensureLanguage("json");
     const oauth = screen.getByTestId("mcp-auth-oauth");
     oauth.click();
     await waitFor(() => {
