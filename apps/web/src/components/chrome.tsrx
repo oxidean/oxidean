@@ -629,6 +629,10 @@ const MobileNavSheet = memo(MobileNavSheetImpl);
 function SiteHeaderImpl() @{
   const [menuOpen, setMenuOpen] = useState(false);
   const { needsSetup } = useChromeAccountState();
+  // auth.bootstrap mounts resolved from the web tier's <html> stamp — even on
+  // cold loads — so a needs_setup verdict would mount ThemeSelect during
+  // hydration over SSR DOM that has none. Hold the SSR branch until mounted.
+  const mounted = useMounted();
   const pathname = useLivePathname();
 
   const closeMenu = useEffectEvent(() => setMenuOpen(false));
@@ -694,7 +698,7 @@ function SiteHeaderImpl() @{
       <GlobalSearch className="col-start-2 row-start-1" />
 
       <div className="col-start-3 row-start-1 hidden items-center justify-end gap-2 md:flex">
-        @if (needsSetup) {
+        @if (mounted && needsSetup) {
           <ThemeSelect />;
         }
         <AccountActions />
