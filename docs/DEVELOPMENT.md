@@ -156,8 +156,8 @@ oxidean/
 | `bun run --filter @oxidean/web test` | Vitest (unit / integration / e2e projects) |
 | `bun run --filter @oxidean/web test:e2e:stack` | Stack e2e Vitest projects |
 | `bun run --filter @oxidean/web lint` | `oxlint --type-aware --deny-warnings` via `@tsrx/oxc` + `oxlint-tsgolint` |
-| `bun run --filter @oxidean/web format` | `oxfmt --write` |
-| `bun run --filter @oxidean/web format:check` | `oxfmt --check` |
+| `bun run --filter @oxidean/web format` | `oxfmt --write` + `prettier --write` for `*.astro` |
+| `bun run --filter @oxidean/web format:check` | `oxfmt --check` + `prettier --check` for `*.astro` |
 | `bun run --filter @oxidean/api-client test` | api-client Vitest |
 
 ### Make targets (preferred day-to-day)
@@ -170,7 +170,7 @@ oxidean/
 | `make up` / `make down` / `make logs` | Default Compose stack |
 | `make up-mysql` / `up-sqlite` / `up-dev-auth` | Dialect and auth overlays |
 | `make test` | `cargo nextest` (or `cargo test`) + `bun run test` |
-| `make web-lint` / `make web-format-check` | Web oxlint (type-aware) / oxfmt check |
+| `make web-lint` / `make web-format-check` | Web oxlint (type-aware) / oxfmt + prettier check |
 | `make test-e2e-stack` | `./scripts/dev-auth/run-stack-e2e.sh` |
 | `make smoke` / `smoke-mysql` / `smoke-sqlite` | Compose bring-up smoke |
 | `make db-migrate` / `db-switch-dialect` / `db-matrix` | Migrations and dialect probe |
@@ -190,8 +190,8 @@ The Docker builds use [cargo-chef](https://github.com/LukeMathWalker/cargo-chef)
 
 ## Code style
 
-- **JavaScript / TypeScript / TSRX** — Lint and format with [`@tsrx/oxc`](https://oxc.tsrx.dev/guide/getting-started) in `@oxidean/web`: type-aware `oxlint` (`oxlint-tsgolint`) and `oxfmt` (scripts `lint`, `format`, `format:check`; Make `web-lint` / `web-format-check`). CI `web-octane` runs lint + format check. No ESLint or Prettier. Prefer existing patterns in `apps/web` (TypeScript, Octane/TanStack, Tailwind v4). Full `tsc --noEmit` is not the gate yet (`.tsrx` needs `@tsrx/typescript-plugin`, which still peers TypeScript 5.9.x while this app uses TypeScript 7) — type-aware oxlint is the enforced substitute.
-- **Rust** — Use standard `rustfmt` / `cargo fmt` and Clippy locally (`cargo clippy --workspace`). There is no committed `rustfmt.toml` / `clippy.toml`; CI currently gates on `cargo nextest`, not fmt/clippy.
+- **JavaScript / TypeScript / TSRX** — Lint and format with [`@tsrx/oxc`](https://oxc.tsrx.dev/guide/getting-started) in `@oxidean/web`: type-aware `oxlint` (`oxlint-tsgolint`) and `oxfmt` for ts/tsx/tsrx/css (scripts `lint`, `format`, `format:check`; Make `web-lint` / `web-format-check`); Prettier (`prettier-plugin-astro`) covers `*.astro`. CI `web-octane` runs lint + format check. No ESLint. Prefer existing patterns in `apps/web` (TypeScript, Octane/TanStack, Tailwind v4). Full `tsc --noEmit` is not the gate yet (`.tsrx` needs `@tsrx/typescript-plugin`, which still peers TypeScript 5.9.x while this app uses TypeScript 7) — type-aware oxlint is the enforced substitute.
+- **Rust** — Use standard `rustfmt` / `cargo fmt` and Clippy locally (`cargo clippy --workspace`). There is no committed `rustfmt.toml` / `clippy.toml`; CI `rust-fmt` gates `cargo fmt --check` (`make rust-fmt-check`) alongside `cargo nextest`.
 - **Generated client** — Do not reformat or hand-patch `packages/api-client` as a substitute for updating Rust + `make rpc-gen`.
 - **Env files** — Keep secrets out of git (`.env`, `.env.dev-auth`, `.env.sqlite`).
 
@@ -207,6 +207,7 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for PR conventions and `.github/pull_r
 
 - Open a PR against `main`; all workflow jobs must pass.
 - **commit-lint** — `versioning commit-check` on the PR commit range + PR title, plus `versioning check` registry completeness
+- **rust-fmt** — `make rust-fmt-check` (`cargo fmt --all -- --check`)
 - **rust-build** — one shared compile: workspace bins + `cargo nextest archive` feed the Rust lane below
 - **api-rust** — `cargo nextest run --archive-file … --profile ci` partitioned 5 ways from the shared archive
 - **web-octane** — `bun install --frozen-lockfile`, `bun run --filter @oxidean/web lint`, `format:check`, `bun run test`, `turbo run build --filter=@oxidean/web`

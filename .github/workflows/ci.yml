@@ -194,7 +194,7 @@ jobs:
         run: bun install --frozen-lockfile
       - name: web lint (oxlint type-aware + octane checks + route sync)
         run: make web-lint
-      - name: web format check (oxfmt)
+      - name: web format check (oxfmt + prettier)
         run: bun run --filter @oxidean/web format:check
       - name: vitest (api-client + web unit/integration)
         run: bun run test

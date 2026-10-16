@@ -33,7 +33,7 @@ Workspace version is **0.1.0** (Cargo `[workspace.package]` and package `package
 - Prefer existing path aliases (`@/…` in web) over deep relative imports.
 - Colocate tests: `*.unit.test.ts`, `*.integration.test.ts`, e2e under `apps/web/e2e/`.
 - Do not edit generated `packages/api-client` by hand — change Rust, then `make rpc-gen`.
-- **Lint / format / types (web):** `@tsrx/oxc` — `make web-lint` (type-aware `oxlint --deny-warnings`) and `make web-format-check` (`oxfmt`). CI runs both on `web-octane`. Run them before committing web changes. No ESLint/Prettier.
+- **Lint / format / types (web):** `@tsrx/oxc` — `make web-lint` (type-aware `oxlint --deny-warnings`) and `make web-format-check` (`oxfmt`, plus Prettier for `*.astro`). CI runs both on `web-octane`. Run them before committing web changes. No ESLint.
 
 ## Octane UI
 
