@@ -251,8 +251,10 @@ jobs:
         # Retry once on flake (the build is deterministic; flakes are run-side).
         run: |
           cargo nextest run --archive-file target/nextest-archive.tar.zst \
+            --workspace-remap "${{ github.workspace }}" \
             --profile ci --partition count:${{ matrix.shard }}/5 \
             || cargo nextest run --archive-file target/nextest-archive.tar.zst \
+              --workspace-remap "${{ github.workspace }}" \
               --profile ci --partition count:${{ matrix.shard }}/5
 
   web-octane:
@@ -465,24 +467,25 @@ jobs:
 
   e2e-stack:
     name: e2e-stack
-    needs: [rust-build, ci-image]
+    needs: [rust-build]
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: read
-    # tools image supplies bun + docker CLI + Playwright chromium. The stack
-    # under test still runs on the HOST daemon: host networking + the daemon
-    # socket are wired in `options`, so published ports resolve on localhost
-    # for the scripts' probes. No Rust toolchain is installed — the scripts
-    # honor OXIDEAN_PREBUILT_BINS=1 and run rust-build's artifact bins.
-    container:
-      image: ${{ needs.ci-image.outputs.tools }}
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-      options: --network host -v /var/run/docker.sock:/var/run/docker.sock
+    # Host job — no ci-base image. The stack under test runs on the host
+    # docker daemon and the scripts' probes must resolve localhost, neither
+    # of which works from a job container: Actions always injects its managed
+    # network, so host-network mode fails at container creation. Bun and
+    # Playwright chromium install on the runner; the docker CLI ships with
+    # it. No Rust toolchain — the scripts honor OXIDEAN_PREBUILT_BINS=1 and
+    # run rust-build's artifact bins.
     steps:
       - uses: actions/checkout@v7
+      - name: free disk for stack e2e
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /usr/local/share/boost /usr/share/swift || true
+          df -h /
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.0"
       - name: download prebuilt rust bins
         uses: actions/download-artifact@v8
         with:
@@ -492,8 +495,8 @@ jobs:
         run: chmod +x target/debug/*
       - name: bun install
         run: bun install --frozen-lockfile
-      - name: verify Playwright chromium (baked in image)
-        run: cd apps/web && bunx playwright install chromium
+      - name: install Playwright chromium (browsers + sysdeps)
+        run: cd apps/web && bunx playwright install --with-deps chromium
       - name: stack e2e (API + Mailpit/OIDC/stubs + web)
         env:
           OXIDEAN_PREBUILT_BINS: "1"
@@ -776,6 +779,7 @@ jobs:
             echo "==> dialect: $dialect"
             DATABASE_URL="$url" OXIDEAN_DB_DIALECT="$dialect" \
               cargo nextest run --archive-file target/nextest-archive.tar.zst \
+                --workspace-remap "${{ github.workspace }}" \
                 --profile ci -E 'binary_id(oxidean-db::dialect_probe)' "$@"
           }
           probe postgres postgres://oxidean:oxidean@localhost:5432/oxidean
