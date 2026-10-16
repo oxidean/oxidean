@@ -54,6 +54,14 @@ static SHELLS: &[Shell] = &[
         protected: false,
         redirect: None,
     },
+    // Pending 2FA challenge — anonymous until the factor mints the session.
+    Shell {
+        pattern: &[L("login"), L("two-factor")],
+        file: "login/two-factor/index.html",
+        title: None,
+        protected: false,
+        redirect: None,
+    },
     Shell {
         pattern: &[L("signup")],
         file: "signup/index.html",
@@ -193,6 +201,13 @@ static SHELLS: &[Shell] = &[
     Shell {
         pattern: &[L("settings"), L("ssh-keys")],
         file: "settings/ssh-keys/index.html",
+        title: None,
+        protected: true,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[L("settings"), L("security")],
+        file: "settings/security/index.html",
         title: None,
         protected: true,
         redirect: None,

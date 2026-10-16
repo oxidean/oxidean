@@ -107,7 +107,7 @@ async fn readable_repo_ids_and_readers_of_repo() {
     assert!(has(&set, &org_repo.id));
 
     // member_base → none revokes the member's read.
-    db.update_organization_settings(&org.id, Some("none"), None)
+    db.update_organization_settings(&org.id, Some("none"), None, None)
         .await
         .expect("member_base none");
     let set = db
@@ -120,7 +120,7 @@ async fn readable_repo_ids_and_readers_of_repo() {
         .await
         .expect("org owner readable none");
     assert!(has(&set, &org_repo.id), "org owner keeps read at base=none");
-    db.update_organization_settings(&org.id, Some("read"), None)
+    db.update_organization_settings(&org.id, Some("read"), None, None)
         .await
         .expect("member_base read");
 

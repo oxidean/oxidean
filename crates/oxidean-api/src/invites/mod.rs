@@ -241,18 +241,31 @@ pub async fn resolve_or_provision_invitee(
         .await
         .map_err(db_err)?;
 
-    let (_tok, cookie) = ctx
-        .sessions
-        .create(
-            &ctx.db,
-            &created.id,
-            false,
-            ctx.client.ip_address.as_deref(),
-            ctx.client.user_agent.as_deref(),
-        )
-        .await
-        .map_err(session_err)?;
-    ctx.set_cookie = Some(CookieChange::Set(cookie));
+    // Two-factor gate (#130): a freshly provisioned account cannot hold a
+    // factor — when instance policy requires one, skip the session mint. The
+    // membership grant still lands below; the first `auth.login` opens the
+    // enroll challenge. Signed-in accepters keep their existing session, and
+    // org `require_two_factor` gates their org access per-request.
+    let gate = crate::auth::two_factor::flags::login_gate(
+        &ctx.db,
+        &created,
+        crate::auth::two_factor::LoginChannel::Local,
+    )
+    .await?;
+    if !gate.enroll_required {
+        let (_tok, cookie) = ctx
+            .sessions
+            .create(
+                &ctx.db,
+                &created.id,
+                false,
+                ctx.client.ip_address.as_deref(),
+                ctx.client.user_agent.as_deref(),
+            )
+            .await
+            .map_err(session_err)?;
+        ctx.set_cookie = Some(CookieChange::Set(cookie));
+    }
 
     ctx.db
         .find_user_by_id(&created.id)

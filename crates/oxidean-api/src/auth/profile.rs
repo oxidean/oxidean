@@ -50,7 +50,7 @@ pub async fn get_profile(ctx: &RpcCtx) -> Result<UserPublic, AppError> {
             "This account has been suspended.",
         ));
     }
-    Ok(user_to_public(&user))
+    Ok(user_to_public(&ctx.db, &user).await)
 }
 
 /// Build the public profile DTO for `user` with follow counts and viewer
@@ -200,5 +200,5 @@ pub async fn update_profile(
         updated
     };
 
-    Ok(user_to_public(&updated))
+    Ok(user_to_public(&ctx.db, &updated).await)
 }

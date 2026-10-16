@@ -147,6 +147,8 @@ pub fn settings_to_public(row: &AuthSettingsRow) -> Result<AuthSettingsPublic, A
         allow_signup: row.allow_signup,
         default_visibility: RepoVisibility::parse(&row.default_visibility)
             .unwrap_or(RepoVisibility::Public),
+        require_two_factor_local: row.require_two_factor_local,
+        require_two_factor_external: row.require_two_factor_external,
     })
 }
 
@@ -180,6 +182,8 @@ pub async fn update_settings(
             req.workos_client_id.as_deref(),
             req.allow_signup,
             req.default_visibility.as_str(),
+            req.require_two_factor_local,
+            req.require_two_factor_external,
         )
         .await
         .map_err(db_err)?;
@@ -734,6 +738,8 @@ mod tests {
             workos_client_id: Some("client_abc".into()),
             allow_signup: false,
             default_visibility: "public".into(),
+            require_two_factor_local: false,
+            require_two_factor_external: false,
             updated_at: "2026-01-01T00:00:00Z".into(),
         };
         let pub_ = settings_to_public(&row).expect("map");

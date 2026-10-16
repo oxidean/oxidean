@@ -97,6 +97,9 @@ export default defineConfig({
       "remark-parse",
       "remark-rehype",
       "unified",
+      // Two-factor UI (#130) — QR + WebAuthn ceremony wrappers.
+      "qrcode",
+      "@simplewebauthn/browser",
     ],
   },
   test: {

@@ -56,12 +56,26 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+/**
+ * Simulate the `Set-Cookie` pair a sessioned `invites.accept` response sends:
+ * the API always pairs the HttpOnly session cookie with the readable
+ * `oxidean_signed_in=1` presence hint the page checks post-accept (#130).
+ */
+function mintSessionCookies() {
+  document.cookie = "oxidean_signed_in=1; path=/";
+}
+
+function clearSessionCookies() {
+  document.cookie = "oxidean_signed_in=; path=/; max-age=0";
+}
+
 describe("/invites/$token (G-11.1-15)", () => {
   beforeEach(() => {
     meMock.mockReset();
     getMock.mockReset();
     acceptMock.mockReset();
     assignMock.mockReset();
+    clearSessionCookies();
     window.history.pushState({}, "", "/invites/invite-token-abc");
     vi.spyOn(window.location, "assign").mockImplementation(assignMock);
     getMock.mockResolvedValue({ ok: true, data: boundInstanceInvite });
@@ -126,7 +140,10 @@ describe("/invites/$token (G-11.1-15)", () => {
       ok: false,
       error: { code: "auth.unauthenticated", message: "Not signed in" },
     });
-    acceptMock.mockResolvedValue({ ok: true, data: { kind: "instance" } });
+    acceptMock.mockImplementation(() => {
+      mintSessionCookies();
+      return Promise.resolve({ ok: true, data: { kind: "instance" } });
+    });
 
     renderWithQueryClient(InviteAcceptPage);
 
@@ -161,7 +178,10 @@ describe("/invites/$token (G-11.1-15)", () => {
       ok: false,
       error: { code: "auth.unauthenticated", message: "Not signed in" },
     });
-    acceptMock.mockResolvedValue({ ok: true, data: { kind: "instance" } });
+    acceptMock.mockImplementation(() => {
+      mintSessionCookies();
+      return Promise.resolve({ ok: true, data: { kind: "instance" } });
+    });
 
     renderWithQueryClient(InviteAcceptPage);
 
@@ -189,18 +209,21 @@ describe("/invites/$token (G-11.1-15)", () => {
 
   it("accepts org invite and redirects to org", async () => {
     meMock.mockResolvedValue({ ok: true, data: signedInUser });
-    acceptMock.mockResolvedValue({
-      ok: true,
-      data: {
-        kind: "org",
-        org: { id: "o1", slug: "acme", display_name: "Acme", member_base_permission: "none" },
-        member: {
-          user_id: "u1",
-          username: "ada",
-          role: "member",
-          created_at: "2026-09-30T00:00:00Z",
+    acceptMock.mockImplementation(() => {
+      mintSessionCookies();
+      return Promise.resolve({
+        ok: true,
+        data: {
+          kind: "org",
+          org: { id: "o1", slug: "acme", display_name: "Acme", member_base_permission: "none" },
+          member: {
+            user_id: "u1",
+            username: "ada",
+            role: "member",
+            created_at: "2026-09-30T00:00:00Z",
+          },
         },
-      },
+      });
     });
 
     renderWithQueryClient(InviteAcceptPage);
@@ -218,14 +241,17 @@ describe("/invites/$token (G-11.1-15)", () => {
 
   it("accepts repo invite and redirects to repository", async () => {
     meMock.mockResolvedValue({ ok: true, data: signedInUser });
-    acceptMock.mockResolvedValue({
-      ok: true,
-      data: {
-        kind: "repo",
-        owner: "acme",
-        name: "app",
-        permission: "write",
-      },
+    acceptMock.mockImplementation(() => {
+      mintSessionCookies();
+      return Promise.resolve({
+        ok: true,
+        data: {
+          kind: "repo",
+          owner: "acme",
+          name: "app",
+          permission: "write",
+        },
+      });
     });
 
     renderWithQueryClient(InviteAcceptPage);
@@ -238,6 +264,77 @@ describe("/invites/$token (G-11.1-15)", () => {
     await waitFor(() => {
       expect(acceptMock).toHaveBeenCalled();
       expect(assignMock).toHaveBeenCalledWith("/acme/app");
+    });
+  });
+
+  it("routes to login when an enroll-required accept mints no session", async () => {
+    meMock.mockResolvedValue({
+      ok: false,
+      error: { code: "auth.unauthenticated", message: "Not signed in" },
+    });
+    // Enroll-required accepts skip the session mint (#130): ok response, but
+    // no `oxidean_signed_in` cookie — the page must hand off to login (which
+    // re-authenticates and opens the enroll challenge), not a protected page.
+    acceptMock.mockResolvedValue({ ok: true, data: { kind: "instance" } });
+
+    renderWithQueryClient(InviteAcceptPage);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Username")).toBeTruthy();
+    });
+
+    fireEvent.input(screen.getByLabelText("Username"), { target: { value: "newbie" } });
+    fireEvent.input(screen.getByLabelText("Password"), { target: { value: "password1" } });
+    fireEvent.input(screen.getByLabelText("Confirm password"), {
+      target: { value: "password1" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create account and join" }));
+
+    await waitFor(() => {
+      expect(acceptMock).toHaveBeenCalled();
+      expect(assignMock).toHaveBeenCalledWith("/login?returnTo=%2F");
+    });
+  });
+
+  it("carries the org destination through login when no session was minted", async () => {
+    meMock.mockResolvedValue({
+      ok: false,
+      error: { code: "auth.unauthenticated", message: "Not signed in" },
+    });
+    getMock.mockResolvedValue({
+      ok: true,
+      data: { kind: "org", email: "newbie@example.com", org_slug: "acme", acceptable: true },
+    });
+    acceptMock.mockResolvedValue({
+      ok: true,
+      data: {
+        kind: "org",
+        org: { id: "o1", slug: "acme", display_name: "Acme", member_base_permission: "none" },
+        member: {
+          user_id: "u2",
+          username: "newbie",
+          role: "member",
+          created_at: "2026-09-30T00:00:00Z",
+        },
+      },
+    });
+
+    renderWithQueryClient(InviteAcceptPage);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Username")).toBeTruthy();
+    });
+
+    fireEvent.input(screen.getByLabelText("Username"), { target: { value: "newbie" } });
+    fireEvent.input(screen.getByLabelText("Password"), { target: { value: "password1" } });
+    fireEvent.input(screen.getByLabelText("Confirm password"), {
+      target: { value: "password1" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create account and join" }));
+
+    await waitFor(() => {
+      expect(acceptMock).toHaveBeenCalled();
+      expect(assignMock).toHaveBeenCalledWith("/login?returnTo=%2Facme");
     });
   });
 });

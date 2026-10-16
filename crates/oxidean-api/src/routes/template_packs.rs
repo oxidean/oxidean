@@ -67,6 +67,11 @@ async fn build_ctx(state: &AppState, headers: &HeaderMap) -> RpcCtx {
         pat: None,
         client,
         set_cookie: None,
+        two_factor: crate::auth::two_factor::TwoFactorCtx {
+            store: state.two_factor_store.clone(),
+            challenge_id: None,
+        },
+        login_begin_limiter: state.login_begin_limiter.clone(),
         lookup_limiter: state.lookup_limiter.clone(),
         search_timeout_ms: state.search_timeout_ms,
         search_max_matches: state.search_max_matches,

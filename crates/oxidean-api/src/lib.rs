@@ -4,6 +4,7 @@ pub mod app;
 pub mod audit;
 pub mod auth;
 pub mod cors;
+pub mod crypto;
 pub mod deploy_keys;
 pub mod email;
 pub mod emails;

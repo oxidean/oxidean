@@ -63,6 +63,7 @@ pub(crate) fn to_public(row: &OrganizationRow) -> Result<OrgPublic, AppError> {
         slug: row.slug.clone(),
         display_name: row.display_name.clone(),
         member_base_permission,
+        require_two_factor: row.require_two_factor,
         created_at: row.created_at.clone(),
         updated_at: row.updated_at.clone(),
     })
@@ -107,6 +108,31 @@ pub(crate) async fn require_org_role(
         .await
         .map_err(db_err)?
         .ok_or_else(|| AppError::new("org.forbidden", "not a member of this organization"))?;
+
+    // Org 2FA membership policy (issue #130): when the org requires a second
+    // factor, members without one lose org-scoped access until they enroll —
+    // mirrors GitHub's "enable 2FA to continue" lockout. The user can still
+    // reach `auth.two_factor.*` (not org-scoped) to enroll.
+    let required = ctx
+        .db
+        .find_organization_by_id(org_id)
+        .await
+        .map_err(db_err)?
+        .map(|o| o.require_two_factor)
+        .unwrap_or(false);
+    if required
+        && !ctx
+            .db
+            .user_has_confirmed_factor(user_id)
+            .await
+            .map_err(db_err)?
+    {
+        return Err(AppError::new(
+            "org.two_factor_required",
+            "This organization requires two-factor authentication. Enable it in your account security settings to continue.",
+        ));
+    }
+
     OrgRole::parse(&role).map_err(|e| {
         tracing::error!(error = %e, "invalid org role in membership");
         AppError::new("org.internal", "organization operation failed")
@@ -237,13 +263,18 @@ pub async fn update_settings(
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string());
 
-    if base.is_none() && display.is_none() {
+    if base.is_none() && display.is_none() && req.require_two_factor.is_none() {
         return to_public(&org);
     }
 
     let row = ctx
         .db
-        .update_organization_settings(&org.id, base.as_deref(), display.as_deref())
+        .update_organization_settings(
+            &org.id,
+            base.as_deref(),
+            display.as_deref(),
+            req.require_two_factor,
+        )
         .await
         .map_err(db_err)?;
 

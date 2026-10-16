@@ -45,6 +45,7 @@ pub mod stars;
 pub mod tag_protection;
 pub mod templates;
 pub mod topics;
+pub mod two_factor;
 pub mod user_emails;
 pub mod users;
 pub mod watches;
@@ -277,12 +278,14 @@ impl Database {
         id: &str,
         member_base_permission: Option<&str>,
         display_name: Option<&str>,
+        require_two_factor: Option<bool>,
     ) -> Result<OrganizationRow, String> {
         organizations::update_settings(
             self.require_pool()?,
             id,
             member_base_permission,
             display_name,
+            require_two_factor,
         )
         .await
     }
@@ -2669,6 +2672,124 @@ impl Database {
         sessions::delete_all_for_user(self.require_pool()?, user_id).await
     }
 
+    // --- two-factor credentials (#130) ---
+
+    pub async fn totp_upsert(&self, user_id: &str, secret_enc: &str) -> Result<(), String> {
+        two_factor::totp_upsert(self.require_pool()?, user_id, secret_enc).await
+    }
+
+    pub async fn totp_find(&self, user_id: &str) -> Result<Option<two_factor::TotpRow>, String> {
+        two_factor::totp_find(self.require_pool()?, user_id).await
+    }
+
+    pub async fn totp_confirm(&self, user_id: &str) -> Result<(), String> {
+        two_factor::totp_confirm(self.require_pool()?, user_id).await
+    }
+
+    pub async fn totp_touch_last_used(&self, user_id: &str) -> Result<(), String> {
+        two_factor::totp_touch_last_used(self.require_pool()?, user_id).await
+    }
+
+    pub async fn totp_delete(&self, user_id: &str) -> Result<(), String> {
+        two_factor::totp_delete(self.require_pool()?, user_id).await
+    }
+
+    pub async fn recovery_replace(
+        &self,
+        user_id: &str,
+        codes: &[(String, String)],
+    ) -> Result<(), String> {
+        two_factor::recovery_replace(self.require_pool()?, user_id, codes).await
+    }
+
+    pub async fn recovery_consume(&self, user_id: &str, code_hash: &str) -> Result<bool, String> {
+        two_factor::recovery_consume(self.require_pool()?, user_id, code_hash).await
+    }
+
+    pub async fn recovery_count_remaining(&self, user_id: &str) -> Result<i64, String> {
+        two_factor::recovery_count_remaining(self.require_pool()?, user_id).await
+    }
+
+    pub async fn recovery_delete_all(&self, user_id: &str) -> Result<(), String> {
+        two_factor::recovery_delete_all(self.require_pool()?, user_id).await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn passkey_insert(
+        &self,
+        id: &str,
+        user_id: &str,
+        credential_id: &str,
+        nickname: &str,
+        passkey_json: &str,
+        transports: &str,
+        sign_count: i64,
+    ) -> Result<(), String> {
+        two_factor::passkey_insert(
+            self.require_pool()?,
+            id,
+            user_id,
+            credential_id,
+            nickname,
+            passkey_json,
+            transports,
+            sign_count,
+        )
+        .await
+    }
+
+    pub async fn passkey_list_for_user(
+        &self,
+        user_id: &str,
+    ) -> Result<Vec<two_factor::PasskeyRow>, String> {
+        two_factor::passkey_list_for_user(self.require_pool()?, user_id).await
+    }
+
+    pub async fn passkey_find_for_user(
+        &self,
+        user_id: &str,
+        id: &str,
+    ) -> Result<Option<two_factor::PasskeyRow>, String> {
+        two_factor::passkey_find_for_user(self.require_pool()?, user_id, id).await
+    }
+
+    pub async fn passkey_update_nickname(
+        &self,
+        user_id: &str,
+        id: &str,
+        nickname: &str,
+    ) -> Result<bool, String> {
+        two_factor::passkey_update_nickname(self.require_pool()?, user_id, id, nickname).await
+    }
+
+    pub async fn passkey_after_assertion(
+        &self,
+        id: &str,
+        sign_count: i64,
+        passkey_json: &str,
+    ) -> Result<(), String> {
+        two_factor::passkey_after_assertion(self.require_pool()?, id, sign_count, passkey_json)
+            .await
+    }
+
+    pub async fn passkey_delete(&self, user_id: &str, id: &str) -> Result<bool, String> {
+        two_factor::passkey_delete(self.require_pool()?, user_id, id).await
+    }
+
+    pub async fn passkey_delete_all_for_user(&self, user_id: &str) -> Result<(), String> {
+        two_factor::passkey_delete_all_for_user(self.require_pool()?, user_id).await
+    }
+
+    /// Confirmed TOTP or any passkey exists for the user.
+    pub async fn user_has_confirmed_factor(&self, user_id: &str) -> Result<bool, String> {
+        two_factor::user_has_confirmed_factor(self.require_pool()?, user_id).await
+    }
+
+    /// The user belongs to at least one org with `require_two_factor`.
+    pub async fn user_in_org_requiring_two_factor(&self, user_id: &str) -> Result<bool, String> {
+        two_factor::user_in_org_requiring_two_factor(self.require_pool()?, user_id).await
+    }
+
     // --- personal access tokens ---
 
     #[allow(clippy::too_many_arguments)]
@@ -3698,6 +3819,8 @@ impl Database {
         workos_client_id: Option<&str>,
         allow_signup: bool,
         default_visibility: &str,
+        require_two_factor_local: bool,
+        require_two_factor_external: bool,
     ) -> Result<auth_settings::AuthSettingsRow, String> {
         auth_settings::update(
             self.require_pool()?,
@@ -3709,6 +3832,8 @@ impl Database {
             workos_client_id,
             allow_signup,
             default_visibility,
+            require_two_factor_local,
+            require_two_factor_external,
         )
         .await
     }

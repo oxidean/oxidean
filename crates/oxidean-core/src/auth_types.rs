@@ -84,6 +84,12 @@ pub struct UserPublic {
     /// Default branch name for new repositories (D-09); defaults to `main`.
     #[serde(default = "default_branch_main")]
     pub default_branch: String,
+    /// True when the account has at least one active 2FA factor (#130).
+    #[serde(default)]
+    pub two_factor_enabled: bool,
+    /// True when instance/org policy requires enrolling a factor (#130).
+    #[serde(default)]
+    pub two_factor_enroll_required: bool,
 }
 
 fn default_branch_main() -> String {
@@ -171,11 +177,50 @@ pub struct SignupRequest {
 }
 
 /// Local login input (D-02). `identifier` is email or username.
+///
+/// Two shapes: a one-shot credential check (`challenge` absent — machine
+/// clients and the legacy path, `identifier` required), or the password step
+/// of an identifier-first flow (`challenge` set to the `auth.login_begin`
+/// challenge id). When a challenge is supplied the account binds to the
+/// challenge, not the identifier — so `identifier` may be omitted (e.g. a
+/// page reload resuming a pending challenge) and is verified to agree with
+/// the challenge when it is present.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct LoginRequest {
+    #[serde(default)]
     pub identifier: String,
     pub password: String,
     pub remember_me: bool,
+    #[serde(default)]
+    pub challenge: Option<String>,
+}
+
+/// `auth.login_begin` input — the identifier-first sign-in step (#130): the
+/// server resolves the account, opens an `oxidean_2fa` challenge, and reports
+/// which step comes next (`factor` or `password`).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct LoginBeginRequest {
+    /// Email or username.
+    pub identifier: String,
+    #[serde(default)]
+    pub remember_me: bool,
+}
+
+/// `auth.login_begin` output. `next` is `"factor"` when the account must
+/// prove a second factor before the password step, else `"password"`.
+/// `kind` mirrors the challenge kind (`"verify"` / `"enroll"`) when one
+/// applies. Unknown identifiers get an indistinguishable password-step
+/// response bound to a dead-end challenge (no account-existence leak).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct LoginBeginResponse {
+    /// Challenge id — also set as the `oxidean_2fa` HttpOnly cookie.
+    pub challenge: String,
+    /// `"factor"` or `"password"`.
+    pub next: String,
+    /// `"verify"` / `"enroll"` when a factor step is pending, else null.
+    pub kind: Option<String>,
+    /// Factor methods the pending challenge accepts.
+    pub methods: Vec<String>,
 }
 
 /// Public provider config for `auth.provider_config`.
@@ -545,6 +590,12 @@ pub struct AuthSettingsPublic {
     /// Instance default visibility for new repos (D-08).
     #[serde(default = "default_visibility_public")]
     pub default_visibility: crate::RepoVisibility,
+    /// Require an enrolled 2FA factor for local (email/password) logins (#130).
+    #[serde(default)]
+    pub require_two_factor_local: bool,
+    /// Require an enrolled 2FA factor for external OIDC/WorkOS SSO logins (#130).
+    #[serde(default)]
+    pub require_two_factor_external: bool,
 }
 
 fn default_visibility_public() -> crate::RepoVisibility {
@@ -565,6 +616,10 @@ pub struct UpdateAuthSettingsRequest {
     /// Instance default visibility for new repos (D-08).
     #[serde(default = "default_visibility_public")]
     pub default_visibility: crate::RepoVisibility,
+    #[serde(default)]
+    pub require_two_factor_local: bool,
+    #[serde(default)]
+    pub require_two_factor_external: bool,
 }
 
 const RESERVED_USERNAMES: &[&str] = &[
