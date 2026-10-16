@@ -500,7 +500,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          args=(--title "ox ${{ github.ref_name }}")
+          # Title is the tag itself — the tag embeds the `ox` name, so a
+          # prefix would duplicate it (`ox ox-v0.1.0`).
+          args=(--title "${{ github.ref_name }}")
           if [[ "${GITHUB_REF_NAME#ox-v}" == *-* ]]; then
             args+=(--prerelease)
           fi

@@ -178,7 +178,9 @@ matrix lane in `.github/workflows/ox-cli.yml`, which ships `latest.json`
 on the tag's release assets — the distribution manifest consumed by
 `ox self-update` / `/cli/latest` (deploy tooling pins
 `OXIDEAN_CLI_DIST_URL` to the newest `ox-v*` stable tag merged into the
-deployed commit).
+deployed commit). Release **titles are the tag names verbatim** (e.g.
+`wire-v0.1.0`) — the tag already embeds the component name, so a prefix
+would duplicate it (`wire wire-v0.1.0`).
 
 ### Prerelease channels
 

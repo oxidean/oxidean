@@ -47,6 +47,13 @@ describe("ox-cli.yml retarget", () => {
     expect(release).toContain("assets/SOURCE_COMMIT");
     expect(release).toContain("gh release create");
   });
+
+  test("release title is the tag itself — no component prefix (#151)", () => {
+    // The tag embeds the component name (ox-v0.1.0), so a prefix would
+    // read as `ox ox-v0.1.0`.
+    expect(yml).toContain('--title "${{ github.ref_name }}"');
+    expect(yml).not.toContain('args=(--title "ox ');
+  });
 });
 
 describe("images.yml image lane", () => {
@@ -106,6 +113,13 @@ describe("release.yml generic lane", () => {
   test("prerelease tags mark the Release prerelease", () => {
     expect(yml).toContain("--prerelease");
     expect(yml).toMatch(/\^?\[0-9\].*-/) // semver `-` gate
+  });
+
+  test("release title is the tag itself — no component prefix (#151)", () => {
+    // Tags embed the component name (wire-v0.1.0); a prefix read as
+    // `wire wire-v0.1.0`.
+    expect(yml).toContain('--title "${{ github.ref_name }}"');
+    expect(yml).not.toContain("steps.tag.outputs.component");
   });
 
   test("dispatch lane takes {component, channel} and never GITHUB_TOKEN-pushes tags", () => {
