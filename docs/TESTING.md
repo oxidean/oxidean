@@ -272,6 +272,21 @@ Workflow: [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) (`name: CI`)
 
 Default `web-octane` stays fast (no Docker auth stubs). True auth/email path coverage is the separate `e2e-stack` job. The `coverage-weighted` job enforces D-QH-02 without reviving component Playwright. Compose dialect health (Traefik `/` + `/health` + `system.db_probe`) is the `compose-smoke` matrix — not folded into `smoke-protocol`. Forge protocol edges (Smart HTTP / SSH TCP / LFS batch / packages PathPrefix) plus ORG-06 protected-push denial are the `smoke-protocol` job — not happy-dom only.
 
+### CI base images (run-isolated, no cross-run Rust cache)
+
+Most jobs run inside self-owned images published to `ghcr.io/<owner>/oxidean-ci` by [`.github/workflows/ci-base.yml`](../.github/workflows/ci-base.yml) from [`docker/ci-base/Dockerfile`](../docker/ci-base/Dockerfile). The `ci-image` job resolves each flavor's content tag to an `@sha256` digest at run start, so every leg in a run executes on byte-identical bits — an immutable input, not a cache. There is deliberately **no `Swatinem/rust-cache`**: nothing a run writes ever feeds another run's inputs; the only retained cross-run cache is the `type=gha` BuildKit layer cache used to *build* images (layers are content-keyed).
+
+| Flavor | Contents | Consumers |
+|--------|----------|-----------|
+| `dev` | stable Rust + mold/protoc + `cargo-nextest`/`cargo-machete`/`cargo-chef` + bun; third-party deps pre-cooked to `/ci/target-dev` | `rust-build`, `dead-code` |
+| `release` | same toolchain; release-profile deps at `/ci/target-release` | `build-metrics` |
+| `cov` | + `llvm-tools-preview`, `cargo-llvm-cov`; instrumented deps at `/ci/target-cov` (`CARGO_LLVM_COV_TARGET_DIR`) | `coverage-weighted` |
+| `tools` | bun + Playwright chromium + docker CLI/compose/buildx (no rustc) | web lanes, `e2e-stack`, `actions-e2e`, `rpc-sync`, `commit-lint` |
+
+Exec-only legs (`api-rust` shards, `db-dialects`) stay on the host runner — pulling an image outweighs their ~10s `cargo-nextest` install. Container legs that drive Compose mount the host daemon socket (`e2e-stack` also runs `--network host` so published ports resolve on localhost). The dep-bake uses `cargo chef cook`, which produces *dependency-only* artifacts — workspace crates always compile from the fresh checkout, which is the isolation guarantee.
+
+Tags: `<flavor>-<content-hash>` (content-keyed — hash covers `Cargo.toml`/`Cargo.lock`, `crates/*/Cargo.toml`, `docker/ci-base/**`, and `scripts/ci-image-tag.sh`; same-repo PRs touching those inputs may publish the hash tag, which is safe because it can only be selected by runs whose inputs hash identically) plus moving `<flavor>-latest` (main-owned only). A lockfile-ahead PR before the publisher lands falls back to `-latest` (per-crate fingerprints still hit every unchanged dep). When no tag resolves, `ci-image` polls the registry for up to 40 min (`CI_IMAGE_WAIT_SECONDS`) so a same-repo PR that changes image inputs waits for its own `ci-base` publish leg; fork PRs can't publish and skip the wait (fail fast / `-latest` fallback). rustc is pinned exactly (`RUST_IMAGE` ARG in the Dockerfile — a bump is a one-line, hash-covered PR); weekly cron + `workflow_dispatch` rebuild all flavors so Debian/apt patch drift lands deliberately. Refresh procedure: bump inputs on a branch → merge → the push-to-main leg builds and pushes both tags; or run `ci-base` via `workflow_dispatch` for a manual refresh. Bootstrap on a fresh fork: same `workflow_dispatch` (requires `packages: write`).
+
 ### Compose dialect smokes (local + CI)
 
 | Target | Proves | Notes |

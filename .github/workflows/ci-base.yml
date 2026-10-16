@@ -1,0 +1,149 @@
+# CI base images — build + publish the run-isolated CI images ci.yml consumes.
+#
+# Images: ghcr.io/<owner>/oxidean-ci:{dev,release,cov,tools}-<hash> plus a
+# moving :{flavor}-latest fallback per flavor. The hash covers every input
+# that changes image content (Cargo.lock, Cargo.toml, crates/*/Cargo.toml,
+# the bun workspace manifests COPYed into the bun-deps/tools stages —
+# package.json, bun.lock, turbo.json, apps/web/package.json,
+# packages/api-client/package.json — plus docker/ci-base/** and
+# scripts/ci-image-tag.sh; see ci-image-tag.sh), so a tag only needs
+# rebuilding when those paths move; rustc is pinned exactly in the
+# Dockerfile (bump = one-line PR) and the weekly cron rebuilds for Debian base
+# / apt patch drift — a deliberate refresh instead of per-run surprise.
+#
+# Triggers:
+#   push to main on hashed inputs  → build + push <flavor>-<hash> + -latest
+#                                    (skip + retag -latest when a PR leg
+#                                    already published the content tag)
+#   pull_request on ci-base inputs → same-repo PRs push the <flavor>-<hash> tag
+#                                    only (content-keyed: a PR-built image can
+#                                    only be selected by runs whose inputs hash
+#                                    identically) — this is how the fleet
+#                                    bootstraps/updates. -latest stays
+#                                    main-owned; fork PRs build-only (their
+#                                    token is read-only).
+#   weekly cron                    → rebuild all flavors (base-image patch
+#                                    drift) even when the hash tag exists
+#   workflow_dispatch              → same as cron (manual refresh/bootstrap)
+#
+# The ci-image job in ci.yml resolves tags to @sha256 digests; a tag rewrite
+# mid-run can never give two jobs different bits.
+
+name: CI base images
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - Cargo.toml
+      - Cargo.lock
+      - 'crates/*/Cargo.toml'
+      - package.json
+      - bun.lock
+      - turbo.json
+      - apps/web/package.json
+      - packages/api-client/package.json
+      - docker/ci-base/**
+      - scripts/ci-image-tag.sh
+      - .github/workflows/ci-base.yml
+  pull_request:
+    paths:
+      - docker/ci-base/**
+      - scripts/ci-image-tag.sh
+      - .github/workflows/ci-base.yml
+  schedule:
+    - cron: "37 4 * * 1" # Mondays 04:37 UTC — off the top of the hour
+  workflow_dispatch: {}
+
+concurrency:
+  group: ci-base-${{ github.ref }}
+  # Never cancel mid-publish: a half-pushed -latest tag is worse than a late one.
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write # ghcr.io/<owner>/oxidean-ci publish (PR legs stay push:false)
+
+env:
+  IMAGE_NS: ghcr.io/${{ github.repository_owner }}
+
+jobs:
+  bake:
+    name: ci-base ${{ matrix.flavor }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        flavor: [dev, release, cov, tools]
+    steps:
+      - uses: actions/checkout@v7
+      - name: compute content tag
+        id: t
+        run: echo "tag=$(./scripts/ci-image-tag.sh tag "${{ matrix.flavor }}")" | tee "$GITHUB_OUTPUT"
+      - name: free disk for dep-cooked image builds
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /usr/local/share/boost /usr/share/swift || true
+          df -h /
+      - uses: docker/setup-buildx-action@v4
+      - name: login to GHCR
+        # Fork PR tokens are read-only → skip login and push nothing. Must
+        # precede the skip check: unauthenticated `imagetools inspect` always
+        # fails on private packages, so the skip would never engage.
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork != true
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: skip check (content tag already published)
+        id: skip
+        # Scheduled/dispatched runs always rebuild — rustc freshness is the
+        # point. Push/PR legs skip when the content tag already exists.
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if docker buildx imagetools inspect \
+              "${IMAGE_NS}/oxidean-ci:${{ steps.t.outputs.tag }}" >/dev/null 2>&1; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "tag already published — nothing to do"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: retag -latest to the existing content tag
+        # A same-repo PR leg publishes the hash tag pre-merge; when the main
+        # push then skips the rebuild, -latest still has to move to it.
+        if: steps.skip.outputs.skip == 'true' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        run: |
+          docker buildx imagetools create \
+            -t "${IMAGE_NS}/oxidean-ci:${{ matrix.flavor }}-latest" \
+            "${IMAGE_NS}/oxidean-ci:${{ steps.t.outputs.tag }}"
+      - name: resolve push tags
+        id: tags
+        if: steps.skip.outputs.skip != 'true'
+        run: |
+          {
+            echo "list<<EOF"
+            echo "${IMAGE_NS}/oxidean-ci:${{ steps.t.outputs.tag }}"
+            # -latest is main-owned: PR legs publish only the hash tag, and a
+            # workflow_dispatch on a branch must not move the main-owned tag.
+            [ "${{ github.event_name }}" != "pull_request" ] && \
+              [ "${{ github.ref }}" = "refs/heads/main" ] && \
+              echo "${IMAGE_NS}/oxidean-ci:${{ matrix.flavor }}-latest"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+      - name: build ${{ matrix.flavor }}
+        if: steps.skip.outputs.skip != 'true'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/ci-base/Dockerfile
+          target: ${{ matrix.flavor }}
+          push: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork != true }}
+          tags: ${{ steps.tags.outputs.list }}
+          # The docker lane is the documented cross-run cache exception —
+          # BuildKit layers are content-keyed inputs (a lockfile or source
+          # move busts them), never mutable shared state a run writes into.
+          cache-from: type=gha,scope=ci-base-${{ matrix.flavor }}
+          cache-to: type=gha,mode=max,scope=ci-base-${{ matrix.flavor }}
