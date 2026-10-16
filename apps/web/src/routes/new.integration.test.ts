@@ -1,5 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@octanejs/testing-library";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { getQueryClient } from "@/lib/query-client";
+import { authMeQueryKey } from "@/lib/session-queries";
 import { trackDomErrors } from "@/test/dom-errors";
 
 /**
@@ -81,6 +83,57 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("/new Wave 0 (D-11 verify wall)", () => {
+  // Issue #143 regression: with a warm auth.me cache the first client render
+  // must still match the prerendered wall — otherwise Octane sees a structural
+  // hydration mismatch and rolls back/remounts the whole island. Observe the
+  // committed DOM sequence: the wall must mount first, then swap to the form.
+  it("warm auth.me cache commits the SSR wall first, then swaps to the form", async () => {
+    const verified = {
+      id: "u1",
+      email: "ada@example.com",
+      username: "ada",
+      display_name: "Ada",
+      bio: "",
+      avatar_url: null,
+      role: "user",
+      profile_incomplete: false,
+      email_verified: true,
+    };
+    const client = getQueryClient();
+    client.clear();
+    client.setQueryData(authMeQueryKey, verified);
+
+    const wallText = "Verify your email";
+    const commits: string[] = [];
+    const observer = new MutationObserver((records) => {
+      for (const record of records) {
+        for (const node of record.addedNodes) {
+          if (node.textContent?.includes(wallText)) commits.push("wall-mounted");
+        }
+        for (const node of record.removedNodes) {
+          if (node.textContent?.includes(wallText)) commits.push("wall-removed");
+        }
+      }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    try {
+      const { NewPage } = await import("./new");
+      render(NewPage as never);
+
+      await waitFor(() => {
+        expect(screen.getByLabelText(/repository name/i)).toBeInTheDocument();
+      });
+      // MutationObserver callbacks deliver asynchronously to the mutations.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(commits[0]).toBe("wall-mounted");
+      expect(commits).toContain("wall-removed");
+    } finally {
+      observer.disconnect();
+      client.clear();
+    }
+  }, 20000);
+
   it("unverified session shows Verify your email wall — not the create form", async () => {
     const { NewPage } = await import("./new");
     render(NewPage as never);

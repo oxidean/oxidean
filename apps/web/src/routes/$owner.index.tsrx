@@ -16,6 +16,7 @@ import { matchPath } from "@/lib/route-params";
 import { fetchOrgOverview, type OrgOverviewPayload } from "@/lib/ssr-org";
 import { fetchUserProfile, type UserProfilePayload } from "@/lib/ssr-user-profile";
 import { useChromeAccountState } from "@/lib/use-chrome-account";
+import { useMounted } from "@/lib/use-mounted.tsrx";
 import { cn } from "@/lib/utils";
 import { AppLink } from "@/components/ui/app-link";
 
@@ -248,7 +249,10 @@ export function UserProfilePage() @{
   const profileReadme = payload?.profileReadme ?? null;
   const [tab, setTab] = useState<"repos" | "stars">("repos");
   const account = useChromeAccountState();
-  const signedIn = !!account.user;
+  // SSR can't see the session, so a warm auth.me cache must not flip this
+  // branch on the first commit — same mounted gate as repo-chrome.
+  const mounted = useMounted();
+  const signedIn = mounted && !!account.user;
   const [followBusy, setFollowBusy] = useState(false);
   const [followOverride, setFollowOverride] = useState<{
     following: boolean;

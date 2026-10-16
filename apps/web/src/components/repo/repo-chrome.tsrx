@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api-client";
 import type { RepoChromeActive } from "@/lib/repo-chrome-active";
 import { useChromeAccountState } from "@/lib/use-chrome-account";
+import { useMounted } from "@/lib/use-mounted.tsrx";
 import { useRepoStore } from "@/lib/repo-store";
 import { AppLink } from "@/components/ui/app-link";
 
@@ -65,7 +66,12 @@ export function RepoChrome({ repo, active, showSettings = false }: RepoChromePro
   const insightsHref = `${base}/insights`;
   const settingsHref = `${base}/settings`;
   const forkHref = `${base}/fork`;
-  const signedIn = !!account.user;
+  // SSR emits the anon /login links; a warm auth.me cache (persisted chrome
+  // resolves it before this island hydrates) would otherwise render the
+  // signed-in controls over that DOM and roll the island back. Hold the SSR
+  // branch until mounted, then flip in one clean commit.
+  const mounted = useMounted();
+  const signedIn = mounted && !!account.user;
 
   async function toggleStar() {
     if (!signedIn || starBusy) return;

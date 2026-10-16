@@ -9,7 +9,7 @@ import {
   Search,
   Users,
 } from "@octanejs/lucide";
-import { useEffect, useEffectEvent, useState } from "octane";
+import { memo, useEffect, useEffectEvent, useState } from "octane";
 import { Input } from "@/components/ui/input";
 import {
   fetchSearchSuggestions,
@@ -75,7 +75,7 @@ function actionIcon(type: SearchActionSuggestion["type"]) {
   }
 }
 
-export function GlobalSearch({ className }: GlobalSearchProps) @{
+function GlobalSearchImpl({ className }: GlobalSearchProps) @{
   const { user } = useChromeAccountState();
   const signedIn = !!user;
   const [q, setQ] = useState("");
@@ -389,3 +389,4 @@ export function GlobalSearch({ className }: GlobalSearchProps) @{
     }
   </div>;
 }
+export const GlobalSearch = memo(GlobalSearchImpl);

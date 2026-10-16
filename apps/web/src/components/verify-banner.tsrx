@@ -1,9 +1,10 @@
 import { useQuery } from "@octanejs/tanstack-query";
-import { useEffect, useState } from "octane";
+import { memo, useEffect, useState } from "octane";
 import { Button } from "@/components/ui/button";
 import { apiClient } from "@/lib/api-client";
 import { authSessionQueryOptions } from "@/lib/session-queries";
 import { toastError, toastSuccess } from "@/lib/toast";
+import { useMounted } from "@/lib/use-mounted.tsrx";
 import { AppLink } from "@/components/ui/app-link";
 
 const BANNER_MESSAGE =
@@ -18,14 +19,17 @@ const RESEND_COOLDOWN_SECS = 60;
  * Fixed bottom-right overlay — does not insert into document flow (no layout shift).
  * Resend feedback uses Base UI toasts so the callout stays calm.
  */
-export function VerifyBanner() {
+export const VerifyBanner = memo(function VerifyBanner() {
   const me = useQuery(authSessionQueryOptions());
   const [resendPending, setResendPending] = useState(false);
   const [cooldownUntil, setCooldownUntil] = useState(0);
   const [cooldownLeft, setCooldownLeft] = useState(0);
 
   const ready = !me.isPending;
-  const visible = Boolean(me.isSuccess && me.data && me.data.email_verified === false);
+  // SSR renders null; keep it null until mounted so a client-warm session
+  // cache can't mount the callout during hydration and roll the island back.
+  const mounted = useMounted();
+  const visible = Boolean(mounted && me.isSuccess && me.data && me.data.email_verified === false);
 
   useEffect(() => {
     if (cooldownUntil <= 0) {
@@ -114,4 +118,4 @@ export function VerifyBanner() {
       </div>
     </aside>
   );
-}
+});

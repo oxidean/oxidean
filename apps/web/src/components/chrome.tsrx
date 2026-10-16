@@ -16,8 +16,9 @@ import {
 } from "@octanejs/lucide";
 import { useQuery, useQueryClient } from "@octanejs/tanstack-query";
 import type { UserPublic } from "@oxidean/api-client";
-import { useEffect, useEffectEvent, useState } from "octane";
-import { usePathname } from "@/lib/pathname.tsrx";
+import { memo, useEffect, useEffectEvent, useState } from "octane";
+import { useLivePathname } from "@/lib/pathname.tsrx";
+import { useMounted } from "@/lib/use-mounted.tsrx";
 import { GlobalSearch } from "@/components/global-search";
 import { OxideanMark } from "@/components/oxidean-mark";
 import { ThemeSelect } from "@/components/theme-select";
@@ -49,7 +50,13 @@ function initialsFor(user: UserPublic): string {
   return source.slice(0, 2).toUpperCase();
 }
 
-function AccountAvatar({ user, size = "sm" }: { user: UserPublic; size?: "sm" | "md" }) @{
+function AccountAvatarImpl({
+  user,
+  size = "sm",
+}: {
+  user: UserPublic;
+  size?: "sm" | "md";
+}) @{
   const box = size === "md" ? "size-9" : "size-7";
   const text = size === "md" ? "text-[12px]" : "text-[11px]";
   const px = size === "md" ? 36 : 28;
@@ -80,15 +87,18 @@ function AccountAvatar({ user, size = "sm" }: { user: UserPublic; size?: "sm" | 
     }
   </div>;
 }
+const AccountAvatar = memo(AccountAvatarImpl);
 
 function useRepoContext(): { owner: string; repo: string } | null {
   // Reactive pathname — this chrome persists across ClientRouter swaps, so a
   // non-reactive read would leave repo-scoped links (New issue/release) bound
-  // to the repo you navigated AWAY from.
-  return repoParamsFromPathname(usePathname());
+  // to the repo you navigated AWAY from. Live variant is safe here: the only
+  // DOM it drives lives inside menu portals and the lazily-mounted mobile
+  // sheet, never in prerendered HTML.
+  return repoParamsFromPathname(useLivePathname());
 }
 
-function CreateMenu({ onNavigated }: { onNavigated?: () => void }) @{
+function CreateMenuImpl({ onNavigated }: { onNavigated?: () => void }) @{
   const repo = useRepoContext();
 
   <DropdownMenu>
@@ -128,8 +138,9 @@ function CreateMenu({ onNavigated }: { onNavigated?: () => void }) @{
     </DropdownMenuContent>
   </DropdownMenu>;
 }
+const CreateMenu = memo(CreateMenuImpl);
 
-function AccountMenu({
+function AccountMenuImpl({
   user,
   onNavigated,
 }: {
@@ -208,8 +219,9 @@ function AccountMenu({
     </DropdownMenuContent>
   </DropdownMenu>;
 }
+const AccountMenu = memo(AccountMenuImpl);
 
-function NotificationsBell({ onNavigated }: { onNavigated?: () => void }) @{
+function NotificationsBellImpl({ onNavigated }: { onNavigated?: () => void }) @{
   const unreadQ = useQuery(notificationUnreadCountQueryOptions());
   const countNum = Number(unreadQ.data ?? 0);
   const count = Number.isFinite(countNum) ? countNum : 0;
@@ -239,9 +251,10 @@ function NotificationsBell({ onNavigated }: { onNavigated?: () => void }) @{
     }
   </AppLink>;
 }
+const NotificationsBell = memo(NotificationsBellImpl);
 
 /** Resolved signed-in cluster — `gap-1`; mirrors `AccountClusterPending`'s authed candidate. */
-function AccountClusterSignedIn({
+function AccountClusterSignedInImpl({
   user,
   onNavigated,
   className,
@@ -260,9 +273,10 @@ function AccountClusterSignedIn({
     <AccountMenu user={user} onNavigated={onNavigated} />
   </div>;
 }
+const AccountClusterSignedIn = memo(AccountClusterSignedInImpl);
 
 /** Resolved signed-out cluster — `gap-2`; mirrors `AccountClusterPending`'s anon candidate. */
-function AccountClusterAnon({
+function AccountClusterAnonImpl({
   allowSignup,
   onNavigated,
   className,
@@ -294,6 +308,7 @@ function AccountClusterAnon({
     }
   </div>;
 }
+const AccountClusterAnon = memo(AccountClusterAnonImpl);
 
 /**
  * Pending cluster — the island is SSR'd before `auth.me` resolves, so emit
@@ -303,7 +318,7 @@ function AccountClusterAnon({
  * stamp says a live session is present. Each candidate mirrors its resolved
  * cluster's geometry so hydration swaps shape, not layout.
  */
-function AccountClusterPending({ className }: { className?: string }) @{
+function AccountClusterPendingImpl({ className }: { className?: string }) @{
   <div
     role="group"
     aria-label="Account"
@@ -326,8 +341,9 @@ function AccountClusterPending({ className }: { className?: string }) @{
     </div>
   </div>;
 }
+const AccountClusterPending = memo(AccountClusterPendingImpl);
 
-function AccountActions({
+const AccountActions = memo(function AccountActions({
   className,
   onNavigated,
 }: {
@@ -335,8 +351,12 @@ function AccountActions({
   onNavigated?: () => void;
 }) {
   const { pending, user, needsSetup, allowSignup } = useChromeAccountState();
+  // SSR emits the pending cluster; hold that branch until mounted so a
+  // client-warm session cache can't render a different cluster during
+  // hydration and roll the island back.
+  const mounted = useMounted();
 
-  if (pending || user === undefined || needsSetup === null) {
+  if (!mounted || pending || user === undefined || needsSetup === null) {
     return <AccountClusterPending className={className} />;
   }
 
@@ -358,12 +378,12 @@ function AccountActions({
   return (
     <AccountClusterAnon allowSignup={allowSignup} onNavigated={onNavigated} className={className} />
   );
-}
+});
 
 const mobileNavItemClass =
   "flex h-11 w-full items-center gap-3 rounded-md px-3 text-[14px] font-medium text-foreground no-underline outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring";
 
-function MobileNavSheet({ onClose }: { onClose: () => void }) @{
+function MobileNavSheetImpl({ onClose }: { onClose: () => void }) @{
   const queryClient = useQueryClient();
   const { pending, user, needsSetup, allowSignup } = useChromeAccountState();
   const repo = useRepoContext();
@@ -604,11 +624,16 @@ function MobileNavSheet({ onClose }: { onClose: () => void }) @{
     </div>
   </nav>;
 }
+const MobileNavSheet = memo(MobileNavSheetImpl);
 
-export function SiteHeader() @{
+function SiteHeaderImpl() @{
   const [menuOpen, setMenuOpen] = useState(false);
   const { needsSetup } = useChromeAccountState();
-  const pathname = usePathname();
+  // auth.bootstrap mounts resolved from the web tier's <html> stamp — even on
+  // cold loads — so a needs_setup verdict would mount ThemeSelect during
+  // hydration over SSR DOM that has none. Hold the SSR branch until mounted.
+  const mounted = useMounted();
+  const pathname = useLivePathname();
 
   const closeMenu = useEffectEvent(() => setMenuOpen(false));
 
@@ -673,7 +698,7 @@ export function SiteHeader() @{
       <GlobalSearch className="col-start-2 row-start-1" />
 
       <div className="col-start-3 row-start-1 hidden items-center justify-end gap-2 md:flex">
-        @if (needsSetup) {
+        @if (mounted && needsSetup) {
           <ThemeSelect />;
         }
         <AccountActions />
@@ -708,8 +733,9 @@ export function SiteHeader() @{
     }
   </header>;
 }
+export const SiteHeader = memo(SiteHeaderImpl);
 
-export function SiteFooter() @{
+function SiteFooterImpl() @{
   <footer className="border-t border-border bg-header py-10 text-[14px] text-muted-foreground">
     <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-4">
       <span className="font-[family-name:var(--font-display)] text-[13px] font-medium tracking-tight text-foreground/80">
@@ -727,3 +753,4 @@ export function SiteFooter() @{
     </div>
   </footer>;
 }
+export const SiteFooter = memo(SiteFooterImpl);

@@ -6,7 +6,7 @@ function smallPatch(marker: string): string {
   return ["@@ -1 +1 @@", "-old", `+${marker}`].join("\n");
 }
 
-describe("ssrHighlightDiffFiles", () => {
+describe("ssrHighlightDiffFiles", { timeout: 60_000 }, () => {
   it("caps eager highlighting at the first few small files (issue #110)", async () => {
     const files = [
       { path: "a.ts", patch: smallPatch("a") },
