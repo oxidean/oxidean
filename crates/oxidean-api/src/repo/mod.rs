@@ -25,8 +25,8 @@ pub(crate) mod units;
 pub use acl::{
     archived_error, can_read_as_owner, coalesce, effective_capability, ensure_not_archived,
     fg_all_covers_repo, is_private_visibility, login_slug_taken, lookup_repo_row_or_redirect,
-    meets, not_found, owner_ref_for_repo, resolve_owner_slug, resolve_repo_for_read,
-    AccessibleRepo, Capability, MemberBasePermission, OrgRole, OwnerRef,
+    meets, not_found, org_member_capability_sources, owner_ref_for_repo, resolve_owner_slug,
+    resolve_repo_for_read, AccessibleRepo, Capability, MemberBasePermission, OrgRole, OwnerRef,
 };
 pub use activity::{
     list as activity_list, record_branch_creation, record_branch_deletion, record_branch_rename,

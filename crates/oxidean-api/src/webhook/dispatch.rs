@@ -628,7 +628,15 @@ pub async fn notify_workflow_run(db: &Database, run_id: &str, action: &str, env_
         &sender,
         run.triggered_by.as_deref().unwrap_or(""),
     );
-    emit(db, &run.repository_id, "workflow_run", action, payload, env_name).await;
+    emit(
+        db,
+        &run.repository_id,
+        "workflow_run",
+        action,
+        payload,
+        env_name,
+    )
+    .await;
 }
 
 /// Emit `registry_package` when a version is published on a package linked to

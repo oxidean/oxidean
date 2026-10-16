@@ -18,10 +18,7 @@ async fn lfs_store_oid_sharded_path_under_lfs_dir() {
         .expect("put");
     assert_eq!(written, payload.len() as u64);
     let path = store::shard_path(&lfs, &oid).unwrap();
-    assert_eq!(
-        path,
-        lfs.join(&oid[0..2]).join(&oid[2..4]).join(&oid)
-    );
+    assert_eq!(path, lfs.join(&oid[0..2]).join(&oid[2..4]).join(&oid));
     assert!(path.is_file());
     assert_eq!(std::fs::read(&path).unwrap(), payload);
 }
@@ -95,9 +92,7 @@ async fn lfs_gc_unreferenced_oid_removed() {
         .await
         .unwrap();
     // No links → unreferenced.
-    let stats = run_lfs_gc(&db, &lfs, Duration::ZERO)
-        .await
-        .expect("gc");
+    let stats = run_lfs_gc(&db, &lfs, Duration::ZERO).await.expect("gc");
     assert_eq!(stats.deleted, 1, "should delete unreferenced");
     assert!(!store::object_exists(&lfs, &oid).unwrap());
     assert!(db.find_lfs_object(&oid).await.unwrap().is_none());

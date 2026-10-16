@@ -158,6 +158,20 @@ jobs:
       - name: registry completeness
         run: bun scripts/versioning/cli.ts check
 
+  # Formatting gates — rustfmt for the workspace; oxfmt (ts/tsx/tsrx/css) +
+  # prettier (astro) for apps/web run inside web-octane's format:check step.
+  rust-fmt:
+    name: rust-fmt
+    needs: [makefile-lint]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: cargo fmt --check
+        run: make rust-fmt-check
+
   # Single compile for the whole debug-profile Rust lane: workspace bins plus
   # a nextest archive feed api-rust shards, db-dialects, and the e2e/sync jobs —
   # none of them pay a second compile. Artifacts are same-run only (the
@@ -280,7 +294,7 @@ jobs:
         run: bun install --frozen-lockfile
       - name: web lint (oxlint type-aware + octane checks + route sync)
         run: make web-lint
-      - name: web format check (oxfmt)
+      - name: web format check (oxfmt + prettier)
         run: bun run --filter @oxidean/web format:check
       - name: vitest (api-client + web unit/integration)
         run: bun run test

@@ -1,10 +1,31 @@
 import { Menu as MenuPrimitive } from "@octanejs/base-ui/menu";
-import type { ComponentProps } from "octane";
+import { createContext, useContext, useState, type ComponentProps } from "octane";
 import { portalRoot } from "@/lib/portal-root";
 import { cn } from "@/lib/utils";
 
+/**
+ * True once this menu has been opened at least once. `keepMounted` keeps the
+ * Portal node itself stable (the DOM-race fix), but the floating internals
+ * inside — positioner, focus manager, composite list — still mounted eagerly
+ * at page load. Gating them on first open skips that work on pages whose
+ * menus are never used, while open/close cost stays identical afterwards.
+ */
+const DropdownMenuOpened = createContext(false);
+
 export function DropdownMenu(props: ComponentProps<typeof MenuPrimitive.Root>) @{
-  <MenuPrimitive.Root data-slot="dropdown-menu" {...props} />;
+  const [hasOpened, setHasOpened] = useState(Boolean(props.open ?? props.defaultOpen));
+  const onOpenChange = props.onOpenChange;
+
+  <DropdownMenuOpened value={hasOpened}>
+    <MenuPrimitive.Root
+      data-slot="dropdown-menu"
+      {...props}
+      onOpenChange={(open, details) => {
+        if (open) setHasOpened(true);
+        onOpenChange?.(open, details);
+      }}
+    />
+  </DropdownMenuOpened>;
 }
 
 export function DropdownMenuTrigger(props: ComponentProps<typeof MenuPrimitive.Trigger>) @{
@@ -23,23 +44,27 @@ export function DropdownMenuContent({
     ComponentProps<typeof MenuPrimitive.Positioner>,
     "align" | "alignOffset" | "side" | "sideOffset"
   >) @{
+  const hasOpened = useContext(DropdownMenuOpened);
+
   <MenuPrimitive.Portal keepMounted container={portalRoot()}>
-    <MenuPrimitive.Positioner
-      className="isolate z-50 outline-none"
-      align={align}
-      alignOffset={alignOffset}
-      side={side}
-      sideOffset={sideOffset}
-    >
-      <MenuPrimitive.Popup
-        data-slot="dropdown-menu-content"
-        className={cn(
-          "z-50 min-w-40 overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-lg outline-none",
-          className,
-        )}
-        {...props}
-      />
-    </MenuPrimitive.Positioner>
+    @if (hasOpened) {
+      <MenuPrimitive.Positioner
+        className="isolate z-50 outline-none"
+        align={align}
+        alignOffset={alignOffset}
+        side={side}
+        sideOffset={sideOffset}
+      >
+        <MenuPrimitive.Popup
+          data-slot="dropdown-menu-content"
+          className={cn(
+            "z-50 min-w-40 overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-lg outline-none",
+            className,
+          )}
+          {...props}
+        />
+      </MenuPrimitive.Positioner>;
+    }
   </MenuPrimitive.Portal>;
 }
 

@@ -67,7 +67,10 @@ pub async fn run_git_http_backend(req: CgiRequest<'_>) -> Result<Response, Strin
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .env_clear()
-        .env("PATH", std::env::var("PATH").unwrap_or_else(|_| "/usr/bin:/bin".into()))
+        .env(
+            "PATH",
+            std::env::var("PATH").unwrap_or_else(|_| "/usr/bin:/bin".into()),
+        )
         .env("GIT_PROJECT_ROOT", req.repos_dir)
         .env("GIT_HTTP_EXPORT_ALL", "1")
         .env("PATH_INFO", req.path_info)

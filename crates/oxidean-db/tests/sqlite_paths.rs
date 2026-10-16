@@ -11,7 +11,10 @@ async fn sqlite_creates_parent_dir() {
 
     let result = Database::connect(&url).await;
     assert!(result.is_ok(), "connect failed: {:?}", result.err());
-    assert!(db_path.exists(), "sqlite file was not created at {db_path:?}");
+    assert!(
+        db_path.exists(),
+        "sqlite file was not created at {db_path:?}"
+    );
 }
 
 #[tokio::test]

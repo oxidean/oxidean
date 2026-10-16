@@ -46,12 +46,9 @@ async fn fanout_inner(
         }
     }
     // Independent inserts run concurrently; each still soft-fails alone.
-    let ids: Vec<String> = targets
-        .iter()
-        .map(|_| Uuid::new_v4().to_string())
-        .collect();
-    let results = futures_util::future::join_all(targets.iter().zip(&ids).map(
-        |(recipient_id, id)| {
+    let ids: Vec<String> = targets.iter().map(|_| Uuid::new_v4().to_string()).collect();
+    let results =
+        futures_util::future::join_all(targets.iter().zip(&ids).map(|(recipient_id, id)| {
             db.insert_notification(
                 id,
                 recipient_id,
@@ -63,9 +60,8 @@ async fn fanout_inner(
                 &subject.title,
                 subject.subject_ref.as_deref(),
             )
-        },
-    ))
-    .await;
+        }))
+        .await;
     for (recipient_id, result) in targets.iter().zip(results) {
         if let Err(e) = result {
             tracing::warn!(
@@ -226,7 +222,8 @@ async fn fanout_suppress_ignored_inner(
             fanout(
                 db,
                 actor_id,
-                list.into_iter().filter(|uid| !ignored.contains(uid.as_str())),
+                list.into_iter()
+                    .filter(|uid| !ignored.contains(uid.as_str())),
                 reason,
                 subject,
             )

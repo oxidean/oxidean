@@ -51,10 +51,8 @@ pub async fn mirror_hook(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("")
         .to_ascii_lowercase();
-    let is_push = event.is_empty()
-        || event.contains("push")
-        || event == "tag_push"
-        || event == "create";
+    let is_push =
+        event.is_empty() || event.contains("push") || event == "tag_push" || event == "create";
 
     if is_push {
         let db = state.db.clone();
@@ -154,10 +152,7 @@ mod tests {
         let body = br#"{"ref":"refs/heads/main"}"#;
         let sig = format!("sha256={}", hmac_sha256_hex(secret.as_bytes(), body));
         let mut headers = HeaderMap::new();
-        headers.insert(
-            "x-hub-signature-256",
-            HeaderValue::from_str(&sig).unwrap(),
-        );
+        headers.insert("x-hub-signature-256", HeaderValue::from_str(&sig).unwrap());
         assert!(verify_hook_auth(&headers, body, secret));
     }
 

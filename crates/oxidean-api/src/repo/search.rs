@@ -67,7 +67,12 @@ async fn search_code(
         .as_deref()
         .map(languages_named)
         .unwrap_or_default();
-    if parsed.language.as_deref().is_some_and(|v| !v.trim().is_empty()) && langs.is_empty() {
+    if parsed
+        .language
+        .as_deref()
+        .is_some_and(|v| !v.trim().is_empty())
+        && langs.is_empty()
+    {
         return Ok((Vec::new(), false));
     }
 
@@ -120,9 +125,8 @@ async fn search_code(
         filtered.push(h);
     }
 
-    let truncated = result.truncated
-        || file_truncated
-        || filtered.len() as u32 > offset.saturating_add(limit);
+    let truncated =
+        result.truncated || file_truncated || filtered.len() as u32 > offset.saturating_add(limit);
     let page: Vec<RepoSearchHit> = filtered
         .into_iter()
         .skip(offset as usize)
@@ -203,9 +207,9 @@ async fn browse_code_paths(
         _ => accessible.row.default_branch.clone(),
     };
     let timeout = std::time::Duration::from_millis(ctx.search_timeout_ms.max(1));
-    let list_fut =
-        ctx.git
-            .ls_tree_sized_blobs(&path, &ref_name, language_stats::MAX_BLOBS);
+    let list_fut = ctx
+        .git
+        .ls_tree_sized_blobs(&path, &ref_name, language_stats::MAX_BLOBS);
     let blobs = match tokio::time::timeout(timeout, list_fut).await {
         Ok(Ok(b)) => b,
         Ok(Err(e)) => return Err(map_git_err(e)),
@@ -322,7 +326,10 @@ async fn resolve_author_id(ctx: &RpcCtx, login: Option<&str>) -> Result<Option<S
         Ok(None) => Ok(None),
         Err(e) => {
             tracing::error!("search author resolve: {e}");
-            Err(AppError::new("repo.internal", "repository operation failed"))
+            Err(AppError::new(
+                "repo.internal",
+                "repository operation failed",
+            ))
         }
     }
 }

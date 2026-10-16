@@ -75,7 +75,15 @@ async fn dialect_webhooks_migrate_schema_presence() {
     assert_eq!(delivery.status, "pending");
 
     let attempt = db
-        .insert_webhook_delivery_attempt("att-1", &delivery.id, 1, Some(200), None, Some(12), Some("ok"))
+        .insert_webhook_delivery_attempt(
+            "att-1",
+            &delivery.id,
+            1,
+            Some(200),
+            None,
+            Some(12),
+            Some("ok"),
+        )
         .await
         .expect("attempt");
     assert_eq!(attempt.http_status, Some(200));

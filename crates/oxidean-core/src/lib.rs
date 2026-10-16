@@ -22,6 +22,7 @@ pub mod repo_types;
 pub mod scope_catalog;
 pub mod search_types;
 pub mod ssh_key_types;
+pub mod two_factor_types;
 pub mod webhook_types;
 
 pub use action_types::*;
@@ -46,6 +47,7 @@ pub use repo_types::*;
 pub use scope_catalog::*;
 pub use search_types::*;
 pub use ssh_key_types::*;
+pub use two_factor_types::*;
 pub use webhook_types::*;
 
 use serde::{Deserialize, Serialize};
@@ -75,12 +77,7 @@ pub const ECHO_MAX_BYTES: usize = 8192;
 /// Parses `major.minor.patch` (optional `-prerelease`/`+build` ignored for
 /// compatibility purposes). Returns `(major, minor)`.
 fn semver_major_minor(version: &str) -> Option<(u64, u64)> {
-    let core = version
-        .trim()
-        .split('+')
-        .next()?
-        .split('-')
-        .next()?;
+    let core = version.trim().split('+').next()?.split('-').next()?;
     let mut parts = core.split('.');
     let major = parts.next()?.parse::<u64>().ok()?;
     let minor = parts.next()?.parse::<u64>().ok()?;

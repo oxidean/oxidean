@@ -30,6 +30,22 @@ async function chooseFromOpenDialog(name: RegExp | string) {
 }
 
 describe("TemplatePicker DOM races (issue #18)", () => {
+  // Issue #143: the overlay + its card list must not mount while the picker is
+  // closed (they're ~hundreds of nodes inside a closed <details>).
+  it("mounts the overlay and cards lazily on first open", async () => {
+    renderWithQueryClient(TemplatePickerSiblingHarness);
+
+    expect(screen.queryByTestId("repo-stack-overlay")).not.toBeInTheDocument();
+    expect(document.querySelector("[data-template-id]")).toBeNull();
+
+    openStackPicker();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("repo-stack-overlay")).toBeInTheDocument();
+    });
+    expect(document.querySelector("[data-template-id]")).toBeTruthy();
+  }, 20_000);
+
   it("selecting a stack with sibling gitignore update does not throw insertBefore", async () => {
     const tracker = trackDomErrors();
     try {

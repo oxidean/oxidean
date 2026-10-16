@@ -10,6 +10,8 @@ pub struct OrganizationRow {
     pub slug: String,
     pub display_name: String,
     pub member_base_permission: String,
+    /// Members must have a 2FA factor enrolled to sign in (#130).
+    pub require_two_factor: bool,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -17,6 +19,14 @@ pub struct OrganizationRow {
 macro_rules! map_org {
     ($row:expr) => {{
         let row = $row;
+        let require_two_factor = row
+            .try_get::<bool, _>("require_two_factor")
+            .or_else(|_| {
+                row.try_get::<i64, _>("require_two_factor")
+                    .map(|v| v != 0)
+                    .or_else(|_| row.try_get::<i8, _>("require_two_factor").map(|v| v != 0))
+            })
+            .unwrap_or(false);
         OrganizationRow {
             id: row.try_get("id").map_err(|e| format!("org row: {e}"))?,
             slug: row.try_get("slug").map_err(|e| format!("org row: {e}"))?,
@@ -26,6 +36,7 @@ macro_rules! map_org {
             member_base_permission: row
                 .try_get("member_base_permission")
                 .map_err(|e| format!("org row: {e}"))?,
+            require_two_factor,
             created_at: row
                 .try_get("created_at")
                 .map_err(|e| format!("org row: {e}"))?,
@@ -36,17 +47,20 @@ macro_rules! map_org {
     }};
 }
 
-const ORG_SELECT_PG: &str = "SELECT id, slug, display_name, member_base_permission,
+const ORG_SELECT_PG: &str =
+    "SELECT id, slug, display_name, member_base_permission, require_two_factor,
        to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS created_at,
        to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS updated_at
 FROM organizations";
 
-const ORG_SELECT_MYSQL: &str = "SELECT id, slug, display_name, member_base_permission,
+const ORG_SELECT_MYSQL: &str =
+    "SELECT id, slug, display_name, member_base_permission, require_two_factor,
        DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at,
        DATE_FORMAT(updated_at, '%Y-%m-%dT%H:%i:%sZ') AS updated_at
 FROM organizations";
 
-const ORG_SELECT_SQLITE: &str = "SELECT id, slug, display_name, member_base_permission,
+const ORG_SELECT_SQLITE: &str =
+    "SELECT id, slug, display_name, member_base_permission, require_two_factor,
        strftime('%Y-%m-%dT%H:%M:%SZ', created_at) AS created_at,
        strftime('%Y-%m-%dT%H:%M:%SZ', updated_at) AS updated_at
 FROM organizations";
@@ -121,22 +135,26 @@ pub async fn update_settings(
     id: &str,
     member_base_permission: Option<&str>,
     display_name: Option<&str>,
+    require_two_factor: Option<bool>,
 ) -> Result<OrganizationRow, String> {
     let current = find_by_id(pool, id)
         .await?
         .ok_or_else(|| "organization not found".to_string())?;
     let base = member_base_permission.unwrap_or(current.member_base_permission.as_str());
     let name = display_name.unwrap_or(current.display_name.as_str());
+    let require_2fa = require_two_factor.unwrap_or(current.require_two_factor);
     match pool {
         DbPool::Postgres(p) => {
             sqlx::query(
                 "UPDATE organizations
-SET member_base_permission = $2, display_name = $3, updated_at = now()
+SET member_base_permission = $2, display_name = $3, require_two_factor = $4,
+    updated_at = now()
 WHERE id = $1",
             )
             .bind(id)
             .bind(base)
             .bind(name)
+            .bind(require_2fa)
             .execute(p)
             .await
             .map_err(|e| format!("update organization failed: {e}"))?;
@@ -144,11 +162,13 @@ WHERE id = $1",
         DbPool::MySql(p) => {
             sqlx::query(
                 "UPDATE organizations
-SET member_base_permission = ?, display_name = ?, updated_at = NOW()
+SET member_base_permission = ?, display_name = ?, require_two_factor = ?,
+    updated_at = NOW()
 WHERE id = ?",
             )
             .bind(base)
             .bind(name)
+            .bind(require_2fa)
             .bind(id)
             .execute(p)
             .await
@@ -157,13 +177,14 @@ WHERE id = ?",
         DbPool::Sqlite(p) => {
             sqlx::query(
                 "UPDATE organizations
-SET member_base_permission = ?2, display_name = ?3,
+SET member_base_permission = ?2, display_name = ?3, require_two_factor = ?4,
     updated_at = strftime('%Y-%m-%d %H:%M:%S','now')
 WHERE id = ?1",
             )
             .bind(id)
             .bind(base)
             .bind(name)
+            .bind(require_2fa)
             .execute(p)
             .await
             .map_err(|e| format!("update organization failed: {e}"))?;

@@ -138,13 +138,8 @@ pub(crate) async fn mint_classic_pat(
     // Display fingerprint: brand prefix + first 8 hex of secret (not the hash).
     let token_prefix = format!("{CLASSIC_PAT_PREFIX}{}", &secret_hex[..8]);
 
-    let scopes_json = serde_json::to_string(
-        &scopes
-            .iter()
-            .map(|s| s.as_str())
-            .collect::<Vec<_>>(),
-    )
-    .map_err(|e| AppError::new("pat.internal", format!("scopes serialize: {e}")))?;
+    let scopes_json = serde_json::to_string(&scopes.iter().map(|s| s.as_str()).collect::<Vec<_>>())
+        .map_err(|e| AppError::new("pat.internal", format!("scopes serialize: {e}")))?;
 
     let id = Uuid::new_v4().to_string();
     db.create_pat(

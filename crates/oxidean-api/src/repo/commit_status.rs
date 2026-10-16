@@ -24,8 +24,8 @@ fn db_err(e: String) -> AppError {
 }
 
 fn row_public(row: &CommitStatusRow) -> Result<CommitStatusPublic, AppError> {
-    let state = CommitStatusState::parse(&row.state)
-        .map_err(|e| AppError::new("repo.internal", e))?;
+    let state =
+        CommitStatusState::parse(&row.state).map_err(|e| AppError::new("repo.internal", e))?;
     Ok(CommitStatusPublic {
         id: row.id.clone(),
         repo_id: row.repo_id.clone(),

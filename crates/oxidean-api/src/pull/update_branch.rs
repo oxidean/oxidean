@@ -25,7 +25,11 @@ async fn resolve_head(
     row: &PullRow,
 ) -> Result<(RepositoryRow, String, Option<Capability>), AppError> {
     if row.head_repo_id == base.row.id {
-        return Ok((base.row.clone(), base.owner_username.clone(), base.capability));
+        return Ok((
+            base.row.clone(),
+            base.owner_username.clone(),
+            base.capability,
+        ));
     }
     let head = ctx
         .db
@@ -65,7 +69,11 @@ async fn live_tips(
             })?
     } else {
         ctx.git
-            .fetch_ref_from(head_bare, base_bare, &format!("refs/heads/{}", row.base_ref))
+            .fetch_ref_from(
+                head_bare,
+                base_bare,
+                &format!("refs/heads/{}", row.base_ref),
+            )
             .await
             .map_err(|_| {
                 AppError::new(
@@ -96,7 +104,11 @@ pub async fn branch_status(
     let row = load_pull_in_repo(ctx, &accessible.row.id, req.number).await?;
     let (head_repo, head_slug, head_cap) = resolve_head(ctx, &accessible, &row).await?;
 
-    let base_bare = bare_repo_path(&ctx.repos_dir, &accessible.owner_username, &accessible.row.name)?;
+    let base_bare = bare_repo_path(
+        &ctx.repos_dir,
+        &accessible.owner_username,
+        &accessible.row.name,
+    )?;
     let head_bare = bare_repo_path(&ctx.repos_dir, &head_slug, &head_repo.name)?;
     let (base_sha, head_sha) = live_tips(ctx, &row, &base_bare, &head_bare).await?;
 
@@ -107,7 +119,10 @@ pub async fn branch_status(
             .ahead_behind(&head_bare, &head_sha, &base_sha)
             .await
             .map_err(|e| {
-                AppError::new("pull.update_failed", format!("divergence check failed: {e}"))
+                AppError::new(
+                    "pull.update_failed",
+                    format!("divergence check failed: {e}"),
+                )
             })?
     };
     let can_update =
@@ -152,8 +167,11 @@ pub async fn update_branch(
         return Err(not_found());
     }
 
-    let base_bare: PathBuf =
-        bare_repo_path(&ctx.repos_dir, &accessible.owner_username, &accessible.row.name)?;
+    let base_bare: PathBuf = bare_repo_path(
+        &ctx.repos_dir,
+        &accessible.owner_username,
+        &accessible.row.name,
+    )?;
     let head_bare: PathBuf = bare_repo_path(&ctx.repos_dir, &head_slug, &head_repo.name)?;
     let (base_sha, head_sha) = live_tips(ctx, &row, &base_bare, &head_bare).await?;
 

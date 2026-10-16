@@ -57,11 +57,7 @@ async fn require_session_user(ctx: &RpcCtx) -> Result<oxidean_db::UserRow, AppEr
 /// `email.list` — all addresses for the signed-in user.
 pub async fn list(ctx: &RpcCtx) -> Result<Vec<EmailListItem>, AppError> {
     let user = require_session_user(ctx).await?;
-    let mut rows = ctx
-        .db
-        .list_user_emails(&user.id)
-        .await
-        .map_err(db_err)?;
+    let mut rows = ctx.db.list_user_emails(&user.id).await.map_err(db_err)?;
     // Heal accounts where no row is marked primary (e.g. interrupted setPrimary).
     if !rows.is_empty() && !rows.iter().any(|r| r.is_primary) {
         let heal_id = rows
@@ -70,11 +66,7 @@ pub async fn list(ctx: &RpcCtx) -> Result<Vec<EmailListItem>, AppError> {
             .map(|r| r.id.clone())
             .unwrap_or_else(|| rows[0].id.clone());
         if let Ok(primary) = ctx.db.set_user_email_primary(&heal_id).await {
-            rows = ctx
-                .db
-                .list_user_emails(&user.id)
-                .await
-                .map_err(db_err)?;
+            rows = ctx.db.list_user_emails(&user.id).await.map_err(db_err)?;
             let _ = primary;
         }
     }
@@ -88,11 +80,7 @@ pub async fn add(ctx: &RpcCtx, input: serde_json::Value) -> Result<EmailListItem
         .map_err(|e| AppError::new("rpc.bad_input", format!("invalid email.add input: {e}")))?;
     let email = normalize_email(&req.email)?;
 
-    let count = ctx
-        .db
-        .count_user_emails(&user.id)
-        .await
-        .map_err(db_err)?;
+    let count = ctx.db.count_user_emails(&user.id).await.map_err(db_err)?;
     if count >= MAX_EMAILS_PER_USER {
         return Err(AppError::new(
             "email.max_emails",

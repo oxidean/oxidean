@@ -1,9 +1,14 @@
 import { navigate } from "astro:transitions/client";
 import { queryOptions, useQuery } from "@octanejs/tanstack-query";
 import { useForm, useStore } from "@octanejs/tanstack-form";
-import type { OrgMineEntry, RepoCreateDefaults, RepoVisibility } from "@oxidean/api-client";
+import type {
+  OrgMineEntry,
+  RepoCreateDefaults,
+  RepoTemplateOption,
+  RepoVisibility,
+} from "@oxidean/api-client";
 import { Check, ChevronDown, Globe, Lock } from "@octanejs/lucide";
-import { useState } from "octane";
+import { useCallback, useState } from "octane";
 import { AuthErrorBanner, AuthShell } from "@/components/auth-shell";
 import { TemplatePicker } from "@/components/repo/template-picker";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -25,6 +30,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { apiClient } from "@/lib/api-client";
 import { usePageRedirect } from "@/lib/nav.tsrx";
+import { useMounted } from "@/lib/use-mounted.tsrx";
 import { authSessionQueryOptions } from "@/lib/session-queries";
 import { listLicensePickerOptions } from "@/lib/spdx-licenses";
 import { fetchRepoCreateDefaults } from "@/lib/ssr-auth";
@@ -36,6 +42,7 @@ import { AppLink } from "@/components/ui/app-link";
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
 const NAME_HELPER = "Letters, digits, hyphen, underscore, and period. Reserved names are rejected.";
 const DUPLICATE_NAME_ERROR = "A repository with this name already exists. Choose a different name.";
+const NO_TEMPLATE_OPTIONS: RepoTemplateOption[] = [];
 
 /** Repo-create defaults — soft (null on failure), verified users only. */
 function repoCreateDefaultsQueryOptions(enabled: boolean) {
@@ -92,11 +99,16 @@ function NewContent() @{
   const verified = user?.email_verified === true;
   const defaultsQ = useQuery(repoCreateDefaultsQueryOptions(verified));
   const orgsQ = useQuery(newOwnerOrgsQueryOptions(verified));
-  const showWall = !user || !verified;
+  // Prerender always emits the wall; a warm auth.me cache (persisted chrome
+  // resolves it before this island hydrates) would otherwise render the form
+  // against wall DOM and roll back the whole island. Stay on the SSR branch
+  // until mounted, then flip in one clean commit.
+  const mounted = useMounted();
+  const showWall = !mounted || !user || !verified;
   const ownerOrgs = orgsQ.data ?? [];
-
-  const stacks = defaultsQ.data?.stacks ?? [];
-  const gitignores = defaultsQ.data?.gitignores ?? [];
+  // `?? []` would mint a fresh array every render and break memoized children.
+  const stacks = defaultsQ.data?.stacks ?? NO_TEMPLATE_OPTIONS;
+  const gitignores = defaultsQ.data?.gitignores ?? NO_TEMPLATE_OPTIONS;
   const licenseOptions = listLicensePickerOptions();
 
   const initialVisibility: RepoVisibility =
@@ -166,6 +178,25 @@ function NewContent() @{
   const values = useStore(form.store, (s) => s.values);
   const selectedOwner = values.ownerSlug || selfUsername;
   const ownerDisplay = ownerOptionLabel(selectedOwner, selfUsername, ownerOrgs);
+
+  // Stable handlers — TemplatePicker forwards them to memo(TemplateCard).
+  const onStackChange = useCallback(
+    (id: string) => {
+      form.setFieldValue("stackId", id);
+      if (id === "none") {
+        form.setFieldValue("gitignoreId", "none");
+        return;
+      }
+      const pack = stacks.find((s) => s.id === id);
+      form.setFieldValue("gitignoreId", pack?.default_gitignore ?? "none");
+    },
+    [form, stacks],
+  );
+  const onLicenseChange = useCallback((id: string) => form.setFieldValue("licenseId", id), [form]);
+  const onGitignoreChange = useCallback(
+    (id: string) => form.setFieldValue("gitignoreId", id),
+    [form],
+  );
 
   @if (showWall) {
     <AuthShell title="Verify your email" support="Verify your email before creating a repository.">
@@ -343,15 +374,7 @@ function NewContent() @{
             options={stacks}
             noneLabel="None"
             noneDescription="No template files — empty repo with Quick setup."
-            onChange={(id) => {
-              form.setFieldValue("stackId", id);
-              if (id === "none") {
-                form.setFieldValue("gitignoreId", "none");
-                return;
-              }
-              const pack = stacks.find((s) => s.id === id);
-              form.setFieldValue("gitignoreId", pack?.default_gitignore ?? "none");
-            }}
+            onChange={onStackChange}
           />
           <TemplatePicker
             id="repo-license"
@@ -363,7 +386,7 @@ function NewContent() @{
             noneDescription="No LICENSE in the initial commit."
             browseGroups={["Popular"]}
             searchPlaceholder="Search SPDX licenses…"
-            onChange={(id) => form.setFieldValue("licenseId", id)}
+            onChange={onLicenseChange}
           />
           <TemplatePicker
             id="repo-gitignore"
@@ -373,7 +396,7 @@ function NewContent() @{
             options={gitignores}
             noneLabel="None"
             noneDescription="No .gitignore in the initial commit."
-            onChange={(id) => form.setFieldValue("gitignoreId", id)}
+            onChange={onGitignoreChange}
           />
         </div>
 

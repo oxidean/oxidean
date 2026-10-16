@@ -16,16 +16,14 @@ use oxidean_core::{
 };
 use oxidean_db::{ActionJobRow, ActionRunFilter, ActionRunRow, ActionRunnerRow};
 
+use crate::actions::discover_workflows;
 use crate::actions::dispatch::{bare_repo_path, enqueue_run};
 use crate::actions::logs::read_job_log;
 use crate::actions::secrets::{encrypt_secret, validate_secret_name};
 use crate::actions::tokens::mint_registration_token;
-use crate::actions::discover_workflows;
 use crate::auth::admin::require_admin as require_sys_admin;
 use crate::auth::gate::require_verified;
-use crate::repo::{
-    meets, not_found, resolve_repo_for_admin, resolve_repo_for_read, Capability,
-};
+use crate::repo::{meets, not_found, resolve_repo_for_admin, resolve_repo_for_read, Capability};
 use crate::rpc::RpcCtx;
 
 const RUNS_DEFAULT_PER_PAGE: u32 = 25;
@@ -75,10 +73,7 @@ async fn actors_for_runs(
     ctx: &RpcCtx,
     runs: &[ActionRunRow],
 ) -> Result<HashMap<String, RunActor>, AppError> {
-    let ids: Vec<String> = runs
-        .iter()
-        .filter_map(|r| r.triggered_by.clone())
-        .collect();
+    let ids: Vec<String> = runs.iter().filter_map(|r| r.triggered_by.clone()).collect();
     let mut out = HashMap::new();
     if ids.is_empty() {
         return Ok(out);
@@ -86,12 +81,7 @@ async fn actors_for_runs(
     let mut unique = ids;
     unique.sort();
     unique.dedup();
-    for u in ctx
-        .db
-        .find_users_by_ids(&unique)
-        .await
-        .map_err(db_err)?
-    {
+    for u in ctx.db.find_users_by_ids(&unique).await.map_err(db_err)? {
         let avatar_url = u
             .avatar_path
             .as_ref()
@@ -157,9 +147,7 @@ pub async fn list_runs(
     let offset = i64::from((page - 1) * per_page);
 
     // Optional GitHub-style filters (status/event/branch/workflow/actor/query).
-    let nonempty = |v: Option<String>| {
-        v.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
-    };
+    let nonempty = |v: Option<String>| v.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
     let branch = nonempty(req.branch).map(|b| {
         b.strip_prefix("refs/heads/")
             .map(str::to_string)
@@ -167,12 +155,7 @@ pub async fn list_runs(
     });
     let mut triggered_by = None;
     if let Some(actor) = nonempty(req.actor) {
-        match ctx
-            .db
-            .find_user_by_username(&actor)
-            .await
-            .map_err(db_err)?
-        {
+        match ctx.db.find_user_by_username(&actor).await.map_err(db_err)? {
             Some(u) => triggered_by = Some(u.id),
             // Unknown actor — no runs can match; skip the list query entirely.
             None => {
@@ -196,12 +179,7 @@ pub async fn list_runs(
     let (rows, total_count) = tokio::try_join!(
         async {
             ctx.db
-                .list_action_runs_for_repo(
-                    &accessible.row.id,
-                    &filter,
-                    i64::from(per_page),
-                    offset,
-                )
+                .list_action_runs_for_repo(&accessible.row.id, &filter, i64::from(per_page), offset)
                 .await
         },
         async {
@@ -486,8 +464,13 @@ pub async fn list_workflows(
         return Err(not_found());
     }
     let bare = bare_repo_path(&ctx.repos_dir, &req.owner, &req.name);
-    let treeish = resolve_treeish(ctx, &accessible.row.default_branch, req.git_ref.as_deref(), &bare)
-        .await?;
+    let treeish = resolve_treeish(
+        ctx,
+        &accessible.row.default_branch,
+        req.git_ref.as_deref(),
+        &bare,
+    )
+    .await?;
     let discovered = discover_workflows(ctx.git.as_ref(), &bare, &treeish)
         .await
         .map_err(|e| {
@@ -512,7 +495,9 @@ pub async fn list_workflows(
                 message: e.message.clone(),
             })
             .collect(),
-        git_ref: req.git_ref.unwrap_or_else(|| accessible.row.default_branch.clone()),
+        git_ref: req
+            .git_ref
+            .unwrap_or_else(|| accessible.row.default_branch.clone()),
     })
 }
 
@@ -571,9 +556,11 @@ pub async fn dispatch_workflow(
     let wf = match wf {
         Some(w) => w,
         None => {
-            if let Some(fe) = discovered.errors.iter().find(|e| {
-                e.path == wanted || e.path.rsplit('/').next() == Some(wanted)
-            }) {
+            if let Some(fe) = discovered
+                .errors
+                .iter()
+                .find(|e| e.path == wanted || e.path.rsplit('/').next() == Some(wanted))
+            {
                 return Err(AppError::new(
                     "repo.actions.workflow_invalid",
                     format!("workflow is invalid: {}", fe.message),
@@ -638,13 +625,8 @@ pub async fn rerun_run(
         .await
         .map_err(db_err)?;
     // API-04: a requeued run is a new `workflow_run` `requested` delivery.
-    crate::webhook::dispatch::notify_workflow_run(
-        &ctx.db,
-        &req.run_id,
-        "requested",
-        &ctx.env_name,
-    )
-    .await;
+    crate::webhook::dispatch::notify_workflow_run(&ctx.db, &req.run_id, "requested", &ctx.env_name)
+        .await;
     run_mutation_response(ctx, &accessible.row.id, &req.run_id).await
 }
 
@@ -684,13 +666,8 @@ pub async fn cancel_run(
         }
     }
     // API-04: cancellation completes the run with conclusion `cancelled`.
-    crate::webhook::dispatch::notify_workflow_run(
-        &ctx.db,
-        &req.run_id,
-        "completed",
-        &ctx.env_name,
-    )
-    .await;
+    crate::webhook::dispatch::notify_workflow_run(&ctx.db, &req.run_id, "completed", &ctx.env_name)
+        .await;
     run_mutation_response(ctx, &accessible.row.id, &req.run_id).await
 }
 
@@ -698,7 +675,14 @@ async fn run_mutation_target(
     ctx: &RpcCtx,
     input: serde_json::Value,
     proc: &str,
-) -> Result<(ActionRunMutationRequest, crate::repo::AccessibleRepo, ActionRunRow), AppError> {
+) -> Result<
+    (
+        ActionRunMutationRequest,
+        crate::repo::AccessibleRepo,
+        ActionRunRow,
+    ),
+    AppError,
+> {
     let _ = require_verified(ctx).await?;
     let req: ActionRunMutationRequest = serde_json::from_value(input).map_err(|e| {
         AppError::new(
@@ -752,13 +736,10 @@ async fn resolve_treeish(
         .filter(|r| !r.is_empty())
         .map(str::to_string)
         .unwrap_or_else(|| format!("refs/heads/{default_branch}"));
-    ctx.git
-        .rev_parse(bare, &candidate)
-        .await
-        .map_err(|e| {
-            tracing::warn!(error = %e, ref_ = %candidate, "ref resolution failed");
-            AppError::new("repo.actions.ref_not_found", "ref not found")
-        })
+    ctx.git.rev_parse(bare, &candidate).await.map_err(|e| {
+        tracing::warn!(error = %e, ref_ = %candidate, "ref resolution failed");
+        AppError::new("repo.actions.ref_not_found", "ref not found")
+    })
 }
 
 /// Pretty ref for run rows: `main` for branch names, raw value otherwise.

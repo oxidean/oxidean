@@ -41,7 +41,8 @@ impl PendingAuthStore {
     pub fn take(&self, state: &str) -> Option<PendingAuth> {
         let mut map = self.inner.lock().expect("pending auth lock");
         Self::evict_expired_locked(&mut map);
-        map.remove(state).filter(|p| p.created_at.elapsed() < PENDING_TTL)
+        map.remove(state)
+            .filter(|p| p.created_at.elapsed() < PENDING_TTL)
     }
 
     fn evict_expired_locked(map: &mut HashMap<String, PendingAuth>) {

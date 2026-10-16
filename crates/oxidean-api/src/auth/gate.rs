@@ -22,10 +22,7 @@ fn db_err(e: String) -> AppError {
 /// Unauthenticated → `auth.unauthenticated`; unverified → `auth.email_unverified`.
 pub async fn require_verified(ctx: &RpcCtx) -> Result<UserRow, AppError> {
     let Some(session) = &ctx.session else {
-        return Err(AppError::new(
-            "auth.unauthenticated",
-            "not authenticated",
-        ));
+        return Err(AppError::new("auth.unauthenticated", "not authenticated"));
     };
     let user = ctx
         .db

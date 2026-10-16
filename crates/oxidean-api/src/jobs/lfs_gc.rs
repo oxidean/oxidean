@@ -120,7 +120,10 @@ pub async fn wipe_lfs_dir_contents(lfs_dir: &Path) -> Result<(), String> {
             Err(_) => path.clone(),
         };
         if !canon.starts_with(&root) {
-            return Err(format!("refusing to delete outside lfs_dir: {}", path.display()));
+            return Err(format!(
+                "refusing to delete outside lfs_dir: {}",
+                path.display()
+            ));
         }
         let ft = entry
             .file_type()

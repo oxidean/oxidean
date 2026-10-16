@@ -54,8 +54,17 @@ mod tests {
         let mysql = migration_files("mysql");
         let sqlite = migration_files("sqlite");
 
-        assert!(!postgres.is_empty(), "postgres migrations must not be empty");
-        assert_eq!(postgres, mysql, "postgres and mysql migration sets diverged");
-        assert_eq!(postgres, sqlite, "postgres and sqlite migration sets diverged");
+        assert!(
+            !postgres.is_empty(),
+            "postgres migrations must not be empty"
+        );
+        assert_eq!(
+            postgres, mysql,
+            "postgres and mysql migration sets diverged"
+        );
+        assert_eq!(
+            postgres, sqlite,
+            "postgres and sqlite migration sets diverged"
+        );
     }
 }

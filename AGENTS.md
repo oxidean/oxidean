@@ -69,7 +69,7 @@ make up-with-dev-auth        # preferred local stack: Compose + Mailpit/OIDC/stu
 make up / make smoke         # Compose + health
 make rpc-sync-check          # CI gate for client drift
 make web-lint                # oxlint type-aware (apps/web; @tsrx/oxc) + octane DOM-race heuristic
-make web-format-check        # oxfmt --check (apps/web)
+make web-format-check        # oxfmt + prettier --check (apps/web)
 make dead-code-check         # knip (.ts/.tsrx/.astro) + cargo machete + clippy -D dead_code
 make test-web-browser           # Vitest Chromium component DOM-race tests
 make browser-coverage-check-pr  # high-risk UI Chromium gate (change-aware vs origin/main)

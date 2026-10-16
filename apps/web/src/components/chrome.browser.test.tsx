@@ -160,7 +160,13 @@ describe("header pending account cluster", () => {
       });
 
       await waitForSelector("[aria-label='Account menu']");
+
+      // Issue #143: the keepMounted portal node stays, but the floating
+      // internals (positioner/popup/focus manager) mount only on first open.
+      expect(document.querySelector("[data-slot='dropdown-menu-content']")).toBeNull();
+
       await clickAriaLabel("Account menu");
+      await waitForSelector("[data-slot='dropdown-menu-content']");
 
       // Menu navigation items are LinkItem anchors — role stays menuitem, but
       // the element carries a real href (ClientRouter morph + middle-click).

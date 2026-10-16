@@ -61,11 +61,11 @@ async fn dialect_notification_subject_kinds_migration_present() {
     );
     for path in [sqlite, postgres, mysql] {
         let sql = std::fs::read_to_string(path).unwrap_or_default();
-        assert!(!sql.is_empty(), "subject-kinds migration must exist at {path}");
         assert!(
-            sql.contains("subject_ref"),
-            "{path} must add subject_ref"
+            !sql.is_empty(),
+            "subject-kinds migration must exist at {path}"
         );
+        assert!(sql.contains("subject_ref"), "{path} must add subject_ref");
         for kind in ["release", "workflow_run", "push"] {
             assert!(
                 sql.contains(kind),
@@ -81,7 +81,9 @@ async fn dialect_notification_subject_kinds_migration_present() {
     let dir = tempfile::tempdir().expect("tempdir");
     let url = format!("sqlite:{}", dir.path().join("kinds.db").display());
     let db = Database::connect(&url).await.expect("connect");
-    db.migrate().await.expect("migrate 0044_notification_subject_kinds");
+    db.migrate()
+        .await
+        .expect("migrate 0044_notification_subject_kinds");
 
     // New subject kinds + subject_ref must actually persist post-migration.
     let user = db
@@ -148,15 +150,7 @@ async fn dialect_notification_subject_kinds_migration_present() {
     // Rejected kinds still rejected by the rebuilt CHECK.
     let bad = db
         .insert_notification(
-            "n-bogus",
-            &user.id,
-            &user.id,
-            "x",
-            "bogus",
-            &repo.id,
-            0,
-            "t",
-            None,
+            "n-bogus", &user.id, &user.id, "x", "bogus", &repo.id, 0, "t", None,
         )
         .await;
     assert!(bad.is_err(), "unknown subject_kind must violate CHECK");

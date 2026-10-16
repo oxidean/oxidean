@@ -68,9 +68,7 @@ pub fn resolve_public_origin() -> String {
             let cfg_host = origin_hostname(&cfg);
             let rw_host = origin_hostname(&railway);
             match (cfg_host, rw_host) {
-                (Some(ch), Some(rh))
-                    if is_railway_app_host(ch) && !ch.eq_ignore_ascii_case(rh) =>
-                {
+                (Some(ch), Some(rh)) if is_railway_app_host(ch) && !ch.eq_ignore_ascii_case(rh) => {
                     railway
                 }
                 _ => cfg,
@@ -176,10 +174,7 @@ mod tests {
         clear_origin_env();
         unsafe {
             std::env::set_var("OXIDEAN_PUBLIC_ORIGIN", "https://app.oxidean.dev");
-            std::env::set_var(
-                "RAILWAY_PUBLIC_DOMAIN",
-                "gateway-production.up.railway.app",
-            );
+            std::env::set_var("RAILWAY_PUBLIC_DOMAIN", "gateway-production.up.railway.app");
         }
         assert_eq!(resolve_public_origin(), "https://app.oxidean.dev");
         clear_origin_env();

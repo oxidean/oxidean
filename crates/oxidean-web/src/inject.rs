@@ -192,7 +192,12 @@ pub fn inject(
     // Route <title> — shells ship a generic "Oxidean" title for dynamic pages.
     if let Some(t) = title {
         if let (Some(a), Some(b)) = (out.find("<title>"), out.find("</title>")) {
-            out = format!("{}<title>{}</title>{}", &out[..a], t, &out[b + "</title>".len()..]);
+            out = format!(
+                "{}<title>{}</title>{}",
+                &out[..a],
+                t,
+                &out[b + "</title>".len()..]
+            );
         }
     }
 
@@ -306,10 +311,7 @@ mod tests {
     #[test]
     fn theme_chain() {
         assert_eq!(resolve_theme(None, None), "light");
-        assert_eq!(
-            resolve_theme(Some("oxidean-theme=dark"), None),
-            "dark"
-        );
+        assert_eq!(resolve_theme(Some("oxidean-theme=dark"), None), "dark");
         // resolved cookie beats CH header
         assert_eq!(
             resolve_theme(Some("oxidean-color-scheme=light"), Some("dark")),
@@ -317,7 +319,10 @@ mod tests {
         );
         assert_eq!(resolve_theme(None, Some("dark")), "dark");
         assert_eq!(
-            resolve_theme(Some("oxidean-theme=system; oxidean-color-scheme=dark"), None),
+            resolve_theme(
+                Some("oxidean-theme=system; oxidean-color-scheme=dark"),
+                None
+            ),
             "dark"
         );
     }
@@ -378,7 +383,14 @@ mod tests {
         // Unknown (API unreachable/unconfigured) → presence fallback.
         let out = inject(html, &h, None, &meta, SessionSignal::Unknown, None);
         assert!(out.contains("data-oxidean-session=\"1\""));
-        let out = inject(html, &HeaderMap::new(), None, &meta, SessionSignal::Unknown, None);
+        let out = inject(
+            html,
+            &HeaderMap::new(),
+            None,
+            &meta,
+            SessionSignal::Unknown,
+            None,
+        );
         assert!(!out.contains("data-oxidean-session"));
     }
 
@@ -406,22 +418,23 @@ mod tests {
 
         // Open registration per the companion cookie → stamped.
         let mut open = HeaderMap::new();
-        open.insert(
-            "cookie",
-            HeaderValue::from_static("oxidean_allow_signup=1"),
-        );
+        open.insert("cookie", HeaderValue::from_static("oxidean_allow_signup=1"));
         let out = inject(html, &open, None, &meta, SessionSignal::Absent, None);
         assert!(out.contains("data-oxidean-signup=\"1\""));
 
         // Closed (`=0`) or never-resolved (absent) → no stamp.
         let mut closed = HeaderMap::new();
-        closed.insert(
-            "cookie",
-            HeaderValue::from_static("oxidean_allow_signup=0"),
-        );
+        closed.insert("cookie", HeaderValue::from_static("oxidean_allow_signup=0"));
         let out = inject(html, &closed, None, &meta, SessionSignal::Absent, None);
         assert!(!out.contains("data-oxidean-signup"));
-        let out = inject(html, &HeaderMap::new(), None, &meta, SessionSignal::Absent, None);
+        let out = inject(
+            html,
+            &HeaderMap::new(),
+            None,
+            &meta,
+            SessionSignal::Absent,
+            None,
+        );
         assert!(!out.contains("data-oxidean-signup"));
     }
 
@@ -526,7 +539,14 @@ mod tests {
             public_origin: Some("http://localhost".into()),
             ..Default::default()
         };
-        let out = inject(html, &HeaderMap::new(), None, &meta, SessionSignal::Absent, None);
+        let out = inject(
+            html,
+            &HeaderMap::new(),
+            None,
+            &meta,
+            SessionSignal::Absent,
+            None,
+        );
         assert!(out.contains("oxidean:public-origin\" content=\"http://localhost\""));
         assert!(out.contains("<body>http://localhost/api/mcp</body>"));
     }

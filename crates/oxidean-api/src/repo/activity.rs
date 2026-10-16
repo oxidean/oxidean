@@ -134,12 +134,11 @@ pub async fn record_ref_updates(
             false
         };
         let push_type = classify_push_type(before, after, forced);
-        let (commits_count, commit_message) =
-            if let (Some(g), Some(path)) = (git.as_ref(), bare) {
-                enrich_commits(g.as_ref(), path, before, after).await
-            } else {
-                (0, None)
-            };
+        let (commits_count, commit_message) = if let (Some(g), Some(path)) = (git.as_ref(), bare) {
+            enrich_commits(g.as_ref(), path, before, after).await
+        } else {
+            (0, None)
+        };
         let id = Uuid::new_v4().to_string();
         if let Err(e) = db
             .insert_repo_activity(
@@ -188,7 +187,11 @@ pub async fn record_branch_creation(
             "branch_creation",
             &ref_name,
             ZERO_OID,
-            if after_oid.is_empty() { ZERO_OID } else { after_oid },
+            if after_oid.is_empty() {
+                ZERO_OID
+            } else {
+                after_oid
+            },
             0,
             None,
             None,
@@ -251,7 +254,11 @@ pub async fn record_branch_rename(
         format!("refs/heads/{to}")
     };
     let from_short = short_ref(from);
-    let after = if tip_oid.is_empty() { ZERO_OID } else { tip_oid };
+    let after = if tip_oid.is_empty() {
+        ZERO_OID
+    } else {
+        tip_oid
+    };
     let id = Uuid::new_v4().to_string();
     if let Err(e) = db
         .insert_repo_activity(
@@ -375,7 +382,10 @@ fn row_to_item(row: oxidean_db::RepoActivityRow) -> RepoActivityItem {
 }
 
 /// `repo.activity.list` — chronological push feed behind Read ACL.
-pub async fn list(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoActivityListResponse, AppError> {
+pub async fn list(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<RepoActivityListResponse, AppError> {
     let req: RepoActivityListRequest = serde_json::from_value(input).map_err(|e| {
         AppError::new(
             "rpc.bad_input",

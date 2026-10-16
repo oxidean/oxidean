@@ -1,10 +1,11 @@
+import { memo } from "octane";
 import { cn } from "@/lib/utils";
 
 /**
  * Layout placeholder — Base UI does not ship Skeleton yet; this matches
  * Oxidean chrome (muted surface + pulse) and reserves space to avoid jumps.
  */
-export function Skeleton({
+function SkeletonImpl({
   className,
   ...rest
 }: {
@@ -18,3 +19,4 @@ export function Skeleton({
     {...rest}
   />;
 }
+export const Skeleton = memo(SkeletonImpl);

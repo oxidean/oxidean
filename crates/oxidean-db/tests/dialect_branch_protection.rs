@@ -88,9 +88,7 @@ async fn dialect_branch_protection_migrate_schema_presence() {
 
     let dir = tempfile::tempdir().expect("tempdir");
     let url = format!("sqlite:{}", dir.path().join("bp.db").display());
-    let db = oxidean_db::Database::connect(&url)
-        .await
-        .expect("connect");
+    let db = oxidean_db::Database::connect(&url).await.expect("connect");
     db.migrate()
         .await
         .expect("migrate must apply branch protection schema");

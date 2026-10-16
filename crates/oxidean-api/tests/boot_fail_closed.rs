@@ -11,7 +11,10 @@ fn d14_fail_closed_exits_on_admin_seed_err() {
     );
 
     // Use the call site (not the earlier D-04 comment that also names maybe_seed_admin).
-    let after_call = src.split(call).nth(1).expect("seed::maybe_seed_admin call site");
+    let after_call = src
+        .split(call)
+        .nth(1)
+        .expect("seed::maybe_seed_admin call site");
     let seed_err_block = after_call
         .split("let bind")
         .next()

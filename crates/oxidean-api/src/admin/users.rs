@@ -61,13 +61,15 @@ async fn wipe_owner_dir(repos_dir: &std::path::Path, owner_slug: &str) -> Result
     if !tokio::fs::try_exists(&target).await.unwrap_or(false) {
         return Ok(());
     }
-    delete_under_repos_dir(repos_dir, &target).await.map_err(|e| {
-        tracing::error!(error = %e, owner = %owner_slug, "wipe owner repos dir failed");
-        AppError::new(
-            "admin.delete_repos_failed",
-            "Failed to delete repository files for this account.",
-        )
-    })
+    delete_under_repos_dir(repos_dir, &target)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, owner = %owner_slug, "wipe owner repos dir failed");
+            AppError::new(
+                "admin.delete_repos_failed",
+                "Failed to delete repository files for this account.",
+            )
+        })
 }
 
 /// `admin.users.list` — paginated searchable user list.
@@ -244,7 +246,11 @@ pub async fn get_activity(
     })?;
     let target = load_target(ctx, &req.user_id).await?;
     let limit = req.limit.unwrap_or(100).clamp(1, 200);
-    let source = req.source.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let source = req
+        .source
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
     let event_type = req
         .event_type
         .as_deref()

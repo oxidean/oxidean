@@ -64,13 +64,7 @@ async fn factory_reset_wipes_orgs_members_invites_collaborators_and_repos() {
 
     let user_repo = db
         .insert_repository(
-            "r-user-1",
-            &owner.id,
-            "user",
-            "personal",
-            "private",
-            "",
-            "main",
+            "r-user-1", &owner.id, "user", "personal", "private", "", "main",
         )
         .await
         .expect("user repo");
@@ -90,8 +84,16 @@ async fn factory_reset_wipes_orgs_members_invites_collaborators_and_repos() {
         .unwrap()
         .is_some());
     assert!(db.find_org_invite_by_id("inv-1").await.unwrap().is_some());
-    assert!(db.find_repository_by_id(&user_repo.id).await.unwrap().is_some());
-    assert!(db.find_repository_by_id(&org_repo.id).await.unwrap().is_some());
+    assert!(db
+        .find_repository_by_id(&user_repo.id)
+        .await
+        .unwrap()
+        .is_some());
+    assert!(db
+        .find_repository_by_id(&org_repo.id)
+        .await
+        .unwrap()
+        .is_some());
     assert!(db
         .find_repo_collaborator(&user_repo.id, &collab.id)
         .await

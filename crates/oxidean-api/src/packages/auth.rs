@@ -33,13 +33,9 @@ fn sha256_hex(bytes: &[u8]) -> String {
 
 mod base64_lite {
     pub fn decode(input: &str) -> Option<Vec<u8>> {
-        const TABLE: &[u8] =
-            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        const TABLE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
         let mut out = Vec::new();
-        let bytes: Vec<u8> = input
-            .bytes()
-            .filter(|b| !b.is_ascii_whitespace())
-            .collect();
+        let bytes: Vec<u8> = input.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
         let mut buf = 0u32;
         let mut bits = 0u32;
         for &b in &bytes {
@@ -105,10 +101,7 @@ pub async fn authenticate_registry(
         let hash = sha256_hex(token.as_bytes());
         // Revoked-inclusive lookup — the explicit `revoked_at` check below is
         // what rejects them (kept visible rather than hidden in the query).
-        let Some(pat) = db
-            .find_pat_by_token_hash_including_revoked(&hash)
-            .await?
-        else {
+        let Some(pat) = db.find_pat_by_token_hash_including_revoked(&hash).await? else {
             return Ok(None);
         };
         pat

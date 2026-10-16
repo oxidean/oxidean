@@ -65,9 +65,7 @@ async fn main() {
             }
             tracing::info!("database migrations applied");
         } else {
-            tracing::info!(
-                "OXIDEAN_AUTO_MIGRATE=false; run `make db-migrate` to apply migrations"
-            );
+            tracing::info!("OXIDEAN_AUTO_MIGRATE=false; run `make db-migrate` to apply migrations");
         }
 
         // Optional first-admin seed (T-04-13). Phase 6 owns the interactive wizard —

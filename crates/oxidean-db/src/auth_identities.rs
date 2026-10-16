@@ -17,7 +17,9 @@ macro_rules! map_identity {
     ($row:expr) => {{
         let row = $row;
         AuthIdentityRow {
-            id: row.try_get("id").map_err(|e| format!("auth identity row: {e}"))?,
+            id: row
+                .try_get("id")
+                .map_err(|e| format!("auth identity row: {e}"))?,
             user_id: row
                 .try_get("user_id")
                 .map_err(|e| format!("auth identity row: {e}"))?,

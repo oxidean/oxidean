@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 use std::time::Duration;
 
 use oxidean_core::{
-    wire_compatible, LEGACY_WIRE_VERSION, RPC_PROTOCOL_VERSION, RpcResponse, WIRE_VERSION,
+    wire_compatible, RpcResponse, LEGACY_WIRE_VERSION, RPC_PROTOCOL_VERSION, WIRE_VERSION,
 };
 use serde::Deserialize;
 use serde_json::json;

@@ -259,7 +259,9 @@ impl ContentsPerm {
 }
 
 /// Fine-grained permission level shared by every family — `read` | `write`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum FgPermLevel {
     Read,

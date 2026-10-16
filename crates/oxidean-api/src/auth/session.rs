@@ -90,7 +90,8 @@ impl SessionService {
             SESSION_IDLE
         };
         let now = Utc::now();
-        let expires_at = now + chrono::Duration::from_std(ttl).map_err(|e| AuthError::Store(e.to_string()))?;
+        let expires_at =
+            now + chrono::Duration::from_std(ttl).map_err(|e| AuthError::Store(e.to_string()))?;
         let expires_at_str = expires_at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
 
         let mut token_bytes = [0u8; TOKEN_BYTES];
@@ -167,9 +168,15 @@ impl SessionService {
                 .map_err(|e| AuthError::Store(e.to_string()))?
         };
         let new_expires_str = new_expires.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-        db.touch_session(&row.id, &new_expires_str, &last_seen, ip_address, user_agent)
-            .await
-            .map_err(AuthError::from_db)?;
+        db.touch_session(
+            &row.id,
+            &new_expires_str,
+            &last_seen,
+            ip_address,
+            user_agent,
+        )
+        .await
+        .map_err(AuthError::from_db)?;
 
         Ok(Some(ResolvedSession {
             session_id: row.id,
@@ -196,9 +203,7 @@ impl SessionService {
             return Ok(false);
         };
         let expires_at = parse_rfc3339(&row.expires_at).map_err(AuthError::Store)?;
-        Ok(expires_at > Utc::now()
-            && row.joined_user_id.is_some()
-            && row.user_banned_at.is_none())
+        Ok(expires_at > Utc::now() && row.joined_user_id.is_some() && row.user_banned_at.is_none())
     }
 
     /// Revoke a single session (this device / logout).
@@ -342,10 +347,7 @@ mod tests {
             cookie.max_age().unwrap() >= CookieDuration::seconds(SESSION_IDLE.as_secs() as i64 - 1)
         );
 
-        let resolved = svc
-            .resolve(&db, &token, None, None)
-            .await
-            .expect("resolve");
+        let resolved = svc.resolve(&db, &token, None, None).await.expect("resolve");
         let session = resolved.expect("some");
         assert_eq!(session.user_id, user_id);
         assert!(!session.remember_me);

@@ -3,8 +3,8 @@ use std::sync::{Arc, Mutex, RwLock};
 
 use cookie::Cookie;
 use oxidean_core::{
-    AppError, EchoRequest, EchoResponse, HealthResponse, ManifestCapabilities, ManifestResponse,
-    wire_compatible, RpcRequest, RpcResponse, ECHO_MAX_BYTES, LEGACY_WIRE_VERSION,
+    wire_compatible, AppError, EchoRequest, EchoResponse, HealthResponse, ManifestCapabilities,
+    ManifestResponse, RpcRequest, RpcResponse, ECHO_MAX_BYTES, LEGACY_WIRE_VERSION,
     RPC_PROTOCOL_VERSION, WIRE_VERSION,
 };
 use oxidean_db::Database;
@@ -16,6 +16,7 @@ use crate::auth::bootstrap;
 use crate::auth::local;
 use crate::auth::profile;
 use crate::auth::session::{ResolvedSession, SessionService};
+use crate::auth::two_factor;
 use crate::auth::verify_reset;
 use crate::email::EmailSender;
 use crate::emails;
@@ -42,6 +43,9 @@ pub const VERSION_HEADER: &str = "Oxidean-RPC-Version";
 #[derive(Debug)]
 pub enum CookieChange {
     Set(Cookie<'static>),
+    /// Set only the `oxidean_2fa` challenge cookie (no session) — opened by a
+    /// successful primary-auth step that still needs a second factor (#130).
+    SetTwoFactor(Cookie<'static>),
     Clear,
 }
 
@@ -96,6 +100,12 @@ pub struct RpcCtx {
     /// Request client metadata (IP / user-agent) — sessions + audit events.
     pub client: ClientMeta,
     pub set_cookie: Option<CookieChange>,
+    /// Pending second-factor challenge state (#130): shared store + the
+    /// `oxidean_2fa` cookie id parsed at the HTTP edge.
+    pub two_factor: crate::auth::two_factor::TwoFactorCtx,
+    /// `auth.login_begin` rate limiter — bounds pre-password challenge churn
+    /// per client IP and per identifier (#130).
+    pub login_begin_limiter: Arc<Mutex<crate::auth::login_rate::LoginBeginLimiter>>,
     /// Per-session `user.lookup` rate limiter (T-10-03).
     pub lookup_limiter: Arc<Mutex<LookupLimiter>>,
     pub search_timeout_ms: u64,
@@ -144,6 +154,7 @@ pub const PROCEDURES: &[&str] = &[
     "system.manifest",
     "auth.signup",
     "auth.login",
+    "auth.login_begin",
     "auth.logout",
     "auth.logout_all",
     "auth.me",
@@ -157,6 +168,19 @@ pub const PROCEDURES: &[&str] = &[
     "auth.request_password_reset",
     "auth.reset_password",
     "auth.dev.privileged_ping",
+    "auth.two_factor.status",
+    "auth.two_factor.totp_begin",
+    "auth.two_factor.totp_confirm",
+    "auth.two_factor.totp_disable",
+    "auth.two_factor.recovery_regenerate",
+    "auth.two_factor.complete",
+    "auth.two_factor.passkey_begin",
+    "auth.two_factor.passkey_complete",
+    "auth.two_factor.passkey_register_begin",
+    "auth.two_factor.passkey_register_complete",
+    "auth.two_factor.passkey_update",
+    "auth.two_factor.passkey_delete",
+    "auth.two_factor.email_send",
     "user.get_profile",
     "user.getPublicProfile",
     "user.update_profile",
@@ -193,6 +217,7 @@ pub const PROCEDURES: &[&str] = &[
     "admin.users.getAccess",
     "admin.users.listSessions",
     "admin.users.getActivity",
+    "admin.users.resetTwoFactor",
     "admin.invites.create",
     "admin.invites.createLink",
     "admin.invites.list",
@@ -429,7 +454,10 @@ pub fn manifest_response() -> ManifestResponse {
         protocol_version: RPC_PROTOCOL_VERSION,
         wire_version: WIRE_VERSION.into(),
         server_version: crate::version::version().into(),
-        procedures: PROCEDURES.iter().map(|p| ((*p).to_string(), true)).collect(),
+        procedures: PROCEDURES
+            .iter()
+            .map(|p| ((*p).to_string(), true))
+            .collect(),
         capabilities: ManifestCapabilities {
             // All mounted unconditionally in app.rs: /api/mcp, /api/v1,
             // /oauth/*, /cli/*.
@@ -523,6 +551,10 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Ok(user) => RpcResponse::ok(user),
             Err(e) => RpcResponse::err(e),
         },
+        "auth.login_begin" => match local::login_begin(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
         "auth.logout" => match local::logout(ctx).await {
             Ok(()) => RpcResponse::ok(serde_json::json!({ "ok": true })),
             Err(e) => RpcResponse::err(e),
@@ -588,6 +620,68 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
                 }
             }
         }
+        "auth.two_factor.status" => match two_factor::status(ctx).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "auth.two_factor.totp_begin" => match two_factor::totp_begin(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "auth.two_factor.totp_confirm" => match two_factor::totp_confirm(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "auth.two_factor.totp_disable" => match two_factor::totp_disable(ctx).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "auth.two_factor.recovery_regenerate" => match two_factor::recovery_regenerate(ctx).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "auth.two_factor.complete" => match two_factor::complete(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "auth.two_factor.passkey_begin" => match two_factor::passkey_begin(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "auth.two_factor.passkey_complete" => {
+            match two_factor::passkey_complete(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
+        "auth.two_factor.passkey_register_begin" => {
+            match two_factor::passkey_register_begin(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
+        "auth.two_factor.passkey_register_complete" => {
+            match two_factor::passkey_register_complete(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
+        "auth.two_factor.passkey_update" => {
+            match two_factor::passkey_update(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
+        "auth.two_factor.passkey_delete" => {
+            match two_factor::passkey_delete(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
+        "auth.two_factor.email_send" => match two_factor::email_send(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
         "user.get_profile" => match profile::get_profile(ctx).await {
             Ok(user) => RpcResponse::ok(user),
             Err(e) => RpcResponse::err(e),
@@ -735,6 +829,10 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Err(e) => RpcResponse::err(e),
         },
         "admin.users.getActivity" => match admin::users_get_activity(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "admin.users.resetTwoFactor" => match two_factor::admin_reset(ctx, req.input).await {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },

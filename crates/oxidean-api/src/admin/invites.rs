@@ -45,10 +45,7 @@ fn generate_magic() -> String {
 }
 
 fn rate_limited() -> AppError {
-    AppError::new(
-        "auth.rate_limited",
-        "too many emails; try again later",
-    )
+    AppError::new("auth.rate_limited", "too many emails; try again later")
 }
 
 fn invite_public(row: &InstanceInviteRow) -> InstanceInvitePublic {
@@ -105,12 +102,11 @@ pub(crate) fn normalize_expiry(raw: Option<&str>) -> Result<Option<String>, AppE
         .map(|d| d.with_timezone(&Utc))
         .or_else(|_| {
             // Accept `YYYY-MM-DD` (date-only UI input) as end-of-day UTC.
-            chrono::NaiveDate::parse_from_str(raw, "%Y-%m-%d")
-                .map(|d| {
-                    d.and_hms_opt(23, 59, 59)
-                        .unwrap_or_else(|| d.and_hms_opt(0, 0, 0).unwrap_or_default())
-                        .and_utc()
-                })
+            chrono::NaiveDate::parse_from_str(raw, "%Y-%m-%d").map(|d| {
+                d.and_hms_opt(23, 59, 59)
+                    .unwrap_or_else(|| d.and_hms_opt(0, 0, 0).unwrap_or_default())
+                    .and_utc()
+            })
         })
         .map_err(|_| {
             AppError::new(
@@ -200,7 +196,14 @@ async fn create_one_email_invite(
 
     let row = match ctx
         .db
-        .insert_instance_invite(&id, Some(&email), &token_hash, Some(&expires_at), caller_id, Some(1))
+        .insert_instance_invite(
+            &id,
+            Some(&email),
+            &token_hash,
+            Some(&expires_at),
+            caller_id,
+            Some(1),
+        )
         .await
     {
         Ok(r) => r,
@@ -279,9 +282,7 @@ pub async fn create(
         Some((&caller.id, &caller.username)),
         "admin.invites_create",
         None,
-        Some(
-            serde_json::json!({ "requested": req.emails.len(), "created": issued }).to_string(),
-        ),
+        Some(serde_json::json!({ "requested": req.emails.len(), "created": issued }).to_string()),
     )
     .await;
 

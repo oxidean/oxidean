@@ -134,10 +134,7 @@ pub async fn poll(instance: &str, device_code: &str, interval: i64) -> Result<Po
             "application/x-www-form-urlencoded",
         )
         .body(form_encode(&[
-            (
-                "grant_type",
-                "urn:ietf:params:oauth:grant-type:device_code",
-            ),
+            ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
             ("device_code", device_code),
         ]))
         .send()
@@ -159,9 +156,7 @@ pub async fn poll(instance: &str, device_code: &str, interval: i64) -> Result<Po
         Some("access_denied") => Poll::Failed("sign-in was denied".into()),
         Some("expired_token") => Poll::Failed("device code expired — try again".into()),
         Some(other) => Poll::Failed(format!("device poll failed: {other}")),
-        None if status.is_success() => {
-            Poll::Failed("device poll returned no token".into())
-        }
+        None if status.is_success() => Poll::Failed("device poll returned no token".into()),
         None => Poll::Failed(format!("device poll failed ({status})")),
     })
 }
@@ -191,15 +186,13 @@ pub async fn run_grant(instance: &str, scopes: &str) -> Result<String, CliError>
         eprintln!("Waiting for approval…");
     }
 
-    let deadline = std::time::Instant::now()
-        + std::time::Duration::from_secs(grant.expires_in.max(60) as u64);
+    let deadline =
+        std::time::Instant::now() + std::time::Duration::from_secs(grant.expires_in.max(60) as u64);
     let mut interval = grant.interval.max(1) as u64;
     loop {
         if std::time::Instant::now() >= deadline {
             spinner.finish();
-            return Err(CliError::Auth(
-                "device code expired before approval".into(),
-            ));
+            return Err(CliError::Auth("device code expired before approval".into()));
         }
         tokio::time::sleep(std::time::Duration::from_secs(interval)).await;
         match poll(instance, &grant.device_code, interval as i64).await? {

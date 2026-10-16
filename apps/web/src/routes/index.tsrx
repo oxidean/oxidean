@@ -13,6 +13,7 @@ import {
   authSessionQueryOptions,
   repoListMineQueryOptions,
 } from "@/lib/session-queries";
+import { useMounted } from "@/lib/use-mounted.tsrx";
 import { cn } from "@/lib/utils";
 
 /** D-20 home tree priority after shared root access gate. */
@@ -100,12 +101,22 @@ function HomeContent() {
   // Cookie is only readable after mount — reading it for reveal gating feeds an
   // effect arg, not SSR markup, so it's safe client-side.
   const sessionHint = typeof document !== "undefined" ? hasSessionPresenceHint() : false;
-  useScrollReveal(tree === "marketing" || (tree == null && !sessionHint), tree);
+  // Prerender always emits the pending pair; a warm auth.me cache (persisted
+  // chrome resolves it before this island hydrates) would otherwise paint the
+  // resolved tree over that DOM and roll the island back. renderedTree pins the
+  // SSR branch until mounted and feeds the reveal effect's epoch so its
+  // observer rebinds when the pending pair swaps for the resolved tree.
+  const mounted = useMounted();
+  const renderedTree = mounted ? tree : null;
+  useScrollReveal(
+    renderedTree === "marketing" || (renderedTree == null && !sessionHint),
+    renderedTree,
+  );
 
   // Pending: SSR cannot see the session, so emit both candidates — the
   // `data-oxidean-session` stamp on <html> (set per-request by the web tier)
   // selects via CSS which one paints before `auth.me` resolves.
-  if (tree == null) {
+  if (renderedTree == null) {
     return (
       <>
         <div data-anon-landing>
@@ -118,7 +129,7 @@ function HomeContent() {
     );
   }
 
-  if (tree === "signed-in" && user) {
+  if (renderedTree === "signed-in" && user) {
     // `repo.listMine` only starts once `auth.me` resolves signed-in
     // (`enabled: signedIn`), so pending here means "loading" — keep the
     // skeleton up instead of flashing the empty state (issue #120).

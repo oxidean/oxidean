@@ -424,16 +424,22 @@ async fn release_asset_pat_scope_gate() {
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
-    let state = AppState::new(db.clone(), Arc::new(LogSink) as Arc<dyn EmailSender>, "development")
-        .with_repos_dir(repos.clone())
-        .with_release_assets_dir(assets.clone())
-        .with_git(Arc::new(CliGitBackend::new()));
+    let state = AppState::new(
+        db.clone(),
+        Arc::new(LogSink) as Arc<dyn EmailSender>,
+        "development",
+    )
+    .with_repos_dir(repos.clone())
+    .with_release_assets_dir(assets.clone())
+    .with_git(Arc::new(CliGitBackend::new()));
     let cors = build_cors("development", None).expect("cors");
     let app = router_with_state(state, cors);
     let (cookie, login_v) = signup_and_login(&app, "pa1@ex.com", "powner").await;
     let user_id = login_v["data"]["id"].as_str().unwrap().to_string();
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    db.set_email_verified_at(&user_id, &now).await.expect("verify");
+    db.set_email_verified_at(&user_id, &now)
+        .await
+        .expect("verify");
     setup_repo_with_tag(&app, &db, &repos, &cookie, "powner", "hello", "v1.0.0").await;
     let created = rpc_json(
         &app,

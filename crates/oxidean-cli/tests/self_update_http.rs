@@ -63,15 +63,9 @@ async fn self_update_replaces_when_sha_differs_same_version() {
     let exe = dir.path().join("ox");
     fs::write(&exe, b"old-local-ox-bytes").unwrap();
 
-    let out = self_update::run_with_exe(
-        &global(&server.uri()),
-        &runtime(),
-        &exe,
-        true,
-        true,
-    )
-    .await
-    .expect("self-update should succeed");
+    let out = self_update::run_with_exe(&global(&server.uri()), &runtime(), &exe, true, true)
+        .await
+        .expect("self-update should succeed");
 
     assert_eq!(fs::read(&exe).unwrap(), new_bytes.as_slice());
     match out {
@@ -120,15 +114,9 @@ async fn self_update_skips_when_version_and_sha_match() {
     let exe = dir.path().join("ox");
     fs::write(&exe, local_bytes).unwrap();
 
-    let out = self_update::run_with_exe(
-        &global(&server.uri()),
-        &runtime(),
-        &exe,
-        true,
-        true,
-    )
-    .await
-    .expect("self-update should report up to date");
+    let out = self_update::run_with_exe(&global(&server.uri()), &runtime(), &exe, true, true)
+        .await
+        .expect("self-update should report up to date");
 
     assert_eq!(fs::read(&exe).unwrap(), local_bytes);
     match out {

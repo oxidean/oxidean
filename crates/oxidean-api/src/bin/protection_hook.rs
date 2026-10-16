@@ -66,13 +66,7 @@ async fn main() -> ExitCode {
     };
 
     match check_ref_update(
-        &db,
-        &repos_dir,
-        &git_dir,
-        &git_ref,
-        &old_sha,
-        &new_sha,
-        capability,
+        &db, &repos_dir, &git_dir, &git_ref, &old_sha, &new_sha, capability,
     )
     .await
     {

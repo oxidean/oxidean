@@ -32,7 +32,9 @@ impl OrgRole {
 
 /// Default Member permission on org private repos (D-ORG-02b).
 /// Serialized lowercase: `none` | `read` | `write`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum MemberBasePermission {
     #[default]
@@ -122,6 +124,9 @@ pub struct OrgPublic {
     pub slug: String,
     pub display_name: String,
     pub member_base_permission: MemberBasePermission,
+    /// Members must enroll a 2FA factor to use the instance (#130).
+    #[serde(default)]
+    pub require_two_factor: bool,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -148,6 +153,9 @@ pub struct OrgUpdateSettingsRequest {
     pub member_base_permission: Option<MemberBasePermission>,
     #[serde(default)]
     pub display_name: Option<String>,
+    /// Set/clear the org's "members must have 2FA" policy (#130).
+    #[serde(default)]
+    pub require_two_factor: Option<bool>,
 }
 
 /// One org in `org.listMine` — includes caller's membership role.

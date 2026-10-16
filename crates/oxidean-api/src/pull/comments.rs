@@ -2,9 +2,8 @@
 
 use oxidean_core::{
     AppError, CommentHistoryResponse, CommentRevisionPublic, CreatePullCommentRequest,
-    DeletePullCommentResponse, PullCommentPublic, PullCommentRefRequest,
-    PullCommentsListResponse, PullRefRequest, ResolvePullCommentRequest,
-    UpdatePullCommentRequest,
+    DeletePullCommentResponse, PullCommentPublic, PullCommentRefRequest, PullCommentsListResponse,
+    PullRefRequest, ResolvePullCommentRequest, UpdatePullCommentRequest,
 };
 use oxidean_db::{PullCommentRow, PullRow};
 use uuid::Uuid;
@@ -89,7 +88,15 @@ async fn emit_comment_webhook(
         );
         ("issue_comment", payload)
     };
-    dispatch::emit(&ctx.db, &accessible.row.id, event, action, payload, &ctx.env_name).await;
+    dispatch::emit(
+        &ctx.db,
+        &accessible.row.id,
+        event,
+        action,
+        payload,
+        &ctx.env_name,
+    )
+    .await;
 }
 
 async fn load_comment_usernames(
@@ -242,13 +249,29 @@ pub async fn comments_create(
     let mentions = notify::resolve_mention_user_ids(&ctx.db, &body).await;
     // One watch-level lookup serves both fanouts below.
     let watch = ctx.db.list_repo_watch_levels(&subject.repo_id).await;
-    notify::fanout_activity_with_watch(&ctx.db, &user.id, participants.clone(), "pr_comment", &subject, &watch).await;
+    notify::fanout_activity_with_watch(
+        &ctx.db,
+        &user.id,
+        participants.clone(),
+        "pr_comment",
+        &subject,
+        &watch,
+    )
+    .await;
     let participant_set: std::collections::HashSet<_> = participants.into_iter().collect();
     let mention_only: Vec<_> = mentions
         .into_iter()
         .filter(|m| !participant_set.contains(m))
         .collect();
-    notify::fanout_suppress_ignored_with_watch(&ctx.db, &user.id, mention_only, "pr_mention", &subject, &watch).await;
+    notify::fanout_suppress_ignored_with_watch(
+        &ctx.db,
+        &user.id,
+        mention_only,
+        "pr_mention",
+        &subject,
+        &watch,
+    )
+    .await;
     emit_comment_webhook(
         ctx,
         &accessible,

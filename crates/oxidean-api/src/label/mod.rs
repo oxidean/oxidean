@@ -3,8 +3,8 @@
 use std::collections::HashSet;
 
 use oxidean_core::{
-    AppError, CreateLabelRequest, DeleteLabelRequest, LabelPublic, LabelScope,
-    LabelsListResponse, ListLabelsForRepoRequest, OrgRole, OrgSlugRequest, UpdateLabelRequest,
+    AppError, CreateLabelRequest, DeleteLabelRequest, LabelPublic, LabelScope, LabelsListResponse,
+    ListLabelsForRepoRequest, OrgRole, OrgSlugRequest, UpdateLabelRequest,
 };
 use oxidean_db::LabelRow;
 use uuid::Uuid;
@@ -24,7 +24,10 @@ fn db_err(e: String) -> AppError {
             "no database configured for this instance",
         )
     } else if e.contains("UNIQUE") || e.contains("unique") || e.contains("Duplicate") {
-        AppError::new("rpc.bad_input", "a label with this name already exists in this scope")
+        AppError::new(
+            "rpc.bad_input",
+            "a label with this name already exists in this scope",
+        )
     } else {
         tracing::error!("label db error: {e}");
         AppError::new("label.internal", "label operation failed")
@@ -95,7 +98,10 @@ fn is_org_admin(role: OrgRole) -> bool {
     matches!(role, OrgRole::Owner | OrgRole::Admin)
 }
 
-async fn require_org_admin(ctx: &RpcCtx, slug: &str) -> Result<oxidean_db::OrganizationRow, AppError> {
+async fn require_org_admin(
+    ctx: &RpcCtx,
+    slug: &str,
+) -> Result<oxidean_db::OrganizationRow, AppError> {
     let caller = require_verified(ctx).await?;
     let org = load_org_by_slug(ctx, slug).await?;
     let role = require_org_role(ctx, &org.id, &caller.id).await?;

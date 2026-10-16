@@ -199,7 +199,12 @@ pub async fn upload_avatar(
     };
 
     let ct = content_type.unwrap_or_default();
-    let ct_base = ct.split(';').next().unwrap_or("").trim().to_ascii_lowercase();
+    let ct_base = ct
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
     if !ALLOWED_TYPES.iter().any(|t| *t == ct_base) {
         return err_response(
             StatusCode::BAD_REQUEST,

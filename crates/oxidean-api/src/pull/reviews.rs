@@ -27,8 +27,8 @@ async fn review_to_public(ctx: &RpcCtx, row: &PullReviewRow) -> Result<PullRevie
         .map_err(db_err)?
         .map(|u| u.username)
         .unwrap_or_else(|| "unknown".into());
-    let state = PullReviewState::parse(&row.state)
-        .map_err(|e| AppError::new("pull.internal", e))?;
+    let state =
+        PullReviewState::parse(&row.state).map_err(|e| AppError::new("pull.internal", e))?;
     Ok(PullReviewPublic {
         id: row.id.clone(),
         pull_id: row.pull_id.clone(),

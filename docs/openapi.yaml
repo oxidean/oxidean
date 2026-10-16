@@ -3072,6 +3072,14 @@ components:
           type: string
           description: Default branch name for new repositories (D-09); defaults to `main`.
           default: main
+        two_factor_enabled:
+          type: boolean
+          description: True when the account has at least one active 2FA factor (#130).
+          default: false
+        two_factor_enroll_required:
+          type: boolean
+          description: True when instance/org policy requires enrolling a factor (#130).
+          default: false
       required:
       - id
       - email
@@ -3361,6 +3369,10 @@ components:
           type: string
         member_base_permission:
           $ref: '#/components/schemas/MemberBasePermission'
+        require_two_factor:
+          type: boolean
+          description: Members must enroll a 2FA factor to use the instance (#130).
+          default: false
         created_at:
           type: string
         updated_at:

@@ -30,10 +30,7 @@ impl SmtpSender {
     pub fn build_message(&self, msg: &OutboundEmail) -> Result<Message, EmailError> {
         let from = parse_mailbox(&self.from)?;
         let to = parse_mailbox(&msg.to)?;
-        let mut builder = Message::builder()
-            .from(from)
-            .to(to)
-            .subject(&msg.subject);
+        let mut builder = Message::builder().from(from).to(to).subject(&msg.subject);
 
         if let Some(html) = &msg.html {
             builder = builder.header(ContentType::TEXT_HTML);

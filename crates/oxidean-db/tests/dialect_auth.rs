@@ -192,6 +192,8 @@ async fn migrate_0006_bootstrap_flags_columns() {
             settings.workos_client_id.as_deref(),
             true,
             &settings.default_visibility,
+            settings.require_two_factor_local,
+            settings.require_two_factor_external,
         )
         .await
         .expect("set allow_signup");
@@ -315,7 +317,11 @@ async fn user_emails_backfill_uniqueness_and_primary_sync() {
         .expect("set primary");
     assert!(promoted.is_primary);
     assert_eq!(promoted.email, "alice-work@example.com");
-    let mirrored = db.find_user_by_id(&a.id).await.expect("find").expect("user");
+    let mirrored = db
+        .find_user_by_id(&a.id)
+        .await
+        .expect("find")
+        .expect("user");
     assert_eq!(mirrored.email, "alice-work@example.com");
     assert!(mirrored.email_verified_at.is_some());
 }
