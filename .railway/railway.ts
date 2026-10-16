@@ -166,7 +166,13 @@ export default defineRailway((ctx) => {
     },
   });
 
-  const forge = group("Oxidean Cloud", [db, forgeData, api, web, runner, gateway]);
+  // Production does not run the actions-runner service — the promote/rollback
+  // set is api/web/gateway (scripts/railway-production-deploy.sh), so the
+  // runner (and its runner-data volume, which only mounts onto it) is omitted
+  // from the production manifest entirely.
+  const forge = ctx.isEnvironment("production")
+    ? group("Oxidean Cloud", [db, forgeData, api, web, gateway])
+    : group("Oxidean Cloud", [db, forgeData, api, web, runner, gateway]);
 
   return project("oxidean-cloud", {
     resources: [forge],

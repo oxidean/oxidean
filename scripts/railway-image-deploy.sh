@@ -372,6 +372,35 @@ main() {
   done
   [[ -n "$valid" ]] || die "--services matched nothing (known:${known})"
 
+  # Pre-flight: every bound service must already have an instance in the
+  # target environment. serviceInstanceUpdate stages no config on a missing
+  # instance and serviceInstanceDeployV2 fails "Service Instance not found" —
+  # without this check a first-time service (never forked into the env) is
+  # only discovered after earlier services have already rolled, leaving the
+  # environment half-deployed. Instances come from an environment fork or a
+  # one-time bootstrap in the dashboard — not from this script.
+  if [[ "$DRY_RUN" != "1" ]]; then
+    local inst_raw inst_got missing_names=""
+    inst_raw="$(
+      railway_gql '
+        query($id: String!) {
+          environment(id: $id) {
+            serviceInstances { edges { node { serviceId } } }
+          }
+        }
+      ' "$(jq -n --arg id "$env_id" '{id:$id}')"
+    )"
+    inst_got=" $(echo "$inst_raw" | jq -r '.data.environment.serviceInstances.edges[]?.node.serviceId' | tr '\n' ' ')"
+    while read -r name sid; do
+      [[ -z "$name" ]] && continue
+      [[ "$want" == *" $name "* ]] || continue
+      [[ "$inst_got" == *" $sid "* ]] || missing_names+="${name} "
+    done < <(service_pairs)
+    if [[ -n "$missing_names" ]]; then
+      die "no service instance in environment ${env_id} for:${missing_names}— bootstrap the service in this environment first (fork or Railway dashboard), then re-run"
+    fi
+  fi
+
   # Phase 1: pin every bound service's image source (config only — nothing
   # rolls yet). Phase 2 then triggers one deploy per service, so every pin
   # settles before any roll and a mid-loop failure never leaves a half-rolled

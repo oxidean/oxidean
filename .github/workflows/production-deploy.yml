@@ -1,5 +1,6 @@
-# Manual promote / rollback for Railway production (api, web, runner,
-# gateway). Deploys pin each service's source.image to the GHCR sha-<sha>
+# Manual promote / rollback for Railway production (api, web, gateway —
+# runner deploys to staging/preview/PR envs only). Deploys pin each
+# service's source.image to the GHCR sha-<sha>
 # tag set built by images.yml — Railway pulls images, never builds. Does not
 # Sync environments or mutate variables except the api CLI-feed pin; rollback
 # restores the previous canRollback deployment (and its image ref) per service.
@@ -64,7 +65,6 @@ jobs:
       RAILWAY_ENVIRONMENT_ID: b1c33c22-90ce-433b-99f6-864656512115
       RAILWAY_SERVICE_API_ID: 19bf0a47-2fdf-4130-b6b0-858de92cb858
       RAILWAY_SERVICE_WEB_ID: 26b7e1b6-6cfa-4c7e-942a-bed8e5ce12a2
-      RAILWAY_SERVICE_RUNNER_ID: 36f9b50a-738a-419a-9171-49f56c902e6a
       RAILWAY_SERVICE_GATEWAY_ID: 864fa81c-6e5d-4939-b33b-85eb435365ac
       OXIDEAN_PRODUCTION_HEALTH_URL: https://app.oxidean.dev/health
     steps:
@@ -146,6 +146,13 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         if: inputs.action == 'promote' && inputs.cut_release && !inputs.dry_run
+
+      # oxidean-api's build script prost-compiles proto/runner.proto — the
+      # stable cut runs `make rpc-gen`, which compiles the crate on this bare
+      # runner (the ci-base image has protoc baked; ubuntu-latest does not).
+      - name: Install protoc (oxidean-api build script)
+        if: inputs.action == 'promote' && inputs.cut_release && !inputs.dry_run
+        run: sudo apt-get install -y -qq protobuf-compiler
 
       - name: RELEASE_TOKEN is configured
         if: inputs.action == 'promote' && inputs.cut_release && !inputs.dry_run
