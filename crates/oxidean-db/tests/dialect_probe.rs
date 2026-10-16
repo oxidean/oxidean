@@ -76,5 +76,7 @@ async fn migrate_is_idempotent() {
 
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("first migrate");
-    db.migrate().await.expect("second migrate should be a no-op");
+    db.migrate()
+        .await
+        .expect("second migrate should be a no-op");
 }

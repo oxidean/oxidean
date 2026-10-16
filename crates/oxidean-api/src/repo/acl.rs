@@ -272,8 +272,8 @@ pub async fn effective_capability(
     repo: &RepositoryRow,
     owner: &OwnerRef,
 ) -> Result<Option<Capability>, String> {
-    let personal_owner = matches!(owner, OwnerRef::User { .. })
-        && caller_user_id.is_some_and(|id| id == owner.id());
+    let personal_owner =
+        matches!(owner, OwnerRef::User { .. }) && caller_user_id.is_some_and(|id| id == owner.id());
 
     // Membership (with org-2FA lockout) and collaborator lookups are
     // independent — run them concurrently instead of sequential round trips.
@@ -393,7 +393,10 @@ pub async fn resolve_repo_for_read(
         Ok(v) => v,
         Err(e) => {
             tracing::error!(error = %e, "lookup_repo_row_or_redirect failed");
-            return Err(AppError::new("repo.internal", "repository operation failed"));
+            return Err(AppError::new(
+                "repo.internal",
+                "repository operation failed",
+            ));
         }
     };
     let Some((row, owner_ref)) = pair else {
@@ -405,7 +408,10 @@ pub async fn resolve_repo_for_read(
         Ok(c) => c,
         Err(e) => {
             tracing::error!(error = %e, "effective_capability failed");
-            return Err(AppError::new("repo.internal", "repository operation failed"));
+            return Err(AppError::new(
+                "repo.internal",
+                "repository operation failed",
+            ));
         }
     };
 

@@ -94,7 +94,10 @@ jobs:
     .await
     .expect("dispatch");
     assert_eq!(n, 1);
-    let runs = db.list_action_runs_for_repo(&repo_id, &Default::default(), 100, 0).await.unwrap();
+    let runs = db
+        .list_action_runs_for_repo(&repo_id, &Default::default(), 100, 0)
+        .await
+        .unwrap();
     assert_eq!(runs.len(), 1);
     assert_eq!(runs[0].event, "push");
     assert_eq!(runs[0].status, "queued");
@@ -188,7 +191,10 @@ jobs:
     )
     .await
     .expect("dispatch");
-    assert_eq!(n, 1, "good workflow must still enqueue despite broken sibling");
+    assert_eq!(
+        n, 1,
+        "good workflow must still enqueue despite broken sibling"
+    );
     let runs = db
         .list_action_runs_for_repo(&repo_id, &Default::default(), 100, 0)
         .await
@@ -200,12 +206,9 @@ jobs:
 #[tokio::test]
 async fn actions_triggers_pull_request_lifecycle() {
     let dir = tempfile::tempdir().unwrap();
-    let db = Database::connect(&format!(
-        "sqlite:{}",
-        dir.path().join("pr.db").display()
-    ))
-    .await
-    .unwrap();
+    let db = Database::connect(&format!("sqlite:{}", dir.path().join("pr.db").display()))
+        .await
+        .unwrap();
     db.migrate().await.unwrap();
     let bare = dir.path().join("acttrig").join("trig-demo.git");
     std::fs::create_dir_all(bare.parent().unwrap()).unwrap();
@@ -242,7 +245,10 @@ jobs:
         assert_eq!(n, 1, "{action:?}");
     }
 
-    let runs = db.list_action_runs_for_repo(&repo_id, &Default::default(), 100, 0).await.unwrap();
+    let runs = db
+        .list_action_runs_for_repo(&repo_id, &Default::default(), 100, 0)
+        .await
+        .unwrap();
     assert_eq!(runs.len(), 3);
     assert!(runs.iter().all(|r| r.event == "pull_request"));
 
@@ -319,12 +325,9 @@ jobs:
 #[tokio::test]
 async fn actions_triggers_respect_instance_and_repo_gates() {
     let dir = tempfile::tempdir().unwrap();
-    let db = Database::connect(&format!(
-        "sqlite:{}",
-        dir.path().join("g.db").display()
-    ))
-    .await
-    .unwrap();
+    let db = Database::connect(&format!("sqlite:{}", dir.path().join("g.db").display()))
+        .await
+        .unwrap();
     db.migrate().await.unwrap();
     let bare = dir.path().join("acttrig").join("trig-demo.git");
     std::fs::create_dir_all(bare.parent().unwrap()).unwrap();

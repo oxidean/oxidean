@@ -91,14 +91,10 @@ async fn with_org_context(
         return Ok(empty());
     }
 
-    let members = ctx
-        .db
-        .list_org_members(&org.id)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "user.lookup org members failed");
-            AppError::new("user.lookup_failed", "Could not look up users.")
-        })?;
+    let members = ctx.db.list_org_members(&org.id).await.map_err(|e| {
+        tracing::error!(error = %e, "user.lookup org members failed");
+        AppError::new("user.lookup_failed", "Could not look up users.")
+    })?;
     let exclude: HashSet<String> = members
         .into_iter()
         .map(|m| m.username.to_ascii_lowercase())

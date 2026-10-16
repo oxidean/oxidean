@@ -5,12 +5,12 @@ use std::sync::Arc;
 use std::path::Path;
 
 use oxidean_core::{
-    AdminGitSettingsPublic, AdminGitUpdateSettingsRequest, AdminLfsSettingsPublic,
-    AdminLfsUpdateSettingsRequest, AdminLfsUsageResponse, AdminLfsOwnerUsageEntry,
-    AdminLfsRepoUsageEntry, AdminMcpSettingsPublic, AdminMcpUpdateSettingsRequest,
+    AdminGitSettingsPublic, AdminGitUpdateSettingsRequest, AdminLfsOwnerUsageEntry,
+    AdminLfsRepoUsageEntry, AdminLfsSettingsPublic, AdminLfsUpdateSettingsRequest,
+    AdminLfsUsageResponse, AdminMcpSettingsPublic, AdminMcpUpdateSettingsRequest,
     AdminPatSettingsPublic, AdminPatUpdateSettingsRequest, AppError, AuthSettingsPublic,
-    EmailProviderKind, FactoryResetRequest, FactoryResetResponse, FactoryResetScope,
-    ProviderMode, RepoVisibility, UpdateAuthSettingsRequest,
+    EmailProviderKind, FactoryResetRequest, FactoryResetResponse, FactoryResetScope, ProviderMode,
+    RepoVisibility, UpdateAuthSettingsRequest,
 };
 use oxidean_db::AuthSettingsRow;
 
@@ -78,10 +78,7 @@ fn db_err(e: String) -> AppError {
 
 pub(crate) async fn require_admin(ctx: &RpcCtx) -> Result<(), AppError> {
     let Some(session) = &ctx.session else {
-        return Err(AppError::new(
-            "auth.unauthenticated",
-            "not authenticated",
-        ));
+        return Err(AppError::new("auth.unauthenticated", "not authenticated"));
     };
     let user = ctx
         .db
@@ -110,7 +107,11 @@ pub fn settings_to_public(row: &AuthSettingsRow) -> Result<AuthSettingsPublic, A
         .workos_client_id
         .clone()
         .filter(|s| !s.is_empty())
-        .or_else(|| std::env::var("WORKOS_CLIENT_ID").ok().filter(|s| !s.is_empty()));
+        .or_else(|| {
+            std::env::var("WORKOS_CLIENT_ID")
+                .ok()
+                .filter(|s| !s.is_empty())
+        });
 
     let oidc_issuer = row
         .oidc_issuer
@@ -207,12 +208,8 @@ pub async fn factory_reset(
     input: serde_json::Value,
 ) -> Result<FactoryResetResponse, AppError> {
     require_admin(ctx).await?;
-    let req: FactoryResetRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new(
-            "rpc.bad_input",
-            format!("invalid factory_reset input: {e}"),
-        )
-    })?;
+    let req: FactoryResetRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid factory_reset input: {e}")))?;
     if req.confirmation.trim() != "RESET" {
         return Err(AppError::new(
             "admin.factory_reset_confirm",
@@ -236,10 +233,7 @@ pub async fn factory_reset(
             .await
             .map_err(|e| {
                 tracing::error!(error = %e, "wipe lfs_dir failed");
-                AppError::new(
-                    "admin.factory_reset_lfs",
-                    "Failed to wipe LFS storage.",
-                )
+                AppError::new("admin.factory_reset_lfs", "Failed to wipe LFS storage.")
             })?;
         wipe_dir_contents(
             &ctx.release_assets_dir,
@@ -269,11 +263,14 @@ pub async fn repo_gc(
     input: serde_json::Value,
 ) -> Result<oxidean_core::RepoGcResponse, AppError> {
     require_admin(ctx).await?;
-    let req: oxidean_core::RepoGcRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid repo_gc input: {e}"))
-    })?;
+    let req: oxidean_core::RepoGcRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid repo_gc input: {e}")))?;
 
-    let owner = req.owner.as_deref().map(str::trim).filter(|s| !s.is_empty());
+    let owner = req
+        .owner
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
     let name = req.name.as_deref().map(str::trim).filter(|s| !s.is_empty());
 
     match (owner, name) {
@@ -292,13 +289,12 @@ pub async fn repo_gc(
             })
         }
         (None, None) => {
-            let (ok, err) =
-                crate::jobs::run_gc_all(&ctx.db, ctx.git.as_ref(), &ctx.repos_dir)
-                    .await
-                    .map_err(|e| {
-                        tracing::error!(error = %e, "manual gc-all failed");
-                        AppError::new("admin.repo_gc_failed", "git gc failed")
-                    })?;
+            let (ok, err) = crate::jobs::run_gc_all(&ctx.db, ctx.git.as_ref(), &ctx.repos_dir)
+                .await
+                .map_err(|e| {
+                    tracing::error!(error = %e, "manual gc-all failed");
+                    AppError::new("admin.repo_gc_failed", "git gc failed")
+                })?;
             Ok(oxidean_core::RepoGcResponse {
                 ok: err == 0,
                 gc_count: ok,
@@ -341,10 +337,7 @@ pub async fn wipe_dir_contents(dir: &Path, err_code: &str, label: &str) -> Resul
 
     while let Some(entry) = entries.next_entry().await.map_err(|e| {
         tracing::error!(error = %e, label, "storage dir entry read failed");
-        AppError::new(
-            err_code,
-            format!("Failed to read {label} entry."),
-        )
+        AppError::new(err_code, format!("Failed to read {label} entry."))
     })? {
         let path = entry.path();
         let canon = match tokio::fs::canonicalize(&path).await {
@@ -371,10 +364,7 @@ pub async fn wipe_dir_contents(dir: &Path, err_code: &str, label: &str) -> Resul
         }
         let ft = entry.file_type().await.map_err(|e| {
             tracing::error!(error = %e, path = %canon.display(), label, "file_type failed");
-            AppError::new(
-                err_code,
-                format!("Failed to inspect {label} entry."),
-            )
+            AppError::new(err_code, format!("Failed to inspect {label} entry."))
         })?;
         if ft.is_dir() {
             tokio::fs::remove_dir_all(&canon).await.map_err(|e| {
@@ -387,10 +377,7 @@ pub async fn wipe_dir_contents(dir: &Path, err_code: &str, label: &str) -> Resul
         } else {
             tokio::fs::remove_file(&canon).await.map_err(|e| {
                 tracing::error!(error = %e, path = %canon.display(), label, "remove_file failed");
-                AppError::new(
-                    err_code,
-                    format!("Failed to delete a file under {label}."),
-                )
+                AppError::new(err_code, format!("Failed to delete a file under {label}."))
             })?;
         }
     }
@@ -663,10 +650,9 @@ mod tests {
         let req: FactoryResetRequest =
             serde_json::from_str(r#"{"confirmation":"RESET"}"#).expect("parse");
         assert_eq!(req.scope, FactoryResetScope::DatabaseOnly);
-        let both: FactoryResetRequest = serde_json::from_str(
-            r#"{"confirmation":"RESET","scope":"database_and_repositories"}"#,
-        )
-        .expect("parse");
+        let both: FactoryResetRequest =
+            serde_json::from_str(r#"{"confirmation":"RESET","scope":"database_and_repositories"}"#)
+                .expect("parse");
         assert_eq!(both.scope, FactoryResetScope::DatabaseAndRepositories);
     }
 
@@ -677,7 +663,9 @@ mod tests {
         tokio::fs::create_dir_all(root.join("owner").join("a.git"))
             .await
             .unwrap();
-        tokio::fs::write(root.join("stray.txt"), b"x").await.unwrap();
+        tokio::fs::write(root.join("stray.txt"), b"x")
+            .await
+            .unwrap();
         wipe_repos_dir_contents(&root).await.expect("wipe");
         assert!(root.exists(), "root mount dir must remain");
         assert!(
@@ -697,7 +685,9 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let root = tmp.path().join("release-assets");
         tokio::fs::create_dir_all(&root).await.unwrap();
-        tokio::fs::write(root.join("asset-aaa"), b"bin").await.unwrap();
+        tokio::fs::write(root.join("asset-aaa"), b"bin")
+            .await
+            .unwrap();
         wipe_dir_contents(
             &root,
             "admin.factory_reset_release_assets",
@@ -728,11 +718,13 @@ mod tests {
         let root_c = root.canonicalize().unwrap();
         let sib_c = sibling.canonicalize().unwrap();
         assert!(!path_is_under(&sib_c, &root_c));
-        assert!(path_is_under(&root_c.join("owner"), &root_c) || {
-            // join may not exist — create then check
-            std::fs::create_dir_all(root.join("owner")).unwrap();
-            path_is_under(&root.join("owner").canonicalize().unwrap(), &root_c)
-        });
+        assert!(
+            path_is_under(&root_c.join("owner"), &root_c) || {
+                // join may not exist — create then check
+                std::fs::create_dir_all(root.join("owner")).unwrap();
+                path_is_under(&root.join("owner").canonicalize().unwrap(), &root_c)
+            }
+        );
     }
 
     #[test]

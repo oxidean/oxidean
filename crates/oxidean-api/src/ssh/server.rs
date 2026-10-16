@@ -87,7 +87,11 @@ impl Handler for SshHandler {
         let fp = auth::fingerprint_of(public_key);
 
         {
-            let mut lim = self.state.auth_limiter.lock().unwrap_or_else(|e| e.into_inner());
+            let mut lim = self
+                .state
+                .auth_limiter
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
             if lim.check_ip(&ip).is_err() || lim.check_user(&fp).is_err() {
                 return Ok(Auth::Reject {
                     proceed_with_methods: None,
@@ -98,7 +102,11 @@ impl Handler for SshHandler {
 
         if user != "git" {
             tracing::debug!(%user, "SSH reject: username must be git");
-            let mut lim = self.state.auth_limiter.lock().unwrap_or_else(|e| e.into_inner());
+            let mut lim = self
+                .state
+                .auth_limiter
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
             lim.record_ip(&ip);
             lim.record_user(&fp);
             return Ok(Auth::Reject {
@@ -118,7 +126,11 @@ impl Handler for SshHandler {
                     .touch_ssh_key_last_used(&row.id, &now, Some(&ip))
                     .await;
                 {
-                    let mut lim = self.state.auth_limiter.lock().unwrap_or_else(|e| e.into_inner());
+                    let mut lim = self
+                        .state
+                        .auth_limiter
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner());
                     lim.clear_user(&fp);
                 }
                 Ok(Auth::Accept)
@@ -131,8 +143,11 @@ impl Handler for SshHandler {
                 match auth::find_deploy_key(&self.state.db, public_key).await {
                     Ok(Some(row)) => {
                         self.deploy_key_fingerprint = Some(row.fingerprint.clone());
-                        let mut lim =
-                            self.state.auth_limiter.lock().unwrap_or_else(|e| e.into_inner());
+                        let mut lim = self
+                            .state
+                            .auth_limiter
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner());
                         lim.clear_user(&fp);
                         return Ok(Auth::Accept);
                     }
@@ -141,7 +156,11 @@ impl Handler for SshHandler {
                         tracing::error!(error = %e, "SSH deploy key lookup failed");
                     }
                 }
-                let mut lim = self.state.auth_limiter.lock().unwrap_or_else(|e| e.into_inner());
+                let mut lim = self
+                    .state
+                    .auth_limiter
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
                 lim.record_ip(&ip);
                 lim.record_user(&fp);
                 Ok(Auth::Reject {
@@ -151,7 +170,11 @@ impl Handler for SshHandler {
             }
             Err(e) => {
                 tracing::error!(error = %e, "SSH fingerprint lookup failed");
-                let mut lim = self.state.auth_limiter.lock().unwrap_or_else(|e| e.into_inner());
+                let mut lim = self
+                    .state
+                    .auth_limiter
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
                 lim.record_ip(&ip);
                 lim.record_user(&fp);
                 Ok(Auth::Reject {
@@ -187,26 +210,14 @@ impl Handler for SshHandler {
         // Account keys authorize via the full capability ladder; deploy keys
         // authorize only the repos they are attached to (GIT-23).
         let decision = if let Some(user_id) = self.user_id.clone() {
-            pack::authorize_pack(
-                &self.state.db,
-                &self.state.repos_dir,
-                &user_id,
-                &cmd,
-            )
-            .await
+            pack::authorize_pack(&self.state.db, &self.state.repos_dir, &user_id, &cmd).await
         } else if let Some(fp) = self.deploy_key_fingerprint.clone() {
             let ip = self
                 .peer
                 .map(|p| p.ip().to_string())
                 .unwrap_or_else(|| "unknown".into());
-            pack::authorize_deploy_key_pack(
-                &self.state.db,
-                &self.state.repos_dir,
-                &fp,
-                &cmd,
-                &ip,
-            )
-            .await
+            pack::authorize_deploy_key_pack(&self.state.db, &self.state.repos_dir, &fp, &cmd, &ip)
+                .await
         } else {
             session.channel_failure(channel)?;
             return Ok(());
@@ -250,7 +261,8 @@ impl Handler for SshHandler {
                 let handle = session.handle();
                 let db = self.state.db.clone();
                 let repos_dir = self.state.repos_dir.clone();
-                let env_name = std::env::var("OXIDEAN_ENV").unwrap_or_else(|_| "development".into());
+                let env_name =
+                    std::env::var("OXIDEAN_ENV").unwrap_or_else(|_| "development".into());
                 // Post-push hooks attribute to the account user, or to the
                 // admin who attached the authorizing deploy key (GIT-23).
                 let user_id = actor_user_id.clone();
@@ -332,10 +344,9 @@ impl Handler for SshHandler {
                     if code == 0 && is_push {
                         if let Ok(Some(user)) = db.find_user_by_id(&user_id).await {
                             // GIT-25: refresh cached size_bytes for UI/admin surfaces.
-                            if let Err(e) = crate::git::quota::refresh_repo_size_bytes(
-                                &db, &repo_id, &bare,
-                            )
-                            .await
+                            if let Err(e) =
+                                crate::git::quota::refresh_repo_size_bytes(&db, &repo_id, &bare)
+                                    .await
                             {
                                 tracing::warn!(error = %e, "refresh repo size_bytes failed");
                             }
@@ -425,8 +436,7 @@ impl Handler for SshHandler {
     ) -> Result<(), Self::Error> {
         // GIT-27: accept only allowlisted names with sane values; exec_request
         // replays the stored list into the pack service's environment.
-        let accept =
-            PACK_ENV_ALLOWLIST.contains(&variable_name) && env_value_ok(variable_value);
+        let accept = PACK_ENV_ALLOWLIST.contains(&variable_name) && env_value_ok(variable_value);
         if accept {
             self.channel_env
                 .entry(channel)
@@ -578,9 +588,7 @@ pub async fn maybe_spawn_from_env(db: Database, repos_dir: PathBuf) -> Option<on
         return None;
     }
     let port = ssh_port_from_env();
-    let bind: SocketAddr = format!("0.0.0.0:{port}")
-        .parse()
-        .expect("SSH bind parse");
+    let bind: SocketAddr = format!("0.0.0.0:{port}").parse().expect("SSH bind parse");
     let state = SshState {
         db,
         repos_dir,

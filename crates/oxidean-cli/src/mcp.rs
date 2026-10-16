@@ -22,7 +22,7 @@ use std::time::Duration;
 
 use serde_json::{json, Map, Value};
 
-use oxidean_core::{MCP_PROTOCOL_VERSIONS, RpcResponse};
+use oxidean_core::{RpcResponse, MCP_PROTOCOL_VERSIONS};
 
 use crate::args::Global;
 use crate::commands::{resolve_instance, CliError, Out, Runtime};

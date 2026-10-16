@@ -850,7 +850,8 @@ pub async fn dispatch(inv: &Invocation, rt: &Runtime) -> Result<Out, CliError> {
         Command::AuthLogout => auth_logout(g, rt),
         Command::AuthToken => auth_token(g, rt),
         Command::AuthRefresh {
-            scopes, keep_scopes,
+            scopes,
+            keep_scopes,
         } => auth_refresh(g, rt, scopes.as_deref(), *keep_scopes).await,
         Command::AuthRevoke => auth_revoke(g, rt).await,
         Command::AuthSetupGit => auth_setup_git(g, rt),
@@ -3574,7 +3575,10 @@ async fn auth_refresh(
     // `--keep-scopes` on an under-scoped token keeps the gap — name it.
     let keep_warn = if keep_scopes && scopes != CLI_DEFAULT_SCOPES {
         let missing = uncovered_scope_names(&parse_scope_names(
-            &scopes.split_whitespace().map(str::to_string).collect::<Vec<_>>(),
+            &scopes
+                .split_whitespace()
+                .map(str::to_string)
+                .collect::<Vec<_>>(),
         ));
         (!missing.is_empty()).then(|| missing.join(", "))
     } else {

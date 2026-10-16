@@ -17,10 +17,7 @@ pub async fn effective_owner_quota(
     owner_type: &str,
     owner_id: &str,
 ) -> Result<u64, String> {
-    if let Some(max) = db
-        .find_package_quota_override(owner_type, owner_id)
-        .await?
-    {
+    if let Some(max) = db.find_package_quota_override(owner_type, owner_id).await? {
         return Ok(max as u64);
     }
     Ok(owner_quota_default_from_env())

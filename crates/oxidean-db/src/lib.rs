@@ -40,12 +40,12 @@ pub mod repo_units;
 pub mod repositories;
 pub mod search;
 pub mod sessions;
-pub mod two_factor;
 pub mod ssh_keys;
 pub mod stars;
 pub mod tag_protection;
 pub mod templates;
 pub mod topics;
+pub mod two_factor;
 pub mod user_emails;
 pub mod users;
 pub mod watches;
@@ -2678,10 +2678,7 @@ impl Database {
         two_factor::totp_upsert(self.require_pool()?, user_id, secret_enc).await
     }
 
-    pub async fn totp_find(
-        &self,
-        user_id: &str,
-    ) -> Result<Option<two_factor::TotpRow>, String> {
+    pub async fn totp_find(&self, user_id: &str) -> Result<Option<two_factor::TotpRow>, String> {
         two_factor::totp_find(self.require_pool()?, user_id).await
     }
 
@@ -3096,8 +3093,14 @@ impl Database {
         approved_at: &str,
         granted_scopes: Option<&str>,
     ) -> Result<bool, String> {
-        oauth::approve_device_code(self.require_pool()?, id, user_id, approved_at, granted_scopes)
-            .await
+        oauth::approve_device_code(
+            self.require_pool()?,
+            id,
+            user_id,
+            approved_at,
+            granted_scopes,
+        )
+        .await
     }
 
     /// Single-claim deny — false when the code was not pending.

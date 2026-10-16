@@ -96,11 +96,12 @@ pub async fn list(
     input: serde_json::Value,
 ) -> Result<NotificationListResponse, AppError> {
     let user_id = require_session_user_id(ctx)?;
-    let req: NotificationListRequest = serde_json::from_value(input).unwrap_or(NotificationListRequest {
-        filter: None,
-        offset: None,
-        limit: None,
-    });
+    let req: NotificationListRequest =
+        serde_json::from_value(input).unwrap_or(NotificationListRequest {
+            filter: None,
+            offset: None,
+            limit: None,
+        });
     let filter = req
         .filter
         .as_deref()

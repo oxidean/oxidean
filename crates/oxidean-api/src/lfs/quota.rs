@@ -86,7 +86,9 @@ fn env_i64(key: &str, default: i64) -> i64 {
 }
 
 /// Raw limit values before unlimited normalization (for Admin getSettings).
-pub async fn raw_effective_limits(state: &AppState) -> Result<(i64, i64, i64, bool, bool, bool), String> {
+pub async fn raw_effective_limits(
+    state: &AppState,
+) -> Result<(i64, i64, i64, bool, bool, bool), String> {
     let row = state.db.get_lfs_settings().await?;
     let max = row
         .max_object_bytes

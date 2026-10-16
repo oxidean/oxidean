@@ -31,10 +31,7 @@ async fn require_sys_admin(ctx: &RpcCtx) -> Result<(), AppError> {
     Ok(())
 }
 
-async fn resolve_owner_login(
-    ctx: &RpcCtx,
-    login: &str,
-) -> Result<(String, String), AppError> {
+async fn resolve_owner_login(ctx: &RpcCtx, login: &str) -> Result<(String, String), AppError> {
     if let Some(u) = ctx.db.find_user_by_username(login).await.map_err(db_err)? {
         return Ok(("user".into(), u.id));
     }
@@ -91,11 +88,13 @@ async fn to_public(ctx: &RpcCtx, row: PackageRow) -> Result<Option<PackagePublic
     }))
 }
 
-pub async fn list(ctx: &RpcCtx, input: serde_json::Value) -> Result<PackagesListResponse, AppError> {
+pub async fn list(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<PackagesListResponse, AppError> {
     // Anonymous OK — `to_public` enforces Pull ACL (public packages / linked-repo Read).
-    let req: PackagesListRequest = serde_json::from_value(input).map_err(|e| {
-        AppError::new("rpc.bad_input", format!("invalid packages.list input: {e}"))
-    })?;
+    let req: PackagesListRequest = serde_json::from_value(input)
+        .map_err(|e| AppError::new("rpc.bad_input", format!("invalid packages.list input: {e}")))?;
 
     let rows = if let Some(repo_id) = req.repository_id.as_deref() {
         ctx.db

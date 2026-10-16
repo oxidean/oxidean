@@ -45,8 +45,8 @@ fn hotp(secret: &[u8], counter: u64) -> Option<u32> {
     mac.update(&counter.to_be_bytes());
     let h = mac.finalize().into_bytes();
     let offset = (h[h.len() - 1] & 0x0f) as usize;
-    let bin = u32::from_be_bytes([h[offset], h[offset + 1], h[offset + 2], h[offset + 3]])
-        & 0x7fff_ffff;
+    let bin =
+        u32::from_be_bytes([h[offset], h[offset + 1], h[offset + 2], h[offset + 3]]) & 0x7fff_ffff;
     Some(bin % 10u32.pow(DIGITS))
 }
 
@@ -80,9 +80,7 @@ pub fn verify_code(secret_b32: &str, code: &str, unix_secs: u64) -> bool {
 /// `otpauth://` URI for QR + manual-entry flows.
 /// `otpauth://totp/{issuer}:{account}?secret=..&issuer=..&algorithm=SHA1&digits=6&period=30`
 pub fn otpauth_uri(issuer: &str, account: &str, secret_b32: &str) -> String {
-    let enc = |s: &str| -> String {
-        url::form_urlencoded::byte_serialize(s.as_bytes()).collect()
-    };
+    let enc = |s: &str| -> String { url::form_urlencoded::byte_serialize(s.as_bytes()).collect() };
     format!(
         "otpauth://totp/{}:{}?secret={}&issuer={}&algorithm=SHA1&digits={}&period={}",
         enc(issuer),
@@ -106,9 +104,15 @@ mod tests {
         // t=59 → counter 1 → 94287082 → 287082 (8-digit) → 6-digit 287082.
         assert_eq!(code_at_unix(&secret_b32, 59).as_deref(), Some("287082"));
         // t=1111111109 → 07081804 → 081804.
-        assert_eq!(code_at_unix(&secret_b32, 1111111109).as_deref(), Some("081804"));
+        assert_eq!(
+            code_at_unix(&secret_b32, 1111111109).as_deref(),
+            Some("081804")
+        );
         // t=1234567890 → 00592489 wait 89005924 → 005924 → check 6-digit = 005924.
-        assert_eq!(code_at_unix(&secret_b32, 1234567890).as_deref(), Some("005924"));
+        assert_eq!(
+            code_at_unix(&secret_b32, 1234567890).as_deref(),
+            Some("005924")
+        );
     }
 
     #[test]

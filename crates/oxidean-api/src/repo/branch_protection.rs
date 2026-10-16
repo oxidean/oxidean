@@ -18,7 +18,10 @@ fn db_err(e: String) -> AppError {
             "no database configured for this instance",
         )
     } else if e == "branch protection rule not found" {
-        AppError::new("repo.branch_protection_not_found", "Branch protection rule not found")
+        AppError::new(
+            "repo.branch_protection_not_found",
+            "Branch protection rule not found",
+        )
     } else {
         tracing::error!(error = %e, "branch protection db error");
         AppError::new("repo.internal", "repository operation failed")

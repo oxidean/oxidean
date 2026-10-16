@@ -221,15 +221,18 @@ async fn dialect_issues_batch_enrichment() {
 
     // comment_count rides along on every issue row — no extra queries needed.
     let (rows, _total) = db
-        .list_issues_for_repo(&repo.id, oxidean_db::issues::IssueListFilters {
-            state: "all",
-            author_id: None,
-            label_id: None,
-            assignee_id: None,
-            q: None,
-            offset: 0,
-            limit: 50,
-        })
+        .list_issues_for_repo(
+            &repo.id,
+            oxidean_db::issues::IssueListFilters {
+                state: "all",
+                author_id: None,
+                label_id: None,
+                assignee_id: None,
+                q: None,
+                offset: 0,
+                limit: 50,
+            },
+        )
         .await
         .expect("list issues");
     assert_eq!(rows.len(), 3);
@@ -298,7 +301,9 @@ async fn dialect_issues_batch_enrichment() {
         .expect("batch users");
     assert_eq!(users.len(), 2);
     for u in [&author, &other] {
-        assert!(users.iter().any(|x| x.id == u.id && x.username == u.username));
+        assert!(users
+            .iter()
+            .any(|x| x.id == u.id && x.username == u.username));
     }
     let repos = db
         .find_repositories_by_ids(std::slice::from_ref(&repo.id))
@@ -308,19 +313,21 @@ async fn dialect_issues_batch_enrichment() {
     assert_eq!(repos[0].name, "batch-demo");
 
     // Empty inputs must not error.
-    assert!(db.find_users_by_ids(&[]).await.expect("empty users").is_empty());
-    assert!(
-        db.list_labels_for_issues(&[])
-            .await
-            .expect("empty labels")
-            .is_empty()
-    );
-    assert!(
-        db.list_issue_reaction_groups_for_issues(&[], None)
-            .await
-            .expect("empty reactions")
-            .is_empty()
-    );
+    assert!(db
+        .find_users_by_ids(&[])
+        .await
+        .expect("empty users")
+        .is_empty());
+    assert!(db
+        .list_labels_for_issues(&[])
+        .await
+        .expect("empty labels")
+        .is_empty());
+    assert!(db
+        .list_issue_reaction_groups_for_issues(&[], None)
+        .await
+        .expect("empty reactions")
+        .is_empty());
 }
 
 /// Tri-dialect parity: postgres and mysql siblings must exist alongside sqlite.

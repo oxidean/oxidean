@@ -283,9 +283,15 @@ pub async fn get_lfs_settings(pool: &DbPool) -> Result<LfsSettingsRow, String> {
             .await
             .map_err(|e| format!("get_lfs_settings: {e}"))?;
             Ok(LfsSettingsRow {
-                max_object_bytes: row.try_get::<Option<i64>, _>("max_object_bytes").unwrap_or(None),
-                quota_repo_bytes: row.try_get::<Option<i64>, _>("quota_repo_bytes").unwrap_or(None),
-                quota_user_bytes: row.try_get::<Option<i64>, _>("quota_user_bytes").unwrap_or(None),
+                max_object_bytes: row
+                    .try_get::<Option<i64>, _>("max_object_bytes")
+                    .unwrap_or(None),
+                quota_repo_bytes: row
+                    .try_get::<Option<i64>, _>("quota_repo_bytes")
+                    .unwrap_or(None),
+                quota_user_bytes: row
+                    .try_get::<Option<i64>, _>("quota_user_bytes")
+                    .unwrap_or(None),
             })
         }
         DbPool::Postgres(p) => {
@@ -296,9 +302,15 @@ pub async fn get_lfs_settings(pool: &DbPool) -> Result<LfsSettingsRow, String> {
             .await
             .map_err(|e| format!("get_lfs_settings: {e}"))?;
             Ok(LfsSettingsRow {
-                max_object_bytes: row.try_get::<Option<i64>, _>("max_object_bytes").unwrap_or(None),
-                quota_repo_bytes: row.try_get::<Option<i64>, _>("quota_repo_bytes").unwrap_or(None),
-                quota_user_bytes: row.try_get::<Option<i64>, _>("quota_user_bytes").unwrap_or(None),
+                max_object_bytes: row
+                    .try_get::<Option<i64>, _>("max_object_bytes")
+                    .unwrap_or(None),
+                quota_repo_bytes: row
+                    .try_get::<Option<i64>, _>("quota_repo_bytes")
+                    .unwrap_or(None),
+                quota_user_bytes: row
+                    .try_get::<Option<i64>, _>("quota_user_bytes")
+                    .unwrap_or(None),
             })
         }
         DbPool::MySql(p) => {
@@ -309,9 +321,15 @@ pub async fn get_lfs_settings(pool: &DbPool) -> Result<LfsSettingsRow, String> {
             .await
             .map_err(|e| format!("get_lfs_settings: {e}"))?;
             Ok(LfsSettingsRow {
-                max_object_bytes: row.try_get::<Option<i64>, _>("max_object_bytes").unwrap_or(None),
-                quota_repo_bytes: row.try_get::<Option<i64>, _>("quota_repo_bytes").unwrap_or(None),
-                quota_user_bytes: row.try_get::<Option<i64>, _>("quota_user_bytes").unwrap_or(None),
+                max_object_bytes: row
+                    .try_get::<Option<i64>, _>("max_object_bytes")
+                    .unwrap_or(None),
+                quota_repo_bytes: row
+                    .try_get::<Option<i64>, _>("quota_repo_bytes")
+                    .unwrap_or(None),
+                quota_user_bytes: row
+                    .try_get::<Option<i64>, _>("quota_user_bytes")
+                    .unwrap_or(None),
             })
         }
     }
@@ -672,13 +690,12 @@ pub async fn list_repo_lfs_objects(
 pub async fn repo_lfs_object_count(pool: &DbPool, repository_id: &str) -> Result<i64, String> {
     match pool {
         DbPool::Sqlite(p) => {
-            let row = sqlx::query(
-                "SELECT COUNT(*) AS c FROM lfs_object_links WHERE repository_id = ?",
-            )
-            .bind(repository_id)
-            .fetch_one(p)
-            .await
-            .map_err(|e| format!("repo_lfs_object_count: {e}"))?;
+            let row =
+                sqlx::query("SELECT COUNT(*) AS c FROM lfs_object_links WHERE repository_id = ?")
+                    .bind(repository_id)
+                    .fetch_one(p)
+                    .await
+                    .map_err(|e| format!("repo_lfs_object_count: {e}"))?;
             Ok(row.try_get::<i64, _>("c").unwrap_or(0))
         }
         DbPool::Postgres(p) => {
@@ -692,13 +709,12 @@ pub async fn repo_lfs_object_count(pool: &DbPool, repository_id: &str) -> Result
             Ok(row.try_get::<i64, _>("c").unwrap_or(0))
         }
         DbPool::MySql(p) => {
-            let row = sqlx::query(
-                "SELECT COUNT(*) AS c FROM lfs_object_links WHERE repository_id = ?",
-            )
-            .bind(repository_id)
-            .fetch_one(p)
-            .await
-            .map_err(|e| format!("repo_lfs_object_count: {e}"))?;
+            let row =
+                sqlx::query("SELECT COUNT(*) AS c FROM lfs_object_links WHERE repository_id = ?")
+                    .bind(repository_id)
+                    .fetch_one(p)
+                    .await
+                    .map_err(|e| format!("repo_lfs_object_count: {e}"))?;
             Ok(row.try_get::<i64, _>("c").unwrap_or(0))
         }
     }

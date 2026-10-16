@@ -40,7 +40,9 @@ pub fn validate_remote_url(url: &str) -> Result<&str, GitError> {
         return Err(GitError::InvalidArg("remote URL is required".into()));
     }
     if u.contains('\0') || u.contains('\n') || u.contains('\r') {
-        return Err(GitError::InvalidArg("remote URL contains invalid characters".into()));
+        return Err(GitError::InvalidArg(
+            "remote URL contains invalid characters".into(),
+        ));
     }
     let lower = u.to_ascii_lowercase();
     if lower.starts_with("file:")
@@ -92,7 +94,9 @@ pub fn ssh_host_from_remote_url(url: &str) -> Result<String, GitError> {
             .unwrap_or(hostport);
         let host = host.trim().trim_start_matches('[').trim_end_matches(']');
         if host.is_empty() {
-            return Err(GitError::InvalidArg("could not parse SSH host from URL".into()));
+            return Err(GitError::InvalidArg(
+                "could not parse SSH host from URL".into(),
+            ));
         }
         return Ok(host.to_string());
     }
@@ -100,7 +104,9 @@ pub fn ssh_host_from_remote_url(url: &str) -> Result<String, GitError> {
     if let Some(rest) = u.strip_prefix("git@") {
         let host = rest.split_once(':').map(|(h, _)| h).unwrap_or(rest).trim();
         if host.is_empty() {
-            return Err(GitError::InvalidArg("could not parse SSH host from URL".into()));
+            return Err(GitError::InvalidArg(
+                "could not parse SSH host from URL".into(),
+            ));
         }
         return Ok(host.to_string());
     }

@@ -47,7 +47,9 @@ where
             languages.push(RepoLanguageStat {
                 name: name.to_string(),
                 bytes,
-                color: language_named(name).and_then(|s| s.color).map(str::to_string),
+                color: language_named(name)
+                    .and_then(|s| s.color)
+                    .map(str::to_string),
             });
         } else {
             other_bytes = other_bytes.saturating_add(bytes);
@@ -105,8 +107,8 @@ mod tests {
             ("src/lib.rs", 500),
             ("web/app.ts", 200),
             ("web/util.js", 100),
-            ("README.md", 9999), // prose — excluded
-            ("data.json", 8000), // data — excluded
+            ("README.md", 9999),           // prose — excluded
+            ("data.json", 8000),           // data — excluded
             ("node_modules/x.js", 50_000), // vendored
         ];
         let stats = aggregate_language_stats(blobs.iter().map(|(p, s)| (*p, *s)));

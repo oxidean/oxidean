@@ -116,10 +116,7 @@ pub async fn login_gate(
 /// (SSO-only) users follow the external policy. Fail-open to `false` — this
 /// field is advisory chrome, the login gate is the enforcement.
 pub async fn for_user(db: &Database, row: &UserRow) -> (bool, bool) {
-    let enabled = db
-        .user_has_confirmed_factor(&row.id)
-        .await
-        .unwrap_or(false);
+    let enabled = db.user_has_confirmed_factor(&row.id).await.unwrap_or(false);
     if enabled {
         return (true, false);
     }

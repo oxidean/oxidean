@@ -136,13 +136,12 @@ pub async fn watch_repository(
                 .await
                 .map_err(|e| format!("watch bump: {e}"))?;
             }
-            let count: i64 = sqlx::query_scalar(
-                "SELECT watch_count FROM repositories WHERE id = ?1",
-            )
-            .bind(repository_id)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|e| format!("watch count: {e}"))?;
+            let count: i64 =
+                sqlx::query_scalar("SELECT watch_count FROM repositories WHERE id = ?1")
+                    .bind(repository_id)
+                    .fetch_one(&mut *tx)
+                    .await
+                    .map_err(|e| format!("watch count: {e}"))?;
             tx.commit()
                 .await
                 .map_err(|e| format!("watch commit: {e}"))?;
@@ -280,13 +279,12 @@ pub async fn unwatch_repository(
                 .await
                 .map_err(|e| format!("unwatch bump: {e}"))?;
             }
-            let count: i64 = sqlx::query_scalar(
-                "SELECT watch_count FROM repositories WHERE id = ?1",
-            )
-            .bind(repository_id)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|e| format!("unwatch count: {e}"))?;
+            let count: i64 =
+                sqlx::query_scalar("SELECT watch_count FROM repositories WHERE id = ?1")
+                    .bind(repository_id)
+                    .fetch_one(&mut *tx)
+                    .await
+                    .map_err(|e| format!("unwatch count: {e}"))?;
             tx.commit()
                 .await
                 .map_err(|e| format!("unwatch commit: {e}"))?;
@@ -369,7 +367,10 @@ pub struct RepoWatcherListRow {
 }
 
 fn like_pat(q: &str) -> String {
-    let escaped = q.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_");
+    let escaped = q
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_");
     format!("%{escaped}%")
 }
 
@@ -377,8 +378,12 @@ macro_rules! map_watcher {
     ($row:expr) => {{
         let row = $row;
         RepoWatcherListRow {
-            user_id: row.try_get("user_id").map_err(|e| format!("watcher row: {e}"))?,
-            username: row.try_get("username").map_err(|e| format!("watcher row: {e}"))?,
+            user_id: row
+                .try_get("user_id")
+                .map_err(|e| format!("watcher row: {e}"))?,
+            username: row
+                .try_get("username")
+                .map_err(|e| format!("watcher row: {e}"))?,
             display_name: row
                 .try_get("display_name")
                 .map_err(|e| format!("watcher row: {e}"))?,
@@ -401,7 +406,9 @@ pub async fn list_repo_watchers(
     limit: i64,
 ) -> Result<Vec<RepoWatcherListRow>, String> {
     use sqlx::Row;
-    let pat = q.filter(|s| !s.trim().is_empty()).map(|s| like_pat(s.trim()));
+    let pat = q
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| like_pat(s.trim()));
     match pool {
         DbPool::Postgres(p) => {
             let rows = if let Some(ref pat) = pat {
@@ -524,7 +531,9 @@ pub async fn count_repo_watchers(
     repository_id: &str,
     q: Option<&str>,
 ) -> Result<i64, String> {
-    let pat = q.filter(|s| !s.trim().is_empty()).map(|s| like_pat(s.trim()));
+    let pat = q
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| like_pat(s.trim()));
     match pool {
         DbPool::Postgres(p) => {
             if let Some(ref pat) = pat {

@@ -228,11 +228,7 @@ pub struct ReconcileStats {
 }
 
 /// Run `git gc` on one active bare repo path (must be under repos_dir).
-pub async fn run_gc_one(
-    git: &dyn GitBackend,
-    repos_dir: &Path,
-    path: &Path,
-) -> Result<(), String> {
+pub async fn run_gc_one(git: &dyn GitBackend, repos_dir: &Path, path: &Path) -> Result<(), String> {
     let root = tokio::fs::canonicalize(repos_dir)
         .await
         .map_err(|e| format!("canonicalize repos_dir: {e}"))?;

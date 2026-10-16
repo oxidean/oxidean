@@ -198,7 +198,10 @@ pub async fn resolve_bearer(
     let token_hash = sha256_hex(token.as_bytes());
     // Revoked rows must reach this classification — filtering them at the DB
     // layer makes a revoked token indistinguishable from a nonexistent one.
-    let pat = match db.find_pat_by_token_hash_including_revoked(&token_hash).await {
+    let pat = match db
+        .find_pat_by_token_hash_including_revoked(&token_hash)
+        .await
+    {
         Ok(Some(p)) => p,
         Ok(None) => {
             lock(limiter).record_ip(ip);
@@ -313,7 +316,7 @@ pub async fn touch_last_used(db: &Database, pat_id: &str, ip: Option<&str>) {
 /// This module keeps only the db/context-dependent half: `repo_target`
 /// resolution, FG `repo_access`/perm evaluation, and the authorize fns.
 use oxidean_core::proc_classes::{
-    classify_pat_proc as classify, classic_scopes_for, fg_family_name, public_repo_covers,
+    classic_scopes_for, classify_pat_proc as classify, fg_family_name, public_repo_covers,
     required_scope_names, PatProc,
 };
 
@@ -365,9 +368,7 @@ async fn authorize_classic(
     let names = required_scope_names(class).join("\", \"");
     Err(pat_scope_err(
         procedure,
-        &format!(
-            "insufficient scope — this procedure requires one of: \"{names}\""
-        ),
+        &format!("insufficient scope — this procedure requires one of: \"{names}\""),
     ))
 }
 
@@ -624,9 +625,7 @@ pub(crate) async fn authorize_pat_on_repo(
             {
                 return Ok(());
             }
-            if public_repo_covers(class)
-                && has_scope(&pat.scopes, ClassicPatScope::PublicRepo)
-            {
+            if public_repo_covers(class) && has_scope(&pat.scopes, ClassicPatScope::PublicRepo) {
                 if !is_private_visibility(&repo.visibility) {
                     return Ok(());
                 }
@@ -635,9 +634,7 @@ pub(crate) async fn authorize_pat_on_repo(
             let names = required_scope_names(class).join("\", \"");
             Err(pat_scope_err(
                 procedure,
-                &format!(
-                    "insufficient scope — this procedure requires one of: \"{names}\""
-                ),
+                &format!("insufficient scope — this procedure requires one of: \"{names}\""),
             ))
         }
         PatKind::FineGrained => {

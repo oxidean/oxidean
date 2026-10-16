@@ -7,12 +7,9 @@ use oxidean_db::Database;
 #[tokio::test]
 async fn actions_rpc_list_runs() {
     let dir = tempfile::tempdir().unwrap();
-    let db = Database::connect(&format!(
-        "sqlite:{}",
-        dir.path().join("rpc.db").display()
-    ))
-    .await
-    .unwrap();
+    let db = Database::connect(&format!("sqlite:{}", dir.path().join("rpc.db").display()))
+        .await
+        .unwrap();
     db.migrate().await.unwrap();
     let owner = db
         .create_user(
@@ -44,7 +41,10 @@ async fn actions_rpc_list_runs() {
     )
     .await
     .unwrap();
-    let runs = db.list_action_runs_for_repo(&repo.id, &Default::default(), 100, 0).await.unwrap();
+    let runs = db
+        .list_action_runs_for_repo(&repo.id, &Default::default(), 100, 0)
+        .await
+        .unwrap();
     assert_eq!(runs.len(), 1);
     assert_eq!(runs[0].id, "run-rpc");
 }
@@ -52,12 +52,9 @@ async fn actions_rpc_list_runs() {
 #[tokio::test]
 async fn actions_rpc_run_detail() {
     let dir = tempfile::tempdir().unwrap();
-    let db = Database::connect(&format!(
-        "sqlite:{}",
-        dir.path().join("rpc2.db").display()
-    ))
-    .await
-    .unwrap();
+    let db = Database::connect(&format!("sqlite:{}", dir.path().join("rpc2.db").display()))
+        .await
+        .unwrap();
     db.migrate().await.unwrap();
     let owner = db
         .create_user(

@@ -121,11 +121,7 @@ jobs:
 "#,
     )
     .expect_err("missing runs-on");
-    assert!(
-        missing.message.contains("runs-on"),
-        "{}",
-        missing.message
-    );
+    assert!(missing.message.contains("runs-on"), "{}", missing.message);
 }
 
 #[tokio::test]
@@ -225,5 +221,8 @@ jobs:
 "#,
     )
     .expect("parse");
-    assert_eq!(doc.jobs[0].steps[0].run.as_deref(), Some("echo should-not-run-in-api"));
+    assert_eq!(
+        doc.jobs[0].steps[0].run.as_deref(),
+        Some("echo should-not-run-in-api")
+    );
 }

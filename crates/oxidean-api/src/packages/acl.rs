@@ -15,10 +15,7 @@ pub enum PackageAction {
     Delete,
 }
 
-pub fn effective_visibility(
-    package: &PackageRow,
-    linked_repo: Option<&RepositoryRow>,
-) -> String {
+pub fn effective_visibility(package: &PackageRow, linked_repo: Option<&RepositoryRow>) -> String {
     if let Some(repo) = linked_repo {
         return repo.visibility.clone();
     }
@@ -45,7 +42,10 @@ pub fn pat_allows_packages(
                 .iter()
                 .any(|s| matches!(s, ClassicPatScope::PackageWrite)),
             PackageAction::Pull => scopes.iter().any(|s| {
-                matches!(s, ClassicPatScope::PackageRead | ClassicPatScope::PackageWrite)
+                matches!(
+                    s,
+                    ClassicPatScope::PackageRead | ClassicPatScope::PackageWrite
+                )
             }),
         };
     }

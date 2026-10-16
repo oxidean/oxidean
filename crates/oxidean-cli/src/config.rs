@@ -50,7 +50,9 @@ pub enum ConfigError {
     NoConfigDir,
     /// Windows variant of `NoConfigDir` — `HOME` is not a platform default.
     #[cfg(windows)]
-    #[error("cannot locate a config directory (set OXIDEAN_CONFIG_DIR, XDG_CONFIG_HOME, or APPDATA)")]
+    #[error(
+        "cannot locate a config directory (set OXIDEAN_CONFIG_DIR, XDG_CONFIG_HOME, or APPDATA)"
+    )]
     NoConfigDir,
     #[error("{0}")]
     Io(String),

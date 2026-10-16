@@ -157,7 +157,11 @@ pub async fn upload_asset(
     let owner_ref = match resolve_owner_slug(&state.db, &owner).await {
         Ok(Some(r)) => r,
         Ok(None) => {
-            return err_response(StatusCode::NOT_FOUND, "repo.not_found", "Repository not found");
+            return err_response(
+                StatusCode::NOT_FOUND,
+                "repo.not_found",
+                "Repository not found",
+            );
         }
         Err(e) => {
             tracing::error!(error = %e, "resolve_owner_slug");
@@ -175,7 +179,11 @@ pub async fn upload_asset(
     {
         Ok(Some(r)) => r,
         Ok(None) => {
-            return err_response(StatusCode::NOT_FOUND, "repo.not_found", "Repository not found");
+            return err_response(
+                StatusCode::NOT_FOUND,
+                "repo.not_found",
+                "Repository not found",
+            );
         }
         Err(e) => {
             tracing::error!(error = %e, "find repository");
@@ -199,21 +207,24 @@ pub async fn upload_asset(
             return pat_err_response(&e);
         }
     }
-    let capability = match effective_capability(&state.db, Some(&user_id), &repo_row, &owner_ref)
-        .await
-    {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::error!(error = %e, "effective_capability");
-            return err_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "release.internal",
-                "upload failed",
-            );
-        }
-    };
+    let capability =
+        match effective_capability(&state.db, Some(&user_id), &repo_row, &owner_ref).await {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::error!(error = %e, "effective_capability");
+                return err_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "release.internal",
+                    "upload failed",
+                );
+            }
+        };
     if !meets(capability, Capability::Write) {
-        return err_response(StatusCode::NOT_FOUND, "repo.not_found", "Repository not found");
+        return err_response(
+            StatusCode::NOT_FOUND,
+            "repo.not_found",
+            "Repository not found",
+        );
     }
     // GIT-20: archived repositories are read-only — no asset uploads.
     if repo_row.archived {
@@ -413,7 +424,11 @@ pub async fn download_asset(
     headers: HeaderMap,
 ) -> Response {
     if asset_id.contains('/') || asset_id.contains('\\') || asset_id.contains("..") {
-        return err_response(StatusCode::NOT_FOUND, "release.asset_not_found", "Asset not found");
+        return err_response(
+            StatusCode::NOT_FOUND,
+            "release.asset_not_found",
+            "Asset not found",
+        );
     }
     let asset = match state.db.find_release_asset_by_id(&asset_id).await {
         Ok(Some(a)) => a,
@@ -482,32 +497,36 @@ pub async fn download_asset(
 
     let caller = resolve_session_user_id(&state, &headers).await;
     if let Some((_, Some(pat))) = &caller {
-        if let Err(e) =
-            crate::pat::bearer::authorize_pat_on_repo(&state.db, pat, "release.get", &repo, &owner_ref)
-                .await
-        {
-            return pat_err_response(&e);
-        }
-    }
-    let capability =
-        match effective_capability(
+        if let Err(e) = crate::pat::bearer::authorize_pat_on_repo(
             &state.db,
-            caller.as_ref().map(|(id, _)| id.as_str()),
+            pat,
+            "release.get",
             &repo,
             &owner_ref,
         )
         .await
         {
-            Ok(c) => c,
-            Err(e) => {
-                tracing::error!(error = %e, "effective_capability download");
-                return err_response(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "release.internal",
-                    "download failed",
-                );
-            }
-        };
+            return pat_err_response(&e);
+        }
+    }
+    let capability = match effective_capability(
+        &state.db,
+        caller.as_ref().map(|(id, _)| id.as_str()),
+        &repo,
+        &owner_ref,
+    )
+    .await
+    {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!(error = %e, "effective_capability download");
+            return err_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "release.internal",
+                "download failed",
+            );
+        }
+    };
 
     let need = if release.draft {
         Capability::Write
@@ -560,13 +579,10 @@ pub async fn delete_asset_with_file(
     release_assets_dir: &Path,
     asset_id: &str,
 ) -> Result<(), oxidean_core::AppError> {
-    ctx.db
-        .delete_release_asset(asset_id)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "delete_release_asset");
-            oxidean_core::AppError::new("release.internal", "could not delete asset")
-        })?;
+    ctx.db.delete_release_asset(asset_id).await.map_err(|e| {
+        tracing::error!(error = %e, "delete_release_asset");
+        oxidean_core::AppError::new("release.internal", "could not delete asset")
+    })?;
     remove_asset_file(release_assets_dir, asset_id).await;
     Ok(())
 }

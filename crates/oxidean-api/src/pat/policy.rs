@@ -122,9 +122,7 @@ pub fn resolve_expires_at(
             ),
         ));
     }
-    Ok(Some(
-        dt.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
-    ))
+    Ok(Some(dt.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)))
 }
 
 /// Seconds until `expires_at` (0 when `None`) — for the OAuth device exchange's

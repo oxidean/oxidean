@@ -14,11 +14,24 @@ use oxidean_api::git::bare_repo_path;
 use oxidean_api::protection::hooks_installed;
 use oxidean_api::{build_cors, router_with_state, AppState};
 use oxidean_db::Database;
+use oxidean_git::CliGitBackend;
 use tower::ServiceExt;
 
 async fn test_app(db: Database, repos_dir: std::path::PathBuf) -> axum::Router {
     let state = AppState::new(db, Arc::new(LogSink) as Arc<dyn EmailSender>, "development")
         .with_repos_dir(repos_dir);
+    let cors = build_cors("development", None).expect("cors");
+    router_with_state(state, cors)
+}
+
+async fn test_app_with_git(
+    db: Database,
+    repos_dir: std::path::PathBuf,
+    git: CliGitBackend,
+) -> axum::Router {
+    let state = AppState::new(db, Arc::new(LogSink) as Arc<dyn EmailSender>, "development")
+        .with_repos_dir(repos_dir)
+        .with_git(Arc::new(git));
     let cors = build_cors("development", None).expect("cors");
     router_with_state(state, cors)
 }
@@ -272,19 +285,25 @@ async fn repo_fork_failed_when_hook_install_blocked() {
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
-    let app = test_app(db.clone(), repos.clone()).await;
+
+    // Poison the backend's clone template so the fork's bare clone lands
+    // `hooks` as a file; install fails after clone → fork must compensate.
+    // Scoped to the backend (not process env) — process env would race
+    // sibling tests under plain `cargo test`.
+    let template = dir.path().join("bad-template");
+    std::fs::create_dir_all(&template).expect("template");
+    std::fs::write(template.join("hooks"), b"not-a-directory\n").expect("hooks file");
+    let app = test_app_with_git(
+        db.clone(),
+        repos.clone(),
+        CliGitBackend::new().with_clone_template_dir(&template),
+    )
+    .await;
 
     let (src_c, src_v) = signup_and_login(&app, "failsrc@ex.com", "failsrc").await;
     let src_id = src_v["data"]["id"].as_str().unwrap().to_string();
     verify_user(&db, &src_id).await;
     create_repo(&app, &src_c, "upstream", "public").await;
-
-    // Poison GIT_TEMPLATE_DIR so bare clone's hooks dir is a file; install fails.
-    let template = dir.path().join("bad-template");
-    std::fs::create_dir_all(&template).expect("template");
-    std::fs::write(template.join("hooks"), b"not-a-directory\n").expect("hooks file");
-    let prev = std::env::var_os("GIT_TEMPLATE_DIR");
-    std::env::set_var("GIT_TEMPLATE_DIR", &template);
 
     let (fork_c, fork_v) = signup_and_login(&app, "failfork@ex.com", "failfork").await;
     let fork_uid = fork_v["data"]["id"].as_str().unwrap().to_string();
@@ -296,11 +315,6 @@ async fn repo_fork_failed_when_hook_install_blocked() {
         r#"{"procedure":"repo.fork","input":{"owner":"failsrc","name":"upstream"}}"#,
     )
     .await;
-
-    match prev {
-        Some(v) => std::env::set_var("GIT_TEMPLATE_DIR", v),
-        None => std::env::remove_var("GIT_TEMPLATE_DIR"),
-    }
 
     assert_eq!(forked["ok"], false, "{forked}");
     assert_eq!(

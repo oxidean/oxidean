@@ -58,7 +58,9 @@ pub fn is_placeholder_username(username: &str) -> bool {
     let b = username.as_bytes();
     b.len() == 9
         && b[0] == b'u'
-        && b[1..].iter().all(|c| matches!(c, b'0'..=b'9' | b'a'..=b'f'))
+        && b[1..]
+            .iter()
+            .all(|c| matches!(c, b'0'..=b'9' | b'a'..=b'f'))
 }
 
 /// Sanitize email local-part into a candidate username.
@@ -99,18 +101,20 @@ pub async fn allocate_username(
     email: &str,
 ) -> Result<(String, bool), ExternalAuthError> {
     let base = candidate_from_email(email);
-    let try_name = |name: &str| -> bool {
-        validate_username(name).is_ok() && !is_reserved_username(name)
-    };
+    let try_name =
+        |name: &str| -> bool { validate_username(name).is_ok() && !is_reserved_username(name) };
 
     if try_name(&base) {
-        match db.find_user_by_username(&base).await.map_err(ExternalAuthError::from_db)? {
-            None
-                if db
-                    .find_organization_by_slug(&base)
-                    .await
-                    .map_err(ExternalAuthError::from_db)?
-                    .is_none() =>
+        match db
+            .find_user_by_username(&base)
+            .await
+            .map_err(ExternalAuthError::from_db)?
+        {
+            None if db
+                .find_organization_by_slug(&base)
+                .await
+                .map_err(ExternalAuthError::from_db)?
+                .is_none() =>
             {
                 return Ok((base, false));
             }
@@ -297,7 +301,10 @@ mod tests {
     fn sanitize_rejects_open_redirect() {
         assert_eq!(sanitize_return_to(Some("https://evil.example")), "/");
         assert_eq!(sanitize_return_to(Some("//evil.example")), "/");
-        assert_eq!(sanitize_return_to(Some("/settings/profile")), "/settings/profile");
+        assert_eq!(
+            sanitize_return_to(Some("/settings/profile")),
+            "/settings/profile"
+        );
         assert_eq!(sanitize_return_to(Some("/")), "/");
         assert_eq!(sanitize_return_to(Some("/dashboard")), "/");
         assert_eq!(sanitize_return_to(None), "/");
@@ -312,7 +319,10 @@ mod tests {
 
     #[test]
     fn candidate_sanitizes_local_part() {
-        assert_eq!(candidate_from_email("Alice.Bob_tag@ex.com"), "alice-bob-tag");
+        assert_eq!(
+            candidate_from_email("Alice.Bob_tag@ex.com"),
+            "alice-bob-tag"
+        );
     }
 
     /// D-03/D-15: IdP-asserted verified email marks users.email_verified_at on SSO link/create.

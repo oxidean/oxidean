@@ -18,12 +18,12 @@ async fn system_echo_over_ws() {
     let mut req = format!("ws://{addr}/api/rpc/ws")
         .into_client_request()
         .unwrap();
-    req.headers_mut().insert(
-        "Oxidean-RPC-Version",
-        HeaderValue::from_static("1"),
-    );
+    req.headers_mut()
+        .insert("Oxidean-RPC-Version", HeaderValue::from_static("1"));
 
-    let (mut ws, _) = tokio_tungstenite::connect_async(req).await.expect("ws connect");
+    let (mut ws, _) = tokio_tungstenite::connect_async(req)
+        .await
+        .expect("ws connect");
     ws.send(Message::Text(
         r#"{"procedure":"system.echo","input":{"message":"pong"}}"#.into(),
     ))

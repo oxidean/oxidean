@@ -244,7 +244,13 @@ pub fn evaluate_push(
         "repo.branch_protection",
         "Branch protection rules block this update",
     )
-    .with_data(serde_json::to_value(ProtectionBlockReasons { reasons, ..Default::default() }).unwrap_or_default()))
+    .with_data(
+        serde_json::to_value(ProtectionBlockReasons {
+            reasons,
+            ..Default::default()
+        })
+        .unwrap_or_default(),
+    ))
 }
 
 /// What the actor is attempting on a tag ref (GIT-21).
@@ -474,7 +480,10 @@ pub fn branch_from_ref(git_ref: &str) -> Option<&str> {
 }
 
 /// Derive `owner/name` relative path from absolute bare `GIT_DIR` under `repos_dir`.
-pub fn owner_name_from_git_dir(repos_dir: &Path, git_dir: &Path) -> Result<(String, String), String> {
+pub fn owner_name_from_git_dir(
+    repos_dir: &Path,
+    git_dir: &Path,
+) -> Result<(String, String), String> {
     let repos = std::fs::canonicalize(repos_dir).unwrap_or_else(|_| repos_dir.to_path_buf());
     let bare = std::fs::canonicalize(git_dir).unwrap_or_else(|_| git_dir.to_path_buf());
     let rel = bare
@@ -962,7 +971,14 @@ async fn enforce_signed_commits(
 async fn git_is_fast_forward(git_dir: &Path, old_sha: &str, new_sha: &str) -> Result<bool, String> {
     let dir = git_dir.to_str().ok_or("non-utf8 GIT_DIR")?;
     let out = tokio::process::Command::new("git")
-        .args(["--git-dir", dir, "merge-base", "--is-ancestor", old_sha, new_sha])
+        .args([
+            "--git-dir",
+            dir,
+            "merge-base",
+            "--is-ancestor",
+            old_sha,
+            new_sha,
+        ])
         .output()
         .await
         .map_err(|e| format!("git ff check: {e}"))?;
@@ -1075,7 +1091,9 @@ mod tests {
             "v2",
         );
         assert!(!miss.matched);
-        assert!(evaluate_tag_push(&miss, TagProtectionIntent::Delete, Some(Capability::Read)).is_ok());
+        assert!(
+            evaluate_tag_push(&miss, TagProtectionIntent::Delete, Some(Capability::Read)).is_ok()
+        );
     }
 
     #[test]

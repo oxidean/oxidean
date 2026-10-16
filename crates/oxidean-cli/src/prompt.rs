@@ -50,13 +50,15 @@ pub fn confirm(message: &str) -> Result<bool, dialoguer::Error> {
 /// Masked input — never for scripting paths; callers must keep a
 /// non-interactive alternative (flag/stdin) for secrets.
 pub fn password(message: &str) -> Result<String, dialoguer::Error> {
-    dialoguer::Password::new()
-        .with_prompt(message)
-        .interact()
+    dialoguer::Password::new().with_prompt(message).interact()
 }
 
 /// Multi-select checkboxes (e.g. OAuth scope picking on `auth login --web`).
-pub fn multi_select(message: &str, items: &[String], defaults: &[bool]) -> Result<Vec<usize>, dialoguer::Error> {
+pub fn multi_select(
+    message: &str,
+    items: &[String],
+    defaults: &[bool],
+) -> Result<Vec<usize>, dialoguer::Error> {
     dialoguer::MultiSelect::new()
         .with_prompt(message)
         .items(items)

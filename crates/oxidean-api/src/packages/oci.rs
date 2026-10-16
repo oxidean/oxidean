@@ -95,10 +95,7 @@ fn split_name(name: &str) -> Option<(String, String)> {
     Some((owner.to_string(), rest.to_string()))
 }
 
-async fn resolve_owner(
-    db: &Database,
-    login: &str,
-) -> Result<Option<(String, String)>, String> {
+async fn resolve_owner(db: &Database, login: &str) -> Result<Option<(String, String)>, String> {
     if let Some(u) = db.find_user_by_username(login).await? {
         return Ok(Some(("user".into(), u.id)));
     }
@@ -117,7 +114,13 @@ async fn capability_for_owner(
 ) -> Result<Option<Capability>, String> {
     let public = acl::is_public(visibility);
     let Some(uid) = user_id else {
-        return Ok(coalesce(false, None, MemberBasePermission::None, None, public));
+        return Ok(coalesce(
+            false,
+            None,
+            MemberBasePermission::None,
+            None,
+            public,
+        ));
     };
     if owner_type == "user" {
         return Ok(coalesce(
@@ -130,8 +133,7 @@ async fn capability_for_owner(
     }
     // Org 2FA lockout (#130): members without a confirmed factor get no
     // org-derived grants — same suppression `org::require_org_role` applies.
-    let (org_role, member_base, _locked) =
-        org_member_capability_sources(db, owner_id, uid).await?;
+    let (org_role, member_base, _locked) = org_member_capability_sources(db, owner_id, uid).await?;
     Ok(coalesce(false, org_role, member_base, None, public))
 }
 
@@ -204,8 +206,12 @@ async fn ensure_package(
     )
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    if !acl::authorize(visibility, have, identity.allows(PackageAction::Publish), PackageAction::Publish)
-    {
+    if !acl::authorize(
+        visibility,
+        have,
+        identity.allows(PackageAction::Publish),
+        PackageAction::Publish,
+    ) {
         return Err(StatusCode::FORBIDDEN);
     }
     let id = Uuid::new_v4().to_string();
@@ -612,7 +618,10 @@ async fn put_manifest(
             return StatusCode::BAD_REQUEST.into_response();
         }
         if let Ok(Some(existing)) = state.db.find_package_version(&pkg.id, &reference).await {
-            if let Ok(stored) = store::get_blob(&state.packages_dir, existing.digest.as_deref().unwrap_or("")) {
+            if let Ok(stored) = store::get_blob(
+                &state.packages_dir,
+                existing.digest.as_deref().unwrap_or(""),
+            ) {
                 if stored != body.as_ref() {
                     return StatusCode::CONFLICT.into_response();
                 }
@@ -647,7 +656,10 @@ async fn put_manifest(
             _ => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
         };
     }
-    let _ = state.db.upsert_package_blob(&digest, body.len() as i64).await;
+    let _ = state
+        .db
+        .upsert_package_blob(&digest, body.len() as i64)
+        .await;
 
     let meta = ManifestMeta {
         digest: digest.clone(),
@@ -678,7 +690,10 @@ async fn put_manifest(
             )
             .await;
         let _ = state.db.adjust_package_blob_refcount(&digest, 1).await;
-        let _ = state.db.add_package_blob_ref(&vid, &digest, "manifest").await;
+        let _ = state
+            .db
+            .add_package_blob_ref(&vid, &digest, "manifest")
+            .await;
     }
 
     // Tag reference (mutable retarget)
@@ -715,12 +730,19 @@ async fn put_manifest(
             )
             .await;
         let _ = state.db.adjust_package_blob_refcount(&digest, 1).await;
-        let _ = state.db.add_package_blob_ref(&vid, &digest, "manifest").await;
+        let _ = state
+            .db
+            .add_package_blob_ref(&vid, &digest, "manifest")
+            .await;
     }
 
     // API-04: `registry_package` for repo-linked OCI packages (no-op when the
     // package has no repository link, which `ensure_package` leaves unset).
-    let action = if tag_retargeted { "updated" } else { "published" };
+    let action = if tag_retargeted {
+        "updated"
+    } else {
+        "published"
+    };
     crate::webhook::dispatch::notify_package_publish(
         &state.db,
         &pkg,
@@ -742,7 +764,10 @@ async fn put_manifest(
                 header::HeaderName::from_static("docker-content-digest"),
                 HeaderValue::from_str(&digest).unwrap(),
             ),
-            (header::CONTENT_TYPE, HeaderValue::from_str(&media_type).unwrap()),
+            (
+                header::CONTENT_TYPE,
+                HeaderValue::from_str(&media_type).unwrap(),
+            ),
         ],
     )
         .into_response()
@@ -957,6 +982,9 @@ pub fn router() -> Router<AppState> {
                 .delete(delete_manifest),
         )
         .route("/{owner}/{image}/tags/list", get(tags_list))
-        .route("/{owner}/{image}/referrers/{digest}", get(referrers_deferred))
+        .route(
+            "/{owner}/{image}/referrers/{digest}",
+            get(referrers_deferred),
+        )
         .layer(DefaultBodyLimit::max(max))
 }

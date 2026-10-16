@@ -33,7 +33,7 @@ make rpc-gen               # after RPC / DTO changes
 make test                  # Rust + Vitest
 make test-e2e-stack        # API + Mailpit/OIDC stubs + browser
 make web-lint              # oxlint type-aware (apps/web)
-make web-format-check      # oxfmt --check (apps/web)
+make web-format-check      # oxfmt + prettier --check (apps/web)
 make up && make smoke      # Compose stack
 ```
 

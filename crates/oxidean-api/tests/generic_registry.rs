@@ -227,8 +227,7 @@ async fn generic_registry_delete_version() {
         "FG packages:write must not delete versions"
     );
 
-    let del_token =
-        mint_classic_pat(&app, &cookie, r#"["package:write","package:delete"]"#).await;
+    let del_token = mint_classic_pat(&app, &cookie, r#"["package:write","package:delete"]"#).await;
     let del = Request::builder()
         .method("DELETE")
         .uri("/generic/pkgowner/tool/1.0.0")

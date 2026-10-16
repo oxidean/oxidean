@@ -25,7 +25,12 @@ pub fn job_status_to_commit_state(job_status: &str) -> &'static str {
     }
 }
 
-fn target_url_for_run(public_origin: Option<&str>, owner: &str, repo: &str, run_id: &str) -> Option<String> {
+fn target_url_for_run(
+    public_origin: Option<&str>,
+    owner: &str,
+    repo: &str,
+    run_id: &str,
+) -> Option<String> {
     let origin = public_origin?.trim().trim_end_matches('/');
     if origin.is_empty() {
         return None;

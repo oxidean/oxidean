@@ -46,7 +46,10 @@ impl std::fmt::Display for DiscoverError {
             Self::Git(e) => write!(f, "git: {e}"),
             Self::Parse { path, error } => write!(f, "{path}: {error}"),
             Self::TooLarge { path, size } => {
-                write!(f, "{path}: workflow exceeds {MAX_WORKFLOW_BYTES} bytes ({size})")
+                write!(
+                    f,
+                    "{path}: workflow exceeds {MAX_WORKFLOW_BYTES} bytes ({size})"
+                )
             }
             Self::PathEscape(p) => write!(f, "path escape rejected: {p}"),
         }

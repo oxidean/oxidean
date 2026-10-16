@@ -24,10 +24,7 @@ macro_rules! map_org {
             .or_else(|_| {
                 row.try_get::<i64, _>("require_two_factor")
                     .map(|v| v != 0)
-                    .or_else(|_| {
-                        row.try_get::<i8, _>("require_two_factor")
-                            .map(|v| v != 0)
-                    })
+                    .or_else(|_| row.try_get::<i8, _>("require_two_factor").map(|v| v != 0))
             })
             .unwrap_or(false);
         OrganizationRow {
@@ -50,17 +47,20 @@ macro_rules! map_org {
     }};
 }
 
-const ORG_SELECT_PG: &str = "SELECT id, slug, display_name, member_base_permission, require_two_factor,
+const ORG_SELECT_PG: &str =
+    "SELECT id, slug, display_name, member_base_permission, require_two_factor,
        to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS created_at,
        to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS updated_at
 FROM organizations";
 
-const ORG_SELECT_MYSQL: &str = "SELECT id, slug, display_name, member_base_permission, require_two_factor,
+const ORG_SELECT_MYSQL: &str =
+    "SELECT id, slug, display_name, member_base_permission, require_two_factor,
        DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at,
        DATE_FORMAT(updated_at, '%Y-%m-%dT%H:%i:%sZ') AS updated_at
 FROM organizations";
 
-const ORG_SELECT_SQLITE: &str = "SELECT id, slug, display_name, member_base_permission, require_two_factor,
+const ORG_SELECT_SQLITE: &str =
+    "SELECT id, slug, display_name, member_base_permission, require_two_factor,
        strftime('%Y-%m-%dT%H:%M:%SZ', created_at) AS created_at,
        strftime('%Y-%m-%dT%H:%M:%SZ', updated_at) AS updated_at
 FROM organizations";

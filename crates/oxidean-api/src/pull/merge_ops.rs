@@ -462,7 +462,11 @@ pub async fn merge(ctx: &RpcCtx, input: serde_json::Value) -> Result<MergePullRe
         nums.sort_unstable();
         nums.dedup();
         for n in nums {
-            if let Ok(Some(issue)) = ctx.db.find_issue_by_repo_number(&accessible.row.id, n).await {
+            if let Ok(Some(issue)) = ctx
+                .db
+                .find_issue_by_repo_number(&accessible.row.id, n)
+                .await
+            {
                 if issue.state == "open" {
                     let _ = ctx.db.close_issue(&issue.id, &user.id).await;
                 }

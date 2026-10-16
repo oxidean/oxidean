@@ -340,9 +340,7 @@ async fn update_task(
     if let Ok(Some(run)) = state.db.find_action_run_by_id(&job.run_id).await {
         let action = match run.status.as_str() {
             "success" | "failure" | "cancelled" => Some("completed"),
-            "in_progress" if prev_run_status.as_deref() == Some("queued") => {
-                Some("in_progress")
-            }
+            "in_progress" if prev_run_status.as_deref() == Some("queued") => Some("in_progress"),
             _ => None,
         };
         if let Some(action) = action {

@@ -62,10 +62,7 @@ fn valid_filename(s: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '+'))
 }
 
-async fn resolve_owner(
-    db: &Database,
-    login: &str,
-) -> Result<Option<(String, String)>, String> {
+async fn resolve_owner(db: &Database, login: &str) -> Result<Option<(String, String)>, String> {
     if let Some(u) = db.find_user_by_username(login).await? {
         return Ok(Some(("user".into(), u.id)));
     }
@@ -103,8 +100,7 @@ async fn capability_for_owner(
     }
     // Org 2FA lockout (#130): members without a confirmed factor get no
     // org-derived grants — same suppression `org::require_org_role` applies.
-    let (org_role, member_base, _locked) =
-        org_member_capability_sources(db, owner_id, uid).await?;
+    let (org_role, member_base, _locked) = org_member_capability_sources(db, owner_id, uid).await?;
     Ok(coalesce(false, org_role, member_base, None, public))
 }
 
@@ -148,7 +144,10 @@ async fn put_file(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    if !valid_segment(&owner) || !valid_segment(&name) || !valid_segment(&version) || !valid_filename(&filename)
+    if !valid_segment(&owner)
+        || !valid_segment(&name)
+        || !valid_segment(&version)
+        || !valid_filename(&filename)
     {
         return (StatusCode::BAD_REQUEST, "invalid path segment").into_response();
     }
@@ -381,7 +380,11 @@ async fn put_file(
 
     // API-04: repo-linked packages fan out `registry_package` (no-op when the
     // package is not linked to a repository).
-    let action = if is_new_version { "published" } else { "updated" };
+    let action = if is_new_version {
+        "published"
+    } else {
+        "updated"
+    };
     crate::webhook::dispatch::notify_package_publish(
         &state.db,
         &package,
@@ -392,7 +395,11 @@ async fn put_file(
     )
     .await;
 
-    (StatusCode::CREATED, Json(json!({ "ok": true, "digest": digest, "size": size }))).into_response()
+    (
+        StatusCode::CREATED,
+        Json(json!({ "ok": true, "digest": digest, "size": size })),
+    )
+        .into_response()
 }
 
 async fn get_file(
@@ -400,7 +407,10 @@ async fn get_file(
     Path((owner, name, version, filename)): Path<(String, String, String, String)>,
     headers: HeaderMap,
 ) -> Response {
-    if !valid_segment(&owner) || !valid_segment(&name) || !valid_segment(&version) || !valid_filename(&filename)
+    if !valid_segment(&owner)
+        || !valid_segment(&name)
+        || !valid_segment(&version)
+        || !valid_filename(&filename)
     {
         return (StatusCode::BAD_REQUEST, "invalid path segment").into_response();
     }
@@ -431,12 +441,11 @@ async fn get_file(
         return StatusCode::NOT_FOUND.into_response();
     };
 
-    let ok = match authorize_action(&state.db, identity.as_ref(), &package, PackageAction::Pull)
-        .await
-    {
-        Ok(v) => v,
-        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-    };
+    let ok =
+        match authorize_action(&state.db, identity.as_ref(), &package, PackageAction::Pull).await {
+            Ok(v) => v,
+            Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+        };
     if !ok {
         // Anti-enumeration for private: 404
         if !acl::is_public(&package.visibility) && identity.is_none() {
@@ -518,12 +527,11 @@ async fn delete_version(
         return StatusCode::NOT_FOUND.into_response();
     };
 
-    let ok = match authorize_action(&state.db, Some(&identity), &package, PackageAction::Delete)
-        .await
-    {
-        Ok(v) => v,
-        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-    };
+    let ok =
+        match authorize_action(&state.db, Some(&identity), &package, PackageAction::Delete).await {
+            Ok(v) => v,
+            Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+        };
     if !ok {
         return StatusCode::FORBIDDEN.into_response();
     }
@@ -584,12 +592,11 @@ async fn list_package(
         return StatusCode::NOT_FOUND.into_response();
     };
 
-    let ok = match authorize_action(&state.db, identity.as_ref(), &package, PackageAction::Pull)
-        .await
-    {
-        Ok(v) => v,
-        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-    };
+    let ok =
+        match authorize_action(&state.db, identity.as_ref(), &package, PackageAction::Pull).await {
+            Ok(v) => v,
+            Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+        };
     if !ok {
         if !acl::is_public(&package.visibility) && identity.is_none() {
             return (

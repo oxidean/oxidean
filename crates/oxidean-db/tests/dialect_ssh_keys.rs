@@ -60,7 +60,8 @@ async fn dialect_ssh_keys_migrate_0009_schema_presence() {
         .expect("create owner");
 
     let fp1 = "SHA256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-    let pk1 = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA laptop";
+    let pk1 =
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA laptop";
     db.create_ssh_key(
         "ssh-key-1",
         &owner.id,
@@ -89,9 +90,18 @@ async fn dialect_ssh_keys_migrate_0009_schema_presence() {
 
     let fp2 = "SHA256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
     let pk2 = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB ci";
-    db.create_ssh_key("ssh-key-2", &owner.id, "ci", pk2, fp2, "ssh-ed25519", true, true)
-        .await
-        .expect("create second key");
+    db.create_ssh_key(
+        "ssh-key-2",
+        &owner.id,
+        "ci",
+        pk2,
+        fp2,
+        "ssh-ed25519",
+        true,
+        true,
+    )
+    .await
+    .expect("create second key");
 
     let listed = db.list_ssh_keys_for_user(&owner.id).await.expect("list");
     assert_eq!(listed.len(), 2, "both keys listed");
@@ -119,7 +129,10 @@ async fn dialect_ssh_keys_migrate_0009_schema_presence() {
         "revoked SSH keys must hard-delete (no fingerprint resolve)"
     );
 
-    let listed_after = db.list_ssh_keys_for_user(&owner.id).await.expect("list after");
+    let listed_after = db
+        .list_ssh_keys_for_user(&owner.id)
+        .await
+        .expect("list after");
     assert_eq!(listed_after.len(), 1);
     assert_eq!(listed_after[0].id, "ssh-key-2");
 

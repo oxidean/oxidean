@@ -43,7 +43,9 @@ pub enum AuthzDecision {
         /// path (GIT-23): the admin who attached the authorizing key row.
         actor_user_id: String,
     },
-    Deny { message: String },
+    Deny {
+        message: String,
+    },
 }
 
 /// Parse `git-upload-pack 'owner/name.git'` / `git-receive-pack "owner/name.git"`.
@@ -600,14 +602,8 @@ pub fn receive_pack_protection_env(
     oxidean_env: Option<&str>,
 ) -> Vec<(String, String)> {
     let mut out = Vec::with_capacity(5);
-    out.push((
-        "OXIDEAN_DATABASE_URL".into(),
-        database_url.to_string(),
-    ));
-    out.push((
-        "OXIDEAN_REPOS_DIR".into(),
-        repos_dir.display().to_string(),
-    ));
+    out.push(("OXIDEAN_DATABASE_URL".into(), database_url.to_string()));
+    out.push(("OXIDEAN_REPOS_DIR".into(), repos_dir.display().to_string()));
     out.push((
         "OXIDEAN_ACTOR_CAPABILITY".into(),
         actor_capability.to_string(),
@@ -657,14 +653,8 @@ mod tests {
             map.get("OXIDEAN_DATABASE_URL").copied(),
             Some("sqlite:/tmp/oxidean.db")
         );
-        assert_eq!(
-            map.get("OXIDEAN_REPOS_DIR").copied(),
-            Some("/var/repos")
-        );
-        assert_eq!(
-            map.get("OXIDEAN_ACTOR_CAPABILITY").copied(),
-            Some("admin")
-        );
+        assert_eq!(map.get("OXIDEAN_REPOS_DIR").copied(), Some("/var/repos"));
+        assert_eq!(map.get("OXIDEAN_ACTOR_CAPABILITY").copied(), Some("admin"));
         assert_eq!(map.get("OXIDEAN_ENV").copied(), Some("compose"));
     }
 
@@ -684,7 +674,10 @@ mod tests {
         );
         assert_eq!(map.get("OXIDEAN_ACTOR_CAPABILITY").copied(), Some("write"));
         assert_eq!(map.get("OXIDEAN_ENV").copied(), Some("production"));
-        assert_eq!(map.get("OXIDEAN_DATABASE_URL").copied(), Some("postgres://x"));
+        assert_eq!(
+            map.get("OXIDEAN_DATABASE_URL").copied(),
+            Some("postgres://x")
+        );
         assert_eq!(map.get("OXIDEAN_REPOS_DIR").copied(), Some("/repos"));
     }
 

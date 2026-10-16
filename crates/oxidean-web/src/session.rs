@@ -85,10 +85,7 @@ impl SessionValidator {
         let resp = self
             .client
             .get(&self.url)
-            .header(
-                reqwest::header::COOKIE,
-                format!("oxidean_session={token}"),
-            )
+            .header(reqwest::header::COOKIE, format!("oxidean_session={token}"))
             .send()
             .await;
         let Ok(resp) = resp else {
@@ -221,7 +218,11 @@ mod tests {
         for _ in 0..3 {
             assert_eq!(v.check_token("abc").await, SessionSignal::Valid);
         }
-        assert_eq!(*count.lock().unwrap(), 1, "cached verdict must not re-probe");
+        assert_eq!(
+            *count.lock().unwrap(),
+            1,
+            "cached verdict must not re-probe"
+        );
         // A different token is a different cache key.
         assert_eq!(v.check_token("other").await, SessionSignal::Valid);
         assert_eq!(*count.lock().unwrap(), 2);

@@ -32,7 +32,9 @@ impl RepoVisibility {
 
 /// Per-user repository watch level — the notification matrix (DEBT-06).
 /// Serialized snake_case: `all` | `participating` | `ignore`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum WatchLevel {
     /// Notified on all repo activity (default for `repo.watch`).
@@ -70,7 +72,9 @@ impl WatchLevel {
 }
 
 /// Provenance for `/new` template picker cards (issue #18).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum TemplateProvenance {
     #[default]
@@ -323,7 +327,9 @@ pub struct RepoWatchersListResponse {
 }
 
 /// Sort keys for `repo.forks.list` (subset we can support with stored data).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum RepoForksSort {
     #[default]

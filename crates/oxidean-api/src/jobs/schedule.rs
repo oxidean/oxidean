@@ -122,10 +122,7 @@ pub fn spawn_background_jobs(
                 }
             }
         });
-        tracing::info!(
-            secs = config.gc_interval.as_secs(),
-            "git gc job scheduled"
-        );
+        tracing::info!(secs = config.gc_interval.as_secs(), "git gc job scheduled");
     } else {
         tracing::info!("git gc job disabled (interval 0)");
     }

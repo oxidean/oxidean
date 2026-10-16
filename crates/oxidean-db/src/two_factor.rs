@@ -81,9 +81,7 @@ macro_rules! map_passkey {
                 .try_get::<Option<String>, _>("transports")
                 .unwrap_or(None)
                 .unwrap_or_default(),
-            sign_count: row
-                .try_get::<i64, _>("sign_count")
-                .unwrap_or(0),
+            sign_count: row.try_get::<i64, _>("sign_count").unwrap_or(0),
             last_used_at: row
                 .try_get::<Option<String>, _>("last_used_at")
                 .unwrap_or(None),
@@ -136,46 +134,40 @@ FROM webauthn_credentials";
 /// pending (`confirmed_at NULL`) until the new code is verified.
 pub async fn totp_upsert(pool: &DbPool, user_id: &str, secret_enc: &str) -> Result<(), String> {
     match pool {
-        DbPool::Postgres(p) => {
-            sqlx::query(
-                "INSERT INTO user_totp_secrets (user_id, secret_enc)
+        DbPool::Postgres(p) => sqlx::query(
+            "INSERT INTO user_totp_secrets (user_id, secret_enc)
 VALUES ($1, $2)
 ON CONFLICT (user_id) DO UPDATE
 SET secret_enc = EXCLUDED.secret_enc, confirmed_at = NULL, last_used_at = NULL, updated_at = now()",
-            )
-            .bind(user_id)
-            .bind(secret_enc)
-            .execute(p)
-            .await
-            .map(|_| ())
-        }
-        DbPool::MySql(p) => {
-            sqlx::query(
-                "INSERT INTO user_totp_secrets (user_id, secret_enc)
+        )
+        .bind(user_id)
+        .bind(secret_enc)
+        .execute(p)
+        .await
+        .map(|_| ()),
+        DbPool::MySql(p) => sqlx::query(
+            "INSERT INTO user_totp_secrets (user_id, secret_enc)
 VALUES (?, ?)
 ON DUPLICATE KEY UPDATE
   secret_enc = VALUES(secret_enc), confirmed_at = NULL, last_used_at = NULL, updated_at = NOW()",
-            )
-            .bind(user_id)
-            .bind(secret_enc)
-            .execute(p)
-            .await
-            .map(|_| ())
-        }
-        DbPool::Sqlite(p) => {
-            sqlx::query(
-                "INSERT INTO user_totp_secrets (user_id, secret_enc)
+        )
+        .bind(user_id)
+        .bind(secret_enc)
+        .execute(p)
+        .await
+        .map(|_| ()),
+        DbPool::Sqlite(p) => sqlx::query(
+            "INSERT INTO user_totp_secrets (user_id, secret_enc)
 VALUES (?1, ?2)
 ON CONFLICT (user_id) DO UPDATE
 SET secret_enc = excluded.secret_enc, confirmed_at = NULL, last_used_at = NULL,
     updated_at = strftime('%Y-%m-%d %H:%M:%S','now')",
-            )
-            .bind(user_id)
-            .bind(secret_enc)
-            .execute(p)
-            .await
-            .map(|_| ())
-        }
+        )
+        .bind(user_id)
+        .bind(secret_enc)
+        .execute(p)
+        .await
+        .map(|_| ()),
     }
     .map_err(|e| format!("totp upsert failed: {e}"))?;
     Ok(())
@@ -191,7 +183,10 @@ pub async fn totp_find(pool: &DbPool, user_id: &str) -> Result<Option<TotpRow>, 
             .fetch_optional(p)
             .await
             .map_err(|e| format!("totp find failed: {e}"))?;
-            Ok(match row { Some(r) => Some(map_totp!(&r)), None => None })
+            Ok(match row {
+                Some(r) => Some(map_totp!(&r)),
+                None => None,
+            })
         }
         DbPool::MySql(p) => {
             let row = sqlx::query(sqlx::AssertSqlSafe(format!(
@@ -201,7 +196,10 @@ pub async fn totp_find(pool: &DbPool, user_id: &str) -> Result<Option<TotpRow>, 
             .fetch_optional(p)
             .await
             .map_err(|e| format!("totp find failed: {e}"))?;
-            Ok(match row { Some(r) => Some(map_totp!(&r)), None => None })
+            Ok(match row {
+                Some(r) => Some(map_totp!(&r)),
+                None => None,
+            })
         }
         DbPool::Sqlite(p) => {
             let row = sqlx::query(sqlx::AssertSqlSafe(format!(
@@ -211,7 +209,10 @@ pub async fn totp_find(pool: &DbPool, user_id: &str) -> Result<Option<TotpRow>, 
             .fetch_optional(p)
             .await
             .map_err(|e| format!("totp find failed: {e}"))?;
-            Ok(match row { Some(r) => Some(map_totp!(&r)), None => None })
+            Ok(match row {
+                Some(r) => Some(map_totp!(&r)),
+                None => None,
+            })
         }
     }
 }
@@ -401,40 +402,34 @@ pub async fn recovery_consume(
     code_hash: &str,
 ) -> Result<bool, String> {
     let affected = match pool {
-        DbPool::Postgres(p) => {
-            sqlx::query(
-                "UPDATE user_recovery_codes SET used_at = now()
+        DbPool::Postgres(p) => sqlx::query(
+            "UPDATE user_recovery_codes SET used_at = now()
 WHERE user_id = $1 AND code_hash = $2 AND used_at IS NULL",
-            )
-            .bind(user_id)
-            .bind(code_hash)
-            .execute(p)
-            .await
-            .map(|r| r.rows_affected())
-        }
-        DbPool::MySql(p) => {
-            sqlx::query(
-                "UPDATE user_recovery_codes SET used_at = NOW()
+        )
+        .bind(user_id)
+        .bind(code_hash)
+        .execute(p)
+        .await
+        .map(|r| r.rows_affected()),
+        DbPool::MySql(p) => sqlx::query(
+            "UPDATE user_recovery_codes SET used_at = NOW()
 WHERE user_id = ? AND code_hash = ? AND used_at IS NULL",
-            )
-            .bind(user_id)
-            .bind(code_hash)
-            .execute(p)
-            .await
-            .map(|r| r.rows_affected())
-        }
-        DbPool::Sqlite(p) => {
-            sqlx::query(
-                "UPDATE user_recovery_codes
+        )
+        .bind(user_id)
+        .bind(code_hash)
+        .execute(p)
+        .await
+        .map(|r| r.rows_affected()),
+        DbPool::Sqlite(p) => sqlx::query(
+            "UPDATE user_recovery_codes
 SET used_at = strftime('%Y-%m-%d %H:%M:%S','now')
 WHERE user_id = ?1 AND code_hash = ?2 AND used_at IS NULL",
-            )
-            .bind(user_id)
-            .bind(code_hash)
-            .execute(p)
-            .await
-            .map(|r| r.rows_affected())
-        }
+        )
+        .bind(user_id)
+        .bind(code_hash)
+        .execute(p)
+        .await
+        .map(|r| r.rows_affected()),
     }
     .map_err(|e| format!("recovery consume failed: {e}"))?;
     Ok(affected > 0)
@@ -507,57 +502,51 @@ pub async fn passkey_insert(
     sign_count: i64,
 ) -> Result<(), String> {
     match pool {
-        DbPool::Postgres(p) => {
-            sqlx::query(
-                "INSERT INTO webauthn_credentials
+        DbPool::Postgres(p) => sqlx::query(
+            "INSERT INTO webauthn_credentials
 (id, user_id, credential_id, nickname, passkey_json, transports, sign_count)
 VALUES ($1, $2, $3, $4, $5, $6, $7)",
-            )
-            .bind(id)
-            .bind(user_id)
-            .bind(credential_id)
-            .bind(nickname)
-            .bind(passkey_json)
-            .bind(transports)
-            .bind(sign_count)
-            .execute(p)
-            .await
-            .map(|_| ())
-        }
-        DbPool::MySql(p) => {
-            sqlx::query(
-                "INSERT INTO webauthn_credentials
+        )
+        .bind(id)
+        .bind(user_id)
+        .bind(credential_id)
+        .bind(nickname)
+        .bind(passkey_json)
+        .bind(transports)
+        .bind(sign_count)
+        .execute(p)
+        .await
+        .map(|_| ()),
+        DbPool::MySql(p) => sqlx::query(
+            "INSERT INTO webauthn_credentials
 (id, user_id, credential_id, nickname, passkey_json, transports, sign_count)
 VALUES (?, ?, ?, ?, ?, ?, ?)",
-            )
-            .bind(id)
-            .bind(user_id)
-            .bind(credential_id)
-            .bind(nickname)
-            .bind(passkey_json)
-            .bind(transports)
-            .bind(sign_count)
-            .execute(p)
-            .await
-            .map(|_| ())
-        }
-        DbPool::Sqlite(p) => {
-            sqlx::query(
-                "INSERT INTO webauthn_credentials
+        )
+        .bind(id)
+        .bind(user_id)
+        .bind(credential_id)
+        .bind(nickname)
+        .bind(passkey_json)
+        .bind(transports)
+        .bind(sign_count)
+        .execute(p)
+        .await
+        .map(|_| ()),
+        DbPool::Sqlite(p) => sqlx::query(
+            "INSERT INTO webauthn_credentials
 (id, user_id, credential_id, nickname, passkey_json, transports, sign_count)
 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            )
-            .bind(id)
-            .bind(user_id)
-            .bind(credential_id)
-            .bind(nickname)
-            .bind(passkey_json)
-            .bind(transports)
-            .bind(sign_count)
-            .execute(p)
-            .await
-            .map(|_| ())
-        }
+        )
+        .bind(id)
+        .bind(user_id)
+        .bind(credential_id)
+        .bind(nickname)
+        .bind(passkey_json)
+        .bind(transports)
+        .bind(sign_count)
+        .execute(p)
+        .await
+        .map(|_| ()),
     }
     .map_err(|e| format!("passkey insert failed: {e}"))?;
     Ok(())
@@ -616,7 +605,10 @@ pub async fn passkey_find_for_user(
             .fetch_optional(p)
             .await
             .map_err(|e| format!("passkey find failed: {e}"))?;
-            Ok(match row { Some(r) => Some(map_passkey!(&r)), None => None })
+            Ok(match row {
+                Some(r) => Some(map_passkey!(&r)),
+                None => None,
+            })
         }
         DbPool::MySql(p) => {
             let row = sqlx::query(sqlx::AssertSqlSafe(format!(
@@ -627,7 +619,10 @@ pub async fn passkey_find_for_user(
             .fetch_optional(p)
             .await
             .map_err(|e| format!("passkey find failed: {e}"))?;
-            Ok(match row { Some(r) => Some(map_passkey!(&r)), None => None })
+            Ok(match row {
+                Some(r) => Some(map_passkey!(&r)),
+                None => None,
+            })
         }
         DbPool::Sqlite(p) => {
             let row = sqlx::query(sqlx::AssertSqlSafe(format!(
@@ -638,7 +633,10 @@ pub async fn passkey_find_for_user(
             .fetch_optional(p)
             .await
             .map_err(|e| format!("passkey find failed: {e}"))?;
-            Ok(match row { Some(r) => Some(map_passkey!(&r)), None => None })
+            Ok(match row {
+                Some(r) => Some(map_passkey!(&r)),
+                None => None,
+            })
         }
     }
 }
@@ -651,15 +649,15 @@ pub async fn passkey_update_nickname(
     nickname: &str,
 ) -> Result<bool, String> {
     let affected = match pool {
-        DbPool::Postgres(p) => {
-            sqlx::query("UPDATE webauthn_credentials SET nickname = $3 WHERE id = $1 AND user_id = $2")
-                .bind(id)
-                .bind(user_id)
-                .bind(nickname)
-                .execute(p)
-                .await
-                .map(|r| r.rows_affected())
-        }
+        DbPool::Postgres(p) => sqlx::query(
+            "UPDATE webauthn_credentials SET nickname = $3 WHERE id = $1 AND user_id = $2",
+        )
+        .bind(id)
+        .bind(user_id)
+        .bind(nickname)
+        .execute(p)
+        .await
+        .map(|r| r.rows_affected()),
         DbPool::MySql(p) => {
             sqlx::query("UPDATE webauthn_credentials SET nickname = ? WHERE id = ? AND user_id = ?")
                 .bind(nickname)
@@ -669,17 +667,15 @@ pub async fn passkey_update_nickname(
                 .await
                 .map(|r| r.rows_affected())
         }
-        DbPool::Sqlite(p) => {
-            sqlx::query(
-                "UPDATE webauthn_credentials SET nickname = ?3 WHERE id = ?1 AND user_id = ?2",
-            )
-            .bind(id)
-            .bind(user_id)
-            .bind(nickname)
-            .execute(p)
-            .await
-            .map(|r| r.rows_affected())
-        }
+        DbPool::Sqlite(p) => sqlx::query(
+            "UPDATE webauthn_credentials SET nickname = ?3 WHERE id = ?1 AND user_id = ?2",
+        )
+        .bind(id)
+        .bind(user_id)
+        .bind(nickname)
+        .execute(p)
+        .await
+        .map(|r| r.rows_affected()),
     }
     .map_err(|e| format!("passkey rename failed: {e}"))?;
     Ok(affected > 0)
@@ -693,46 +689,40 @@ pub async fn passkey_after_assertion(
     passkey_json: &str,
 ) -> Result<(), String> {
     match pool {
-        DbPool::Postgres(p) => {
-            sqlx::query(
-                "UPDATE webauthn_credentials
+        DbPool::Postgres(p) => sqlx::query(
+            "UPDATE webauthn_credentials
 SET sign_count = $2, passkey_json = $3, last_used_at = now()
 WHERE id = $1",
-            )
-            .bind(id)
-            .bind(sign_count)
-            .bind(passkey_json)
-            .execute(p)
-            .await
-            .map(|_| ())
-        }
-        DbPool::MySql(p) => {
-            sqlx::query(
-                "UPDATE webauthn_credentials
+        )
+        .bind(id)
+        .bind(sign_count)
+        .bind(passkey_json)
+        .execute(p)
+        .await
+        .map(|_| ()),
+        DbPool::MySql(p) => sqlx::query(
+            "UPDATE webauthn_credentials
 SET sign_count = ?, passkey_json = ?, last_used_at = NOW()
 WHERE id = ?",
-            )
-            .bind(sign_count)
-            .bind(passkey_json)
-            .bind(id)
-            .execute(p)
-            .await
-            .map(|_| ())
-        }
-        DbPool::Sqlite(p) => {
-            sqlx::query(
-                "UPDATE webauthn_credentials
+        )
+        .bind(sign_count)
+        .bind(passkey_json)
+        .bind(id)
+        .execute(p)
+        .await
+        .map(|_| ()),
+        DbPool::Sqlite(p) => sqlx::query(
+            "UPDATE webauthn_credentials
 SET sign_count = ?2, passkey_json = ?3,
     last_used_at = strftime('%Y-%m-%d %H:%M:%S','now')
 WHERE id = ?1",
-            )
-            .bind(id)
-            .bind(sign_count)
-            .bind(passkey_json)
-            .execute(p)
-            .await
-            .map(|_| ())
-        }
+        )
+        .bind(id)
+        .bind(sign_count)
+        .bind(passkey_json)
+        .execute(p)
+        .await
+        .map(|_| ()),
     }
     .map_err(|e| format!("passkey assertion update failed: {e}"))?;
     Ok(())

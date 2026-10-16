@@ -15,7 +15,7 @@ use std::path::PathBuf;
 use crate::args::Global;
 use crate::commands::{CliError, Out, Runtime};
 use crate::harness::{self, Detect, Dirs, HarnessRow, Scope};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 /// The skill document, verbatim.
 pub const SKILL_MD: &str = include_str!("../skill/SKILL.md");
@@ -67,178 +67,740 @@ impl HarnessRow for Harness {
 /// covers anything else that loads `.agents/skills`.
 const HARNESSES: &[Harness] = &[
     // ── first-class: dedicated dirs and/or binaries ─────────────────────
-    Harness { id: "claude",   label: "Claude Code",      project: Some(".claude/skills"),   global: &[GlobalDir::Env("CLAUDE_CONFIG_DIR", ".claude/skills")],
-        detect: &[Detect::Project(".claude"), Detect::Home(".claude"), Detect::Bin("claude")] },
-    Harness { id: "cursor",   label: "Cursor",           project: Some(".agents/skills"),   global: &[GlobalDir::Home(".cursor/skills")],
-        detect: &[Detect::Project(".cursor"), Detect::Home(".cursor"), Detect::Bin("cursor-agent"), Detect::Bin("agent")] },
-    Harness { id: "codex",    label: "Codex",            project: Some(".agents/skills"),   global: &[GlobalDir::Home(".agents/skills")],
-        detect: &[Detect::Project(".codex"), Detect::Home(".codex"), Detect::Bin("codex")] },
-    Harness { id: "copilot",  label: "GitHub Copilot",   project: Some(".agents/skills"),   global: &[GlobalDir::Home(".copilot/skills")],
-        detect: &[Detect::Project(".copilot"), Detect::Home(".copilot"), Detect::Bin("copilot")] },
-    Harness { id: "gemini",   label: "Gemini CLI",       project: Some(".agents/skills"),   global: &[GlobalDir::Home(".gemini/skills")],
-        detect: &[Detect::Project(".gemini"), Detect::Home(".gemini"), Detect::Bin("gemini")] },
-    Harness { id: "antigravity", label: "Antigravity",   project: Some(".agents/skills"),   global: &[GlobalDir::Home(".gemini/antigravity/skills"), GlobalDir::Home(".gemini/antigravity-cli/skills")],
-        detect: &[Detect::Home(".gemini/antigravity"), Detect::Home(".gemini/antigravity-cli"), Detect::Bin("antigravity"), Detect::Bin("agy")] },
-    Harness { id: "opencode", label: "OpenCode",         project: Some(".agents/skills"),   global: &[GlobalDir::Xdg("opencode/skills")],
-        detect: &[Detect::Project(".opencode"), Detect::Xdg("opencode"), Detect::Bin("opencode")] },
-    Harness { id: "amp",      label: "Amp",              project: Some(".agents/skills"),   global: &[GlobalDir::Xdg("agents/skills")],
-        detect: &[Detect::Project(".amp"), Detect::Xdg("amp"), Detect::Bin("amp")] },
-    Harness { id: "replit",   label: "Replit / Universal", project: Some(".agents/skills"), global: &[GlobalDir::Xdg("agents/skills")],
-        detect: &[Detect::Bin("repl")] },
-    Harness { id: "devin",    label: "Devin for Terminal", project: Some(".devin/skills"),  global: &[GlobalDir::Xdg("devin/skills")],
-        detect: &[Detect::Project(".devin"), Detect::Xdg("devin"), Detect::Bin("devin")] },
-    Harness { id: "windsurf", label: "Windsurf",         project: Some(".windsurf/skills"), global: &[GlobalDir::Home(".codeium/windsurf/skills")],
-        detect: &[Detect::Project(".windsurf"), Detect::Home(".codeium/windsurf"), Detect::Bin("windsurf")] },
-    Harness { id: "kiro",     label: "Kiro CLI",         project: Some(".kiro/skills"),     global: &[GlobalDir::Home(".kiro/skills")],
-        detect: &[Detect::Project(".kiro"), Detect::Home(".kiro"), Detect::Bin("kiro"), Detect::Bin("kiro-cli")] },
-    Harness { id: "roo",      label: "Roo Code",         project: Some(".roo/skills"),      global: &[GlobalDir::Home(".roo/skills")],
-        detect: &[Detect::Project(".roo"), Detect::Home(".roo")] },
-    Harness { id: "goose",    label: "Goose",            project: Some(".goose/skills"),    global: &[GlobalDir::Xdg("goose/skills")],
-        detect: &[Detect::Project(".goose"), Detect::Xdg("goose"), Detect::Bin("goose")] },
-    Harness { id: "cline",    label: "Cline",            project: Some(".agents/skills"),   global: &[GlobalDir::Home(".agents/skills")],
-        detect: &[Detect::Project(".cline"), Detect::Home(".cline"), Detect::Bin("cline")] },
-    Harness { id: "openclaw", label: "OpenClaw",         project: Some("skills"),           global: &[GlobalDir::Home(".openclaw/skills")],
-        detect: &[Detect::Project(".openclaw"), Detect::Home(".openclaw"), Detect::Bin("openclaw")] },
+    Harness {
+        id: "claude",
+        label: "Claude Code",
+        project: Some(".claude/skills"),
+        global: &[GlobalDir::Env("CLAUDE_CONFIG_DIR", ".claude/skills")],
+        detect: &[
+            Detect::Project(".claude"),
+            Detect::Home(".claude"),
+            Detect::Bin("claude"),
+        ],
+    },
+    Harness {
+        id: "cursor",
+        label: "Cursor",
+        project: Some(".agents/skills"),
+        global: &[GlobalDir::Home(".cursor/skills")],
+        detect: &[
+            Detect::Project(".cursor"),
+            Detect::Home(".cursor"),
+            Detect::Bin("cursor-agent"),
+            Detect::Bin("agent"),
+        ],
+    },
+    Harness {
+        id: "codex",
+        label: "Codex",
+        project: Some(".agents/skills"),
+        global: &[GlobalDir::Home(".agents/skills")],
+        detect: &[
+            Detect::Project(".codex"),
+            Detect::Home(".codex"),
+            Detect::Bin("codex"),
+        ],
+    },
+    Harness {
+        id: "copilot",
+        label: "GitHub Copilot",
+        project: Some(".agents/skills"),
+        global: &[GlobalDir::Home(".copilot/skills")],
+        detect: &[
+            Detect::Project(".copilot"),
+            Detect::Home(".copilot"),
+            Detect::Bin("copilot"),
+        ],
+    },
+    Harness {
+        id: "gemini",
+        label: "Gemini CLI",
+        project: Some(".agents/skills"),
+        global: &[GlobalDir::Home(".gemini/skills")],
+        detect: &[
+            Detect::Project(".gemini"),
+            Detect::Home(".gemini"),
+            Detect::Bin("gemini"),
+        ],
+    },
+    Harness {
+        id: "antigravity",
+        label: "Antigravity",
+        project: Some(".agents/skills"),
+        global: &[
+            GlobalDir::Home(".gemini/antigravity/skills"),
+            GlobalDir::Home(".gemini/antigravity-cli/skills"),
+        ],
+        detect: &[
+            Detect::Home(".gemini/antigravity"),
+            Detect::Home(".gemini/antigravity-cli"),
+            Detect::Bin("antigravity"),
+            Detect::Bin("agy"),
+        ],
+    },
+    Harness {
+        id: "opencode",
+        label: "OpenCode",
+        project: Some(".agents/skills"),
+        global: &[GlobalDir::Xdg("opencode/skills")],
+        detect: &[
+            Detect::Project(".opencode"),
+            Detect::Xdg("opencode"),
+            Detect::Bin("opencode"),
+        ],
+    },
+    Harness {
+        id: "amp",
+        label: "Amp",
+        project: Some(".agents/skills"),
+        global: &[GlobalDir::Xdg("agents/skills")],
+        detect: &[
+            Detect::Project(".amp"),
+            Detect::Xdg("amp"),
+            Detect::Bin("amp"),
+        ],
+    },
+    Harness {
+        id: "replit",
+        label: "Replit / Universal",
+        project: Some(".agents/skills"),
+        global: &[GlobalDir::Xdg("agents/skills")],
+        detect: &[Detect::Bin("repl")],
+    },
+    Harness {
+        id: "devin",
+        label: "Devin for Terminal",
+        project: Some(".devin/skills"),
+        global: &[GlobalDir::Xdg("devin/skills")],
+        detect: &[
+            Detect::Project(".devin"),
+            Detect::Xdg("devin"),
+            Detect::Bin("devin"),
+        ],
+    },
+    Harness {
+        id: "windsurf",
+        label: "Windsurf",
+        project: Some(".windsurf/skills"),
+        global: &[GlobalDir::Home(".codeium/windsurf/skills")],
+        detect: &[
+            Detect::Project(".windsurf"),
+            Detect::Home(".codeium/windsurf"),
+            Detect::Bin("windsurf"),
+        ],
+    },
+    Harness {
+        id: "kiro",
+        label: "Kiro CLI",
+        project: Some(".kiro/skills"),
+        global: &[GlobalDir::Home(".kiro/skills")],
+        detect: &[
+            Detect::Project(".kiro"),
+            Detect::Home(".kiro"),
+            Detect::Bin("kiro"),
+            Detect::Bin("kiro-cli"),
+        ],
+    },
+    Harness {
+        id: "roo",
+        label: "Roo Code",
+        project: Some(".roo/skills"),
+        global: &[GlobalDir::Home(".roo/skills")],
+        detect: &[Detect::Project(".roo"), Detect::Home(".roo")],
+    },
+    Harness {
+        id: "goose",
+        label: "Goose",
+        project: Some(".goose/skills"),
+        global: &[GlobalDir::Xdg("goose/skills")],
+        detect: &[
+            Detect::Project(".goose"),
+            Detect::Xdg("goose"),
+            Detect::Bin("goose"),
+        ],
+    },
+    Harness {
+        id: "cline",
+        label: "Cline",
+        project: Some(".agents/skills"),
+        global: &[GlobalDir::Home(".agents/skills")],
+        detect: &[
+            Detect::Project(".cline"),
+            Detect::Home(".cline"),
+            Detect::Bin("cline"),
+        ],
+    },
+    Harness {
+        id: "openclaw",
+        label: "OpenClaw",
+        project: Some("skills"),
+        global: &[GlobalDir::Home(".openclaw/skills")],
+        detect: &[
+            Detect::Project(".openclaw"),
+            Detect::Home(".openclaw"),
+            Detect::Bin("openclaw"),
+        ],
+    },
     // ── dedicated dirs ──────────────────────────────────────────────────
-    Harness { id: "continue",  label: "Continue",        project: Some(".continue/skills"), global: &[GlobalDir::Home(".continue/skills")],
-        detect: &[Detect::Project(".continue"), Detect::Home(".continue"), Detect::Bin("cn"), Detect::Bin("continue")] },
-    Harness { id: "openhands", label: "OpenHands",       project: Some(".openhands/skills"), global: &[GlobalDir::Home(".openhands/skills")],
-        detect: &[Detect::Project(".openhands"), Detect::Home(".openhands"), Detect::Bin("openhands")] },
-    Harness { id: "crush",     label: "Crush",           project: Some(".crush/skills"),    global: &[GlobalDir::Xdg("crush/skills")],
-        detect: &[Detect::Project(".crush"), Detect::Xdg("crush"), Detect::Bin("crush")] },
-    Harness { id: "trae",      label: "Trae / Trae CN",  project: Some(".trae/skills"),     global: &[GlobalDir::Home(".trae/skills"), GlobalDir::Home(".trae-cn/skills")],
-        detect: &[Detect::Project(".trae"), Detect::Home(".trae"), Detect::Home(".trae-cn"), Detect::Bin("trae")] },
-    Harness { id: "qoder",     label: "Qoder / Qoder CN", project: Some(".qoder/skills"),   global: &[GlobalDir::Home(".qoder/skills"), GlobalDir::Home(".qoder-cn/skills")],
-        detect: &[Detect::Project(".qoder"), Detect::Home(".qoder"), Detect::Home(".qoder-cn"), Detect::Bin("qoder")] },
-    Harness { id: "qwen",      label: "Qwen Code",       project: Some(".qwen/skills"),     global: &[GlobalDir::Home(".qwen/skills")],
-        detect: &[Detect::Project(".qwen"), Detect::Home(".qwen"), Detect::Bin("qwen-code"), Detect::Bin("qwen")] },
-    Harness { id: "grok",      label: "Grok Build",      project: Some(".grok/skills"),     global: &[GlobalDir::Env("GROK_HOME", ".grok/skills")],
-        detect: &[Detect::Project(".grok"), Detect::Home(".grok"), Detect::Bin("grok")] },
-    Harness { id: "vibe",      label: "Mistral Vibe",    project: Some(".vibe/skills"),     global: &[GlobalDir::Env("VIBE_HOME", ".vibe/skills")],
-        detect: &[Detect::Project(".vibe"), Detect::Home(".vibe"), Detect::Bin("vibe")] },
-    Harness { id: "junie",     label: "Junie",           project: Some(".junie/skills"),    global: &[GlobalDir::Home(".junie/skills")],
-        detect: &[Detect::Project(".junie"), Detect::Home(".junie")] },
-    Harness { id: "augment",   label: "Augment",         project: Some(".augment/skills"),  global: &[GlobalDir::Home(".augment/skills")],
-        detect: &[Detect::Project(".augment"), Detect::Home(".augment"), Detect::Bin("auggie")] },
-    Harness { id: "bob",       label: "IBM Bob",         project: Some(".bob/skills"),      global: &[GlobalDir::Home(".bob/skills")],
-        detect: &[Detect::Project(".bob"), Detect::Home(".bob"), Detect::Bin("bob")] },
-    Harness { id: "cortex",    label: "Cortex Code",     project: Some(".cortex/skills"),   global: &[GlobalDir::Home(".snowflake/cortex/skills")],
-        detect: &[Detect::Project(".cortex"), Detect::Home(".snowflake/cortex"), Detect::Bin("cortex")] },
-    Harness { id: "posit",     label: "Posit Assistant", project: Some(".posit/assistant/skills"), global: &[GlobalDir::Home(".posit/assistant/skills")],
-        detect: &[Detect::Project(".posit"), Detect::Home(".posit")] },
-    Harness { id: "tabnine",   label: "Tabnine CLI",     project: Some(".tabnine/agent/skills"), global: &[GlobalDir::Home(".tabnine/agent/skills")],
-        detect: &[Detect::Project(".tabnine"), Detect::Home(".tabnine"), Detect::Bin("tabnine")] },
-    Harness { id: "aider-desk", label: "AiderDesk",      project: Some(".aider-desk/skills"), global: &[GlobalDir::Home(".aider-desk/skills")],
-        detect: &[Detect::Project(".aider-desk"), Detect::Home(".aider-desk")] },
-    Harness { id: "astrbot",   label: "AstrBot",         project: Some("data/skills"),      global: &[GlobalDir::Home(".astrbot/data/skills")],
-        detect: &[Detect::Home(".astrbot"), Detect::Bin("astrbot")] },
-    Harness { id: "autohand",  label: "Autohand Code CLI", project: Some(".autohand/skills"), global: &[GlobalDir::Env("AUTOHAND_HOME", ".autohand/skills")],
-        detect: &[Detect::Project(".autohand"), Detect::Home(".autohand"), Detect::Bin("autohand")] },
-    Harness { id: "codearts",  label: "CodeArts Agent",  project: Some(".codeartsdoer/skills"), global: &[GlobalDir::Home(".codeartsdoer/skills")],
-        detect: &[Detect::Project(".codeartsdoer"), Detect::Home(".codeartsdoer")] },
-    Harness { id: "forgecode", label: "ForgeCode",       project: Some(".forge/skills"),    global: &[GlobalDir::Home(".forge/skills")],
-        detect: &[Detect::Project(".forge"), Detect::Home(".forge"), Detect::Bin("forgecode"), Detect::Bin("forge")] },
-    Harness { id: "fx",        label: "fx",              project: Some(".fx/skills"),       global: &[GlobalDir::Home(".fx/skills")],
-        detect: &[Detect::Project(".fx"), Detect::Home(".fx")] },
-    Harness { id: "hermes",    label: "Hermes Agent",    project: Some(".hermes/skills"),   global: &[GlobalDir::Env("HERMES_HOME", ".hermes/skills")],
-        detect: &[Detect::Project(".hermes"), Detect::Home(".hermes"), Detect::Bin("hermes")] },
-    Harness { id: "inferencesh", label: "inference.sh",  project: Some(".inferencesh/skills"), global: &[GlobalDir::Home(".inferencesh/skills")],
-        detect: &[Detect::Project(".inferencesh"), Detect::Home(".inferencesh"), Detect::Bin("inference"), Detect::Bin("infsh")] },
-    Harness { id: "iflow",     label: "iFlow CLI",       project: Some(".iflow/skills"),    global: &[GlobalDir::Home(".iflow/skills")],
-        detect: &[Detect::Project(".iflow"), Detect::Home(".iflow"), Detect::Bin("iflow")] },
-    Harness { id: "jazz",      label: "Jazz",            project: Some(".jazz/skills"),     global: &[GlobalDir::Home(".jazz/skills")],
-        detect: &[Detect::Project(".jazz"), Detect::Home(".jazz"), Detect::Bin("jazz")] },
-    Harness { id: "kimchi",    label: "Kimchi",          project: Some(".kimchi/skills"),   global: &[GlobalDir::Xdg("kimchi/harness/skills")],
-        detect: &[Detect::Project(".kimchi"), Detect::Xdg("kimchi"), Detect::Bin("kimchi")] },
-    Harness { id: "kode",      label: "Kode",            project: Some(".kode/skills"),     global: &[GlobalDir::Home(".kode/skills")],
-        detect: &[Detect::Project(".kode"), Detect::Home(".kode"), Detect::Bin("kode")] },
-    Harness { id: "lingma",    label: "Lingma",          project: Some(".lingma/skills"),   global: &[GlobalDir::Home(".lingma/skills")],
-        detect: &[Detect::Project(".lingma"), Detect::Home(".lingma")] },
-    Harness { id: "mcpjam",    label: "MCPJam",          project: Some(".mcpjam/skills"),   global: &[GlobalDir::Home(".mcpjam/skills")],
-        detect: &[Detect::Project(".mcpjam"), Detect::Home(".mcpjam"), Detect::Bin("mcpjam")] },
-    Harness { id: "minimax",   label: "MiniMax Code",    project: Some(".minimax/skills"),  global: &[GlobalDir::Home(".minimax/skills")],
-        detect: &[Detect::Project(".minimax"), Detect::Home(".minimax"), Detect::Bin("minimax")] },
-    Harness { id: "moxby",     label: "Moxby",           project: Some(".moxby/skills"),    global: &[GlobalDir::Home(".moxby/skills")],
-        detect: &[Detect::Project(".moxby"), Detect::Home(".moxby")] },
-    Harness { id: "mux",       label: "Mux",             project: Some(".mux/skills"),      global: &[GlobalDir::Home(".mux/skills")],
-        detect: &[Detect::Project(".mux"), Detect::Home(".mux"), Detect::Bin("mux")] },
-    Harness { id: "ona",       label: "Ona",             project: Some(".ona/skills"),      global: &[GlobalDir::Home(".ona/skills")],
-        detect: &[Detect::Project(".ona"), Detect::Home(".ona")] },
-    Harness { id: "reasonix",  label: "Reasonix",        project: Some(".reasonix/skills"), global: &[GlobalDir::Home(".reasonix/skills")],
-        detect: &[Detect::Project(".reasonix"), Detect::Home(".reasonix")] },
-    Harness { id: "rovodev",   label: "Rovo Dev",        project: Some(".rovodev/skills"),  global: &[GlobalDir::Home(".rovodev/skills")],
-        detect: &[Detect::Project(".rovodev"), Detect::Home(".rovodev"), Detect::Bin("rovodev"), Detect::Bin("acli")] },
-    Harness { id: "terramind", label: "Terramind",       project: Some(".terramind/skills"), global: &[GlobalDir::Home(".terramind/skills")],
-        detect: &[Detect::Project(".terramind"), Detect::Home(".terramind")] },
-    Harness { id: "tinycloud", label: "Tinycloud",       project: Some(".tinycloud/skills"), global: &[GlobalDir::Home(".tinycloud/skills")],
-        detect: &[Detect::Project(".tinycloud"), Detect::Home(".tinycloud")] },
-    Harness { id: "zcode",     label: "ZCode",           project: Some(".zcode/skills"),    global: &[GlobalDir::Home(".zcode/skills")],
-        detect: &[Detect::Project(".zcode"), Detect::Home(".zcode")] },
-    Harness { id: "zencoder",  label: "Zencoder / Zenflow", project: Some(".zencoder/skills"), global: &[GlobalDir::Home(".zencoder/skills")],
-        detect: &[Detect::Project(".zencoder"), Detect::Home(".zencoder")] },
-    Harness { id: "neovate",   label: "Neovate",         project: Some(".neovate/skills"),  global: &[GlobalDir::Home(".neovate/skills")],
-        detect: &[Detect::Project(".neovate"), Detect::Home(".neovate")] },
-    Harness { id: "pochi",     label: "Pochi",           project: Some(".pochi/skills"),    global: &[GlobalDir::Home(".pochi/skills")],
-        detect: &[Detect::Project(".pochi"), Detect::Home(".pochi"), Detect::Bin("pochi")] },
-    Harness { id: "adal",      label: "AdaL",            project: Some(".adal/skills"),     global: &[GlobalDir::Home(".adal/skills")],
-        detect: &[Detect::Project(".adal"), Detect::Home(".adal")] },
-    Harness { id: "codebuddy", label: "CodeBuddy",       project: Some(".codebuddy/skills"), global: &[GlobalDir::Home(".codebuddy/skills")],
-        detect: &[Detect::Project(".codebuddy"), Detect::Home(".codebuddy"), Detect::Bin("codebuddy")] },
-    Harness { id: "codemaker", label: "Codemaker",       project: Some(".codemaker/skills"), global: &[GlobalDir::Home(".codemaker/skills")],
-        detect: &[Detect::Project(".codemaker"), Detect::Home(".codemaker")] },
-    Harness { id: "codestudio", label: "Code Studio",    project: Some(".codestudio/skills"), global: &[GlobalDir::Home(".codestudio/skills")],
-        detect: &[Detect::Project(".codestudio"), Detect::Home(".codestudio")] },
-    Harness { id: "commandcode", label: "Command Code",  project: Some(".commandcode/skills"), global: &[GlobalDir::Home(".commandcode/skills")],
-        detect: &[Detect::Project(".commandcode"), Detect::Home(".commandcode")] },
-    Harness { id: "droid",     label: "Droid (Factory)", project: Some(".agents/skills"),   global: &[GlobalDir::Home(".factory/skills")],
-        detect: &[Detect::Home(".factory"), Detect::Bin("droid")] },
-    Harness { id: "firebender", label: "Firebender",     project: Some(".agents/skills"),   global: &[GlobalDir::Home(".firebender/skills")],
-        detect: &[Detect::Home(".firebender"), Detect::Bin("firebender")] },
-    Harness { id: "deepagents", label: "Deep Agents",    project: Some(".agents/skills"),   global: &[GlobalDir::Home(".deepagents/agent/skills")],
-        detect: &[Detect::Home(".deepagents")] },
-    Harness { id: "kilo",      label: "Kilo Code",       project: Some(".agents/skills"),   global: &[GlobalDir::Home(".kilo/skills")],
-        detect: &[Detect::Project(".kilocode"), Detect::Home(".kilo"), Detect::Bin("kilocode")] },
+    Harness {
+        id: "continue",
+        label: "Continue",
+        project: Some(".continue/skills"),
+        global: &[GlobalDir::Home(".continue/skills")],
+        detect: &[
+            Detect::Project(".continue"),
+            Detect::Home(".continue"),
+            Detect::Bin("cn"),
+            Detect::Bin("continue"),
+        ],
+    },
+    Harness {
+        id: "openhands",
+        label: "OpenHands",
+        project: Some(".openhands/skills"),
+        global: &[GlobalDir::Home(".openhands/skills")],
+        detect: &[
+            Detect::Project(".openhands"),
+            Detect::Home(".openhands"),
+            Detect::Bin("openhands"),
+        ],
+    },
+    Harness {
+        id: "crush",
+        label: "Crush",
+        project: Some(".crush/skills"),
+        global: &[GlobalDir::Xdg("crush/skills")],
+        detect: &[
+            Detect::Project(".crush"),
+            Detect::Xdg("crush"),
+            Detect::Bin("crush"),
+        ],
+    },
+    Harness {
+        id: "trae",
+        label: "Trae / Trae CN",
+        project: Some(".trae/skills"),
+        global: &[
+            GlobalDir::Home(".trae/skills"),
+            GlobalDir::Home(".trae-cn/skills"),
+        ],
+        detect: &[
+            Detect::Project(".trae"),
+            Detect::Home(".trae"),
+            Detect::Home(".trae-cn"),
+            Detect::Bin("trae"),
+        ],
+    },
+    Harness {
+        id: "qoder",
+        label: "Qoder / Qoder CN",
+        project: Some(".qoder/skills"),
+        global: &[
+            GlobalDir::Home(".qoder/skills"),
+            GlobalDir::Home(".qoder-cn/skills"),
+        ],
+        detect: &[
+            Detect::Project(".qoder"),
+            Detect::Home(".qoder"),
+            Detect::Home(".qoder-cn"),
+            Detect::Bin("qoder"),
+        ],
+    },
+    Harness {
+        id: "qwen",
+        label: "Qwen Code",
+        project: Some(".qwen/skills"),
+        global: &[GlobalDir::Home(".qwen/skills")],
+        detect: &[
+            Detect::Project(".qwen"),
+            Detect::Home(".qwen"),
+            Detect::Bin("qwen-code"),
+            Detect::Bin("qwen"),
+        ],
+    },
+    Harness {
+        id: "grok",
+        label: "Grok Build",
+        project: Some(".grok/skills"),
+        global: &[GlobalDir::Env("GROK_HOME", ".grok/skills")],
+        detect: &[
+            Detect::Project(".grok"),
+            Detect::Home(".grok"),
+            Detect::Bin("grok"),
+        ],
+    },
+    Harness {
+        id: "vibe",
+        label: "Mistral Vibe",
+        project: Some(".vibe/skills"),
+        global: &[GlobalDir::Env("VIBE_HOME", ".vibe/skills")],
+        detect: &[
+            Detect::Project(".vibe"),
+            Detect::Home(".vibe"),
+            Detect::Bin("vibe"),
+        ],
+    },
+    Harness {
+        id: "junie",
+        label: "Junie",
+        project: Some(".junie/skills"),
+        global: &[GlobalDir::Home(".junie/skills")],
+        detect: &[Detect::Project(".junie"), Detect::Home(".junie")],
+    },
+    Harness {
+        id: "augment",
+        label: "Augment",
+        project: Some(".augment/skills"),
+        global: &[GlobalDir::Home(".augment/skills")],
+        detect: &[
+            Detect::Project(".augment"),
+            Detect::Home(".augment"),
+            Detect::Bin("auggie"),
+        ],
+    },
+    Harness {
+        id: "bob",
+        label: "IBM Bob",
+        project: Some(".bob/skills"),
+        global: &[GlobalDir::Home(".bob/skills")],
+        detect: &[
+            Detect::Project(".bob"),
+            Detect::Home(".bob"),
+            Detect::Bin("bob"),
+        ],
+    },
+    Harness {
+        id: "cortex",
+        label: "Cortex Code",
+        project: Some(".cortex/skills"),
+        global: &[GlobalDir::Home(".snowflake/cortex/skills")],
+        detect: &[
+            Detect::Project(".cortex"),
+            Detect::Home(".snowflake/cortex"),
+            Detect::Bin("cortex"),
+        ],
+    },
+    Harness {
+        id: "posit",
+        label: "Posit Assistant",
+        project: Some(".posit/assistant/skills"),
+        global: &[GlobalDir::Home(".posit/assistant/skills")],
+        detect: &[Detect::Project(".posit"), Detect::Home(".posit")],
+    },
+    Harness {
+        id: "tabnine",
+        label: "Tabnine CLI",
+        project: Some(".tabnine/agent/skills"),
+        global: &[GlobalDir::Home(".tabnine/agent/skills")],
+        detect: &[
+            Detect::Project(".tabnine"),
+            Detect::Home(".tabnine"),
+            Detect::Bin("tabnine"),
+        ],
+    },
+    Harness {
+        id: "aider-desk",
+        label: "AiderDesk",
+        project: Some(".aider-desk/skills"),
+        global: &[GlobalDir::Home(".aider-desk/skills")],
+        detect: &[Detect::Project(".aider-desk"), Detect::Home(".aider-desk")],
+    },
+    Harness {
+        id: "astrbot",
+        label: "AstrBot",
+        project: Some("data/skills"),
+        global: &[GlobalDir::Home(".astrbot/data/skills")],
+        detect: &[Detect::Home(".astrbot"), Detect::Bin("astrbot")],
+    },
+    Harness {
+        id: "autohand",
+        label: "Autohand Code CLI",
+        project: Some(".autohand/skills"),
+        global: &[GlobalDir::Env("AUTOHAND_HOME", ".autohand/skills")],
+        detect: &[
+            Detect::Project(".autohand"),
+            Detect::Home(".autohand"),
+            Detect::Bin("autohand"),
+        ],
+    },
+    Harness {
+        id: "codearts",
+        label: "CodeArts Agent",
+        project: Some(".codeartsdoer/skills"),
+        global: &[GlobalDir::Home(".codeartsdoer/skills")],
+        detect: &[
+            Detect::Project(".codeartsdoer"),
+            Detect::Home(".codeartsdoer"),
+        ],
+    },
+    Harness {
+        id: "forgecode",
+        label: "ForgeCode",
+        project: Some(".forge/skills"),
+        global: &[GlobalDir::Home(".forge/skills")],
+        detect: &[
+            Detect::Project(".forge"),
+            Detect::Home(".forge"),
+            Detect::Bin("forgecode"),
+            Detect::Bin("forge"),
+        ],
+    },
+    Harness {
+        id: "fx",
+        label: "fx",
+        project: Some(".fx/skills"),
+        global: &[GlobalDir::Home(".fx/skills")],
+        detect: &[Detect::Project(".fx"), Detect::Home(".fx")],
+    },
+    Harness {
+        id: "hermes",
+        label: "Hermes Agent",
+        project: Some(".hermes/skills"),
+        global: &[GlobalDir::Env("HERMES_HOME", ".hermes/skills")],
+        detect: &[
+            Detect::Project(".hermes"),
+            Detect::Home(".hermes"),
+            Detect::Bin("hermes"),
+        ],
+    },
+    Harness {
+        id: "inferencesh",
+        label: "inference.sh",
+        project: Some(".inferencesh/skills"),
+        global: &[GlobalDir::Home(".inferencesh/skills")],
+        detect: &[
+            Detect::Project(".inferencesh"),
+            Detect::Home(".inferencesh"),
+            Detect::Bin("inference"),
+            Detect::Bin("infsh"),
+        ],
+    },
+    Harness {
+        id: "iflow",
+        label: "iFlow CLI",
+        project: Some(".iflow/skills"),
+        global: &[GlobalDir::Home(".iflow/skills")],
+        detect: &[
+            Detect::Project(".iflow"),
+            Detect::Home(".iflow"),
+            Detect::Bin("iflow"),
+        ],
+    },
+    Harness {
+        id: "jazz",
+        label: "Jazz",
+        project: Some(".jazz/skills"),
+        global: &[GlobalDir::Home(".jazz/skills")],
+        detect: &[
+            Detect::Project(".jazz"),
+            Detect::Home(".jazz"),
+            Detect::Bin("jazz"),
+        ],
+    },
+    Harness {
+        id: "kimchi",
+        label: "Kimchi",
+        project: Some(".kimchi/skills"),
+        global: &[GlobalDir::Xdg("kimchi/harness/skills")],
+        detect: &[
+            Detect::Project(".kimchi"),
+            Detect::Xdg("kimchi"),
+            Detect::Bin("kimchi"),
+        ],
+    },
+    Harness {
+        id: "kode",
+        label: "Kode",
+        project: Some(".kode/skills"),
+        global: &[GlobalDir::Home(".kode/skills")],
+        detect: &[
+            Detect::Project(".kode"),
+            Detect::Home(".kode"),
+            Detect::Bin("kode"),
+        ],
+    },
+    Harness {
+        id: "lingma",
+        label: "Lingma",
+        project: Some(".lingma/skills"),
+        global: &[GlobalDir::Home(".lingma/skills")],
+        detect: &[Detect::Project(".lingma"), Detect::Home(".lingma")],
+    },
+    Harness {
+        id: "mcpjam",
+        label: "MCPJam",
+        project: Some(".mcpjam/skills"),
+        global: &[GlobalDir::Home(".mcpjam/skills")],
+        detect: &[
+            Detect::Project(".mcpjam"),
+            Detect::Home(".mcpjam"),
+            Detect::Bin("mcpjam"),
+        ],
+    },
+    Harness {
+        id: "minimax",
+        label: "MiniMax Code",
+        project: Some(".minimax/skills"),
+        global: &[GlobalDir::Home(".minimax/skills")],
+        detect: &[
+            Detect::Project(".minimax"),
+            Detect::Home(".minimax"),
+            Detect::Bin("minimax"),
+        ],
+    },
+    Harness {
+        id: "moxby",
+        label: "Moxby",
+        project: Some(".moxby/skills"),
+        global: &[GlobalDir::Home(".moxby/skills")],
+        detect: &[Detect::Project(".moxby"), Detect::Home(".moxby")],
+    },
+    Harness {
+        id: "mux",
+        label: "Mux",
+        project: Some(".mux/skills"),
+        global: &[GlobalDir::Home(".mux/skills")],
+        detect: &[
+            Detect::Project(".mux"),
+            Detect::Home(".mux"),
+            Detect::Bin("mux"),
+        ],
+    },
+    Harness {
+        id: "ona",
+        label: "Ona",
+        project: Some(".ona/skills"),
+        global: &[GlobalDir::Home(".ona/skills")],
+        detect: &[Detect::Project(".ona"), Detect::Home(".ona")],
+    },
+    Harness {
+        id: "reasonix",
+        label: "Reasonix",
+        project: Some(".reasonix/skills"),
+        global: &[GlobalDir::Home(".reasonix/skills")],
+        detect: &[Detect::Project(".reasonix"), Detect::Home(".reasonix")],
+    },
+    Harness {
+        id: "rovodev",
+        label: "Rovo Dev",
+        project: Some(".rovodev/skills"),
+        global: &[GlobalDir::Home(".rovodev/skills")],
+        detect: &[
+            Detect::Project(".rovodev"),
+            Detect::Home(".rovodev"),
+            Detect::Bin("rovodev"),
+            Detect::Bin("acli"),
+        ],
+    },
+    Harness {
+        id: "terramind",
+        label: "Terramind",
+        project: Some(".terramind/skills"),
+        global: &[GlobalDir::Home(".terramind/skills")],
+        detect: &[Detect::Project(".terramind"), Detect::Home(".terramind")],
+    },
+    Harness {
+        id: "tinycloud",
+        label: "Tinycloud",
+        project: Some(".tinycloud/skills"),
+        global: &[GlobalDir::Home(".tinycloud/skills")],
+        detect: &[Detect::Project(".tinycloud"), Detect::Home(".tinycloud")],
+    },
+    Harness {
+        id: "zcode",
+        label: "ZCode",
+        project: Some(".zcode/skills"),
+        global: &[GlobalDir::Home(".zcode/skills")],
+        detect: &[Detect::Project(".zcode"), Detect::Home(".zcode")],
+    },
+    Harness {
+        id: "zencoder",
+        label: "Zencoder / Zenflow",
+        project: Some(".zencoder/skills"),
+        global: &[GlobalDir::Home(".zencoder/skills")],
+        detect: &[Detect::Project(".zencoder"), Detect::Home(".zencoder")],
+    },
+    Harness {
+        id: "neovate",
+        label: "Neovate",
+        project: Some(".neovate/skills"),
+        global: &[GlobalDir::Home(".neovate/skills")],
+        detect: &[Detect::Project(".neovate"), Detect::Home(".neovate")],
+    },
+    Harness {
+        id: "pochi",
+        label: "Pochi",
+        project: Some(".pochi/skills"),
+        global: &[GlobalDir::Home(".pochi/skills")],
+        detect: &[
+            Detect::Project(".pochi"),
+            Detect::Home(".pochi"),
+            Detect::Bin("pochi"),
+        ],
+    },
+    Harness {
+        id: "adal",
+        label: "AdaL",
+        project: Some(".adal/skills"),
+        global: &[GlobalDir::Home(".adal/skills")],
+        detect: &[Detect::Project(".adal"), Detect::Home(".adal")],
+    },
+    Harness {
+        id: "codebuddy",
+        label: "CodeBuddy",
+        project: Some(".codebuddy/skills"),
+        global: &[GlobalDir::Home(".codebuddy/skills")],
+        detect: &[
+            Detect::Project(".codebuddy"),
+            Detect::Home(".codebuddy"),
+            Detect::Bin("codebuddy"),
+        ],
+    },
+    Harness {
+        id: "codemaker",
+        label: "Codemaker",
+        project: Some(".codemaker/skills"),
+        global: &[GlobalDir::Home(".codemaker/skills")],
+        detect: &[Detect::Project(".codemaker"), Detect::Home(".codemaker")],
+    },
+    Harness {
+        id: "codestudio",
+        label: "Code Studio",
+        project: Some(".codestudio/skills"),
+        global: &[GlobalDir::Home(".codestudio/skills")],
+        detect: &[Detect::Project(".codestudio"), Detect::Home(".codestudio")],
+    },
+    Harness {
+        id: "commandcode",
+        label: "Command Code",
+        project: Some(".commandcode/skills"),
+        global: &[GlobalDir::Home(".commandcode/skills")],
+        detect: &[
+            Detect::Project(".commandcode"),
+            Detect::Home(".commandcode"),
+        ],
+    },
+    Harness {
+        id: "droid",
+        label: "Droid (Factory)",
+        project: Some(".agents/skills"),
+        global: &[GlobalDir::Home(".factory/skills")],
+        detect: &[Detect::Home(".factory"), Detect::Bin("droid")],
+    },
+    Harness {
+        id: "firebender",
+        label: "Firebender",
+        project: Some(".agents/skills"),
+        global: &[GlobalDir::Home(".firebender/skills")],
+        detect: &[Detect::Home(".firebender"), Detect::Bin("firebender")],
+    },
+    Harness {
+        id: "deepagents",
+        label: "Deep Agents",
+        project: Some(".agents/skills"),
+        global: &[GlobalDir::Home(".deepagents/agent/skills")],
+        detect: &[Detect::Home(".deepagents")],
+    },
+    Harness {
+        id: "kilo",
+        label: "Kilo Code",
+        project: Some(".agents/skills"),
+        global: &[GlobalDir::Home(".kilo/skills")],
+        detect: &[
+            Detect::Project(".kilocode"),
+            Detect::Home(".kilo"),
+            Detect::Bin("kilocode"),
+        ],
+    },
     // ── `.agents` at both scopes — no dedicated marker; named rows so the
     //    harnesses can be picked explicitly ───────────────────────────────
-    Harness { id: "dexto",     label: "Dexto",           project: Some(".agents/skills"),   global: &[GlobalDir::Home(".agents/skills")],
-        detect: &[Detect::Bin("dexto")] },
-    Harness { id: "kimi",      label: "Kimi Code CLI",   project: Some(".agents/skills"),   global: &[GlobalDir::Home(".agents/skills")],
-        detect: &[Detect::Bin("kimi")] },
-    Harness { id: "loaf",      label: "Loaf",            project: Some(".agents/skills"),   global: &[GlobalDir::Home(".agents/skills")],
-        detect: &[Detect::Bin("loaf")] },
-    Harness { id: "pi",        label: "Pi",              project: Some(".agents/skills"),   global: &[GlobalDir::Home(".agents/skills")],
-        detect: &[] },
-    Harness { id: "sarvam",    label: "Sarvam Code",     project: Some(".agents/skills"),   global: &[GlobalDir::Home(".agents/skills")],
-        detect: &[Detect::Bin("sarvam")] },
-    Harness { id: "warp",      label: "Warp",            project: Some(".agents/skills"),   global: &[GlobalDir::Home(".agents/skills")],
-        detect: &[Detect::Bin("warp-terminal"), Detect::Bin("warp")] },
-    Harness { id: "zed",       label: "Zed",             project: Some(".agents/skills"),   global: &[GlobalDir::Home(".agents/skills")],
-        detect: &[Detect::Xdg("zed"), Detect::Bin("zed")] },
+    Harness {
+        id: "dexto",
+        label: "Dexto",
+        project: Some(".agents/skills"),
+        global: &[GlobalDir::Home(".agents/skills")],
+        detect: &[Detect::Bin("dexto")],
+    },
+    Harness {
+        id: "kimi",
+        label: "Kimi Code CLI",
+        project: Some(".agents/skills"),
+        global: &[GlobalDir::Home(".agents/skills")],
+        detect: &[Detect::Bin("kimi")],
+    },
+    Harness {
+        id: "loaf",
+        label: "Loaf",
+        project: Some(".agents/skills"),
+        global: &[GlobalDir::Home(".agents/skills")],
+        detect: &[Detect::Bin("loaf")],
+    },
+    Harness {
+        id: "pi",
+        label: "Pi",
+        project: Some(".agents/skills"),
+        global: &[GlobalDir::Home(".agents/skills")],
+        detect: &[],
+    },
+    Harness {
+        id: "sarvam",
+        label: "Sarvam Code",
+        project: Some(".agents/skills"),
+        global: &[GlobalDir::Home(".agents/skills")],
+        detect: &[Detect::Bin("sarvam")],
+    },
+    Harness {
+        id: "warp",
+        label: "Warp",
+        project: Some(".agents/skills"),
+        global: &[GlobalDir::Home(".agents/skills")],
+        detect: &[Detect::Bin("warp-terminal"), Detect::Bin("warp")],
+    },
+    Harness {
+        id: "zed",
+        label: "Zed",
+        project: Some(".agents/skills"),
+        global: &[GlobalDir::Home(".agents/skills")],
+        detect: &[Detect::Xdg("zed"), Detect::Bin("zed")],
+    },
     // ── project-only ────────────────────────────────────────────────────
-    Harness { id: "eve",       label: "Eve",             project: Some("agent/skills"),     global: &[],
-        detect: &[Detect::Project("agent/skills"), Detect::Bin("eve")] },
-    Harness { id: "promptscript", label: "PromptScript", project: Some(".agents/skills"),   global: &[],
-        detect: &[] },
-    Harness { id: "generic",  label: "Any `.agents/skills` harness", project: Some(".agents/skills"), global: &[GlobalDir::Home(".agents/skills")],
-        detect: &[Detect::Project(".agents"), Detect::Home(".agents")] },
+    Harness {
+        id: "eve",
+        label: "Eve",
+        project: Some("agent/skills"),
+        global: &[],
+        detect: &[Detect::Project("agent/skills"), Detect::Bin("eve")],
+    },
+    Harness {
+        id: "promptscript",
+        label: "PromptScript",
+        project: Some(".agents/skills"),
+        global: &[],
+        detect: &[],
+    },
+    Harness {
+        id: "generic",
+        label: "Any `.agents/skills` harness",
+        project: Some(".agents/skills"),
+        global: &[GlobalDir::Home(".agents/skills")],
+        detect: &[Detect::Project(".agents"), Detect::Home(".agents")],
+    },
 ];
 
 fn resolve_global(dirs: &Dirs, g: &GlobalDir) -> Result<PathBuf, CliError> {
     match g {
-        GlobalDir::Home(suffix) => dirs
-            .home
-            .as_ref()
-            .map(|h| h.join(suffix))
-            .ok_or_else(|| CliError::Usage("no home directory — cannot resolve global scope".into())),
+        GlobalDir::Home(suffix) => dirs.home.as_ref().map(|h| h.join(suffix)).ok_or_else(|| {
+            CliError::Usage("no home directory — cannot resolve global scope".into())
+        }),
         GlobalDir::Xdg(suffix) => Ok(dirs.xdg.join(suffix)),
         GlobalDir::Env(var, fallback) => std::env::var_os(var)
             .map(PathBuf::from)
             .filter(|p| !p.as_os_str().is_empty())
             .map(|p| p.join("skills"))
             .or_else(|| dirs.home.as_ref().map(|h| h.join(fallback)))
-            .ok_or_else(|| CliError::Usage(
-                "no home directory — cannot resolve global scope".into(),
-            )),
+            .ok_or_else(|| {
+                CliError::Usage("no home directory — cannot resolve global scope".into())
+            }),
     }
 }
 
@@ -390,7 +952,9 @@ fn upgrade_at(
         (true, false) => &[Scope::Project],
         (false, true) => &[Scope::Global],
         (true, true) => {
-            return Err(CliError::Usage("--project and --global are exclusive".into()));
+            return Err(CliError::Usage(
+                "--project and --global are exclusive".into(),
+            ));
         }
         (false, false) => &[Scope::Project, Scope::Global],
     };
@@ -417,9 +981,8 @@ fn upgrade_at(
                     .map(|s| s != SKILL_MD)
                     .unwrap_or(true);
                 if stale {
-                    std::fs::write(&path, SKILL_MD).map_err(|e| {
-                        CliError::Usage(format!("write {}: {e}", path.display()))
-                    })?;
+                    std::fs::write(&path, SKILL_MD)
+                        .map_err(|e| CliError::Usage(format!("write {}: {e}", path.display())))?;
                     upgraded.push(path.display().to_string());
                 } else {
                     current.push(path.display().to_string());
@@ -461,7 +1024,7 @@ mod tests {
     fn harness_ids_unique_and_nonflag() {
         let mut seen = std::collections::BTreeSet::new();
         for h in HARNESSES {
-            assert!(seen.insert(h.id), "dup {}" , h.id);
+            assert!(seen.insert(h.id), "dup {}", h.id);
             assert!(!h.id.contains(' '));
             // Detection is best-effort — only `.agents`-only harnesses (which
             // can't use the shared dir as a marker) may have no markers.
@@ -479,18 +1042,80 @@ mod tests {
     #[test]
     fn covers_spec_harness_table() {
         const SPEC: &[&str] = &[
-            "claude", "cursor", "codex", "copilot", "gemini", "antigravity",
-            "opencode", "amp", "replit", "devin", "cline", "dexto", "kimi",
-            "loaf", "pi", "sarvam", "warp", "zed", "droid", "firebender",
-            "deepagents", "kilo", "windsurf", "kiro", "roo", "goose",
-            "continue", "openhands", "crush", "trae", "qoder", "qwen", "grok",
-            "vibe", "junie", "augment", "bob", "cortex", "posit", "tabnine",
-            "openclaw", "aider-desk", "astrbot", "autohand", "codearts",
-            "codebuddy", "codemaker", "codestudio", "commandcode", "forgecode",
-            "fx", "hermes", "inferencesh", "iflow", "jazz", "kimchi", "kode",
-            "lingma", "mcpjam", "minimax", "moxby", "mux", "ona", "reasonix",
-            "rovodev", "terramind", "tinycloud", "zcode", "zencoder",
-            "neovate", "pochi", "adal", "eve", "promptscript",
+            "claude",
+            "cursor",
+            "codex",
+            "copilot",
+            "gemini",
+            "antigravity",
+            "opencode",
+            "amp",
+            "replit",
+            "devin",
+            "cline",
+            "dexto",
+            "kimi",
+            "loaf",
+            "pi",
+            "sarvam",
+            "warp",
+            "zed",
+            "droid",
+            "firebender",
+            "deepagents",
+            "kilo",
+            "windsurf",
+            "kiro",
+            "roo",
+            "goose",
+            "continue",
+            "openhands",
+            "crush",
+            "trae",
+            "qoder",
+            "qwen",
+            "grok",
+            "vibe",
+            "junie",
+            "augment",
+            "bob",
+            "cortex",
+            "posit",
+            "tabnine",
+            "openclaw",
+            "aider-desk",
+            "astrbot",
+            "autohand",
+            "codearts",
+            "codebuddy",
+            "codemaker",
+            "codestudio",
+            "commandcode",
+            "forgecode",
+            "fx",
+            "hermes",
+            "inferencesh",
+            "iflow",
+            "jazz",
+            "kimchi",
+            "kode",
+            "lingma",
+            "mcpjam",
+            "minimax",
+            "moxby",
+            "mux",
+            "ona",
+            "reasonix",
+            "rovodev",
+            "terramind",
+            "tinycloud",
+            "zcode",
+            "zencoder",
+            "neovate",
+            "pochi",
+            "adal",
+            "eve",
+            "promptscript",
         ];
         for id in SPEC {
             assert!(
@@ -503,7 +1128,15 @@ mod tests {
     #[test]
     fn multi_global_writes_all_dirs() {
         let dir = test_dir("multi-global");
-        let out = install_at(&test_dirs(&dir), &dir, &["antigravity".to_string()], false, false, true).unwrap();
+        let out = install_at(
+            &test_dirs(&dir),
+            &dir,
+            &["antigravity".to_string()],
+            false,
+            false,
+            true,
+        )
+        .unwrap();
         match out {
             Out::Report { text, .. } => {
                 assert!(text.contains(".gemini/antigravity/skills/ox/SKILL.md"));
@@ -517,13 +1150,29 @@ mod tests {
     #[test]
     fn project_only_harness_skips_global() {
         let dir = test_dir("no-global");
-        let out = install_at(&test_dirs(&dir), &dir, &["eve".to_string()], false, false, true).unwrap();
+        let out = install_at(
+            &test_dirs(&dir),
+            &dir,
+            &["eve".to_string()],
+            false,
+            false,
+            true,
+        )
+        .unwrap();
         match out {
             Out::Report { text, .. } => assert!(text.contains("skipped Eve (no global dir)")),
             _ => panic!(),
         }
         // …but installs fine at project scope.
-        let out = install_at(&test_dirs(&dir), &dir, &["eve".to_string()], false, true, false).unwrap();
+        let out = install_at(
+            &test_dirs(&dir),
+            &dir,
+            &["eve".to_string()],
+            false,
+            true,
+            false,
+        )
+        .unwrap();
         match out {
             Out::Report { text, .. } => assert!(text.contains("agent/skills/ox/SKILL.md")),
             _ => panic!(),
@@ -548,8 +1197,15 @@ mod tests {
         std::fs::create_dir_all(dir.join(".agents")).unwrap();
         let generic = harness::by_id(HARNESSES, "generic").unwrap();
         let pi = harness::by_id(HARNESSES, "pi").unwrap();
-        assert!(harness::detected_at(&test_dirs(&dir), &dir, generic.markers()));
-        assert!(!harness::detected_at(&test_dirs(&dir), &dir, pi.markers()), "shared .agents dir must not mark a named harness");
+        assert!(harness::detected_at(
+            &test_dirs(&dir),
+            &dir,
+            generic.markers()
+        ));
+        assert!(
+            !harness::detected_at(&test_dirs(&dir), &dir, pi.markers()),
+            "shared .agents dir must not mark a named harness"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -615,7 +1271,15 @@ mod tests {
         let fresh = dir.join(".agents/skills/ox");
         std::fs::create_dir_all(&fresh).unwrap();
         std::fs::write(fresh.join("SKILL.md"), SKILL_MD).unwrap();
-        let out = upgrade_at(&test_dirs(&dir), &dir, &["codex".to_string()], false, true, false).unwrap();
+        let out = upgrade_at(
+            &test_dirs(&dir),
+            &dir,
+            &["codex".to_string()],
+            false,
+            true,
+            false,
+        )
+        .unwrap();
         match out {
             Out::Report { text, .. } => {
                 assert!(text.contains("up-to-date "));
@@ -642,7 +1306,11 @@ mod tests {
         let dir = test_dir("detect");
         std::fs::create_dir_all(dir.join(".claude")).unwrap();
         let claude = harness::by_id(HARNESSES, "claude").unwrap();
-        assert!(harness::detected_at(&test_dirs(&dir), &dir, claude.markers()));
+        assert!(harness::detected_at(
+            &test_dirs(&dir),
+            &dir,
+            claude.markers()
+        ));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -681,16 +1349,16 @@ mod tests {
 
     #[test]
     fn harness_flags_all_dedup_and_unknown() {
-        let all = harness::parse_harness_flags(
-            HARNESSES,
-            &["all".to_string(), "claude".to_string()],
-        )
-        .unwrap();
-        assert_eq!(all.len(), HARNESSES.len());
-        let one =
-            harness::parse_harness_flags(HARNESSES, &["claude, claude ,cursor".to_string()])
+        let all =
+            harness::parse_harness_flags(HARNESSES, &["all".to_string(), "claude".to_string()])
                 .unwrap();
-        assert_eq!(one.iter().map(|h| h.id).collect::<Vec<_>>(), ["claude", "cursor"]);
+        assert_eq!(all.len(), HARNESSES.len());
+        let one = harness::parse_harness_flags(HARNESSES, &["claude, claude ,cursor".to_string()])
+            .unwrap();
+        assert_eq!(
+            one.iter().map(|h| h.id).collect::<Vec<_>>(),
+            ["claude", "cursor"]
+        );
         assert!(harness::parse_harness_flags(HARNESSES, &["nope".to_string()]).is_err());
     }
 
@@ -700,7 +1368,11 @@ mod tests {
         let out = install_at(
             &test_dirs(&dir),
             &dir,
-            &["codex".to_string(), "copilot".to_string(), "generic".to_string()],
+            &[
+                "codex".to_string(),
+                "copilot".to_string(),
+                "generic".to_string(),
+            ],
             false,
             true,
             false,
