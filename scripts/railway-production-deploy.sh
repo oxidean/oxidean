@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2016 # GraphQL literals stay single-quoted; $vars bind via jq --arg/--argjson
-# Promote a commit's GHCR image set to Railway production (api/web/runner/
-# gateway) or roll back each service to the previous canRollback deployment —
+# Promote a commit's GHCR image set to Railway production (api/web/gateway)
+# or roll back each service to the previous canRollback deployment —
 # without Environment Sync.
 #
 # Deploys pin each service's source.image to ghcr.io/oxidean/oxidean-<svc>:
@@ -23,8 +23,7 @@
 #
 # Env overrides (defaults = Oxidean Cloud production):
 #   RAILWAY_PROJECT_ID, RAILWAY_ENVIRONMENT_ID
-#   RAILWAY_SERVICE_API_ID, RAILWAY_SERVICE_WEB_ID,
-#   RAILWAY_SERVICE_RUNNER_ID, RAILWAY_SERVICE_GATEWAY_ID
+#   RAILWAY_SERVICE_API_ID, RAILWAY_SERVICE_WEB_ID, RAILWAY_SERVICE_GATEWAY_ID
 #   OXIDEAN_PRODUCTION_HEALTH_URL (default https://app.oxidean.dev/health)
 #   SKIP_HEALTH_CHECK=1 to skip the post-action health probe
 
@@ -40,17 +39,19 @@ PROJECT_ID="${RAILWAY_PROJECT_ID:-cec803d0-289b-4078-80cf-7291c16fc5ec}"
 ENVIRONMENT_ID="${RAILWAY_ENVIRONMENT_ID:-b1c33c22-90ce-433b-99f6-864656512115}"
 SERVICE_API_ID="${RAILWAY_SERVICE_API_ID:-19bf0a47-2fdf-4130-b6b0-858de92cb858}"
 SERVICE_WEB_ID="${RAILWAY_SERVICE_WEB_ID:-26b7e1b6-6cfa-4c7e-942a-bed8e5ce12a2}"
-SERVICE_RUNNER_ID="${RAILWAY_SERVICE_RUNNER_ID:-36f9b50a-738a-419a-9171-49f56c902e6a}"
 SERVICE_GATEWAY_ID="${RAILWAY_SERVICE_GATEWAY_ID:-864fa81c-6e5d-4939-b33b-85eb435365ac}"
 HEALTH_URL="${OXIDEAN_PRODUCTION_HEALTH_URL:-https://app.oxidean.dev/health}"
 
 DRY_RUN=0
 
-# Canonical deploy order — backends before the edge.
+# Canonical deploy order — backends before the edge. runner is deliberately
+# absent: it has never run in the production environment (it deploys only to
+# staging/preview/PR envs via railway-image-deploy.sh's own pair list) and
+# serviceInstanceDeployV2 fails "Service Instance not found" on a service
+# with no instance in the target environment.
 service_pairs() {
   printf '%s %s\n' api "$SERVICE_API_ID"
   printf '%s %s\n' web "$SERVICE_WEB_ID"
-  printf '%s %s\n' runner "$SERVICE_RUNNER_ID"
   printf '%s %s\n' gateway "$SERVICE_GATEWAY_ID"
 }
 
@@ -156,11 +157,13 @@ cmd_promote() {
   # before deploying (empty URL on untagged commits = host-only ox in the image).
   upsert_cli_dist_url "$(resolve_ox_dist_url "$sha")"
 
-  # Atomic image deploy: all four services pin ghcr.io/oxidean/oxidean-<svc>:
-  # sha-<sha>, then the :production channel tag follows the deployed bits.
-  # --wait makes the call return only once every service's new deployment is
-  # terminal (dry-run skips it).
-  local args=(--environment-id "$ENVIRONMENT_ID" --tag "sha-${sha}" --channel-tag production --wait)
+  # Atomic image deploy: the production services pin ghcr.io/oxidean/
+  # oxidean-<svc>:sha-<sha>, then the :production channel tag follows the
+  # deployed bits. --services matches service_pairs above — the default set
+  # includes runner, which has no production instance. --wait makes the call
+  # return only once every service's new deployment is terminal (dry-run
+  # skips it).
+  local args=(--environment-id "$ENVIRONMENT_ID" --tag "sha-${sha}" --services "api,web,gateway" --channel-tag production --wait)
   if [[ "$DRY_RUN" == "1" ]]; then
     args+=(--dry-run)
   fi

@@ -72,7 +72,7 @@ Do **not** use Railway Environment Sync to promote: Sync copies service **variab
 
 1. Validate the commit on **staging** (`images.yml` deploys every `main` push).
 2. Repo → **Actions** → **Production deploy** → **Run workflow**:
-   - `action=promote` — pins `ghcr.io/oxidean/oxidean-<svc>:sha-<sha>` on production `api`, `web`, `runner`, and `gateway` (default SHA = `main` HEAD; optional override) and moves the `:production` channel tag to the deployed images. Requires a successful **CI** run on that SHA, then waits for all four `sha-*` manifests on GHCR (the stable cut's `chore(release):` bump commit gets its image set as a seconds-long release-layer retag by `images.yml`). Does not mutate Railway variables beyond the api CLI-feed pin. New `api` containers run pending sqlx migrations on boot (`OXIDEAN_AUTO_MIGRATE=true`); a failed migration keeps the previous replica.
+   - `action=promote` — pins `ghcr.io/oxidean/oxidean-<svc>:sha-<sha>` on production `api`, `web`, and `gateway` (default SHA = `main` HEAD; optional override) and moves the `:production` channel tag to the deployed images. `runner` is not part of the production set — it deploys to staging/preview/PR environments only. Requires a successful **CI** run on that SHA, then waits for all four `sha-*` manifests on GHCR (the stable cut's `chore(release):` bump commit gets its image set as a seconds-long release-layer retag by `images.yml`). Does not mutate Railway variables beyond the api CLI-feed pin. New `api` containers run pending sqlx migrations on boot (`OXIDEAN_AUTO_MIGRATE=true`); a failed migration keeps the previous replica.
    - `action=rollback` — Railway `deploymentRollback` to the previous `canRollback` deployment on each of those services (restores that deployment’s image; Railway may also restore that deployment’s custom variables).
    - `dry_run=true` — resolves SHA / CI / rollback targets and prints the plan only (no deploys, rollbacks, or health probe).
 3. Confirm `GET https://app.oxidean.dev/health` (skipped when `dry_run=true`).
@@ -224,7 +224,7 @@ No automated rollback is defined in CI or platform config files.
 2. Redeploy a known-good revision: check out the previous git tag/commit, then `make up` (or rebuild with the prior image tags if you publish images externally).
 3. Confirm with `make smoke` (or the dialect-specific smoke target) and `GET /health` / `system.health`.
 
-**Oxidean Cloud:** use the **Production deploy** action (`action=rollback` — `deploymentRollback` restores the previous deployment's image ref on `api` / `web` / `runner` / `gateway`), or re-promote a known-good `sha-*` tag after `make cloud-plan` review. `railway config apply` has no undo and does not roll back deployments: revert the `.railway/railway.ts` edit in git, re-plan, and re-apply to restore configuration.
+**Oxidean Cloud:** use the **Production deploy** action (`action=rollback` — `deploymentRollback` restores the previous deployment's image ref on `api` / `web` / `gateway`), or re-promote a known-good `sha-*` tag after `make cloud-plan` review. `railway config apply` has no undo and does not roll back deployments: revert the `.railway/railway.ts` edit in git, re-plan, and re-apply to restore configuration.
 
 ## Monitoring
 
