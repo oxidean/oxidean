@@ -134,12 +134,14 @@ channel**. There are no release PRs and no manual tag pushes.
   live in the tag annotations / GitHub Releases.
 - **Stable (production deploy)**: `production-deploy.yml` `promote` resolves
   the SHA, computes `plan --channel stable`, writes changelogs, applies the
-  bump, commits `chore(release): cut stable release` to `main`, pushes the
-  `*-vX.Y.Z` tags via `RELEASE_TOKEN`, waits for any fresh `ox-v*` release
-  assets, then deploys the **bump commit** — shipped binaries self-report the
-  released version. Pass `cut_release: false` to re-promote without cutting.
-  The very first promote on a tagless repo instead runs `release-tags --all`:
-  a `0.1.0` baseline for every component.
+  bump, commits `chore(release): cut stable release` to `main`, and pushes it
+  plus the `*-vX.Y.Z` tags **as the release GitHub App** (`RELEASE_APP_ID` /
+  `RELEASE_APP_PRIVATE_KEY`) — `main` is pull-request-only under the `Main`
+  ruleset and the App is its sole bypass actor. It then waits for any fresh
+  `ox-v*` release assets and deploys the **bump commit** — shipped binaries
+  self-report the released version. Pass `cut_release: false` to re-promote
+  without cutting. The very first promote on a tagless repo instead runs
+  `release-tags --all`: a `0.1.0` baseline for every component.
 - **Rollback** never touches versions or tags.
 
 ## Image lanes (deploy artifacts)
@@ -170,7 +172,10 @@ existing components:
 Tag pushes must use the **`RELEASE_TOKEN`** secret (a maintainer PAT) —
 the default `GITHUB_TOKEN` does not re-trigger workflows, so tag pushes
 made with it would silently skip every release lane. The tag-push lanes
-fail loudly if `RELEASE_TOKEN` is unset.
+fail loudly if `RELEASE_TOKEN` is unset. The production-deploy stable cut
+is the one lane that also pushes a *commit* to `main`, so it authenticates
+as the release GitHub App (short-lived installation token minted in the
+job) — App-token pushes trigger workflows exactly like PAT pushes.
 
 On a `*-v*.*.*` tag push, `.github/workflows/release.yml` turns the
 annotated tag body into a GitHub Release; `ox-v*` tags take the binary
