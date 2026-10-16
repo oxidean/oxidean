@@ -39,3 +39,22 @@ export function syncAllowSignupHint(allowed: boolean): void {
   if (new RegExp(`(?:^|;\\s*)${ALLOW_SIGNUP_COOKIE}=${next}(?:;|$)`).test(document.cookie)) return;
   document.cookie = `${ALLOW_SIGNUP_COOKIE}=${next}; Path=/; SameSite=Lax; Max-Age=${30 * 24 * 3600}${secureAttr()}`;
 }
+
+/**
+ * Mirror the resolved `allow_signup` onto the <html> stamp the web tier sets
+ * per request (see `data-oxidean-signup` in oxidean-web). The stamp only
+ * reflects the last server response, so a first visit without the companion
+ * cookie starts unstamped — syncing from the fresh `providerConfig` result
+ * makes the CSS-gated CTA (hero, header skeleton) correct for the whole SPA
+ * session. Clearing over a stale server stamp is intentional: the RPC answer
+ * is newer than the per-request stamp.
+ */
+export function syncSignupStamp(allowed: boolean): void {
+  if (typeof document === "undefined") return;
+  const root = document.documentElement;
+  if (allowed) {
+    root.setAttribute("data-oxidean-signup", "1");
+  } else {
+    root.removeAttribute("data-oxidean-signup");
+  }
+}

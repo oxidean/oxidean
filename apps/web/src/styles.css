@@ -321,6 +321,13 @@
   html:not([data-oxidean-signup]) [data-header-skeleton-signup] {
     display: none;
   }
+  /* Hero/CTA "Get started" links (home `/` marketing tree): same fail-closed
+     stamp gate. The links are always in the DOM (so the hero subtree never
+     re-renders on providerConfig settles); the web tier stamps <html> per
+     request and the client syncs it once `providerConfig` resolves. */
+  html:not([data-oxidean-signup]) [data-anon-signup-cta] {
+    display: none;
+  }
 
   /* Marketing landing reveal (home `/`). */
   .oct-rise {

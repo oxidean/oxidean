@@ -1,6 +1,5 @@
 import { useQuery } from "@octanejs/tanstack-query";
-import type { RepoPublic, UserPublic } from "@oxidean/api-client";
-import { useEffect } from "octane";
+import { memo, useEffect } from "octane";
 import { AppPage } from "@/components/app-page";
 import { AppLink } from "@/components/ui/app-link";
 import { buttonVariants } from "@/components/ui/button";
@@ -8,11 +7,7 @@ import { OxideanMark } from "@/components/oxidean-mark";
 import { SignedInHomeSkeleton } from "@/components/page-skeletons";
 import { SignedInHome } from "@/components/signed-in-home";
 import { hasSessionPresenceHint, syncSessionPresenceHint } from "@/lib/session-hint";
-import {
-  authProviderConfigQueryOptions,
-  authSessionQueryOptions,
-  repoListMineQueryOptions,
-} from "@/lib/session-queries";
+import { authSessionQueryOptions, repoListMineQueryOptions } from "@/lib/session-queries";
 import { useMounted } from "@/lib/use-mounted.tsrx";
 import { cn } from "@/lib/utils";
 
@@ -24,16 +19,6 @@ export function selectHomeTree(input: { needs_setup: boolean; hasSession: boolea
   if (input.hasSession) return "signed-in";
   return "marketing";
 }
-
-export type HomeLoaderData = {
-  tree: Exclude<HomeTree, "setup">;
-  user: UserPublic | null;
-  /** Present when tree === "signed-in". */
-  repos: RepoPublic[];
-  reposError: string | null;
-  /** Marketing CTA — SSR'd so signup button paints without client fetch. */
-  allowSignup: boolean;
-};
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
 
@@ -72,9 +57,10 @@ function useScrollReveal(enabled: boolean, epoch: unknown) {
     );
     nodes.forEach((n) => io.observe(n));
     return () => io.disconnect();
-    // epoch re-runs the query when the rendered tree shape changes: pending →
-    // marketing replaces the .oct-reveal nodes (wrapped → bare AnonLanding),
-    // and an observer holding the detached nodes would reveal nothing.
+    // epoch re-runs the query when the rendered tree shape settles (pending →
+    // marketing keeps the same .oct-reveal nodes in place, so the re-run is a
+    // cheap re-observe; it is still the safety net if a future change does
+    // replace the nodes, e.g. the marketing → signed-in swap).
   }, [enabled, epoch]);
 }
 
@@ -89,7 +75,6 @@ function HomeContent() {
   const meQ = useQuery(authSessionQueryOptions());
   const signedIn = meQ.data != null;
   const reposQ = useQuery({ ...repoListMineQueryOptions(), enabled: signedIn });
-  const cfgQ = useQuery(authProviderConfigQueryOptions());
 
   const tree: HomeTree | null = meQ.isPending ? null : signedIn ? "signed-in" : "marketing";
   const user = meQ.data ?? null;
@@ -105,7 +90,7 @@ function HomeContent() {
   // chrome resolves it before this island hydrates) would otherwise paint the
   // resolved tree over that DOM and roll the island back. renderedTree pins the
   // SSR branch until mounted and feeds the reveal effect's epoch so its
-  // observer rebinds when the pending pair swaps for the resolved tree.
+  // observer rebinds when the tree settles.
   const mounted = useMounted();
   const renderedTree = mounted ? tree : null;
   useScrollReveal(
@@ -116,15 +101,24 @@ function HomeContent() {
   // Pending: SSR cannot see the session, so emit both candidates — the
   // `data-oxidean-session` stamp on <html> (set per-request by the web tier)
   // selects via CSS which one paints before `auth.me` resolves.
-  if (renderedTree == null) {
+  //
+  // The anonymous branch always renders the SAME fragment shape (landing
+  // first, skeleton second) in both states — only the skeleton slot appears /
+  // drops. A fragment→single-node root change makes Octane replace the whole
+  // root and remount the hero (verified in Chromium); keeping the fragment
+  // shape lets the landing subtree stay in place across the settle (issue
+  // #143).
+  if (renderedTree == null || renderedTree === "marketing") {
     return (
       <>
         <div data-anon-landing>
-          <AnonLanding allowSignup={cfgQ.data?.allow_signup === true} />
+          <AnonLanding />
         </div>
-        <div data-home-skeleton>
-          <SignedInHomeSkeleton />
-        </div>
+        {renderedTree == null ? (
+          <div data-home-skeleton>
+            <SignedInHomeSkeleton />
+          </div>
+        ) : null}
       </>
     );
   }
@@ -145,10 +139,26 @@ function HomeContent() {
     );
   }
 
-  return <AnonLanding allowSignup={cfgQ.data?.allow_signup === true} />;
+  // (Signed-in tree above replaces the fragment wholesale — expected churn.)
+
+  // Wrapper retained (pending branch renders the same shape) so Octane keeps
+  // the landing subtree in place — no hero remount or `oct-rise` restart on
+  // the auth.me settle (issue #143).
+  return (
+    <div data-anon-landing>
+      <AnonLanding />
+    </div>
+  );
 }
 
-function AnonLanding({ allowSignup }: { allowSignup: boolean }) @{
+/**
+ * Zero-prop on purpose: `memo` bails out of every `HomeContent` re-render
+ * (auth.me settle, chrome query settles) so the hero DOM never churns. The
+ * "Get started" CTA is always rendered and gated in CSS by the
+ * `data-oxidean-signup` stamp on <html> (web tier + client stamp sync), so
+ * signup open/closed changes mutate <html> — not this subtree.
+ */
+function AnonLandingImpl() @{
   <>
     <section className="relative min-h-[32rem] overflow-hidden md:min-h-[36rem] lg:min-h-[40rem]">
       <div
@@ -171,11 +181,10 @@ function AnonLanding({ allowSignup }: { allowSignup: boolean }) @{
             self-host
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
-            @if (allowSignup) {
-              <AppLink href="/signup" className={cn(buttonVariants())}>
-                Get started
-              </AppLink>;
-            }
+            <AppLink href="/signup" data-anon-signup-cta className={cn(buttonVariants())}>
+              Get started
+            </AppLink>
+            ;
             <AppLink href="/explore" className={cn(buttonVariants({ variant: "secondary" }))}>
               Explore
             </AppLink>
@@ -239,12 +248,11 @@ function AnonLanding({ allowSignup }: { allowSignup: boolean }) @{
         <h2 className="font-[family-name:var(--font-display)] text-[24px] font-semibold leading-[1.2] text-foreground">
           One forge. Cloud or yours.
         </h2>
-        <div className="mt-8 flex flex-wrap gap-3">
-          @if (allowSignup) {
-            <AppLink href="/signup" className={cn(buttonVariants())}>
-              Get started
-            </AppLink>;
-          }
+        <div class="mt-8 flex flex-wrap gap-3">
+          <AppLink href="/signup" data-anon-signup-cta className={cn(buttonVariants())}>
+            Get started
+          </AppLink>
+          ;
           <AppLink href="/explore" className={cn(buttonVariants({ variant: "secondary" }))}>
             Explore
           </AppLink>
@@ -253,3 +261,5 @@ function AnonLanding({ allowSignup }: { allowSignup: boolean }) @{
     </section>
   </>;
 }
+
+export const AnonLanding = memo(AnonLandingImpl);

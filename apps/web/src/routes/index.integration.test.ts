@@ -69,9 +69,10 @@ describe("index/home SSR tree gate (D-18/D-20)", () => {
 /**
  * Pending dual-render: while `auth.me` is unsettled the page emits both the
  * anonymous landing and the signed-in skeleton so the `data-oxidean-session`
- * stamp on <html> can pick via CSS. Resolution must swap to a single tree and
- * drop the wrappers — the scroll-reveal observer watches live nodes only if
- * the effect re-runs on the swap (covered by index.browser.test.tsx).
+ * stamp on <html> can pick via CSS. Resolution drops the skeleton candidate
+ * only — the `data-anon-landing` wrapper is retained so the landing subtree
+ * keeps its DOM position and the hero never remounts (issue #143). Reveal
+ * re-observation is covered in index.browser.test.tsx.
  */
 describe("index pending dual-render", () => {
   beforeEach(() => {
@@ -103,18 +104,22 @@ describe("index pending dual-render", () => {
     expect(document.querySelector("[data-anon-landing] .oct-reveal")).toBeTruthy();
   });
 
-  it("anonymous resolution swaps to the bare landing tree (wrappers dropped)", async () => {
+  it("anonymous resolution drops the skeleton wrapper, keeps the landing wrapper", async () => {
     const me = deferred<unknown>();
     meMock.mockReturnValue(me.promise);
 
     render(HomePage, {});
+    const landingBefore = document.querySelector("[data-anon-landing]")!;
+    expect(landingBefore).toBeTruthy();
     me.resolve(ANON);
 
     await vi.waitFor(() => {
       expect(document.querySelector("#explore")).toBeTruthy();
-      expect(document.querySelector("[data-anon-landing]")).toBeNull();
+      expect(document.querySelector("[data-anon-landing]")).not.toBeNull();
       expect(document.querySelector("[data-home-skeleton]")).toBeNull();
     });
+    // The landing wrapper is the very same node — no remount (issue #143).
+    expect(document.querySelector("[data-anon-landing]")).toBe(landingBefore);
   });
 });
 

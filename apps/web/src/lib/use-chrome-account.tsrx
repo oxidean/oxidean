@@ -1,7 +1,7 @@
 import { useQuery } from "@octanejs/tanstack-query";
 import type { UserPublic } from "@oxidean/api-client";
 import { useEffect } from "octane";
-import { syncAllowSignupHint } from "@/lib/session-hint";
+import { syncAllowSignupHint, syncSignupStamp } from "@/lib/session-hint";
 import {
   authBootstrapQueryOptions,
   authProviderConfigQueryOptions,
@@ -49,9 +49,15 @@ export function useChromeAccountState(): {
   const allowSignup = resolveAllowSignup(cfg.data);
 
   // Heal the readable signup hint so the next static shell's anon skeleton
-  // matches the resolved cluster's geometry (web tier stamps it on <html>).
+  // matches the resolved cluster's geometry (web tier stamps it on <html>),
+  // and mirror the verdict onto <html> itself so the CSS-gated signup CTA
+  // surfaces are correct when the per-request stamp was absent (first visit)
+  // or stale (allow_signup changed since the last response).
   useEffect(() => {
-    if (cfg.isSuccess) syncAllowSignupHint(allowSignup);
+    if (cfg.isSuccess) {
+      syncAllowSignupHint(allowSignup);
+      syncSignupStamp(allowSignup);
+    }
   }, [cfg.isSuccess, allowSignup]);
 
   return { pending, user, needsSetup, allowSignup };
