@@ -98,7 +98,8 @@ SSO start routes redirect to the IdP when configured. If WorkOS/OIDC ENV is miss
 | `system.db_probe` | Dialect probe / `instances` counter | No |
 | `system.manifest` | Compatibility contract: `protocol_version`, `server_version`, `procedures` map (every dispatch procedure → `true`), `capabilities` (`mcp`/`rest`/`oauth`), `min_cli_version` — clients feature-gate on this (CLI-02) | No |
 | `auth.signup` | Local signup; sets session cookie. Rejected with `auth.setup_required` while empty-instance setup is needed; rejected when instance `allow_signup` is false | No (local mode) |
-| `auth.login` | Local login; sets session cookie. ENV-seeded admins with `must_change_credentials` are redirected to `/setup/credentials` in the SPA | No (local mode) |
+| `auth.login_begin` | Identifier-first sign-in (#130): resolves email/username, opens an `oxidean_2fa` challenge cookie, returns `{ challenge, next, kind, methods }` — `next` is `"factor"` when a second factor is owed before the password, else `"password"`. Unknown/banned/passwordless identifiers get an indistinguishable dead-end password step (no account-existence leak). Rate-limited per IP + identifier | No (local mode) |
+| `auth.login` | Local login; sets session cookie. Two shapes: one-shot `{identifier, password, remember_me}` (machine clients; may surface `auth.two_factor_required`), or the password leg of a `login_begin` challenge via `{challenge, password}` — the challenge binds the account, `identifier` optional. ENV-seeded admins with `must_change_credentials` are redirected to `/setup/credentials` in the SPA | No (local mode) |
 | `auth.logout` | Revoke current session; clear cookie | Session |
 | `auth.logout_all` | Revoke all sessions for user; clear cookie | Session |
 | `auth.me` | Current user public profile (`must_change_credentials` included) | Session |
@@ -366,13 +367,28 @@ curl -sS http://127.0.0.1:8080/api/rpc \
 { "email": "user@example.com", "username": "alice", "password": "at-least-8-chars" }
 ```
 
+`auth.login_begin` (identifier-first sign-in, #130):
+
+```json
+{ "identifier": "alice", "remember_me": false }
+```
+
+→ `{ "challenge": "<id>", "next": "factor" | "password", "kind": "verify" | "enroll" | null, "methods": [...] }`
+
 `auth.login`:
 
 ```json
 { "identifier": "alice", "password": "…", "remember_me": false }
 ```
 
-`identifier` is email or username. Password minimum length: **8**. Response data is `UserPublic` (`id`, `email`, `username`, `display_name`, `bio`, `avatar_url`, `role` (`user` \| `admin` \| `sys-admin`), `profile_incomplete`, `email_verified`).
+or, as the password leg of a `login_begin` challenge (the challenge binds the
+account — `identifier` optional):
+
+```json
+{ "challenge": "<id>", "password": "…", "remember_me": false }
+```
+
+`identifier` is email or username. Password minimum length: **8**. Response data is `UserPublic` (`id`, `email`, `username`, `display_name`, `bio`, `avatar_url`, `role` (`user` \| `admin` \| `sys-admin`), `profile_incomplete`, `email_verified`). When a challenge remains incomplete after the password leg, the response is `auth.two_factor_required` with `{ challenge, kind, methods }` in `error.data`.
 
 ### Profile
 

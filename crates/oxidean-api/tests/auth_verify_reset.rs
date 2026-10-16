@@ -12,6 +12,10 @@ use oxidean_api::{build_cors, router_with_state, AppState};
 use oxidean_db::Database;
 use tower::ServiceExt;
 
+/// `OXIDEAN_PUBLIC_ORIGIN` is process-global — tests that set it must not
+/// overlap or one clears it under the other.
+static ORIGIN_ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 #[derive(Default)]
 struct RecordingSender {
     sent: Mutex<Vec<OutboundEmail>>,
@@ -177,6 +181,7 @@ async fn issue_otp_consume_sets_email_verified_on_me() {
 
 #[tokio::test]
 async fn request_verify_sends_magic_and_otp_email() {
+    let _origin_guard = ORIGIN_ENV_LOCK.lock().await;
     std::env::set_var("OXIDEAN_PUBLIC_ORIGIN", "https://app.example.com");
     let dir = tempfile::tempdir().expect("tempdir");
     let url = format!("sqlite:{}", dir.path().join("req_verify.db").display());
@@ -475,6 +480,7 @@ async fn rpc_json(app: &axum::Router, body: &str) -> (StatusCode, serde_json::Va
 /// AUTH-12 / D-28: unknown, local-password, and SSO-only share identical success payload.
 #[tokio::test]
 async fn request_password_reset_anti_enumeration_identical_success() {
+    let _origin_guard = ORIGIN_ENV_LOCK.lock().await;
     std::env::set_var("OXIDEAN_PUBLIC_ORIGIN", "https://app.example.com");
     let dir = tempfile::tempdir().expect("tempdir");
     let url = format!("sqlite:{}", dir.path().join("reset_req.db").display());

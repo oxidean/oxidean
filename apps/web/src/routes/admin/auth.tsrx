@@ -135,6 +135,8 @@ function formDefaultsFromSettings(s: AuthSettingsPublic | null | undefined) {
     workos_client_id: s?.workos_client_id ?? "",
     oidc_issuer: s?.oidc_issuer ?? "",
     oidc_client_id: s?.oidc_client_id ?? "",
+    require_two_factor_local: s?.require_two_factor_local === true,
+    require_two_factor_external: s?.require_two_factor_external === true,
   };
 }
 
@@ -275,6 +277,8 @@ export function AdminAuthContent() @{
             value.provider_mode === "oidc" ? value.oidc_client_id.trim() || null : null,
           allow_signup: value.allow_signup,
           default_visibility: value.default_visibility,
+          require_two_factor_local: value.require_two_factor_local,
+          require_two_factor_external: value.require_two_factor_external,
         });
         if (!res.ok) {
           toastError(res.error.message || "Could not save auth settings.");
@@ -304,6 +308,8 @@ export function AdminAuthContent() @{
     form.setFieldValue("workos_client_id", next.workos_client_id ?? "");
     form.setFieldValue("oidc_issuer", next.oidc_issuer ?? "");
     form.setFieldValue("oidc_client_id", next.oidc_client_id ?? "");
+    form.setFieldValue("require_two_factor_local", next.require_two_factor_local === true);
+    form.setFieldValue("require_two_factor_external", next.require_two_factor_external === true);
     setFlags(flagsFromSettings(next));
     setDraftReady(true);
   }
@@ -425,6 +431,44 @@ export function AdminAuthContent() @{
                       <p className="text-[14px] font-normal leading-[1.4] text-muted-foreground">
                         When off, new accounts can’t self-register. You can change this later in
                         Auth settings.
+                      </p>
+                    </div>
+
+                    <div className="flex flex-col gap-2">
+                      <div className="flex min-h-11 items-center gap-2">
+                        <Switch
+                          id="admin-require-2fa-local"
+                          checked={values.require_two_factor_local}
+                          onCheckedChange={(checked) =>
+                            form.setFieldValue("require_two_factor_local", checked === true)
+                          }
+                        />
+                        <Label htmlFor="admin-require-2fa-local">
+                          Require two-factor authentication
+                        </Label>
+                      </div>
+                      <p className="text-[14px] font-normal leading-[1.4] text-muted-foreground">
+                        Local password accounts must enroll an authenticator app or passkey before
+                        they can sign in.
+                      </p>
+                    </div>
+
+                    <div className="flex flex-col gap-2">
+                      <div className="flex min-h-11 items-center gap-2">
+                        <Switch
+                          id="admin-require-2fa-external"
+                          checked={values.require_two_factor_external}
+                          onCheckedChange={(checked) =>
+                            form.setFieldValue("require_two_factor_external", checked === true)
+                          }
+                        />
+                        <Label htmlFor="admin-require-2fa-external">
+                          Require local 2FA after SSO
+                        </Label>
+                      </div>
+                      <p className="text-[14px] font-normal leading-[1.4] text-muted-foreground">
+                        OIDC/WorkOS users must also hold a local two-factor method. Leave off to
+                        trust the identity provider’s MFA.
                       </p>
                     </div>
 

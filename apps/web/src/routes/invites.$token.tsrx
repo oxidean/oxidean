@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiClient } from "@/lib/api-client";
+import { hasSessionPresenceHint } from "@/lib/session-hint";
 import { usePathname } from "@/lib/pathname.tsrx";
 import { matchPath } from "@/lib/route-params";
 import { AppLink } from "@/components/ui/app-link";
@@ -177,13 +178,19 @@ function InviteAcceptContent() @{
         return;
       }
       setPhase({ kind: "done", accept: res.data });
-      if (res.data.kind === "org") {
-        window.location.assign(`/${res.data.org.slug}`);
-      } else if (res.data.kind === "repo") {
-        window.location.assign(`/${res.data.owner}/${res.data.name}`);
-      } else {
-        window.location.assign("/");
-      }
+      const dest =
+        res.data.kind === "org"
+          ? `/${res.data.org.slug}`
+          : res.data.kind === "repo"
+            ? `/${res.data.owner}/${res.data.name}`
+            : "/";
+      // Enroll-required accepts skip the session mint (#130) — route through
+      // login (which opens the 2FA challenge) instead of bouncing off a
+      // protected page. A sessioned response always pairs the presence
+      // cookie; its absence means the accept minted no session (#130).
+      window.location.assign(
+        hasSessionPresenceHint() ? dest : `/login?returnTo=${encodeURIComponent(dest)}`,
+      );
     } catch {
       setError(NETWORK_ERROR);
     }

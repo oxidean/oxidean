@@ -21,6 +21,7 @@ pub mod release_types;
 pub mod repo_types;
 pub mod scope_catalog;
 pub mod search_types;
+pub mod two_factor_types;
 pub mod ssh_key_types;
 pub mod webhook_types;
 
@@ -45,6 +46,7 @@ pub use release_types::*;
 pub use repo_types::*;
 pub use scope_catalog::*;
 pub use search_types::*;
+pub use two_factor_types::*;
 pub use ssh_key_types::*;
 pub use webhook_types::*;
 

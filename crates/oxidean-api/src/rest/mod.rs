@@ -104,6 +104,7 @@ async fn ctx_for(state: &AppState, headers: &HeaderMap) -> Result<RpcCtx, Respon
         state,
         edge_credential(headers),
         rpc::ClientMeta::from_headers(headers),
+        crate::app::two_factor_id_from_headers(headers),
     )
     .await
     .map_err(bearer_rejection_response)

@@ -61,6 +61,18 @@ function SignupContent() @{
         });
         if (!res.ok) {
           const code = res.error.code;
+          // Two-factor gate (#130): signup under a require-2FA policy opens an
+          // enroll challenge instead of minting — continue on the challenge page.
+          if (code === "auth.two_factor_required") {
+            const data = res.error.data as { challenge?: string } | undefined;
+            const challenge = data?.challenge
+              ? `&challenge=${encodeURIComponent(data.challenge)}`
+              : "";
+            window.location.assign(
+              `/login/two-factor?returnTo=${encodeURIComponent(returnTo)}${challenge}`,
+            );
+            return;
+          }
           if (code === "auth.taken") setError(TAKEN_ERROR);
           else if (code === "auth.reserved_username") setError(RESERVED_ERROR);
           else if (code === "auth.signup_closed") {

@@ -116,6 +116,10 @@ export type UserPublic = {
   email_verified: boolean;
   must_change_credentials: boolean;
   default_branch: string;
+  /** Confirmed TOTP or ≥1 passkey enrolled (issue #130). */
+  two_factor_enabled: boolean;
+  /** Instance/org policy requires this user to enroll a factor. */
+  two_factor_enroll_required: boolean;
 };
 
 export type BootstrapStatus = {
@@ -142,6 +146,95 @@ export type FactoryResetRequest = {
 export type FactoryResetResponse = {
   ok: boolean;
   needs_setup: boolean;
+};
+
+// --- Two-factor auth (issue #130) ---
+
+/** One registered WebAuthn/passkey credential. */
+export type PasskeyPublic = {
+  id: string;
+  nickname: string;
+  created_at: string;
+  last_used_at?: string | null;
+};
+
+/** `auth.two_factor.status` — factor inventory, or pending-challenge metadata. */
+export type TwoFactorStatusPublic = {
+  totp_enabled: boolean;
+  recovery_codes_remaining: number;
+  passkeys: PasskeyPublic[];
+  challenge_pending: boolean;
+  /** `"verify"` (prove a factor) or `"enroll"` (must add one) when pending. */
+  challenge_kind?: "verify" | "enroll" | null;
+  challenge_methods: string[];
+  /** The step the pending challenge waits on (#130): `"factor"` first when a
+   *  factor and the password are both owed, `"password"` when the password
+   *  leg remains or must precede enrollment, `"enroll"` last. */
+  challenge_next?: "factor" | "password" | "enroll" | null;
+  /** Instance/org policy requires this user to enroll a factor. */
+  enroll_required: boolean;
+};
+
+/** `auth.two_factor.totp_begin` — new pending secret for QR/manual entry. */
+export type TotpEnrollmentPublic = {
+  /** Base32 secret — display grouped for manual entry; never re-shown confirmed. */
+  secret: string;
+  /** `otpauth://totp/...` URI for QR rendering. */
+  otpauth_uri: string;
+};
+
+/** `auth.two_factor.totp_confirm` / `recovery_regenerate` — plaintext codes,
+ *  returned exactly once; only hashes persist server-side. */
+export type RecoveryCodesPublic = {
+  recovery_codes: string[];
+};
+
+/** `auth.two_factor.complete` — 6-digit TOTP, 8-digit email OTP, or a
+ *  recovery code (`xxxxx-xxxxx`). `challenge` only needed without the cookie. */
+export type TwoFactorCompleteRequest = {
+  code: string;
+  challenge?: string | null;
+};
+
+/** `auth.two_factor.complete` output — `"password"` when the identifier-first
+ *  flow still owes the password step, `"done"` + user when a session minted. */
+export type TwoFactorCompletePublic = {
+  next: "password" | "done";
+  user?: UserPublic | null;
+};
+
+/** `auth.two_factor.passkey_complete` — browser assertion JSON. */
+export type PasskeyCompleteRequest = {
+  assertion: unknown;
+  challenge?: string | null;
+};
+
+/** `auth.two_factor.passkey_register_complete` — browser attestation JSON. */
+export type PasskeyRegisterCompleteRequest = {
+  nickname: string;
+  attestation: unknown;
+  challenge?: string | null;
+};
+
+/** `auth.two_factor.passkey_update` — rename a credential. */
+export type PasskeyUpdateRequest = {
+  id: string;
+  nickname: string;
+};
+
+/** `auth.two_factor.passkey_delete` input. */
+export type PasskeyDeleteRequest = {
+  id: string;
+};
+
+/** `auth.two_factor.*` inputs carrying an optional explicit challenge id. */
+export type TwoFactorChallengeRequest = {
+  challenge?: string | null;
+};
+
+/** `admin.users.resetTwoFactor` input — clear all factors for a user. */
+export type AdminResetTwoFactorRequest = {
+  user_id: string;
 };
 
 export type AdminUserPublic = {
@@ -328,9 +421,32 @@ export type SignupRequest = {
 };
 
 export type LoginRequest = {
-  identifier: string;
+  /** Email or username — required for the one-shot check; omittable when
+   *  `challenge` is set (the challenge binds the account). */
+  identifier?: string;
   password: string;
   remember_me: boolean;
+  /** Identifier-first flow (#130): the `oxidean_2fa` challenge this password
+   *  leg answers. Omit for the one-shot credential check. */
+  challenge?: string | null;
+};
+
+/** `auth.login_begin` input — the identifier-first sign-in step (#130). */
+export type LoginBeginRequest = {
+  identifier: string;
+  remember_me?: boolean;
+};
+
+/** `auth.login_begin` output — which sign-in step comes next. */
+export type LoginBeginResponse = {
+  /** Challenge id — also set as the `oxidean_2fa` HttpOnly cookie. */
+  challenge: string;
+  /** `"factor"` when a second factor is owed first, else `"password"`. */
+  next: "factor" | "password";
+  /** `"verify"` / `"enroll"` when a factor step is pending, else null. */
+  kind?: "verify" | "enroll" | null;
+  /** Factor methods the pending challenge accepts. */
+  methods: string[];
 };
 
 export type VerifyRequest = {
@@ -397,6 +513,10 @@ export type AuthSettingsPublic = {
   oidc_client_secret_configured: boolean;
   allow_signup: boolean;
   default_visibility: RepoVisibility;
+  /** Require a 2FA factor for local-password logins (issue #130). */
+  require_two_factor_local: boolean;
+  /** Require a local 2FA factor for OIDC/WorkOS logins — off = trust IdP MFA. */
+  require_two_factor_external: boolean;
 };
 
 export type UpdateAuthSettingsRequest = {
@@ -408,6 +528,8 @@ export type UpdateAuthSettingsRequest = {
   workos_client_id?: string | null;
   allow_signup?: boolean;
   default_visibility?: RepoVisibility;
+  require_two_factor_local?: boolean;
+  require_two_factor_external?: boolean;
 };
 
 export type TemplateProvenance = "builtin" | "instance" | "user";
@@ -2114,6 +2236,8 @@ export type OrgPublic = {
   slug: string;
   display_name: string;
   member_base_permission: MemberBasePermission;
+  /** Members must enroll a 2FA factor to keep org access (issue #130). */
+  require_two_factor: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -2131,6 +2255,8 @@ export type OrgUpdateSettingsRequest = {
   slug: string;
   member_base_permission?: MemberBasePermission | null;
   display_name?: string | null;
+  /** Set/clear the org's "members must have 2FA" policy (issue #130). */
+  require_two_factor?: boolean | null;
 };
 
 export type OrgMineEntry = {
@@ -3504,6 +3630,8 @@ export function createClient(opts: CreateClientOptions) {
     auth: {
       signup: (input: SignupRequest) => rpcCall<UserPublic>(opts, "auth.signup", input),
       login: (input: LoginRequest) => rpcCall<UserPublic>(opts, "auth.login", input),
+      loginBegin: (input: LoginBeginRequest) =>
+        rpcCall<LoginBeginResponse>(opts, "auth.login_begin", input),
       logout: () => rpcCall<{ ok: boolean }>(opts, "auth.logout", {}),
       logoutAll: () => rpcCall<{ ok: boolean }>(opts, "auth.logout_all", {}),
       me: () => rpcCall<UserPublic>(opts, "auth.me", {}),
@@ -3524,6 +3652,46 @@ export function createClient(opts: CreateClientOptions) {
         rpcCall<UserPublic>(opts, "auth.reset_password", input),
       privilegedPing: () =>
         rpcCall<{ ok: boolean }>(opts, "auth.dev.privileged_ping", {}),
+    },
+    twoFactor: {
+      status: () =>
+        rpcCall<TwoFactorStatusPublic>(opts, "auth.two_factor.status", {}),
+      totpBegin: (input: TwoFactorChallengeRequest) =>
+        rpcCall<TotpEnrollmentPublic>(opts, "auth.two_factor.totp_begin", input),
+      totpConfirm: (input: TwoFactorCompleteRequest) =>
+        rpcCall<RecoveryCodesPublic>(opts, "auth.two_factor.totp_confirm", input),
+      totpDisable: () =>
+        rpcCall<{ ok: boolean }>(opts, "auth.two_factor.totp_disable", {}),
+      recoveryRegenerate: () =>
+        rpcCall<RecoveryCodesPublic>(
+          opts,
+          "auth.two_factor.recovery_regenerate",
+          {},
+        ),
+      complete: (input: TwoFactorCompleteRequest) =>
+        rpcCall<TwoFactorCompletePublic>(opts, "auth.two_factor.complete", input),
+      passkeyBegin: (input: TwoFactorChallengeRequest) =>
+        rpcCall<{ publicKey: unknown }>(opts, "auth.two_factor.passkey_begin", input),
+      passkeyComplete: (input: PasskeyCompleteRequest) =>
+        rpcCall<UserPublic>(opts, "auth.two_factor.passkey_complete", input),
+      passkeyRegisterBegin: (input: TwoFactorChallengeRequest) =>
+        rpcCall<{ publicKey: unknown }>(
+          opts,
+          "auth.two_factor.passkey_register_begin",
+          input,
+        ),
+      passkeyRegisterComplete: (input: PasskeyRegisterCompleteRequest) =>
+        rpcCall<PasskeyPublic>(
+          opts,
+          "auth.two_factor.passkey_register_complete",
+          input,
+        ),
+      passkeyUpdate: (input: PasskeyUpdateRequest) =>
+        rpcCall<{ ok: boolean }>(opts, "auth.two_factor.passkey_update", input),
+      passkeyDelete: (input: PasskeyDeleteRequest) =>
+        rpcCall<{ ok: boolean }>(opts, "auth.two_factor.passkey_delete", input),
+      emailSend: (input: TwoFactorChallengeRequest) =>
+        rpcCall<{ ok: boolean }>(opts, "auth.two_factor.email_send", input),
     },
     user: {
       getProfile: () => rpcCall<UserPublic>(opts, "user.get_profile", {}),
@@ -4185,6 +4353,8 @@ export function createClient(opts: CreateClientOptions) {
             "admin.users.getActivity",
             input,
           ),
+        resetTwoFactor: (input: AdminResetTwoFactorRequest) =>
+          rpcCall<{ ok: boolean }>(opts, "admin.users.resetTwoFactor", input),
       },
       invites: {
         create: (input: AdminInvitesCreateRequest) =>
@@ -4294,6 +4464,17 @@ export function authLoginMutationOptions(client: OxideanClient) {
   };
 }
 
+export function authLoginBeginMutationOptions(client: OxideanClient) {
+  return {
+    mutationKey: ["auth", "loginBegin"] as const,
+    mutationFn: async (input: LoginBeginRequest) => {
+      const res = await client.auth.loginBegin(input);
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
 export function authLogoutMutationOptions(client: OxideanClient) {
   return {
     mutationKey: ["auth", "logout"] as const,
@@ -4310,6 +4491,160 @@ export function authLogoutAllMutationOptions(client: OxideanClient) {
     mutationKey: ["auth", "logoutAll"] as const,
     mutationFn: async () => {
       const res = await client.auth.logoutAll();
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
+export function twoFactorStatusQueryOptions(client: OxideanClient) {
+  return {
+    queryKey: ["twoFactor", "status"] as const,
+    queryFn: async () => {
+      const res = await client.twoFactor.status();
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
+export function twoFactorTotpBeginMutationOptions(client: OxideanClient) {
+  return {
+    mutationKey: ["twoFactor", "totpBegin"] as const,
+    mutationFn: async (input: TwoFactorChallengeRequest) => {
+      const res = await client.twoFactor.totpBegin(input);
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
+export function twoFactorTotpConfirmMutationOptions(client: OxideanClient) {
+  return {
+    mutationKey: ["twoFactor", "totpConfirm"] as const,
+    mutationFn: async (input: TwoFactorCompleteRequest) => {
+      const res = await client.twoFactor.totpConfirm(input);
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
+export function twoFactorTotpDisableMutationOptions(client: OxideanClient) {
+  return {
+    mutationKey: ["twoFactor", "totpDisable"] as const,
+    mutationFn: async () => {
+      const res = await client.twoFactor.totpDisable();
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
+export function twoFactorRecoveryRegenerateMutationOptions(client: OxideanClient) {
+  return {
+    mutationKey: ["twoFactor", "recoveryRegenerate"] as const,
+    mutationFn: async () => {
+      const res = await client.twoFactor.recoveryRegenerate();
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
+export function twoFactorCompleteMutationOptions(client: OxideanClient) {
+  return {
+    mutationKey: ["twoFactor", "complete"] as const,
+    mutationFn: async (input: TwoFactorCompleteRequest) => {
+      const res = await client.twoFactor.complete(input);
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
+export function twoFactorPasskeyBeginMutationOptions(client: OxideanClient) {
+  return {
+    mutationKey: ["twoFactor", "passkeyBegin"] as const,
+    mutationFn: async (input: TwoFactorChallengeRequest) => {
+      const res = await client.twoFactor.passkeyBegin(input);
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
+export function twoFactorPasskeyCompleteMutationOptions(client: OxideanClient) {
+  return {
+    mutationKey: ["twoFactor", "passkeyComplete"] as const,
+    mutationFn: async (input: PasskeyCompleteRequest) => {
+      const res = await client.twoFactor.passkeyComplete(input);
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
+export function twoFactorPasskeyRegisterBeginMutationOptions(client: OxideanClient) {
+  return {
+    mutationKey: ["twoFactor", "passkeyRegisterBegin"] as const,
+    mutationFn: async (input: TwoFactorChallengeRequest) => {
+      const res = await client.twoFactor.passkeyRegisterBegin(input);
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
+export function twoFactorPasskeyRegisterCompleteMutationOptions(client: OxideanClient) {
+  return {
+    mutationKey: ["twoFactor", "passkeyRegisterComplete"] as const,
+    mutationFn: async (input: PasskeyRegisterCompleteRequest) => {
+      const res = await client.twoFactor.passkeyRegisterComplete(input);
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
+export function twoFactorPasskeyUpdateMutationOptions(client: OxideanClient) {
+  return {
+    mutationKey: ["twoFactor", "passkeyUpdate"] as const,
+    mutationFn: async (input: PasskeyUpdateRequest) => {
+      const res = await client.twoFactor.passkeyUpdate(input);
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
+export function twoFactorPasskeyDeleteMutationOptions(client: OxideanClient) {
+  return {
+    mutationKey: ["twoFactor", "passkeyDelete"] as const,
+    mutationFn: async (input: PasskeyDeleteRequest) => {
+      const res = await client.twoFactor.passkeyDelete(input);
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
+export function twoFactorEmailSendMutationOptions(client: OxideanClient) {
+  return {
+    mutationKey: ["twoFactor", "emailSend"] as const,
+    mutationFn: async (input: TwoFactorChallengeRequest) => {
+      const res = await client.twoFactor.emailSend(input);
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
+export function adminUsersResetTwoFactorMutationOptions(client: OxideanClient) {
+  return {
+    mutationKey: ["admin", "users", "resetTwoFactor"] as const,
+    mutationFn: async (input: AdminResetTwoFactorRequest) => {
+      const res = await client.admin.users.resetTwoFactor(input);
       if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
       return res.data;
     },
@@ -5455,6 +5790,7 @@ export const queryOptions = {
   gpgKeyList: gpgKeyListQueryOptions,
   emailList: emailListQueryOptions,
   adminAuthGetSettings: adminAuthGetSettingsQueryOptions,
+  twoFactorStatus: twoFactorStatusQueryOptions,
 };
 export const mutationOptions = {
   systemEcho: systemEchoMutationOptions,
@@ -5483,6 +5819,19 @@ export const mutationOptions = {
   emailSetPrimary: emailSetPrimaryMutationOptions,
   emailResendVerify: emailResendVerifyMutationOptions,
   adminAuthUpdateSettings: adminAuthUpdateSettingsMutationOptions,
+  twoFactorTotpBegin: twoFactorTotpBeginMutationOptions,
+  twoFactorTotpConfirm: twoFactorTotpConfirmMutationOptions,
+  twoFactorTotpDisable: twoFactorTotpDisableMutationOptions,
+  twoFactorRecoveryRegenerate: twoFactorRecoveryRegenerateMutationOptions,
+  twoFactorComplete: twoFactorCompleteMutationOptions,
+  twoFactorPasskeyBegin: twoFactorPasskeyBeginMutationOptions,
+  twoFactorPasskeyComplete: twoFactorPasskeyCompleteMutationOptions,
+  twoFactorPasskeyRegisterBegin: twoFactorPasskeyRegisterBeginMutationOptions,
+  twoFactorPasskeyRegisterComplete: twoFactorPasskeyRegisterCompleteMutationOptions,
+  twoFactorPasskeyUpdate: twoFactorPasskeyUpdateMutationOptions,
+  twoFactorPasskeyDelete: twoFactorPasskeyDeleteMutationOptions,
+  twoFactorEmailSend: twoFactorEmailSendMutationOptions,
+  adminUsersResetTwoFactor: adminUsersResetTwoFactorMutationOptions,
 };
 
 export * from "./languages";

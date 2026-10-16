@@ -192,6 +192,8 @@ async fn migrate_0006_bootstrap_flags_columns() {
             settings.workos_client_id.as_deref(),
             true,
             &settings.default_visibility,
+            settings.require_two_factor_local,
+            settings.require_two_factor_external,
         )
         .await
         .expect("set allow_signup");

@@ -2,23 +2,10 @@
 
 use std::collections::HashMap;
 
-use aes_gcm::aead::consts::U12;
-use aes_gcm::aead::{Aead, KeyInit};
-use aes_gcm::{Aes256Gcm, Nonce};
 use oxidean_db::Database;
-use sha2::{Digest, Sha256};
 
-fn secrets_key_bytes() -> Result<[u8; 32], String> {
-    let raw = std::env::var("OXIDEAN_ACTIONS_SECRETS_KEY")
-        .or_else(|_| std::env::var("OXIDEAN_SESSION_SECRET"))
-        .map_err(|_| {
-            "OXIDEAN_ACTIONS_SECRETS_KEY (or OXIDEAN_SESSION_SECRET) is required to encrypt secrets at rest"
-                .to_string()
-        })?;
-    let mut h = Sha256::new();
-    h.update(raw.as_bytes());
-    Ok(h.finalize().into())
-}
+/// Actions secret key chain — dedicated var first, session secret fallback.
+const KEY_ENVS: &[&str] = &["OXIDEAN_ACTIONS_SECRETS_KEY", "OXIDEAN_SESSION_SECRET"];
 
 /// Validate Actions secret name (alphanumeric + `_`).
 pub fn validate_secret_name(name: &str) -> Result<(), String> {
@@ -39,46 +26,11 @@ pub fn validate_secret_name(name: &str) -> Result<(), String> {
 }
 
 pub fn encrypt_secret(plaintext: &str) -> Result<String, String> {
-    let key = Aes256Gcm::new_from_slice(&secrets_key_bytes()?).map_err(|e| e.to_string())?;
-    let mut nonce_bytes = [0u8; 12];
-    getrandom::fill(&mut nonce_bytes).map_err(|e| e.to_string())?;
-    let nonce: &Nonce<U12> = nonce_bytes
-        .as_slice()
-        .try_into()
-        .map_err(|_| "invalid nonce length")?;
-    let ct = key
-        .encrypt(nonce, plaintext.as_bytes())
-        .map_err(|e| e.to_string())?;
-    let mut out = Vec::with_capacity(12 + ct.len());
-    out.extend_from_slice(&nonce_bytes);
-    out.extend_from_slice(&ct);
-    Ok(hex_encode(&out))
+    crate::crypto::encrypt(KEY_ENVS, plaintext)
 }
 
 pub fn decrypt_secret(blob: &str) -> Result<String, String> {
-    let raw = hex_decode(blob)?;
-    if raw.len() < 13 {
-        return Err("ciphertext too short".into());
-    }
-    let (nonce_bytes, ct) = raw.split_at(12);
-    let key = Aes256Gcm::new_from_slice(&secrets_key_bytes()?).map_err(|e| e.to_string())?;
-    let nonce: &Nonce<U12> = nonce_bytes.try_into().map_err(|_| "invalid nonce length")?;
-    let pt = key.decrypt(nonce, ct).map_err(|e| e.to_string())?;
-    String::from_utf8(pt).map_err(|e| e.to_string())
-}
-
-fn hex_encode(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
-}
-
-fn hex_decode(s: &str) -> Result<Vec<u8>, String> {
-    if !s.len().is_multiple_of(2) {
-        return Err("bad hex ciphertext".into());
-    }
-    (0..s.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).map_err(|e| e.to_string()))
-        .collect()
+    crate::crypto::decrypt(KEY_ENVS, blob)
 }
 
 /// Decrypt all secrets for a repo (FetchTask injection).

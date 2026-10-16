@@ -4,6 +4,7 @@ import { AppLink } from "@/components/ui/app-link";
 export type SettingsNavActive =
   | "general"
   | "profile"
+  | "security"
   | "notifications"
   | "tokens"
   | "ssh-keys"
@@ -18,6 +19,7 @@ type SettingsNavProps = {
 const LINKS: { id: SettingsNavActive; href: string; label: string }[] = [
   { id: "general", href: "/settings/general", label: "General" },
   { id: "profile", href: "/settings/profile", label: "Account" },
+  { id: "security", href: "/settings/security", label: "Security" },
   {
     id: "notifications",
     href: "/settings/notifications",

@@ -228,6 +228,43 @@ pub async fn login_slug_taken(db: &Database, slug: &str) -> Result<bool, String>
     Ok(false)
 }
 
+/// Org-derived grants for `uid` inside `org_id`, suppressed when the org
+/// requires two-factor and the caller holds no confirmed factor (issue #130).
+///
+/// Returns `(org_role, member_base, locked)`. `locked` is true when the org
+/// lockout applied to this member — callers may use it to also suppress
+/// repo-level collaborator grants (a member's grant on an org-owned repo is
+/// org-scoped access, same rule `org::require_org_role` applies to org RPCs).
+/// Outside collaborators (non-members) keep their per-repo grant.
+pub async fn org_member_capability_sources(
+    db: &Database,
+    org_id: &str,
+    uid: &str,
+) -> Result<(Option<OrgRole>, MemberBasePermission, bool), String> {
+    let org_role = db
+        .find_org_member_role(org_id, uid)
+        .await?
+        .and_then(|role| parse_org_role(&role));
+    if org_role.is_none() {
+        return Ok((None, MemberBasePermission::None, false));
+    }
+    let locked = db
+        .find_organization_by_id(org_id)
+        .await?
+        .map(|o| o.require_two_factor)
+        .unwrap_or(false)
+        && !db.user_has_confirmed_factor(uid).await?;
+    if locked {
+        return Ok((None, MemberBasePermission::None, true));
+    }
+    let member_base = db
+        .find_org_member_base_permission(org_id)
+        .await?
+        .map(|base| parse_member_base(&base))
+        .unwrap_or(MemberBasePermission::None);
+    Ok((org_role, member_base, false))
+}
+
 /// Load ACL sources and coalesce (D-ORG-05). Does not map HTTP status.
 pub async fn effective_capability(
     db: &Database,
@@ -238,22 +275,14 @@ pub async fn effective_capability(
     let personal_owner = matches!(owner, OwnerRef::User { .. })
         && caller_user_id.is_some_and(|id| id == owner.id());
 
-    // Role / base-permission / collaborator lookups are independent — run them
-    // concurrently instead of three sequential round trips.
-    let (org_role_row, base_row, collab_row) = tokio::try_join!(
+    // Membership (with org-2FA lockout) and collaborator lookups are
+    // independent — run them concurrently instead of sequential round trips.
+    let ((org_role, member_base, org_locked), collab_row) = tokio::try_join!(
         async {
-            if matches!(owner, OwnerRef::Org { .. }) {
-                if let Some(caller) = caller_user_id {
-                    return db.find_org_member_role(owner.id(), caller).await;
-                }
+            if let (OwnerRef::Org { id, .. }, Some(caller)) = (owner, caller_user_id) {
+                return org_member_capability_sources(db, id, caller).await;
             }
-            Ok(None)
-        },
-        async {
-            if matches!(owner, OwnerRef::Org { .. }) {
-                return db.find_org_member_base_permission(owner.id()).await;
-            }
-            Ok(None)
+            Ok((None, MemberBasePermission::None, false))
         },
         async {
             if let Some(caller) = caller_user_id {
@@ -263,11 +292,13 @@ pub async fn effective_capability(
         },
     )?;
 
-    let org_role: Option<OrgRole> = org_role_row.and_then(|role| parse_org_role(&role));
-    let member_base = base_row
-        .map(|base| parse_member_base(&base))
-        .unwrap_or(MemberBasePermission::None);
-    let collaborator = collab_row.and_then(|row| parse_collaborator_capability(&row.permission));
+    // A locked-out member's collaborator grant on an org-owned repo is still
+    // org-scoped access — suppress it alongside the role/base grants (#130).
+    let collaborator = if org_locked {
+        None
+    } else {
+        collab_row.and_then(|row| parse_collaborator_capability(&row.permission))
+    };
 
     let public_repo = !is_private_visibility(&repo.visibility);
     Ok(coalesce(

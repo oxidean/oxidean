@@ -19,7 +19,7 @@ use crate::app::AppState;
 use crate::packages::acl::{self, PackageAction};
 use crate::packages::auth::{self, RegistryIdentity};
 use crate::packages::store::{self, max_blob_bytes_from_env};
-use crate::repo::{coalesce, Capability, MemberBasePermission, OrgRole};
+use crate::repo::{coalesce, org_member_capability_sources, Capability, MemberBasePermission};
 
 const FORMAT: &str = "generic";
 
@@ -101,24 +101,10 @@ async fn capability_for_owner(
             public,
         ));
     }
-    let mut org_role = None;
-    if let Some(role) = db.find_org_member_role(owner_id, uid).await? {
-        org_role = match role.as_str() {
-            "owner" => Some(OrgRole::Owner),
-            "admin" => Some(OrgRole::Admin),
-            "member" => Some(OrgRole::Member),
-            _ => None,
-        };
-    }
-    let member_base = match db
-        .find_org_member_base_permission(owner_id)
-        .await?
-        .as_deref()
-    {
-        Some("read") => MemberBasePermission::Read,
-        Some("write") => MemberBasePermission::Write,
-        _ => MemberBasePermission::None,
-    };
+    // Org 2FA lockout (#130): members without a confirmed factor get no
+    // org-derived grants — same suppression `org::require_org_role` applies.
+    let (org_role, member_base, _locked) =
+        org_member_capability_sources(db, owner_id, uid).await?;
     Ok(coalesce(false, org_role, member_base, None, public))
 }
 
