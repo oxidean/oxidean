@@ -20,6 +20,7 @@ import { apiClient } from "@/lib/api-client";
 import {
   adminAuthSettingsQueryKey,
   adminAuthSettingsQueryOptions,
+  authBootstrapQueryOptions,
   authMeQueryKey,
   authProviderConfigQueryKey,
   authProviderConfigQueryOptions,
@@ -93,6 +94,22 @@ describe("authSessionQueryOptions", () => {
     } as never);
 
     await expect(authSessionQueryOptions().queryFn()).rejects.toThrow(/rpc.internal/);
+  });
+});
+
+describe("authBootstrapQueryOptions", () => {
+  // Node env has no document → stamped verdict is null; the query must fall
+  // back to auth.bootstrapStatus (DOM-stamped cases live in the happy-dom
+  // integration suite).
+  it("falls back to auth.bootstrapStatus when no stamp is present", async () => {
+    vi.mocked(apiClient.auth.bootstrapStatus).mockResolvedValueOnce({
+      ok: true,
+      data: { needs_setup: false },
+    } as never);
+
+    const data = await authBootstrapQueryOptions().queryFn();
+    expect(data).toEqual({ needs_setup: false });
+    expect(apiClient.auth.bootstrapStatus).toHaveBeenCalledTimes(1);
   });
 });
 
