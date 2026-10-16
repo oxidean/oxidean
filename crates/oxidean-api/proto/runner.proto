@@ -40,6 +40,28 @@ message FetchTaskResponse {
   // Repository coordinates so runners can clone {origin}/{owner}/{repo}.git.
   string repository_owner = 11;
   string repository_name = 12;
+  // Triggering event name (push, pull_request, workflow_dispatch, …).
+  string event = 13;
+  int64 run_number = 14;
+  // Always 1: requeueing reuses the run row (no attempt counter exists yet).
+  int64 run_attempt = 15;
+  // Triggering user's username / id ("" when system-triggered).
+  string actor = 16;
+  string actor_id = 17;
+  string repository_id = 18;
+  // Owner user id or org id, whichever owner_ref_for_repo resolves.
+  string repository_owner_id = 19;
+  // Instance public origin (OXIDEAN_PUBLIC_ORIGIN / Railway gateway).
+  string server_url = 20;
+  // PR context for pull_request runs only ("" / 0 otherwise).
+  string base_ref = 21;
+  int64 pull_number = 22;
+  // Per-job OXIDEAN_TOKEN (`oxidean_job_…` bearer); "" when not minted.
+  string job_token = 23;
+  // Granted contents level for job_token: "read" | "write" | "".
+  string job_token_permission = 24;
+  // "{owner}/{repo}/{workflow_path}@{head_ref}".
+  string workflow_ref = 25;
 }
 
 message UpdateTaskRequest {

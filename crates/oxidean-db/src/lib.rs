@@ -52,8 +52,8 @@ pub mod watches;
 pub mod webhooks;
 
 pub use actions::{
-    ActionJobRow, ActionRunFilter, ActionRunRow, ActionRunnerRow, ActionSecretCipherRow,
-    ActionSecretMetaRow,
+    ActionJobRow, ActionJobTokenRow, ActionRunFilter, ActionRunRow, ActionRunnerRow,
+    ActionSecretCipherRow, ActionSecretMetaRow,
 };
 pub use audit_events::AuditEventRow;
 pub use auth_settings::AuthSettingsRow;
@@ -3532,6 +3532,51 @@ impl Database {
 
     pub async fn update_action_job_status(&self, job_id: &str, status: &str) -> Result<(), String> {
         actions::update_job_status(self.require_pool()?, job_id, status).await
+    }
+
+    /// Per-job bearer token (`OXIDEAN_TOKEN`) — upserts on `job_id` so a
+    /// requeued job re-mints cleanly. `expires_at` is RFC3339 text.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn insert_action_job_token(
+        &self,
+        id: &str,
+        job_id: &str,
+        run_id: &str,
+        repository_id: &str,
+        user_id: &str,
+        permission: &str,
+        token_hash: &str,
+        expires_at: &str,
+    ) -> Result<(), String> {
+        actions::insert_action_job_token(
+            self.require_pool()?,
+            id,
+            job_id,
+            run_id,
+            repository_id,
+            user_id,
+            permission,
+            token_hash,
+            expires_at,
+        )
+        .await
+    }
+
+    /// Hash lookup returns revoked/expired rows too — the bearer edge
+    /// distinguishes revoked tokens from nonexistent ones.
+    pub async fn find_action_job_token_by_hash(
+        &self,
+        token_hash: &str,
+    ) -> Result<Option<ActionJobTokenRow>, String> {
+        actions::find_action_job_token_by_hash(self.require_pool()?, token_hash).await
+    }
+
+    pub async fn revoke_action_job_token_for_job(&self, job_id: &str) -> Result<(), String> {
+        actions::revoke_action_job_token_for_job(self.require_pool()?, job_id).await
+    }
+
+    pub async fn revoke_action_job_tokens_for_run(&self, run_id: &str) -> Result<(), String> {
+        actions::revoke_action_job_tokens_for_run(self.require_pool()?, run_id).await
     }
 
     pub async fn recompute_action_run_status(&self, run_id: &str) -> Result<(), String> {

@@ -3,6 +3,7 @@
 pub mod dispatch;
 pub mod events;
 pub mod hooks;
+pub mod job_tokens;
 pub mod logs;
 pub mod parse;
 pub mod rpc;
@@ -19,7 +20,8 @@ pub use events::{
 };
 pub use logs::{append_job_log, read_job_log};
 pub use parse::{
-    parse_workflow_yaml, JobSpec, ParseError, StepSpec, WorkflowDocument, WorkflowTriggers,
+    effective_contents_permission, parse_workflow_yaml, ContentsPermission, JobSpec, ParseError,
+    StepSpec, WorkflowDocument, WorkflowPermissions, WorkflowTriggers,
 };
 pub use statuses::{job_status_to_commit_state, publish_from_job_update, status_context};
 pub use tokens::mint_registration_token;

@@ -43,6 +43,27 @@ pub struct Task {
     pub secrets: Option<HashMap<String, String>>,
     pub repository_owner: Option<String>,
     pub repository_name: Option<String>,
+    /// Triggering event name (push, pull_request, workflow_dispatch, …).
+    pub event: Option<String>,
+    pub run_number: Option<i64>,
+    /// Currently always 1 — requeueing reuses the run row.
+    pub run_attempt: Option<i64>,
+    /// Triggering user's username / id ("" when system-triggered).
+    pub actor: Option<String>,
+    pub actor_id: Option<String>,
+    pub repository_id: Option<String>,
+    /// Owner user id or org id.
+    pub repository_owner_id: Option<String>,
+    /// Instance public origin.
+    pub server_url: Option<String>,
+    /// PR context for pull_request runs only ("" / 0 otherwise).
+    pub base_ref: Option<String>,
+    pub pull_number: Option<i64>,
+    /// Per-job OXIDEAN_TOKEN bearer; None/"" when not minted. The API also
+    /// sends `job_token_permission` (read|write) — informational, ignored.
+    pub job_token: Option<String>,
+    /// "{owner}/{repo}/{workflow_path}@{head_ref}".
+    pub workflow_ref: Option<String>,
 }
 
 impl Task {
