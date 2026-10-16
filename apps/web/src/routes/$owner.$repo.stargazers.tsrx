@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { List, ListRow } from "@/components/ui/list";
 import { PageHeader } from "@/components/ui/page-header";
+import { Skeleton } from "@/components/ui/skeleton";
 import { apiClient } from "@/lib/api-client";
 import { socialListHref } from "@/lib/repo-social-lists";
 
@@ -117,7 +118,8 @@ function RepoStargazersPageContent() @{
   const owner = params.owner ?? "";
   const repoName = params.repo ?? "";
   const layout = useRepoLayoutData();
-  const data = useQuery(repoStargazersQueryOptions(params, searchStr)).data;
+  const dataQ = useQuery(repoStargazersQueryOptions(params, searchStr));
+  const data = dataQ.data;
 
   const showNotFound = !data || data.kind === "not_found" || layout?.status === "not_found";
   const errorMessage = data?.kind === "error" ? data.message : "";
@@ -169,7 +171,24 @@ function RepoStargazersPageContent() @{
     }
   }
 
-  @if (showNotFound) {
+  // Pending must not fall into `showNotFound` (`!data` covers the in-flight
+  // window) — keep skeleton rows up instead of flashing RepoNotFound (#120).
+  @if (dataQ.isPending && layout?.status !== "not_found") {
+    <div role="status" aria-busy="true" aria-label="Loading">
+      <Skeleton className="h-8 w-56" />
+      <List className="mt-6">
+        @for (const i of [0, 1, 2]; key i) {
+          <ListRow className="items-start gap-3 py-3">
+            <Skeleton className="mt-0.5 size-4 shrink-0 rounded" />
+            <div className="flex flex-1 flex-col gap-2">
+              <Skeleton className="h-4 w-48" />
+              <Skeleton className="h-3 w-32" />
+            </div>
+          </ListRow>;
+        }
+      </List>
+    </div>;
+  } @else if (showNotFound) {
     <RepoNotFound />;
   } @else {
     @if (errorMessage) {

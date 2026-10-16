@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { List, ListRow } from "@/components/ui/list";
+import { Skeleton } from "@/components/ui/skeleton";
 import { apiClient } from "@/lib/api-client";
 import { AppPage } from "@/components/app-page";
 import { RepoNotFound } from "@/components/repo/repo-not-found";
@@ -87,7 +88,33 @@ export function OwnerIndexContent() @{
   const data = dataQ.data;
   useOwnerIndexMeta(data, owner);
 
-  @if (data === null) {
+  // The owner query has no SSR payload — pending must not fall through to a
+  // "not found" branch and flash it before the profile lands (issue #120).
+  @if (dataQ.isPending) {
+    <div
+      className="mx-auto max-w-6xl px-4 py-12"
+      role="status"
+      aria-busy="true"
+      aria-label="Loading"
+    >
+      <div className="flex flex-col gap-2">
+        <Skeleton className="h-8 w-56" />
+        <Skeleton className="mt-1 h-5 w-32" />
+      </div>
+      <Skeleton className="mt-8 h-5 w-40" />
+      <List className="mt-4">
+        @for (const i of [0, 1, 2]; key i) {
+          <ListRow className="items-start gap-3 py-4">
+            <Skeleton className="mt-0.5 size-4 shrink-0 rounded" />
+            <div className="min-w-0 flex-1">
+              <Skeleton className="h-5 w-40" />
+              <Skeleton className="mt-1 h-4 w-64 max-w-full" />
+            </div>
+          </ListRow>;
+        }
+      </List>
+    </div>;
+  } @else if (data === null) {
     <div className="mx-auto max-w-6xl px-4 py-16">
       <RepoNotFound />
     </div>;

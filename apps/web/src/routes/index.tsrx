@@ -119,6 +119,12 @@ function HomeContent() {
   }
 
   if (tree === "signed-in" && user) {
+    // `repo.listMine` only starts once `auth.me` resolves signed-in
+    // (`enabled: signedIn`), so pending here means "loading" — keep the
+    // skeleton up instead of flashing the empty state (issue #120).
+    if (reposQ.isPending) {
+      return <SignedInHomeSkeleton />;
+    }
     return (
       <SignedInHome
         user={user}

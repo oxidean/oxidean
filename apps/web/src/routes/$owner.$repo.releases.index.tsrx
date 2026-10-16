@@ -159,7 +159,21 @@ function RepoReleasesPageContent() @{
           ) : undefined
         }
       />
-      @if (listQ.isError) {
+      {/* repoQ wins the race while release.list is still in flight — keep
+          skeleton rows up instead of flashing the empty state (issue #120). */}
+      @if (listQ.isPending) {
+        <List className="mt-6" aria-busy="true" aria-label="Loading releases">
+          @for (const i of [0, 1, 2]; key i) {
+            <ListRow className="items-start gap-3">
+              <Skeleton className="mt-0.5 size-4 rounded" />
+              <div className="flex flex-1 flex-col gap-2">
+                <Skeleton className="h-4 w-56" />
+                <Skeleton className="h-3 w-32" />
+              </div>
+            </ListRow>;
+          }
+        </List>;
+      } @else if (listQ.isError) {
         <p role="alert" className="mt-6 text-[16px] text-destructive">
           {(listQ.error?.message || NETWORK_ERROR) as string}
         </p>;

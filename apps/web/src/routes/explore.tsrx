@@ -9,6 +9,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { List, ListRow } from "@/components/ui/list";
 import { PageHeader } from "@/components/ui/page-header";
+import { Skeleton } from "@/components/ui/skeleton";
 import { AppLink } from "@/components/ui/app-link";
 import { apiClient } from "@/lib/api-client";
 import { useSearchString } from "@/lib/pathname.tsrx";
@@ -87,7 +88,22 @@ function ExploreContent() @{
         }
       />
 
-      @if (repos.length === 0) {
+      // `repo.explore` has no SSR payload — keep skeleton rows up instead of
+      // flashing the empty state before the list lands (issue #120).
+      @if (q2.isPending) {
+        <List className="mt-8" aria-busy="true" aria-label="Loading repositories">
+          @for (const i of [0, 1, 2, 3]; key i) {
+            <ListRow className="items-start gap-3 py-4">
+              <Skeleton className="mt-0.5 size-4 shrink-0 rounded" />
+              <div className="min-w-0 flex-1">
+                <Skeleton className="h-5 w-48" />
+                <Skeleton className="mt-2 h-4 w-72 max-w-full" />
+                <Skeleton className="mt-2 h-3 w-20" />
+              </div>
+            </ListRow>;
+          }
+        </List>;
+      } @else if (repos.length === 0) {
         <EmptyState
           className="mt-10"
           icon={<BookMarked aria-hidden size={22} />}
