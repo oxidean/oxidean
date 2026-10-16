@@ -373,11 +373,14 @@ jobs:
         id: ver
         run: |
           if [[ "$GITHUB_REF" == refs/tags/ox-v* ]]; then
-            echo "version=${GITHUB_REF_NAME#ox-v}" >> "$GITHUB_OUTPUT"
+            version="${GITHUB_REF_NAME#ox-v}"
           else
-            # no + or - in the version — apk pkgver and pacman pkgver reject them
-            echo "version=0.0.0.dev.${GITHUB_RUN_ID:-0}" >> "$GITHUB_OUTPUT"
+            version="0.0.0.dev.${GITHUB_RUN_ID:-0}"
           fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          # no + or - in pkg_version — apk pkgver and pacman pkgver reject them
+          pkg_version=$(echo "$version" | tr '+-' '..')
+          echo "pkg_version=$pkg_version" >> "$GITHUB_OUTPUT"
       - name: download target binary
         uses: actions/download-artifact@v4
         with:
@@ -397,7 +400,7 @@ jobs:
       - name: nfpm package
         env:
           PKG_ARCH: ${{ matrix.arch }}
-          PKG_VERSION: ${{ steps.ver.outputs.version }}
+          PKG_VERSION: ${{ steps.ver.outputs.pkg_version }}
           PKG_TARGET: ${{ matrix.target }}
           PKG_FILE: ox-${{ steps.ver.outputs.version }}-${{ matrix.arch }}.${{ matrix.ext }}
         run: |
