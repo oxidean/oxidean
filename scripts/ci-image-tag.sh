@@ -65,13 +65,24 @@ tag_exists() { # $1 = image:tag
 
 # The canonical digest of a tag is sha256 over the manifest document itself —
 # --raw emits exactly those bytes, for single-manifest and OCI index alike.
+# A tag can vanish between tag_exists and this inspect: --raw then prints
+# nothing, and hashing empty input mints a bogus @sha256:e3b0c44… ref that
+# only fails later at docker pull — refuse it here instead.
 digest_of() { # $1 = image:tag
-  docker buildx imagetools inspect --raw "$1" | sha256sum | cut -d' ' -f1
+  local raw
+  raw="$(docker buildx imagetools inspect --raw "$1")"
+  if [ -z "$raw" ]; then
+    echo "::error::empty manifest for $1 — tag disappeared mid-resolve" >&2
+    return 1
+  fi
+  # --raw emits no trailing newline, so $() capture + %s re-emits the exact
+  # manifest bytes the pipeline used to hash.
+  printf '%s' "$raw" | sha256sum | cut -d' ' -f1
 }
 
 ref() { # $1 = flavor → echoes image:tag@sha256:digest
   local flavor="$1" img="${IMAGE_NS}/${IMAGE_NAME}"
-  local hash exact fallback chosen
+  local hash exact fallback chosen digest
   # assignment on its own line — `local x=$(…)` would mask content_hash failure
   hash="$(content_hash)"
   exact="${img}:${flavor}-${hash}"; fallback="${img}:${flavor}-latest"
@@ -84,7 +95,10 @@ ref() { # $1 = flavor → echoes image:tag@sha256:digest
     echo "::error::no ${IMAGE_NAME}:${flavor} image — neither ${exact#${img}:} nor ${flavor}-latest exists on GHCR. Run the ci-base workflow (workflow_dispatch) to bootstrap." >&2
     return 1
   fi
-  echo "${chosen}@sha256:$(digest_of "$chosen")"
+  # || return 1: ref() runs inside `v=$(ref_wait …)`, where errexit is
+  # suspended — a digest_of failure would otherwise emit a digestless ref.
+  digest="$(digest_of "$chosen")" || return 1
+  echo "${chosen}@sha256:${digest}"
 }
 
 # When waiting is enabled (resolve-all with CI_IMAGE_WAIT_SECONDS > 0), poll

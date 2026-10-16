@@ -23,16 +23,18 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# Jobs that need more (packages:read on ci-image, actions:write on
-# rust-artifacts-cleanup) declare it themselves.
+# Jobs that need more (packages:read on ci-image + the container lanes
+# pulling GHCR images, actions:write on rust-artifacts-cleanup) declare it
+# themselves.
 permissions:
   contents: read
 
 defaults:
   run:
-    # container: jobs otherwise fall back to `sh` (dash) — no pipefail there,
-    # and every lane script assumes bash. Host jobs are unaffected (ubuntu has
-    # bash either way).
+    # GitHub already prefers bash when the image has it on PATH — `sh` (dash)
+    # is only the no-bash fallback. Pin it anyway so a bash-less image fails
+    # loudly instead of silently losing pipefail (every lane script assumes
+    # bash). Host jobs are unaffected (ubuntu has bash either way).
     shell: bash
 
 jobs:
@@ -115,6 +117,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      packages: read
     # dev image, not tools: the registry-completeness step's `cli.ts check`
     # shells out to `cargo metadata`, and tools ships no Rust toolchain.
     container:
@@ -164,6 +167,9 @@ jobs:
     name: rust-build
     needs: [makefile-lint, ci-image]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
     # ci-base dev image: toolchain + mold + protoc + nextest baked, every dep
     # pre-cooked to /ci/target-dev — only workspace crates compile. Image ENV
     # carries CARGO_INCREMENTAL=0 + mold RUSTFLAGS; they are dep-fingerprint
@@ -253,6 +259,9 @@ jobs:
     name: web-octane
     needs: [makefile-lint, ci-image]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
     container:
       image: ${{ needs.ci-image.outputs.tools }}
       credentials:
@@ -278,6 +287,9 @@ jobs:
     name: dead-code
     needs: [makefile-lint, ci-image]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
     # clippy check artifacts are cooked into /ci/target-dev alongside the build
     # artifacts — no compile lane, no rust-cache.
     container:
@@ -305,6 +317,9 @@ jobs:
     name: web-browser
     needs: [makefile-lint, ci-image]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
     container:
       image: ${{ needs.ci-image.outputs.tools }}
       credentials:
@@ -329,6 +344,9 @@ jobs:
     name: route-coverage
     needs: [makefile-lint, ci-image]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
     container:
       image: ${{ needs.ci-image.outputs.tools }}
       credentials:
@@ -358,6 +376,9 @@ jobs:
     name: browser-coverage
     needs: [makefile-lint, ci-image]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
     container:
       image: ${{ needs.ci-image.outputs.tools }}
       credentials:
@@ -387,6 +408,9 @@ jobs:
     name: coverage-weighted
     needs: [makefile-lint, ci-image]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
     # ci-base cov image: llvm-cov + nextest + protoc/mold baked, instrumented
     # dep artifacts cooked to /ci/target-cov. CARGO_LLVM_COV_TARGET_DIR must
     # point at the baked dir so dep fingerprints match (RUSTFLAGS+incremental
@@ -443,6 +467,9 @@ jobs:
     name: e2e-stack
     needs: [rust-build, ci-image]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
     # tools image supplies bun + docker CLI + Playwright chromium. The stack
     # under test still runs on the HOST daemon: host networking + the daemon
     # socket are wired in `options`, so published ports resolve on localhost
@@ -487,6 +514,9 @@ jobs:
     name: actions-e2e
     needs: [rust-build, ci-image]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
     # No Rust toolchain in the tools image — e2e-actions-pipeline.sh only
     # requires cargo when OXIDEAN_PREBUILT_BINS is unset.
     container:
@@ -512,6 +542,9 @@ jobs:
     name: rpc-sync
     needs: [rust-build, ci-image]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
     container:
       image: ${{ needs.ci-image.outputs.tools }}
       credentials:
@@ -758,6 +791,9 @@ jobs:
     name: build-metrics
     needs: [makefile-lint, ci-image]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
     # ci-base release image: release-profile deps pre-cooked to
     # /ci/target-release — the metrics build only compiles workspace crates.
     container:
