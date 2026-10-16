@@ -17,12 +17,13 @@
 #                                       GHCR (keeps the IaC channel seed — e.g.
 #                                       :staging / :production — pointing at
 #                                       the environment's live image)
-#   --wait                              after pinning + rolling, poll the
-#                                       triggered deployments until all reach
-#                                       a terminal state (SUCCESS/SKIPPED ok;
-#                                       FAILED/CRASHED/REMOVED fail) — makes
-#                                       "redeploy done" observable instead of
-#                                       returning at mutation-accepted
+#   --wait                              after pinning + rolling, poll each
+#                                       service's live deployment until all
+#                                       reach a terminal state (SUCCESS/
+#                                       SKIPPED ok; FAILED/CRASHED/REMOVED
+#                                       fail) — makes "redeploy done"
+#                                       observable instead of returning at
+#                                       mutation-accepted
 #   --timeout <secs>                    --pr environment wait + --wait bound
 #                                       (default 600)
 #   --dry-run                           print mutations without applying
@@ -120,51 +121,102 @@ retag_channel() {
   fi
 }
 
-# Poll the deployments this run triggered (exact ids from
-# serviceInstanceDeployV2) until all reach a terminal state. Prints a status
-# line whenever one changes. Dies on failure or timeout. Transient query
-# failures count as pending — a network blip must not fail a healthy deploy.
+LATEST_DEPLOYMENTS_QUERY='
+  query($id: String!) {
+    environment(id: $id) {
+      serviceInstances {
+        edges { node { serviceId latestDeployment { id status createdAt } } }
+      }
+    }
+  }
+'
+
+# Poll until every bound service's live deployment reaches a terminal state.
+# Tracking is per service, not per triggered id: Railway swaps a triggered
+# deployment for one of its own when a fork-healed volume attach or a
+# concurrent roll supersedes it, and the retired id turns REMOVED — a state
+# environment.deployments does not list at all, so a fixed id list waits on
+# ghosts until the timeout while the environment has already converged. A
+# service whose latestDeployment is a different, post-roll deployment was
+# superseded — adopt the replacement and keep waiting on it. A pre-roll (or
+# absent) latest means the triggered roll has not registered yet and stays
+# pending. Prints a status line whenever one changes. Dies on failure or
+# timeout. Transient query failures count as pending — a network blip must
+# not fail a healthy deploy.
 wait_for_deployments() {
-  local env_id="$1" ids_csv="$2" timeout="$3"
+  local env_id="$1" pairs_csv="$2" timeout="$3" roll_sec="$4"
   local deadline=$((SECONDS + timeout))
 
-  declare -A last_seen=()
+  # name → service id / deployment id currently tracked; name → last status
+  # printed. pairs_csv entries are "name:service-id:deployment-id".
+  declare -A tracked=() sid_of=() last_seen=() removed_streak=()
+  local pair name
+  for pair in ${pairs_csv//,/ }; do
+    name="${pair%%:*}"
+    pair="${pair#*:}"
+    sid_of[$name]="${pair%%:*}"
+    tracked[$name]="${pair##*:}"
+  done
+
   while (( SECONDS < deadline )); do
-    local raw
+    local raw latest
     if ! raw="$(
-      railway_gql '
-        query($id: String!) {
-          environment(id: $id) {
-            deployments(first: 100) {
-              edges { node { id status } }
-            }
-          }
-        }
-      ' "$(jq -n --arg id "$env_id" '{id:$id}')" 2>/dev/null
+      railway_gql "$LATEST_DEPLOYMENTS_QUERY" \
+        "$(jq -n --arg id "$env_id" '{id:$id}')" 2>/dev/null
     )"; then
       echo "  wait: Railway query failed — retrying" >&2
       sleep 15
       continue
     fi
+    latest="$(echo "$raw" | jq -r '
+      .data.environment.serviceInstances.edges[].node
+      | "\(.serviceId)\t\(.latestDeployment.id // "none")\t\(.latestDeployment.status // "none")\t\(.latestDeployment.createdAt // "")"'
+    )"
     local pending=0 hard_failed=0 soft_failed=0
-    local dep_id status st
-    for dep_id in ${ids_csv//,/ }; do
-      status="$(echo "$raw" | jq -r --arg id "$dep_id" '
-        [.data.environment.deployments.edges[].node | select(.id == $id)]
-        | first | .status // "missing"
-      ' 2>/dev/null || echo "missing")"
+    local sid dep_id cur_id cur_status cur_sec status st
+    for name in "${!tracked[@]}"; do
+      dep_id="${tracked[$name]}"
+      sid="${sid_of[$name]}"
+      cur_id="$(awk -F'\t' -v s="$sid" '$1==s {print $2}' <<<"$latest")"
+      cur_status="$(awk -F'\t' -v s="$sid" '$1==s {print $3}' <<<"$latest")"
+      # createdAt → seconds-precision ISO for the roll-start comparison.
+      cur_sec="$(awk -F'\t' -v s="$sid" '$1==s {print $4}' <<<"$latest")"
+      cur_sec="${cur_sec%%.*}"
+      cur_sec="${cur_sec%Z}"
+      if [[ "$cur_id" == "$dep_id" ]]; then
+        status="$cur_status"
+      elif [[ -n "$cur_id" && "$cur_id" != "none" && ! "$cur_sec" < "$roll_sec" ]]; then
+        # Superseded: a post-roll deployment we did not trigger now leads
+        # the service — follow it to its own terminal state.
+        echo "  wait: ${name} deployment ${dep_id:0:8}… superseded — tracking ${cur_id:0:8}…" >&2
+        tracked[$name]="$cur_id"
+        dep_id="$cur_id"
+        status="$cur_status"
+      else
+        # Latest is still a pre-roll deployment (or none) — the triggered
+        # roll has not registered as latest yet.
+        status="pending"
+      fi
       # CRASHED is soft: restart policies can flap a deployment back to
-      # DEPLOYING — only fail once every tracked id is terminal. FAILED and
-      # REMOVED never recover — die immediately.
+      # DEPLOYING — only fail once every tracked service is terminal.
+      # FAILED never recovers — die immediately. A latest deployment that
+      # stays REMOVED is a service dying with no replacement behind it, but
+      # a supersession gap can flash REMOVED first — require a few stable
+      # reads before failing.
       case "$status" in
         SUCCESS | SKIPPED) st="ok" ;;
-        FAILED | REMOVED) st="failed:${status}" ;;
+        FAILED) st="failed:FAILED" ;;
+        REMOVED)
+          removed_streak[$name]=$(( ${removed_streak[$name]:-0} + 1 ))
+          if (( removed_streak[$name] >= 4 )); then st="failed:REMOVED"; else st="removed"; fi
+          ;;
         CRASHED) st="crashed" ;;
-        *) st="$status" ;;  # QUEUED/BUILDING/DEPLOYING/INITIALIZING/missing…
+        *) st="$status" ;;  # QUEUED/BUILDING/DEPLOYING/INITIALIZING/pending…
       esac
-      if [[ "${last_seen[$dep_id]:-}" != "$st" ]]; then
-        echo "  wait: deployment ${dep_id:0:8}… ${st}"
-        last_seen[$dep_id]="$st"
+      [[ "$st" == "removed" || "$st" == "failed:REMOVED" ]] || removed_streak[$name]=0
+      if [[ "${last_seen[$name]:-}" != "$st" ]]; then
+        echo "  wait: ${name} deployment ${dep_id:0:8}… ${st}"
+        last_seen[$name]="$st"
       fi
       case "$st" in
         ok) ;;
@@ -180,7 +232,7 @@ wait_for_deployments() {
       if (( soft_failed > 0 )); then
         die "deployments crashed in environment ${env_id} (see Railway logs)"
       fi
-      echo "wait: all triggered deployments reached a terminal state"
+      echo "wait: all bound services reached a terminal deployment"
       return 0
     fi
     sleep 15
@@ -330,20 +382,24 @@ main() {
     update_service_image "$env_id" "$name" "$sid" "${IMAGE_BASE}/oxidean-${name}:${tag}"
   done < <(service_pairs)
 
-  local dep_ids="" dep_id
+  # Seconds-precision UTC stamp of the roll start — the wait uses it to tell
+  # a post-roll superseding deployment (adopt it) from a stale pre-roll
+  # latest (keep pending until ours registers).
+  local roll_sec dep_pairs="" dep_id
+  roll_sec="$(date -u '+%Y-%m-%dT%H:%M:%S')"
   while read -r name sid; do
     [[ -z "$name" ]] && continue
     [[ "$want" == *" $name "* ]] || continue
     dep_id="$(deploy_service "$env_id" "$name" "$sid")"
-    [[ -n "$dep_id" ]] && dep_ids+="${dep_id},"
+    [[ -n "$dep_id" ]] && dep_pairs+="${name}:${sid}:${dep_id},"
   done < <(service_pairs)
-  dep_ids="${dep_ids%,}"
+  dep_pairs="${dep_pairs%,}"
 
   # Wait before moving the channel tag: on failure the die above means
   # :staging / :production keep pointing at the env's last healthy image, so
   # a `railway config apply` never redeploys a broken sha.
-  if [[ "$wait" == "1" && "$DRY_RUN" != "1" && -n "$dep_ids" ]]; then
-    wait_for_deployments "$env_id" "$dep_ids" "$timeout"
+  if [[ "$wait" == "1" && "$DRY_RUN" != "1" && -n "$dep_pairs" ]]; then
+    wait_for_deployments "$env_id" "$dep_pairs" "$timeout" "$roll_sec"
   fi
 
   if [[ -n "$channel_tag" ]]; then
