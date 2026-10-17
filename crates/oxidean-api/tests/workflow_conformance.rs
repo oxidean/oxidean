@@ -363,6 +363,7 @@ async fn start_runner(
         state_path: fx.dir.path().join(format!("runner-state-{name}.json")),
         work_dir: fx.dir.path().join(format!("runner-work-{name}")),
         poll_ms: 1,
+        wait_ms: 0,
         git_token: fx.git_token.clone(),
         job_timeout_secs: 300,
         actions_mirror: None,
@@ -375,7 +376,7 @@ async fn claim_loop(
     config: &oxidean_runner::config::Config,
 ) {
     for _ in 0..64 {
-        match client.fetch_task().await.expect("fetch_task") {
+        match client.fetch_task(0).await.expect("fetch_task") {
             Some(task) => {
                 oxidean_runner::exec::execute(client, &task, config).await;
             }

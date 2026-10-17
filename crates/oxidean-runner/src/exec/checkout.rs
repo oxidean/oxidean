@@ -89,6 +89,12 @@ pub(crate) async fn checkout(
     }
     args.extend([url, dest.to_string_lossy().to_string()]);
 
+    // Never let git prompt — a private `repository:` override without usable
+    // credentials would otherwise block the job on a tty read forever.
+    let mut git_env: Vec<(String, String)> = env.to_vec();
+    git_env.push(("GIT_TERMINAL_PROMPT".into(), "0".into()));
+    let env = git_env.as_slice();
+
     let mut cmd = Command::new("git");
     cmd.args(&args).current_dir(workspace);
     let code = run_streamed(&mut cmd, env, logger, timeout).await?;

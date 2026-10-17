@@ -883,3 +883,143 @@ jobs:
         v["secrets"]
     );
 }
+
+/// Phase 9 — `fetch_task` long-poll: an empty queue holds the request up to
+/// `wait_ms`, an enqueue wakes it mid-hold, and `wait_ms=0` returns
+/// immediately (old cadence).
+#[tokio::test]
+async fn actions_runner_protocol_fetch_task_long_poll() {
+    let (app, db, _dir) = app_db().await;
+    let reg = mint_registration_token(&db).await.unwrap();
+    let reg_res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/actions/register")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "name": "r-lp",
+                        "labels": ["ubuntu-latest"],
+                        "token": reg
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let reg_v: serde_json::Value =
+        serde_json::from_slice(&reg_res.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    let runner_token = reg_v["runner_token"].as_str().unwrap().to_string();
+
+    let fetch = |app: axum::Router, tok: String, wait_ms: u64| {
+        tokio::spawn(async move {
+            let res = app
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/api/actions/fetch_task")
+                        .header("content-type", "application/json")
+                        .header("authorization", format!("Bearer {tok}"))
+                        .body(Body::from(
+                            serde_json::json!({"wait_ms": wait_ms}).to_string(),
+                        ))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let bytes = res.into_body().collect().await.unwrap().to_bytes();
+            serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()
+        })
+    };
+
+    // wait_ms=0 → immediate empty response (legacy short-poll shape).
+    let t0 = std::time::Instant::now();
+    let v = fetch(app.clone(), runner_token.clone(), 0).await.unwrap();
+    assert!(v["job_id"].is_null(), "empty queue returns no job: {v}");
+    assert!(
+        t0.elapsed() < std::time::Duration::from_secs(2),
+        "wait_ms=0 must not hold"
+    );
+
+    // Bounded hold — nothing enqueued, so a 300ms wait releases empty on its own.
+    let t0 = std::time::Instant::now();
+    let v = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        fetch(app.clone(), runner_token.clone(), 300),
+    )
+    .await
+    .expect("long-poll must release on its own deadline")
+    .unwrap();
+    assert!(v["job_id"].is_null(), "held-then-empty response: {v}");
+    assert!(
+        t0.elapsed() >= std::time::Duration::from_millis(300),
+        "hold released before wait_ms elapsed"
+    );
+
+    // Wake-on-enqueue — a 10s hold must cut short when a job lands.
+    let pending = fetch(app.clone(), runner_token.clone(), 10_000);
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    assert!(
+        !pending.is_finished(),
+        "long-poll must hold while the queue is empty"
+    );
+
+    let owner = db
+        .create_user(
+            "u-lp",
+            "lp@example.com",
+            "lp",
+            Some("h"),
+            "L",
+            "",
+            None,
+            Role::User,
+        )
+        .await
+        .unwrap();
+    let repo = db
+        .insert_repository("r-lp", &owner.id, "user", "lp", "private", "", "main")
+        .await
+        .unwrap();
+    let doc = parse_workflow_yaml(
+        br#"
+name: CI
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+"#,
+    )
+    .unwrap();
+    let t0 = std::time::Instant::now();
+    enqueue_run(
+        &db,
+        &repo.id,
+        ".github/workflows/ci.yml",
+        &doc,
+        "push",
+        "feedface",
+        "refs/heads/main",
+        Some(&owner.id),
+        None,
+        None,
+        false,
+    )
+    .await
+    .unwrap();
+    let v = tokio::time::timeout(std::time::Duration::from_secs(5), pending)
+        .await
+        .expect("enqueue must wake the long-poll")
+        .unwrap();
+    assert!(v["job_id"].as_str().is_some(), "woken claim: {v}");
+    assert!(
+        t0.elapsed() < std::time::Duration::from_secs(3),
+        "wake took {:?} — the 2s fallback tick shouldn't be the mechanism",
+        t0.elapsed()
+    );
+}

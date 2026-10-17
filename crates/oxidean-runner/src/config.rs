@@ -84,6 +84,10 @@ pub struct Config {
     /// Per-job workspaces are created under this directory.
     pub work_dir: PathBuf,
     pub poll_ms: u64,
+    /// Server-side `fetch_task` long-poll hold (`OXIDEAN_RUNNER_WAIT_MS`,
+    /// default 20 000, capped server-side at 30s). `0` disables long-poll
+    /// and returns to pure `poll_ms` cadence.
+    pub wait_ms: u64,
     /// Optional PAT used for cloning private repositories over smart HTTP.
     pub git_token: Option<String>,
     pub job_timeout_secs: u64,
@@ -130,6 +134,10 @@ impl Config {
             .ok()
             .and_then(|v| v.parse::<u64>().ok())
             .unwrap_or(2000);
+        let wait_ms = std::env::var("OXIDEAN_RUNNER_WAIT_MS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(20_000);
         let git_token = std::env::var("OXIDEAN_RUNNER_GIT_TOKEN")
             .ok()
             .map(|t| t.trim().to_string())
@@ -150,6 +158,7 @@ impl Config {
             state_path,
             work_dir,
             poll_ms,
+            wait_ms,
             git_token,
             job_timeout_secs,
             actions_mirror,

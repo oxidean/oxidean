@@ -21,6 +21,7 @@ pub mod scheduler;
 pub mod secrets;
 pub mod statuses;
 pub mod sweeps;
+pub mod task_wake;
 pub mod templates;
 pub mod tokens;
 pub mod workflow;

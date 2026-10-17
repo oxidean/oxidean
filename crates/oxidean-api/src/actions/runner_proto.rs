@@ -201,6 +201,11 @@ async fn declare(
 #[derive(Debug, Deserialize)]
 struct FetchTaskRequest {
     runner_token: Option<String>,
+    /// Long-poll hold (Phase 9): when no job is claimable, keep the request
+    /// open up to this many ms (server caps at 30s), returning as soon as a
+    /// job lands. `0`/absent keeps the old immediate-empty behavior.
+    #[serde(default)]
+    wait_ms: Option<u64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -333,11 +338,32 @@ async fn fetch_task(
 ) -> Result<Json<FetchTaskResponse>, StatusCode> {
     let runner = runner_from_headers(&state, &headers, req.runner_token.as_deref()).await?;
     let labels: Vec<String> = serde_json::from_str(&runner.labels_json).unwrap_or_default();
-    let job = state
-        .db
-        .claim_queued_action_job_for_labels(&runner.id, &labels)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    // Long-poll: hold empty responses up to `wait_ms` (cap 30s), waking on
+    // enqueue/approval/promotion via `task_wake` plus a 2s fallback tick —
+    // bounded and stateless (no sticky runner sessions; any tick re-probes).
+    let wait = req.wait_ms.unwrap_or(0).min(30_000);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(wait);
+    let job = loop {
+        // Register the waiter BEFORE the claim probe — a wake between probe
+        // and await otherwise goes missing.
+        let waiter = crate::actions::task_wake::waiter();
+        let notified = waiter.notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
+        let job = state
+            .db
+            .claim_queued_action_job_for_labels(&runner.id, &labels)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        if job.is_some() || wait == 0 || std::time::Instant::now() >= deadline {
+            break job;
+        }
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        tokio::select! {
+            _ = notified => {}
+            _ = tokio::time::sleep(remaining.min(std::time::Duration::from_secs(2))) => {}
+        }
+    };
     Ok(Json(match job {
         Some(j) => {
             let runs_on: Vec<String> = serde_json::from_str(&j.runs_on_json).unwrap_or_default();

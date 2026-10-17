@@ -146,6 +146,7 @@ async fn requeue_dead_runner_job(db: &Database, job: &StaleJobRow, stale_secs: u
     .await;
     let landed = db.requeue_stale_action_job(&job.id).await.unwrap_or(false);
     if landed {
+        crate::actions::task_wake::wake();
         if let Err(e) = db.revoke_action_job_token_for_job(&job.id).await {
             tracing::warn!(error = %e, job_id = %job.id, "stale requeue: token revoke failed");
         }

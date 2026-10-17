@@ -200,15 +200,7 @@ async fn fetch_remote_action(
         .join("actions")
         .join(owner)
         .join(repo);
-    let dest = cache_root.join(git_ref.replace('/', "_"));
-    if dest.is_dir() {
-        return Ok(if subdir.is_empty() {
-            dest
-        } else {
-            dest.join(subdir)
-        });
-    }
-    std::fs::create_dir_all(&cache_root).map_err(|e| e.to_string())?;
+    let sha_pinned = git_ref.len() == 40 && git_ref.chars().all(|c| c.is_ascii_hexdigit());
 
     let creds: Vec<Vec<String>> = [
         senv.task.job_token.as_deref().filter(|t| !t.is_empty()),
@@ -230,11 +222,60 @@ async fn fetch_remote_action(
         format!("{}/{}/{}.git", senv.config.origin, owner, repo),
         format!("{fallback}/{}/{}.git", owner, repo),
     ];
+
+    // Git must never prompt — a `uses:` repo that hits an auth/askpass
+    // prompt would otherwise block the job forever (no tty to answer it).
+    let mut git_env: Vec<(String, String)> = senv.env.to_vec();
+    git_env.push(("GIT_TERMINAL_PROMPT".into(), "0".into()));
+    let git_env = git_env.as_slice();
+
+    // Phase 9: key the download cache on the resolved commit, not the ref
+    // name — a re-pushed tag or moved branch must fetch fresh code (GitHub
+    // resolves `@v4` to its current sha before consulting its toolcache).
+    // `ls-remote` is a single cheap round-trip; when every endpoint is
+    // unreachable (airgapped, mirror down) fall back to the legacy
+    // ref-keyed cache so a warm cache still serves.
+    let resolved_sha = if sha_pinned {
+        Some(git_ref.to_string())
+    } else {
+        let mut sha = None;
+        'resolve: for url in &urls {
+            for auth in &creds {
+                if let Some(s) = ls_remote_commit(git_env, url, auth, git_ref).await {
+                    sha = Some(s);
+                    break 'resolve;
+                }
+            }
+        }
+        sha
+    };
+    let ref_key = git_ref.replace('/', "_");
+    let dest = match &resolved_sha {
+        Some(sha) => cache_root.join(format!("{ref_key}@{sha}")),
+        None => cache_root.join(&ref_key),
+    };
+    if dest.is_dir() {
+        return Ok(if subdir.is_empty() {
+            dest
+        } else {
+            dest.join(subdir)
+        });
+    }
+    std::fs::create_dir_all(&cache_root).map_err(|e| e.to_string())?;
+
     let mut last_err = String::new();
     let logger = senv.logger;
+    // Unique temp dir per attempt — concurrent jobs on one runner may fetch
+    // the same action; a shared `.clone-<pid>` path would let one job remove
+    // the other's in-flight clone mid-rename.
+    static CLONE_TMP_SEQ: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let tmp = cache_root.join(format!(
+        ".clone-{}-{}",
+        std::process::id(),
+        CLONE_TMP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
     for url in &urls {
         for auth in &creds {
-            let tmp = cache_root.join(format!(".clone-{}", std::process::id()));
             let _ = std::fs::remove_dir_all(&tmp);
             let attempts = [
                 vec![
@@ -256,7 +297,7 @@ async fn fetch_remote_action(
             for args in attempts {
                 let mut cmd = Command::new("git");
                 cmd.args(auth.iter().chain(args.iter()));
-                match run_streamed(&mut cmd, senv.env, logger, Duration::from_secs(180)).await {
+                match run_streamed(&mut cmd, git_env, logger, Duration::from_secs(180)).await {
                     Ok(0) => {
                         cloned = true;
                         break;
@@ -266,6 +307,47 @@ async fn fetch_remote_action(
                 }
                 let _ = std::fs::remove_dir_all(&tmp);
             }
+            // SHA-pinned ref: `clone --branch` can't name a commit, but a
+            // targeted `fetch <sha>` can (servers permitting sha-in-want —
+            // Oxidean's git-http and github.com both do). Cheaper than the
+            // full-clone fallback for pinned releases.
+            if !cloned && sha_pinned {
+                let _ = std::fs::create_dir_all(&tmp);
+                let seq: [Vec<String>; 4] = [
+                    vec!["init".into(), "-q".into()],
+                    vec!["remote".into(), "add".into(), "origin".into(), url.clone()],
+                    vec![
+                        "fetch".into(),
+                        "--depth".into(),
+                        "1".into(),
+                        "origin".into(),
+                        git_ref.to_string(),
+                    ],
+                    vec!["checkout".into(), "-q".into(), "FETCH_HEAD".into()],
+                ];
+                let mut ok = true;
+                for args in seq {
+                    let mut cmd = Command::new("git");
+                    cmd.args(auth.iter().chain(args.iter())).current_dir(&tmp);
+                    match run_streamed(&mut cmd, git_env, logger, Duration::from_secs(180)).await {
+                        Ok(0) => {}
+                        Ok(code) => {
+                            last_err = format!("git fetch {git_ref} from {url} exited {code}");
+                            ok = false;
+                            break;
+                        }
+                        Err(e) => {
+                            last_err = format!("git fetch {git_ref} from {url}: {e}");
+                            ok = false;
+                            break;
+                        }
+                    }
+                }
+                cloned = ok;
+                if !cloned {
+                    let _ = std::fs::remove_dir_all(&tmp);
+                }
+            }
             if !cloned {
                 continue;
             }
@@ -273,7 +355,7 @@ async fn fetch_remote_action(
             let mut cmd = Command::new("git");
             cmd.args(auth.iter().cloned()).current_dir(&tmp);
             cmd.args(["checkout", git_ref]);
-            let _ = run_streamed(&mut cmd, senv.env, logger, Duration::from_secs(60)).await;
+            let _ = run_streamed(&mut cmd, git_env, logger, Duration::from_secs(60)).await;
             // Download integrity: record the resolved commit; for a
             // SHA-pinned ref, hard-verify HEAD matches the pin (a substituted
             // clone would silently run different code).
@@ -298,8 +380,14 @@ async fn fetch_remote_action(
                 }
                 _ => {}
             }
+            // Atomic install: rename wins; a loser removes its clone and uses
+            // the racing job's identical result (same resolved sha).
             if std::fs::rename(&tmp, &dest).is_err() {
                 let _ = std::fs::remove_dir_all(&tmp);
+                if !dest.is_dir() {
+                    last_err = format!("install {owner}/{repo}@{git_ref} into cache failed");
+                    continue;
+                }
             }
             senv.logger
                 .line(&format!(
@@ -319,6 +407,56 @@ async fn fetch_remote_action(
     Err(format!(
         "could not resolve action {owner}/{repo}@{git_ref}: {last_err}"
     ))
+}
+
+/// `git ls-remote` resolution of a movable ref → commit sha (Phase 9 cache
+/// key). Prefers the peeled annotated-tag commit (`ref^{}`) so
+/// `uses: x/y@v4` caches under the tag's target commit, not the tag object.
+/// `None` on transport/auth failure — the caller tries the next url/auth
+/// pair, and a fully-unreachable network falls back to ref-keyed caching.
+async fn ls_remote_commit(
+    env: &[(String, String)],
+    url: &str,
+    auth: &[String],
+    git_ref: &str,
+) -> Option<String> {
+    let peeled = format!("refs/tags/{git_ref}^{{}}");
+    let out = tokio::time::timeout(Duration::from_secs(30), async {
+        Command::new("git")
+            .args(auth.iter())
+            .args([
+                "ls-remote",
+                url,
+                &peeled,
+                &format!("refs/tags/{git_ref}"),
+                &format!("refs/heads/{git_ref}"),
+                git_ref,
+            ])
+            .envs(env.iter().cloned())
+            .output()
+            .await
+    })
+    .await
+    .ok()?
+    .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    let mut first: Option<String> = None;
+    for line in text.lines() {
+        let Some((sha, name)) = line.split_once('\t') else {
+            continue;
+        };
+        // Peeled entries carry the real commit for annotated tags.
+        if name == peeled {
+            return Some(sha.to_string());
+        }
+        if first.is_none() {
+            first = Some(sha.to_string());
+        }
+    }
+    first
 }
 
 /// `git -c http.extraHeader=…` for clone auth (same scheme as checkout).
@@ -1024,4 +1162,283 @@ fn fnv(bytes: &[u8]) -> u64 {
         h = h.wrapping_mul(0x100000001b3);
     }
     h
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ls_remote_commit;
+
+    /// `git ls-remote` against a local bare repo (file transport — no
+    /// network): the movable ref resolves to its commit sha, an annotated
+    /// tag resolves to the peeled commit, and a missing ref yields None.
+    #[tokio::test]
+    async fn ls_remote_resolves_local_repo() {
+        let dir = std::env::temp_dir().join(format!("oxidean-lsremote-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let git = |args: &[&str], cwd: &std::path::Path| {
+            let out = std::process::Command::new("git")
+                .args(args)
+                .current_dir(cwd)
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .env("HOME", cwd)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "git {args:?}: {:?}", out);
+        };
+        let src = dir.join("src");
+        git(&["init", "-q", "--bare", "src"], &dir);
+        let work = dir.join("work");
+        git(&["init", "-q", "work"], &dir);
+        git(&["-C", "work", "config", "user.email", "t@t"], &dir);
+        git(&["-C", "work", "config", "user.name", "t"], &dir);
+        std::fs::write(work.join("f"), b"x").unwrap();
+        git(&["-C", "work", "add", "f"], &dir);
+        git(&["-C", "work", "commit", "-qm", "c1"], &dir);
+        let head = String::from_utf8(
+            std::process::Command::new("git")
+                .args(["-C", "work", "rev-parse", "HEAD"])
+                .current_dir(&dir)
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .unwrap();
+        let head = head.trim().to_string();
+        git(&["-C", "work", "tag", "-a", "v1", "-m", "v1"], &dir);
+        git(&["-C", "work", "tag", "v2"], &dir);
+        git(&["-C", "work", "branch", "dev"], &dir);
+        git(
+            &["-C", "work", "push", "-q", src.to_str().unwrap(), "--all"],
+            &dir,
+        );
+        git(
+            &["-C", "work", "push", "-q", src.to_str().unwrap(), "--tags"],
+            &dir,
+        );
+
+        let env: Vec<(String, String)> = vec![];
+        let url = src.to_str().unwrap();
+        // Annotated tag → peeled commit; lightweight tag → commit; branch → commit.
+        assert_eq!(
+            ls_remote_commit(&env, url, &[], "v1").await.as_deref(),
+            Some(head.as_str())
+        );
+        assert_eq!(
+            ls_remote_commit(&env, url, &[], "v2").await.as_deref(),
+            Some(head.as_str())
+        );
+        assert_eq!(
+            ls_remote_commit(&env, url, &[], "dev").await.as_deref(),
+            Some(head.as_str())
+        );
+        assert_eq!(ls_remote_commit(&env, url, &[], "no-such-ref").await, None);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Phase 9: the tool-cache keys on the *resolved* commit — moving a tag
+    /// to a new commit must fetch fresh code into a second cache dir instead
+    /// of serving the stale ref-keyed one.
+    #[tokio::test]
+    async fn action_cache_rekeys_on_moved_ref() {
+        use super::{fetch_remote_action, PendingPost, StepEnv};
+        use crate::client::{Client, Task};
+        use crate::config::{Config, ExecMode};
+        use crate::exec::Logger;
+        use std::collections::HashSet;
+        use std::path::PathBuf;
+
+        let dir = std::env::temp_dir().join(format!("oxidean-actcache-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let git = |args: &[&str], cwd: &std::path::Path| {
+            let out = std::process::Command::new("git")
+                .args(args)
+                .current_dir(cwd)
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .env("HOME", cwd)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "git {args:?}: {:?}", out);
+        };
+
+        // Local-transport "instance": origin/<owner>/<repo>.git is a bare repo.
+        let origin = dir.join("origin");
+        let bare = origin.join("acme").join("demo.git");
+        git(&["init", "-q", "--bare", bare.to_str().unwrap()], &dir);
+        git(
+            &[
+                "-C",
+                bare.to_str().unwrap(),
+                "config",
+                "uploadpack.allowAnySHA1InWant",
+                "true",
+            ],
+            &dir,
+        );
+        let work = dir.join("work");
+        git(&["init", "-q", work.to_str().unwrap()], &dir);
+        git(
+            &["-C", work.to_str().unwrap(), "config", "user.email", "t@t"],
+            &dir,
+        );
+        git(
+            &["-C", work.to_str().unwrap(), "config", "user.name", "t"],
+            &dir,
+        );
+        std::fs::write(
+            work.join("action.yml"),
+            b"runs:\n  using: composite\n  steps: []\n",
+        )
+        .unwrap();
+        git(&["-C", work.to_str().unwrap(), "add", "."], &dir);
+        git(&["-C", work.to_str().unwrap(), "commit", "-qm", "c1"], &dir);
+        let rev = |w: &std::path::Path| -> String {
+            String::from_utf8(
+                std::process::Command::new("git")
+                    .args(["rev-parse", "HEAD"])
+                    .current_dir(w)
+                    .output()
+                    .unwrap()
+                    .stdout,
+            )
+            .unwrap()
+            .trim()
+            .to_string()
+        };
+        let sha1 = rev(&work);
+        git(&["-C", work.to_str().unwrap(), "tag", "-f", "v1"], &dir);
+        git(
+            &[
+                "-C",
+                work.to_str().unwrap(),
+                "push",
+                "-qf",
+                bare.to_str().unwrap(),
+                "--all",
+            ],
+            &dir,
+        );
+        git(
+            &[
+                "-C",
+                work.to_str().unwrap(),
+                "push",
+                "-qf",
+                bare.to_str().unwrap(),
+                "--tags",
+            ],
+            &dir,
+        );
+
+        let runner_temp = dir.join("rt");
+        let workspace = dir.join("ws");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let config = Config {
+            origin: origin.to_str().unwrap().to_string(),
+            registration_token: None,
+            name: "t".into(),
+            labels: vec![],
+            state_path: PathBuf::from("/tmp/x"),
+            work_dir: workspace.clone(),
+            poll_ms: 1,
+            wait_ms: 0,
+            git_token: None,
+            job_timeout_secs: 60,
+            // Point the fallback at an empty local root — no network egress.
+            actions_mirror: Some(dir.join("mirror").to_str().unwrap().to_string()),
+        };
+        // Logger's client needs a *real* socket — a dead port blackholes the
+        // connect on some networks instead of refusing it, stalling send().
+        let stub = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = stub.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            while let Ok((mut s, _)) = stub.accept().await {
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 8192];
+                    let _ = s.read(&mut buf).await;
+                    let _ = s
+                        .write_all(b"HTTP/1.1 500\r\ncontent-length: 0\r\n\r\n")
+                        .await;
+                });
+            }
+        });
+        let client = Client::new(&format!("http://127.0.0.1:{port}"), None);
+        let logger = Logger {
+            client: &client,
+            run_id: "r".into(),
+            job_id: "j".into(),
+            mask_values: &[],
+            cancelled: std::sync::atomic::AtomicBool::new(false),
+            log_cursor: std::sync::atomic::AtomicI64::new(0),
+        };
+        let mode = ExecMode::Host;
+        let mut env: Vec<(String, String)> = vec![];
+        let reserved: HashSet<String> = HashSet::new();
+        let mut posts: Vec<PendingPost> = vec![];
+        let task: Task = serde_json::from_value(serde_json::json!({})).unwrap();
+        let senv = StepEnv {
+            task: &task,
+            config: &config,
+            mode: &mode,
+            workspace: &workspace,
+            runner_temp: &runner_temp,
+            env: &mut env,
+            reserved: &reserved,
+            logger: &logger,
+            posts: &mut posts,
+        };
+
+        let d1 = fetch_remote_action(&senv, "acme", "demo", "", "v1")
+            .await
+            .expect("first fetch");
+        assert!(
+            d1.ends_with(format!("v1@{sha1}")),
+            "first cache keyed by resolved sha: {d1:?}"
+        );
+        assert!(d1.join("action.yml").is_file(), "clone materialized");
+
+        // Move the tag → a second commit; the cache must re-resolve.
+        std::fs::write(
+            work.join("action.yml"),
+            b"runs:\n  using: composite\n  steps: [{ run: 'echo v2' }]\n",
+        )
+        .unwrap();
+        git(
+            &["-C", work.to_str().unwrap(), "commit", "-qam", "c2"],
+            &dir,
+        );
+        let sha2 = rev(&work);
+        git(&["-C", work.to_str().unwrap(), "tag", "-f", "v1"], &dir);
+        git(
+            &[
+                "-C",
+                work.to_str().unwrap(),
+                "push",
+                "-qf",
+                bare.to_str().unwrap(),
+                "--tags",
+            ],
+            &dir,
+        );
+
+        let d2 = fetch_remote_action(&senv, "acme", "demo", "", "v1")
+            .await
+            .expect("second fetch after tag move");
+        assert!(
+            d2.ends_with(format!("v1@{sha2}")),
+            "moved ref produced a fresh sha-keyed cache: {d2:?}"
+        );
+        assert_ne!(d1, d2);
+        assert!(
+            std::fs::read_to_string(d2.join("action.yml"))
+                .map(|s| s.contains("v2"))
+                .unwrap_or(false),
+            "fresh content under the new sha key"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

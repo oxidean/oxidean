@@ -166,7 +166,13 @@ fn urlencoding(s: &str) -> String {
 impl Client {
     pub fn new(origin: &str, token: Option<String>) -> Self {
         Client {
-            http: reqwest::Client::new(),
+            // 60s covers the server-side 30s `fetch_task` long-poll plus
+            // margin; without it a blackholed API connection stalls a job's
+            // log stream (and the claim loop) indefinitely.
+            http: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(60))
+                .build()
+                .expect("reqwest client"),
             base: origin.trim_end_matches('/').to_string(),
             token,
         }
@@ -225,11 +231,13 @@ impl Client {
         Ok(())
     }
 
-    /// Poll for work. Returns `Ok(None)` when no queued job matches.
-    pub async fn fetch_task(&self) -> Result<Option<Task>, String> {
+    /// Poll for work — `wait_ms` > 0 asks the server to hold an empty
+    /// response (long-poll, capped 30s). Returns `Ok(None)` when no queued
+    /// job matched before the hold lapsed.
+    pub async fn fetch_task(&self, wait_ms: u64) -> Result<Option<Task>, String> {
         let res = self
             .authed(self.http.post(self.url("fetch_task")))
-            .json(&serde_json::json!({}))
+            .json(&serde_json::json!({ "wait_ms": wait_ms }))
             .send()
             .await
             .map_err(|e| e.to_string())?;

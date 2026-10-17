@@ -118,18 +118,39 @@ async fn main() {
             tracing::info!("drained — runner exiting");
             return;
         }
-        match client.fetch_task().await {
+        // Race the fetch against a drain check — a 30s long-poll shouldn't
+        // hold SIGTERM/SIGINT hostage for its full hold.
+        let fetch = client.fetch_task(config.wait_ms);
+        tokio::pin!(fetch);
+        let fetched = loop {
+            tokio::select! {
+                r = &mut fetch => break Some(r),
+                _ = tokio::time::sleep(Duration::from_millis(500)) => {
+                    if draining.load(std::sync::atomic::Ordering::SeqCst) {
+                        break None;
+                    }
+                }
+            }
+        };
+        let Some(result) = fetched else {
+            continue;
+        };
+        match result {
             Ok(Some(task)) => {
                 let job = task.job_id.clone().unwrap_or_default();
                 tracing::info!(job_id = %job, "claimed job");
                 let outcome = exec::execute(&client, &task, &config).await;
                 tracing::info!(job_id = %job, state = %outcome, "job finished");
             }
-            Ok(None) => {}
+            // Long-poll timed out server-side — re-poll immediately, no
+            // local cadence. With wait_ms=0 the server answered instantly,
+            // so the poll_ms cadence below still applies.
+            Ok(None) if config.wait_ms > 0 => {}
+            Ok(None) => tokio::time::sleep(Duration::from_millis(config.poll_ms)).await,
             Err(e) => {
                 tracing::warn!("fetch_task failed: {e}");
+                tokio::time::sleep(Duration::from_millis(config.poll_ms)).await;
             }
         }
-        tokio::time::sleep(Duration::from_millis(config.poll_ms)).await;
     }
 }

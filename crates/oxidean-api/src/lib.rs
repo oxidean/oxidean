@@ -1,3 +1,9 @@
+// The typed-RPC dispatch graph compiles to very deep async-future types;
+// proving `Send` on them exceeds the default trait-resolution recursion
+// limit (the future IS Send — the proof just needs more depth). Without
+// this, `clippy -D warnings` (dead-code-check) hard-errors on the overflow.
+#![recursion_limit = "256"]
+
 pub mod actions;
 pub mod admin;
 pub mod app;

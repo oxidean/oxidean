@@ -678,6 +678,7 @@ mod tests {
             state_path: PathBuf::from("/tmp/x"),
             work_dir: PathBuf::from("/tmp/xwork"),
             poll_ms: 1,
+            wait_ms: 0,
             git_token: None,
             job_timeout_secs: 60,
             actions_mirror: None,

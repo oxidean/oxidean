@@ -818,6 +818,8 @@ pub async fn enqueue_run(
     // resolve the same `OXIDEAN_ENV` source the app state was built from.
     let env_name = std::env::var("OXIDEAN_ENV").unwrap_or_else(|_| "development".into());
     crate::webhook::dispatch::notify_workflow_run(db, &run_id, "requested", &env_name).await;
+    // New claimable work — wake `fetch_task` long-polls (Phase 9).
+    crate::actions::task_wake::wake();
     Ok((run_id, job_ids))
 }
 

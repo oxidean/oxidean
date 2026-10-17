@@ -1058,6 +1058,7 @@ pub async fn approve_job(
     if let Err(e) = ctx.db.recompute_action_run_status(&job.run_id).await {
         tracing::warn!(error = %e, run_id = %job.run_id, "post-approval rollup failed");
     }
+    crate::actions::task_wake::wake();
     let job = ctx
         .db
         .find_action_job_by_id(&req.job_id)
@@ -1391,6 +1392,7 @@ pub async fn approve_run(
     if let Err(e) = ctx.db.recompute_action_run_status(&run.id).await {
         tracing::warn!(error = %e, run_id = %run.id, "post-approval rollup failed");
     }
+    crate::actions::task_wake::wake();
     run_mutation_response(ctx, &accessible.row.id, &req.run_id).await
 }
 
@@ -1467,6 +1469,7 @@ pub async fn rerun_run(
     // API-04: a requeued run is a new `workflow_run` `requested` delivery.
     crate::webhook::dispatch::notify_workflow_run(&ctx.db, &req.run_id, "requested", &ctx.env_name)
         .await;
+    crate::actions::task_wake::wake();
     run_mutation_response(ctx, &accessible.row.id, &req.run_id).await
 }
 

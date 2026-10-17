@@ -351,6 +351,7 @@ Oxidean Actions evaluates workflows from `.github/workflows/*.{yml,yaml}` on **p
 | `OXIDEAN_RUNNER_GIT_TOKEN` | Optional PAT (`repo` scope) the runner uses to clone **private** repositories; public repos clone anonymously. |
 | `OXIDEAN_RUNNER_STATE` / `OXIDEAN_RUNNER_WORK_DIR` | Runner registration-state file (default `/data/runner.json`) and per-job workspace root (default `<state dir>/work`). Mount a volume at `/data` in the official image. |
 | `OXIDEAN_RUNNER_POLL_MS` / `OXIDEAN_RUNNER_JOB_TIMEOUT_SECS` | `fetch_task` poll interval (default `2000`) and hard job timeout (default `3600`). |
+| `OXIDEAN_RUNNER_WAIT_MS` | `fetch_task` long-poll hold (default `20000`, server-capped at `30000`). The server keeps an empty claim open until a job lands or the hold lapses — claims land sub-second instead of at poll cadence. `0` disables and restores pure `POLL_MS` cadence. |
 | `OXIDEAN_ACTIONS_SECRETS_KEY` | AES-256-GCM key for repo Actions secrets at rest (D-ACT-17). Required (or `OXIDEAN_SESSION_SECRET`); encrypt fails closed if unset. Compose/`make up` defaults to a local-only value — **set a unique key in production**. Prefer a dedicated secret. |
 
 **Registration tokens:** instance admins mint via `admin.actions.createRegistrationToken` (one-time plaintext `reg_…`) or env bootstrap above. **Runner tokens** (`ort_…`) are returned once at register and used as Bearer on `/api/actions/*` — session cookies are ignored (D-ACT-18).

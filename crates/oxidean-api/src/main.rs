@@ -4,8 +4,19 @@ use oxidean_db::Database;
 use oxidean_git::assert_git_version;
 use tracing_subscriber::EnvFilter;
 
-#[tokio::main]
-async fn main() {
+fn main() {
+    // The RPC dispatch graph compiles to very large async futures; in debug
+    // builds a single poll can exceed tokio's default 2 MiB worker stack.
+    // 16 MiB stacks are virtual — only touched pages are committed.
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_stack_size(16 * 1024 * 1024)
+        .build()
+        .expect("tokio runtime");
+    rt.block_on(serve());
+}
+
+async fn serve() {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env().add_directive("info".parse().unwrap()))
         .init();

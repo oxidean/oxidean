@@ -144,6 +144,7 @@ pub fn spawn_background_jobs(
                 let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
                 match db_c.promote_due_deployment_jobs(&now).await {
                     Ok(n) if n > 0 => {
+                        crate::actions::task_wake::wake();
                         tracing::info!(promoted = n, "deployment wait timer released jobs");
                     }
                     Err(e) => {
