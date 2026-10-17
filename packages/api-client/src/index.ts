@@ -2226,6 +2226,127 @@ export type ActionListRunnersResponse = {
   runners: ActionRunnerPublic[];
 };
 
+export type WorkflowTemplateProvenance = "builtin" | "instance" | "org";
+
+export type WorkflowTemplateSummary = {
+  /** `builtin:<dir>/<file-stem>` | `instance:<slug>` | `org:<file-stem>`. */
+  id: string;
+  name: string;
+  description: string;
+  icon_name?: string | null;
+  /** `/api/actions/template-icons/<icon_name>.svg` when the icon is servable. */
+  icon_url?: string | null;
+  categories: string[];
+  /** Root-tree glob patterns behind `suggested` detection. */
+  file_patterns: string[];
+  filename: string;
+  provenance: WorkflowTemplateProvenance;
+  source_label?: string | null;
+  suggested: boolean;
+  /** `uses:` refs the bundled runner cannot execute (not `actions/checkout*`). */
+  unsupported_actions: string[];
+  parse_error?: string | null;
+};
+
+export type WorkflowTemplatesListRequest = {
+  owner: string;
+  name: string;
+  /** Branch/tag/SHA for suggestion matching (default: repo default branch). */
+  git_ref?: string;
+  category?: string;
+  /** `builtin` | `instance` | `org`. */
+  source?: string;
+  query?: string;
+  page?: number;
+  per_page?: number;
+};
+
+export type WorkflowTemplatesListResponse = {
+  suggested: WorkflowTemplateSummary[];
+  templates: WorkflowTemplateSummary[];
+  categories: string[];
+  /** Filtered count before pagination; bare requests return every template. */
+  total_count: number;
+};
+
+export type WorkflowTemplateGetRequest = {
+  owner: string;
+  name: string;
+  /** Catalog id (`builtin:ci/rust`, `instance:<slug>`, `org:<file-stem>`). */
+  id: string;
+};
+
+export type WorkflowTemplateGetResponse = {
+  template: WorkflowTemplateSummary;
+  /** `$default-branch` substituted for the repository's default branch. */
+  content: string;
+};
+
+export type WorkflowCreateRequest = RepoFileCommitOptions & {
+  owner: string;
+  name: string;
+  /** Exactly one of `template_id` / `content`. */
+  template_id?: string;
+  content?: string;
+  /** `.github/workflows/<flat-name>.yml|.yaml` — default `.github/workflows/<template filename>`; required for authored content. */
+  path?: string;
+  message?: string;
+  /** Commit onto this open same-repo PR's head branch instead. */
+  pull_number?: number;
+};
+
+export type InstanceWorkflowTemplatePublic = {
+  id: string;
+  slug: string;
+  name: string;
+  description: string;
+  icon_name?: string | null;
+  categories: string[];
+  file_patterns: string[];
+  filename: string;
+  content: string;
+  enabled: boolean;
+  created_by_user_id: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AdminWorkflowTemplatesListResponse = {
+  templates: InstanceWorkflowTemplatePublic[];
+};
+
+export type AdminWorkflowTemplateCreateRequest = {
+  slug: string;
+  name: string;
+  description?: string;
+  icon_name?: string | null;
+  categories?: string[];
+  file_patterns?: string[];
+  /** Default `<slug>.yml`. */
+  filename?: string;
+  content: string;
+};
+
+export type AdminWorkflowTemplateUpdateRequest = {
+  id: string;
+  name?: string;
+  description?: string;
+  icon_name?: string | null;
+  categories?: string[];
+  file_patterns?: string[];
+  filename?: string;
+  content?: string;
+};
+
+export type AdminWorkflowTemplateSetEnabledRequest = {
+  id: string;
+  enabled: boolean;
+};
+
+export type AdminWorkflowTemplateDeleteRequest = {
+  id: string;
+};
+
 
 export type MemberBasePermission = "none" | "read" | "write";
 
@@ -3948,6 +4069,28 @@ export function createClient(opts: CreateClientOptions) {
           rpcCall<ActionEnabledResponse>(opts, "repo.actions.getEnabled", input),
         setEnabled: (input: ActionSetEnabledRequest) =>
           rpcCall<ActionEnabledResponse>(opts, "repo.actions.setEnabled", input),
+        workflowTemplates: {
+          list: (input: WorkflowTemplatesListRequest) =>
+            rpcCall<WorkflowTemplatesListResponse>(
+              opts,
+              "repo.actions.workflowTemplates.list",
+              input,
+            ),
+          get: (input: WorkflowTemplateGetRequest) =>
+            rpcCall<WorkflowTemplateGetResponse>(
+              opts,
+              "repo.actions.workflowTemplates.get",
+              input,
+            ),
+        },
+        workflows: {
+          create: (input: WorkflowCreateRequest) =>
+            rpcCall<RepoFileCommitResponse>(
+              opts,
+              "repo.actions.workflows.create",
+              input,
+            ),
+        },
       },
       issues: {
         getEnabled: (input: RepoUnitGetEnabledRequest) =>
@@ -4311,6 +4454,34 @@ export function createClient(opts: CreateClientOptions) {
           rpcCall<InstanceTemplatePackPublic>(opts, "admin.templates.setEnabled", input),
         delete: (input: AdminTemplateDeleteRequest) =>
           rpcCall<{ ok: boolean }>(opts, "admin.templates.delete", input),
+      },
+      workflowTemplates: {
+        list: () =>
+          rpcCall<AdminWorkflowTemplatesListResponse>(
+            opts,
+            "admin.workflowTemplates.list",
+            {},
+          ),
+        create: (input: AdminWorkflowTemplateCreateRequest) =>
+          rpcCall<InstanceWorkflowTemplatePublic>(
+            opts,
+            "admin.workflowTemplates.create",
+            input,
+          ),
+        update: (input: AdminWorkflowTemplateUpdateRequest) =>
+          rpcCall<InstanceWorkflowTemplatePublic>(
+            opts,
+            "admin.workflowTemplates.update",
+            input,
+          ),
+        setEnabled: (input: AdminWorkflowTemplateSetEnabledRequest) =>
+          rpcCall<InstanceWorkflowTemplatePublic>(
+            opts,
+            "admin.workflowTemplates.setEnabled",
+            input,
+          ),
+        delete: (input: AdminWorkflowTemplateDeleteRequest) =>
+          rpcCall<{ ok: boolean }>(opts, "admin.workflowTemplates.delete", input),
       },
       actions: {
         createRegistrationToken: () =>

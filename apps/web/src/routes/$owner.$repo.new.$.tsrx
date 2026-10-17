@@ -1,7 +1,7 @@
 import { navigate } from "astro:transitions/client";
 import { queryOptions, useQuery } from "@octanejs/tanstack-query";
 
-import { matchPath } from "@/lib/route-params";
+import { matchPath, searchRecord } from "@/lib/route-params";
 import { usePathname, useSearchString } from "@/lib/pathname.tsrx";
 import { RepoLayout } from "@/routes/$owner.$repo.tsrx";
 import { AppPage } from "@/components/app-page";
@@ -13,8 +13,15 @@ import { RepoNotFound } from "@/components/repo/repo-not-found";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { apiClient } from "@/lib/api-client";
+import { actionsWorkflowTemplateQuery } from "@/lib/actions-queries";
 import { blobHref, joinRepoPath, parseRefAndPath, shortRefName, treeHref } from "@/lib/repo-browse";
 import { fetchRepoGet, fetchRepoRefs } from "@/lib/ssr-repo";
+
+function templateProvenanceLabel(p: string, sourceLabel?: string | null): string {
+  if (p === "builtin") return "Official";
+  if (p === "instance") return "Instance";
+  return sourceLabel ?? "Org";
+}
 
 type NewFileLoaderData =
   | { kind: "not_found" }
@@ -49,12 +56,15 @@ async function loadNewFilePage(
   const refs: RepoRefEntry[] = refsRes.ok ? refsRes.data.refs : [];
   const knownRefs = refs.map((r) => shortRefName(r.name));
   const parsed = parseRefAndPath(splat, knownRefs);
-  const refName = parsed.ref || repo.default_branch || "main";
+  const splatIsDir = knownRefs.length > 0 && !knownRefs.includes(parsed.ref);
+  const refName = splatIsDir
+    ? repo.default_branch || "main"
+    : parsed.ref || repo.default_branch || "main";
   return {
     kind: "ready",
     repo,
     refName,
-    dir: parsed.path,
+    dir: splatIsDir ? joinRepoPath(splat ?? "") : parsed.path,
   };
 }
 
@@ -107,6 +117,38 @@ function RepoFileNewPageContent() @{
   const [content, setContent] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
+
+  // Catalog entry point: `?template=<catalog-id>` prefills filename+content;
+  // `?filename=<name>` prefills just the file name (blank-workflow link).
+  const search = searchRecord(searchStr);
+  const templateId = typeof search.template === "string" ? search.template : "";
+  const filenameParam = typeof search.filename === "string" ? search.filename : "";
+  const [prefilled, setPrefilled] = useState(false);
+  const templateQ = useQuery({
+    ...actionsWorkflowTemplateQuery(owner, repoName, templateId),
+    enabled: !!templateId && phase.kind === "ready",
+  });
+  const templateMeta = templateQ.data?.template ?? null;
+
+  useEffect(() => {
+    if (prefilled) return;
+    // Never clobber typing: template fill needs both fields empty; a bare
+    // `filename` only fills the name.
+    if (templateId) {
+      const data = templateQ.data;
+      if (!data) return; // still loading (or failed — leave blank)
+      setPrefilled(true);
+      if (name === "" && content === "") {
+        setName(data.template.filename);
+        setContent(data.content);
+      }
+      return;
+    }
+    if (filenameParam) {
+      setPrefilled(true);
+      if (name === "") setName(filenameParam);
+    }
+  }, [prefilled, templateId, filenameParam, templateQ.data, name, content]);
 
   useEffect(() => {
     if (loaderData) {
@@ -200,6 +242,18 @@ function RepoFileNewPageContent() @{
     </p>;
   } @else {
     <>
+      @if (templateMeta) {
+        <p className="mb-4 text-[13px] text-muted-foreground">
+          {"From template: " +
+            (templateMeta?.name ?? "") +
+            " (" +
+            templateProvenanceLabel(
+              templateMeta?.provenance ?? "",
+              templateMeta?.source_label,
+            ) +
+            ")"}
+        </p>;
+      }
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <PathBreadcrumb owner={owner} repo={repoName} refName={refName} path={dir} />
         <span className="text-[16px] text-muted-foreground">/</span>

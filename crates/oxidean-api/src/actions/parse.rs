@@ -17,6 +17,32 @@ impl std::fmt::Display for ParseError {
 
 impl std::error::Error for ParseError {}
 
+/// `contents` permission level granted to the per-job `OXIDEAN_TOKEN`
+/// (GitHub `permissions:` semantics — `none` revokes the token entirely).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ContentsPermission {
+    None,
+    Read,
+    Write,
+}
+
+impl ContentsPermission {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Read => "read",
+            Self::Write => "write",
+        }
+    }
+}
+
+/// Parsed `permissions:` block — only `contents` is honoured today.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct WorkflowPermissions {
+    pub contents: ContentsPermission,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct WorkflowDocument {
     pub name: String,
@@ -24,6 +50,8 @@ pub struct WorkflowDocument {
     pub jobs: Vec<JobSpec>,
     /// Raw `env` map if present (opaque JSON object).
     pub env: Option<JsonValue>,
+    /// Workflow-level `permissions:` (`None` = not specified).
+    pub permissions: Option<WorkflowPermissions>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -40,6 +68,8 @@ pub struct JobSpec {
     pub runs_on: Vec<String>,
     pub steps: Vec<StepSpec>,
     pub env: Option<JsonValue>,
+    /// Job-level `permissions:` — overrides the workflow-level block.
+    pub permissions: Option<WorkflowPermissions>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -64,6 +94,7 @@ struct RawWorkflow {
     jobs: Option<serde_yaml::Mapping>,
     env: Option<serde_yaml::Value>,
     defaults: Option<RawDefaults>,
+    permissions: Option<serde_yaml::Value>,
 }
 
 /// `defaults:` — currently only `run.shell` / `run.working-directory`
@@ -104,6 +135,7 @@ struct RawJob {
     steps: Option<Vec<RawStep>>,
     env: Option<serde_yaml::Value>,
     defaults: Option<RawDefaults>,
+    permissions: Option<serde_yaml::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -163,6 +195,51 @@ fn apply_event(t: &mut WorkflowTriggers, name: &str) {
             // Unsupported triggers ignored for matching; jobs still parse.
         }
     }
+}
+
+/// Parse a `permissions:` value (GitHub subset).
+///
+/// - `read-all` / `write-all` scalars set `contents` to read/write.
+/// - A map honours only the `contents` key (`read`/`write`/`none`); per GitHub
+///   semantics, specifying a map resets unlisted scopes to `none`, so a map
+///   without `contents` — including `{}` — yields `contents: none`.
+/// - `None` (absent) or an unrecognized shape → `None` ("not specified").
+fn parse_permissions(raw: Option<&serde_yaml::Value>) -> Option<WorkflowPermissions> {
+    match raw {
+        None => None,
+        Some(serde_yaml::Value::String(s)) => match s.trim() {
+            "read-all" => Some(WorkflowPermissions {
+                contents: ContentsPermission::Read,
+            }),
+            "write-all" => Some(WorkflowPermissions {
+                contents: ContentsPermission::Write,
+            }),
+            _ => None,
+        },
+        Some(serde_yaml::Value::Mapping(map)) => {
+            let mut contents = ContentsPermission::None;
+            for (k, v) in map {
+                if k.as_str() == Some("contents") {
+                    contents = match v.as_str().map(str::trim) {
+                        Some("read") => ContentsPermission::Read,
+                        Some("write") => ContentsPermission::Write,
+                        _ => ContentsPermission::None,
+                    };
+                }
+            }
+            Some(WorkflowPermissions { contents })
+        }
+        Some(_) => None,
+    }
+}
+
+/// Effective `contents` permission for a job: job-level block wins, then
+/// workflow-level, else `read` (the instance default).
+pub fn effective_contents_permission(doc: &WorkflowDocument, job: &JobSpec) -> ContentsPermission {
+    job.permissions
+        .map(|p| p.contents)
+        .or_else(|| doc.permissions.map(|p| p.contents))
+        .unwrap_or(ContentsPermission::Read)
 }
 
 fn parse_runs_on(raw: Option<RawRunsOn>) -> Result<Vec<String>, ParseError> {
@@ -265,6 +342,7 @@ pub fn parse_workflow_yaml(bytes: &[u8]) -> Result<WorkflowDocument, ParseError>
             runs_on,
             steps,
             env: job.env.map(yaml_to_json).transpose()?,
+            permissions: parse_permissions(job.permissions.as_ref()),
         });
     }
 
@@ -273,6 +351,7 @@ pub fn parse_workflow_yaml(bytes: &[u8]) -> Result<WorkflowDocument, ParseError>
         triggers,
         jobs,
         env: raw.env.map(yaml_to_json).transpose()?,
+        permissions: parse_permissions(raw.permissions.as_ref()),
     })
 }
 
@@ -306,5 +385,182 @@ jobs:
     fn invalid_yaml_returns_parse_error() {
         let err = parse_workflow_yaml(b"name: [\n").expect_err("bad yaml");
         assert!(err.message.contains("invalid workflow YAML"));
+    }
+
+    fn perm_of(yaml: &[u8]) -> (Option<WorkflowPermissions>, Option<WorkflowPermissions>) {
+        let doc = parse_workflow_yaml(yaml).expect("parse");
+        (doc.permissions, doc.jobs[0].permissions)
+    }
+
+    #[test]
+    fn permissions_read_all_and_write_all_scalars() {
+        let (wf, _) = perm_of(
+            br#"
+name: CI
+on: [push]
+permissions: read-all
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+"#,
+        );
+        assert_eq!(
+            wf,
+            Some(WorkflowPermissions {
+                contents: ContentsPermission::Read
+            })
+        );
+
+        let (wf, _) = perm_of(
+            br#"
+name: CI
+on: [push]
+permissions: write-all
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+"#,
+        );
+        assert_eq!(
+            wf,
+            Some(WorkflowPermissions {
+                contents: ContentsPermission::Write
+            })
+        );
+    }
+
+    #[test]
+    fn permissions_map_contents_write() {
+        let (wf, _) = perm_of(
+            br#"
+name: CI
+on: [push]
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+"#,
+        );
+        assert_eq!(
+            wf,
+            Some(WorkflowPermissions {
+                contents: ContentsPermission::Write
+            })
+        );
+    }
+
+    #[test]
+    fn permissions_map_without_contents_defaults_to_none() {
+        // GitHub semantics: a permissions map resets unlisted scopes to none.
+        let (wf, _) = perm_of(
+            br#"
+name: CI
+on: [push]
+permissions:
+  issues: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+"#,
+        );
+        assert_eq!(
+            wf,
+            Some(WorkflowPermissions {
+                contents: ContentsPermission::None
+            })
+        );
+        let (wf, _) = perm_of(
+            br#"
+name: CI
+on: [push]
+permissions: {}
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+"#,
+        );
+        assert_eq!(
+            wf,
+            Some(WorkflowPermissions {
+                contents: ContentsPermission::None
+            })
+        );
+    }
+
+    #[test]
+    fn effective_contents_permission_job_overrides_workflow() {
+        let doc = parse_workflow_yaml(
+            br#"
+name: CI
+on: [push]
+permissions: read-all
+jobs:
+  build:
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+"#,
+        )
+        .expect("parse");
+        assert_eq!(
+            effective_contents_permission(&doc, &doc.jobs[0]),
+            ContentsPermission::Write
+        );
+    }
+
+    #[test]
+    fn effective_contents_permission_defaults_to_read() {
+        let doc = parse_workflow_yaml(
+            br#"
+name: CI
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+"#,
+        )
+        .expect("parse");
+        assert_eq!(doc.permissions, None);
+        assert_eq!(doc.jobs[0].permissions, None);
+        assert_eq!(
+            effective_contents_permission(&doc, &doc.jobs[0]),
+            ContentsPermission::Read
+        );
+    }
+
+    #[test]
+    fn effective_contents_permission_workflow_level_applies() {
+        let doc = parse_workflow_yaml(
+            br#"
+name: CI
+on: [push]
+permissions: write-all
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+"#,
+        )
+        .expect("parse");
+        assert_eq!(
+            effective_contents_permission(&doc, &doc.jobs[0]),
+            ContentsPermission::Write
+        );
     }
 }

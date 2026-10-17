@@ -125,7 +125,9 @@ fn base64_lite_decode(input: &str) -> Option<Vec<u8>> {
 }
 
 fn looks_like_pat(password: &str) -> bool {
-    password.starts_with(CLASSIC_PAT_PREFIX) || password.starts_with(FINE_GRAINED_PAT_PREFIX)
+    password.starts_with(CLASSIC_PAT_PREFIX)
+        || password.starts_with(FINE_GRAINED_PAT_PREFIX)
+        || password.starts_with(crate::actions::job_tokens::JOB_TOKEN_PREFIX)
 }
 
 fn pat_expired(expires_at: &Option<String>) -> bool {
@@ -161,17 +163,42 @@ pub async fn authenticate_pat(
     if !looks_like_pat(&password) {
         return Err(unauthorized_lfs());
     }
-    let token_hash = sha256_hex(password.as_bytes());
-    let pat = match state
-        .db
-        .find_pat_by_token_hash_including_revoked(&token_hash)
-        .await
-    {
-        Ok(Some(p)) => p,
-        Ok(None) => return Err(unauthorized_lfs()),
-        Err(e) => {
-            tracing::error!(error = %e, "find_pat_by_token_hash");
-            return Err(StatusCode::INTERNAL_SERVER_ERROR.into_response());
+    let pat = if password.starts_with(crate::actions::job_tokens::JOB_TOKEN_PREFIX) {
+        // Actions job tokens (OXIDEAN_TOKEN) authenticate like a fine-grained
+        // PAT selected onto the job's repository (GITHUB_TOKEN parity).
+        use crate::actions::job_tokens::{authenticate_job_token_status, JobTokenAuthStatus};
+        match authenticate_job_token_status(&state.db, &password).await {
+            Ok(JobTokenAuthStatus::Ok(ident)) => ident.synthetic_pat(&password),
+            Ok(JobTokenAuthStatus::Revoked) => {
+                return Err(unauthorized_lfs_reason(
+                    "actions job token has been revoked",
+                ))
+            }
+            Ok(JobTokenAuthStatus::Expired) => {
+                return Err(unauthorized_lfs_reason("actions job token has expired"))
+            }
+            Ok(JobTokenAuthStatus::Banned) => {
+                return Err(unauthorized_lfs_reason("this account has been suspended"))
+            }
+            Ok(JobTokenAuthStatus::Invalid) => return Err(unauthorized_lfs()),
+            Err(e) => {
+                tracing::error!(error = %e, "authenticate_job_token_status");
+                return Err(StatusCode::INTERNAL_SERVER_ERROR.into_response());
+            }
+        }
+    } else {
+        let token_hash = sha256_hex(password.as_bytes());
+        match state
+            .db
+            .find_pat_by_token_hash_including_revoked(&token_hash)
+            .await
+        {
+            Ok(Some(p)) => p,
+            Ok(None) => return Err(unauthorized_lfs()),
+            Err(e) => {
+                tracing::error!(error = %e, "find_pat_by_token_hash");
+                return Err(StatusCode::INTERNAL_SERVER_ERROR.into_response());
+            }
         }
     };
     // Distinct messages so `git lfs` stderr tells users *why* auth failed.

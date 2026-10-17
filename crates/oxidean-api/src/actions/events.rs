@@ -36,6 +36,10 @@ pub struct PullRequestEvent {
     pub head_sha: String,
     pub head_ref: String,
     pub actor_id: Option<String>,
+    /// The PR's `head_repo_id` — equals `repository_id` for same-repo PRs,
+    /// differs for fork heads. Recorded on the run at enqueue; claim uses it
+    /// to gate secrets and the job token's write grant.
+    pub head_repo_id: Option<String>,
     pub actions_enabled_instance: bool,
 }
 
@@ -111,6 +115,7 @@ async fn dispatch_pull_request_inner(
             &event.head_sha,
             &event.head_ref,
             event.actor_id.as_deref(),
+            event.head_repo_id.as_deref(),
         )
         .await?;
         n += 1;
@@ -129,6 +134,7 @@ pub async fn dispatch_pull_request_for_sha(
     head_sha: &str,
     head_ref: &str,
     actor_id: Option<&str>,
+    head_repo_id: Option<&str>,
     actions_enabled_instance: bool,
 ) -> Result<usize, String> {
     let event = PullRequestEvent {
@@ -138,6 +144,7 @@ pub async fn dispatch_pull_request_for_sha(
         head_sha: head_sha.to_string(),
         head_ref: head_ref.to_string(),
         actor_id: actor_id.map(str::to_string),
+        head_repo_id: head_repo_id.map(str::to_string),
         actions_enabled_instance,
     };
     dispatch_pull_request_inner(db, git, &event).await

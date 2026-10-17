@@ -248,11 +248,17 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         "repo.actions.listRuns"
         | "repo.actions.getRun"
         | "repo.actions.getJobLog"
-        | "repo.actions.listWorkflows" => ActionsRead,
+        | "repo.actions.listWorkflows"
+        | "repo.actions.workflowTemplates.list"
+        | "repo.actions.workflowTemplates.get" => ActionsRead,
 
         "repo.actions.dispatchWorkflow" | "repo.actions.rerunRun" | "repo.actions.cancelRun" => {
             ActionsWrite
         }
+
+        // Drafting a workflow file is a contents write (ActionsWrite ⇒ classic
+        // `repo` or `workflow`, FG `actions:write`).
+        "repo.actions.workflows.create" => ActionsWrite,
 
         "repo.commitStatus.list" => StatusesRead,
         "repo.commitStatus.create" => StatusesWrite,

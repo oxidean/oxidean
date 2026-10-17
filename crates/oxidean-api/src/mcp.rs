@@ -768,6 +768,62 @@ fn tool_defs() -> Vec<ToolDef> {
             }),
         },
         ToolDef {
+            name: "workflow_templates_list",
+            description: "List the workflow-template catalog for a repository: builtin starters vendored from GitHub's starter-workflows, admin-managed instance templates, and org templates from the owner's `.github` repo. Ids are `builtin:<dir>/<stem>` (e.g. builtin:ci/rust), `instance:<slug>`, or `org:<file-stem>`; `suggested` marks templates whose file_patterns match the repository's root tree.",
+            procedure: "repo.actions.workflowTemplates.list",
+            access: Access::RepoRead,
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "owner": {"type": "string"},
+                    "name": {"type": "string"},
+                    "category": {"type": "string", "description": "Exact category filter (case-insensitive)"},
+                    "source": {"type": "string", "enum": ["builtin", "instance", "org"]},
+                    "query": {"type": "string", "description": "Case-insensitive substring match on name/description"},
+                },
+                "required": ["owner", "name"],
+            }),
+        },
+        ToolDef {
+            name: "workflow_template_get",
+            description: "Get one workflow template's summary plus its content with `$default-branch` substituted for the repository's default branch.",
+            procedure: "repo.actions.workflowTemplates.get",
+            access: Access::RepoRead,
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "owner": {"type": "string"},
+                    "name": {"type": "string"},
+                    "id": {"type": "string", "description": "Catalog id, e.g. builtin:ci/rust"},
+                },
+                "required": ["owner", "name", "id"],
+            }),
+        },
+        ToolDef {
+            name: "workflow_create",
+            description: "Draft a workflow file into `.github/workflows/`. Pass `pull_number` to commit onto an open PR's head branch; pass `new_branch` to open a new PR; otherwise commits to `branch` (default branch). Exactly one of `template_id` / `content` is required; `path` must be `.github/workflows/<name>.yml|.yaml`.",
+            procedure: "repo.actions.workflows.create",
+            access: Access::RepoWrite,
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "owner": {"type": "string"},
+                    "name": {"type": "string"},
+                    "template_id": {"type": "string", "description": "Catalog id from workflow_templates_list"},
+                    "content": {"type": "string", "description": "Authored workflow YAML"},
+                    "path": {"type": "string", "description": "Destination path (default: .github/workflows/<template filename>)"},
+                    "message": {"type": "string"},
+                    "pull_number": {"type": "integer", "description": "Commit onto this open same-repo PR's head branch"},
+                    "branch": {"type": "string"},
+                    "new_branch": {"type": "string"},
+                    "open_pr": {"type": "boolean"},
+                    "pr_title": {"type": "string"},
+                    "pr_body": {"type": "string"},
+                },
+                "required": ["owner", "name"],
+            }),
+        },
+        ToolDef {
             name: "packages_list",
             description: "List packages for an owner (user or org slug) or a repository id.",
             procedure: "packages.list",
@@ -1569,6 +1625,9 @@ mod tests {
             "pull_get",
             "actions_list_runs",
             "actions_get_run",
+            "workflow_templates_list",
+            "workflow_template_get",
+            "workflow_create",
             "packages_list",
             "search_repos",
             "search_issues",
@@ -1626,6 +1685,37 @@ mod tests {
         let args = json!({"owner": "o", "name": "n", "number": 3});
         let (proc, input) = build_rpc_input(tool, &args).unwrap();
         assert_eq!(proc, "issue.get");
+        assert_eq!(input, args);
+    }
+
+    #[test]
+    fn build_rpc_input_workflow_tools() {
+        let defs = tool_defs();
+        let list = defs
+            .iter()
+            .find(|t| t.name == "workflow_templates_list")
+            .unwrap();
+        let args = json!({"owner": "o", "name": "n", "source": "builtin", "query": "rust"});
+        let (proc, input) = build_rpc_input(list, &args).unwrap();
+        assert_eq!(proc, "repo.actions.workflowTemplates.list");
+        assert_eq!(input, args);
+
+        let get = defs
+            .iter()
+            .find(|t| t.name == "workflow_template_get")
+            .unwrap();
+        let args = json!({"owner": "o", "name": "n", "id": "builtin:ci/rust"});
+        let (proc, input) = build_rpc_input(get, &args).unwrap();
+        assert_eq!(proc, "repo.actions.workflowTemplates.get");
+        assert_eq!(input, args);
+
+        let create = defs.iter().find(|t| t.name == "workflow_create").unwrap();
+        let args = json!({
+            "owner": "o", "name": "n", "template_id": "builtin:ci/rust",
+            "pull_number": 42, "message": "ci: add rust",
+        });
+        let (proc, input) = build_rpc_input(create, &args).unwrap();
+        assert_eq!(proc, "repo.actions.workflows.create");
         assert_eq!(input, args);
     }
 

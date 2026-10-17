@@ -593,6 +593,10 @@ jobs:
         run: make openapi-sync-check
       - name: check-skill-sync
         run: make skill-sync-check
+      - name: check-workflow-templates
+        run: make check-workflow-templates
+      - name: check-workflow-templates-upstream
+        run: bun scripts/sync-workflow-templates.mjs --check
 
   compose:
     name: compose

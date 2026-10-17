@@ -34,6 +34,11 @@ pub struct ActionRunRow {
     /// serialized — RPC paths always re-read).
     pub run_number: i64,
     pub triggered_by: Option<String>,
+    /// Recorded PR head-repo provenance for `pull_request` runs (the PR's
+    /// `head_repo_id`); `NULL` for every other event. Claim compares this to
+    /// `repository_id` — a fork head, or a `pull_request` run with no recorded
+    /// provenance, is untrusted (no secrets, read-only job token).
+    pub head_repo_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
     pub finished_at: Option<String>,
@@ -260,30 +265,34 @@ pub async fn insert_run(
     head_ref: &str,
     title: &str,
     triggered_by: Option<&str>,
+    head_repo_id: Option<&str>,
 ) -> Result<ActionRunRow, String> {
     match pool {
         DbPool::Postgres(p) => {
             sqlx::query(r#"INSERT INTO action_runs
-                (id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, title, triggered_by)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)"#)
+                (id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, title, triggered_by, head_repo_id)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)"#)
                 .bind(id).bind(repository_id).bind(workflow_path).bind(workflow_name)
                 .bind(event).bind(head_sha).bind(head_ref).bind(title).bind(triggered_by)
+                .bind(head_repo_id)
                 .execute(p).await.map_err(|e| e.to_string())?;
         }
         DbPool::MySql(p) => {
             sqlx::query(r#"INSERT INTO action_runs
-                (id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, title, triggered_by)
-                VALUES (?,?,?,?,?,?,?,?,?)"#)
+                (id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, title, triggered_by, head_repo_id)
+                VALUES (?,?,?,?,?,?,?,?,?,?)"#)
                 .bind(id).bind(repository_id).bind(workflow_path).bind(workflow_name)
                 .bind(event).bind(head_sha).bind(head_ref).bind(title).bind(triggered_by)
+                .bind(head_repo_id)
                 .execute(p).await.map_err(|e| e.to_string())?;
         }
         DbPool::Sqlite(p) => {
             sqlx::query(r#"INSERT INTO action_runs
-                (id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, title, triggered_by)
-                VALUES (?,?,?,?,?,?,?,?,?)"#)
+                (id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, title, triggered_by, head_repo_id)
+                VALUES (?,?,?,?,?,?,?,?,?,?)"#)
                 .bind(id).bind(repository_id).bind(workflow_path).bind(workflow_name)
                 .bind(event).bind(head_sha).bind(head_ref).bind(title).bind(triggered_by)
+                .bind(head_repo_id)
                 .execute(p).await.map_err(|e| e.to_string())?;
         }
     }
@@ -299,6 +308,7 @@ pub async fn insert_run(
         title: title.into(),
         run_number: 0,
         triggered_by: triggered_by.map(str::to_string),
+        head_repo_id: head_repo_id.map(str::to_string),
         created_at: String::new(),
         updated_at: String::new(),
         finished_at: None,
@@ -308,7 +318,7 @@ pub async fn insert_run(
 pub async fn find_run_by_id(pool: &DbPool, id: &str) -> Result<Option<ActionRunRow>, String> {
     match pool {
         DbPool::Postgres(p) => {
-            let row = sqlx::query(sqlx::AssertSqlSafe(format!("SELECT id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, status, title, triggered_by, finished_at::text AS finished_at, {RUN_NUMBER_SQL} FROM action_runs WHERE id = $1")))
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!("SELECT id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, status, title, triggered_by, head_repo_id, finished_at::text AS finished_at, {RUN_NUMBER_SQL} FROM action_runs WHERE id = $1")))
                 .bind(id).fetch_optional(p).await.map_err(|e| e.to_string())?;
             Ok(row.map(|r| ActionRunRow {
                 id: r.get("id"),
@@ -322,13 +332,14 @@ pub async fn find_run_by_id(pool: &DbPool, id: &str) -> Result<Option<ActionRunR
                 title: r.get("title"),
                 run_number: r.get("run_number"),
                 triggered_by: r.get("triggered_by"),
+                head_repo_id: r.get("head_repo_id"),
                 created_at: String::new(),
                 updated_at: String::new(),
                 finished_at: r.get("finished_at"),
             }))
         }
         DbPool::MySql(p) => {
-            let row = sqlx::query(sqlx::AssertSqlSafe(format!("SELECT id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, status, title, triggered_by, CAST(finished_at AS CHAR) AS finished_at, {RUN_NUMBER_SQL} FROM action_runs WHERE id = ?")))
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!("SELECT id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, status, title, triggered_by, head_repo_id, CAST(finished_at AS CHAR) AS finished_at, {RUN_NUMBER_SQL} FROM action_runs WHERE id = ?")))
                 .bind(id).fetch_optional(p).await.map_err(|e| e.to_string())?;
             Ok(row.map(|r| ActionRunRow {
                 id: r.get("id"),
@@ -342,13 +353,14 @@ pub async fn find_run_by_id(pool: &DbPool, id: &str) -> Result<Option<ActionRunR
                 title: r.get("title"),
                 run_number: r.get("run_number"),
                 triggered_by: r.get("triggered_by"),
+                head_repo_id: r.get("head_repo_id"),
                 created_at: String::new(),
                 updated_at: String::new(),
                 finished_at: r.get("finished_at"),
             }))
         }
         DbPool::Sqlite(p) => {
-            let row = sqlx::query(sqlx::AssertSqlSafe(format!("SELECT id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, status, title, triggered_by, finished_at, {RUN_NUMBER_SQL} FROM action_runs WHERE id = ?")))
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!("SELECT id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, status, title, triggered_by, head_repo_id, finished_at, {RUN_NUMBER_SQL} FROM action_runs WHERE id = ?")))
                 .bind(id).fetch_optional(p).await.map_err(|e| e.to_string())?;
             Ok(row.map(|r| ActionRunRow {
                 id: r.get("id"),
@@ -362,6 +374,7 @@ pub async fn find_run_by_id(pool: &DbPool, id: &str) -> Result<Option<ActionRunR
                 title: r.get("title"),
                 run_number: r.get("run_number"),
                 triggered_by: r.get("triggered_by"),
+                head_repo_id: r.get("head_repo_id"),
                 created_at: String::new(),
                 updated_at: String::new(),
                 finished_at: r.get("finished_at"),
@@ -782,6 +795,7 @@ pub async fn insert_runner_token(
 
 pub async fn wipe_actions_domain(pool: &DbPool) -> Result<(), String> {
     for sql in [
+        "DELETE FROM action_job_tokens",
         "DELETE FROM action_jobs",
         "DELETE FROM action_runs",
         "DELETE FROM action_secrets",
@@ -1204,7 +1218,7 @@ pub async fn list_runs_for_repo(
         DbPool::Sqlite(p) => {
             let rows = bind_run_filter!(
                 sqlx::query(sqlx::AssertSqlSafe(format!(
-                    "SELECT id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, status, title, triggered_by, created_at, updated_at, finished_at, {RUN_NUMBER_SQL} FROM action_runs WHERE repository_id = ?{RUNS_FILTER_SQLITE} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?"
+                    "SELECT id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, status, title, triggered_by, head_repo_id, created_at, updated_at, finished_at, {RUN_NUMBER_SQL} FROM action_runs WHERE repository_id = ?{RUNS_FILTER_SQLITE} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?"
                 )))
                 .bind(repository_id),
                 filter,
@@ -1228,6 +1242,7 @@ pub async fn list_runs_for_repo(
                     status: r.get("status"),
                     title: r.get("title"),
                     triggered_by: r.get("triggered_by"),
+                    head_repo_id: r.get("head_repo_id"),
                     created_at: r.get("created_at"),
                     updated_at: r.get("updated_at"),
                     run_number: r.get("run_number"),
@@ -1238,7 +1253,7 @@ pub async fn list_runs_for_repo(
         DbPool::Postgres(p) => {
             let rows = bind_run_filter_pg!(
                 sqlx::query(sqlx::AssertSqlSafe(format!(
-                    "SELECT id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, status, title, triggered_by, created_at::text AS created_at, updated_at::text AS updated_at, finished_at::text AS finished_at, {RUN_NUMBER_SQL} FROM action_runs WHERE repository_id = $1{RUNS_FILTER_PG} ORDER BY created_at DESC, id DESC LIMIT $9 OFFSET $10"
+                    "SELECT id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, status, title, triggered_by, head_repo_id, created_at::text AS created_at, updated_at::text AS updated_at, finished_at::text AS finished_at, {RUN_NUMBER_SQL} FROM action_runs WHERE repository_id = $1{RUNS_FILTER_PG} ORDER BY created_at DESC, id DESC LIMIT $9 OFFSET $10"
                 )))
                 .bind(repository_id),
                 filter,
@@ -1262,6 +1277,7 @@ pub async fn list_runs_for_repo(
                     status: r.get("status"),
                     title: r.get("title"),
                     triggered_by: r.get("triggered_by"),
+                    head_repo_id: r.get("head_repo_id"),
                     created_at: r.get("created_at"),
                     updated_at: r.get("updated_at"),
                     run_number: r.get("run_number"),
@@ -1272,7 +1288,7 @@ pub async fn list_runs_for_repo(
         DbPool::MySql(p) => {
             let rows = bind_run_filter!(
                 sqlx::query(sqlx::AssertSqlSafe(format!(
-                    "SELECT id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, status, title, triggered_by, CAST(created_at AS CHAR) AS created_at, CAST(updated_at AS CHAR) AS updated_at, CAST(finished_at AS CHAR) AS finished_at, {RUN_NUMBER_SQL} FROM action_runs WHERE repository_id = ?{RUNS_FILTER_MYSQL} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?"
+                    "SELECT id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, status, title, triggered_by, head_repo_id, CAST(created_at AS CHAR) AS created_at, CAST(updated_at AS CHAR) AS updated_at, CAST(finished_at AS CHAR) AS finished_at, {RUN_NUMBER_SQL} FROM action_runs WHERE repository_id = ?{RUNS_FILTER_MYSQL} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?"
                 )))
                 .bind(repository_id),
                 filter,
@@ -1296,6 +1312,7 @@ pub async fn list_runs_for_repo(
                     status: r.get("status"),
                     title: r.get("title"),
                     triggered_by: r.get("triggered_by"),
+                    head_repo_id: r.get("head_repo_id"),
                     created_at: r.get("created_at"),
                     updated_at: r.get("updated_at"),
                     run_number: r.get("run_number"),
@@ -1771,4 +1788,189 @@ pub async fn cancel_run(pool: &DbPool, run_id: &str) -> Result<bool, String> {
         }
     }
     Ok(true)
+}
+
+// ---------------------------------------------------------------------------
+// Per-job bearer tokens (OXIDEAN_TOKEN) — minted at claim, revoked on terminal
+// status / run cancel; `job_id` UNIQUE so a rerun re-mints onto the same row.
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct ActionJobTokenRow {
+    pub id: String,
+    pub job_id: String,
+    pub run_id: String,
+    pub repository_id: String,
+    pub user_id: String,
+    /// `read` | `write` (validated by CHECK / Rust callers).
+    pub permission: String,
+    pub token_hash: String,
+    pub created_at: String,
+    pub expires_at: String,
+    pub revoked_at: Option<String>,
+}
+
+macro_rules! map_job_token {
+    ($row:expr) => {{
+        let row = $row;
+        ActionJobTokenRow {
+            id: row.get("id"),
+            job_id: row.get("job_id"),
+            run_id: row.get("run_id"),
+            repository_id: row.get("repository_id"),
+            user_id: row.get("user_id"),
+            permission: row.get("permission"),
+            token_hash: row.get("token_hash"),
+            created_at: row.try_get("created_at").unwrap_or_default(),
+            expires_at: row.try_get("expires_at").unwrap_or_default(),
+            revoked_at: row.try_get("revoked_at").unwrap_or(None),
+        }
+    }};
+}
+
+/// Insert the job token row — `ON CONFLICT (job_id)` re-mints in place so a
+/// requeued job's next claim issues a fresh token and the old hash stops
+/// resolving (the row's plaintext is never stored).
+#[allow(clippy::too_many_arguments)]
+pub async fn insert_action_job_token(
+    pool: &DbPool,
+    id: &str,
+    job_id: &str,
+    run_id: &str,
+    repository_id: &str,
+    user_id: &str,
+    permission: &str,
+    token_hash: &str,
+    expires_at: &str,
+) -> Result<(), String> {
+    match pool {
+        DbPool::Sqlite(p) => {
+            sqlx::query(
+                "INSERT INTO action_job_tokens (id, job_id, run_id, repository_id, user_id, permission, token_hash, expires_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                 ON CONFLICT (job_id) DO UPDATE SET token_hash = excluded.token_hash,
+                     permission = excluded.permission, expires_at = excluded.expires_at,
+                     revoked_at = NULL",
+            )
+            .bind(id).bind(job_id).bind(run_id).bind(repository_id).bind(user_id)
+            .bind(permission).bind(token_hash).bind(expires_at)
+            .execute(p).await.map_err(|e| e.to_string())?;
+        }
+        DbPool::Postgres(p) => {
+            sqlx::query(
+                "INSERT INTO action_job_tokens (id, job_id, run_id, repository_id, user_id, permission, token_hash, expires_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8::timestamptz)
+                 ON CONFLICT (job_id) DO UPDATE SET token_hash = excluded.token_hash,
+                     permission = excluded.permission, expires_at = excluded.expires_at,
+                     revoked_at = NULL",
+            )
+            .bind(id).bind(job_id).bind(run_id).bind(repository_id).bind(user_id)
+            .bind(permission).bind(token_hash).bind(expires_at)
+            .execute(p).await.map_err(|e| e.to_string())?;
+        }
+        DbPool::MySql(p) => {
+            sqlx::query(
+                "INSERT INTO action_job_tokens (id, job_id, run_id, repository_id, user_id, permission, token_hash, expires_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, STR_TO_DATE(REPLACE(REPLACE(?, 'T', ' '), 'Z', ''), '%Y-%m-%d %H:%i:%s'))
+                 ON DUPLICATE KEY UPDATE token_hash = VALUES(token_hash),
+                     permission = VALUES(permission), expires_at = VALUES(expires_at),
+                     revoked_at = NULL",
+            )
+            .bind(id).bind(job_id).bind(run_id).bind(repository_id).bind(user_id)
+            .bind(permission).bind(token_hash).bind(expires_at)
+            .execute(p).await.map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+/// Token-hash lookup — returns revoked/expired rows too so the bearer edge can
+/// distinguish "revoked" from "never existed" (same rule as PAT resolution).
+pub async fn find_action_job_token_by_hash(
+    pool: &DbPool,
+    token_hash: &str,
+) -> Result<Option<ActionJobTokenRow>, String> {
+    match pool {
+        DbPool::Sqlite(p) => {
+            let row = sqlx::query(
+                "SELECT id, job_id, run_id, repository_id, user_id, permission, token_hash,
+                        strftime('%Y-%m-%dT%H:%M:%SZ', created_at) AS created_at,
+                        expires_at,
+                        strftime('%Y-%m-%dT%H:%M:%SZ', revoked_at) AS revoked_at
+                 FROM action_job_tokens WHERE token_hash = ?",
+            )
+            .bind(token_hash)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| e.to_string())?;
+            Ok(row.map(|r| map_job_token!(r)))
+        }
+        DbPool::Postgres(p) => {
+            let row = sqlx::query(
+                "SELECT id, job_id, run_id, repository_id, user_id, permission, token_hash,
+                        to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS created_at,
+                        to_char(expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS expires_at,
+                        to_char(revoked_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS revoked_at
+                 FROM action_job_tokens WHERE token_hash = $1",
+            )
+            .bind(token_hash)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| e.to_string())?;
+            Ok(row.map(|r| map_job_token!(r)))
+        }
+        DbPool::MySql(p) => {
+            let row = sqlx::query(
+                "SELECT id, job_id, run_id, repository_id, user_id, permission, token_hash,
+                        DATE_FORMAT(created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at,
+                        DATE_FORMAT(expires_at, '%Y-%m-%dT%H:%i:%sZ') AS expires_at,
+                        DATE_FORMAT(revoked_at, '%Y-%m-%dT%H:%i:%sZ') AS revoked_at
+                 FROM action_job_tokens WHERE token_hash = ?",
+            )
+            .bind(token_hash)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| e.to_string())?;
+            Ok(row.map(|r| map_job_token!(r)))
+        }
+    }
+}
+
+/// Revoke a job's token (terminal status or re-mint replacement). Idempotent —
+/// already-revoked rows are untouched.
+pub async fn revoke_action_job_token_for_job(pool: &DbPool, job_id: &str) -> Result<(), String> {
+    match pool {
+        DbPool::Sqlite(p) => {
+            sqlx::query("UPDATE action_job_tokens SET revoked_at = CURRENT_TIMESTAMP WHERE job_id = ? AND revoked_at IS NULL")
+                .bind(job_id).execute(p).await.map_err(|e| e.to_string())?;
+        }
+        DbPool::Postgres(p) => {
+            sqlx::query("UPDATE action_job_tokens SET revoked_at = now() WHERE job_id = $1 AND revoked_at IS NULL")
+                .bind(job_id).execute(p).await.map_err(|e| e.to_string())?;
+        }
+        DbPool::MySql(p) => {
+            sqlx::query("UPDATE action_job_tokens SET revoked_at = CURRENT_TIMESTAMP WHERE job_id = ? AND revoked_at IS NULL")
+                .bind(job_id).execute(p).await.map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+/// Revoke every token minted for a run's jobs (run cancel).
+pub async fn revoke_action_job_tokens_for_run(pool: &DbPool, run_id: &str) -> Result<(), String> {
+    match pool {
+        DbPool::Sqlite(p) => {
+            sqlx::query("UPDATE action_job_tokens SET revoked_at = CURRENT_TIMESTAMP WHERE run_id = ? AND revoked_at IS NULL")
+                .bind(run_id).execute(p).await.map_err(|e| e.to_string())?;
+        }
+        DbPool::Postgres(p) => {
+            sqlx::query("UPDATE action_job_tokens SET revoked_at = now() WHERE run_id = $1 AND revoked_at IS NULL")
+                .bind(run_id).execute(p).await.map_err(|e| e.to_string())?;
+        }
+        DbPool::MySql(p) => {
+            sqlx::query("UPDATE action_job_tokens SET revoked_at = CURRENT_TIMESTAMP WHERE run_id = ? AND revoked_at IS NULL")
+                .bind(run_id).execute(p).await.map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
 }

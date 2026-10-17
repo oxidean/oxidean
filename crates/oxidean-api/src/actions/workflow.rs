@@ -64,13 +64,13 @@ impl From<GitError> for DiscoverError {
     }
 }
 
-fn is_workflow_filename(name: &str) -> bool {
+pub(crate) fn is_workflow_filename(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
     lower.ends_with(".yml") || lower.ends_with(".yaml")
 }
 
 /// Reject `..` and absolute components; require under `.github/workflows/`.
-fn confine_workflow_path(path: &str) -> Result<String, DiscoverError> {
+pub(crate) fn confine_workflow_path(path: &str) -> Result<String, DiscoverError> {
     let p = Path::new(path);
     if p.is_absolute() {
         return Err(DiscoverError::PathEscape(path.into()));

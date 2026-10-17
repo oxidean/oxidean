@@ -212,7 +212,16 @@ pub const COMMAND_TREE: &[(&str, Subs)] = &[
             ("deliveries", &["list", "get", "view", "redeliver"]),
         ],
     ),
-    ("workflow", &[("list", &[]), ("view", &[]), ("run", &[])]),
+    (
+        "workflow",
+        &[
+            ("list", &[]),
+            ("view", &[]),
+            ("run", &[]),
+            ("create", &[]),
+            ("template", &["list", "view"]),
+        ],
+    ),
 ];
 
 pub fn run(shell: &str) -> Result<Out, CliError> {

@@ -93,6 +93,8 @@ mkdir -p .github/workflows
 cat > .github/workflows/ci.yml <<'YAML'
 name: CI
 on: [push, workflow_dispatch]
+permissions:
+  contents: read
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -104,12 +106,27 @@ jobs:
           test -f README.md || { echo "workspace missing README.md"; exit 1; }
           test -n "$GITHUB_SHA" || { echo "GITHUB_SHA unset"; exit 1; }
           echo "checkout ok at $GITHUB_SHA"
+      - name: oxidean env contract
+        run: |
+          echo "sha=$OXIDEAN_SHA alias=$GITHUB_SHA repo=$OXIDEAN_REPOSITORY ref=$OXIDEAN_REF_NAME"
+          test -n "$OXIDEAN_TOKEN" || { echo "OXIDEAN_TOKEN unset"; exit 1; }
+          test "$OXIDEAN_SHA" = "$GITHUB_SHA" || { echo "sha alias mismatch"; exit 1; }
+      - name: env file write
+        run: echo "FOO=bar" >> "$OXIDEAN_ENV_FILE"
+      - name: env file read next step
+        run: test "$FOO" = "bar" || { echo "OXIDEAN_ENV_FILE propagation broken"; exit 1; }
+      - name: job token authenticated read
+        run: |
+          resp="$(curl -fsS -H "Authorization: Bearer $OXIDEAN_TOKEN" "$OXIDEAN_API_URL/v1/repos/$OXIDEAN_REPOSITORY")"
+          test "$(echo "$resp" | jq -r '.name')" = "${OXIDEAN_REPOSITORY##*/}" \
+            && echo "job token read OK"
 YAML
 [ -f README.md ] || echo "# $REPO" > README.md
 # Always produce a fresh commit so re-runs trigger a new Actions run.
 date +%s > .seed-ts
 git add -A
 git commit -qm "seed: ci workflow $(date +%s)"
+HEAD_SHA="$(git rev-parse HEAD)"
 git push -q "$AUTH_ORIGIN/$OWNER/$REPO.git" HEAD:refs/heads/main 2>/dev/null \
   || git push -q origin HEAD:refs/heads/main
 cd - >/dev/null
@@ -142,7 +159,18 @@ if [ -n "$JOB_ID" ]; then
       echo "log lacks the oxidean-hello marker" >&2
       exit 1
     fi
-    echo "WARN: run succeeded but log lacks the oxidean-hello marker" >&2
+    echo "WARN: run succeeded but log lacks the oxidean-hello marker"
+  fi
+  # OXIDEAN_* env contract + job-token authenticated read must have run.
+  if [ "$STATUS" = "success" ]; then
+    echo "$LOG" | grep -q "sha=$HEAD_SHA" || {
+      echo "log lacks the pushed head sha marker (sha=$HEAD_SHA)" >&2
+      exit 1
+    }
+    echo "$LOG" | grep -q "job token read OK" || {
+      echo "log lacks the OXIDEAN_TOKEN authenticated-read marker" >&2
+      exit 1
+    }
   fi
 fi
 

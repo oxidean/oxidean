@@ -145,12 +145,15 @@ fn parse_basic(headers: &HeaderMap) -> Result<Option<(String, String)>, Response
     Ok(Some((user.to_string(), pass.to_string())))
 }
 
-/// Smart HTTP credential check: PAT prefixes, or OAuth access tokens
-/// (`oxidean_oat_` — resolved via `oauth::authenticate_oauth_token`; API-03).
+/// Smart HTTP credential check: PAT prefixes, OAuth access tokens
+/// (`oxidean_oat_` — resolved via `oauth::authenticate_oauth_token`; API-03),
+/// or per-job Actions tokens (`oxidean_job_` — `OXIDEAN_TOKEN` / `GITHUB_TOKEN`
+/// parity for `git fetch`/`push` inside workflows).
 fn looks_like_token(password: &str) -> bool {
     password.starts_with(CLASSIC_PAT_PREFIX)
         || password.starts_with(FINE_GRAINED_PAT_PREFIX)
         || password.starts_with(OAUTH_ACCESS_TOKEN_PREFIX)
+        || password.starts_with(crate::actions::job_tokens::JOB_TOKEN_PREFIX)
 }
 
 /// Client IP for last-used / rate-limit — rightmost `X-Forwarded-For` hop
@@ -182,6 +185,11 @@ struct AuthedPat {
     /// (`pat` is a synthesized classic-scope row — see
     /// `oauth::OAuthTokenIdentity::synthetic_pat`).
     is_oauth: bool,
+    /// True when the credential was an `oxidean_job_` per-job token
+    /// (`pat` is a synthesized fine-grained selected-repo row — see
+    /// `actions::job_tokens::JobTokenIdentity::synthetic_pat`). Job-token
+    /// pushes must not re-trigger Actions (GITHUB_TOKEN recursion parity).
+    is_job_token: bool,
 }
 
 /// Record a failed Basic/PAT attempt against IP and optional username→user bucket.
@@ -235,12 +243,12 @@ async fn authenticate_pat(
         record_failed_auth(state, headers, Some(&username)).await;
         return Err(unauthorized_pat_hint());
     }
-    let (pat, is_oauth) = if password.starts_with(OAUTH_ACCESS_TOKEN_PREFIX) {
+    let (pat, is_oauth, is_job_token) = if password.starts_with(OAUTH_ACCESS_TOKEN_PREFIX) {
         // API-03: OAuth access tokens authenticate like classic PATs.
         // The synthesized row carries `repo`/`package:*` scopes so
         // `pat_allows_operation` applies unchanged downstream.
         match crate::oauth::authenticate_oauth_token_status(&state.db, &password).await {
-            Ok(crate::oauth::OAuthAuthStatus::Ok(ident)) => (ident.synthetic_pat(), true),
+            Ok(crate::oauth::OAuthAuthStatus::Ok(ident)) => (ident.synthetic_pat(), true, false),
             Ok(crate::oauth::OAuthAuthStatus::Revoked) => {
                 record_failed_auth(state, headers, Some(&username)).await;
                 return Err(unauthorized_pat_hint_reason(PAT_HINT_REVOKED));
@@ -259,6 +267,33 @@ async fn authenticate_pat(
             }
             Err(e) => {
                 tracing::error!(error = %e, "authenticate_oauth_token failed");
+                return Err(StatusCode::INTERNAL_SERVER_ERROR.into_response());
+            }
+        }
+    } else if password.starts_with(crate::actions::job_tokens::JOB_TOKEN_PREFIX) {
+        // Actions job tokens (OXIDEAN_TOKEN) authenticate like a fine-grained
+        // PAT selected onto the job's repository (GITHUB_TOKEN parity).
+        use crate::actions::job_tokens::{authenticate_job_token_status, JobTokenAuthStatus};
+        match authenticate_job_token_status(&state.db, &password).await {
+            Ok(JobTokenAuthStatus::Ok(ident)) => (ident.synthetic_pat(&password), false, true),
+            Ok(JobTokenAuthStatus::Revoked) => {
+                record_failed_auth(state, headers, Some(&username)).await;
+                return Err(unauthorized_pat_hint_reason(PAT_HINT_REVOKED));
+            }
+            Ok(JobTokenAuthStatus::Expired) => {
+                record_failed_auth(state, headers, Some(&username)).await;
+                return Err(unauthorized_pat_hint_reason(PAT_HINT_EXPIRED));
+            }
+            Ok(JobTokenAuthStatus::Banned) => {
+                record_failed_auth(state, headers, Some(&username)).await;
+                return Err(unauthorized_pat_hint_reason(PAT_HINT_BANNED));
+            }
+            Ok(JobTokenAuthStatus::Invalid) => {
+                record_failed_auth(state, headers, Some(&username)).await;
+                return Err(unauthorized_pat_hint());
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "authenticate_job_token_status failed");
                 return Err(StatusCode::INTERNAL_SERVER_ERROR.into_response());
             }
         }
@@ -281,7 +316,7 @@ async fn authenticate_pat(
                 return Err(StatusCode::INTERNAL_SERVER_ERROR.into_response());
             }
         };
-        (pat, false)
+        (pat, false, false)
     };
     if pat.revoked_at.is_some() {
         record_failed_auth(state, headers, Some(&username)).await;
@@ -320,6 +355,7 @@ async fn authenticate_pat(
         pat,
         owner,
         is_oauth,
+        is_job_token,
     }))
 }
 
@@ -437,6 +473,10 @@ fn strip_git_suffix(repo_git: &str) -> Option<&str> {
 }
 
 async fn touch_last_used(state: &AppState, auth: &AuthedPat, headers: &HeaderMap) {
+    // Job tokens live in `action_job_tokens` — no last_used bookkeeping there.
+    if auth.is_job_token {
+        return;
+    }
     let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
     let ip = client_ip(headers);
     let pat_id = auth.pat.id.as_str();
@@ -699,29 +739,35 @@ async fn authorize_and_cgi(
                             )
                             .await;
                         });
-                        let db2 = state.db.clone();
-                        let git2 = state.git.clone();
-                        let repos_dir2 = state.repos_dir.clone();
-                        let repo_id2 = resolved.row.id.clone();
-                        let owner2 = resolved.disk_owner.clone();
-                        let name2 = resolved.disk_name.clone();
-                        let uid2 = auth.owner.id.clone();
-                        let updates2 = updates;
-                        let actions_on = state.actions_enabled;
-                        tokio::spawn(async move {
-                            crate::actions::notify_push_actions(
-                                &db2,
-                                git2,
-                                &repos_dir2,
-                                &repo_id2,
-                                &owner2,
-                                &name2,
-                                Some(&uid2),
-                                &updates2,
-                                actions_on,
-                            )
-                            .await;
-                        });
+                        // GITHUB_TOKEN parity: pushes authenticated with an
+                        // Actions job token must not trigger new workflow runs
+                        // (prevents job → push → run recursion). Webhooks and
+                        // other side effects above are unchanged.
+                        if !auth.is_job_token {
+                            let db2 = state.db.clone();
+                            let git2 = state.git.clone();
+                            let repos_dir2 = state.repos_dir.clone();
+                            let repo_id2 = resolved.row.id.clone();
+                            let owner2 = resolved.disk_owner.clone();
+                            let name2 = resolved.disk_name.clone();
+                            let uid2 = auth.owner.id.clone();
+                            let updates2 = updates;
+                            let actions_on = state.actions_enabled;
+                            tokio::spawn(async move {
+                                crate::actions::notify_push_actions(
+                                    &db2,
+                                    git2,
+                                    &repos_dir2,
+                                    &repo_id2,
+                                    &owner2,
+                                    &name2,
+                                    Some(&uid2),
+                                    &updates2,
+                                    actions_on,
+                                )
+                                .await;
+                            });
+                        }
                         let db3 = state.db.clone();
                         let git3 = state.git.clone();
                         let repos3 = state.repos_dir.clone();

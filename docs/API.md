@@ -193,6 +193,8 @@ SSO start routes redirect to the IdP when configured. If WorkOS/OIDC ENV is miss
 | `repo.actions.rerunRun` / `cancelRun` | Requeue or cancel a run; cancel on a finished run → `repo.actions.run_finished` | Session + Write+ |
 | `repo.actions.secrets.list` / `put` / `delete` | Repo Actions secrets (names only on list) | Session + Admin |
 | `repo.actions.getEnabled` / `setEnabled` | Per-repo Actions enable toggle | Session + Read+ / Admin |
+| `repo.actions.workflowTemplates.list` / `get` | Workflow-template catalog merged from builtin, instance, and org sources; `get` returns content with `$default-branch` substituted | Session + Read+ |
+| `repo.actions.workflows.create` | Draft a workflow file into `.github/workflows/` on a branch, a new PR, or an open PR head (`pull_number`); content is YAML-validated (`actions.invalid_workflow`) | Session + Write+ (classic `repo`\|`workflow`; FG `actions:write`) |
 | `repo.issues.getEnabled` / `setEnabled` | Per-repo Issues unit toggle (COL-13) | Session + Read+ / Admin |
 | `repo.pulls.getEnabled` / `setEnabled` | Per-repo Pull-requests unit toggle (COL-13) | Session + Read+ / Admin |
 | `repo.mirror.get` / `upsert` / `delete` / `syncNow` | Two-way remote mirror config + enqueue sync | Session + Admin |
@@ -201,6 +203,7 @@ SSO start routes redirect to the IdP when configured. If WorkOS/OIDC ENV is miss
 | `repo.commitStatus.create` / `list` | Commit statuses (Phase 13 + Actions publisher) | Session + Write+ / Read+ |
 | `admin.actions.createRegistrationToken` | Mint one-time runner registration token | Sys-admin |
 | `admin.actions.listRunners` | List registered runners (no secrets) | Sys-admin |
+| `admin.workflowTemplates.list` / `create` / `update` / `delete` / `setEnabled` | Instance workflow templates merged into every repo's Actions catalog | Sys-admin session |
 
 Unknown procedure → `rpc.unknown_procedure` (HTTP 404).
 

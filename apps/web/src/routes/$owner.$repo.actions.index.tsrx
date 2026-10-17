@@ -11,7 +11,7 @@ import type {
   ActionRunsListResponse,
   ActionWorkflowPublic,
 } from "@oxidean/api-client";
-import { CheckCircle2, Circle, Loader2, Play, Workflow, XCircle } from "@octanejs/lucide";
+import { CheckCircle2, Circle, Loader2, Play, Plus, Workflow, XCircle } from "@octanejs/lucide";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -25,6 +25,7 @@ import {
   filtersActive,
   type ActionsFilterDraft,
 } from "@/components/repo/actions-filters";
+import { WorkflowTemplateCatalog } from "@/components/repo/workflow-template-catalog";
 import { useRepoStore } from "@/lib/repo-store";
 import { formatRelative } from "@/lib/relative-time";
 import { fetchActionsListRuns, fetchActionsListWorkflows, fetchRepoGet } from "@/lib/ssr-repo";
@@ -33,6 +34,7 @@ import {
   actionsDispatchWorkflowMutation,
   actionsRunsQuery,
   actionsWorkflowsQuery,
+  actionsWorkflowTemplatesQuery,
   type ActionsRunFilters,
 } from "@/lib/actions-queries";
 import { cn } from "@/lib/utils";
@@ -256,6 +258,19 @@ function RepoActionsPageContent() @{
     (routeLoader?.kind === "ready" ? (routeLoader.workflows ?? []) : []);
   const dispatchable = workflows.filter((w) => w.supports_dispatch);
 
+  // Writer with no workflow files and no filters → inline template catalog.
+  // Wait for the workflows query to settle first so the catalog query does
+  // not fire during the pending flash.
+  const workflowsLoaded = workflowsQ.data !== undefined || routeLoader?.kind === "ready";
+  const showCatalog = canWrite && !hasFilters && workflowsLoaded && workflows.length === 0;
+  const catalogQ = useQuery({
+    ...actionsWorkflowTemplatesQuery(owner, repoName),
+    enabled: showCatalog && !!owner && !!repoName,
+  });
+  const catalogError = catalogQ.isError
+    ? String(catalogQ.error?.message ?? "Could not load workflow templates.")
+    : null;
+
   const qc = useQueryClient();
   const dispatchM = useMutation({
     ...actionsDispatchWorkflowMutation(),
@@ -326,16 +341,31 @@ function RepoActionsPageContent() @{
         title="Actions"
         description="Workflow runs for this repository."
         actions={
-          canWrite && dispatchable.length > 0 ? (
-            <Button
-              type="button"
-              size="sm"
-              data-testid="actions-run-workflow"
-              onClick={() => openDispatch()}
-            >
-              <Play aria-hidden size={14} />
-              Run workflow
-            </Button>
+          canWrite ? (
+            <div className="flex items-center gap-2">
+              <AppLink href={`/${owner}/${repoName}/actions/new` as string}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  data-testid="actions-new-workflow"
+                >
+                  <Plus aria-hidden size={14} />
+                  New workflow
+                </Button>
+              </AppLink>
+              {dispatchable.length > 0 ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  data-testid="actions-run-workflow"
+                  onClick={() => openDispatch()}
+                >
+                  <Play aria-hidden size={14} />
+                  Run workflow
+                </Button>
+              ) : null}
+            </div>
           ) : undefined
         }
       />
@@ -431,12 +461,30 @@ function RepoActionsPageContent() @{
                     description="Try broadening the filters or clear them to see all runs."
                   />;
                 } @else {
-                  <EmptyState
-                    className="mt-6"
-                    icon={<Workflow aria-hidden size={22} />}
-                    title="No workflow runs yet"
-                    description="Runs triggered by pushes and other events will appear here."
-                  />;
+                  @if (showCatalog) {
+                    <div className="mt-6">
+                      <h2 className="text-[18px] font-semibold text-foreground">
+                        Get started with Oxidean Actions
+                      </h2>
+                      <div className="mt-4">
+                        <WorkflowTemplateCatalog
+                          owner={owner}
+                          repo={repoName}
+                          refName={repo?.default_branch ?? "main"}
+                          data={catalogQ.data}
+                          loading={catalogQ.isPending}
+                          error={catalogError}
+                        />
+                      </div>
+                    </div>;
+                  } @else {
+                    <EmptyState
+                      className="mt-6"
+                      icon={<Workflow aria-hidden size={22} />}
+                      title="No workflow runs yet"
+                      description="Runs triggered by pushes and other events will appear here."
+                    />;
+                  }
                 }
               } @else {
                 <>

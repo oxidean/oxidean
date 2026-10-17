@@ -79,7 +79,7 @@ fn rfc3339_in(secs: i64) -> String {
         .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
 }
 
-fn rfc3339_expired(at: &str) -> bool {
+pub(crate) fn rfc3339_expired(at: &str) -> bool {
     match DateTime::parse_from_rfc3339(at) {
         Ok(dt) => dt.with_timezone(&Utc) <= Utc::now(),
         Err(_) => true,

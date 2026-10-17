@@ -98,6 +98,7 @@ jobs:
         "abc1234deadbeef",
         "refs/heads/main",
         Some(&uid),
+        None,
     )
     .await
     .unwrap();
@@ -135,6 +136,7 @@ jobs:
         "feedface0123456",
         "refs/heads/main",
         Some(&uid),
+        None,
     )
     .await
     .unwrap();
@@ -180,6 +182,7 @@ jobs:
         "push",
         "bada55c0ffee123",
         "refs/heads/main",
+        None,
         None,
     )
     .await

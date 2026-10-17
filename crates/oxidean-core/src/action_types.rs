@@ -289,3 +289,225 @@ pub struct AdminActionsListRunnersResponse {
 }
 
 pub type ActionListRunnersResponse = AdminActionsListRunnersResponse;
+
+/// Provenance of a workflow template in the `repo.actions.workflowTemplates`
+/// catalog.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum WorkflowTemplateProvenance {
+    /// Vendored from actions/starter-workflows.
+    Builtin,
+    /// Instance-managed (admin CRUD, `instance_workflow_templates` table).
+    Instance,
+    /// Published by the repository owner's `.github` repository under
+    /// `workflow-templates/`.
+    Org,
+}
+
+/// A workflow template in the catalog (GitHub "New workflow" parity).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct WorkflowTemplateSummary {
+    /// `builtin:<dir>/<file-stem>` | `instance:<slug>` | `org:<file-stem>`.
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    /// Properties `iconName`; absent when the source provides none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon_name: Option<String>,
+    /// `/api/…/template-icons/<icon_name>.svg` when the icon is servable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon_url: Option<String>,
+    #[serde(default)]
+    pub categories: Vec<String>,
+    /// Root-tree glob patterns used for `suggested` detection.
+    #[serde(default)]
+    pub file_patterns: Vec<String>,
+    /// Template file name — the default create target is
+    /// `.github/workflows/<filename>`.
+    pub filename: String,
+    pub provenance: WorkflowTemplateProvenance,
+    /// Human source hint — `@<org>/.github` for org templates, slug for
+    /// instance templates; absent for builtin.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_label: Option<String>,
+    /// True when any `file_patterns` entry matched the repository root tree.
+    #[serde(default)]
+    pub suggested: bool,
+    /// Distinct `uses:` refs the bundled runner cannot execute (anything not
+    /// `actions/checkout*`).
+    #[serde(default)]
+    pub unsupported_actions: Vec<String>,
+    /// Set when the template fails `parse_workflow_yaml`; content is still
+    /// returned verbatim.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parse_error: Option<String>,
+}
+
+/// `repo.actions.workflowTemplates.list` — merged catalog for a repository.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct WorkflowTemplatesListRequest {
+    pub owner: String,
+    pub name: String,
+    /// Optional branch/tag/SHA for suggestion matching; defaults to the
+    /// repository's default branch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_ref: Option<String>,
+    /// Exact category filter (case-insensitive).
+    #[serde(default)]
+    pub category: Option<String>,
+    /// Provenance filter: `builtin` | `instance` | `org`.
+    #[serde(default)]
+    pub source: Option<String>,
+    /// Case-insensitive substring match on name/description.
+    #[serde(default)]
+    pub query: Option<String>,
+    #[serde(default)]
+    pub page: Option<u32>,
+    #[serde(default)]
+    pub per_page: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct WorkflowTemplatesListResponse {
+    /// Subset of `templates` with `suggested == true`.
+    #[serde(default)]
+    pub suggested: Vec<WorkflowTemplateSummary>,
+    #[serde(default)]
+    pub templates: Vec<WorkflowTemplateSummary>,
+    /// Distinct categories across `templates` (GitHub display order where
+    /// known, then alphabetical).
+    #[serde(default)]
+    pub categories: Vec<String>,
+    /// Filtered template count before any pagination.
+    #[serde(default)]
+    pub total_count: u64,
+}
+
+/// `repo.actions.workflowTemplates.get` — full template content.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct WorkflowTemplateGetRequest {
+    pub owner: String,
+    pub name: String,
+    /// Catalog id (`builtin:ci/rust`, `instance:<slug>`, `org:<file-stem>`).
+    pub id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct WorkflowTemplateGetResponse {
+    pub template: WorkflowTemplateSummary,
+    /// Raw template content with `$default-branch` substituted for the
+    /// repository's default branch.
+    pub content: String,
+}
+
+/// `repo.actions.workflows.create` — draft a workflow file from a catalog
+/// template (`template_id`) or authored `content` onto a branch or an open PR.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct WorkflowCreateRequest {
+    pub owner: String,
+    pub name: String,
+    /// Catalog template id. Exactly one of `template_id` / `content`.
+    #[serde(default)]
+    pub template_id: Option<String>,
+    /// Authored workflow YAML. Exactly one of `template_id` / `content`.
+    #[serde(default)]
+    pub content: Option<String>,
+    /// Destination path. Defaults to `.github/workflows/<template filename>`
+    /// for templates; required for authored content. Must be
+    /// `.github/workflows/<flat-name>.yml|.yaml`.
+    #[serde(default)]
+    pub path: Option<String>,
+    /// Commit message (default: `ci: add <filename> workflow`).
+    #[serde(default)]
+    pub message: Option<String>,
+    /// When set, commit onto this open PR's head branch (same-repo PRs only).
+    #[serde(default)]
+    pub pull_number: Option<i64>,
+    #[serde(flatten)]
+    pub target: crate::repo_types::RepoFileCommitOptions,
+}
+
+/// Instance-managed workflow template as stored in `instance_workflow_templates`.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct InstanceWorkflowTemplatePublic {
+    pub id: String,
+    pub slug: String,
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon_name: Option<String>,
+    #[serde(default)]
+    pub categories: Vec<String>,
+    #[serde(default)]
+    pub file_patterns: Vec<String>,
+    pub filename: String,
+    #[serde(default)]
+    pub content: String,
+    pub enabled: bool,
+    pub created_by_user_id: String,
+    #[serde(default)]
+    pub created_at: String,
+    #[serde(default)]
+    pub updated_at: String,
+}
+
+/// `admin.workflowTemplates.list` response.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct AdminWorkflowTemplatesListResponse {
+    #[serde(default)]
+    pub templates: Vec<InstanceWorkflowTemplatePublic>,
+}
+
+/// `admin.workflowTemplates.create` input.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct AdminWorkflowTemplateCreateRequest {
+    pub slug: String,
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub icon_name: Option<String>,
+    #[serde(default)]
+    pub categories: Vec<String>,
+    #[serde(default)]
+    pub file_patterns: Vec<String>,
+    /// Default `<slug>.yml`.
+    #[serde(default)]
+    pub filename: Option<String>,
+    pub content: String,
+}
+
+/// `admin.workflowTemplates.update` input — only set fields change.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct AdminWorkflowTemplateUpdateRequest {
+    pub id: String,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub icon_name: Option<Option<String>>,
+    #[serde(default)]
+    pub categories: Option<Vec<String>>,
+    #[serde(default)]
+    pub file_patterns: Option<Vec<String>>,
+    #[serde(default)]
+    pub filename: Option<String>,
+    #[serde(default)]
+    pub content: Option<String>,
+}
+
+/// `admin.workflowTemplates.setEnabled` input.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct AdminWorkflowTemplateSetEnabledRequest {
+    pub id: String,
+    pub enabled: bool,
+}
+
+/// `admin.workflowTemplates.delete` input.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct AdminWorkflowTemplateDeleteRequest {
+    pub id: String,
+}

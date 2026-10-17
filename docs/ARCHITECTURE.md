@@ -250,6 +250,7 @@ oxidean/
 - **Cloud gateway (`deploy/cloud`)** — File-configured Caddy mirrors Compose path priorities for Railway-class hosts; IaC in `.railway/railway.ts` (see [DEPLOYMENT.md](DEPLOYMENT.md)).
 - **`deploy/`** — Traefik notes for Compose; cloud ingress under `deploy/cloud/`.
 - **Stack presets** — Day-one `/new` templates are in-repo packs under `crates/oxidean-api/assets/stack-presets/` (community PRs; no marketplace UI yet). See [guides/stack-presets.md](guides/stack-presets.md).
+- **Workflow templates** — The Actions "New workflow" catalog merges vendored `actions/starter-workflows`, admin instance templates, and org `.github` repos. See [guides/workflow-templates.md](guides/workflow-templates.md).
 - **Repos volume** — Compose binds `./var/repos` for bare git objects and `./var/lfs` for Git LFS OIDs; cloud mounts `forge-data` at `/var`. Knobs in [CONFIGURATION.md](CONFIGURATION.md) (`OXIDEAN_REPOS_DIR`, `OXIDEAN_LFS_DIR`, orphan/gc/LFS intervals).
 
 
@@ -268,4 +269,4 @@ Actions lives in `crates/oxidean-api/src/actions/`:
 
 **Registered runners only:** jobs stay `queued` until a compatible runner `fetch_task`s them. Custom `runs-on` labels match declared runner labels (`label[:schema[:args]]`, D-ACT-09). Official runner: `oxidean-runner` (Rust, `crates/oxidean-runner`) speaking the `/api/actions/*` JSON protocol; image built from `docker/oxidean-runner`. Compose profile `actions` — see [DEPLOYMENT.md](DEPLOYMENT.md). Operators bring compute; Oxidean does not sell managed minutes (ACT-07 / D-ACT-10).
 
-Commit status contexts for Phase 13 required checks: `{workflow_name} / {job_key}` (YAML job id), published on job state transitions and queryable via `repo.commitStatus.list` (D-ACT-15 / D-ACT-16).
+Commit status contexts for Phase 13 required checks: `{workflow_name} / {job_key}` (YAML job id), published on job state transitions and queryable via `repo.commitStatus.list` (D-ACT-15 / D-ACT-16). Job environments, `OXIDEAN_*`/`GITHUB_*` variables, file commands, and the per-job `OXIDEAN_TOKEN` are documented in [guides/actions-runtime.md](guides/actions-runtime.md).

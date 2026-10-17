@@ -146,7 +146,7 @@ fn validate_branch_name(raw: &str, field: &str) -> Result<(), AppError> {
 }
 
 /// Commit message: trimmed, NUL-free, length-capped; blank → per-op default.
-fn commit_message(raw: &str, default: &str) -> Result<String, AppError> {
+pub(crate) fn commit_message(raw: &str, default: &str) -> Result<String, AppError> {
     if raw.contains('\0') {
         return Err(invalid_input("commit message contains NUL"));
     }
@@ -160,7 +160,7 @@ fn commit_message(raw: &str, default: &str) -> Result<String, AppError> {
 
 /// Resolve the base branch (`target.branch` or the repo default) and validate
 /// every branch field in the request.
-fn resolve_base_branch(
+pub(crate) fn resolve_base_branch(
     accessible: &AccessibleRepo,
     target: &RepoFileCommitOptions,
 ) -> Result<String, AppError> {
@@ -228,7 +228,7 @@ async fn assert_ancestors_clear(
 }
 
 /// `path` must be completely unused on `branch`.
-async fn assert_path_creatable(
+pub(crate) async fn assert_path_creatable(
     ctx: &RpcCtx,
     bare: &Path,
     branch: &str,
@@ -376,7 +376,7 @@ fn generate_web_edit_branch(username: &str) -> String {
 /// (direct vs new-branch + PR), run the signed commit, then fan out activity,
 /// webhooks, PR sync, Actions and mirrors exactly like a receive-pack push
 /// (GIT-19).
-async fn commit_changes(
+pub(crate) async fn commit_changes(
     ctx: &RpcCtx,
     accessible: &AccessibleRepo,
     user: &UserRow,

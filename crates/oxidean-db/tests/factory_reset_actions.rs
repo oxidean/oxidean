@@ -67,6 +67,7 @@ async fn factory_reset_actions_wipes_runners_runs_jobs_secrets() {
             "refs/heads/main",
             "CI",
             Some(&owner.id),
+            None,
         )
         .await
         .expect("run");

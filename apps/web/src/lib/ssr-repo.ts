@@ -192,6 +192,14 @@ export async function fetchActionsListWorkflows(data: OwnerName & { git_ref?: st
   });
 }
 
+/** `repo.actions.workflowTemplates.list` — merged catalog (unpaged). */
+export async function fetchActionsWorkflowTemplates(data: OwnerName) {
+  return apiClient.repo.actions.workflowTemplates.list({
+    owner: data.owner,
+    name: data.name,
+  });
+}
+
 /** `repo.actions.getRun`. */
 export async function fetchActionsGetRun(data: OwnerName & { run_id: string }) {
   return apiClient.repo.actions.getRun({

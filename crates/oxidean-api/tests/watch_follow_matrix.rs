@@ -1000,6 +1000,7 @@ jobs:
         "deadbeef",
         "refs/heads/main",
         Some(&pusher_id),
+        None,
     )
     .await
     .unwrap();
@@ -1146,6 +1147,7 @@ async fn workflow_run_failure_fanout() {
         "deadbeef",
         "refs/heads/main",
         Some(&pusher_id),
+        None,
     )
     .await
     .unwrap();
@@ -1267,6 +1269,7 @@ async fn workflow_run_cancel_fanout_and_finished_guard() {
         "deadbeef",
         "refs/heads/main",
         Some(&owner_id),
+        None,
     )
     .await
     .unwrap();

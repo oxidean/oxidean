@@ -117,6 +117,7 @@ async fn dispatch_push_inner(
             treeish,
             &head_ref,
             pusher_id,
+            None,
         )
         .await?;
     }
@@ -149,6 +150,7 @@ pub async fn enqueue_run(
     head_sha: &str,
     head_ref: &str,
     triggered_by: Option<&str>,
+    head_repo_id: Option<&str>,
 ) -> Result<(String, Vec<String>), String> {
     let run_id = Uuid::new_v4().to_string();
     db.insert_action_run(
@@ -161,6 +163,7 @@ pub async fn enqueue_run(
         head_ref,
         &doc.name,
         triggered_by,
+        head_repo_id,
     )
     .await?;
     let mut job_ids = Vec::new();
@@ -236,6 +239,7 @@ pub async fn dispatch_push_for_sha(
             head_sha,
             head_ref,
             pusher_id,
+            None,
         )
         .await?;
         n += 1;

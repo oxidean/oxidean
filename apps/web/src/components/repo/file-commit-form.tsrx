@@ -178,6 +178,7 @@ export function FileCommitForm({
           <RadioGroup
             value={field.state.value}
             disabled={disabled}
+            className="w-max"
             onValueChange={(v) => {
               if (v === "direct" || v === "branch") field.handleChange(v);
             }}
@@ -235,11 +236,20 @@ export function FileCommitForm({
       <AppLink href={cancelHref as string} className="text-[14px] text-muted-foreground underline">
         Cancel
       </AppLink>
-      @if (policyPending) {
-        <span className="text-[13px] text-muted-foreground">
-          Checking branch protection…
-        </span>;
-      }
+      <span
+        className={cn(
+          "text-[13px]",
+          policyPending ? "text-muted-foreground" : "text-destructive",
+          policyPending || !policy ? "" : "hidden",
+        )}
+        role={!policyPending && !policy ? "alert" : undefined}
+      >
+        {
+          (policyPending
+            ? "Checking branch protection…"
+            : "Could not check branch protection — reload the page.") as string
+        }
+      </span>
     </div>
   </form>;
 }

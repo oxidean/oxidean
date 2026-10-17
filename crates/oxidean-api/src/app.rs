@@ -603,8 +603,19 @@ pub(crate) async fn build_rpc_ctx(
                 client.ip_address.as_deref(),
             )
             .await?;
-            bearer::touch_last_used(&state.db, &identity.token_id, client.ip_address.as_deref())
+            // Job tokens live in `action_job_tokens`, not `personal_access_tokens`
+            // — skip the PAT `last_used` write for them.
+            if !identity
+                .token_prefix
+                .starts_with(crate::actions::job_tokens::JOB_TOKEN_PREFIX)
+            {
+                bearer::touch_last_used(
+                    &state.db,
+                    &identity.token_id,
+                    client.ip_address.as_deref(),
+                )
                 .await;
+            }
             (Some(session), Some(identity))
         }
         RpcCredential::Anonymous => (None, None),

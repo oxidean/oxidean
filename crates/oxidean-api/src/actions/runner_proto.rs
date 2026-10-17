@@ -3,7 +3,7 @@
 
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
-use axum::routing::post;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -24,6 +24,12 @@ pub fn router() -> Router<AppState> {
         .route("/fetch_task", post(fetch_task))
         .route("/update_task", post(update_task))
         .route("/update_log", post(update_log))
+        // Anonymous template-icon route (GET …/template-icons/{name}.svg) —
+        // shares the /api/actions nest; matchit captures the whole segment.
+        .route(
+            "/template-icons/{name}",
+            get(crate::actions::templates::template_icon),
+        )
 }
 
 fn bearer_token(headers: &HeaderMap) -> Option<String> {
@@ -152,6 +158,31 @@ struct FetchTaskResponse {
     /// Repository coordinates — runners clone {origin}/{owner}/{repo}.git.
     repository_owner: Option<String>,
     repository_name: Option<String>,
+    /// Triggering event name (`push`, `pull_request`, `workflow_dispatch`, …).
+    event: Option<String>,
+    run_number: Option<i64>,
+    /// Always 1 — requeueing reuses the run row (`requeue_run` resets jobs in
+    /// place); there is no attempt counter to increment.
+    run_attempt: Option<i64>,
+    /// Username of `triggered_by` ("" when the run was system-triggered).
+    actor: Option<String>,
+    actor_id: Option<String>,
+    repository_id: Option<String>,
+    /// Owner user id or org id, whichever `owner_ref_for_repo` resolves.
+    repository_owner_id: Option<String>,
+    /// Instance public origin (OXIDEAN_PUBLIC_ORIGIN / Railway gateway).
+    server_url: Option<String>,
+    /// PR metadata — base ref + number for `pull_request` runs only.
+    base_ref: Option<String>,
+    pull_number: Option<i64>,
+    /// Per-job `oxidean_job_…` bearer token (OXIDEAN_TOKEN); absent when the
+    /// workflow's `contents` permission is `none` or the run was
+    /// system-triggered.
+    job_token: Option<String>,
+    /// Granted contents level for `job_token`: `read` | `write` | "".
+    job_token_permission: Option<String>,
+    /// `{owner}/{repo}/{workflow_path}@{head_ref}`.
+    workflow_ref: Option<String>,
 }
 
 async fn fetch_task(
@@ -178,24 +209,87 @@ async fn fetch_task(
                 .await
                 .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
                 .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
-            let secrets =
+            // PR provenance must resolve BEFORE secrets/token minting: a
+            // `pull_request` run whose head commit cannot be traced to a
+            // same-repository PR head (fork head, stale synchronize, deleted
+            // PR) gets no repo secrets and a read-only job token — GitHub's
+            // fork-PR model, failing closed on any lookup miss.
+            let pr_ctx = pull_context_for_run(&state.db, &run).await;
+            let secrets = if pr_ctx.trusted {
                 crate::actions::secrets::decrypted_secrets_for_repo(&state.db, &run.repository_id)
                     .await
-                    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-            let (steps, workflow_name) = job_steps_at_head(&state, &run, &j.job_key)
-                .await
-                .unwrap_or((serde_json::Value::Array(vec![]), run.workflow_name.clone()));
+                    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+            } else {
+                std::collections::HashMap::new()
+            };
+            let (steps, workflow_name, mut contents_permission) =
+                job_steps_at_head(&state, &run, &j.job_key)
+                    .await
+                    .unwrap_or((
+                        serde_json::Value::Array(vec![]),
+                        run.workflow_name.clone(),
+                        crate::actions::ContentsPermission::Read,
+                    ));
+            if !pr_ctx.trusted && contents_permission == crate::actions::ContentsPermission::Write {
+                contents_permission = crate::actions::ContentsPermission::Read;
+            }
             let repo = state
                 .db
                 .find_repository_by_id(&run.repository_id)
                 .await
                 .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
                 .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
-            let owner_slug = crate::repo::owner_ref_for_repo(&state.db, &repo)
+            let owner_ref = crate::repo::owner_ref_for_repo(&state.db, &repo)
                 .await
                 .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-                .map(|o| o.slug().to_string())
                 .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
+            let owner_slug = owner_ref.slug().to_string();
+            let owner_id = owner_ref.id().to_string();
+
+            // Triggering actor — "" when the run was system-triggered.
+            let (actor, actor_id) = match run.triggered_by.as_deref() {
+                Some(uid) => {
+                    let name = state
+                        .db
+                        .find_user_by_id(uid)
+                        .await
+                        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+                        .map(|u| u.username)
+                        .unwrap_or_default();
+                    (name, uid.to_string())
+                }
+                None => (String::new(), String::new()),
+            };
+            let base_ref = pr_ctx.base_ref.clone();
+            let pull_number = pr_ctx.pull_number;
+
+            // Per-job OXIDEAN_TOKEN — minted at claim so the grant reflects the
+            // workflow's effective `contents` permission at head_sha.
+            let (job_token, job_token_permission) =
+                match crate::actions::job_tokens::mint_job_token(
+                    &state.db,
+                    &run,
+                    &repo,
+                    &owner_ref,
+                    &j.id,
+                    contents_permission,
+                )
+                .await
+                {
+                    Ok(Some((plaintext, perm))) => (Some(plaintext), perm.as_str().to_string()),
+                    Ok(None) => (None, String::new()),
+                    Err(e) => {
+                        tracing::error!(error = %e, job_id = %j.id, "mint_job_token failed");
+                        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+                    }
+                };
+
+            let workflow_ref = format!(
+                "{}/{}/{}@{}",
+                owner_slug, repo.name, run.workflow_path, run.head_ref
+            );
+            let server_url = crate::public_origin::resolve_public_origin();
+
             // Keep prost types linked when regenerating.
             let _ = pb::FetchTaskResponse {
                 job_id: j.id.clone(),
@@ -210,20 +304,46 @@ async fn fetch_task(
                 secrets_json: serde_json::to_string(&secrets).unwrap_or_else(|_| "{}".into()),
                 repository_owner: owner_slug.clone(),
                 repository_name: repo.name.clone(),
+                event: run.event.clone(),
+                run_number: run.run_number,
+                run_attempt: 1,
+                actor: actor.clone(),
+                actor_id: actor_id.clone(),
+                repository_id: run.repository_id.clone(),
+                repository_owner_id: owner_id.clone(),
+                server_url: server_url.clone(),
+                base_ref: base_ref.clone(),
+                pull_number,
+                job_token: job_token.clone().unwrap_or_default(),
+                job_token_permission: job_token_permission.clone(),
+                workflow_ref: workflow_ref.clone(),
             };
             FetchTaskResponse {
                 job_id: Some(j.id),
                 run_id: Some(j.run_id),
                 job_key: Some(j.job_key),
                 runs_on: Some(runs_on),
-                workflow_path: Some(run.workflow_path),
+                workflow_path: Some(run.workflow_path.clone()),
                 workflow_name: Some(workflow_name),
-                head_sha: Some(run.head_sha),
-                head_ref: Some(run.head_ref),
+                head_sha: Some(run.head_sha.clone()),
+                head_ref: Some(run.head_ref.clone()),
                 steps: Some(steps),
                 secrets: Some(secrets),
                 repository_owner: Some(owner_slug),
                 repository_name: Some(repo.name),
+                event: Some(run.event),
+                run_number: Some(run.run_number),
+                run_attempt: Some(1),
+                actor: Some(actor),
+                actor_id: Some(actor_id),
+                repository_id: Some(run.repository_id),
+                repository_owner_id: Some(owner_id),
+                server_url: Some(server_url),
+                base_ref: Some(base_ref),
+                pull_number: Some(pull_number),
+                job_token,
+                job_token_permission: Some(job_token_permission),
+                workflow_ref: Some(workflow_ref),
             }
         }
         None => FetchTaskResponse {
@@ -239,16 +359,94 @@ async fn fetch_task(
             secrets: None,
             repository_owner: None,
             repository_name: None,
+            event: None,
+            run_number: None,
+            run_attempt: None,
+            actor: None,
+            actor_id: None,
+            repository_id: None,
+            repository_owner_id: None,
+            server_url: None,
+            base_ref: None,
+            pull_number: None,
+            job_token: None,
+            job_token_permission: None,
+            workflow_ref: None,
         },
     }))
 }
 
-/// Re-read workflow YAML at the run's head and extract steps for `job_key`.
+/// PR provenance for `pull_request` runs.
+///
+/// `trusted` is the security boundary, decided by the `head_repo_id` recorded
+/// on the run at dispatch: `true` only when it is present and equals the run's
+/// `repository_id` (a same-repo branch PR). Fork heads and `pull_request` runs
+/// with no recorded provenance resolve `false` — callers must treat that as
+/// untrusted (no secrets, read-only token). Non-`pull_request` events are
+/// always trusted.
+struct PullRunContext {
+    base_ref: String,
+    pull_number: i64,
+    trusted: bool,
+}
+
+async fn pull_context_for_run(
+    db: &oxidean_db::Database,
+    run: &oxidean_db::ActionRunRow,
+) -> PullRunContext {
+    if run.event != "pull_request" {
+        return PullRunContext {
+            base_ref: String::new(),
+            pull_number: 0,
+            trusted: true,
+        };
+    }
+    let trusted = run.head_repo_id.as_deref() == Some(run.repository_id.as_str());
+    // Cosmetic PR metadata (base ref + number) — best effort from the open
+    // pulls list. Two pulls can legitimately share a head SHA (a fork and a
+    // same-repo branch at the same commit), so the ref is the discriminator
+    // before falling back to SHA-only and ref-only matches.
+    let short = run
+        .head_ref
+        .strip_prefix("refs/heads/")
+        .unwrap_or(&run.head_ref);
+    let pulls = db
+        .list_pulls_for_repo(&run.repository_id, Some("open"), 0, 100)
+        .await
+        .map(|(rows, _)| rows)
+        .unwrap_or_default();
+    let (base_ref, pull_number) = pulls
+        .iter()
+        .find(|p| p.head_sha == run.head_sha && (p.head_ref == short || p.head_ref == run.head_ref))
+        .or_else(|| pulls.iter().find(|p| p.head_sha == run.head_sha))
+        .or_else(|| {
+            pulls
+                .iter()
+                .find(|p| p.head_ref == short || p.head_ref == run.head_ref)
+        })
+        .map(|p| (p.base_ref.clone(), p.number))
+        .unwrap_or_else(|| (String::new(), 0));
+    PullRunContext {
+        base_ref,
+        pull_number,
+        trusted,
+    }
+}
+
+/// Re-read workflow YAML at the run's head; extract the job's steps, the
+/// workflow name, and its effective `contents` permission.
 async fn job_steps_at_head(
     state: &AppState,
     run: &oxidean_db::ActionRunRow,
     job_key: &str,
-) -> Result<(serde_json::Value, String), StatusCode> {
+) -> Result<
+    (
+        serde_json::Value,
+        String,
+        crate::actions::ContentsPermission,
+    ),
+    StatusCode,
+> {
     let repo = state
         .db
         .find_repository_by_id(&run.repository_id)
@@ -278,7 +476,11 @@ async fn job_steps_at_head(
         .find(|j| j.id == job_key)
         .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
     let steps = serde_json::to_value(&job.steps).unwrap_or_else(|_| serde_json::json!([]));
-    Ok((steps, wf.document.name))
+    Ok((
+        steps,
+        wf.document.name.clone(),
+        crate::actions::effective_contents_permission(&wf.document, job),
+    ))
 }
 
 #[derive(Debug, Deserialize)]
@@ -321,6 +523,12 @@ async fn update_task(
         .update_action_job_status(&job.id, status)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    // Terminal state revokes the per-job OXIDEAN_TOKEN (idempotent).
+    if matches!(status, "success" | "failure" | "cancelled") {
+        if let Err(e) = state.db.revoke_action_job_token_for_job(&job.id).await {
+            tracing::warn!(error = %e, job_id = %job.id, "failed to revoke job token");
+        }
+    }
     if let Err(e) = state.db.recompute_action_run_status(&job.run_id).await {
         tracing::warn!(error = %e, run_id = %job.run_id, "failed to roll up run status");
     }

@@ -238,6 +238,7 @@ jobs:
             &tip,
             "refs/heads/feature",
             Some(&uid),
+            Some(&repo_id),
             true,
         )
         .await
@@ -315,6 +316,7 @@ jobs:
         &tip2,
         "refs/heads/feature",
         Some(&owner.id),
+        Some(&repo2.id),
         true,
     )
     .await

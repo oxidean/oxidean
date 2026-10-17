@@ -1,4 +1,9 @@
-import type { ActionJobLogResponse } from "@oxidean/api-client";
+import type {
+  ActionJobLogResponse,
+  AdminWorkflowTemplatesListResponse,
+  WorkflowTemplateGetResponse,
+  WorkflowTemplatesListResponse,
+} from "@oxidean/api-client";
 import type { QueryFunctionContext } from "@octanejs/tanstack-query";
 import {
   actionsCancelRunMutationOptions,
@@ -106,6 +111,46 @@ export function actionsJobLogQuery(owner: string, name: string, runId: string, j
 
 export function actionsWorkflowsQuery(owner: string, name: string, gitRef?: string) {
   return actionsListWorkflowsQueryOptions(apiClient, { owner, name, git_ref: gitRef });
+}
+
+/** `repo.actions.workflowTemplates.list` — full catalog (server returns all
+ * templates when page/per_page are omitted). */
+export function actionsWorkflowTemplatesQuery(owner: string, name: string) {
+  return {
+    queryKey: ["repo", "actions", "workflowTemplates", owner, name] as const,
+    queryFn: async (): Promise<WorkflowTemplatesListResponse> => {
+      const res = await apiClient.repo.actions.workflowTemplates.list({ owner, name });
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+    staleTime: 60_000,
+  };
+}
+
+/** `repo.actions.workflowTemplates.get` — one template's substituted content. */
+export function actionsWorkflowTemplateQuery(owner: string, name: string, id: string) {
+  return {
+    queryKey: ["repo", "actions", "workflowTemplate", owner, name, id] as const,
+    queryFn: async (): Promise<WorkflowTemplateGetResponse> => {
+      const res = await apiClient.repo.actions.workflowTemplates.get({ owner, name, id });
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+    enabled: Boolean(id),
+    staleTime: 60_000,
+  };
+}
+
+/** `admin.workflowTemplates.list` — all instance workflow templates. */
+export function adminWorkflowTemplatesQuery() {
+  return {
+    queryKey: ["admin", "workflowTemplates", "list"] as const,
+    queryFn: async (): Promise<AdminWorkflowTemplatesListResponse> => {
+      const res = await apiClient.admin.workflowTemplates.list();
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
 }
 
 export function actionsDispatchWorkflowMutation() {

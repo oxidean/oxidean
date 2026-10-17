@@ -120,6 +120,8 @@ validation, and error codes are identical to `/api/rpc`.
 | `issue_list_comments` | `issue.comments.list` | |
 | `pull_list` / `pull_get` | `pull.list` / `pull.get` | `state`: open\|closed\|merged\|all |
 | `actions_list_runs` / `actions_get_run` | `repo.actions.listRuns` / `repo.actions.getRun` | |
+| `workflow_templates_list` / `workflow_template_get` | `repo.actions.workflowTemplates.list` / `repo.actions.workflowTemplates.get` | Template catalog (builtin + instance + org); `suggested` is computed from the repo tree |
+| `workflow_create` | `repo.actions.workflows.create` | Draft a workflow into `.github/workflows/`; `pull_number` commits onto an open PR head, `new_branch` opens a PR |
 | `packages_list` | `packages.list` | `owner` slug or `repository_id` |
 | `search_repos` | `repo.explore` | Public repo search/browse |
 | `search_issues` / `search_pulls` / `search_code` | `repo.search` | `type` fixed per tool; `q` required |

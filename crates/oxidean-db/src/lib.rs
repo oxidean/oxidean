@@ -50,10 +50,11 @@ pub mod user_emails;
 pub mod users;
 pub mod watches;
 pub mod webhooks;
+pub mod workflow_templates;
 
 pub use actions::{
-    ActionJobRow, ActionRunFilter, ActionRunRow, ActionRunnerRow, ActionSecretCipherRow,
-    ActionSecretMetaRow,
+    ActionJobRow, ActionJobTokenRow, ActionRunFilter, ActionRunRow, ActionRunnerRow,
+    ActionSecretCipherRow, ActionSecretMetaRow,
 };
 pub use audit_events::AuditEventRow;
 pub use auth_settings::AuthSettingsRow;
@@ -104,6 +105,7 @@ pub use user_emails::UserEmailRow;
 pub use users::UserRow;
 pub use watches::RepoWatcherListRow;
 pub use webhooks::{WebhookDeliveryAttemptRow, WebhookDeliveryRow, WebhookRow};
+pub use workflow_templates::InstanceWorkflowTemplateRow;
 
 #[derive(Clone)]
 pub struct Database {
@@ -3327,6 +3329,7 @@ impl Database {
         head_ref: &str,
         title: &str,
         triggered_by: Option<&str>,
+        head_repo_id: Option<&str>,
     ) -> Result<actions::ActionRunRow, String> {
         actions::insert_run(
             self.require_pool()?,
@@ -3339,6 +3342,7 @@ impl Database {
             head_ref,
             title,
             triggered_by,
+            head_repo_id,
         )
         .await
     }
@@ -3532,6 +3536,51 @@ impl Database {
 
     pub async fn update_action_job_status(&self, job_id: &str, status: &str) -> Result<(), String> {
         actions::update_job_status(self.require_pool()?, job_id, status).await
+    }
+
+    /// Per-job bearer token (`OXIDEAN_TOKEN`) — upserts on `job_id` so a
+    /// requeued job re-mints cleanly. `expires_at` is RFC3339 text.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn insert_action_job_token(
+        &self,
+        id: &str,
+        job_id: &str,
+        run_id: &str,
+        repository_id: &str,
+        user_id: &str,
+        permission: &str,
+        token_hash: &str,
+        expires_at: &str,
+    ) -> Result<(), String> {
+        actions::insert_action_job_token(
+            self.require_pool()?,
+            id,
+            job_id,
+            run_id,
+            repository_id,
+            user_id,
+            permission,
+            token_hash,
+            expires_at,
+        )
+        .await
+    }
+
+    /// Hash lookup returns revoked/expired rows too — the bearer edge
+    /// distinguishes revoked tokens from nonexistent ones.
+    pub async fn find_action_job_token_by_hash(
+        &self,
+        token_hash: &str,
+    ) -> Result<Option<ActionJobTokenRow>, String> {
+        actions::find_action_job_token_by_hash(self.require_pool()?, token_hash).await
+    }
+
+    pub async fn revoke_action_job_token_for_job(&self, job_id: &str) -> Result<(), String> {
+        actions::revoke_action_job_token_for_job(self.require_pool()?, job_id).await
+    }
+
+    pub async fn revoke_action_job_tokens_for_run(&self, run_id: &str) -> Result<(), String> {
+        actions::revoke_action_job_tokens_for_run(self.require_pool()?, run_id).await
     }
 
     pub async fn recompute_action_run_status(&self, run_id: &str) -> Result<(), String> {
@@ -4790,5 +4839,103 @@ impl Database {
         viewer_user_id: Option<&str>,
     ) -> Result<Vec<TemplateRepoListRow>, String> {
         templates::list_template_repositories(self.require_pool()?, viewer_user_id).await
+    }
+
+    // --- instance workflow templates (actions.templates catalog) ---
+
+    pub async fn list_instance_workflow_templates(
+        &self,
+        enabled_only: bool,
+    ) -> Result<Vec<InstanceWorkflowTemplateRow>, String> {
+        workflow_templates::list_instance_workflow_templates(self.require_pool()?, enabled_only)
+            .await
+    }
+
+    pub async fn find_instance_workflow_template_by_id(
+        &self,
+        id: &str,
+    ) -> Result<Option<InstanceWorkflowTemplateRow>, String> {
+        workflow_templates::find_instance_workflow_template_by_id(self.require_pool()?, id).await
+    }
+
+    pub async fn find_instance_workflow_template_by_slug(
+        &self,
+        slug: &str,
+    ) -> Result<Option<InstanceWorkflowTemplateRow>, String> {
+        workflow_templates::find_instance_workflow_template_by_slug(self.require_pool()?, slug)
+            .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn insert_instance_workflow_template(
+        &self,
+        id: &str,
+        slug: &str,
+        name: &str,
+        description: &str,
+        icon_name: Option<&str>,
+        categories_json: &str,
+        file_patterns_json: &str,
+        filename: &str,
+        content: &str,
+        created_by_user_id: &str,
+    ) -> Result<InstanceWorkflowTemplateRow, String> {
+        workflow_templates::insert_instance_workflow_template(
+            self.require_pool()?,
+            id,
+            slug,
+            name,
+            description,
+            icon_name,
+            categories_json,
+            file_patterns_json,
+            filename,
+            content,
+            created_by_user_id,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn update_instance_workflow_template(
+        &self,
+        id: &str,
+        name: &str,
+        description: &str,
+        icon_name: Option<&str>,
+        categories_json: &str,
+        file_patterns_json: &str,
+        filename: &str,
+        content: &str,
+    ) -> Result<(), String> {
+        workflow_templates::update_instance_workflow_template(
+            self.require_pool()?,
+            id,
+            name,
+            description,
+            icon_name,
+            categories_json,
+            file_patterns_json,
+            filename,
+            content,
+        )
+        .await
+    }
+
+    pub async fn set_instance_workflow_template_enabled(
+        &self,
+        id: &str,
+        enabled: bool,
+    ) -> Result<(), String> {
+        workflow_templates::set_instance_workflow_template_enabled(
+            self.require_pool()?,
+            id,
+            enabled,
+        )
+        .await
+    }
+
+    pub async fn delete_instance_workflow_template(&self, id: &str) -> Result<(), String> {
+        workflow_templates::delete_instance_workflow_template(self.require_pool()?, id).await
     }
 }

@@ -690,6 +690,16 @@ fn required_procedures(cmd: &Command) -> Vec<String> {
             }
             p
         }
+        Command::WorkflowTemplateList { .. } => one("repo.actions.workflowTemplates.list"),
+        Command::WorkflowTemplateView { .. } => one("repo.actions.workflowTemplates.get"),
+        Command::WorkflowCreate { template, path, .. } => {
+            let mut p = vec!["repo.actions.workflows.create".to_string()];
+            // --template without --path resolves the default filename first.
+            if template.is_some() && path.is_none() {
+                p.push("repo.actions.workflowTemplates.get".into());
+            }
+            p
+        }
         Command::SecretList { .. } => one("repo.actions.secrets.list"),
         Command::SecretSet { .. } => one("repo.actions.secrets.put"),
         Command::SecretDelete { .. } => one("repo.actions.secrets.delete"),
@@ -1932,6 +1942,94 @@ pub async fn dispatch(inv: &Invocation, rt: &Runtime) -> Result<Out, CliError> {
             )
             .await
         }
+        Command::WorkflowTemplateList {
+            repo,
+            category,
+            source,
+            search,
+            suggested,
+        } => {
+            let mut input = repo_input(repo)?;
+            let m = input.as_object_mut().unwrap();
+            opt(m, "category", category.clone());
+            opt(m, "source", source.clone());
+            opt(m, "query", search.clone());
+            let suggested_only = *suggested;
+            invoke(
+                g,
+                rt,
+                "repo.actions.workflowTemplates.list",
+                input,
+                move |d| output::workflow_template_list(d, suggested_only),
+            )
+            .await
+        }
+        Command::WorkflowTemplateView { repo, id } => {
+            let mut input = repo_input(repo)?;
+            input
+                .as_object_mut()
+                .unwrap()
+                .insert("id".into(), json!(id));
+            invoke(
+                g,
+                rt,
+                "repo.actions.workflowTemplates.get",
+                input,
+                output::blob,
+            )
+            .await
+        }
+        Command::WorkflowCreate {
+            repo,
+            template,
+            file,
+            path,
+            pull_number,
+            branch,
+            new_branch,
+            no_pr,
+            message,
+            pr_title,
+            pr_body,
+        } => {
+            let mut input = repo_input(repo)?;
+            let m = input.as_object_mut().unwrap();
+            let mut path = path.clone();
+            if let Some(t) = template {
+                m.insert("template_id".into(), json!(t));
+                if path.is_none() {
+                    // Fetch the default filename so the request — and the
+                    // confirmation line — name the path explicitly.
+                    let mut gi = repo_input(repo)?;
+                    gi.as_object_mut().unwrap().insert("id".into(), json!(t));
+                    let d = call(g, rt, "repo.actions.workflowTemplates.get", gi).await?;
+                    let filename = output::s(&d["template"], "filename").unwrap_or("main.yml");
+                    path = Some(format!(".github/workflows/{filename}"));
+                }
+            }
+            if let Some(src) = file {
+                m.insert("content".into(), json!(read_body_source(src)?));
+            }
+            opt(m, "path", path.clone());
+            opt(m, "message", message.clone());
+            if let Some(num) = pull_number {
+                m.insert("pull_number".into(), json!(num));
+            }
+            opt(m, "branch", branch.clone());
+            opt(m, "new_branch", new_branch.clone());
+            if *no_pr {
+                m.insert("open_pr".into(), json!(false));
+            }
+            opt(m, "pr_title", pr_title.clone());
+            opt(m, "pr_body", pr_body.clone());
+            let instance = resolve_instance(g, &rt.config)?;
+            let repo = repo.clone();
+            let onto_pr = *pull_number;
+            invoke(g, rt, "repo.actions.workflows.create", input, move |d| {
+                output::workflow_created(d, path.as_deref(), &instance, &repo, onto_pr)
+            })
+            .await
+        }
         Command::SecretList { repo } => {
             invoke(
                 g,
@@ -2856,6 +2954,9 @@ const CLI_PROCS: &[&str] = &[
     "repo.actions.secrets.list",
     "repo.actions.secrets.put",
     "repo.actions.secrets.delete",
+    "repo.actions.workflowTemplates.list",
+    "repo.actions.workflowTemplates.get",
+    "repo.actions.workflows.create",
     "repo.commitStatus.list",
     "repo.commitStatus.create",
     "repo.blob",
@@ -2926,6 +3027,9 @@ const MCP_PROCS: &[&str] = &[
     "pull.list",
     "repo.actions.getRun",
     "repo.actions.listRuns",
+    "repo.actions.workflowTemplates.get",
+    "repo.actions.workflowTemplates.list",
+    "repo.actions.workflows.create",
     "repo.blob",
     "repo.explore",
     "repo.get",

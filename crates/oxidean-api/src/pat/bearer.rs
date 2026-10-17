@@ -190,6 +190,12 @@ pub async fn resolve_bearer(
         return Err(BearerRejection::rate_limited(retry));
     }
 
+    // Per-job Actions tokens (`oxidean_job_…`) resolve to a repo-locked
+    // fine-grained identity — same scope gates as a selected-repo FG PAT.
+    if token.starts_with(crate::actions::job_tokens::JOB_TOKEN_PREFIX) {
+        return resolve_job_token(db, limiter, token, ip).await;
+    }
+
     if !looks_like_pat(token) {
         lock(limiter).record_ip(ip);
         return Err(BearerRejection::unauthenticated("invalid bearer token"));
@@ -301,6 +307,122 @@ pub async fn resolve_bearer(
         expires_at,
     };
     Ok((session, identity))
+}
+
+/// Resolve an `oxidean_job_…` per-job token to a repo-locked FG identity.
+///
+/// The `action_job_tokens` row already pins `repository_id` and a `read`/`write`
+/// contents level, so the synthesized [`PatIdentity`] is exactly what a minimal
+/// selected-repo fine-grained PAT carries — `authorize_fine_grained` then
+/// enforces "reads pass / writes fail" for `read`, and "other repos → 404" for
+/// both. PAT minting (`pat.create*`), admin and other session-only procedures
+/// stay unreachable through the same dispatch table.
+#[allow(clippy::result_large_err)]
+async fn resolve_job_token(
+    db: &Database,
+    limiter: &Mutex<FailedAuthLimiter>,
+    token: &str,
+    ip: &str,
+) -> Result<(ResolvedSession, PatIdentity), BearerRejection> {
+    let token_hash = sha256_hex(token.as_bytes());
+    let row = match db.find_action_job_token_by_hash(&token_hash).await {
+        Ok(Some(r)) => r,
+        Ok(None) => {
+            lock(limiter).record_ip(ip);
+            return Err(BearerRejection::unauthenticated("invalid bearer token"));
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "find_action_job_token_by_hash failed");
+            return Err(BearerRejection::unauthenticated("authentication failed"));
+        }
+    };
+
+    // Per-user failed-auth gate once the token maps to an account (D-26).
+    if let Err(retry) = lock(limiter).check_user(&row.user_id) {
+        return Err(BearerRejection::rate_limited(retry));
+    }
+    let fail_all = || {
+        let mut lim = lock(limiter);
+        lim.record_ip(ip);
+        lim.record_user(&row.user_id);
+    };
+
+    if row.revoked_at.is_some() {
+        fail_all();
+        return Err(BearerRejection::coded(
+            "auth.token_revoked",
+            "actions job token has been revoked",
+        ));
+    }
+    if pat_expired(&Some(row.expires_at.clone())) {
+        fail_all();
+        return Err(BearerRejection::coded(
+            "auth.token_expired",
+            "actions job token expired",
+        ));
+    }
+    let owner = match db.find_user_by_id(&row.user_id).await {
+        Ok(Some(u)) => u,
+        Ok(None) => {
+            fail_all();
+            return Err(BearerRejection::unauthenticated("invalid bearer token"));
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "find_user_by_id failed");
+            return Err(BearerRejection::unauthenticated("authentication failed"));
+        }
+    };
+    if owner.banned_at.is_some() {
+        fail_all();
+        return Err(BearerRejection::coded(
+            "auth.banned",
+            "This account has been suspended.",
+        ));
+    }
+    // Successful auth clears the user bucket only (D-26).
+    lock(limiter).clear_user(&owner.id);
+
+    let expires_at = DateTime::parse_from_rfc3339(&row.expires_at)
+        .map(|dt| dt.with_timezone(&Utc))
+        .unwrap_or_else(|_| Utc::now());
+    let display_prefix = {
+        let tail = &token[crate::actions::job_tokens::JOB_TOKEN_PREFIX.len()..];
+        format!(
+            "{}{}",
+            crate::actions::job_tokens::JOB_TOKEN_PREFIX,
+            &tail[..tail.len().min(8)]
+        )
+    };
+    let identity = PatIdentity {
+        token_id: row.id.clone(),
+        user_id: owner.id.clone(),
+        kind: PatKind::FineGrained,
+        name: "actions job token".into(),
+        token_prefix: display_prefix,
+        expires_at_raw: Some(row.expires_at.clone()),
+        last_used_at: None,
+        created_at: row.created_at.clone(),
+        scopes: Vec::new(),
+        contents: ContentsPerm::parse(&row.permission).ok(),
+        repo_access: Some(FgRepoAccess::Selected),
+        repository_ids: vec![row.repository_id.clone()],
+        perms: FgPerms::default(),
+    };
+    let session = ResolvedSession {
+        session_id: format!("job:{}", row.id),
+        user_id: owner.id,
+        remember_me: false,
+        expires_at,
+    };
+    Ok((session, identity))
+}
+
+/// Whether `pat` is a synthesized Actions job-token identity. Job tokens are
+/// strictly pinned to their repository — unlike FG PATs they get no
+/// public-repo read bypass on other repositories (GITHUB_TOKEN parity).
+fn is_job_token(pat: &PatIdentity) -> bool {
+    pat.token_prefix
+        .starts_with(crate::actions::job_tokens::JOB_TOKEN_PREFIX)
 }
 
 /// Best-effort `last_used_at`/`last_used_ip` update after a resolved Bearer call.
@@ -564,7 +686,8 @@ async fn authorize_fine_grained(
         }
         // Public repos stay readable with any FG token (GitHub parity);
         // writes and private repos outside the selection → not_found.
-        if !write && !is_private_visibility(&row.visibility) {
+        // Job tokens are repo-locked — no public-repo bypass.
+        if !write && !is_private_visibility(&row.visibility) && !is_job_token(pat) {
             return Ok(());
         }
         return Err(not_found());
@@ -653,7 +776,10 @@ pub(crate) async fn authorize_pat_on_repo(
             if fg_covers(db, pat, repo, owner).await? {
                 return Ok(());
             }
-            if need == FgPermLevel::Read && !is_private_visibility(&repo.visibility) {
+            if need == FgPermLevel::Read
+                && !is_private_visibility(&repo.visibility)
+                && !is_job_token(pat)
+            {
                 return Ok(());
             }
             Err(not_found())

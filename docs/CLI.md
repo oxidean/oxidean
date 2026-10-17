@@ -384,6 +384,10 @@ ox run view o/n <run-id> [--log] [--job <id>]
 ox run watch o/n <run-id> [--interval s] [--timeout s] [--exit-status]
 ox run rerun|cancel o/n <run-id> [--failed-only]
 ox workflow list|view|run o/n [<workflow-id>] [--ref r]
+ox workflow template list o/n [--category c --source builtin|instance|org --search q --suggested]
+ox workflow template view <id> [o/n]        # prints the template YAML
+ox workflow create o/n (--template <id> | --file <path>|-) [--path p] [--message m]
+                        [--pr n | --branch b --new-branch nb --no-pr --pr-title t --pr-body b]
 ox secret list|set|delete o/n [<NAME>]  # set: --body v | --file path | stdin
 ox status create o/n --sha s --context c --state pending|success|failure|error
 

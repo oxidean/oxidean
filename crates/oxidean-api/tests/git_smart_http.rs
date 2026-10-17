@@ -7,6 +7,7 @@ use std::sync::Arc;
 use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
 use http_body_util::BodyExt;
+use oxidean_api::auth::session::sha256_hex;
 use oxidean_api::email::{EmailSender, LogSink};
 use oxidean_api::{build_cors, router_with_state, AppState};
 use oxidean_db::Database;
@@ -1012,5 +1013,275 @@ async fn git_smart_collaborator_fg_selected_push() {
         push_res.status(),
         StatusCode::OK,
         "collaborator FG Selected write must receive-pack"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Actions job tokens (OXIDEAN_TOKEN) — GITHUB_TOKEN parity over Smart HTTP.
+// ---------------------------------------------------------------------------
+
+/// Seed run + job rows and mint a raw `oxidean_job_…` token for `repo_id`.
+async fn mint_job_token(
+    db: &Database,
+    repo_id: &str,
+    user_id: &str,
+    permission: &str,
+    tag: &str,
+) -> String {
+    let run_id = format!("run-{tag}");
+    let job_id = format!("job-{tag}");
+    db.insert_action_run(
+        &run_id,
+        repo_id,
+        ".github/workflows/ci.yml",
+        "CI",
+        "push",
+        "abc123",
+        "refs/heads/main",
+        "ci",
+        Some(user_id),
+        None,
+    )
+    .await
+    .expect("insert run");
+    db.insert_action_job(&job_id, &run_id, "build", "build", r#"["ubuntu-latest"]"#)
+        .await
+        .expect("insert job");
+    let raw = format!("oxidean_job_{tag}0123456789abcdef0123456789abcdef");
+    let expires = (chrono::Utc::now() + chrono::Duration::hours(1))
+        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    db.insert_action_job_token(
+        &format!("tok-{tag}"),
+        &job_id,
+        &run_id,
+        repo_id,
+        user_id,
+        permission,
+        &sha256_hex(raw.as_bytes()),
+        &expires,
+    )
+    .await
+    .expect("insert job token");
+    raw
+}
+
+/// `contents: read` job token: upload-pack on its own repo → 200.
+#[tokio::test]
+async fn git_smart_job_token_read_upload_pack() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("smart_jt_read.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos).await;
+
+    let (cookie, login_v) = signup_and_login(&app, "jt@ex.com", "jtread").await;
+    let user_id = login_v["data"]["id"].as_str().unwrap();
+    create_public_repo(&app, &db, &cookie, user_id).await;
+    let repo_id = db
+        .find_repository_by_owner_name(user_id, "hello")
+        .await
+        .unwrap()
+        .expect("repo")
+        .id;
+    let token = mint_job_token(&db, &repo_id, user_id, "read", "r1").await;
+
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(info_refs_uri("jtread", "hello"))
+                .header(header::AUTHORIZATION, basic_header("git", &token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK, "read job token must fetch");
+}
+
+/// Job tokens are repo-locked: the same token on a different repo → 403 (the
+/// non-covered FG Selected response), never the public-repo anon bypass.
+#[tokio::test]
+async fn git_smart_job_token_repo_locked() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("smart_jt_lock.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos).await;
+
+    let (cookie, login_v) = signup_and_login(&app, "jl@ex.com", "jtlock").await;
+    let user_id = login_v["data"]["id"].as_str().unwrap();
+    create_public_repo(&app, &db, &cookie, user_id).await;
+    let repo_id = db
+        .find_repository_by_owner_name(user_id, "hello")
+        .await
+        .unwrap()
+        .expect("repo")
+        .id;
+    let other = app
+        .clone()
+        .oneshot(rpc_req_with_cookie(
+            r#"{"procedure":"repo.create","input":{"name":"other","visibility":"public","description":""}}"#,
+            &cookie,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(other.status(), StatusCode::OK);
+    let _ = other.into_body().collect().await;
+
+    let token = mint_job_token(&db, &repo_id, user_id, "write", "l1").await;
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(info_refs_uri("jtlock", "other"))
+                .header(header::AUTHORIZATION, basic_header("git", &token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::FORBIDDEN,
+        "job token must not cover other repos"
+    );
+}
+
+/// `contents: read` job token cannot receive-pack (push) → 403.
+#[tokio::test]
+async fn git_smart_job_token_read_cannot_push() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("smart_jt_ro.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos).await;
+
+    let (cookie, login_v) = signup_and_login(&app, "ro@ex.com", "jtro").await;
+    let user_id = login_v["data"]["id"].as_str().unwrap();
+    create_public_repo(&app, &db, &cookie, user_id).await;
+    let repo_id = db
+        .find_repository_by_owner_name(user_id, "hello")
+        .await
+        .unwrap()
+        .expect("repo")
+        .id;
+    let token = mint_job_token(&db, &repo_id, user_id, "read", "ro1").await;
+
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/jtro/hello.git/info/refs?service=git-receive-pack")
+                .header(header::AUTHORIZATION, basic_header("git", &token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::FORBIDDEN,
+        "read job token must not push"
+    );
+}
+
+/// `contents: write` job token → receive-pack advertisement 200 (push allowed).
+#[tokio::test]
+async fn git_smart_job_token_write_receive_pack() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("smart_jt_rw.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos).await;
+
+    let (cookie, login_v) = signup_and_login(&app, "rw@ex.com", "jtrw").await;
+    let user_id = login_v["data"]["id"].as_str().unwrap();
+    create_public_repo(&app, &db, &cookie, user_id).await;
+    let repo_id = db
+        .find_repository_by_owner_name(user_id, "hello")
+        .await
+        .unwrap()
+        .expect("repo")
+        .id;
+    let token = mint_job_token(&db, &repo_id, user_id, "write", "rw1").await;
+
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/jtrw/hello.git/info/refs?service=git-receive-pack")
+                .header(header::AUTHORIZATION, basic_header("git", &token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::OK,
+        "write job token must allow receive-pack"
+    );
+    let ct = res
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    assert!(
+        ct.contains("git-receive-pack"),
+        "expected receive-pack advertisement, got {ct}"
+    );
+}
+
+/// Revoked job token (job ended / run cancelled) → 401 with the revoked hint.
+#[tokio::test]
+async fn git_smart_job_token_revoked_401() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("smart_jt_rev.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos).await;
+
+    let (cookie, login_v) = signup_and_login(&app, "rv@ex.com", "jtrev").await;
+    let user_id = login_v["data"]["id"].as_str().unwrap();
+    create_public_repo(&app, &db, &cookie, user_id).await;
+    let repo_id = db
+        .find_repository_by_owner_name(user_id, "hello")
+        .await
+        .unwrap()
+        .expect("repo")
+        .id;
+    let token = mint_job_token(&db, &repo_id, user_id, "write", "rv1").await;
+    db.revoke_action_job_token_for_job("job-rv1")
+        .await
+        .expect("revoke");
+
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(info_refs_uri("jtrev", "hello"))
+                .header(header::AUTHORIZATION, basic_header("git", &token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    let body = res.into_body().collect().await.unwrap().to_bytes();
+    let body = String::from_utf8_lossy(&body);
+    assert!(
+        body.contains("revoked"),
+        "expected revoked hint, got {body}"
     );
 }

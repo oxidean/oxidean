@@ -588,6 +588,7 @@ pub async fn dispatch_workflow(
         &treeish,
         &head_ref,
         Some(&user.id),
+        None,
     )
     .await
     .map_err(db_err)?;
@@ -653,6 +654,10 @@ pub async fn cancel_run(
             "repo.actions.run_finished",
             "workflow run already finished",
         ));
+    }
+    // Revoke any OXIDEAN_TOKENs minted for this run's jobs (idempotent).
+    if let Err(e) = ctx.db.revoke_action_job_tokens_for_run(&req.run_id).await {
+        tracing::warn!(error = %e, run_id = %req.run_id, "failed to revoke job tokens");
     }
     // DEBT-06: cancelled runs complete — claim + emit through the watch matrix.
     if ctx
@@ -725,7 +730,7 @@ async fn run_mutation_response(
 }
 
 /// Resolve a user-supplied ref (branch/tag/SHA) or the default branch to a SHA.
-async fn resolve_treeish(
+pub(crate) async fn resolve_treeish(
     ctx: &RpcCtx,
     default_branch: &str,
     git_ref: Option<&str>,
