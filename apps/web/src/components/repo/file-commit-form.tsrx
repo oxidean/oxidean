@@ -236,17 +236,20 @@ export function FileCommitForm({
       <AppLink href={cancelHref as string} className="text-[14px] text-muted-foreground underline">
         Cancel
       </AppLink>
-      @if (policyPending) {
-        <span className="text-[13px] text-muted-foreground">
-          Checking branch protection…
-        </span>;
-      } @else {
-        @if (!policy && !pending) {
-          <span className="text-[13px] text-destructive" role="alert">
-            Could not check branch protection — reload the page.
-          </span>;
+      <span
+        className={cn(
+          "text-[13px]",
+          policyPending ? "text-muted-foreground" : "text-destructive",
+          policyPending || !policy ? "" : "hidden",
+        )}
+        role={!policyPending && !policy ? "alert" : undefined}
+      >
+        {
+          (policyPending
+            ? "Checking branch protection…"
+            : "Could not check branch protection — reload the page.") as string
         }
-      }
+      </span>
     </div>
   </form>;
 }
