@@ -117,7 +117,7 @@ check-stack-presets:
 	@./scripts/check-stack-presets.sh
 
 check-workflow-templates:
-	@./scripts/check-workflow-templates.sh
+	@bun scripts/check-workflow-templates.mjs
 
 version-check:
 	@bun scripts/versioning/cli.ts check
