@@ -67,6 +67,35 @@ const TEMPLATES = {
   total_count: 2,
 };
 
+const LONG_ACTION_TEMPLATES = {
+  suggested: [],
+  templates: [
+    {
+      id: "builtin:deployments/octopus",
+      name: "Build and Deploy with Octopus Deploy",
+      description: "Build, release, and deploy with Octopus Deploy.",
+      icon_name: null,
+      icon_url: null,
+      categories: ["Deployment"],
+      file_patterns: [],
+      filename: "octopus.yml",
+      provenance: "builtin" as const,
+      source_label: null,
+      suggested: false,
+      unsupported_actions: [
+        "OctopusDeploy/create-release-action@fea7e7b45c38c021b6bc5a14bd7eaa2ed5269214",
+        "OctopusDeploy/deploy-release-action@b10a606c903b0a5bce24102af9d066638ab429ac",
+        "OctopusDeploy/login-action@34b6dcc1e86fa373c14e6a28c5507d221e4de622b8582d",
+        "docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567",
+        "OctopusDeploy/push-package-action@aea43c0359b39d1a7b898a7553e649f3f40b88f9",
+      ],
+      parse_error: null,
+    },
+  ],
+  categories: ["Deployment"],
+  total_count: 1,
+};
+
 async function waitForTestId(testId: string, ms = 5_000): Promise<Element> {
   const deadline = Date.now() + ms;
   while (Date.now() < deadline) {
@@ -109,6 +138,39 @@ describe("WorkflowTemplateCatalog browser DOM races", () => {
           document.querySelector('[data-testid="workflow-template-card-builtin:deployments/aws"]'),
         ).toBeTruthy();
       });
+      expectNoOctaneOverlayInDocument();
+      expect(tracker.errors).toEqual([]);
+    } finally {
+      tracker.dispose();
+    }
+  });
+
+  it("long action@sha notes stay inside the card — no horizontal overflow", async () => {
+    const tracker = trackDomErrors();
+    try {
+      await mountComponent(WorkflowTemplateCatalog, {
+        owner: "ada",
+        repo: "hello",
+        data: LONG_ACTION_TEMPLATES,
+        loading: false,
+        error: null,
+      });
+      const card = (await waitForTestId(
+        "workflow-template-card-builtin:deployments/octopus",
+      )) as HTMLElement;
+
+      const note = card.querySelector("p[title]") as HTMLElement;
+      expect(note).toBeTruthy();
+      expect(note.textContent).toContain("OctopusDeploy/create-release-action");
+      expect(note.textContent).toContain("+2 more");
+      expect(note.textContent).not.toContain("@fea7e7b");
+
+      expect(note.scrollWidth).toBeLessThanOrEqual(note.clientWidth + 1);
+      expect(card.scrollWidth).toBeLessThanOrEqual(card.clientWidth + 1);
+      expect(
+        (document.querySelector('[data-testid="workflow-template-catalog"]') as HTMLElement)
+          .scrollWidth,
+      ).toBeLessThanOrEqual(document.documentElement.clientWidth + 1);
       expectNoOctaneOverlayInDocument();
       expect(tracker.errors).toEqual([]);
     } finally {

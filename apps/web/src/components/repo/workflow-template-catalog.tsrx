@@ -38,23 +38,32 @@ function matches(t: WorkflowTemplateSummary, q: string): boolean {
   );
 }
 
+function actionDisplayNames(actions: string[]): string[] {
+  const seen = new Set<string>();
+  for (const a of actions) {
+    seen.add(a.split("@", 1)[0]);
+  }
+  return [...seen];
+}
+
 const WorkflowTemplateCard = memo(function WorkflowTemplateCard(props: {
   owner: string;
   repo: string;
   template: WorkflowTemplateSummary;
 }) @{
   const t = props.template;
-  const extraActions = Math.max(0, t.unsupported_actions.length - 3);
+  const actionNames = actionDisplayNames(t.unsupported_actions);
+  const extraActions = Math.max(0, actionNames.length - 3);
   const unsupportedNote =
-    t.unsupported_actions.length === 0
+    actionNames.length === 0
       ? ""
-      : `Uses actions the bundled runner does not run yet: ${t.unsupported_actions
+      : `Uses actions the bundled runner does not run yet: ${actionNames
           .slice(0, 3)
           .join(", ")}${extraActions > 0 ? ` +${extraActions} more` : ""}`;
 
   <div
     data-testid={`workflow-template-card-${t.id}`}
-    className="flex flex-col gap-3 rounded-lg border border-border bg-card p-4"
+    className="flex min-w-0 flex-col gap-3 rounded-lg border border-border bg-card p-4"
   >
     <div className="flex items-start gap-3">
       @if (t.icon_url) {
@@ -71,7 +80,7 @@ const WorkflowTemplateCard = memo(function WorkflowTemplateCard(props: {
       }
       <div className="min-w-0 flex-1">
         <p className="flex flex-wrap items-center gap-2 text-[14px] font-semibold text-foreground">
-          <span className="truncate">{t.name as string}</span>
+          <span className="min-w-0 truncate">{t.name as string}</span>
           <Badge variant="outline">{provenanceLabel(t) as string}</Badge>
         </p>
         <p className="mt-1 line-clamp-2 text-[13px] leading-snug text-muted-foreground">
@@ -81,7 +90,7 @@ const WorkflowTemplateCard = memo(function WorkflowTemplateCard(props: {
     </div>
     @if (t.unsupported_actions.length > 0) {
       <p
-        className="text-[12px] text-muted-foreground"
+        className="line-clamp-3 break-words text-[12px] text-muted-foreground"
         title={t.unsupported_actions.join(", ") as string}
       >
         {unsupportedNote as string}
@@ -115,7 +124,7 @@ function CatalogSection(props: {
 }) @{
   <section aria-label={props.title} className="flex flex-col gap-3">
     <h2 className="text-[16px] font-semibold text-foreground">{props.title as string}</h2>
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+    <div className="grid gap-3 sm:grid-cols-[repeat(2,minmax(0,1fr))] lg:grid-cols-[repeat(3,minmax(0,1fr))]">
       @for (const t of props.items; key t.id) {
         <WorkflowTemplateCard owner={props.owner} repo={props.repo} template={t} />;
       }
@@ -166,7 +175,7 @@ export function WorkflowTemplateCatalog(props: WorkflowTemplateCatalogProps) @{
       className="max-w-md"
     />
     @if (props.loading) {
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-[repeat(2,minmax(0,1fr))] lg:grid-cols-[repeat(3,minmax(0,1fr))]">
         @for (const i of [0, 1, 2, 3, 4, 5]; key i) {
           <Skeleton className="h-32 rounded-lg" />;
         }
