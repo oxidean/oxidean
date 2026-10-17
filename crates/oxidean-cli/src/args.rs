@@ -35,7 +35,7 @@ ISSUES & PULL REQUESTS
 
 ACTIONS
   ox run list|view|watch|rerun|cancel              --job/--log for logs
-  ox workflow list|view|run
+  ox workflow list|view|run|create|template
   ox secret list|set|delete
   ox status create <o/n> --sha <s> --context <c> --state <st>
 
@@ -162,10 +162,12 @@ const HELP: &[(&str, &str)] = &[
     ("run view", "ox run view <o/n> <run-id> [--log] [--job <job-id>]\n\n--log streams the job log (first job unless --job)."),
     ("run rerun", "ox run rerun <o/n> <run-id> [--failed-only]"),
     ("run cancel", "ox run cancel <o/n> <run-id>"),
-    ("workflow", "ox workflow — workflow files\n\n  list|view|run"),
+    ("workflow", "ox workflow — workflow files\n\n  list|view|run|create\n  template list|view"),
     ("workflow list", "ox workflow list <o/n> [--ref <r>]"),
     ("workflow view", "ox workflow view <o/n> <path-or-name> [--ref <r>]\n\nPrints the workflow file (repo.blob)."),
     ("workflow run", "ox workflow run <o/n> <workflow-id> [--ref <r>]\n\nDispatches repo.actions.dispatchWorkflow; --ref defaults to the repo's\ndefault branch."),
+    ("workflow create", "ox workflow create [<o/n> | -R o/n] (--template <id> | --file <path>|-)\n                  [--path .github/workflows/<name>.yml] [--pr <n>]\n                  [--branch <base>] [--new-branch <name>] [--no-pr]\n                  [--message <m>] [--pr-title <t>] [--pr-body <b>]\n\nDrafts a workflow file into .github/workflows/. --template pulls from\nthe catalog (see `ox workflow template list`); --file - reads stdin.\n--pr commits onto an open pull request's head branch; --new-branch\nopens a PR (use --no-pr to skip it); otherwise commits to --branch\n(default: the repo's default branch)."),
+    ("workflow template", "ox workflow template — starter-workflow catalog\n\n  list [<o/n> | -R o/n] [--category <c>] [--source builtin|instance|org]\n       [--search <q>] [--suggested]\n  view <id> [<o/n> | -R o/n]\n\nThe catalog is repo-contextual: org templates and the suggested set are\ncomputed from the repository's tree. Ids look like builtin:ci/rust,\ninstance:<slug>, org:<file-stem>."),
     ("secret", "ox secret — actions secrets\n\n  list|set|delete"),
     ("secret list", "ox secret list <o/n>"),
     ("secret set", "ox secret set <o/n> <NAME> [--body <v> | --file <path>]\n\nWith no --body/--file, a piped stdin supplies the value."),
@@ -632,6 +634,30 @@ pub enum Command {
         repo: String,
         workflow_id: String,
         git_ref: Option<String>,
+    },
+    WorkflowCreate {
+        repo: String,
+        template: Option<String>,
+        file: Option<String>,
+        path: Option<String>,
+        pull_number: Option<u64>,
+        branch: Option<String>,
+        new_branch: Option<String>,
+        no_pr: bool,
+        message: Option<String>,
+        pr_title: Option<String>,
+        pr_body: Option<String>,
+    },
+    WorkflowTemplateList {
+        repo: String,
+        category: Option<String>,
+        source: Option<String>,
+        search: Option<String>,
+        suggested: bool,
+    },
+    WorkflowTemplateView {
+        repo: String,
+        id: String,
     },
     SecretList {
         repo: String,
@@ -1327,6 +1353,7 @@ const NESTED: &[(&str, &str, &[&str], Option<&str>)] = &[
         &["list", "get", "view", "redeliver"],
         Some("list"),
     ),
+    ("workflow", "template", &["list", "view"], None),
 ];
 
 /// Split argv into globals + command. Global flags may appear anywhere;
@@ -2454,6 +2481,123 @@ pub fn parse(argv: &[String]) -> Result<Invocation, UsageError> {
                 repo,
                 workflow_id,
                 git_ref: f.values.get("--ref").cloned(),
+            }
+        }
+        ("workflow", "template", "list") => {
+            let f = scan(
+                tail,
+                &["-R", "--repo", "--category", "--source", "--search"],
+                &["--suggested"],
+                &[],
+            )?;
+            check_choice(
+                &f,
+                "--source",
+                &["builtin", "instance", "org"],
+                "workflow template list",
+            )?;
+            Command::WorkflowTemplateList {
+                repo: repo_spec(&f, "workflow template list")?,
+                category: f.values.get("--category").cloned(),
+                source: f.values.get("--source").cloned(),
+                search: f.values.get("--search").cloned(),
+                suggested: f.bools.contains("--suggested"),
+            }
+        }
+        ("workflow", "template", "view") => {
+            let f = scan(tail, REPO_FLAGS, &[], &[])?;
+            // `<id>` leads — the repo is the optional second positional
+            // (or -R, or the detected git remote).
+            let id = f
+                .positionals
+                .first()
+                .ok_or_else(|| usage("usage: ox workflow template view <id> [<owner/name>]"))?
+                .clone();
+            let repo = if f.values.contains_key("-R") || f.values.contains_key("--repo") {
+                if let Some(extra) = f.positionals.get(1) {
+                    return Err(usage(format!(
+                        "ox workflow template view: unexpected argument '{extra}'"
+                    )));
+                }
+                let raw = f
+                    .values
+                    .get("-R")
+                    .or_else(|| f.values.get("--repo"))
+                    .expect("checked above")
+                    .clone();
+                parse_repo(&raw)?;
+                raw
+            } else {
+                match f.positionals.len() {
+                    1 => {
+                        let repo = detected_repo().ok_or_else(|| {
+                            usage("usage: ox workflow template view <id> <owner/name>")
+                        })?;
+                        parse_repo(&repo)?;
+                        repo
+                    }
+                    2 => {
+                        parse_repo(&f.positionals[1])?;
+                        f.positionals[1].clone()
+                    }
+                    _ => {
+                        return Err(usage(
+                            "usage: ox workflow template view <id> [<owner/name>]",
+                        ))
+                    }
+                }
+            };
+            Command::WorkflowTemplateView { repo, id }
+        }
+        ("workflow", "create", "") => {
+            let f = scan(
+                tail,
+                &[
+                    "-R",
+                    "--repo",
+                    "--template",
+                    "--file",
+                    "--path",
+                    "--pr",
+                    "--branch",
+                    "--new-branch",
+                    "--message",
+                    "--pr-title",
+                    "--pr-body",
+                ],
+                &["--no-pr"],
+                &[],
+            )?;
+            let template = f.values.get("--template").cloned();
+            let file = f.values.get("--file").cloned();
+            if template.is_some() == file.is_some() {
+                return Err(usage(
+                    "ox workflow create: exactly one of --template <id> or --file <path>|- is required",
+                ));
+            }
+            let pull_number = opt_u64(&f, "--pr")?;
+            if pull_number.is_some()
+                && (f.values.contains_key("--new-branch")
+                    || f.bools.contains("--no-pr")
+                    || f.values.contains_key("--pr-title")
+                    || f.values.contains_key("--pr-body"))
+            {
+                return Err(usage(
+                    "ox workflow create: --pr cannot be combined with --new-branch, --no-pr, --pr-title, or --pr-body",
+                ));
+            }
+            Command::WorkflowCreate {
+                repo: repo_spec(&f, "workflow create")?,
+                template,
+                file,
+                path: f.values.get("--path").cloned(),
+                pull_number,
+                branch: f.values.get("--branch").cloned(),
+                new_branch: f.values.get("--new-branch").cloned(),
+                no_pr: f.bools.contains("--no-pr"),
+                message: f.values.get("--message").cloned(),
+                pr_title: f.values.get("--pr-title").cloned(),
+                pr_body: f.values.get("--pr-body").cloned(),
             }
         }
         ("secret", "list", "") => {
@@ -3730,6 +3874,229 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
+    }
+
+    #[test]
+    fn workflow_template_list_parses() {
+        let inv = parse(&argv(&["workflow", "template", "list", "o/n"])).unwrap();
+        match inv.command {
+            Command::WorkflowTemplateList {
+                repo,
+                category,
+                source,
+                search,
+                suggested,
+            } => {
+                assert_eq!(repo, "o/n");
+                assert_eq!((category, source, search), (None, None, None));
+                assert!(!suggested);
+            }
+            other => panic!("{other:?}"),
+        }
+        let inv = parse(&argv(&[
+            "workflow",
+            "template",
+            "list",
+            "-R",
+            "o/n",
+            "--category",
+            "Continuous integration",
+            "--source",
+            "builtin",
+            "--search",
+            "rust",
+            "--suggested",
+        ]))
+        .unwrap();
+        match inv.command {
+            Command::WorkflowTemplateList {
+                repo,
+                category,
+                source,
+                search,
+                suggested,
+            } => {
+                assert_eq!(repo, "o/n");
+                assert_eq!(category.as_deref(), Some("Continuous integration"));
+                assert_eq!(source.as_deref(), Some("builtin"));
+                assert_eq!(search.as_deref(), Some("rust"));
+                assert!(suggested);
+            }
+            other => panic!("{other:?}"),
+        }
+        let err = parse(&argv(&[
+            "workflow", "template", "list", "o/n", "--source", "bogus",
+        ]))
+        .unwrap_err();
+        assert!(err.0.contains("--source must be one of"), "{err}");
+    }
+
+    #[test]
+    fn workflow_template_view_parses() {
+        let inv = parse(&argv(&[
+            "workflow",
+            "template",
+            "view",
+            "builtin:ci/rust",
+            "o/n",
+        ]))
+        .unwrap();
+        match inv.command {
+            Command::WorkflowTemplateView { repo, id } => {
+                assert_eq!(id, "builtin:ci/rust");
+                assert_eq!(repo, "o/n");
+            }
+            other => panic!("{other:?}"),
+        }
+        let inv = parse(&argv(&[
+            "workflow",
+            "template",
+            "view",
+            "builtin:ci/rust",
+            "-R",
+            "o/n",
+        ]))
+        .unwrap();
+        match inv.command {
+            Command::WorkflowTemplateView { repo, id } => {
+                assert_eq!(id, "builtin:ci/rust");
+                assert_eq!(repo, "o/n");
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(parse(&argv(&["workflow", "template", "view"])).is_err());
+        let err = parse(&argv(&[
+            "workflow",
+            "template",
+            "view",
+            "builtin:ci/rust",
+            "-R",
+            "o/n",
+            "extra",
+        ]))
+        .unwrap_err();
+        assert!(err.0.contains("unexpected argument"), "{err}");
+    }
+
+    #[test]
+    fn workflow_create_parses() {
+        let inv = parse(&argv(&[
+            "workflow",
+            "create",
+            "o/n",
+            "--template",
+            "builtin:ci/rust",
+        ]))
+        .unwrap();
+        match inv.command {
+            Command::WorkflowCreate {
+                repo,
+                template,
+                file,
+                pull_number,
+                ..
+            } => {
+                assert_eq!(repo, "o/n");
+                assert_eq!(template.as_deref(), Some("builtin:ci/rust"));
+                assert!(file.is_none());
+                assert!(pull_number.is_none());
+            }
+            other => panic!("{other:?}"),
+        }
+        let inv = parse(&argv(&[
+            "workflow",
+            "create",
+            "o/n",
+            "--file",
+            "-",
+            "--path",
+            ".github/workflows/ci.yml",
+            "--branch",
+            "main",
+            "--new-branch",
+            "ci/add-ci",
+            "--no-pr",
+            "--message",
+            "ci: add CI",
+        ]))
+        .unwrap();
+        match inv.command {
+            Command::WorkflowCreate {
+                file,
+                path,
+                branch,
+                new_branch,
+                no_pr,
+                message,
+                ..
+            } => {
+                assert_eq!(file.as_deref(), Some("-"));
+                assert_eq!(path.as_deref(), Some(".github/workflows/ci.yml"));
+                assert_eq!(branch.as_deref(), Some("main"));
+                assert_eq!(new_branch.as_deref(), Some("ci/add-ci"));
+                assert!(no_pr);
+                assert_eq!(message.as_deref(), Some("ci: add CI"));
+            }
+            other => panic!("{other:?}"),
+        }
+        let inv = parse(&argv(&[
+            "workflow",
+            "create",
+            "o/n",
+            "--template",
+            "builtin:ci/rust",
+            "--pr",
+            "42",
+        ]))
+        .unwrap();
+        match inv.command {
+            Command::WorkflowCreate { pull_number, .. } => {
+                assert_eq!(pull_number, Some(42));
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn workflow_create_rejects_bad_flag_combos() {
+        // neither source
+        let err = parse(&argv(&["workflow", "create", "o/n"])).unwrap_err();
+        assert!(err.0.contains("exactly one of --template"), "{err}");
+        // both sources
+        let err = parse(&argv(&[
+            "workflow",
+            "create",
+            "o/n",
+            "--template",
+            "x",
+            "--file",
+            "y",
+        ]))
+        .unwrap_err();
+        assert!(err.0.contains("exactly one of --template"), "{err}");
+        // --pr + --new-branch / --no-pr / --pr-title / --pr-body
+        for extra in [
+            vec!["--new-branch", "b"],
+            vec!["--no-pr"],
+            vec!["--pr-title", "t"],
+            vec!["--pr-body", "b"],
+        ] {
+            let mut a = vec!["workflow", "create", "o/n", "--template", "x", "--pr", "3"];
+            a.extend(extra);
+            let err = parse(&argv(&a)).unwrap_err();
+            assert!(err.0.contains("--pr cannot be combined"), "{err}");
+        }
+        let err = parse(&argv(&[
+            "workflow",
+            "create",
+            "o/n",
+            "--template",
+            "x",
+            "--pr",
+            "nope",
+        ]))
+        .unwrap_err();
+        assert!(err.0.contains("invalid --pr"), "{err}");
     }
 
     /// Every verb/op in `completion::COMMAND_TREE` must resolve through the

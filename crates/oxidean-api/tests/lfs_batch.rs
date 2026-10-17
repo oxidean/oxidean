@@ -238,6 +238,50 @@ async fn verify_user(db: &Database, user_id: &str) {
         .expect("verify email");
 }
 
+/// Seed run + job rows and mint a raw `oxidean_job_…` token for `repo_id`.
+async fn mint_job_token(
+    db: &Database,
+    repo_id: &str,
+    user_id: &str,
+    permission: &str,
+    tag: &str,
+) -> String {
+    let run_id = format!("run-{tag}");
+    let job_id = format!("job-{tag}");
+    db.insert_action_run(
+        &run_id,
+        repo_id,
+        ".github/workflows/ci.yml",
+        "CI",
+        "push",
+        "abc123",
+        "refs/heads/main",
+        "ci",
+        Some(user_id),
+    )
+    .await
+    .expect("insert run");
+    db.insert_action_job(&job_id, &run_id, "build", "build", r#"["ubuntu-latest"]"#)
+        .await
+        .expect("insert job");
+    let raw = format!("oxidean_job_{tag}0123456789abcdef0123456789abcdef");
+    let expires = (chrono::Utc::now() + chrono::Duration::hours(1))
+        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    db.insert_action_job_token(
+        &format!("tok-{tag}"),
+        &job_id,
+        &run_id,
+        repo_id,
+        user_id,
+        permission,
+        &sha256_hex(raw.as_bytes()),
+        &expires,
+    )
+    .await
+    .expect("insert job token");
+    raw
+}
+
 /// D-LFS-09: session Cookie alone never authorizes LFS — public download stays anon OK.
 #[tokio::test]
 async fn lfs_batch_cookie_ignored_as_anon() {
@@ -1298,4 +1342,88 @@ async fn lfs_admin_get_usage_breakdown() {
     assert_eq!(usage_v["data"]["object_count"], 1);
     assert!(!usage_v["data"]["by_repo"].as_array().unwrap().is_empty());
     assert!(!usage_v["data"]["by_owner"].as_array().unwrap().is_empty());
+}
+
+/// OXIDEAN_TOKEN parity: an Actions job token (`oxidean_job_…`) authenticates
+/// the LFS batch endpoint like a selected-repo FG PAT — `write` uploads,
+/// `read` is rejected.
+#[tokio::test]
+async fn lfs_batch_job_token_scopes() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let lfs = dir.path().join("lfs");
+    let url = format!("sqlite:{}", dir.path().join("lfs_jobtok.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos, lfs).await;
+
+    let (cookie, login_v) = signup_and_login(&app, "jt@ex.com", "jtuser").await;
+    let user_id = login_v["data"]["id"].as_str().unwrap();
+    verify_user(&db, user_id).await;
+
+    let create = app
+        .clone()
+        .oneshot(rpc_req_with_cookie(
+            r#"{"procedure":"repo.create","input":{"name":"blobs","visibility":"public","description":""}}"#,
+            &cookie,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(create.status(), StatusCode::OK);
+    let create_bytes = create.into_body().collect().await.unwrap().to_bytes();
+    let create_v: serde_json::Value = serde_json::from_slice(&create_bytes).unwrap();
+    let repo_id = create_v["data"]["id"].as_str().expect("repo id");
+    db.set_repo_lfs_enabled(repo_id, true)
+        .await
+        .expect("enable lfs");
+
+    // Mint two job tokens on the same repo — one read, one write.
+    let write_token = mint_job_token(&db, repo_id, user_id, "write", "w").await;
+    let read_token = mint_job_token(&db, repo_id, user_id, "read", "r").await;
+
+    let batch_body = serde_json::json!({
+        "operation": "upload",
+        "transfers": ["basic"],
+        "objects": [{ "oid": sha256_hex(b"job-lfs"), "size": 7 }]
+    });
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/jtuser/blobs.git/info/lfs/objects/batch")
+                .header(header::AUTHORIZATION, basic_header("git", &write_token))
+                .header(header::ACCEPT, "application/vnd.git-lfs+json")
+                .header(header::CONTENT_TYPE, "application/vnd.git-lfs+json")
+                .body(Body::from(batch_body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::OK,
+        "write job token must upload LFS"
+    );
+    let _ = res.into_body().collect().await;
+
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/jtuser/blobs.git/info/lfs/objects/batch")
+                .header(header::AUTHORIZATION, basic_header("git", &read_token))
+                .header(header::ACCEPT, "application/vnd.git-lfs+json")
+                .header(header::CONTENT_TYPE, "application/vnd.git-lfs+json")
+                .body(Body::from(batch_body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::FORBIDDEN,
+        "read job token must not upload LFS"
+    );
 }

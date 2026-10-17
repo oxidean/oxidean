@@ -100,6 +100,8 @@ surface and fails when an `implemented`/`partial` row drifts.
 | `cache list` / `delete` | — | planned | Actions cache |
 | `workflow list` / `view` / `run` | same | implemented | |
 | `workflow disable` / `enable` | — | planned | |
+| — | `workflow template list` / `view` | ox-only | starter-workflow catalog (builtin + instance + org `.github` repo); gh has no equivalent subcommand |
+| — | `workflow create` | ox-only | drafts a workflow file onto a branch, a new PR, or an open PR's head |
 | `ssh-key list` / `add` / `delete` | same | implemented | |
 | `gpg-key list` / `add` / `delete` | same | implemented | |
 | `label list` / `create` / `edit` / `delete` | same | implemented | |

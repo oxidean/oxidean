@@ -680,6 +680,121 @@ pub fn workflow_list(data: &Value) -> String {
         .join("\n")
 }
 
+/// Bundled-runner compatibility cell for a template summary: `ok`,
+/// `partial(<n> actions)` when some `uses:` refs can't run, or `unparsable`.
+fn template_runner(t: &Value) -> String {
+    if s(t, "parse_error").is_some() {
+        return "unparsable".to_string();
+    }
+    let n = arr(t, "unsupported_actions").len();
+    if n > 0 {
+        format!("partial({n} actions)")
+    } else {
+        "ok".to_string()
+    }
+}
+
+/// `repo.actions.workflowTemplates.list` — aligned `ID NAME CATEGORIES
+/// SOURCE RUNNER` table. Suggested rows lead (marked `*`), then the rest by
+/// name; `suggested_only` restricts the table to `data.suggested`.
+pub fn workflow_template_list(data: &Value, suggested_only: bool) -> String {
+    let pool: &[Value] = if suggested_only {
+        arr(data, "suggested")
+    } else {
+        arr(data, "templates")
+    };
+    let mut suggested: Vec<&Value> = Vec::new();
+    let mut rest: Vec<&Value> = Vec::new();
+    for t in pool {
+        if b(t, "suggested") {
+            suggested.push(t);
+        } else {
+            rest.push(t);
+        }
+    }
+    let by_name = |a: &&Value, b: &&Value| {
+        s(a, "name")
+            .unwrap_or_default()
+            .to_lowercase()
+            .cmp(&s(b, "name").unwrap_or_default().to_lowercase())
+    };
+    suggested.sort_by(by_name);
+    rest.sort_by(by_name);
+
+    let mut rows: Vec<[String; 5]> = Vec::new();
+    for (t, mark) in suggested
+        .iter()
+        .map(|t| (*t, "*"))
+        .chain(rest.iter().map(|t| (*t, " ")))
+    {
+        rows.push([
+            format!("{mark} {}", s(t, "id").unwrap_or("?")),
+            s(t, "name").unwrap_or_default().to_string(),
+            arr(t, "categories")
+                .iter()
+                .filter_map(Value::as_str)
+                .collect::<Vec<_>>()
+                .join(", "),
+            s(t, "provenance").unwrap_or_default().to_string(),
+            template_runner(t),
+        ]);
+    }
+    if rows.is_empty() {
+        return String::new();
+    }
+    let header = ["ID", "NAME", "CATEGORIES", "SOURCE", "RUNNER"];
+    let mut widths = header.map(str::len);
+    for row in &rows {
+        for (i, cell) in row.iter().enumerate() {
+            widths[i] = widths[i].max(cell.chars().count());
+        }
+    }
+    let line = |cells: &[String; 5]| {
+        cells
+            .iter()
+            .enumerate()
+            .map(|(i, c)| {
+                if i == cells.len() - 1 {
+                    c.clone()
+                } else {
+                    format!("{c:<w$}", w = widths[i])
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("  ")
+            .trim_end()
+            .to_string()
+    };
+    let mut out = vec![line(&header.map(String::from))];
+    out.extend(rows.iter().map(line));
+    out.join("\n")
+}
+
+/// `repo.actions.workflows.create` — RepoFileCommitResponse plus request
+/// context (`path` may be None when the server picked the default).
+pub fn workflow_created(
+    data: &Value,
+    path: Option<&str>,
+    instance: &str,
+    repo: &str,
+    onto_pr: Option<u64>,
+) -> String {
+    let sha = truncate(s(data, "commit_sha").unwrap_or_default(), 7);
+    let branch = s(data, "branch").unwrap_or_default();
+    let mut out = format!(
+        "Created {} on {branch} ({sha})",
+        path.unwrap_or(".github/workflows/")
+    );
+    if let Some(num) = onto_pr {
+        out.push_str(&format!("\nCommitted onto pull request #{num}"));
+    } else if let Some(num) = n(data, "pr_number") {
+        out.push_str(&format!(
+            "\nOpened pull request #{num}: {instance}/{repo}/pull/{num}"
+        ));
+    }
+    out
+}
+
 /// `repo.actions.secrets.list` — `data.secrets[]` (names only — values never
 /// leave the server).
 pub fn secret_list(data: &Value) -> String {
@@ -1092,5 +1207,75 @@ mod tests {
     fn truncate_long_text() {
         assert_eq!(truncate("abc", 5), "abc");
         assert_eq!(truncate("abcdef", 5), "abcde…");
+    }
+
+    #[test]
+    fn workflow_template_list_table() {
+        let data = json!({
+            "suggested": [
+                {"id": "builtin:ci/rust", "name": "Rust", "categories": ["Continuous integration"],
+                 "provenance": "builtin", "suggested": true,
+                 "unsupported_actions": [], "parse_error": null},
+            ],
+            "templates": [
+                {"id": "builtin:ci/rust", "name": "Rust", "categories": ["Continuous integration"],
+                 "provenance": "builtin", "suggested": true,
+                 "unsupported_actions": [], "parse_error": null},
+                {"id": "instance:deploy", "name": "Deploy", "categories": ["Deployment"],
+                 "provenance": "instance", "suggested": false,
+                 "unsupported_actions": ["actions/setup-node", "actions/upload-artifact"],
+                 "parse_error": null},
+                {"id": "org:broken", "name": "Broken", "categories": [],
+                 "provenance": "org", "suggested": false,
+                 "unsupported_actions": [], "parse_error": "jobs.x: runs-on required"},
+            ],
+            "categories": ["Continuous integration", "Deployment"],
+            "total_count": 3,
+        });
+        let out = workflow_template_list(&data, false);
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(lines.len(), 4, "{out}");
+        assert!(lines[0].starts_with("ID"), "{out}");
+        assert!(lines[0].contains("RUNNER"), "{out}");
+        // suggested first with the * marker, then by name
+        assert!(lines[1].starts_with("* builtin:ci/rust"), "{out}");
+        assert!(lines[2].contains("org:broken"), "{out}");
+        assert!(lines[2].contains("unparsable"), "{out}");
+        assert!(lines[3].contains("instance:deploy"), "{out}");
+        assert!(lines[3].contains("partial(2 actions)"), "{out}");
+
+        let sug = workflow_template_list(&data, true);
+        assert_eq!(sug.lines().count(), 2, "{sug}");
+        assert!(sug.contains("builtin:ci/rust"), "{sug}");
+        assert!(!sug.contains("org:broken"), "{sug}");
+
+        assert_eq!(workflow_template_list(&json!({"templates": []}), false), "");
+    }
+
+    #[test]
+    fn workflow_created_lines() {
+        let data = json!({
+            "commit_sha": "abcdef1234567890", "branch": "ci/add",
+            "created_branch": true, "pr_number": 9,
+        });
+        let out = workflow_created(
+            &data,
+            Some(".github/workflows/rust.yml"),
+            "https://f.example.com",
+            "o/n",
+            None,
+        );
+        assert!(
+            out.contains("Created .github/workflows/rust.yml on ci/add (abcdef1…)"),
+            "{out}"
+        );
+        assert!(
+            out.contains("Opened pull request #9: https://f.example.com/o/n/pull/9"),
+            "{out}"
+        );
+
+        let out = workflow_created(&data, None, "https://f.example.com", "o/n", Some(9));
+        assert!(out.contains("Committed onto pull request #9"), "{out}");
+        assert!(!out.contains("Opened pull request"), "{out}");
     }
 }

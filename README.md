@@ -85,6 +85,8 @@ Canonical docs live under [`docs/`](docs/).
 - [`docs/API.md`](docs/API.md) — RPC + Smart HTTP / LFS / SSH / registry surfaces
 - [`docs/CLI.md`](docs/CLI.md) — `ox`, the companion command-line client
 - [`docs/guides/stack-presets.md`](docs/guides/stack-presets.md) — in-repo `/new` stack presets
+- [`docs/guides/workflow-templates.md`](docs/guides/workflow-templates.md) — Actions workflow-template catalog (builtin / instance / org sources)
+- [`docs/guides/actions-runtime.md`](docs/guides/actions-runtime.md) — job environment, `OXIDEAN_*`/`GITHUB_*` variables, `OXIDEAN_TOKEN`
 
 **Develop**
 

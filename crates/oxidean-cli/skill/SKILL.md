@@ -60,7 +60,7 @@ instance PAT policy — `auth refresh` renews them.
 | repos | `repo list\|view\|create\|templates\|fork\|sync\|clone`, `repo edit\|rename\|archive\|unarchive\|delete\|transfer`, `repo star\|unstar\|watch\|unwatch`, `repo deploy-key`, `collaborator(s)`, `invites`, `branch-protection`, `tag-protection`, `mirror`, `merge-settings`, `lfs`, `quota` |
 | issues | `issue list\|view\|create\|edit\|close\|reopen\|delete\|comment` |
 | prs | `pr list\|view\|create\|merge\|diff\|files\|review\|comment\|ready\|update-branch\|checks\|close\|reopen\|checkout` |
-| actions | `run list\|view [--log]\|rerun\|cancel`, `workflow list\|view\|run`, `secret list\|set\|delete`, `status create` |
+| actions | `run list\|view [--log]\|rerun\|cancel`, `workflow list\|view\|run\|create`, `workflow template list\|view`, `secret list\|set\|delete`, `status create` |
 | releases | `release list\|view\|create\|edit\|delete`, `release upload\|download\|delete-asset` |
 | mcp | `mcp print\|install\|status\|remove` — wire the instance's `/api/mcp` endpoint into agent-harness MCP configs |
 | everything else | `search`, `browse`, `pkg list`, `org …`, `user …`, `notification …`, `label …`, `webhook …`, `ssh-key`, `gpg-key`, `email` |
@@ -131,6 +131,11 @@ ox repo clone o/my-lib
 ox workflow run o/n ci.yml --ref main
 ox run view o/n <run-id> --json | jq '.data.run.status'
 
+# Add a workflow to the PR you're working on
+ox workflow template list o/n --suggested --json | jq -r '.data.suggested[].id'
+ox workflow create o/n --template builtin:ci/rust --pr 42        # commit onto PR #42's head
+ox workflow create o/n --file ci.yml --new-branch ci/add-ci --message "ci: add CI"   # new branch + PR
+
 # Publish a release with artifacts
 ox release create o/n v1.2.0 --title "v1.2.0" --body-file CHANGELOG.md
 ox release upload o/n v1.2.0 dist/*.tar.gz
@@ -198,3 +203,15 @@ unless `--no-mcp-refresh`. `remove` deletes only the `oxidean` entry.
 - `release upload`/`download` use multipart HTTP routes, not RPC; they still
   honor the same instance/token resolution.
 - Non-TTY commands never prompt; missing input fails fast with exit 2.
+- Inside workflow jobs the environment is `OXIDEAN_*` with `GITHUB_*` aliases
+  (`OXIDEAN_TOKEN`, `OXIDEAN_SHA`, `OXIDEAN_REPOSITORY`, `OXIDEAN_REF_NAME`,
+  `OXIDEAN_API_URL`, `OXIDEAN_ENV_FILE`/`GITHUB_ENV`, …). The per-job
+  `OXIDEAN_TOKEN` authenticates as `Authorization: Bearer` against this
+  instance's API and as a git-over-HTTP(S)/LFS Basic password, is locked to
+  the triggering repo, is read-only on contents
+  unless the workflow sets `permissions: {contents: write}`, and is revoked
+  when the job ends. Pushes made with it never re-trigger workflows.
+- `workflow template` builtins are 1:1 vendored GitHub starter workflows —
+  many reference `actions/setup-*` actions the bundled runner does not
+  execute yet. Check the RUNNER column of `workflow template list` (or
+  `unsupported_actions`/`parse_error` in `--json`) before committing one.

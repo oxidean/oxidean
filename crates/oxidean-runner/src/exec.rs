@@ -390,13 +390,7 @@ async fn checkout(
     let url = format!("{}/{}/{}.git", config.origin, owner, name);
     logger.line(&format!("Cloning {owner}/{name}")).await;
 
-    // Token rides in http.extraHeader — never in the URL or ps-visible args.
-    let mut args: Vec<String> = Vec::new();
-    if let Some(token) = &config.git_token {
-        let creds = base64::engine::general_purpose::STANDARD.encode(format!("oauth2:{token}"));
-        args.push("-c".into());
-        args.push(format!("http.extraHeader=Authorization: Basic {creds}"));
-    }
+    let mut args = checkout_auth_args(task.job_token.as_deref(), config.git_token.as_deref());
     args.extend(["clone".into(), url, ".".into()]);
 
     let mut cmd = Command::new("git");
@@ -417,6 +411,25 @@ async fn checkout(
         return Err(format!("git checkout {sha} exited {code}"));
     }
     Ok(())
+}
+
+/// `git -c http.extraHeader=…` args for clone/fetch auth. The per-job
+/// `OXIDEAN_TOKEN` (`task.job_token`) wins — it is repo-locked and minted for
+/// exactly this checkout; the runner-wide `OXIDEAN_RUNNER_GIT_TOKEN` is the
+/// fallback for tasks minted without a token. The credential rides in
+/// `http.extraHeader` — never in the URL or ps-visible args.
+fn checkout_auth_args(job_token: Option<&str>, git_token: Option<&str>) -> Vec<String> {
+    let token = job_token.filter(|t| !t.is_empty()).or(git_token);
+    match token {
+        Some(t) => {
+            let creds = base64::engine::general_purpose::STANDARD.encode(format!("oauth2:{t}"));
+            vec![
+                "-c".into(),
+                format!("http.extraHeader=Authorization: Basic {creds}"),
+            ]
+        }
+        None => Vec::new(),
+    }
 }
 
 fn shell_argv(shell: Option<&str>, script: &str) -> Vec<String> {
@@ -867,6 +880,34 @@ mod tests {
             mask_secrets("token=oxidean_job_aaaabbbb done", &mask),
             "token=*** done"
         );
+    }
+
+    #[test]
+    fn checkout_auth_prefers_job_token() {
+        // Job token (OXIDEAN_TOKEN) wins over the runner-wide git token.
+        let args = checkout_auth_args(Some("oxidean_job_secret"), Some("oxidean_pat_runner"));
+        assert_eq!(args.len(), 2);
+        let encoded = args[1]
+            .strip_prefix("http.extraHeader=Authorization: Basic ")
+            .unwrap();
+        let decoded = String::from_utf8(
+            base64::engine::general_purpose::STANDARD
+                .decode(encoded)
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(decoded, "oauth2:oxidean_job_secret");
+
+        // Empty/absent job token falls back to the configured runner token.
+        let args = checkout_auth_args(Some(""), Some("oxidean_pat_runner"));
+        assert!(args[1].contains(
+            &base64::engine::general_purpose::STANDARD.encode("oauth2:oxidean_pat_runner")
+        ));
+        let args = checkout_auth_args(None, Some("oxidean_pat_runner"));
+        assert_eq!(args.len(), 2);
+
+        // Neither → no auth header.
+        assert!(checkout_auth_args(None, None).is_empty());
     }
 
     #[test]

@@ -10,7 +10,7 @@
 //!
 //! [`PatIdentity`]: crate::pat::bearer::PatIdentity
 
-use oxidean_db::{ActionRunRow, Database, RepositoryRow};
+use oxidean_db::{ActionJobTokenRow, ActionRunRow, Database, PatRow, RepositoryRow, UserRow};
 use uuid::Uuid;
 
 use crate::actions::parse::ContentsPermission;
@@ -19,6 +19,87 @@ use crate::repo::{effective_capability, meets, Capability, OwnerRef};
 
 /// Bearer token prefix routed by `pat::bearer::resolve_bearer`.
 pub const JOB_TOKEN_PREFIX: &str = "oxidean_job_";
+
+/// Resolved `oxidean_job_…` row + owner for the Basic-auth surfaces (git smart
+/// HTTP, LFS) — mirrors [`crate::oauth::OAuthTokenIdentity`].
+#[derive(Debug, Clone)]
+pub struct JobTokenIdentity {
+    pub token: ActionJobTokenRow,
+    pub user: UserRow,
+}
+
+impl JobTokenIdentity {
+    /// Synthesize a fine-grained-shaped `PatRow` so the git/LFS ACL helpers
+    /// (`pat_allows_operation`) apply unchanged: `selected` repo access pinned
+    /// to the job's repository and `contents_perm` from the minted permission.
+    /// `raw_token` supplies the display prefix (first 8 chars of the secret).
+    pub fn synthetic_pat(&self, raw_token: &str) -> PatRow {
+        let tail = raw_token
+            .strip_prefix(JOB_TOKEN_PREFIX)
+            .unwrap_or(raw_token);
+        PatRow {
+            id: self.token.id.clone(),
+            user_id: self.token.user_id.clone(),
+            kind: "fine_grained".into(),
+            name: "actions job token".into(),
+            token_prefix: format!("{JOB_TOKEN_PREFIX}{}", &tail[..tail.len().min(8)]),
+            token_hash: self.token.token_hash.clone(),
+            scopes_json: Some("[]".into()),
+            contents_perm: Some(self.token.permission.clone()),
+            perms_json: None,
+            repo_access: Some("selected".into()),
+            expires_at: Some(self.token.expires_at.clone()),
+            revoked_at: self.token.revoked_at.clone(),
+            last_used_at: None,
+            last_used_ip: None,
+            created_at: self.token.created_at.clone(),
+            repository_ids: vec![self.token.repository_id.clone()],
+        }
+    }
+}
+
+/// Why an `oxidean_job_` credential failed — mirrors
+/// [`crate::oauth::OAuthAuthStatus`] so git/LFS callers can surface a reason.
+pub enum JobTokenAuthStatus {
+    Ok(Box<JobTokenIdentity>),
+    /// Unknown token or vanished owner — indistinguishable from "never existed".
+    Invalid,
+    Revoked,
+    Expired,
+    Banned,
+}
+
+/// Status-returning resolver for `oxidean_job_` Basic-auth passwords — the
+/// revoked-inclusive lookup matches the PAT/OAuth seams so callers can emit
+/// distinct revoked/expired/banned responses.
+pub async fn authenticate_job_token_status(
+    db: &Database,
+    raw_token: &str,
+) -> Result<JobTokenAuthStatus, String> {
+    if !raw_token.starts_with(JOB_TOKEN_PREFIX) {
+        return Ok(JobTokenAuthStatus::Invalid);
+    }
+    let hash = sha256_hex(raw_token.as_bytes());
+    let Some(token) = db.find_action_job_token_by_hash(&hash).await? else {
+        return Ok(JobTokenAuthStatus::Invalid);
+    };
+    if token.revoked_at.is_some() {
+        return Ok(JobTokenAuthStatus::Revoked);
+    }
+    if crate::oauth::rfc3339_expired(&token.expires_at) {
+        return Ok(JobTokenAuthStatus::Expired);
+    }
+    let Some(user) = db.find_user_by_id(&token.user_id).await? else {
+        return Ok(JobTokenAuthStatus::Invalid);
+    };
+    if user.banned_at.is_some() {
+        return Ok(JobTokenAuthStatus::Banned);
+    }
+    Ok(JobTokenAuthStatus::Ok(Box::new(JobTokenIdentity {
+        token,
+        user,
+    })))
+}
 
 /// 20 random bytes → 40 lowercase hex chars after the prefix.
 const JOB_TOKEN_SECRET_BYTES: usize = 20;
