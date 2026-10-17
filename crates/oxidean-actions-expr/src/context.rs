@@ -17,6 +17,9 @@ pub enum JobStatus {
     Success,
     Failure,
     Cancelled,
+    /// A needed job (or leg) that never ran — `success()`/`failure()`/
+    /// `cancelled()` all false, `always()` true.
+    Skipped,
 }
 
 impl JobStatus {
@@ -25,6 +28,7 @@ impl JobStatus {
             "success" => Self::Success,
             "failure" => Self::Failure,
             "cancelled" => Self::Cancelled,
+            "skipped" => Self::Skipped,
             _ => Self::Pending,
         }
     }

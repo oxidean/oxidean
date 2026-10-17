@@ -526,7 +526,10 @@ fn runner_context(
             "secrets",
             serde_json::to_value(secrets).unwrap_or_else(|_| serde_json::json!({})),
         )
-        .with_context("needs", serde_json::json!({}))
+        .with_context(
+            "needs",
+            task.needs.clone().unwrap_or_else(|| serde_json::json!({})),
+        )
         .with_context("steps", serde_json::json!({}))
         .with_context("inputs", serde_json::json!({}))
         .with_context("vars", serde_json::json!({}))
@@ -624,6 +627,7 @@ fn sync_job_ctx(ctx: &mut Context) {
         JobStatus::Success => "success",
         JobStatus::Failure => "failure",
         JobStatus::Cancelled => "cancelled",
+        JobStatus::Skipped => "skipped",
         JobStatus::Pending => "pending",
     };
     ctx.set_context("job", serde_json::json!({"status": status}));
@@ -683,20 +687,35 @@ struct Logger<'a> {
     job_id: String,
     /// Secret values + the job token — masked out of every log chunk.
     mask_values: &'a [String],
+    /// Server-side cancel signal — set when an `update_log` ack reports
+    /// `cancelled`; the step loop checks `take_cancelled()` between steps.
+    cancelled: std::sync::atomic::AtomicBool,
 }
 
 impl<'a> Logger<'a> {
+    fn take_cancelled(&self) -> bool {
+        self.cancelled
+            .swap(false, std::sync::atomic::Ordering::Relaxed)
+    }
+
     async fn send(&self, chunk: &str) {
         let masked = mask_secrets(chunk, self.mask_values);
         if masked.is_empty() {
             return;
         }
-        if let Err(e) = self
+        match self
             .client
             .update_log(&self.run_id, &self.job_id, &masked)
             .await
         {
-            tracing::warn!("update_log failed: {e}");
+            Ok(ack) if ack.cancelled => {
+                self.cancelled
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+            Err(e) => {
+                tracing::warn!("update_log failed: {e}");
+            }
+            _ => {}
         }
         // Mirror to runner stdout for operator visibility (masked).
         use std::io::Write;
@@ -1009,11 +1028,16 @@ pub async fn execute(client: &Client, task: &Task, config: &Config) -> &'static 
         run_id: run_id.clone(),
         job_id: job_id.clone(),
         mask_values: &mask_values,
+        cancelled: std::sync::atomic::AtomicBool::new(false),
     };
 
-    if let Err(e) = client.update_task(&job_id, "in_progress").await {
-        tracing::error!("update_task in_progress failed: {e}");
-        return "failure";
+    match client.update_task(&job_id, "in_progress", None).await {
+        Ok(ack) if ack.cancelled => return "cancelled",
+        Ok(_) => {}
+        Err(e) => {
+            tracing::error!("update_task in_progress failed: {e}");
+            return "failure";
+        }
     }
 
     let workspace = config.work_dir.join(&job_id);
@@ -1021,7 +1045,7 @@ pub async fn execute(client: &Client, task: &Task, config: &Config) -> &'static 
         logger
             .line(&format!("::error::failed to prepare workspace: {e}"))
             .await;
-        let _ = client.update_task(&job_id, "failure").await;
+        let _ = client.update_task(&job_id, "failure", None).await;
         return "failure";
     }
     // Per-job runner temp: event.json + env/path/output/step_summary files.
@@ -1030,7 +1054,7 @@ pub async fn execute(client: &Client, task: &Task, config: &Config) -> &'static 
         logger
             .line(&format!("::error::failed to prepare runner temp dir: {e}"))
             .await;
-        let _ = client.update_task(&job_id, "failure").await;
+        let _ = client.update_task(&job_id, "failure", None).await;
         return "failure";
     }
 
@@ -1102,6 +1126,22 @@ pub async fn execute(client: &Client, task: &Task, config: &Config) -> &'static 
                 .await;
             record_step(&mut ctx, &step_id, "skipped", HashMap::new());
             cancelled = true;
+            ctx.set_job_status(JobStatus::Cancelled);
+            sync_job_ctx(&mut ctx);
+            continue;
+        }
+        // Server-side cancel (concurrency supersede, fail-fast sibling,
+        // run cancel) arrives via update_log acks.
+        if logger.take_cancelled() {
+            logger
+                .line(&format!(
+                    "::notice::step '{step_id}' skipped — job cancelled"
+                ))
+                .await;
+            record_step(&mut ctx, &step_id, "skipped", HashMap::new());
+            cancelled = true;
+            ctx.set_job_status(JobStatus::Cancelled);
+            sync_job_ctx(&mut ctx);
             continue;
         }
         // Step `if` — implicit `success()` unless a status fn is present.
@@ -1235,10 +1275,30 @@ pub async fn execute(client: &Client, task: &Task, config: &Config) -> &'static 
         JobStatus::Failure => "failure",
         _ => "success",
     };
-    if let Err(e) = client.update_task(&job_id, final_state).await {
+    // `steps.<id>.outputs` ride the terminal report so the API materializes
+    // `jobs.<id>.outputs` for `needs.*` consumers.
+    let outputs = step_outputs_report(&ctx);
+    if let Err(e) = client
+        .update_task(&job_id, final_state, Some(&outputs))
+        .await
+    {
         tracing::error!("update_task {final_state} failed: {e}");
     }
     final_state
+}
+
+/// `{step_id: {name: value}}` from the `steps` context — the shape
+/// `update_task.outputs` and `needs.<id>.outputs.*` consume.
+fn step_outputs_report(ctx: &Context) -> serde_json::Value {
+    let mut out = serde_json::Map::new();
+    if let Some(serde_json::Value::Object(steps)) = ctx.get_context("steps") {
+        for (id, entry) in steps {
+            if let Some(outputs) = entry.get("outputs") {
+                out.insert(id.clone(), outputs.clone());
+            }
+        }
+    }
+    serde_json::Value::Object(out)
 }
 
 /// Create the per-job runner temp dir (`work_dir/_runner/{job_id}`) — clean
@@ -1487,6 +1547,7 @@ mod tests {
             timeout_seconds: None,
             event_payload: None,
             matrix: None,
+            needs: None,
         }
     }
 

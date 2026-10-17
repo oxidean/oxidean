@@ -1,0 +1,10 @@
+name: concurrency-cancel
+on: [push]
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo build-ran

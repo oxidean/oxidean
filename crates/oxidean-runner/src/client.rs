@@ -76,6 +76,9 @@ pub struct Task {
     pub event_payload: Option<serde_json::Value>,
     /// Matrix assignment → `matrix` context.
     pub matrix: Option<serde_json::Value>,
+    /// `needs.<id>.{result,outputs}` for dependents — step expressions can
+    /// read `needs.*.outputs.*`.
+    pub needs: Option<serde_json::Value>,
 }
 
 impl Task {
@@ -88,6 +91,20 @@ impl Task {
 struct UpdateTaskBody<'a> {
     job_id: &'a str,
     state: &'a str,
+    /// `steps.<id>.outputs` map — reported on terminal states so the API
+    /// materializes `jobs.<id>.outputs`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    outputs: Option<&'a serde_json::Value>,
+}
+
+/// `update_task` response — `cancelled` means the job was cancelled
+/// server-side while running; the runner should abort remaining steps.
+#[derive(Debug, Deserialize, Default)]
+pub struct UpdateTaskAck {
+    #[serde(default)]
+    pub ok: bool,
+    #[serde(default)]
+    pub cancelled: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -172,20 +189,40 @@ impl Client {
         Ok(if task.is_empty() { None } else { Some(task) })
     }
 
-    pub async fn update_task(&self, job_id: &str, state: &str) -> Result<(), String> {
+    /// Report a state transition. `outputs` carries `steps.<id>.outputs`
+    /// on terminal calls; the ack's `cancelled` flag signals a server-side
+    /// cancel (concurrency supersede, fail-fast, run cancel) — the runner
+    /// should abort remaining steps rather than finish the queue.
+    pub async fn update_task(
+        &self,
+        job_id: &str,
+        state: &str,
+        outputs: Option<&serde_json::Value>,
+    ) -> Result<UpdateTaskAck, String> {
         let res = self
             .authed(self.http.post(self.url("update_task")))
-            .json(&UpdateTaskBody { job_id, state })
+            .json(&UpdateTaskBody {
+                job_id,
+                state,
+                outputs,
+            })
             .send()
             .await
             .map_err(|e| e.to_string())?;
-        res.error_for_status().map_err(|e| e.to_string())?;
-        Ok(())
+        let res = res.error_for_status().map_err(|e| e.to_string())?;
+        res.json::<UpdateTaskAck>().await.map_err(|e| e.to_string())
     }
 
-    pub async fn update_log(&self, run_id: &str, job_id: &str, chunk: &str) -> Result<(), String> {
+    /// Append a log chunk. The ack's `cancelled` flag is the runner's
+    /// mid-job cancel signal — checked between steps.
+    pub async fn update_log(
+        &self,
+        run_id: &str,
+        job_id: &str,
+        chunk: &str,
+    ) -> Result<UpdateTaskAck, String> {
         if chunk.is_empty() {
-            return Ok(());
+            return Ok(UpdateTaskAck::default());
         }
         let res = self
             .authed(self.http.post(self.url("update_log")))
@@ -197,7 +234,7 @@ impl Client {
             .send()
             .await
             .map_err(|e| e.to_string())?;
-        res.error_for_status().map_err(|e| e.to_string())?;
-        Ok(())
+        let res = res.error_for_status().map_err(|e| e.to_string())?;
+        res.json::<UpdateTaskAck>().await.map_err(|e| e.to_string())
     }
 }

@@ -478,7 +478,16 @@ pub fn manifest_response() -> ManifestResponse {
     }
 }
 
+/// The dispatch match's union future is only as small as its largest arm —
+/// procedure handlers hold serde trees, expr contexts, and whole workflow
+/// enqueue pipelines. Heap-allocate the inner future once here so every
+/// entry point (HTTP, WS, MCP, REST) carries a small frame instead of
+/// inheriting the union's size.
 pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
+    Box::pin(dispatch_inner(ctx, req)).await
+}
+
+async fn dispatch_inner(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
     // D-11 / T-06-06: empty-instance lock — bootstrap_* + health/db_probe diagnostics
     // until setup completes. confirm_admin_credentials stays off the list (ENV path
     // already has users). db_probe is allowlisted so compose dialect smokes work
@@ -1338,16 +1347,23 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
                 Err(e) => RpcResponse::err(e),
             }
         }
+        // Boxed: dispatch_workflow → enqueue_run (matrix expansion,
+        // payloads, supersede + scheduler passes) — keep it off the
+        // monolithic dispatch future's stack.
         "repo.actions.dispatchWorkflow" => {
-            match crate::actions::rpc::dispatch_workflow(ctx, req.input).await {
+            match Box::pin(crate::actions::rpc::dispatch_workflow(ctx, req.input)).await {
                 Ok(v) => RpcResponse::ok(v),
                 Err(e) => RpcResponse::err(e),
             }
         }
-        "repo.actions.rerunRun" => match crate::actions::rpc::rerun_run(ctx, req.input).await {
-            Ok(v) => RpcResponse::ok(v),
-            Err(e) => RpcResponse::err(e),
-        },
+        // Boxed: rerun_run's future grew past the stack budget of the
+        // monolithic dispatch future (scheduler re-gating + timeout restore).
+        "repo.actions.rerunRun" => {
+            match Box::pin(crate::actions::rpc::rerun_run(ctx, req.input)).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
         "repo.actions.cancelRun" => match crate::actions::rpc::cancel_run(ctx, req.input).await {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
@@ -1389,7 +1405,7 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             }
         }
         "repo.actions.workflows.create" => {
-            match crate::actions::templates::create_workflow(ctx, req.input).await {
+            match Box::pin(crate::actions::templates::create_workflow(ctx, req.input)).await {
                 Ok(v) => RpcResponse::ok(v),
                 Err(e) => RpcResponse::err(e),
             }

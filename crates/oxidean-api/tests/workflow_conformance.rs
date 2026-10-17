@@ -35,12 +35,37 @@ struct Case {
     runner_labels: Option<Vec<String>>,
     secrets: Option<HashMap<String, String>>,
     head_ref: Option<String>,
+    /// Push the same workflow twice — exercises concurrency supersede.
+    second_dispatch: Option<bool>,
     expect_run: Option<String>,
     expect_jobs: Option<HashMap<String, String>>,
     expect_job_names: Option<HashMap<String, String>>,
+    /// Per-job_key status multiset over all legs: {"build": ["success","success"]}.
+    expect_job_statuses: Option<HashMap<String, Vec<String>>>,
+    /// Status multiset over every run in the repo: ["cancelled","success"].
+    expect_runs: Option<Vec<String>>,
     expect_unsupported: Option<Vec<String>>,
     log_contains: Option<Vec<String>>,
     log_absent: Option<Vec<String>>,
+}
+
+fn base_case(id: &str) -> Case {
+    Case {
+        id: id.into(),
+        kind: "run".into(),
+        runner_labels: None,
+        secrets: None,
+        head_ref: None,
+        second_dispatch: None,
+        expect_run: None,
+        expect_jobs: None,
+        expect_job_names: None,
+        expect_job_statuses: None,
+        expect_runs: None,
+        expect_unsupported: None,
+        log_contains: None,
+        log_absent: None,
+    }
 }
 
 fn cases() -> Vec<Case> {
@@ -79,6 +104,10 @@ struct Fixture {
     dir: tempfile::TempDir,
     log_dir: PathBuf,
     repo_id: String,
+    bare: PathBuf,
+    head_sha: String,
+    owner_id: String,
+    head_ref: String,
     n_dispatched: usize,
 }
 
@@ -173,6 +202,23 @@ async fn fixture(case: &Case) -> Fixture {
     )
     .await
     .unwrap();
+    if case.second_dispatch.unwrap_or(false) {
+        // A second push lands while the first run's jobs are still
+        // nonterminal — concurrency `cancel-in-progress` supersedes it.
+        let n2 = dispatch_push_for_sha(
+            &db,
+            &git as &dyn GitBackend,
+            &bare,
+            &repo.id,
+            &head_sha,
+            case.head_ref.as_deref().unwrap_or("refs/heads/main"),
+            Some(&owner.id),
+            true,
+        )
+        .await
+        .unwrap();
+        assert_eq!(n2, 1, "{}: second dispatch must enqueue", case.id);
+    }
 
     Fixture {
         app,
@@ -180,6 +226,13 @@ async fn fixture(case: &Case) -> Fixture {
         dir,
         log_dir,
         repo_id: repo.id,
+        bare,
+        head_sha,
+        owner_id: owner.id,
+        head_ref: case
+            .head_ref
+            .clone()
+            .unwrap_or_else(|| "refs/heads/main".into()),
         n_dispatched,
     }
 }
@@ -189,7 +242,18 @@ async fn fixture(case: &Case) -> Fixture {
 /// protocol — checkout performs a real `git clone` through the server's git
 /// smart-HTTP, file commands and expression evaluation run in the real
 /// runner engine (no mirrored interpreter to drift).
-async fn drive_runner(fx: &Fixture, labels: &[String]) {
+/// Spin up the real API server + a registered runner; returns the client,
+/// config, and server handle. The claim/execute loop is separate so tests
+/// can run it in the background while they mutate state underneath.
+async fn start_runner(
+    fx: &Fixture,
+    labels: &[String],
+    name: &str,
+) -> (
+    oxidean_runner::client::Client,
+    oxidean_runner::config::Config,
+    tokio::task::JoinHandle<()>,
+) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let app = fx.app.clone();
@@ -201,7 +265,7 @@ async fn drive_runner(fx: &Fixture, labels: &[String]) {
     let mut client = oxidean_runner::client::Client::new(&origin, None);
     let reg = mint_registration_token(&fx.db).await.unwrap();
     let (_, token) = client
-        .register("conformance", labels, &reg)
+        .register(name, labels, &reg)
         .await
         .expect("runner register");
     client.set_token(token);
@@ -210,22 +274,34 @@ async fn drive_runner(fx: &Fixture, labels: &[String]) {
     let config = oxidean_runner::config::Config {
         origin: origin.clone(),
         registration_token: None,
-        name: "conformance".into(),
+        name: name.into(),
         labels: oxidean_runner::config::parse_labels(&labels.join(",")).unwrap(),
-        state_path: fx.dir.path().join("runner-state.json"),
-        work_dir: fx.dir.path().join("runner-work"),
+        state_path: fx.dir.path().join(format!("runner-state-{name}.json")),
+        work_dir: fx.dir.path().join(format!("runner-work-{name}")),
         poll_ms: 1,
         git_token: None,
         job_timeout_secs: 300,
     };
+    (client, config, server)
+}
+
+async fn claim_loop(
+    client: &oxidean_runner::client::Client,
+    config: &oxidean_runner::config::Config,
+) {
     for _ in 0..64 {
         match client.fetch_task().await.expect("fetch_task") {
             Some(task) => {
-                oxidean_runner::exec::execute(&client, &task, &config).await;
+                oxidean_runner::exec::execute(client, &task, config).await;
             }
             None => break,
         }
     }
+}
+
+async fn drive_runner(fx: &Fixture, labels: &[String]) {
+    let (client, config, server) = start_runner(fx, labels, "conformance").await;
+    claim_loop(&client, &config).await;
     server.abort();
 }
 
@@ -347,13 +423,30 @@ async fn run_case(case: &Case) {
         }
         "queued" | "run" => {
             assert_eq!(fx.n_dispatched, 1, "{}: expected one enqueue", case.id);
-            assert_eq!(runs.len(), 1, "{}: expected one run", case.id);
             let labels = case
                 .runner_labels
                 .clone()
                 .unwrap_or_else(|| vec!["ubuntu-latest".into()]);
             drive_runner(&fx, &labels).await;
-            let jobs = fx.db.list_action_jobs_for_run(&runs[0].id).await.unwrap();
+            let runs = fx
+                .db
+                .list_action_runs_for_repo(&fx.repo_id, &Default::default(), 10, 0)
+                .await
+                .unwrap();
+            // The "current" run — the one the assertions target. A
+            // superseded run is flagged `concurrency_cancel_pending`.
+            let run = runs
+                .iter()
+                .find(|r| !r.concurrency_cancel_pending)
+                .unwrap_or(&runs[0]);
+            if let Some(want) = case.expect_runs.clone() {
+                let mut got: Vec<String> = runs.iter().map(|r| r.status.clone()).collect();
+                let mut want = want;
+                got.sort();
+                want.sort();
+                assert_eq!(got, want, "{}: run status multiset", case.id);
+            }
+            let jobs = fx.db.list_action_jobs_for_run(&run.id).await.unwrap();
             for (key, want) in case.expect_jobs.clone().unwrap_or_default() {
                 let job = jobs
                     .iter()
@@ -364,7 +457,24 @@ async fn run_case(case: &Case) {
                     want,
                     "{}: job '{key}' status (log: {})",
                     case.id,
-                    read_job_log(&fx, &runs[0].id, &job.id)
+                    read_job_log(&fx, &run.id, &job.id)
+                );
+            }
+            for (key, want) in case.expect_job_statuses.clone().unwrap_or_default() {
+                let mut got: Vec<String> = jobs
+                    .iter()
+                    .filter(|j| j.job_key == key.as_str())
+                    .map(|j| j.status.clone())
+                    .collect();
+                let mut want = want;
+                got.sort();
+                want.sort();
+                assert_eq!(
+                    got,
+                    want,
+                    "{}: job '{key}' leg statuses (log: {})",
+                    case.id,
+                    all_logs(&fx, &run.id).await
                 );
             }
             for (key, want) in case.expect_job_names.clone().unwrap_or_default() {
@@ -372,18 +482,10 @@ async fn run_case(case: &Case) {
                 assert_eq!(job.name, want, "{}: job '{key}' name", case.id);
             }
             if case.kind == "run" {
-                let run = fx
-                    .db
-                    .find_action_run_by_id(&runs[0].id)
-                    .await
-                    .unwrap()
-                    .unwrap();
-                assert_eq!(
-                    run.status,
-                    case.expect_run.as_deref().unwrap_or("success"),
-                    "{}: run status",
-                    case.id
-                );
+                let run = fx.db.find_action_run_by_id(&run.id).await.unwrap().unwrap();
+                if let Some(want) = &case.expect_run {
+                    assert_eq!(run.status, *want, "{}: run status", case.id);
+                }
                 golden_diff(
                     case,
                     &run.status,
@@ -459,6 +561,25 @@ conformance_case!(timeout_minutes_step, "timeout-minutes-step");
 conformance_case!(push_tag_ref, "push-tag-ref");
 conformance_case!(trigger_map_form, "trigger-map-form");
 conformance_case!(trigger_list_form, "trigger-list-form");
+// Phase 3 — scheduler semantics.
+conformance_case!(needs_basic, "needs-basic");
+conformance_case!(needs_diamond, "needs-diamond");
+conformance_case!(needs_fail_default, "needs-fail-default");
+conformance_case!(needs_always, "needs-always");
+conformance_case!(needs_failure_fn, "needs-failure-fn");
+conformance_case!(needs_success_fn, "needs-success-fn");
+conformance_case!(needs_outputs, "needs-outputs");
+conformance_case!(needs_ctx_if, "needs-ctx-if");
+conformance_case!(needs_skipped_dep, "needs-skipped-dep");
+conformance_case!(needs_matrix_dep, "needs-matrix-dep");
+conformance_case!(strategy_matrix, "strategy-matrix");
+conformance_case!(matrix_basic, "matrix-basic");
+conformance_case!(matrix_include_exclude, "matrix-include-exclude");
+conformance_case!(matrix_max_parallel, "matrix-max-parallel");
+conformance_case!(matrix_fail_fast, "matrix-fail-fast");
+conformance_case!(matrix_fail_fast_off, "matrix-fail-fast-off");
+conformance_case!(concurrency_cancel, "concurrency-cancel");
+conformance_case!(concurrency_job_cancel, "concurrency-job-cancel");
 
 // ── queued / never_dispatch ───────────────────────────────────────────
 conformance_case!(runs_on_nomatch, "runs-on-nomatch");
@@ -468,9 +589,7 @@ conformance_case!(prt_only, "prt-only");
 conformance_case!(runs_on_missing, "runs-on-missing");
 
 // ── validation_failure (loud-failure contract) ────────────────────────
-conformance_case!(needs_basic, "needs-basic");
-conformance_case!(needs_diamond, "needs-diamond");
-conformance_case!(strategy_matrix, "strategy-matrix");
+conformance_case!(needs_cycle, "needs-cycle");
 conformance_case!(container_job, "container-job");
 conformance_case!(services_job, "services-job");
 conformance_case!(environment_job, "environment-job");
@@ -527,4 +646,162 @@ async fn fetch_task_survives_repo_deletion() {
     let job = jobs.iter().find(|j| j.job_key == "build").unwrap();
     let log = read_job_log(&fx, &run.id, &job.id);
     assert!(log.contains("hello conformance"), "log:\n{log}");
+}
+
+/// Mid-flight cancellation: run 2 supersedes run 1's *in-progress* job; the
+/// runner learns of it through the update_log ack, aborts its remaining
+/// steps, and its terminal report cannot overwrite the cancelled status.
+#[tokio::test]
+async fn running_job_aborts_on_supersede() {
+    let case = base_case("concurrency-cancel-running");
+    let fx = fixture(&case).await;
+    let (client, config, server) = start_runner(&fx, &["ubuntu-latest".into()], "r1").await;
+    let runner = tokio::spawn(async move { claim_loop(&client, &config).await });
+
+    let run1_id = {
+        let runs = fx
+            .db
+            .list_action_runs_for_repo(&fx.repo_id, &Default::default(), 10, 0)
+            .await
+            .unwrap();
+        runs[0].id.clone()
+    };
+    // Wait until run 1's job is actually executing.
+    for _ in 0..200 {
+        let jobs = fx.db.list_action_jobs_for_run(&run1_id).await.unwrap();
+        if jobs.iter().any(|j| j.status == "in_progress") {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    let jobs1 = fx.db.list_action_jobs_for_run(&run1_id).await.unwrap();
+    assert!(
+        jobs1.iter().any(|j| j.status == "in_progress"),
+        "run1 job never reached in_progress: {:?}",
+        jobs1.iter().map(|j| &j.status).collect::<Vec<_>>()
+    );
+
+    // Second push supersedes the running job — cancel-in-progress: true.
+    let n = dispatch_push_for_sha(
+        &fx.db,
+        &CliGitBackend::new(),
+        &fx.bare,
+        &fx.repo_id,
+        &fx.head_sha,
+        &fx.head_ref,
+        Some(&fx.owner_id),
+        true,
+    )
+    .await
+    .unwrap();
+    assert_eq!(n, 1);
+
+    runner.await.unwrap();
+    server.abort();
+
+    let runs = fx
+        .db
+        .list_action_runs_for_repo(&fx.repo_id, &Default::default(), 10, 0)
+        .await
+        .unwrap();
+    assert_eq!(runs.len(), 2);
+    // List order isn't stable for same-second inserts — identify run 2 by id.
+    let run2_id = runs
+        .iter()
+        .find(|r| r.id != run1_id)
+        .expect("second run")
+        .id
+        .clone();
+    let run1 = runs.iter().find(|r| r.id == run1_id).unwrap();
+    let run2 = runs.iter().find(|r| r.id == run2_id).unwrap();
+    assert_eq!(run1.status, "cancelled", "run1 must be cancelled");
+    assert_eq!(run2.status, "success", "run2 must succeed");
+
+    let jobs1 = fx.db.list_action_jobs_for_run(&run1_id).await.unwrap();
+    assert_eq!(jobs1[0].status, "cancelled", "run1 job stays cancelled");
+    let log1 = read_job_log(&fx, &run1_id, &jobs1[0].id);
+    assert!(
+        log1.contains("skipped — job cancelled"),
+        "runner must abort remaining steps; log:\n{log1}"
+    );
+    assert!(
+        !log1.contains("s4-final"),
+        "last step must never run; log:\n{log1}"
+    );
+
+    let jobs2 = fx.db.list_action_jobs_for_run(&run2_id).await.unwrap();
+    assert_eq!(jobs2[0].status, "success");
+    let log2 = read_job_log(&fx, &run2_id, &jobs2[0].id);
+    assert!(
+        log2.contains("s4-final"),
+        "run2 must complete; log:\n{log2}"
+    );
+}
+
+/// Rerun: a finished run requeues — jobs with needs go back to `waiting`
+/// and re-gate, a need skipped at enqueue stays skipped, and the run's
+/// attempt counter bumps.
+#[tokio::test]
+async fn rerun_resets_and_regates() {
+    let case = cases()
+        .into_iter()
+        .find(|c| c.id == "needs-skipped-dep")
+        .expect("needs-skipped-dep case");
+    let fx = fixture(&case).await;
+    drive_runner(&fx, &["ubuntu-latest".into()]).await;
+
+    let run = {
+        let runs = fx
+            .db
+            .list_action_runs_for_repo(&fx.repo_id, &Default::default(), 10, 0)
+            .await
+            .unwrap();
+        runs[0].clone()
+    };
+    assert_eq!(run.status, "success");
+
+    fx.db
+        .requeue_action_run(&run.id, false, None)
+        .await
+        .unwrap();
+    oxidean_api::actions::scheduler::recompute_ready_jobs(&fx.db, &run.id)
+        .await
+        .unwrap();
+
+    let run2 = fx
+        .db
+        .find_action_run_by_id(&run.id)
+        .await
+        .unwrap()
+        .expect("run row");
+    assert_eq!(run2.attempt, 2, "requeue bumps run attempt");
+    assert_eq!(run2.status, "queued");
+
+    drive_runner(&fx, &["ubuntu-latest".into()]).await;
+
+    let jobs = fx.db.list_action_jobs_for_run(&run.id).await.unwrap();
+    let by_key: std::collections::HashMap<String, String> = jobs
+        .iter()
+        .map(|j| (j.job_key.clone(), j.status.clone()))
+        .collect();
+    assert_eq!(
+        by_key,
+        std::collections::HashMap::from([
+            ("a".to_string(), "skipped".to_string()),
+            ("b".to_string(), "skipped".to_string()),
+            ("c".to_string(), "success".to_string()),
+        ]),
+        "rerun must reproduce the same outcome"
+    );
+    assert!(
+        jobs.iter().all(|j| j.attempt == 2),
+        "each job's attempt bumped"
+    );
+    let run3 = fx
+        .db
+        .find_action_run_by_id(&run.id)
+        .await
+        .unwrap()
+        .expect("run row");
+    assert_eq!(run3.status, "success");
 }

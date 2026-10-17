@@ -1,0 +1,11 @@
+name: matrix-max-parallel
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 1
+      matrix:
+        leg: [x, y, z]
+    steps:
+      - run: echo "leg-${{ matrix.leg }}"

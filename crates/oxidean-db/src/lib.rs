@@ -3566,6 +3566,69 @@ impl Database {
         actions::update_job_status(self.require_pool()?, job_id, status).await
     }
 
+    /// Guarded transition — only lands while the job is nonterminal.
+    /// `false` = the job was already terminal (e.g. server-side cancel).
+    pub async fn transition_action_job_status(
+        &self,
+        job_id: &str,
+        status: &str,
+    ) -> Result<bool, String> {
+        actions::transition_job_status(self.require_pool()?, job_id, status).await
+    }
+
+    /// Persist the evaluated `outputs` map — read by `needs.<id>.outputs.*`.
+    pub async fn set_action_job_outputs(
+        &self,
+        job_id: &str,
+        outputs_json: &str,
+    ) -> Result<(), String> {
+        actions::set_job_outputs(self.require_pool()?, job_id, outputs_json).await
+    }
+
+    /// `concurrency.cancel-in-progress` — cancel every nonterminal run in
+    /// the same repo+group, returning the superseded run ids.
+    pub async fn cancel_superseded_concurrency_runs(
+        &self,
+        repository_id: &str,
+        group: &str,
+        new_run_id: &str,
+    ) -> Result<Vec<String>, String> {
+        actions::cancel_superseded_concurrency_runs(
+            self.require_pool()?,
+            repository_id,
+            group,
+            new_run_id,
+        )
+        .await
+    }
+
+    /// Job-level `concurrency.cancel-in-progress` — cancel nonterminal
+    /// same-group jobs in *other* unfinished runs; returns affected run ids.
+    pub async fn cancel_superseded_concurrency_jobs(
+        &self,
+        repository_id: &str,
+        group: &str,
+        new_run_id: &str,
+    ) -> Result<Vec<String>, String> {
+        actions::cancel_superseded_concurrency_jobs(
+            self.require_pool()?,
+            repository_id,
+            group,
+            new_run_id,
+        )
+        .await
+    }
+
+    /// Restore/clear `action_jobs.timeout_at` after a requeue reset —
+    /// `timeout_at` is RFC3339 text (Postgres casts it).
+    pub async fn set_action_job_timeout_at(
+        &self,
+        job_id: &str,
+        timeout_at: Option<&str>,
+    ) -> Result<(), String> {
+        actions::set_job_timeout_at(self.require_pool()?, job_id, timeout_at).await
+    }
+
     /// Per-job bearer token (`OXIDEAN_TOKEN`) — upserts on `job_id` so a
     /// requeued job re-mints cleanly. `expires_at` is RFC3339 text.
     #[allow(clippy::too_many_arguments)]

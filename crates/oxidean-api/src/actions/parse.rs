@@ -95,6 +95,25 @@ pub struct JobSpec {
     /// `jobs.<id>.outputs` — raw `{name: expression}` map, materialized for
     /// `needs.<id>.outputs.*` consumers when the scheduler lands.
     pub outputs: Option<JsonValue>,
+    /// `jobs.<id>.needs` — upstream job keys; non-empty needs defer `if`
+    /// evaluation to ready-time (the `needs.<id>.result/outputs` context
+    /// only exists once the upstream legs finish).
+    pub needs: Vec<String>,
+    /// `jobs.<id>.strategy` — matrix expansion happens at enqueue into N
+    /// job rows sharing `job_key` with distinct `matrix_key` legs.
+    pub strategy: Option<StrategySpec>,
+}
+
+/// `strategy:` shape — `matrix` is an evaluatable map of `key → [values]`
+/// (embedded `${{ }}` against github/env/vars/inputs); `include`/`exclude`
+/// ride inside the matrix map itself, per GitHub.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StrategySpec {
+    pub matrix: Option<JsonValue>,
+    /// `fail-fast` — bool literal or expression source; default true.
+    pub fail_fast: Option<JsonValue>,
+    /// `max-parallel` — int literal or expression source; default unbounded.
+    pub max_parallel: Option<JsonValue>,
 }
 
 /// `concurrency:` shape — a bare group string or `{group, cancel-in-progress}`.
@@ -270,6 +289,59 @@ fn parse_concurrency(raw: Option<&serde_yaml::Value>) -> Option<Concurrency> {
     }
 }
 
+/// `needs:` — a job-id string or a list of job-id strings. Job-ids are
+/// literal (GitHub doesn't allow expressions here); anything else is a
+/// parse error.
+fn parse_needs(raw: Option<&serde_yaml::Value>, job_id: &str) -> Result<Vec<String>, ParseError> {
+    let bad = |v: &serde_yaml::Value| ParseError {
+        message: format!("job '{job_id}': needs must be a job id or a list of job ids, got {v:?}"),
+    };
+    match raw {
+        None => Ok(Vec::new()),
+        Some(serde_yaml::Value::String(s)) => Ok(vec![s.clone()]),
+        Some(serde_yaml::Value::Sequence(items)) => items
+            .iter()
+            .map(|v| match v {
+                serde_yaml::Value::String(s) => Ok(s.clone()),
+                other => Err(bad(other)),
+            })
+            .collect(),
+        Some(other) => Err(bad(other)),
+    }
+}
+
+/// `strategy:` — keep `matrix`/`fail-fast`/`max-parallel` as evaluatable
+/// JSON values; `${{ }}` inside them is syntax-checked but resolved at
+/// enqueue (`github`/`env`/`vars`/`inputs` contexts — `needs.*` matrices
+/// need the scheduler, flagged separately there).
+fn parse_strategy(
+    raw: Option<&serde_yaml::Value>,
+    job_id: &str,
+) -> Result<Option<StrategySpec>, ParseError> {
+    let Some(raw) = raw else {
+        return Ok(None);
+    };
+    let serde_yaml::Value::Mapping(map) = raw else {
+        return Err(ParseError {
+            message: format!("job '{job_id}': strategy must be a mapping"),
+        });
+    };
+    let mut s = StrategySpec {
+        matrix: None,
+        fail_fast: None,
+        max_parallel: None,
+    };
+    for (k, v) in map {
+        match k.as_str() {
+            Some("matrix") => s.matrix = Some(yaml_to_json(v.clone())?),
+            Some("fail-fast") => s.fail_fast = Some(yaml_to_json(v.clone())?),
+            Some("max-parallel") => s.max_parallel = Some(yaml_to_json(v.clone())?),
+            _ => {}
+        }
+    }
+    Ok(Some(s))
+}
+
 /// Check every `${{ }}` in `s` for syntax errors; detail strings go to
 /// `warnings`, the presence of any error sets the `expressions` flag.
 fn check_str(src: &str, unsupported: &mut Vec<String>, warnings: &mut Vec<String>) {
@@ -434,9 +506,6 @@ pub fn parse_workflow_yaml(bytes: &[u8]) -> Result<WorkflowDocument, ParseError>
     let (triggers, mut unsupported) = parse_triggers(raw.on);
     let mut warnings = Vec::new();
     let wf_concurrency = parse_concurrency(raw.concurrency.as_ref());
-    if wf_concurrency.is_some() {
-        flag(&mut warnings, "concurrency (captured but not enforced yet)");
-    }
     check_str(&name, &mut unsupported, &mut warnings);
     let wf_env = raw.env.map(yaml_to_json).transpose()?;
     if let Some(v) = &wf_env {
@@ -477,8 +546,6 @@ pub fn parse_workflow_yaml(bytes: &[u8]) -> Result<WorkflowDocument, ParseError>
         })?;
         // Structural features that would mis-execute — fail loudly at dispatch.
         for (present, key) in [
-            (job.needs.is_some(), "needs"),
-            (job.strategy.is_some(), "strategy"),
             (job.container.is_some(), "container"),
             (job.services.is_some(), "services"),
             (job.environment.is_some(), "environment"),
@@ -493,15 +560,8 @@ pub fn parse_workflow_yaml(bytes: &[u8]) -> Result<WorkflowDocument, ParseError>
             flag(&mut unsupported, "reusable-workflow");
         }
         let job_concurrency = parse_concurrency(job.concurrency.as_ref());
-        if job_concurrency.is_some() {
-            flag(&mut warnings, "concurrency (captured but not enforced yet)");
-        }
-        if job.outputs.is_some() {
-            flag(
-                &mut warnings,
-                "outputs (materialize for needs-consumers with the scheduler)",
-            );
-        }
+        let needs = parse_needs(job.needs.as_ref(), &id)?;
+        let strategy = parse_strategy(job.strategy.as_ref(), &id)?;
         // Reusable-call jobs (`uses:`) carry no `runs-on` — the unsupported
         // flag above already routes them to the validation-failure path.
         let runs_on = if job.uses.is_some() {
@@ -526,6 +586,14 @@ pub fn parse_workflow_yaml(bytes: &[u8]) -> Result<WorkflowDocument, ParseError>
         if let Some(c) = &job_concurrency {
             for s in [&c.group, &c.cancel_in_progress].into_iter().flatten() {
                 check_str(s, &mut unsupported, &mut warnings);
+            }
+        }
+        if let Some(s) = &strategy {
+            for v in [&s.matrix, &s.fail_fast, &s.max_parallel]
+                .into_iter()
+                .flatten()
+            {
+                check_json(v, &mut unsupported, &mut warnings);
             }
         }
         let job_env = job.env.map(yaml_to_json).transpose()?;
@@ -618,7 +686,57 @@ pub fn parse_workflow_yaml(bytes: &[u8]) -> Result<WorkflowDocument, ParseError>
             timeout_minutes: expr_src_opt(&job.timeout_minutes),
             concurrency: job_concurrency,
             outputs: job_outputs,
+            needs,
+            strategy,
         });
+    }
+
+    // `needs:` references must resolve to declared job ids — GitHub fails
+    // validation; we flag it loud rather than wedge a `waiting` job forever.
+    let job_ids: std::collections::BTreeSet<&str> = jobs.iter().map(|j| j.id.as_str()).collect();
+    for j in &jobs {
+        for n in &j.needs {
+            if !job_ids.contains(n.as_str()) {
+                flag(&mut unsupported, "needs");
+                warnings.push(format!("job '{}' needs unknown job '{n}'", j.id));
+            }
+        }
+    }
+    // Cyclic `needs:` would wedge every member in `waiting` — GitHub
+    // rejects the file; flag it loud.
+    {
+        let mut state: std::collections::HashMap<&str, u8> = std::collections::HashMap::new(); // 0=visiting,1=done
+        fn visit<'a>(
+            id: &'a str,
+            graph: &std::collections::HashMap<&'a str, &'a [String]>,
+            state: &mut std::collections::HashMap<&'a str, u8>,
+        ) -> bool {
+            match state.get(id) {
+                Some(0) => return true,  // back edge — cycle
+                Some(_) => return false, // already fully explored
+                None => {}
+            }
+            state.insert(id, 0);
+            let cyclic = graph
+                .get(id)
+                .into_iter()
+                .flat_map(|ns| ns.iter().map(String::as_str))
+                .filter(|n| graph.contains_key(n))
+                .any(|n| visit(n, graph, state));
+            state.insert(id, 1);
+            cyclic
+        }
+        let graph: std::collections::HashMap<&str, &[String]> = jobs
+            .iter()
+            .map(|j| (j.id.as_str(), j.needs.as_slice()))
+            .collect();
+        if jobs
+            .iter()
+            .any(|j| visit(j.id.as_str(), &graph, &mut state))
+        {
+            flag(&mut unsupported, "needs");
+            warnings.push("cyclic needs graph".to_string());
+        }
     }
 
     unsupported.sort();
@@ -891,13 +1009,16 @@ on: [push]
 jobs:
   a:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        os: [ubuntu, macos]
+    needs: b
+    steps:
+      - run: echo hi
+  b:
+    runs-on: ubuntu-latest
+    needs: a
     steps:
       - run: echo hi
 "#,
-                &["strategy"],
+                &["needs"],
             ),
             (
                 br#"
@@ -1029,11 +1150,7 @@ jobs:
         assert!(doc.unsupported.is_empty());
         assert_eq!(
             doc.warnings,
-            vec![
-                "concurrency (captured but not enforced yet)".to_string(),
-                "outputs (materialize for needs-consumers with the scheduler)".to_string(),
-                "with (inputs applied for actions/checkout only)".to_string(),
-            ]
+            vec!["with (inputs applied for actions/checkout only)".to_string()]
         );
         assert_eq!(
             doc.jobs[0].if_expr.as_deref(),

@@ -1317,7 +1317,7 @@ pub async fn claim_queued_job_for_labels(
                    WHERE j.status = 'queued' AND NOT EXISTS ( \
                      SELECT 1 FROM action_job_labels l WHERE l.job_id = j.id \
                      AND NOT (l.base = ANY($2::text[]))) \
-                   ORDER BY j.created_at LIMIT 1 FOR UPDATE SKIP LOCKED) \
+                   ORDER BY j.created_at, j.matrix_key LIMIT 1 FOR UPDATE SKIP LOCKED) \
                  AND status = 'queued' RETURNING {JOB_COLS_PG}"
             )))
             .bind(runner_id)
@@ -1336,7 +1336,7 @@ pub async fn claim_queued_job_for_labels(
                        SELECT 1 FROM action_job_labels l WHERE l.job_id = j.id \
                        AND l.base NOT IN (SELECT value FROM JSON_TABLE(?, '$[*]' \
                          COLUMNS (value VARCHAR(255) PATH '$')) AS lb)) \
-                     ORDER BY j.created_at LIMIT 5",
+                     ORDER BY j.created_at, j.matrix_key LIMIT 5",
                 )
                 .bind(&bases_json)
                 .fetch_all(p)
@@ -1362,7 +1362,7 @@ pub async fn claim_queued_job_for_labels(
                    WHERE j.status = 'queued' AND NOT EXISTS ( \
                      SELECT 1 FROM action_job_labels l WHERE l.job_id = j.id \
                      AND l.base NOT IN (SELECT value FROM json_each(?2))) \
-                   ORDER BY j.created_at LIMIT 1) \
+                   ORDER BY j.created_at, j.matrix_key LIMIT 1) \
                  AND status = 'queued' RETURNING {JOB_COLS_SQLITE}"
             )))
             .bind(runner_id)
@@ -1588,6 +1588,328 @@ pub async fn update_job_status(pool: &DbPool, job_id: &str, status: &str) -> Res
 /// - otherwise → keep current status (jobs still queued/claimed)
 ///
 /// `finished_at` is set exactly when the run first reaches a terminal status.
+/// Guarded status write — only lands while the job is nonterminal
+/// ('queued','waiting','in_progress'). A job the server already cancelled
+/// (concurrency supersede, fail-fast sibling) keeps its terminal state
+/// even when a runner reports success afterwards. Returns whether the
+/// write landed.
+pub async fn transition_job_status(
+    pool: &DbPool,
+    job_id: &str,
+    status: &str,
+) -> Result<bool, String> {
+    let in_progress = status == "in_progress";
+    let terminal = matches!(status, "success" | "failure" | "cancelled" | "skipped");
+    let guard = "status IN ('queued','waiting','in_progress')";
+    match pool {
+        DbPool::Sqlite(p) => {
+            let res = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "UPDATE action_jobs SET status = ?, started_at = CASE WHEN ? AND started_at IS NULL THEN CURRENT_TIMESTAMP ELSE started_at END, finished_at = CASE WHEN ? AND finished_at IS NULL THEN CURRENT_TIMESTAMP ELSE finished_at END, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND {guard}"
+            )))
+                .bind(status).bind(in_progress).bind(terminal).bind(job_id).execute(p).await.map_err(|e| e.to_string())?;
+            Ok(res.rows_affected() > 0)
+        }
+        DbPool::Postgres(p) => {
+            let res = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "UPDATE action_jobs SET status = $1, started_at = CASE WHEN $2 AND started_at IS NULL THEN now() ELSE started_at END, finished_at = CASE WHEN $3 AND finished_at IS NULL THEN now() ELSE finished_at END, updated_at = now() WHERE id = $4 AND {guard}"
+            )))
+                .bind(status).bind(in_progress).bind(terminal).bind(job_id).execute(p).await.map_err(|e| e.to_string())?;
+            Ok(res.rows_affected() > 0)
+        }
+        DbPool::MySql(p) => {
+            let res = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "UPDATE action_jobs SET status = ?, started_at = CASE WHEN ? AND started_at IS NULL THEN CURRENT_TIMESTAMP ELSE started_at END, finished_at = CASE WHEN ? AND finished_at IS NULL THEN CURRENT_TIMESTAMP ELSE finished_at END, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND {guard}"
+            )))
+                .bind(status).bind(in_progress).bind(terminal).bind(job_id).execute(p).await.map_err(|e| e.to_string())?;
+            Ok(res.rows_affected() > 0)
+        }
+    }
+}
+
+/// Store the materialized `outputs` map for a completed job — the values
+/// dependents read through `needs.<id>.outputs.*`.
+pub async fn set_job_outputs(
+    pool: &DbPool,
+    job_id: &str,
+    outputs_json: &str,
+) -> Result<(), String> {
+    match pool {
+        DbPool::Sqlite(p) => {
+            sqlx::query("UPDATE action_jobs SET outputs_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+                .bind(outputs_json).bind(job_id).execute(p).await.map_err(|e| e.to_string())?;
+        }
+        DbPool::Postgres(p) => {
+            sqlx::query(
+                "UPDATE action_jobs SET outputs_json = $1, updated_at = now() WHERE id = $2",
+            )
+            .bind(outputs_json)
+            .bind(job_id)
+            .execute(p)
+            .await
+            .map_err(|e| e.to_string())?;
+        }
+        DbPool::MySql(p) => {
+            sqlx::query("UPDATE action_jobs SET outputs_json = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+                .bind(outputs_json).bind(job_id).execute(p).await.map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+/// Job-level `concurrency.cancel-in-progress` — supersede every nonterminal
+/// job in the same repo+group belonging to a *different* unfinished run:
+/// the jobs go `cancelled` (finished_at exactly once), their job tokens are
+/// revoked, and the affected runs are marked `concurrency_cancel_pending`
+/// (callers roll run status up afterwards). Returns affected run ids.
+pub async fn cancel_superseded_concurrency_jobs(
+    pool: &DbPool,
+    repository_id: &str,
+    group: &str,
+    new_run_id: &str,
+) -> Result<Vec<String>, String> {
+    const SEL_SQLITE: &str = "SELECT DISTINCT run_id FROM action_jobs WHERE concurrency_group = ? AND status IN ('queued','waiting','in_progress') AND run_id IN (SELECT id FROM action_runs WHERE repository_id = ? AND id != ? AND finished_at IS NULL)";
+    const UPD_SQLITE: &str = "UPDATE action_jobs SET status = 'cancelled', finished_at = COALESCE(finished_at, CURRENT_TIMESTAMP), updated_at = CURRENT_TIMESTAMP WHERE concurrency_group = ? AND status IN ('queued','waiting','in_progress') AND run_id IN (SELECT id FROM action_runs WHERE repository_id = ? AND id != ? AND finished_at IS NULL)";
+    const REVOKE_SQLITE: &str = "UPDATE action_job_tokens SET revoked_at = CURRENT_TIMESTAMP WHERE revoked_at IS NULL AND job_id IN (SELECT id FROM action_jobs WHERE concurrency_group = ? AND run_id IN (SELECT id FROM action_runs WHERE repository_id = ? AND id != ?))";
+    const MARK_SQLITE: &str = "UPDATE action_runs SET concurrency_cancel_pending = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?";
+    const SEL_PG: &str = "SELECT DISTINCT run_id FROM action_jobs WHERE concurrency_group = $1 AND status IN ('queued','waiting','in_progress') AND run_id IN (SELECT id FROM action_runs WHERE repository_id = $2 AND id != $3 AND finished_at IS NULL)";
+    const UPD_PG: &str = "UPDATE action_jobs SET status = 'cancelled', finished_at = COALESCE(finished_at, now()), updated_at = now() WHERE concurrency_group = $1 AND status IN ('queued','waiting','in_progress') AND run_id IN (SELECT id FROM action_runs WHERE repository_id = $2 AND id != $3 AND finished_at IS NULL)";
+    const REVOKE_PG: &str = "UPDATE action_job_tokens SET revoked_at = now() WHERE revoked_at IS NULL AND job_id IN (SELECT id FROM action_jobs WHERE concurrency_group = $1 AND run_id IN (SELECT id FROM action_runs WHERE repository_id = $2 AND id != $3))";
+    const MARK_PG: &str = "UPDATE action_runs SET concurrency_cancel_pending = true, updated_at = now() WHERE id = $1";
+    const SEL_MYSQL: &str = SEL_SQLITE;
+    const UPD_MYSQL: &str = UPD_SQLITE;
+    const REVOKE_MYSQL: &str = REVOKE_SQLITE;
+    const MARK_MYSQL: &str = MARK_SQLITE;
+    match pool {
+        DbPool::Sqlite(p) => {
+            let mut tx = p.begin().await.map_err(|e| e.to_string())?;
+            let ids: Vec<String> = sqlx::query_scalar(SEL_SQLITE)
+                .bind(group)
+                .bind(repository_id)
+                .bind(new_run_id)
+                .fetch_all(&mut *tx)
+                .await
+                .map_err(|e| e.to_string())?;
+            if !ids.is_empty() {
+                sqlx::query(UPD_SQLITE)
+                    .bind(group)
+                    .bind(repository_id)
+                    .bind(new_run_id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                sqlx::query(REVOKE_SQLITE)
+                    .bind(group)
+                    .bind(repository_id)
+                    .bind(new_run_id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                for id in &ids {
+                    sqlx::query(MARK_SQLITE)
+                        .bind(id)
+                        .execute(&mut *tx)
+                        .await
+                        .map_err(|e| e.to_string())?;
+                }
+            }
+            tx.commit().await.map_err(|e| e.to_string())?;
+            Ok(ids)
+        }
+        DbPool::Postgres(p) => {
+            let mut tx = p.begin().await.map_err(|e| e.to_string())?;
+            let ids: Vec<String> = sqlx::query_scalar(SEL_PG)
+                .bind(group)
+                .bind(repository_id)
+                .bind(new_run_id)
+                .fetch_all(&mut *tx)
+                .await
+                .map_err(|e| e.to_string())?;
+            if !ids.is_empty() {
+                sqlx::query(UPD_PG)
+                    .bind(group)
+                    .bind(repository_id)
+                    .bind(new_run_id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                sqlx::query(REVOKE_PG)
+                    .bind(group)
+                    .bind(repository_id)
+                    .bind(new_run_id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                for id in &ids {
+                    sqlx::query(MARK_PG)
+                        .bind(id)
+                        .execute(&mut *tx)
+                        .await
+                        .map_err(|e| e.to_string())?;
+                }
+            }
+            tx.commit().await.map_err(|e| e.to_string())?;
+            Ok(ids)
+        }
+        DbPool::MySql(p) => {
+            let mut tx = p.begin().await.map_err(|e| e.to_string())?;
+            let ids: Vec<String> = sqlx::query_scalar(SEL_MYSQL)
+                .bind(group)
+                .bind(repository_id)
+                .bind(new_run_id)
+                .fetch_all(&mut *tx)
+                .await
+                .map_err(|e| e.to_string())?;
+            if !ids.is_empty() {
+                sqlx::query(UPD_MYSQL)
+                    .bind(group)
+                    .bind(repository_id)
+                    .bind(new_run_id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                sqlx::query(REVOKE_MYSQL)
+                    .bind(group)
+                    .bind(repository_id)
+                    .bind(new_run_id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                for id in &ids {
+                    sqlx::query(MARK_MYSQL)
+                        .bind(id)
+                        .execute(&mut *tx)
+                        .await
+                        .map_err(|e| e.to_string())?;
+                }
+            }
+            tx.commit().await.map_err(|e| e.to_string())?;
+            Ok(ids)
+        }
+    }
+}
+
+/// Restore a job's `timeout_at` after a requeue reset — `seconds` is the
+/// evaluated `timeout-minutes` stored in the payload (None clears).
+pub async fn set_job_timeout_at(
+    pool: &DbPool,
+    job_id: &str,
+    timeout_at: Option<&str>,
+) -> Result<(), String> {
+    match pool {
+        DbPool::Sqlite(p) => {
+            sqlx::query("UPDATE action_jobs SET timeout_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+                .bind(timeout_at).bind(job_id).execute(p).await.map_err(|e| e.to_string())?;
+        }
+        DbPool::Postgres(p) => {
+            sqlx::query("UPDATE action_jobs SET timeout_at = $1::timestamptz, updated_at = now() WHERE id = $2")
+                .bind(timeout_at).bind(job_id).execute(p).await.map_err(|e| e.to_string())?;
+        }
+        DbPool::MySql(p) => {
+            sqlx::query("UPDATE action_jobs SET timeout_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+                .bind(timeout_at).bind(job_id).execute(p).await.map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+/// `concurrency.cancel-in-progress` — supersede every nonterminal run in
+/// the same repo+group when a new run lands: mark `concurrency_cancel_pending`,
+/// cancel all its nonterminal jobs (finished_at exactly once), and let the
+/// rollup carry the run to 'cancelled'. Returns superseded run ids.
+pub async fn cancel_superseded_concurrency_runs(
+    pool: &DbPool,
+    repository_id: &str,
+    group: &str,
+    new_run_id: &str,
+) -> Result<Vec<String>, String> {
+    match pool {
+        DbPool::Sqlite(p) => {
+            let mut tx = p.begin().await.map_err(|e| e.to_string())?;
+            let ids: Vec<String> = sqlx::query_scalar(
+                "SELECT id FROM action_runs WHERE repository_id = ? AND concurrency_group = ? AND id != ? AND finished_at IS NULL",
+            )
+            .bind(repository_id).bind(group).bind(new_run_id)
+            .fetch_all(&mut *tx).await.map_err(|e| e.to_string())?;
+            for id in &ids {
+                sqlx::query(
+                    "UPDATE action_runs SET concurrency_cancel_pending = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                )
+                .bind(id).execute(&mut *tx).await.map_err(|e| e.to_string())?;
+                sqlx::query(
+                    "UPDATE action_jobs SET status = 'cancelled', finished_at = COALESCE(finished_at, CURRENT_TIMESTAMP), updated_at = CURRENT_TIMESTAMP WHERE run_id = ? AND status IN ('queued','waiting','in_progress')",
+                )
+                .bind(id).execute(&mut *tx).await.map_err(|e| e.to_string())?;
+                sqlx::query(
+                    "UPDATE action_runs SET status = 'cancelled', finished_at = COALESCE(finished_at, CURRENT_TIMESTAMP), updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                )
+                .bind(id).execute(&mut *tx).await.map_err(|e| e.to_string())?;
+                sqlx::query(
+                    "UPDATE action_job_tokens SET revoked_at = CURRENT_TIMESTAMP WHERE run_id = ? AND revoked_at IS NULL",
+                )
+                .bind(id).execute(&mut *tx).await.map_err(|e| e.to_string())?;
+            }
+            tx.commit().await.map_err(|e| e.to_string())?;
+            Ok(ids)
+        }
+        DbPool::Postgres(p) => {
+            let mut tx = p.begin().await.map_err(|e| e.to_string())?;
+            let ids: Vec<String> = sqlx::query_scalar(
+                "SELECT id FROM action_runs WHERE repository_id = $1 AND concurrency_group = $2 AND id != $3 AND finished_at IS NULL",
+            )
+            .bind(repository_id).bind(group).bind(new_run_id)
+            .fetch_all(&mut *tx).await.map_err(|e| e.to_string())?;
+            for id in &ids {
+                sqlx::query(
+                    "UPDATE action_runs SET concurrency_cancel_pending = true, updated_at = now() WHERE id = $1",
+                )
+                .bind(id).execute(&mut *tx).await.map_err(|e| e.to_string())?;
+                sqlx::query(
+                    "UPDATE action_jobs SET status = 'cancelled', finished_at = COALESCE(finished_at, now()), updated_at = now() WHERE run_id = $1 AND status IN ('queued','waiting','in_progress')",
+                )
+                .bind(id).execute(&mut *tx).await.map_err(|e| e.to_string())?;
+                sqlx::query(
+                    "UPDATE action_runs SET status = 'cancelled', finished_at = COALESCE(finished_at, now()), updated_at = now() WHERE id = $1",
+                )
+                .bind(id).execute(&mut *tx).await.map_err(|e| e.to_string())?;
+                sqlx::query(
+                    "UPDATE action_job_tokens SET revoked_at = now() WHERE run_id = $1 AND revoked_at IS NULL",
+                )
+                .bind(id).execute(&mut *tx).await.map_err(|e| e.to_string())?;
+            }
+            tx.commit().await.map_err(|e| e.to_string())?;
+            Ok(ids)
+        }
+        DbPool::MySql(p) => {
+            let mut tx = p.begin().await.map_err(|e| e.to_string())?;
+            let ids: Vec<String> = sqlx::query_scalar(
+                "SELECT id FROM action_runs WHERE repository_id = ? AND concurrency_group = ? AND id != ? AND finished_at IS NULL",
+            )
+            .bind(repository_id).bind(group).bind(new_run_id)
+            .fetch_all(&mut *tx).await.map_err(|e| e.to_string())?;
+            for id in &ids {
+                sqlx::query(
+                    "UPDATE action_runs SET concurrency_cancel_pending = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                )
+                .bind(id).execute(&mut *tx).await.map_err(|e| e.to_string())?;
+                sqlx::query(
+                    "UPDATE action_jobs SET status = 'cancelled', finished_at = COALESCE(finished_at, CURRENT_TIMESTAMP), updated_at = CURRENT_TIMESTAMP WHERE run_id = ? AND status IN ('queued','waiting','in_progress')",
+                )
+                .bind(id).execute(&mut *tx).await.map_err(|e| e.to_string())?;
+                sqlx::query(
+                    "UPDATE action_runs SET status = 'cancelled', finished_at = COALESCE(finished_at, CURRENT_TIMESTAMP), updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                )
+                .bind(id).execute(&mut *tx).await.map_err(|e| e.to_string())?;
+                sqlx::query(
+                    "UPDATE action_job_tokens SET revoked_at = CURRENT_TIMESTAMP WHERE run_id = ? AND revoked_at IS NULL",
+                )
+                .bind(id).execute(&mut *tx).await.map_err(|e| e.to_string())?;
+            }
+            tx.commit().await.map_err(|e| e.to_string())?;
+            Ok(ids)
+        }
+    }
+}
+
 pub async fn recompute_run_status(pool: &DbPool, run_id: &str) -> Result<(), String> {
     const ROLLUP: &str = "UPDATE action_runs SET \
         status = CASE \
@@ -1767,9 +2089,12 @@ pub async fn requeue_run(
     failed_only: bool,
     job_id: Option<&str>,
 ) -> Result<(), String> {
-    const JOB_RESET_SQLITE: &str = "UPDATE action_jobs SET status = 'queued', runner_id = NULL, started_at = NULL, finished_at = NULL, timeout_at = NULL, attempt = attempt + 1, updated_at = CURRENT_TIMESTAMP WHERE run_id = ?";
-    const JOB_RESET_PG: &str = "UPDATE action_jobs SET status = 'queued', runner_id = NULL, started_at = NULL, finished_at = NULL, timeout_at = NULL, attempt = attempt + 1, updated_at = now() WHERE run_id = $1";
-    const JOB_RESET_MYSQL: &str = "UPDATE action_jobs SET status = 'queued', runner_id = NULL, started_at = NULL, finished_at = NULL, timeout_at = NULL, attempt = attempt + 1, updated_at = CURRENT_TIMESTAMP WHERE run_id = ?";
+    // Requeued needs-jobs go back to `waiting` so the scheduler re-gates
+    // them; enqueue-skipped jobs (if:false, no needs) stay skipped — a
+    // rerun must not resurrect a job the expression already rejected.
+    const JOB_RESET_SQLITE: &str = "UPDATE action_jobs SET status = CASE WHEN status = 'skipped' AND needs_json = '[]' THEN 'skipped' WHEN needs_json != '[]' THEN 'waiting' ELSE 'queued' END, runner_id = NULL, started_at = NULL, finished_at = NULL, timeout_at = NULL, attempt = attempt + 1, updated_at = CURRENT_TIMESTAMP WHERE run_id = ?";
+    const JOB_RESET_PG: &str = "UPDATE action_jobs SET status = CASE WHEN status = 'skipped' AND needs_json = '[]' THEN 'skipped' WHEN needs_json != '[]' THEN 'waiting' ELSE 'queued' END, runner_id = NULL, started_at = NULL, finished_at = NULL, timeout_at = NULL, attempt = attempt + 1, updated_at = now() WHERE run_id = $1";
+    const JOB_RESET_MYSQL: &str = "UPDATE action_jobs SET status = CASE WHEN status = 'skipped' AND needs_json = '[]' THEN 'skipped' WHEN needs_json != '[]' THEN 'waiting' ELSE 'queued' END, runner_id = NULL, started_at = NULL, finished_at = NULL, timeout_at = NULL, attempt = attempt + 1, updated_at = CURRENT_TIMESTAMP WHERE run_id = ?";
     match pool {
         DbPool::Sqlite(p) => {
             sqlx::query(
@@ -1914,7 +2239,7 @@ pub async fn cancel_run(pool: &DbPool, run_id: &str) -> Result<bool, String> {
                 return Ok(false);
             }
             sqlx::query(
-                "UPDATE action_jobs SET status = 'cancelled', finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE run_id = ? AND status IN ('queued', 'waiting', 'in_progress')",
+                "UPDATE action_jobs SET status = 'cancelled', finished_at = COALESCE(finished_at, CURRENT_TIMESTAMP), updated_at = CURRENT_TIMESTAMP WHERE run_id = ? AND status IN ('queued', 'waiting', 'in_progress')",
             )
             .bind(run_id).execute(p).await.map_err(|e| e.to_string())?;
         }
@@ -1927,7 +2252,7 @@ pub async fn cancel_run(pool: &DbPool, run_id: &str) -> Result<bool, String> {
                 return Ok(false);
             }
             sqlx::query(
-                "UPDATE action_jobs SET status = 'cancelled', finished_at = now(), updated_at = now() WHERE run_id = $1 AND status IN ('queued', 'waiting', 'in_progress')",
+                "UPDATE action_jobs SET status = 'cancelled', finished_at = COALESCE(finished_at, now()), updated_at = now() WHERE run_id = $1 AND status IN ('queued', 'waiting', 'in_progress')",
             )
             .bind(run_id).execute(p).await.map_err(|e| e.to_string())?;
         }
@@ -1940,7 +2265,7 @@ pub async fn cancel_run(pool: &DbPool, run_id: &str) -> Result<bool, String> {
                 return Ok(false);
             }
             sqlx::query(
-                "UPDATE action_jobs SET status = 'cancelled', finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE run_id = ? AND status IN ('queued', 'waiting', 'in_progress')",
+                "UPDATE action_jobs SET status = 'cancelled', finished_at = COALESCE(finished_at, CURRENT_TIMESTAMP), updated_at = CURRENT_TIMESTAMP WHERE run_id = ? AND status IN ('queued', 'waiting', 'in_progress')",
             )
             .bind(run_id).execute(p).await.map_err(|e| e.to_string())?;
         }

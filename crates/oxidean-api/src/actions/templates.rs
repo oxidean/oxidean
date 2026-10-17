@@ -731,7 +731,7 @@ pub async fn create_workflow(
         &accessible.row.name,
     )?;
     file_assert_path_creatable(ctx, &bare, &base_branch, &path).await?;
-    file_commit_changes(
+    Box::pin(file_commit_changes(
         ctx,
         &accessible,
         &user,
@@ -742,7 +742,7 @@ pub async fn create_workflow(
             path,
             content: content.into_bytes(),
         }],
-    )
+    ))
     .await
 }
 

@@ -1,0 +1,13 @@
+name: concurrency-cancel-running
+on: [push]
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: sleep 0.4 && echo s1
+      - run: sleep 0.4 && echo s2
+      - run: sleep 0.4 && echo s3
+      - run: echo s4-final

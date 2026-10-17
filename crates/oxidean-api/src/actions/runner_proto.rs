@@ -117,9 +117,18 @@ struct DeclareRequest {
     runner_token: Option<String>,
 }
 
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
 #[derive(Debug, Serialize)]
 struct OkResponse {
     ok: bool,
+    /// `update_task` only — the job was cancelled server-side (concurrency
+    /// supersede, fail-fast sibling, run cancel) while the runner was still
+    /// executing; the runner aborts remaining steps on `true`.
+    #[serde(default, skip_serializing_if = "is_false")]
+    cancelled: bool,
 }
 
 async fn declare(
@@ -134,7 +143,10 @@ async fn declare(
         .update_action_runner_labels(&runner.id, &labels)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    Ok(Json(OkResponse { ok: true }))
+    Ok(Json(OkResponse {
+        ok: true,
+        cancelled: false,
+    }))
 }
 
 #[derive(Debug, Deserialize)]
@@ -195,6 +207,9 @@ struct FetchTaskResponse {
     event_payload: Option<serde_json::Value>,
     /// Matrix assignment (`action_jobs.matrix_json`) → `matrix` context.
     matrix: Option<serde_json::Value>,
+    /// `needs.<id>.{result,outputs}` for dependents — `None` for need-less
+    /// jobs.
+    needs: Option<serde_json::Value>,
     /// Seconds until `timeout_at`, computed at claim — runners don't parse
     /// the timestamp or depend on wall-clock agreement with the API.
     timeout_seconds: Option<i64>,
@@ -235,6 +250,7 @@ impl FetchTaskResponse {
             timeout_at: None,
             event_payload: None,
             matrix: None,
+            needs: None,
             timeout_seconds: None,
         }
     }
@@ -410,6 +426,16 @@ async fn fetch_task(
                 job_token_permission: job_token_permission.clone(),
                 workflow_ref: workflow_ref.clone(),
             };
+            // `needs.<id>.{result,outputs}` for dependents — computed before
+            // the response literal moves `j.run_id`/`j.needs_json`.
+            let needs = {
+                let all = state
+                    .db
+                    .list_action_jobs_for_run(&j.run_id)
+                    .await
+                    .unwrap_or_default();
+                crate::actions::scheduler::needs_context_for_task(&all, &j.needs_json)
+            };
             FetchTaskResponse {
                 job_id: Some(j.id),
                 run_id: Some(j.run_id),
@@ -448,6 +474,7 @@ async fn fetch_task(
                 matrix: Some(
                     serde_json::from_str(&j.matrix_json).unwrap_or_else(|_| serde_json::json!({})),
                 ),
+                needs,
                 timeout_seconds: j.timeout_at.as_deref().and_then(|s| {
                     chrono::DateTime::parse_from_rfc3339(s).ok().map(|t| {
                         t.signed_duration_since(chrono::Utc::now())
@@ -523,6 +550,10 @@ struct UpdateTaskRequest {
     job_id: String,
     state: String,
     runner_token: Option<String>,
+    /// `steps.<id>.outputs` collected from `$GITHUB_OUTPUT` file commands —
+    /// reported on terminal states so `jobs.<id>.outputs` can materialize.
+    #[serde(default)]
+    outputs: Option<serde_json::Value>,
 }
 
 async fn update_task(
@@ -553,15 +584,37 @@ async fn update_task(
         .ok()
         .flatten()
         .map(|r| r.status);
-    state
+    // Guarded transition — a job the server already cancelled (concurrency
+    // supersede, fail-fast sibling, run cancel) keeps its terminal state
+    // even when a runner reports success afterwards.
+    let landed = state
         .db
-        .update_action_job_status(&job.id, status)
+        .transition_action_job_status(&job.id, status)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     // Terminal state revokes the per-job OXIDEAN_TOKEN (idempotent).
     if matches!(status, "success" | "failure" | "cancelled") {
         if let Err(e) = state.db.revoke_action_job_token_for_job(&job.id).await {
             tracing::warn!(error = %e, job_id = %job.id, "failed to revoke job token");
+        }
+        // Materialize `jobs.<id>.outputs` from reported step outputs so
+        // `needs.<id>.outputs.*` resolves for dependents.
+        if let Some(outputs) = &req.outputs {
+            if let Err(e) =
+                crate::actions::scheduler::materialize_outputs(&state.db, &job, outputs).await
+            {
+                tracing::warn!(error = %e, job_id = %job.id, "job outputs materialization failed");
+            }
+        }
+        // Flip `waiting` jobs whose needs just finished. Boxed — this runs
+        // inside the runner-proto handler chain on small test stacks.
+        if let Err(e) = Box::pin(crate::actions::scheduler::recompute_ready_jobs(
+            &state.db,
+            &job.run_id,
+        ))
+        .await
+        {
+            tracing::warn!(error = %e, run_id = %job.run_id, "ready-job recompute failed");
         }
     }
     if let Err(e) = state.db.recompute_action_run_status(&job.run_id).await {
@@ -607,7 +660,23 @@ async fn update_task(
     {
         tracing::warn!(error = %e, job_id = %job.id, "failed to publish job commit status");
     }
-    Ok(Json(OkResponse { ok: true }))
+    // If the write didn't land the job was already terminal — tell the
+    // runner when that's a cancel so it aborts instead of continuing.
+    let cancelled = if landed {
+        false
+    } else {
+        state
+            .db
+            .find_action_job_by_id(&job.id)
+            .await
+            .ok()
+            .flatten()
+            .is_some_and(|j| j.status == "cancelled")
+    };
+    Ok(Json(OkResponse {
+        ok: true,
+        cancelled,
+    }))
 }
 
 #[derive(Debug, Deserialize)]
@@ -651,5 +720,18 @@ async fn update_log(
     )
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    Ok(Json(OkResponse { ok: true }))
+    // Log traffic is the runner's most frequent contact — piggyback the
+    // cancel signal so a superseded/fail-fast job aborts mid-run rather
+    // than executing its remaining steps.
+    let cancelled = state
+        .db
+        .find_action_job_by_id(&job.id)
+        .await
+        .ok()
+        .flatten()
+        .is_some_and(|j| j.status == "cancelled");
+    Ok(Json(OkResponse {
+        ok: true,
+        cancelled,
+    }))
 }

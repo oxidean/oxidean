@@ -1,0 +1,15 @@
+name: matrix-include-exclude
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [linux, macos]
+        v: [a, b]
+        exclude:
+          - {os: macos, v: b}
+        include:
+          - {os: win, v: c}
+    steps:
+      - run: echo "leg-${{ matrix.os }}-${{ matrix.v }}"

@@ -1,0 +1,8 @@
+# Dev/test environment settings.
+#
+# The RPC dispatch + git-cli poll chains in debug builds overflow the default
+# 2 MiB spawned-thread stack used by libtest and tokio workers. Raise the
+# default for processes spawned by cargo (tests, `cargo run`) — virtual
+# reservation only; memory commits lazily.
+[env]
+RUST_MIN_STACK = "33554432"

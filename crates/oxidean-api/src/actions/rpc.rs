@@ -625,6 +625,49 @@ pub async fn rerun_run(
         )
         .await
         .map_err(db_err)?;
+    // Requeue cleared `timeout_at` — restart job deadlines from the
+    // evaluated `timeout_seconds` captured in the durable payload, and let
+    // the scheduler re-gate `waiting` needs-jobs whose upstreams stayed
+    // terminal across the rerun.
+    if let Ok(jobs) = ctx.db.list_action_jobs_for_run(&req.run_id).await {
+        for job in &jobs {
+            if !matches!(job.status.as_str(), "queued" | "waiting") {
+                continue;
+            }
+            let secs = match job.payload_sha.as_deref() {
+                Some(sha) => ctx
+                    .db
+                    .find_action_payload(sha)
+                    .await
+                    .ok()
+                    .flatten()
+                    .and_then(|p| serde_json::from_str::<serde_json::Value>(&p.payload_json).ok())
+                    .and_then(|p| p.get("timeout_seconds").and_then(|v| v.as_f64())),
+                None => None,
+            };
+            let deadline = secs.map(|s| {
+                (chrono::Utc::now() + chrono::Duration::milliseconds((s * 1000.0) as i64))
+                    .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+            });
+            let _ = ctx
+                .db
+                .set_action_job_timeout_at(&job.id, deadline.as_deref())
+                .await;
+        }
+        // Boxed: the scheduler future is large and this call sits inside the
+        // monolithic rpc::dispatch future — keep its frame off the caller's.
+        if let Err(e) = Box::pin(crate::actions::scheduler::recompute_ready_jobs(
+            &ctx.db,
+            &req.run_id,
+        ))
+        .await
+        {
+            tracing::warn!(error = %e, run_id = %req.run_id, "post-requeue ready-job recompute failed");
+        }
+        if let Err(e) = ctx.db.recompute_action_run_status(&req.run_id).await {
+            tracing::warn!(error = %e, run_id = %req.run_id, "post-requeue rollup failed");
+        }
+    }
     // API-04: a requeued run is a new `workflow_run` `requested` delivery.
     crate::webhook::dispatch::notify_workflow_run(&ctx.db, &req.run_id, "requested", &ctx.env_name)
         .await;

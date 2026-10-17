@@ -1,0 +1,19 @@
+name: needs-ctx-if
+on: [push]
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo a
+  gated-yes:
+    runs-on: ubuntu-latest
+    needs: a
+    if: ${{ needs.a.result == 'success' }}
+    steps:
+      - run: echo gated-ran
+  gated-no:
+    runs-on: ubuntu-latest
+    needs: a
+    if: ${{ needs.a.result == 'failure' }}
+    steps:
+      - run: echo should-not-run

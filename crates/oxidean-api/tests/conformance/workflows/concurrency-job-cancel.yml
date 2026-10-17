@@ -1,0 +1,10 @@
+name: concurrency-job-cancel
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: job-ci
+      cancel-in-progress: true
+    steps:
+      - run: echo job-level-supersede

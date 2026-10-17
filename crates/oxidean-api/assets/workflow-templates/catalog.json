@@ -424,10 +424,8 @@
       "warnings": []
     },
     "ci/cmake-multi-platform": {
-      "status": "unsupported-runtime",
-      "missing_features": [
-        "strategy"
-      ],
+      "status": "runnable",
+      "missing_features": [],
       "unsupported_actions": [],
       "warnings": []
     },
@@ -482,10 +480,8 @@
       ]
     },
     "ci/django": {
-      "status": "unsupported-runtime",
-      "missing_features": [
-        "strategy"
-      ],
+      "status": "partial",
+      "missing_features": [],
       "unsupported_actions": [
         "actions/setup-python@v3"
       ],
@@ -524,10 +520,8 @@
       ]
     },
     "ci/dotnet-desktop": {
-      "status": "unsupported-runtime",
-      "missing_features": [
-        "strategy"
-      ],
+      "status": "partial",
+      "missing_features": [],
       "unsupported_actions": [
         "actions/setup-dotnet@v4",
         "actions/upload-artifact@v4",
@@ -569,13 +563,10 @@
     "ci/generator-generic-ossf-slsa3-publish": {
       "status": "reusable-workflow",
       "missing_features": [
-        "needs",
         "reusable-workflow"
       ],
       "unsupported_actions": [],
-      "warnings": [
-        "outputs (materialize for needs-consumers with the scheduler)"
-      ]
+      "warnings": []
     },
     "ci/go": {
       "status": "partial",
@@ -687,10 +678,8 @@
       "warnings": []
     },
     "ci/node.js": {
-      "status": "unsupported-runtime",
-      "missing_features": [
-        "strategy"
-      ],
+      "status": "partial",
+      "missing_features": [],
       "unsupported_actions": [
         "actions/setup-node@v4"
       ],
@@ -699,10 +688,8 @@
       ]
     },
     "ci/npm-publish": {
-      "status": "unsupported-runtime",
-      "missing_features": [
-        "needs"
-      ],
+      "status": "partial",
+      "missing_features": [],
       "unsupported_actions": [
         "actions/setup-node@v4"
       ],
@@ -711,10 +698,8 @@
       ]
     },
     "ci/npm-publish-github-packages": {
-      "status": "unsupported-runtime",
-      "missing_features": [
-        "needs"
-      ],
+      "status": "partial",
+      "missing_features": [],
       "unsupported_actions": [
         "actions/setup-node@v4"
       ],
@@ -739,10 +724,8 @@
       ]
     },
     "ci/pylint": {
-      "status": "unsupported-runtime",
-      "missing_features": [
-        "strategy"
-      ],
+      "status": "partial",
+      "missing_features": [],
       "unsupported_actions": [
         "actions/setup-python@v3"
       ],
@@ -761,10 +744,8 @@
       ]
     },
     "ci/python-package": {
-      "status": "unsupported-runtime",
-      "missing_features": [
-        "strategy"
-      ],
+      "status": "partial",
+      "missing_features": [],
       "unsupported_actions": [
         "actions/setup-python@v3"
       ],
@@ -773,10 +754,8 @@
       ]
     },
     "ci/python-package-conda": {
-      "status": "unsupported-runtime",
-      "missing_features": [
-        "strategy"
-      ],
+      "status": "partial",
+      "missing_features": [],
       "unsupported_actions": [
         "actions/setup-python@v3"
       ],
@@ -787,8 +766,7 @@
     "ci/python-publish": {
       "status": "unsupported-runtime",
       "missing_features": [
-        "environment",
-        "needs"
+        "environment"
       ],
       "unsupported_actions": [
         "actions/download-artifact@v4",
@@ -801,10 +779,8 @@
       ]
     },
     "ci/r": {
-      "status": "unsupported-runtime",
-      "missing_features": [
-        "strategy"
-      ],
+      "status": "partial",
+      "missing_features": [],
       "unsupported_actions": [
         "r-lib/actions/setup-r@f57f1301a053485946083d7a45022b278929a78a"
       ],
@@ -813,10 +789,8 @@
       ]
     },
     "ci/ruby": {
-      "status": "unsupported-runtime",
-      "missing_features": [
-        "strategy"
-      ],
+      "status": "partial",
+      "missing_features": [],
       "unsupported_actions": [
         "ruby/setup-ruby@55283cc23133118229fd3f97f9336ee23a179fcf"
       ],
@@ -879,10 +853,8 @@
       ]
     },
     "ci/webpack": {
-      "status": "unsupported-runtime",
-      "missing_features": [
-        "strategy"
-      ],
+      "status": "partial",
+      "missing_features": [],
       "unsupported_actions": [
         "actions/setup-node@v4"
       ],
@@ -922,8 +894,7 @@
     "deployments/azure-container-webapp": {
       "status": "unsupported-runtime",
       "missing_features": [
-        "environment",
-        "needs"
+        "environment"
       ],
       "unsupported_actions": [
         "azure/webapps-deploy@v2",
@@ -1027,10 +998,8 @@
       ]
     },
     "deployments/azure-kubernetes-service": {
-      "status": "unsupported-runtime",
-      "missing_features": [
-        "needs"
-      ],
+      "status": "partial",
+      "missing_features": [],
       "unsupported_actions": [
         "Azure/k8s-deploy@v4",
         "azure/aks-set-context@v3",
@@ -1042,10 +1011,8 @@
       ]
     },
     "deployments/azure-kubernetes-service-helm": {
-      "status": "unsupported-runtime",
-      "missing_features": [
-        "needs"
-      ],
+      "status": "partial",
+      "missing_features": [],
       "unsupported_actions": [
         "Azure/k8s-deploy@v4",
         "azure/aks-set-context@v3",
@@ -1058,10 +1025,8 @@
       ]
     },
     "deployments/azure-kubernetes-service-kompose": {
-      "status": "unsupported-runtime",
-      "missing_features": [
-        "needs"
-      ],
+      "status": "partial",
+      "missing_features": [],
       "unsupported_actions": [
         "Azure/k8s-deploy@v4",
         "azure/aks-set-context@v3",
@@ -1074,10 +1039,8 @@
       ]
     },
     "deployments/azure-kubernetes-service-kustomize": {
-      "status": "unsupported-runtime",
-      "missing_features": [
-        "needs"
-      ],
+      "status": "partial",
+      "missing_features": [],
       "unsupported_actions": [
         "Azure/k8s-deploy@v4",
         "azure/aks-set-context@v3",
@@ -1102,8 +1065,7 @@
     "deployments/azure-webapps-dotnet-core": {
       "status": "unsupported-runtime",
       "missing_features": [
-        "environment",
-        "needs"
+        "environment"
       ],
       "unsupported_actions": [
         "actions/cache@v3",
@@ -1119,8 +1081,7 @@
     "deployments/azure-webapps-java-jar": {
       "status": "unsupported-runtime",
       "missing_features": [
-        "environment",
-        "needs"
+        "environment"
       ],
       "unsupported_actions": [
         "actions/download-artifact@v4",
@@ -1135,8 +1096,7 @@
     "deployments/azure-webapps-java-jar-gradle": {
       "status": "unsupported-runtime",
       "missing_features": [
-        "environment",
-        "needs"
+        "environment"
       ],
       "unsupported_actions": [
         "actions/download-artifact@v4",
@@ -1151,8 +1111,7 @@
     "deployments/azure-webapps-node": {
       "status": "unsupported-runtime",
       "missing_features": [
-        "environment",
-        "needs"
+        "environment"
       ],
       "unsupported_actions": [
         "actions/download-artifact@v4",
@@ -1167,8 +1126,7 @@
     "deployments/azure-webapps-php": {
       "status": "unsupported-runtime",
       "missing_features": [
-        "environment",
-        "needs"
+        "environment"
       ],
       "unsupported_actions": [
         "actions/cache@v3",
@@ -1185,8 +1143,7 @@
     "deployments/azure-webapps-python": {
       "status": "unsupported-runtime",
       "missing_features": [
-        "environment",
-        "needs"
+        "environment"
       ],
       "unsupported_actions": [
         "actions/download-artifact@v4",
@@ -1244,10 +1201,8 @@
       "warnings": []
     },
     "deployments/octopusdeploy": {
-      "status": "unsupported-runtime",
-      "missing_features": [
-        "needs"
-      ],
+      "status": "partial",
+      "missing_features": [],
       "unsupported_actions": [
         "OctopusDeploy/create-release-action@fea7e7b45c38c021b6bc5a14bd7eaa2ed5269214",
         "OctopusDeploy/deploy-release-action@b10a606c903b0a5bce24102af9d066638ab429ac",
@@ -1258,7 +1213,6 @@
         "docker/setup-buildx-action@f95db51fddba0c2d1ec667646a06c2ce06100226"
       ],
       "warnings": [
-        "outputs (materialize for needs-consumers with the scheduler)",
         "with (inputs applied for actions/checkout only)"
       ]
     },
@@ -1276,7 +1230,6 @@
         "redhat-actions/push-to-registry@v2"
       ],
       "warnings": [
-        "outputs (materialize for needs-consumers with the scheduler)",
         "with (inputs applied for actions/checkout only)"
       ]
     },
