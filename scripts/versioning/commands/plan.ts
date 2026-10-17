@@ -55,6 +55,7 @@ export function buildPlan(root: string, args: string[]):
       git,
       channel: flags.channel,
       componentBounds: range.componentBounds,
+      levelBounds: range.levelBounds,
     });
     return { ok: true, plan, registry, json: flags.json, dryRun: flags.dryRun };
   } catch (e) {

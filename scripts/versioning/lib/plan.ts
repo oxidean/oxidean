@@ -169,7 +169,11 @@ export interface RangeCommit {
 /**
  * Compute the release plan over a pre-enumerated range. `componentBounds`
  * (FR3) holds, per component that has released before, the sha set of commits
- * after its latest tag — attributions outside it are dropped.
+ * after its latest tag — attributions outside it are dropped from the
+ * entry's evidence. `levelBounds` holds, per component, the commits not yet
+ * in a *stable* tag and drives the prerelease `<ver>` base: a shipped
+ * `<ver>-<channel>.N` tag must never lower the next cut's base. Omit it and
+ * the level bound falls back to `componentBounds` (stable-channel behavior).
  */
 export function computePlan(
   registry: RegistryConfig,
@@ -179,14 +183,17 @@ export function computePlan(
     git: Git;
     channel: Channel;
     componentBounds?: Map<string, Set<string>>;
+    levelBounds?: Map<string, Set<string>>;
   },
 ): BumpPlan {
   const warnings: string[] = [];
   const entries = registry.entries;
   const versions = new Map(entries.map((e) => [e.id, carrierVersion(opts.rootDir, e)]));
+  const levelBounds = opts.levelBounds ?? opts.componentBounds;
 
   const directCommits = new Map<string, PlanEntry["commits"]>();
   const directLevel = new Map<string, BumpLevel>();
+  const pendingLevel = new Map<string, BumpLevel>();
   for (const c of commits) {
     const p = c.parsed;
     // Exempt subjects AND reserved scopes produce no attribution (BR2.3/BR3.2 —
@@ -204,9 +211,16 @@ export function computePlan(
       warnings,
     );
     for (const a of attrs) {
-      const bound = opts.componentBounds?.get(a.componentId);
-      if (bound && !bound.has(a.sha)) continue;
+      const evBound = opts.componentBounds?.get(a.componentId);
+      const lvBound = levelBounds?.get(a.componentId);
+      const inEvidence = evBound === undefined || evBound.has(a.sha);
+      const inPending = lvBound === undefined || lvBound.has(a.sha);
+      if (!inEvidence && !inPending) continue;
       const level = bumpForCommit(a.type, a.breaking, versions.get(a.componentId)!);
+      if (inPending) {
+        pendingLevel.set(a.componentId, maxBump(pendingLevel.get(a.componentId) ?? "none", level));
+      }
+      if (!inEvidence) continue;
       const list = directCommits.get(a.componentId) ?? [];
       list.push({ sha: a.sha, type: a.type, scope: a.scope, breaking: a.breaking, subject: a.subject });
       directCommits.set(a.componentId, list);
@@ -219,6 +233,10 @@ export function computePlan(
     [...directLevel.entries()].filter(([, l]) => l !== "none").map(([id]) => id),
   );
   const propagatedFrom = propagate(entries, origins);
+  const pendingOrigins = new Set(
+    [...pendingLevel.entries()].filter(([, l]) => l !== "none").map(([id]) => id),
+  );
+  const pendingProp = propagate(entries, pendingOrigins);
 
   const channel = opts.channel;
   const planEntries: PlanEntry[] = [];
@@ -228,8 +246,19 @@ export function computePlan(
     const hasProp = prop !== undefined && prop.size > 0;
     const bump: BumpLevel = hasProp ? maxBump(direct, "patch") : direct;
     if (bump === "none") continue;
+    // The prerelease <ver> is the pending stable version — level over the
+    // stable-tag bound (patch floor via pending origins), so a shipped beta
+    // never drops the next cut onto the carrier's lower patch line.
+    const pendingDirect = pendingLevel.get(e.id) ?? "none";
+    const hasPendingProp = (pendingProp.get(e.id)?.size ?? 0) > 0;
+    const pendingBump: BumpLevel = hasPendingProp
+      ? maxBump(pendingDirect, "patch")
+      : pendingDirect;
+    // Non-stable cuts with no pending level carry evidence already shipped
+    // by a stable release — nothing new to release on this channel.
+    if (channel !== "stable" && pendingBump === "none") continue;
     const from = versions.get(e.id)!;
-    const base = applyBump(from, bump);
+    const base = applyBump(from, pendingBump);
     const prior =
       channel === "stable"
         ? 0
@@ -240,7 +269,7 @@ export function computePlan(
       component: e.id,
       fromVersion: from,
       toVersion: withChannel(base, channel, prior),
-      bump,
+      bump: pendingBump,
       direct: direct !== "none",
       propagatedFrom: prop ? [...prop].sort() : [],
       commits: (directCommits.get(e.id) ?? []).sort((a, b) => a.sha.localeCompare(b.sha)),
@@ -261,7 +290,10 @@ export function computePlan(
 
 /**
  * Enumerate the live range: global bound (BR3.1) + per-component tag bounds
- * (FR3). Returns commits (newest first) with parsed signals + changed files.
+ * (FR3). Returns commits (newest first) with parsed signals + changed files,
+ * the evidence bounds, and `levelBounds` — on non-stable channels, the
+ * commits not yet in a *stable* tag (the pending stable range); on stable or
+ * no channel, identical to `componentBounds`.
  */
 export function collectRange(
   rootDir: string,
@@ -272,6 +304,7 @@ export function collectRange(
 ): {
   commits: RangeCommit[];
   componentBounds: Map<string, Set<string>>;
+  levelBounds: Map<string, Set<string>>;
   lower: string | null;
 } {
   const lower =
@@ -287,18 +320,33 @@ export function collectRange(
     files: git.commitFiles(c.sha),
   }));
   const componentBounds = new Map<string, Set<string>>();
+  const pending = new Map<string, Set<string>>();
+  const usePendingBounds = channel !== undefined && channel !== "stable";
   for (const e of registry.entries) {
-    const tags = git
+    const all = git
       .prefixedTags(e.tag_prefix)
       .filter((t) => isSemver(t.version))
-      // Stable plans bound at the latest *stable* tag only: a prerelease tag
-      // must not truncate the range, or the stable changelog would silently
-      // drop commits already shipped on beta/alpha/nightly cuts. Prerelease
-      // channels keep every tag so each cut's notes cover "since last cut".
-      .filter((t) => channel !== "stable" || prereleaseOf(t.version) === null)
       .sort((a, b) => compareSemver(a.version, b.version));
-    if (tags.length === 0) continue;
-    componentBounds.set(e.id, git.commitsSince(tags[tags.length - 1].tag));
+    // Stable plans bound at the latest *stable* tag only: a prerelease tag
+    // must not truncate the range, or the stable changelog would silently
+    // drop commits already shipped on beta/alpha/nightly cuts. Prerelease
+    // channels keep every tag so each cut's notes cover "since last cut".
+    const stable = all.filter((t) => prereleaseOf(t.version) === null);
+    const ev = channel === "stable" ? stable : all;
+    if (ev.length > 0) {
+      componentBounds.set(e.id, git.commitsSince(ev[ev.length - 1].tag));
+    }
+    // The prerelease <ver> is the pending stable version, so its level is
+    // measured over commits since the latest stable tag — a component with
+    // no stable tag has everything in range pending.
+    if (usePendingBounds && stable.length > 0) {
+      pending.set(e.id, git.commitsSince(stable[stable.length - 1].tag));
+    }
   }
-  return { commits, componentBounds, lower };
+  return {
+    commits,
+    componentBounds,
+    levelBounds: usePendingBounds ? pending : componentBounds,
+    lower,
+  };
 }
