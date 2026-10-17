@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 
-export type WorkflowTemplateCatalogProps = {
+type WorkflowTemplateCatalogProps = {
   owner: string;
   repo: string;
   data: WorkflowTemplatesListResponse | undefined;

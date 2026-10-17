@@ -1,7 +1,6 @@
 import type {
   ActionJobLogResponse,
   AdminWorkflowTemplatesListResponse,
-  WorkflowCreateRequest,
   WorkflowTemplateGetResponse,
   WorkflowTemplatesListResponse,
 } from "@oxidean/api-client";
@@ -139,18 +138,6 @@ export function actionsWorkflowTemplateQuery(owner: string, name: string, id: st
     },
     enabled: Boolean(id),
     staleTime: 60_000,
-  };
-}
-
-/** `repo.actions.workflows.create` — draft a workflow file onto a branch/PR. */
-export function actionsWorkflowCreateMutation() {
-  return {
-    mutationKey: ["repo", "actions", "workflows", "create"] as const,
-    mutationFn: async (input: WorkflowCreateRequest) => {
-      const res = await apiClient.repo.actions.workflows.create(input);
-      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
-      return res.data;
-    },
   };
 }
 
