@@ -698,10 +698,8 @@
       "warnings": []
     },
     "ci/python-publish": {
-      "status": "unsupported-runtime",
-      "missing_features": [
-        "environment"
-      ],
+      "status": "partial",
+      "missing_features": [],
       "unsupported_actions": [
         "actions/download-artifact@v4",
         "actions/setup-python@v5",
@@ -781,10 +779,8 @@
       "warnings": []
     },
     "deployments/alibabacloud": {
-      "status": "unsupported-runtime",
-      "missing_features": [
-        "environment"
-      ],
+      "status": "partial",
+      "missing_features": [],
       "unsupported_actions": [
         "aliyun/ack-set-context@v1",
         "aliyun/acr-login@v1",
@@ -793,10 +789,8 @@
       "warnings": []
     },
     "deployments/aws": {
-      "status": "unsupported-runtime",
-      "missing_features": [
-        "environment"
-      ],
+      "status": "partial",
+      "missing_features": [],
       "unsupported_actions": [
         "aws-actions/amazon-ecr-login@v1",
         "aws-actions/amazon-ecs-deploy-task-definition@v1",
@@ -806,10 +800,8 @@
       "warnings": []
     },
     "deployments/azure-container-webapp": {
-      "status": "unsupported-runtime",
-      "missing_features": [
-        "environment"
-      ],
+      "status": "partial",
+      "missing_features": [],
       "unsupported_actions": [
         "azure/webapps-deploy@v2",
         "docker/build-push-action@0565240e2d4ab88bba5387d719585280857ece09",
@@ -819,10 +811,8 @@
       "warnings": []
     },
     "deployments/azure-functions-app-container": {
-      "status": "unsupported-runtime",
-      "missing_features": [
-        "environment"
-      ],
+      "status": "partial",
+      "missing_features": [],
       "unsupported_actions": [
         "Azure/functions-container-action@v1",
         "azure/docker-login@v1",
@@ -831,10 +821,8 @@
       "warnings": []
     },
     "deployments/azure-functions-app-dotnet": {
-      "status": "unsupported-runtime",
-      "missing_features": [
-        "environment"
-      ],
+      "status": "partial",
+      "missing_features": [],
       "unsupported_actions": [
         "Azure/functions-action@v1",
         "actions/setup-dotnet@v4"
@@ -842,10 +830,8 @@
       "warnings": []
     },
     "deployments/azure-functions-app-java": {
-      "status": "unsupported-runtime",
-      "missing_features": [
-        "environment"
-      ],
+      "status": "partial",
+      "missing_features": [],
       "unsupported_actions": [
         "Azure/functions-action@v1",
         "actions/setup-java@v4"
@@ -853,10 +839,8 @@
       "warnings": []
     },
     "deployments/azure-functions-app-java-gradle": {
-      "status": "unsupported-runtime",
-      "missing_features": [
-        "environment"
-      ],
+      "status": "partial",
+      "missing_features": [],
       "unsupported_actions": [
         "Azure/functions-action@v1",
         "actions/setup-java@v4"
@@ -864,10 +848,8 @@
       "warnings": []
     },
     "deployments/azure-functions-app-nodejs": {
-      "status": "unsupported-runtime",
-      "missing_features": [
-        "environment"
-      ],
+      "status": "partial",
+      "missing_features": [],
       "unsupported_actions": [
         "Azure/functions-action@v1",
         "actions/setup-node@v4"
@@ -875,20 +857,16 @@
       "warnings": []
     },
     "deployments/azure-functions-app-powershell": {
-      "status": "unsupported-runtime",
-      "missing_features": [
-        "environment"
-      ],
+      "status": "partial",
+      "missing_features": [],
       "unsupported_actions": [
         "Azure/functions-action@v1"
       ],
       "warnings": []
     },
     "deployments/azure-functions-app-python": {
-      "status": "unsupported-runtime",
-      "missing_features": [
-        "environment"
-      ],
+      "status": "partial",
+      "missing_features": [],
       "unsupported_actions": [
         "Azure/functions-action@v1",
         "actions/setup-python@v4"
@@ -951,10 +929,8 @@
       "warnings": []
     },
     "deployments/azure-webapps-dotnet-core": {
-      "status": "unsupported-runtime",
-      "missing_features": [
-        "environment"
-      ],
+      "status": "partial",
+      "missing_features": [],
       "unsupported_actions": [
         "actions/cache@v3",
         "actions/download-artifact@v4",
@@ -965,10 +941,8 @@
       "warnings": []
     },
     "deployments/azure-webapps-java-jar": {
-      "status": "unsupported-runtime",
-      "missing_features": [
-        "environment"
-      ],
+      "status": "partial",
+      "missing_features": [],
       "unsupported_actions": [
         "actions/download-artifact@v4",
         "actions/setup-java@v4",
@@ -978,10 +952,8 @@
       "warnings": []
     },
     "deployments/azure-webapps-java-jar-gradle": {
-      "status": "unsupported-runtime",
-      "missing_features": [
-        "environment"
-      ],
+      "status": "partial",
+      "missing_features": [],
       "unsupported_actions": [
         "actions/download-artifact@v4",
         "actions/setup-java@v4",
@@ -991,10 +963,8 @@
       "warnings": []
     },
     "deployments/azure-webapps-node": {
-      "status": "unsupported-runtime",
-      "missing_features": [
-        "environment"
-      ],
+      "status": "partial",
+      "missing_features": [],
       "unsupported_actions": [
         "actions/download-artifact@v4",
         "actions/setup-node@v4",
@@ -1004,10 +974,8 @@
       "warnings": []
     },
     "deployments/azure-webapps-php": {
-      "status": "unsupported-runtime",
-      "missing_features": [
-        "environment"
-      ],
+      "status": "partial",
+      "missing_features": [],
       "unsupported_actions": [
         "actions/cache@v3",
         "actions/download-artifact@v4",
@@ -1019,10 +987,8 @@
       "warnings": []
     },
     "deployments/azure-webapps-python": {
-      "status": "unsupported-runtime",
-      "missing_features": [
-        "environment"
-      ],
+      "status": "partial",
+      "missing_features": [],
       "unsupported_actions": [
         "actions/download-artifact@v4",
         "actions/setup-python@v3.0.0",
@@ -1032,10 +998,8 @@
       "warnings": []
     },
     "deployments/google": {
-      "status": "unsupported-runtime",
-      "missing_features": [
-        "environment"
-      ],
+      "status": "partial",
+      "missing_features": [],
       "unsupported_actions": [
         "docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567",
         "google-github-actions/auth@f112390a2df9932162083945e46d439060d66ec2",
@@ -1063,10 +1027,8 @@
       "warnings": []
     },
     "deployments/ibm": {
-      "status": "unsupported-runtime",
-      "missing_features": [
-        "environment"
-      ],
+      "status": "runnable",
+      "missing_features": [],
       "unsupported_actions": [],
       "warnings": []
     },
@@ -1085,10 +1047,8 @@
       "warnings": []
     },
     "deployments/openshift": {
-      "status": "unsupported-runtime",
-      "missing_features": [
-        "environment"
-      ],
+      "status": "partial",
+      "missing_features": [],
       "unsupported_actions": [
         "actions/github-script@v6",
         "redhat-actions/buildah-build@v2",
@@ -1100,20 +1060,16 @@
       "warnings": []
     },
     "deployments/tencent": {
-      "status": "unsupported-runtime",
-      "missing_features": [
-        "environment"
-      ],
+      "status": "partial",
+      "missing_features": [],
       "unsupported_actions": [
         "TencentCloud/tke-cluster-credential-action@v1"
       ],
       "warnings": []
     },
     "deployments/terraform": {
-      "status": "unsupported-runtime",
-      "missing_features": [
-        "environment"
-      ],
+      "status": "partial",
+      "missing_features": [],
       "unsupported_actions": [
         "hashicorp/setup-terraform@v1"
       ],

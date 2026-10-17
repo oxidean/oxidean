@@ -560,3 +560,136 @@ pub struct AdminWorkflowTemplateSetEnabledRequest {
 pub struct AdminWorkflowTemplateDeleteRequest {
     pub id: String,
 }
+
+/// `repo.actions.getDefaultPermissions` / `setDefaultPermissions` — the
+/// permission floor applied when a workflow declares no `permissions:` block:
+/// `read` (contents+packages read) or `write` (all scopes write).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RepoActionsDefaultPermissionsRequest {
+    pub owner: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RepoActionsSetDefaultPermissionsRequest {
+    pub owner: String,
+    pub name: String,
+    /// `read` (default) or `write`.
+    pub default_permissions: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RepoActionsDefaultPermissionsResponse {
+    pub default_permissions: String,
+}
+
+/// Environment protection rules — GitHub's `protection_rules` shape
+/// (`required_reviewers` = user ids, `wait_timer_minutes`,
+/// `deployment_branches` = branch allowlist). All fields optional.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionEnvironmentProtection {
+    #[serde(default)]
+    pub wait_timer_minutes: i64,
+    #[serde(default)]
+    pub required_reviewers: Vec<String>,
+    #[serde(default)]
+    pub deployment_branches: Vec<String>,
+}
+
+/// Public environment record (`repo.actions.environments.*`).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionEnvironmentPublic {
+    pub name: String,
+    pub protection: ActionEnvironmentProtection,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RepoActionsEnvironmentsListRequest {
+    pub owner: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RepoActionsEnvironmentsListResponse {
+    pub environments: Vec<ActionEnvironmentPublic>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RepoActionsEnvironmentGetRequest {
+    pub owner: String,
+    pub name: String,
+    pub environment: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RepoActionsEnvironmentResponse {
+    pub environment: ActionEnvironmentPublic,
+}
+
+/// `repo.actions.upsertEnvironment` — create or replace an environment's
+/// protection rules (Admin). Missing env rows are created on save.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RepoActionsEnvironmentUpsertRequest {
+    pub owner: String,
+    pub name: String,
+    pub environment: String,
+    #[serde(default)]
+    pub protection: ActionEnvironmentProtection,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RepoActionsEnvironmentDeleteRequest {
+    pub owner: String,
+    pub name: String,
+    pub environment: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RepoActionsEnvironmentDeleteResponse {
+    pub deleted: bool,
+}
+
+/// One recorded environment deployment (`action_deployments`).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionDeploymentPublic {
+    pub id: String,
+    pub environment: String,
+    pub run_id: String,
+    pub job_id: String,
+    pub sha: String,
+    pub git_ref: String,
+    pub url: Option<String>,
+    /// Derived from the backing job's status (coalesced `waiting_approval`).
+    pub job_status: String,
+    pub created_at: String,
+}
+
+/// `repo.actions.listDeployments` — deployment records for a run.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionDeploymentsListRequest {
+    pub owner: String,
+    pub name: String,
+    pub run_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionDeploymentsListResponse {
+    pub deployments: Vec<ActionDeploymentPublic>,
+}
+
+/// `repo.actions.approveJob` — release one approval-held job (deployment
+/// review). Write+; when the environment names `required_reviewers` the
+/// caller must be one of them or an Admin.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionJobApproveRequest {
+    pub owner: String,
+    pub name: String,
+    pub job_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionJobApproveResponse {
+    pub job: ActionJobPublic,
+}

@@ -37,10 +37,33 @@ impl ContentsPermission {
     }
 }
 
-/// Parsed `permissions:` block — only `contents` is honoured today.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+/// GitHub `permissions:` scope names — the full key set (parity).
+/// `id-token: write` gates the OIDC `ACTIONS_ID_TOKEN_REQUEST_*` surface.
+pub const GITHUB_PERMISSION_SCOPES: &[&str] = &[
+    "actions",
+    "attestations",
+    "checks",
+    "contents",
+    "deployments",
+    "discussions",
+    "id-token",
+    "issues",
+    "models",
+    "packages",
+    "pages",
+    "pull-requests",
+    "repository-projects",
+    "security-events",
+    "statuses",
+];
+
+/// Parsed `permissions:` block — `contents` stays promoted (git/LFS token
+/// path); `scopes` carries the remaining GitHub families with explicit
+/// `none|read|write` levels. A map resets unlisted scopes to `none`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct WorkflowPermissions {
     pub contents: ContentsPermission,
+    pub scopes: std::collections::BTreeMap<String, ContentsPermission>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -163,11 +186,22 @@ pub struct JobSpec {
     pub container: Option<JsonValue>,
     /// `jobs.<id>.services` — `{name: {image, env, ports, …}}` map.
     pub services: Option<JsonValue>,
+    /// `jobs.<id>.environment` — scalar name or `{name, url}`; name/url may
+    /// interpolate and are evaluated at enqueue.
+    pub environment: Option<EnvironmentSpec>,
     /// The raw YAML subtree for this job, re-marshaled at parse. The Gitea
     /// actions-proto surface embeds it into the single-job workflow payload
     /// stock act_runner executes — fields we don't model still reach the
     /// runner verbatim.
     pub raw_yaml: String,
+}
+
+/// `environment:` shape — a bare name string or `{name, url}` mapping.
+/// Fields stay expression-source strings; enqueue interpolates them.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EnvironmentSpec {
+    pub name: String,
+    pub url: Option<String>,
 }
 
 /// `strategy:` shape — `matrix` is an evaluatable map of `key → [values]`
@@ -583,37 +617,54 @@ fn yaml_string_list(v: &serde_yaml::Value) -> Vec<String> {
     }
 }
 
-/// Parse a `permissions:` value (GitHub subset).
+/// Parse a `permissions:` value (full GitHub key set).
 ///
-/// - `read-all` / `write-all` scalars set `contents` to read/write.
-/// - A map honours only the `contents` key (`read`/`write`/`none`); per GitHub
+/// - `read-all` / `write-all` scalars grant every scope that level.
+/// - A map sets each listed scope (`read`/`write`/`none`); per GitHub
 ///   semantics, specifying a map resets unlisted scopes to `none`, so a map
 ///   without `contents` — including `{}` — yields `contents: none`.
+/// - Unknown scope keys fail loud: the caller flags them `unsupported`.
 /// - `None` (absent) or an unrecognized shape → `None` ("not specified").
-fn parse_permissions(raw: Option<&serde_yaml::Value>) -> Option<WorkflowPermissions> {
+fn parse_permissions(
+    raw: Option<&serde_yaml::Value>,
+    unsupported: &mut Vec<String>,
+) -> Option<WorkflowPermissions> {
+    fn all(level: ContentsPermission) -> WorkflowPermissions {
+        WorkflowPermissions {
+            contents: level,
+            scopes: GITHUB_PERMISSION_SCOPES
+                .iter()
+                .filter(|s| **s != "contents")
+                .map(|s| (s.to_string(), level))
+                .collect(),
+        }
+    }
     match raw {
         None => None,
         Some(serde_yaml::Value::String(s)) => match s.trim() {
-            "read-all" => Some(WorkflowPermissions {
-                contents: ContentsPermission::Read,
-            }),
-            "write-all" => Some(WorkflowPermissions {
-                contents: ContentsPermission::Write,
-            }),
+            "read-all" => Some(all(ContentsPermission::Read)),
+            "write-all" => Some(all(ContentsPermission::Write)),
             _ => None,
         },
         Some(serde_yaml::Value::Mapping(map)) => {
             let mut contents = ContentsPermission::None;
+            let mut scopes = std::collections::BTreeMap::new();
             for (k, v) in map {
-                if k.as_str() == Some("contents") {
-                    contents = match v.as_str().map(str::trim) {
-                        Some("read") => ContentsPermission::Read,
-                        Some("write") => ContentsPermission::Write,
-                        _ => ContentsPermission::None,
-                    };
+                let Some(key) = k.as_str() else { continue };
+                let level = match v.as_str().map(str::trim) {
+                    Some("read") => ContentsPermission::Read,
+                    Some("write") => ContentsPermission::Write,
+                    _ => ContentsPermission::None,
+                };
+                if key == "contents" {
+                    contents = level;
+                } else if GITHUB_PERMISSION_SCOPES.contains(&key) {
+                    scopes.insert(key.to_string(), level);
+                } else {
+                    flag(unsupported, &format!("permissions:{key}"));
                 }
             }
-            Some(WorkflowPermissions { contents })
+            Some(WorkflowPermissions { contents, scopes })
         }
         Some(_) => None,
     }
@@ -623,9 +674,89 @@ fn parse_permissions(raw: Option<&serde_yaml::Value>) -> Option<WorkflowPermissi
 /// workflow-level, else `read` (the instance default).
 pub fn effective_contents_permission(doc: &WorkflowDocument, job: &JobSpec) -> ContentsPermission {
     job.permissions
+        .as_ref()
         .map(|p| p.contents)
-        .or_else(|| doc.permissions.map(|p| p.contents))
+        .or_else(|| doc.permissions.as_ref().map(|p| p.contents))
         .unwrap_or(ContentsPermission::Read)
+}
+
+/// The resolved GitHub scope set for a job — `{scope: none|read|write}` with
+/// every declared scope present. `default_permissions` is the repo's
+/// "Workflow permissions" setting (`read` restricted / `write` permissive)
+/// applied when neither job nor workflow declares `permissions:`.
+///
+/// Resolution (GitHub parity): a job-level `permissions:` block replaces the
+/// workflow-level one entirely — a map resets every unlisted scope to none.
+/// Absent both → `read` grants contents+packages read, `write` grants every
+/// scope write (GitHub's permissive default).
+pub fn effective_permissions(
+    doc: &WorkflowDocument,
+    job: &JobSpec,
+    default_permissions: &str,
+) -> std::collections::BTreeMap<String, ContentsPermission> {
+    let block = job.permissions.as_ref().or(doc.permissions.as_ref());
+    let mut out: std::collections::BTreeMap<String, ContentsPermission> = match block {
+        Some(p) => {
+            let mut m = p.scopes.clone();
+            m.insert("contents".to_string(), p.contents);
+            m
+        }
+        None => {
+            let mut m = std::collections::BTreeMap::new();
+            if default_permissions == "write" {
+                for s in GITHUB_PERMISSION_SCOPES {
+                    m.insert(s.to_string(), ContentsPermission::Write);
+                }
+            } else {
+                m.insert("contents".to_string(), ContentsPermission::Read);
+                m.insert("packages".to_string(), ContentsPermission::Read);
+            }
+            m
+        }
+    };
+    // A declared block resets unlisted scopes to none — fill the gaps so the
+    // frozen payload always carries the complete scope set.
+    for s in GITHUB_PERMISSION_SCOPES {
+        out.entry(s.to_string()).or_insert(ContentsPermission::None);
+    }
+    out
+}
+
+/// `environment:` — scalar name or `{name, url}`. Unknown shapes warn (the
+/// job still parses; the environment simply doesn't apply).
+fn parse_environment(
+    raw: Option<&serde_yaml::Value>,
+    warnings: &mut Vec<String>,
+) -> Option<EnvironmentSpec> {
+    match raw {
+        None => None,
+        Some(serde_yaml::Value::String(s)) => {
+            let name = s.trim().to_string();
+            (!name.is_empty()).then_some(EnvironmentSpec { name, url: None })
+        }
+        Some(serde_yaml::Value::Mapping(map)) => {
+            let name = map
+                .get(serde_yaml::Value::String("name".into()))
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .unwrap_or_default()
+                .to_string();
+            let url = map
+                .get(serde_yaml::Value::String("url".into()))
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
+            if name.is_empty() {
+                warnings.push("environment mapping lacks a name".to_string());
+                None
+            } else {
+                Some(EnvironmentSpec { name, url })
+            }
+        }
+        Some(_) => {
+            warnings.push("unsupported environment shape".to_string());
+            None
+        }
+    }
 }
 
 /// Mark a feature key once per document (dedup'd, sorted at the end).
@@ -713,13 +844,8 @@ pub fn parse_workflow_yaml(bytes: &[u8]) -> Result<WorkflowDocument, ParseError>
             message: format!("invalid job '{id}': {e}"),
         })?;
         // Structural features that would mis-execute — fail loudly at dispatch.
-        for (present, key) in [
-            (job.environment.is_some(), "environment"),
-            (job.continue_on_error.is_some(), "continue-on-error"),
-        ] {
-            if present {
-                flag(&mut unsupported, key);
-            }
+        if job.continue_on_error.is_some() {
+            flag(&mut unsupported, "continue-on-error");
         }
         // `uses:`/`with:`/`secrets:` on a job is the reusable-workflow call shape.
         if job.uses.is_some() || job.with.is_some() || job.secrets.is_some() {
@@ -845,7 +971,7 @@ pub fn parse_workflow_yaml(bytes: &[u8]) -> Result<WorkflowDocument, ParseError>
             runs_on,
             steps,
             env: job_env,
-            permissions: parse_permissions(job.permissions.as_ref()),
+            permissions: parse_permissions(job.permissions.as_ref(), &mut unsupported),
             if_expr: expr_src_opt(&job.if_expr),
             timeout_minutes: expr_src_opt(&job.timeout_minutes),
             concurrency: job_concurrency,
@@ -854,6 +980,7 @@ pub fn parse_workflow_yaml(bytes: &[u8]) -> Result<WorkflowDocument, ParseError>
             strategy,
             container: job_container,
             services: job_services,
+            environment: parse_environment(job.environment.as_ref(), &mut warnings),
             raw_yaml: job_yaml,
         });
     }
@@ -914,7 +1041,7 @@ pub fn parse_workflow_yaml(bytes: &[u8]) -> Result<WorkflowDocument, ParseError>
         triggers,
         jobs,
         env: wf_env,
-        permissions: parse_permissions(raw.permissions.as_ref()),
+        permissions: parse_permissions(raw.permissions.as_ref(), &mut unsupported),
         unsupported,
         concurrency: wf_concurrency,
         warnings,
@@ -955,7 +1082,7 @@ jobs:
 
     fn perm_of(yaml: &[u8]) -> (Option<WorkflowPermissions>, Option<WorkflowPermissions>) {
         let doc = parse_workflow_yaml(yaml).expect("parse");
-        (doc.permissions, doc.jobs[0].permissions)
+        (doc.permissions, doc.jobs[0].permissions.clone())
     }
 
     #[test]
@@ -972,12 +1099,10 @@ jobs:
       - run: echo hi
 "#,
         );
-        assert_eq!(
-            wf,
-            Some(WorkflowPermissions {
-                contents: ContentsPermission::Read
-            })
-        );
+        let wf = wf.unwrap();
+        assert_eq!(wf.contents, ContentsPermission::Read);
+        // read-all lifts every scope.
+        assert_eq!(wf.scopes.get("id-token"), Some(&ContentsPermission::Read));
 
         let (wf, _) = perm_of(
             br#"
@@ -991,11 +1116,11 @@ jobs:
       - run: echo hi
 "#,
         );
+        let wf = wf.unwrap();
+        assert_eq!(wf.contents, ContentsPermission::Write);
         assert_eq!(
-            wf,
-            Some(WorkflowPermissions {
-                contents: ContentsPermission::Write
-            })
+            wf.scopes.get("pull-requests"),
+            Some(&ContentsPermission::Write)
         );
     }
 
@@ -1007,6 +1132,7 @@ name: CI
 on: [push]
 permissions:
   contents: write
+  id-token: write
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -1014,12 +1140,12 @@ jobs:
       - run: echo hi
 "#,
         );
-        assert_eq!(
-            wf,
-            Some(WorkflowPermissions {
-                contents: ContentsPermission::Write
-            })
-        );
+        let wf = wf.unwrap();
+        assert_eq!(wf.contents, ContentsPermission::Write);
+        assert_eq!(wf.scopes.get("id-token"), Some(&ContentsPermission::Write));
+        // Unlisted scopes are not recorded on the block — resolution fills
+        // them as `none` (GitHub's map-reset semantics).
+        assert!(wf.scopes.get("issues").is_none());
     }
 
     #[test]
@@ -1038,12 +1164,9 @@ jobs:
       - run: echo hi
 "#,
         );
-        assert_eq!(
-            wf,
-            Some(WorkflowPermissions {
-                contents: ContentsPermission::None
-            })
-        );
+        let wf = wf.unwrap();
+        assert_eq!(wf.contents, ContentsPermission::None);
+        assert_eq!(wf.scopes.get("issues"), Some(&ContentsPermission::Write));
         let (wf, _) = perm_of(
             br#"
 name: CI
@@ -1056,12 +1179,92 @@ jobs:
       - run: echo hi
 "#,
         );
+        assert_eq!(wf.unwrap().contents, ContentsPermission::None);
+    }
+
+    #[test]
+    fn effective_permissions_resolution() {
+        let doc = parse_workflow_yaml(
+            br#"
+name: CI
+on: [push]
+permissions:
+  contents: write
+  id-token: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+"#,
+        )
+        .expect("parse");
+        let m = effective_permissions(&doc, &doc.jobs[0], "read");
+        assert_eq!(m.get("contents"), Some(&ContentsPermission::Write));
+        assert_eq!(m.get("id-token"), Some(&ContentsPermission::Write));
+        // Declared map — unlisted scopes resolve to none.
+        assert_eq!(m.get("issues"), Some(&ContentsPermission::None));
+
+        // No `permissions:` anywhere — 'read' default: contents+packages.
+        let doc2 = parse_workflow_yaml(
+            br#"
+name: CI
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+"#,
+        )
+        .expect("parse");
+        let m = effective_permissions(&doc2, &doc2.jobs[0], "read");
+        assert_eq!(m.get("contents"), Some(&ContentsPermission::Read));
+        assert_eq!(m.get("packages"), Some(&ContentsPermission::Read));
+        assert_eq!(m.get("id-token"), Some(&ContentsPermission::None));
+        // 'write' (permissive) default — every scope write.
+        let m = effective_permissions(&doc2, &doc2.jobs[0], "write");
+        assert_eq!(m.get("statuses"), Some(&ContentsPermission::Write));
+        assert_eq!(m.get("id-token"), Some(&ContentsPermission::Write));
+    }
+
+    #[test]
+    fn environment_parses_scalar_and_mapping() {
+        let doc = parse_workflow_yaml(
+            br#"
+name: CI
+on: [push]
+jobs:
+  build:
+    environment: production
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+"#,
+        )
+        .expect("parse");
         assert_eq!(
-            wf,
-            Some(WorkflowPermissions {
-                contents: ContentsPermission::None
-            })
+            doc.jobs[0].environment.as_ref().map(|e| e.name.as_str()),
+            Some("production")
         );
+        let doc = parse_workflow_yaml(
+            br#"
+name: CI
+on: [push]
+jobs:
+  build:
+    environment:
+      name: staging
+      url: https://staging.example.com
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+"#,
+        )
+        .expect("parse");
+        let env = doc.jobs[0].environment.as_ref().unwrap();
+        assert_eq!(env.name, "staging");
+        assert_eq!(env.url.as_deref(), Some("https://staging.example.com"));
     }
 
     #[test]
@@ -1186,19 +1389,6 @@ jobs:
       - run: echo hi
 "#,
                 &["needs"],
-            ),
-            (
-                br#"
-name: CI
-on: [push]
-jobs:
-  a:
-    runs-on: ubuntu-latest
-    environment: production
-    steps:
-      - run: echo hi
-"#,
-                &["environment"],
             ),
             (
                 br#"

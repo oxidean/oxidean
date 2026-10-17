@@ -282,6 +282,7 @@ async fn mint_job_token(
         repo_id,
         user_id,
         permission,
+        None,
         &sha256_hex(raw.as_bytes()),
         &expires,
     )

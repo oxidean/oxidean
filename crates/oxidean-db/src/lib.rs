@@ -53,8 +53,9 @@ pub mod webhooks;
 pub mod workflow_templates;
 
 pub use actions::{
-    ActionJobRow, ActionJobTokenRow, ActionPayloadRow, ActionRunFilter, ActionRunRow,
-    ActionRunnerRow, ActionSecretCipherRow, ActionSecretMetaRow, JobInsert,
+    ActionDeploymentRow, ActionEnvironmentRow, ActionJobRow, ActionJobTokenRow, ActionOidcKeyRow,
+    ActionPayloadRow, ActionRunFilter, ActionRunRow, ActionRunnerRow, ActionSecretCipherRow,
+    ActionSecretMetaRow, JobInsert,
 };
 pub use audit_events::AuditEventRow;
 pub use auth_settings::AuthSettingsRow;
@@ -3518,6 +3519,11 @@ impl Database {
         actions::approve_run(self.require_pool()?, run_id).await
     }
 
+    /// Release one approval-held job — per-deployment review approval.
+    pub async fn approve_action_job(&self, job_id: &str) -> Result<bool, String> {
+        actions::approve_job(self.require_pool()?, job_id).await
+    }
+
     /// `first-time` policy probe — actor has a prior non-held run in repo.
     pub async fn actor_has_prior_approved_run(
         &self,
@@ -3542,6 +3548,140 @@ impl Database {
     /// Every repo with Actions enabled — the cron sweeper's iteration set.
     pub async fn list_actions_enabled_repo_ids(&self) -> Result<Vec<String>, String> {
         actions::list_actions_enabled_repo_ids(self.require_pool()?).await
+    }
+
+    /// `read` (restricted) | `write` (permissive) — the effective permission
+    /// floor when a workflow declares no `permissions:` block.
+    pub async fn get_repo_actions_default_permissions(
+        &self,
+        repo_id: &str,
+    ) -> Result<String, String> {
+        actions::get_actions_default_permissions(self.require_pool()?, repo_id).await
+    }
+
+    pub async fn set_repo_actions_default_permissions(
+        &self,
+        repo_id: &str,
+        default_permissions: &str,
+    ) -> Result<(), String> {
+        actions::set_actions_default_permissions(self.require_pool()?, repo_id, default_permissions)
+            .await
+    }
+
+    /// Auto-create the environment row on first workflow reference; returns
+    /// the stored row either way.
+    pub async fn ensure_action_environment(
+        &self,
+        id: &str,
+        repository_id: &str,
+        name: &str,
+    ) -> Result<ActionEnvironmentRow, String> {
+        actions::ensure_environment(self.require_pool()?, id, repository_id, name).await
+    }
+
+    pub async fn find_action_environment(
+        &self,
+        repository_id: &str,
+        name: &str,
+    ) -> Result<Option<ActionEnvironmentRow>, String> {
+        actions::find_environment(self.require_pool()?, repository_id, name).await
+    }
+
+    pub async fn list_action_environments(
+        &self,
+        repository_id: &str,
+    ) -> Result<Vec<ActionEnvironmentRow>, String> {
+        actions::list_environments(self.require_pool()?, repository_id).await
+    }
+
+    pub async fn upsert_action_environment(
+        &self,
+        id: &str,
+        repository_id: &str,
+        name: &str,
+        protection_json: &str,
+    ) -> Result<(), String> {
+        actions::upsert_environment(
+            self.require_pool()?,
+            id,
+            repository_id,
+            name,
+            protection_json,
+        )
+        .await
+    }
+
+    pub async fn delete_action_environment(
+        &self,
+        repository_id: &str,
+        name: &str,
+    ) -> Result<bool, String> {
+        actions::delete_environment(self.require_pool()?, repository_id, name).await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn insert_action_deployment(
+        &self,
+        id: &str,
+        repository_id: &str,
+        environment: &str,
+        run_id: &str,
+        job_id: &str,
+        sha: &str,
+        git_ref: &str,
+        url: Option<&str>,
+    ) -> Result<(), String> {
+        actions::insert_deployment(
+            self.require_pool()?,
+            id,
+            repository_id,
+            environment,
+            run_id,
+            job_id,
+            sha,
+            git_ref,
+            url,
+        )
+        .await
+    }
+
+    pub async fn list_action_deployments_for_run(
+        &self,
+        run_id: &str,
+    ) -> Result<Vec<ActionDeploymentRow>, String> {
+        actions::list_deployments_for_run(self.require_pool()?, run_id).await
+    }
+
+    /// Stamp the environment wait-timer deadline on a needs-gated leg.
+    pub async fn set_job_deployment_timer(
+        &self,
+        job_id: &str,
+        not_before: &str,
+    ) -> Result<(), String> {
+        actions::set_deployment_timer(self.require_pool()?, job_id, not_before).await
+    }
+
+    /// Promote `waiting` legs whose wait timer lapsed (scheduler sweep tick).
+    pub async fn promote_due_deployment_jobs(&self, now: &str) -> Result<u64, String> {
+        actions::promote_due_deployment_jobs(self.require_pool()?, now).await
+    }
+
+    pub async fn insert_action_oidc_key(
+        &self,
+        kid: &str,
+        private_der: &str,
+        public_jwk_json: &str,
+    ) -> Result<(), String> {
+        actions::insert_oidc_key(self.require_pool()?, kid, private_der, public_jwk_json).await
+    }
+
+    pub async fn find_active_action_oidc_key(&self) -> Result<Option<ActionOidcKeyRow>, String> {
+        actions::find_active_oidc_key(self.require_pool()?).await
+    }
+
+    /// Public JWK JSON for every key — JWKS keeps rotated keys verifiable.
+    pub async fn list_action_oidc_public_jwks(&self) -> Result<Vec<String>, String> {
+        actions::list_oidc_public_jwks(self.require_pool()?).await
     }
 
     /// Per-repo unit enable flags (COL-13): issues / pulls, future wiki/boards.
@@ -3732,6 +3872,7 @@ impl Database {
 
     /// Per-job bearer token (`OXIDEAN_TOKEN`) — upserts on `job_id` so a
     /// requeued job re-mints cleanly. `expires_at` is RFC3339 text.
+    /// `perms_json` carries the serialized effective permission map (Phase 7).
     #[allow(clippy::too_many_arguments)]
     pub async fn insert_action_job_token(
         &self,
@@ -3741,6 +3882,7 @@ impl Database {
         repository_id: &str,
         user_id: &str,
         permission: &str,
+        perms_json: Option<&str>,
         token_hash: &str,
         expires_at: &str,
     ) -> Result<(), String> {
@@ -3752,6 +3894,7 @@ impl Database {
             repository_id,
             user_id,
             permission,
+            perms_json,
             token_hash,
             expires_at,
         )
@@ -3765,6 +3908,19 @@ impl Database {
         token_hash: &str,
     ) -> Result<Option<ActionJobTokenRow>, String> {
         actions::find_action_job_token_by_hash(self.require_pool()?, token_hash).await
+    }
+
+    /// Bind the per-job OIDC request-token hash (`ACTIONS_ID_TOKEN_REQUEST_TOKEN`).
+    pub async fn set_job_token_oidc_hash(&self, job_id: &str, hash: &str) -> Result<(), String> {
+        actions::set_job_token_oidc_hash(self.require_pool()?, job_id, hash).await
+    }
+
+    /// Resolve an `ACTIONS_ID_TOKEN_REQUEST_TOKEN` to its bound job token row.
+    pub async fn find_job_token_by_oidc_hash(
+        &self,
+        hash: &str,
+    ) -> Result<Option<ActionJobTokenRow>, String> {
+        actions::find_job_token_by_oidc_hash(self.require_pool()?, hash).await
     }
 
     pub async fn revoke_action_job_token_for_job(&self, job_id: &str) -> Result<(), String> {

@@ -424,10 +424,10 @@
   },
   {
    "id": "environment-job",
-   "kind": "validation_failure",
-   "expect_unsupported": [
-    "environment"
-   ]
+   "kind": "queued",
+   "expect_jobs": {
+    "deploy": "success"
+   }
   },
   {
    "id": "concurrency-workflow",

@@ -133,6 +133,19 @@ pub fn spawn_background_jobs(
                     }
                     Err(e) => tracing::error!(error = %e, "actions schedule sweep failed"),
                 }
+                // Environment wait timers — promote legs whose deadline
+                // lapsed (the same 30s granularity; GitHub's timers are
+                // minute-granularity anyway).
+                let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+                match db_c.promote_due_deployment_jobs(&now).await {
+                    Ok(n) if n > 0 => {
+                        tracing::info!(promoted = n, "deployment wait timer released jobs");
+                    }
+                    Err(e) => {
+                        tracing::error!(error = %e, "deployment wait timer sweep failed")
+                    }
+                    _ => {}
+                }
             }
         });
         tracing::info!(

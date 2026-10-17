@@ -90,6 +90,17 @@ pub(crate) fn runner_context(
         .with_context("inputs", serde_json::json!({}))
         .with_context("vars", serde_json::json!({}))
         .with_context("strategy", serde_json::json!({}))
+        .with_context(
+            // `jobs.<id>.environment` — `{name, url}` for job expressions.
+            "environment",
+            match &task.environment {
+                Some(name) => serde_json::json!({
+                    "name": name,
+                    "url": task.environment_url.clone().unwrap_or_default(),
+                }),
+                None => serde_json::json!({}),
+            },
+        )
         .with_context("job", serde_json::json!({"status": "success"}))
         .with_job_status("success")
         .with_hash_files(hash_files_fn(workspace.to_path_buf()))

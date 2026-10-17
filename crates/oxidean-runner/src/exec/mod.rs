@@ -670,6 +670,10 @@ mod tests {
             needs: None,
             container: None,
             services: None,
+            environment: None,
+            environment_url: None,
+            id_token_request_url: None,
+            id_token_request_token: None,
         }
     }
 

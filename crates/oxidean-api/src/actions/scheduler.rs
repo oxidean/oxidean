@@ -266,8 +266,20 @@ async fn needs_pass(
         }
         match decide_waiting_job(db, job, &jobs, &needs, shared).await {
             WaitDecision::Run => {
-                db.update_action_job_status(&job.id, "queued").await?;
-                queued += 1;
+                // Environment wait timer starts at the ready transition —
+                // stamp the deadline and leave the leg `waiting`; the timer
+                // sweep owns the release, so stamped legs never queue here.
+                if job.deployment_wait_minutes > 0 {
+                    if job.deployment_not_before.is_none() {
+                        let not_before = (chrono::Utc::now()
+                            + chrono::Duration::minutes(job.deployment_wait_minutes))
+                        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+                        db.set_job_deployment_timer(&job.id, &not_before).await?;
+                    }
+                } else {
+                    db.update_action_job_status(&job.id, "queued").await?;
+                    queued += 1;
+                }
             }
             WaitDecision::Skip => {
                 db.update_action_job_status(&job.id, "skipped").await?;
@@ -305,20 +317,47 @@ async fn maxpar_pass(db: &Database, run_id: &str) -> Result<bool, String> {
             .as_ref()
             .and_then(|p| p.get("max_parallel").and_then(|v| v.as_u64()))
             .map(|n| n as usize);
-        let Some(cap) = cap else { continue };
+        // A no-needs leg waits on exactly one gate: a max-parallel slot, a
+        // deployment timer, or a released approval hold. With no cap the
+        // only remaining waits are timer/approval — unheld unstamped legs
+        // queue outright.
+        let Some(cap) = cap else {
+            for leg in legs.iter().filter(|l| {
+                l.status == "waiting" && !l.approval_hold && l.deployment_not_before.is_none()
+            }) {
+                if leg.deployment_wait_minutes > 0 {
+                    let not_before = (chrono::Utc::now()
+                        + chrono::Duration::minutes(leg.deployment_wait_minutes))
+                    .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+                    db.set_job_deployment_timer(&leg.id, &not_before).await?;
+                } else {
+                    db.update_action_job_status(&leg.id, "queued").await?;
+                }
+                changed = true;
+            }
+            continue;
+        };
         let active = legs
             .iter()
             .filter(|l| matches!(l.status.as_str(), "queued" | "in_progress"))
             .count();
         let mut room = cap.saturating_sub(active);
-        for leg in legs
-            .iter()
-            .filter(|l| l.status == "waiting" && !l.approval_hold)
-        {
+        for leg in legs.iter().filter(|l| {
+            l.status == "waiting" && !l.approval_hold && l.deployment_not_before.is_none()
+        }) {
             if room == 0 {
                 break;
             }
-            db.update_action_job_status(&leg.id, "queued").await?;
+            // Timer-gated legs occupy the freed slot while they wait —
+            // stamp the deadline instead of queueing.
+            if leg.deployment_wait_minutes > 0 {
+                let not_before = (chrono::Utc::now()
+                    + chrono::Duration::minutes(leg.deployment_wait_minutes))
+                .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+                db.set_job_deployment_timer(&leg.id, &not_before).await?;
+            } else {
+                db.update_action_job_status(&leg.id, "queued").await?;
+            }
             room -= 1;
             changed = true;
         }

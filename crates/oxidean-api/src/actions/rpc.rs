@@ -5,16 +5,23 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 use oxidean_core::{
+    ActionDeploymentPublic, ActionDeploymentsListRequest, ActionDeploymentsListResponse,
     ActionDispatchRequest, ActionDispatchResponse, ActionEnabledRequest, ActionEnabledResponse,
-    ActionJobLogRequest, ActionJobLogResponse, ActionJobPublic, ActionListRunnersResponse,
-    ActionRegistrationTokenResponse, ActionRunGetRequest, ActionRunGetResponse,
-    ActionRunMutationRequest, ActionRunMutationResponse, ActionRunPublic, ActionRunnerPublic,
-    ActionRunsListRequest, ActionRunsListResponse, ActionSecretDeleteRequest,
+    ActionEnvironmentProtection, ActionEnvironmentPublic, ActionJobApproveRequest,
+    ActionJobApproveResponse, ActionJobLogRequest, ActionJobLogResponse, ActionJobPublic,
+    ActionListRunnersResponse, ActionRegistrationTokenResponse, ActionRunGetRequest,
+    ActionRunGetResponse, ActionRunMutationRequest, ActionRunMutationResponse, ActionRunPublic,
+    ActionRunnerPublic, ActionRunsListRequest, ActionRunsListResponse, ActionSecretDeleteRequest,
     ActionSecretMetaPublic, ActionSecretPutRequest, ActionSecretsListRequest,
     ActionSecretsListResponse, ActionSetEnabledRequest, ActionWorkflowFileError,
     ActionWorkflowPublic, ActionWorkflowsListRequest, ActionWorkflowsListResponse, AppError,
-    RepoActionsForkPrApprovalRequest, RepoActionsForkPrApprovalResponse,
-    RepoActionsPullRequestTargetRequest, RepoActionsPullRequestTargetResponse,
+    RepoActionsDefaultPermissionsRequest, RepoActionsDefaultPermissionsResponse,
+    RepoActionsEnvironmentDeleteRequest, RepoActionsEnvironmentDeleteResponse,
+    RepoActionsEnvironmentGetRequest, RepoActionsEnvironmentResponse,
+    RepoActionsEnvironmentUpsertRequest, RepoActionsEnvironmentsListRequest,
+    RepoActionsEnvironmentsListResponse, RepoActionsForkPrApprovalRequest,
+    RepoActionsForkPrApprovalResponse, RepoActionsPullRequestTargetRequest,
+    RepoActionsPullRequestTargetResponse, RepoActionsSetDefaultPermissionsRequest,
     RepoActionsSetForkPrApprovalRequest, RepoActionsSetPullRequestTargetRequest,
 };
 use oxidean_db::{ActionJobRow, ActionRunFilter, ActionRunRow, ActionRunnerRow};
@@ -533,6 +540,388 @@ pub async fn set_fork_pr_approval(
         .await
         .map_err(db_err)?;
     Ok(RepoActionsForkPrApprovalResponse { policy: req.policy })
+}
+
+/// `repo.actions.getDefaultPermissions` — Read+; the permission floor applied
+/// when a workflow declares no `permissions:` block (`read` | `write`).
+pub async fn get_default_permissions(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<RepoActionsDefaultPermissionsResponse, AppError> {
+    let req: RepoActionsDefaultPermissionsRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid repo.actions.getDefaultPermissions input: {e}"),
+        )
+    })?;
+    let accessible = resolve_repo_for_read(ctx, &req.owner, &req.name).await?;
+    if !meets(accessible.capability, Capability::Read) {
+        return Err(not_found());
+    }
+    let default_permissions = ctx
+        .db
+        .get_repo_actions_default_permissions(&accessible.row.id)
+        .await
+        .map_err(db_err)?;
+    Ok(RepoActionsDefaultPermissionsResponse {
+        default_permissions,
+    })
+}
+
+/// `repo.actions.setDefaultPermissions` — Admin; GitHub's "Workflow
+/// permissions" setting (`read` restricted | `write` permissive).
+pub async fn set_default_permissions(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<RepoActionsDefaultPermissionsResponse, AppError> {
+    let _ = require_verified(ctx).await?;
+    let req: RepoActionsSetDefaultPermissionsRequest =
+        serde_json::from_value(input).map_err(|e| {
+            AppError::new(
+                "rpc.bad_input",
+                format!("invalid repo.actions.setDefaultPermissions input: {e}"),
+            )
+        })?;
+    if !matches!(req.default_permissions.as_str(), "read" | "write") {
+        return Err(AppError::new(
+            "rpc.bad_input",
+            "default_permissions must be one of: read, write",
+        ));
+    }
+    let accessible = resolve_repo_for_admin(ctx, &req.owner, &req.name).await?;
+    ctx.db
+        .set_repo_actions_default_permissions(&accessible.row.id, &req.default_permissions)
+        .await
+        .map_err(db_err)?;
+    Ok(RepoActionsDefaultPermissionsResponse {
+        default_permissions: req.default_permissions,
+    })
+}
+
+/// Stored protection JSON → the typed public shape.
+fn environment_public(r: &oxidean_db::ActionEnvironmentRow) -> ActionEnvironmentPublic {
+    let raw: serde_json::Value =
+        serde_json::from_str(&r.protection_json).unwrap_or_else(|_| serde_json::json!({}));
+    let protection = ActionEnvironmentProtection {
+        wait_timer_minutes: raw
+            .get("wait_timer_minutes")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0)
+            .max(0),
+        required_reviewers: raw
+            .get("required_reviewers")
+            .and_then(|v| v.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|x| x.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        deployment_branches: raw
+            .get("deployment_branches")
+            .and_then(|v| v.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|x| x.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default(),
+    };
+    ActionEnvironmentPublic {
+        name: r.name.clone(),
+        protection,
+        created_at: r.created_at.clone(),
+        updated_at: r.updated_at.clone(),
+    }
+}
+
+/// `repo.actions.environments.list` — Read+.
+pub async fn list_environments(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<RepoActionsEnvironmentsListResponse, AppError> {
+    let req: RepoActionsEnvironmentsListRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid repo.actions.environments.list input: {e}"),
+        )
+    })?;
+    let accessible = resolve_repo_for_read(ctx, &req.owner, &req.name).await?;
+    if !meets(accessible.capability, Capability::Read) {
+        return Err(not_found());
+    }
+    let rows = ctx
+        .db
+        .list_action_environments(&accessible.row.id)
+        .await
+        .map_err(db_err)?;
+    Ok(RepoActionsEnvironmentsListResponse {
+        environments: rows.iter().map(environment_public).collect(),
+    })
+}
+
+/// `repo.actions.environments.get` — Read+.
+pub async fn get_environment(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<RepoActionsEnvironmentResponse, AppError> {
+    let req: RepoActionsEnvironmentGetRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid repo.actions.environments.get input: {e}"),
+        )
+    })?;
+    let accessible = resolve_repo_for_read(ctx, &req.owner, &req.name).await?;
+    if !meets(accessible.capability, Capability::Read) {
+        return Err(not_found());
+    }
+    let row = ctx
+        .db
+        .find_action_environment(&accessible.row.id, &req.environment)
+        .await
+        .map_err(db_err)?
+        .ok_or_else(not_found)?;
+    Ok(RepoActionsEnvironmentResponse {
+        environment: environment_public(&row),
+    })
+}
+
+/// `repo.actions.environments.upsert` — Admin; create or replace an
+/// environment's protection rules. The env row is created on save when it
+/// doesn't exist yet (workflows also auto-create rows on first reference).
+pub async fn upsert_environment(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<RepoActionsEnvironmentResponse, AppError> {
+    let _ = require_verified(ctx).await?;
+    let req: RepoActionsEnvironmentUpsertRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid repo.actions.environments.upsert input: {e}"),
+        )
+    })?;
+    if req.environment.trim().is_empty() {
+        return Err(AppError::new(
+            "rpc.bad_input",
+            "environment name is required",
+        ));
+    }
+    if req.protection.wait_timer_minutes < 0 {
+        return Err(AppError::new(
+            "rpc.bad_input",
+            "wait_timer_minutes must be non-negative",
+        ));
+    }
+    let accessible = resolve_repo_for_admin(ctx, &req.owner, &req.name).await?;
+    // Reviewers are user ids — drop unknown ids rather than storing a rule
+    // that can never be satisfied.
+    let mut reviewers = Vec::with_capacity(req.protection.required_reviewers.len());
+    for uid in &req.protection.required_reviewers {
+        match ctx.db.find_user_by_id(uid).await {
+            Ok(Some(_)) => reviewers.push(uid.clone()),
+            _ => {
+                return Err(AppError::new(
+                    "rpc.bad_input",
+                    format!("unknown reviewer user id: {uid}"),
+                ))
+            }
+        }
+    }
+    let protection_json = serde_json::json!({
+        "wait_timer_minutes": req.protection.wait_timer_minutes,
+        "required_reviewers": reviewers,
+        "deployment_branches": req.protection.deployment_branches,
+    })
+    .to_string();
+    ctx.db
+        .upsert_action_environment(
+            &Uuid::new_v4().to_string(),
+            &accessible.row.id,
+            req.environment.trim(),
+            &protection_json,
+        )
+        .await
+        .map_err(db_err)?;
+    let row = ctx
+        .db
+        .find_action_environment(&accessible.row.id, req.environment.trim())
+        .await
+        .map_err(db_err)?
+        .ok_or_else(not_found)?;
+    Ok(RepoActionsEnvironmentResponse {
+        environment: environment_public(&row),
+    })
+}
+
+/// `repo.actions.environments.delete` — Admin.
+pub async fn delete_environment(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<RepoActionsEnvironmentDeleteResponse, AppError> {
+    let _ = require_verified(ctx).await?;
+    let req: RepoActionsEnvironmentDeleteRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid repo.actions.environments.delete input: {e}"),
+        )
+    })?;
+    let accessible = resolve_repo_for_admin(ctx, &req.owner, &req.name).await?;
+    let deleted = ctx
+        .db
+        .delete_action_environment(&accessible.row.id, &req.environment)
+        .await
+        .map_err(db_err)?;
+    Ok(RepoActionsEnvironmentDeleteResponse { deleted })
+}
+
+fn deployment_public(d: &oxidean_db::ActionDeploymentRow) -> ActionDeploymentPublic {
+    ActionDeploymentPublic {
+        id: d.id.clone(),
+        environment: d.environment.clone(),
+        run_id: d.run_id.clone(),
+        job_id: d.job_id.clone(),
+        sha: d.sha.clone(),
+        git_ref: d.git_ref.clone(),
+        url: d.url.clone(),
+        job_status: d.job_status.clone(),
+        created_at: d.created_at.clone(),
+    }
+}
+
+/// `repo.actions.listDeployments` — Read+; environment deployment records
+/// for a run.
+pub async fn list_deployments(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<ActionDeploymentsListResponse, AppError> {
+    let req: ActionDeploymentsListRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid repo.actions.listDeployments input: {e}"),
+        )
+    })?;
+    let accessible = resolve_repo_for_read(ctx, &req.owner, &req.name).await?;
+    if !meets(accessible.capability, Capability::Read) {
+        return Err(not_found());
+    }
+    let run = ctx
+        .db
+        .find_action_run_by_id(&req.run_id)
+        .await
+        .map_err(db_err)?
+        .ok_or_else(not_found)?;
+    if run.repository_id != accessible.row.id {
+        return Err(not_found());
+    }
+    let rows = ctx
+        .db
+        .list_action_deployments_for_run(&req.run_id)
+        .await
+        .map_err(db_err)?;
+    Ok(ActionDeploymentsListResponse {
+        deployments: rows.iter().map(deployment_public).collect(),
+    })
+}
+
+/// `repo.actions.approveJob` — Write+; release one approval-held job.
+/// Deployment reviews are per-job (GitHub parity): when the job's
+/// environment lists `required_reviewers`, the caller must be one of them —
+/// or a repo Admin, who overrides reviewer membership the same way GitHub's
+/// environment admins do.
+pub async fn approve_job(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<ActionJobApproveResponse, AppError> {
+    let caller = require_verified(ctx).await?;
+    let req: ActionJobApproveRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid repo.actions.approveJob input: {e}"),
+        )
+    })?;
+    let accessible = resolve_repo_for_read(ctx, &req.owner, &req.name).await?;
+    if !meets(accessible.capability, Capability::Write) {
+        return Err(not_found());
+    }
+    let job = ctx
+        .db
+        .find_action_job_by_id(&req.job_id)
+        .await
+        .map_err(db_err)?
+        .ok_or_else(not_found)?;
+    let run = ctx
+        .db
+        .find_action_run_by_id(&job.run_id)
+        .await
+        .map_err(db_err)?
+        .ok_or_else(not_found)?;
+    if run.repository_id != accessible.row.id {
+        return Err(not_found());
+    }
+    if !job.approval_hold {
+        return Err(AppError::new(
+            "repo.actions.job_not_held",
+            "job is not waiting for approval",
+        ));
+    }
+    // Required-reviewer membership: the hold is a deployment review only
+    // when the env names reviewers — check the stored rule before releasing.
+    if let Some(env_name) = job.environment_name.as_deref() {
+        if let Some(env_row) = ctx
+            .db
+            .find_action_environment(&accessible.row.id, env_name)
+            .await
+            .map_err(db_err)?
+        {
+            let protection: serde_json::Value = serde_json::from_str(&env_row.protection_json)
+                .unwrap_or_else(|_| serde_json::json!({}));
+            let reviewers: Vec<String> = protection
+                .get("required_reviewers")
+                .and_then(|v| v.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|x| x.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default();
+            if !reviewers.is_empty()
+                && !reviewers.iter().any(|r| r == &caller.id)
+                && !meets(accessible.capability, Capability::Admin)
+            {
+                return Err(AppError::new(
+                    "repo.actions.not_a_reviewer",
+                    "caller is not a required reviewer for this environment",
+                ));
+            }
+        }
+    }
+    let released = ctx.db.approve_action_job(&job.id).await.map_err(db_err)?;
+    if !released {
+        return Err(AppError::new(
+            "repo.actions.job_not_held",
+            "job is not waiting for approval",
+        ));
+    }
+    if let Err(e) = Box::pin(crate::actions::scheduler::recompute_ready_jobs(
+        &ctx.db,
+        &job.run_id,
+    ))
+    .await
+    {
+        tracing::warn!(error = %e, run_id = %job.run_id, "post-approval recompute failed");
+    }
+    if let Err(e) = ctx.db.recompute_action_run_status(&job.run_id).await {
+        tracing::warn!(error = %e, run_id = %job.run_id, "post-approval rollup failed");
+    }
+    let job = ctx
+        .db
+        .find_action_job_by_id(&req.job_id)
+        .await
+        .map_err(db_err)?
+        .ok_or_else(not_found)?;
+    Ok(ActionJobApproveResponse {
+        job: job_public(&job),
+    })
 }
 
 /// `admin.actions.createRegistrationToken` — instance Admin; one-time token (D-ACT-08).

@@ -36,9 +36,16 @@ pub enum PatProc {
     /// Actions run/workflow reads. Classic `repo`|`public_repo`; FG
     /// `actions:read`.
     ActionsRead,
-    /// Workflow dispatch/rerun/cancel. Classic `workflow`|`repo`|
+    /// Workflow dispatch/rerun/cancel/approve. Classic `workflow`|`repo`|
     /// `public_repo`; FG `actions:write`.
     ActionsWrite,
+    /// Actions environments config (protection rules). Classic `repo`; FG
+    /// `environments` perm.
+    EnvironmentsRead,
+    EnvironmentsWrite,
+    /// Environment deployment records. Classic `repo`; FG `deployments`
+    /// perm.
+    DeploymentsRead,
     /// Commit statuses. Classic `repo:status`|`repo`|`public_repo`; FG
     /// `commit_statuses` perm.
     StatusesRead,
@@ -171,6 +178,9 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         | "repo.lfs.download"
         | "repo.templates.getEnabled"
         | "repo.actions.getEnabled"
+        | "repo.actions.getPullRequestTarget"
+        | "repo.actions.getForkPrApproval"
+        | "repo.actions.getDefaultPermissions"
         | "repo.mergeSettings.get"
         | "repo.quota.get"
         | "repo.createDefaults"
@@ -252,9 +262,17 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         | "repo.actions.workflowTemplates.list"
         | "repo.actions.workflowTemplates.get" => ActionsRead,
 
-        "repo.actions.dispatchWorkflow" | "repo.actions.rerunRun" | "repo.actions.cancelRun" => {
-            ActionsWrite
+        "repo.actions.dispatchWorkflow"
+        | "repo.actions.rerunRun"
+        | "repo.actions.cancelRun"
+        | "repo.actions.approveRun"
+        | "repo.actions.approveJob" => ActionsWrite,
+
+        "repo.actions.environments.list" | "repo.actions.environments.get" => EnvironmentsRead,
+        "repo.actions.environments.upsert" | "repo.actions.environments.delete" => {
+            EnvironmentsWrite
         }
+        "repo.actions.listDeployments" => DeploymentsRead,
 
         // Drafting a workflow file is a contents write (ActionsWrite ⇒ classic
         // `repo` or `workflow`, FG `actions:write`).
@@ -308,6 +326,9 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         | "repo.deployKey.create"
         | "repo.deployKey.delete"
         | "repo.actions.setEnabled"
+        | "repo.actions.setPullRequestTarget"
+        | "repo.actions.setForkPrApproval"
+        | "repo.actions.setDefaultPermissions"
         | "repo.lfs.setEnabled"
         | "repo.templates.setEnabled"
         | "repo.mergeSettings.update"
@@ -400,8 +421,8 @@ pub fn classic_scopes_for(class: PatProc) -> &'static [ClassicPatScope] {
     match class {
         // `repo` umbrella classes (narrower scopes add on below).
         RepoRead | RepoWrite | IssuesRead | IssuesWrite | PullsRead | PullsWrite | ActionsRead
-        | SecretsRead | SecretsWrite | ReleasesRead | ReleasesWrite | RepoAdminRead
-        | RepoAdminWrite => &[S::Repo],
+        | EnvironmentsRead | EnvironmentsWrite | DeploymentsRead | SecretsRead | SecretsWrite
+        | ReleasesRead | ReleasesWrite | RepoAdminRead | RepoAdminWrite => &[S::Repo],
         ActionsWrite => &[S::Repo, S::Workflow],
         StatusesRead | StatusesWrite => &[S::Repo, S::RepoStatus],
         WebhooksRead | WebhooksWrite => &[S::Repo, S::AdminRepoHook],
@@ -447,6 +468,8 @@ pub fn fg_family_name(class: PatProc) -> Option<&'static str> {
         IssuesRead | IssuesWrite => "issues",
         PullsRead | PullsWrite => "pull_requests",
         ActionsRead | ActionsWrite => "actions",
+        EnvironmentsRead | EnvironmentsWrite => "environments",
+        DeploymentsRead => "deployments",
         StatusesRead | StatusesWrite => "commit_statuses",
         SecretsRead | SecretsWrite => "secrets",
         ReleasesRead | ReleasesWrite => "releases",

@@ -260,6 +260,16 @@ struct FetchTaskResponse {
     container: Option<serde_json::Value>,
     /// `jobs.<id>.services` map — sibling containers on the job network.
     services: Option<serde_json::Value>,
+    /// `jobs.<id>.environment` (resolved name) — surfaces in the runner's
+    /// deployment context.
+    environment: Option<String>,
+    /// `jobs.<id>.environment.url` (resolved) — the `environment.url`
+    /// expression context + deployment record.
+    environment_url: Option<String>,
+    /// `ACTIONS_ID_TOKEN_REQUEST_URL` — set when `id-token: write` is granted.
+    id_token_request_url: Option<String>,
+    /// `ACTIONS_ID_TOKEN_REQUEST_TOKEN` — bound to this job's token row.
+    id_token_request_token: Option<String>,
 }
 
 impl FetchTaskResponse {
@@ -301,6 +311,10 @@ impl FetchTaskResponse {
             timeout_seconds: None,
             container: None,
             services: None,
+            environment: None,
+            environment_url: None,
+            id_token_request_url: None,
+            id_token_request_token: None,
         }
     }
 }
@@ -379,16 +393,13 @@ async fn fetch_task(
                 .cloned()
                 .unwrap_or_else(|| serde_json::json!([]));
             let workflow_name = run.workflow_name.clone();
-            let mut contents_permission = match payload_json
-                .get("contents_permission")
-                .and_then(|v| v.as_str())
-            {
-                Some("write") => crate::actions::ContentsPermission::Write,
-                Some("none") => crate::actions::ContentsPermission::None,
-                _ => crate::actions::ContentsPermission::Read,
-            };
-            if !pr_ctx.trusted && contents_permission == crate::actions::ContentsPermission::Write {
-                contents_permission = crate::actions::ContentsPermission::Read;
+            // The frozen scope map drives the minted token's perms_json +
+            // OIDC gating; `contents_permission` remains as the legacy
+            // fallback for payloads enqueued before Phase 7.
+            let mut permissions =
+                crate::actions::job_tokens::permissions_from_payload(&payload_json);
+            if !pr_ctx.trusted {
+                crate::actions::job_tokens::downgrade_write_grants(&mut permissions);
             }
             let repo = state
                 .db
@@ -420,21 +431,26 @@ async fn fetch_task(
             let base_ref = pr_ctx.base_ref.clone();
             let pull_number = pr_ctx.pull_number;
 
-            // Per-job OXIDEAN_TOKEN — minted at claim so the grant reflects the
-            // workflow's effective `contents` permission at head_sha.
-            let (job_token, job_token_permission) =
+            // Per-job OXIDEAN_TOKEN — minted at claim against the frozen
+            // scope map so the grant reflects the workflow's permissions at
+            // head_sha (and `id-token: write` mints the OIDC request pair).
+            let (job_token, job_token_permission, id_token_request_token) =
                 match crate::actions::job_tokens::mint_job_token(
                     &state.db,
                     &run,
                     &repo,
                     &owner_ref,
                     &j.id,
-                    contents_permission,
+                    &permissions,
                 )
                 .await
                 {
-                    Ok(Some((plaintext, perm))) => (Some(plaintext), perm.as_str().to_string()),
-                    Ok(None) => (None, String::new()),
+                    Ok(Some(minted)) => (
+                        minted.plaintext,
+                        minted.contents.as_str().to_string(),
+                        minted.oidc_request_token,
+                    ),
+                    Ok(None) => (None, String::new(), None),
                     Err(e) => {
                         tracing::error!(error = %e, job_id = %j.id, "mint_job_token failed");
                         return Err(StatusCode::INTERNAL_SERVER_ERROR);
@@ -446,6 +462,11 @@ async fn fetch_task(
                 owner_slug, repo.name, run.workflow_path, run.head_ref
             );
             let server_url = crate::public_origin::resolve_public_origin();
+            // `ACTIONS_ID_TOKEN_REQUEST_URL` — minted only alongside the
+            // request token; the endpoint bound the hash at mint.
+            let id_token_request_url = id_token_request_token
+                .as_ref()
+                .map(|_| format!("{server_url}{}", crate::actions::oidc::TOKEN_REQUEST_PATH));
 
             // Keep prost types linked when regenerating.
             let _ = pb::FetchTaskResponse {
@@ -526,6 +547,16 @@ async fn fetch_task(
                 needs,
                 container: payload_json.get("container").cloned(),
                 services: payload_json.get("services").cloned(),
+                environment: payload_json
+                    .get("environment")
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
+                environment_url: payload_json
+                    .get("environment_url")
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
+                id_token_request_url,
+                id_token_request_token,
                 timeout_seconds: j.timeout_at.as_deref().and_then(|s| {
                     chrono::DateTime::parse_from_rfc3339(s).ok().map(|t| {
                         t.signed_duration_since(chrono::Utc::now())

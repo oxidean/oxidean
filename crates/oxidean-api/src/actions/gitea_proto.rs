@@ -455,6 +455,10 @@ pub(crate) struct ClaimContext {
     pub pull_number: i64,
     pub secrets: HashMap<String, String>,
     pub job_token: Option<String>,
+    /// OIDC request credential pair — `ACTIONS_ID_TOKEN_REQUEST_*` (Some
+    /// only when `id-token: write` survived provenance gating).
+    pub id_token_request_url: Option<String>,
+    pub id_token_request_token: Option<String>,
     pub server_url: String,
     pub workflow_ref: String,
 }
@@ -465,7 +469,7 @@ pub(crate) async fn claim_context(
     state: &AppState,
     j: &oxidean_db::ActionJobRow,
     run: &oxidean_db::ActionRunRow,
-    contents_permission: crate::actions::ContentsPermission,
+    permissions: std::collections::BTreeMap<String, crate::actions::ContentsPermission>,
 ) -> Result<ClaimContext, StatusCode> {
     let pr_ctx = pull_context_for_run(&state.db, run).await;
     let secrets = if pr_ctx.trusted {
@@ -475,9 +479,9 @@ pub(crate) async fn claim_context(
     } else {
         HashMap::new()
     };
-    let mut permission = contents_permission;
-    if !pr_ctx.trusted && permission == crate::actions::ContentsPermission::Write {
-        permission = crate::actions::ContentsPermission::Read;
+    let mut permissions = permissions;
+    if !pr_ctx.trusted {
+        crate::actions::job_tokens::downgrade_write_grants(&mut permissions);
     }
     let repo = state
         .db
@@ -499,13 +503,17 @@ pub(crate) async fn claim_context(
             .unwrap_or_default(),
         None => String::new(),
     };
-    let job_token = match crate::actions::job_tokens::mint_job_token(
-        &state.db, run, &repo, &owner_ref, &j.id, permission,
+    let minted = match crate::actions::job_tokens::mint_job_token(
+        &state.db,
+        run,
+        &repo,
+        &owner_ref,
+        &j.id,
+        &permissions,
     )
     .await
     {
-        Ok(Some((plaintext, _perm))) => Some(plaintext),
-        Ok(None) => None,
+        Ok(m) => m,
         Err(e) => {
             tracing::error!(error = %e, job_id = %j.id, "mint_job_token failed");
             return Err(StatusCode::INTERNAL_SERVER_ERROR);
@@ -516,6 +524,14 @@ pub(crate) async fn claim_context(
         "{}/{}/{}@{}",
         owner_slug, repo.name, run.workflow_path, run.head_ref
     );
+    let server_url = crate::public_origin::resolve_public_origin();
+    let (job_token, id_token_request_token) = match minted {
+        Some(m) => (m.plaintext, m.oidc_request_token),
+        None => (None, None),
+    };
+    let id_token_request_url = id_token_request_token
+        .as_ref()
+        .map(|_| format!("{server_url}{}", crate::actions::oidc::TOKEN_REQUEST_PATH));
     Ok(ClaimContext {
         repo_name: repo.name.clone(),
         owner_slug,
@@ -524,7 +540,9 @@ pub(crate) async fn claim_context(
         pull_number: pr_ctx.pull_number,
         secrets,
         job_token,
-        server_url: crate::public_origin::resolve_public_origin(),
+        id_token_request_url,
+        id_token_request_token,
+        server_url,
         workflow_ref,
     })
 }
@@ -536,9 +554,31 @@ fn build_workflow_payload(
     payload_json: &serde_json::Value,
     job: &oxidean_db::ActionJobRow,
     event: &str,
+    env_extra: &std::collections::BTreeMap<String, String>,
 ) -> Option<Vec<u8>> {
     let job_yaml = payload_json.get("job_yaml")?.as_str()?;
     let mut job_v: serde_yaml::Value = serde_yaml::from_str(job_yaml).ok()?;
+    // `ACTIONS_ID_TOKEN_REQUEST_*` — GitHub injects these into the job env;
+    // the Task wire has no env surface, so they ride the job's `env:` map.
+    if !env_extra.is_empty() {
+        if let serde_yaml::Value::Mapping(m) = &mut job_v {
+            let env_key = serde_yaml::Value::String("env".into());
+            if !matches!(m.get(&env_key), Some(serde_yaml::Value::Mapping(_))) {
+                m.insert(
+                    env_key.clone(),
+                    serde_yaml::Value::Mapping(serde_yaml::Mapping::new()),
+                );
+            }
+            if let Some(serde_yaml::Value::Mapping(env)) = m.get_mut(&env_key) {
+                for (k, v) in env_extra {
+                    env.insert(
+                        serde_yaml::Value::String(k.clone()),
+                        serde_yaml::Value::String(v.clone()),
+                    );
+                }
+            }
+        }
+    }
     let assignment: serde_json::Value =
         serde_json::from_str(&job.matrix_json).unwrap_or_else(|_| serde_json::json!({}));
     if let (serde_yaml::Value::Mapping(m), Some(assign)) =
@@ -821,18 +861,16 @@ async fn build_task(
     };
     let payload_json: serde_json::Value =
         serde_json::from_str(&payload.payload_json).unwrap_or_else(|_| serde_json::json!({}));
-    let workflow_payload = build_workflow_payload(&payload_json, j, &run.event);
-    let contents_permission = match payload_json
-        .get("contents_permission")
-        .and_then(|v| v.as_str())
-    {
-        Some("write") => crate::actions::ContentsPermission::Write,
-        Some("none") => crate::actions::ContentsPermission::None,
-        _ => crate::actions::ContentsPermission::Read,
-    };
-    let cc = claim_context(state, j, &run, contents_permission)
+    let permissions = crate::actions::job_tokens::permissions_from_payload(&payload_json);
+    let cc = claim_context(state, j, &run, permissions)
         .await
         .map_err(|_| internal_err("claim context failed"))?;
+    let mut env_extra = std::collections::BTreeMap::new();
+    if let (Some(url), Some(tok)) = (&cc.id_token_request_url, &cc.id_token_request_token) {
+        env_extra.insert("ACTIONS_ID_TOKEN_REQUEST_URL".into(), url.clone());
+        env_extra.insert("ACTIONS_ID_TOKEN_REQUEST_TOKEN".into(), tok.clone());
+    }
+    let workflow_payload = build_workflow_payload(&payload_json, j, &run.event, &env_extra);
     let task_id = state
         .db
         .mint_action_task_claim(&j.id, runner_id)

@@ -4127,6 +4127,52 @@ export function createClient(opts: CreateClientOptions) {
             "repo.actions.setForkPrApproval",
             input,
           ),
+        getDefaultPermissions: (input: RepoActionsDefaultPermissionsRequest) =>
+          rpcCall<RepoActionsDefaultPermissionsResponse>(
+            opts,
+            "repo.actions.getDefaultPermissions",
+            input,
+          ),
+        setDefaultPermissions: (input: RepoActionsSetDefaultPermissionsRequest) =>
+          rpcCall<RepoActionsDefaultPermissionsResponse>(
+            opts,
+            "repo.actions.setDefaultPermissions",
+            input,
+          ),
+        environments: {
+          list: (input: RepoActionsEnvironmentsListRequest) =>
+            rpcCall<RepoActionsEnvironmentsListResponse>(
+              opts,
+              "repo.actions.environments.list",
+              input,
+            ),
+          get: (input: RepoActionsEnvironmentGetRequest) =>
+            rpcCall<RepoActionsEnvironmentResponse>(
+              opts,
+              "repo.actions.environments.get",
+              input,
+            ),
+          upsert: (input: RepoActionsEnvironmentUpsertRequest) =>
+            rpcCall<RepoActionsEnvironmentResponse>(
+              opts,
+              "repo.actions.environments.upsert",
+              input,
+            ),
+          delete: (input: RepoActionsEnvironmentDeleteRequest) =>
+            rpcCall<RepoActionsEnvironmentDeleteResponse>(
+              opts,
+              "repo.actions.environments.delete",
+              input,
+            ),
+        },
+        listDeployments: (input: ActionDeploymentsListRequest) =>
+          rpcCall<ActionDeploymentsListResponse>(
+            opts,
+            "repo.actions.listDeployments",
+            input,
+          ),
+        approveJob: (input: ActionJobApproveRequest) =>
+          rpcCall<ActionJobApproveResponse>(opts, "repo.actions.approveJob", input),
         secrets: {
           list: (input: ActionSecretsListRequest) =>
             rpcCall<ActionSecretsListResponse>(opts, "repo.actions.secrets.list", input),

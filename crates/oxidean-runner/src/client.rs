@@ -84,6 +84,16 @@ pub struct Task {
     pub container: Option<serde_json::Value>,
     /// `jobs.<id>.services` map — sibling containers on the job network.
     pub services: Option<serde_json::Value>,
+    /// `jobs.<id>.environment` resolved at enqueue — deployment context
+    /// (`jobs.<id>.outputs.url` / `environment.url` source).
+    pub environment: Option<String>,
+    /// `jobs.<id>.environment.url` resolved at enqueue — the `environment.url`
+    /// expression context.
+    pub environment_url: Option<String>,
+    /// `ACTIONS_ID_TOKEN_REQUEST_URL` — OIDC mint endpoint (`id-token: write`).
+    pub id_token_request_url: Option<String>,
+    /// `ACTIONS_ID_TOKEN_REQUEST_TOKEN` — request credential bound to this job.
+    pub id_token_request_token: Option<String>,
 }
 
 impl Task {

@@ -348,6 +348,14 @@ pub const PROCEDURES: &[&str] = &[
     "repo.actions.setPullRequestTarget",
     "repo.actions.getForkPrApproval",
     "repo.actions.setForkPrApproval",
+    "repo.actions.getDefaultPermissions",
+    "repo.actions.setDefaultPermissions",
+    "repo.actions.environments.list",
+    "repo.actions.environments.get",
+    "repo.actions.environments.upsert",
+    "repo.actions.environments.delete",
+    "repo.actions.listDeployments",
+    "repo.actions.approveJob",
     "repo.actions.workflowTemplates.list",
     "repo.actions.workflowTemplates.get",
     "repo.actions.workflows.create",
@@ -1425,6 +1433,52 @@ async fn dispatch_inner(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
                 Err(e) => RpcResponse::err(e),
             }
         }
+        "repo.actions.getDefaultPermissions" => {
+            match crate::actions::rpc::get_default_permissions(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
+        "repo.actions.setDefaultPermissions" => {
+            match crate::actions::rpc::set_default_permissions(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
+        "repo.actions.environments.list" => {
+            match crate::actions::rpc::list_environments(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
+        "repo.actions.environments.get" => {
+            match crate::actions::rpc::get_environment(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
+        "repo.actions.environments.upsert" => {
+            match crate::actions::rpc::upsert_environment(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
+        "repo.actions.environments.delete" => {
+            match crate::actions::rpc::delete_environment(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
+        "repo.actions.listDeployments" => {
+            match crate::actions::rpc::list_deployments(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
+        "repo.actions.approveJob" => match crate::actions::rpc::approve_job(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
         "repo.actions.workflowTemplates.list" => {
             match crate::actions::templates::list_templates(ctx, req.input).await {
                 Ok(v) => RpcResponse::ok(v),

@@ -206,6 +206,16 @@ pub(crate) fn job_env(
         ),
     ]);
 
+    // `ACTIONS_ID_TOKEN_REQUEST_*` — unpaired (already ACTIONS-namespaced);
+    // present only when `id-token: write` survived provenance gating.
+    if let (Some(url), Some(tok)) = (
+        task.id_token_request_url.as_ref(),
+        task.id_token_request_token.as_ref(),
+    ) {
+        vars.push(("ACTIONS_ID_TOKEN_REQUEST_URL".into(), url.clone()));
+        vars.push(("ACTIONS_ID_TOKEN_REQUEST_TOKEN".into(), tok.clone()));
+    }
+
     // Repo secrets last: a collision with a reserved name is skipped loudly
     // rather than silently overriding a default.
     let reserved: std::collections::HashSet<String> = vars.iter().map(|(k, _)| k.clone()).collect();

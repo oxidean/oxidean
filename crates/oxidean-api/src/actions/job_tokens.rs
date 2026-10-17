@@ -31,7 +31,8 @@ pub struct JobTokenIdentity {
 impl JobTokenIdentity {
     /// Synthesize a fine-grained-shaped `PatRow` so the git/LFS ACL helpers
     /// (`pat_allows_operation`) apply unchanged: `selected` repo access pinned
-    /// to the job's repository and `contents_perm` from the minted permission.
+    /// to the job's repository, `contents_perm` from the minted permission,
+    /// and the GitHub scope map translated onto `FgPerms` families.
     /// `raw_token` supplies the display prefix (first 8 chars of the secret).
     pub fn synthetic_pat(&self, raw_token: &str) -> PatRow {
         let tail = raw_token
@@ -46,7 +47,7 @@ impl JobTokenIdentity {
             token_hash: self.token.token_hash.clone(),
             scopes_json: Some("[]".into()),
             contents_perm: Some(self.token.permission.clone()),
-            perms_json: None,
+            perms_json: Some(fg_perms_json(&self.token)),
             repo_access: Some("selected".into()),
             expires_at: Some(self.token.expires_at.clone()),
             revoked_at: self.token.revoked_at.clone(),
@@ -56,6 +57,39 @@ impl JobTokenIdentity {
             repository_ids: vec![self.token.repository_id.clone()],
         }
     }
+}
+
+/// Translate the stored GitHub scope map (`{"issues":"write",…}`) into the
+/// `FgPerms` JSON the shared PAT ACL consumes. Scopes with no FG family
+/// (`id-token`, `attestations`, `checks`, `discussions`, `repository-projects`,
+/// `security-events`) carry no proc-class grants; `contents`/`packages` ride
+/// their dedicated `PatRow` columns instead.
+fn fg_perms_json(token: &ActionJobTokenRow) -> String {
+    use oxidean_core::{FgPermLevel, FgPerms};
+    let Some(raw) = token.perms_json.as_deref() else {
+        return "{}".into();
+    };
+    let Ok(map) = serde_json::from_str::<std::collections::BTreeMap<String, String>>(raw) else {
+        return "{}".into();
+    };
+    let level = |scope: &str| -> Option<FgPermLevel> {
+        match map.get(scope).map(String::as_str) {
+            Some("read") => Some(FgPermLevel::Read),
+            Some("write") => Some(FgPermLevel::Write),
+            _ => None,
+        }
+    };
+    let perms = FgPerms {
+        issues: level("issues"),
+        pull_requests: level("pull-requests"),
+        actions: level("actions"),
+        commit_statuses: level("statuses"),
+        deployments: level("deployments"),
+        environments: level("environments"),
+        pages: level("pages"),
+        ..FgPerms::default()
+    };
+    serde_json::to_string(&perms).unwrap_or_else(|_| "{}".into())
 }
 
 /// Why an `oxidean_job_` credential failed — mirrors
@@ -123,16 +157,32 @@ impl JobTokenPermission {
     }
 }
 
+/// What a successful mint hands back to the claim path.
+#[derive(Debug)]
+pub struct MintedJobToken {
+    /// `oxidean_job_…` plaintext — injected as `OXIDEAN_TOKEN`/`GITHUB_TOKEN`.
+    /// `None` when the map grants `contents: none` but OIDC creds still minted
+    /// (GitHub injects `ACTIONS_ID_TOKEN_REQUEST_*` without `GITHUB_TOKEN`).
+    pub plaintext: Option<String>,
+    /// The granted `contents` level after capability capping.
+    pub contents: JobTokenPermission,
+    /// `ACTIONS_ID_TOKEN_REQUEST_TOKEN` plaintext — `Some` only when the
+    /// granted scope set carries `id-token: write`. The row stores its hash;
+    /// the OIDC endpoint mints JWTs against it ([`crate::actions::oidc`]).
+    pub oidc_request_token: Option<String>,
+}
+
 /// Mint the per-job `oxidean_job_` token for a claimed job.
 ///
 /// Returns `Ok(None)` when the run has no triggering user (`triggered_by` is
-/// `NULL`, e.g. an internal/system dispatch) or the workflow's effective
-/// `contents` permission is `none` — no token is injected in either case.
+/// `NULL`, e.g. an internal/system dispatch) or the scope map grants neither
+/// `contents` nor `id-token: write` — no credentials are injected then.
 ///
-/// `requested` comes from [`crate::actions::parse::effective_contents_permission`].
-/// The grant is capped by the triggering user's effective capability on the
-/// repo: a `write` request from a read-only actor is downgraded to `read`
-/// (mirrors GitHub's "permissions can only be lowered" rule).
+/// `requested` is the frozen scope map from the durable payload
+/// (`permissions` — see [`crate::actions::effective_permissions`]). Grant
+/// levels are capped by the triggering user's effective capability on the
+/// repo: `write` scopes for a read-only actor downgrade to `read` (GitHub's
+/// "permissions can only be lowered" rule, applied per scope).
 ///
 /// Re-minting (a requeued job's next claim) replaces the `job_id`-unique row,
 /// so the previous plaintext stops resolving.
@@ -142,9 +192,19 @@ pub async fn mint_job_token(
     repo: &RepositoryRow,
     owner: &OwnerRef,
     job_id: &str,
-    requested: ContentsPermission,
-) -> Result<Option<(String, JobTokenPermission)>, String> {
-    if matches!(requested, ContentsPermission::None) {
+    requested: &std::collections::BTreeMap<String, ContentsPermission>,
+) -> Result<Option<MintedJobToken>, String> {
+    let contents_requested = requested
+        .get("contents")
+        .copied()
+        .unwrap_or(ContentsPermission::None);
+    let id_token_requested = requested
+        .get("id-token")
+        .copied()
+        .unwrap_or(ContentsPermission::None);
+    if matches!(contents_requested, ContentsPermission::None)
+        && matches!(id_token_requested, ContentsPermission::None)
+    {
         return Ok(None);
     }
     let Some(user_id) = run.triggered_by.as_deref() else {
@@ -152,13 +212,37 @@ pub async fn mint_job_token(
     };
 
     let capability = effective_capability(db, Some(user_id), repo, owner).await?;
-    let granted = match requested {
-        ContentsPermission::Write if !meets(capability, Capability::Write) => {
+    let actor_can_write = meets(capability, Capability::Write);
+    // Per-scope cap — write grants for a non-write actor drop to read. The
+    // granted map (not the requested one) is what lands in perms_json.
+    let mut granted_map = std::collections::BTreeMap::new();
+    for (scope, level) in requested {
+        let granted = match level {
+            ContentsPermission::Write if !actor_can_write => ContentsPermission::Read,
+            l => *l,
+        };
+        granted_map.insert(scope.clone(), granted);
+    }
+    let contents_granted = match granted_map.get("contents") {
+        Some(ContentsPermission::Write) => JobTokenPermission::Write,
+        Some(ContentsPermission::Read) => JobTokenPermission::Read,
+        _ => {
+            // `contents: none` — no OXIDEAN_TOKEN plaintext is injected; the
+            // row still exists to carry the OIDC request hash.
             JobTokenPermission::Read
         }
-        ContentsPermission::Write => JobTokenPermission::Write,
-        _ => JobTokenPermission::Read,
     };
+    let inject_token = !matches!(
+        granted_map.get("contents"),
+        None | Some(ContentsPermission::None)
+    );
+    let perms_json = serde_json::to_string(
+        &granted_map
+            .iter()
+            .map(|(k, v)| (k, v.as_str()))
+            .collect::<std::collections::BTreeMap<_, _>>(),
+    )
+    .map_err(|e| e.to_string())?;
 
     let mut secret = [0u8; JOB_TOKEN_SECRET_BYTES];
     rand::fill(&mut secret);
@@ -174,11 +258,89 @@ pub async fn mint_job_token(
         &run.id,
         &run.repository_id,
         user_id,
-        granted.as_str(),
+        // The truthful granted level — `none` rows exist only to bind the
+        // OIDC request hash and resolve to no contents access.
+        granted_map
+            .get("contents")
+            .map(|l| l.as_str())
+            .unwrap_or("none"),
+        Some(&perms_json),
         &token_hash,
         &expires_at,
     )
     .await?;
 
-    Ok(Some((plaintext, granted)))
+    // `id-token: write` → mint the OIDC request credential. The job env gets
+    // the plaintext; the row gets its hash so `/.well-known/…/token` can bind
+    // a request to exactly this job.
+    let oidc_request_token =
+        if matches!(granted_map.get("id-token"), Some(ContentsPermission::Write)) {
+            let mut oid = [0u8; JOB_TOKEN_SECRET_BYTES];
+            rand::fill(&mut oid);
+            let plain = format!("{}{}", OIDC_REQUEST_TOKEN_PREFIX, bytes_to_hex(&oid));
+            db.set_job_token_oidc_hash(job_id, &sha256_hex(plain.as_bytes()))
+                .await?;
+            Some(plain)
+        } else {
+            None
+        };
+
+    Ok(Some(MintedJobToken {
+        plaintext: inject_token.then_some(plaintext),
+        contents: contents_granted,
+        oidc_request_token,
+    }))
+}
+
+/// Prefix for the OIDC request credential (`ACTIONS_ID_TOKEN_REQUEST_TOKEN`).
+/// Distinct from [`JOB_TOKEN_PREFIX`] so bearer routing never confuses them —
+/// the request token resolves only through `oidc_request_hash`.
+pub const OIDC_REQUEST_TOKEN_PREFIX: &str = "oxidean_oidc_";
+
+/// Extract the frozen GitHub scope map from a durable job payload
+/// (`permissions` — `{scope: "none"|"read"|"write"}`). Payloads enqueued
+/// before Phase 7 carry only `contents_permission`; the fallback synthesizes
+/// a `contents`-only map so legacy jobs mint identically to before.
+pub fn permissions_from_payload(
+    payload_json: &serde_json::Value,
+) -> std::collections::BTreeMap<String, ContentsPermission> {
+    use std::collections::BTreeMap;
+    let parse_level = |s: &str| -> ContentsPermission {
+        match s {
+            "write" => ContentsPermission::Write,
+            "none" => ContentsPermission::None,
+            _ => ContentsPermission::Read,
+        }
+    };
+    if let Some(map) = payload_json.get("permissions").and_then(|v| v.as_object()) {
+        let mut out = BTreeMap::new();
+        for (k, v) in map {
+            if let Some(s) = v.as_str() {
+                out.insert(k.clone(), parse_level(s));
+            }
+        }
+        if !out.is_empty() {
+            return out;
+        }
+    }
+    let mut out = BTreeMap::new();
+    let legacy = payload_json
+        .get("contents_permission")
+        .and_then(|v| v.as_str())
+        .unwrap_or("read");
+    out.insert("contents".to_string(), parse_level(legacy));
+    out
+}
+
+/// Untrusted `pull_request` runs (forks, untrusted actors): every `write`
+/// grant drops to `read` — the same rule GitHub applies to `GITHUB_TOKEN`
+/// on fork PRs, applied across the whole scope map (`id-token` included).
+pub fn downgrade_write_grants(
+    permissions: &mut std::collections::BTreeMap<String, ContentsPermission>,
+) {
+    for level in permissions.values_mut() {
+        if *level == ContentsPermission::Write {
+            *level = ContentsPermission::Read;
+        }
+    }
 }

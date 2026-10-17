@@ -255,6 +255,16 @@ pub async fn enqueue_run(
     };
     let (mut ctx, mut eval_warnings) =
         crate::actions::eval_ctx::build_context(db, repository_id, doc, &prov, event_payload).await;
+    // Repository "Workflow permissions" default — `read` restricted |
+    // `write` permissive — resolves the scope set when a workflow/job
+    // declares no `permissions:` block.
+    let default_permissions = db
+        .get_repo_actions_default_permissions(repository_id)
+        .await
+        .unwrap_or_else(|e| {
+            tracing::warn!(error = %e, repository_id, "default permissions lookup failed — read");
+            "read".into()
+        });
     // `name:` interpolates — the run's display name and `github.workflow`.
     let mut name_notes = Vec::new();
     let workflow_name = crate::actions::eval_ctx::interp_or_raw(&doc.name, &ctx, &mut name_notes);
@@ -461,8 +471,81 @@ pub async fn enqueue_run(
             job_status = "failure";
             notes.push(err);
         }
+        // `environment:` — name/url interpolate at enqueue; the resolved name
+        // binds protection rules (wait timer, reviewers, branch allowlist)
+        // and the deployment record.
+        let mut environment_name: Option<String> = None;
+        let mut environment_url: Option<String> = None;
+        let mut environment_wait_minutes: i64 = 0;
+        let mut environment_reviewers = false;
+        if let Some(env_spec) = &job.environment {
+            let resolved_name =
+                crate::actions::eval_ctx::interp_or_raw(&env_spec.name, &ctx, &mut notes);
+            if resolved_name.is_empty() {
+                notes.push("environment name evaluated empty — skipped".to_string());
+            } else {
+                environment_url = env_spec
+                    .url
+                    .as_deref()
+                    .map(|u| crate::actions::eval_ctx::interp_or_raw(u, &ctx, &mut notes));
+                environment_name = Some(resolved_name);
+            }
+        }
+        // Protection rules attach by name; the environment row auto-creates
+        // on first reference (GitHub parity). Rule failures degrade to a
+        // loud job failure, never silent passthrough.
+        if let Some(env_name) = &environment_name {
+            match db
+                .ensure_action_environment(&Uuid::new_v4().to_string(), repository_id, env_name)
+                .await
+            {
+                Ok(env_row) => {
+                    let protection: serde_json::Value =
+                        serde_json::from_str(&env_row.protection_json)
+                            .unwrap_or_else(|_| serde_json::json!({}));
+                    environment_wait_minutes = protection
+                        .get("wait_timer_minutes")
+                        .and_then(|v| v.as_i64())
+                        .unwrap_or(0)
+                        .max(0);
+                    environment_reviewers = protection
+                        .get("required_reviewers")
+                        .and_then(|v| v.as_array())
+                        .is_some_and(|a| !a.is_empty());
+                    if let Some(branches) = protection
+                        .get("deployment_branches")
+                        .and_then(|v| v.as_array())
+                    {
+                        let allowed: Vec<String> = branches
+                            .iter()
+                            .filter_map(|b| b.as_str().map(str::to_string))
+                            .collect();
+                        let short_ref = head_ref.strip_prefix("refs/heads/").unwrap_or(head_ref);
+                        if !allowed.is_empty()
+                            && !allowed.iter().any(|b| b == short_ref || b == head_ref)
+                        {
+                            job_status = "failure";
+                            notes.push(format!(
+                                "environment '{env_name}' does not allow deployments from ref '{head_ref}'"
+                            ));
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, repository_id, env_name, "environment lookup failed");
+                    notes.push(format!("environment '{env_name}' lookup failed: {e}"));
+                }
+            }
+        }
         let runs_on_shared = serde_json::to_string(&runs_on_eval).unwrap_or_else(|_| "[]".into());
         let needs_json = serde_json::to_string(&job.needs).unwrap_or_else(|_| "[]".into());
+        // The full GitHub scope set rides the frozen payload — claim mints
+        // `OXIDEAN_TOKEN` against it and `id-token: write` gates OIDC.
+        let permission_map = crate::actions::effective_permissions(doc, job, &default_permissions);
+        let permissions_json: serde_json::Map<String, serde_json::Value> = permission_map
+            .iter()
+            .map(|(k, v)| (k.clone(), serde_json::Value::String(v.as_str().into())))
+            .collect();
         // Durable payload: capture everything fetch_task needs at enqueue so
         // claim never re-reads the bare repo (head could move / be GC'd).
         // `if`/`needs`/`fail_fast`/`max_parallel` ride along so the scheduler
@@ -488,6 +571,9 @@ pub async fn enqueue_run(
             "container": job.container.as_ref().map(|c| crate::actions::eval_ctx::interp_json(c, &ctx, &mut notes)),
             "services": job.services.as_ref().map(|s| crate::actions::eval_ctx::interp_json(s, &ctx, &mut notes)),
             "contents_permission": crate::actions::effective_contents_permission(doc, job).as_str(),
+            "permissions": serde_json::Value::Object(permissions_json),
+            "environment": environment_name.clone(),
+            "environment_url": environment_url.clone(),
         })
         .to_string();
         let sha = crate::auth::session::sha256_hex(payload_json.as_bytes());
@@ -507,8 +593,25 @@ pub async fn enqueue_run(
             // Approval-held runs: live legs insert as `waiting` + hold flag —
             // claim never sees `waiting`, so there is no claim window and the
             // CHECK-vocabulary stays intact (`waiting_approval` is derived).
-            let held = hold_for_approval && matches!(leg_status, "queued" | "waiting");
-            let insert_status = if held { "waiting" } else { leg_status };
+            // Environment `required_reviewers` rides the same flag — a pending
+            // deployment review surfaces identically (`approveJob`/`approveRun`
+            // releases).
+            let held = (hold_for_approval || environment_reviewers)
+                && matches!(leg_status, "queued" | "waiting");
+            let mut insert_status = if held { "waiting" } else { leg_status };
+            // Environment wait timer — ungated legs are ready at enqueue, so
+            // the deadline is stamped now and the timer sweeps promotes them.
+            // Needs-gated legs get the stamp at upstream-resolve time instead.
+            let deployment_not_before = if insert_status == "queued" && environment_wait_minutes > 0
+            {
+                insert_status = "waiting";
+                Some(
+                    (chrono::Utc::now() + chrono::Duration::minutes(environment_wait_minutes))
+                        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+                )
+            } else {
+                None
+            };
             let leg_name = crate::actions::matrix::leg_display_name(&name, leg);
             let leg_runs_on = if leg.assignment.as_object().is_some_and(|o| !o.is_empty()) {
                 let mut lctx = ctx.clone();
@@ -528,12 +631,34 @@ pub async fn enqueue_run(
             insert.approval_hold = held;
             insert.timeout_at = timeout_at.clone();
             insert.concurrency_group = concurrency_group.clone();
+            insert.environment_name = environment_name.clone();
+            insert.deployment_wait_minutes = environment_wait_minutes;
+            insert.deployment_not_before = deployment_not_before;
             insert.outputs_json = job
                 .outputs
                 .as_ref()
                 .map(|o| o.to_string())
                 .unwrap_or_else(|| "{}".into());
             db.insert_action_job(insert).await?;
+            // The deployment record is the public projection of the
+            // environment deployment — GitHub's Deployments API analogue.
+            if let Some(env_name) = &environment_name {
+                if let Err(e) = db
+                    .insert_action_deployment(
+                        &Uuid::new_v4().to_string(),
+                        repository_id,
+                        env_name,
+                        &run_id,
+                        &job_id,
+                        head_sha,
+                        head_ref,
+                        environment_url.as_deref(),
+                    )
+                    .await
+                {
+                    tracing::warn!(error = %e, run_id, env_name, "deployment insert failed");
+                }
+            }
             // Validation warnings + eval notes + skip/failure annotations
             // land in the job log — visible without a runner.
             let mut note = String::new();
@@ -549,7 +674,15 @@ pub async fn enqueue_run(
                 note.push_str(&format!("::{kind}::{n}\n"));
             }
             if held {
-                note.push_str("::notice::run is waiting for maintainer approval (fork policy)\n");
+                let reason = if environment_reviewers {
+                    format!(
+                        "deployment to environment '{}' waits for reviewer approval",
+                        environment_name.as_deref().unwrap_or_default()
+                    )
+                } else {
+                    "run is waiting for maintainer approval (fork policy)".to_string()
+                };
+                note.push_str(&format!("::notice::{reason}\n"));
             }
             if leg_status == "waiting" && has_needs {
                 note.push_str(&format!(
