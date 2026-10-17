@@ -1,0 +1,10 @@
+name: run-env-multiline
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          set -e
+          echo "line one"
+          echo "line two"

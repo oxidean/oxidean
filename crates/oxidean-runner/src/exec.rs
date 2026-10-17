@@ -593,6 +593,19 @@ pub async fn execute(client: &Client, task: &Task, config: &Config) -> &'static 
             .unwrap_or_else(|| format!("step {i}"));
         logger.line(&format!("##[step]{title}")).await;
 
+        // Expressions are not evaluated yet — never silently mis-execute.
+        if step.run.as_deref().is_some_and(|r| r.contains("${{"))
+            || step.uses.as_deref().is_some_and(|u| u.contains("${{"))
+            || step
+                .env
+                .as_ref()
+                .is_some_and(|e| e.to_string().contains("${{"))
+        {
+            logger
+                .line("::warning::${{ }} expressions are not evaluated — used literally")
+                .await;
+        }
+
         let result: Result<(), String> = if let Some(uses) = &step.uses {
             if uses.starts_with("actions/checkout") {
                 checkout(task, config, &workspace, &env.vars, &logger, timeout).await

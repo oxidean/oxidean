@@ -166,6 +166,54 @@ pub async fn enqueue_run(
         head_repo_id,
     )
     .await?;
+    // Fail loudly: a workflow that names features we can't execute becomes a
+    // failed validation run instead of silently mis-executing.
+    if !doc.unsupported.is_empty() {
+        let msg = format!(
+            "unsupported workflow features: {}",
+            doc.unsupported.join(", ")
+        );
+        let job_id = Uuid::new_v4().to_string();
+        db.insert_action_job(&job_id, &run_id, "__validation", &msg, "[]")
+            .await?;
+        if let Err(e) = crate::actions::logs::append_job_log(
+            &crate::actions::logs::resolve_log_dir(),
+            &run_id,
+            &job_id,
+            format!("::error::{msg}\n").as_bytes(),
+        )
+        .await
+        {
+            tracing::warn!(error = %e, run_id, "failed to write validation log");
+        }
+        db.update_action_job_status(&job_id, "failure").await?;
+        if let Err(e) = db.recompute_action_run_status(&run_id).await {
+            tracing::warn!(error = %e, run_id, "validation run rollup failed");
+        }
+        let env_name = std::env::var("OXIDEAN_ENV").unwrap_or_else(|_| "development".into());
+        crate::webhook::dispatch::notify_workflow_run(db, &run_id, "requested", &env_name).await;
+        if let Err(e) = crate::actions::statuses::upsert_job_status(
+            db,
+            repository_id,
+            head_sha,
+            &doc.name,
+            "__validation",
+            "failure",
+            &msg,
+            None,
+            triggered_by,
+        )
+        .await
+        {
+            tracing::warn!(error = %e, run_id, "failed to publish validation status");
+        }
+        return Ok((run_id, vec![job_id]));
+    }
+    let log_dir = if doc.warnings.is_empty() {
+        None
+    } else {
+        Some(crate::actions::logs::resolve_log_dir())
+    };
     let mut job_ids = Vec::new();
     let mut job_keys = Vec::new();
     for job in &doc.jobs {
@@ -174,6 +222,18 @@ pub async fn enqueue_run(
         let name = job.name.clone().unwrap_or_else(|| job.id.clone());
         db.insert_action_job(&job_id, &run_id, &job.id, &name, &runs_on)
             .await?;
+        if let Some(dir) = &log_dir {
+            let note: String = doc
+                .warnings
+                .iter()
+                .map(|w| format!("::warning::{w}\n"))
+                .collect();
+            if let Err(e) =
+                crate::actions::logs::append_job_log(dir, &run_id, &job_id, note.as_bytes()).await
+            {
+                tracing::warn!(error = %e, run_id, "failed to write dispatch warnings");
+            }
+        }
         job_ids.push(job_id);
         job_keys.push(job.id.clone());
     }

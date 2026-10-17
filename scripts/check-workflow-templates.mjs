@@ -103,6 +103,51 @@ for (const key of Object.keys(catalog.templates ?? {})) {
   }
 }
 
+// compat ledger: every vendored workflow has a classified entry; values are
+// recomputed and verified by tests/actions_catalog_ledger.rs.
+const COMPAT_STATUSES = new Set([
+  "runnable",
+  "partial",
+  "unsupported-runtime",
+  "reusable-workflow",
+  "restricted",
+  "parse_error",
+]);
+const compat = catalog.compat ?? {};
+const compatKeys = new Set(Object.keys(compat));
+for (const d of dirs) {
+  for (const ent of readdirSync(join(TEMPLATES, d))) {
+    if (!ent.endsWith(".yml") && !ent.endsWith(".yaml")) continue;
+    const key = `${d}/${ent.slice(0, ent.lastIndexOf("."))}`;
+    const entry = compat[key];
+    if (!entry) {
+      err(`catalog compat missing '${key}'`);
+      fail = 1;
+      continue;
+    }
+    if (!COMPAT_STATUSES.has(entry.status)) {
+      err(`catalog compat '${key}' has unknown status '${entry.status}'`);
+      fail = 1;
+    }
+    for (const f of ["missing_features", "unsupported_actions", "warnings"]) {
+      if (!Array.isArray(entry[f])) {
+        err(`catalog compat '${key}.${f}' must be an array`);
+        fail = 1;
+      }
+    }
+  }
+}
+for (const key of compatKeys) {
+  const [d, stem] = key.split("/", 2);
+  if (
+    !dirs.includes(d) ||
+    (!isFile(join(TEMPLATES, d, `${stem}.yml`)) && !isFile(join(TEMPLATES, d, `${stem}.yaml`)))
+  ) {
+    err(`catalog compat entry '${key}' has no vendored template`);
+    fail = 1;
+  }
+}
+
 console.error(`check: ${templates} templates validated`);
 
 // Total vendored size budget.

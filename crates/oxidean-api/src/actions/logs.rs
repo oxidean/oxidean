@@ -4,6 +4,22 @@ use std::path::{Path, PathBuf};
 
 use tokio::fs;
 
+/// `OXIDEAN_ACTIONS_LOG_DIR` (default `var/actions-logs`, relative to cwd) —
+/// same contract `AppState::new` applies; shared by enqueue-side writers that
+/// don't carry `AppState` (push dispatch over SSH/RPC).
+pub fn resolve_log_dir() -> PathBuf {
+    let dir = std::env::var("OXIDEAN_ACTIONS_LOG_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("var/actions-logs"));
+    if dir.is_absolute() {
+        dir
+    } else {
+        std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("/"))
+            .join(dir)
+    }
+}
+
 /// `{log_dir}/{run_id}/{job_id}.log` — IDs must not contain path separators (T-19-05).
 pub fn job_log_path(log_dir: &Path, run_id: &str, job_id: &str) -> Result<PathBuf, String> {
     reject_id(run_id)?;

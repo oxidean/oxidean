@@ -1,0 +1,9 @@
+name: run-env-step
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "marker=$MARKER"
+        env:
+          MARKER: step-env-value

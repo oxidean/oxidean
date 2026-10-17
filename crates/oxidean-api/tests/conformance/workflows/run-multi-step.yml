@@ -1,0 +1,12 @@
+name: run-multi-step
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: first
+        run: echo one
+      - name: second
+        run: echo two
+      - name: third
+        run: echo three

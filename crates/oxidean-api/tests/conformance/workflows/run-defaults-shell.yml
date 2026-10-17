@@ -1,0 +1,10 @@
+name: run-defaults-shell
+on: [push]
+defaults:
+  run:
+    shell: sh
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "default shell applied"

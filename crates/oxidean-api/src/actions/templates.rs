@@ -158,12 +158,57 @@ fn unsupported_actions(doc: &WorkflowDocument) -> Vec<String> {
     out.into_iter().collect()
 }
 
+/// Compatibility classification for a template — the single source the
+/// `catalog.json` `compat` ledger is checked against (Phase 0 conformance).
+/// `missing_features` = structural features that force the validation-failure
+/// path; `unsupported_actions` = non-checkout `uses:` refs the runner can't
+/// execute yet; `warnings` = features that run degraded.
+#[derive(Debug, Clone)]
+pub struct TemplateCompat {
+    pub status: &'static str,
+    pub missing_features: Vec<String>,
+    pub unsupported_actions: Vec<String>,
+    pub warnings: Vec<String>,
+    pub parse_error: Option<String>,
+}
+
+pub fn classify_template_content(content: &str) -> TemplateCompat {
+    let substituted = content.replace("$default-branch", "main");
+    match parse_workflow_yaml(substituted.as_bytes()) {
+        Err(e) => TemplateCompat {
+            status: "parse_error",
+            missing_features: Vec::new(),
+            unsupported_actions: Vec::new(),
+            warnings: Vec::new(),
+            parse_error: Some(e.message),
+        },
+        Ok(doc) => {
+            let unsupported = unsupported_actions(&doc);
+            let status = if doc.unsupported.iter().any(|u| u == "pull_request_target") {
+                "restricted"
+            } else if doc.unsupported.iter().any(|u| u == "reusable-workflow") {
+                "reusable-workflow"
+            } else if !doc.unsupported.is_empty() {
+                "unsupported-runtime"
+            } else if !doc.warnings.is_empty() || !unsupported.is_empty() {
+                "partial"
+            } else {
+                "runnable"
+            };
+            TemplateCompat {
+                status,
+                missing_features: doc.unsupported,
+                unsupported_actions: unsupported,
+                warnings: doc.warnings,
+                parse_error: None,
+            }
+        }
+    }
+}
+
 fn to_summary(t: &ResolvedTemplate, root_entries: &[String]) -> WorkflowTemplateSummary {
-    let substituted = t.content.replace("$default-branch", "main");
-    let (unsupported, parse_error) = match parse_workflow_yaml(substituted.as_bytes()) {
-        Ok(doc) => (unsupported_actions(&doc), None),
-        Err(e) => (Vec::new(), Some(e.message)),
-    };
+    let compat = classify_template_content(&t.content);
+    let (unsupported, parse_error) = (compat.unsupported_actions, compat.parse_error);
     WorkflowTemplateSummary {
         id: t.id.clone(),
         name: t.name.clone(),

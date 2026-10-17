@@ -327,5 +327,1028 @@
         "Dockerfile"
       ]
     }
+  },
+  "compat": {
+    "automation/greetings": {
+      "status": "restricted",
+      "missing_features": [
+        "pull_request_target"
+      ],
+      "unsupported_actions": [
+        "actions/first-interaction@v1"
+      ],
+      "warnings": [
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "automation/label": {
+      "status": "restricted",
+      "missing_features": [
+        "pull_request_target"
+      ],
+      "unsupported_actions": [
+        "actions/labeler@v4"
+      ],
+      "warnings": [
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "automation/manual": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "automation/stale": {
+      "status": "partial",
+      "missing_features": [],
+      "unsupported_actions": [
+        "actions/stale@v5"
+      ],
+      "warnings": [
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "automation/summary": {
+      "status": "partial",
+      "missing_features": [],
+      "unsupported_actions": [
+        "actions/ai-inference@v1"
+      ],
+      "warnings": [
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "ci/ada": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "ci/android": {
+      "status": "partial",
+      "missing_features": [],
+      "unsupported_actions": [
+        "actions/setup-java@v4"
+      ],
+      "warnings": [
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "ci/ant": {
+      "status": "partial",
+      "missing_features": [],
+      "unsupported_actions": [
+        "actions/setup-java@v4"
+      ],
+      "warnings": [
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "ci/blank": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "ci/c-cpp": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "ci/clojure": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "ci/cmake-multi-platform": {
+      "status": "unsupported-runtime",
+      "missing_features": [
+        "strategy"
+      ],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "ci/cmake-single-platform": {
+      "status": "partial",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": [
+        "env (workflow env is not applied yet)"
+      ]
+    },
+    "ci/crystal": {
+      "status": "unsupported-runtime",
+      "missing_features": [
+        "container"
+      ],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "ci/d": {
+      "status": "partial",
+      "missing_features": [],
+      "unsupported_actions": [
+        "dlang-community/setup-dlang@4c99aa991ce7d19dd3064de0a4f2f6b2f152e2d7"
+      ],
+      "warnings": []
+    },
+    "ci/dart": {
+      "status": "partial",
+      "missing_features": [],
+      "unsupported_actions": [
+        "dart-lang/setup-dart@9a04e6d73cca37bd455e0608d7e5092f881fd603"
+      ],
+      "warnings": []
+    },
+    "ci/datadog-synthetics": {
+      "status": "partial",
+      "missing_features": [],
+      "unsupported_actions": [
+        "DataDog/synthetics-ci-github-action@87b505388a22005bb8013481e3f73a367b9a53eb"
+      ],
+      "warnings": [
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "ci/deno": {
+      "status": "partial",
+      "missing_features": [],
+      "unsupported_actions": [
+        "denoland/setup-deno@61fe2df320078202e33d7d5ad347e7dcfa0e8f31"
+      ],
+      "warnings": [
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "ci/django": {
+      "status": "unsupported-runtime",
+      "missing_features": [
+        "strategy"
+      ],
+      "unsupported_actions": [
+        "actions/setup-python@v3"
+      ],
+      "warnings": [
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "ci/docker-image": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "ci/docker-publish": {
+      "status": "unsupported-runtime",
+      "missing_features": [
+        "if"
+      ],
+      "unsupported_actions": [
+        "docker/build-push-action@0565240e2d4ab88bba5387d719585280857ece09",
+        "docker/login-action@343f7c4344506bcbf9b4de18042ae17996df046d",
+        "docker/metadata-action@96383f45573cb7f253c731d3b3ab81c87ef81934",
+        "docker/setup-buildx-action@f95db51fddba0c2d1ec667646a06c2ce06100226",
+        "sigstore/cosign-installer@59acb6260d9c0ba8f4a2f9d9b48431a222b68e20"
+      ],
+      "warnings": [
+        "env (workflow env is not applied yet)",
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "ci/dotnet": {
+      "status": "partial",
+      "missing_features": [],
+      "unsupported_actions": [
+        "actions/setup-dotnet@v4"
+      ],
+      "warnings": [
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "ci/dotnet-desktop": {
+      "status": "unsupported-runtime",
+      "missing_features": [
+        "strategy"
+      ],
+      "unsupported_actions": [
+        "actions/setup-dotnet@v4",
+        "actions/upload-artifact@v4",
+        "microsoft/setup-msbuild@v2"
+      ],
+      "warnings": [
+        "env (job env is not applied yet)",
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "ci/elixir": {
+      "status": "partial",
+      "missing_features": [],
+      "unsupported_actions": [
+        "actions/cache@v3",
+        "erlef/setup-beam@61e01a43a562a89bfc54c7f9a378ff67b03e4a21"
+      ],
+      "warnings": [
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "ci/erlang": {
+      "status": "unsupported-runtime",
+      "missing_features": [
+        "container"
+      ],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "ci/gem-push": {
+      "status": "partial",
+      "missing_features": [],
+      "unsupported_actions": [
+        "ruby/setup-ruby@55283cc23133118229fd3f97f9336ee23a179fcf"
+      ],
+      "warnings": [
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "ci/generator-generic-ossf-slsa3-publish": {
+      "status": "reusable-workflow",
+      "missing_features": [
+        "needs",
+        "outputs",
+        "reusable-workflow"
+      ],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "ci/go": {
+      "status": "partial",
+      "missing_features": [],
+      "unsupported_actions": [
+        "actions/setup-go@v4"
+      ],
+      "warnings": [
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "ci/go-ossf-slsa3-publish": {
+      "status": "reusable-workflow",
+      "missing_features": [
+        "reusable-workflow"
+      ],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "ci/gradle": {
+      "status": "partial",
+      "missing_features": [],
+      "unsupported_actions": [
+        "actions/setup-java@v4",
+        "gradle/actions/dependency-submission@af1da67850ed9a4cedd57bfd976089dd991e2582",
+        "gradle/actions/setup-gradle@af1da67850ed9a4cedd57bfd976089dd991e2582"
+      ],
+      "warnings": [
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "ci/gradle-publish": {
+      "status": "partial",
+      "missing_features": [],
+      "unsupported_actions": [
+        "actions/setup-java@v4",
+        "gradle/actions/setup-gradle@af1da67850ed9a4cedd57bfd976089dd991e2582"
+      ],
+      "warnings": [
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "ci/haskell": {
+      "status": "partial",
+      "missing_features": [],
+      "unsupported_actions": [
+        "actions/cache@v3",
+        "actions/setup-haskell@v1"
+      ],
+      "warnings": [
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "ci/ios": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "ci/jekyll-docker": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "ci/laravel": {
+      "status": "partial",
+      "missing_features": [],
+      "unsupported_actions": [
+        "shivammathur/setup-php@15c43e89cdef867065b0213be354c2841860869e"
+      ],
+      "warnings": [
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "ci/makefile": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "ci/maven": {
+      "status": "partial",
+      "missing_features": [],
+      "unsupported_actions": [
+        "actions/setup-java@v4",
+        "advanced-security/maven-dependency-submission-action@571e99aab1055c2e71a1e2309b9691de18d6b7d6"
+      ],
+      "warnings": [
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "ci/maven-publish": {
+      "status": "partial",
+      "missing_features": [],
+      "unsupported_actions": [
+        "actions/setup-java@v4"
+      ],
+      "warnings": [
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "ci/msbuild": {
+      "status": "partial",
+      "missing_features": [],
+      "unsupported_actions": [
+        "microsoft/setup-msbuild@v1.0.2"
+      ],
+      "warnings": [
+        "env (workflow env is not applied yet)"
+      ]
+    },
+    "ci/node.js": {
+      "status": "unsupported-runtime",
+      "missing_features": [
+        "strategy"
+      ],
+      "unsupported_actions": [
+        "actions/setup-node@v4"
+      ],
+      "warnings": [
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "ci/npm-publish": {
+      "status": "unsupported-runtime",
+      "missing_features": [
+        "needs"
+      ],
+      "unsupported_actions": [
+        "actions/setup-node@v4"
+      ],
+      "warnings": [
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "ci/npm-publish-github-packages": {
+      "status": "unsupported-runtime",
+      "missing_features": [
+        "needs"
+      ],
+      "unsupported_actions": [
+        "actions/setup-node@v4"
+      ],
+      "warnings": [
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "ci/objective-c-xcode": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "ci/php": {
+      "status": "partial",
+      "missing_features": [],
+      "unsupported_actions": [
+        "actions/cache@v3"
+      ],
+      "warnings": [
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "ci/pylint": {
+      "status": "unsupported-runtime",
+      "missing_features": [
+        "strategy"
+      ],
+      "unsupported_actions": [
+        "actions/setup-python@v3"
+      ],
+      "warnings": [
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "ci/python-app": {
+      "status": "partial",
+      "missing_features": [],
+      "unsupported_actions": [
+        "actions/setup-python@v3"
+      ],
+      "warnings": [
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "ci/python-package": {
+      "status": "unsupported-runtime",
+      "missing_features": [
+        "strategy"
+      ],
+      "unsupported_actions": [
+        "actions/setup-python@v3"
+      ],
+      "warnings": [
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "ci/python-package-conda": {
+      "status": "unsupported-runtime",
+      "missing_features": [
+        "strategy"
+      ],
+      "unsupported_actions": [
+        "actions/setup-python@v3"
+      ],
+      "warnings": [
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "ci/python-publish": {
+      "status": "unsupported-runtime",
+      "missing_features": [
+        "environment",
+        "needs"
+      ],
+      "unsupported_actions": [
+        "actions/download-artifact@v4",
+        "actions/setup-python@v5",
+        "actions/upload-artifact@v4",
+        "pypa/gh-action-pypi-publish@release/v1"
+      ],
+      "warnings": [
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "ci/r": {
+      "status": "unsupported-runtime",
+      "missing_features": [
+        "strategy"
+      ],
+      "unsupported_actions": [
+        "r-lib/actions/setup-r@f57f1301a053485946083d7a45022b278929a78a"
+      ],
+      "warnings": [
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "ci/ruby": {
+      "status": "unsupported-runtime",
+      "missing_features": [
+        "strategy"
+      ],
+      "unsupported_actions": [
+        "ruby/setup-ruby@55283cc23133118229fd3f97f9336ee23a179fcf"
+      ],
+      "warnings": [
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "ci/rubyonrails": {
+      "status": "unsupported-runtime",
+      "missing_features": [
+        "services"
+      ],
+      "unsupported_actions": [
+        "ruby/setup-ruby@78c01b705fd9d5ad960d432d3a0cfa341d50e410"
+      ],
+      "warnings": [
+        "env (job env is not applied yet)",
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "ci/rust": {
+      "status": "partial",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": [
+        "env (workflow env is not applied yet)"
+      ]
+    },
+    "ci/scala": {
+      "status": "partial",
+      "missing_features": [],
+      "unsupported_actions": [
+        "actions/setup-java@v4",
+        "scalacenter/sbt-dependency-submission@ab086b50c947c9774b70f39fc7f6e20ca2706c91"
+      ],
+      "warnings": [
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "ci/super-linter": {
+      "status": "partial",
+      "missing_features": [],
+      "unsupported_actions": [
+        "github/super-linter@v4"
+      ],
+      "warnings": [
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "ci/swift": {
+      "status": "runnable",
+      "missing_features": [],
+      "unsupported_actions": [],
+      "warnings": []
+    },
+    "ci/symfony": {
+      "status": "partial",
+      "missing_features": [],
+      "unsupported_actions": [
+        "actions/cache@v3",
+        "shivammathur/setup-php@2cb9b829437ee246e9b3cac53555a39208ca6d28"
+      ],
+      "warnings": [
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "ci/webpack": {
+      "status": "unsupported-runtime",
+      "missing_features": [
+        "strategy"
+      ],
+      "unsupported_actions": [
+        "actions/setup-node@v4"
+      ],
+      "warnings": [
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "deployments/alibabacloud": {
+      "status": "unsupported-runtime",
+      "missing_features": [
+        "environment"
+      ],
+      "unsupported_actions": [
+        "aliyun/ack-set-context@v1",
+        "aliyun/acr-login@v1",
+        "aliyun/acr-scan@v1"
+      ],
+      "warnings": [
+        "env (workflow env is not applied yet)",
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "deployments/aws": {
+      "status": "unsupported-runtime",
+      "missing_features": [
+        "environment"
+      ],
+      "unsupported_actions": [
+        "aws-actions/amazon-ecr-login@v1",
+        "aws-actions/amazon-ecs-deploy-task-definition@v1",
+        "aws-actions/amazon-ecs-render-task-definition@v1",
+        "aws-actions/configure-aws-credentials@v1"
+      ],
+      "warnings": [
+        "env (workflow env is not applied yet)",
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "deployments/azure-container-webapp": {
+      "status": "unsupported-runtime",
+      "missing_features": [
+        "environment",
+        "needs"
+      ],
+      "unsupported_actions": [
+        "azure/webapps-deploy@v2",
+        "docker/build-push-action@0565240e2d4ab88bba5387d719585280857ece09",
+        "docker/login-action@343f7c4344506bcbf9b4de18042ae17996df046d",
+        "docker/setup-buildx-action@f95db51fddba0c2d1ec667646a06c2ce06100226"
+      ],
+      "warnings": [
+        "env (workflow env is not applied yet)",
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "deployments/azure-functions-app-container": {
+      "status": "unsupported-runtime",
+      "missing_features": [
+        "environment"
+      ],
+      "unsupported_actions": [
+        "Azure/functions-container-action@v1",
+        "azure/docker-login@v1",
+        "azure/login@v1"
+      ],
+      "warnings": [
+        "env (workflow env is not applied yet)",
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "deployments/azure-functions-app-dotnet": {
+      "status": "unsupported-runtime",
+      "missing_features": [
+        "environment"
+      ],
+      "unsupported_actions": [
+        "Azure/functions-action@v1",
+        "actions/setup-dotnet@v4"
+      ],
+      "warnings": [
+        "env (workflow env is not applied yet)",
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "deployments/azure-functions-app-java": {
+      "status": "unsupported-runtime",
+      "missing_features": [
+        "environment"
+      ],
+      "unsupported_actions": [
+        "Azure/functions-action@v1",
+        "actions/setup-java@v4"
+      ],
+      "warnings": [
+        "env (workflow env is not applied yet)",
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "deployments/azure-functions-app-java-gradle": {
+      "status": "unsupported-runtime",
+      "missing_features": [
+        "environment"
+      ],
+      "unsupported_actions": [
+        "Azure/functions-action@v1",
+        "actions/setup-java@v4"
+      ],
+      "warnings": [
+        "env (workflow env is not applied yet)",
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "deployments/azure-functions-app-nodejs": {
+      "status": "unsupported-runtime",
+      "missing_features": [
+        "environment"
+      ],
+      "unsupported_actions": [
+        "Azure/functions-action@v1",
+        "actions/setup-node@v4"
+      ],
+      "warnings": [
+        "env (workflow env is not applied yet)",
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "deployments/azure-functions-app-powershell": {
+      "status": "unsupported-runtime",
+      "missing_features": [
+        "environment"
+      ],
+      "unsupported_actions": [
+        "Azure/functions-action@v1"
+      ],
+      "warnings": [
+        "env (workflow env is not applied yet)",
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "deployments/azure-functions-app-python": {
+      "status": "unsupported-runtime",
+      "missing_features": [
+        "environment"
+      ],
+      "unsupported_actions": [
+        "Azure/functions-action@v1",
+        "actions/setup-python@v4"
+      ],
+      "warnings": [
+        "env (workflow env is not applied yet)",
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "deployments/azure-kubernetes-service": {
+      "status": "unsupported-runtime",
+      "missing_features": [
+        "needs"
+      ],
+      "unsupported_actions": [
+        "Azure/k8s-deploy@v4",
+        "azure/aks-set-context@v3",
+        "azure/login@v1.4.6",
+        "azure/use-kubelogin@v1"
+      ],
+      "warnings": [
+        "env (workflow env is not applied yet)",
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "deployments/azure-kubernetes-service-helm": {
+      "status": "unsupported-runtime",
+      "missing_features": [
+        "needs"
+      ],
+      "unsupported_actions": [
+        "Azure/k8s-deploy@v4",
+        "azure/aks-set-context@v3",
+        "azure/k8s-bake@v2",
+        "azure/login@v1.4.6",
+        "azure/use-kubelogin@v1"
+      ],
+      "warnings": [
+        "env (workflow env is not applied yet)",
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "deployments/azure-kubernetes-service-kompose": {
+      "status": "unsupported-runtime",
+      "missing_features": [
+        "needs"
+      ],
+      "unsupported_actions": [
+        "Azure/k8s-deploy@v4",
+        "azure/aks-set-context@v3",
+        "azure/k8s-bake@v2",
+        "azure/login@v1.4.6",
+        "azure/use-kubelogin@v1"
+      ],
+      "warnings": [
+        "env (workflow env is not applied yet)",
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "deployments/azure-kubernetes-service-kustomize": {
+      "status": "unsupported-runtime",
+      "missing_features": [
+        "needs"
+      ],
+      "unsupported_actions": [
+        "Azure/k8s-deploy@v4",
+        "azure/aks-set-context@v3",
+        "azure/k8s-bake@v2",
+        "azure/login@v1.4.6",
+        "azure/use-kubelogin@v1"
+      ],
+      "warnings": [
+        "env (workflow env is not applied yet)",
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "deployments/azure-staticwebapp": {
+      "status": "unsupported-runtime",
+      "missing_features": [
+        "if"
+      ],
+      "unsupported_actions": [
+        "Azure/static-web-apps-deploy@v1"
+      ],
+      "warnings": [
+        "env (workflow env is not applied yet)",
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "deployments/azure-webapps-dotnet-core": {
+      "status": "unsupported-runtime",
+      "missing_features": [
+        "environment",
+        "needs"
+      ],
+      "unsupported_actions": [
+        "actions/cache@v3",
+        "actions/download-artifact@v4",
+        "actions/setup-dotnet@v4",
+        "actions/upload-artifact@v4",
+        "azure/webapps-deploy@v2"
+      ],
+      "warnings": [
+        "env (workflow env is not applied yet)",
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "deployments/azure-webapps-java-jar": {
+      "status": "unsupported-runtime",
+      "missing_features": [
+        "environment",
+        "needs"
+      ],
+      "unsupported_actions": [
+        "actions/download-artifact@v4",
+        "actions/setup-java@v4",
+        "actions/upload-artifact@v4",
+        "azure/webapps-deploy@v2"
+      ],
+      "warnings": [
+        "env (workflow env is not applied yet)",
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "deployments/azure-webapps-java-jar-gradle": {
+      "status": "unsupported-runtime",
+      "missing_features": [
+        "environment",
+        "needs"
+      ],
+      "unsupported_actions": [
+        "actions/download-artifact@v4",
+        "actions/setup-java@v4",
+        "actions/upload-artifact@v4",
+        "azure/webapps-deploy@v2"
+      ],
+      "warnings": [
+        "env (workflow env is not applied yet)",
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "deployments/azure-webapps-node": {
+      "status": "unsupported-runtime",
+      "missing_features": [
+        "environment",
+        "needs"
+      ],
+      "unsupported_actions": [
+        "actions/download-artifact@v4",
+        "actions/setup-node@v4",
+        "actions/upload-artifact@v4",
+        "azure/webapps-deploy@v2"
+      ],
+      "warnings": [
+        "env (workflow env is not applied yet)",
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "deployments/azure-webapps-php": {
+      "status": "unsupported-runtime",
+      "missing_features": [
+        "environment",
+        "if",
+        "needs"
+      ],
+      "unsupported_actions": [
+        "actions/cache@v3",
+        "actions/download-artifact@v4",
+        "actions/upload-artifact@v4",
+        "andstor/file-existence-action@87d74d4732ddb824259d80c8a508c0124bf1c673",
+        "azure/webapps-deploy@v2",
+        "shivammathur/setup-php@7c0b4c8c8ebed23eca9ec2802474895d105b11bc"
+      ],
+      "warnings": [
+        "env (workflow env is not applied yet)",
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "deployments/azure-webapps-python": {
+      "status": "unsupported-runtime",
+      "missing_features": [
+        "environment",
+        "needs"
+      ],
+      "unsupported_actions": [
+        "actions/download-artifact@v4",
+        "actions/setup-python@v3.0.0",
+        "actions/upload-artifact@v4",
+        "azure/webapps-deploy@v2"
+      ],
+      "warnings": [
+        "env (workflow env is not applied yet)",
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "deployments/google": {
+      "status": "unsupported-runtime",
+      "missing_features": [
+        "environment"
+      ],
+      "unsupported_actions": [
+        "docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567",
+        "google-github-actions/auth@f112390a2df9932162083945e46d439060d66ec2",
+        "google-github-actions/get-gke-credentials@6051de21ad50fbb1767bc93c11357a49082ad116"
+      ],
+      "warnings": [
+        "env (workflow env is not applied yet)",
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "deployments/google-cloudrun-docker": {
+      "status": "partial",
+      "missing_features": [],
+      "unsupported_actions": [
+        "docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567",
+        "google-github-actions/auth@f112390a2df9932162083945e46d439060d66ec2",
+        "google-github-actions/deploy-cloudrun@33553064113a37d688aa6937bacbdc481580be17"
+      ],
+      "warnings": [
+        "env (workflow env is not applied yet)",
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "deployments/google-cloudrun-source": {
+      "status": "partial",
+      "missing_features": [],
+      "unsupported_actions": [
+        "google-github-actions/auth@f112390a2df9932162083945e46d439060d66ec2",
+        "google-github-actions/deploy-cloudrun@33553064113a37d688aa6937bacbdc481580be17"
+      ],
+      "warnings": [
+        "env (workflow env is not applied yet)",
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "deployments/ibm": {
+      "status": "unsupported-runtime",
+      "missing_features": [
+        "environment"
+      ],
+      "unsupported_actions": [],
+      "warnings": [
+        "env (workflow env is not applied yet)"
+      ]
+    },
+    "deployments/octopusdeploy": {
+      "status": "unsupported-runtime",
+      "missing_features": [
+        "needs",
+        "outputs"
+      ],
+      "unsupported_actions": [
+        "OctopusDeploy/create-release-action@fea7e7b45c38c021b6bc5a14bd7eaa2ed5269214",
+        "OctopusDeploy/deploy-release-action@b10a606c903b0a5bce24102af9d066638ab429ac",
+        "OctopusDeploy/login@34b6dcc1e86fa373c14e6a28c5507d221e4de629",
+        "docker/build-push-action@f2a1d5e99d037542a71f64918e516c093c6f3fc4",
+        "docker/login-action@65b78e6e13532edd9afa3aa52ac7964289d1a9c1",
+        "docker/metadata-action@9ec57ed1fcdbf14dcef7dfbe97b2010124a938b7",
+        "docker/setup-buildx-action@f95db51fddba0c2d1ec667646a06c2ce06100226"
+      ],
+      "warnings": [
+        "env (job env is not applied yet)",
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "deployments/openshift": {
+      "status": "unsupported-runtime",
+      "missing_features": [
+        "environment",
+        "if",
+        "outputs"
+      ],
+      "unsupported_actions": [
+        "actions/github-script@v6",
+        "redhat-actions/buildah-build@v2",
+        "redhat-actions/oc-login@v1",
+        "redhat-actions/oc-new-app@v1",
+        "redhat-actions/openshift-tools-installer@v1",
+        "redhat-actions/push-to-registry@v2"
+      ],
+      "warnings": [
+        "env (workflow env is not applied yet)",
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "deployments/tencent": {
+      "status": "unsupported-runtime",
+      "missing_features": [
+        "environment"
+      ],
+      "unsupported_actions": [
+        "TencentCloud/tke-cluster-credential-action@v1"
+      ],
+      "warnings": [
+        "env (workflow env is not applied yet)",
+        "with (step inputs are not applied yet)"
+      ]
+    },
+    "deployments/terraform": {
+      "status": "unsupported-runtime",
+      "missing_features": [
+        "environment",
+        "if"
+      ],
+      "unsupported_actions": [
+        "hashicorp/setup-terraform@v1"
+      ],
+      "warnings": [
+        "with (step inputs are not applied yet)"
+      ]
+    }
   }
 }

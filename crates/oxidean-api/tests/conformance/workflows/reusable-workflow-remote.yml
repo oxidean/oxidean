@@ -1,0 +1,6 @@
+name: reusable-workflow-remote
+on: [push]
+jobs:
+  call:
+    uses: octo/hello/.github/workflows/reusable.yml@main
+    secrets: inherit

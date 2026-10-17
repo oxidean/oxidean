@@ -1,0 +1,7 @@
+name: trigger-list-form
+on: [push, workflow_dispatch]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo list form

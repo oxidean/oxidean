@@ -1,0 +1,7 @@
+name: runs-on-array
+on: [push]
+jobs:
+  build:
+    runs-on: [self-hosted, linux]
+    steps:
+      - run: echo array labels

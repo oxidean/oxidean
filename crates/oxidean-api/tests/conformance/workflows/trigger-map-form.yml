@@ -1,0 +1,9 @@
+name: trigger-map-form
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo map form

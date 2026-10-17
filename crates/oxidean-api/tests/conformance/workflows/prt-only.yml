@@ -1,0 +1,7 @@
+name: prt-only
+on: [pull_request_target]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo should never run

@@ -1,0 +1,7 @@
+name: echo-unicode
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "héllo wörld ünïcode ✓"

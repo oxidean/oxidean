@@ -1,0 +1,9 @@
+name: step-if
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo always
+      - run: echo conditional
+        if: success()

@@ -1,0 +1,8 @@
+name: continue-on-error-job
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - run: exit 1

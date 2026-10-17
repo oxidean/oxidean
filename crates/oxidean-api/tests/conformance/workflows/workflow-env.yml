@@ -1,0 +1,9 @@
+name: workflow-env
+on: [push]
+env:
+  GLOBAL_VAR: from-workflow
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "GLOBAL_VAR=$GLOBAL_VAR"

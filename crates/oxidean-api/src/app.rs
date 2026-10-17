@@ -140,16 +140,7 @@ impl AppState {
                 .unwrap_or_else(|_| PathBuf::from("/"))
                 .join(packages_dir)
         };
-        let actions_log_dir = std::env::var("OXIDEAN_ACTIONS_LOG_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from("var/actions-logs"));
-        let actions_log_dir = if actions_log_dir.is_absolute() {
-            actions_log_dir
-        } else {
-            std::env::current_dir()
-                .unwrap_or_else(|_| PathBuf::from("/"))
-                .join(actions_log_dir)
-        };
+        let actions_log_dir = crate::actions::logs::resolve_log_dir();
         let actions_enabled = std::env::var("OXIDEAN_ACTIONS_ENABLED")
             .map(|v| {
                 let t = v.trim().to_ascii_lowercase();

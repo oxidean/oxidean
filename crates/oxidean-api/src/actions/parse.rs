@@ -52,6 +52,14 @@ pub struct WorkflowDocument {
     pub env: Option<JsonValue>,
     /// Workflow-level `permissions:` (`None` = not specified).
     pub permissions: Option<WorkflowPermissions>,
+    /// Structural features parsed but not executable — dispatch must refuse
+    /// the workflow rather than silently mis-execute it (D-parity: fail
+    /// loudly). Sorted, dedup'd feature keys (`needs`, `strategy`, …).
+    pub unsupported: Vec<String>,
+    /// Dispatch-time warnings: features that run but are partially ignored
+    /// (`env` blocks not applied, `with:` inputs not forwarded). Surfaced in
+    /// each job's log at enqueue — never silent.
+    pub warnings: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -95,9 +103,8 @@ struct RawWorkflow {
     env: Option<serde_yaml::Value>,
     defaults: Option<RawDefaults>,
     permissions: Option<serde_yaml::Value>,
+    concurrency: Option<serde_yaml::Value>,
 }
-
-/// `defaults:` — currently only `run.shell` / `run.working-directory`
 /// are honoured (workflow-level fallback for every step).
 #[derive(Debug, Deserialize, Clone)]
 struct RawDefaults {
@@ -136,6 +143,22 @@ struct RawJob {
     env: Option<serde_yaml::Value>,
     defaults: Option<RawDefaults>,
     permissions: Option<serde_yaml::Value>,
+    needs: Option<serde_yaml::Value>,
+    strategy: Option<serde_yaml::Value>,
+    container: Option<serde_yaml::Value>,
+    services: Option<serde_yaml::Value>,
+    environment: Option<serde_yaml::Value>,
+    concurrency: Option<serde_yaml::Value>,
+    outputs: Option<serde_yaml::Value>,
+    #[serde(rename = "if")]
+    if_expr: Option<serde_yaml::Value>,
+    uses: Option<serde_yaml::Value>,
+    with: Option<serde_yaml::Value>,
+    secrets: Option<serde_yaml::Value>,
+    #[serde(rename = "continue-on-error")]
+    continue_on_error: Option<serde_yaml::Value>,
+    #[serde(rename = "timeout-minutes")]
+    timeout_minutes: Option<serde_yaml::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -157,6 +180,10 @@ struct RawStep {
     env: Option<serde_yaml::Value>,
     #[serde(rename = "if")]
     if_expr: Option<String>,
+    #[serde(rename = "continue-on-error")]
+    continue_on_error: Option<serde_yaml::Value>,
+    #[serde(rename = "timeout-minutes")]
+    timeout_minutes: Option<serde_yaml::Value>,
 }
 
 fn yaml_to_json(v: serde_yaml::Value) -> Result<JsonValue, ParseError> {
@@ -165,34 +192,38 @@ fn yaml_to_json(v: serde_yaml::Value) -> Result<JsonValue, ParseError> {
     })
 }
 
-fn parse_triggers(on: Option<RawOn>) -> WorkflowTriggers {
+fn parse_triggers(on: Option<RawOn>) -> (WorkflowTriggers, Vec<String>) {
     let mut t = WorkflowTriggers::default();
+    let mut unsupported = Vec::new();
     match on {
         None => {}
-        Some(RawOn::Single(s)) => apply_event(&mut t, &s),
+        Some(RawOn::Single(s)) => apply_event(&mut t, &mut unsupported, &s),
         Some(RawOn::List(list)) => {
             for s in list {
-                apply_event(&mut t, &s);
+                apply_event(&mut t, &mut unsupported, &s);
             }
         }
         Some(RawOn::Map(map)) => {
             for (k, _) in map {
                 if let serde_yaml::Value::String(s) = k {
-                    apply_event(&mut t, &s);
+                    apply_event(&mut t, &mut unsupported, &s);
                 }
             }
         }
     }
-    t
+    (t, unsupported)
 }
 
-fn apply_event(t: &mut WorkflowTriggers, name: &str) {
+fn apply_event(t: &mut WorkflowTriggers, unsupported: &mut Vec<String>, name: &str) {
     match name.trim() {
         "push" => t.push = true,
         "pull_request" => t.pull_request = true,
         "workflow_dispatch" => t.workflow_dispatch = true,
+        // Dangerous-on-forks event we never fire — restricted until designed in.
+        "pull_request_target" => unsupported.push("pull_request_target".into()),
         _ => {
-            // Unsupported triggers ignored for matching; jobs still parse.
+            // Other unimplemented events (schedule, release, issues, …) simply
+            // never fire — harmless to ignore, not mis-executed.
         }
     }
 }
@@ -242,6 +273,13 @@ pub fn effective_contents_permission(doc: &WorkflowDocument, job: &JobSpec) -> C
         .unwrap_or(ContentsPermission::Read)
 }
 
+/// Mark a feature key once per document (dedup'd, sorted at the end).
+fn flag(set: &mut Vec<String>, key: &str) {
+    if !set.iter().any(|k| k == key) {
+        set.push(key.to_string());
+    }
+}
+
 fn parse_runs_on(raw: Option<RawRunsOn>) -> Result<Vec<String>, ParseError> {
     match raw {
         None => Err(ParseError {
@@ -278,7 +316,14 @@ pub fn parse_workflow_yaml(bytes: &[u8]) -> Result<WorkflowDocument, ParseError>
         });
     }
 
-    let triggers = parse_triggers(raw.on);
+    let (triggers, mut unsupported) = parse_triggers(raw.on);
+    let mut warnings = Vec::new();
+    if raw.concurrency.is_some() {
+        flag(&mut unsupported, "concurrency");
+    }
+    if raw.env.is_some() {
+        flag(&mut warnings, "env (workflow env is not applied yet)");
+    }
     let jobs_map = raw.jobs.ok_or_else(|| ParseError {
         message: "workflow missing jobs".into(),
     })?;
@@ -307,7 +352,37 @@ pub fn parse_workflow_yaml(bytes: &[u8]) -> Result<WorkflowDocument, ParseError>
         let job: RawJob = serde_yaml::from_value(value).map_err(|e| ParseError {
             message: format!("invalid job '{id}': {e}"),
         })?;
-        let runs_on = parse_runs_on(job.runs_on)?;
+        // Structural features that would mis-execute — fail loudly at dispatch.
+        for (present, key) in [
+            (job.needs.is_some(), "needs"),
+            (job.strategy.is_some(), "strategy"),
+            (job.container.is_some(), "container"),
+            (job.services.is_some(), "services"),
+            (job.environment.is_some(), "environment"),
+            (job.concurrency.is_some(), "concurrency"),
+            (job.outputs.is_some(), "outputs"),
+            (job.if_expr.is_some(), "if"),
+            (job.continue_on_error.is_some(), "continue-on-error"),
+            (job.timeout_minutes.is_some(), "timeout-minutes"),
+        ] {
+            if present {
+                flag(&mut unsupported, key);
+            }
+        }
+        // `uses:`/`with:`/`secrets:` on a job is the reusable-workflow call shape.
+        if job.uses.is_some() || job.with.is_some() || job.secrets.is_some() {
+            flag(&mut unsupported, "reusable-workflow");
+        }
+        if job.env.is_some() {
+            flag(&mut warnings, "env (job env is not applied yet)");
+        }
+        // Reusable-call jobs (`uses:`) carry no `runs-on` — the unsupported
+        // flag above already routes them to the validation-failure path.
+        let runs_on = if job.uses.is_some() {
+            Vec::new()
+        } else {
+            parse_runs_on(job.runs_on)?
+        };
         let (job_shell, job_workdir) = run_defaults(job.defaults.as_ref());
         let mut steps = Vec::new();
         for (i, step) in job.steps.unwrap_or_default().into_iter().enumerate() {
@@ -315,6 +390,18 @@ pub fn parse_workflow_yaml(bytes: &[u8]) -> Result<WorkflowDocument, ParseError>
                 return Err(ParseError {
                     message: format!("job '{id}' step {i} needs uses or run"),
                 });
+            }
+            for (present, key) in [
+                (step.if_expr.is_some(), "if"),
+                (step.continue_on_error.is_some(), "continue-on-error"),
+                (step.timeout_minutes.is_some(), "timeout-minutes"),
+            ] {
+                if present {
+                    flag(&mut unsupported, key);
+                }
+            }
+            if step.with.is_some() {
+                flag(&mut warnings, "with (step inputs are not applied yet)");
             }
             // Precedence: step > job defaults > workflow defaults.
             let shell = step
@@ -336,6 +423,10 @@ pub fn parse_workflow_yaml(bytes: &[u8]) -> Result<WorkflowDocument, ParseError>
                 if_expr: step.if_expr,
             });
         }
+        if steps.is_empty() && job.uses.is_none() {
+            // GitHub rejects the file: a job needs `steps:` or a `uses:` call.
+            flag(&mut unsupported, "steps");
+        }
         jobs.push(JobSpec {
             id,
             name: job.name,
@@ -346,12 +437,16 @@ pub fn parse_workflow_yaml(bytes: &[u8]) -> Result<WorkflowDocument, ParseError>
         });
     }
 
+    unsupported.sort();
+    warnings.sort();
     Ok(WorkflowDocument {
         name,
         triggers,
         jobs,
         env: raw.env.map(yaml_to_json).transpose()?,
         permissions: parse_permissions(raw.permissions.as_ref()),
+        unsupported,
+        warnings,
     })
 }
 
@@ -562,5 +657,203 @@ jobs:
             effective_contents_permission(&doc, &doc.jobs[0]),
             ContentsPermission::Write
         );
+    }
+
+    fn unsupported_of(yaml: &[u8]) -> Vec<String> {
+        parse_workflow_yaml(yaml).expect("parse").unsupported
+    }
+
+    #[test]
+    fn clean_workflow_has_no_unsupported() {
+        let doc = parse_workflow_yaml(
+            br#"
+name: CI
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo hi
+"#,
+        )
+        .expect("parse");
+        assert!(doc.unsupported.is_empty());
+        assert!(doc.warnings.is_empty());
+    }
+
+    #[test]
+    fn structural_features_are_flagged_unsupported() {
+        let cases: &[(&[u8], &[&str])] = &[
+            (
+                br#"
+name: CI
+on: [push]
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - run: echo hi
+"#,
+                &["needs"],
+            ),
+            (
+                br#"
+name: CI
+on: [push]
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu, macos]
+    steps:
+      - run: echo hi
+"#,
+                &["strategy"],
+            ),
+            (
+                br#"
+name: CI
+on: [push]
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    container: node:20
+    services:
+      pg:
+        image: postgres:16
+    steps:
+      - run: echo hi
+"#,
+                &["container", "services"],
+            ),
+            (
+                br#"
+name: CI
+on: [push]
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    environment: production
+    if: github.ref == 'refs/heads/main'
+    outputs:
+      v: ${{ steps.x.outputs.v }}
+    steps:
+      - run: echo hi
+"#,
+                &["environment", "if", "outputs"],
+            ),
+            (
+                br#"
+name: CI
+on: [push]
+concurrency: g
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 5
+    steps:
+      - run: echo hi
+        continue-on-error: true
+"#,
+                &["concurrency", "continue-on-error", "timeout-minutes"],
+            ),
+            (
+                br#"
+name: CI
+on: [push]
+jobs:
+  call:
+    uses: ./.github/workflows/reuse.yml
+    with:
+      x: 1
+    secrets: inherit
+"#,
+                &["reusable-workflow"],
+            ),
+            (
+                br#"
+name: CI
+on: pull_request_target
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+"#,
+                &["pull_request_target"],
+            ),
+            (
+                br#"
+name: CI
+on: [push]
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+        if: success()
+        timeout-minutes: 2
+"#,
+                &["if", "timeout-minutes"],
+            ),
+        ];
+        for (yaml, want) in cases {
+            let got = unsupported_of(yaml);
+            for key in *want {
+                assert!(
+                    got.iter().any(|k| k == key),
+                    "expected unsupported '{key}' in {got:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn env_and_with_are_warnings_not_unsupported() {
+        let doc = parse_workflow_yaml(
+            br#"
+name: CI
+on: [push]
+env:
+  A: "1"
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    env:
+      B: "2"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+"#,
+        )
+        .expect("parse");
+        assert!(doc.unsupported.is_empty());
+        assert_eq!(doc.warnings.len(), 3);
+    }
+
+    #[test]
+    fn unimplemented_events_like_schedule_do_not_flag() {
+        let doc = parse_workflow_yaml(
+            br#"
+name: CI
+on:
+  push:
+  schedule:
+    - cron: '0 0 * * *'
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+"#,
+        )
+        .expect("parse");
+        assert!(doc.unsupported.is_empty());
+        assert!(doc.triggers.push);
     }
 }

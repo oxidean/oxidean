@@ -1,0 +1,7 @@
+name: runs-on-nomatch
+on: [push]
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - run: echo should not run

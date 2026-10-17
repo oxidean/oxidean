@@ -1,0 +1,7 @@
+name: reusable-workflow-local
+on: [push]
+jobs:
+  call:
+    uses: ./.github/workflows/reusable.yml
+    with:
+      env: prod

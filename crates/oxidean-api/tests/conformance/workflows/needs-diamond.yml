@@ -1,0 +1,22 @@
+name: needs-diamond
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo build
+  lint:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - run: echo lint
+  test:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - run: echo test
+  ship:
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    steps:
+      - run: echo ship

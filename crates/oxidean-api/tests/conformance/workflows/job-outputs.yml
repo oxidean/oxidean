@@ -1,0 +1,10 @@
+name: job-outputs
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - id: v
+        run: echo "version=1.0" >> $GITHUB_OUTPUT
