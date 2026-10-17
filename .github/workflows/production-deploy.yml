@@ -11,6 +11,11 @@
 #      production environment (sent via the Project-Access-Token header).
 #      An account/workspace token works too if set as RAILWAY_API_TOKEN.
 #   3. Optional: enable required reviewers on the environment
+#   4. Stable cut credentials: an org-owned GitHub App (`oxidean-release`,
+#      Contents: read/write, installed on this repo) — repo variable
+#      RELEASE_APP_ID + repo secret RELEASE_APP_PRIVATE_KEY. The App must be
+#      the `Main` ruleset's bypass actor: main is PR-only, and the cut pushes
+#      the `chore(release):` bump commit straight to main.
 #
 # Run: Actions → Production deploy → Run workflow
 
@@ -48,7 +53,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: write # the stable cut pushes the bump commit + tags via RELEASE_TOKEN
+  contents: read # checkout only — the stable cut pushes the bump commit + tags with the release App token, never GITHUB_TOKEN
   actions: read
   packages: write # promote moves the :production channel tag on GHCR
   deployments: write # image deploys post GitHub Deployment records (Railway only posts git-triggered ones)
@@ -68,14 +73,59 @@ jobs:
       RAILWAY_SERVICE_GATEWAY_ID: 864fa81c-6e5d-4939-b33b-85eb435365ac
       OXIDEAN_PRODUCTION_HEALTH_URL: https://app.oxidean.dev/health
     steps:
+      # Humans reach main only through pull requests (`Main` ruleset). The
+      # stable cut is the one exception: it pushes the bump commit and the
+      # release tags as the release App — the ruleset's sole bypass actor —
+      # with a short-lived installation token (GITHUB_TOKEN pushes would also
+      # never fire the release lanes). Rollback, dry-run, and cut-less promotes
+      # need no write credential and ride GITHUB_TOKEN.
+      - name: Release App credentials are configured
+        if: inputs.action == 'promote' && inputs.cut_release && !inputs.dry_run
+        env:
+          RELEASE_APP_ID: ${{ vars.RELEASE_APP_ID }}
+          RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+        run: |
+          if [ -z "${RELEASE_APP_ID:-}" ] || [ -z "${RELEASE_APP_PRIVATE_KEY:-}" ]; then
+            echo "::error::RELEASE_APP_ID (variable) and RELEASE_APP_PRIVATE_KEY (secret) must be set — the stable cut pushes commits + tags as the release App (FR3.4)"
+            exit 1
+          fi
+
+      - name: Mint release App token
+        id: release-token
+        if: inputs.action == 'promote' && inputs.cut_release && !inputs.dry_run
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
       - name: Checkout
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
-          # RELEASE_TOKEN (maintainer PAT): the stable cut pushes the bump
-          # commit to main and pushes the *-v* tags — GITHUB_TOKEN pushes are
-          # recursion-blocked and would never fire the release lanes.
-          token: ${{ secrets.RELEASE_TOKEN }}
+          # The stable cut pushes the bump commit to main and the *-v* tags as
+          # the release App (minted above); every other path only reads and
+          # rides GITHUB_TOKEN.
+          token: ${{ steps.release-token.outputs.token || github.token }}
+
+      - name: Commit as the release App
+        if: inputs.action == 'promote' && inputs.cut_release && !inputs.dry_run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APP_SLUG: ${{ steps.release-token.outputs.app-slug }}
+        run: |
+          set -euo pipefail
+          # The bump commit and the annotated tags need a committer identity —
+          # the App's bot user, so history attributes them to the actor that
+          # pushed them. Falls back to the generic Actions bot if the lookup
+          # fails (identity only; the push credential is unaffected).
+          bot_id="$(gh api "/users/${APP_SLUG}%5Bbot%5D" --jq .id 2>/dev/null || true)"
+          if [ -n "$bot_id" ]; then
+            git config user.name "${APP_SLUG}[bot]"
+            git config user.email "${bot_id}+${APP_SLUG}[bot]@users.noreply.github.com"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          fi
 
       - name: Fetch main
         run: git fetch origin main:refs/remotes/origin/main
@@ -154,16 +204,6 @@ jobs:
         if: inputs.action == 'promote' && inputs.cut_release && !inputs.dry_run
         run: sudo apt-get install -y -qq protobuf-compiler
 
-      - name: RELEASE_TOKEN is configured
-        if: inputs.action == 'promote' && inputs.cut_release && !inputs.dry_run
-        env:
-          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
-        run: |
-          if [ -z "${RELEASE_TOKEN:-}" ]; then
-            echo "::error::RELEASE_TOKEN secret is not set — the stable cut pushes commits + tags (FR3.4)"
-            exit 1
-          fi
-
       - name: Compute stable release plan at the promoted SHA
         id: cut
         if: inputs.action == 'promote' && inputs.cut_release
@@ -186,10 +226,6 @@ jobs:
         if: inputs.action == 'promote' && inputs.cut_release && !inputs.dry_run && steps.cut.outputs.baseline == 'true'
         run: |
           set -euo pipefail
-          # Annotated tags need a committer identity — the baseline path makes
-          # no commits, so nothing else configures one.
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           remote_tags="$(git ls-remote --tags origin | awk '{print $2}' | sed 's|refs/tags/||' | sort)"
           bun scripts/versioning/cli.ts release-tags --all
           NEW="$(comm -13 <(echo "$remote_tags") <(git tag -l | sort))"
@@ -210,8 +246,6 @@ jobs:
           # WIRE_VERSION is embedded into the generated api-client + OpenAPI
           # spec — regen so the bump commit doesn't fail rpc-sync on its own CI.
           make rpc-gen openapi-gen
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git commit -m "chore(release): cut stable release"
           # Fast-forward only: if main moved since the promoted SHA, fail —

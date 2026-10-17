@@ -171,9 +171,15 @@ describe("production-deploy.yml stable cut", () => {
     expect(yml).toContain("release-tags --all");
   });
 
-  test("cut writes via RELEASE_TOKEN and deploys the bump commit", () => {
-    expect(yml).toContain("secrets.RELEASE_TOKEN");
-    expect(yml).toContain("contents: write");
+  test("cut writes as the release App (Main ruleset bypass) and deploys the bump commit", () => {
+    // main is PR-only; the bump commit lands via the App installation token —
+    // never a human PAT, never GITHUB_TOKEN (which would also skip the lanes).
+    expect(yml).toContain("actions/create-github-app-token");
+    expect(yml).toContain("vars.RELEASE_APP_ID");
+    expect(yml).toContain("secrets.RELEASE_APP_PRIVATE_KEY");
+    expect(yml).not.toContain("secrets.RELEASE_TOKEN");
+    expect(yml).toContain("contents: read");
+    expect(yml).not.toContain("contents: write");
     expect(yml).toContain("deploy_sha");
   });
 
