@@ -174,8 +174,14 @@ pub async fn enqueue_run(
             doc.unsupported.join(", ")
         );
         let job_id = Uuid::new_v4().to_string();
-        db.insert_action_job(&job_id, &run_id, "__validation", &msg, "[]")
-            .await?;
+        db.insert_action_job(oxidean_db::JobInsert::basic(
+            &job_id,
+            &run_id,
+            "__validation",
+            &msg,
+            "[]",
+        ))
+        .await?;
         if let Err(e) = crate::actions::logs::append_job_log(
             &crate::actions::logs::resolve_log_dir(),
             &run_id,
@@ -220,8 +226,25 @@ pub async fn enqueue_run(
         let job_id = Uuid::new_v4().to_string();
         let runs_on = serde_json::to_string(&job.runs_on).unwrap_or_else(|_| "[]".into());
         let name = job.name.clone().unwrap_or_else(|| job.id.clone());
-        db.insert_action_job(&job_id, &run_id, &job.id, &name, &runs_on)
+        // Durable payload: capture everything fetch_task needs at enqueue so
+        // claim never re-reads the bare repo (head could move / be GC'd).
+        let payload_json = serde_json::json!({
+            "version": 1,
+            "job_key": job.id,
+            "name": name,
+            "runs_on": job.runs_on,
+            "steps": job.steps,
+            "env": job.env,
+            "workflow_env": doc.env,
+            "contents_permission": crate::actions::effective_contents_permission(doc, job).as_str(),
+        })
+        .to_string();
+        let sha = crate::auth::session::sha256_hex(payload_json.as_bytes());
+        db.insert_action_payload(&sha, repository_id, workflow_path, head_sha, &payload_json)
             .await?;
+        let mut insert = oxidean_db::JobInsert::basic(&job_id, &run_id, &job.id, &name, &runs_on);
+        insert.payload_sha = Some(sha);
+        db.insert_action_job(insert).await?;
         if let Some(dir) = &log_dir {
             let note: String = doc
                 .warnings

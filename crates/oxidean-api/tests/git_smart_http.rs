@@ -1044,9 +1044,15 @@ async fn mint_job_token(
     )
     .await
     .expect("insert run");
-    db.insert_action_job(&job_id, &run_id, "build", "build", r#"["ubuntu-latest"]"#)
-        .await
-        .expect("insert job");
+    db.insert_action_job(oxidean_db::JobInsert::basic(
+        &job_id,
+        &run_id,
+        "build",
+        "build",
+        r#"["ubuntu-latest"]"#,
+    ))
+    .await
+    .expect("insert job");
     let raw = format!("oxidean_job_{tag}0123456789abcdef0123456789abcdef");
     let expires = (chrono::Utc::now() + chrono::Duration::hours(1))
         .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);

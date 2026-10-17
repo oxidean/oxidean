@@ -194,9 +194,122 @@ jobs:
     let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert!(v["job_id"].as_str().is_some());
     assert_eq!(v["job_key"], "build");
+    // 0053: steps come from the durable payload captured at enqueue — the
+    // fixture's repos_dir points nowhere real, so a git re-read would yield [].
+    assert_eq!(v["steps"][0]["run"], "echo hi");
+    assert_eq!(v["run_attempt"], 1);
     let _ = dir;
     let _ = dispatch_push_for_sha;
     let _ = CliGitBackend::new();
+}
+
+/// A requeued run increments `attempt` — `fetch_task` reports it as
+/// `run_attempt` (GITHUB_RUN_ATTEMPT parity).
+#[tokio::test]
+async fn actions_runner_protocol_rerun_bumps_run_attempt() {
+    let (app, db, _dir) = app_db().await;
+    let owner = db
+        .create_user(
+            "u-ra",
+            "ra@example.com",
+            "ra",
+            Some("h"),
+            "R",
+            "",
+            None,
+            Role::User,
+        )
+        .await
+        .unwrap();
+    let repo = db
+        .insert_repository("r-ra", &owner.id, "user", "ra", "private", "", "main")
+        .await
+        .unwrap();
+    let doc = parse_workflow_yaml(
+        br#"
+name: CI
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+"#,
+    )
+    .unwrap();
+    let (run_id, _) = enqueue_run(
+        &db,
+        &repo.id,
+        ".github/workflows/ci.yml",
+        &doc,
+        "push",
+        "deadbeef",
+        "refs/heads/main",
+        Some(&owner.id),
+        None,
+    )
+    .await
+    .unwrap();
+
+    let reg = mint_registration_token(&db).await.unwrap();
+    let reg_res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/actions/register")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "name": "r1",
+                        "labels": ["ubuntu-latest"],
+                        "token": reg
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let reg_body = reg_res.into_body().collect().await.unwrap().to_bytes();
+    let runner_token = serde_json::from_slice::<serde_json::Value>(&reg_body).unwrap()
+        ["runner_token"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let fetch = |app: axum::Router, tok: &str| {
+        let tok = tok.to_string();
+        async move {
+            let res = app
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/api/actions/fetch_task")
+                        .header("content-type", "application/json")
+                        .header("authorization", format!("Bearer {tok}"))
+                        .body(Body::from("{}"))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let bytes = res.into_body().collect().await.unwrap().to_bytes();
+            serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()
+        }
+    };
+
+    let first = fetch(app.clone(), &runner_token).await;
+    assert_eq!(first["run_attempt"], 1);
+    let job_id = first["job_id"].as_str().unwrap();
+    db.update_action_job_status(job_id, "failure")
+        .await
+        .unwrap();
+
+    db.requeue_action_run(&run_id, false, None).await.unwrap();
+
+    let second = fetch(app.clone(), &runner_token).await;
+    assert_eq!(second["run_attempt"], 2);
+    assert_eq!(second["job_id"], job_id, "requeue resets the same job row");
 }
 
 #[tokio::test]
@@ -728,15 +841,26 @@ jobs:
     )
     .await
     .unwrap();
-    db.insert_action_job(
+    // 0053: a hand-inserted job needs a durable payload row or the claim
+    // path fails it loudly instead of handing it out.
+    db.insert_action_payload(
+        "sha-orphan",
+        &base.id,
+        ".github/workflows/ci.yml",
+        "9".repeat(40).as_str(),
+        r#"{"version":1,"steps":[{"run":"echo hi"}],"contents_permission":"write"}"#,
+    )
+    .await
+    .unwrap();
+    let mut orphan = oxidean_db::JobInsert::basic(
         "job-orphan",
         "run-orphan",
         "build",
         "build",
         r#"["ubuntu-latest"]"#,
-    )
-    .await
-    .unwrap();
+    );
+    orphan.payload_sha = Some("sha-orphan".into());
+    db.insert_action_job(orphan).await.unwrap();
     let v = fetch_once(&app).await;
     assert_eq!(v["job_id"], "job-orphan");
     assert!(

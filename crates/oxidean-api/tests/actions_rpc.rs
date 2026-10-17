@@ -88,9 +88,15 @@ async fn actions_rpc_run_detail() {
     )
     .await
     .unwrap();
-    db.insert_action_job("job-2", "run-2", "build", "build", r#"["ubuntu-latest"]"#)
-        .await
-        .unwrap();
+    db.insert_action_job(oxidean_db::JobInsert::basic(
+        "job-2",
+        "run-2",
+        "build",
+        "build",
+        r#"["ubuntu-latest"]"#,
+    ))
+    .await
+    .unwrap();
     let jobs = db.list_action_jobs_for_run("run-2").await.unwrap();
     assert_eq!(jobs.len(), 1);
     assert_eq!(jobs[0].job_key, "build");

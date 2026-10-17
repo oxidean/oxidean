@@ -264,9 +264,21 @@ async fn actions_secrets_injected_into_fetch_task() {
     )
     .await
     .unwrap();
-    db.insert_action_job("job-ft", "run-ft", "build", "build", r#"["ubuntu-latest"]"#)
-        .await
-        .unwrap();
+    // 0053: fetch_task serves steps from the durable payload — hand-built
+    // jobs need one or the claim path fails them loudly.
+    db.insert_action_payload(
+        "sha-ft",
+        &repo.id,
+        ".github/workflows/ci.yml",
+        "abc",
+        r#"{"version":1,"steps":[{"run":"echo hi"}],"contents_permission":"read"}"#,
+    )
+    .await
+    .unwrap();
+    let mut ft =
+        oxidean_db::JobInsert::basic("job-ft", "run-ft", "build", "build", r#"["ubuntu-latest"]"#);
+    ft.payload_sha = Some("sha-ft".into());
+    db.insert_action_job(ft).await.unwrap();
 
     let app = test_app(db.clone()).await;
     let reg = mint_registration_token(&db).await.unwrap();

@@ -53,8 +53,8 @@ pub mod webhooks;
 pub mod workflow_templates;
 
 pub use actions::{
-    ActionJobRow, ActionJobTokenRow, ActionRunFilter, ActionRunRow, ActionRunnerRow,
-    ActionSecretCipherRow, ActionSecretMetaRow,
+    ActionJobRow, ActionJobTokenRow, ActionPayloadRow, ActionRunFilter, ActionRunRow,
+    ActionRunnerRow, ActionSecretCipherRow, ActionSecretMetaRow, JobInsert,
 };
 pub use audit_events::AuditEventRow;
 pub use auth_settings::AuthSettingsRow;
@@ -3354,23 +3354,42 @@ impl Database {
         actions::find_run_by_id(self.require_pool()?, id).await
     }
 
+    /// Insert a job + its claim labels in one transaction (Phase-1 durable
+    /// payloads): `JobInsert::basic` for plain jobs, full struct for
+    /// scheduled/matrix jobs.
     pub async fn insert_action_job(
         &self,
-        id: &str,
-        run_id: &str,
-        job_key: &str,
-        name: &str,
-        runs_on_json: &str,
+        job: actions::JobInsert,
     ) -> Result<actions::ActionJobRow, String> {
-        actions::insert_job(
+        actions::insert_job(self.require_pool()?, &job).await
+    }
+
+    /// Content-addressed job payload — `INSERT OR IGNORE` semantics (shas
+    /// dedupe across runs/reruns).
+    pub async fn insert_action_payload(
+        &self,
+        sha: &str,
+        repository_id: &str,
+        workflow_path: &str,
+        head_sha: &str,
+        payload_json: &str,
+    ) -> Result<(), String> {
+        actions::insert_payload(
             self.require_pool()?,
-            id,
-            run_id,
-            job_key,
-            name,
-            runs_on_json,
+            sha,
+            repository_id,
+            workflow_path,
+            head_sha,
+            payload_json,
         )
         .await
+    }
+
+    pub async fn find_action_payload(
+        &self,
+        sha: &str,
+    ) -> Result<Option<actions::ActionPayloadRow>, String> {
+        actions::find_payload(self.require_pool()?, sha).await
     }
 
     pub async fn find_action_job_by_id(

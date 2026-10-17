@@ -494,7 +494,7 @@ async fn run_case(case: &Case) {
             for (key, want) in case.expect_jobs.clone().unwrap_or_default() {
                 let job = jobs
                     .iter()
-                    .find(|j| &j.job_key == key.as_str())
+                    .find(|j| j.job_key == key.as_str())
                     .unwrap_or_else(|| panic!("{}: job '{key}' missing", case.id));
                 assert_eq!(
                     job.status,
@@ -505,7 +505,7 @@ async fn run_case(case: &Case) {
                 );
             }
             for (key, want) in case.expect_job_names.clone().unwrap_or_default() {
-                let job = jobs.iter().find(|j| &j.job_key == key.as_str()).unwrap();
+                let job = jobs.iter().find(|j| j.job_key == key.as_str()).unwrap();
                 assert_eq!(job.name, want, "{}: job '{key}' name", case.id);
             }
             if case.kind == "run" {
@@ -625,4 +625,29 @@ fn corpus_is_complete_and_wired() {
             case.id
         );
     }
+}
+
+/// 0053: fetch_task serves steps from the durable payload — the bare repo is
+/// deleted after dispatch, so a git re-read would hand the runner nothing.
+#[tokio::test]
+async fn fetch_task_survives_repo_deletion() {
+    let case = cases()
+        .into_iter()
+        .find(|c| c.id == "run-basic")
+        .expect("run-basic case");
+    let fx = fixture(&case).await;
+    assert_eq!(fx.n_dispatched, 1);
+    std::fs::remove_dir_all(fx.dir.path().join("repos")).unwrap();
+    drive_runner(&fx, &["ubuntu-latest".into()]).await;
+    let runs = fx
+        .db
+        .list_action_runs_for_repo(&fx.repo_id, &Default::default(), 10, 0)
+        .await
+        .unwrap();
+    let run = &runs[0];
+    assert_eq!(run.status, "success", "run must succeed from payload alone");
+    let jobs = fx.db.list_action_jobs_for_run(&run.id).await.unwrap();
+    let job = jobs.iter().find(|j| j.job_key == "build").unwrap();
+    let log = read_job_log(&fx, &run.id, &job.id);
+    assert!(log.contains("hello conformance"), "log:\n{log}");
 }

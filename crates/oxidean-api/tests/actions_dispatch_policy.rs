@@ -121,13 +121,13 @@ async fn actions_dispatch_policy_unmatched_labels_stay_queued() {
     )
     .await
     .unwrap();
-    db.insert_action_job(
+    db.insert_action_job(oxidean_db::JobInsert::basic(
         "job-um",
         "run-um",
         "build",
         "build",
         r#"["windows-latest"]"#,
-    )
+    ))
     .await
     .unwrap();
     // Runner with ubuntu only cannot claim windows job.

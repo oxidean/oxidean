@@ -299,7 +299,13 @@ async fn get_run_anonymous_includes_jobs_and_timestamps() {
         .await
         .unwrap();
     fx.db
-        .insert_action_job("job-1", "run-j", "build", "build", r#"["ubuntu-latest"]"#)
+        .insert_action_job(oxidean_db::JobInsert::basic(
+            "job-1",
+            "run-j",
+            "build",
+            "build",
+            r#"["ubuntu-latest"]"#,
+        ))
         .await
         .unwrap();
 
@@ -396,7 +402,13 @@ async fn rerun_and_cancel_run() {
         .await
         .unwrap();
     fx.db
-        .insert_action_job("job-m", "run-m", "build", "build", r#"["ubuntu-latest"]"#)
+        .insert_action_job(oxidean_db::JobInsert::basic(
+            "job-m",
+            "run-m",
+            "build",
+            "build",
+            r#"["ubuntu-latest"]"#,
+        ))
         .await
         .unwrap();
 

@@ -152,7 +152,8 @@ struct FetchTaskResponse {
     workflow_name: Option<String>,
     head_sha: Option<String>,
     head_ref: Option<String>,
-    /// Step objects for the claimed job (re-read from workflow YAML at head_sha).
+    /// Step objects for the claimed job — from the durable `action_payloads`
+    /// row captured at enqueue (never re-read from the bare repo at claim).
     steps: Option<serde_json::Value>,
     secrets: Option<std::collections::HashMap<String, String>>,
     /// Repository coordinates — runners clone {origin}/{owner}/{repo}.git.
@@ -161,8 +162,7 @@ struct FetchTaskResponse {
     /// Triggering event name (`push`, `pull_request`, `workflow_dispatch`, …).
     event: Option<String>,
     run_number: Option<i64>,
-    /// Always 1 — requeueing reuses the run row (`requeue_run` resets jobs in
-    /// place); there is no attempt counter to increment.
+    /// `action_runs.attempt` — bumped by `requeue_run`; GITHUB_RUN_ATTEMPT.
     run_attempt: Option<i64>,
     /// Username of `triggered_by` ("" when the run was system-triggered).
     actor: Option<String>,
@@ -183,6 +183,40 @@ struct FetchTaskResponse {
     job_token_permission: Option<String>,
     /// `{owner}/{repo}/{workflow_path}@{head_ref}`.
     workflow_ref: Option<String>,
+}
+
+impl FetchTaskResponse {
+    /// Empty "no work" response — shared by the no-claim path and the
+    /// loud-failure path for claimed jobs missing their payload.
+    fn empty() -> Self {
+        Self {
+            job_id: None,
+            run_id: None,
+            job_key: None,
+            runs_on: None,
+            workflow_path: None,
+            workflow_name: None,
+            head_sha: None,
+            head_ref: None,
+            steps: None,
+            secrets: None,
+            repository_owner: None,
+            repository_name: None,
+            event: None,
+            run_number: None,
+            run_attempt: None,
+            actor: None,
+            actor_id: None,
+            repository_id: None,
+            repository_owner_id: None,
+            server_url: None,
+            base_ref: None,
+            pull_number: None,
+            job_token: None,
+            job_token_permission: None,
+            workflow_ref: None,
+        }
+    }
 }
 
 async fn fetch_task(
@@ -222,14 +256,51 @@ async fn fetch_task(
             } else {
                 std::collections::HashMap::new()
             };
-            let (steps, workflow_name, mut contents_permission) =
-                job_steps_at_head(&state, &run, &j.job_key)
+            // Durable payload: steps + effective permissions captured at
+            // enqueue (0053). A claimed job with no payload predates the
+            // migration — fail it loudly rather than hand the runner an empty
+            // step list it would report as a no-op success.
+            let payload = match j.payload_sha.as_deref() {
+                Some(sha) => state
+                    .db
+                    .find_action_payload(sha)
                     .await
-                    .unwrap_or((
-                        serde_json::Value::Array(vec![]),
-                        run.workflow_name.clone(),
-                        crate::actions::ContentsPermission::Read,
-                    ));
+                    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
+                None => None,
+            };
+            let Some(payload) = payload else {
+                tracing::error!(job_id = %j.id, run_id = %j.run_id, "claimed job has no captured payload");
+                let _ = append_job_log(
+                    &state.actions_log_dir,
+                    &j.run_id,
+                    &j.id,
+                    "::error::job payload missing (enqueued before durable payloads) — re-run the workflow\n"
+                        .as_bytes(),
+                )
+                .await;
+                if let Err(e) = state.db.update_action_job_status(&j.id, "failure").await {
+                    tracing::warn!(error = %e, job_id = %j.id, "failed to fail payload-less job");
+                }
+                if let Err(e) = state.db.recompute_action_run_status(&j.run_id).await {
+                    tracing::warn!(error = %e, run_id = %j.run_id, "run rollup failed");
+                }
+                return Ok(Json(FetchTaskResponse::empty()));
+            };
+            let payload_json: serde_json::Value = serde_json::from_str(&payload.payload_json)
+                .unwrap_or_else(|_| serde_json::json!({}));
+            let steps = payload_json
+                .get("steps")
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!([]));
+            let workflow_name = run.workflow_name.clone();
+            let mut contents_permission = match payload_json
+                .get("contents_permission")
+                .and_then(|v| v.as_str())
+            {
+                Some("write") => crate::actions::ContentsPermission::Write,
+                Some("none") => crate::actions::ContentsPermission::None,
+                _ => crate::actions::ContentsPermission::Read,
+            };
             if !pr_ctx.trusted && contents_permission == crate::actions::ContentsPermission::Write {
                 contents_permission = crate::actions::ContentsPermission::Read;
             }
@@ -306,7 +377,7 @@ async fn fetch_task(
                 repository_name: repo.name.clone(),
                 event: run.event.clone(),
                 run_number: run.run_number,
-                run_attempt: 1,
+                run_attempt: run.attempt,
                 actor: actor.clone(),
                 actor_id: actor_id.clone(),
                 repository_id: run.repository_id.clone(),
@@ -333,7 +404,7 @@ async fn fetch_task(
                 repository_name: Some(repo.name),
                 event: Some(run.event),
                 run_number: Some(run.run_number),
-                run_attempt: Some(1),
+                run_attempt: Some(run.attempt),
                 actor: Some(actor),
                 actor_id: Some(actor_id),
                 repository_id: Some(run.repository_id),
@@ -346,33 +417,7 @@ async fn fetch_task(
                 workflow_ref: Some(workflow_ref),
             }
         }
-        None => FetchTaskResponse {
-            job_id: None,
-            run_id: None,
-            job_key: None,
-            runs_on: None,
-            workflow_path: None,
-            workflow_name: None,
-            head_sha: None,
-            head_ref: None,
-            steps: None,
-            secrets: None,
-            repository_owner: None,
-            repository_name: None,
-            event: None,
-            run_number: None,
-            run_attempt: None,
-            actor: None,
-            actor_id: None,
-            repository_id: None,
-            repository_owner_id: None,
-            server_url: None,
-            base_ref: None,
-            pull_number: None,
-            job_token: None,
-            job_token_permission: None,
-            workflow_ref: None,
-        },
+        None => FetchTaskResponse::empty(),
     }))
 }
 
@@ -431,56 +476,6 @@ async fn pull_context_for_run(
         pull_number,
         trusted,
     }
-}
-
-/// Re-read workflow YAML at the run's head; extract the job's steps, the
-/// workflow name, and its effective `contents` permission.
-async fn job_steps_at_head(
-    state: &AppState,
-    run: &oxidean_db::ActionRunRow,
-    job_key: &str,
-) -> Result<
-    (
-        serde_json::Value,
-        String,
-        crate::actions::ContentsPermission,
-    ),
-    StatusCode,
-> {
-    let repo = state
-        .db
-        .find_repository_by_id(&run.repository_id)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
-    let owner_ref = crate::repo::owner_ref_for_repo(&state.db, &repo)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
-    let bare = state
-        .repos_dir
-        .join(owner_ref.slug())
-        .join(format!("{}.git", repo.name));
-    let discovered = crate::actions::discover_workflows(state.git.as_ref(), &bare, &run.head_sha)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let wf = discovered
-        .workflows
-        .into_iter()
-        .find(|w| w.path == run.workflow_path)
-        .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
-    let job = wf
-        .document
-        .jobs
-        .iter()
-        .find(|j| j.id == job_key)
-        .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
-    let steps = serde_json::to_value(&job.steps).unwrap_or_else(|_| serde_json::json!([]));
-    Ok((
-        steps,
-        wf.document.name.clone(),
-        crate::actions::effective_contents_permission(&wf.document, job),
-    ))
 }
 
 #[derive(Debug, Deserialize)]

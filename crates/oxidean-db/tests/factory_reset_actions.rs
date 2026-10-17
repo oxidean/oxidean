@@ -71,9 +71,15 @@ async fn factory_reset_actions_wipes_runners_runs_jobs_secrets() {
         )
         .await
         .expect("run");
-    db.insert_action_job("job-fr", &run.id, "build", "build", r#"["ubuntu-latest"]"#)
-        .await
-        .expect("job");
+    db.insert_action_job(oxidean_db::JobInsert::basic(
+        "job-fr",
+        &run.id,
+        "build",
+        "build",
+        r#"["ubuntu-latest"]"#,
+    ))
+    .await
+    .expect("job");
     db.insert_action_secret("sec-fr", &repo.id, "SECRET", "cipher")
         .await
         .expect("secret");

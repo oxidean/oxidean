@@ -46,7 +46,7 @@ pub struct Task {
     /// Triggering event name (push, pull_request, workflow_dispatch, …).
     pub event: Option<String>,
     pub run_number: Option<i64>,
-    /// Currently always 1 — requeueing reuses the run row.
+    /// Re-run counter — bumped per `requeue_run` (GITHUB_RUN_ATTEMPT).
     pub run_attempt: Option<i64>,
     /// Triggering user's username / id ("" when system-triggered).
     pub actor: Option<String>,
