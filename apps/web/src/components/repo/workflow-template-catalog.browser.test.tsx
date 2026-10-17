@@ -117,6 +117,7 @@ describe("WorkflowTemplateCatalog browser DOM races", () => {
       await mountComponent(WorkflowTemplateCatalog, {
         owner: "ada",
         repo: "hello",
+        refName: "main",
         data: TEMPLATES,
         loading: false,
         error: null,
@@ -151,6 +152,7 @@ describe("WorkflowTemplateCatalog browser DOM races", () => {
       await mountComponent(WorkflowTemplateCatalog, {
         owner: "ada",
         repo: "hello",
+        refName: "main",
         data: LONG_ACTION_TEMPLATES,
         loading: false,
         error: null,

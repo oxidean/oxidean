@@ -56,12 +56,15 @@ async function loadNewFilePage(
   const refs: RepoRefEntry[] = refsRes.ok ? refsRes.data.refs : [];
   const knownRefs = refs.map((r) => shortRefName(r.name));
   const parsed = parseRefAndPath(splat, knownRefs);
-  const refName = parsed.ref || repo.default_branch || "main";
+  const splatIsDir = knownRefs.length > 0 && !knownRefs.includes(parsed.ref);
+  const refName = splatIsDir
+    ? repo.default_branch || "main"
+    : parsed.ref || repo.default_branch || "main";
   return {
     kind: "ready",
     repo,
     refName,
-    dir: parsed.path,
+    dir: splatIsDir ? joinRepoPath(splat ?? "") : parsed.path,
   };
 }
 

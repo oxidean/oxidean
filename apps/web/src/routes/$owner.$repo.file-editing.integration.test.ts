@@ -270,6 +270,25 @@ describe("GIT-19 web file-editing routes", () => {
     expect(wfTemplateGetMock).not.toHaveBeenCalled();
   }, 30_000);
 
+  it("new route treats a ref-less splat as a directory on the default branch", async () => {
+    setPathname("/ada/hello/new/.github/workflows?filename=go.yml");
+    const { RepoFileNewPage } = await import("./$owner.$repo.new.$.tsrx");
+    renderWithQueryClient(RepoFileNewPage);
+
+    await waitFor(() =>
+      expect((screen.getByTestId("file-new-name") as HTMLInputElement).value).toBe("go.yml"),
+    );
+    await waitFor(() =>
+      expect(commitPolicyMock).toHaveBeenCalledWith(expect.objectContaining({ branch: "main" })),
+    );
+    const direct = (await waitFor(() =>
+      screen.getByTestId("file-commit-mode-direct"),
+    )) as HTMLElement;
+    expect(direct.getAttribute("aria-disabled")).not.toBe("true");
+    const branch = screen.getByTestId("file-commit-mode-branch") as HTMLElement;
+    expect(branch.getAttribute("aria-disabled")).not.toBe("true");
+  }, 30_000);
+
   it("routes deny non-writers", async () => {
     repoGetMock.mockResolvedValue({ ok: true, data: { ...REPO, can_write: false } });
     setPathname("/ada/hello/new/main/src");

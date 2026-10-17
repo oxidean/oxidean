@@ -178,6 +178,7 @@ export function FileCommitForm({
           <RadioGroup
             value={field.state.value}
             disabled={disabled}
+            className="w-max"
             onValueChange={(v) => {
               if (v === "direct" || v === "branch") field.handleChange(v);
             }}
@@ -239,6 +240,12 @@ export function FileCommitForm({
         <span className="text-[13px] text-muted-foreground">
           Checking branch protection…
         </span>;
+      } @else {
+        @if (!policy && !pending) {
+          <span className="text-[13px] text-destructive" role="alert">
+            Could not check branch protection — reload the page.
+          </span>;
+        }
       }
     </div>
   </form>;

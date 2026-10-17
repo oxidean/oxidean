@@ -6,10 +6,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { newFileHref } from "@/lib/repo-browse";
 
 type WorkflowTemplateCatalogProps = {
   owner: string;
   repo: string;
+  /** Ref the workflow file commits onto (repo default branch). */
+  refName: string;
   data: WorkflowTemplatesListResponse | undefined;
   loading: boolean;
   error: string | null;
@@ -25,8 +28,8 @@ function provenanceLabel(t: WorkflowTemplateSummary): string {
   return t.source_label ?? "Org";
 }
 
-function configureHref(owner: string, repo: string, id: string): string {
-  return `/${owner}/${repo}/new/.github/workflows?template=${encodeURIComponent(id)}`;
+function configureHref(owner: string, repo: string, refName: string, id: string): string {
+  return `${newFileHref(owner, repo, refName, ".github/workflows")}?template=${encodeURIComponent(id)}`;
 }
 
 function matches(t: WorkflowTemplateSummary, q: string): boolean {
@@ -49,6 +52,7 @@ function actionDisplayNames(actions: string[]): string[] {
 const WorkflowTemplateCard = memo(function WorkflowTemplateCard(props: {
   owner: string;
   repo: string;
+  refName: string;
   template: WorkflowTemplateSummary;
 }) @{
   const t = props.template;
@@ -102,7 +106,7 @@ const WorkflowTemplateCard = memo(function WorkflowTemplateCard(props: {
       </p>;
     }
     <div className="mt-auto flex justify-end">
-      <AppLink href={configureHref(props.owner, props.repo, t.id)}>
+      <AppLink href={configureHref(props.owner, props.repo, props.refName, t.id)}>
         <Button
           type="button"
           variant="outline"
@@ -120,13 +124,19 @@ function CatalogSection(props: {
   title: string;
   owner: string;
   repo: string;
+  refName: string;
   items: WorkflowTemplateSummary[];
 }) @{
   <section aria-label={props.title} className="flex flex-col gap-3">
     <h2 className="text-[16px] font-semibold text-foreground">{props.title as string}</h2>
     <div className="grid gap-3 sm:grid-cols-[repeat(2,minmax(0,1fr))] lg:grid-cols-[repeat(3,minmax(0,1fr))]">
       @for (const t of props.items; key t.id) {
-        <WorkflowTemplateCard owner={props.owner} repo={props.repo} template={t} />;
+        <WorkflowTemplateCard
+          owner={props.owner}
+          repo={props.repo}
+          refName={props.refName}
+          template={t}
+        />;
       }
     </div>
   </section>;
@@ -144,7 +154,7 @@ export function WorkflowTemplateCatalog(props: WorkflowTemplateCatalogProps) @{
     items: templates.filter((t) => t.categories.some((c) => c.toLowerCase() === cat.toLowerCase())),
   })).filter((s) => s.items.length > 0);
   const nothingShown = suggested.length === 0 && sections.length === 0;
-  const blankHref = `/${props.owner}/${props.repo}/new/.github/workflows?filename=main.yml`;
+  const blankHref = `${newFileHref(props.owner, props.repo, props.refName, ".github/workflows")}?filename=main.yml`;
 
   <div data-testid="workflow-template-catalog" className="flex flex-col gap-8">
     <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -197,6 +207,7 @@ export function WorkflowTemplateCatalog(props: WorkflowTemplateCatalogProps) @{
                 title="Suggested for this repository"
                 owner={props.owner}
                 repo={props.repo}
+                refName={props.refName}
                 items={suggested}
               />;
             }
@@ -205,6 +216,7 @@ export function WorkflowTemplateCatalog(props: WorkflowTemplateCatalogProps) @{
                 title={section.title}
                 owner={props.owner}
                 repo={props.repo}
+                refName={props.refName}
                 items={section.items}
               />;
             }

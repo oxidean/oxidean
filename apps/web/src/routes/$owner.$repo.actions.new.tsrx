@@ -129,6 +129,7 @@ function RepoActionsNewPageContent() @{
             <WorkflowTemplateCatalog
               owner={owner}
               repo={repoName}
+              refName={repo?.default_branch ?? "main"}
               data={templatesQ.data ?? undefined}
               loading={templatesQ.isPending}
               error={catalogError}

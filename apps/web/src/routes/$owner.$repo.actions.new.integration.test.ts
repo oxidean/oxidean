@@ -162,11 +162,11 @@ describe("/$owner/$repo/actions/new", () => {
       .getAllByTestId("workflow-template-configure-builtin:ci/rust")[0]
       .closest("a");
     expect(link?.getAttribute("href")).toContain(
-      "/ada/hello/new/.github/workflows?template=builtin%3Aci%2Frust",
+      "/ada/hello/new/main/.github/workflows?template=builtin%3Aci%2Frust",
     );
     const blank = screen.getByTestId("workflow-template-blank").closest("a");
     expect(blank?.getAttribute("href")).toContain(
-      "/ada/hello/new/.github/workflows?filename=main.yml",
+      "/ada/hello/new/main/.github/workflows?filename=main.yml",
     );
   }, 30_000);
 

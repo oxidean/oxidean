@@ -470,6 +470,7 @@ function RepoActionsPageContent() @{
                         <WorkflowTemplateCatalog
                           owner={owner}
                           repo={repoName}
+                          refName={repo?.default_branch ?? "main"}
                           data={catalogQ.data}
                           loading={catalogQ.isPending}
                           error={catalogError}
