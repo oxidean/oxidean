@@ -306,13 +306,16 @@ pub async fn enqueue_run(
                 None
             }
         };
-        // `runs-on` labels interpolate — evaluated values drive label
-        // matching on the claim path.
-        let runs_on_eval: Vec<String> = job
-            .runs_on
-            .iter()
-            .map(|s| crate::actions::eval_ctx::interp_or_raw(s, &ctx, &mut notes))
-            .collect();
+        // `runs-on` labels interpolate per leg — `matrix.*` resolves to that
+        // leg's assignment, and the evaluated values drive label matching on
+        // the claim path.
+        let runs_on_for = |ctx: &oxidean_actions_expr::Context, notes: &mut Vec<String>| {
+            job.runs_on
+                .iter()
+                .map(|s| crate::actions::eval_ctx::interp_or_raw(s, ctx, notes))
+                .collect::<Vec<String>>()
+        };
+        let runs_on_eval = runs_on_for(&ctx, &mut notes);
         // `name` interpolates for display.
         let name = job
             .name
@@ -363,7 +366,7 @@ pub async fn enqueue_run(
             job_status = "failure";
             notes.push(err);
         }
-        let runs_on = serde_json::to_string(&runs_on_eval).unwrap_or_else(|_| "[]".into());
+        let runs_on_shared = serde_json::to_string(&runs_on_eval).unwrap_or_else(|_| "[]".into());
         let needs_json = serde_json::to_string(&job.needs).unwrap_or_else(|_| "[]".into());
         // Durable payload: capture everything fetch_task needs at enqueue so
         // claim never re-reads the bare repo (head could move / be GC'd).
@@ -377,6 +380,10 @@ pub async fn enqueue_run(
             "steps": job.steps,
             "env": job.env,
             "workflow_env": doc.env,
+            "workflow_name": workflow_name,
+            // Raw job subtree — re-emitted as the single-job workflow doc the
+            // Gitea `runner.v1` surface hands stock act_runner.
+            "job_yaml": job.raw_yaml,
             "outputs": job.outputs,
             "if": job.if_expr,
             "needs": job.needs,
@@ -403,8 +410,16 @@ pub async fn enqueue_run(
                 queued_legs += 1;
             }
             let leg_name = crate::actions::matrix::leg_display_name(&name, leg);
+            let leg_runs_on = if leg.assignment.as_object().is_some_and(|o| !o.is_empty()) {
+                let mut lctx = ctx.clone();
+                lctx.set_context("matrix", leg.assignment.clone());
+                serde_json::to_string(&runs_on_for(&lctx, &mut Vec::new()))
+                    .unwrap_or_else(|_| "[]".into())
+            } else {
+                runs_on_shared.clone()
+            };
             let mut insert =
-                oxidean_db::JobInsert::basic(&job_id, &run_id, &job.id, &leg_name, &runs_on);
+                oxidean_db::JobInsert::basic(&job_id, &run_id, &job.id, &leg_name, &leg_runs_on);
             insert.matrix_key = leg.matrix_key.clone();
             insert.matrix_json = leg.assignment.to_string();
             insert.needs_json = needs_json.clone();

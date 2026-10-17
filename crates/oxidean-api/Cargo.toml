@@ -91,6 +91,7 @@ schemars = { workspace = true }
 utoipa-swagger-ui = { version = "10", features = ["axum", "vendored"] }
 tokio-util = { version = "0.7.20", features = ["io"] }
 hex = "0.4.3"
+prost-types = "0.14"
 
 [dev-dependencies]
 oxidean-runner = { path = "../oxidean-runner" }
@@ -108,4 +109,4 @@ prost-build = "0.14"
 # prost-build-generated `pb` module (actions/runner_proto.rs) and prost-build
 # only runs from build.rs.
 [package.metadata.cargo-machete]
-ignored = ["prost", "prost-build"]
+ignored = ["prost", "prost-types", "prost-build"]

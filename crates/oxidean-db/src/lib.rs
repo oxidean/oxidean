@@ -5062,3 +5062,33 @@ impl Database {
         workflow_templates::delete_instance_workflow_template(self.require_pool()?, id).await
     }
 }
+
+// --- `runner.v1` task claims + tasks_version (0055) ------------------------
+impl Database {
+    /// Bump the global `tasks` watermark and return the new value.
+    pub async fn bump_action_tasks_version(&self) -> Result<i64, String> {
+        actions::bump_action_tasks_version(self.require_pool()?).await
+    }
+
+    /// Current `tasks` watermark (0 before the first enqueue).
+    pub async fn action_tasks_version(&self) -> Result<i64, String> {
+        actions::action_tasks_version(self.require_pool()?).await
+    }
+
+    /// Mint a never-reused numeric task_id for a claimed job.
+    pub async fn mint_action_task_claim(
+        &self,
+        job_id: &str,
+        runner_id: &str,
+    ) -> Result<i64, String> {
+        actions::mint_task_claim(self.require_pool()?, job_id, runner_id).await
+    }
+
+    /// Resolve a task_id to `(job_id, runner_id)`.
+    pub async fn find_action_task_claim(
+        &self,
+        task_id: i64,
+    ) -> Result<Option<(String, String)>, String> {
+        actions::find_task_claim(self.require_pool()?, task_id).await
+    }
+}

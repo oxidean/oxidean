@@ -597,7 +597,7 @@ pub async fn insert_job(pool: &DbPool, job: &JobInsert) -> Result<ActionJobRow, 
             tx.commit().await.map_err(|e| e.to_string())?;
         }
     }
-    Ok(ActionJobRow {
+    let row = ActionJobRow {
         id: job.id.clone(),
         run_id: job.run_id.clone(),
         job_key: job.job_key.clone(),
@@ -618,7 +618,11 @@ pub async fn insert_job(pool: &DbPool, job: &JobInsert) -> Result<ActionJobRow, 
         finished_at: None,
         created_at: String::new(),
         updated_at: String::new(),
-    })
+    };
+    // A new job row is new claimable work — bump the tasks watermark so
+    // `runner.v1` FetchTask callers retry promptly.
+    bump_action_tasks_version(pool).await?;
+    Ok(row)
 }
 
 /// Record the workflow-level `concurrency:` group on the run (evaluated at
@@ -2211,6 +2215,8 @@ pub async fn requeue_run(
             }
         }
     }
+    // Requeued jobs are claimable again — wake `runner.v1` pollers.
+    bump_action_tasks_version(pool).await?;
     Ok(())
 }
 
@@ -2634,5 +2640,159 @@ pub async fn list_action_artifacts_for_run(
         .await
         .map(|rs| rs.into_iter().map(|r| map_artifact_row!(r)).collect())
         .map_err(|e| e.to_string()),
+    }
+}
+
+// --- `runner.v1` task claims + tasks_version counter (0055) ---------------
+
+/// Bump the global `tasks` watermark — every enqueue/requeue of claimable
+/// work must call this so Gitea-protocol runners see `tasks_version` drift
+/// and re-poll for work. Returns the new value.
+pub async fn bump_action_tasks_version(pool: &DbPool) -> Result<i64, String> {
+    match pool {
+        DbPool::Sqlite(p) => {
+            sqlx::query(
+                "INSERT INTO action_counters (name, value) VALUES ('tasks', 1)
+                 ON CONFLICT(name) DO UPDATE SET value = value + 1",
+            )
+            .execute(p)
+            .await
+            .map_err(|e| e.to_string())?;
+            sqlx::query("SELECT value FROM action_counters WHERE name = 'tasks'")
+                .fetch_one(p)
+                .await
+                .map_err(|e| e.to_string())?
+                .try_get::<i64, _>("value")
+                .map_err(|e| e.to_string())
+        }
+        DbPool::Postgres(p) => {
+            sqlx::query(
+                "INSERT INTO action_counters (name, value) VALUES ('tasks', 1)
+                 ON CONFLICT(name) DO UPDATE SET value = action_counters.value + 1",
+            )
+            .execute(p)
+            .await
+            .map_err(|e| e.to_string())?;
+            sqlx::query("SELECT value FROM action_counters WHERE name = 'tasks'")
+                .fetch_one(p)
+                .await
+                .map_err(|e| e.to_string())?
+                .try_get::<i64, _>("value")
+                .map_err(|e| e.to_string())
+        }
+        DbPool::MySql(p) => {
+            sqlx::query(
+                "INSERT INTO action_counters (name, value) VALUES ('tasks', 1)
+                 ON DUPLICATE KEY UPDATE value = value + 1",
+            )
+            .execute(p)
+            .await
+            .map_err(|e| e.to_string())?;
+            sqlx::query("SELECT value FROM action_counters WHERE name = 'tasks'")
+                .fetch_one(p)
+                .await
+                .map_err(|e| e.to_string())?
+                .try_get::<i64, _>("value")
+                .map_err(|e| e.to_string())
+        }
+    }
+}
+
+/// Current `tasks` watermark (0 before the first enqueue).
+pub async fn action_tasks_version(pool: &DbPool) -> Result<i64, String> {
+    const SQL: &str =
+        "SELECT COALESCE(MAX(value), 0) AS v FROM action_counters WHERE name = 'tasks'";
+    match pool {
+        DbPool::Sqlite(p) => sqlx::query(SQL)
+            .fetch_one(p)
+            .await
+            .map_err(|e| e.to_string())?
+            .try_get::<i64, _>("v")
+            .map_err(|e| e.to_string()),
+        DbPool::Postgres(p) => sqlx::query(SQL)
+            .fetch_one(p)
+            .await
+            .map_err(|e| e.to_string())?
+            .try_get::<i64, _>("v")
+            .map_err(|e| e.to_string()),
+        DbPool::MySql(p) => sqlx::query(SQL)
+            .fetch_one(p)
+            .await
+            .map_err(|e| e.to_string())?
+            .try_get::<i64, _>("v")
+            .map_err(|e| e.to_string()),
+    }
+}
+
+/// Mint a never-reused numeric `task_id` for a claimed job (Gitea
+/// `runner.v1.Task.id` ↔ `action_jobs.id` mapping).
+pub async fn mint_task_claim(pool: &DbPool, job_id: &str, runner_id: &str) -> Result<i64, String> {
+    match pool {
+        DbPool::Sqlite(p) => {
+            sqlx::query("INSERT INTO action_task_claims (job_id, runner_id) VALUES (?, ?)")
+                .bind(job_id)
+                .bind(runner_id)
+                .execute(p)
+                .await
+                .map_err(|e| e.to_string())
+                .map(|r| r.last_insert_rowid())
+        }
+        DbPool::MySql(p) => {
+            sqlx::query("INSERT INTO action_task_claims (job_id, runner_id) VALUES (?, ?)")
+                .bind(job_id)
+                .bind(runner_id)
+                .execute(p)
+                .await
+                .map_err(|e| e.to_string())
+                .map(|r| r.last_insert_id() as i64)
+        }
+        DbPool::Postgres(p) => sqlx::query(
+            "INSERT INTO action_task_claims (job_id, runner_id) VALUES ($1, $2) RETURNING task_id",
+        )
+        .bind(job_id)
+        .bind(runner_id)
+        .fetch_one(p)
+        .await
+        .map_err(|e| e.to_string())?
+        .try_get::<i64, _>("task_id")
+        .map_err(|e| e.to_string()),
+    }
+}
+
+/// Resolve a `task_id` back to `(job_id, runner_id)`.
+pub async fn find_task_claim(
+    pool: &DbPool,
+    task_id: i64,
+) -> Result<Option<(String, String)>, String> {
+    macro_rules! run {
+        ($q:expr, $p:expr) => {
+            sqlx::query($q)
+                .bind(task_id)
+                .fetch_optional($p)
+                .await
+                .map_err(|e| e.to_string())
+                .map(|opt| {
+                    opt.map(|r| {
+                        (
+                            r.try_get::<String, _>("job_id").unwrap_or_default(),
+                            r.try_get::<String, _>("runner_id").unwrap_or_default(),
+                        )
+                    })
+                })
+        };
+    }
+    match pool {
+        DbPool::Sqlite(p) => run!(
+            "SELECT job_id, runner_id FROM action_task_claims WHERE task_id = ?",
+            p
+        ),
+        DbPool::Postgres(p) => run!(
+            "SELECT job_id, runner_id FROM action_task_claims WHERE task_id = $1",
+            p
+        ),
+        DbPool::MySql(p) => run!(
+            "SELECT job_id, runner_id FROM action_task_claims WHERE task_id = ?",
+            p
+        ),
     }
 }

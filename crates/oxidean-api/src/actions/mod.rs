@@ -4,6 +4,7 @@ pub mod artifacts;
 pub mod dispatch;
 pub mod eval_ctx;
 pub mod events;
+pub mod gitea_proto;
 pub mod hooks;
 pub mod job_tokens;
 pub mod logs;

@@ -107,6 +107,11 @@ pub struct JobSpec {
     pub container: Option<JsonValue>,
     /// `jobs.<id>.services` — `{name: {image, env, ports, …}}` map.
     pub services: Option<JsonValue>,
+    /// The raw YAML subtree for this job, re-marshaled at parse. The Gitea
+    /// actions-proto surface embeds it into the single-job workflow payload
+    /// stock act_runner executes — fields we don't model still reach the
+    /// runner verbatim.
+    pub raw_yaml: String,
 }
 
 /// `strategy:` shape — `matrix` is an evaluatable map of `key → [values]`
@@ -550,6 +555,7 @@ pub fn parse_workflow_yaml(bytes: &[u8]) -> Result<WorkflowDocument, ParseError>
                 message: format!("invalid job id '{id}'"),
             });
         }
+        let job_yaml = serde_yaml::to_string(&value).unwrap_or_default();
         let job: RawJob = serde_yaml::from_value(value).map_err(|e| ParseError {
             message: format!("invalid job '{id}': {e}"),
         })?;
@@ -695,6 +701,7 @@ pub fn parse_workflow_yaml(bytes: &[u8]) -> Result<WorkflowDocument, ParseError>
             strategy,
             container: job_container,
             services: job_services,
+            raw_yaml: job_yaml,
         });
     }
 

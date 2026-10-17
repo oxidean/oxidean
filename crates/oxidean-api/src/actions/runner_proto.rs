@@ -24,6 +24,34 @@ pub fn router() -> Router<AppState> {
         .route("/fetch_task", post(fetch_task))
         .route("/update_task", post(update_task))
         .route("/update_log", post(update_log))
+        // Gitea `runner.v1` compat surface — stock act_runner speaks
+        // ConnectRPC unary (application/proto | application/json) at these
+        // fixed procedure paths.
+        .route(
+            "/runner.v1.RunnerService/Register",
+            post(crate::actions::gitea_proto::register),
+        )
+        .route(
+            "/runner.v1.RunnerService/Declare",
+            post(crate::actions::gitea_proto::declare),
+        )
+        .route(
+            "/runner.v1.RunnerService/FetchTask",
+            post(crate::actions::gitea_proto::fetch_task),
+        )
+        .route(
+            "/runner.v1.RunnerService/UpdateTask",
+            post(crate::actions::gitea_proto::update_task),
+        )
+        .route(
+            "/runner.v1.RunnerService/UpdateLog",
+            post(crate::actions::gitea_proto::update_log),
+        )
+        // act_runner pings the instance before registering / on daemon start.
+        .route(
+            "/ping.v1.PingService/Ping",
+            post(crate::actions::gitea_proto::ping),
+        )
         .route("/artifacts/upload", post(crate::actions::artifacts::upload))
         .route(
             "/artifacts/{run_id}/{name}",
@@ -57,7 +85,7 @@ pub(crate) async fn runner_from_headers_pub(
     runner_from_headers(state, headers, None).await
 }
 
-async fn runner_from_headers(
+pub(crate) async fn runner_from_headers(
     state: &AppState,
     headers: &HeaderMap,
     body_token: Option<&str>,
@@ -519,13 +547,13 @@ async fn fetch_task(
 /// with no recorded provenance resolve `false` — callers must treat that as
 /// untrusted (no secrets, read-only token). Non-`pull_request` events are
 /// always trusted.
-struct PullRunContext {
-    base_ref: String,
-    pull_number: i64,
-    trusted: bool,
+pub(crate) struct PullRunContext {
+    pub base_ref: String,
+    pub pull_number: i64,
+    pub trusted: bool,
 }
 
-async fn pull_context_for_run(
+pub(crate) async fn pull_context_for_run(
     db: &oxidean_db::Database,
     run: &oxidean_db::ActionRunRow,
 ) -> PullRunContext {
@@ -618,13 +646,9 @@ async fn update_task(
         .transition_action_job_status(&job.id, status)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    // Terminal state revokes the per-job OXIDEAN_TOKEN (idempotent).
+    // Materialize `jobs.<id>.outputs` from reported step outputs so
+    // `needs.<id>.outputs.*` resolves for dependents (terminal states only).
     if matches!(status, "success" | "failure" | "cancelled") {
-        if let Err(e) = state.db.revoke_action_job_token_for_job(&job.id).await {
-            tracing::warn!(error = %e, job_id = %job.id, "failed to revoke job token");
-        }
-        // Materialize `jobs.<id>.outputs` from reported step outputs so
-        // `needs.<id>.outputs.*` resolves for dependents.
         if let Some(outputs) = &req.outputs {
             if let Err(e) =
                 crate::actions::scheduler::materialize_outputs(&state.db, &job, outputs).await
@@ -632,8 +656,41 @@ async fn update_task(
                 tracing::warn!(error = %e, job_id = %job.id, "job outputs materialization failed");
             }
         }
+    }
+    let cancelled = finalize_task_update(
+        &state,
+        &job,
+        prev_run_status,
+        status,
+        landed,
+        req.summary.as_deref(),
+    )
+    .await;
+    Ok(Json(OkResponse {
+        ok: true,
+        cancelled,
+    }))
+}
+
+/// Shared post-transition tail for both runner protocols — token revoke,
+/// summary persist, scheduler wakeup, run rollup, completion notice,
+/// `workflow_run` webhook, commit-status publish. Returns whether the job
+/// was already terminal `cancelled` server-side (the runner should abort).
+pub(crate) async fn finalize_task_update(
+    state: &AppState,
+    job: &oxidean_db::ActionJobRow,
+    prev_run_status: Option<String>,
+    status: &str,
+    landed: bool,
+    summary: Option<&str>,
+) -> bool {
+    // Terminal state revokes the per-job OXIDEAN_TOKEN (idempotent).
+    if matches!(status, "success" | "failure" | "cancelled") {
+        if let Err(e) = state.db.revoke_action_job_token_for_job(&job.id).await {
+            tracing::warn!(error = %e, job_id = %job.id, "failed to revoke job token");
+        }
         // `$GITHUB_STEP_SUMMARY` → `action_jobs.summary_md` for the run UI.
-        if let Some(summary) = req.summary.as_deref().filter(|s| !s.trim().is_empty()) {
+        if let Some(summary) = summary.filter(|s| !s.trim().is_empty()) {
             if let Err(e) = state.db.set_action_job_summary(&job.id, summary).await {
                 tracing::warn!(error = %e, job_id = %job.id, "job summary persist failed");
             }
@@ -694,7 +751,7 @@ async fn update_task(
     }
     // If the write didn't land the job was already terminal — tell the
     // runner when that's a cancel so it aborts instead of continuing.
-    let cancelled = if landed {
+    if landed {
         false
     } else {
         state
@@ -704,11 +761,7 @@ async fn update_task(
             .ok()
             .flatten()
             .is_some_and(|j| j.status == "cancelled")
-    };
-    Ok(Json(OkResponse {
-        ok: true,
-        cancelled,
-    }))
+    }
 }
 
 #[derive(Debug, Deserialize)]
