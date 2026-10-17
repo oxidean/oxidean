@@ -209,11 +209,20 @@ async fn fetch_task(
                 .await
                 .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
                 .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
-            let secrets =
+            // PR provenance must resolve BEFORE secrets/token minting: a
+            // `pull_request` run whose head commit cannot be traced to a
+            // same-repository PR head (fork head, stale synchronize, deleted
+            // PR) gets no repo secrets and a read-only job token — GitHub's
+            // fork-PR model, failing closed on any lookup miss.
+            let pr_ctx = pull_context_for_run(&state.db, &run).await;
+            let secrets = if pr_ctx.trusted {
                 crate::actions::secrets::decrypted_secrets_for_repo(&state.db, &run.repository_id)
                     .await
-                    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-            let (steps, workflow_name, contents_permission) =
+                    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+            } else {
+                std::collections::HashMap::new()
+            };
+            let (steps, workflow_name, mut contents_permission) =
                 job_steps_at_head(&state, &run, &j.job_key)
                     .await
                     .unwrap_or((
@@ -221,6 +230,9 @@ async fn fetch_task(
                         run.workflow_name.clone(),
                         crate::actions::ContentsPermission::Read,
                     ));
+            if !pr_ctx.trusted && contents_permission == crate::actions::ContentsPermission::Write {
+                contents_permission = crate::actions::ContentsPermission::Read;
+            }
             let repo = state
                 .db
                 .find_repository_by_id(&run.repository_id)
@@ -248,9 +260,8 @@ async fn fetch_task(
                 }
                 None => (String::new(), String::new()),
             };
-
-            // PR context for pull_request runs — best effort, never fails.
-            let (base_ref, pull_number) = pull_context_for_run(&state.db, &run).await;
+            let base_ref = pr_ctx.base_ref.clone();
+            let pull_number = pr_ctx.pull_number;
 
             // Per-job OXIDEAN_TOKEN — minted at claim so the grant reflects the
             // workflow's effective `contents` permission at head_sha.
@@ -365,16 +376,36 @@ async fn fetch_task(
     }))
 }
 
-/// Open-PR context for `pull_request` runs: the open pull in this repo whose
-/// head ref matches the run's head ref (short or `refs/heads/` form — PR events
-/// store the short branch name). Best effort — `(\"\", 0)` on any miss or error.
+/// PR provenance for `pull_request` runs.
+///
+/// `trusted` is the security boundary, decided by the `head_repo_id` recorded
+/// on the run at dispatch: `true` only when it is present and equals the run's
+/// `repository_id` (a same-repo branch PR). Fork heads and `pull_request` runs
+/// with no recorded provenance resolve `false` — callers must treat that as
+/// untrusted (no secrets, read-only token). Non-`pull_request` events are
+/// always trusted.
+struct PullRunContext {
+    base_ref: String,
+    pull_number: i64,
+    trusted: bool,
+}
+
 async fn pull_context_for_run(
     db: &oxidean_db::Database,
     run: &oxidean_db::ActionRunRow,
-) -> (String, i64) {
+) -> PullRunContext {
     if run.event != "pull_request" {
-        return (String::new(), 0);
+        return PullRunContext {
+            base_ref: String::new(),
+            pull_number: 0,
+            trusted: true,
+        };
     }
+    let trusted = run.head_repo_id.as_deref() == Some(run.repository_id.as_str());
+    // Cosmetic PR metadata (base ref + number) — best effort from the open
+    // pulls list. Two pulls can legitimately share a head SHA (a fork and a
+    // same-repo branch at the same commit), so the ref is the discriminator
+    // before falling back to SHA-only and ref-only matches.
     let short = run
         .head_ref
         .strip_prefix("refs/heads/")
@@ -384,11 +415,22 @@ async fn pull_context_for_run(
         .await
         .map(|(rows, _)| rows)
         .unwrap_or_default();
-    pulls
-        .into_iter()
-        .find(|p| p.head_ref == short || p.head_ref == run.head_ref)
-        .map(|p| (p.base_ref, p.number))
-        .unwrap_or_else(|| (String::new(), 0))
+    let (base_ref, pull_number) = pulls
+        .iter()
+        .find(|p| p.head_sha == run.head_sha && (p.head_ref == short || p.head_ref == run.head_ref))
+        .or_else(|| pulls.iter().find(|p| p.head_sha == run.head_sha))
+        .or_else(|| {
+            pulls
+                .iter()
+                .find(|p| p.head_ref == short || p.head_ref == run.head_ref)
+        })
+        .map(|p| (p.base_ref.clone(), p.number))
+        .unwrap_or_else(|| (String::new(), 0));
+    PullRunContext {
+        base_ref,
+        pull_number,
+        trusted,
+    }
 }
 
 /// Re-read workflow YAML at the run's head; extract the job's steps, the

@@ -148,6 +148,7 @@ jobs:
         "deadbeef",
         "refs/heads/main",
         Some(&owner.id),
+        None,
     )
     .await
     .unwrap();
@@ -345,6 +346,7 @@ jobs:
         "cafebabe",
         "refs/heads/main",
         Some(&owner.id),
+        None,
     )
     .await
     .unwrap();
@@ -493,4 +495,256 @@ jobs:
         .find(|s| s.context.contains("build"))
         .expect("commit status published for job");
     assert_eq!(st.state, "success");
+}
+
+/// Fork-PR hardening: a `pull_request` run whose head commit comes from a pull
+/// opened against this repo from another repository (`head_repo_id` recorded
+/// at dispatch differs from the run's `repository_id`) must receive no repo
+/// secrets, and its OXIDEAN_TOKEN must be clamped to `read` even when the
+/// workflow asks for `contents: write`. Same-repo PRs keep both.
+#[tokio::test]
+async fn actions_runner_protocol_pull_request_provenance_gate() {
+    use oxidean_api::actions::secrets::encrypt_secret;
+    use oxidean_git::GitBackend;
+
+    std::env::set_var("OXIDEAN_ACTIONS_SECRETS_KEY", "integration-test-key");
+    let dir = tempfile::tempdir().unwrap();
+    let db = Database::connect(&format!("sqlite:{}", dir.path().join("fk.db").display()))
+        .await
+        .unwrap();
+    db.migrate().await.unwrap();
+    let repos_dir = dir.path().join("repos");
+    let state = AppState::new(
+        db.clone(),
+        Arc::new(LogSink) as Arc<dyn EmailSender>,
+        "development",
+    )
+    .with_actions_enabled(true)
+    .with_repos_dir(repos_dir.clone());
+    let app = router_with_state(state, build_cors("development", None).unwrap());
+
+    let owner = db
+        .create_user(
+            "u-fk",
+            "fk@example.com",
+            "fkown",
+            Some("h"),
+            "F",
+            "",
+            None,
+            Role::User,
+        )
+        .await
+        .unwrap();
+    let base = db
+        .insert_repository(
+            "r-fkbase", &owner.id, "user", "fkbase", "private", "", "main",
+        )
+        .await
+        .unwrap();
+    let fork = db
+        .insert_repository(
+            "r-fkfork", &owner.id, "user", "fkfork", "private", "", "main",
+        )
+        .await
+        .unwrap();
+    let ct = encrypt_secret("base-secret").unwrap();
+    db.insert_action_secret("sec-fk", &base.id, "API_TOKEN", &ct)
+        .await
+        .unwrap();
+
+    // The workflow at head asks for write; fork runs must be clamped to read.
+    let yaml = br#"
+name: CI
+on: [pull_request]
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+"#;
+    let bare = repos_dir.join("fkown").join("fkbase.git");
+    std::fs::create_dir_all(bare.parent().unwrap()).unwrap();
+    let git = CliGitBackend::new();
+    git.init_bare(&bare, "main").await.unwrap();
+    git.seed_commit(
+        &bare,
+        "main",
+        "wf",
+        &[(".github/workflows/ci.yml".into(), yaml.to_vec())],
+    )
+    .await
+    .unwrap();
+    let tip = git
+        .list_refs(&bare)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|r| r.name.ends_with("main"))
+        .map(|r| r.oid)
+        .unwrap();
+    let doc = parse_workflow_yaml(yaml).unwrap();
+
+    let reg = mint_registration_token(&db).await.unwrap();
+    let reg_res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/actions/register")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({"name":"r-fk","labels":["ubuntu-latest"],"token":reg})
+                        .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let reg_v: serde_json::Value =
+        serde_json::from_slice(&reg_res.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    let runner_token = reg_v["runner_token"].as_str().unwrap().to_string();
+
+    let fetch_once = |app: &axum::Router| {
+        let token = runner_token.clone();
+        let app = app.clone();
+        async move {
+            let res = app
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/api/actions/fetch_task")
+                        .header("content-type", "application/json")
+                        .header("authorization", format!("Bearer {token}"))
+                        .body(Body::from("{}"))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(res.status(), StatusCode::OK);
+            serde_json::from_slice::<serde_json::Value>(
+                &res.into_body().collect().await.unwrap().to_bytes(),
+            )
+            .unwrap()
+        }
+    };
+
+    // Case 1 — fork head: no secrets, write clamped to read.
+    db.insert_pull(
+        "pr-fork",
+        &base.id,
+        1,
+        "fork pr",
+        "",
+        &owner.id,
+        "main",
+        "0".repeat(40).as_str(),
+        &fork.id,
+        "feature",
+        &tip,
+        false,
+    )
+    .await
+    .unwrap();
+    enqueue_run(
+        &db,
+        &base.id,
+        ".github/workflows/ci.yml",
+        &doc,
+        "pull_request",
+        &tip,
+        "refs/heads/feature",
+        Some(&owner.id),
+        Some(&fork.id),
+    )
+    .await
+    .unwrap();
+    let v = fetch_once(&app).await;
+    assert_eq!(v["event"], "pull_request");
+    assert_eq!(v["pull_number"], 1);
+    assert!(
+        v["secrets"]
+            .as_object()
+            .map(|m| m.is_empty())
+            .unwrap_or(true),
+        "fork PR run must receive no secrets, got: {}",
+        v["secrets"]
+    );
+    assert_eq!(
+        v["job_token_permission"], "read",
+        "fork PR write grant must clamp to read"
+    );
+
+    // Case 2 — same-repo head: secrets + write preserved.
+    db.insert_pull(
+        "pr-same",
+        &base.id,
+        2,
+        "same pr",
+        "",
+        &owner.id,
+        "main",
+        "0".repeat(40).as_str(),
+        &base.id,
+        "feature2",
+        &tip,
+        false,
+    )
+    .await
+    .unwrap();
+    enqueue_run(
+        &db,
+        &base.id,
+        ".github/workflows/ci.yml",
+        &doc,
+        "pull_request",
+        &tip,
+        "refs/heads/feature2",
+        Some(&owner.id),
+        Some(&base.id),
+    )
+    .await
+    .unwrap();
+    let v = fetch_once(&app).await;
+    assert_eq!(v["event"], "pull_request");
+    assert_eq!(v["pull_number"], 2);
+    assert_eq!(v["secrets"]["API_TOKEN"], "base-secret");
+    assert_eq!(v["job_token_permission"], "write");
+
+    // Case 3 — pull_request run with no recorded provenance: fail closed.
+    db.insert_action_run(
+        "run-orphan",
+        &base.id,
+        ".github/workflows/ci.yml",
+        "CI",
+        "pull_request",
+        "9".repeat(40).as_str(),
+        "refs/heads/feature9",
+        "CI",
+        Some(&owner.id),
+        None,
+    )
+    .await
+    .unwrap();
+    db.insert_action_job(
+        "job-orphan",
+        "run-orphan",
+        "build",
+        "build",
+        r#"["ubuntu-latest"]"#,
+    )
+    .await
+    .unwrap();
+    let v = fetch_once(&app).await;
+    assert_eq!(v["job_id"], "job-orphan");
+    assert!(
+        v["secrets"]
+            .as_object()
+            .map(|m| m.is_empty())
+            .unwrap_or(true),
+        "unprovenanced pull_request run must receive no secrets, got: {}",
+        v["secrets"]
+    );
 }

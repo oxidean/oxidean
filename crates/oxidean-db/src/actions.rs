@@ -34,6 +34,11 @@ pub struct ActionRunRow {
     /// serialized — RPC paths always re-read).
     pub run_number: i64,
     pub triggered_by: Option<String>,
+    /// Recorded PR head-repo provenance for `pull_request` runs (the PR's
+    /// `head_repo_id`); `NULL` for every other event. Claim compares this to
+    /// `repository_id` — a fork head, or a `pull_request` run with no recorded
+    /// provenance, is untrusted (no secrets, read-only job token).
+    pub head_repo_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
     pub finished_at: Option<String>,
@@ -260,30 +265,34 @@ pub async fn insert_run(
     head_ref: &str,
     title: &str,
     triggered_by: Option<&str>,
+    head_repo_id: Option<&str>,
 ) -> Result<ActionRunRow, String> {
     match pool {
         DbPool::Postgres(p) => {
             sqlx::query(r#"INSERT INTO action_runs
-                (id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, title, triggered_by)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)"#)
+                (id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, title, triggered_by, head_repo_id)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)"#)
                 .bind(id).bind(repository_id).bind(workflow_path).bind(workflow_name)
                 .bind(event).bind(head_sha).bind(head_ref).bind(title).bind(triggered_by)
+                .bind(head_repo_id)
                 .execute(p).await.map_err(|e| e.to_string())?;
         }
         DbPool::MySql(p) => {
             sqlx::query(r#"INSERT INTO action_runs
-                (id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, title, triggered_by)
-                VALUES (?,?,?,?,?,?,?,?,?)"#)
+                (id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, title, triggered_by, head_repo_id)
+                VALUES (?,?,?,?,?,?,?,?,?,?)"#)
                 .bind(id).bind(repository_id).bind(workflow_path).bind(workflow_name)
                 .bind(event).bind(head_sha).bind(head_ref).bind(title).bind(triggered_by)
+                .bind(head_repo_id)
                 .execute(p).await.map_err(|e| e.to_string())?;
         }
         DbPool::Sqlite(p) => {
             sqlx::query(r#"INSERT INTO action_runs
-                (id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, title, triggered_by)
-                VALUES (?,?,?,?,?,?,?,?,?)"#)
+                (id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, title, triggered_by, head_repo_id)
+                VALUES (?,?,?,?,?,?,?,?,?,?)"#)
                 .bind(id).bind(repository_id).bind(workflow_path).bind(workflow_name)
                 .bind(event).bind(head_sha).bind(head_ref).bind(title).bind(triggered_by)
+                .bind(head_repo_id)
                 .execute(p).await.map_err(|e| e.to_string())?;
         }
     }
@@ -299,6 +308,7 @@ pub async fn insert_run(
         title: title.into(),
         run_number: 0,
         triggered_by: triggered_by.map(str::to_string),
+        head_repo_id: head_repo_id.map(str::to_string),
         created_at: String::new(),
         updated_at: String::new(),
         finished_at: None,
@@ -308,7 +318,7 @@ pub async fn insert_run(
 pub async fn find_run_by_id(pool: &DbPool, id: &str) -> Result<Option<ActionRunRow>, String> {
     match pool {
         DbPool::Postgres(p) => {
-            let row = sqlx::query(sqlx::AssertSqlSafe(format!("SELECT id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, status, title, triggered_by, finished_at::text AS finished_at, {RUN_NUMBER_SQL} FROM action_runs WHERE id = $1")))
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!("SELECT id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, status, title, triggered_by, head_repo_id, finished_at::text AS finished_at, {RUN_NUMBER_SQL} FROM action_runs WHERE id = $1")))
                 .bind(id).fetch_optional(p).await.map_err(|e| e.to_string())?;
             Ok(row.map(|r| ActionRunRow {
                 id: r.get("id"),
@@ -322,13 +332,14 @@ pub async fn find_run_by_id(pool: &DbPool, id: &str) -> Result<Option<ActionRunR
                 title: r.get("title"),
                 run_number: r.get("run_number"),
                 triggered_by: r.get("triggered_by"),
+                head_repo_id: r.get("head_repo_id"),
                 created_at: String::new(),
                 updated_at: String::new(),
                 finished_at: r.get("finished_at"),
             }))
         }
         DbPool::MySql(p) => {
-            let row = sqlx::query(sqlx::AssertSqlSafe(format!("SELECT id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, status, title, triggered_by, CAST(finished_at AS CHAR) AS finished_at, {RUN_NUMBER_SQL} FROM action_runs WHERE id = ?")))
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!("SELECT id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, status, title, triggered_by, head_repo_id, CAST(finished_at AS CHAR) AS finished_at, {RUN_NUMBER_SQL} FROM action_runs WHERE id = ?")))
                 .bind(id).fetch_optional(p).await.map_err(|e| e.to_string())?;
             Ok(row.map(|r| ActionRunRow {
                 id: r.get("id"),
@@ -342,13 +353,14 @@ pub async fn find_run_by_id(pool: &DbPool, id: &str) -> Result<Option<ActionRunR
                 title: r.get("title"),
                 run_number: r.get("run_number"),
                 triggered_by: r.get("triggered_by"),
+                head_repo_id: r.get("head_repo_id"),
                 created_at: String::new(),
                 updated_at: String::new(),
                 finished_at: r.get("finished_at"),
             }))
         }
         DbPool::Sqlite(p) => {
-            let row = sqlx::query(sqlx::AssertSqlSafe(format!("SELECT id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, status, title, triggered_by, finished_at, {RUN_NUMBER_SQL} FROM action_runs WHERE id = ?")))
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!("SELECT id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, status, title, triggered_by, head_repo_id, finished_at, {RUN_NUMBER_SQL} FROM action_runs WHERE id = ?")))
                 .bind(id).fetch_optional(p).await.map_err(|e| e.to_string())?;
             Ok(row.map(|r| ActionRunRow {
                 id: r.get("id"),
@@ -362,6 +374,7 @@ pub async fn find_run_by_id(pool: &DbPool, id: &str) -> Result<Option<ActionRunR
                 title: r.get("title"),
                 run_number: r.get("run_number"),
                 triggered_by: r.get("triggered_by"),
+                head_repo_id: r.get("head_repo_id"),
                 created_at: String::new(),
                 updated_at: String::new(),
                 finished_at: r.get("finished_at"),
@@ -1205,7 +1218,7 @@ pub async fn list_runs_for_repo(
         DbPool::Sqlite(p) => {
             let rows = bind_run_filter!(
                 sqlx::query(sqlx::AssertSqlSafe(format!(
-                    "SELECT id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, status, title, triggered_by, created_at, updated_at, finished_at, {RUN_NUMBER_SQL} FROM action_runs WHERE repository_id = ?{RUNS_FILTER_SQLITE} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?"
+                    "SELECT id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, status, title, triggered_by, head_repo_id, created_at, updated_at, finished_at, {RUN_NUMBER_SQL} FROM action_runs WHERE repository_id = ?{RUNS_FILTER_SQLITE} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?"
                 )))
                 .bind(repository_id),
                 filter,
@@ -1229,6 +1242,7 @@ pub async fn list_runs_for_repo(
                     status: r.get("status"),
                     title: r.get("title"),
                     triggered_by: r.get("triggered_by"),
+                    head_repo_id: r.get("head_repo_id"),
                     created_at: r.get("created_at"),
                     updated_at: r.get("updated_at"),
                     run_number: r.get("run_number"),
@@ -1239,7 +1253,7 @@ pub async fn list_runs_for_repo(
         DbPool::Postgres(p) => {
             let rows = bind_run_filter_pg!(
                 sqlx::query(sqlx::AssertSqlSafe(format!(
-                    "SELECT id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, status, title, triggered_by, created_at::text AS created_at, updated_at::text AS updated_at, finished_at::text AS finished_at, {RUN_NUMBER_SQL} FROM action_runs WHERE repository_id = $1{RUNS_FILTER_PG} ORDER BY created_at DESC, id DESC LIMIT $9 OFFSET $10"
+                    "SELECT id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, status, title, triggered_by, head_repo_id, created_at::text AS created_at, updated_at::text AS updated_at, finished_at::text AS finished_at, {RUN_NUMBER_SQL} FROM action_runs WHERE repository_id = $1{RUNS_FILTER_PG} ORDER BY created_at DESC, id DESC LIMIT $9 OFFSET $10"
                 )))
                 .bind(repository_id),
                 filter,
@@ -1263,6 +1277,7 @@ pub async fn list_runs_for_repo(
                     status: r.get("status"),
                     title: r.get("title"),
                     triggered_by: r.get("triggered_by"),
+                    head_repo_id: r.get("head_repo_id"),
                     created_at: r.get("created_at"),
                     updated_at: r.get("updated_at"),
                     run_number: r.get("run_number"),
@@ -1273,7 +1288,7 @@ pub async fn list_runs_for_repo(
         DbPool::MySql(p) => {
             let rows = bind_run_filter!(
                 sqlx::query(sqlx::AssertSqlSafe(format!(
-                    "SELECT id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, status, title, triggered_by, CAST(created_at AS CHAR) AS created_at, CAST(updated_at AS CHAR) AS updated_at, CAST(finished_at AS CHAR) AS finished_at, {RUN_NUMBER_SQL} FROM action_runs WHERE repository_id = ?{RUNS_FILTER_MYSQL} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?"
+                    "SELECT id, repository_id, workflow_path, workflow_name, event, head_sha, head_ref, status, title, triggered_by, head_repo_id, CAST(created_at AS CHAR) AS created_at, CAST(updated_at AS CHAR) AS updated_at, CAST(finished_at AS CHAR) AS finished_at, {RUN_NUMBER_SQL} FROM action_runs WHERE repository_id = ?{RUNS_FILTER_MYSQL} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?"
                 )))
                 .bind(repository_id),
                 filter,
@@ -1297,6 +1312,7 @@ pub async fn list_runs_for_repo(
                     status: r.get("status"),
                     title: r.get("title"),
                     triggered_by: r.get("triggered_by"),
+                    head_repo_id: r.get("head_repo_id"),
                     created_at: r.get("created_at"),
                     updated_at: r.get("updated_at"),
                     run_number: r.get("run_number"),

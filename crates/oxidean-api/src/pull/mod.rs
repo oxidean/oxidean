@@ -62,6 +62,7 @@ async fn notify_actions_for_pull(
     head_name: &str,
     head_sha: &str,
     head_ref: &str,
+    head_repo_id: &str,
     actor_id: Option<&str>,
     action: crate::actions::PullRequestAction,
 ) {
@@ -75,6 +76,7 @@ async fn notify_actions_for_pull(
         head_sha: head_sha.to_string(),
         head_ref: head_ref.to_string(),
         actor_id: actor_id.map(str::to_string),
+        head_repo_id: Some(head_repo_id.to_string()),
         actions_enabled_instance: crate::actions::env_actions_enabled(),
     };
     crate::actions::notify_pull_request_actions(db, git, &event).await;
@@ -403,6 +405,7 @@ pub(crate) async fn synchronize_pull_after_head_move(
         head_name,
         new_head_sha,
         &updated.head_ref,
+        &pull.head_repo_id,
         Some(actor_id),
         crate::actions::PullRequestAction::Synchronize,
     )
@@ -817,6 +820,7 @@ pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullPublic
         &head_repo_name,
         &row.head_sha,
         &row.head_ref,
+        &row.head_repo_id,
         Some(&user.id),
         crate::actions::PullRequestAction::Opened,
     )
@@ -1167,6 +1171,7 @@ pub async fn reopen(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullPublic
         &head_name,
         &updated.head_sha,
         &updated.head_ref,
+        &updated.head_repo_id,
         Some(&user.id),
         crate::actions::PullRequestAction::Reopened,
     )

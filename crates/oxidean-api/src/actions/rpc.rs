@@ -588,6 +588,7 @@ pub async fn dispatch_workflow(
         &treeish,
         &head_ref,
         Some(&user.id),
+        None,
     )
     .await
     .map_err(db_err)?;

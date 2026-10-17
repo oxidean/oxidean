@@ -3329,6 +3329,7 @@ impl Database {
         head_ref: &str,
         title: &str,
         triggered_by: Option<&str>,
+        head_repo_id: Option<&str>,
     ) -> Result<actions::ActionRunRow, String> {
         actions::insert_run(
             self.require_pool()?,
@@ -3341,6 +3342,7 @@ impl Database {
             head_ref,
             title,
             triggered_by,
+            head_repo_id,
         )
         .await
     }

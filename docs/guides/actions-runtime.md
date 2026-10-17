@@ -2,7 +2,7 @@
 
 Every job step runs with an `OXIDEAN_*` environment, each variable paired with a `GITHUB_*` alias carrying the identical value, so workflows written for GitHub run unmodified. `PAIRED_VARS` in `crates/oxidean-runner/src/exec.rs` is the single source of truth for the pair set — the two namespaces cannot drift.
 
-`CI=true` and `OXIDEAN=true` are also set. Repo secrets are appended last and can never override a reserved name (a collision is logged and skipped).
+`CI=true` and `OXIDEAN=true` are also set. Repo secrets are appended last and can never override a reserved name (a collision is logged and skipped). **`pull_request` runs whose head commit comes from a fork receive no repo secrets at all** — GitHub's model — and the same gate fails closed whenever the run's head-repo provenance was not recorded at dispatch.
 
 ## Default variables
 
@@ -67,6 +67,7 @@ A per-job `oxidean_job_…` bearer token minted when the runner claims the job:
 - **Repo-locked** — resolves to a fine-grained identity scoped to the job's repository only.
 - **Read by default** — `contents: read` unless the workflow sets `permissions: {contents: write}`; `contents: none` injects no token at all.
 - **Capability-capped** — a `write` request from a read-only triggering user is downgraded to `read` (permissions can only be lowered). Runs with no triggering user (internal dispatches) get no token.
+- **Read-only on fork PRs** — a `pull_request` run with a fork head clamps `contents: write` down to `read` regardless of the workflow's `permissions:` block.
 - **Short-lived** — revoked when the job reaches a terminal state or the run is cancelled; 24-hour `expires_at` is the hard backstop. Re-mint on requeue replaces the row, so the previous plaintext stops resolving.
 - Usable as `Authorization: Bearer oxidean_job_…` against `POST /api/rpc` (job-token procedure class) and the `/api/v1` REST surface.
 - **Git over HTTP(S) + LFS** — works as a Basic-auth password (`git clone https://…/owner/repo.git` with `oauth2:<token>`, or any username). `contents: read` can fetch; `contents: write` can push (subject to the capability cap above). LFS batch/download/upload accept the same credential.

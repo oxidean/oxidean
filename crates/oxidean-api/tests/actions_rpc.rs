@@ -38,6 +38,7 @@ async fn actions_rpc_list_runs() {
         "refs/heads/main",
         "CI",
         Some(&owner.id),
+        None,
     )
     .await
     .unwrap();
@@ -82,6 +83,7 @@ async fn actions_rpc_run_detail() {
         "abc",
         "refs/heads/main",
         "CI",
+        None,
         None,
     )
     .await

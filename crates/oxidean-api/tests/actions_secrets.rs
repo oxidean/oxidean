@@ -260,6 +260,7 @@ async fn actions_secrets_injected_into_fetch_task() {
         "refs/heads/main",
         "CI",
         None,
+        None,
     )
     .await
     .unwrap();
