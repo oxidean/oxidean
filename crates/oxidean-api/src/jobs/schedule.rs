@@ -21,6 +21,9 @@ pub struct JobConfig {
     pub lfs_gc_interval: Duration,
     /// Default 24h. Set `OXIDEAN_PACKAGES_GC_INTERVAL_SECS=0` to disable.
     pub packages_gc_interval: Duration,
+    /// Default 30s. Set `OXIDEAN_ACTIONS_SCHEDULE_SWEEP_SECS=0` to disable the
+    /// `on.schedule` cron sweeper.
+    pub actions_schedule_sweep: Duration,
 }
 
 impl JobConfig {
@@ -32,11 +35,13 @@ impl JobConfig {
             super::lfs_gc::DEFAULT_GC_INTERVAL_SECS,
         );
         let packages_gc_secs = parse_u64_env("OXIDEAN_PACKAGES_GC_INTERVAL_SECS", 86_400);
+        let actions_schedule_secs = parse_u64_env("OXIDEAN_ACTIONS_SCHEDULE_SWEEP_SECS", 30);
         Self {
             orphan_interval: Duration::from_secs(orphan_secs),
             gc_interval: Duration::from_secs(gc_secs),
             lfs_gc_interval: Duration::from_secs(lfs_gc_secs),
             packages_gc_interval: Duration::from_secs(packages_gc_secs),
+            actions_schedule_sweep: Duration::from_secs(actions_schedule_secs),
         }
     }
 }
@@ -98,6 +103,44 @@ pub fn spawn_background_jobs(
         );
     } else {
         tracing::info!("orphan reconcile job disabled (interval 0)");
+    }
+
+    if config.actions_schedule_sweep.as_secs() > 0 {
+        let db_c = db.clone();
+        let git_c = git.clone();
+        let repos_c = repos_dir.clone();
+        let period = config.actions_schedule_sweep;
+        tokio::spawn(async move {
+            let mut ticker = interval(period);
+            ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+            // Skip the immediate boot tick so a restart mid-minute cannot
+            // claim a tick the booting sweeper never observed; dedupe still
+            // guards the real double-fire window.
+            ticker.tick().await;
+            loop {
+                ticker.tick().await;
+                match crate::actions::cron::sweep_scheduled_workflows(
+                    &db_c,
+                    git_c.clone(),
+                    &repos_c,
+                )
+                .await
+                {
+                    Ok(n) => {
+                        if n > 0 {
+                            tracing::info!(enqueued = n, "actions schedule sweep fired");
+                        }
+                    }
+                    Err(e) => tracing::error!(error = %e, "actions schedule sweep failed"),
+                }
+            }
+        });
+        tracing::info!(
+            secs = config.actions_schedule_sweep.as_secs(),
+            "actions schedule sweeper scheduled"
+        );
+    } else {
+        tracing::info!("actions schedule sweeper disabled (interval 0)");
     }
 
     if config.gc_interval.as_secs() > 0 {

@@ -338,11 +338,16 @@ pub const PROCEDURES: &[&str] = &[
     "repo.actions.dispatchWorkflow",
     "repo.actions.rerunRun",
     "repo.actions.cancelRun",
+    "repo.actions.approveRun",
     "repo.actions.secrets.list",
     "repo.actions.secrets.put",
     "repo.actions.secrets.delete",
     "repo.actions.getEnabled",
     "repo.actions.setEnabled",
+    "repo.actions.getPullRequestTarget",
+    "repo.actions.setPullRequestTarget",
+    "repo.actions.getForkPrApproval",
+    "repo.actions.setForkPrApproval",
     "repo.actions.workflowTemplates.list",
     "repo.actions.workflowTemplates.get",
     "repo.actions.workflows.create",
@@ -1368,6 +1373,10 @@ async fn dispatch_inner(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },
+        "repo.actions.approveRun" => match crate::actions::rpc::approve_run(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
         "repo.actions.secrets.list" => {
             match crate::actions::rpc::list_secrets(ctx, req.input).await {
                 Ok(v) => RpcResponse::ok(v),
@@ -1392,6 +1401,30 @@ async fn dispatch_inner(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },
+        "repo.actions.getPullRequestTarget" => {
+            match crate::actions::rpc::get_pull_request_target(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
+        "repo.actions.setPullRequestTarget" => {
+            match crate::actions::rpc::set_pull_request_target(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
+        "repo.actions.getForkPrApproval" => {
+            match crate::actions::rpc::get_fork_pr_approval(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
+        "repo.actions.setForkPrApproval" => {
+            match crate::actions::rpc::set_fork_pr_approval(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
         "repo.actions.workflowTemplates.list" => {
             match crate::actions::templates::list_templates(ctx, req.input).await {
                 Ok(v) => RpcResponse::ok(v),

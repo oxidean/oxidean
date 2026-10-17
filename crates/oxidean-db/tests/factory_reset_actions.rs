@@ -68,6 +68,7 @@ async fn factory_reset_actions_wipes_runners_runs_jobs_secrets() {
             "CI",
             Some(&owner.id),
             None,
+            None,
         )
         .await
         .expect("run");

@@ -3330,6 +3330,7 @@ impl Database {
         title: &str,
         triggered_by: Option<&str>,
         head_repo_id: Option<&str>,
+        event_payload_json: Option<&str>,
     ) -> Result<actions::ActionRunRow, String> {
         actions::insert_run(
             self.require_pool()?,
@@ -3343,6 +3344,7 @@ impl Database {
             title,
             triggered_by,
             head_repo_id,
+            event_payload_json,
         )
         .await
     }
@@ -3473,6 +3475,73 @@ impl Database {
         enabled: bool,
     ) -> Result<(), String> {
         actions::set_actions_enabled(self.require_pool()?, repo_id, enabled).await
+    }
+
+    /// `pull_request_target` opt-in — trusted-context PR workflows on forks.
+    pub async fn get_repo_actions_pull_request_target(
+        &self,
+        repo_id: &str,
+    ) -> Result<bool, String> {
+        actions::get_actions_pull_request_target(self.require_pool()?, repo_id).await
+    }
+
+    pub async fn set_repo_actions_pull_request_target(
+        &self,
+        repo_id: &str,
+        enabled: bool,
+    ) -> Result<(), String> {
+        actions::set_actions_pull_request_target(self.require_pool()?, repo_id, enabled).await
+    }
+
+    /// Fork-PR approval policy: 'never' | 'first-time' | 'always'.
+    pub async fn get_repo_actions_fork_pr_approval(&self, repo_id: &str) -> Result<String, String> {
+        actions::get_actions_fork_pr_approval(self.require_pool()?, repo_id).await
+    }
+
+    pub async fn set_repo_actions_fork_pr_approval(
+        &self,
+        repo_id: &str,
+        policy: &str,
+    ) -> Result<(), String> {
+        actions::set_actions_fork_pr_approval(self.require_pool()?, repo_id, policy).await
+    }
+
+    /// Hold a run for maintainer approval (run + claimable jobs →
+    /// `waiting_approval`).
+    pub async fn hold_run_for_approval(&self, run_id: &str) -> Result<(), String> {
+        actions::hold_run_for_approval(self.require_pool()?, run_id).await
+    }
+
+    /// Release an approval-held run — jobs become `waiting` for the
+    /// scheduler's recompute pass to restore.
+    pub async fn approve_action_run(&self, run_id: &str) -> Result<(), String> {
+        actions::approve_run(self.require_pool()?, run_id).await
+    }
+
+    /// `first-time` policy probe — actor has a prior non-held run in repo.
+    pub async fn actor_has_prior_approved_run(
+        &self,
+        repo_id: &str,
+        actor_id: &str,
+    ) -> Result<bool, String> {
+        actions::actor_has_prior_approved_run(self.require_pool()?, repo_id, actor_id).await
+    }
+
+    /// Cron-sweeper tick claim — one fire per (repo, workflow, cron, minute).
+    pub async fn claim_schedule_tick(
+        &self,
+        repo_id: &str,
+        workflow_path: &str,
+        cron: &str,
+        minute: i64,
+    ) -> Result<bool, String> {
+        actions::claim_schedule_tick(self.require_pool()?, repo_id, workflow_path, cron, minute)
+            .await
+    }
+
+    /// Every repo with Actions enabled — the cron sweeper's iteration set.
+    pub async fn list_actions_enabled_repo_ids(&self) -> Result<Vec<String>, String> {
+        actions::list_actions_enabled_repo_ids(self.require_pool()?).await
     }
 
     /// Per-repo unit enable flags (COL-13): issues / pulls, future wiki/boards.

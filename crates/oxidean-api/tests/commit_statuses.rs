@@ -99,6 +99,8 @@ jobs:
         "refs/heads/main",
         Some(&uid),
         None,
+        None,
+        false,
     )
     .await
     .unwrap();
@@ -137,6 +139,8 @@ jobs:
         "refs/heads/main",
         Some(&uid),
         None,
+        None,
+        false,
     )
     .await
     .unwrap();
@@ -184,6 +188,8 @@ jobs:
         "refs/heads/main",
         None,
         None,
+        None,
+        false,
     )
     .await
     .unwrap();

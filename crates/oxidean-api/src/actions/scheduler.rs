@@ -44,7 +44,12 @@ pub async fn recompute_ready_jobs(db: &Database, run_id: &str) -> Result<usize, 
     // already-deep handler chains).
     {
         let jobs = db.list_action_jobs_for_run(run_id).await?;
-        let any_waiting = jobs.iter().any(|j| j.status == "waiting");
+        // Approval-held jobs are `waiting` but invisible to promotion —
+        // a fully held run takes this fast-path exit until approve_run
+        // clears the flag and the next pass re-evaluates.
+        let any_waiting = jobs
+            .iter()
+            .any(|j| j.status == "waiting" && !j.approval_hold);
         let fail_fast_candidate = jobs.iter().any(|f| {
             f.status == "failure"
                 && !f.matrix_key.is_empty()
@@ -244,7 +249,7 @@ async fn needs_pass(
     let mut queued = 0usize;
     let mut resolved = 0usize;
     for job in &jobs {
-        if job.status != "waiting" {
+        if job.status != "waiting" || job.approval_hold {
             continue;
         }
         let needs: Vec<String> = serde_json::from_str(&job.needs_json).unwrap_or_default();
@@ -281,7 +286,11 @@ async fn maxpar_pass(db: &Database, run_id: &str) -> Result<bool, String> {
     let jobs = db.list_action_jobs_for_run(run_id).await?;
     let mut keys: Vec<&str> = Vec::new();
     for j in &jobs {
-        if j.status == "waiting" && j.needs_json == "[]" && !keys.contains(&j.job_key.as_str()) {
+        if j.status == "waiting"
+            && !j.approval_hold
+            && j.needs_json == "[]"
+            && !keys.contains(&j.job_key.as_str())
+        {
             keys.push(&j.job_key);
         }
     }
@@ -302,7 +311,10 @@ async fn maxpar_pass(db: &Database, run_id: &str) -> Result<bool, String> {
             .filter(|l| matches!(l.status.as_str(), "queued" | "in_progress"))
             .count();
         let mut room = cap.saturating_sub(active);
-        for leg in legs.iter().filter(|l| l.status == "waiting") {
+        for leg in legs
+            .iter()
+            .filter(|l| l.status == "waiting" && !l.approval_hold)
+        {
             if room == 0 {
                 break;
             }

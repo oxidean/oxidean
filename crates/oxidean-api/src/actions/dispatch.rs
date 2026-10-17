@@ -89,54 +89,141 @@ async fn dispatch_push_inner(
         return Err(format!("bare repo missing: {}", bare.display()));
     }
 
-    // Prefer the first non-delete branch tip from updates; fall back to HEAD.
-    let (head_sha, head_ref) = pick_push_tip(updates);
-    let treeish = if head_sha.chars().all(|c| c == '0') || head_sha.is_empty() {
-        return Ok(()); // delete-only
-    } else {
-        head_sha.as_str()
+    let sender = match pusher_id {
+        Some(uid) => db
+            .find_user_by_id(uid)
+            .await
+            .ok()
+            .flatten()
+            .map(|u| u.username)
+            .unwrap_or_default(),
+        None => String::new(),
     };
-
-    let discovered = discover_workflows(git, &bare, treeish)
+    let default_branch = db
+        .find_repository_by_id(repository_id)
         .await
-        .map_err(|e| e.to_string())?;
-    for fe in &discovered.errors {
-        tracing::warn!(path = %fe.path, error = %fe.message, "skipping invalid workflow file");
-    }
+        .ok()
+        .flatten()
+        .map(|r| r.default_branch)
+        .unwrap_or_else(|| "main".into());
+    let repository =
+        crate::actions::payload::repository_embed(owner_slug, repo_name, &default_branch);
+    let sender_embed = crate::actions::payload::user_embed(&sender);
 
-    for wf in &discovered.workflows {
-        if !wf.document.triggers.push {
-            continue;
+    // GitHub dispatches one run per updated ref — iterate every non-delete
+    // branch/tag update rather than collapsing to a single tip.
+    for (before, after, refname) in updates {
+        if after.chars().all(|c| c == '0') || after.is_empty() {
+            continue; // ref deletion never runs workflows
         }
-        enqueue_run(
-            db,
-            repository_id,
-            &wf.path,
-            &wf.document,
-            "push",
-            treeish,
-            &head_ref,
-            pusher_id,
-            None,
-        )
-        .await?;
+        let (branch, tag) = if let Some(b) = refname.strip_prefix("refs/heads/") {
+            (Some(b), None)
+        } else if let Some(t) = refname.strip_prefix("refs/tags/") {
+            (None, Some(t))
+        } else {
+            continue; // notes/replace/etc — no push workflows on non-branch/tag refs
+        };
+        let commits = match git.push_event_commits(&bare, before, after, 2048).await {
+            Ok(c) => Some(c),
+            Err(e) => {
+                // Force-push with unreachable `before`, etc. — read as
+                // unconstrained rather than dropping `paths`-filtered runs.
+                tracing::warn!(
+                    error = %e, repository_id, refname,
+                    "push paths filter skipped — commit listing failed"
+                );
+                None
+            }
+        };
+        let changed: Option<Vec<String>> = commits.as_ref().map(|cs| {
+            let mut v: Vec<String> = cs
+                .iter()
+                .flat_map(|c| {
+                    c.added
+                        .iter()
+                        .chain(c.removed.iter())
+                        .chain(c.modified.iter())
+                        .cloned()
+                })
+                .collect();
+            v.sort();
+            v.dedup();
+            v
+        });
+        // `before` all-zeros (ref creation) or unlistable history → GitHub
+        // skips path checks.
+        let changed: Option<Vec<String>> = if before.chars().all(|c| c == '0') || before.is_empty()
+        {
+            None
+        } else {
+            changed
+        };
+
+        let discovered = discover_workflows(git, &bare, after)
+            .await
+            .map_err(|e| e.to_string())?;
+        for fe in &discovered.errors {
+            tracing::warn!(path = %fe.path, error = %fe.message, "skipping invalid workflow file");
+        }
+
+        let payload_commits: Vec<crate::actions::payload::PayloadCommit> = commits
+            .unwrap_or_default()
+            .iter()
+            .map(|c| crate::actions::payload::PayloadCommit {
+                id: c.sha.clone(),
+                message: c.subject.clone(),
+                author_name: c.author_name.clone(),
+                author_email: c.author_email.clone(),
+                timestamp: c.authored_at.clone(),
+                added: c.added.clone(),
+                removed: c.removed.clone(),
+                modified: c.modified.clone(),
+            })
+            .collect();
+        let payload = crate::actions::payload::push_payload(
+            before,
+            after,
+            refname,
+            &payload_commits,
+            if sender.is_empty() {
+                None
+            } else {
+                Some(&sender)
+            },
+            &repository,
+            &sender_embed,
+        );
+
+        for wf in &discovered.workflows {
+            if !wf.document.triggers.push {
+                continue;
+            }
+            if !crate::actions::filters::event_matches(
+                &wf.document.triggers.push_filters,
+                branch,
+                tag,
+                changed.as_deref(),
+                None,
+            ) {
+                continue;
+            }
+            enqueue_run(
+                db,
+                repository_id,
+                &wf.path,
+                &wf.document,
+                "push",
+                after,
+                refname,
+                pusher_id,
+                None,
+                Some(&payload),
+                false,
+            )
+            .await?;
+        }
     }
     Ok(())
-}
-
-fn pick_push_tip(updates: &[(String, String, String)]) -> (String, String) {
-    for (_before, after, refname) in updates {
-        if after.chars().all(|c| c == '0') {
-            continue;
-        }
-        if refname.starts_with("refs/heads/") || refname.starts_with("refs/tags/") {
-            return (after.clone(), refname.clone());
-        }
-    }
-    if let Some((_b, after, refname)) = updates.first() {
-        return (after.clone(), refname.clone());
-    }
-    (String::new(), String::new())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -151,6 +238,11 @@ pub async fn enqueue_run(
     head_ref: &str,
     triggered_by: Option<&str>,
     head_repo_id: Option<&str>,
+    event_payload: Option<&serde_json::Value>,
+    // Fork runs held for maintainer approval — live legs insert with
+    // `approval_hold` set (unclaimable, publicly `waiting_approval`) until
+    // `repo.actions.approveRun` clears the flag.
+    hold_for_approval: bool,
 ) -> Result<(String, Vec<String>), String> {
     let run_id = Uuid::new_v4().to_string();
     // Enqueue-time expression context (Phase 2): github/env/vars/inputs.
@@ -162,7 +254,7 @@ pub async fn enqueue_run(
         run_id: &run_id,
     };
     let (mut ctx, mut eval_warnings) =
-        crate::actions::eval_ctx::build_context(db, repository_id, doc, &prov).await;
+        crate::actions::eval_ctx::build_context(db, repository_id, doc, &prov, event_payload).await;
     // `name:` interpolates — the run's display name and `github.workflow`.
     let mut name_notes = Vec::new();
     let workflow_name = crate::actions::eval_ctx::interp_or_raw(&doc.name, &ctx, &mut name_notes);
@@ -179,6 +271,9 @@ pub async fn enqueue_run(
         &workflow_name,
         triggered_by,
         head_repo_id,
+        event_payload
+            .and_then(|v| serde_json::to_string(v).ok())
+            .as_deref(),
     )
     .await?;
     // Workflow `concurrency:` — recorded on the run; enforcement lands with
@@ -409,6 +504,11 @@ pub async fn enqueue_run(
             if leg_status == "queued" {
                 queued_legs += 1;
             }
+            // Approval-held runs: live legs insert as `waiting` + hold flag —
+            // claim never sees `waiting`, so there is no claim window and the
+            // CHECK-vocabulary stays intact (`waiting_approval` is derived).
+            let held = hold_for_approval && matches!(leg_status, "queued" | "waiting");
+            let insert_status = if held { "waiting" } else { leg_status };
             let leg_name = crate::actions::matrix::leg_display_name(&name, leg);
             let leg_runs_on = if leg.assignment.as_object().is_some_and(|o| !o.is_empty()) {
                 let mut lctx = ctx.clone();
@@ -424,7 +524,8 @@ pub async fn enqueue_run(
             insert.matrix_json = leg.assignment.to_string();
             insert.needs_json = needs_json.clone();
             insert.payload_sha = Some(sha.clone());
-            insert.status = leg_status.into();
+            insert.status = insert_status.into();
+            insert.approval_hold = held;
             insert.timeout_at = timeout_at.clone();
             insert.concurrency_group = concurrency_group.clone();
             insert.outputs_json = job
@@ -446,6 +547,9 @@ pub async fn enqueue_run(
                     "notice"
                 };
                 note.push_str(&format!("::{kind}::{n}\n"));
+            }
+            if held {
+                note.push_str("::notice::run is waiting for maintainer approval (fork policy)\n");
             }
             if leg_status == "waiting" && has_needs {
                 note.push_str(&format!(
@@ -515,6 +619,14 @@ pub async fn enqueue_run(
             _ => {}
         }
     }
+    // Approval gate: set the hold flag on the run — jobs were already
+    // inserted held, and the recompute below skips held `waiting` legs
+    // (the public `waiting_approval` status derives from the flag).
+    if hold_for_approval {
+        if let Err(e) = db.hold_run_for_approval(&run_id).await {
+            tracing::warn!(error = %e, run_id, "approval hold failed — run stays queued");
+        }
+    }
     // Needs-jobs whose upstreams were already terminal at enqueue (e.g. a
     // job skipped by `if: false`) resolve immediately.
     if let Err(e) = Box::pin(crate::actions::scheduler::recompute_ready_jobs(db, &run_id)).await {
@@ -573,9 +685,68 @@ pub async fn dispatch_push_for_sha(
     for fe in &discovered.errors {
         tracing::warn!(path = %fe.path, error = %fe.message, "skipping invalid workflow file");
     }
+    // Helper path has no `before` — synthesize a minimal push payload so
+    // `github.event`/`OXIDEAN_EVENT_PATH` still carry the ref+head shape.
+    let (branch, tag) = if let Some(b) = head_ref.strip_prefix("refs/heads/") {
+        (Some(b), None)
+    } else if let Some(t) = head_ref.strip_prefix("refs/tags/") {
+        (None, Some(t))
+    } else {
+        (None, None)
+    };
+    let commits = git
+        .push_event_commits(bare, "", head_sha, 2048)
+        .await
+        .unwrap_or_default();
+    let repo_row = db.find_repository_by_id(repository_id).await.ok().flatten();
+    let repository = match &repo_row {
+        Some(r) => {
+            let owner = crate::repo::owner_ref_for_repo(db, r)
+                .await
+                .ok()
+                .flatten()
+                .map(|o| o.slug().to_string())
+                .unwrap_or_default();
+            crate::actions::payload::repository_embed(&owner, &r.name, &r.default_branch)
+        }
+        None => serde_json::json!({}),
+    };
+    let payload_commits: Vec<crate::actions::payload::PayloadCommit> = commits
+        .iter()
+        .map(|c| crate::actions::payload::PayloadCommit {
+            id: c.sha.clone(),
+            message: c.subject.clone(),
+            author_name: c.author_name.clone(),
+            author_email: c.author_email.clone(),
+            timestamp: c.authored_at.clone(),
+            added: c.added.clone(),
+            removed: c.removed.clone(),
+            modified: c.modified.clone(),
+        })
+        .collect();
+    let payload = crate::actions::payload::push_payload(
+        "",
+        head_sha,
+        head_ref,
+        &payload_commits,
+        None,
+        &repository,
+        &serde_json::json!({}),
+    );
     let mut n = 0;
     for wf in &discovered.workflows {
         if !wf.document.triggers.push {
+            continue;
+        }
+        // No `before` → changed set unknown → paths filters unconstrained
+        // (same as ref-creation semantics).
+        if !crate::actions::filters::event_matches(
+            &wf.document.triggers.push_filters,
+            branch,
+            tag,
+            None,
+            None,
+        ) {
             continue;
         }
         enqueue_run(
@@ -588,6 +759,8 @@ pub async fn dispatch_push_for_sha(
             head_ref,
             pusher_id,
             None,
+            Some(&payload),
+            false,
         )
         .await?;
         n += 1;

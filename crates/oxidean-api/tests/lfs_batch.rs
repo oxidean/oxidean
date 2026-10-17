@@ -259,6 +259,7 @@ async fn mint_job_token(
         "ci",
         Some(user_id),
         None,
+        None,
     )
     .await
     .expect("insert run");

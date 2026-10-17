@@ -142,6 +142,8 @@ async fn seed_repo_job(db: &Database, yaml: &[u8], key: &str) -> String {
         "refs/heads/main",
         Some(&owner.id),
         None,
+        None,
+        false,
     )
     .await
     .unwrap();

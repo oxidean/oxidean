@@ -13,6 +13,9 @@ use oxidean_core::{
     ActionSecretMetaPublic, ActionSecretPutRequest, ActionSecretsListRequest,
     ActionSecretsListResponse, ActionSetEnabledRequest, ActionWorkflowFileError,
     ActionWorkflowPublic, ActionWorkflowsListRequest, ActionWorkflowsListResponse, AppError,
+    RepoActionsForkPrApprovalRequest, RepoActionsForkPrApprovalResponse,
+    RepoActionsPullRequestTargetRequest, RepoActionsPullRequestTargetResponse,
+    RepoActionsSetForkPrApprovalRequest, RepoActionsSetPullRequestTargetRequest,
 };
 use oxidean_db::{ActionJobRow, ActionRunFilter, ActionRunRow, ActionRunnerRow};
 
@@ -41,6 +44,17 @@ fn db_err(e: String) -> AppError {
     }
 }
 
+/// Coalesce the `approval_hold` flag into the public `waiting_approval`
+/// status — terminal stored statuses always win (a cancelled held run is
+/// `cancelled`, not `waiting_approval`).
+fn public_status(status: &str, approval_hold: bool) -> String {
+    if approval_hold && !matches!(status, "success" | "failure" | "cancelled" | "skipped") {
+        "waiting_approval".into()
+    } else {
+        status.into()
+    }
+}
+
 fn run_public(r: &ActionRunRow, actors: &HashMap<String, RunActor>) -> ActionRunPublic {
     let actor = r.triggered_by.as_ref().and_then(|id| actors.get(id));
     ActionRunPublic {
@@ -51,7 +65,7 @@ fn run_public(r: &ActionRunRow, actors: &HashMap<String, RunActor>) -> ActionRun
         event: r.event.clone(),
         head_sha: r.head_sha.clone(),
         head_ref: r.head_ref.clone(),
-        status: r.status.clone(),
+        status: public_status(&r.status, r.approval_hold),
         title: r.title.clone(),
         run_number: r.run_number,
         actor: actor.map(|a| a.username.clone()),
@@ -104,7 +118,7 @@ fn job_public(j: &ActionJobRow) -> ActionJobPublic {
         run_id: j.run_id.clone(),
         job_key: j.job_key.clone(),
         name: j.name.clone(),
-        status: j.status.clone(),
+        status: public_status(&j.status, j.approval_hold),
         runs_on,
         started_at: j.started_at.clone(),
         finished_at: j.finished_at.clone(),
@@ -420,6 +434,107 @@ pub async fn set_enabled(
     })
 }
 
+/// `repo.actions.getPullRequestTarget` — Read+; repository opt-in for the
+/// `pull_request_target` trigger.
+pub async fn get_pull_request_target(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<RepoActionsPullRequestTargetResponse, AppError> {
+    let req: RepoActionsPullRequestTargetRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid repo.actions.getPullRequestTarget input: {e}"),
+        )
+    })?;
+    let accessible = resolve_repo_for_read(ctx, &req.owner, &req.name).await?;
+    if !meets(accessible.capability, Capability::Read) {
+        return Err(not_found());
+    }
+    let enabled = ctx
+        .db
+        .get_repo_actions_pull_request_target(&accessible.row.id)
+        .await
+        .map_err(db_err)?;
+    Ok(RepoActionsPullRequestTargetResponse { enabled })
+}
+
+/// `repo.actions.setPullRequestTarget` — Admin; enables trusted-context PR
+/// workflows (`pull_request_target`). Off by default — opting in runs
+/// workflow code from the *base* ref with full secrets on PR events, which is
+/// why it requires Admin rather than Write.
+pub async fn set_pull_request_target(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<RepoActionsPullRequestTargetResponse, AppError> {
+    let _ = require_verified(ctx).await?;
+    let req: RepoActionsSetPullRequestTargetRequest =
+        serde_json::from_value(input).map_err(|e| {
+            AppError::new(
+                "rpc.bad_input",
+                format!("invalid repo.actions.setPullRequestTarget input: {e}"),
+            )
+        })?;
+    let accessible = resolve_repo_for_admin(ctx, &req.owner, &req.name).await?;
+    ctx.db
+        .set_repo_actions_pull_request_target(&accessible.row.id, req.enabled)
+        .await
+        .map_err(db_err)?;
+    Ok(RepoActionsPullRequestTargetResponse {
+        enabled: req.enabled,
+    })
+}
+
+/// `repo.actions.getForkPrApproval` — Read+; the fork PR run approval policy.
+pub async fn get_fork_pr_approval(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<RepoActionsForkPrApprovalResponse, AppError> {
+    let req: RepoActionsForkPrApprovalRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid repo.actions.getForkPrApproval input: {e}"),
+        )
+    })?;
+    let accessible = resolve_repo_for_read(ctx, &req.owner, &req.name).await?;
+    if !meets(accessible.capability, Capability::Read) {
+        return Err(not_found());
+    }
+    let policy = ctx
+        .db
+        .get_repo_actions_fork_pr_approval(&accessible.row.id)
+        .await
+        .map_err(db_err)?;
+    Ok(RepoActionsForkPrApprovalResponse { policy })
+}
+
+/// `repo.actions.setForkPrApproval` — Admin; `never` | `first-time` |
+/// `always`. Controls whether `pull_request` runs from fork heads are held
+/// in `waiting_approval` until a maintainer approves them.
+pub async fn set_fork_pr_approval(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<RepoActionsForkPrApprovalResponse, AppError> {
+    let _ = require_verified(ctx).await?;
+    let req: RepoActionsSetForkPrApprovalRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid repo.actions.setForkPrApproval input: {e}"),
+        )
+    })?;
+    if !matches!(req.policy.as_str(), "never" | "first-time" | "always") {
+        return Err(AppError::new(
+            "rpc.bad_input",
+            "policy must be one of: never, first-time, always",
+        ));
+    }
+    let accessible = resolve_repo_for_admin(ctx, &req.owner, &req.name).await?;
+    ctx.db
+        .set_repo_actions_fork_pr_approval(&accessible.row.id, &req.policy)
+        .await
+        .map_err(db_err)?;
+    Ok(RepoActionsForkPrApprovalResponse { policy: req.policy })
+}
+
 /// `admin.actions.createRegistrationToken` — instance Admin; one-time token (D-ACT-08).
 pub async fn admin_create_registration_token(
     ctx: &RpcCtx,
@@ -579,7 +694,27 @@ pub async fn dispatch_workflow(
             "workflow does not declare the workflow_dispatch trigger",
         ));
     }
+    // `on.workflow_dispatch.inputs` — validate/coerce the caller's inputs
+    // against the declared types; undeclared inputs pass through (GitHub
+    // accepts extras and surfaces them in `github.event.inputs`).
+    let inputs = resolve_dispatch_inputs(
+        wf.document.triggers.dispatch_inputs.as_ref(),
+        req.inputs.as_ref(),
+    )
+    .map_err(|msg| AppError::new("rpc.bad_input", msg))?;
     let head_ref = ref_display(&req.git_ref, &accessible.row.default_branch);
+    let repository = crate::actions::payload::repository_embed(
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.default_branch,
+    );
+    let sender = crate::actions::payload::user_embed(&user.username);
+    let payload = crate::actions::payload::workflow_dispatch_payload(
+        &head_ref,
+        &inputs,
+        &repository,
+        &sender,
+    );
     let (run_id, _jobs) = enqueue_run(
         &ctx.db,
         &accessible.row.id,
@@ -590,6 +725,8 @@ pub async fn dispatch_workflow(
         &head_ref,
         Some(&user.id),
         None,
+        Some(&payload),
+        false,
     )
     .await
     .map_err(db_err)?;
@@ -597,6 +734,130 @@ pub async fn dispatch_workflow(
         ok: true,
         run_id: Some(run_id),
     })
+}
+
+/// Validate/coerce `workflow_dispatch` inputs against the workflow's declared
+/// `on.workflow_dispatch.inputs` map. GitHub semantics:
+/// - `string` (default type)/`environment` → string values.
+/// - `boolean` → JSON booleans (string "true"/"false" coerced).
+/// - `number` → JSON numbers.
+/// - `choice` → string in the declared `options` list.
+/// - `required: true` with no `default` → must be supplied.
+/// - Undeclared names pass through verbatim.
+fn resolve_dispatch_inputs(
+    declared: Option<&serde_json::Value>,
+    supplied: Option<&serde_json::Value>,
+) -> Result<serde_json::Value, String> {
+    let mut out = serde_json::Map::new();
+    if let Some(map) = supplied.and_then(|v| v.as_object()) {
+        for (k, v) in map {
+            out.insert(k.clone(), v.clone());
+        }
+    } else if supplied.is_some() {
+        return Err("inputs must be an object".into());
+    }
+    let Some(declared) = declared.and_then(|v| v.as_object()) else {
+        return Ok(serde_json::Value::Object(out));
+    };
+    for (name, spec) in declared {
+        let spec = spec.as_object();
+        let ty = spec
+            .and_then(|s| s.get("type"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("string");
+        let present = out.contains_key(name);
+        if !present {
+            let default = spec.and_then(|s| s.get("default")).cloned();
+            match default {
+                Some(d) => {
+                    out.insert(name.clone(), d);
+                }
+                None => {
+                    if spec
+                        .and_then(|s| s.get("required"))
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false)
+                    {
+                        return Err(format!("input '{name}' is required"));
+                    }
+                    continue;
+                }
+            }
+        }
+        let v = out.get(name).cloned().unwrap_or(serde_json::Value::Null);
+        let coerced = match ty {
+            "boolean" => match &v {
+                serde_json::Value::Bool(_) => v,
+                serde_json::Value::String(s) if s == "true" || s == "false" => {
+                    serde_json::Value::Bool(s == "true")
+                }
+                _ => return Err(format!("input '{name}' must be a boolean")),
+            },
+            "number" => match &v {
+                serde_json::Value::Number(_) => v,
+                serde_json::Value::String(s) => s
+                    .parse::<f64>()
+                    .ok()
+                    .and_then(serde_json::Number::from_f64)
+                    .map(serde_json::Value::Number)
+                    .ok_or_else(|| format!("input '{name}' must be a number"))?,
+                _ => return Err(format!("input '{name}' must be a number")),
+            },
+            "choice" => {
+                let opts: Vec<String> = spec
+                    .and_then(|s| s.get("options"))
+                    .and_then(|v| v.as_array())
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|o| o.as_str().map(str::to_string))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let sv = v.as_str().unwrap_or_default();
+                if !opts.is_empty() && !opts.iter().any(|o| o == sv) {
+                    return Err(format!(
+                        "input '{name}' must be one of: {}",
+                        opts.join(", ")
+                    ));
+                }
+                v
+            }
+            // string / environment / unknown types — accept as-is (strings
+            // are the norm; GitHub coerces scalars to strings, we keep the
+            // caller's JSON type since expressions compare loosely).
+            _ => v,
+        };
+        out.insert(name.clone(), coerced);
+    }
+    Ok(serde_json::Value::Object(out))
+}
+
+/// `repo.actions.approveRun` — Write+; releases a fork PR run held by the
+/// `actions_fork_pr_approval` policy (clears `approval_hold`; the public
+/// `waiting_approval` status is derived from that flag).
+pub async fn approve_run(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<ActionRunMutationResponse, AppError> {
+    let (req, accessible, run) = run_mutation_target(ctx, input, "approveRun").await?;
+    if !run.approval_hold {
+        return Err(AppError::new(
+            "repo.actions.run_not_held",
+            "run is not waiting for approval",
+        ));
+    }
+    ctx.db.approve_action_run(&run.id).await.map_err(db_err)?;
+    if let Err(e) = Box::pin(crate::actions::scheduler::recompute_ready_jobs(
+        &ctx.db, &run.id,
+    ))
+    .await
+    {
+        tracing::warn!(error = %e, run_id = %run.id, "post-approval recompute failed");
+    }
+    if let Err(e) = ctx.db.recompute_action_run_status(&run.id).await {
+        tracing::warn!(error = %e, run_id = %run.id, "post-approval rollup failed");
+    }
+    run_mutation_response(ctx, &accessible.row.id, &req.run_id).await
 }
 
 /// `repo.actions.rerunRun` — Write+; requeues the run and all its jobs.

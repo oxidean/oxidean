@@ -261,6 +261,7 @@ async fn actions_secrets_injected_into_fetch_task() {
         "CI",
         None,
         None,
+        None,
     )
     .await
     .unwrap();

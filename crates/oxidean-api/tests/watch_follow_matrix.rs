@@ -1001,6 +1001,8 @@ jobs:
         "refs/heads/main",
         Some(&pusher_id),
         None,
+        None,
+        false,
     )
     .await
     .unwrap();
@@ -1148,6 +1150,8 @@ async fn workflow_run_failure_fanout() {
         "refs/heads/main",
         Some(&pusher_id),
         None,
+        None,
+        false,
     )
     .await
     .unwrap();
@@ -1270,6 +1274,8 @@ async fn workflow_run_cancel_fanout_and_finished_guard() {
         "refs/heads/main",
         Some(&owner_id),
         None,
+        None,
+        false,
     )
     .await
     .unwrap();

@@ -68,11 +68,67 @@ pub struct WorkflowDocument {
     pub warnings: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct WorkflowTriggers {
     pub push: bool,
     pub pull_request: bool,
+    /// `on.pull_request_target` — trusted-context PR runs; dispatch requires
+    /// the repository `actions_pull_request_target` opt-in.
+    pub pull_request_target: bool,
     pub workflow_dispatch: bool,
+    /// `on.release` — fires from the release lifecycle hooks.
+    pub release: bool,
+    /// `on.issues` — fires from the issue lifecycle hooks.
+    pub issues: bool,
+    /// `on.schedule` — fires from the cron sweeper (default branch only).
+    pub schedule: bool,
+    /// Filter detail under `on.push` — empty = match-all.
+    pub push_filters: EventFilters,
+    /// Filter detail under `on.pull_request`.
+    pub pull_request_filters: EventFilters,
+    /// Filter detail under `on.pull_request_target`.
+    pub pull_request_target_filters: EventFilters,
+    /// `on.release.types` — empty = GitHub's default subset
+    /// (published/created/edited/prereleased/released).
+    pub release_types: Vec<String>,
+    /// `on.issues.types` — empty = GitHub's default (all activity types).
+    pub issues_types: Vec<String>,
+    /// `on.schedule[].cron` entries.
+    pub schedule_crons: Vec<String>,
+    /// `on.workflow_dispatch.inputs` — `{name: {type, default, required,
+    /// options, description}}` normalized to JSON for the dispatch RPC.
+    pub dispatch_inputs: Option<JsonValue>,
+}
+
+/// `on.<event>` filter detail. GitHub's semantics per key:
+/// - `branches`/`tags`/`paths`/`types` — at least one pattern must match;
+///   empty = no constraint.
+/// - `*-ignore` variants — fire only when NO pattern matches; GitHub forbids
+///   mixing a positive list with its `-ignore` twin on the same event.
+/// - `types` applies to `pull_request`/`pull_request_target` (activity types
+///   like `opened`/`synchronize`/`reopened`); meaningless on `push`.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct EventFilters {
+    pub branches: Vec<String>,
+    pub branches_ignore: Vec<String>,
+    pub tags: Vec<String>,
+    pub tags_ignore: Vec<String>,
+    pub paths: Vec<String>,
+    pub paths_ignore: Vec<String>,
+    pub types: Vec<String>,
+}
+
+impl EventFilters {
+    /// True when no constraint is set (bare `on: push` etc.).
+    pub fn is_empty(&self) -> bool {
+        self.branches.is_empty()
+            && self.branches_ignore.is_empty()
+            && self.tags.is_empty()
+            && self.tags_ignore.is_empty()
+            && self.paths.is_empty()
+            && self.paths_ignore.is_empty()
+            && self.types.is_empty()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -393,39 +449,137 @@ fn check_json(v: &JsonValue, unsupported: &mut Vec<String>, warnings: &mut Vec<S
     }
 }
 
-fn parse_triggers(on: Option<RawOn>) -> (WorkflowTriggers, Vec<String>) {
+fn parse_triggers(on: Option<RawOn>) -> (WorkflowTriggers, Vec<String>, Vec<String>) {
     let mut t = WorkflowTriggers::default();
-    let mut unsupported = Vec::new();
+    let unsupported = Vec::new();
+    let mut warnings = Vec::new();
     match on {
         None => {}
-        Some(RawOn::Single(s)) => apply_event(&mut t, &mut unsupported, &s),
+        Some(RawOn::Single(s)) => apply_event(&mut t, &s, None),
         Some(RawOn::List(list)) => {
             for s in list {
-                apply_event(&mut t, &mut unsupported, &s);
+                apply_event(&mut t, &s, None);
             }
         }
         Some(RawOn::Map(map)) => {
-            for (k, _) in map {
+            for (k, v) in &map {
                 if let serde_yaml::Value::String(s) = k {
-                    apply_event(&mut t, &mut unsupported, &s);
+                    apply_event(&mut t, s, Some(v));
                 }
             }
         }
     }
-    (t, unsupported)
+    // GitHub forbids mixing a positive filter list with its `-ignore` twin on
+    // the same event — surface it as a validation failure rather than
+    // silently honoring one side.
+    for (event, f) in [
+        ("push", &t.push_filters),
+        ("pull_request", &t.pull_request_filters),
+        ("pull_request_target", &t.pull_request_target_filters),
+    ] {
+        if !f.branches.is_empty() && !f.branches_ignore.is_empty() {
+            warnings.push(format!(
+                "on.{event}: 'branches' and 'branches-ignore' are mutually exclusive"
+            ));
+        }
+        if !f.tags.is_empty() && !f.tags_ignore.is_empty() {
+            warnings.push(format!(
+                "on.{event}: 'tags' and 'tags-ignore' are mutually exclusive"
+            ));
+        }
+        if !f.paths.is_empty() && !f.paths_ignore.is_empty() {
+            warnings.push(format!(
+                "on.{event}: 'paths' and 'paths-ignore' are mutually exclusive"
+            ));
+        }
+    }
+    (t, unsupported, warnings)
 }
 
-fn apply_event(t: &mut WorkflowTriggers, unsupported: &mut Vec<String>, name: &str) {
+fn apply_event(t: &mut WorkflowTriggers, name: &str, value: Option<&serde_yaml::Value>) {
     match name.trim() {
-        "push" => t.push = true,
-        "pull_request" => t.pull_request = true,
-        "workflow_dispatch" => t.workflow_dispatch = true,
-        // Dangerous-on-forks event we never fire — restricted until designed in.
-        "pull_request_target" => unsupported.push("pull_request_target".into()),
+        "push" => {
+            t.push = true;
+            t.push_filters = parse_event_filters(value);
+        }
+        "pull_request" => {
+            t.pull_request = true;
+            t.pull_request_filters = parse_event_filters(value);
+        }
+        "pull_request_target" => {
+            t.pull_request_target = true;
+            t.pull_request_target_filters = parse_event_filters(value);
+        }
+        "workflow_dispatch" => {
+            t.workflow_dispatch = true;
+            if let Some(serde_yaml::Value::Mapping(m)) = value {
+                if let Some(inputs) = m.get(serde_yaml::Value::String("inputs".into())) {
+                    t.dispatch_inputs = serde_json::to_value(inputs).ok();
+                }
+            }
+        }
+        "schedule" => {
+            t.schedule = true;
+            // `on.schedule` is a list of `{cron: "…"}` entries.
+            if let Some(serde_yaml::Value::Sequence(items)) = value {
+                for item in items {
+                    if let Some(cron) = item
+                        .get(serde_yaml::Value::String("cron".into()))
+                        .and_then(|v| v.as_str())
+                    {
+                        t.schedule_crons.push(cron.trim().to_string());
+                    }
+                }
+            }
+        }
+        "release" => {
+            t.release = true;
+            t.release_types = parse_event_filters(value).types;
+        }
+        "issues" => {
+            t.issues = true;
+            t.issues_types = parse_event_filters(value).types;
+        }
         _ => {
-            // Other unimplemented events (schedule, release, issues, …) simply
+            // Other unimplemented events (fork, watch, discussion, …) simply
             // never fire — harmless to ignore, not mis-executed.
         }
+    }
+}
+
+/// Parse the `{branches, tags, paths, types, *-ignore}` mapping under an
+/// `on.<event>` key. Bare `on: push:` (null value) → empty filters.
+fn parse_event_filters(value: Option<&serde_yaml::Value>) -> EventFilters {
+    let mut f = EventFilters::default();
+    let Some(serde_yaml::Value::Mapping(m)) = value else {
+        return f;
+    };
+    for (k, v) in m {
+        let Some(key) = k.as_str() else { continue };
+        let list = yaml_string_list(v);
+        match key.trim() {
+            "branches" => f.branches = list,
+            "branches-ignore" => f.branches_ignore = list,
+            "tags" => f.tags = list,
+            "tags-ignore" => f.tags_ignore = list,
+            "paths" => f.paths = list,
+            "paths-ignore" => f.paths_ignore = list,
+            "types" => f.types = list,
+            _ => {}
+        }
+    }
+    f
+}
+
+/// YAML scalar-or-sequence → Vec<String> (filter keys accept both shapes).
+fn yaml_string_list(v: &serde_yaml::Value) -> Vec<String> {
+    match v {
+        serde_yaml::Value::String(s) => vec![s.clone()],
+        serde_yaml::Value::Sequence(items) => items
+            .iter()
+            .filter_map(|i| i.as_str().map(str::to_string))
+            .collect(),
+        _ => Vec::new(),
     }
 }
 
@@ -517,8 +671,7 @@ pub fn parse_workflow_yaml(bytes: &[u8]) -> Result<WorkflowDocument, ParseError>
         });
     }
 
-    let (triggers, mut unsupported) = parse_triggers(raw.on);
-    let mut warnings = Vec::new();
+    let (triggers, mut unsupported, mut warnings) = parse_triggers(raw.on);
     let wf_concurrency = parse_concurrency(raw.concurrency.as_ref());
     check_str(&name, &mut unsupported, &mut warnings);
     let wf_env = raw.env.map(yaml_to_json).transpose()?;
@@ -1072,18 +1225,6 @@ jobs:
     secrets: inherit
 "#,
                 &["reusable-workflow"],
-            ),
-            (
-                br#"
-name: CI
-on: pull_request_target
-jobs:
-  a:
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo hi
-"#,
-                &["pull_request_target"],
             ),
         ];
         for (yaml, want) in cases {

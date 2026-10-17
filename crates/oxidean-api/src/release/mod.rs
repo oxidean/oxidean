@@ -192,6 +192,7 @@ pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<ReleasePub
         &ctx.env_name,
     )
     .await;
+    notify_actions_release(ctx, &accessible, action, &row, &user).await;
     Ok(public)
 }
 
@@ -319,6 +320,7 @@ pub async fn update(ctx: &RpcCtx, input: serde_json::Value) -> Result<ReleasePub
         &ctx.env_name,
     )
     .await;
+    notify_actions_release(ctx, &accessible, action, &row, &user).await;
     Ok(public)
 }
 
@@ -393,7 +395,57 @@ pub async fn delete(
         &ctx.env_name,
     )
     .await;
+    notify_actions_release(ctx, &accessible, "deleted", &existing, &user).await;
     Ok(DeleteReleaseResponse { ok: true })
+}
+
+/// `on: release` Actions trigger — soft-fail (the mutation already committed).
+/// `action` is the same activity name the webhook fan-out emitted.
+async fn notify_actions_release(
+    ctx: &RpcCtx,
+    accessible: &crate::repo::AccessibleRepo,
+    action: &str,
+    row: &oxidean_db::ReleaseRow,
+    user: &oxidean_db::UserRow,
+) {
+    let Ok(bare) = bare_repo_path(
+        &ctx.repos_dir,
+        &accessible.owner_username,
+        &accessible.row.name,
+    ) else {
+        return;
+    };
+    let repository = crate::actions::payload::repository_embed(
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.default_branch,
+    );
+    let sender = crate::actions::payload::user_embed(&user.username);
+    let payload = crate::actions::payload::release_payload(
+        action,
+        &row.tag_name,
+        &row.title,
+        row.draft,
+        row.prerelease,
+        &row.body,
+        &repository,
+        &sender,
+    );
+    crate::actions::events::notify_lifecycle_actions(
+        &ctx.db,
+        ctx.git.as_ref(),
+        &crate::actions::events::LifecycleEvent {
+            bare_repo: bare,
+            repository_id: accessible.row.id.clone(),
+            default_branch: accessible.row.default_branch.clone(),
+            event_name: "release",
+            action: action.to_string(),
+            payload,
+            actor_id: Some(user.id.clone()),
+            actions_enabled_instance: crate::actions::env_actions_enabled(),
+        },
+    )
+    .await;
 }
 
 pub async fn delete_asset(

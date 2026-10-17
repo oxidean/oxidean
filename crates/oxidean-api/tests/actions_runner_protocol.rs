@@ -149,6 +149,8 @@ jobs:
         "refs/heads/main",
         Some(&owner.id),
         None,
+        None,
+        false,
     )
     .await
     .unwrap();
@@ -247,6 +249,8 @@ jobs:
         "refs/heads/main",
         Some(&owner.id),
         None,
+        None,
+        false,
     )
     .await
     .unwrap();
@@ -460,6 +464,8 @@ jobs:
         "refs/heads/main",
         Some(&owner.id),
         None,
+        None,
+        false,
     )
     .await
     .unwrap();
@@ -771,6 +777,8 @@ jobs:
         "refs/heads/feature",
         Some(&owner.id),
         Some(&fork.id),
+        None,
+        false,
     )
     .await
     .unwrap();
@@ -817,6 +825,8 @@ jobs:
         "refs/heads/feature2",
         Some(&owner.id),
         Some(&base.id),
+        None,
+        false,
     )
     .await
     .unwrap();
@@ -837,6 +847,7 @@ jobs:
         "refs/heads/feature9",
         "CI",
         Some(&owner.id),
+        None,
         None,
     )
     .await

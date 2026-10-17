@@ -190,6 +190,7 @@ async fn list_runs_anonymous_on_public_repo() {
             "CI",
             Some(&fx.owner_id),
             None,
+            None,
         )
         .await
         .unwrap();
@@ -250,6 +251,7 @@ async fn list_runs_paginates() {
                 "CI",
                 None,
                 None,
+                None,
             )
             .await
             .unwrap();
@@ -294,6 +296,7 @@ async fn get_run_anonymous_includes_jobs_and_timestamps() {
             "main",
             "CI",
             Some(&fx.owner_id),
+            None,
             None,
         )
         .await
@@ -397,6 +400,7 @@ async fn rerun_and_cancel_run() {
             "main",
             "CI",
             Some(&fx.owner_id),
+            None,
             None,
         )
         .await

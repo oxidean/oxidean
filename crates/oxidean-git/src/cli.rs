@@ -8,8 +8,8 @@ use tokio::process::Command;
 use crate::backend::{
     validate_remote_url, ArchiveFormat, BlameFile, BlameLine, CommitDetail, CommitSummary,
     CommitTimesResult, ContributorScan, ContributorStat, ContributorSummary, DiffFile, DiffResult,
-    FileChange, FilesCommit, GitBackend, GitError, GitRef, GrepHit, GrepResult, RemoteAuthKind,
-    RemoteCredentials, SizedBlobEntry, TreeEntry, TreeEntryKind, ARCHIVE_TIMEOUT,
+    FileChange, FilesCommit, GitBackend, GitError, GitRef, GrepHit, GrepResult, PushEventCommit,
+    RemoteAuthKind, RemoteCredentials, SizedBlobEntry, TreeEntry, TreeEntryKind, ARCHIVE_TIMEOUT,
     BLAME_SOFT_MAX_LINES, DIFF_SOFT_MAX_BYTES, FORGE_NOREPLY_EMAIL,
 };
 
@@ -2876,6 +2876,100 @@ impl GitBackend for CliGitBackend {
         for j in joins {
             if let Ok(Some((name, commit))) = j.await {
                 out.insert(name, commit);
+            }
+        }
+        Ok(out)
+    }
+
+    async fn push_event_commits(
+        &self,
+        repo: &Path,
+        old: &str,
+        new: &str,
+        limit: u32,
+    ) -> Result<Vec<PushEventCommit>, GitError> {
+        let new = validate_treeish(new)?;
+        let repo_s = repo_str(repo)?;
+        let rev = Command::new("git")
+            .args([
+                "-C",
+                repo_s,
+                "rev-parse",
+                "--verify",
+                &format!("{new}^{{commit}}"),
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .await
+            .map_err(|e| GitError::Process(format!("failed to spawn git: {e}")))?;
+        if !rev.status.success() {
+            return Ok(Vec::new());
+        }
+        // Records are NUL-delimited header fields; `--name-status` rows follow
+        // each header as `X\tpath` lines (`R100\told\tnew` for renames).
+        // core.quotePath=false keeps non-ASCII names literal.
+        let old = old.trim();
+        let max = format!("--max-count={}", limit.clamp(1, 2048));
+        let mut args = vec![
+            "-C",
+            repo_s,
+            "-c",
+            "core.quotePath=false",
+            "log",
+            "--format=%x00%H%x00%an%x00%ae%x00%aI%x00%s%x00",
+            "--name-status",
+            &max,
+            new,
+            "--not",
+        ];
+        if old.is_empty() || old.bytes().all(|b| b == b'0') {
+            args.push("--all");
+        } else {
+            args.push(validate_treeish(old)?);
+        }
+        let stdout = run_git_stdout(&args).await?;
+        let text = String::from_utf8_lossy(&stdout);
+        let mut out: Vec<PushEventCommit> = Vec::new();
+        for line in text.split('\n') {
+            if let Some(rec) = line.strip_prefix('\0') {
+                let f: Vec<&str> = rec.split('\0').collect();
+                if f.len() < 5 {
+                    continue;
+                }
+                out.push(PushEventCommit {
+                    sha: f[0].to_string(),
+                    author_name: f[1].to_string(),
+                    author_email: f[2].to_string(),
+                    authored_at: f[3].to_string(),
+                    subject: f[4].to_string(),
+                    added: Vec::new(),
+                    removed: Vec::new(),
+                    modified: Vec::new(),
+                });
+                continue;
+            }
+            let Some(cur) = out.last_mut() else { continue };
+            let Some((status, rest)) = line.split_once('\t') else {
+                continue;
+            };
+            match status {
+                "A" => cur.added.push(rest.to_string()),
+                "D" => cur.removed.push(rest.to_string()),
+                "M" | "T" => cur.modified.push(rest.to_string()),
+                "C" => {
+                    if let Some((_, newp)) = rest.split_once('\t') {
+                        cur.added.push(newp.to_string());
+                    }
+                }
+                s if s.starts_with('R') => {
+                    if let Some((oldp, newp)) = rest.split_once('\t') {
+                        cur.removed.push(oldp.to_string());
+                        cur.added.push(newp.to_string());
+                    }
+                }
+                _ => {}
             }
         }
         Ok(out)

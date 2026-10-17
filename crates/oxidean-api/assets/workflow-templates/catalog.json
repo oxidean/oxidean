@@ -330,20 +330,16 @@
   },
   "compat": {
     "automation/greetings": {
-      "status": "restricted",
-      "missing_features": [
-        "pull_request_target"
-      ],
+      "status": "partial",
+      "missing_features": [],
       "unsupported_actions": [
         "actions/first-interaction@v1"
       ],
       "warnings": []
     },
     "automation/label": {
-      "status": "restricted",
-      "missing_features": [
-        "pull_request_target"
-      ],
+      "status": "partial",
+      "missing_features": [],
       "unsupported_actions": [
         "actions/labeler@v4"
       ],

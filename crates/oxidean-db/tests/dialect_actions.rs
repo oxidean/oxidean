@@ -163,6 +163,7 @@ async fn dialect_actions_schema_presence() {
             "CI",
             Some(&owner.id),
             None,
+            None,
         )
         .await
         .expect("run");
@@ -278,6 +279,7 @@ async fn dialect_actions_claim_race() {
             "refs/heads/main",
             "CI",
             Some(&owner.id),
+            None,
             None,
         )
         .await

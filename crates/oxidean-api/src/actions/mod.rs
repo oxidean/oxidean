@@ -1,15 +1,18 @@
 //! Actions control plane (Phase 19) — parse/discover/dispatch/protocol; no in-process job execution.
 
 pub mod artifacts;
+pub mod cron;
 pub mod dispatch;
 pub mod eval_ctx;
 pub mod events;
+pub mod filters;
 pub mod gitea_proto;
 pub mod hooks;
 pub mod job_tokens;
 pub mod logs;
 pub mod matrix;
 pub mod parse;
+pub mod payload;
 pub mod rpc;
 pub mod runner_proto;
 pub mod scheduler;
@@ -21,8 +24,8 @@ pub mod workflow;
 
 pub use dispatch::{dispatch_push_for_sha, enqueue_run, env_actions_enabled, notify_push_actions};
 pub use events::{
-    dispatch_pull_request, dispatch_pull_request_for_sha, notify_pull_request_actions,
-    PullRequestAction, PullRequestEvent,
+    dispatch_pull_request, dispatch_pull_request_for_sha, notify_lifecycle_actions,
+    notify_pull_request_actions, LifecycleEvent, PullRequestAction, PullRequestEvent,
 };
 pub use logs::{append_job_log, read_job_log};
 pub use parse::{

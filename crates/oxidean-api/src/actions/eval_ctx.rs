@@ -33,6 +33,7 @@ fn github_ctx(
     actor_id: &str,
     doc_name: &str,
     prov: &Provenance<'_>,
+    event_payload: Option<&JsonValue>,
 ) -> JsonValue {
     let ref_name = prov
         .head_ref
@@ -51,8 +52,9 @@ fn github_ctx(
         "actor_id": actor_id,
         "workflow": doc_name,
         "run_id": prov.run_id,
-        // `github.event` fills in when event payloads land (triggers phase).
-        "event": {},
+        // Frozen event payload captured at dispatch — expressions see the
+        // same `github.event` the runner does via `OXIDEAN_EVENT_PATH`.
+        "event": event_payload.cloned().unwrap_or_else(|| serde_json::json!({})),
     })
 }
 
@@ -65,6 +67,7 @@ pub async fn build_context(
     repository_id: &str,
     doc: &WorkflowDocument,
     prov: &Provenance<'_>,
+    event_payload: Option<&JsonValue>,
 ) -> (Context, Vec<String>) {
     let mut warnings = Vec::new();
     let repo = db.find_repository_by_id(repository_id).await.ok().flatten();
@@ -100,11 +103,19 @@ pub async fn build_context(
         &actor_id,
         &doc.name,
         prov,
+        event_payload,
     );
+    // `inputs` mirrors `github.event.inputs` — `workflow_dispatch` payloads
+    // carry the caller's inputs there (GitHub parity).
+    let inputs = event_payload
+        .and_then(|p| p.get("inputs"))
+        .and_then(|i| i.as_object())
+        .map(|m| JsonValue::Object(m.clone()))
+        .unwrap_or_else(|| serde_json::json!({}));
     let mut ctx = Context::new()
         .with_context("github", github)
         .with_context("vars", serde_json::json!({}))
-        .with_context("inputs", serde_json::json!({}))
+        .with_context("inputs", inputs)
         .with_context("needs", serde_json::json!({}))
         .with_context("matrix", serde_json::json!({}))
         .with_context("steps", serde_json::json!({}))

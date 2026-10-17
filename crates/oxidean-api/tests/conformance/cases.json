@@ -338,7 +338,7 @@
   {
    "id": "prt-only",
    "kind": "never_dispatch",
-   "note": "pull_request_target is flagged unsupported and never fires; a push-only workflow containing it would validation-fail instead"
+   "note": "pull_request_target parses but the repo opt-in is off by default \u2014 never fires"
   },
   {
    "id": "runs-on-missing",
@@ -545,10 +545,11 @@
   },
   {
    "id": "prt-push",
-   "kind": "validation_failure",
-   "expect_unsupported": [
-    "pull_request_target"
-   ]
+   "kind": "run",
+   "expect_jobs": {
+    "build": "success"
+   },
+   "note": "pull_request_target is a declared (opt-in-gated) trigger \u2014 push still fires normally"
   },
   {
    "id": "empty-steps",

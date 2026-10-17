@@ -256,6 +256,21 @@ pub struct SizedBlobEntry {
     pub size: u64,
 }
 
+/// One entry of a push's commit list — metadata plus the per-file change
+/// sets Actions `push` event payloads carry (`commits[].added/removed/modified`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PushEventCommit {
+    pub sha: String,
+    pub subject: String,
+    pub author_name: String,
+    pub author_email: String,
+    /// ISO-8601 author date (`%aI`).
+    pub authored_at: String,
+    pub added: Vec<String>,
+    pub removed: Vec<String>,
+    pub modified: Vec<String>,
+}
+
 /// One file in a commit or compare diff.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiffFile {
@@ -628,6 +643,18 @@ pub trait GitBackend: Send + Sync {
         dir_path: &str,
         entry_names: &[String],
     ) -> Result<std::collections::HashMap<String, CommitSummary>, GitError>;
+
+    /// `git log --name-status <new> --not <old>` — commits a push introduces,
+    /// each with the per-file added/removed/modified sets Actions payloads and
+    /// `paths` filters need. `old` empty/all-zeros → full history up to `new`.
+    /// Bounded by `limit` (GitHub caps `push.commits` at 2048).
+    async fn push_event_commits(
+        &self,
+        repo: &Path,
+        old: &str,
+        new: &str,
+        limit: u32,
+    ) -> Result<Vec<PushEventCommit>, GitError>;
 
     /// `git rev-list --count <refname>`. Unborn → 0.
     async fn rev_list_count(&self, repo: &Path, refname: &str) -> Result<u64, GitError>;

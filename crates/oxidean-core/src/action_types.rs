@@ -168,6 +168,10 @@ pub struct ActionDispatchRequest {
     pub workflow_id: String,
     /// Branch/tag/SHA to run against.
     pub git_ref: String,
+    /// `on.workflow_dispatch.inputs` values — validated against the declared
+    /// input types at dispatch; missing keys take their declared `default`.
+    #[serde(default)]
+    pub inputs: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
@@ -260,6 +264,48 @@ pub struct RepoActionsEnabledResponse {
 }
 
 pub type ActionEnabledResponse = RepoActionsEnabledResponse;
+
+/// `repo.actions.getPullRequestTarget` / `setPullRequestTarget` — Admin;
+/// repository opt-in for the `pull_request_target` trigger (trusted-context
+/// PR workflows). Read: Read+; Write: Admin.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RepoActionsPullRequestTargetRequest {
+    pub owner: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RepoActionsSetPullRequestTargetRequest {
+    pub owner: String,
+    pub name: String,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RepoActionsPullRequestTargetResponse {
+    pub enabled: bool,
+}
+
+/// `repo.actions.getForkPrApproval` / `setForkPrApproval` — Admin; fork PR
+/// run approval policy: `never` | `first-time` | `always`.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RepoActionsForkPrApprovalRequest {
+    pub owner: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RepoActionsSetForkPrApprovalRequest {
+    pub owner: String,
+    pub name: String,
+    /// `never` (default), `first-time`, or `always`.
+    pub policy: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RepoActionsForkPrApprovalResponse {
+    pub policy: String,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct AdminActionsCreateRegistrationTokenResponse {

@@ -2153,6 +2153,8 @@ export type ActionDispatchRequest = {
   name: string;
   workflow_id: string;
   git_ref: string;
+  /** `on.workflow_dispatch.inputs` values — validated against declared types. */
+  inputs?: Record<string, unknown>;
 };
 
 export type ActionDispatchResponse = {
@@ -2212,6 +2214,37 @@ export type ActionSetEnabledRequest = {
   owner: string;
   name: string;
   enabled: boolean;
+};
+
+export type RepoActionsPullRequestTargetRequest = {
+  owner: string;
+  name: string;
+};
+
+export type RepoActionsSetPullRequestTargetRequest = {
+  owner: string;
+  name: string;
+  enabled: boolean;
+};
+
+export type RepoActionsPullRequestTargetResponse = {
+  enabled: boolean;
+};
+
+export type RepoActionsForkPrApprovalRequest = {
+  owner: string;
+  name: string;
+};
+
+export type RepoActionsSetForkPrApprovalRequest = {
+  owner: string;
+  name: string;
+  /** `never` (default), `first-time`, or `always`. */
+  policy: string;
+};
+
+export type RepoActionsForkPrApprovalResponse = {
+  policy: string;
 };
 
 export type ActionRunnerPublic = {
@@ -4058,6 +4091,32 @@ export function createClient(opts: CreateClientOptions) {
           rpcCall<ActionRunMutationResponse>(opts, "repo.actions.rerunRun", input),
         cancelRun: (input: ActionRunMutationRequest) =>
           rpcCall<ActionRunMutationResponse>(opts, "repo.actions.cancelRun", input),
+        approveRun: (input: ActionRunMutationRequest) =>
+          rpcCall<ActionRunMutationResponse>(opts, "repo.actions.approveRun", input),
+        getPullRequestTarget: (input: RepoActionsPullRequestTargetRequest) =>
+          rpcCall<RepoActionsPullRequestTargetResponse>(
+            opts,
+            "repo.actions.getPullRequestTarget",
+            input,
+          ),
+        setPullRequestTarget: (input: RepoActionsSetPullRequestTargetRequest) =>
+          rpcCall<RepoActionsPullRequestTargetResponse>(
+            opts,
+            "repo.actions.setPullRequestTarget",
+            input,
+          ),
+        getForkPrApproval: (input: RepoActionsForkPrApprovalRequest) =>
+          rpcCall<RepoActionsForkPrApprovalResponse>(
+            opts,
+            "repo.actions.getForkPrApproval",
+            input,
+          ),
+        setForkPrApproval: (input: RepoActionsSetForkPrApprovalRequest) =>
+          rpcCall<RepoActionsForkPrApprovalResponse>(
+            opts,
+            "repo.actions.setForkPrApproval",
+            input,
+          ),
         secrets: {
           list: (input: ActionSecretsListRequest) =>
             rpcCall<ActionSecretsListResponse>(opts, "repo.actions.secrets.list", input),

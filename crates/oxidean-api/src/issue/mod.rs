@@ -289,6 +289,7 @@ pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssuePubli
         &ctx.env_name,
     )
     .await;
+    notify_actions_issue(ctx, &accessible, "opened", &row, &user).await;
     to_public(ctx, &row).await
 }
 
@@ -443,6 +444,7 @@ pub async fn update(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssuePubli
         &ctx.env_name,
     )
     .await;
+    notify_actions_issue(ctx, &accessible, "edited", &updated, &user).await;
     to_public(ctx, &updated).await
 }
 
@@ -488,6 +490,7 @@ pub async fn close(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssuePublic
         &ctx.env_name,
     )
     .await;
+    notify_actions_issue(ctx, &accessible, "closed", &updated, &user).await;
     to_public(ctx, &updated).await
 }
 
@@ -529,6 +532,7 @@ pub async fn reopen(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssuePubli
         &ctx.env_name,
     )
     .await;
+    notify_actions_issue(ctx, &accessible, "reopened", &updated, &user).await;
     to_public(ctx, &updated).await
 }
 
@@ -1442,4 +1446,57 @@ pub async fn links_remove(
         return Err(AppError::new("issue.link_not_found", "Link not found"));
     }
     Ok(RemoveIssueLinkResponse { ok: true })
+}
+
+/// `on: issues` Actions trigger — soft-fail (the mutation already committed).
+/// `action` is the same activity name the webhook fan-out emitted.
+async fn notify_actions_issue(
+    ctx: &RpcCtx,
+    accessible: &crate::repo::AccessibleRepo,
+    action: &str,
+    row: &IssueRow,
+    user: &oxidean_db::UserRow,
+) {
+    let Ok(bare) = crate::git::bare_repo_path(
+        &ctx.repos_dir,
+        &accessible.owner_username,
+        &accessible.row.name,
+    ) else {
+        return;
+    };
+    let author = match ctx.db.find_user_by_id(&row.author_id).await {
+        Ok(Some(u)) => crate::actions::payload::user_embed(&u.username),
+        _ => serde_json::json!({}),
+    };
+    let repository = crate::actions::payload::repository_embed(
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.default_branch,
+    );
+    let sender = crate::actions::payload::user_embed(&user.username);
+    let payload = crate::actions::payload::issues_payload(
+        action,
+        row.number,
+        &row.title,
+        &row.state,
+        &row.body,
+        &author,
+        &repository,
+        &sender,
+    );
+    crate::actions::events::notify_lifecycle_actions(
+        &ctx.db,
+        ctx.git.as_ref(),
+        &crate::actions::events::LifecycleEvent {
+            bare_repo: bare,
+            repository_id: accessible.row.id.clone(),
+            default_branch: accessible.row.default_branch.clone(),
+            event_name: "issues",
+            action: action.to_string(),
+            payload,
+            actor_id: Some(user.id.clone()),
+            actions_enabled_instance: crate::actions::env_actions_enabled(),
+        },
+    )
+    .await;
 }

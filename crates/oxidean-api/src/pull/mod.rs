@@ -57,26 +57,46 @@ async fn notify_actions_for_pull(
     db: &Database,
     git: &dyn GitBackend,
     repos_dir: &Path,
-    base_repo_id: &str,
+    pull: &PullRow,
+    base_owner: &str,
+    base_name: &str,
     head_owner: &str,
     head_name: &str,
-    head_sha: &str,
-    head_ref: &str,
-    head_repo_id: &str,
     actor_id: Option<&str>,
     action: crate::actions::PullRequestAction,
 ) {
     let Ok(bare) = bare_repo_path(repos_dir, head_owner, head_name) else {
         return;
     };
+    let Ok(base_bare) = bare_repo_path(repos_dir, base_owner, base_name) else {
+        return;
+    };
+    let base_default_branch = db
+        .find_repository_by_id(&pull.repo_id)
+        .await
+        .ok()
+        .flatten()
+        .map(|r| r.default_branch)
+        .unwrap_or_else(|| "main".into());
     let event = crate::actions::PullRequestEvent {
         action,
-        repository_id: base_repo_id.to_string(),
+        repository_id: pull.repo_id.to_string(),
         bare_repo: bare,
-        head_sha: head_sha.to_string(),
-        head_ref: head_ref.to_string(),
+        base_bare,
+        head_sha: pull.head_sha.clone(),
+        head_ref: pull.head_ref.clone(),
+        base_ref: pull.base_ref.clone(),
+        base_sha: pull.base_sha.clone(),
+        pull_number: pull.number,
+        pull_title: pull.title.clone(),
+        pull_author_id: Some(pull.author_id.clone()),
+        head_owner: head_owner.to_string(),
+        head_name: head_name.to_string(),
+        base_owner: base_owner.to_string(),
+        base_name: base_name.to_string(),
+        base_default_branch,
         actor_id: actor_id.map(str::to_string),
-        head_repo_id: Some(head_repo_id.to_string()),
+        head_repo_id: Some(pull.head_repo_id.clone()),
         actions_enabled_instance: crate::actions::env_actions_enabled(),
     };
     crate::actions::notify_pull_request_actions(db, git, &event).await;
@@ -400,12 +420,11 @@ pub(crate) async fn synchronize_pull_after_head_move(
         db,
         git,
         repos_dir,
-        &pull.repo_id,
+        &updated,
+        base_owner,
+        base_name,
         head_owner,
         head_name,
-        new_head_sha,
-        &updated.head_ref,
-        &pull.head_repo_id,
         Some(actor_id),
         crate::actions::PullRequestAction::Synchronize,
     )
@@ -815,12 +834,11 @@ pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullPublic
         &ctx.db,
         ctx.git.as_ref(),
         &ctx.repos_dir,
-        &accessible.row.id,
+        &row,
+        &accessible.owner_username,
+        &accessible.row.name,
         &head_owner_slug,
         &head_repo_name,
-        &row.head_sha,
-        &row.head_ref,
-        &row.head_repo_id,
         Some(&user.id),
         crate::actions::PullRequestAction::Opened,
     )
@@ -1166,12 +1184,11 @@ pub async fn reopen(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullPublic
         &ctx.db,
         ctx.git.as_ref(),
         &ctx.repos_dir,
-        &accessible.row.id,
+        &updated,
+        &accessible.owner_username,
+        &accessible.row.name,
         &head_owner,
         &head_name,
-        &updated.head_sha,
-        &updated.head_ref,
-        &updated.head_repo_id,
         Some(&user.id),
         crate::actions::PullRequestAction::Reopened,
     )
