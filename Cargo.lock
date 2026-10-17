@@ -3661,7 +3661,7 @@ dependencies = [
 
 [[package]]
 name = "oxidean-api"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "aes-gcm 0.11.1",
  "argon2",
@@ -3715,7 +3715,7 @@ dependencies = [
 
 [[package]]
 name = "oxidean-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anstyle",
  "dialoguer",
@@ -3738,7 +3738,7 @@ dependencies = [
 
 [[package]]
 name = "oxidean-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "schemars 1.2.2",
  "serde",
@@ -3747,7 +3747,7 @@ dependencies = [
 
 [[package]]
 name = "oxidean-db"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "oxidean-core",
  "serde_json",
@@ -3768,7 +3768,7 @@ dependencies = [
 
 [[package]]
 name = "oxidean-runner"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "base64 0.23.1",
  "reqwest 0.13.5",
@@ -3782,7 +3782,7 @@ dependencies = [
 
 [[package]]
 name = "oxidean-web"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "axum",
  "hyper",
