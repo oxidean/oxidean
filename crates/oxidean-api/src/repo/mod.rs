@@ -42,6 +42,10 @@ pub use collaborators::{
 };
 pub use commit_status::{create as commit_status_create, list as commit_status_list};
 pub use file_templates::file_templates;
+pub(crate) use files::{
+    assert_path_creatable as file_assert_path_creatable, commit_changes as file_commit_changes,
+    commit_message as file_commit_message, resolve_base_branch as file_resolve_base_branch,
+};
 pub use files::{
     commit_policy as file_commit_policy, create as file_create, delete as file_delete,
     mkdir as file_mkdir, rename as file_rename, update as file_update, upload as file_upload,
@@ -1533,7 +1537,7 @@ fn soft_protect_err() -> AppError {
 /// Resolve repo for Write mutate (D-27 branch CRUD / T-10-14).
 /// Insufficient capability → identical [`acl::not_found`].
 /// Visibility / soft-delete use [`resolve_repo_for_admin`] (Admin) instead.
-async fn resolve_repo_for_owner_mutate(
+pub(crate) async fn resolve_repo_for_owner_mutate(
     ctx: &RpcCtx,
     owner: &str,
     name: &str,

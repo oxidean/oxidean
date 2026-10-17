@@ -1,0 +1,331 @@
+{
+  "upstream": {
+    "repo": "actions/starter-workflows",
+    "commit": "e3c451d60f119b71caebf13c98ac45da6e15b4b7",
+    "synced": "2026-10-16"
+  },
+  "include_dirs": [
+    "ci",
+    "deployments",
+    "automation"
+  ],
+  "excluded": {
+    "code-scanning": "requires GitHub Advanced Security / CodeQL",
+    "pages": "GitHub Pages-specific publishing"
+  },
+  "templates": {
+    "ci/rust": {
+      "file_patterns": [
+        "Cargo.toml"
+      ]
+    },
+    "ci/go": {
+      "file_patterns": [
+        "go.mod"
+      ]
+    },
+    "ci/node.js": {
+      "file_patterns": [
+        "package.json"
+      ]
+    },
+    "ci/npm-publish": {
+      "file_patterns": [
+        "package.json"
+      ]
+    },
+    "ci/npm-publish-github-packages": {
+      "file_patterns": [
+        "package.json"
+      ]
+    },
+    "ci/webpack": {
+      "file_patterns": [
+        "webpack.config.js",
+        "package.json"
+      ]
+    },
+    "ci/python-app": {
+      "file_patterns": [
+        "requirements.txt",
+        "pyproject.toml",
+        "setup.py"
+      ]
+    },
+    "ci/pylint": {
+      "file_patterns": [
+        "requirements.txt",
+        "pyproject.toml",
+        "setup.py",
+        "*.py"
+      ]
+    },
+    "ci/python-package": {
+      "file_patterns": [
+        "requirements.txt",
+        "pyproject.toml",
+        "setup.py"
+      ]
+    },
+    "ci/python-package-conda": {
+      "file_patterns": [
+        "environment.yml",
+        "environment.yaml"
+      ]
+    },
+    "ci/python-publish": {
+      "file_patterns": [
+        "pyproject.toml",
+        "setup.py"
+      ]
+    },
+    "ci/django": {
+      "file_patterns": [
+        "manage.py",
+        "requirements.txt"
+      ]
+    },
+    "ci/maven": {
+      "file_patterns": [
+        "pom.xml"
+      ]
+    },
+    "ci/maven-publish": {
+      "file_patterns": [
+        "pom.xml"
+      ]
+    },
+    "ci/gradle": {
+      "file_patterns": [
+        "build.gradle",
+        "build.gradle.kts",
+        "settings.gradle",
+        "settings.gradle.kts",
+        "gradlew"
+      ]
+    },
+    "ci/gradle-publish": {
+      "file_patterns": [
+        "build.gradle",
+        "build.gradle.kts",
+        "settings.gradle",
+        "settings.gradle.kts"
+      ]
+    },
+    "ci/ant": {
+      "file_patterns": [
+        "build.xml"
+      ]
+    },
+    "ci/dotnet": {
+      "file_patterns": [
+        "*.sln",
+        "*.csproj",
+        "*.fsproj",
+        "*.vbproj"
+      ]
+    },
+    "ci/dotnet-desktop": {
+      "file_patterns": [
+        "*.sln",
+        "*.csproj",
+        "*.fsproj",
+        "*.vbproj"
+      ]
+    },
+    "ci/msbuild": {
+      "file_patterns": [
+        "*.sln",
+        "*.csproj"
+      ]
+    },
+    "ci/ruby": {
+      "file_patterns": [
+        "Gemfile"
+      ]
+    },
+    "ci/rubyonrails": {
+      "file_patterns": [
+        "Gemfile",
+        "config.ru",
+        "Rakefile"
+      ]
+    },
+    "ci/gem-push": {
+      "file_patterns": [
+        "*.gemspec",
+        "Gemfile"
+      ]
+    },
+    "ci/php": {
+      "file_patterns": [
+        "composer.json"
+      ]
+    },
+    "ci/laravel": {
+      "file_patterns": [
+        "composer.json",
+        "artisan"
+      ]
+    },
+    "ci/symfony": {
+      "file_patterns": [
+        "composer.json",
+        "symfony.lock"
+      ]
+    },
+    "ci/dart": {
+      "file_patterns": [
+        "pubspec.yaml"
+      ]
+    },
+    "ci/deno": {
+      "file_patterns": [
+        "deno.json",
+        "deno.jsonc"
+      ]
+    },
+    "ci/elixir": {
+      "file_patterns": [
+        "mix.exs"
+      ]
+    },
+    "ci/erlang": {
+      "file_patterns": [
+        "rebar.config"
+      ]
+    },
+    "ci/haskell": {
+      "file_patterns": [
+        "*.cabal",
+        "stack.yaml",
+        "cabal.project"
+      ]
+    },
+    "ci/scala": {
+      "file_patterns": [
+        "build.sbt"
+      ]
+    },
+    "ci/swift": {
+      "file_patterns": [
+        "Package.swift"
+      ]
+    },
+    "ci/clojure": {
+      "file_patterns": [
+        "deps.edn",
+        "project.clj",
+        "build.boot"
+      ]
+    },
+    "ci/crystal": {
+      "file_patterns": [
+        "shard.yml"
+      ]
+    },
+    "ci/d": {
+      "file_patterns": [
+        "dub.json",
+        "dub.sdl"
+      ]
+    },
+    "ci/r": {
+      "file_patterns": [
+        "DESCRIPTION"
+      ]
+    },
+    "ci/c-cpp": {
+      "file_patterns": [
+        "Makefile",
+        "CMakeLists.txt",
+        "*.c",
+        "*.cpp",
+        "*.cc",
+        "*.h",
+        "*.hpp"
+      ]
+    },
+    "ci/cmake-multi-platform": {
+      "file_patterns": [
+        "CMakeLists.txt"
+      ]
+    },
+    "ci/cmake-single-platform": {
+      "file_patterns": [
+        "CMakeLists.txt"
+      ]
+    },
+    "ci/makefile": {
+      "file_patterns": [
+        "Makefile",
+        "makefile"
+      ]
+    },
+    "ci/docker-image": {
+      "file_patterns": [
+        "Dockerfile"
+      ]
+    },
+    "ci/docker-publish": {
+      "file_patterns": [
+        "Dockerfile"
+      ]
+    },
+    "ci/android": {
+      "file_patterns": [
+        "build.gradle",
+        "settings.gradle",
+        "gradlew",
+        "AndroidManifest.xml"
+      ]
+    },
+    "ci/ios": {
+      "file_patterns": [
+        "*.xcodeproj",
+        "*.xcworkspace",
+        "Podfile"
+      ]
+    },
+    "ci/objective-c-xcode": {
+      "file_patterns": [
+        "*.xcodeproj",
+        "*.xcworkspace",
+        "Podfile"
+      ]
+    },
+    "ci/jekyll-docker": {
+      "file_patterns": [
+        "_config.yml",
+        "Gemfile"
+      ]
+    },
+    "ci/ada": {
+      "file_patterns": [
+        "*.gpr",
+        "alire.toml"
+      ]
+    },
+    "deployments/terraform": {
+      "file_patterns": [
+        "*.tf",
+        "main.tf"
+      ]
+    },
+    "deployments/google-cloudrun-docker": {
+      "file_patterns": [
+        "Dockerfile"
+      ]
+    },
+    "deployments/azure-container-webapp": {
+      "file_patterns": [
+        "Dockerfile"
+      ]
+    },
+    "deployments/openshift": {
+      "file_patterns": [
+        "Dockerfile"
+      ]
+    }
+  }
+}

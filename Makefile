@@ -1,7 +1,7 @@
 # One target per .PHONY line group — checkmake does not parse backslash-continued
 # .PHONY lists, so keep each declaration on a single physical line.
 .PHONY: help makefile-lint
-.PHONY: dev rpc-gen openapi-gen openapi-sync-check rpc-sync-check cli-parity-check skill-sync-check check-stack-presets sync-stack-presets
+.PHONY: dev rpc-gen openapi-gen openapi-sync-check rpc-sync-check cli-parity-check skill-sync-check check-stack-presets sync-stack-presets check-workflow-templates sync-workflow-templates
 .PHONY: up down logs test smoke smoke-git-https smoke-git-ssh
 .PHONY: smoke-git-lfs
 .PHONY: smoke-packages
@@ -31,6 +31,7 @@ help:
 	@echo "  make openapi-gen    - regenerate docs/openapi.yaml from the REST route table"
 	@echo "  make rpc-sync-check - fail if generated client is out of sync"
 	@echo "  make check-stack-presets - validate stack-presets catalog + size budget"
+	@echo "  make check-workflow-templates - validate vendored starter-workflow templates"
 	@echo "  make version-check   - validate versioning.toml registry + workspace completeness"
 	@echo "  make commit-check    - lint recent commits against the SemVer prefix grammar"
 	@echo "  make release-plan    - print the SemVer bump plan (--channel/--since/--json via ARGS)"
@@ -38,6 +39,7 @@ help:
 	@echo "  make release-tags    - create annotated <component>-v<ver> tags (--all for baseline)"
 	@echo "  make setup           - install the opt-in commit-msg hook (core.hooksPath=.githooks)"
 	@echo "  make sync-stack-presets - stamp/refresh stack-presets metadata"
+	@echo "  make sync-workflow-templates - re-vendor starter-workflows at the pinned commit"
 	@echo "  make up             - docker compose up (Traefik on :80)"
 	@echo "  make up-mysql       - compose up with the MySQL profile (D-07)"
 	@echo "  make up-sqlite      - compose up with SQLite file in ./var (D-19)"
@@ -114,6 +116,9 @@ makefile-lint:
 check-stack-presets:
 	@./scripts/check-stack-presets.sh
 
+check-workflow-templates:
+	@./scripts/check-workflow-templates.sh
+
 version-check:
 	@bun scripts/versioning/cli.ts check
 
@@ -142,6 +147,9 @@ setup:
 
 sync-stack-presets:
 	@bun scripts/sync-stack-presets.mjs --stamp
+
+sync-workflow-templates:
+	@bun scripts/sync-workflow-templates.mjs $(ARGS)
 
 up:
 	$(COMPOSE) -f $(COMPOSE_FILE) up --build -d

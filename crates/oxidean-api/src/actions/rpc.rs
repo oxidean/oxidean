@@ -729,7 +729,7 @@ async fn run_mutation_response(
 }
 
 /// Resolve a user-supplied ref (branch/tag/SHA) or the default branch to a SHA.
-async fn resolve_treeish(
+pub(crate) async fn resolve_treeish(
     ctx: &RpcCtx,
     default_branch: &str,
     git_ref: Option<&str>,

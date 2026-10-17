@@ -10,6 +10,7 @@ pub mod rpc;
 pub mod runner_proto;
 pub mod secrets;
 pub mod statuses;
+pub mod templates;
 pub mod tokens;
 pub mod workflow;
 

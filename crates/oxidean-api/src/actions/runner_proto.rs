@@ -3,7 +3,7 @@
 
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
-use axum::routing::post;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -24,6 +24,12 @@ pub fn router() -> Router<AppState> {
         .route("/fetch_task", post(fetch_task))
         .route("/update_task", post(update_task))
         .route("/update_log", post(update_log))
+        // Anonymous template-icon route (GET …/template-icons/{name}.svg) —
+        // shares the /api/actions nest; matchit captures the whole segment.
+        .route(
+            "/template-icons/{name}",
+            get(crate::actions::templates::template_icon),
+        )
 }
 
 fn bearer_token(headers: &HeaderMap) -> Option<String> {

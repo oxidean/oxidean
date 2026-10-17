@@ -206,6 +206,11 @@ pub const PROCEDURES: &[&str] = &[
     "admin.templates.update",
     "admin.templates.setEnabled",
     "admin.templates.delete",
+    "admin.workflowTemplates.list",
+    "admin.workflowTemplates.create",
+    "admin.workflowTemplates.update",
+    "admin.workflowTemplates.setEnabled",
+    "admin.workflowTemplates.delete",
     "admin.instance.factory_reset",
     "admin.repos.gc",
     "admin.users.list",
@@ -338,6 +343,9 @@ pub const PROCEDURES: &[&str] = &[
     "repo.actions.secrets.delete",
     "repo.actions.getEnabled",
     "repo.actions.setEnabled",
+    "repo.actions.workflowTemplates.list",
+    "repo.actions.workflowTemplates.get",
+    "repo.actions.workflows.create",
     "repo.issues.getEnabled",
     "repo.issues.setEnabled",
     "repo.pulls.getEnabled",
@@ -784,6 +792,34 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
         }
         "admin.templates.delete" => {
             match crate::templates::handlers::admin_delete(ctx, req.input).await {
+                Ok(s) => RpcResponse::ok(s),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
+        "admin.workflowTemplates.list" => match crate::actions::templates::admin_list(ctx).await {
+            Ok(s) => RpcResponse::ok(s),
+            Err(e) => RpcResponse::err(e),
+        },
+        "admin.workflowTemplates.create" => {
+            match crate::actions::templates::admin_create(ctx, req.input).await {
+                Ok(s) => RpcResponse::ok(s),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
+        "admin.workflowTemplates.update" => {
+            match crate::actions::templates::admin_update(ctx, req.input).await {
+                Ok(s) => RpcResponse::ok(s),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
+        "admin.workflowTemplates.setEnabled" => {
+            match crate::actions::templates::admin_set_enabled(ctx, req.input).await {
+                Ok(s) => RpcResponse::ok(s),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
+        "admin.workflowTemplates.delete" => {
+            match crate::actions::templates::admin_delete(ctx, req.input).await {
                 Ok(s) => RpcResponse::ok(s),
                 Err(e) => RpcResponse::err(e),
             }
@@ -1340,6 +1376,24 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },
+        "repo.actions.workflowTemplates.list" => {
+            match crate::actions::templates::list_templates(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
+        "repo.actions.workflowTemplates.get" => {
+            match crate::actions::templates::get_template(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
+        "repo.actions.workflows.create" => {
+            match crate::actions::templates::create_workflow(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
         "repo.issues.getEnabled" => match repo::issues_get_enabled(ctx, req.input).await {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
