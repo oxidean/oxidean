@@ -1,7 +1,7 @@
 //! Per-job Actions bearer tokens (`oxidean_job_…`) — the `OXIDEAN_TOKEN`
 //! credential injected into the job environment (GITHUB_TOKEN parity).
 //!
-//! Minted at runner claim time ([`crate::actions::runner_proto::fetch_task`]),
+//! Minted at runner claim time (`fetch_task` in [`crate::actions::runner_proto`]),
 //! hashed like PATs ([`sha256_hex`] at rest, never stored in plaintext), and
 //! resolved through the shared Bearer router [`crate::pat::bearer::resolve_bearer`]
 //! where the row becomes a repo-locked fine-grained [`PatIdentity`].
