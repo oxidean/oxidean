@@ -100,7 +100,7 @@ struct Fixture {
 
 async fn fixture(visibility: &str) -> Fixture {
     let dir = tempfile::tempdir().unwrap();
-    let db = Database::connect(&format!("sqlite:{}", dir.path().join("t.db").display()))
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("t.db").display()))
         .await
         .unwrap();
     db.migrate().await.unwrap();

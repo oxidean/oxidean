@@ -101,7 +101,7 @@ fn actions_secrets_encrypt_never_stores_plaintext_blob() {
 #[tokio::test]
 async fn actions_secrets_list_names_only_never_echoes_value() {
     let dir = tempfile::tempdir().unwrap();
-    let db = Database::connect(&format!("sqlite:{}", dir.path().join("sec.db").display()))
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("sec.db").display()))
         .await
         .unwrap();
     db.migrate().await.unwrap();
@@ -170,7 +170,7 @@ async fn actions_secrets_list_names_only_never_echoes_value() {
 #[tokio::test]
 async fn actions_secrets_enable_toggle_persists() {
     let dir = tempfile::tempdir().unwrap();
-    let db = Database::connect(&format!("sqlite:{}", dir.path().join("en.db").display()))
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("en.db").display()))
         .await
         .unwrap();
     db.migrate().await.unwrap();
@@ -225,7 +225,7 @@ async fn actions_secrets_enable_toggle_persists() {
 async fn actions_secrets_injected_into_fetch_task() {
     std::env::set_var("OXIDEAN_ACTIONS_SECRETS_KEY", "integration-test-key");
     let dir = tempfile::tempdir().unwrap();
-    let db = Database::connect(&format!("sqlite:{}", dir.path().join("ft.db").display()))
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("ft.db").display()))
         .await
         .unwrap();
     db.migrate().await.unwrap();
@@ -328,7 +328,7 @@ async fn actions_secrets_injected_into_fetch_task() {
 #[tokio::test]
 async fn actions_secrets_admin_create_registration_token() {
     let dir = tempfile::tempdir().unwrap();
-    let db = Database::connect(&format!("sqlite:{}", dir.path().join("tok.db").display()))
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("tok.db").display()))
         .await
         .unwrap();
     db.migrate().await.unwrap();

@@ -18,4 +18,4 @@ jobs:
         with:
           name: bundle
           path: dl
-      - run: cat dl/out/msg.txt
+      - run: cat dl/msg.txt && cat dl/b.txt

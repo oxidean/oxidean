@@ -297,10 +297,6 @@ pub fn router_with_state(state: AppState, cors: CorsLayer) -> Router {
         // OIDC issuer for `id-token: write` jobs — the request token itself
         // is the credential, so these paths carry no session middleware.
         .nest("/api/actions/oidc", crate::actions::oidc::router())
-        .route(
-            "/.well-known/actions-oidc/openid-configuration",
-            get(crate::actions::oidc::openid_configuration),
-        )
         .route("/api/auth/workos/start", get(auth_callbacks::workos_start))
         .route(
             "/api/auth/workos/callback",

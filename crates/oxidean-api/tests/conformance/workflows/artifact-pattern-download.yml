@@ -21,4 +21,4 @@ jobs:
         with:
           pattern: web-*
           path: dl
-      - run: cat dl/web-a/a/f.txt && cat dl/web-b/b/f.txt && test ! -d dl/other
+      - run: cat dl/web-a/f.txt && cat dl/web-b/f.txt && test ! -d dl/other

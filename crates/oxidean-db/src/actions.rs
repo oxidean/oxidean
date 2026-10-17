@@ -3880,9 +3880,12 @@ pub async fn promote_due_deployment_jobs(pool: &DbPool, now: &str) -> Result<u64
 pub struct ActionOidcKeyRow {
     pub kid: String,
     pub alg: String,
-    /// PKCS#8 hex of the Ed25519 private key — signing happens API-side.
+    /// PKCS#8 hex of the Ed25519 private key — legacy rows only; RS256 keys
+    /// store ciphertext in `private_enc` instead.
     pub private_der: String,
-    /// Public JWK JSON ({kty, crv, x, kid, alg, use}).
+    /// Actions-secrets ciphertext of the PKCS#8-hex signing key (RS256 rows).
+    pub private_enc: Option<String>,
+    /// Public JWK JSON ({kty, n|x, e|crv, kid, alg, use}).
     pub public_jwk_json: String,
     pub active: bool,
     pub created_at: String,
@@ -3895,6 +3898,7 @@ macro_rules! map_oidc_key {
             kid: r.get("kid"),
             alg: r.try_get("alg").unwrap_or_else(|_| "EdDSA".into()),
             private_der: r.get("private_der"),
+            private_enc: r.try_get("private_enc").ok().flatten(),
             public_jwk_json: r.get("public_jwk_json"),
             active: r
                 .try_get::<bool, _>("active")
@@ -3906,60 +3910,73 @@ macro_rules! map_oidc_key {
     }};
 }
 
-/// Insert a signing key (generated upstream — the DB only stores it).
+/// Insert a signing key (generated upstream — the DB only stores it). RS256
+/// rows carry the private key as ciphertext in `private_enc` (`private_der`
+/// is the legacy plaintext-hex column, left empty for new rows).
+#[allow(clippy::too_many_arguments)]
 pub async fn insert_oidc_key(
     pool: &DbPool,
     kid: &str,
+    alg: &str,
     private_der: &str,
+    private_enc: Option<&str>,
     public_jwk_json: &str,
 ) -> Result<(), String> {
     match pool {
         DbPool::Sqlite(p) => {
-            sqlx::query("INSERT INTO action_oidc_keys (kid, alg, private_der, public_jwk_json, active) VALUES (?, 'EdDSA', ?, ?, 1)")
-                .bind(kid).bind(private_der).bind(public_jwk_json)
+            sqlx::query("INSERT INTO action_oidc_keys (kid, alg, private_der, private_enc, public_jwk_json, active) VALUES (?, ?, ?, ?, ?, 1)")
+                .bind(kid).bind(alg).bind(private_der).bind(private_enc).bind(public_jwk_json)
                 .execute(p).await.map_err(|e| e.to_string())?;
         }
         DbPool::Postgres(p) => {
-            sqlx::query("INSERT INTO action_oidc_keys (kid, alg, private_der, public_jwk_json, active) VALUES ($1, 'EdDSA', $2, $3, true)")
-                .bind(kid).bind(private_der).bind(public_jwk_json)
+            sqlx::query("INSERT INTO action_oidc_keys (kid, alg, private_der, private_enc, public_jwk_json, active) VALUES ($1, $2, $3, $4, $5, true)")
+                .bind(kid).bind(alg).bind(private_der).bind(private_enc).bind(public_jwk_json)
                 .execute(p).await.map_err(|e| e.to_string())?;
         }
         DbPool::MySql(p) => {
-            sqlx::query("INSERT INTO action_oidc_keys (kid, alg, private_der, public_jwk_json, active) VALUES (?, 'EdDSA', ?, ?, 1)")
-                .bind(kid).bind(private_der).bind(public_jwk_json)
+            sqlx::query("INSERT INTO action_oidc_keys (kid, alg, private_der, private_enc, public_jwk_json, active) VALUES (?, ?, ?, ?, ?, 1)")
+                .bind(kid).bind(alg).bind(private_der).bind(private_enc).bind(public_jwk_json)
                 .execute(p).await.map_err(|e| e.to_string())?;
         }
     }
     Ok(())
 }
 
-/// The active signing key — NULL when no key has been generated yet.
-pub async fn find_active_oidc_key(pool: &DbPool) -> Result<Option<ActionOidcKeyRow>, String> {
+/// The active signing key for an algorithm — NULL when none has been
+/// generated yet.
+pub async fn find_active_oidc_key(
+    pool: &DbPool,
+    alg: &str,
+) -> Result<Option<ActionOidcKeyRow>, String> {
     match pool {
         DbPool::Sqlite(p) => {
-            let row = sqlx::query("SELECT kid, alg, private_der, public_jwk_json, active, created_at FROM action_oidc_keys WHERE active = 1 ORDER BY created_at DESC LIMIT 1")
+            let row = sqlx::query("SELECT kid, alg, private_der, private_enc, public_jwk_json, active, created_at FROM action_oidc_keys WHERE active = 1 AND alg = ? ORDER BY created_at DESC LIMIT 1")
+                .bind(alg)
                 .fetch_optional(p).await.map_err(|e| e.to_string())?;
             Ok(row.map(|r| map_oidc_key!(r)))
         }
         DbPool::Postgres(p) => {
-            let row = sqlx::query("SELECT kid, alg, private_der, public_jwk_json, active, created_at::text AS created_at FROM action_oidc_keys WHERE active ORDER BY created_at DESC LIMIT 1")
+            let row = sqlx::query("SELECT kid, alg, private_der, private_enc, public_jwk_json, active, created_at::text AS created_at FROM action_oidc_keys WHERE active AND alg = $1 ORDER BY created_at DESC LIMIT 1")
+                .bind(alg)
                 .fetch_optional(p).await.map_err(|e| e.to_string())?;
             Ok(row.map(|r| map_oidc_key!(r)))
         }
         DbPool::MySql(p) => {
-            let row = sqlx::query("SELECT kid, alg, private_der, public_jwk_json, active, created_at FROM action_oidc_keys WHERE active = 1 ORDER BY created_at DESC LIMIT 1")
+            let row = sqlx::query("SELECT kid, alg, private_der, private_enc, public_jwk_json, active, created_at FROM action_oidc_keys WHERE active = 1 AND alg = ? ORDER BY created_at DESC LIMIT 1")
+                .bind(alg)
                 .fetch_optional(p).await.map_err(|e| e.to_string())?;
             Ok(row.map(|r| map_oidc_key!(r)))
         }
     }
 }
 
-/// All keys (public halves) — JWKS keeps rotated keys verifiable while
-/// in-flight JWTs age out.
-pub async fn list_oidc_public_jwks(pool: &DbPool) -> Result<Vec<String>, String> {
+/// Public halves of every key for an algorithm — JWKS keeps rotated keys of
+/// the current alg verifiable while in-flight JWTs age out.
+pub async fn list_oidc_public_jwks(pool: &DbPool, alg: &str) -> Result<Vec<String>, String> {
     macro_rules! run {
-        ($q:expr, $p:expr) => {
+        ($q:expr, $p:expr, $a:expr) => {
             sqlx::query($q)
+                .bind($a)
                 .fetch_all($p)
                 .await
                 .map_err(|e| e.to_string())
@@ -3972,9 +3989,21 @@ pub async fn list_oidc_public_jwks(pool: &DbPool) -> Result<Vec<String>, String>
         };
     }
     match pool {
-        DbPool::Sqlite(p) => run!("SELECT public_jwk_json FROM action_oidc_keys", p),
-        DbPool::Postgres(p) => run!("SELECT public_jwk_json FROM action_oidc_keys", p),
-        DbPool::MySql(p) => run!("SELECT public_jwk_json FROM action_oidc_keys", p),
+        DbPool::Sqlite(p) => run!(
+            "SELECT public_jwk_json FROM action_oidc_keys WHERE alg = ?",
+            p,
+            alg
+        ),
+        DbPool::Postgres(p) => run!(
+            "SELECT public_jwk_json FROM action_oidc_keys WHERE alg = $1",
+            p,
+            alg
+        ),
+        DbPool::MySql(p) => run!(
+            "SELECT public_jwk_json FROM action_oidc_keys WHERE alg = ?",
+            p,
+            alg
+        ),
     }
 }
 

@@ -107,6 +107,44 @@ cargo nextest run --workspace --profile ci   # same profile as CI api-rust
 cargo test -p oxidean-db --test dialect_probe -- --nocapture
 ```
 
+### Real-engine runs (Postgres / MySQL)
+
+The `oxidean-db` dialect suites and the Actions API suites run against real
+Postgres/MySQL when pointed at a reachable server (Compose services, CI
+service containers, or throwaway local containers — see `docker/` Compose
+overlays for the standard images `postgres:16-alpine` / `mysql:8.4`).
+
+```bash
+# DB layer: dialect_probe + dialect_actions honor DATABASE_URL.
+DATABASE_URL=postgres://oxidean:oxidean@127.0.0.1:5432/oxidean \
+  OXIDEAN_DB_DIALECT=postgres \
+  cargo nextest run -p oxidean-db --test dialect_probe --test dialect_actions
+DATABASE_URL=mysql://oxidean:oxidean@127.0.0.1:3306/oxidean \
+  OXIDEAN_DB_DIALECT=mysql \
+  cargo nextest run -p oxidean-db --test dialect_probe --test dialect_actions
+# Same pair through make (DATABASE_URL in env):
+make db-matrix
+```
+
+For the API layer, `crates/oxidean-api/tests/support/mod.rs` reads
+`OXIDEAN_TEST_DATABASE_URL` — a **server-level admin URL** with `CREATE
+DATABASE` privilege (e.g. `postgres://oxidean:oxidean@127.0.0.1:5432/postgres`,
+`mysql://root:oxidean@127.0.0.1:3306/`). When set, every test that goes through
+the support helper provisions a fresh `oxt_<uuid>` database and migrates it;
+when unset the historical per-file SQLite behaviour is unchanged. Provisioned
+databases are intentionally **not dropped** — run against throwaway servers.
+
+```bash
+# Every actions_* API binary + the workflow-conformance corpus on both engines:
+OXIDEAN_TEST_PG_URL=postgres://oxidean:oxidean@127.0.0.1:5432/postgres \
+OXIDEAN_TEST_MYSQL_URL=mysql://root:oxidean@127.0.0.1:3306/ \
+  make actions-db-matrix
+
+# Single engine / single binary manually:
+OXIDEAN_TEST_DATABASE_URL=postgres://oxidean:oxidean@127.0.0.1:5432/postgres \
+  cargo nextest run -p oxidean-api --test workflow_conformance
+```
+
 ## Writing new tests
 
 ### Web (`apps/web`)
@@ -338,6 +376,19 @@ make smoke-actions
 # green run with the streamed log marker.
 make test-e2e-actions
 # or: bash scripts/e2e-actions-pipeline.sh
+
+# Public-ecosystem smoke (real github.com): boots API + host runner, pushes a
+# workflow that runs the real actions/setup-node (Node 20 download),
+# actions/cache (cache-service-absent warning path), an artifact round-trip,
+# and actions/github-script minting an OIDC JWT (RS256) via @actions/core.
+# Skips exit-0 when github.com/nodejs.org are unreachable;
+# E2E_PUBLIC_ACTIONS_REQUIRED=1 makes unreachable a failure.
+./scripts/e2e-actions-public.sh
+
+# Stock Gitea act_runner compatibility: builds act_runner (pin: v0.2.11) and
+# runs the runner.v1 protocol end to end. ACT_RUNNER_HOST_MODE=1 runs without
+# Docker; ACT_RUNNER_BIN points at a prebuilt binary.
+ACT_RUNNER_HOST_MODE=1 ./scripts/e2e-act-runner.sh
 
 # Seed only (works against any origin incl. preview/staging):
 #   OXIDEAN_ORIGIN=https://<gateway> OXIDEAN_SEED_USER=… OXIDEAN_SEED_PASSWORD=… \

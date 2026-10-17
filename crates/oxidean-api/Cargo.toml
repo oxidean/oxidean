@@ -93,8 +93,7 @@ utoipa-swagger-ui = { version = "10", features = ["axum", "vendored"] }
 tokio-util = { version = "0.7.20", features = ["io"] }
 hex = "0.4.3"
 prost-types = "0.14"
-jsonwebtoken = "10.3.0"
-ed25519-dalek = { version = "2.2", features = ["pkcs8"] }
+aws-lc-rs = "1.18"
 
 [dev-dependencies]
 oxidean-runner = { path = "../oxidean-runner" }

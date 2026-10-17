@@ -1,6 +1,7 @@
 //! Uniform database adapter boundary — the only place dialect branching is allowed (D-08).
 
 pub mod actions;
+pub mod admin;
 pub mod audit_events;
 pub mod auth_identities;
 pub mod auth_settings;
@@ -3669,19 +3670,33 @@ impl Database {
     pub async fn insert_action_oidc_key(
         &self,
         kid: &str,
+        alg: &str,
         private_der: &str,
+        private_enc: Option<&str>,
         public_jwk_json: &str,
     ) -> Result<(), String> {
-        actions::insert_oidc_key(self.require_pool()?, kid, private_der, public_jwk_json).await
+        actions::insert_oidc_key(
+            self.require_pool()?,
+            kid,
+            alg,
+            private_der,
+            private_enc,
+            public_jwk_json,
+        )
+        .await
     }
 
-    pub async fn find_active_action_oidc_key(&self) -> Result<Option<ActionOidcKeyRow>, String> {
-        actions::find_active_oidc_key(self.require_pool()?).await
+    pub async fn find_active_action_oidc_key(
+        &self,
+        alg: &str,
+    ) -> Result<Option<ActionOidcKeyRow>, String> {
+        actions::find_active_oidc_key(self.require_pool()?, alg).await
     }
 
-    /// Public JWK JSON for every key — JWKS keeps rotated keys verifiable.
-    pub async fn list_action_oidc_public_jwks(&self) -> Result<Vec<String>, String> {
-        actions::list_oidc_public_jwks(self.require_pool()?).await
+    /// Public JWK JSON for every key of an algorithm — JWKS keeps rotated keys
+    /// of the current alg verifiable.
+    pub async fn list_action_oidc_public_jwks(&self, alg: &str) -> Result<Vec<String>, String> {
+        actions::list_oidc_public_jwks(self.require_pool()?, alg).await
     }
 
     // ---- Phase 8: heartbeat, log ordering, org/env secrets -----------------

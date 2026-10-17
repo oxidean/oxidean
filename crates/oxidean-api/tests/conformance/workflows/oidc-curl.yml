@@ -1,0 +1,30 @@
+name: oidc-curl
+on: [push]
+jobs:
+  oidc:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: none
+    steps:
+      # GitHub's documented OIDC fetch verbatim — `bearer` (lowercase), the
+      # request URL carrying its `?api-version=2.0` query, `&audience=`
+      # appended by the caller. Asserts the JWT decodes and carries the
+      # requested audience + RS256 header.
+      - name: mint id token via documented curl
+        run: |
+          resp="$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com")"
+          echo "oidc response: $resp"
+          token="$(printf '%s' "$resp" | sed -n 's/.*"value":"\([^"]*\)".*/\1/p')"
+          test -n "$token" || { echo "no .value in response"; exit 1; }
+          pad() {
+            s="$1"; n=$(( (4 - ${#s} % 4) % 4 ));
+            printf '%s' "$s" | tr '_-' '/+';
+            while [ "$n" -gt 0 ]; do printf '='; n=$((n-1)); done
+          }
+          header="$(pad "$(printf '%s' "$token" | cut -d. -f1)" | base64 -d)"
+          echo "oidc header: $header"
+          claims="$(pad "$(printf '%s' "$token" | cut -d. -f2)" | base64 -d)"
+          echo "oidc claims: $claims"
+          printf '%s' "$header" | grep -q '"alg":"RS256"'
+          printf '%s' "$claims" | grep -q '"aud":"sts.amazonaws.com"'

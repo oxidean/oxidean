@@ -8,8 +8,10 @@
 //! as `validation_failure` (the loud-failure contract) and flip to `run` as
 //! later phases land.
 
+mod support;
+
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use oxidean_api::actions::dispatch_push_for_sha;
@@ -50,6 +52,11 @@ struct Case {
     /// Extra repos seeded under the same owner for remote `uses:` resolution
     /// — `{name: {path: content}}` becomes `{slug}/{name}.git` on the origin.
     action_repos: Option<HashMap<String, HashMap<String, String>>>,
+    /// Mint `server_url`/`ACTIONS_ID_TOKEN_REQUEST_URL` against the ephemeral
+    /// listener (`OXIDEAN_PUBLIC_ORIGIN`) — only set for cases that actually
+    /// call the API from inside a step, so a stale env never leaks into
+    /// sibling cases sharing the process under plain `cargo test`.
+    needs_public_origin: Option<bool>,
     log_contains: Option<Vec<String>>,
     log_absent: Option<Vec<String>>,
 }
@@ -70,13 +77,23 @@ fn base_case(id: &str) -> Case {
         expect_unsupported: None,
         files: None,
         action_repos: None,
+        needs_public_origin: None,
         log_contains: None,
         log_absent: None,
     }
 }
 
+/// Runtime `CARGO_MANIFEST_DIR` — nextest sets it under `--workspace-remap`
+/// where the build-time `env!` still points at the (absent) image path.
+fn manifest_dir() -> PathBuf {
+    match std::env::var("CARGO_MANIFEST_DIR") {
+        Ok(d) if !d.is_empty() => PathBuf::from(d),
+        _ => PathBuf::from(env!("CARGO_MANIFEST_DIR")),
+    }
+}
+
 fn cases() -> Vec<Case> {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/conformance/cases.json");
+    let path = manifest_dir().join("tests/conformance/cases.json");
     let raw = std::fs::read_to_string(&path).expect("read cases.json");
     let file: CasesFile = serde_json::from_str(&raw).expect("parse cases.json");
     file.cases
@@ -101,7 +118,7 @@ fn docker_present() -> bool {
 }
 
 fn workflow_path(id: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
+    manifest_dir()
         .join("tests/conformance/workflows")
         .join(format!("{id}.yml"))
 }
@@ -137,13 +154,14 @@ struct Fixture {
     git_token: Option<String>,
     head_ref: String,
     n_dispatched: usize,
+    needs_public_origin: bool,
 }
 
 async fn fixture(case: &Case) -> Fixture {
     let log_dir = ensure_env().clone();
     let dir = tempfile::tempdir().unwrap();
     let repos_dir = dir.path().join("repos");
-    let db = Database::connect(&format!("sqlite:{}", dir.path().join("c.db").display()))
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("c.db").display()))
         .await
         .unwrap();
     db.migrate().await.unwrap();
@@ -318,6 +336,7 @@ async fn fixture(case: &Case) -> Fixture {
             .clone()
             .unwrap_or_else(|| "refs/heads/main".into()),
         n_dispatched,
+        needs_public_origin: case.needs_public_origin.unwrap_or(false),
     }
 }
 
@@ -345,6 +364,14 @@ async fn start_runner(
         axum::serve(listener, app).await.unwrap();
     });
     let origin = format!("http://127.0.0.1:{port}");
+    // `resolve_public_origin()` is env-driven — point it at this ephemeral
+    // listener so minted `server_url`/`ACTIONS_ID_TOKEN_REQUEST_URL` reach the
+    // server-under-test. Only cases that call the API from inside a step opt
+    // in — a process-global env write could otherwise cross-wire a sibling
+    // case's port under plain `cargo test` (nextest runs each in-process).
+    if fx.needs_public_origin {
+        std::env::set_var("OXIDEAN_PUBLIC_ORIGIN", &origin);
+    }
 
     let mut client = oxidean_runner::client::Client::new(&origin, None);
     let reg = mint_registration_token(&fx.db).await.unwrap();
@@ -428,7 +455,7 @@ fn golden_diff(case: &Case, our_run: &str, our_jobs: &HashMap<String, String>) {
     if std::env::var_os("OXIDEAN_CONFORMANCE_GOLDEN").is_none() {
         return;
     }
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/conformance/golden.json");
+    let path = manifest_dir().join("tests/conformance/golden.json");
     let Ok(raw) = std::fs::read_to_string(&path) else {
         eprintln!("golden: {path:?} missing — run scripts/conformance-oracle.sh");
         return;
@@ -706,6 +733,7 @@ conformance_case!(uses_node_post, "uses-node-post");
 conformance_case!(composite_env, "composite-env");
 conformance_case!(step_summary, "step-summary");
 conformance_case!(artifact_upload_download, "artifact-upload-download");
+conformance_case!(artifact_search_path_root, "artifact-search-path-root");
 conformance_case!(artifact_overwrite, "artifact-overwrite");
 conformance_case!(artifact_pattern_download, "artifact-pattern-download");
 conformance_case!(artifact_missing, "artifact-missing");
@@ -714,6 +742,7 @@ conformance_case!(expr_malformed_run, "expr-malformed-run");
 conformance_case!(expr_malformed_if, "expr-malformed-if");
 conformance_case!(prt_push, "prt-push");
 conformance_case!(empty_steps, "empty-steps");
+conformance_case!(oidc_curl, "oidc-curl");
 
 /// Every `cases.json` entry is wired to a generated test and every corpus
 /// workflow is referenced — guards the corpus against silent drift.

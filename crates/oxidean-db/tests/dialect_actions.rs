@@ -5,10 +5,17 @@ use std::path::PathBuf;
 use oxidean_core::Role;
 use oxidean_db::Database;
 
+/// Runtime `CARGO_MANIFEST_DIR` — nextest sets it under `--workspace-remap`
+/// where the build-time `env!` still points at the (absent) image path.
+fn manifest_dir() -> PathBuf {
+    match std::env::var("CARGO_MANIFEST_DIR") {
+        Ok(d) if !d.is_empty() => PathBuf::from(d),
+        _ => PathBuf::from(env!("CARGO_MANIFEST_DIR")),
+    }
+}
+
 fn migrations_dir(dialect: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("migrations")
-        .join(dialect)
+    manifest_dir().join("migrations").join(dialect)
 }
 
 fn find_actions_migration(dialect: &str) -> Option<(PathBuf, String)> {
@@ -72,8 +79,7 @@ async fn dialect_actions_schema_presence() {
     }
 
     // commit_statuses lives in 0017 (Phase 13) — assert still present for D-ACT-15.
-    let bp = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("migrations/sqlite/0017_branch_protection.sql");
+    let bp = manifest_dir().join("migrations/sqlite/0017_branch_protection.sql");
     let bp_sql = std::fs::read_to_string(&bp).expect("0017_branch_protection.sql");
     assert!(
         bp_sql.contains("commit_statuses"),
@@ -251,11 +257,24 @@ async fn dialect_actions_claim_race() {
     };
     db.migrate().await.expect("migrate");
 
+    // Shared CI databases persist across runs: tag every id and use a
+    // run-unique claim label so leftover/concurrent jobs can never match.
+    let tag = format!(
+        "{:x}-{:x}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos()
+    );
+    let label = format!("ubuntu-latest-{tag}");
+    let labels_json = format!(r#"["{label}"]"#);
+
     let owner = db
         .create_user(
-            "u-race",
-            "race@example.com",
-            "race",
+            &format!("u-race-{tag}"),
+            &format!("race-{tag}@example.com"),
+            &format!("race-{tag}"),
             Some("hash"),
             "Race",
             "",
@@ -265,17 +284,25 @@ async fn dialect_actions_claim_race() {
         .await
         .expect("owner");
     let repo = db
-        .insert_repository("r-race", &owner.id, "user", "race", "private", "", "main")
+        .insert_repository(
+            &format!("r-race-{tag}"),
+            &owner.id,
+            "user",
+            "race",
+            "private",
+            "",
+            "main",
+        )
         .await
         .expect("repo");
     let run = db
         .insert_action_run(
-            "run-race",
+            &format!("run-race-{tag}"),
             &repo.id,
             ".github/workflows/ci.yml",
             "CI",
             "push",
-            "sha",
+            &format!("sha-{tag}"),
             "refs/heads/main",
             "CI",
             Some(&owner.id),
@@ -288,10 +315,10 @@ async fn dialect_actions_claim_race() {
     // Claiming runners must exist — action_jobs.runner_id is a real FK.
     for w in 0..4 {
         db.insert_action_runner(
-            &format!("runner-{w}"),
+            &format!("runner-{w}-{tag}"),
             &format!("r{w}"),
-            &format!("hash-{w}"),
-            r#"["ubuntu-latest"]"#,
+            &format!("hash-{w}-{tag}"),
+            &labels_json,
             Some(&repo.id),
             false,
         )
@@ -302,11 +329,11 @@ async fn dialect_actions_claim_race() {
     const JOBS: usize = 16;
     for i in 0..JOBS {
         db.insert_action_job(oxidean_db::JobInsert::basic(
-            &format!("job-race-{i}"),
+            &format!("job-race-{i}-{tag}"),
             &run.id,
             &format!("build-{i}"),
             "build",
-            r#"["ubuntu-latest"]"#,
+            &labels_json,
         ))
         .await
         .expect("job");
@@ -317,12 +344,11 @@ async fn dialect_actions_claim_race() {
     for w in 0..4 {
         let db = db.clone();
         let claims = claims.clone();
+        let runner_id = format!("runner-{w}-{tag}");
+        let labels = vec![label.clone()];
         handles.push(tokio::spawn(async move {
             while let Some(job) = db
-                .claim_queued_action_job_for_labels(
-                    &format!("runner-{w}"),
-                    &["ubuntu-latest".to_string()],
-                )
+                .claim_queued_action_job_for_labels(&runner_id, &labels)
                 .await
                 .expect("claim")
             {

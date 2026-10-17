@@ -8,6 +8,29 @@ use oxidean_api::auth::hash_password_str;
 use oxidean_db::Database;
 use uuid::Uuid;
 
+/// Connect a test database.
+///
+/// Without `OXIDEAN_TEST_DATABASE_URL` this is exactly the historical SQLite
+/// behaviour — `sqlite_url` must be the test's usual per-file `sqlite:` URL
+/// and is passed through untouched.
+///
+/// When `OXIDEAN_TEST_DATABASE_URL` names a server-level Postgres/MySQL admin
+/// URL (e.g. `postgres://oxidean:oxidean@127.0.0.1:5432/postgres`,
+/// `mysql://root:pw@127.0.0.1:3306/`), every call provisions a fresh database
+/// `oxt_<uuid>` over an admin connection and connects there; callers still run
+/// `db.migrate()` as usual. Created databases are intentionally NOT dropped —
+/// the harness is meant to run against throwaway containers/CI services.
+pub async fn connect_test_db(sqlite_url: &str) -> Result<Database, String> {
+    match std::env::var("OXIDEAN_TEST_DATABASE_URL") {
+        Ok(admin) if !admin.trim().is_empty() => {
+            let name = format!("oxt_{}", Uuid::new_v4().simple());
+            let url = oxidean_db::admin::create_database(&admin, &name).await?;
+            Database::connect(&url).await
+        }
+        _ => Database::connect(sqlite_url).await,
+    }
+}
+
 /// Serialize tests that mutate `OXIDEAN_ADMIN_*` / `OXIDEAN_ALLOW_SIGNUP` (process-wide env).
 /// Async mutex: the guard is `Send` and intentionally held across `.await`s.
 pub async fn lock_admin_env() -> MutexGuard<'static, ()> {

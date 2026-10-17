@@ -1,15 +1,16 @@
 //! Phase 19 — registered-only dispatch (ACT-07 / D-ACT-10 / D-ACT-20).
 
+mod support;
+
 use oxidean_api::actions::dispatch_push_for_sha;
 use oxidean_core::Role;
-use oxidean_db::Database;
 use oxidean_git::{CliGitBackend, GitBackend};
 
 #[tokio::test]
 async fn actions_dispatch_policy_registered_runners_only() {
     // Jobs are only assigned via FetchTask on registered runners — enqueue leaves status queued.
     let dir = tempfile::tempdir().unwrap();
-    let db = Database::connect(&format!("sqlite:{}", dir.path().join("p.db").display()))
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("p.db").display()))
         .await
         .unwrap();
     db.migrate().await.unwrap();
@@ -86,7 +87,7 @@ jobs:
 #[tokio::test]
 async fn actions_dispatch_policy_unmatched_labels_stay_queued() {
     let dir = tempfile::tempdir().unwrap();
-    let db = Database::connect(&format!("sqlite:{}", dir.path().join("u.db").display()))
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("u.db").display()))
         .await
         .unwrap();
     db.migrate().await.unwrap();

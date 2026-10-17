@@ -1,6 +1,8 @@
 //! Phase 6 — trigger filters, pull_request_target, fork approval, schedule
 //! sweeper, lifecycle events, workflow_dispatch inputs.
 
+mod support;
+
 use std::sync::Arc;
 
 use oxidean_api::actions::dispatch::notify_push_actions;
@@ -112,7 +114,7 @@ async fn run_count(db: &Database, repo_id: &str) -> usize {
 #[tokio::test]
 async fn p6_push_branch_and_tag_filters() {
     let dir = tempfile::tempdir().unwrap();
-    let db = Database::connect(&format!("sqlite:{}", dir.path().join("t.db").display()))
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("t.db").display()))
         .await
         .unwrap();
     db.migrate().await.unwrap();
@@ -190,7 +192,7 @@ jobs:
 #[tokio::test]
 async fn p6_push_paths_filters() {
     let dir = tempfile::tempdir().unwrap();
-    let db = Database::connect(&format!("sqlite:{}", dir.path().join("t.db").display()))
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("t.db").display()))
         .await
         .unwrap();
     db.migrate().await.unwrap();
@@ -285,7 +287,7 @@ jobs:
 #[tokio::test]
 async fn p6_pull_request_types_and_target_optin() {
     let dir = tempfile::tempdir().unwrap();
-    let db = Database::connect(&format!("sqlite:{}", dir.path().join("t.db").display()))
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("t.db").display()))
         .await
         .unwrap();
     db.migrate().await.unwrap();
@@ -406,7 +408,7 @@ jobs:
 #[tokio::test]
 async fn p6_fork_approval_hold_and_release() {
     let dir = tempfile::tempdir().unwrap();
-    let db = Database::connect(&format!("sqlite:{}", dir.path().join("t.db").display()))
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("t.db").display()))
         .await
         .unwrap();
     db.migrate().await.unwrap();
@@ -503,7 +505,7 @@ jobs:
 #[tokio::test]
 async fn p6_schedule_sweep_dedupes_per_minute() {
     let dir = tempfile::tempdir().unwrap();
-    let db = Database::connect(&format!("sqlite:{}", dir.path().join("t.db").display()))
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("t.db").display()))
         .await
         .unwrap();
     db.migrate().await.unwrap();
@@ -548,7 +550,7 @@ jobs:
 #[tokio::test]
 async fn p6_lifecycle_release_and_issues() {
     let dir = tempfile::tempdir().unwrap();
-    let db = Database::connect(&format!("sqlite:{}", dir.path().join("t.db").display()))
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("t.db").display()))
         .await
         .unwrap();
     db.migrate().await.unwrap();
@@ -603,7 +605,7 @@ jobs:
 #[tokio::test]
 async fn p6_event_payload_persisted_for_runner() {
     let dir = tempfile::tempdir().unwrap();
-    let db = Database::connect(&format!("sqlite:{}", dir.path().join("t.db").display()))
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("t.db").display()))
         .await
         .unwrap();
     db.migrate().await.unwrap();

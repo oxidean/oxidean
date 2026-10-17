@@ -85,10 +85,21 @@ async fn job_payload(db: &Database, job_id: &str) -> serde_json::Value {
     serde_json::from_str(&p.payload_json).unwrap()
 }
 
+/// The Actions secrets key is read process-wide — set it once before any
+/// test in this binary can touch the DB (a mid-test `set_var` leaks into
+/// siblings under plain `cargo test`).
+fn ensure_env() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        std::env::set_var("OXIDEAN_ACTIONS_SECRETS_KEY", "p7-oidc-test-key");
+    });
+}
+
 #[tokio::test]
 async fn p7_permissions_full_map_in_payload() {
+    ensure_env();
     let dir = tempfile::tempdir().unwrap();
-    let db = Database::connect(&format!("sqlite:{}", dir.path().join("t.db").display()))
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("t.db").display()))
         .await
         .unwrap();
     db.migrate().await.unwrap();
@@ -142,8 +153,9 @@ jobs:
 
 #[tokio::test]
 async fn p7_default_permissions_floor() {
+    ensure_env();
     let dir = tempfile::tempdir().unwrap();
-    let db = Database::connect(&format!("sqlite:{}", dir.path().join("t.db").display()))
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("t.db").display()))
         .await
         .unwrap();
     db.migrate().await.unwrap();
@@ -212,8 +224,9 @@ jobs:
 
 #[tokio::test]
 async fn p7_environment_auto_create_and_deployments() {
+    ensure_env();
     let dir = tempfile::tempdir().unwrap();
-    let db = Database::connect(&format!("sqlite:{}", dir.path().join("t.db").display()))
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("t.db").display()))
         .await
         .unwrap();
     db.migrate().await.unwrap();
@@ -265,8 +278,9 @@ jobs:
 
 #[tokio::test]
 async fn p7_environment_required_reviewers_hold() {
+    ensure_env();
     let dir = tempfile::tempdir().unwrap();
-    let db = Database::connect(&format!("sqlite:{}", dir.path().join("t.db").display()))
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("t.db").display()))
         .await
         .unwrap();
     db.migrate().await.unwrap();
@@ -344,8 +358,9 @@ jobs:
 
 #[tokio::test]
 async fn p7_environment_branch_allowlist_fails_loudly() {
+    ensure_env();
     let dir = tempfile::tempdir().unwrap();
-    let db = Database::connect(&format!("sqlite:{}", dir.path().join("t.db").display()))
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("t.db").display()))
         .await
         .unwrap();
     db.migrate().await.unwrap();
@@ -388,8 +403,9 @@ jobs:
 
 #[tokio::test]
 async fn p7_environment_wait_timer() {
+    ensure_env();
     let dir = tempfile::tempdir().unwrap();
-    let db = Database::connect(&format!("sqlite:{}", dir.path().join("t.db").display()))
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("t.db").display()))
         .await
         .unwrap();
     db.migrate().await.unwrap();
@@ -455,8 +471,9 @@ jobs:
 
 #[tokio::test]
 async fn p7_id_token_request_credentials() {
+    ensure_env();
     let dir = tempfile::tempdir().unwrap();
-    let db = Database::connect(&format!("sqlite:{}", dir.path().join("t.db").display()))
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("t.db").display()))
         .await
         .unwrap();
     db.migrate().await.unwrap();
@@ -563,7 +580,7 @@ async fn app_db() -> (axum::Router, Database, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let log_dir = dir.path().join("actions-logs");
     std::fs::create_dir_all(&log_dir).unwrap();
-    let db = Database::connect(&format!("sqlite:{}", dir.path().join("r.db").display()))
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("r.db").display()))
         .await
         .unwrap();
     db.migrate().await.unwrap();
@@ -594,13 +611,17 @@ async fn get(app: &axum::Router, uri: &str, bearer: Option<&str>) -> (StatusCode
     (status, bytes.to_vec())
 }
 
+/// RS256 OIDC issuer interop — discovery at the issuer-relative
+/// `/.well-known/openid-configuration`, RSA JWKS, GitHub's claim set, and the
+/// private key stored as secrets ciphertext (never plaintext).
 #[tokio::test]
 async fn p7_oidc_token_endpoint_flow() {
+    ensure_env();
     let (app, db, _dir) = app_db().await;
     let (owner, repo) = mk_owner_repo(&db, "http").await;
 
     // A live job with `id-token: write` + an environment (claim surfaces in
-    // the JWT's `environment` claim).
+    // the JWT's `environment` claim and `sub`).
     let (run_id, job_ids) = enqueue(
         &db,
         &repo.id,
@@ -647,53 +668,186 @@ jobs:
     let (s, _) = get(&app, "/api/actions/oidc/token", Some("oxidean_oidc_bad")).await;
     assert_eq!(s, StatusCode::UNAUTHORIZED);
 
-    // Valid request token → {"value": jwt} bound to this job.
+    // Lowercase `bearer` (GitHub's documented curl) must authenticate too.
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/actions/oidc/token?api-version=2.0&audience=sts.example.com")
+                .header("authorization", format!("bearer {request_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = res.into_body().collect().await.unwrap().to_bytes();
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let jwt = v["value"].as_str().expect("jwt").to_string();
+
+    // Discovery is served at exactly `{iss}/.well-known/openid-configuration`
+    // — the location OIDC consumers resolve from the issuer claim. The legacy
+    // root-level path is gone.
+    let (s, _) = get(&app, "/.well-known/actions-oidc/openid-configuration", None).await;
+    assert_eq!(s, StatusCode::NOT_FOUND, "legacy discovery route removed");
     let (s, body) = get(
         &app,
-        "/api/actions/oidc/token?audience=sts.example.com",
-        Some(&request_token),
+        "/api/actions/oidc/.well-known/openid-configuration",
+        None,
     )
     .await;
-    assert_eq!(s, StatusCode::OK, "{:?}", String::from_utf8_lossy(&body));
-    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    let jwt = v["value"].as_str().expect("jwt");
+    assert_eq!(s, StatusCode::OK);
+    let disc: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let iss = disc["issuer"].as_str().expect("issuer");
+    assert!(
+        iss.ends_with("/api/actions/oidc"),
+        "issuer is a path issuer: {iss}"
+    );
+    assert_eq!(disc["jwks_uri"].as_str().unwrap(), format!("{iss}/jwks"));
+    assert_eq!(
+        disc["id_token_signing_alg_values_supported"],
+        serde_json::json!(["RS256"])
+    );
+    assert_eq!(
+        disc["subject_types_supported"],
+        serde_json::json!(["public", "pairwise"])
+    );
+    assert_eq!(disc["scopes_supported"], serde_json::json!(["openid"]));
+    assert!(
+        disc["claims_supported"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c == "job_workflow_sha"),
+        "claims_supported covers the emitted claims"
+    );
 
-    // JWKS serves the signing key's public JWK.
+    // JWKS serves only RSA keys.
     let (s, body) = get(&app, "/api/actions/oidc/jwks", None).await;
     assert_eq!(s, StatusCode::OK);
     let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
     let keys = v["keys"].as_array().expect("jwks keys");
     assert_eq!(keys.len(), 1, "lazy key provisioning minted one key");
-    let jwk: jsonwebtoken::jwk::Jwk = serde_json::from_value(keys[0].clone()).expect("jwk shape");
-    assert!(jwk.common.key_id.is_some());
-
-    // Decode + verify the JWT against the advertised key.
-    let (s, body) = get(&app, "/.well-known/actions-oidc/openid-configuration", None).await;
-    assert_eq!(s, StatusCode::OK);
-    let disc: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(
-        disc["jwks_uri"].as_str().unwrap(),
-        format!("{}/api/actions/oidc/jwks", disc["issuer"].as_str().unwrap())
+    assert_eq!(keys[0]["kty"], "RSA");
+    assert_eq!(keys[0]["alg"], "RS256");
+    assert_eq!(keys[0]["use"], "sig");
+    assert!(
+        keys[0]["n"].as_str().unwrap().len() > 300,
+        "RSA-2048 modulus"
     );
+    let jwk: jsonwebtoken::jwk::Jwk = serde_json::from_value(keys[0].clone()).expect("jwk shape");
+    let jwk_kid = jwk.common.key_id.clone().expect("jwks kid");
 
+    // The JWT verifies RS256 against the advertised key, matching `kid`.
+    let header = jsonwebtoken::decode_header(&jwt).expect("jwt header");
+    assert_eq!(header.alg, jsonwebtoken::Algorithm::RS256);
+    assert_eq!(header.kid.as_deref(), Some(jwk_kid.as_str()));
     let key = jsonwebtoken::DecodingKey::from_jwk(&jwk).expect("decoding key");
-    let mut validation = jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::EdDSA);
+    let mut validation = jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::RS256);
     validation.set_audience(&["sts.example.com"]);
     let data = jsonwebtoken::decode::<serde_json::Value>(jwt, &key, &validation)
-        .expect("jwt verifies against JWKS");
+        .expect("jwt verifies RS256 against JWKS");
     let claims = data.claims;
-    assert_eq!(claims["iss"], disc["issuer"]);
+    // `iss` byte-for-byte equals the discovery `issuer`.
+    assert_eq!(claims["iss"], serde_json::Value::String(iss.to_string()));
     assert_eq!(claims["aud"], "sts.example.com");
     assert_eq!(claims["sha"], "deadbeef");
     assert_eq!(claims["ref"], "refs/heads/main");
+    assert_eq!(claims["ref_type"], "branch");
+    assert_eq!(claims["ref_protected"], false);
     assert_eq!(claims["event_name"], "push");
     assert_eq!(claims["environment"], "production");
+    assert_eq!(
+        claims["sub"],
+        format!(
+            "repo:{}/{}:environment:production",
+            owner.username, repo.name
+        )
+    );
     assert_eq!(claims["run_id"], run_id);
+    assert_eq!(claims["run_number"], 1);
+    assert_eq!(claims["run_attempt"], 1);
     assert_eq!(claims["runner_environment"], "self-hosted");
-    assert!(claims["sub"].as_str().unwrap().starts_with("repo:"));
+    assert_eq!(claims["actor"], owner.username);
+    assert_eq!(claims["actor_id"], owner.id);
+    assert_eq!(claims["base_ref"], "");
+    assert_eq!(claims["head_ref"], "");
+    assert_eq!(
+        claims["repository"],
+        format!("{}/{}", owner.username, repo.name)
+    );
+    assert_eq!(claims["repository_id"], repo.id);
+    assert_eq!(claims["repository_owner"], owner.username);
+    assert_eq!(claims["repository_owner_id"], owner.id);
+    assert_eq!(claims["repository_visibility"], "private");
+    let workflow_ref = format!(
+        "{}/{}/.github/workflows/ci.yml@refs/heads/main",
+        owner.username, repo.name
+    );
+    assert_eq!(claims["workflow_ref"], workflow_ref);
+    assert_eq!(claims["workflow_sha"], "deadbeef");
+    assert_eq!(claims["job_workflow_ref"], workflow_ref);
+    assert_eq!(claims["job_workflow_sha"], "deadbeef");
     let exp = claims["exp"].as_i64().unwrap();
     let iat = claims["iat"].as_i64().unwrap();
     assert_eq!(exp - iat, 600, "10-minute token lifetime");
+
+    // The private key is ciphertext at rest — `private_enc` holds the
+    // secrets-encrypted blob and decrypts to PKCS#8 hex; `private_der`
+    // stays empty (plaintext column retired for RS256 keys).
+    let stored = db
+        .find_active_action_oidc_key("RS256")
+        .await
+        .unwrap()
+        .expect("rs256 key row");
+    assert_eq!(stored.alg, "RS256");
+    assert!(stored.private_der.is_empty(), "no plaintext private key");
+    let enc = stored.private_enc.as_deref().expect("private_enc present");
+    let der_hex = oxidean_api::actions::secrets::decrypt_secret(enc)
+        .expect("private key decrypts with secrets key");
+    assert!(
+        hex::decode(&der_hex).is_ok(),
+        "decrypted material is der hex"
+    );
+
+    // Default `aud` is the repository owner's URL (GitHub parity).
+    let origin = oxidean_api::public_origin::resolve_public_origin();
+    let (s, body) = get(&app, "/api/actions/oidc/token", Some(&request_token)).await;
+    assert_eq!(s, StatusCode::OK);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let jwt2 = v["value"].as_str().expect("jwt");
+    let mut validation = jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::RS256);
+    validation.set_audience(&[&format!("{origin}/{}", owner.username)]);
+    let data = jsonwebtoken::decode::<serde_json::Value>(jwt2, &key, &validation)
+        .expect("default-aud jwt verifies");
+    assert_eq!(data.claims["aud"], format!("{origin}/{}", owner.username));
+
+    // Without a secrets key the endpoint fails with a clear error instead of
+    // minting — the stored key exists but cannot be decrypted.
+    let saved: Vec<(&str, Option<String>)> =
+        ["OXIDEAN_ACTIONS_SECRETS_KEY", "OXIDEAN_SESSION_SECRET"]
+            .iter()
+            .map(|k| (*k, std::env::var(k).ok()))
+            .collect();
+    for (k, _) in &saved {
+        std::env::remove_var(k);
+    }
+    let (s, body) = get(&app, "/api/actions/oidc/token", Some(&request_token)).await;
+    for (k, v) in &saved {
+        if let Some(v) = v {
+            std::env::set_var(k, v);
+        }
+    }
+    assert_eq!(s, StatusCode::INTERNAL_SERVER_ERROR);
+    let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert!(
+        v["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("OXIDEAN_ACTIONS_SECRETS_KEY"),
+        "missing-key error names the fix: {v}"
+    );
 
     // Terminal job → requests closed.
     db.update_action_job_status(&job_ids[0], "success")
@@ -701,7 +855,7 @@ jobs:
         .unwrap();
     let (s, _) = get(
         &app,
-        "/api/actions/oidc/token?audience=sts.example.com",
+        "/api/actions/oidc/token?api-version=2.0&audience=sts.example.com",
         Some(&request_token),
     )
     .await;

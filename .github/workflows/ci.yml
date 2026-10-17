@@ -803,13 +803,27 @@ jobs:
             DATABASE_URL="$url" OXIDEAN_DB_DIALECT="$dialect" \
               cargo nextest run --archive-file target/nextest-archive.tar.zst \
                 --workspace-remap "${{ github.workspace }}" \
-                --profile ci -E 'binary_id(oxidean-db::dialect_probe)' "$@"
+                --profile ci -E 'binary_id(oxidean-db::dialect_probe) | binary_id(oxidean-db::dialect_actions)' "$@"
           }
           probe postgres postgres://oxidean:oxidean@localhost:5432/oxidean
           probe mysql mysql://oxidean:oxidean@127.0.0.1:3306/oxidean
-          # sqlite serializes: the three probe tests share one database file
-          # and parallel migrations race (duplicate column on migration 6).
+          # sqlite serializes: the probe + actions tests share one database
+          # file and parallel migrations race (duplicate column on migration 6).
           probe sqlite sqlite:./var/oxidean.db --test-threads=1
+          # API actions conformance on real engines: every test provisions a
+          # fresh oxt_<uuid> database through OXIDEAN_TEST_DATABASE_URL. MySQL
+          # needs the root URL — MYSQL_USER only owns the oxidean schema.
+          # ubuntu-latest has git + bash + docker, so docker_gated conformance
+          # cases execute for real here.
+          for admin_url in \
+            "postgres://oxidean:oxidean@localhost:5432/postgres" \
+            "mysql://root:oxidean@127.0.0.1:3306/"; do
+            echo "==> workflow_conformance: $admin_url"
+            OXIDEAN_TEST_DATABASE_URL="$admin_url" \
+              cargo nextest run --archive-file target/nextest-archive.tar.zst \
+                --workspace-remap "${{ github.workspace }}" \
+                --profile ci -E 'binary_id(oxidean-api::workflow_conformance)'
+          done
 
   # Release-build evidence: `cargo build --timings` HTML + binary size, so build
   # performance changes are measurable on the PR that makes them. Runs on pushes

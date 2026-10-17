@@ -103,7 +103,7 @@ async fn mk_runner(db: &Database, suffix: &str) -> String {
 #[tokio::test]
 async fn p8_claim_stamps_heartbeat_and_binds_runner() {
     let dir = tempfile::tempdir().unwrap();
-    let db = Database::connect(&format!("sqlite:{}", dir.path().join("t.db").display()))
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("t.db").display()))
         .await
         .unwrap();
     db.migrate().await.unwrap();
@@ -127,7 +127,7 @@ async fn p8_claim_stamps_heartbeat_and_binds_runner() {
 #[tokio::test]
 async fn p8_log_index_cas_orders_batches() {
     let dir = tempfile::tempdir().unwrap();
-    let db = Database::connect(&format!("sqlite:{}", dir.path().join("t.db").display()))
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("t.db").display()))
         .await
         .unwrap();
     db.migrate().await.unwrap();
@@ -159,7 +159,7 @@ async fn p8_log_index_cas_orders_batches() {
 #[tokio::test]
 async fn p8_stale_sweep_requeues_dead_runner() {
     let dir = tempfile::tempdir().unwrap();
-    let db = Database::connect(&format!("sqlite:{}", dir.path().join("t.db").display()))
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("t.db").display()))
         .await
         .unwrap();
     db.migrate().await.unwrap();
@@ -203,7 +203,7 @@ async fn p8_stale_sweep_requeues_dead_runner() {
 async fn p8_deadline_lapse_fails_job_and_run() {
     let dir = tempfile::tempdir().unwrap();
     std::env::set_var("OXIDEAN_ACTIONS_LOG_DIR", dir.path().join("logs"));
-    let db = Database::connect(&format!("sqlite:{}", dir.path().join("t.db").display()))
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("t.db").display()))
         .await
         .unwrap();
     db.migrate().await.unwrap();
@@ -305,7 +305,7 @@ async fn p8_gzip_roundtrip_preserves_offsets_and_merges_late_appends() {
 async fn p8_retention_sweep_compresses_terminal_and_deletes_aged() {
     let dir = tempfile::tempdir().unwrap();
     let log_dir = dir.path().join("logs");
-    let db = Database::connect(&format!("sqlite:{}", dir.path().join("t.db").display()))
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("t.db").display()))
         .await
         .unwrap();
     db.migrate().await.unwrap();
@@ -361,7 +361,7 @@ async fn p8_retention_sweep_compresses_terminal_and_deletes_aged() {
 async fn p8_org_env_secret_merge_precedence_and_audit() {
     let dir = tempfile::tempdir().unwrap();
     std::env::set_var("OXIDEAN_ACTIONS_SECRETS_KEY", "phase8-test-key");
-    let db = Database::connect(&format!("sqlite:{}", dir.path().join("t.db").display()))
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("t.db").display()))
         .await
         .unwrap();
     db.migrate().await.unwrap();
@@ -469,7 +469,7 @@ async fn p8_org_env_secret_merge_precedence_and_audit() {
 async fn p8_org_secret_selected_visibility_scopes_repos() {
     let dir = tempfile::tempdir().unwrap();
     std::env::set_var("OXIDEAN_ACTIONS_SECRETS_KEY", "phase8-test-key");
-    let db = Database::connect(&format!("sqlite:{}", dir.path().join("t.db").display()))
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("t.db").display()))
         .await
         .unwrap();
     db.migrate().await.unwrap();
@@ -543,7 +543,7 @@ async fn p8_policy_violation_fails_validation_loudly() {
 
     let dir = tempfile::tempdir().unwrap();
     std::env::set_var("OXIDEAN_ACTIONS_LOG_DIR", dir.path().join("logs"));
-    let db = Database::connect(&format!("sqlite:{}", dir.path().join("t.db").display()))
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("t.db").display()))
         .await
         .unwrap();
     db.migrate().await.unwrap();
@@ -584,7 +584,7 @@ jobs:
 async fn p8_discovery_errors_persist_as_failed_validation_runs() {
     let dir = tempfile::tempdir().unwrap();
     std::env::set_var("OXIDEAN_ACTIONS_LOG_DIR", dir.path().join("logs"));
-    let db = Database::connect(&format!("sqlite:{}", dir.path().join("t.db").display()))
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("t.db").display()))
         .await
         .unwrap();
     db.migrate().await.unwrap();

@@ -1,5 +1,7 @@
 //! Phase 19 — push + pull_request triggers (ACT-02 / D-ACT-04 / D-ACT-05 / D-ACT-06).
 
+mod support;
+
 use std::sync::Arc;
 
 use oxidean_api::actions::{
@@ -64,7 +66,7 @@ async fn seed_repo_with_workflow(
 async fn actions_triggers_push_after_receive_pack() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("t.db");
-    let db = Database::connect(&format!("sqlite:{}", db_path.display()))
+    let db = support::connect_test_db(&format!("sqlite:{}", db_path.display()))
         .await
         .unwrap();
     db.migrate().await.unwrap();
@@ -110,7 +112,7 @@ jobs:
 async fn actions_triggers_push_skips_broken_workflow_file() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("t.db");
-    let db = Database::connect(&format!("sqlite:{}", db_path.display()))
+    let db = support::connect_test_db(&format!("sqlite:{}", db_path.display()))
         .await
         .unwrap();
     db.migrate().await.unwrap();
@@ -218,7 +220,7 @@ jobs:
 #[tokio::test]
 async fn actions_triggers_pull_request_lifecycle() {
     let dir = tempfile::tempdir().unwrap();
-    let db = Database::connect(&format!("sqlite:{}", dir.path().join("pr.db").display()))
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("pr.db").display()))
         .await
         .unwrap();
     db.migrate().await.unwrap();
@@ -339,7 +341,7 @@ jobs:
 #[tokio::test]
 async fn actions_triggers_respect_instance_and_repo_gates() {
     let dir = tempfile::tempdir().unwrap();
-    let db = Database::connect(&format!("sqlite:{}", dir.path().join("g.db").display()))
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("g.db").display()))
         .await
         .unwrap();
     db.migrate().await.unwrap();

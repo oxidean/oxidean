@@ -29,7 +29,7 @@ async fn app_db() -> (axum::Router, Database, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let log_dir = dir.path().join("actions-logs");
     std::fs::create_dir_all(&log_dir).unwrap();
-    let db = Database::connect(&format!("sqlite:{}", dir.path().join("r.db").display()))
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("r.db").display()))
         .await
         .unwrap();
     db.migrate().await.unwrap();

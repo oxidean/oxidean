@@ -19,7 +19,7 @@ use tower::ServiceExt;
 
 async fn app_db() -> (axum::Router, Database, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
-    let db = Database::connect(&format!("sqlite:{}", dir.path().join("r.db").display()))
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("r.db").display()))
         .await
         .unwrap();
     db.migrate().await.unwrap();
@@ -411,7 +411,7 @@ async fn actions_runner_protocol_update_task_and_log() {
     let dir = tempfile::tempdir().unwrap();
     let log_dir = dir.path().join("actions-logs");
     std::fs::create_dir_all(&log_dir).unwrap();
-    let db = Database::connect(&format!("sqlite:{}", dir.path().join("r.db").display()))
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("r.db").display()))
         .await
         .unwrap();
     db.migrate().await.unwrap();
@@ -628,7 +628,7 @@ async fn actions_runner_protocol_pull_request_provenance_gate() {
 
     std::env::set_var("OXIDEAN_ACTIONS_SECRETS_KEY", "integration-test-key");
     let dir = tempfile::tempdir().unwrap();
-    let db = Database::connect(&format!("sqlite:{}", dir.path().join("fk.db").display()))
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("fk.db").display()))
         .await
         .unwrap();
     db.migrate().await.unwrap();

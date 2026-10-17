@@ -45,7 +45,21 @@ pub(crate) async fn upload(
             Some(p) => (true, p),
             None => (false, line),
         };
-        let mut hits = glob_walk(senv.workspace, pat);
+        // A magic-free pattern that names a directory contributes every file
+        // beneath it — upstream walks the search path itself.
+        let mut hits = if !pat.contains(['*', '?', '[', '{'])
+            && senv.workspace.join(pat.trim_start_matches('/')).is_dir()
+        {
+            let base = pat.trim_end_matches('/');
+            let dir_glob = if base == "." {
+                "**".to_string()
+            } else {
+                format!("{base}/**")
+            };
+            glob_walk(senv.workspace, &dir_glob)
+        } else {
+            glob_walk(senv.workspace, pat)
+        };
         if !include_hidden {
             hits.retain(|f| !has_hidden_segment(senv.workspace, f));
         }
@@ -76,14 +90,17 @@ pub(crate) async fn upload(
         };
     }
 
-    // Archive: `tar -czf <tgz> -C <workspace> -T <list>` — file list avoids
-    // argv limits; entries stay workspace-relative like upstream zips.
+    // Archive entries are relative to the upload root — computed from the
+    // *search paths* (non-wildcard pattern prefixes), not the matched files:
+    // `build/` → `build`, `out/**/*.txt` → `out`, a lone `dist/payload.txt`
+    // → `dist`. Upstream findFilesToUpload semantics.
+    let root = upload_archive_root(senv.workspace, path_spec, &files);
     let stage = senv.runner_temp.join("artifacts");
     std::fs::create_dir_all(&stage).map_err(|e| e.to_string())?;
     let rels: Vec<String> = files
         .iter()
         .filter_map(|f| {
-            f.strip_prefix(senv.workspace)
+            f.strip_prefix(&root)
                 .ok()
                 .map(|r| r.to_string_lossy().replace('\\', "/"))
         })
@@ -95,7 +112,7 @@ pub(crate) async fn upload(
         .args(["czf"])
         .arg(&tgz)
         .arg("-C")
-        .arg(senv.workspace)
+        .arg(&root)
         .arg("-T")
         .arg(&list_file)
         .output()
@@ -222,6 +239,91 @@ pub(crate) async fn download(
     Ok(outs)
 }
 
+/// The non-wildcard prefix of one `path:` pattern — upstream
+/// `globber.getSearchPaths()` for a single pattern. A magic-free pattern
+/// contributes its own path (literal file or directory); `.`/`..` collapse
+/// lexically and `..` cannot climb above the workspace.
+fn pattern_search_path(workspace: &Path, pattern: &str) -> PathBuf {
+    let rel = pattern.trim().trim_start_matches('/');
+    let mut root = workspace.to_path_buf();
+    for seg in rel.split('/') {
+        if seg.is_empty() || seg == "." {
+            continue;
+        }
+        if seg.contains(['*', '?', '[', '{']) {
+            break;
+        }
+        if seg == ".." {
+            if root != workspace {
+                root.pop();
+            }
+            continue;
+        }
+        root.push(seg);
+    }
+    root
+}
+
+/// Upload archive root — upstream `findFilesToUpload` semantics:
+/// - search paths come only from non-negated `path:` lines, de-duplicated,
+///   with any path already under another search path dropped;
+/// - >1 search path → `getMultiPathLCA(searchPaths)`;
+/// - exactly 1 → that path, except when the single matched file *is* the
+///   search path (a literal `path: f.txt`), where the root is its parent.
+fn upload_archive_root(workspace: &Path, path_spec: &str, files: &[PathBuf]) -> PathBuf {
+    let mut search_paths: Vec<PathBuf> = Vec::new();
+    for raw in path_spec.lines() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('!') {
+            continue;
+        }
+        let sp = pattern_search_path(workspace, line);
+        if !search_paths.contains(&sp) {
+            search_paths.push(sp);
+        }
+    }
+    search_paths = search_paths
+        .iter()
+        .filter(|sp| !search_paths.iter().any(|o| o != *sp && sp.starts_with(o)))
+        .cloned()
+        .collect();
+    match search_paths.len() {
+        0 => workspace.to_path_buf(),
+        1 => {
+            let sp = &search_paths[0];
+            if files.len() == 1 && files[0] == *sp {
+                sp.parent()
+                    .map(|p| p.to_path_buf())
+                    .unwrap_or_else(|| workspace.to_path_buf())
+            } else {
+                sp.clone()
+            }
+        }
+        _ => multi_path_lca(&search_paths, workspace),
+    }
+}
+
+/// Least common ancestor of a set of paths — `getMultiPathLCA`.
+fn multi_path_lca(paths: &[PathBuf], fallback: &Path) -> PathBuf {
+    let mut it = paths.iter();
+    let mut root = match it.next() {
+        Some(p) => p.clone(),
+        None => return fallback.to_path_buf(),
+    };
+    for p in it {
+        while !p.starts_with(&root) {
+            if !root.pop() {
+                return fallback.to_path_buf();
+            }
+        }
+    }
+    if root.as_os_str().is_empty() {
+        fallback.to_path_buf()
+    } else {
+        root
+    }
+}
+
 /// Any relative path segment starting with `.` (hidden-file filter).
 fn has_hidden_segment(root: &Path, f: &Path) -> bool {
     f.strip_prefix(root)
@@ -230,4 +332,76 @@ fn has_hidden_segment(root: &Path, f: &Path) -> bool {
                 .any(|c| c.as_os_str().to_string_lossy().starts_with('.'))
         })
         .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::upload_archive_root;
+    use std::path::{Path, PathBuf};
+
+    fn ws() -> &'static Path {
+        Path::new("/w")
+    }
+
+    /// The archive root follows the *search paths*, not the matched files —
+    /// `findFilesToUpload` semantics. A lone literal file ships at the
+    /// artifact root; a directory pattern keeps its interior layout even
+    /// when only one deep file matched.
+    #[test]
+    fn archive_root_follows_search_paths() {
+        // Single literal file → parent dir → entry `payload.txt`.
+        let files = vec![PathBuf::from("/w/dist/payload.txt")];
+        assert_eq!(
+            upload_archive_root(ws(), "dist/payload.txt", &files),
+            PathBuf::from("/w/dist")
+        );
+
+        // Directory pattern whose only match sits in a subdir → root is the
+        // directory → entry `libs/app.jar` (not `app.jar`).
+        let files = vec![PathBuf::from("/w/build/libs/app.jar")];
+        assert_eq!(
+            upload_archive_root(ws(), "build/", &files),
+            PathBuf::from("/w/build")
+        );
+
+        // `**` glob with a deep single match → root is the literal prefix
+        // → entry `sub/b.txt` (not `b.txt`).
+        let files = vec![PathBuf::from("/w/out/sub/b.txt")];
+        assert_eq!(
+            upload_archive_root(ws(), "out/**/*.txt", &files),
+            PathBuf::from("/w/out")
+        );
+
+        // Two literal files in one dir → LCA is the dir.
+        let files = vec![PathBuf::from("/w/a/f1.txt"), PathBuf::from("/w/a/f2.txt")];
+        assert_eq!(
+            upload_archive_root(ws(), "a/f1.txt\na/f2.txt", &files),
+            PathBuf::from("/w/a")
+        );
+
+        // Disjoint patterns → LCA = workspace.
+        let files = vec![PathBuf::from("/w/a/f.txt"), PathBuf::from("/w/b/f.txt")];
+        assert_eq!(
+            upload_archive_root(ws(), "a/**\nb/**", &files),
+            ws().to_path_buf()
+        );
+
+        // A `!` exclusion contributes no search path — the `a/` root stands.
+        let files = vec![PathBuf::from("/w/a/keep.txt")];
+        assert_eq!(
+            upload_archive_root(ws(), "a/**\n!a/drop.txt", &files),
+            PathBuf::from("/w/a")
+        );
+
+        // A search path already covered by an ancestor drops out — the
+        // ancestor is the root, not the LCA of the two.
+        let files = vec![
+            PathBuf::from("/w/src/app/f.js"),
+            PathBuf::from("/w/src/util/g.js"),
+        ];
+        assert_eq!(
+            upload_archive_root(ws(), "src/\nsrc/app", &files),
+            PathBuf::from("/w/src")
+        );
+    }
 }

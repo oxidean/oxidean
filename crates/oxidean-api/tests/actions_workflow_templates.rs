@@ -171,7 +171,7 @@ async fn workflow_templates_list_merges_three_sources() {
     let dir = tempfile::tempdir().expect("tempdir");
     let repos = dir.path().join("repos");
     let url = format!("sqlite:{}", dir.path().join("wt_list.db").display());
-    let db = Database::connect(&url).await.expect("connect");
+    let db = support::connect_test_db(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
     let app = test_app(db.clone(), repos).await;
@@ -311,7 +311,7 @@ async fn workflow_templates_get_substitutes_default_branch() {
     let dir = tempfile::tempdir().expect("tempdir");
     let repos = dir.path().join("repos");
     let url = format!("sqlite:{}", dir.path().join("wt_get.db").display());
-    let db = Database::connect(&url).await.expect("connect");
+    let db = support::connect_test_db(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
     let app = test_app(db.clone(), repos).await;
@@ -352,7 +352,7 @@ async fn workflows_create_input_validation() {
     let dir = tempfile::tempdir().expect("tempdir");
     let repos = dir.path().join("repos");
     let url = format!("sqlite:{}", dir.path().join("wt_create.db").display());
-    let db = Database::connect(&url).await.expect("connect");
+    let db = support::connect_test_db(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
     let app = test_app(db.clone(), repos).await;
@@ -439,7 +439,7 @@ async fn workflows_create_direct_commit() {
     let dir = tempfile::tempdir().expect("tempdir");
     let repos = dir.path().join("repos");
     let url = format!("sqlite:{}", dir.path().join("wt_direct.db").display());
-    let db = Database::connect(&url).await.expect("connect");
+    let db = support::connect_test_db(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
     let app = test_app(db.clone(), repos).await;
@@ -508,7 +508,7 @@ async fn workflows_create_onto_pull_head() {
     let dir = tempfile::tempdir().expect("tempdir");
     let repos = dir.path().join("repos");
     let url = format!("sqlite:{}", dir.path().join("wt_pr.db").display());
-    let db = Database::connect(&url).await.expect("connect");
+    let db = support::connect_test_db(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
     let app = test_app(db.clone(), repos).await;
@@ -586,7 +586,7 @@ async fn workflows_create_rejects_fork_pull() {
     let dir = tempfile::tempdir().expect("tempdir");
     let repos = dir.path().join("repos");
     let url = format!("sqlite:{}", dir.path().join("wt_fork.db").display());
-    let db = Database::connect(&url).await.expect("connect");
+    let db = support::connect_test_db(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
     let app = test_app(db.clone(), repos).await;
@@ -636,7 +636,7 @@ async fn workflows_create_new_branch_opens_pr() {
     let dir = tempfile::tempdir().expect("tempdir");
     let repos = dir.path().join("repos");
     let url = format!("sqlite:{}", dir.path().join("wt_nb.db").display());
-    let db = Database::connect(&url).await.expect("connect");
+    let db = support::connect_test_db(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
     let app = test_app(db.clone(), repos).await;
@@ -677,7 +677,7 @@ async fn workflow_templates_admin_crud() {
     let dir = tempfile::tempdir().expect("tempdir");
     let repos = dir.path().join("repos");
     let url = format!("sqlite:{}", dir.path().join("wt_admin.db").display());
-    let db = Database::connect(&url).await.expect("connect");
+    let db = support::connect_test_db(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
     let app = test_app(db.clone(), repos).await;
@@ -827,7 +827,7 @@ async fn template_icons_route() {
     let dir = tempfile::tempdir().expect("tempdir");
     let repos = dir.path().join("repos");
     let url = format!("sqlite:{}", dir.path().join("wt_icons.db").display());
-    let db = Database::connect(&url).await.expect("connect");
+    let db = support::connect_test_db(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     let app = test_app(db, repos).await;
 

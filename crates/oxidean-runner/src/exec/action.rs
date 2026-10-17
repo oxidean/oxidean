@@ -504,7 +504,7 @@ fn run_action_spec<'x>(
             return Err("action nesting too deep".into());
         }
         // Resolve `with:` inputs → INPUT_* env + `inputs` context.
-        let inputs = resolve_inputs(&spec, step)?;
+        let inputs = resolve_inputs(&spec, step, ctx)?;
         let mut action_env = step_env.to_vec();
         let mut inputs_json = serde_json::Map::new();
         for (k, v) in &inputs {
@@ -562,14 +562,22 @@ fn run_action_spec<'x>(
 }
 
 /// `with:` → resolved inputs: declared defaults + required checks.
-fn resolve_inputs(spec: &ActionSpec, step: &Step) -> Result<HashMap<String, String>, String> {
+/// `default:` may be any YAML scalar (`default: false` is a bool, not a
+/// string) and may embed `${{ }}` (e.g. `${{ github.token }}`) — GitHub
+/// evaluates it in the step context, so we do the same.
+fn resolve_inputs(
+    spec: &ActionSpec,
+    step: &Step,
+    ctx: &Context,
+) -> Result<HashMap<String, String>, String> {
     let mut out = HashMap::new();
     if let Some(inputs) = &spec.inputs {
         for (k, v) in inputs {
             let name = k.as_str().unwrap_or_default();
             let default = v
                 .get(serde_yaml::Value::String("default".into()))
-                .and_then(|d| d.as_str());
+                .and_then(yaml_scalar_string)
+                .map(|s| expr::interpolate(&s, ctx).unwrap_or(s));
             let required = v
                 .get(serde_yaml::Value::String("required".into()))
                 .and_then(|d| d.as_bool())
@@ -579,7 +587,7 @@ fn resolve_inputs(spec: &ActionSpec, step: &Step) -> Result<HashMap<String, Stri
                 .as_ref()
                 .and_then(|w| w.get(name))
                 .map(expr::stringify);
-            match supplied.or_else(|| default.map(String::from)) {
+            match supplied.or(default) {
                 Some(val) => {
                     out.insert(name.to_string(), val);
                 }
@@ -602,14 +610,31 @@ fn resolve_inputs(spec: &ActionSpec, step: &Step) -> Result<HashMap<String, Stri
     Ok(out)
 }
 
-/// `INPUT_*` env naming: uppercase, non-alphanumeric → `_`.
+/// YAML scalar → input string. Null is "no default"; bool/number stringify
+/// like GitHub; composite defaults collapse through the JSON stringifier.
+fn yaml_scalar_string(v: &serde_yaml::Value) -> Option<String> {
+    match v {
+        serde_yaml::Value::Null => None,
+        serde_yaml::Value::Bool(b) => Some(b.to_string()),
+        serde_yaml::Value::Number(n) => Some(n.to_string()),
+        serde_yaml::Value::String(s) => Some(s.clone()),
+        other => serde_json::to_value(other)
+            .ok()
+            .map(|j| expr::stringify(&j)),
+    }
+}
+
+/// `INPUT_*` env naming — GitHub's toolkit reads
+/// `INPUT_${name.replace(/ /g, '_').toUpperCase()}`: only *spaces* become
+/// underscores; hyphens and every other character survive verbatim
+/// (`node-version` → `INPUT_NODE-VERSION`, legal in process env blocks).
 fn normalize_input_key(k: &str) -> String {
     k.chars()
         .map(|c| {
-            if c.is_ascii_alphanumeric() {
-                c.to_ascii_uppercase()
-            } else {
+            if c == ' ' {
                 '_'
+            } else {
+                c.to_ascii_uppercase()
             }
         })
         .collect()
@@ -1167,6 +1192,74 @@ fn fnv(bytes: &[u8]) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::ls_remote_commit;
+    use crate::exec::Step;
+    use oxidean_actions_expr::Context;
+
+    /// Declared `default:` values survive YAML non-string scalars and get
+    /// `${{ }}` evaluation — the github-script `debug: false` default must
+    /// reach `INPUT_DEBUG` as "false" or `getBooleanInput` throws.
+    #[test]
+    fn resolve_inputs_applies_scalar_and_expr_defaults() {
+        use super::{resolve_inputs, ActionSpec};
+        let spec: ActionSpec = serde_yaml::from_str(
+            r#"
+name: t
+inputs:
+  debug: {default: false}
+  retries: {default: 3}
+  github-token: {default: "${{ github.token }}"}
+  script: {required: true}
+runs: {using: node20, main: index.js}
+"#,
+        )
+        .unwrap();
+        let step = Step {
+            with: Some(serde_json::json!({"script": "1+1"})),
+            ..step_stub()
+        };
+        let ctx = Context::new().with_context("github", serde_json::json!({"token": "ghs_test"}));
+        let inputs = resolve_inputs(&spec, &step, &ctx).unwrap();
+        assert_eq!(inputs["debug"], "false");
+        assert_eq!(inputs["retries"], "3");
+        assert_eq!(inputs["github-token"], "ghs_test");
+        assert_eq!(inputs["script"], "1+1");
+        // required input missing → error
+        let step2 = Step {
+            with: None,
+            ..step_stub()
+        };
+        assert!(resolve_inputs(&spec, &step2, &ctx).is_err());
+    }
+
+    fn step_stub() -> Step {
+        Step {
+            continue_on_error: None,
+            id: None,
+            name: None,
+            uses: None,
+            run: None,
+            if_expr: None,
+            timeout_minutes: None,
+            shell: None,
+            working_directory: None,
+            with: None,
+            env: None,
+        }
+    }
+
+    /// `INPUT_*` naming matches the toolkit's own lookup —
+    /// `process.env['INPUT_' + name.replace(/ /g,'_').toUpperCase()]`: only
+    /// spaces become underscores; hyphens (node-version, check-latest,
+    /// github-token) survive or `@actions/core.getInput` sees an empty string.
+    #[test]
+    fn input_env_names_preserve_hyphens() {
+        use super::normalize_input_key;
+        assert_eq!(normalize_input_key("node-version"), "NODE-VERSION");
+        assert_eq!(normalize_input_key("check-latest"), "CHECK-LATEST");
+        assert_eq!(normalize_input_key("github-token"), "GITHUB-TOKEN");
+        assert_eq!(normalize_input_key("path"), "PATH");
+        assert_eq!(normalize_input_key("token file"), "TOKEN_FILE");
+    }
 
     /// `git ls-remote` against a local bare repo (file transport — no
     /// network): the movable ref resolves to its commit sha, an annotated

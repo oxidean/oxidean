@@ -1110,6 +1110,18 @@
    ]
   },
   {
+   "id": "artifact-search-path-root",
+   "kind": "run",
+   "expect_run": "success",
+   "expect_jobs": {
+    "up": "success",
+    "down": "success"
+   },
+   "log_contains": [
+    "app-content"
+   ]
+  },
+  {
    "id": "artifact-overwrite",
    "kind": "run",
    "expect_run": "success",
@@ -1153,6 +1165,20 @@
    "log_contains": [
     "no files were found"
    ]
+  },
+  {
+   "id": "oidc-curl",
+   "kind": "run",
+   "expect_run": "success",
+   "expect_jobs": {
+    "oidc": "success"
+   },
+   "log_contains": [
+    "oidc header:",
+    "\"alg\":\"RS256\"",
+    "\"aud\":\"sts.amazonaws.com\""
+   ],
+   "needs_public_origin": true
   }
  ]
 }
