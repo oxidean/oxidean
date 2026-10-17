@@ -1145,7 +1145,7 @@ jobs:
         assert_eq!(wf.scopes.get("id-token"), Some(&ContentsPermission::Write));
         // Unlisted scopes are not recorded on the block — resolution fills
         // them as `none` (GitHub's map-reset semantics).
-        assert!(wf.scopes.get("issues").is_none());
+        assert!(!wf.scopes.contains_key("issues"));
     }
 
     #[test]

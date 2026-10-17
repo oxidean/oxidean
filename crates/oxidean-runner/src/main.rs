@@ -83,7 +83,41 @@ async fn main() {
         tracing::warn!("declare failed (continuing): {e}");
     }
 
+    // Graceful drain: SIGTERM/SIGINT stop claiming new work but let the
+    // in-flight job finish — the process exits after `execute` returns so a
+    // running job is never killed mid-step by a rolling deploy.
+    let draining = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    {
+        let draining = draining.clone();
+        tokio::spawn(async move {
+            let term = async {
+                #[cfg(unix)]
+                {
+                    match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                    {
+                        Ok(mut s) => {
+                            s.recv().await;
+                        }
+                        Err(_) => std::future::pending::<()>().await,
+                    }
+                }
+                #[cfg(not(unix))]
+                std::future::pending::<()>().await
+            };
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {},
+                _ = term => {},
+            }
+            draining.store(true, std::sync::atomic::Ordering::SeqCst);
+            tracing::info!("drain signal received — finishing current job, then exiting");
+        });
+    }
+
     loop {
+        if draining.load(std::sync::atomic::Ordering::SeqCst) {
+            tracing::info!("drained — runner exiting");
+            return;
+        }
         match client.fetch_task().await {
             Ok(Some(task)) => {
                 let job = task.job_id.clone().unwrap_or_default();

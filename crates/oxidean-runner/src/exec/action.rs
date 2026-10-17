@@ -218,9 +218,17 @@ async fn fetch_remote_action(
     .into_iter()
     .map(auth_args)
     .collect();
+    // Instance mirror (`OXIDEAN_ACTIONS_MIRROR`) replaces the public github
+    // fallback — an airgapped instance mirrors vetted action repos instead of
+    // letting the runner reach out directly.
+    let fallback = senv
+        .config
+        .actions_mirror
+        .as_deref()
+        .unwrap_or("https://github.com");
     let urls = [
         format!("{}/{}/{}.git", senv.config.origin, owner, repo),
-        format!("https://github.com/{}/{}.git", owner, repo),
+        format!("{fallback}/{}/{}.git", owner, repo),
     ];
     let mut last_err = String::new();
     let logger = senv.logger;
@@ -266,11 +274,40 @@ async fn fetch_remote_action(
             cmd.args(auth.iter().cloned()).current_dir(&tmp);
             cmd.args(["checkout", git_ref]);
             let _ = run_streamed(&mut cmd, senv.env, logger, Duration::from_secs(60)).await;
+            // Download integrity: record the resolved commit; for a
+            // SHA-pinned ref, hard-verify HEAD matches the pin (a substituted
+            // clone would silently run different code).
+            let head = Command::new("git")
+                .args(["rev-parse", "HEAD"])
+                .current_dir(&tmp)
+                .output()
+                .await
+                .ok()
+                .filter(|o| o.status.success())
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+            match head.as_deref() {
+                Some(h)
+                    if git_ref.len() == 40
+                        && git_ref.chars().all(|c| c.is_ascii_hexdigit())
+                        && !h.eq_ignore_ascii_case(git_ref) =>
+                {
+                    let _ = std::fs::remove_dir_all(&tmp);
+                    return Err(format!(
+                        "action {owner}/{repo}@{git_ref} resolved to {h} — SHA pin mismatch"
+                    ));
+                }
+                _ => {}
+            }
             if std::fs::rename(&tmp, &dest).is_err() {
                 let _ = std::fs::remove_dir_all(&tmp);
             }
             senv.logger
-                .line(&format!("Resolved {owner}/{repo}@{git_ref} → {url}"))
+                .line(&format!(
+                    "Resolved {owner}/{repo}@{git_ref} → {url}{}",
+                    head.as_deref()
+                        .map(|h| format!(" (commit {h})"))
+                        .unwrap_or_default()
+                ))
                 .await;
             return Ok(if subdir.is_empty() {
                 dest

@@ -472,13 +472,6 @@ pub(crate) async fn claim_context(
     permissions: std::collections::BTreeMap<String, crate::actions::ContentsPermission>,
 ) -> Result<ClaimContext, StatusCode> {
     let pr_ctx = pull_context_for_run(&state.db, run).await;
-    let secrets = if pr_ctx.trusted {
-        crate::actions::secrets::decrypted_secrets_for_repo(&state.db, &run.repository_id)
-            .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-    } else {
-        HashMap::new()
-    };
     let mut permissions = permissions;
     if !pr_ctx.trusted {
         crate::actions::job_tokens::downgrade_write_grants(&mut permissions);
@@ -502,6 +495,30 @@ pub(crate) async fn claim_context(
             .map(|u| u.username)
             .unwrap_or_default(),
         None => String::new(),
+    };
+    // Claim-time secrets: repo < org < environment merge + decrypt audit
+    // (Phase 8); untrusted fork PRs still get an empty map.
+    let secrets = if pr_ctx.trusted {
+        crate::actions::secrets::decrypted_secrets_for_job(
+            &state.db,
+            &run.repository_id,
+            j.environment_name.as_deref(),
+            Some(crate::actions::secrets::SecretAudit {
+                actor_username: if actor.is_empty() {
+                    "oxidean-actions"
+                } else {
+                    &actor
+                },
+                actor_id: run.triggered_by.as_deref(),
+                repository_id: &run.repository_id,
+                run_id: &run.id,
+                job_id: &j.id,
+            }),
+        )
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    } else {
+        HashMap::new()
     };
     let minted = match crate::actions::job_tokens::mint_job_token(
         &state.db,
@@ -955,6 +972,9 @@ pub async fn update_task(
         Ok(None) => return not_found("unknown job"),
         Err(e) => return internal_err(e),
     };
+    // Runner contact — liveness heartbeat for the stale-claim sweeper.
+    let at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let _ = state.db.touch_action_job_heartbeat(&job.id, &at).await;
     let status = status_for_result(task_state.result);
     let prev_run_status = state
         .db
@@ -1065,30 +1085,67 @@ pub async fn update_log(
         Ok(None) => return not_found("unknown job"),
         Err(e) => return internal_err(e),
     };
-    // Rows are newline-less lines; append each with its terminator.
-    let mut chunk = String::new();
-    for r in &req.rows {
-        chunk.push_str(&r.content);
-        chunk.push('\n');
-    }
-    if chunk.len() > MAX_GITEA_LOG_BYTES {
-        return connect_err(
-            StatusCode::PAYLOAD_TOO_LARGE,
-            "resource_exhausted",
-            "log batch too large",
+    // Ordering by row cursor: `index` is the client's next-row position,
+    // `log_index` the server's. Below stored → partial/full replay (only the
+    // unseen tail appends); above stored → a gap — ack the stored cursor so
+    // act_runner resends from it instead of dropping rows.
+    let stored = match state.db.action_job_log_index(&job.id).await {
+        Ok(i) => i,
+        Err(e) => return internal_err(e),
+    };
+    if req.index > stored {
+        return respond(
+            w,
+            &pb::UpdateLogResponse { ack_index: stored },
+            serde_json::json!({"ackIndex": stored}),
         );
     }
-    if let Err(e) = crate::actions::logs::append_job_log(
-        &state.actions_log_dir,
-        &job.run_id,
-        &job.id,
-        chunk.as_bytes(),
-    )
-    .await
-    {
-        return internal_err(e);
+    let overlap = (stored - req.index).clamp(0, req.rows.len() as i64) as usize;
+    let new_rows = &req.rows[overlap..];
+    if !new_rows.is_empty() {
+        // Rows are newline-less lines; append each with its terminator.
+        let mut chunk = String::new();
+        for r in new_rows {
+            chunk.push_str(&r.content);
+            chunk.push('\n');
+        }
+        if chunk.len() > MAX_GITEA_LOG_BYTES {
+            return connect_err(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "resource_exhausted",
+                "log batch too large",
+            );
+        }
+        let next = req.index + req.rows.len() as i64;
+        match state
+            .db
+            .set_action_job_log_index_if(&job.id, stored, next)
+            .await
+        {
+            Ok(true) => {}
+            Ok(false) => {
+                // Cursor moved under us — treat as retryable.
+                return connect_err(StatusCode::CONFLICT, "aborted", "log cursor moved");
+            }
+            Err(e) => return internal_err(e),
+        }
+        if let Err(e) = crate::actions::logs::append_job_log_bounded(
+            &state.actions_log_dir,
+            &job.run_id,
+            &job.id,
+            chunk.as_bytes(),
+            crate::actions::runner_proto::max_job_log_bytes() as u64,
+        )
+        .await
+        {
+            return internal_err(e);
+        }
     }
-    let ack = req.index + req.rows.len() as i64;
+    let at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let _ = state.db.touch_action_job_heartbeat(&job.id, &at).await;
+    // ack = next row index the client should send — never behind the stored
+    // cursor so a full replay converges instead of looping on dup rows.
+    let ack = (req.index + req.rows.len() as i64).max(stored);
     respond(
         w,
         &pb::UpdateLogResponse { ack_index: ack },

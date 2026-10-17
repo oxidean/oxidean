@@ -191,16 +191,28 @@ jobs:
     )
     .await
     .expect("dispatch");
-    assert_eq!(
-        n, 1,
-        "good workflow must still enqueue despite broken sibling"
-    );
+    // One real run + one failed `__validation` run for the broken sibling.
+    assert_eq!(n, 2, "good workflow + broken-file validation run");
     let runs = db
         .list_action_runs_for_repo(&repo_id, &Default::default(), 100, 0)
         .await
         .unwrap();
-    assert_eq!(runs.len(), 1);
-    assert_eq!(runs[0].workflow_path, ".github/workflows/ci.yml");
+    // Phase 8: the broken sibling isn't silent — a failed `__validation`
+    // run persists next to the good workflow's queued run.
+    assert_eq!(runs.len(), 2);
+    let good = runs
+        .iter()
+        .find(|r| r.workflow_path == ".github/workflows/ci.yml")
+        .expect("good run");
+    assert_ne!(good.status, "failure");
+    let bad = runs
+        .iter()
+        .find(|r| r.workflow_path == ".github/workflows/broken.yml")
+        .expect("validation run for broken file");
+    assert_eq!(bad.status, "failure");
+    let bad_jobs = db.list_action_jobs_for_run(&bad.id).await.unwrap();
+    assert_eq!(bad_jobs[0].job_key, "__validation");
+    assert_eq!(bad_jobs[0].status, "failure");
 }
 
 #[tokio::test]

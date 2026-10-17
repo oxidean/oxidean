@@ -110,6 +110,12 @@ pub struct ActionJobLogRequest {
     /// `next_offset` to receive only newly appended bytes.
     #[serde(default)]
     pub offset: Option<u64>,
+    /// Live-tail long-poll: when no bytes are available past `offset`, hold
+    /// the request up to this many milliseconds (server caps at 30s) and
+    /// return as soon as new bytes land or the job goes terminal. `0`/absent
+    /// keeps the old immediate-return behavior.
+    #[serde(default)]
+    pub wait_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
@@ -122,6 +128,10 @@ pub struct ActionJobLogResponse {
     /// Total log size in bytes at read time.
     #[serde(default)]
     pub size: u64,
+    /// The job reached a terminal status — callers can stop polling.
+    /// `false` on servers that predate the flag.
+    #[serde(default)]
+    pub done: bool,
 }
 
 /// `repo.actions.listWorkflows` — discovered workflow files at a ref.
@@ -692,4 +702,86 @@ pub struct ActionJobApproveRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ActionJobApproveResponse {
     pub job: ActionJobPublic,
+}
+
+// --- Phase 8: org + environment secrets ---
+
+/// `repo.actions.environments.secretsList` — names only, never values.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RepoActionsEnvironmentSecretsListRequest {
+    pub owner: String,
+    pub name: String,
+    pub environment: String,
+}
+
+/// `repo.actions.environments.secretsPut` — Admin; value never returned.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RepoActionsEnvironmentSecretPutRequest {
+    pub owner: String,
+    pub name: String,
+    pub environment: String,
+    pub secret_name: String,
+    pub value: String,
+}
+
+/// `repo.actions.environments.secretsDelete` — Admin.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RepoActionsEnvironmentSecretDeleteRequest {
+    pub owner: String,
+    pub name: String,
+    pub environment: String,
+    pub secret_name: String,
+}
+
+/// Public metadata for an org Actions secret — never the value.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OrgSecretMetaPublic {
+    pub name: String,
+    /// 'all' | 'private' | 'selected'.
+    pub visibility: String,
+    pub updated_at: String,
+}
+
+/// `org.actions.secrets.list` — Admin+; names + visibility only.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OrgActionsSecretsListRequest {
+    pub slug: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OrgActionsSecretsListResponse {
+    pub secrets: Vec<OrgSecretMetaPublic>,
+}
+
+/// `org.actions.secrets.put` — Admin+. `visibility` defaults to 'all';
+/// `repository_ids` replaces the selected-repo set when visibility is
+/// 'selected'.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OrgActionsSecretPutRequest {
+    pub slug: String,
+    pub secret_name: String,
+    pub value: String,
+    #[serde(default)]
+    pub visibility: Option<String>,
+    #[serde(default)]
+    pub repository_ids: Option<Vec<String>>,
+}
+
+/// `org.actions.secrets.delete` — Admin+.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OrgActionsSecretDeleteRequest {
+    pub slug: String,
+    pub secret_name: String,
+}
+
+/// `org.actions.secrets.listRepos` — Admin+; repo ids in the selected set.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OrgActionsSecretReposRequest {
+    pub slug: String,
+    pub secret_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OrgActionsSecretReposResponse {
+    pub repository_ids: Vec<String>,
 }

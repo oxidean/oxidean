@@ -56,6 +56,7 @@ rand = "0.10.2"
 uuid = { version = "1.26.0", features = ["v4"] }
 chrono = "0.4.45"
 cookie = "0.18.2"
+flate2 = "1.1"
 workos = "3.4"
 url = "2.5.8"
 openidconnect = { version = "4.0", features = ["reqwest"] }

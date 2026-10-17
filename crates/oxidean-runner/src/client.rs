@@ -115,14 +115,18 @@ struct UpdateTaskBody<'a> {
     summary: Option<&'a str>,
 }
 
-/// `update_task` response — `cancelled` means the job was cancelled
-/// server-side while running; the runner should abort remaining steps.
+/// `update_task`/`update_log` response — `cancelled` means the job was
+/// cancelled server-side while running; `log_index` is the server's next
+/// expected log-batch index (the runner resyncs its cursor to it, covering
+/// accept, duplicate-drop, and the 409 gap response alike).
 #[derive(Debug, Deserialize, Default)]
 pub struct UpdateTaskAck {
     #[serde(default)]
     pub ok: bool,
     #[serde(default)]
     pub cancelled: bool,
+    #[serde(default)]
+    pub log_index: i64,
 }
 
 #[derive(Debug, Serialize)]
@@ -130,6 +134,7 @@ struct UpdateLogBody<'a> {
     run_id: &'a str,
     job_id: &'a str,
     chunk: &'a str,
+    log_index: i64,
 }
 
 /// Artifact metadata returned by upload/list (server-side `ArtifactMeta`).
@@ -325,13 +330,16 @@ impl Client {
             .map_err(|e| e.to_string())
     }
 
-    /// Append a log chunk. The ack's `cancelled` flag is the runner's
-    /// mid-job cancel signal — checked between steps.
+    /// Append a log chunk at `log_index`. The ack's `cancelled` flag is the
+    /// runner's mid-job cancel signal — checked between steps. A 409 still
+    /// decodes the body: the server reports its next expected index there so
+    /// the caller can resync its cursor.
     pub async fn update_log(
         &self,
         run_id: &str,
         job_id: &str,
         chunk: &str,
+        log_index: i64,
     ) -> Result<UpdateTaskAck, String> {
         if chunk.is_empty() {
             return Ok(UpdateTaskAck::default());
@@ -342,10 +350,17 @@ impl Client {
                 run_id,
                 job_id,
                 chunk,
+                log_index,
             })
             .send()
             .await
             .map_err(|e| e.to_string())?;
+        let status = res.status();
+        if status == reqwest::StatusCode::CONFLICT {
+            // Gap — body carries the server's expected index; surface it as
+            // `ok:false` + `log_index` so the caller resyncs and resends.
+            return res.json::<UpdateTaskAck>().await.map_err(|e| e.to_string());
+        }
         let res = res.error_for_status().map_err(|e| e.to_string())?;
         res.json::<UpdateTaskAck>().await.map_err(|e| e.to_string())
     }

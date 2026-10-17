@@ -269,8 +269,12 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         | "repo.actions.approveJob" => ActionsWrite,
 
         "repo.actions.environments.list" | "repo.actions.environments.get" => EnvironmentsRead,
+        "repo.actions.environments.secretsList" => SecretsRead,
         "repo.actions.environments.upsert" | "repo.actions.environments.delete" => {
             EnvironmentsWrite
+        }
+        "repo.actions.environments.secretsPut" | "repo.actions.environments.secretsDelete" => {
+            SecretsWrite
         }
         "repo.actions.listDeployments" => DeploymentsRead,
 
@@ -363,6 +367,10 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         "gpgKey.add" | "gpgKey.revoke" => GpgKeyWrite,
 
         "label.listForOrg" | "org.listMine" | "org.members.list" | "org.invites.list" => OrgRead,
+        // Org Actions secrets — classified with the secrets families like
+        // their repo-level siblings (FG `secrets` perm).
+        "org.actions.secrets.list" | "org.actions.secrets.listRepos" => SecretsRead,
+        "org.actions.secrets.put" | "org.actions.secrets.delete" => SecretsWrite,
         "org.create"
         | "org.updateSettings"
         | "org.members.add"

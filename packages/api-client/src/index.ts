@@ -2117,12 +2117,14 @@ export type ActionJobLogRequest = {
   run_id: string;
   job_id: string;
   offset?: number;
+  wait_ms?: number;
 };
 
 export type ActionJobLogResponse = {
   content: string;
   next_offset: number;
   size: number;
+  done?: boolean;
 };
 
 export type ActionWorkflowsListRequest = {

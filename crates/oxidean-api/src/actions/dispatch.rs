@@ -159,13 +159,6 @@ async fn dispatch_push_inner(
             changed
         };
 
-        let discovered = discover_workflows(git, &bare, after)
-            .await
-            .map_err(|e| e.to_string())?;
-        for fe in &discovered.errors {
-            tracing::warn!(path = %fe.path, error = %fe.message, "skipping invalid workflow file");
-        }
-
         let payload_commits: Vec<crate::actions::payload::PayloadCommit> = commits
             .unwrap_or_default()
             .iter()
@@ -193,6 +186,27 @@ async fn dispatch_push_inner(
             &repository,
             &sender_embed,
         );
+
+        let discovered = discover_workflows(git, &bare, after)
+            .await
+            .map_err(|e| e.to_string())?;
+        if !discovered.errors.is_empty() {
+            for fe in &discovered.errors {
+                tracing::warn!(path = %fe.path, error = %fe.message, "invalid workflow file");
+            }
+            fail_discovery_runs(
+                db,
+                repository_id,
+                &discovered.errors,
+                "push",
+                after,
+                refname,
+                pusher_id,
+                None,
+                Some(&payload),
+            )
+            .await?;
+        }
 
         for wf in &discovered.workflows {
             if !wf.document.triggers.push {
@@ -296,13 +310,26 @@ pub async fn enqueue_run(
             tracing::warn!(error = %e, run_id, "failed to record run concurrency group");
         }
     }
-    // Fail loudly: a workflow that names features we can't execute becomes a
+    // Fail loudly: a workflow that names features we can't execute — or
+    // violates the instance action-source policy (Phase 8) — becomes a
     // failed validation run instead of silently mis-executing.
-    if !doc.unsupported.is_empty() {
-        let msg = format!(
-            "unsupported workflow features: {}",
-            doc.unsupported.join(", ")
-        );
+    let policy_violations =
+        crate::actions::policy::check_doc(doc, &crate::actions::policy::policy_from_env());
+    if !doc.unsupported.is_empty() || !policy_violations.is_empty() {
+        let msg = [
+            (!doc.unsupported.is_empty()).then(|| {
+                format!(
+                    "unsupported workflow features: {}",
+                    doc.unsupported.join(", ")
+                )
+            }),
+            (!policy_violations.is_empty())
+                .then(|| format!("action source policy: {}", policy_violations.join("; "))),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" | ");
         let job_id = Uuid::new_v4().to_string();
         db.insert_action_job(oxidean_db::JobInsert::basic(
             &job_id,
@@ -812,11 +839,26 @@ pub async fn dispatch_push_for_sha(
     if !db.get_repo_actions_enabled(repository_id).await? {
         return Ok(0);
     }
+    let mut n = 0;
     let discovered = discover_workflows(git, bare, head_sha)
         .await
         .map_err(|e| e.to_string())?;
-    for fe in &discovered.errors {
-        tracing::warn!(path = %fe.path, error = %fe.message, "skipping invalid workflow file");
+    if !discovered.errors.is_empty() {
+        for fe in &discovered.errors {
+            tracing::warn!(path = %fe.path, error = %fe.message, "invalid workflow file");
+        }
+        n += fail_discovery_runs(
+            db,
+            repository_id,
+            &discovered.errors,
+            "push",
+            head_sha,
+            head_ref,
+            pusher_id,
+            None,
+            None,
+        )
+        .await?;
     }
     // Helper path has no `before` — synthesize a minimal push payload so
     // `github.event`/`OXIDEAN_EVENT_PATH` still carry the ref+head shape.
@@ -866,7 +908,6 @@ pub async fn dispatch_push_for_sha(
         &repository,
         &serde_json::json!({}),
     );
-    let mut n = 0;
     for wf in &discovered.workflows {
         if !wf.document.triggers.push {
             continue;
@@ -896,6 +937,86 @@ pub async fn dispatch_push_for_sha(
             false,
         )
         .await?;
+        n += 1;
+    }
+    Ok(n)
+}
+
+/// Phase 8: persist discovery-time file errors as failed `__validation`
+/// runs — an unparseable workflow file is a visible failure on the Actions
+/// surface (GitHub renders it the same way), not a silent warn-and-skip.
+/// Returns how many validation runs were created.
+#[allow(clippy::too_many_arguments)]
+pub async fn fail_discovery_runs(
+    db: &Database,
+    repository_id: &str,
+    errors: &[crate::actions::DiscoveryFileError],
+    event: &str,
+    head_sha: &str,
+    head_ref: &str,
+    triggered_by: Option<&str>,
+    head_repo_id: Option<&str>,
+    event_payload: Option<&serde_json::Value>,
+) -> Result<usize, String> {
+    let env_name = std::env::var("OXIDEAN_ENV").unwrap_or_else(|_| "development".into());
+    let payload_json = event_payload.and_then(|v| serde_json::to_string(v).ok());
+    let mut n = 0;
+    for fe in errors {
+        let run_id = Uuid::new_v4().to_string();
+        db.insert_action_run(
+            &run_id,
+            repository_id,
+            &fe.path,
+            &fe.path,
+            event,
+            head_sha,
+            head_ref,
+            &format!("Invalid workflow file: {}", fe.path),
+            triggered_by,
+            head_repo_id,
+            payload_json.as_deref(),
+        )
+        .await?;
+        let job_id = Uuid::new_v4().to_string();
+        let msg = format!("invalid workflow file: {}", fe.message);
+        db.insert_action_job(oxidean_db::JobInsert::basic(
+            &job_id,
+            &run_id,
+            "__validation",
+            &msg,
+            "[]",
+        ))
+        .await?;
+        if let Err(e) = crate::actions::logs::append_job_log(
+            &crate::actions::logs::resolve_log_dir(),
+            &run_id,
+            &job_id,
+            format!("::error::{msg}\n").as_bytes(),
+        )
+        .await
+        {
+            tracing::warn!(error = %e, run_id, "failed to write validation log");
+        }
+        db.update_action_job_status(&job_id, "failure").await?;
+        if let Err(e) = db.recompute_action_run_status(&run_id).await {
+            tracing::warn!(error = %e, run_id, "validation run rollup failed");
+        }
+        crate::webhook::dispatch::notify_workflow_run(db, &run_id, "requested", &env_name).await;
+        if let Err(e) = crate::actions::statuses::upsert_job_status(
+            db,
+            repository_id,
+            head_sha,
+            &fe.path,
+            "__validation",
+            "failure",
+            &msg,
+            None,
+            triggered_by,
+        )
+        .await
+        {
+            tracing::warn!(error = %e, run_id, "failed to publish validation status");
+        }
         n += 1;
     }
     Ok(n)

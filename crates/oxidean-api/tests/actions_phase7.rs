@@ -665,7 +665,7 @@ jobs:
     let keys = v["keys"].as_array().expect("jwks keys");
     assert_eq!(keys.len(), 1, "lazy key provisioning minted one key");
     let jwk: jsonwebtoken::jwk::Jwk = serde_json::from_value(keys[0].clone()).expect("jwk shape");
-    assert_eq!(jwk.common.key_id.is_some(), true);
+    assert!(jwk.common.key_id.is_some());
 
     // Decode + verify the JWT against the advertised key.
     let (s, body) = get(&app, "/.well-known/actions-oidc/openid-configuration", None).await;

@@ -24,6 +24,9 @@ pub struct JobConfig {
     /// Default 30s. Set `OXIDEAN_ACTIONS_SCHEDULE_SWEEP_SECS=0` to disable the
     /// `on.schedule` cron sweeper.
     pub actions_schedule_sweep: Duration,
+    /// Default 1h. Set `OXIDEAN_ACTIONS_LOG_SWEEP_SECS=0` to disable the
+    /// finished-log gzip + retention sweeper.
+    pub actions_log_sweep: Duration,
 }
 
 impl JobConfig {
@@ -36,12 +39,14 @@ impl JobConfig {
         );
         let packages_gc_secs = parse_u64_env("OXIDEAN_PACKAGES_GC_INTERVAL_SECS", 86_400);
         let actions_schedule_secs = parse_u64_env("OXIDEAN_ACTIONS_SCHEDULE_SWEEP_SECS", 30);
+        let actions_log_secs = parse_u64_env("OXIDEAN_ACTIONS_LOG_SWEEP_SECS", 3_600);
         Self {
             orphan_interval: Duration::from_secs(orphan_secs),
             gc_interval: Duration::from_secs(gc_secs),
             lfs_gc_interval: Duration::from_secs(lfs_gc_secs),
             packages_gc_interval: Duration::from_secs(packages_gc_secs),
             actions_schedule_sweep: Duration::from_secs(actions_schedule_secs),
+            actions_log_sweep: Duration::from_secs(actions_log_secs),
         }
     }
 }
@@ -146,6 +151,16 @@ pub fn spawn_background_jobs(
                     }
                     _ => {}
                 }
+                // Stale claims + job timeouts — requeue dead runners' legs,
+                // fail legs past `timeout_at` (Phase 8).
+                let (timed_out, requeued) = crate::actions::sweeps::sweep_stale_action_jobs(
+                    &db_c,
+                    crate::actions::sweeps::stale_job_secs(),
+                )
+                .await;
+                if timed_out > 0 || requeued > 0 {
+                    tracing::info!(timed_out, requeued, "stale-claim sweep reaped jobs");
+                }
             }
         });
         tracing::info!(
@@ -154,6 +169,34 @@ pub fn spawn_background_jobs(
         );
     } else {
         tracing::info!("actions schedule sweeper disabled (interval 0)");
+    }
+
+    if config.actions_log_sweep.as_secs() > 0 {
+        let db_l = db.clone();
+        let period = config.actions_log_sweep;
+        tokio::spawn(async move {
+            let mut ticker = interval(period);
+            ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+            loop {
+                ticker.tick().await;
+                let log_dir = crate::actions::logs::resolve_log_dir();
+                let (compressed, deleted) = crate::actions::sweeps::sweep_action_logs(
+                    &db_l,
+                    &log_dir,
+                    crate::actions::sweeps::log_retention_days(),
+                )
+                .await;
+                if compressed > 0 || deleted > 0 {
+                    tracing::info!(compressed, deleted, "actions log maintenance pass done");
+                }
+            }
+        });
+        tracing::info!(
+            secs = config.actions_log_sweep.as_secs(),
+            "actions log maintenance sweeper scheduled"
+        );
+    } else {
+        tracing::info!("actions log maintenance sweeper disabled (interval 0)");
     }
 
     if config.gc_interval.as_secs() > 0 {

@@ -186,7 +186,7 @@
     "build": "success"
    },
    "log_contains": [
-    "h\u00e9llo w\u00f6rld \u00fcn\u00efcode"
+    "héllo wörld ünïcode"
    ]
   },
   {
@@ -338,12 +338,15 @@
   {
    "id": "prt-only",
    "kind": "never_dispatch",
-   "note": "pull_request_target parses but the repo opt-in is off by default \u2014 never fires"
+   "note": "pull_request_target parses but the repo opt-in is off by default — never fires"
   },
   {
    "id": "runs-on-missing",
-   "kind": "never_dispatch",
-   "note": "ParseError \u2014 lands in discovered.errors today (lossy; Phase 8 persists these as failed validation jobs)"
+   "kind": "validation_failure",
+   "note": "ParseError — Phase 8 persists discovery errors as failed __validation runs",
+   "expect_unsupported": [
+    "runs-on"
+   ]
   },
   {
    "id": "needs-basic",
@@ -549,7 +552,7 @@
    "expect_jobs": {
     "build": "success"
    },
-   "note": "pull_request_target is a declared (opt-in-gated) trigger \u2014 push still fires normally"
+   "note": "pull_request_target is a declared (opt-in-gated) trigger — push still fires normally"
   },
   {
    "id": "empty-steps",
@@ -567,7 +570,7 @@
     "other": "success"
    },
    "log_contains": [
-    "skipped \u2014 if evaluated to false",
+    "skipped — if evaluated to false",
     "other ran"
    ],
    "log_absent": [

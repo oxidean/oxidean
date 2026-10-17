@@ -91,11 +91,17 @@ impl SharedCtx {
             Some(r) => github_for_run(db, r).await,
             None => json!({}),
         };
+        // `secrets` context for `jobs.<id>.if` — repo + org scopes (env
+        // secrets resolve per-leg at claim, not at run-level eval). No audit
+        // event: values stay server-side for expression gating, the claim
+        // path is what leaves the trust boundary.
         let secrets = match &run {
-            Some(r) => crate::actions::secrets::decrypted_secrets_for_repo(db, &r.repository_id)
-                .await
-                .map(|m| serde_json::to_value(m).unwrap_or_else(|_| json!({})))
-                .unwrap_or_else(|_| json!({})),
+            Some(r) => {
+                crate::actions::secrets::decrypted_secrets_for_job(db, &r.repository_id, None, None)
+                    .await
+                    .map(|m| serde_json::to_value(m).unwrap_or_else(|_| json!({})))
+                    .unwrap_or_else(|_| json!({}))
+            }
             None => json!({}),
         };
         SharedCtx { github, secrets }

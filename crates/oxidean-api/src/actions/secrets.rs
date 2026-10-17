@@ -46,6 +46,94 @@ pub async fn decrypted_secrets_for_repo(
     Ok(out)
 }
 
+/// What the caller knows for the decrypt-path audit record — the event lands
+/// under `event_type = "actions.secrets.decrypt"` with name/count detail only
+/// (never values).
+pub struct SecretAudit<'a> {
+    pub actor_username: &'a str,
+    pub actor_id: Option<&'a str>,
+    pub repository_id: &'a str,
+    pub run_id: &'a str,
+    pub job_id: &'a str,
+}
+
+/// Claim-time merged secrets for one job — repo < org < environment
+/// precedence (GitHub: the narrowest scope wins). `environment_name` is the
+/// job's resolved environment name; org secrets only exist for org-owned
+/// repos (`owner_type = 'org'`) whose `visibility` covers this repo — both
+/// resolved inside the queries.
+///
+/// `pull_request_target` / fork-PR callers must NOT pass this path: keep the
+/// existing `pr_ctx.trusted` gate outside — untrusted runs skip the function
+/// entirely.
+pub async fn decrypted_secrets_for_job(
+    db: &Database,
+    repository_id: &str,
+    environment_name: Option<&str>,
+    audit: Option<SecretAudit<'_>>,
+) -> Result<HashMap<String, String>, String> {
+    let mut out = decrypted_secrets_for_repo(db, repository_id).await?;
+    let repo_count = out.len();
+    let mut org_count = 0usize;
+    let mut env_count = 0usize;
+
+    for row in db
+        .list_action_org_secret_ciphertexts_for_repo(repository_id)
+        .await?
+    {
+        out.insert(row.name, decrypt_secret(&row.ciphertext)?);
+        org_count += 1;
+    }
+
+    if let Some(env_name) = environment_name {
+        if let Some(env) = db.find_action_environment(repository_id, env_name).await? {
+            for row in db
+                .list_action_environment_secret_ciphertexts(&env.id)
+                .await?
+            {
+                out.insert(row.name, decrypt_secret(&row.ciphertext)?);
+                env_count += 1;
+            }
+        }
+    }
+
+    // Decrypt-path audit: one event per claim batch recording scopes +
+    // counts — names are logged (they're metadata, listed by the UI) but
+    // never values.
+    if let Some(a) = audit {
+        if repo_count + org_count + env_count > 0 {
+            let detail = serde_json::json!({
+                "repository_id": a.repository_id,
+                "run_id": a.run_id,
+                "job_id": a.job_id,
+                "repo_secrets": repo_count,
+                "org_secrets": org_count,
+                "environment": environment_name,
+                "environment_secrets": env_count,
+            })
+            .to_string();
+            if let Err(e) = db
+                .insert_audit_event(
+                    &uuid::Uuid::new_v4().to_string(),
+                    a.actor_id,
+                    a.actor_username,
+                    "actions.secrets.decrypt",
+                    Some("repository"),
+                    Some(a.repository_id),
+                    Some(&detail),
+                    None,
+                    None,
+                )
+                .await
+            {
+                tracing::warn!(error = %e, "secret decrypt audit write failed");
+            }
+        }
+    }
+
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

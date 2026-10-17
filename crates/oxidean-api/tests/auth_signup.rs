@@ -1,4 +1,7 @@
 //! AUTH-01: local signup with Set-Cookie, uniqueness, reserved username, welcome email.
+// ENV_LOCK guards are held across awaits on purpose — they serialize
+// env-mutating tests within this binary.
+#![allow(clippy::await_holding_lock)]
 
 mod support;
 
@@ -11,6 +14,11 @@ use oxidean_api::email::{EmailError, EmailSender, LogSink, OutboundEmail};
 use oxidean_api::{build_cors, router_with_state, AppState};
 use oxidean_db::Database;
 use tower::ServiceExt;
+
+/// Env-var-mutating tests serialize on this — `OXIDEAN_ADMIN_*` /
+/// `OXIDEAN_ALLOW_SIGNUP` are process-global and parallel test threads
+/// otherwise race each other's app construction.
+static ENV_LOCK: Mutex<()> = Mutex::new(());
 
 #[derive(Default)]
 struct RecordingSender {
@@ -44,6 +52,7 @@ fn rpc_req(body: &str) -> Request<Body> {
 
 #[tokio::test]
 async fn signup_sets_cookie_and_sends_welcome() {
+    let _env = ENV_LOCK.lock().unwrap();
     let dir = tempfile::tempdir().expect("tempdir");
     let url = format!("sqlite:{}", dir.path().join("signup.db").display());
     let db = Database::connect(&url).await.expect("connect");
@@ -95,6 +104,7 @@ async fn signup_sets_cookie_and_sends_welcome() {
 
 #[tokio::test]
 async fn signup_duplicate_returns_taken() {
+    let _env = ENV_LOCK.lock().unwrap();
     let dir = tempfile::tempdir().expect("tempdir");
     let url = format!("sqlite:{}", dir.path().join("dup.db").display());
     let db = Database::connect(&url).await.expect("connect");
@@ -126,6 +136,7 @@ async fn signup_duplicate_returns_taken() {
 
 #[tokio::test]
 async fn signup_reserved_username() {
+    let _env = ENV_LOCK.lock().unwrap();
     let dir = tempfile::tempdir().expect("tempdir");
     let url = format!("sqlite:{}", dir.path().join("reserved.db").display());
     let db = Database::connect(&url).await.expect("connect");
@@ -147,6 +158,7 @@ async fn signup_reserved_username() {
 
 #[tokio::test]
 async fn signup_works_with_log_sink_default_router() {
+    let _env = ENV_LOCK.lock().unwrap();
     // Smoke: default router path (LogSink) still accepts signup.
     let dir = tempfile::tempdir().expect("tempdir");
     let url = format!("sqlite:{}", dir.path().join("logsink.db").display());
@@ -168,6 +180,7 @@ async fn signup_works_with_log_sink_default_router() {
 
 #[tokio::test]
 async fn signup_open_without_invite_fields_auth05() {
+    let _env = ENV_LOCK.lock().unwrap();
     // AUTH-05 / D-08: signup succeeds with only email/username/password — no invite schema.
     let dir = tempfile::tempdir().expect("tempdir");
     let url = format!("sqlite:{}", dir.path().join("open.db").display());
@@ -191,6 +204,7 @@ async fn signup_open_without_invite_fields_auth05() {
 
 #[tokio::test]
 async fn seeded_admin_is_auto_verified() {
+    let _env = ENV_LOCK.lock().unwrap();
     let _env = support::lock_admin_env().await;
     let dir = tempfile::tempdir().expect("tempdir");
     let url = format!("sqlite:{}", dir.path().join("admin_seed.db").display());
@@ -243,6 +257,7 @@ async fn seeded_admin_is_auto_verified() {
 /// Wave 0: OXIDEAN_ALLOW_SIGNUP=true/1 must persist open signup on ENV seed (D-15).
 #[tokio::test]
 async fn seeded_admin_parses_allow_signup_true() {
+    let _env = ENV_LOCK.lock().unwrap();
     let _env = support::lock_admin_env().await;
     let dir = tempfile::tempdir().expect("tempdir");
     let url = format!("sqlite:{}", dir.path().join("admin_allow.db").display());
@@ -269,6 +284,7 @@ async fn seeded_admin_parses_allow_signup_true() {
 /// D-13: empty-string ADMIN ENV is treated as absent (same as unset).
 #[tokio::test]
 async fn seed_partial_env_empty_string_email_does_not_seed() {
+    let _env = ENV_LOCK.lock().unwrap();
     let _env = support::lock_admin_env().await;
     let dir = tempfile::tempdir().expect("tempdir");
     let url = format!("sqlite:{}", dir.path().join("empty_email.db").display());
@@ -292,6 +308,7 @@ async fn seed_partial_env_empty_string_email_does_not_seed() {
 /// D-13: empty-string password is treated as absent.
 #[tokio::test]
 async fn seed_partial_env_empty_string_password_does_not_seed() {
+    let _env = ENV_LOCK.lock().unwrap();
     let _env = support::lock_admin_env().await;
     let dir = tempfile::tempdir().expect("tempdir");
     let url = format!("sqlite:{}", dir.path().join("empty_pw.db").display());
@@ -315,6 +332,7 @@ async fn seed_partial_env_empty_string_password_does_not_seed() {
 /// D-05/D-07: after users exist with allow_signup false, auth.signup is rejected server-side.
 #[tokio::test]
 async fn signup_rejects_when_allow_signup_false() {
+    let _env = ENV_LOCK.lock().unwrap();
     let dir = tempfile::tempdir().expect("tempdir");
     let url = format!("sqlite:{}", dir.path().join("closed_signup.db").display());
     let db = Database::connect(&url).await.expect("connect");
@@ -361,6 +379,7 @@ async fn signup_rejects_when_allow_signup_false() {
 /// D-05: allow_signup true → signup succeeds (welcome/verify retained).
 #[tokio::test]
 async fn signup_succeeds_when_allow_signup_true() {
+    let _env = ENV_LOCK.lock().unwrap();
     let dir = tempfile::tempdir().expect("tempdir");
     let url = format!("sqlite:{}", dir.path().join("open_signup.db").display());
     let db = Database::connect(&url).await.expect("connect");
@@ -393,6 +412,7 @@ async fn signup_succeeds_when_allow_signup_true() {
 /// Empty instance: needs_setup still blocks signup before bootstrap (AUTH-07).
 #[tokio::test]
 async fn signup_setup_required_before_bootstrap() {
+    let _env = ENV_LOCK.lock().unwrap();
     let dir = tempfile::tempdir().expect("tempdir");
     let url = format!("sqlite:{}", dir.path().join("needs_setup.db").display());
     let db = Database::connect(&url).await.expect("connect");
@@ -415,6 +435,7 @@ async fn signup_setup_required_before_bootstrap() {
 /// D-06/D-07: auth.provider_config exposes allow_signup for public chrome (fail closed).
 #[tokio::test]
 async fn provider_config_includes_allow_signup() {
+    let _env = ENV_LOCK.lock().unwrap();
     let dir = tempfile::tempdir().expect("tempdir");
     let url = format!("sqlite:{}", dir.path().join("provider_cfg.db").display());
     let db = Database::connect(&url).await.expect("connect");
@@ -470,6 +491,7 @@ async fn provider_config_includes_allow_signup() {
 /// AUTH-06 ordering / AUTH-07 adjacency: second seed with users present is a no-op.
 #[tokio::test]
 async fn seed_second_run_idempotent_when_users_exist() {
+    let _env = ENV_LOCK.lock().unwrap();
     let _env = support::lock_admin_env().await;
     let dir = tempfile::tempdir().expect("tempdir");
     let url = format!("sqlite:{}", dir.path().join("seed_idem.db").display());

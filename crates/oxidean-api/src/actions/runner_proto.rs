@@ -3,6 +3,7 @@
 
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
@@ -171,6 +172,11 @@ struct OkResponse {
     /// executing; the runner aborts remaining steps on `true`.
     #[serde(default, skip_serializing_if = "is_false")]
     cancelled: bool,
+    /// `update_log` only — the server's next expected batch index. Returned
+    /// on every outcome (accept, duplicate-drop, gap-409) so the runner can
+    /// resync its cursor without another round-trip.
+    #[serde(default)]
+    log_index: i64,
 }
 
 async fn declare(
@@ -188,6 +194,7 @@ async fn declare(
     Ok(Json(OkResponse {
         ok: true,
         cancelled: false,
+        log_index: 0,
     }))
 }
 
@@ -349,13 +356,6 @@ async fn fetch_task(
             // PR) gets no repo secrets and a read-only job token — GitHub's
             // fork-PR model, failing closed on any lookup miss.
             let pr_ctx = pull_context_for_run(&state.db, &run).await;
-            let secrets = if pr_ctx.trusted {
-                crate::actions::secrets::decrypted_secrets_for_repo(&state.db, &run.repository_id)
-                    .await
-                    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-            } else {
-                std::collections::HashMap::new()
-            };
             // Durable payload: steps + effective permissions captured at
             // enqueue (0053). A claimed job with no payload predates the
             // migration — fail it loudly rather than hand the runner an empty
@@ -427,6 +427,35 @@ async fn fetch_task(
                     (name, uid.to_string())
                 }
                 None => (String::new(), String::new()),
+            };
+            // Claim-time secrets: repo < org < environment merge + decrypt
+            // audit (Phase 8). The trusted-PR gate still decides whether ANY
+            // secrets leave the server — untrusted fork PRs get nothing.
+            let secrets = if pr_ctx.trusted {
+                crate::actions::secrets::decrypted_secrets_for_job(
+                    &state.db,
+                    &run.repository_id,
+                    j.environment_name.as_deref(),
+                    Some(crate::actions::secrets::SecretAudit {
+                        actor_username: if actor.is_empty() {
+                            "oxidean-actions"
+                        } else {
+                            &actor
+                        },
+                        actor_id: if actor_id.is_empty() {
+                            None
+                        } else {
+                            Some(actor_id.as_str())
+                        },
+                        repository_id: &run.repository_id,
+                        run_id: &run.id,
+                        job_id: &j.id,
+                    }),
+                )
+                .await
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+            } else {
+                std::collections::HashMap::new()
             };
             let base_ref = pr_ctx.base_ref.clone();
             let pull_number = pr_ctx.pull_number;
@@ -660,6 +689,9 @@ async fn update_task(
         "in_progress" | "success" | "failure" | "cancelled" => req.state.as_str(),
         _ => return Err(StatusCode::BAD_REQUEST),
     };
+    // Runner contact — liveness heartbeat for the stale-claim sweeper.
+    let at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let _ = state.db.touch_action_job_heartbeat(&job.id, &at).await;
     // API-04: capture the pre-update run status so the queued→in_progress
     // transition emits `workflow_run` `in_progress` exactly once.
     let prev_run_status = state
@@ -700,6 +732,7 @@ async fn update_task(
     Ok(Json(OkResponse {
         ok: true,
         cancelled,
+        log_index: 0,
     }))
 }
 
@@ -801,16 +834,48 @@ struct UpdateLogRequest {
     job_id: String,
     chunk: String,
     runner_token: Option<String>,
+    /// Monotonic batch cursor (Phase 8) — the server stores `log_index` as
+    /// the next expected batch. `None` = legacy client → append unordered.
+    #[serde(default)]
+    log_index: Option<i64>,
 }
 
 /// Cap per-request log appends so a stolen runner token cannot fill the disk in one call.
 const MAX_LOG_CHUNK_BYTES: usize = 256 * 1024;
 
+/// Per-job total log cap — `OXIDEAN_ACTIONS_MAX_LOG_BYTES` (default 64 MiB).
+/// Over-cap appends land a truncation marker once, then drop; a stolen token
+/// can no longer fill the disk one 256 KiB chunk at a time.
+pub(crate) fn max_job_log_bytes() -> usize {
+    std::env::var("OXIDEAN_ACTIONS_MAX_LOG_BYTES")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(64 * 1024 * 1024)
+}
+
+/// Per-job bounded append — over-cap writes land a truncation marker and
+/// report OK so the runner keeps running (the log itself records the loss).
+async fn append_job_log_capped(
+    state: &AppState,
+    job: &oxidean_db::ActionJobRow,
+    chunk: &[u8],
+) -> Result<bool, StatusCode> {
+    crate::actions::logs::append_job_log_bounded(
+        &state.actions_log_dir,
+        &job.run_id,
+        &job.id,
+        chunk,
+        max_job_log_bytes() as u64,
+    )
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+}
+
 async fn update_log(
     State(state): State<AppState>,
     headers: HeaderMap,
     Json(req): Json<UpdateLogRequest>,
-) -> Result<Json<OkResponse>, StatusCode> {
+) -> Result<Response, StatusCode> {
     let runner = runner_from_headers(&state, &headers, req.runner_token.as_deref()).await?;
     if req.chunk.len() > MAX_LOG_CHUNK_BYTES {
         return Err(StatusCode::PAYLOAD_TOO_LARGE);
@@ -828,14 +893,56 @@ async fn update_log(
     if req.run_id != job.run_id {
         return Err(StatusCode::BAD_REQUEST);
     }
-    append_job_log(
-        &state.actions_log_dir,
-        &job.run_id,
-        &job.id,
-        req.chunk.as_bytes(),
-    )
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    // Ordering CAS — a replayed batch drops idempotently; a skipped index is
+    // a real gap the runner must resend from its last ack (409 carries the
+    // server's next expected index).
+    let mut skip_append = false;
+    if let Some(index) = req.log_index {
+        match state
+            .db
+            .advance_action_job_log_index(&job.id, index)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        {
+            oxidean_db::LogIndexCas::Accept => {}
+            oxidean_db::LogIndexCas::Duplicate => skip_append = true,
+            oxidean_db::LogIndexCas::Gap => {
+                let cursor = state.db.action_job_log_index(&job.id).await.unwrap_or(0);
+                return Ok((
+                    StatusCode::CONFLICT,
+                    Json(OkResponse {
+                        ok: false,
+                        cancelled: false,
+                        log_index: cursor,
+                    }),
+                )
+                    .into_response());
+            }
+        }
+    }
+    if !skip_append {
+        let appended = append_job_log_capped(&state, &job, req.chunk.as_bytes()).await?;
+        if !appended {
+            // Total per-job cap hit — the CAS already consumed this index so
+            // a retry lands Duplicate, but signal back-pressure so a
+            // flooding runner slows down instead of hammering.
+            let cursor = state.db.action_job_log_index(&job.id).await.unwrap_or(0);
+            return Ok((
+                StatusCode::TOO_MANY_REQUESTS,
+                [(axum::http::header::RETRY_AFTER, "5")],
+                Json(OkResponse {
+                    ok: false,
+                    cancelled: false,
+                    log_index: cursor,
+                }),
+            )
+                .into_response());
+        }
+    }
+    // Every runner contact bumps the liveness heartbeat for the stale-claim
+    // sweeper — best-effort, never fails the request.
+    let at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let _ = state.db.touch_action_job_heartbeat(&job.id, &at).await;
     // Log traffic is the runner's most frequent contact — piggyback the
     // cancel signal so a superseded/fail-fast job aborts mid-run rather
     // than executing its remaining steps.
@@ -846,8 +953,14 @@ async fn update_log(
         .ok()
         .flatten()
         .is_some_and(|j| j.status == "cancelled");
-    Ok(Json(OkResponse {
-        ok: true,
-        cancelled,
-    }))
+    let cursor = state.db.action_job_log_index(&job.id).await.unwrap_or(0);
+    Ok((
+        StatusCode::OK,
+        Json(OkResponse {
+            ok: true,
+            cancelled,
+            log_index: cursor,
+        }),
+    )
+        .into_response())
 }

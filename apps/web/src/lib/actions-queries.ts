@@ -59,9 +59,13 @@ export function actionsRunDetailQuery(owner: string, name: string, runId: string
 }
 
 /**
- * Live job log — refetches every 5s, requesting only bytes after the
- * previously seen `next_offset` and appending the tail. If the stored log
- * shrank (rotation/rewrite), falls back to a full refetch.
+ * Live job log — server-side long-poll: each request passes `wait_ms` so the
+ * server holds it until new bytes land or the job goes terminal, then the
+ * query re-arms after `refetchInterval`. Effectively a live tail without
+ * fixed-cadence polling traffic; on server versions without `wait_ms`
+ * support the request returns immediately and the interval keeps things
+ * moving. If the stored log shrank (rotation/rewrite), falls back to a full
+ * refetch.
  */
 export function actionsJobLogQuery(owner: string, name: string, runId: string, jobId: string) {
   const base = actionsGetJobLogQueryOptions(apiClient, {
@@ -81,6 +85,7 @@ export function actionsJobLogQuery(owner: string, name: string, runId: string, j
         run_id: runId,
         job_id: jobId,
         offset,
+        wait_ms: 20_000,
       });
       if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
       const data = res.data;
@@ -105,7 +110,13 @@ export function actionsJobLogQuery(owner: string, name: string, runId: string, j
       }
       return data;
     },
-    refetchInterval: 5_000,
+    // Re-arm quickly after each long-poll response — the server's 20s hold
+    // means this only fires when the job is live but silent (or pre-`wait_ms`
+    // servers, where it degrades to the old fixed-cadence poll). `done`
+    // stops polling entirely on terminal jobs; servers that predate the
+    // flag never set it and keep polling.
+    refetchInterval: (query: { state: { data?: ActionJobLogResponse } }) =>
+      query.state.data?.done ? false : 1_000,
   };
 }
 

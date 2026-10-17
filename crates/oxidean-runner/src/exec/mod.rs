@@ -104,6 +104,9 @@ pub(crate) struct Logger<'a> {
     /// Server-side cancel signal — set when an `update_log` ack reports
     /// `cancelled`; the step loop checks `take_cancelled()` between steps.
     pub cancelled: std::sync::atomic::AtomicBool,
+    /// Next log-batch index the server expects. Shared because log sends can
+    /// overlap with step output; every ack (and every 409) resyncs it.
+    pub log_cursor: std::sync::atomic::AtomicI64,
 }
 
 impl<'a> Logger<'a> {
@@ -112,22 +115,65 @@ impl<'a> Logger<'a> {
             .swap(false, std::sync::atomic::Ordering::Relaxed)
     }
 
+    /// One send attempt at the shared cursor. Cursor serializes batches: the
+    /// claim is single-runner and sends are `await`ed in-order, so claiming
+    /// the slot then awaiting the response can't interleave.
+    async fn send_once(&self, masked: &str) -> Result<crate::client::UpdateTaskAck, String> {
+        let index = self.log_cursor.load(std::sync::atomic::Ordering::SeqCst);
+        let ack = self
+            .client
+            .update_log(&self.run_id, &self.job_id, masked, index)
+            .await?;
+        // Accepted batch consumed our slot; a rejected gap didn't — in both
+        // cases the server reports its next expected index, so trust it.
+        let next = if ack.ok {
+            ack.log_index.max(index + 1)
+        } else {
+            ack.log_index
+        };
+        self.log_cursor
+            .store(next, std::sync::atomic::Ordering::SeqCst);
+        Ok(ack)
+    }
+
     pub(crate) async fn send(&self, chunk: &str) {
         let masked = mask_secrets(chunk, self.mask_values);
         if masked.is_empty() {
             return;
         }
-        match self
-            .client
-            .update_log(&self.run_id, &self.job_id, &masked)
-            .await
-        {
+        match self.send_once(&masked).await {
+            Ok(ack) if !ack.ok => {
+                // 409 gap — cursor already resynced to the server's expected
+                // index; resend this chunk once. A second gap drops it (log
+                // loss is tolerable; wedging is not).
+                match self.send_once(&masked).await {
+                    Ok(ack) if ack.cancelled => {
+                        self.cancelled
+                            .store(true, std::sync::atomic::Ordering::Relaxed);
+                    }
+                    Err(e) => tracing::warn!("update_log retry failed: {e}"),
+                    _ => {}
+                }
+            }
             Ok(ack) if ack.cancelled => {
                 self.cancelled
                     .store(true, std::sync::atomic::Ordering::Relaxed);
             }
             Err(e) => {
-                tracing::warn!("update_log failed: {e}");
+                // Transport failure — the chunk may have landed with the ack
+                // lost. Resend once at the same index: the server answers
+                // Duplicate (drop, resync) or Accept (append) — exactly-once
+                // either way. A second failure drops the chunk.
+                match self.send_once(&masked).await {
+                    Ok(ack) if ack.cancelled => {
+                        self.cancelled
+                            .store(true, std::sync::atomic::Ordering::Relaxed);
+                    }
+                    Err(e2) => {
+                        tracing::warn!("update_log failed twice, chunk dropped: {e} / {e2}")
+                    }
+                    _ => {}
+                }
             }
             _ => {}
         }
@@ -211,6 +257,7 @@ pub async fn execute(client: &Client, task: &Task, config: &Config) -> &'static 
         job_id: job_id.clone(),
         mask_values: &mask_values,
         cancelled: std::sync::atomic::AtomicBool::new(false),
+        log_cursor: std::sync::atomic::AtomicI64::new(0),
     };
 
     match client.update_task(&job_id, "in_progress", None, None).await {
@@ -633,6 +680,7 @@ mod tests {
             poll_ms: 1,
             git_token: None,
             job_timeout_secs: 60,
+            actions_mirror: None,
         }
     }
 

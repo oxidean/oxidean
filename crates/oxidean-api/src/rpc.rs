@@ -240,6 +240,10 @@ pub const PROCEDURES: &[&str] = &[
     "org.invites.revoke",
     "org.invites.accept",
     "org.invites.createLink",
+    "org.actions.secrets.list",
+    "org.actions.secrets.put",
+    "org.actions.secrets.delete",
+    "org.actions.secrets.listRepos",
     "invites.accept",
     "invites.get",
     "repo.listMine",
@@ -354,6 +358,9 @@ pub const PROCEDURES: &[&str] = &[
     "repo.actions.environments.get",
     "repo.actions.environments.upsert",
     "repo.actions.environments.delete",
+    "repo.actions.environments.secretsList",
+    "repo.actions.environments.secretsPut",
+    "repo.actions.environments.secretsDelete",
     "repo.actions.listDeployments",
     "repo.actions.approveJob",
     "repo.actions.workflowTemplates.list",
@@ -962,6 +969,22 @@ async fn dispatch_inner(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },
+        "org.actions.secrets.list" => match org::secrets_list(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "org.actions.secrets.put" => match org::secrets_put(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "org.actions.secrets.delete" => match org::secrets_delete(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "org.actions.secrets.listRepos" => match org::secrets_list_repos(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
         "invites.accept" => match invites::accept(ctx, req.input).await {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
@@ -1465,6 +1488,24 @@ async fn dispatch_inner(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
         }
         "repo.actions.environments.delete" => {
             match crate::actions::rpc::delete_environment(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
+        "repo.actions.environments.secretsList" => {
+            match crate::actions::rpc::list_environment_secrets(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
+        "repo.actions.environments.secretsPut" => {
+            match crate::actions::rpc::put_environment_secret(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
+        "repo.actions.environments.secretsDelete" => {
+            match crate::actions::rpc::delete_environment_secret(ctx, req.input).await {
                 Ok(v) => RpcResponse::ok(v),
                 Err(e) => RpcResponse::err(e),
             }

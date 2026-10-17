@@ -222,8 +222,22 @@ async fn dispatch_pull_request_inner(
         let discovered = discover_workflows(git, &event.base_bare, &event.base_sha)
             .await
             .map_err(|e| e.to_string())?;
-        for fe in &discovered.errors {
-            tracing::warn!(path = %fe.path, error = %fe.message, "skipping invalid workflow file");
+        if !discovered.errors.is_empty() {
+            for fe in &discovered.errors {
+                tracing::warn!(path = %fe.path, error = %fe.message, "invalid workflow file");
+            }
+            n += crate::actions::dispatch::fail_discovery_runs(
+                db,
+                &event.repository_id,
+                &discovered.errors,
+                "pull_request_target",
+                &event.base_sha,
+                &format!("refs/heads/{}", event.base_ref),
+                event.actor_id.as_deref(),
+                None,
+                Some(&payload),
+            )
+            .await?;
         }
         let hold = is_fork && fork_needs_approval(db, event).await;
         for wf in &discovered.workflows {
@@ -264,8 +278,22 @@ async fn dispatch_pull_request_inner(
     let discovered = discover_workflows(git, &event.bare_repo, &event.head_sha)
         .await
         .map_err(|e| e.to_string())?;
-    for fe in &discovered.errors {
-        tracing::warn!(path = %fe.path, error = %fe.message, "skipping invalid workflow file");
+    if !discovered.errors.is_empty() {
+        for fe in &discovered.errors {
+            tracing::warn!(path = %fe.path, error = %fe.message, "invalid workflow file");
+        }
+        n += crate::actions::dispatch::fail_discovery_runs(
+            db,
+            &event.repository_id,
+            &discovered.errors,
+            "pull_request",
+            &event.head_sha,
+            &format!("refs/pull/{}/head", event.pull_number),
+            event.actor_id.as_deref(),
+            event.head_repo_id.as_deref(),
+            Some(&payload),
+        )
+        .await?;
     }
     let hold = is_fork && fork_needs_approval(db, event).await;
     for wf in &discovered.workflows {
@@ -432,10 +460,24 @@ async fn dispatch_lifecycle_inner(
     let discovered = discover_workflows(git, &event.bare_repo, &head_sha)
         .await
         .map_err(|e| e.to_string())?;
-    for fe in &discovered.errors {
-        tracing::warn!(path = %fe.path, error = %fe.message, "skipping invalid workflow file");
-    }
     let mut n = 0;
+    if !discovered.errors.is_empty() {
+        for fe in &discovered.errors {
+            tracing::warn!(path = %fe.path, error = %fe.message, "invalid workflow file");
+        }
+        n += crate::actions::dispatch::fail_discovery_runs(
+            db,
+            &event.repository_id,
+            &discovered.errors,
+            event.event_name,
+            &head_sha,
+            &default_ref,
+            event.actor_id.as_deref(),
+            None,
+            Some(&event.payload),
+        )
+        .await?;
+    }
     for wf in &discovered.workflows {
         let types: &[String] = match event.event_name {
             "release" if wf.document.triggers.release => &wf.document.triggers.release_types,

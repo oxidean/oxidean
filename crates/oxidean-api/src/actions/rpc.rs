@@ -18,11 +18,13 @@ use oxidean_core::{
     RepoActionsDefaultPermissionsRequest, RepoActionsDefaultPermissionsResponse,
     RepoActionsEnvironmentDeleteRequest, RepoActionsEnvironmentDeleteResponse,
     RepoActionsEnvironmentGetRequest, RepoActionsEnvironmentResponse,
-    RepoActionsEnvironmentUpsertRequest, RepoActionsEnvironmentsListRequest,
-    RepoActionsEnvironmentsListResponse, RepoActionsForkPrApprovalRequest,
-    RepoActionsForkPrApprovalResponse, RepoActionsPullRequestTargetRequest,
-    RepoActionsPullRequestTargetResponse, RepoActionsSetDefaultPermissionsRequest,
-    RepoActionsSetForkPrApprovalRequest, RepoActionsSetPullRequestTargetRequest,
+    RepoActionsEnvironmentSecretDeleteRequest, RepoActionsEnvironmentSecretPutRequest,
+    RepoActionsEnvironmentSecretsListRequest, RepoActionsEnvironmentUpsertRequest,
+    RepoActionsEnvironmentsListRequest, RepoActionsEnvironmentsListResponse,
+    RepoActionsForkPrApprovalRequest, RepoActionsForkPrApprovalResponse,
+    RepoActionsPullRequestTargetRequest, RepoActionsPullRequestTargetResponse,
+    RepoActionsSetDefaultPermissionsRequest, RepoActionsSetForkPrApprovalRequest,
+    RepoActionsSetPullRequestTargetRequest,
 };
 use oxidean_db::{ActionJobRow, ActionRunFilter, ActionRunRow, ActionRunnerRow};
 
@@ -289,19 +291,51 @@ pub async fn get_job_log(
     if job.run_id != run.id {
         return Err(not_found());
     }
-    let (bytes, size) = read_job_log(
-        &ctx.actions_log_dir,
-        &req.run_id,
-        &req.job_id,
-        req.offset.unwrap_or(0),
-    )
-    .await
-    .unwrap_or_default();
+    let offset = req.offset.unwrap_or(0);
+    let (bytes, size) = read_job_log(&ctx.actions_log_dir, &req.run_id, &req.job_id, offset)
+        .await
+        .unwrap_or_default();
+    // Live-tail long-poll (Phase 8): nothing new and the job is still live →
+    // hold the request until bytes land, the job goes terminal, or the wait
+    // cap expires — the UI's log viewer gets sub-second updates without
+    // fixed-cadence polling traffic.
+    if bytes.is_empty() {
+        let wait = req.wait_ms.unwrap_or(0).min(30_000);
+        if wait > 0 && !job_status_terminal(&job.status) {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_millis(wait);
+            loop {
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                let (b, s) = read_job_log(&ctx.actions_log_dir, &req.run_id, &req.job_id, offset)
+                    .await
+                    .unwrap_or_default();
+                let live = ctx
+                    .db
+                    .find_action_job_by_id(&req.job_id)
+                    .await
+                    .ok()
+                    .flatten()
+                    .is_some_and(|j| !job_status_terminal(&j.status));
+                if !b.is_empty() || !live || std::time::Instant::now() >= deadline {
+                    return Ok(ActionJobLogResponse {
+                        content: String::from_utf8_lossy(&b).into_owned(),
+                        next_offset: s,
+                        size: s,
+                        done: !live,
+                    });
+                }
+            }
+        }
+    }
     Ok(ActionJobLogResponse {
         content: String::from_utf8_lossy(&bytes).into_owned(),
         next_offset: size,
         size,
+        done: job_status_terminal(&job.status),
     })
+}
+
+fn job_status_terminal(status: &str) -> bool {
+    matches!(status, "success" | "failure" | "cancelled" | "skipped")
 }
 
 /// `repo.actions.secrets.list` — Admin; names only (D-ACT-17).
@@ -772,6 +806,117 @@ pub async fn delete_environment(
         .await
         .map_err(db_err)?;
     Ok(RepoActionsEnvironmentDeleteResponse { deleted })
+}
+
+/// Resolve the repo + environment row for env-secret ops — the env must
+/// exist; secrets against a not-yet-created environment 404.
+async fn resolve_env_for_admin(
+    ctx: &RpcCtx,
+    owner: &str,
+    name: &str,
+    environment: &str,
+) -> Result<oxidean_db::ActionEnvironmentRow, AppError> {
+    let accessible = resolve_repo_for_admin(ctx, owner, name).await?;
+    ctx.db
+        .find_action_environment(&accessible.row.id, environment)
+        .await
+        .map_err(db_err)?
+        .ok_or_else(|| {
+            AppError::new(
+                "repo.actions.environment_not_found",
+                "environment not found",
+            )
+        })
+}
+
+/// `repo.actions.environments.secretsList` — Admin; names only.
+pub async fn list_environment_secrets(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<ActionSecretsListResponse, AppError> {
+    let _ = require_verified(ctx).await?;
+    let req: RepoActionsEnvironmentSecretsListRequest =
+        serde_json::from_value(input).map_err(|e| {
+            AppError::new(
+                "rpc.bad_input",
+                format!("invalid repo.actions.environments.secretsList input: {e}"),
+            )
+        })?;
+    let env = resolve_env_for_admin(ctx, &req.owner, &req.name, &req.environment).await?;
+    let rows = ctx
+        .db
+        .list_action_environment_secrets(&env.id)
+        .await
+        .map_err(db_err)?;
+    Ok(ActionSecretsListResponse {
+        secrets: rows
+            .into_iter()
+            .map(|r| ActionSecretMetaPublic {
+                name: r.name,
+                updated_at: r.updated_at,
+            })
+            .collect(),
+    })
+}
+
+/// `repo.actions.environments.secretsPut` — Admin; value never returned.
+pub async fn put_environment_secret(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<serde_json::Value, AppError> {
+    let _ = require_verified(ctx).await?;
+    let req: RepoActionsEnvironmentSecretPutRequest =
+        serde_json::from_value(input).map_err(|e| {
+            AppError::new(
+                "rpc.bad_input",
+                format!("invalid repo.actions.environments.secretsPut input: {e}"),
+            )
+        })?;
+    validate_secret_name(&req.secret_name)
+        .map_err(|msg| AppError::new("repo.actions.invalid_secret_name", msg))?;
+    if req.value.is_empty() {
+        return Err(AppError::new(
+            "repo.actions.invalid_secret_value",
+            "secret value is required",
+        ));
+    }
+    let env = resolve_env_for_admin(ctx, &req.owner, &req.name, &req.environment).await?;
+    let ciphertext = encrypt_secret(&req.value)
+        .map_err(|e| AppError::new("repo.actions.secret_encrypt_failed", e))?;
+    ctx.db
+        .upsert_action_environment_secret(
+            &Uuid::new_v4().to_string(),
+            &env.id,
+            &req.secret_name,
+            &ciphertext,
+        )
+        .await
+        .map_err(db_err)?;
+    Ok(serde_json::json!({ "ok": true, "name": req.secret_name }))
+}
+
+/// `repo.actions.environments.secretsDelete` — Admin.
+pub async fn delete_environment_secret(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<serde_json::Value, AppError> {
+    let _ = require_verified(ctx).await?;
+    let req: RepoActionsEnvironmentSecretDeleteRequest =
+        serde_json::from_value(input).map_err(|e| {
+            AppError::new(
+                "rpc.bad_input",
+                format!("invalid repo.actions.environments.secretsDelete input: {e}"),
+            )
+        })?;
+    validate_secret_name(&req.secret_name)
+        .map_err(|msg| AppError::new("repo.actions.invalid_secret_name", msg))?;
+    let env = resolve_env_for_admin(ctx, &req.owner, &req.name, &req.environment).await?;
+    let ok = ctx
+        .db
+        .delete_action_environment_secret(&env.id, &req.secret_name)
+        .await
+        .map_err(db_err)?;
+    Ok(serde_json::json!({ "ok": ok }))
 }
 
 fn deployment_public(d: &oxidean_db::ActionDeploymentRow) -> ActionDeploymentPublic {

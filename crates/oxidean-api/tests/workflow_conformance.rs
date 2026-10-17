@@ -365,6 +365,7 @@ async fn start_runner(
         poll_ms: 1,
         git_token: fx.git_token.clone(),
         job_timeout_secs: 300,
+        actions_mirror: None,
     };
     (client, config, server)
 }

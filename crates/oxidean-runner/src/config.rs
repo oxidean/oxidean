@@ -87,6 +87,11 @@ pub struct Config {
     /// Optional PAT used for cloning private repositories over smart HTTP.
     pub git_token: Option<String>,
     pub job_timeout_secs: u64,
+    /// Optional instance action mirror — replaces the public `github.com`
+    /// fallback in remote `uses:` resolution (`OXIDEAN_ACTIONS_MIRROR`, e.g.
+    /// `https://mirror.internal/actions`). The Oxidean origin is always tried
+    /// first; when unset, `github.com` remains the fallback.
+    pub actions_mirror: Option<String>,
 }
 
 impl Config {
@@ -133,6 +138,10 @@ impl Config {
             .ok()
             .and_then(|v| v.parse::<u64>().ok())
             .unwrap_or(3600);
+        let actions_mirror = std::env::var("OXIDEAN_ACTIONS_MIRROR")
+            .ok()
+            .map(|m| m.trim().trim_end_matches('/').to_string())
+            .filter(|m| !m.is_empty());
         Ok(Config {
             origin,
             registration_token,
@@ -143,6 +152,7 @@ impl Config {
             poll_ms,
             git_token,
             job_timeout_secs,
+            actions_mirror,
         })
     }
 }

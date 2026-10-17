@@ -55,7 +55,7 @@ pub mod workflow_templates;
 pub use actions::{
     ActionDeploymentRow, ActionEnvironmentRow, ActionJobRow, ActionJobTokenRow, ActionOidcKeyRow,
     ActionPayloadRow, ActionRunFilter, ActionRunRow, ActionRunnerRow, ActionSecretCipherRow,
-    ActionSecretMetaRow, JobInsert,
+    ActionSecretMetaRow, EnvSecretMetaRow, JobInsert, LogIndexCas, OrgSecretRow, StaleJobRow,
 };
 pub use audit_events::AuditEventRow;
 pub use auth_settings::AuthSettingsRow;
@@ -3682,6 +3682,163 @@ impl Database {
     /// Public JWK JSON for every key — JWKS keeps rotated keys verifiable.
     pub async fn list_action_oidc_public_jwks(&self) -> Result<Vec<String>, String> {
         actions::list_oidc_public_jwks(self.require_pool()?).await
+    }
+
+    // ---- Phase 8: heartbeat, log ordering, org/env secrets -----------------
+
+    /// Bump a live job's `heartbeat_at` — every runner contact is a liveness
+    /// proof for the stale-claim sweeper. Best-effort.
+    pub async fn touch_action_job_heartbeat(&self, job_id: &str, at: &str) -> Result<(), String> {
+        actions::touch_job_heartbeat(self.require_pool()?, job_id, at).await
+    }
+
+    /// Log-batch ordering CAS — see [`actions::advance_job_log_index`].
+    pub async fn advance_action_job_log_index(
+        &self,
+        job_id: &str,
+        index: i64,
+    ) -> Result<actions::LogIndexCas, String> {
+        actions::advance_job_log_index(self.require_pool()?, job_id, index).await
+    }
+
+    /// Guarded cursor move for the gitea row-index protocol.
+    pub async fn set_action_job_log_index_if(
+        &self,
+        job_id: &str,
+        expected: i64,
+        next: i64,
+    ) -> Result<bool, String> {
+        actions::set_job_log_index_if(self.require_pool()?, job_id, expected, next).await
+    }
+
+    /// The stored next-expected log batch index for a job.
+    pub async fn action_job_log_index(&self, job_id: &str) -> Result<i64, String> {
+        actions::job_log_index(self.require_pool()?, job_id).await
+    }
+
+    /// All `in_progress` jobs — the sweeper evaluates staleness/deadline in
+    /// Rust (dialect timestamp formats stay inside this crate).
+    pub async fn list_in_progress_action_jobs(&self) -> Result<Vec<StaleJobRow>, String> {
+        actions::list_in_progress_jobs(self.require_pool()?).await
+    }
+
+    /// Requeue a stale `in_progress` job (runner_id/log cursor cleared,
+    /// attempt bumped). Returns false when the row already left `in_progress`.
+    pub async fn requeue_stale_action_job(&self, job_id: &str) -> Result<bool, String> {
+        actions::requeue_stale_job(self.require_pool()?, job_id).await
+    }
+
+    /// Fail a job whose `timeout_at` deadline lapsed while `in_progress`.
+    pub async fn fail_action_job_deadline(&self, job_id: &str, now: &str) -> Result<bool, String> {
+        actions::fail_job_deadline(self.require_pool()?, job_id, now).await
+    }
+
+    pub async fn upsert_action_org_secret(
+        &self,
+        id: &str,
+        owner_id: &str,
+        name: &str,
+        ciphertext: &str,
+        visibility: &str,
+    ) -> Result<(), String> {
+        actions::upsert_org_secret(
+            self.require_pool()?,
+            id,
+            owner_id,
+            name,
+            ciphertext,
+            visibility,
+        )
+        .await
+    }
+
+    pub async fn list_action_org_secrets(
+        &self,
+        owner_id: &str,
+    ) -> Result<Vec<OrgSecretRow>, String> {
+        actions::list_org_secrets(self.require_pool()?, owner_id).await
+    }
+
+    pub async fn find_action_org_secret(
+        &self,
+        owner_id: &str,
+        name: &str,
+    ) -> Result<Option<OrgSecretRow>, String> {
+        actions::find_org_secret_by_name(self.require_pool()?, owner_id, name).await
+    }
+
+    pub async fn delete_action_org_secret(
+        &self,
+        owner_id: &str,
+        name: &str,
+    ) -> Result<bool, String> {
+        actions::delete_org_secret(self.require_pool()?, owner_id, name).await
+    }
+
+    /// Replace the `visibility = 'selected'` repo set for an org secret.
+    pub async fn set_action_org_secret_repos(
+        &self,
+        secret_id: &str,
+        repository_ids: &[String],
+    ) -> Result<(), String> {
+        actions::set_org_secret_repos(self.require_pool()?, secret_id, repository_ids).await
+    }
+
+    /// Repo ids in an org secret's `visibility = 'selected'` allow set.
+    pub async fn list_action_org_secret_repos(
+        &self,
+        secret_id: &str,
+    ) -> Result<Vec<String>, String> {
+        actions::list_org_secret_repos(self.require_pool()?, secret_id).await
+    }
+
+    /// Org secrets visible to a repo at claim — owner + visibility resolved
+    /// inside the query.
+    pub async fn list_action_org_secret_ciphertexts_for_repo(
+        &self,
+        repository_id: &str,
+    ) -> Result<Vec<ActionSecretCipherRow>, String> {
+        actions::list_org_secret_ciphertexts_for_repo(self.require_pool()?, repository_id).await
+    }
+
+    pub async fn upsert_action_environment_secret(
+        &self,
+        id: &str,
+        environment_id: &str,
+        name: &str,
+        ciphertext: &str,
+    ) -> Result<(), String> {
+        actions::upsert_environment_secret(
+            self.require_pool()?,
+            id,
+            environment_id,
+            name,
+            ciphertext,
+        )
+        .await
+    }
+
+    pub async fn list_action_environment_secrets(
+        &self,
+        environment_id: &str,
+    ) -> Result<Vec<EnvSecretMetaRow>, String> {
+        actions::list_environment_secrets(self.require_pool()?, environment_id).await
+    }
+
+    pub async fn delete_action_environment_secret(
+        &self,
+        environment_id: &str,
+        name: &str,
+    ) -> Result<bool, String> {
+        actions::delete_environment_secret(self.require_pool()?, environment_id, name).await
+    }
+
+    /// Claim-time environment-secret read — ciphertexts only.
+    pub async fn list_action_environment_secret_ciphertexts(
+        &self,
+        environment_id: &str,
+    ) -> Result<Vec<ActionSecretCipherRow>, String> {
+        actions::list_environment_secret_ciphertexts(self.require_pool()?, environment_id).await
     }
 
     /// Per-repo unit enable flags (COL-13): issues / pulls, future wiki/boards.

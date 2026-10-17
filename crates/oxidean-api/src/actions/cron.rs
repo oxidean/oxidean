@@ -166,6 +166,26 @@ pub async fn sweep_scheduled_workflows(
         else {
             continue;
         };
+        if !discovered.errors.is_empty() {
+            for fe in &discovered.errors {
+                tracing::warn!(path = %fe.path, error = %fe.message, "invalid workflow file");
+            }
+            if let Err(e) = crate::actions::dispatch::fail_discovery_runs(
+                db,
+                &repo.id,
+                &discovered.errors,
+                "schedule",
+                &sha,
+                &default_ref,
+                None,
+                None,
+                None,
+            )
+            .await
+            {
+                tracing::warn!(error = %e, repo = %repo.name, "discovery validation runs failed");
+            }
+        }
         let repository =
             crate::actions::payload::repository_embed(&owner, &repo.name, &repo.default_branch);
         for wf in &discovered.workflows {
