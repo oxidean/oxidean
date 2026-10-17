@@ -16,6 +16,9 @@ const meMock = vi.fn();
 const listMock = vi.fn();
 const setEnabledMock = vi.fn();
 const createDefaultsMock = vi.fn();
+const wfListMock = vi.fn();
+const wfSetEnabledMock = vi.fn();
+const wfDeleteMock = vi.fn();
 
 vi.mock("@/lib/api-client", () => ({
   apiClient: {
@@ -28,6 +31,13 @@ vi.mock("@/lib/api-client", () => ({
         setEnabled: (...args: unknown[]) => setEnabledMock(...args),
         delete: vi.fn(),
         update: vi.fn(),
+      },
+      workflowTemplates: {
+        list: (...args: unknown[]) => wfListMock(...args),
+        setEnabled: (...args: unknown[]) => wfSetEnabledMock(...args),
+        create: vi.fn(),
+        update: vi.fn(),
+        delete: (...args: unknown[]) => wfDeleteMock(...args),
       },
     },
     repo: {
@@ -92,6 +102,9 @@ beforeEach(() => {
   listMock.mockReset();
   setEnabledMock.mockReset();
   createDefaultsMock.mockReset();
+  wfListMock.mockReset();
+  wfSetEnabledMock.mockReset();
+  wfDeleteMock.mockReset();
   fetchSessionMeMock.mockReset();
 
   meMock.mockResolvedValue({ ok: true, data: sysAdmin });
@@ -102,6 +115,9 @@ beforeEach(() => {
     ok: true,
     data: { default_visibility: "public", stacks: [], licenses: [], gitignores: [] },
   });
+  wfListMock.mockResolvedValue({ ok: true, data: { templates: [] } });
+  wfSetEnabledMock.mockResolvedValue({ ok: true, data: {} });
+  wfDeleteMock.mockResolvedValue({ ok: true, data: {} });
 });
 
 afterEach(async () => {
@@ -118,6 +134,22 @@ async function waitForSelector(selector: string, ms = 10_000): Promise<Element> 
   throw new Error(`${selector} never appeared. ${debugBody()}`);
 }
 
+const WF_TEMPLATE = {
+  id: "wt-1",
+  slug: "acme-ci",
+  name: "Acme CI",
+  description: "Instance CI starter",
+  icon_name: "rust",
+  categories: ["Continuous integration"],
+  file_patterns: ["Cargo.toml"],
+  filename: "acme-ci.yml",
+  enabled: true,
+  content: "name: acme-ci\n",
+  created_by_user_id: "u1",
+  created_at: "2026-01-01T00:00:00Z",
+  updated_at: "2026-01-01T00:00:00Z",
+};
+
 describe("/admin/templates browser", () => {
   it("toggles a template pack's Enabled switch via setEnabled RPC", async () => {
     const races = trackDomErrors();
@@ -133,6 +165,30 @@ describe("/admin/templates browser", () => {
 
     await vi.waitFor(() => {
       expect(setEnabledMock).toHaveBeenCalledWith({ id: "p1", enabled: false });
+    });
+    expectNoOctaneOverlayInDocument();
+    expect(races.errors).toEqual([]);
+  });
+
+  it("deletes a workflow template through the AlertDialog portal", async () => {
+    const races = trackDomErrors();
+    wfListMock.mockResolvedValue({ ok: true, data: { templates: [WF_TEMPLATE] } });
+
+    await mountWithQueryClient(AdminTemplatesPage);
+    const del = (await waitForSelector('[data-testid="admin-wf-delete-wt-1"]')) as HTMLElement;
+    await act(async () => {
+      del.click();
+    });
+
+    const confirm = (await waitForSelector(
+      '[data-testid="admin-wf-delete-confirm"]',
+    )) as HTMLElement;
+    await act(async () => {
+      confirm.click();
+    });
+
+    await vi.waitFor(() => {
+      expect(wfDeleteMock).toHaveBeenCalledWith({ id: "wt-1" });
     });
     expectNoOctaneOverlayInDocument();
     expect(races.errors).toEqual([]);

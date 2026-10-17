@@ -349,6 +349,13 @@ static SHELLS: &[Shell] = &[
         redirect: None,
     },
     Shell {
+        pattern: &[P("owner"), P("repo"), L("actions"), L("new")],
+        file: "_/_/actions/new/index.html",
+        title: Some("New workflow · {owner}/{repo} · Oxidean"),
+        protected: true,
+        redirect: None,
+    },
+    Shell {
         pattern: &[P("owner"), P("repo"), L("actions"), P("run")],
         file: "_/_/actions/_/index.html",
         title: Some("Run {run} · {owner}/{repo} · Oxidean"),
@@ -790,6 +797,9 @@ mod tests {
         assert_eq!(file_of("/o/r/pulls/new"), "_/_/pulls/new/index.html");
         // Owner "settings" beats repo named "settings".
         assert_eq!(file_of("/jesse/settings"), "_/settings/index.html");
+        // Literal "new" beats the actions/{run} param.
+        assert_eq!(file_of("/o/r/actions/new"), "_/_/actions/new/index.html");
+        assert_eq!(file_of("/o/r/actions/123"), "_/_/actions/_/index.html");
     }
 
     #[test]

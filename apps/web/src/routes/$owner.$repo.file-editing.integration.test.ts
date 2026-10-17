@@ -19,6 +19,7 @@ const fileUploadMock = vi.fn();
 const fileMkdirMock = vi.fn();
 const authMeMock = vi.fn();
 const bootstrapStatusMock = vi.fn();
+const wfTemplateGetMock = vi.fn();
 
 vi.mock("@/lib/api-client", () => ({
   apiClient: {
@@ -27,6 +28,11 @@ vi.mock("@/lib/api-client", () => ({
       bootstrapStatus: (...args: unknown[]) => bootstrapStatusMock(...args),
     },
     repo: {
+      actions: {
+        workflowTemplates: {
+          get: (...args: unknown[]) => wfTemplateGetMock(...args),
+        },
+      },
       file: {
         commitPolicy: (...args: unknown[]) => commitPolicyMock(...args),
         create: (...args: unknown[]) => fileCreateMock(...args),
@@ -137,6 +143,7 @@ beforeEach(() => {
     fileMkdirMock,
     authMeMock,
     bootstrapStatusMock,
+    wfTemplateGetMock,
     repoGetMock,
     repoRefsMock,
     repoBlobMock,
@@ -210,6 +217,57 @@ describe("GIT-19 web file-editing routes", () => {
       expect(screen.getByText(/Drop files here, or click to browse/)).toBeTruthy(),
     );
     await waitFor(() => expect(screen.getByTestId("file-commit-form")).toBeTruthy());
+  }, 30_000);
+
+  it("new route prefills filename + content from ?template=", async () => {
+    wfTemplateGetMock.mockResolvedValue({
+      ok: true,
+      data: {
+        template: {
+          id: "builtin:ci/rust",
+          name: "Rust",
+          description: "Build and test a Rust project.",
+          icon_name: "rust",
+          icon_url: "/api/actions/template-icons/rust.svg",
+          categories: ["Continuous integration"],
+          file_patterns: ["Cargo.toml"],
+          filename: "rust.yml",
+          provenance: "builtin",
+          source_label: null,
+          suggested: false,
+          unsupported_actions: [],
+          parse_error: null,
+        },
+        content: "name: rust\non: [push]\njobs:\n  build:\n    runs-on: oxidean\n",
+      },
+    });
+    setPathname("/ada/hello/new/main/.github/workflows?template=builtin%3Aci%2Frust");
+    const { RepoFileNewPage } = await import("./$owner.$repo.new.$.tsrx");
+    renderWithQueryClient(RepoFileNewPage);
+
+    await waitFor(() =>
+      expect((screen.getByTestId("file-new-name") as HTMLInputElement).value).toBe("rust.yml"),
+    );
+    await waitFor(() =>
+      expect((screen.getByTestId("file-new-content") as HTMLTextAreaElement).value).toContain(
+        "name: rust",
+      ),
+    );
+    expect(screen.getByText(/From template: Rust/)).toBeTruthy();
+    expect(wfTemplateGetMock).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "builtin:ci/rust" }),
+    );
+  }, 30_000);
+
+  it("new route prefills only the name from ?filename=", async () => {
+    setPathname("/ada/hello/new/main/.github/workflows?filename=main.yml");
+    const { RepoFileNewPage } = await import("./$owner.$repo.new.$.tsrx");
+    renderWithQueryClient(RepoFileNewPage);
+
+    await waitFor(() =>
+      expect((screen.getByTestId("file-new-name") as HTMLInputElement).value).toBe("main.yml"),
+    );
+    expect(wfTemplateGetMock).not.toHaveBeenCalled();
   }, 30_000);
 
   it("routes deny non-writers", async () => {
