@@ -193,6 +193,11 @@ Channels: `stable`, `alpha`, `beta`, `nightly`. Stable emits the bare
 SemVer; `alpha`/`beta` append `-<channel>.N` (per-base counter);
 `nightly` appends `-nightly.YYYYMMDDN`. Stable plans bound at the latest
 stable tag — prerelease tags never truncate the stable changelog range.
+The `<ver>` in `<ver>-<channel>.N` is the *pending stable version*: its
+level is measured over commits not yet in a stable tag, so a shipped
+prerelease never lowers the next cut's base (a `0.2.0-beta.1` followed by
+patch-only work continues `0.2.0-beta.2`, never `0.1.1-beta.*`); each cut's
+notes still cover only the commits since the latest tag of any channel.
 
 - `beta`: automated on `main` via `release-beta.yml`.
 - `alpha`/`nightly` (and ad-hoc per-component cuts on any channel):
