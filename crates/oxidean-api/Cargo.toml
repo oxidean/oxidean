@@ -89,6 +89,8 @@ webauthn-rs = "0.5.2"
 base64 = "0.23"
 schemars = { workspace = true }
 utoipa-swagger-ui = { version = "10", features = ["axum", "vendored"] }
+tokio-util = { version = "0.7.20", features = ["io"] }
+hex = "0.4.3"
 
 [dev-dependencies]
 oxidean-runner = { path = "../oxidean-runner" }

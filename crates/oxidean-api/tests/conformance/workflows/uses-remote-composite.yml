@@ -1,0 +1,11 @@
+name: uses-remote-composite
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - id: remote
+        uses: {{SLUG}}/hello-remote@main
+        with:
+          who: remote
+      - run: echo "remote saw=${{ steps.remote.outputs.greeting }}"

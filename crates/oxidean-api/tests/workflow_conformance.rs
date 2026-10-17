@@ -45,6 +45,11 @@ struct Case {
     /// Status multiset over every run in the repo: ["cancelled","success"].
     expect_runs: Option<Vec<String>>,
     expect_unsupported: Option<Vec<String>>,
+    /// Extra files seeded into the main repo's commit (local actions etc.).
+    files: Option<HashMap<String, String>>,
+    /// Extra repos seeded under the same owner for remote `uses:` resolution
+    /// — `{name: {path: content}}` becomes `{slug}/{name}.git` on the origin.
+    action_repos: Option<HashMap<String, HashMap<String, String>>>,
     log_contains: Option<Vec<String>>,
     log_absent: Option<Vec<String>>,
 }
@@ -63,6 +68,8 @@ fn base_case(id: &str) -> Case {
         expect_job_statuses: None,
         expect_runs: None,
         expect_unsupported: None,
+        files: None,
+        action_repos: None,
         log_contains: None,
         log_absent: None,
     }
@@ -73,6 +80,24 @@ fn cases() -> Vec<Case> {
     let raw = std::fs::read_to_string(&path).expect("read cases.json");
     let file: CasesFile = serde_json::from_str(&raw).expect("parse cases.json");
     file.cases
+}
+
+fn sha256_hex(data: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(data)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+/// Docker daemon reachable? `docker_gated` cases assert dispatch only when
+/// absent (CI hosts without a daemon still cover parse/queue semantics).
+fn docker_present() -> bool {
+    std::process::Command::new("docker")
+        .args(["version", "--format", "{{.Server.Version}}"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
 }
 
 fn workflow_path(id: &str) -> PathBuf {
@@ -107,6 +132,9 @@ struct Fixture {
     bare: PathBuf,
     head_sha: String,
     owner_id: String,
+    /// Runner `git_token` — a user PAT minted when the case seeds remote
+    /// `uses:` action repos (job tokens are repo-locked).
+    git_token: Option<String>,
     head_ref: String,
     n_dispatched: usize,
 }
@@ -126,6 +154,7 @@ async fn fixture(case: &Case) -> Fixture {
     )
     .with_actions_enabled(true)
     .with_actions_log_dir(log_dir.clone())
+    .with_actions_artifacts_dir(dir.path().join("artifacts"))
     .with_repos_dir(repos_dir.clone());
     let app = router_with_state(state, build_cors("development", None).unwrap());
 
@@ -171,16 +200,70 @@ async fn fixture(case: &Case) -> Fixture {
     std::fs::create_dir_all(bare.parent().unwrap()).unwrap();
     let git = CliGitBackend::new();
     git.init_bare(&bare, "main").await.unwrap();
-    let workflow = std::fs::read(workflow_path(&case.id))
-        .unwrap_or_else(|e| panic!("read corpus workflow for {}: {e}", case.id));
-    git.seed_commit(
-        &bare,
-        "main",
-        "conformance seed",
-        &[(".github/workflows/conformance.yml".into(), workflow)],
+    let workflow = String::from_utf8(
+        std::fs::read(workflow_path(&case.id))
+            .unwrap_or_else(|e| panic!("read corpus workflow for {}: {e}", case.id)),
     )
-    .await
-    .unwrap();
+    .unwrap()
+    .replace("{{SLUG}}", &slug);
+    let mut seed_files: Vec<(String, Vec<u8>)> = vec![(
+        ".github/workflows/conformance.yml".into(),
+        workflow.into_bytes(),
+    )];
+    for (p, c) in case.files.clone().unwrap_or_default() {
+        seed_files.push((p, c.replace("{{SLUG}}", &slug).into_bytes()));
+    }
+    git.seed_commit(&bare, "main", "conformance seed", &seed_files)
+        .await
+        .unwrap();
+    // Remote `uses:` repos — `{slug}/{name}.git` on the fixture origin, plus a
+    // repository row so smart-HTTP resolves them. The runner's `git_token` is
+    // a user PAT: job tokens are repo-locked and can't clone a sibling repo.
+    let mut git_token = None;
+    let has_action_repos = case.action_repos.is_some();
+    for (name, files) in case.action_repos.clone().unwrap_or_default() {
+        let abare = repos_dir.join(&slug).join(format!("{name}.git"));
+        git.init_bare(&abare, "main").await.unwrap();
+        let afiles: Vec<(String, Vec<u8>)> = files
+            .into_iter()
+            .map(|(p, c)| (p, c.replace("{{SLUG}}", &slug).into_bytes()))
+            .collect();
+        git.seed_commit(&abare, "main", "action seed", &afiles)
+            .await
+            .unwrap();
+        db.insert_repository(
+            &format!("r-{slug}-{name}"),
+            &owner.id,
+            "user",
+            &name,
+            "private",
+            "",
+            "main",
+        )
+        .await
+        .unwrap();
+    }
+    if has_action_repos {
+        let token = format!("oxidean_pat_{}{slug}", "x".repeat(64));
+        let prefix = &token[..oxidean_core::CLASSIC_PAT_PREFIX.len() + 8];
+        db.create_pat(
+            &format!("pat-{slug}"),
+            &owner.id,
+            "classic",
+            "conformance",
+            prefix,
+            &sha256_hex(token.as_bytes()),
+            Some(r#"["repo"]"#),
+            None,
+            None,
+            None,
+            None,
+            &[],
+        )
+        .await
+        .unwrap();
+        git_token = Some(token);
+    }
     let head_sha = git
         .list_refs(&bare)
         .await
@@ -229,6 +312,7 @@ async fn fixture(case: &Case) -> Fixture {
         bare,
         head_sha,
         owner_id: owner.id,
+        git_token,
         head_ref: case
             .head_ref
             .clone()
@@ -279,7 +363,7 @@ async fn start_runner(
         state_path: fx.dir.path().join(format!("runner-state-{name}.json")),
         work_dir: fx.dir.path().join(format!("runner-work-{name}")),
         poll_ms: 1,
-        git_token: None,
+        git_token: fx.git_token.clone(),
         job_timeout_secs: 300,
     };
     (client, config, server)
@@ -421,8 +505,20 @@ async fn run_case(case: &Case) {
                 );
             }
         }
-        "queued" | "run" => {
+        "queued" | "run" | "docker_gated" => {
             assert_eq!(fx.n_dispatched, 1, "{}: expected one enqueue", case.id);
+            // `container:`/`services:` jobs execute against a Docker daemon;
+            // without one we still assert parse+dispatch (jobs must queue,
+            // not bounce to the __validation job).
+            if case.kind == "docker_gated" && !docker_present() {
+                let jobs = fx.db.list_action_jobs_for_run(&runs[0].id).await.unwrap();
+                assert!(
+                    !jobs.is_empty() && jobs.iter().all(|j| j.job_key != "__validation"),
+                    "{}: container/services jobs must dispatch (docker absent)",
+                    case.id
+                );
+                return;
+            }
             let labels = case
                 .runner_labels
                 .clone()
@@ -481,7 +577,7 @@ async fn run_case(case: &Case) {
                 let job = jobs.iter().find(|j| j.job_key == key.as_str()).unwrap();
                 assert_eq!(job.name, want, "{}: job '{key}' name", case.id);
             }
-            if case.kind == "run" {
+            if case.kind == "run" || case.kind == "docker_gated" {
                 let run = fx.db.find_action_run_by_id(&run.id).await.unwrap().unwrap();
                 if let Some(want) = &case.expect_run {
                     assert_eq!(run.status, *want, "{}: run status", case.id);
@@ -597,6 +693,21 @@ conformance_case!(reusable_workflow_local, "reusable-workflow-local");
 conformance_case!(reusable_workflow_remote, "reusable-workflow-remote");
 conformance_case!(continue_on_error_job, "continue-on-error-job");
 conformance_case!(continue_on_error_step, "continue-on-error-step");
+// Phase 4 — step lifecycle, shells, action runtimes.
+conformance_case!(shell_python, "shell-python");
+conformance_case!(shell_custom, "shell-custom");
+conformance_case!(shell_pwsh, "shell-pwsh");
+conformance_case!(uses_local_composite, "uses-local-composite");
+conformance_case!(uses_remote_composite, "uses-remote-composite");
+conformance_case!(uses_node_action, "uses-node-action");
+conformance_case!(uses_node_post, "uses-node-post");
+conformance_case!(composite_env, "composite-env");
+conformance_case!(step_summary, "step-summary");
+conformance_case!(artifact_upload_download, "artifact-upload-download");
+conformance_case!(artifact_overwrite, "artifact-overwrite");
+conformance_case!(artifact_pattern_download, "artifact-pattern-download");
+conformance_case!(artifact_missing, "artifact-missing");
+conformance_case!(artifact_no_files_error, "artifact-no-files-error");
 conformance_case!(expr_malformed_run, "expr-malformed-run");
 conformance_case!(expr_malformed_if, "expr-malformed-if");
 conformance_case!(prt_push, "prt-push");
@@ -621,6 +732,35 @@ fn corpus_is_complete_and_wired() {
             case.id
         );
     }
+}
+
+/// A `container:` job claimed on a daemon-less runner fails loudly — never
+/// silently executes on the host (GitHub would fail the job the same way).
+#[tokio::test]
+async fn container_job_fails_loudly_without_docker() {
+    if docker_present() {
+        eprintln!("docker present — skipping no-docker failure coverage");
+        return;
+    }
+    let case = cases()
+        .into_iter()
+        .find(|c| c.id == "container-job")
+        .expect("container-job case");
+    let fx = fixture(&case).await;
+    drive_runner(&fx, &["ubuntu-latest".into()]).await;
+    let runs = fx
+        .db
+        .list_action_runs_for_repo(&fx.repo_id, &Default::default(), 10, 0)
+        .await
+        .unwrap();
+    let jobs = fx.db.list_action_jobs_for_run(&runs[0].id).await.unwrap();
+    let job = jobs.iter().find(|j| j.job_key == "build").unwrap();
+    assert_eq!(job.status, "failure");
+    let log = read_job_log(&fx, &runs[0].id, &job.id);
+    assert!(
+        log.contains("docker is not available"),
+        "log must explain the failure:\n{log}"
+    );
 }
 
 /// 0053: fetch_task serves steps from the durable payload — the bare repo is
@@ -804,4 +944,30 @@ async fn rerun_resets_and_regates() {
         .unwrap()
         .expect("run row");
     assert_eq!(run3.status, "success");
+}
+
+/// `$GITHUB_STEP_SUMMARY` — the file-command file accumulates across steps
+/// and lands on `action_jobs.summary_md` via the terminal update_task.
+#[tokio::test]
+async fn step_summary_persists_on_job() {
+    let case = cases()
+        .into_iter()
+        .find(|c| c.id == "step-summary")
+        .expect("step-summary case");
+    let fx = fixture(&case).await;
+    drive_runner(&fx, &["ubuntu-latest".into()]).await;
+    let run = fx
+        .db
+        .list_action_runs_for_repo(&fx.repo_id, &Default::default(), 10, 0)
+        .await
+        .unwrap()
+        .remove(0);
+    assert_eq!(run.status, "success");
+    let jobs = fx.db.list_action_jobs_for_run(&run.id).await.unwrap();
+    let job = jobs.iter().find(|j| j.job_key == "build").unwrap();
+    let summary = job.summary_md.as_deref().unwrap_or_default();
+    assert!(
+        summary.contains("### Results") && summary.contains("- all green"),
+        "job summary_md must carry the step summary — got {summary:?}"
+    );
 }

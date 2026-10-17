@@ -1,0 +1,11 @@
+name: artifact-no-files-error
+on: [push]
+jobs:
+  up:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/upload-artifact@v4
+        with:
+          name: empty
+          path: nothing-here/**
+          if-no-files-found: error

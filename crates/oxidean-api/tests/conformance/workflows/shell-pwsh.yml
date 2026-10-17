@@ -1,0 +1,9 @@
+name: shell-pwsh
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          Write-Output "pwsh-marker"
+        shell: pwsh

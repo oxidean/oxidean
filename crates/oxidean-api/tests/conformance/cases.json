@@ -142,8 +142,8 @@
     "build": "failure"
    },
    "log_contains": [
-    "unsupported action",
-    "actions/setup-node"
+    "could not resolve action",
+    "no-such-repo-12345"
    ]
   },
   {
@@ -400,16 +400,26 @@
   },
   {
    "id": "container-job",
-   "kind": "validation_failure",
-   "expect_unsupported": [
-    "container"
+   "kind": "docker_gated",
+   "expect_run": "success",
+   "expect_jobs": {
+    "build": "success"
+   },
+   "log_contains": [
+    "Started job container (node:20)",
+    "in container"
    ]
   },
   {
    "id": "services-job",
-   "kind": "validation_failure",
-   "expect_unsupported": [
-    "services"
+   "kind": "docker_gated",
+   "expect_run": "success",
+   "expect_jobs": {
+    "build": "success"
+   },
+   "log_contains": [
+    "Started service 'postgres' (postgres:16)",
+    "with service"
    ]
   },
   {
@@ -502,9 +512,13 @@
   },
   {
    "id": "continue-on-error-step",
-   "kind": "validation_failure",
-   "expect_unsupported": [
-    "continue-on-error"
+   "kind": "run",
+   "expect_run": "success",
+   "expect_jobs": {
+    "build": "success"
+   },
+   "log_contains": [
+    "after"
    ]
   },
   {
@@ -951,6 +965,189 @@
    },
    "log_contains": [
     "job-level-supersede"
+   ]
+  },
+  {
+   "id": "shell-python",
+   "kind": "run",
+   "expect_run": "success",
+   "expect_jobs": {
+    "build": "success"
+   },
+   "log_contains": [
+    "py-marker version="
+   ]
+  },
+  {
+   "id": "shell-custom",
+   "kind": "run",
+   "expect_run": "success",
+   "expect_jobs": {
+    "build": "success"
+   },
+   "log_contains": [
+    "custom shell marker"
+   ]
+  },
+  {
+   "id": "shell-pwsh",
+   "kind": "run",
+   "expect_run": "success",
+   "expect_jobs": {
+    "build": "success"
+   },
+   "log_contains": [
+    "pwsh-marker"
+   ]
+  },
+  {
+   "id": "uses-local-composite",
+   "kind": "run",
+   "expect_run": "success",
+   "expect_jobs": {
+    "build": "success"
+   },
+   "files": {
+    ".github/actions/hello/action.yml": "name: hello\ninputs:\n  who:\n    default: world\noutputs:\n  greeting:\n    value: ${{ steps.greet.outputs.greeting }}\nruns:\n  using: composite\n  steps:\n    - id: greet\n      run: echo \"greeting=hello ${{ inputs.who }}\" >> $GITHUB_OUTPUT\n      shell: bash\n"
+   },
+   "log_contains": [
+    "saw=hello world"
+   ]
+  },
+  {
+   "id": "uses-remote-composite",
+   "kind": "run",
+   "expect_run": "success",
+   "expect_jobs": {
+    "build": "success"
+   },
+   "action_repos": {
+    "hello-remote": {
+     "action.yml": "name: hello\ninputs:\n  who:\n    default: world\noutputs:\n  greeting:\n    value: ${{ steps.greet.outputs.greeting }}\nruns:\n  using: composite\n  steps:\n    - id: greet\n      run: echo \"greeting=hello ${{ inputs.who }}\" >> $GITHUB_OUTPUT\n      shell: bash\n"
+    }
+   },
+   "log_contains": [
+    "remote saw=hello remote"
+   ]
+  },
+  {
+   "id": "uses-node-action",
+   "kind": "run",
+   "expect_run": "success",
+   "expect_jobs": {
+    "build": "success"
+   },
+   "files": {
+    "tools/nodeecho/action.yml": "name: nodeecho\ninputs:\n  msg:\n    default: hi\nruns:\n  using: node26\n  main: index.js\n",
+    "tools/nodeecho/index.js": "const fs = require('fs');\nfs.appendFileSync(process.env.GITHUB_OUTPUT, `echoed=${process.env.INPUT_MSG}-echoed\\n`);\nconsole.log('node main ran');\n"
+   },
+   "log_contains": [
+    "node main ran",
+    "node saw=node-hello-echoed"
+   ]
+  },
+  {
+   "id": "uses-node-post",
+   "kind": "run",
+   "expect_run": "success",
+   "expect_jobs": {
+    "build": "success"
+   },
+   "files": {
+    "tools/nodepost/action.yml": "name: nodepost\nruns:\n  using: node26\n  pre: pre.js\n  main: main.js\n  post: post.js\n  post-if: success()\n",
+    "tools/nodepost/pre.js": "console.log('pre ran');\n",
+    "tools/nodepost/main.js": "const fs = require('fs');\nfs.appendFileSync(process.env.GITHUB_STATE, \"ver=main-state\\n\");\nconsole.log('post-action main ran');\n",
+    "tools/nodepost/post.js": "console.log('post-marker state=' + process.env.STATE_ver);\n"
+   },
+   "log_contains": [
+    "pre ran",
+    "post-action main ran",
+    "post-marker state=main-state",
+    "after-main"
+   ]
+  },
+  {
+   "id": "composite-env",
+   "kind": "run",
+   "expect_run": "success",
+   "expect_jobs": {
+    "build": "success"
+   },
+   "files": {
+    ".github/actions/envwriter/action.yml": "name: envwriter\nruns:\n  using: composite\n  steps:\n    - run: echo \"MADE_BY_COMPOSITE=flag-42\" >> $GITHUB_ENV\n      shell: bash\n"
+   },
+   "log_contains": [
+    "env=[flag-42] via=flag-42"
+   ]
+  },
+  {
+   "id": "step-summary",
+   "kind": "run",
+   "expect_run": "success",
+   "expect_jobs": {
+    "build": "success"
+   },
+   "log_contains": [
+    "step ran"
+   ]
+  },
+  {
+   "id": "artifact-upload-download",
+   "kind": "run",
+   "expect_run": "success",
+   "expect_jobs": {
+    "up": "success",
+    "down": "success"
+   },
+   "log_contains": [
+    "Uploaded artifact 'bundle'",
+    "Downloaded artifact 'bundle'",
+    "hello-artifact"
+   ]
+  },
+  {
+   "id": "artifact-overwrite",
+   "kind": "run",
+   "expect_run": "success",
+   "expect_jobs": {
+    "up": "success"
+   },
+   "log_contains": [
+    "version-two"
+   ]
+  },
+  {
+   "id": "artifact-pattern-download",
+   "kind": "run",
+   "expect_run": "success",
+   "expect_jobs": {
+    "up": "success"
+   },
+   "log_contains": [
+    "from-a",
+    "from-b"
+   ]
+  },
+  {
+   "id": "artifact-missing",
+   "kind": "run",
+   "expect_run": "failure",
+   "expect_jobs": {
+    "down": "failure"
+   },
+   "log_contains": [
+    "artifact 'never-uploaded' not found"
+   ]
+  },
+  {
+   "id": "artifact-no-files-error",
+   "kind": "run",
+   "expect_run": "failure",
+   "expect_jobs": {
+    "up": "failure"
+   },
+   "log_contains": [
+    "no files were found"
    ]
   }
  ]

@@ -1,0 +1,10 @@
+name: shell-python
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          import sys
+          print("py-marker version=%d" % sys.version_info.major)
+        shell: python

@@ -337,9 +337,7 @@
       "unsupported_actions": [
         "actions/first-interaction@v1"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "automation/label": {
       "status": "restricted",
@@ -349,9 +347,7 @@
       "unsupported_actions": [
         "actions/labeler@v4"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "automation/manual": {
       "status": "runnable",
@@ -365,9 +361,7 @@
       "unsupported_actions": [
         "actions/stale@v5"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "automation/summary": {
       "status": "partial",
@@ -375,9 +369,7 @@
       "unsupported_actions": [
         "actions/ai-inference@v1"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "ci/ada": {
       "status": "runnable",
@@ -391,9 +383,7 @@
       "unsupported_actions": [
         "actions/setup-java@v4"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "ci/ant": {
       "status": "partial",
@@ -401,9 +391,7 @@
       "unsupported_actions": [
         "actions/setup-java@v4"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "ci/blank": {
       "status": "runnable",
@@ -436,10 +424,8 @@
       "warnings": []
     },
     "ci/crystal": {
-      "status": "unsupported-runtime",
-      "missing_features": [
-        "container"
-      ],
+      "status": "runnable",
+      "missing_features": [],
       "unsupported_actions": [],
       "warnings": []
     },
@@ -465,9 +451,7 @@
       "unsupported_actions": [
         "DataDog/synthetics-ci-github-action@87b505388a22005bb8013481e3f73a367b9a53eb"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "ci/deno": {
       "status": "partial",
@@ -475,9 +459,7 @@
       "unsupported_actions": [
         "denoland/setup-deno@61fe2df320078202e33d7d5ad347e7dcfa0e8f31"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "ci/django": {
       "status": "partial",
@@ -485,9 +467,7 @@
       "unsupported_actions": [
         "actions/setup-python@v3"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "ci/docker-image": {
       "status": "runnable",
@@ -505,9 +485,7 @@
         "docker/setup-buildx-action@f95db51fddba0c2d1ec667646a06c2ce06100226",
         "sigstore/cosign-installer@59acb6260d9c0ba8f4a2f9d9b48431a222b68e20"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "ci/dotnet": {
       "status": "partial",
@@ -515,9 +493,7 @@
       "unsupported_actions": [
         "actions/setup-dotnet@v4"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "ci/dotnet-desktop": {
       "status": "partial",
@@ -527,9 +503,7 @@
         "actions/upload-artifact@v4",
         "microsoft/setup-msbuild@v2"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "ci/elixir": {
       "status": "partial",
@@ -538,15 +512,11 @@
         "actions/cache@v3",
         "erlef/setup-beam@61e01a43a562a89bfc54c7f9a378ff67b03e4a21"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "ci/erlang": {
-      "status": "unsupported-runtime",
-      "missing_features": [
-        "container"
-      ],
+      "status": "runnable",
+      "missing_features": [],
       "unsupported_actions": [],
       "warnings": []
     },
@@ -556,9 +526,7 @@
       "unsupported_actions": [
         "ruby/setup-ruby@55283cc23133118229fd3f97f9336ee23a179fcf"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "ci/generator-generic-ossf-slsa3-publish": {
       "status": "reusable-workflow",
@@ -574,9 +542,7 @@
       "unsupported_actions": [
         "actions/setup-go@v4"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "ci/go-ossf-slsa3-publish": {
       "status": "reusable-workflow",
@@ -594,9 +560,7 @@
         "gradle/actions/dependency-submission@af1da67850ed9a4cedd57bfd976089dd991e2582",
         "gradle/actions/setup-gradle@af1da67850ed9a4cedd57bfd976089dd991e2582"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "ci/gradle-publish": {
       "status": "partial",
@@ -605,9 +569,7 @@
         "actions/setup-java@v4",
         "gradle/actions/setup-gradle@af1da67850ed9a4cedd57bfd976089dd991e2582"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "ci/haskell": {
       "status": "partial",
@@ -616,9 +578,7 @@
         "actions/cache@v3",
         "actions/setup-haskell@v1"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "ci/ios": {
       "status": "runnable",
@@ -638,9 +598,7 @@
       "unsupported_actions": [
         "shivammathur/setup-php@15c43e89cdef867065b0213be354c2841860869e"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "ci/makefile": {
       "status": "runnable",
@@ -655,9 +613,7 @@
         "actions/setup-java@v4",
         "advanced-security/maven-dependency-submission-action@571e99aab1055c2e71a1e2309b9691de18d6b7d6"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "ci/maven-publish": {
       "status": "partial",
@@ -665,9 +621,7 @@
       "unsupported_actions": [
         "actions/setup-java@v4"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "ci/msbuild": {
       "status": "partial",
@@ -683,9 +637,7 @@
       "unsupported_actions": [
         "actions/setup-node@v4"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "ci/npm-publish": {
       "status": "partial",
@@ -693,9 +645,7 @@
       "unsupported_actions": [
         "actions/setup-node@v4"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "ci/npm-publish-github-packages": {
       "status": "partial",
@@ -703,9 +653,7 @@
       "unsupported_actions": [
         "actions/setup-node@v4"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "ci/objective-c-xcode": {
       "status": "runnable",
@@ -719,9 +667,7 @@
       "unsupported_actions": [
         "actions/cache@v3"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "ci/pylint": {
       "status": "partial",
@@ -729,9 +675,7 @@
       "unsupported_actions": [
         "actions/setup-python@v3"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "ci/python-app": {
       "status": "partial",
@@ -739,9 +683,7 @@
       "unsupported_actions": [
         "actions/setup-python@v3"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "ci/python-package": {
       "status": "partial",
@@ -749,9 +691,7 @@
       "unsupported_actions": [
         "actions/setup-python@v3"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "ci/python-package-conda": {
       "status": "partial",
@@ -759,9 +699,7 @@
       "unsupported_actions": [
         "actions/setup-python@v3"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "ci/python-publish": {
       "status": "unsupported-runtime",
@@ -774,9 +712,7 @@
         "actions/upload-artifact@v4",
         "pypa/gh-action-pypi-publish@release/v1"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "ci/r": {
       "status": "partial",
@@ -784,9 +720,7 @@
       "unsupported_actions": [
         "r-lib/actions/setup-r@f57f1301a053485946083d7a45022b278929a78a"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "ci/ruby": {
       "status": "partial",
@@ -794,21 +728,15 @@
       "unsupported_actions": [
         "ruby/setup-ruby@55283cc23133118229fd3f97f9336ee23a179fcf"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "ci/rubyonrails": {
-      "status": "unsupported-runtime",
-      "missing_features": [
-        "services"
-      ],
+      "status": "partial",
+      "missing_features": [],
       "unsupported_actions": [
         "ruby/setup-ruby@78c01b705fd9d5ad960d432d3a0cfa341d50e410"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "ci/rust": {
       "status": "runnable",
@@ -823,9 +751,7 @@
         "actions/setup-java@v4",
         "scalacenter/sbt-dependency-submission@ab086b50c947c9774b70f39fc7f6e20ca2706c91"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "ci/super-linter": {
       "status": "partial",
@@ -848,9 +774,7 @@
         "actions/cache@v3",
         "shivammathur/setup-php@2cb9b829437ee246e9b3cac53555a39208ca6d28"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "ci/webpack": {
       "status": "partial",
@@ -858,9 +782,7 @@
       "unsupported_actions": [
         "actions/setup-node@v4"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "deployments/alibabacloud": {
       "status": "unsupported-runtime",
@@ -872,9 +794,7 @@
         "aliyun/acr-login@v1",
         "aliyun/acr-scan@v1"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "deployments/aws": {
       "status": "unsupported-runtime",
@@ -887,9 +807,7 @@
         "aws-actions/amazon-ecs-render-task-definition@v1",
         "aws-actions/configure-aws-credentials@v1"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "deployments/azure-container-webapp": {
       "status": "unsupported-runtime",
@@ -902,9 +820,7 @@
         "docker/login-action@343f7c4344506bcbf9b4de18042ae17996df046d",
         "docker/setup-buildx-action@f95db51fddba0c2d1ec667646a06c2ce06100226"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "deployments/azure-functions-app-container": {
       "status": "unsupported-runtime",
@@ -916,9 +832,7 @@
         "azure/docker-login@v1",
         "azure/login@v1"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "deployments/azure-functions-app-dotnet": {
       "status": "unsupported-runtime",
@@ -929,9 +843,7 @@
         "Azure/functions-action@v1",
         "actions/setup-dotnet@v4"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "deployments/azure-functions-app-java": {
       "status": "unsupported-runtime",
@@ -942,9 +854,7 @@
         "Azure/functions-action@v1",
         "actions/setup-java@v4"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "deployments/azure-functions-app-java-gradle": {
       "status": "unsupported-runtime",
@@ -955,9 +865,7 @@
         "Azure/functions-action@v1",
         "actions/setup-java@v4"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "deployments/azure-functions-app-nodejs": {
       "status": "unsupported-runtime",
@@ -968,9 +876,7 @@
         "Azure/functions-action@v1",
         "actions/setup-node@v4"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "deployments/azure-functions-app-powershell": {
       "status": "unsupported-runtime",
@@ -980,9 +886,7 @@
       "unsupported_actions": [
         "Azure/functions-action@v1"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "deployments/azure-functions-app-python": {
       "status": "unsupported-runtime",
@@ -993,9 +897,7 @@
         "Azure/functions-action@v1",
         "actions/setup-python@v4"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "deployments/azure-kubernetes-service": {
       "status": "partial",
@@ -1006,9 +908,7 @@
         "azure/login@v1.4.6",
         "azure/use-kubelogin@v1"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "deployments/azure-kubernetes-service-helm": {
       "status": "partial",
@@ -1020,9 +920,7 @@
         "azure/login@v1.4.6",
         "azure/use-kubelogin@v1"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "deployments/azure-kubernetes-service-kompose": {
       "status": "partial",
@@ -1034,9 +932,7 @@
         "azure/login@v1.4.6",
         "azure/use-kubelogin@v1"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "deployments/azure-kubernetes-service-kustomize": {
       "status": "partial",
@@ -1048,9 +944,7 @@
         "azure/login@v1.4.6",
         "azure/use-kubelogin@v1"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "deployments/azure-staticwebapp": {
       "status": "partial",
@@ -1058,9 +952,7 @@
       "unsupported_actions": [
         "Azure/static-web-apps-deploy@v1"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "deployments/azure-webapps-dotnet-core": {
       "status": "unsupported-runtime",
@@ -1074,9 +966,7 @@
         "actions/upload-artifact@v4",
         "azure/webapps-deploy@v2"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "deployments/azure-webapps-java-jar": {
       "status": "unsupported-runtime",
@@ -1089,9 +979,7 @@
         "actions/upload-artifact@v4",
         "azure/webapps-deploy@v2"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "deployments/azure-webapps-java-jar-gradle": {
       "status": "unsupported-runtime",
@@ -1104,9 +992,7 @@
         "actions/upload-artifact@v4",
         "azure/webapps-deploy@v2"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "deployments/azure-webapps-node": {
       "status": "unsupported-runtime",
@@ -1119,9 +1005,7 @@
         "actions/upload-artifact@v4",
         "azure/webapps-deploy@v2"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "deployments/azure-webapps-php": {
       "status": "unsupported-runtime",
@@ -1136,9 +1020,7 @@
         "azure/webapps-deploy@v2",
         "shivammathur/setup-php@7c0b4c8c8ebed23eca9ec2802474895d105b11bc"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "deployments/azure-webapps-python": {
       "status": "unsupported-runtime",
@@ -1151,9 +1033,7 @@
         "actions/upload-artifact@v4",
         "azure/webapps-deploy@v2"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "deployments/google": {
       "status": "unsupported-runtime",
@@ -1165,9 +1045,7 @@
         "google-github-actions/auth@f112390a2df9932162083945e46d439060d66ec2",
         "google-github-actions/get-gke-credentials@6051de21ad50fbb1767bc93c11357a49082ad116"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "deployments/google-cloudrun-docker": {
       "status": "partial",
@@ -1177,9 +1055,7 @@
         "google-github-actions/auth@f112390a2df9932162083945e46d439060d66ec2",
         "google-github-actions/deploy-cloudrun@33553064113a37d688aa6937bacbdc481580be17"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "deployments/google-cloudrun-source": {
       "status": "partial",
@@ -1188,9 +1064,7 @@
         "google-github-actions/auth@f112390a2df9932162083945e46d439060d66ec2",
         "google-github-actions/deploy-cloudrun@33553064113a37d688aa6937bacbdc481580be17"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "deployments/ibm": {
       "status": "unsupported-runtime",
@@ -1212,9 +1086,7 @@
         "docker/metadata-action@9ec57ed1fcdbf14dcef7dfbe97b2010124a938b7",
         "docker/setup-buildx-action@f95db51fddba0c2d1ec667646a06c2ce06100226"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "deployments/openshift": {
       "status": "unsupported-runtime",
@@ -1229,9 +1101,7 @@
         "redhat-actions/openshift-tools-installer@v1",
         "redhat-actions/push-to-registry@v2"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "deployments/tencent": {
       "status": "unsupported-runtime",
@@ -1241,9 +1111,7 @@
       "unsupported_actions": [
         "TencentCloud/tke-cluster-credential-action@v1"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     },
     "deployments/terraform": {
       "status": "unsupported-runtime",
@@ -1253,9 +1121,7 @@
       "unsupported_actions": [
         "hashicorp/setup-terraform@v1"
       ],
-      "warnings": [
-        "with (inputs applied for actions/checkout only)"
-      ]
+      "warnings": []
     }
   }
 }

@@ -53,6 +53,13 @@ pub struct AppState {
     pub packages_dir: PathBuf,
     /// Actions job log store (`OXIDEAN_ACTIONS_LOG_DIR`, default `var/actions-logs`) — D-ACT-13.
     pub actions_log_dir: PathBuf,
+    /// Actions artifact blob store (`OXIDEAN_ACTIONS_ARTIFACTS_DIR`,
+    /// default `var/actions-artifacts`) — upload/download-artifact payloads.
+    pub actions_artifacts_dir: PathBuf,
+    /// Max bytes for a single artifact upload (default 2 GiB).
+    pub actions_artifact_max_bytes: u64,
+    /// Days an artifact is retained (default 90 — GitHub's own default).
+    pub actions_artifact_retention_days: u32,
     /// Instance Actions gate (`OXIDEAN_ACTIONS_ENABLED`, default true) — D-ACT-06.
     pub actions_enabled: bool,
     /// Env default for the MCP endpoint (`OXIDEAN_MCP_ENABLED`, default true) —
@@ -141,6 +148,16 @@ impl AppState {
                 .join(packages_dir)
         };
         let actions_log_dir = crate::actions::logs::resolve_log_dir();
+        let actions_artifacts_dir = crate::actions::artifacts::resolve_artifact_dir();
+        let actions_artifact_max_bytes = std::env::var("OXIDEAN_ACTIONS_ARTIFACT_MAX_BYTES")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(2 * 1024 * 1024 * 1024u64);
+        let actions_artifact_retention_days =
+            std::env::var("OXIDEAN_ACTIONS_ARTIFACT_RETENTION_DAYS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(90u32);
         let actions_enabled = std::env::var("OXIDEAN_ACTIONS_ENABLED")
             .map(|v| {
                 let t = v.trim().to_ascii_lowercase();
@@ -172,6 +189,9 @@ impl AppState {
             repo_redirect_retention_days,
             packages_dir,
             actions_log_dir,
+            actions_artifacts_dir,
+            actions_artifact_max_bytes,
+            actions_artifact_retention_days,
             actions_enabled,
             mcp_enabled,
             git: Arc::new(CliGitBackend::new()) as Arc<dyn GitBackend>,
@@ -222,6 +242,11 @@ impl AppState {
 
     pub fn with_actions_log_dir(mut self, dir: PathBuf) -> Self {
         self.actions_log_dir = dir;
+        self
+    }
+
+    pub fn with_actions_artifacts_dir(mut self, dir: PathBuf) -> Self {
+        self.actions_artifacts_dir = dir;
         self
     }
 

@@ -30,6 +30,7 @@ ALTER TABLE action_jobs
   ADD COLUMN needs_json TEXT NOT NULL DEFAULT ('[]'),
   ADD COLUMN matrix_json TEXT NOT NULL DEFAULT ('{}'),
   ADD COLUMN outputs_json TEXT NOT NULL DEFAULT ('{}'),
+  ADD COLUMN summary_md TEXT NULL,
   ADD COLUMN concurrency_group VARCHAR(255) NULL,
   ADD COLUMN attempt INT NOT NULL DEFAULT 1,
   ADD COLUMN timeout_at TIMESTAMP NULL;

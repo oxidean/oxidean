@@ -1,0 +1,10 @@
+name: shell-custom
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "custom shell marker"
+          exit 0
+        shell: bash --noprofile --norc -e {0}

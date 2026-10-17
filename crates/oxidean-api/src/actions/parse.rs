@@ -102,6 +102,11 @@ pub struct JobSpec {
     /// `jobs.<id>.strategy` — matrix expansion happens at enqueue into N
     /// job rows sharing `job_key` with distinct `matrix_key` legs.
     pub strategy: Option<StrategySpec>,
+    /// `jobs.<id>.container` — string (`image`) or object form, normalized
+    /// JSON; expressions evaluated at enqueue, executed by the runner.
+    pub container: Option<JsonValue>,
+    /// `jobs.<id>.services` — `{name: {image, env, ports, …}}` map.
+    pub services: Option<JsonValue>,
 }
 
 /// `strategy:` shape — `matrix` is an evaluatable map of `key → [values]`
@@ -144,6 +149,10 @@ pub struct StepSpec {
     /// `steps.*.timeout-minutes` — expression source; the runner enforces it.
     #[serde(rename = "timeout-minutes", skip_serializing_if = "Option::is_none")]
     pub timeout_minutes: Option<String>,
+    /// `steps.*.continue-on-error` — bool or `${{ }}` source; the runner
+    /// evaluates and applies failure-suppression semantics.
+    #[serde(rename = "continue-on-error", skip_serializing_if = "Option::is_none")]
+    pub continue_on_error: Option<JsonValue>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -546,8 +555,6 @@ pub fn parse_workflow_yaml(bytes: &[u8]) -> Result<WorkflowDocument, ParseError>
         })?;
         // Structural features that would mis-execute — fail loudly at dispatch.
         for (present, key) in [
-            (job.container.is_some(), "container"),
-            (job.services.is_some(), "services"),
             (job.environment.is_some(), "environment"),
             (job.continue_on_error.is_some(), "continue-on-error"),
         ] {
@@ -604,6 +611,14 @@ pub fn parse_workflow_yaml(bytes: &[u8]) -> Result<WorkflowDocument, ParseError>
         if let Some(v) = &job_outputs {
             check_json(v, &mut unsupported, &mut warnings);
         }
+        let job_container = job.container.map(yaml_to_json).transpose()?;
+        if let Some(v) = &job_container {
+            check_json(v, &mut unsupported, &mut warnings);
+        }
+        let job_services = job.services.map(yaml_to_json).transpose()?;
+        if let Some(v) = &job_services {
+            check_json(v, &mut unsupported, &mut warnings);
+        }
         let (job_shell, job_workdir) = run_defaults(job.defaults.as_ref());
         let mut steps = Vec::new();
         for (i, step) in job.steps.unwrap_or_default().into_iter().enumerate() {
@@ -612,19 +627,8 @@ pub fn parse_workflow_yaml(bytes: &[u8]) -> Result<WorkflowDocument, ParseError>
                     message: format!("job '{id}' step {i} needs uses or run"),
                 });
             }
-            if step.continue_on_error.is_some() {
-                flag(&mut unsupported, "continue-on-error");
-            }
-            if step.with.is_some()
-                && !step
-                    .uses
-                    .as_deref()
-                    .is_some_and(|u| u.starts_with("actions/checkout"))
-            {
-                flag(
-                    &mut warnings,
-                    "with (inputs applied for actions/checkout only)",
-                );
+            if step.with.is_some() && step.uses.is_none() {
+                flag(&mut warnings, "with on run: step has no effect");
             }
             if let Some(s) = &step.name {
                 check_str(s, &mut unsupported, &mut warnings);
@@ -669,6 +673,7 @@ pub fn parse_workflow_yaml(bytes: &[u8]) -> Result<WorkflowDocument, ParseError>
                 env: step_env,
                 if_expr: expr_src_opt(&step.if_expr),
                 timeout_minutes: expr_src_opt(&step.timeout_minutes),
+                continue_on_error: step.continue_on_error.map(yaml_to_json).transpose()?,
             });
         }
         if steps.is_empty() && job.uses.is_none() {
@@ -688,6 +693,8 @@ pub fn parse_workflow_yaml(bytes: &[u8]) -> Result<WorkflowDocument, ParseError>
             outputs: job_outputs,
             needs,
             strategy,
+            container: job_container,
+            services: job_services,
         });
     }
 
@@ -1027,22 +1034,6 @@ on: [push]
 jobs:
   a:
     runs-on: ubuntu-latest
-    container: node:20
-    services:
-      pg:
-        image: postgres:16
-    steps:
-      - run: echo hi
-"#,
-                &["container", "services"],
-            ),
-            (
-                br#"
-name: CI
-on: [push]
-jobs:
-  a:
-    runs-on: ubuntu-latest
     environment: production
     steps:
       - run: echo hi
@@ -1087,19 +1078,6 @@ jobs:
 "#,
                 &["pull_request_target"],
             ),
-            (
-                br#"
-name: CI
-on: [push]
-jobs:
-  a:
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo hi
-        continue-on-error: true
-"#,
-                &["continue-on-error"],
-            ),
         ];
         for (yaml, want) in cases {
             let got = unsupported_of(yaml);
@@ -1134,6 +1112,15 @@ jobs:
       v: ${{ steps.x.outputs.v }}
     env:
       B: "2"
+    container:
+      image: node:20
+      env:
+        INNER: "yes"
+    services:
+      pg:
+        image: postgres:16
+        ports:
+          - 5432:5432
     steps:
       - uses: actions/checkout@v4
         with:
@@ -1148,10 +1135,8 @@ jobs:
         )
         .expect("parse");
         assert!(doc.unsupported.is_empty());
-        assert_eq!(
-            doc.warnings,
-            vec!["with (inputs applied for actions/checkout only)".to_string()]
-        );
+        // `with:` applies to every uses: step now — nothing left to warn on.
+        assert!(doc.warnings.is_empty());
         assert_eq!(
             doc.jobs[0].if_expr.as_deref(),
             Some("github.ref == 'refs/heads/main'")
@@ -1164,6 +1149,15 @@ jobs:
         let jc = doc.jobs[0].concurrency.as_ref().unwrap();
         assert_eq!(jc.group.as_deref(), Some("inner"));
         assert_eq!(doc.jobs[0].steps[2].if_expr.as_deref(), Some("success()"));
+        // container:/services: are captured for the runner, not unsupported.
+        assert_eq!(
+            doc.jobs[0].container.as_ref().unwrap()["image"],
+            serde_json::json!("node:20")
+        );
+        assert_eq!(
+            doc.jobs[0].services.as_ref().unwrap()["pg"]["ports"],
+            serde_json::json!(["5432:5432"])
+        );
     }
 
     #[test]

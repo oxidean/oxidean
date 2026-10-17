@@ -108,6 +108,7 @@ fn job_public(j: &ActionJobRow) -> ActionJobPublic {
         runs_on,
         started_at: j.started_at.clone(),
         finished_at: j.finished_at.clone(),
+        summary: j.summary_md.clone(),
     }
 }
 

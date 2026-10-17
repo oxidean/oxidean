@@ -383,6 +383,8 @@ pub async fn enqueue_run(
             "fail_fast": fail_fast,
             "max_parallel": max_parallel,
             "timeout_seconds": timeout_seconds,
+            "container": job.container.as_ref().map(|c| crate::actions::eval_ctx::interp_json(c, &ctx, &mut notes)),
+            "services": job.services.as_ref().map(|s| crate::actions::eval_ctx::interp_json(s, &ctx, &mut notes)),
             "contents_permission": crate::actions::effective_contents_permission(doc, job).as_str(),
         })
         .to_string();

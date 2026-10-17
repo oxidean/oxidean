@@ -2087,6 +2087,7 @@ export type ActionJobPublic = {
   runs_on: string[];
   started_at?: string;
   finished_at?: string;
+  summary?: string;
 };
 
 export type ActionRunsListRequest = {

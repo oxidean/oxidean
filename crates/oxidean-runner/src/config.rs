@@ -9,6 +9,9 @@ pub enum ExecMode {
     Host,
     /// Run steps inside `docker run` with the given image.
     Docker(String),
+    /// `docker exec` steps into this long-lived job container — set by
+    /// `jobs.<id>.container:` provisioning, never by a label.
+    ContainerExec(String),
 }
 
 /// A declared runner label. Syntax:

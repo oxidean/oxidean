@@ -42,6 +42,7 @@ CREATE TABLE action_jobs_new (
   needs_json    TEXT NOT NULL DEFAULT '[]',
   matrix_json   TEXT NOT NULL DEFAULT '{}',
   outputs_json  TEXT NOT NULL DEFAULT '{}',
+  summary_md    TEXT NULL,
   concurrency_group TEXT NULL,
   attempt       INTEGER NOT NULL DEFAULT 1,
   timeout_at    TEXT NULL,

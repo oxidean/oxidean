@@ -3585,6 +3585,38 @@ impl Database {
         actions::set_job_outputs(self.require_pool()?, job_id, outputs_json).await
     }
 
+    /// `$GITHUB_STEP_SUMMARY` markdown reported by the runner at terminal.
+    pub async fn set_action_job_summary(
+        &self,
+        job_id: &str,
+        summary_md: &str,
+    ) -> Result<(), String> {
+        actions::set_job_summary(self.require_pool()?, job_id, summary_md).await
+    }
+
+    /// Insert-or-replace an artifact record (GitHub v4 `overwrite` semantics).
+    pub async fn upsert_action_artifact(
+        &self,
+        a: &actions::ActionArtifactRow,
+    ) -> Result<(), String> {
+        actions::upsert_action_artifact(self.require_pool()?, a).await
+    }
+
+    pub async fn find_action_artifact(
+        &self,
+        run_id: &str,
+        name: &str,
+    ) -> Result<Option<actions::ActionArtifactRow>, String> {
+        actions::find_action_artifact(self.require_pool()?, run_id, name).await
+    }
+
+    pub async fn list_action_artifacts_for_run(
+        &self,
+        run_id: &str,
+    ) -> Result<Vec<actions::ActionArtifactRow>, String> {
+        actions::list_action_artifacts_for_run(self.require_pool()?, run_id).await
+    }
+
     /// `concurrency.cancel-in-progress` — cancel every nonterminal run in
     /// the same repo+group, returning the superseded run ids.
     pub async fn cancel_superseded_concurrency_runs(

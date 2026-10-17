@@ -1,0 +1,12 @@
+name: uses-node-action
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: na
+        uses: ./tools/nodeecho
+        with:
+          msg: node-hello
+      - run: echo "node saw=${{ steps.na.outputs.echoed }}"

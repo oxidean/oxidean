@@ -1,0 +1,10 @@
+name: uses-node-post
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: pa
+        uses: ./tools/nodepost
+      - run: echo after-main

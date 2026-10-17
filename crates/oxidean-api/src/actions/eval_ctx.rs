@@ -142,6 +142,24 @@ pub fn interp_or_raw(src: &str, ctx: &Context, notes: &mut Vec<String>) -> Strin
     }
 }
 
+/// Deep-interpolate every string leaf of a normalized YAML→JSON value
+/// (`container:`/`services:` shapes hold image/env/options strings that can
+/// carry `${{ }}`). Non-string leaves pass through.
+pub fn interp_json(v: &JsonValue, ctx: &Context, notes: &mut Vec<String>) -> JsonValue {
+    match v {
+        JsonValue::String(s) => JsonValue::String(interp_or_raw(s, ctx, notes)),
+        JsonValue::Array(xs) => {
+            JsonValue::Array(xs.iter().map(|x| interp_json(x, ctx, notes)).collect())
+        }
+        JsonValue::Object(m) => JsonValue::Object(
+            m.iter()
+                .map(|(k, x)| (k.clone(), interp_json(x, ctx, notes)))
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
 /// `timeout-minutes:` evaluation → minutes as f64 (accepts bare numbers and
 /// `${{ }}` expressions).
 pub fn eval_minutes(src: &str, ctx: &Context) -> Result<f64, String> {

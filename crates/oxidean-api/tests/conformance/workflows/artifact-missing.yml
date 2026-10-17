@@ -1,0 +1,10 @@
+name: artifact-missing
+on: [push]
+jobs:
+  down:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: never-uploaded
+          path: dl

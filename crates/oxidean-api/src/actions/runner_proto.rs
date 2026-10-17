@@ -24,6 +24,12 @@ pub fn router() -> Router<AppState> {
         .route("/fetch_task", post(fetch_task))
         .route("/update_task", post(update_task))
         .route("/update_log", post(update_log))
+        .route("/artifacts/upload", post(crate::actions::artifacts::upload))
+        .route(
+            "/artifacts/{run_id}/{name}",
+            get(crate::actions::artifacts::download),
+        )
+        .route("/artifacts/list", post(crate::actions::artifacts::list))
         // Anonymous template-icon route (GET …/template-icons/{name}.svg) —
         // shares the /api/actions nest; matchit captures the whole segment.
         .route(
@@ -41,6 +47,14 @@ fn bearer_token(headers: &HeaderMap) -> Option<String> {
         .strip_prefix("Bearer ")
         .or_else(|| auth.strip_prefix("bearer "))?;
     Some(raw.trim().to_string())
+}
+
+/// Artifact endpoints authenticate with the same runner bearer token.
+pub(crate) async fn runner_from_headers_pub(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<oxidean_db::ActionRunnerRow, StatusCode> {
+    runner_from_headers(state, headers, None).await
 }
 
 async fn runner_from_headers(
@@ -213,6 +227,11 @@ struct FetchTaskResponse {
     /// Seconds until `timeout_at`, computed at claim — runners don't parse
     /// the timestamp or depend on wall-clock agreement with the API.
     timeout_seconds: Option<i64>,
+    /// `jobs.<id>.container` spec (evaluated) — the runner creates one
+    /// long-lived job container and `docker exec`s steps into it.
+    container: Option<serde_json::Value>,
+    /// `jobs.<id>.services` map — sibling containers on the job network.
+    services: Option<serde_json::Value>,
 }
 
 impl FetchTaskResponse {
@@ -252,6 +271,8 @@ impl FetchTaskResponse {
             matrix: None,
             needs: None,
             timeout_seconds: None,
+            container: None,
+            services: None,
         }
     }
 }
@@ -475,6 +496,8 @@ async fn fetch_task(
                     serde_json::from_str(&j.matrix_json).unwrap_or_else(|_| serde_json::json!({})),
                 ),
                 needs,
+                container: payload_json.get("container").cloned(),
+                services: payload_json.get("services").cloned(),
                 timeout_seconds: j.timeout_at.as_deref().and_then(|s| {
                     chrono::DateTime::parse_from_rfc3339(s).ok().map(|t| {
                         t.signed_duration_since(chrono::Utc::now())
@@ -554,6 +577,9 @@ struct UpdateTaskRequest {
     /// reported on terminal states so `jobs.<id>.outputs` can materialize.
     #[serde(default)]
     outputs: Option<serde_json::Value>,
+    /// `$GITHUB_STEP_SUMMARY` markdown — reported once at terminal.
+    #[serde(default)]
+    summary: Option<String>,
 }
 
 async fn update_task(
@@ -604,6 +630,12 @@ async fn update_task(
                 crate::actions::scheduler::materialize_outputs(&state.db, &job, outputs).await
             {
                 tracing::warn!(error = %e, job_id = %job.id, "job outputs materialization failed");
+            }
+        }
+        // `$GITHUB_STEP_SUMMARY` → `action_jobs.summary_md` for the run UI.
+        if let Some(summary) = req.summary.as_deref().filter(|s| !s.trim().is_empty()) {
+            if let Err(e) = state.db.set_action_job_summary(&job.id, summary).await {
+                tracing::warn!(error = %e, job_id = %job.id, "job summary persist failed");
             }
         }
         // Flip `waiting` jobs whose needs just finished. Boxed — this runs

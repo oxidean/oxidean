@@ -99,6 +99,8 @@ pub struct ActionJobRow {
     pub matrix_json: String,
     /// `needs.*.outputs` materialized for downstream evaluation (Phase 3).
     pub outputs_json: String,
+    /// `$GITHUB_STEP_SUMMARY` markdown reported at terminal (Phase 4).
+    pub summary_md: Option<String>,
     /// `concurrency:` group at job level (Phase 3).
     pub concurrency_group: Option<String>,
     /// Claim counter — bumped by `requeue_run`.
@@ -173,9 +175,9 @@ pub struct ActionPayloadRow {
 /// Job SELECT-list per dialect — only timestamp casts differ. Keeping the
 /// list in one const per dialect prevents column drift between
 /// `find_job_by_id`, `list_jobs_for_run`, and the claim path.
-const JOB_COLS_SQLITE: &str = "id, run_id, job_key, matrix_key, name, runs_on_json, status, payload_sha, needs_json, matrix_json, outputs_json, concurrency_group, attempt, timeout_at, runner_id, started_at, finished_at";
-const JOB_COLS_PG: &str = "id, run_id, job_key, matrix_key, name, runs_on_json, status, payload_sha, needs_json, matrix_json, outputs_json, concurrency_group, attempt, to_char(timeout_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS timeout_at, runner_id, started_at::text AS started_at, finished_at::text AS finished_at";
-const JOB_COLS_MYSQL: &str = "id, run_id, job_key, matrix_key, name, runs_on_json, status, payload_sha, needs_json, matrix_json, outputs_json, concurrency_group, attempt, DATE_FORMAT(timeout_at, '%Y-%m-%dT%H:%i:%sZ') AS timeout_at, runner_id, CAST(started_at AS CHAR) AS started_at, CAST(finished_at AS CHAR) AS finished_at";
+const JOB_COLS_SQLITE: &str = "id, run_id, job_key, matrix_key, name, runs_on_json, status, payload_sha, needs_json, matrix_json, outputs_json, summary_md, concurrency_group, attempt, timeout_at, runner_id, started_at, finished_at";
+const JOB_COLS_PG: &str = "id, run_id, job_key, matrix_key, name, runs_on_json, status, payload_sha, needs_json, matrix_json, outputs_json, summary_md, concurrency_group, attempt, to_char(timeout_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS timeout_at, runner_id, started_at::text AS started_at, finished_at::text AS finished_at";
+const JOB_COLS_MYSQL: &str = "id, run_id, job_key, matrix_key, name, runs_on_json, status, payload_sha, needs_json, matrix_json, outputs_json, summary_md, concurrency_group, attempt, DATE_FORMAT(timeout_at, '%Y-%m-%dT%H:%i:%sZ') AS timeout_at, runner_id, CAST(started_at AS CHAR) AS started_at, CAST(finished_at AS CHAR) AS finished_at";
 
 macro_rules! map_job_row {
     ($row:expr) => {{
@@ -192,6 +194,7 @@ macro_rules! map_job_row {
             needs_json: r.try_get("needs_json").unwrap_or_else(|_| "[]".into()),
             matrix_json: r.try_get("matrix_json").unwrap_or_else(|_| "{}".into()),
             outputs_json: r.try_get("outputs_json").unwrap_or_else(|_| "{}".into()),
+            summary_md: r.try_get("summary_md").unwrap_or(None),
             concurrency_group: r.try_get("concurrency_group").unwrap_or(None),
             attempt: r
                 .try_get::<i64, _>("attempt")
@@ -606,6 +609,7 @@ pub async fn insert_job(pool: &DbPool, job: &JobInsert) -> Result<ActionJobRow, 
         needs_json: job.needs_json.clone(),
         matrix_json: job.matrix_json.clone(),
         outputs_json: job.outputs_json.clone(),
+        summary_md: None,
         concurrency_group: job.concurrency_group.clone(),
         attempt: 1,
         timeout_at: job.timeout_at.clone(),
@@ -1656,6 +1660,30 @@ pub async fn set_job_outputs(
     Ok(())
 }
 
+/// `$GITHUB_STEP_SUMMARY` markdown — reported at terminal, survives a
+/// server-side-cancelled job (summary is still worth showing).
+pub async fn set_job_summary(pool: &DbPool, job_id: &str, summary_md: &str) -> Result<(), String> {
+    match pool {
+        DbPool::Sqlite(p) => {
+            sqlx::query("UPDATE action_jobs SET summary_md = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+                .bind(summary_md).bind(job_id).execute(p).await.map_err(|e| e.to_string())?;
+        }
+        DbPool::Postgres(p) => {
+            sqlx::query("UPDATE action_jobs SET summary_md = $1, updated_at = now() WHERE id = $2")
+                .bind(summary_md)
+                .bind(job_id)
+                .execute(p)
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+        DbPool::MySql(p) => {
+            sqlx::query("UPDATE action_jobs SET summary_md = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+                .bind(summary_md).bind(job_id).execute(p).await.map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
 /// Job-level `concurrency.cancel-in-progress` — supersede every nonterminal
 /// job in the same repo+group belonging to a *different* unfinished run:
 /// the jobs go `cancelled` (finished_at exactly once), their job tokens are
@@ -2456,4 +2484,155 @@ pub async fn revoke_action_job_tokens_for_run(pool: &DbPool, run_id: &str) -> Re
         }
     }
     Ok(())
+}
+
+/// `action_artifacts` row (0054) — metadata for a stored artifact archive;
+/// content lives on disk at `storage_path` under the artifacts dir.
+#[derive(Debug, Clone)]
+pub struct ActionArtifactRow {
+    pub id: String,
+    pub repository_id: String,
+    pub run_id: String,
+    pub job_id: Option<String>,
+    pub name: String,
+    pub storage_path: String,
+    pub size_bytes: i64,
+    pub digest_sha256: String,
+    pub expires_at: Option<String>,
+    pub created_at: String,
+}
+
+const ARTIFACT_COLS: &str = "id, repository_id, run_id, job_id, name, storage_path, size_bytes, digest_sha256, expires_at, created_at";
+
+macro_rules! map_artifact_row {
+    ($row:expr) => {{
+        use sqlx::Row;
+        let r = $row;
+        ActionArtifactRow {
+            id: r.get("id"),
+            repository_id: r.get("repository_id"),
+            run_id: r.get("run_id"),
+            job_id: r.try_get("job_id").unwrap_or(None),
+            name: r.get("name"),
+            storage_path: r.get("storage_path"),
+            size_bytes: r
+                .try_get::<i64, _>("size_bytes")
+                .or_else(|_| r.try_get::<i32, _>("size_bytes").map(i64::from))
+                .unwrap_or(0),
+            digest_sha256: r.try_get("digest_sha256").unwrap_or_default(),
+            expires_at: r.try_get("expires_at").unwrap_or(None),
+            created_at: r.try_get("created_at").unwrap_or_default(),
+        }
+    }};
+}
+
+/// Insert-or-replace an artifact record — re-uploading the same (run, name)
+/// overwrites (GitHub v4 `overwrite: true` semantics).
+pub async fn upsert_action_artifact(pool: &DbPool, a: &ActionArtifactRow) -> Result<(), String> {
+    match pool {
+        DbPool::Sqlite(p) => {
+            sqlx::query(sqlx::AssertSqlSafe(format!(
+                "INSERT INTO action_artifacts ({ARTIFACT_COLS}) VALUES (?,?,?,?,?,?,?,?,?,strftime('%Y-%m-%d %H:%M:%S','now')) \
+                 ON CONFLICT(run_id, name) DO UPDATE SET job_id=excluded.job_id, storage_path=excluded.storage_path, \
+                 size_bytes=excluded.size_bytes, digest_sha256=excluded.digest_sha256, expires_at=excluded.expires_at, \
+                 updated_at=strftime('%Y-%m-%d %H:%M:%S','now')"
+            )))
+            .bind(&a.id).bind(&a.repository_id).bind(&a.run_id).bind(&a.job_id)
+            .bind(&a.name).bind(&a.storage_path).bind(a.size_bytes)
+            .bind(&a.digest_sha256).bind(&a.expires_at)
+            .execute(p).await.map_err(|e| e.to_string())?;
+        }
+        DbPool::Postgres(p) => {
+            sqlx::query(sqlx::AssertSqlSafe(format!(
+                "INSERT INTO action_artifacts ({ARTIFACT_COLS}) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::timestamptz,now()) \
+                 ON CONFLICT(run_id, name) DO UPDATE SET job_id=excluded.job_id, storage_path=excluded.storage_path, \
+                 size_bytes=excluded.size_bytes, digest_sha256=excluded.digest_sha256, expires_at=excluded.expires_at, \
+                 updated_at=now()"
+            )))
+            .bind(&a.id).bind(&a.repository_id).bind(&a.run_id).bind(&a.job_id)
+            .bind(&a.name).bind(&a.storage_path).bind(a.size_bytes)
+            .bind(&a.digest_sha256).bind(&a.expires_at)
+            .execute(p).await.map_err(|e| e.to_string())?;
+        }
+        DbPool::MySql(p) => {
+            sqlx::query(sqlx::AssertSqlSafe(format!(
+                "INSERT INTO action_artifacts ({ARTIFACT_COLS}) VALUES (?,?,?,?,?,?,?,?,?,NOW()) \
+                 ON DUPLICATE KEY UPDATE job_id=VALUES(job_id), storage_path=VALUES(storage_path), \
+                 size_bytes=VALUES(size_bytes), digest_sha256=VALUES(digest_sha256), expires_at=VALUES(expires_at)"
+            )))
+            .bind(&a.id).bind(&a.repository_id).bind(&a.run_id).bind(&a.job_id)
+            .bind(&a.name).bind(&a.storage_path).bind(a.size_bytes)
+            .bind(&a.digest_sha256).bind(&a.expires_at)
+            .execute(p).await.map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+pub async fn find_action_artifact(
+    pool: &DbPool,
+    run_id: &str,
+    name: &str,
+) -> Result<Option<ActionArtifactRow>, String> {
+    match pool {
+        DbPool::Sqlite(p) => sqlx::query(sqlx::AssertSqlSafe(format!(
+            "SELECT {ARTIFACT_COLS} FROM action_artifacts WHERE run_id = ? AND name = ?"
+        )))
+        .bind(run_id)
+        .bind(name)
+        .fetch_optional(p)
+        .await
+        .map(|r| r.map(|r| map_artifact_row!(r)))
+        .map_err(|e| e.to_string()),
+        DbPool::Postgres(p) => sqlx::query(sqlx::AssertSqlSafe(format!(
+            "SELECT {ARTIFACT_COLS} FROM action_artifacts WHERE run_id = $1 AND name = $2"
+        )))
+        .bind(run_id)
+        .bind(name)
+        .fetch_optional(p)
+        .await
+        .map(|r| r.map(|r| map_artifact_row!(r)))
+        .map_err(|e| e.to_string()),
+        DbPool::MySql(p) => sqlx::query(sqlx::AssertSqlSafe(format!(
+            "SELECT {ARTIFACT_COLS} FROM action_artifacts WHERE run_id = ? AND name = ?"
+        )))
+        .bind(run_id)
+        .bind(name)
+        .fetch_optional(p)
+        .await
+        .map(|r| r.map(|r| map_artifact_row!(r)))
+        .map_err(|e| e.to_string()),
+    }
+}
+
+pub async fn list_action_artifacts_for_run(
+    pool: &DbPool,
+    run_id: &str,
+) -> Result<Vec<ActionArtifactRow>, String> {
+    match pool {
+        DbPool::Sqlite(p) => sqlx::query(sqlx::AssertSqlSafe(format!(
+            "SELECT {ARTIFACT_COLS} FROM action_artifacts WHERE run_id = ? ORDER BY name"
+        )))
+        .bind(run_id)
+        .fetch_all(p)
+        .await
+        .map(|rs| rs.into_iter().map(|r| map_artifact_row!(r)).collect())
+        .map_err(|e| e.to_string()),
+        DbPool::Postgres(p) => sqlx::query(sqlx::AssertSqlSafe(format!(
+            "SELECT {ARTIFACT_COLS} FROM action_artifacts WHERE run_id = $1 ORDER BY name"
+        )))
+        .bind(run_id)
+        .fetch_all(p)
+        .await
+        .map(|rs| rs.into_iter().map(|r| map_artifact_row!(r)).collect())
+        .map_err(|e| e.to_string()),
+        DbPool::MySql(p) => sqlx::query(sqlx::AssertSqlSafe(format!(
+            "SELECT {ARTIFACT_COLS} FROM action_artifacts WHERE run_id = ? ORDER BY name"
+        )))
+        .bind(run_id)
+        .fetch_all(p)
+        .await
+        .map(|rs| rs.into_iter().map(|r| map_artifact_row!(r)).collect())
+        .map_err(|e| e.to_string()),
+    }
 }

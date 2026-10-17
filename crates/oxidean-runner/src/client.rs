@@ -79,6 +79,11 @@ pub struct Task {
     /// `needs.<id>.{result,outputs}` for dependents — step expressions can
     /// read `needs.*.outputs.*`.
     pub needs: Option<serde_json::Value>,
+    /// `jobs.<id>.container` spec (evaluated) — a long-lived job container
+    /// the runner `docker exec`s steps into.
+    pub container: Option<serde_json::Value>,
+    /// `jobs.<id>.services` map — sibling containers on the job network.
+    pub services: Option<serde_json::Value>,
 }
 
 impl Task {
@@ -95,6 +100,9 @@ struct UpdateTaskBody<'a> {
     /// materializes `jobs.<id>.outputs`.
     #[serde(skip_serializing_if = "Option::is_none")]
     outputs: Option<&'a serde_json::Value>,
+    /// `$GITHUB_STEP_SUMMARY` markdown — reported once at terminal.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    summary: Option<&'a str>,
 }
 
 /// `update_task` response — `cancelled` means the job was cancelled
@@ -112,6 +120,32 @@ struct UpdateLogBody<'a> {
     run_id: &'a str,
     job_id: &'a str,
     chunk: &'a str,
+}
+
+/// Artifact metadata returned by upload/list (server-side `ArtifactMeta`).
+#[derive(Debug, Clone, Deserialize)]
+pub struct ArtifactMeta {
+    pub id: String,
+    pub run_id: String,
+    pub job_id: Option<String>,
+    pub name: String,
+    pub size_bytes: i64,
+    pub digest_sha256: String,
+    pub expires_at: Option<String>,
+    #[allow(dead_code)]
+    pub created_at: String,
+}
+
+/// Percent-encode a single path/query segment.
+fn urlencoding(s: &str) -> String {
+    s.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (b as char).to_string()
+            }
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
 }
 
 impl Client {
@@ -198,6 +232,7 @@ impl Client {
         job_id: &str,
         state: &str,
         outputs: Option<&serde_json::Value>,
+        summary: Option<&str>,
     ) -> Result<UpdateTaskAck, String> {
         let res = self
             .authed(self.http.post(self.url("update_task")))
@@ -205,12 +240,79 @@ impl Client {
                 job_id,
                 state,
                 outputs,
+                summary,
             })
             .send()
             .await
             .map_err(|e| e.to_string())?;
         let res = res.error_for_status().map_err(|e| e.to_string())?;
         res.json::<UpdateTaskAck>().await.map_err(|e| e.to_string())
+    }
+
+    /// Upload a raw tar.gz blob as a run artifact (GitHub v4 overwrite
+    /// semantics — same (run, name) replaces).
+    pub async fn upload_artifact(
+        &self,
+        job_id: &str,
+        name: &str,
+        retention_days: Option<u32>,
+        bytes: Vec<u8>,
+    ) -> Result<ArtifactMeta, String> {
+        let mut url = format!(
+            "{}?job_id={}&name={}",
+            self.url("artifacts/upload"),
+            urlencoding(job_id),
+            urlencoding(name)
+        );
+        if let Some(d) = retention_days {
+            url.push_str(&format!("&retention_days={d}"));
+        }
+        let res = self
+            .authed(self.http.post(url))
+            .header(reqwest::header::CONTENT_TYPE, "application/gzip")
+            .body(bytes)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        let res = res.error_for_status().map_err(|e| e.to_string())?;
+        res.json::<ArtifactMeta>().await.map_err(|e| e.to_string())
+    }
+
+    /// Fetch a run artifact blob by name. `Err("artifact '…' not found")`
+    /// on 404 so callers can emit GitHub-style messages.
+    pub async fn download_artifact(&self, run_id: &str, name: &str) -> Result<Vec<u8>, String> {
+        let res = self
+            .authed(self.http.get(format!(
+                "{}/{}/{}",
+                self.url("artifacts"),
+                urlencoding(run_id),
+                urlencoding(name)
+            )))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        if res.status() == reqwest::StatusCode::NOT_FOUND {
+            return Err(format!("artifact '{name}' not found"));
+        }
+        let res = res.error_for_status().map_err(|e| e.to_string())?;
+        res.bytes()
+            .await
+            .map(|b| b.to_vec())
+            .map_err(|e| e.to_string())
+    }
+
+    /// Every artifact metadata row for a run.
+    pub async fn list_artifacts(&self, run_id: &str) -> Result<Vec<ArtifactMeta>, String> {
+        let res = self
+            .authed(self.http.post(self.url("artifacts/list")))
+            .json(&serde_json::json!({"run_id": run_id}))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        let res = res.error_for_status().map_err(|e| e.to_string())?;
+        res.json::<Vec<ArtifactMeta>>()
+            .await
+            .map_err(|e| e.to_string())
     }
 
     /// Append a log chunk. The ack's `cancelled` flag is the runner's
