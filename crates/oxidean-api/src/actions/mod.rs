@@ -1,6 +1,7 @@
 //! Actions control plane (Phase 19) — parse/discover/dispatch/protocol; no in-process job execution.
 
 pub mod dispatch;
+pub mod eval_ctx;
 pub mod events;
 pub mod hooks;
 pub mod job_tokens;

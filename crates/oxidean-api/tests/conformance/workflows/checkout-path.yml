@@ -1,0 +1,10 @@
+name: checkout-path
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: subdir
+      - run: test -f subdir/.github/workflows/conformance.yml && echo "checked-out"

@@ -1,15 +1,19 @@
 //! Job execution: `actions/checkout` builtin, `run:` steps on the host or in
-//! Docker, log streaming with secret masking.
+//! Docker, expression evaluation (`${{ }}`), log streaming with secret masking.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use base64::Engine;
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 use tokio::io::AsyncReadExt;
 use tokio::process::Command;
+
+use expr::{Context, JobStatus};
+use oxidean_actions_expr as expr;
 
 use crate::client::{Client, Task};
 use crate::config::{Config, ExecMode};
@@ -17,11 +21,17 @@ use crate::config::{Config, ExecMode};
 /// Mirrors `StepSpec` in `oxidean-api::actions::parse`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct Step {
+    pub id: Option<String>,
     pub name: Option<String>,
     pub uses: Option<String>,
     pub run: Option<String>,
+    #[serde(rename = "if")]
+    pub if_expr: Option<String>,
+    #[serde(rename = "timeout-minutes")]
+    pub timeout_minutes: Option<serde_json::Value>,
     pub shell: Option<String>,
     pub working_directory: Option<String>,
+    pub with: Option<serde_json::Value>,
     pub env: Option<serde_json::Value>,
 }
 
@@ -262,6 +272,411 @@ fn job_env(
     }
 }
 
+// ---------- expression context -------------------------------------------
+
+/// `hashFiles(patterns…)` over the workspace — glob match, then SHA-256 of
+/// the concatenated per-file SHA-256 digests (sorted for determinism).
+/// Runner-only: server-side contexts leave the callback unset ("" result).
+fn hash_files_fn(workspace: PathBuf) -> impl Fn(&[String]) -> Result<String, String> + Send + Sync {
+    move |patterns| {
+        let mut include: Vec<PathBuf> = Vec::new();
+        for raw in patterns {
+            let (neg, pat) = match raw.strip_prefix('!') {
+                Some(p) => (true, p),
+                None => (false, raw.as_str()),
+            };
+            let mut hits = glob_walk(&workspace, pat);
+            hits.sort();
+            hits.dedup();
+            if neg {
+                let hits: std::collections::HashSet<PathBuf> = hits.into_iter().collect();
+                include.retain(|f| !hits.contains(f));
+            } else {
+                include.extend(hits);
+            }
+        }
+        include.sort();
+        include.dedup();
+        let mut outer = Sha256::new();
+        for f in &include {
+            let bytes = std::fs::read(f).map_err(|e| e.to_string())?;
+            outer.update(Sha256::digest(&bytes));
+        }
+        let digest = outer.finalize();
+        Ok(digest.iter().map(|b| format!("{b:02x}")).collect())
+    }
+}
+
+/// Files under `root` whose relative path matches `pattern` (minimatch-lite:
+/// `**` crosses segments, `*`/`?`/`[]` within a segment, `{a,b}` alternation,
+/// leading `/` = workspace-rooted). `.git` is never walked.
+fn glob_walk(root: &Path, pattern: &str) -> Vec<PathBuf> {
+    let pat = pattern.trim().trim_start_matches('/');
+    let expanded = expand_braces(pat);
+    let mut out = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(rd) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in rd.flatten() {
+            let path = entry.path();
+            let Ok(ft) = entry.file_type() else { continue };
+            if ft.is_dir() {
+                if entry.file_name() == ".git" {
+                    continue;
+                }
+                stack.push(path);
+                continue;
+            }
+            let Ok(rel) = path.strip_prefix(root) else {
+                continue;
+            };
+            let rel = rel.to_string_lossy().replace('\\', "/");
+            for p in &expanded {
+                if glob_match(p, &rel) {
+                    out.push(path.clone());
+                    break;
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Expand `{a,b}` alternation into separate patterns (nested braces OK).
+fn expand_braces(pat: &str) -> Vec<String> {
+    let Some(open) = pat.find('{') else {
+        return vec![pat.to_string()];
+    };
+    let mut depth = 0;
+    let mut close = None;
+    for (i, c) in pat.char_indices().skip(open) {
+        match c {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    close = Some(i);
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let Some(close) = close else {
+        return vec![pat.to_string()];
+    };
+    let (head, rest) = pat.split_at(open);
+    let (body, tail) = (&rest[1..close - open], &rest[close - open + 1..]);
+    body.split(',')
+        .flat_map(|alt| expand_braces(&format!("{head}{alt}{tail}")))
+        .collect()
+}
+
+/// Segment-wise glob match: `**` consumes zero or more path segments.
+fn glob_match(pattern: &str, path: &str) -> bool {
+    let ps: Vec<&str> = pattern.split('/').collect();
+    let fs: Vec<&str> = path.split('/').collect();
+    fn go(ps: &[&str], fs: &[&str]) -> bool {
+        if ps.is_empty() {
+            return fs.is_empty();
+        }
+        if ps[0] == "**" {
+            for skip in 0..=fs.len() {
+                if go(&ps[1..], &fs[skip..]) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        match fs.split_first() {
+            Some((seg, rest)) if seg_match(ps[0], seg) => go(&ps[1..], rest),
+            _ => false,
+        }
+    }
+    go(&ps, &fs)
+}
+
+/// Single-segment wildcard match (`*`, `?`, `[class]`).
+fn seg_match(pat: &str, seg: &str) -> bool {
+    let (p, s): (Vec<char>, Vec<char>) = (pat.chars().collect(), seg.chars().collect());
+    // Iterative wildcard match with backtracking on `*`.
+    let (mut pi, mut si) = (0usize, 0usize);
+    let (mut star_p, mut star_s) = (usize::MAX, 0usize);
+    while si < s.len() {
+        if pi < p.len() && (p[pi] == '?' || p[pi] == s[si]) {
+            pi += 1;
+            si += 1;
+        } else if pi < p.len() && p[pi] == '[' {
+            // Character class.
+            let mut j = pi + 1;
+            let neg = p.get(j) == Some(&'!') || p.get(j) == Some(&'^');
+            if neg {
+                j += 1;
+            }
+            let mut matched = false;
+            let mut k = j;
+            while k < p.len() && p[k] != ']' {
+                if k + 2 < p.len() && p[k + 1] == '-' && p[k + 2] != ']' {
+                    if p[k] <= s[si] && s[si] <= p[k + 2] {
+                        matched = true;
+                    }
+                    k += 3;
+                } else {
+                    if p[k] == s[si] {
+                        matched = true;
+                    }
+                    k += 1;
+                }
+            }
+            if k >= p.len() || matched == neg {
+                if star_p != usize::MAX {
+                    pi = star_p;
+                    star_s += 1;
+                    si = star_s;
+                    continue;
+                }
+                return false;
+            }
+            pi = k + 1;
+            si += 1;
+        } else if pi < p.len() && p[pi] == '*' {
+            star_p = pi;
+            star_s = si;
+            pi += 1;
+        } else if star_p != usize::MAX {
+            pi = star_p + 1;
+            star_s += 1;
+            si = star_s;
+        } else {
+            return false;
+        }
+    }
+    while pi < p.len() && p[pi] == '*' {
+        pi += 1;
+    }
+    pi == p.len()
+}
+
+/// Build the runner-side expression context for the claimed task.
+fn runner_context(
+    task: &Task,
+    config: &Config,
+    workspace: &Path,
+    workspace_env: &str,
+    runner_temp_env: &str,
+    secrets: &HashMap<String, String>,
+) -> Context {
+    let head_ref = task.head_ref.clone().unwrap_or_default();
+    let ref_name = head_ref
+        .strip_prefix("refs/heads/")
+        .or_else(|| head_ref.strip_prefix("refs/tags/"))
+        .unwrap_or(&head_ref)
+        .to_string();
+    let server_url = task.server_url.clone().unwrap_or_default();
+    let is_pr = task.event.as_deref() == Some("pull_request");
+    let github = serde_json::json!({
+        "sha": task.head_sha.clone().unwrap_or_default(),
+        "ref": head_ref,
+        "ref_name": ref_name,
+        "ref_type": if head_ref.starts_with("refs/tags/") { "tag" } else { "branch" },
+        "event_name": task.event.clone().unwrap_or_default(),
+        "event": task.event_payload.clone().unwrap_or_else(|| serde_json::json!({})),
+        "repository": format!("{}/{}",
+            task.repository_owner.clone().unwrap_or_default(),
+            task.repository_name.clone().unwrap_or_default()),
+        "repository_owner": task.repository_owner.clone().unwrap_or_default(),
+        "repository_id": task.repository_id.clone().unwrap_or_default(),
+        "repository_owner_id": task.repository_owner_id.clone().unwrap_or_default(),
+        "actor": task.actor.clone().unwrap_or_default(),
+        "actor_id": task.actor_id.clone().unwrap_or_default(),
+        "workflow": task.workflow_name.clone().unwrap_or_default(),
+        "workflow_ref": task.workflow_ref.clone().unwrap_or_default(),
+        "workflow_sha": task.head_sha.clone().unwrap_or_default(),
+        "job": task.job_key.clone().unwrap_or_default(),
+        "run_id": task.run_id.clone().unwrap_or_default(),
+        "run_number": task.run_number.unwrap_or_default(),
+        "run_attempt": task.run_attempt.unwrap_or_default(),
+        "server_url": server_url,
+        "api_url": if server_url.is_empty() { String::new() } else { format!("{server_url}/api") },
+        "base_ref": if is_pr { task.base_ref.clone().unwrap_or_default() } else { String::new() },
+        "head_ref": if is_pr { ref_name } else { String::new() },
+        "workspace": workspace_env,
+        "token": task.job_token.clone().unwrap_or_default(),
+    });
+    Context::new()
+        .with_context("github", github)
+        .with_context("env", serde_json::json!({}))
+        .with_context(
+            "runner",
+            serde_json::json!({
+                "os": runner_os(),
+                "arch": runner_arch(),
+                "name": config.name,
+                "temp": runner_temp_env,
+                "tool_cache": format!("{runner_temp_env}/tool-cache"),
+            }),
+        )
+        .with_context(
+            "matrix",
+            task.matrix.clone().unwrap_or_else(|| serde_json::json!({})),
+        )
+        .with_context(
+            "secrets",
+            serde_json::to_value(secrets).unwrap_or_else(|_| serde_json::json!({})),
+        )
+        .with_context("needs", serde_json::json!({}))
+        .with_context("steps", serde_json::json!({}))
+        .with_context("inputs", serde_json::json!({}))
+        .with_context("vars", serde_json::json!({}))
+        .with_context("strategy", serde_json::json!({}))
+        .with_context("job", serde_json::json!({"status": "success"}))
+        .with_job_status("success")
+        .with_hash_files(hash_files_fn(workspace.to_path_buf()))
+}
+
+/// Evaluate an `env:` map against `ctx`, overlay it into the `env` context
+/// (later layers win), and push the values into the process env list.
+fn layer_env(
+    ctx: &mut Context,
+    vars: &mut Vec<(String, String)>,
+    env_map: &serde_json::Value,
+) -> Vec<String> {
+    match expr::eval_json(env_map, ctx) {
+        Ok(evaled) => {
+            ctx.overlay_env(&evaled);
+            if let serde_json::Value::Object(m) = evaled {
+                for (k, v) in &m {
+                    env_set(vars, k, expr::stringify(v));
+                }
+            }
+            Vec::new()
+        }
+        Err(e) => vec![format!("::warning::env evaluation failed: {e}")],
+    }
+}
+
+/// Interpolate every expression-bearing field of a step against `ctx`.
+fn interpolate_step(step: &Step, ctx: &Context) -> Result<Step, String> {
+    let mut s = step.clone();
+    let interp = |v: &Option<String>| -> Result<Option<String>, String> {
+        match v {
+            Some(raw) => expr::interpolate(raw, ctx)
+                .map(Some)
+                .map_err(|e| e.to_string()),
+            None => Ok(None),
+        }
+    };
+    s.name = interp(&s.name)?;
+    s.uses = interp(&s.uses)?;
+    s.run = interp(&s.run)?;
+    s.shell = interp(&s.shell)?;
+    s.working_directory = interp(&s.working_directory)?;
+    if let Some(v) = &s.env {
+        s.env = Some(expr::eval_json(v, ctx).map_err(|e| e.to_string())?);
+    }
+    if let Some(v) = &s.with {
+        s.with = Some(expr::eval_json(v, ctx).map_err(|e| e.to_string())?);
+    }
+    Ok(s)
+}
+
+/// GitHub's `if:` gate for steps: absent → implicit `success()`; present
+/// without a status fn → `success() && expr`; present with a status fn → the
+/// expression carries the semantics itself.
+fn step_allowed(src: Option<&str>, ctx: &Context) -> Result<bool, String> {
+    match src {
+        None => Ok(ctx.job_status() == JobStatus::Success),
+        Some(s) if expr::uses_status_fn(s) => expr::eval_bool(s, ctx).map_err(|e| e.to_string()),
+        Some(s) => {
+            if ctx.job_status() != JobStatus::Success {
+                return Ok(false);
+            }
+            expr::eval_bool(s, ctx).map_err(|e| e.to_string())
+        }
+    }
+}
+
+/// Record a finished step into `steps.<id>` for `steps.*` expressions and
+/// `$GITHUB_OUTPUT` consumers (`needs` lands with the scheduler phase).
+fn record_step(ctx: &mut Context, id: &str, outcome: &str, outputs: HashMap<String, String>) {
+    let mut steps = ctx
+        .get_context("steps")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+    if let Some(obj) = steps.as_object_mut() {
+        obj.insert(
+            id.to_string(),
+            serde_json::json!({
+                "outcome": outcome,
+                "conclusion": outcome,
+                "outputs": outputs,
+            }),
+        );
+    }
+    ctx.set_context("steps", steps);
+}
+
+/// Keep `job.status` in the context in sync with the runner's JobStatus.
+fn sync_job_ctx(ctx: &mut Context) {
+    let status = match ctx.job_status() {
+        JobStatus::Success => "success",
+        JobStatus::Failure => "failure",
+        JobStatus::Cancelled => "cancelled",
+        JobStatus::Pending => "pending",
+    };
+    ctx.set_context("job", serde_json::json!({"status": status}));
+}
+
+/// Step timeout: `timeout-minutes` (evaluated) else the runner-wide cap,
+/// clipped by the job deadline when present.
+fn step_timeout(
+    step: &Step,
+    ctx: &Context,
+    default: Duration,
+    job_remaining: Option<Duration>,
+) -> (Duration, Vec<String>) {
+    let mut warnings = Vec::new();
+    let mut t = default;
+    if let Some(v) = &step.timeout_minutes {
+        let minutes = match v {
+            serde_json::Value::Number(n) => n.as_f64(),
+            serde_json::Value::String(s) => expr::eval_embedded(s, ctx)
+                .ok()
+                .and_then(|v| v.as_f64())
+                .or_else(|| s.parse::<f64>().ok()),
+            _ => None,
+        };
+        match minutes {
+            Some(m) if m > 0.0 => t = Duration::from_secs_f64(m * 60.0),
+            _ => warnings.push(format!(
+                "::warning::timeout-minutes '{v}' is not a positive number — using job default"
+            )),
+        }
+    }
+    if let Some(rem) = job_remaining {
+        t = t.min(rem);
+    }
+    (t, warnings)
+}
+
+/// Seconds remaining until the job deadline (from `timeout_seconds` at
+/// claim + elapsed runtime).
+struct JobDeadline(Option<Instant>);
+
+impl JobDeadline {
+    fn new(timeout_seconds: Option<i64>) -> Self {
+        Self(timeout_seconds.map(|s| Instant::now() + Duration::from_secs(s.max(0) as u64)))
+    }
+    fn remaining(&self) -> Option<Duration> {
+        self.0.map(|d| d.saturating_duration_since(Instant::now()))
+    }
+    fn expired(&self) -> bool {
+        matches!(self.remaining(), Some(d) if d.is_zero())
+    }
+}
+
 struct Logger<'a> {
     client: &'a Client,
     run_id: String,
@@ -374,24 +789,78 @@ async fn run_streamed(
 }
 
 /// `actions/checkout[@ref]` — clone the repo into the workspace and detach at
-/// the run's head sha.
+/// the run's head sha. Supported `with:` inputs: `repository`, `ref`, `path`,
+/// `fetch-depth`, `submodules`, `persist-credentials` (no-op — our credential
+/// rides per-command `http.extraHeader`, never persisted). Everything else is
+/// acknowledged with a `::warning::` and ignored.
 async fn checkout(
     task: &Task,
     config: &Config,
     workspace: &Path,
+    with: &serde_json::Map<String, serde_json::Value>,
     env: &[(String, String)],
     logger: &Logger<'_>,
     timeout: Duration,
 ) -> Result<(), String> {
-    let (owner, name) = match (&task.repository_owner, &task.repository_name) {
-        (Some(o), Some(n)) => (o.clone(), n.clone()),
-        _ => return Err("task lacks repository coordinates for checkout".into()),
+    let input = |key: &str| -> Option<String> {
+        with.get(key).map(expr::stringify).filter(|s| !s.is_empty())
     };
+    // `repository` — `owner/name` override (defaults to the run's repo).
+    let (owner, name) = match input("repository") {
+        Some(repo) => {
+            let mut parts = repo.splitn(2, '/');
+            match (parts.next(), parts.next()) {
+                (Some(o), Some(n)) => (o.to_string(), n.to_string()),
+                _ => return Err(format!("checkout 'repository' '{repo}' is not owner/name")),
+            }
+        }
+        None => match (&task.repository_owner, &task.repository_name) {
+            (Some(o), Some(n)) => (o.clone(), n.clone()),
+            _ => return Err("task lacks repository coordinates for checkout".into()),
+        },
+    };
+    // Unsupported inputs — acknowledged, not silently dropped.
+    for (k, _) in with {
+        if !matches!(
+            k.as_str(),
+            "repository"
+                | "ref"
+                | "path"
+                | "fetch-depth"
+                | "submodules"
+                | "persist-credentials"
+                | "clean"
+                | "token"
+        ) {
+            logger
+                .line(&format!(
+                    "::warning::actions/checkout input '{k}' not supported — ignored"
+                ))
+                .await;
+        }
+    }
     let url = format!("{}/{}/{}.git", config.origin, owner, name);
+    let dest = match input("path") {
+        Some(p) => {
+            let d = workspace.join(&p);
+            std::fs::create_dir_all(&d).map_err(|e| format!("checkout path '{p}': {e}"))?;
+            d
+        }
+        None => workspace.to_path_buf(),
+    };
     logger.line(&format!("Cloning {owner}/{name}")).await;
 
     let mut args = checkout_auth_args(task.job_token.as_deref(), config.git_token.as_deref());
-    args.extend(["clone".into(), url, ".".into()]);
+    args.push("clone".into());
+    // `fetch-depth` — `--depth N` (0/absent = full clone).
+    let depth = input("fetch-depth").and_then(|s| s.parse::<u32>().ok());
+    if let Some(d) = depth {
+        if d > 0 {
+            args.push("--depth".into());
+            args.push(d.to_string());
+        }
+    }
+    args.extend([url, dest.to_string_lossy().to_string()]);
 
     let mut cmd = Command::new("git");
     cmd.args(&args).current_dir(workspace);
@@ -400,15 +869,31 @@ async fn checkout(
         return Err(format!("git clone exited {code}"));
     }
 
-    let sha = task.head_sha.clone().unwrap_or_default();
-    if sha.is_empty() {
-        return Ok(());
+    // `ref` — explicit checkout target wins over the run's head sha.
+    let target = input("ref").unwrap_or_else(|| task.head_sha.clone().unwrap_or_default());
+    if !target.is_empty() {
+        let mut cmd = Command::new("git");
+        cmd.args(["checkout", &target]).current_dir(&dest);
+        let code = run_streamed(&mut cmd, env, logger, timeout).await?;
+        if code != 0 {
+            return Err(format!("git checkout {target} exited {code}"));
+        }
     }
-    let mut cmd = Command::new("git");
-    cmd.args(["checkout", &sha]).current_dir(workspace);
-    let code = run_streamed(&mut cmd, env, logger, timeout).await?;
-    if code != 0 {
-        return Err(format!("git checkout {sha} exited {code}"));
+    // `submodules` — `true` → first level, `recursive` → nested too.
+    match input("submodules").as_deref() {
+        Some("true") | Some("recursive") => {
+            let mut args = vec!["submodule", "update", "--init"];
+            if input("submodules").as_deref() == Some("recursive") {
+                args.push("--recursive");
+            }
+            let mut cmd = Command::new("git");
+            cmd.args(&args).current_dir(&dest);
+            let code = run_streamed(&mut cmd, env, logger, timeout).await?;
+            if code != 0 {
+                return Err(format!("git submodule update exited {code}"));
+            }
+        }
+        _ => {}
     }
     Ok(())
 }
@@ -568,7 +1053,31 @@ pub async fn execute(client: &Client, task: &Task, config: &Config) -> &'static 
     for w in &env.warnings {
         logger.line(w).await;
     }
-    let timeout = Duration::from_secs(config.job_timeout_secs);
+    // Expression context — github/env/runner/matrix/secrets/steps + hashFiles
+    // over the workspace.
+    let mut ctx = runner_context(
+        task,
+        config,
+        &workspace,
+        &workspace_env,
+        &runner_temp_env,
+        &secrets,
+    );
+    // Workflow env → job env layering: each evaluates against the context of
+    // the layers before it and feeds both `env.*` expressions and the step
+    // process env.
+    if let Some(v) = &task.workflow_env {
+        for w in layer_env(&mut ctx, &mut env.vars, v) {
+            logger.line(&w).await;
+        }
+    }
+    if let Some(v) = &task.env {
+        for w in layer_env(&mut ctx, &mut env.vars, v) {
+            logger.line(&w).await;
+        }
+    }
+    let default_timeout = Duration::from_secs(config.job_timeout_secs);
+    let deadline = JobDeadline::new(task.timeout_seconds);
 
     logger
         .line(&format!(
@@ -583,8 +1092,50 @@ pub async fn execute(client: &Client, task: &Task, config: &Config) -> &'static 
         ))
         .await;
 
-    let mut failed = false;
-    for (i, step) in steps.iter().enumerate() {
+    let mut cancelled = false;
+    for (i, raw_step) in steps.iter().enumerate() {
+        let step_id = raw_step.id.clone().unwrap_or_else(|| format!("__step{i}"));
+        // Job deadline gates every subsequent step (GitHub `cancelled`).
+        if deadline.expired() {
+            logger
+                .line(&format!("::notice::step '{step_id}' skipped — job timeout"))
+                .await;
+            record_step(&mut ctx, &step_id, "skipped", HashMap::new());
+            cancelled = true;
+            continue;
+        }
+        // Step `if` — implicit `success()` unless a status fn is present.
+        let allowed = match step_allowed(raw_step.if_expr.as_deref(), &ctx) {
+            Ok(a) => a,
+            Err(e) => {
+                logger
+                    .line(&format!(
+                        "::error::step '{step_id}' if evaluation failed: {e}"
+                    ))
+                    .await;
+                record_step(&mut ctx, &step_id, "failure", HashMap::new());
+                ctx.set_job_status(JobStatus::Failure);
+                sync_job_ctx(&mut ctx);
+                continue;
+            }
+        };
+        if !allowed {
+            record_step(&mut ctx, &step_id, "skipped", HashMap::new());
+            continue;
+        }
+        // Interpolate all expression-bearing fields once per step.
+        let step = match interpolate_step(raw_step, &ctx) {
+            Ok(s) => s,
+            Err(e) => {
+                logger
+                    .line(&format!("::error::step '{step_id}' expression error: {e}"))
+                    .await;
+                record_step(&mut ctx, &step_id, "failure", HashMap::new());
+                ctx.set_job_status(JobStatus::Failure);
+                sync_job_ctx(&mut ctx);
+                continue;
+            }
+        };
         let title = step
             .name
             .clone()
@@ -593,37 +1144,38 @@ pub async fn execute(client: &Client, task: &Task, config: &Config) -> &'static 
             .unwrap_or_else(|| format!("step {i}"));
         logger.line(&format!("##[step]{title}")).await;
 
-        // Expressions are not evaluated yet — never silently mis-execute.
-        if step.run.as_deref().is_some_and(|r| r.contains("${{"))
-            || step.uses.as_deref().is_some_and(|u| u.contains("${{"))
-            || step
-                .env
-                .as_ref()
-                .is_some_and(|e| e.to_string().contains("${{"))
-        {
-            logger
-                .line("::warning::${{ }} expressions are not evaluated — used literally")
-                .await;
+        // Step env layers onto the context only for `run:` steps (GitHub
+        // evaluates step env before the step's own commands run).
+        let (timeout, timeout_warnings) =
+            step_timeout(&step, &ctx, default_timeout, deadline.remaining());
+        for w in timeout_warnings {
+            logger.line(&w).await;
         }
-
         let result: Result<(), String> = if let Some(uses) = &step.uses {
             if uses.starts_with("actions/checkout") {
-                checkout(task, config, &workspace, &env.vars, &logger, timeout).await
+                let with = step
+                    .with
+                    .as_ref()
+                    .and_then(|v| v.as_object().cloned())
+                    .unwrap_or_default();
+                checkout(task, config, &workspace, &with, &env.vars, &logger, timeout).await
             } else {
                 Err(format!(
                     "unsupported action '{uses}' — only actions/checkout and run: steps are supported"
                 ))
             }
         } else if step.run.is_some() {
-            // Step-level env overlays job env.
+            // Step-level env overlays job env — both the `env` context and
+            // the process env for this step.
             let mut step_env = env.vars.clone();
-            if let Some(serde_json::Value::Object(map)) = &step.env {
-                for (k, v) in map {
-                    env_set(&mut step_env, k, v.as_str().unwrap_or_default().to_string());
+            if let Some(step_env_map) = &step.env {
+                let mut step_ctx = ctx.clone();
+                for w in layer_env(&mut step_ctx, &mut step_env, step_env_map) {
+                    logger.line(&w).await;
                 }
             }
             let r = run_step(
-                step,
+                &step,
                 &mode,
                 &workspace,
                 &runner_temp,
@@ -635,24 +1187,54 @@ pub async fn execute(client: &Client, task: &Task, config: &Config) -> &'static 
             .await;
             // File commands apply to subsequent steps even when this one
             // failed (GitHub semantics); the job still fails below.
-            for w in apply_file_commands(&runner_temp, &mut env.vars, &env.reserved, &mode) {
-                logger.line(&w).await;
+            let applied = apply_file_commands(&runner_temp, &mut env.vars, &env.reserved, &mode);
+            for w in &applied.warnings {
+                logger.line(w).await;
+            }
+            // `$GITHUB_ENV` writes also become `env.*` context entries.
+            if !applied.env.is_empty() {
+                let m: serde_json::Map<String, serde_json::Value> = applied
+                    .env
+                    .iter()
+                    .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
+                    .collect();
+                ctx.overlay_env(&serde_json::Value::Object(m));
             }
             r
         } else {
             Ok(())
         };
 
+        // `$GITHUB_OUTPUT` → `steps.<id>.outputs` (consumed by `needs` in
+        // the scheduler phase; also readable via the steps context).
+        let outputs = parse_output_file(&runner_temp.join("output"));
+        let outcome = match &result {
+            Ok(()) => "success",
+            Err(e) if deadline.expired() && e == "step timed out" => {
+                cancelled = true;
+                "cancelled"
+            }
+            Err(_) => "failure",
+        };
+        record_step(&mut ctx, &step_id, outcome, outputs);
         if let Err(e) = result {
             logger.line(&format!("::error::{e}")).await;
-            failed = true;
-            break;
+            ctx.set_job_status(if cancelled {
+                JobStatus::Cancelled
+            } else {
+                JobStatus::Failure
+            });
+            sync_job_ctx(&mut ctx);
         }
         logger.line(&format!("##[step-done]{title}")).await;
     }
 
     let _ = std::fs::remove_dir_all(&runner_temp);
-    let final_state = if failed { "failure" } else { "success" };
+    let final_state = match ctx.job_status() {
+        JobStatus::Cancelled => "cancelled",
+        JobStatus::Failure => "failure",
+        _ => "success",
+    };
     if let Err(e) = client.update_task(&job_id, final_state).await {
         tracing::error!("update_task {final_state} failed: {e}");
     }
@@ -667,30 +1249,34 @@ fn prepare_runner_temp(dir: &Path, task: &Task) -> Result<(), String> {
     }
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     std::fs::create_dir_all(dir.join("tool-cache")).map_err(|e| e.to_string())?;
-    let event = serde_json::json!({
-        "event": task.event.clone().unwrap_or_default(),
-        "ref": task.head_ref.clone().unwrap_or_default(),
-        "sha": task.head_sha.clone().unwrap_or_default(),
-        "repository": format!(
-            "{}/{}",
-            task.repository_owner.clone().unwrap_or_default(),
-            task.repository_name.clone().unwrap_or_default()
-        ),
-        "repository_id": task.repository_id.clone().unwrap_or_default(),
-        "actor": task.actor.clone().unwrap_or_default(),
-        "actor_id": task.actor_id.clone().unwrap_or_default(),
-        "run_id": task.run_id.clone().unwrap_or_default(),
-        "run_number": task.run_number.unwrap_or_default(),
-        "pull_request": match task.event.as_deref() {
-            Some("pull_request") if task.pull_number.unwrap_or_default() != 0 => {
-                serde_json::json!({
-                    "number": task.pull_number.unwrap_or_default(),
-                    "base_ref": task.base_ref.clone().unwrap_or_default(),
-                    "head_ref": task.head_ref.clone().unwrap_or_default(),
-                })
-            }
-            _ => serde_json::Value::Null,
-        },
+    // The persisted event payload wins; the synthetic envelope is the
+    // fallback for pre-Phase-2 jobs.
+    let event = task.event_payload.clone().unwrap_or_else(|| {
+        serde_json::json!({
+            "event": task.event.clone().unwrap_or_default(),
+            "ref": task.head_ref.clone().unwrap_or_default(),
+            "sha": task.head_sha.clone().unwrap_or_default(),
+            "repository": format!(
+                "{}/{}",
+                task.repository_owner.clone().unwrap_or_default(),
+                task.repository_name.clone().unwrap_or_default()
+            ),
+            "repository_id": task.repository_id.clone().unwrap_or_default(),
+            "actor": task.actor.clone().unwrap_or_default(),
+            "actor_id": task.actor_id.clone().unwrap_or_default(),
+            "run_id": task.run_id.clone().unwrap_or_default(),
+            "run_number": task.run_number.unwrap_or_default(),
+            "pull_request": match task.event.as_deref() {
+                Some("pull_request") if task.pull_number.unwrap_or_default() != 0 => {
+                    serde_json::json!({
+                        "number": task.pull_number.unwrap_or_default(),
+                        "base_ref": task.base_ref.clone().unwrap_or_default(),
+                        "head_ref": task.head_ref.clone().unwrap_or_default(),
+                    })
+                }
+                _ => serde_json::Value::Null,
+            },
+        })
     });
     std::fs::write(dir.join("event.json"), event.to_string()).map_err(|e| e.to_string())?;
     for name in ["env", "path", "output", "step_summary"] {
@@ -766,17 +1352,24 @@ fn parse_path_file(text: &str) -> Vec<String> {
 /// prepended onto *host* paths inside a container.
 const DOCKER_DEFAULT_PATH: &str = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 
+/// Result of [`apply_file_commands`]: warnings plus the `$GITHUB_ENV` pairs
+/// actually applied (callers also feed them to the `env` context).
+struct AppliedCommands {
+    warnings: Vec<String>,
+    env: Vec<(String, String)>,
+}
+
 /// Merge the env/path file-command files into `env` for subsequent steps and
 /// truncate them. `mode` decides the PATH base for `$OXIDEAN_PATH` merges:
 /// Docker steps get the container default; host steps inherit the process PATH.
-/// Returns warnings to surface in the log.
 fn apply_file_commands(
     runner_temp: &Path,
     env: &mut Vec<(String, String)>,
     reserved: &std::collections::HashSet<String>,
     mode: &ExecMode,
-) -> Vec<String> {
+) -> AppliedCommands {
     let mut warnings = Vec::new();
+    let mut applied = Vec::new();
     let env_file = runner_temp.join("env");
     if let Ok(text) = std::fs::read_to_string(&env_file) {
         if !text.trim().is_empty() {
@@ -787,7 +1380,8 @@ fn apply_file_commands(
                     ));
                     continue;
                 }
-                env_set(env, &k, v);
+                env_set(env, &k, v.clone());
+                applied.push((k, v));
             }
         }
         let _ = std::fs::write(&env_file, b"");
@@ -807,7 +1401,25 @@ fn apply_file_commands(
         }
         let _ = std::fs::write(&path_file, b"");
     }
-    warnings
+    AppliedCommands {
+        warnings,
+        env: applied,
+    }
+}
+
+/// Parse `$GITHUB_OUTPUT` (`KEY=VALUE` / heredoc — same format as env files)
+/// and truncate it for the next step.
+fn parse_output_file(path: &Path) -> HashMap<String, String> {
+    let mut out = HashMap::new();
+    if let Ok(text) = std::fs::read_to_string(path) {
+        if !text.trim().is_empty() {
+            for (k, v) in parse_env_file(&text) {
+                out.insert(k, v);
+            }
+        }
+        let _ = std::fs::write(path, b"");
+    }
+    out
 }
 
 fn prepare_workspace(dir: &Path) -> Result<(), String> {
@@ -869,6 +1481,12 @@ mod tests {
             pull_number: None,
             job_token: Some("oxidean_job_deadbeef".into()),
             workflow_ref: Some("acme/demo/.oxidean/workflows/ci.yml@refs/heads/main".into()),
+            env: None,
+            workflow_env: None,
+            timeout_at: None,
+            timeout_seconds: None,
+            event_payload: None,
+            matrix: None,
         }
     }
 
@@ -1104,12 +1722,13 @@ mod tests {
         ];
         let mut reserved = std::collections::HashSet::new();
         reserved.insert("GITHUB_SHA".to_string());
-        let warnings = apply_file_commands(dir.path(), &mut env, &reserved, &ExecMode::Host);
+        let applied = apply_file_commands(dir.path(), &mut env, &reserved, &ExecMode::Host);
         let map = env_map(&env);
         assert_eq!(map["FOO"], "bar");
         assert_eq!(map["GITHUB_SHA"], "real"); // reserved not overridden
         assert_eq!(map["PATH"], "/opt/toolbin:/usr/bin");
-        assert_eq!(warnings.len(), 1);
+        assert_eq!(applied.warnings.len(), 1);
+        assert_eq!(applied.env, vec![("FOO".to_string(), "bar".to_string())]);
         // Files truncated.
         assert_eq!(std::fs::read_to_string(dir.path().join("env")).unwrap(), "");
         assert_eq!(
@@ -1216,12 +1835,142 @@ mod tests {
     #[test]
     fn step_deserialize_matches_api_shape() {
         let v = serde_json::json!([
-            {"name": "Checkout", "uses": "actions/checkout@v4", "run": null, "shell": null, "working_directory": null, "with": null, "env": null},
+            {"id": "co", "name": "Checkout", "uses": "actions/checkout@v4", "run": null,
+             "if": "always()", "timeout-minutes": 5, "shell": null,
+             "working_directory": null, "with": {"fetch-depth": 1}, "env": null},
             {"name": null, "uses": null, "run": "echo hi", "shell": "sh", "working_directory": "sub", "env": {"A": "1"}}
         ]);
         let steps: Vec<Step> = serde_json::from_value(v).unwrap();
+        assert_eq!(steps[0].id.as_deref(), Some("co"));
         assert_eq!(steps[0].uses.as_deref(), Some("actions/checkout@v4"));
+        assert_eq!(steps[0].if_expr.as_deref(), Some("always()"));
+        assert_eq!(steps[0].with.as_ref().unwrap()["fetch-depth"], 1);
         assert_eq!(steps[1].working_directory.as_deref(), Some("sub"));
+    }
+
+    #[test]
+    fn glob_match_basics() {
+        assert!(glob_match("**/Cargo.toml", "Cargo.toml"));
+        assert!(glob_match("**/Cargo.toml", "crates/x/Cargo.toml"));
+        assert!(glob_match("src/*.rs", "src/main.rs"));
+        assert!(!glob_match("src/*.rs", "src/a/b.rs"));
+        assert!(glob_match("src/**/b.rs", "src/a/b.rs"));
+        assert!(glob_match("*.txt", "a.txt"));
+        assert!(!glob_match("*.txt", "sub/a.txt"));
+        assert!(glob_match("a?c", "abc"));
+        assert!(glob_match("[a-c]bc", "bbc"));
+        assert!(!glob_match("[!a-c]bc", "bbc"));
+    }
+
+    #[test]
+    fn glob_walk_and_brace_expansion() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("src/sub")).unwrap();
+        std::fs::write(dir.path().join("src/main.rs"), b"fn main()").unwrap();
+        std::fs::write(dir.path().join("src/sub/lib.rs"), b"// lib").unwrap();
+        std::fs::write(dir.path().join("README.md"), b"# x").unwrap();
+        assert_eq!(glob_walk(dir.path(), "src/*.rs").len(), 1);
+        assert_eq!(glob_walk(dir.path(), "**/*.rs").len(), 2);
+        assert_eq!(glob_walk(dir.path(), "**/*.{rs,md}").len(), 3);
+        assert_eq!(glob_walk(dir.path(), "*.{rs,md}").len(), 1);
+        assert_eq!(glob_walk(dir.path(), "/README.md").len(), 1);
+        assert!(glob_walk(dir.path(), "nope/*.rs").is_empty());
+    }
+
+    #[test]
+    fn hash_files_is_deterministic() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.txt"), b"one").unwrap();
+        std::fs::write(dir.path().join("b.txt"), b"two").unwrap();
+        let f = hash_files_fn(dir.path().to_path_buf());
+        let h1 = f(&["*.txt".into()]).unwrap();
+        let h2 = f(&["*.txt".into()]).unwrap();
+        assert_eq!(h1, h2);
+        assert_eq!(h1.len(), 64); // sha256 hex
+                                  // Different file set → different hash.
+        std::fs::write(dir.path().join("c.txt"), b"three").unwrap();
+        let h3 = f(&["*.txt".into()]).unwrap();
+        assert_ne!(h1, h3);
+        // `!` excludes.
+        let excluded = f(&["*.txt".into(), "!b.txt".into()]).unwrap();
+        let only_ac = f(&["a.txt".into(), "c.txt".into()]).unwrap();
+        assert_eq!(excluded, only_ac);
+    }
+
+    #[test]
+    fn step_allowed_implicit_success_gate() {
+        let mut ctx = Context::new().with_job_status("success");
+        // No if → runs only when job is succeeding.
+        assert!(step_allowed(None, &ctx).unwrap());
+        ctx.set_job_status(JobStatus::Failure);
+        assert!(!step_allowed(None, &ctx).unwrap());
+        // Plain expr also gated by implicit success().
+        assert!(!step_allowed(Some("true"), &ctx).unwrap());
+        // Status fn carries its own semantics.
+        assert!(step_allowed(Some("failure()"), &ctx).unwrap());
+        assert!(step_allowed(Some("always()"), &ctx).unwrap());
+        ctx.set_job_status(JobStatus::Success);
+        assert!(!step_allowed(Some("failure()"), &ctx).unwrap());
+        assert!(step_allowed(Some("true && always()"), &ctx).unwrap());
+    }
+
+    #[test]
+    fn step_timeout_parsing() {
+        let ctx = Context::new().with_context("matrix", serde_json::json!({"t": 2}));
+        let mut step = Step {
+            id: None,
+            name: None,
+            uses: None,
+            run: Some("x".into()),
+            if_expr: None,
+            timeout_minutes: Some(serde_json::json!(5)),
+            shell: None,
+            working_directory: None,
+            with: None,
+            env: None,
+        };
+        let (t, w) = step_timeout(&step, &ctx, Duration::from_secs(60), None);
+        assert_eq!(t, Duration::from_secs(300));
+        assert!(w.is_empty());
+        step.timeout_minutes = Some(serde_json::json!("${{ matrix.t }}"));
+        let (t, _) = step_timeout(&step, &ctx, Duration::from_secs(60), None);
+        assert_eq!(t, Duration::from_secs(120));
+        step.timeout_minutes = Some(serde_json::json!("bogus"));
+        let (t, w) = step_timeout(&step, &ctx, Duration::from_secs(60), None);
+        assert_eq!(t, Duration::from_secs(60));
+        assert_eq!(w.len(), 1);
+        // Job deadline clips.
+        let (t, _) = step_timeout(
+            &step,
+            &ctx,
+            Duration::from_secs(60),
+            Some(Duration::from_secs(10)),
+        );
+        assert_eq!(t, Duration::from_secs(10));
+    }
+
+    #[test]
+    fn interpolate_step_fields() {
+        let ctx = Context::new()
+            .with_context("github", serde_json::json!({"sha": "deadbeef"}))
+            .with_context("env", serde_json::json!({"TAG": "v1"}));
+        let step = Step {
+            id: None,
+            name: Some("Build ${{ env.TAG }}".into()),
+            uses: None,
+            run: Some("echo ${{ github.sha }}".into()),
+            if_expr: None,
+            timeout_minutes: None,
+            shell: None,
+            working_directory: Some("dir-${{ env.TAG }}".into()),
+            with: None,
+            env: Some(serde_json::json!({"OUT": "${{ github.sha }}"})),
+        };
+        let s = interpolate_step(&step, &ctx).unwrap();
+        assert_eq!(s.name.as_deref(), Some("Build v1"));
+        assert_eq!(s.run.as_deref(), Some("echo deadbeef"));
+        assert_eq!(s.working_directory.as_deref(), Some("dir-v1"));
+        assert_eq!(s.env.unwrap()["OUT"], "deadbeef");
     }
 
     #[test]

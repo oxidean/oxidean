@@ -1,0 +1,13 @@
+name: expr-steps-context
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - id: producer
+        run: echo "version=9.9" >> $GITHUB_OUTPUT
+      - run: echo "got=${{ steps.producer.outputs.version }}"
+      - run: echo "consumer ran"
+        if: steps.producer.outputs.version == '9.9'
+      - run: echo "bad consumer"
+        if: steps.producer.outputs.version == '0.0'

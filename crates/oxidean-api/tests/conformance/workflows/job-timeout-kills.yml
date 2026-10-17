@@ -1,0 +1,9 @@
+name: job-timeout-kills
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 0.1
+    steps:
+      - run: sleep 30
+      - run: echo unreachable

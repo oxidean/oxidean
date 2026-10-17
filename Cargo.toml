@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+  "crates/oxidean-actions-expr",
   "crates/oxidean-api",
   "crates/oxidean-cli",
   "crates/oxidean-core",

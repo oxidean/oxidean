@@ -1,0 +1,15 @@
+name: expr-env-layering
+on: [push]
+env:
+  WF: wfval
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      JOBV: "job-${{ env.WF }}"
+    steps:
+      - run: echo "JOBV=$JOBV"
+      - run: echo "out=$STEPV"
+        env:
+          STEPV: "${{ env.JOBV }}-s"
+      - run: echo "ctx=${{ env.WF }}-${{ env.JOBV }}"

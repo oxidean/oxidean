@@ -153,19 +153,44 @@ pub async fn enqueue_run(
     head_repo_id: Option<&str>,
 ) -> Result<(String, Vec<String>), String> {
     let run_id = Uuid::new_v4().to_string();
+    // Enqueue-time expression context (Phase 2): github/env/vars/inputs.
+    let prov = crate::actions::eval_ctx::Provenance {
+        event,
+        head_sha,
+        head_ref,
+        triggered_by,
+        run_id: &run_id,
+    };
+    let (mut ctx, mut eval_warnings) =
+        crate::actions::eval_ctx::build_context(db, repository_id, doc, &prov).await;
+    // `name:` interpolates — the run's display name and `github.workflow`.
+    let mut name_notes = Vec::new();
+    let workflow_name = crate::actions::eval_ctx::interp_or_raw(&doc.name, &ctx, &mut name_notes);
+    eval_warnings.extend(name_notes);
+    crate::actions::eval_ctx::set_workflow_name(&mut ctx, &workflow_name);
     db.insert_action_run(
         &run_id,
         repository_id,
         workflow_path,
-        &doc.name,
+        &workflow_name,
         event,
         head_sha,
         head_ref,
-        &doc.name,
+        &workflow_name,
         triggered_by,
         head_repo_id,
     )
     .await?;
+    // Workflow `concurrency:` — recorded on the run; enforcement lands with
+    // the scheduler phase.
+    if let Some(group_src) = doc.concurrency.as_ref().and_then(|c| c.group.as_deref()) {
+        let mut notes = Vec::new();
+        let group = crate::actions::eval_ctx::interp_or_raw(group_src, &ctx, &mut notes);
+        eval_warnings.extend(notes);
+        if let Err(e) = db.set_action_run_concurrency(&run_id, &group).await {
+            tracing::warn!(error = %e, run_id, "failed to record run concurrency group");
+        }
+    }
     // Fail loudly: a workflow that names features we can't execute becomes a
     // failed validation run instead of silently mis-executing.
     if !doc.unsupported.is_empty() {
@@ -215,7 +240,8 @@ pub async fn enqueue_run(
         }
         return Ok((run_id, vec![job_id]));
     }
-    let log_dir = if doc.warnings.is_empty() {
+    let all_warnings: Vec<String> = doc.warnings.iter().cloned().chain(eval_warnings).collect();
+    let log_dir = if all_warnings.is_empty() {
         None
     } else {
         Some(crate::actions::logs::resolve_log_dir())
@@ -224,18 +250,71 @@ pub async fn enqueue_run(
     let mut job_keys = Vec::new();
     for job in &doc.jobs {
         let job_id = Uuid::new_v4().to_string();
-        let runs_on = serde_json::to_string(&job.runs_on).unwrap_or_else(|_| "[]".into());
-        let name = job.name.clone().unwrap_or_else(|| job.id.clone());
+        // Per-job expression evaluation. Errors in `if`/`runs-on` fail the
+        // job loudly; errors in display fields degrade to ::warning::.
+        let mut notes: Vec<String> = Vec::new();
+        let mut job_status = "queued";
+        let mut job_err: Option<String> = None;
+        // `jobs.<id>.if` — eval error fails the job; false skips it.
+        if let Some(src) = &job.if_expr {
+            match oxidean_actions_expr::eval_bool(src, &ctx) {
+                Ok(true) => {}
+                Ok(false) => {
+                    job_status = "skipped";
+                    notes.push(format!("job '{}' skipped — if evaluated to false", job.id));
+                }
+                Err(e) => job_err = Some(format!("if '{src}' evaluation failed: {e}")),
+            }
+        }
+        // `runs-on` labels interpolate — evaluated values drive label
+        // matching on the claim path.
+        let runs_on_eval: Vec<String> = job
+            .runs_on
+            .iter()
+            .map(|s| crate::actions::eval_ctx::interp_or_raw(s, &ctx, &mut notes))
+            .collect();
+        // `name` interpolates for display.
+        let name = job
+            .name
+            .as_deref()
+            .map(|s| crate::actions::eval_ctx::interp_or_raw(s, &ctx, &mut notes))
+            .unwrap_or_else(|| job.id.clone());
+        // `timeout-minutes` → absolute deadline.
+        let timeout_at = match &job.timeout_minutes {
+            Some(src) => match crate::actions::eval_ctx::eval_minutes(src, &ctx) {
+                Ok(m) => Some(crate::actions::eval_ctx::deadline_rfc3339(m)),
+                Err(e) => {
+                    notes.push(format!("timeout-minutes evaluation failed: {e}"));
+                    None
+                }
+            },
+            None => None,
+        };
+        // `concurrency:` — job-level group wins over the workflow's.
+        let concurrency_src = job
+            .concurrency
+            .as_ref()
+            .and_then(|c| c.group.as_deref())
+            .or_else(|| doc.concurrency.as_ref().and_then(|c| c.group.as_deref()));
+        let concurrency_group = concurrency_src
+            .map(|s| crate::actions::eval_ctx::interp_or_raw(s, &ctx, &mut notes))
+            .filter(|g| !g.is_empty());
+        if let Some(err) = job_err {
+            job_status = "failure";
+            notes.push(err);
+        }
+        let runs_on = serde_json::to_string(&runs_on_eval).unwrap_or_else(|_| "[]".into());
         // Durable payload: capture everything fetch_task needs at enqueue so
         // claim never re-reads the bare repo (head could move / be GC'd).
         let payload_json = serde_json::json!({
             "version": 1,
             "job_key": job.id,
             "name": name,
-            "runs_on": job.runs_on,
+            "runs_on": runs_on_eval,
             "steps": job.steps,
             "env": job.env,
             "workflow_env": doc.env,
+            "outputs": job.outputs,
             "contents_permission": crate::actions::effective_contents_permission(doc, job).as_str(),
         })
         .to_string();
@@ -244,21 +323,46 @@ pub async fn enqueue_run(
             .await?;
         let mut insert = oxidean_db::JobInsert::basic(&job_id, &run_id, &job.id, &name, &runs_on);
         insert.payload_sha = Some(sha);
+        insert.status = job_status.into();
+        insert.timeout_at = timeout_at;
+        insert.concurrency_group = concurrency_group;
+        insert.outputs_json = job
+            .outputs
+            .as_ref()
+            .map(|o| o.to_string())
+            .unwrap_or_else(|| "{}".into());
         db.insert_action_job(insert).await?;
-        if let Some(dir) = &log_dir {
-            let note: String = doc
-                .warnings
-                .iter()
-                .map(|w| format!("::warning::{w}\n"))
-                .collect();
+        // Validation warnings + eval notes + skip/failure annotations land
+        // in the job log — visible without a runner.
+        let mut note = String::new();
+        for w in &all_warnings {
+            note.push_str(&format!("::warning::{w}\n"));
+        }
+        for n in &notes {
+            let kind = if job_status == "failure" {
+                "error"
+            } else {
+                "notice"
+            };
+            note.push_str(&format!("::{kind}::{n}\n"));
+        }
+        if !note.is_empty() {
+            let dir = log_dir
+                .clone()
+                .unwrap_or_else(crate::actions::logs::resolve_log_dir);
             if let Err(e) =
-                crate::actions::logs::append_job_log(dir, &run_id, &job_id, note.as_bytes()).await
+                crate::actions::logs::append_job_log(&dir, &run_id, &job_id, note.as_bytes()).await
             {
                 tracing::warn!(error = %e, run_id, "failed to write dispatch warnings");
             }
         }
         job_ids.push(job_id);
         job_keys.push(job.id.clone());
+    }
+    // Jobs skipped or failed at enqueue are already terminal — roll the run
+    // up immediately so all-skipped workflows finish `success`.
+    if let Err(e) = db.recompute_action_run_status(&run_id).await {
+        tracing::warn!(error = %e, run_id, "post-enqueue run rollup failed");
     }
     if let Err(e) = crate::actions::statuses::publish_queued_for_run(
         db,

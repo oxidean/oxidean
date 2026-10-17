@@ -50,8 +50,13 @@ pub async fn decrypted_secrets_for_repo(
 mod tests {
     use super::*;
 
+    /// Env-var-mutating tests serialize on this — `set_var`/`remove_var` are
+    /// process-global and parallel test threads otherwise race each other.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn encrypt_roundtrip() {
+        let _g = ENV_LOCK.lock().unwrap();
         std::env::set_var("OXIDEAN_ACTIONS_SECRETS_KEY", "unit-test-key");
         let ct = encrypt_secret("super-secret").unwrap();
         assert!(!ct.contains("super-secret"));
@@ -60,6 +65,7 @@ mod tests {
 
     #[test]
     fn encrypt_fails_closed_without_key() {
+        let _g = ENV_LOCK.lock().unwrap();
         std::env::remove_var("OXIDEAN_ACTIONS_SECRETS_KEY");
         std::env::remove_var("OXIDEAN_SESSION_SECRET");
         let err = encrypt_secret("x").unwrap_err();

@@ -1,0 +1,13 @@
+name: job-if-skip
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/nope'
+    steps:
+      - run: echo should-not-run
+  other:
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - run: echo "other ran"

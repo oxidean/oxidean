@@ -55,10 +55,16 @@ pub struct WorkflowDocument {
     /// Structural features parsed but not executable — dispatch must refuse
     /// the workflow rather than silently mis-execute it (D-parity: fail
     /// loudly). Sorted, dedup'd feature keys (`needs`, `strategy`, …).
+    /// `expressions` flags malformed `${{ }}` syntax — evaluated keys no
+    /// longer pass through literally, so a broken expression is a parse-level
+    /// contract violation, not a runtime surprise.
     pub unsupported: Vec<String>,
+    /// Workflow-level `concurrency:` — evaluated at enqueue onto the run row
+    /// (enforcement lands with the scheduler phase).
+    pub concurrency: Option<Concurrency>,
     /// Dispatch-time warnings: features that run but are partially ignored
-    /// (`env` blocks not applied, `with:` inputs not forwarded). Surfaced in
-    /// each job's log at enqueue — never silent.
+    /// (`with:` inputs not applied, `concurrency` captured but not enforced).
+    /// Surfaced in each job's log at enqueue — never silent.
     pub warnings: Vec<String>,
 }
 
@@ -78,20 +84,47 @@ pub struct JobSpec {
     pub env: Option<JsonValue>,
     /// Job-level `permissions:` — overrides the workflow-level block.
     pub permissions: Option<WorkflowPermissions>,
+    /// `jobs.<id>.if` — expression source, evaluated at enqueue.
+    pub if_expr: Option<String>,
+    /// `jobs.<id>.timeout-minutes` — expression source (usually a bare
+    /// number); evaluated at enqueue into `action_jobs.timeout_at`.
+    pub timeout_minutes: Option<String>,
+    /// `jobs.<id>.concurrency` — `{group, cancel-in-progress}` evaluated at
+    /// enqueue (enforcement lands with the scheduler phase).
+    pub concurrency: Option<Concurrency>,
+    /// `jobs.<id>.outputs` — raw `{name: expression}` map, materialized for
+    /// `needs.<id>.outputs.*` consumers when the scheduler lands.
+    pub outputs: Option<JsonValue>,
+}
+
+/// `concurrency:` shape — a bare group string or `{group, cancel-in-progress}`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Concurrency {
+    /// Expression source for the group key.
+    pub group: Option<String>,
+    /// Expression source — usually a bare bool.
+    pub cancel_in_progress: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct StepSpec {
+    /// `id:` — the step's address in `steps.<id>.outputs/outcome` contexts.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
     pub name: Option<String>,
     pub uses: Option<String>,
     pub run: Option<String>,
     pub shell: Option<String>,
     pub working_directory: Option<String>,
-    /// Opaque `with` / `env` / `if` — retained for runner; not interpreted in-process.
+    /// `with` / `env` / `if` retained as raw values/strings — the runner
+    /// evaluates their `${{ }}` expressions at step time.
     pub with: Option<JsonValue>,
     pub env: Option<JsonValue>,
     #[serde(rename = "if", skip_serializing_if = "Option::is_none")]
     pub if_expr: Option<String>,
+    /// `steps.*.timeout-minutes` — expression source; the runner enforces it.
+    #[serde(rename = "timeout-minutes", skip_serializing_if = "Option::is_none")]
+    pub timeout_minutes: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -170,6 +203,7 @@ enum RawRunsOn {
 
 #[derive(Debug, Deserialize)]
 struct RawStep {
+    id: Option<String>,
     name: Option<String>,
     uses: Option<String>,
     run: Option<String>,
@@ -178,8 +212,10 @@ struct RawStep {
     working_directory: Option<String>,
     with: Option<serde_yaml::Value>,
     env: Option<serde_yaml::Value>,
+    /// `if:` accepts a bare scalar — `if: false` is valid YAML and GitHub
+    /// treats it as the boolean expression, so keep the raw value.
     #[serde(rename = "if")]
-    if_expr: Option<String>,
+    if_expr: Option<serde_yaml::Value>,
     #[serde(rename = "continue-on-error")]
     continue_on_error: Option<serde_yaml::Value>,
     #[serde(rename = "timeout-minutes")]
@@ -190,6 +226,85 @@ fn yaml_to_json(v: serde_yaml::Value) -> Result<JsonValue, ParseError> {
     serde_json::to_value(v).map_err(|e| ParseError {
         message: format!("failed to normalize workflow YAML value: {e}"),
     })
+}
+
+/// Expression-source strings can be bare scalars (`if: false`,
+/// `timeout-minutes: 30`) — normalize YAML scalars to their source text.
+fn expr_src(v: &serde_yaml::Value) -> Option<String> {
+    match v {
+        serde_yaml::Value::String(s) => Some(s.clone()),
+        serde_yaml::Value::Number(n) => Some(n.to_string()),
+        serde_yaml::Value::Bool(b) => Some(b.to_string()),
+        _ => None,
+    }
+}
+
+/// [`expr_src`] over an `Option` raw value.
+fn expr_src_opt(v: &Option<serde_yaml::Value>) -> Option<String> {
+    v.as_ref().and_then(expr_src)
+}
+
+/// `concurrency:` is either a bare group string or
+/// `{group: …, cancel-in-progress: …}` — keep each field's expression source.
+fn parse_concurrency(raw: Option<&serde_yaml::Value>) -> Option<Concurrency> {
+    match raw? {
+        s @ serde_yaml::Value::String(_) => Some(Concurrency {
+            group: expr_src(s),
+            cancel_in_progress: None,
+        }),
+        serde_yaml::Value::Mapping(map) => {
+            let mut c = Concurrency {
+                group: None,
+                cancel_in_progress: None,
+            };
+            for (k, v) in map {
+                match k.as_str() {
+                    Some("group") => c.group = expr_src(v),
+                    Some("cancel-in-progress") => c.cancel_in_progress = expr_src(v),
+                    _ => {}
+                }
+            }
+            Some(c)
+        }
+        _ => None,
+    }
+}
+
+/// Check every `${{ }}` in `s` for syntax errors; detail strings go to
+/// `warnings`, the presence of any error sets the `expressions` flag.
+fn check_str(src: &str, unsupported: &mut Vec<String>, warnings: &mut Vec<String>) {
+    for e in oxidean_actions_expr::check(src) {
+        flag(unsupported, "expressions");
+        warnings.push(format!("malformed expression in '{src}': {e}"));
+    }
+}
+
+/// `if:` fields are whole expressions — bare `github.sha` or `${{ }}`-wrapped,
+/// both must parse.
+fn check_if(src: &str, unsupported: &mut Vec<String>, warnings: &mut Vec<String>) {
+    for e in oxidean_actions_expr::check_expr(src) {
+        flag(unsupported, "expressions");
+        warnings.push(format!("malformed expression in '{src}': {e}"));
+    }
+}
+
+/// Recursive walk for `env:`/`with:`/`outputs:` maps — only string leaves
+/// carry expressions.
+fn check_json(v: &JsonValue, unsupported: &mut Vec<String>, warnings: &mut Vec<String>) {
+    match v {
+        JsonValue::String(s) => check_str(s, unsupported, warnings),
+        JsonValue::Array(items) => {
+            for i in items {
+                check_json(i, unsupported, warnings);
+            }
+        }
+        JsonValue::Object(map) => {
+            for (_, i) in map {
+                check_json(i, unsupported, warnings);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn parse_triggers(on: Option<RawOn>) -> (WorkflowTriggers, Vec<String>) {
@@ -318,11 +433,19 @@ pub fn parse_workflow_yaml(bytes: &[u8]) -> Result<WorkflowDocument, ParseError>
 
     let (triggers, mut unsupported) = parse_triggers(raw.on);
     let mut warnings = Vec::new();
-    if raw.concurrency.is_some() {
-        flag(&mut unsupported, "concurrency");
+    let wf_concurrency = parse_concurrency(raw.concurrency.as_ref());
+    if wf_concurrency.is_some() {
+        flag(&mut warnings, "concurrency (captured but not enforced yet)");
     }
-    if raw.env.is_some() {
-        flag(&mut warnings, "env (workflow env is not applied yet)");
+    check_str(&name, &mut unsupported, &mut warnings);
+    let wf_env = raw.env.map(yaml_to_json).transpose()?;
+    if let Some(v) = &wf_env {
+        check_json(v, &mut unsupported, &mut warnings);
+    }
+    if let Some(c) = &wf_concurrency {
+        for s in [&c.group, &c.cancel_in_progress].into_iter().flatten() {
+            check_str(s, &mut unsupported, &mut warnings);
+        }
     }
     let jobs_map = raw.jobs.ok_or_else(|| ParseError {
         message: "workflow missing jobs".into(),
@@ -359,11 +482,7 @@ pub fn parse_workflow_yaml(bytes: &[u8]) -> Result<WorkflowDocument, ParseError>
             (job.container.is_some(), "container"),
             (job.services.is_some(), "services"),
             (job.environment.is_some(), "environment"),
-            (job.concurrency.is_some(), "concurrency"),
-            (job.outputs.is_some(), "outputs"),
-            (job.if_expr.is_some(), "if"),
             (job.continue_on_error.is_some(), "continue-on-error"),
-            (job.timeout_minutes.is_some(), "timeout-minutes"),
         ] {
             if present {
                 flag(&mut unsupported, key);
@@ -373,8 +492,15 @@ pub fn parse_workflow_yaml(bytes: &[u8]) -> Result<WorkflowDocument, ParseError>
         if job.uses.is_some() || job.with.is_some() || job.secrets.is_some() {
             flag(&mut unsupported, "reusable-workflow");
         }
-        if job.env.is_some() {
-            flag(&mut warnings, "env (job env is not applied yet)");
+        let job_concurrency = parse_concurrency(job.concurrency.as_ref());
+        if job_concurrency.is_some() {
+            flag(&mut warnings, "concurrency (captured but not enforced yet)");
+        }
+        if job.outputs.is_some() {
+            flag(
+                &mut warnings,
+                "outputs (materialize for needs-consumers with the scheduler)",
+            );
         }
         // Reusable-call jobs (`uses:`) carry no `runs-on` — the unsupported
         // flag above already routes them to the validation-failure path.
@@ -383,6 +509,33 @@ pub fn parse_workflow_yaml(bytes: &[u8]) -> Result<WorkflowDocument, ParseError>
         } else {
             parse_runs_on(job.runs_on)?
         };
+        // Expression-syntax checks — evaluated fields can't carry malformed
+        // `${{ }}` through to silent mis-execution.
+        if let Some(s) = &job.name {
+            check_str(s, &mut unsupported, &mut warnings);
+        }
+        if let Some(s) = expr_src_opt(&job.if_expr) {
+            check_if(&s, &mut unsupported, &mut warnings);
+        }
+        for s in &runs_on {
+            check_str(s, &mut unsupported, &mut warnings);
+        }
+        if let Some(s) = expr_src_opt(&job.timeout_minutes) {
+            check_str(&s, &mut unsupported, &mut warnings);
+        }
+        if let Some(c) = &job_concurrency {
+            for s in [&c.group, &c.cancel_in_progress].into_iter().flatten() {
+                check_str(s, &mut unsupported, &mut warnings);
+            }
+        }
+        let job_env = job.env.map(yaml_to_json).transpose()?;
+        if let Some(v) = &job_env {
+            check_json(v, &mut unsupported, &mut warnings);
+        }
+        let job_outputs = job.outputs.map(yaml_to_json).transpose()?;
+        if let Some(v) = &job_outputs {
+            check_json(v, &mut unsupported, &mut warnings);
+        }
         let (job_shell, job_workdir) = run_defaults(job.defaults.as_ref());
         let mut steps = Vec::new();
         for (i, step) in job.steps.unwrap_or_default().into_iter().enumerate() {
@@ -391,17 +544,42 @@ pub fn parse_workflow_yaml(bytes: &[u8]) -> Result<WorkflowDocument, ParseError>
                     message: format!("job '{id}' step {i} needs uses or run"),
                 });
             }
-            for (present, key) in [
-                (step.if_expr.is_some(), "if"),
-                (step.continue_on_error.is_some(), "continue-on-error"),
-                (step.timeout_minutes.is_some(), "timeout-minutes"),
-            ] {
-                if present {
-                    flag(&mut unsupported, key);
-                }
+            if step.continue_on_error.is_some() {
+                flag(&mut unsupported, "continue-on-error");
             }
-            if step.with.is_some() {
-                flag(&mut warnings, "with (step inputs are not applied yet)");
+            if step.with.is_some()
+                && !step
+                    .uses
+                    .as_deref()
+                    .is_some_and(|u| u.starts_with("actions/checkout"))
+            {
+                flag(
+                    &mut warnings,
+                    "with (inputs applied for actions/checkout only)",
+                );
+            }
+            if let Some(s) = &step.name {
+                check_str(s, &mut unsupported, &mut warnings);
+            }
+            if let Some(s) = expr_src_opt(&step.if_expr) {
+                check_if(&s, &mut unsupported, &mut warnings);
+            }
+            if let Some(s) = &step.run {
+                check_str(s, &mut unsupported, &mut warnings);
+            }
+            if let Some(s) = &step.working_directory {
+                check_str(s, &mut unsupported, &mut warnings);
+            }
+            if let Some(s) = expr_src_opt(&step.timeout_minutes) {
+                check_str(&s, &mut unsupported, &mut warnings);
+            }
+            let step_with = step.with.map(yaml_to_json).transpose()?;
+            if let Some(v) = &step_with {
+                check_json(v, &mut unsupported, &mut warnings);
+            }
+            let step_env = step.env.map(yaml_to_json).transpose()?;
+            if let Some(v) = &step_env {
+                check_json(v, &mut unsupported, &mut warnings);
             }
             // Precedence: step > job defaults > workflow defaults.
             let shell = step
@@ -413,14 +591,16 @@ pub fn parse_workflow_yaml(bytes: &[u8]) -> Result<WorkflowDocument, ParseError>
                 .or_else(|| job_workdir.clone())
                 .or_else(|| wf_workdir.clone());
             steps.push(StepSpec {
+                id: step.id,
                 name: step.name,
                 uses: step.uses,
                 run: step.run,
                 shell,
                 working_directory,
-                with: step.with.map(yaml_to_json).transpose()?,
-                env: step.env.map(yaml_to_json).transpose()?,
-                if_expr: step.if_expr,
+                with: step_with,
+                env: step_env,
+                if_expr: expr_src_opt(&step.if_expr),
+                timeout_minutes: expr_src_opt(&step.timeout_minutes),
             });
         }
         if steps.is_empty() && job.uses.is_none() {
@@ -432,20 +612,26 @@ pub fn parse_workflow_yaml(bytes: &[u8]) -> Result<WorkflowDocument, ParseError>
             name: job.name,
             runs_on,
             steps,
-            env: job.env.map(yaml_to_json).transpose()?,
+            env: job_env,
             permissions: parse_permissions(job.permissions.as_ref()),
+            if_expr: expr_src_opt(&job.if_expr),
+            timeout_minutes: expr_src_opt(&job.timeout_minutes),
+            concurrency: job_concurrency,
+            outputs: job_outputs,
         });
     }
 
     unsupported.sort();
     warnings.sort();
+    warnings.dedup();
     Ok(WorkflowDocument {
         name,
         triggers,
         jobs,
-        env: raw.env.map(yaml_to_json).transpose()?,
+        env: wf_env,
         permissions: parse_permissions(raw.permissions.as_ref()),
         unsupported,
+        concurrency: wf_concurrency,
         warnings,
     })
 }
@@ -737,29 +923,23 @@ jobs:
   a:
     runs-on: ubuntu-latest
     environment: production
-    if: github.ref == 'refs/heads/main'
-    outputs:
-      v: ${{ steps.x.outputs.v }}
     steps:
       - run: echo hi
 "#,
-                &["environment", "if", "outputs"],
+                &["environment"],
             ),
             (
                 br#"
 name: CI
 on: [push]
-concurrency: g
 jobs:
   a:
     runs-on: ubuntu-latest
     continue-on-error: true
-    timeout-minutes: 5
     steps:
       - run: echo hi
-        continue-on-error: true
 "#,
-                &["concurrency", "continue-on-error", "timeout-minutes"],
+                &["continue-on-error"],
             ),
             (
                 br#"
@@ -795,10 +975,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: echo hi
-        if: success()
-        timeout-minutes: 2
+        continue-on-error: true
 "#,
-                &["if", "timeout-minutes"],
+                &["continue-on-error"],
             ),
         ];
         for (yaml, want) in cases {
@@ -813,27 +992,127 @@ jobs:
     }
 
     #[test]
-    fn env_and_with_are_warnings_not_unsupported() {
+    fn captured_features_warn_not_unsupported() {
+        // env blocks and if/timeout/concurrency/outputs are evaluated or
+        // captured now — only not-yet-enforced pieces warn.
         let doc = parse_workflow_yaml(
             br#"
 name: CI
 on: [push]
 env:
   A: "1"
+concurrency:
+  group: ci-${{ github.ref }}
 jobs:
   a:
     runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    timeout-minutes: 5
+    concurrency: inner
+    outputs:
+      v: ${{ steps.x.outputs.v }}
     env:
       B: "2"
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: echo hi
+        if: success()
+        timeout-minutes: 2
 "#,
         )
         .expect("parse");
         assert!(doc.unsupported.is_empty());
-        assert_eq!(doc.warnings.len(), 3);
+        assert_eq!(
+            doc.warnings,
+            vec![
+                "concurrency (captured but not enforced yet)".to_string(),
+                "outputs (materialize for needs-consumers with the scheduler)".to_string(),
+                "with (inputs applied for actions/checkout only)".to_string(),
+            ]
+        );
+        assert_eq!(
+            doc.jobs[0].if_expr.as_deref(),
+            Some("github.ref == 'refs/heads/main'")
+        );
+        assert_eq!(doc.jobs[0].timeout_minutes.as_deref(), Some("5"));
+        assert_eq!(
+            doc.concurrency.unwrap().group.as_deref(),
+            Some("ci-${{ github.ref }}")
+        );
+        let jc = doc.jobs[0].concurrency.as_ref().unwrap();
+        assert_eq!(jc.group.as_deref(), Some("inner"));
+        assert_eq!(doc.jobs[0].steps[2].if_expr.as_deref(), Some("success()"));
+    }
+
+    #[test]
+    fn malformed_expressions_flag_unsupported() {
+        // A broken `${{ }}` anywhere an expression is evaluated is a
+        // parse-level contract violation — it must never reach silent
+        // mis-execution.
+        for yaml in [
+            // bad embedded expr in run
+            &br#"name: CI
+on: [push]
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ${{ github.sha && }}
+"#[..],
+            // bad bare if expr
+            &br#"name: CI
+on: [push]
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    if: ${{ github.ref ==
+    steps:
+      - run: echo hi
+"#[..],
+            // bad expr inside env value
+            &br#"name: CI
+on: [push]
+env:
+  A: ${{ f(, }}
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+"#[..],
+        ] {
+            let doc = parse_workflow_yaml(yaml).expect("parse");
+            assert!(
+                doc.unsupported.iter().any(|k| k == "expressions"),
+                "expected 'expressions' flag: {:?}",
+                doc.unsupported
+            );
+            assert!(
+                doc.warnings
+                    .iter()
+                    .any(|w| w.contains("malformed expression")),
+                "expected malformed-expression warning: {:?}",
+                doc.warnings
+            );
+        }
+        // Well-formed `${{ }}` everywhere is clean.
+        let ok = parse_workflow_yaml(
+            br#"name: CI
+on: [push]
+jobs:
+  a:
+    runs-on: ${{ 'ubuntu-latest' }}
+    steps:
+      - run: echo ${{ github.sha }}
+"#,
+        )
+        .expect("parse");
+        assert!(ok.unsupported.is_empty());
     }
 
     #[test]

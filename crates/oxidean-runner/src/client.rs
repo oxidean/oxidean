@@ -64,6 +64,18 @@ pub struct Task {
     pub job_token: Option<String>,
     /// "{owner}/{repo}/{workflow_path}@{head_ref}".
     pub workflow_ref: Option<String>,
+    /// Job `env:` map captured at enqueue (expression-evaluated runner-side).
+    pub env: Option<serde_json::Value>,
+    /// Workflow `env:` map captured at enqueue.
+    pub workflow_env: Option<serde_json::Value>,
+    /// Evaluated `timeout-minutes` deadline (RFC3339) — job-wide kill time.
+    pub timeout_at: Option<String>,
+    /// Seconds until `timeout_at`, computed at claim.
+    pub timeout_seconds: Option<i64>,
+    /// Triggering event payload → `github.event` context + event.json file.
+    pub event_payload: Option<serde_json::Value>,
+    /// Matrix assignment → `matrix` context.
+    pub matrix: Option<serde_json::Value>,
 }
 
 impl Task {

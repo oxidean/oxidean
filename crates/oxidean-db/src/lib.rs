@@ -3354,6 +3354,15 @@ impl Database {
         actions::find_run_by_id(self.require_pool()?, id).await
     }
 
+    /// Record the evaluated workflow-level `concurrency:` group on a run.
+    pub async fn set_action_run_concurrency(
+        &self,
+        run_id: &str,
+        group: &str,
+    ) -> Result<(), String> {
+        actions::set_run_concurrency(self.require_pool()?, run_id, group).await
+    }
+
     /// Insert a job + its claim labels in one transaction (Phase-1 durable
     /// payloads): `JobInsert::basic` for plain jobs, full struct for
     /// scheduled/matrix jobs.

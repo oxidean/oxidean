@@ -131,6 +131,11 @@ pub struct JobInsert {
     /// JSON object of declared `outputs:` exprs; `'{}'` until Phase 3.
     pub outputs_json: String,
     pub concurrency_group: Option<String>,
+    /// Initial status — `'queued'` normally, `'skipped'`/`'failure'` when
+    /// enqueue-time expression evaluation decides the job never runs.
+    pub status: String,
+    /// `timeout-minutes` materialized to an absolute deadline at enqueue.
+    pub timeout_at: Option<String>,
 }
 
 impl JobInsert {
@@ -148,6 +153,8 @@ impl JobInsert {
             matrix_json: "{}".into(),
             outputs_json: "{}".into(),
             concurrency_group: None,
+            status: "queued".into(),
+            timeout_at: None,
         }
     }
 }
@@ -167,8 +174,8 @@ pub struct ActionPayloadRow {
 /// list in one const per dialect prevents column drift between
 /// `find_job_by_id`, `list_jobs_for_run`, and the claim path.
 const JOB_COLS_SQLITE: &str = "id, run_id, job_key, matrix_key, name, runs_on_json, status, payload_sha, needs_json, matrix_json, outputs_json, concurrency_group, attempt, timeout_at, runner_id, started_at, finished_at";
-const JOB_COLS_PG: &str = "id, run_id, job_key, matrix_key, name, runs_on_json, status, payload_sha, needs_json, matrix_json, outputs_json, concurrency_group, attempt, timeout_at::text AS timeout_at, runner_id, started_at::text AS started_at, finished_at::text AS finished_at";
-const JOB_COLS_MYSQL: &str = "id, run_id, job_key, matrix_key, name, runs_on_json, status, payload_sha, needs_json, matrix_json, outputs_json, concurrency_group, attempt, CAST(timeout_at AS CHAR) AS timeout_at, runner_id, CAST(started_at AS CHAR) AS started_at, CAST(finished_at AS CHAR) AS finished_at";
+const JOB_COLS_PG: &str = "id, run_id, job_key, matrix_key, name, runs_on_json, status, payload_sha, needs_json, matrix_json, outputs_json, concurrency_group, attempt, to_char(timeout_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS timeout_at, runner_id, started_at::text AS started_at, finished_at::text AS finished_at";
+const JOB_COLS_MYSQL: &str = "id, run_id, job_key, matrix_key, name, runs_on_json, status, payload_sha, needs_json, matrix_json, outputs_json, concurrency_group, attempt, DATE_FORMAT(timeout_at, '%Y-%m-%dT%H:%i:%sZ') AS timeout_at, runner_id, CAST(started_at AS CHAR) AS started_at, CAST(finished_at AS CHAR) AS finished_at";
 
 macro_rules! map_job_row {
     ($row:expr) => {{
@@ -526,12 +533,12 @@ pub async fn insert_job(pool: &DbPool, job: &JobInsert) -> Result<ActionJobRow, 
         DbPool::Postgres(p) => {
             let mut tx = p.begin().await.map_err(|e| e.to_string())?;
             sqlx::query(r#"INSERT INTO action_jobs
-                (id, run_id, job_key, matrix_key, name, runs_on_json, payload_sha, needs_json, matrix_json, outputs_json, concurrency_group)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)"#)
+                (id, run_id, job_key, matrix_key, name, runs_on_json, payload_sha, needs_json, matrix_json, outputs_json, concurrency_group, status, timeout_at)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::timestamptz)"#)
                 .bind(&job.id).bind(&job.run_id).bind(&job.job_key).bind(&job.matrix_key)
                 .bind(&job.name).bind(&job.runs_on_json).bind(&job.payload_sha)
                 .bind(&job.needs_json).bind(&job.matrix_json).bind(&job.outputs_json)
-                .bind(&job.concurrency_group)
+                .bind(&job.concurrency_group).bind(&job.status).bind(&job.timeout_at)
                 .execute(&mut *tx).await.map_err(|e| e.to_string())?;
             for label in &labels {
                 sqlx::query("INSERT INTO action_job_labels (job_id, label, base) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING")
@@ -543,12 +550,12 @@ pub async fn insert_job(pool: &DbPool, job: &JobInsert) -> Result<ActionJobRow, 
         DbPool::MySql(p) => {
             let mut tx = p.begin().await.map_err(|e| e.to_string())?;
             sqlx::query(r#"INSERT INTO action_jobs
-                (id, run_id, job_key, matrix_key, name, runs_on_json, payload_sha, needs_json, matrix_json, outputs_json, concurrency_group)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?)"#)
+                (id, run_id, job_key, matrix_key, name, runs_on_json, payload_sha, needs_json, matrix_json, outputs_json, concurrency_group, status, timeout_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,STR_TO_DATE(REPLACE(REPLACE(?, 'T', ' '), 'Z', ''), '%Y-%m-%d %H:%i:%s'))"#)
                 .bind(&job.id).bind(&job.run_id).bind(&job.job_key).bind(&job.matrix_key)
                 .bind(&job.name).bind(&job.runs_on_json).bind(&job.payload_sha)
                 .bind(&job.needs_json).bind(&job.matrix_json).bind(&job.outputs_json)
-                .bind(&job.concurrency_group)
+                .bind(&job.concurrency_group).bind(&job.status).bind(&job.timeout_at)
                 .execute(&mut *tx).await.map_err(|e| e.to_string())?;
             for label in &labels {
                 sqlx::query(
@@ -566,12 +573,12 @@ pub async fn insert_job(pool: &DbPool, job: &JobInsert) -> Result<ActionJobRow, 
         DbPool::Sqlite(p) => {
             let mut tx = p.begin().await.map_err(|e| e.to_string())?;
             sqlx::query(r#"INSERT INTO action_jobs
-                (id, run_id, job_key, matrix_key, name, runs_on_json, payload_sha, needs_json, matrix_json, outputs_json, concurrency_group)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?)"#)
+                (id, run_id, job_key, matrix_key, name, runs_on_json, payload_sha, needs_json, matrix_json, outputs_json, concurrency_group, status, timeout_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)"#)
                 .bind(&job.id).bind(&job.run_id).bind(&job.job_key).bind(&job.matrix_key)
                 .bind(&job.name).bind(&job.runs_on_json).bind(&job.payload_sha)
                 .bind(&job.needs_json).bind(&job.matrix_json).bind(&job.outputs_json)
-                .bind(&job.concurrency_group)
+                .bind(&job.concurrency_group).bind(&job.status).bind(&job.timeout_at)
                 .execute(&mut *tx).await.map_err(|e| e.to_string())?;
             for label in &labels {
                 sqlx::query(
@@ -594,20 +601,46 @@ pub async fn insert_job(pool: &DbPool, job: &JobInsert) -> Result<ActionJobRow, 
         matrix_key: job.matrix_key.clone(),
         name: job.name.clone(),
         runs_on_json: job.runs_on_json.clone(),
-        status: "queued".into(),
+        status: job.status.clone(),
         payload_sha: job.payload_sha.clone(),
         needs_json: job.needs_json.clone(),
         matrix_json: job.matrix_json.clone(),
         outputs_json: job.outputs_json.clone(),
         concurrency_group: job.concurrency_group.clone(),
         attempt: 1,
-        timeout_at: None,
+        timeout_at: job.timeout_at.clone(),
         runner_id: None,
         started_at: None,
         finished_at: None,
         created_at: String::new(),
         updated_at: String::new(),
     })
+}
+
+/// Record the workflow-level `concurrency:` group on the run (evaluated at
+/// enqueue; the scheduler phase enforces cancellation against it).
+pub async fn set_run_concurrency(pool: &DbPool, run_id: &str, group: &str) -> Result<(), String> {
+    match pool {
+        DbPool::Postgres(p) => {
+            sqlx::query(
+                "UPDATE action_runs SET concurrency_group = $1, updated_at = now() WHERE id = $2",
+            )
+            .bind(group)
+            .bind(run_id)
+            .execute(p)
+            .await
+            .map_err(|e| e.to_string())?;
+        }
+        DbPool::MySql(p) => {
+            sqlx::query("UPDATE action_runs SET concurrency_group = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+                .bind(group).bind(run_id).execute(p).await.map_err(|e| e.to_string())?;
+        }
+        DbPool::Sqlite(p) => {
+            sqlx::query("UPDATE action_runs SET concurrency_group = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+                .bind(group).bind(run_id).execute(p).await.map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
 }
 
 /// Upsert a captured job payload — content-addressed by sha, so identical

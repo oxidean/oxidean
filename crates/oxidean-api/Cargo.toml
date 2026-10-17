@@ -28,6 +28,7 @@ path = "src/bin/protection_hook.rs"
 oxidean-core = { path = "../oxidean-core" }
 oxidean-db = { path = "../oxidean-db" }
 oxidean-git = { path = "../oxidean-git" }
+oxidean-actions-expr = { path = "../oxidean-actions-expr" }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -90,6 +91,7 @@ schemars = { workspace = true }
 utoipa-swagger-ui = { version = "10", features = ["axum", "vendored"] }
 
 [dev-dependencies]
+oxidean-runner = { path = "../oxidean-runner" }
 http-body-util = "0.1"
 tower = { version = "0.5", features = ["util"] }
 tokio-tungstenite = "0.30"

@@ -1,0 +1,12 @@
+name: step-failure-flow
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: exit 1
+      - run: echo "skipped-after-failure"
+      - run: echo "always-ran"
+        if: always()
+      - run: echo "on-failure"
+        if: failure()

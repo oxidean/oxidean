@@ -1,0 +1,8 @@
+name: expr-job-name
+on: [push]
+jobs:
+  build:
+    name: "job-${{ github.event_name }}"
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi

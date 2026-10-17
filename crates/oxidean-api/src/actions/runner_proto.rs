@@ -183,6 +183,21 @@ struct FetchTaskResponse {
     job_token_permission: Option<String>,
     /// `{owner}/{repo}/{workflow_path}@{head_ref}`.
     workflow_ref: Option<String>,
+    /// Job `env:` map captured at enqueue (payload) — runner-side `env`
+    /// context + step env overlay.
+    env: Option<serde_json::Value>,
+    /// Workflow `env:` map captured at enqueue.
+    workflow_env: Option<serde_json::Value>,
+    /// Evaluated `timeout-minutes` deadline (RFC3339) from `action_jobs`.
+    timeout_at: Option<String>,
+    /// Triggering event payload (`action_runs.event_payload_json`) →
+    /// `github.event` context.
+    event_payload: Option<serde_json::Value>,
+    /// Matrix assignment (`action_jobs.matrix_json`) → `matrix` context.
+    matrix: Option<serde_json::Value>,
+    /// Seconds until `timeout_at`, computed at claim — runners don't parse
+    /// the timestamp or depend on wall-clock agreement with the API.
+    timeout_seconds: Option<i64>,
 }
 
 impl FetchTaskResponse {
@@ -215,6 +230,12 @@ impl FetchTaskResponse {
             job_token: None,
             job_token_permission: None,
             workflow_ref: None,
+            env: None,
+            workflow_env: None,
+            timeout_at: None,
+            event_payload: None,
+            matrix: None,
+            timeout_seconds: None,
         }
     }
 }
@@ -415,6 +436,25 @@ async fn fetch_task(
                 job_token,
                 job_token_permission: Some(job_token_permission),
                 workflow_ref: Some(workflow_ref),
+                env: payload_json.get("env").cloned(),
+                workflow_env: payload_json.get("workflow_env").cloned(),
+                timeout_at: j.timeout_at.clone(),
+                event_payload: Some(
+                    run.event_payload_json
+                        .as_deref()
+                        .and_then(|s| serde_json::from_str(s).ok())
+                        .unwrap_or_else(|| serde_json::json!({})),
+                ),
+                matrix: Some(
+                    serde_json::from_str(&j.matrix_json).unwrap_or_else(|_| serde_json::json!({})),
+                ),
+                timeout_seconds: j.timeout_at.as_deref().and_then(|s| {
+                    chrono::DateTime::parse_from_rfc3339(s).ok().map(|t| {
+                        t.signed_duration_since(chrono::Utc::now())
+                            .num_seconds()
+                            .max(0)
+                    })
+                }),
             }
         }
         None => FetchTaskResponse::empty(),

@@ -338,7 +338,7 @@
         "actions/first-interaction@v1"
       ],
       "warnings": [
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "automation/label": {
@@ -350,7 +350,7 @@
         "actions/labeler@v4"
       ],
       "warnings": [
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "automation/manual": {
@@ -366,7 +366,7 @@
         "actions/stale@v5"
       ],
       "warnings": [
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "automation/summary": {
@@ -376,7 +376,7 @@
         "actions/ai-inference@v1"
       ],
       "warnings": [
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "ci/ada": {
@@ -392,7 +392,7 @@
         "actions/setup-java@v4"
       ],
       "warnings": [
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "ci/ant": {
@@ -402,7 +402,7 @@
         "actions/setup-java@v4"
       ],
       "warnings": [
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "ci/blank": {
@@ -432,12 +432,10 @@
       "warnings": []
     },
     "ci/cmake-single-platform": {
-      "status": "partial",
+      "status": "runnable",
       "missing_features": [],
       "unsupported_actions": [],
-      "warnings": [
-        "env (workflow env is not applied yet)"
-      ]
+      "warnings": []
     },
     "ci/crystal": {
       "status": "unsupported-runtime",
@@ -470,7 +468,7 @@
         "DataDog/synthetics-ci-github-action@87b505388a22005bb8013481e3f73a367b9a53eb"
       ],
       "warnings": [
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "ci/deno": {
@@ -480,7 +478,7 @@
         "denoland/setup-deno@61fe2df320078202e33d7d5ad347e7dcfa0e8f31"
       ],
       "warnings": [
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "ci/django": {
@@ -492,7 +490,7 @@
         "actions/setup-python@v3"
       ],
       "warnings": [
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "ci/docker-image": {
@@ -502,10 +500,8 @@
       "warnings": []
     },
     "ci/docker-publish": {
-      "status": "unsupported-runtime",
-      "missing_features": [
-        "if"
-      ],
+      "status": "partial",
+      "missing_features": [],
       "unsupported_actions": [
         "docker/build-push-action@0565240e2d4ab88bba5387d719585280857ece09",
         "docker/login-action@343f7c4344506bcbf9b4de18042ae17996df046d",
@@ -514,8 +510,7 @@
         "sigstore/cosign-installer@59acb6260d9c0ba8f4a2f9d9b48431a222b68e20"
       ],
       "warnings": [
-        "env (workflow env is not applied yet)",
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "ci/dotnet": {
@@ -525,7 +520,7 @@
         "actions/setup-dotnet@v4"
       ],
       "warnings": [
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "ci/dotnet-desktop": {
@@ -539,8 +534,7 @@
         "microsoft/setup-msbuild@v2"
       ],
       "warnings": [
-        "env (job env is not applied yet)",
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "ci/elixir": {
@@ -551,7 +545,7 @@
         "erlef/setup-beam@61e01a43a562a89bfc54c7f9a378ff67b03e4a21"
       ],
       "warnings": [
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "ci/erlang": {
@@ -569,18 +563,19 @@
         "ruby/setup-ruby@55283cc23133118229fd3f97f9336ee23a179fcf"
       ],
       "warnings": [
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "ci/generator-generic-ossf-slsa3-publish": {
       "status": "reusable-workflow",
       "missing_features": [
         "needs",
-        "outputs",
         "reusable-workflow"
       ],
       "unsupported_actions": [],
-      "warnings": []
+      "warnings": [
+        "outputs (materialize for needs-consumers with the scheduler)"
+      ]
     },
     "ci/go": {
       "status": "partial",
@@ -589,7 +584,7 @@
         "actions/setup-go@v4"
       ],
       "warnings": [
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "ci/go-ossf-slsa3-publish": {
@@ -609,7 +604,7 @@
         "gradle/actions/setup-gradle@af1da67850ed9a4cedd57bfd976089dd991e2582"
       ],
       "warnings": [
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "ci/gradle-publish": {
@@ -620,7 +615,7 @@
         "gradle/actions/setup-gradle@af1da67850ed9a4cedd57bfd976089dd991e2582"
       ],
       "warnings": [
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "ci/haskell": {
@@ -631,7 +626,7 @@
         "actions/setup-haskell@v1"
       ],
       "warnings": [
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "ci/ios": {
@@ -653,7 +648,7 @@
         "shivammathur/setup-php@15c43e89cdef867065b0213be354c2841860869e"
       ],
       "warnings": [
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "ci/makefile": {
@@ -670,7 +665,7 @@
         "advanced-security/maven-dependency-submission-action@571e99aab1055c2e71a1e2309b9691de18d6b7d6"
       ],
       "warnings": [
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "ci/maven-publish": {
@@ -680,7 +675,7 @@
         "actions/setup-java@v4"
       ],
       "warnings": [
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "ci/msbuild": {
@@ -689,9 +684,7 @@
       "unsupported_actions": [
         "microsoft/setup-msbuild@v1.0.2"
       ],
-      "warnings": [
-        "env (workflow env is not applied yet)"
-      ]
+      "warnings": []
     },
     "ci/node.js": {
       "status": "unsupported-runtime",
@@ -702,7 +695,7 @@
         "actions/setup-node@v4"
       ],
       "warnings": [
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "ci/npm-publish": {
@@ -714,7 +707,7 @@
         "actions/setup-node@v4"
       ],
       "warnings": [
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "ci/npm-publish-github-packages": {
@@ -726,7 +719,7 @@
         "actions/setup-node@v4"
       ],
       "warnings": [
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "ci/objective-c-xcode": {
@@ -742,7 +735,7 @@
         "actions/cache@v3"
       ],
       "warnings": [
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "ci/pylint": {
@@ -754,7 +747,7 @@
         "actions/setup-python@v3"
       ],
       "warnings": [
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "ci/python-app": {
@@ -764,7 +757,7 @@
         "actions/setup-python@v3"
       ],
       "warnings": [
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "ci/python-package": {
@@ -776,7 +769,7 @@
         "actions/setup-python@v3"
       ],
       "warnings": [
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "ci/python-package-conda": {
@@ -788,7 +781,7 @@
         "actions/setup-python@v3"
       ],
       "warnings": [
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "ci/python-publish": {
@@ -804,7 +797,7 @@
         "pypa/gh-action-pypi-publish@release/v1"
       ],
       "warnings": [
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "ci/r": {
@@ -816,7 +809,7 @@
         "r-lib/actions/setup-r@f57f1301a053485946083d7a45022b278929a78a"
       ],
       "warnings": [
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "ci/ruby": {
@@ -828,7 +821,7 @@
         "ruby/setup-ruby@55283cc23133118229fd3f97f9336ee23a179fcf"
       ],
       "warnings": [
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "ci/rubyonrails": {
@@ -840,17 +833,14 @@
         "ruby/setup-ruby@78c01b705fd9d5ad960d432d3a0cfa341d50e410"
       ],
       "warnings": [
-        "env (job env is not applied yet)",
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "ci/rust": {
-      "status": "partial",
+      "status": "runnable",
       "missing_features": [],
       "unsupported_actions": [],
-      "warnings": [
-        "env (workflow env is not applied yet)"
-      ]
+      "warnings": []
     },
     "ci/scala": {
       "status": "partial",
@@ -860,7 +850,7 @@
         "scalacenter/sbt-dependency-submission@ab086b50c947c9774b70f39fc7f6e20ca2706c91"
       ],
       "warnings": [
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "ci/super-linter": {
@@ -869,9 +859,7 @@
       "unsupported_actions": [
         "github/super-linter@v4"
       ],
-      "warnings": [
-        "with (step inputs are not applied yet)"
-      ]
+      "warnings": []
     },
     "ci/swift": {
       "status": "runnable",
@@ -887,7 +875,7 @@
         "shivammathur/setup-php@2cb9b829437ee246e9b3cac53555a39208ca6d28"
       ],
       "warnings": [
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "ci/webpack": {
@@ -899,7 +887,7 @@
         "actions/setup-node@v4"
       ],
       "warnings": [
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "deployments/alibabacloud": {
@@ -913,8 +901,7 @@
         "aliyun/acr-scan@v1"
       ],
       "warnings": [
-        "env (workflow env is not applied yet)",
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "deployments/aws": {
@@ -929,8 +916,7 @@
         "aws-actions/configure-aws-credentials@v1"
       ],
       "warnings": [
-        "env (workflow env is not applied yet)",
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "deployments/azure-container-webapp": {
@@ -946,8 +932,7 @@
         "docker/setup-buildx-action@f95db51fddba0c2d1ec667646a06c2ce06100226"
       ],
       "warnings": [
-        "env (workflow env is not applied yet)",
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "deployments/azure-functions-app-container": {
@@ -961,8 +946,7 @@
         "azure/login@v1"
       ],
       "warnings": [
-        "env (workflow env is not applied yet)",
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "deployments/azure-functions-app-dotnet": {
@@ -975,8 +959,7 @@
         "actions/setup-dotnet@v4"
       ],
       "warnings": [
-        "env (workflow env is not applied yet)",
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "deployments/azure-functions-app-java": {
@@ -989,8 +972,7 @@
         "actions/setup-java@v4"
       ],
       "warnings": [
-        "env (workflow env is not applied yet)",
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "deployments/azure-functions-app-java-gradle": {
@@ -1003,8 +985,7 @@
         "actions/setup-java@v4"
       ],
       "warnings": [
-        "env (workflow env is not applied yet)",
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "deployments/azure-functions-app-nodejs": {
@@ -1017,8 +998,7 @@
         "actions/setup-node@v4"
       ],
       "warnings": [
-        "env (workflow env is not applied yet)",
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "deployments/azure-functions-app-powershell": {
@@ -1030,8 +1010,7 @@
         "Azure/functions-action@v1"
       ],
       "warnings": [
-        "env (workflow env is not applied yet)",
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "deployments/azure-functions-app-python": {
@@ -1044,8 +1023,7 @@
         "actions/setup-python@v4"
       ],
       "warnings": [
-        "env (workflow env is not applied yet)",
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "deployments/azure-kubernetes-service": {
@@ -1060,8 +1038,7 @@
         "azure/use-kubelogin@v1"
       ],
       "warnings": [
-        "env (workflow env is not applied yet)",
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "deployments/azure-kubernetes-service-helm": {
@@ -1077,8 +1054,7 @@
         "azure/use-kubelogin@v1"
       ],
       "warnings": [
-        "env (workflow env is not applied yet)",
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "deployments/azure-kubernetes-service-kompose": {
@@ -1094,8 +1070,7 @@
         "azure/use-kubelogin@v1"
       ],
       "warnings": [
-        "env (workflow env is not applied yet)",
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "deployments/azure-kubernetes-service-kustomize": {
@@ -1111,21 +1086,17 @@
         "azure/use-kubelogin@v1"
       ],
       "warnings": [
-        "env (workflow env is not applied yet)",
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "deployments/azure-staticwebapp": {
-      "status": "unsupported-runtime",
-      "missing_features": [
-        "if"
-      ],
+      "status": "partial",
+      "missing_features": [],
       "unsupported_actions": [
         "Azure/static-web-apps-deploy@v1"
       ],
       "warnings": [
-        "env (workflow env is not applied yet)",
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "deployments/azure-webapps-dotnet-core": {
@@ -1142,8 +1113,7 @@
         "azure/webapps-deploy@v2"
       ],
       "warnings": [
-        "env (workflow env is not applied yet)",
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "deployments/azure-webapps-java-jar": {
@@ -1159,8 +1129,7 @@
         "azure/webapps-deploy@v2"
       ],
       "warnings": [
-        "env (workflow env is not applied yet)",
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "deployments/azure-webapps-java-jar-gradle": {
@@ -1176,8 +1145,7 @@
         "azure/webapps-deploy@v2"
       ],
       "warnings": [
-        "env (workflow env is not applied yet)",
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "deployments/azure-webapps-node": {
@@ -1193,15 +1161,13 @@
         "azure/webapps-deploy@v2"
       ],
       "warnings": [
-        "env (workflow env is not applied yet)",
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "deployments/azure-webapps-php": {
       "status": "unsupported-runtime",
       "missing_features": [
         "environment",
-        "if",
         "needs"
       ],
       "unsupported_actions": [
@@ -1213,8 +1179,7 @@
         "shivammathur/setup-php@7c0b4c8c8ebed23eca9ec2802474895d105b11bc"
       ],
       "warnings": [
-        "env (workflow env is not applied yet)",
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "deployments/azure-webapps-python": {
@@ -1230,8 +1195,7 @@
         "azure/webapps-deploy@v2"
       ],
       "warnings": [
-        "env (workflow env is not applied yet)",
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "deployments/google": {
@@ -1245,8 +1209,7 @@
         "google-github-actions/get-gke-credentials@6051de21ad50fbb1767bc93c11357a49082ad116"
       ],
       "warnings": [
-        "env (workflow env is not applied yet)",
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "deployments/google-cloudrun-docker": {
@@ -1258,8 +1221,7 @@
         "google-github-actions/deploy-cloudrun@33553064113a37d688aa6937bacbdc481580be17"
       ],
       "warnings": [
-        "env (workflow env is not applied yet)",
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "deployments/google-cloudrun-source": {
@@ -1270,8 +1232,7 @@
         "google-github-actions/deploy-cloudrun@33553064113a37d688aa6937bacbdc481580be17"
       ],
       "warnings": [
-        "env (workflow env is not applied yet)",
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "deployments/ibm": {
@@ -1280,15 +1241,12 @@
         "environment"
       ],
       "unsupported_actions": [],
-      "warnings": [
-        "env (workflow env is not applied yet)"
-      ]
+      "warnings": []
     },
     "deployments/octopusdeploy": {
       "status": "unsupported-runtime",
       "missing_features": [
-        "needs",
-        "outputs"
+        "needs"
       ],
       "unsupported_actions": [
         "OctopusDeploy/create-release-action@fea7e7b45c38c021b6bc5a14bd7eaa2ed5269214",
@@ -1300,16 +1258,14 @@
         "docker/setup-buildx-action@f95db51fddba0c2d1ec667646a06c2ce06100226"
       ],
       "warnings": [
-        "env (job env is not applied yet)",
-        "with (step inputs are not applied yet)"
+        "outputs (materialize for needs-consumers with the scheduler)",
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "deployments/openshift": {
       "status": "unsupported-runtime",
       "missing_features": [
-        "environment",
-        "if",
-        "outputs"
+        "environment"
       ],
       "unsupported_actions": [
         "actions/github-script@v6",
@@ -1320,8 +1276,8 @@
         "redhat-actions/push-to-registry@v2"
       ],
       "warnings": [
-        "env (workflow env is not applied yet)",
-        "with (step inputs are not applied yet)"
+        "outputs (materialize for needs-consumers with the scheduler)",
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "deployments/tencent": {
@@ -1333,21 +1289,19 @@
         "TencentCloud/tke-cluster-credential-action@v1"
       ],
       "warnings": [
-        "env (workflow env is not applied yet)",
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     },
     "deployments/terraform": {
       "status": "unsupported-runtime",
       "missing_features": [
-        "environment",
-        "if"
+        "environment"
       ],
       "unsupported_actions": [
         "hashicorp/setup-terraform@v1"
       ],
       "warnings": [
-        "with (step inputs are not applied yet)"
+        "with (inputs applied for actions/checkout only)"
       ]
     }
   }

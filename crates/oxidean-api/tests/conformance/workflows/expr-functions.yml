@@ -1,0 +1,16 @@
+name: expr-functions
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "fmt=${{ format('v{0}-x', 7) }}"
+          echo "contained=${{ contains('hello world', 'world') }}"
+          echo "starts=${{ startsWith(github.workflow, 'expr') }}"
+          echo "ends=${{ endsWith(github.ref_name, 'n') }}"
+          echo "joined=${{ join(fromJSON('["a","b","c"]'), '-') }}"
+          echo "tostr=${{ toJSON(github.event_name) }}"
+          echo "fromjson=${{ fromJSON('{"a":42}').a }}"
+          echo "neg=${{ !contains('abc', 'z') }}"
+          echo "cmp=${{ github.run_number > 0 }}"

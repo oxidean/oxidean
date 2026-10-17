@@ -1,0 +1,10 @@
+name: expr-hashfiles
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          h="${{ hashFiles('**/*.yml') }}"
+          echo "HASH_LEN=${#h}"

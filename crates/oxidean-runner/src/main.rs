@@ -3,16 +3,12 @@
 //! Flow: load-or-register → declare labels → poll fetch_task → execute →
 //! report status/log chunks.
 
-mod client;
-mod config;
-mod exec;
-mod state;
-
 use std::time::Duration;
 
-use client::Client;
-use config::Config;
-use state::RunnerState;
+use oxidean_runner::client::Client;
+use oxidean_runner::config::Config;
+use oxidean_runner::exec;
+use oxidean_runner::state::{self, RunnerState};
 
 #[tokio::main]
 async fn main() {

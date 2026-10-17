@@ -1,0 +1,11 @@
+name: expr-github-ctx
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "evt=${{ github.event_name }}"
+          echo "repo=${{ github.repository }}"
+          echo "refname=${{ github.ref_name }}"
+          echo "empt=${{ github.event.unknown || 'fallback' }}"

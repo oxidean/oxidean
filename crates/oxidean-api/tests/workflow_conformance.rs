@@ -12,9 +12,6 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use axum::body::Body;
-use axum::http::Request;
-use http_body_util::BodyExt;
 use oxidean_api::actions::dispatch_push_for_sha;
 use oxidean_api::actions::mint_registration_token;
 use oxidean_api::actions::secrets::encrypt_secret;
@@ -24,7 +21,6 @@ use oxidean_core::Role;
 use oxidean_db::Database;
 use oxidean_git::{CliGitBackend, GitBackend};
 use serde::Deserialize;
-use tower::ServiceExt;
 use uuid::Uuid;
 
 #[derive(Debug, Deserialize)]
@@ -188,182 +184,49 @@ async fn fixture(case: &Case) -> Fixture {
     }
 }
 
-async fn post(
-    app: &axum::Router,
-    uri: &str,
-    token: Option<&str>,
-    body: serde_json::Value,
-) -> serde_json::Value {
-    let mut req = Request::builder()
-        .method("POST")
-        .uri(uri)
-        .header("content-type", "application/json");
-    if let Some(t) = token {
-        req = req.header("authorization", format!("Bearer {t}"));
-    }
-    let res = app
-        .clone()
-        .oneshot(req.body(Body::from(body.to_string())).unwrap())
-        .await
-        .unwrap();
-    let bytes = res.into_body().collect().await.unwrap().to_bytes();
-    serde_json::from_slice(&bytes).unwrap_or_else(|_| serde_json::json!({}))
-}
-
-fn mask(text: &str, secrets: &HashMap<String, String>) -> String {
-    let mut out = text.to_string();
-    for v in secrets.values() {
-        if !v.is_empty() {
-            out = out.replace(v.as_str(), "***");
-        }
-    }
-    out
-}
-
-/// Scripted runner: claim every job it matches, run the steps, report results.
-/// Mirrors `oxidean-runner`'s step semantics (`##[step]` markers, `${{ }}`
-/// warning, masking, host `sh`) without the binary.
+/// Real runner: serve the app on an ephemeral TCP port and drive
+/// `oxidean_runner::exec::execute` over the actual `/api/actions/*` HTTP
+/// protocol — checkout performs a real `git clone` through the server's git
+/// smart-HTTP, file commands and expression evaluation run in the real
+/// runner engine (no mirrored interpreter to drift).
 async fn drive_runner(fx: &Fixture, labels: &[String]) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let app = fx.app.clone();
+    let server = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    let origin = format!("http://127.0.0.1:{port}");
+
+    let mut client = oxidean_runner::client::Client::new(&origin, None);
     let reg = mint_registration_token(&fx.db).await.unwrap();
-    let reg_v = post(
-        &fx.app,
-        "/api/actions/register",
-        None,
-        serde_json::json!({"name": "conformance", "labels": labels, "token": reg}),
-    )
-    .await;
-    let token = reg_v["runner_token"].as_str().expect("runner_token");
+    let (_, token) = client
+        .register("conformance", labels, &reg)
+        .await
+        .expect("runner register");
+    client.set_token(token);
+    client.declare(labels).await.expect("runner declare");
 
-    for _ in 0..32 {
-        let task = post(
-            &fx.app,
-            "/api/actions/fetch_task",
-            Some(token),
-            serde_json::json!({}),
-        )
-        .await;
-        let Some(job_id) = task["job_id"].as_str() else {
-            break;
-        };
-        let run_id = task["run_id"].as_str().unwrap().to_string();
-        let job_id = job_id.to_string();
-        post(
-            &fx.app,
-            "/api/actions/update_task",
-            Some(token),
-            serde_json::json!({"job_id": job_id, "state": "in_progress"}),
-        )
-        .await;
-
-        let secrets: HashMap<String, String> =
-            serde_json::from_value(task["secrets"].clone()).unwrap_or_default();
-        let steps = task["steps"].as_array().cloned().unwrap_or_default();
-        let workspace = fx.dir.path().join("ws").join(&job_id);
-        std::fs::create_dir_all(&workspace).unwrap();
-
-        let mut failed = false;
-        for (i, step) in steps.iter().enumerate() {
-            let title = step["name"]
-                .as_str()
-                .map(str::to_string)
-                .or_else(|| step["uses"].as_str().map(str::to_string))
-                .or_else(|| step["run"].as_str().map(|r| r.chars().take(60).collect()))
-                .unwrap_or_else(|| format!("step {i}"));
-            let mut log = format!("##[step]{title}\n");
-
-            let contains_expr = |v: &serde_json::Value| {
-                v.as_str().is_some_and(|s| s.contains("${{"))
-                    || (!v.is_string() && v.to_string().contains("${{"))
-            };
-            if contains_expr(&step["run"])
-                || contains_expr(&step["uses"])
-                || contains_expr(&step["env"])
-            {
-                log.push_str("::warning::${{ }} expressions are not evaluated — used literally\n");
+    let config = oxidean_runner::config::Config {
+        origin: origin.clone(),
+        registration_token: None,
+        name: "conformance".into(),
+        labels: oxidean_runner::config::parse_labels(&labels.join(",")).unwrap(),
+        state_path: fx.dir.path().join("runner-state.json"),
+        work_dir: fx.dir.path().join("runner-work"),
+        poll_ms: 1,
+        git_token: None,
+        job_timeout_secs: 300,
+    };
+    for _ in 0..64 {
+        match client.fetch_task().await.expect("fetch_task") {
+            Some(task) => {
+                oxidean_runner::exec::execute(&client, &task, &config).await;
             }
-
-            let step_result: Result<(), String> = if let Some(uses) = step["uses"].as_str() {
-                if uses.starts_with("actions/checkout") {
-                    log.push_str("##[checkout] stubbed checkout\n");
-                    Ok(())
-                } else {
-                    Err(format!(
-                        "unsupported action '{uses}' — only actions/checkout and run: steps are supported"
-                    ))
-                }
-            } else if let Some(script) = step["run"].as_str() {
-                let cwd = step["working_directory"]
-                    .as_str()
-                    .map(|d| workspace.join(d))
-                    .unwrap_or_else(|| workspace.clone());
-                let shell = step["shell"].as_str().unwrap_or("sh");
-                let mut cmd = tokio::process::Command::new(shell);
-                cmd.arg("-c").arg(script).current_dir(&cwd);
-                // Mirror runner job_env: base vars + secrets + step env overlay.
-                cmd.env("CI", "true")
-                    .env("OXIDEAN", "true")
-                    .env("GITHUB_WORKSPACE", &workspace)
-                    .env("GITHUB_SHA", task["head_sha"].as_str().unwrap_or_default())
-                    .env("GITHUB_REF", task["head_ref"].as_str().unwrap_or_default())
-                    .env("GITHUB_RUN_ID", &run_id)
-                    .env(
-                        "GITHUB_REPOSITORY",
-                        format!(
-                            "{}/{}",
-                            task["repository_owner"].as_str().unwrap_or_default(),
-                            task["repository_name"].as_str().unwrap_or_default()
-                        ),
-                    );
-                for (k, v) in &secrets {
-                    cmd.env(k, v);
-                }
-                if let Some(map) = step["env"].as_object() {
-                    for (k, v) in map {
-                        cmd.env(k, v.as_str().unwrap_or_default());
-                    }
-                }
-                match cmd.output().await {
-                    Ok(out) => {
-                        log.push_str(&String::from_utf8_lossy(&out.stdout));
-                        log.push_str(&String::from_utf8_lossy(&out.stderr));
-                        if out.status.success() {
-                            Ok(())
-                        } else {
-                            Err(format!("step exited {}", out.status))
-                        }
-                    }
-                    Err(e) => Err(format!("spawn {shell}: {e}")),
-                }
-            } else {
-                Ok(())
-            };
-
-            if let Err(e) = step_result {
-                log.push_str(&format!("::error::{e}\n"));
-                failed = true;
-            }
-            let masked = mask(&log, &secrets);
-            if !masked.is_empty() {
-                post(
-                    &fx.app,
-                    "/api/actions/update_log",
-                    Some(token),
-                    serde_json::json!({"run_id": run_id, "job_id": job_id, "chunk": masked}),
-                )
-                .await;
-            }
-            if failed {
-                break;
-            }
+            None => break,
         }
-        post(
-            &fx.app,
-            "/api/actions/update_task",
-            Some(token),
-            serde_json::json!({"job_id": job_id, "state": if failed { "failure" } else { "success" }}),
-        )
-        .await;
     }
+    server.abort();
 }
 
 fn read_job_log(fx: &Fixture, run_id: &str, job_id: &str) -> String {
@@ -574,6 +437,25 @@ conformance_case!(secrets_env, "secrets-env");
 conformance_case!(expr_in_run, "expr-in-run");
 conformance_case!(workflow_env, "workflow-env");
 conformance_case!(job_env, "job-env");
+conformance_case!(job_if_skip, "job-if-skip");
+conformance_case!(expr_functions, "expr-functions");
+conformance_case!(expr_env_layering, "expr-env-layering");
+conformance_case!(expr_steps_context, "expr-steps-context");
+conformance_case!(expr_hashfiles, "expr-hashfiles");
+conformance_case!(expr_job_name, "expr-job-name");
+conformance_case!(runs_on_expr, "runs-on-expr");
+conformance_case!(expr_github_ctx, "expr-github-ctx");
+conformance_case!(job_timeout_kills, "job-timeout-kills");
+conformance_case!(checkout_path, "checkout-path");
+conformance_case!(secrets_context, "secrets-context");
+conformance_case!(step_failure_flow, "step-failure-flow");
+conformance_case!(job_if, "job-if");
+conformance_case!(step_if, "step-if");
+conformance_case!(concurrency_workflow, "concurrency-workflow");
+conformance_case!(concurrency_job, "concurrency-job");
+conformance_case!(job_outputs, "job-outputs");
+conformance_case!(timeout_minutes_job, "timeout-minutes-job");
+conformance_case!(timeout_minutes_step, "timeout-minutes-step");
 conformance_case!(push_tag_ref, "push-tag-ref");
 conformance_case!(trigger_map_form, "trigger-map-form");
 conformance_case!(trigger_list_form, "trigger-list-form");
@@ -592,17 +474,12 @@ conformance_case!(strategy_matrix, "strategy-matrix");
 conformance_case!(container_job, "container-job");
 conformance_case!(services_job, "services-job");
 conformance_case!(environment_job, "environment-job");
-conformance_case!(concurrency_workflow, "concurrency-workflow");
-conformance_case!(concurrency_job, "concurrency-job");
-conformance_case!(job_if, "job-if");
-conformance_case!(step_if, "step-if");
-conformance_case!(job_outputs, "job-outputs");
 conformance_case!(reusable_workflow_local, "reusable-workflow-local");
 conformance_case!(reusable_workflow_remote, "reusable-workflow-remote");
 conformance_case!(continue_on_error_job, "continue-on-error-job");
 conformance_case!(continue_on_error_step, "continue-on-error-step");
-conformance_case!(timeout_minutes_job, "timeout-minutes-job");
-conformance_case!(timeout_minutes_step, "timeout-minutes-step");
+conformance_case!(expr_malformed_run, "expr-malformed-run");
+conformance_case!(expr_malformed_if, "expr-malformed-if");
 conformance_case!(prt_push, "prt-push");
 conformance_case!(empty_steps, "empty-steps");
 

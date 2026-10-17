@@ -7,3 +7,7 @@ jobs:
       - run: echo always
       - run: echo conditional
         if: success()
+      - run: echo never
+        if: false
+      - run: echo embedded
+        if: ${{ true }}
