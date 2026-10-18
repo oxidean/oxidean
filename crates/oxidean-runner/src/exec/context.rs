@@ -115,7 +115,12 @@ pub(crate) fn runner_context(
                 .map(|m| serde_json::to_value(m).unwrap_or_else(|_| serde_json::json!({})))
                 .unwrap_or_else(|| serde_json::json!({})),
         )
-        .with_context("strategy", serde_json::json!({}))
+        .with_context(
+            "strategy",
+            task.strategy
+                .clone()
+                .unwrap_or_else(|| serde_json::json!({})),
+        )
         .with_context(
             // `jobs.<id>.environment` — `{name, url}` for job expressions.
             "environment",
@@ -203,6 +208,8 @@ pub(crate) fn record_step(
 }
 
 /// Keep `job.status` in the context in sync with the runner's JobStatus.
+/// Merges into the existing `job` object so `job.container`/`job.services`
+/// survive status transitions.
 pub(crate) fn sync_job_ctx(ctx: &mut Context) {
     let status = match ctx.job_status() {
         JobStatus::Success => "success",
@@ -211,7 +218,15 @@ pub(crate) fn sync_job_ctx(ctx: &mut Context) {
         JobStatus::Skipped => "skipped",
         JobStatus::Pending => "pending",
     };
-    ctx.set_context("job", serde_json::json!({"status": status}));
+    let mut job = ctx
+        .get_context("job")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
+    if !job.is_object() {
+        job = serde_json::json!({});
+    }
+    job["status"] = serde_json::json!(status);
+    ctx.set_context("job", job);
 }
 
 /// Step timeout: `timeout-minutes` (evaluated) else the runner-wide cap,
@@ -312,6 +327,7 @@ mod tests {
             timeout_seconds: None,
             event_payload: None,
             matrix: Some(serde_json::json!({"os": "linux"})),
+            strategy: None,
             needs: None,
             container: None,
             services: None,
@@ -377,5 +393,27 @@ mod tests {
         // `vars` and `inputs` exist but are empty — pinned divergences.
         assert_eq!(ctx.get_context("vars").unwrap(), &serde_json::json!({}));
         assert_eq!(ctx.get_context("inputs").unwrap(), &serde_json::json!({}));
+    }
+
+    #[test]
+    fn sync_job_ctx_preserves_container_and_services() {
+        let mut ctx = Context::default();
+        ctx.set_context(
+            "job",
+            serde_json::json!({
+                "status": "success",
+                "container": {"id": "abc", "network": "oxidean-x"},
+                "services": {"db": {"id": "s1", "network": "oxidean-x", "ports": {"5432": "32768"}}},
+            }),
+        );
+        ctx.set_job_status(JobStatus::Failure);
+        sync_job_ctx(&mut ctx);
+        let job = ctx.get_context("job").unwrap();
+        assert_eq!(job["status"], "failure", "status transitions in place");
+        assert_eq!(
+            job["container"]["network"], "oxidean-x",
+            "container subtree survives"
+        );
+        assert_eq!(job["services"]["db"]["ports"]["5432"], "32768");
     }
 }

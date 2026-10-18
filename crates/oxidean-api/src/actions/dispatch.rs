@@ -1067,7 +1067,7 @@ pub(crate) async fn emit_jobs(
         // Calling legs never consume a runner slot: `waiting` until expanded.
         let mut leg_status = job_status;
         let mut queued_legs = 0usize;
-        for leg in &legs {
+        for (leg_idx, leg) in legs.iter().enumerate() {
             let job_id = Uuid::new_v4().to_string();
             if leg_status == "queued" && max_parallel.is_some_and(|c| queued_legs >= c) {
                 leg_status = "waiting";
@@ -1142,6 +1142,15 @@ pub(crate) async fn emit_jobs(
                 oxidean_db::JobInsert::basic(&job_id, run_id, &job.id, &leg_name, &leg_runs_on);
             insert.matrix_key = leg.matrix_key.clone();
             insert.matrix_json = leg.assignment.to_string();
+            // `strategy` context — the leg index is expansion-order and the
+            // wire has no way to re-derive it at claim, so it's stamped now.
+            insert.strategy_json = serde_json::json!({
+                "job-index": leg_idx,
+                "job-total": legs.len(),
+                "fail-fast": fail_fast,
+                "max-parallel": max_parallel,
+            })
+            .to_string();
             insert.needs_json = needs_json.clone();
             insert.payload_sha = Some(sha.clone());
             insert.status = insert_status.into();

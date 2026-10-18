@@ -410,7 +410,9 @@
       },
       "log_contains": [
         "Started job container (node:20)",
-        "in container"
+        "in container",
+        "jc_id_nonempty=true",
+        "jc_net=oxidean-"
       ]
     },
     {
@@ -422,7 +424,10 @@
       },
       "log_contains": [
         "Started service 'postgres' (postgres:16)",
-        "with service"
+        "with service",
+        "svc_port=15432",
+        "net=oxidean-",
+        "cid_nonempty=true"
       ]
     },
     {
@@ -889,6 +894,24 @@
       "log_contains": [
         "node-18",
         "node-20"
+      ]
+    },
+    {
+      "id": "strategy-context",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_job_statuses": {
+        "build": [
+          "success",
+          "success"
+        ]
+      },
+      "log_contains": [
+        "idx=0",
+        "idx=1",
+        "total=2",
+        "ff=true",
+        "mp=2"
       ]
     },
     {
@@ -1649,7 +1672,7 @@
     {
       "id": "workflow-run-listen",
       "kind": "run",
-      "desc": "on.workflow_run — a completed run fans out to listeners discovered on the default branch; the listener sees the completed run via github.event.workflow_run and executes in trusted context on the default branch ref.",
+      "desc": "on.workflow_run \u2014 a completed run fans out to listeners discovered on the default branch; the listener sees the completed run via github.event.workflow_run and executes in trusted context on the default branch ref.",
       "files": {
         ".github/workflows/downstream.yml": "name: Downstream\non:\n  workflow_run:\n    workflows: [\"Upstream CI\"]\n    types: [completed]\njobs:\n  notify:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo \"saw ${{ github.event.workflow_run.name }} conclude ${{ github.event.workflow_run.conclusion }} as ${{ github.event_name }} on ${{ github.ref_name }}\"\n"
       },
@@ -1697,7 +1720,7 @@
     {
       "id": "ctx-github-extra",
       "kind": "run",
-      "desc": "github context completeness — ref_protected/retention_days/triggering_actor/graphql shape plus per-step action naming: __run ordinals count skipped-free declaration order, github.action is the current step inside its own if:, and uses-step action_repository/action_path reach composite internals.",
+      "desc": "github context completeness \u2014 ref_protected/retention_days/triggering_actor/graphql shape plus per-step action naming: __run ordinals count skipped-free declaration order, github.action is the current step inside its own if:, and uses-step action_repository/action_path reach composite internals.",
       "files": {
         ".github/actions/probe/action.yml": "name: probe\nruns:\n  using: composite\n  steps:\n    - run: echo \"inside action=${{ github.action }} repo=${{ github.action_repository }} ref=${{ github.action_ref }}\"\n      shell: bash\n"
       },

@@ -6,3 +6,4 @@ jobs:
     container: node:20
     steps:
       - run: echo in container
+      - run: echo "jc_id_nonempty=${{ job.container.id != '' }} jc_net=${{ job.container.network }}"

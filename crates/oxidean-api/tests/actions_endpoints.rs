@@ -918,3 +918,61 @@ async fn workflow_badge_svg() {
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
+
+/// GitHub caps an environment's required reviewers at 6; the upsert RPC
+/// enforces the cap and dedupes tokens before counting.
+#[tokio::test]
+async fn environment_reviewer_cap() {
+    let fx = fixture("public").await;
+    for i in 0..7 {
+        fx.db
+            .create_user(
+                &format!("u-cap-{i}"),
+                &format!("cap{i}@example.com"),
+                &format!("capuser{i}"),
+                Some("h"),
+                "C",
+                "",
+                None,
+                oxidean_core::Role::User,
+            )
+            .await
+            .unwrap();
+    }
+    let names = |n: usize| {
+        (0..n)
+            .map(|i| format!("\"capuser{i}\""))
+            .collect::<Vec<_>>()
+            .join(",")
+    };
+    // Seven distinct reviewers → rejected.
+    let res = rpc_json(
+        &fx.app,
+        &fx.cookie,
+        &format!(
+            r#"{{"procedure":"repo.actions.environments.upsert","input":{{"owner":"actowner","name":"actdemo","environment":"prod","protection":{{"required_reviewers":[{}]}}}}}}"#,
+            names(7)
+        ),
+    )
+    .await;
+    assert_eq!(res["ok"], false, "7 reviewers — {res}");
+    // Six distinct reviewers → accepted; a duplicate token doesn't count twice.
+    let res = rpc_json(
+        &fx.app,
+        &fx.cookie,
+        &format!(
+            r#"{{"procedure":"repo.actions.environments.upsert","input":{{"owner":"actowner","name":"actdemo","environment":"prod","protection":{{"required_reviewers":[{},"capuser0"]}}}}}}"#,
+            names(6)
+        ),
+    )
+    .await;
+    assert_eq!(res["ok"], true, "6 reviewers + dup — {res}");
+    assert_eq!(
+        res["data"]["environment"]["protection"]["required_reviewers"]
+            .as_array()
+            .unwrap()
+            .len(),
+        6,
+        "duplicate token deduped"
+    );
+}

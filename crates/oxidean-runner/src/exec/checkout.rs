@@ -287,6 +287,7 @@ mod tests {
             timeout_seconds: None,
             event_payload: None,
             matrix: None,
+            strategy: None,
             needs: None,
             container: None,
             services: None,

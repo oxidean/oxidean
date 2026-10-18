@@ -775,6 +775,7 @@ conformance_case!(needs_skipped_dep, "needs-skipped-dep");
 conformance_case!(needs_matrix_dep, "needs-matrix-dep");
 conformance_case!(strategy_matrix, "strategy-matrix");
 conformance_case!(matrix_basic, "matrix-basic");
+conformance_case!(strategy_context, "strategy-context");
 conformance_case!(matrix_include_exclude, "matrix-include-exclude");
 conformance_case!(matrix_max_parallel, "matrix-max-parallel");
 conformance_case!(matrix_fail_fast, "matrix-fail-fast");

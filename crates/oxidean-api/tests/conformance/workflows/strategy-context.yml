@@ -1,0 +1,11 @@
+name: strategy-context
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 2
+      matrix:
+        node: ['18', '20']
+    steps:
+      - run: echo "idx=${{ strategy.job-index }} total=${{ strategy.job-total }} ff=${{ strategy.fail-fast }} mp=${{ strategy.max-parallel }}"

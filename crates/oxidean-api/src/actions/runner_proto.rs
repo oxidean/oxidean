@@ -268,6 +268,9 @@ struct FetchTaskResponse {
     event_payload: Option<serde_json::Value>,
     /// Matrix assignment (`action_jobs.matrix_json`) → `matrix` context.
     matrix: Option<serde_json::Value>,
+    /// Per-leg strategy metadata (`action_jobs.strategy_json`) → `strategy`
+    /// context — `{"job-index","job-total","fail-fast","max-parallel"}`.
+    strategy: Option<serde_json::Value>,
     /// `needs.<id>.{result,outputs}` for dependents — `None` for need-less
     /// jobs.
     needs: Option<serde_json::Value>,
@@ -338,6 +341,7 @@ impl FetchTaskResponse {
             timeout_at: None,
             event_payload: None,
             matrix: None,
+            strategy: None,
             needs: None,
             timeout_seconds: None,
             container: None,
@@ -727,6 +731,10 @@ async fn fetch_task(
                 event_payload: Some(event_payload),
                 matrix: Some(
                     serde_json::from_str(&j.matrix_json).unwrap_or_else(|_| serde_json::json!({})),
+                ),
+                strategy: Some(
+                    serde_json::from_str(&j.strategy_json)
+                        .unwrap_or_else(|_| serde_json::json!({})),
                 ),
                 needs,
                 container: payload_json.get("container").cloned(),

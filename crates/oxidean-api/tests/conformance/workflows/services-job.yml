@@ -11,3 +11,4 @@ jobs:
           - 15432:5432
     steps:
       - run: echo with service
+      - run: echo "svc_port=${{ job.services.postgres.ports['5432'] }} net=${{ job.services.postgres.network }} cid_nonempty=${{ job.services.postgres.id != '' }}"

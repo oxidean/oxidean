@@ -48,10 +48,10 @@ download, annotations, `workflow_job` webhook.
 | 2. Triggers & filters | 20 | 2 | 0 | 0 |
 | 3. Events | 9 | 0 | 27 | 0 |
 | 4. Workflow-level keys | 8 | 0 | 0 | 0 |
-| 5. Jobs | 28 | 1 | 0 | 1 |
+| 5. Jobs | 29 | 0 | 0 | 1 |
 | 6. Steps | 17 | 1 | 1 | 1 |
 | 7. Expressions | 15 | 0 | 0 | 0 |
-| 8. Contexts | 22 | 2 | 0 | 0 |
+| 8. Contexts | 24 | 0 | 0 | 0 |
 | 9. Workflow commands & environment files | 17 | 4 | 1 | 0 |
 | 10. Default environment variables | 48 | 0 | 0 | 0 |
 | 11. Action metadata — action.yml | 14 | 2 | 1 | 1 |
@@ -59,7 +59,7 @@ download, annotations, `workflow_job` webhook.
 | 13. Artifacts | 11 | 1 | 1 | 0 |
 | 14. Dependency caching | 5 | 0 | 0 | 0 |
 | 15. Concurrency | 4 | 1 | 0 | 0 |
-| 16. Environments & deployments | 10 | 1 | 0 | 0 |
+| 16. Environments & deployments | 11 | 0 | 0 | 0 |
 | 17. `GITHUB_TOKEN` permissions | 8 | 1 | 0 | 0 |
 | 18. OIDC | 9 | 0 | 0 | 0 |
 | 19. Secrets & configuration variables | 13 | 0 | 0 | 0 |
@@ -67,7 +67,7 @@ download, annotations, `workflow_job` webhook.
 | 21. Security behaviours | 8 | 1 | 0 | 0 |
 | 22. Limits | 7 | 0 | 0 | 1 |
 | 23. Run lifecycle & integrations | 13 | 2 | 1 | 1 |
-| 24. GitHub REST API for Actions | 11 | 2 | 2 | 0 |
+| 24. GitHub REST API for Actions | 13 | 1 | 1 | 0 |
 
 ## 1. Workflow files & discovery (`file.`)
 
@@ -209,7 +209,7 @@ and <https://docs.github.com/en/actions/using-jobs/using-a-matrix-for-your-jobs>
 | `job.continue-on-error` | Job-level `continue-on-error:` — leg reports `failure` but the run stays green; exempt from `fail-fast` | supported | case:continue-on-error-job, case:continue-on-error-matrix, case:reusable-coe-callee | Evaluated per matrix leg (`${{ matrix.* }}` allowed). `needs.<job>.result` remains `failure` so dependents without a status function skip, matching GitHub. Rejected on `uses:` caller jobs (as GitHub does). |
 | `job.container` | `container:` — image shorthand and object form | supported | case:container-job, test:crates/oxidean-runner/src/exec/containers.rs::spec_object_form | Requires a Docker-capable runner; absent Docker the job fails loudly. |
 | `job.services` | `services:` — service containers | supported | case:services-job, test:crates/oxidean-runner/src/exec/containers.rs::spec_object_form | Host jobs reach services on published ports; container jobs reach them by service id. |
-| `job.services-ports-ctx` | `job.services.<id>.ports` context | partial | case:services-job | Services run; the mapped-ports context is not populated. Closes in P13. |
+| `job.services-ports-ctx` | `job.services.<id>.ports` context | supported | case:services-job | `{id, network, ports}` populated per service — ports resolve from `HostConfig.PortBindings` (survives a dead service). |
 | `job.uses` | `jobs.<id>.uses:` — call a reusable workflow | supported | case:reusable-workflow-local, case:reusable-workflow-remote, case:reusable-nested | Caller row stays durable and `in_progress` until callee legs close; expansion is deferred to the scheduler. |
 | `job.with` | `jobs.<id>.with:` — inputs to a called workflow | supported | case:reusable-workflow-local, case:reusable-missing-input, case:reusable-undeclared-input, case:reusable-type-mismatch | Required/undeclared inputs and type mismatches fail the caller loudly. |
 | `job.secrets` | `jobs.<id>.secrets:` — secrets to a called workflow, `inherit` | supported | case:reusable-secrets-map, case:reusable-secrets-none, case:reusable-inherit-secret, case:reusable-missing-secret | `inherit` passes the repo's secret set; required-but-absent callee secrets fail loudly. |
@@ -280,12 +280,12 @@ that we also restrict.
 | `ctx.github` | `github` context — sha, ref, ref_name, ref_type, event_name, event payload, repository*, actor*, workflow*, job, run_*, server_url, api_url, graphql_url, ref_protected, retention_days, triggering_actor, action*, base_ref, head_ref, workspace, token | supported | case:expr-github-ctx, case:ctx-github-extra, test:crates/oxidean-runner/src/exec/context.rs::runner_context | `graphql_url` is a shape-only value (no GraphQL endpoint). `github.action`/`action_repository`/`action_ref` are per-step static names incl. `if:` self-reference; `action_path` resolves inside action bodies; `action_status` is set for post phases. `triggering_actor` keeps the original actor on reruns (GitHub restamps). |
 | `ctx.env` | `env` context — workflow/job/step layering | supported | case:expr-env-layering, case:workflow-env | |
 | `ctx.vars` | `vars` context — configuration variables | supported | case:expr-vars-empty, case:vars-context, test:crates/oxidean-api/tests/actions_vars.rs::actions_vars_merge_precedence | Repo/org/environment stores; narrowest scope wins on collisions; values are plaintext by design. |
-| `ctx.job` | `job` context — status | partial | test:crates/oxidean-runner/src/exec/context.rs::sync_job_ctx | `status` only; `container`/`services` sub-objects not populated. P13. |
+| `ctx.job` | `job` context — status, container, services | supported | case:services-job, case:container-job, test:crates/oxidean-runner/src/exec/context.rs::sync_job_ctx_preserves_container_and_services | `status` merges across transitions; `container` carries `{id, network}`; `services.<id>` carries `{id, network, ports}` (container → host port). |
 | `ctx.jobs` | `jobs.<id>.result` / `.outputs` | supported | case:needs-outputs | |
 | `ctx.steps` | `steps.<id>.outcome` / `.conclusion` / `.outputs` | supported | case:expr-steps-context, case:step-conclusion-coe | |
 | `ctx.runner` | `runner` context — os, arch, name, temp, tool_cache, debug, environment | supported | case:ctx-github-extra, test:crates/oxidean-runner/src/exec/mod.rs::debug_flags_resolve_from_env_vars_and_secrets | `environment` is always `self-hosted`; `debug` = "1" when `ACTIONS_RUNNER_DEBUG` resolves on (env/vars/secrets, incl. rerun debug logging). |
 | `ctx.secrets` | `secrets` context | supported | case:secrets-context | |
-| `ctx.strategy` | `strategy` context — job-index, job-total, fail-fast, max-parallel | partial | case:matrix-basic | `matrix` carries the leg; `strategy.*` metadata is not populated. P13. |
+| `ctx.strategy` | `strategy` context — job-index, job-total, fail-fast, max-parallel | supported | case:strategy-context | Stamped per leg at emit (`job-index` is expansion order). Native runner only — the gitea proto narrows `strategy.matrix` per leg so stock `act_runner` sees index 0/total 1. |
 | `ctx.matrix` | `matrix` context | supported | case:matrix-basic | |
 | `ctx.needs` | `needs.<id>.result` / `.outputs` | supported | case:needs-outputs, case:needs-failure-fn | |
 | `ctx.inputs` | `inputs` context — workflow_dispatch / workflow_call inputs | supported | test:crates/oxidean-api/src/actions/rpc.rs::dispatch_inputs_resolve_types_and_defaults, case:reusable-workflow-local | Mirrors `github.event.inputs` — typed values resolve in callee steps. |
@@ -515,7 +515,7 @@ Source: <https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-
 |------|---------|--------|----------|-------|
 | `envr.auto-create` | A job naming an environment creates it if missing | supported | test:crates/oxidean-api/tests/actions_phase7.rs::p7_environment_auto_create_and_deployments | |
 | `envr.required-reviewers` | `required_reviewers` hold the job for approval | supported | test:crates/oxidean-api/tests/actions_phase7.rs::p7_environment_required_reviewers_hold | `waiting_approval` until a reviewer releases it. |
-| `envr.reviewer-cap` | Max 6 reviewers per environment | partial | test:crates/oxidean-api/tests/actions_phase7.rs::p7_environment_required_reviewers_hold | The cap is not enforced — GitHub rejects more; we store them. P13 hardening. |
+| `envr.reviewer-cap` | Max 6 reviewers per environment | supported | test:crates/oxidean-api/tests/actions_endpoints.rs::environment_reviewer_cap | `environments.upsert` rejects >6 resolved reviewers; duplicate tokens dedupe before the count. |
 | `envr.prevent-self-review` | `prevent_self_review` — the deployer cannot approve | supported | test:crates/oxidean-api/tests/actions_ui_surface.rs::review_deployment_membership_and_self_review_gates | Stored in the environment's protection JSON; the review endpoint rejects with `repo.actions.self_review_forbidden` and `can_review` hides the control. |
 | `envr.wait-timer` | `wait_timer_minutes` delays the deployment | supported | test:crates/oxidean-api/tests/actions_phase7.rs::p7_environment_wait_timer | GitHub caps at 30 days; ours accepts any non-negative value — cap not enforced. |
 | `envr.branch-policy` | `deployment_branches` allowlist fails non-matching refs | supported | test:crates/oxidean-api/tests/actions_phase7.rs::p7_environment_branch_allowlist_fails_loudly | Loud failure on disallowed refs, not a silent skip. |
@@ -665,9 +665,9 @@ class, not URL parity.
 |------|---------|--------|----------|-------|
 | `api.runs` | List/get workflow runs | supported | test:crates/oxidean-api/tests/actions_endpoints.rs::list_runs_paginates, test:crates/oxidean-api/tests/actions_endpoints.rs::get_run_anonymous_includes_jobs_and_timestamps | `actions_listRuns` / `actions_getRun` RPC. |
 | `api.runs-mutate` | Cancel / rerun (all, failed, one job) | supported | test:crates/oxidean-api/tests/actions_endpoints.rs::rerun_and_cancel_run | `actions_rerunRun` / `actions_cancelRun`. |
-| `api.runs-delete` | Delete a workflow run | unsupported | test:crates/oxidean-api/tests/actions_endpoints.rs::list_runs_paginates | P16. |
+| `api.runs-delete` | Delete a workflow run | supported | test:crates/oxidean-api/tests/actions_endpoints.rs::rerun_and_cancel_run | `repo.actions.deleteRun` (Write+). |
 | `api.jobs` | List jobs / get a job | supported | test:crates/oxidean-api/tests/actions_endpoints.rs::get_run_anonymous_includes_jobs_and_timestamps | Jobs embed in the run detail. |
-| `api.logs` | Stream/download job logs | partial | test:crates/oxidean-api/tests/actions_rpc.rs::actions_rpc_job_logs | Streamed per job; no archive download. P16. |
+| `api.logs` | Stream/download job logs | supported | test:crates/oxidean-api/tests/actions_rpc.rs::actions_rpc_job_logs, test:crates/oxidean-api/tests/actions_endpoints.rs::download_run_logs_zip | Per-job log reads via RPC; run-level `logs.zip` archive at `GET /api/repos/{o}/{r}/actions/runs/{run}/logs`. |
 | `api.artifacts` | List/download artifacts | supported | test:crates/oxidean-api/tests/actions_phase8.rs::p8_retention_sweep_compresses_terminal_and_deletes_aged | Runner protocol + artifact endpoint. |
 | `api.cache` | Cache endpoints | supported | case:cache-service-absent,test:crates/oxidean-api/tests/actions_cache_service.rs::cache_roundtrip_exact_restore | `_apis/artifactcache` REST surface; repo management via `repo.actions.listCaches`/`deleteCache`. |
 | `api.runners` | Runner registration / tokens / labels | supported | test:crates/oxidean-api/tests/actions_runner_protocol.rs::actions_runner_protocol_register, test:crates/oxidean-api/tests/actions_runner_protocol.rs::actions_runner_protocol_declare_labels | Plus the gitea runner.v1 bridge for stock act_runner. |

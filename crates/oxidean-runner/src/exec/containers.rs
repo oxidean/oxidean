@@ -21,13 +21,23 @@ use crate::client::Task;
 /// Pull/start operations can take a while on a cold image cache.
 const DOCKER_OP_TIMEOUT: Duration = Duration::from_secs(600);
 
+/// One started service — the `job.services.<name>` context entry reads
+/// `{id, network, ports}` (container port → host port) from this.
+#[derive(Debug)]
+struct ServiceInfo {
+    name: String,
+    id: String,
+    /// `(container_port, host_port)` pairs from `docker port`.
+    ports: Vec<(String, String)>,
+}
+
 /// Running container set for one job. `job_container` is `None` when the job
 /// declares only `services:` (steps stay on the host; services still get the
 /// shared network — reachable via mapped ports on localhost).
 pub(crate) struct JobContainers {
     network: String,
     job_container: Option<String>,
-    service_ids: Vec<String>,
+    services: Vec<ServiceInfo>,
 }
 
 /// One parsed `container:`/service spec (object form or `image` shorthand).
@@ -173,6 +183,33 @@ impl JobContainers {
         self.job_container.as_deref()
     }
 
+    /// `job.container`/`job.services` subtrees for the `job` context —
+    /// `{id, network}` on the container and `{id, network, ports}` per
+    /// service (`ports` maps container port → resolved host port).
+    pub(crate) fn job_context(&self) -> serde_json::Value {
+        let mut v = serde_json::json!({});
+        if let Some(id) = &self.job_container {
+            v["container"] = serde_json::json!({"id": id, "network": self.network});
+        }
+        if !self.services.is_empty() {
+            let mut svcs = serde_json::json!({});
+            for s in &self.services {
+                let ports: serde_json::Map<String, JsonValue> = s
+                    .ports
+                    .iter()
+                    .map(|(cp, hp)| (cp.clone(), JsonValue::String(hp.clone())))
+                    .collect();
+                svcs[&s.name] = serde_json::json!({
+                    "id": s.id,
+                    "network": self.network,
+                    "ports": ports,
+                });
+            }
+            v["services"] = svcs;
+        }
+        v
+    }
+
     /// Bring up the network, services, then the job container.
     pub(crate) async fn setup(
         task: &Task,
@@ -198,7 +235,7 @@ impl JobContainers {
         let mut guard = JobContainers {
             network: network.clone(),
             job_container: None,
-            service_ids: Vec::new(),
+            services: Vec::new(),
         };
         let out = docker(&["network".into(), "create".into(), network.clone()]).await?;
         if !out.status.success() {
@@ -250,7 +287,30 @@ impl JobContainers {
                     ));
                 }
                 let cid = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                guard.service_ids.push(cid);
+                // Host-side port mappings for `job.services.<id>.ports`.
+                // `HostConfig.PortBindings` (not `docker port` — an exited
+                // service reports no NetworkSettings ports, but the binding
+                // config still reflects what was requested).
+                let ports = if spec.ports.is_empty() {
+                    Vec::new()
+                } else {
+                    docker(&[
+                        "inspect".into(),
+                        "--format".into(),
+                        "{{json .HostConfig.PortBindings}}".into(),
+                        cid.clone(),
+                    ])
+                    .await
+                    .ok()
+                    .filter(|o| o.status.success())
+                    .map(|o| parse_port_bindings(&String::from_utf8_lossy(&o.stdout)))
+                    .unwrap_or_default()
+                };
+                guard.services.push(ServiceInfo {
+                    name: name.clone(),
+                    id: cid,
+                    ports,
+                });
                 logger
                     .line(&format!("Started service '{name}' ({})", spec.image))
                     .await;
@@ -309,16 +369,47 @@ impl JobContainers {
     }
 }
 
+/// `docker inspect` `HostConfig.PortBindings` → `(container_port, host_port)`
+/// pairs. Shape: `{"5432/tcp": [{"HostIp": "0.0.0.0", "HostPort": "32768"}]}`.
+/// Multiple bind addresses collapse to the first entry per container port.
+fn parse_port_bindings(output: &str) -> Vec<(String, String)> {
+    let Ok(v) = serde_json::from_str::<JsonValue>(output) else {
+        return Vec::new();
+    };
+    let mut pairs: Vec<(String, String)> = Vec::new();
+    if let Some(map) = v.as_object() {
+        for (key, bindings) in map {
+            let cport = key.split('/').next().unwrap_or_default();
+            let hport = bindings
+                .as_array()
+                .and_then(|a| a.first())
+                .and_then(|b| b.get("HostPort"))
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+            if !cport.is_empty() && !hport.is_empty() && !pairs.iter().any(|(cp, _)| cp == cport) {
+                pairs.push((cport.to_string(), hport.to_string()));
+            }
+        }
+    }
+    pairs.sort();
+    pairs
+}
+
 impl Drop for JobContainers {
     fn drop(&mut self) {
         // Sync teardown — Drop can't await; `docker rm -f`/`network rm` are
         // fast and best-effort. Silent on error: teardown must never panic.
-        for id in self.service_ids.iter().chain(self.job_container.iter()) {
+        for id in self
+            .services
+            .iter()
+            .map(|s| &s.id)
+            .chain(self.job_container.iter())
+        {
             let _ = std::process::Command::new("docker")
                 .args(["rm", "-f", id])
                 .output();
         }
-        if self.job_container.is_some() || !self.service_ids.is_empty() {
+        if self.job_container.is_some() || !self.services.is_empty() {
             let _ = std::process::Command::new("docker")
                 .args(["network", "rm", &self.network])
                 .output();
@@ -363,5 +454,22 @@ mod tests {
     fn spec_missing_image_fails() {
         let e = parse_spec(&serde_json::json!({"env": {}}), "service 'db'").unwrap_err();
         assert!(e.contains("service 'db'") && e.contains("image"));
+    }
+
+    #[test]
+    fn port_bindings_parse_container_to_host() {
+        let pairs = parse_port_bindings(
+            r#"{"5432/tcp":[{"HostIp":"0.0.0.0","HostPort":"32768"},{"HostIp":"::","HostPort":"32768"}],"6379/tcp":[{"HostIp":"","HostPort":"40001"}]}"#,
+        );
+        assert_eq!(
+            pairs,
+            vec![
+                ("5432".to_string(), "32768".to_string()),
+                ("6379".to_string(), "40001".to_string()),
+            ],
+            "first bind wins; proto stripped"
+        );
+        assert!(parse_port_bindings("").is_empty());
+        assert!(parse_port_bindings("null").is_empty());
     }
 }

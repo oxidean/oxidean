@@ -101,6 +101,10 @@ pub struct ActionJobRow {
     pub needs_json: String,
     /// Expanded matrix values for this leg (Phase 3).
     pub matrix_json: String,
+    /// Per-leg `strategy` context: `{"job_index","job_total","fail_fast",
+    /// "max_parallel"}` captured at emit — the leg index is expansion order
+    /// and cannot be re-derived at claim.
+    pub strategy_json: String,
     /// `needs.*.outputs` materialized for downstream evaluation (Phase 3).
     pub outputs_json: String,
     /// `$GITHUB_STEP_SUMMARY` markdown reported at terminal (Phase 4).
@@ -164,6 +168,9 @@ pub struct JobInsert {
     pub needs_json: String,
     /// JSON object of this leg's matrix values; `'{}'` until Phase 3.
     pub matrix_json: String,
+    /// JSON object `{"job_index","job_total","fail_fast","max_parallel"}`
+    /// for the `strategy` context; `'{}'` until Phase 3.
+    pub strategy_json: String,
     /// JSON object of declared `outputs:` exprs; `'{}'` until Phase 3.
     pub outputs_json: String,
     pub concurrency_group: Option<String>,
@@ -204,6 +211,7 @@ impl JobInsert {
             payload_sha: None,
             needs_json: "[]".into(),
             matrix_json: "{}".into(),
+            strategy_json: "{}".into(),
             outputs_json: "{}".into(),
             concurrency_group: None,
             status: "queued".into(),
@@ -232,9 +240,9 @@ pub struct ActionPayloadRow {
 /// Job SELECT-list per dialect — only timestamp casts differ. Keeping the
 /// list in one const per dialect prevents column drift between
 /// `find_job_by_id`, `list_jobs_for_run`, and the claim path.
-const JOB_COLS_SQLITE: &str = "id, run_id, job_key, matrix_key, name, runs_on_json, status, payload_sha, needs_json, matrix_json, outputs_json, summary_md, concurrency_group, attempt, timeout_at, approval_hold, environment_name, deployment_wait_minutes, deployment_not_before, caller_job_id, continue_on_error, debug_logging, runner_id, started_at, finished_at, heartbeat_at, log_index";
-const JOB_COLS_PG: &str = "id, run_id, job_key, matrix_key, name, runs_on_json, status, payload_sha, needs_json, matrix_json, outputs_json, summary_md, concurrency_group, attempt, to_char(timeout_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS timeout_at, approval_hold, environment_name, deployment_wait_minutes, deployment_not_before::text AS deployment_not_before, caller_job_id, continue_on_error, debug_logging, runner_id, started_at::text AS started_at, finished_at::text AS finished_at, heartbeat_at, log_index";
-const JOB_COLS_MYSQL: &str = "id, run_id, job_key, matrix_key, name, runs_on_json, status, payload_sha, needs_json, matrix_json, outputs_json, summary_md, concurrency_group, attempt, DATE_FORMAT(timeout_at, '%Y-%m-%dT%H:%i:%sZ') AS timeout_at, approval_hold, environment_name, deployment_wait_minutes, deployment_not_before, caller_job_id, continue_on_error, debug_logging, runner_id, CAST(started_at AS CHAR) AS started_at, CAST(finished_at AS CHAR) AS finished_at, heartbeat_at, log_index";
+const JOB_COLS_SQLITE: &str = "id, run_id, job_key, matrix_key, name, runs_on_json, status, payload_sha, needs_json, matrix_json, strategy_json, outputs_json, summary_md, concurrency_group, attempt, timeout_at, approval_hold, environment_name, deployment_wait_minutes, deployment_not_before, caller_job_id, continue_on_error, debug_logging, runner_id, started_at, finished_at, heartbeat_at, log_index";
+const JOB_COLS_PG: &str = "id, run_id, job_key, matrix_key, name, runs_on_json, status, payload_sha, needs_json, matrix_json, strategy_json, outputs_json, summary_md, concurrency_group, attempt, to_char(timeout_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS timeout_at, approval_hold, environment_name, deployment_wait_minutes, deployment_not_before::text AS deployment_not_before, caller_job_id, continue_on_error, debug_logging, runner_id, started_at::text AS started_at, finished_at::text AS finished_at, heartbeat_at, log_index";
+const JOB_COLS_MYSQL: &str = "id, run_id, job_key, matrix_key, name, runs_on_json, status, payload_sha, needs_json, matrix_json, strategy_json, outputs_json, summary_md, concurrency_group, attempt, DATE_FORMAT(timeout_at, '%Y-%m-%dT%H:%i:%sZ') AS timeout_at, approval_hold, environment_name, deployment_wait_minutes, deployment_not_before, caller_job_id, continue_on_error, debug_logging, runner_id, CAST(started_at AS CHAR) AS started_at, CAST(finished_at AS CHAR) AS finished_at, heartbeat_at, log_index";
 
 macro_rules! map_job_row {
     ($row:expr) => {{
@@ -250,6 +258,7 @@ macro_rules! map_job_row {
             payload_sha: r.try_get("payload_sha").unwrap_or(None),
             needs_json: r.try_get("needs_json").unwrap_or_else(|_| "[]".into()),
             matrix_json: r.try_get("matrix_json").unwrap_or_else(|_| "{}".into()),
+            strategy_json: r.try_get("strategy_json").unwrap_or_else(|_| "{}".into()),
             outputs_json: r.try_get("outputs_json").unwrap_or_else(|_| "{}".into()),
             summary_md: r.try_get("summary_md").unwrap_or(None),
             concurrency_group: r.try_get("concurrency_group").unwrap_or(None),
@@ -619,11 +628,12 @@ pub async fn insert_job(pool: &DbPool, job: &JobInsert) -> Result<ActionJobRow, 
         DbPool::Postgres(p) => {
             let mut tx = p.begin().await.map_err(|e| e.to_string())?;
             sqlx::query(r#"INSERT INTO action_jobs
-                (id, run_id, job_key, matrix_key, name, runs_on_json, payload_sha, needs_json, matrix_json, outputs_json, concurrency_group, status, timeout_at, approval_hold, environment_name, deployment_wait_minutes, deployment_not_before, caller_job_id, continue_on_error)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::timestamptz,$14,$15,$16,$17,$18,$19)"#)
+                (id, run_id, job_key, matrix_key, name, runs_on_json, payload_sha, needs_json, matrix_json, strategy_json, outputs_json, concurrency_group, status, timeout_at, approval_hold, environment_name, deployment_wait_minutes, deployment_not_before, caller_job_id, continue_on_error)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::timestamptz,$15,$16,$17,$18,$19,$20)"#)
                 .bind(&job.id).bind(&job.run_id).bind(&job.job_key).bind(&job.matrix_key)
                 .bind(&job.name).bind(&job.runs_on_json).bind(&job.payload_sha)
-                .bind(&job.needs_json).bind(&job.matrix_json).bind(&job.outputs_json)
+                .bind(&job.needs_json).bind(&job.matrix_json).bind(&job.strategy_json)
+                .bind(&job.outputs_json)
                 .bind(&job.concurrency_group).bind(&job.status).bind(&job.timeout_at)
                 .bind(job.approval_hold)
                 .bind(&job.environment_name).bind(job.deployment_wait_minutes)
@@ -640,11 +650,12 @@ pub async fn insert_job(pool: &DbPool, job: &JobInsert) -> Result<ActionJobRow, 
         DbPool::MySql(p) => {
             let mut tx = p.begin().await.map_err(|e| e.to_string())?;
             sqlx::query(r#"INSERT INTO action_jobs
-                (id, run_id, job_key, matrix_key, name, runs_on_json, payload_sha, needs_json, matrix_json, outputs_json, concurrency_group, status, timeout_at, approval_hold, environment_name, deployment_wait_minutes, deployment_not_before, caller_job_id, continue_on_error)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,STR_TO_DATE(REPLACE(REPLACE(?, 'T', ' '), 'Z', ''), '%Y-%m-%d %H:%i:%s'),?,?,?,?,?,?)"#)
+                (id, run_id, job_key, matrix_key, name, runs_on_json, payload_sha, needs_json, matrix_json, strategy_json, outputs_json, concurrency_group, status, timeout_at, approval_hold, environment_name, deployment_wait_minutes, deployment_not_before, caller_job_id, continue_on_error)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,STR_TO_DATE(REPLACE(REPLACE(?, 'T', ' '), 'Z', ''), '%Y-%m-%d %H:%i:%s'),?,?,?,?,?,?)"#)
                 .bind(&job.id).bind(&job.run_id).bind(&job.job_key).bind(&job.matrix_key)
                 .bind(&job.name).bind(&job.runs_on_json).bind(&job.payload_sha)
-                .bind(&job.needs_json).bind(&job.matrix_json).bind(&job.outputs_json)
+                .bind(&job.needs_json).bind(&job.matrix_json).bind(&job.strategy_json)
+                .bind(&job.outputs_json)
                 .bind(&job.concurrency_group).bind(&job.status).bind(&job.timeout_at)
                 .bind(job.approval_hold)
                 .bind(&job.environment_name).bind(job.deployment_wait_minutes)
@@ -667,11 +678,12 @@ pub async fn insert_job(pool: &DbPool, job: &JobInsert) -> Result<ActionJobRow, 
         DbPool::Sqlite(p) => {
             let mut tx = p.begin().await.map_err(|e| e.to_string())?;
             sqlx::query(r#"INSERT INTO action_jobs
-                (id, run_id, job_key, matrix_key, name, runs_on_json, payload_sha, needs_json, matrix_json, outputs_json, concurrency_group, status, timeout_at, approval_hold, environment_name, deployment_wait_minutes, deployment_not_before, caller_job_id, continue_on_error)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"#)
+                (id, run_id, job_key, matrix_key, name, runs_on_json, payload_sha, needs_json, matrix_json, strategy_json, outputs_json, concurrency_group, status, timeout_at, approval_hold, environment_name, deployment_wait_minutes, deployment_not_before, caller_job_id, continue_on_error)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"#)
                 .bind(&job.id).bind(&job.run_id).bind(&job.job_key).bind(&job.matrix_key)
                 .bind(&job.name).bind(&job.runs_on_json).bind(&job.payload_sha)
-                .bind(&job.needs_json).bind(&job.matrix_json).bind(&job.outputs_json)
+                .bind(&job.needs_json).bind(&job.matrix_json).bind(&job.strategy_json)
+                .bind(&job.outputs_json)
                 .bind(&job.concurrency_group).bind(&job.status).bind(&job.timeout_at)
                 .bind(job.approval_hold)
                 .bind(&job.environment_name).bind(job.deployment_wait_minutes)
@@ -703,6 +715,7 @@ pub async fn insert_job(pool: &DbPool, job: &JobInsert) -> Result<ActionJobRow, 
         payload_sha: job.payload_sha.clone(),
         needs_json: job.needs_json.clone(),
         matrix_json: job.matrix_json.clone(),
+        strategy_json: job.strategy_json.clone(),
         outputs_json: job.outputs_json.clone(),
         summary_md: None,
         concurrency_group: job.concurrency_group.clone(),

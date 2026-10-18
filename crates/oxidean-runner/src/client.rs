@@ -76,6 +76,9 @@ pub struct Task {
     pub event_payload: Option<serde_json::Value>,
     /// Matrix assignment → `matrix` context.
     pub matrix: Option<serde_json::Value>,
+    /// Per-leg `{"job-index","job-total","fail-fast","max-parallel"}` →
+    /// `strategy` context (leg index is expansion order, stamped at emit).
+    pub strategy: Option<serde_json::Value>,
     /// `needs.<id>.{result,outputs}` for dependents — step expressions can
     /// read `needs.*.outputs.*`.
     pub needs: Option<serde_json::Value>,

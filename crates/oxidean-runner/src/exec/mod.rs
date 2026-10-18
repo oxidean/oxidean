@@ -471,6 +471,23 @@ pub async fn execute(client: &Client, task: &Task, config: &Config) -> &'static 
         &runner_temp_env,
         &secrets,
     );
+    // `job.container`/`job.services` — runtime ids, network, and resolved
+    // host ports are only knowable after `JobContainers::setup`.
+    if let Some(c) = &_containers {
+        let mut job = ctx
+            .get_context("job")
+            .cloned()
+            .filter(|v| v.is_object())
+            .unwrap_or_else(|| serde_json::json!({}));
+        if let (Some(job), Some(patch)) =
+            (job.as_object_mut(), c.job_context().as_object().cloned())
+        {
+            for (k, v) in patch {
+                job.insert(k, v);
+            }
+            ctx.set_context("job", serde_json::Value::Object(job.clone()));
+        }
+    }
     // Workflow env → job env layering: each evaluates against the context of
     // the layers before it and feeds both `env.*` expressions and the step
     // process env.
@@ -944,6 +961,7 @@ mod tests {
             timeout_seconds: None,
             event_payload: None,
             matrix: None,
+            strategy: None,
             needs: None,
             container: None,
             services: None,

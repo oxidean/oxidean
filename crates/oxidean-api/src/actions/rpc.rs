@@ -1144,7 +1144,11 @@ pub async fn upsert_environment(
             },
         };
         match hit {
-            Some(uid) => reviewers.push(uid),
+            Some(uid) => {
+                if !reviewers.contains(&uid) {
+                    reviewers.push(uid);
+                }
+            }
             None => {
                 return Err(AppError::new(
                     "rpc.bad_input",
@@ -1152,6 +1156,13 @@ pub async fn upsert_environment(
                 ))
             }
         }
+    }
+    // GitHub caps required reviewers at 6 per environment.
+    if reviewers.len() > 6 {
+        return Err(AppError::new(
+            "rpc.bad_input",
+            "required_reviewers is capped at 6",
+        ));
     }
     let protection_json = serde_json::json!({
         "wait_timer_minutes": req.protection.wait_timer_minutes,
