@@ -52,15 +52,15 @@ download, annotations, `workflow_job` webhook.
 | 6. Steps | 19 | 0 | 0 | 1 |
 | 7. Expressions | 15 | 0 | 0 | 0 |
 | 8. Contexts | 24 | 0 | 0 | 0 |
-| 9. Workflow commands & environment files | 17 | 4 | 1 | 0 |
+| 9. Workflow commands & environment files | 18 | 3 | 1 | 0 |
 | 10. Default environment variables | 48 | 0 | 0 | 0 |
-| 11. Action metadata — action.yml | 15 | 2 | 0 | 1 |
+| 11. Action metadata — action.yml | 16 | 1 | 0 | 1 |
 | 12. Reusable workflows | 10 | 0 | 0 | 0 |
 | 13. Artifacts | 12 | 0 | 1 | 0 |
 | 14. Dependency caching | 5 | 0 | 0 | 0 |
 | 15. Concurrency | 5 | 0 | 0 | 0 |
 | 16. Environments & deployments | 11 | 0 | 0 | 0 |
-| 17. `GITHUB_TOKEN` permissions | 8 | 1 | 0 | 0 |
+| 17. `GITHUB_TOKEN` permissions | 9 | 0 | 0 | 0 |
 | 18. OIDC | 9 | 0 | 0 | 0 |
 | 19. Secrets & configuration variables | 13 | 0 | 0 | 0 |
 | 20. Runners & labels | 6 | 0 | 0 | 3 |
@@ -340,7 +340,7 @@ in the log either way.
 | `envfile.step-summary` | `$GITHUB_STEP_SUMMARY` → rendered step summary | supported | case:step-summary, test:crates/oxidean-api/tests/workflow_conformance.rs::step_summary_persists_on_job | |
 | `envfile.state` | `$GITHUB_STATE` → `STATE_*` in an action's post step | supported | case:uses-node-post, test:crates/oxidean-runner/src/exec/mod.rs::env_file_simple_and_blank_lines | Scoped to the writing action — `run:` writes are cleared, not leaked. |
 | `envfile.reserved` | Reserved names cannot be overridden via env files or secrets | supported | test:crates/oxidean-runner/src/exec/mod.rs::secrets_cannot_override_reserved_vars | Warns and skips the entry. |
-| `envfile.heredoc-collision` | Delimiter line inside the value truncates it | partial | test:crates/oxidean-runner/src/exec/mod.rs::env_file_heredoc | Same truncation rule as GitHub; an unterminated heredoc consumes the file tail — GitHub behaves identically. |
+| `envfile.heredoc-collision` | Delimiter line inside the value truncates it | supported | test:crates/oxidean-runner/src/exec/mod.rs::env_file_heredoc | Same truncation rule as GitHub; an unterminated heredoc consumes the file tail — GitHub behaves identically. |
 
 ## 10. Default environment variables (`env.`)
 
@@ -411,7 +411,7 @@ Source: <https://docs.github.com/en/actions/sharing-automations/creating-actions
 | `action.inputs` | `inputs.<id>` — description, required, default | supported | case:checkout-with-inputs, case:action-metadata-warnings | |
 | `action.input-defaults` | Scalar defaults (bool/number) stringified; expression defaults evaluated | supported | test:crates/oxidean-runner/src/exec/action.rs::resolve_inputs_applies_scalar_and_expr_defaults | `debug: false` reaches the action as `INPUT_DEBUG=false`; `${{ github.token }}` defaults resolve. |
 | `action.input-env-names` | `INPUT_<NAME>` env names preserve hyphens | supported | test:crates/oxidean-runner/src/exec/action.rs::input_env_names_preserve_hyphens | Matches @actions/core's space-only underscore rule. |
-| `action.inputs-required` | `required: true` without a value | partial | case:action-metadata-warnings | GitHub logs a warning (modern runners); we warn the same way — but enforcement details are GitHub behaviour unverified. |
+| `action.inputs-required` | `required: true` without a value | supported | case:action-metadata-warnings | GitHub does not fail the step (docs: "will not automatically return an error"); modern runners warn — we warn the same way. |
 | `action.unexpected-input` | `with:` keys not declared in `inputs:` warn | supported | case:action-metadata-warnings | `::warning::unexpected input(s)` in the log. |
 | `action.deprecation` | `deprecationMessage:` surfaces as a warning | supported | case:action-metadata-warnings | |
 | `action.outputs` | `outputs:` — composite `outputs.<id>.value` evaluated | supported | case:uses-local-composite, case:composite-env | |
@@ -539,7 +539,7 @@ and <https://docs.github.com/en/actions/writing-workflows/workflow-syntax-for-gi
 | `perm.unspecified-none` | A map resets unlisted scopes to `none` | supported | test:crates/oxidean-api/src/actions/parse.rs::permissions_map_contents_write | |
 | `perm.job-override` | A job-level block replaces the workflow-level one | supported | test:crates/oxidean-api/src/actions/parse.rs::effective_contents_permission_job_overrides_workflow | |
 | `perm.default-floor` | Unspecified `contents` falls back to the repo default | supported | test:crates/oxidean-api/src/actions/parse.rs::effective_contents_permission_defaults_to_read, test:crates/oxidean-api/tests/actions_phase7.rs::p7_default_permissions_floor | |
-| `perm.fork-read-only` | Fork PR runs get read-only tokens | partial | test:crates/oxidean-api/tests/actions_runner_protocol.rs::actions_runner_protocol_pull_request_provenance_gate | Provenance-gated; the write-to-read downgrade is enforced at token mint, and fork runs hold for approval. Exact per-scope narrowing on forks is GitHub behaviour unverified. |
+| `perm.fork-read-only` | Fork PR runs get read-only tokens | supported | test:crates/oxidean-api/tests/actions_runner_protocol.rs::actions_runner_protocol_pull_request_provenance_gate | Provenance-gated; every `write` grant drops to `read` across the whole scope map at token mint (`id-token` included — `write` gates OIDC, so fork runs cannot mint identity tokens), and fork runs hold for approval. |
 | `perm.id-token` | `id-token: write` mints OIDC credentials | supported | test:crates/oxidean-api/tests/actions_phase7.rs::p7_id_token_request_credentials, case:oidc-curl | Only scope that changes job env today; other scopes are recorded in the payload for the runner/API surface. |
 
 ## 18. OIDC (`oidc.`)
