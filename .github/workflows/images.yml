@@ -45,6 +45,12 @@ on:
   workflow_run:
     workflows: ["ox CLI"]
     types: [completed]
+  # Hourly backstop for leaked oxidean-pr-<n> Railway envs — merged-PR
+  # closed runs are cancelled before jobs start, so cleanup-pr cannot be
+  # the only teardown. Leaked envs hold volumes until the 20/project cap
+  # breaks every later bind.
+  schedule:
+    - cron: "23 * * * *"
   workflow_dispatch:
 
 concurrency:
@@ -572,6 +578,29 @@ jobs:
                 && echo "deleted ${pkg} version ${id}" || echo "warn: delete failed for ${pkg} ${id}"
             done
           done
+
+  # pull_request:closed runs are cancelled before jobs start on merge —
+  # GitHub removes refs/pull/<n>/merge with the PR — so the cleanup-pr job
+  # above cannot be the only teardown for the Railway side. This hourly
+  # sweep deletes oxidean-pr-<n> envs whose PR is no longer open (volumes
+  # included), keeping the project under the 20-volume cap. Manual run:
+  # scripts/railway-pr-env-sweep.sh with RAILWAY_API_TOKEN set.
+  sweep-pr-envs:
+    name: sweep stale pr environments
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v7
+      - name: delete Railway envs for closed PRs
+        env:
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
+          RAILWAY_PROJECT_ID: cec803d0-289b-4078-80cf-7291c16fc5ec
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: scripts/railway-pr-env-sweep.sh
 
   # An ox-v* tag's release lane finished → the tag's assets are live. Repin
   # staging api's OXIDEAN_CLI_DIST_URL and re-pull so the container entrypoint
