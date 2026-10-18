@@ -294,7 +294,6 @@ export function ActionsSettingsPanel(props: {
             }
           </ul>
         </div>
-        ;
         <div className="mt-6 flex flex-col gap-4" data-testid="actions-permissions-section">
           <h3 className="text-[15px] font-semibold text-foreground">Workflow permissions</h3>
           <div className="flex flex-col gap-1.5">
@@ -439,7 +438,6 @@ escape hatch; popup is anchor-scoped under the Select root. */}
             </div>
           </div>
         </div>
-        ;
         <ActionsEnvironmentsPanel owner={owner} name={name} can_admin={canAdmin} />
         <div className="mt-2">
           <h3 className="mb-1 text-[15px] font-semibold text-foreground">Deployments</h3>

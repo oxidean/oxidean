@@ -184,7 +184,6 @@ function AnonLandingImpl() @{
             <AppLink href="/signup" data-anon-signup-cta className={cn(buttonVariants())}>
               Get started
             </AppLink>
-            ;
             <AppLink href="/explore" className={cn(buttonVariants({ variant: "secondary" }))}>
               Explore
             </AppLink>
@@ -252,7 +251,6 @@ function AnonLandingImpl() @{
           <AppLink href="/signup" data-anon-signup-cta className={cn(buttonVariants())}>
             Get started
           </AppLink>
-          ;
           <AppLink href="/explore" className={cn(buttonVariants({ variant: "secondary" }))}>
             Explore
           </AppLink>
