@@ -606,6 +606,97 @@ jobs:
     let _ = repos_dir;
 }
 
+/// The generic lifecycle map fires for every wired event name and honours
+/// `types:` filtering on each — the mutation-site wiring layers on top.
+#[tokio::test]
+async fn p6_lifecycle_generic_events() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("t.db").display()))
+        .await
+        .unwrap();
+    db.migrate().await.unwrap();
+    let bare = dir.path().join("p6-g").join("p6-demo.git");
+    std::fs::create_dir_all(bare.parent().unwrap()).unwrap();
+
+    let yaml = br#"
+name: L2
+on:
+  issue_comment:
+    types: [created]
+  create: {}
+  delete: {}
+  watch: {}
+  fork: {}
+  pull_request_review:
+    types: [dismissed]
+  pull_request_review_comment: {}
+  registry_package: {}
+jobs:
+  l:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo l
+"#;
+    let (uid, repo_id, _tip) = mk_user_repo(&db, "g", &bare, yaml).await;
+    let git: Arc<dyn GitBackend> = Arc::new(CliGitBackend::new());
+
+    let ev = |event_name: &'static str, action: &str| LifecycleEvent {
+        bare_repo: bare.clone(),
+        repository_id: repo_id.clone(),
+        default_branch: "main".into(),
+        event_name,
+        action: action.to_string(),
+        payload: serde_json::json!({"action": action}),
+        actor_id: Some(uid.clone()),
+        actions_enabled_instance: true,
+    };
+
+    // types:[created] — edited is filtered out, created fires.
+    notify_lifecycle_actions(&db, git.as_ref(), &ev("issue_comment", "edited")).await;
+    assert_eq!(run_count(&db, &repo_id).await, 0);
+    notify_lifecycle_actions(&db, git.as_ref(), &ev("issue_comment", "created")).await;
+    assert_eq!(run_count(&db, &repo_id).await, 1);
+
+    // Empty types — every action fires.
+    for (name, action) in [
+        ("create", "created"),
+        ("delete", "deleted"),
+        ("watch", "started"),
+        ("fork", "created"),
+        ("pull_request_review_comment", "created"),
+        ("registry_package", "published"),
+    ] {
+        notify_lifecycle_actions(&db, git.as_ref(), &ev(name, action)).await;
+    }
+    assert_eq!(run_count(&db, &repo_id).await, 7);
+
+    // pull_request_review types:[dismissed] — submitted filtered, dismissed fires.
+    notify_lifecycle_actions(&db, git.as_ref(), &ev("pull_request_review", "submitted")).await;
+    assert_eq!(run_count(&db, &repo_id).await, 7);
+    notify_lifecycle_actions(&db, git.as_ref(), &ev("pull_request_review", "dismissed")).await;
+    assert_eq!(run_count(&db, &repo_id).await, 8);
+
+    let runs = db
+        .list_action_runs_for_repo(&repo_id, &Default::default(), 100, 0)
+        .await
+        .unwrap();
+    for name in [
+        "issue_comment",
+        "create",
+        "delete",
+        "watch",
+        "fork",
+        "pull_request_review",
+        "pull_request_review_comment",
+        "registry_package",
+    ] {
+        assert!(
+            runs.iter().any(|r| r.event == name),
+            "missing run for {name}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn p6_event_payload_persisted_for_runner() {
     let dir = tempfile::tempdir().unwrap();

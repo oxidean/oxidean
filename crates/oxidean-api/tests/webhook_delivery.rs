@@ -11,7 +11,7 @@ use oxidean_api::email::{EmailSender, LogSink};
 use oxidean_api::webhook::deliver::hmac_sha256_hex;
 use oxidean_api::{build_cors, router_with_state, AppState};
 use oxidean_db::Database;
-use oxidean_git::CliGitBackend;
+use oxidean_git::{CliGitBackend, GitBackend};
 use tower::ServiceExt;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -1609,7 +1609,7 @@ async fn webhook_ref_events_receive_pack() {
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     support::unlock_signup(&db).await;
-    let app = test_app(db.clone(), repos).await;
+    let app = test_app(db.clone(), repos.clone()).await;
     let cookie = verified_owner(&app, &db, "rp@ex.com", "rpown").await;
     let _ = rpc_json(
         &app,
@@ -1640,6 +1640,8 @@ async fn webhook_ref_events_receive_pack() {
         (three.clone(), zero.clone(), "refs/heads/old".to_string()),   // branch delete
         (one.clone(), two.clone(), "refs/heads/main".to_string()),     // push-only update
     ];
+    let git = CliGitBackend::new();
+    let bare = repos.join("rpown").join("demo.git");
     dispatch::notify_ref_events(
         &db,
         &repo_id,
@@ -1649,6 +1651,9 @@ async fn webhook_ref_events_receive_pack() {
         "uid",
         &updates,
         "development",
+        &git,
+        &bare,
+        false,
     )
     .await;
 
@@ -2031,6 +2036,88 @@ jobs:
         completed_payload.contains("\"workflow_job\""),
         "{completed_payload}"
     );
+}
+
+/// `on: issue_comment` end-to-end — a comment created through the real RPC
+/// enqueues an Actions run on the default-branch workflow.
+#[tokio::test]
+async fn actions_issue_comment_trigger_e2e() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("ic.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos.clone()).await;
+    let cookie = verified_owner(&app, &db, "ic@ex.com", "icown").await;
+    let created = rpc_json(
+        &app,
+        r#"{"procedure":"repo.create","input":{"name":"demo","visibility":"public","description":""}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(created["ok"], true, "{created}");
+    let repo_id = created["data"]["id"].as_str().unwrap().to_string();
+
+    // `on: issue_comment` workflow on the default branch.
+    let git = CliGitBackend::new();
+    let bare = repos.join("icown").join("demo.git");
+    git.seed_commit(
+        &bare,
+        "main",
+        "workflows",
+        &[(
+            ".github/workflows/comments.yml".into(),
+            br#"
+name: Comments
+on: issue_comment
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo comment-driven
+"#
+            .to_vec(),
+        )],
+    )
+    .await
+    .unwrap();
+
+    let issue = rpc_json(
+        &app,
+        r#"{"procedure":"issue.create","input":{"owner":"icown","name":"demo","title":"T","body":"b"}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(issue["ok"], true, "{issue}");
+    let comment = rpc_json(
+        &app,
+        r#"{"procedure":"issue.comments.create","input":{"owner":"icown","name":"demo","number":1,"body":"looks good"}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(comment["ok"], true, "{comment}");
+
+    let mut fired = false;
+    for _ in 0..40 {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let runs = db
+            .list_action_runs_for_repo(&repo_id, &Default::default(), 10, 0)
+            .await
+            .unwrap_or_default();
+        if runs.iter().any(|r| r.event == "issue_comment") {
+            fired = true;
+            let payload: serde_json::Value =
+                serde_json::from_str(runs[0].event_payload_json.as_deref().unwrap()).unwrap();
+            assert_eq!(payload["action"], "created", "{payload}");
+            assert!(payload["comment"]["body"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("looks good"));
+            break;
+        }
+    }
+    assert!(fired, "expected an issue_comment action run");
 }
 
 fn basic_auth(user: &str, password: &str) -> String {

@@ -93,10 +93,29 @@ async fn emit_comment_webhook(
         &accessible.row.id,
         event,
         action,
-        payload,
+        payload.clone(),
         &ctx.env_name,
     )
     .await;
+    // Both event names are Actions triggers — `issue_comment` covers PR
+    // conversation comments; `pull_request_review_comment` covers diff lines.
+    if let Some(ev) = crate::actions::events::rpc_lifecycle_event(
+        ctx,
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.id,
+        &accessible.row.default_branch,
+        if event == "issue_comment" {
+            "issue_comment"
+        } else {
+            "pull_request_review_comment"
+        },
+        action,
+        payload,
+        Some(sender_id.to_string()),
+    ) {
+        crate::actions::events::notify_lifecycle_actions(&ctx.db, ctx.git.as_ref(), &ev).await;
+    }
 }
 
 async fn load_comment_usernames(

@@ -382,6 +382,9 @@ impl Handler for SshHandler {
                                 &user.id,
                                 &updates,
                                 &env_name,
+                                git.as_ref(),
+                                bare.as_path(),
+                                false,
                             )
                             .await;
                             crate::pull::synchronize_after_push(

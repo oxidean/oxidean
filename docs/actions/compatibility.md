@@ -46,7 +46,7 @@ download, annotations, `workflow_job` webhook.
 |---------|-----------|---------|-------------|-----|
 | 1. Workflow files & discovery | 7 | 1 | 0 | 0 |
 | 2. Triggers & filters | 20 | 2 | 0 | 0 |
-| 3. Events | 9 | 0 | 27 | 0 |
+| 3. Events | 18 | 0 | 18 | 0 |
 | 4. Workflow-level keys | 8 | 0 | 0 | 0 |
 | 5. Jobs | 29 | 0 | 0 | 1 |
 | 6. Steps | 18 | 0 | 1 | 1 |
@@ -136,15 +136,15 @@ activity-type filter semantics; unsupported ones warn at parse (section 2,
 | `ev.branch_protection_rule` | `branch_protection_rule` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
 | `ev.check_run` | `check_run` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
 | `ev.check_suite` | `check_suite` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
-| `ev.create` | `create` — branch/tag creation | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
-| `ev.delete` | `delete` — branch/tag deletion | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
+| `ev.create` | `create` — branch/tag creation | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_lifecycle_generic_events | Fires on RPC branch/tag creation and receive-pack creates; `ref_type` distinguishes branch/tag in the payload. Job-token pushes are suppressed (GITHUB_TOKEN non-recursion). |
+| `ev.delete` | `delete` — branch/tag deletion | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_lifecycle_generic_events | Fires on RPC and receive-pack deletes; job-token pushes suppressed. |
 | `ev.deployment` | `deployment` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
 | `ev.deployment_status` | `deployment_status` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
 | `ev.discussion` | `discussion` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
 | `ev.discussion_comment` | `discussion_comment` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
-| `ev.fork` | `fork` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
+| `ev.fork` | `fork` | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_lifecycle_generic_events | Fires on `repo.fork` with a `forkee` payload; action `created`. |
 | `ev.gollum` | `gollum` — wiki edits | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
-| `ev.issue_comment` | `issue_comment` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
+| `ev.issue_comment` | `issue_comment` — created/edited/deleted | supported | test:crates/oxidean-api/tests/webhook_delivery.rs::actions_issue_comment_trigger_e2e, test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_lifecycle_generic_events | Fires on issue comments and PR conversation comments; `types:` honoured. |
 | `ev.label` | `label` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
 | `ev.merge_group` | `merge_group` — merge queue | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
 | `ev.milestone` | `milestone` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
@@ -153,13 +153,13 @@ activity-type filter semantics; unsupported ones warn at parse (section 2,
 | `ev.project_card` | `project_card` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
 | `ev.project_column` | `project_column` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
 | `ev.public` | `public` — repo goes public | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
-| `ev.pull_request_review` | `pull_request_review` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
-| `ev.pull_request_review_comment` | `pull_request_review_comment` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
-| `ev.pull_request_comment` | `issue_comment` on a PR (GitHub aliases it) | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
-| `ev.registry_package` | `registry_package` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
+| `ev.pull_request_review` | `pull_request_review` — submitted/dismissed | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_lifecycle_generic_events | Fires on review submit and dismiss; payload carries review state/commit/PR context. `edited` is not an activity type here (no review-edit surface). |
+| `ev.pull_request_review_comment` | `pull_request_review_comment` — created/edited/deleted | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_lifecycle_generic_events | Inline (diff) review comments; conversation comments fire `issue_comment` instead, matching GitHub. |
+| `ev.pull_request_comment` | `issue_comment` on a PR (GitHub aliases it) | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_lifecycle_generic_events | Covered by `issue_comment` — PR conversation comments carry `issue.pull_request` in the payload like GitHub. |
+| `ev.registry_package` | `registry_package` — published/updated | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_lifecycle_generic_events | Fires on generic/npm/OCI package pushes; `types:` honoured. |
 | `ev.repository_dispatch` | `repository_dispatch` — external webhook trigger | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
 | `ev.status` | `status` — commit status posted | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
-| `ev.watch` | `watch` — repo starred | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
+| `ev.watch` | `watch` — repo starred | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_lifecycle_generic_events | Fires on star creation with action `started`; un-starring does not fire (GitHub has no `watch` delete activity). |
 | `ev.workflow_run` | `workflow_run` — another workflow finished | supported | case:workflow-run-listen, case:workflow-run-stem, case:workflow-run-branch-filter | Fan-out on run completion/cancel/timeout; listeners resolve on the default branch (trusted), match `workflows:` by name or file stem, apply `types:`/`branches:` filters, and receive `github.event.workflow_run`. Only `completed` fires — `requested`/`in_progress` activity types are not emitted. |
 
 ## 4. Workflow-level keys (`wf.`)

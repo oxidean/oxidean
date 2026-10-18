@@ -103,10 +103,6 @@ pub struct WorkflowTriggers {
     /// the repository `actions_pull_request_target` opt-in.
     pub pull_request_target: bool,
     pub workflow_dispatch: bool,
-    /// `on.release` — fires from the release lifecycle hooks.
-    pub release: bool,
-    /// `on.issues` — fires from the issue lifecycle hooks.
-    pub issues: bool,
     /// `on.schedule` — fires from the cron sweeper (default branch only).
     pub schedule: bool,
     /// Filter detail under `on.push` — empty = match-all.
@@ -115,11 +111,13 @@ pub struct WorkflowTriggers {
     pub pull_request_filters: EventFilters,
     /// Filter detail under `on.pull_request_target`.
     pub pull_request_target_filters: EventFilters,
-    /// `on.release.types` — empty = GitHub's default subset
-    /// (published/created/edited/prereleased/released).
-    pub release_types: Vec<String>,
-    /// `on.issues.types` — empty = GitHub's default (all activity types).
-    pub issues_types: Vec<String>,
+    /// Domain-mutation lifecycle triggers — `release`, `issues`,
+    /// `issue_comment`, `create`, `delete`, `watch`, `fork`,
+    /// `pull_request_review`, `pull_request_review_comment`,
+    /// `registry_package`. Maps event name → `on.<event>.types`; an empty
+    /// list is GitHub's default (every activity type fires). Presence of
+    /// the key is the subscription.
+    pub lifecycle: std::collections::BTreeMap<String, Vec<String>>,
     /// `on.schedule[].cron` entries.
     pub schedule_crons: Vec<String>,
     /// `on.workflow_dispatch.inputs` — `{name: {type, default, required,
@@ -674,16 +672,24 @@ fn apply_event(
                 }
             }
         }
-        "release" => {
-            t.release = true;
-            t.release_types = parse_event_filters(value).types;
-        }
-        "issues" => {
-            t.issues = true;
-            t.issues_types = parse_event_filters(value).types;
+        // Lifecycle events dispatched from domain mutations — the shared
+        // `LifecycleEvent` fan-out. `types` narrows the activity types the
+        // workflow fires on; empty = GitHub's default (all).
+        name @ ("release"
+        | "issues"
+        | "issue_comment"
+        | "create"
+        | "delete"
+        | "watch"
+        | "fork"
+        | "pull_request_review"
+        | "pull_request_review_comment"
+        | "registry_package") => {
+            t.lifecycle
+                .insert(name.to_string(), parse_event_filters(value).types);
         }
         other => {
-            // Other unimplemented events (fork, watch, discussion, …) never
+            // Other unimplemented events (discussion, merge_group, …) never
             // fire — the caller warns loudly so the gap isn't silent.
             return Some(other.to_string());
         }

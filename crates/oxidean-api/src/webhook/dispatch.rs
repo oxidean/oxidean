@@ -464,6 +464,47 @@ pub fn release_payload(
     })
 }
 
+/// GitHub-compatible `pull_request_review` payload — Actions `on:
+/// pull_request_review` sees `submitted`/`dismissed` (edited reviews are
+/// resubmitted in our model).
+#[expect(clippy::too_many_arguments)]
+pub fn pull_request_review_payload(
+    action: &str,
+    review_id: &str,
+    review_state: &str,
+    review_body: &str,
+    review_commit_sha: Option<&str>,
+    pull_number: i64,
+    pull_title: &str,
+    pull_state: &str,
+    reviewer_login: &str,
+    reviewer_id: &str,
+    owner: &str,
+    repo_name: &str,
+    repo_id: &str,
+    sender_login: &str,
+    sender_id: &str,
+) -> serde_json::Value {
+    json!({
+        "action": action,
+        "review": {
+            "id": review_id,
+            "state": review_state,
+            "body": review_body,
+            "commit_id": review_commit_sha,
+            "user": { "login": reviewer_login, "id": reviewer_id },
+        },
+        "pull_request": {
+            "number": pull_number,
+            "title": pull_title,
+            "state": pull_state,
+            "html_url": format!("/{owner}/{repo_name}/pulls/{pull_number}"),
+        },
+        "repository": repository_block(repo_id, repo_name, owner),
+        "sender": { "login": sender_login, "id": sender_id },
+    })
+}
+
 /// GitHub-compatible `workflow_run` payload. Internal terminal statuses
 /// (`success` / `failure` / `cancelled`) map to `status: "completed"` with the
 /// internal value as `conclusion`; `queued` / `in_progress` pass through.
@@ -543,9 +584,11 @@ pub fn registry_package_payload(
 }
 
 /// After a successful receive-pack: emit `create` / `delete` for branch and
-/// tag refs (API-04). Updates where both sides are non-zero are `push`
-/// territory; refs outside `refs/heads/` / `refs/tags/` are not reported
-/// (matches GitHub's `create`/`delete` scope).
+/// tag refs (API-04), and fire the matching `on: create`/`on: delete`
+/// Actions triggers (`git` + `bare` resolve the default-branch workflows).
+/// Updates where both sides are non-zero are `push` territory; refs outside
+/// `refs/heads/` / `refs/tags/` are not reported (matches GitHub's
+/// `create`/`delete` scope).
 #[expect(clippy::too_many_arguments)]
 pub async fn notify_ref_events(
     db: &Database,
@@ -556,6 +599,12 @@ pub async fn notify_ref_events(
     pusher_id: &str,
     updates: &[(String, String, String)],
     env_name: &str,
+    git: &dyn oxidean_git::GitBackend,
+    bare: &std::path::Path,
+    // Pushes authenticated by an Actions job token suppress `on: create`/
+    // `on: delete` workflow dispatch (GITHUB_TOKEN never re-triggers runs);
+    // the webhook deliveries still fire.
+    suppress_actions: bool,
 ) {
     // (default_branch, description) — resolved lazily, only when a
     // create/delete update is actually present.
@@ -596,7 +645,35 @@ pub async fn notify_ref_events(
             pusher_login,
             pusher_id,
         );
-        emit(db, repository_id, event, "", payload, env_name).await;
+        emit(db, repository_id, event, "", payload.clone(), env_name).await;
+        if suppress_actions {
+            continue;
+        }
+        // `on: create`/`on: delete` — the webhook event name is the trigger
+        // name; GitHub's activity types are `created`/`deleted`.
+        crate::actions::events::notify_lifecycle_actions(
+            db,
+            git,
+            &crate::actions::events::LifecycleEvent {
+                bare_repo: bare.to_path_buf(),
+                repository_id: repository_id.to_string(),
+                default_branch: default_branch.clone(),
+                event_name: if event == "create" {
+                    "create"
+                } else {
+                    "delete"
+                },
+                action: if event == "create" {
+                    "created".to_string()
+                } else {
+                    "deleted".to_string()
+                },
+                payload,
+                actor_id: Some(pusher_id.to_string()),
+                actions_enabled_instance: crate::actions::env_actions_enabled(),
+            },
+        )
+        .await;
     }
 }
 
@@ -716,8 +793,9 @@ pub async fn notify_workflow_job(db: &Database, job_id: &str, action: &str) {
 }
 
 /// Emit `registry_package` when a version is published on a package linked to
-/// a repository (API-04). Unlinked packages have no webhook scope — nothing
-/// is emitted for them.
+/// a repository (API-04), and fire `on: registry_package` Actions triggers.
+/// Unlinked packages have no webhook scope — nothing is emitted for them.
+#[allow(clippy::too_many_arguments)]
 pub async fn notify_package_publish(
     db: &Database,
     package: &oxidean_db::PackageRow,
@@ -725,6 +803,8 @@ pub async fn notify_package_publish(
     action: &str,
     sender_id: &str,
     env_name: &str,
+    git: &dyn oxidean_git::GitBackend,
+    repos_dir: &std::path::Path,
 ) {
     let Some(repo_id) = package.repository_id.as_deref() else {
         return;
@@ -744,5 +824,30 @@ pub async fn notify_package_publish(
         &login,
         sender_id,
     );
-    emit(db, repo_id, "registry_package", action, payload, env_name).await;
+    emit(
+        db,
+        repo_id,
+        "registry_package",
+        action,
+        payload.clone(),
+        env_name,
+    )
+    .await;
+    if let Ok(bare) = crate::git::bare_repo_path(repos_dir, &owner, &repo.name) {
+        crate::actions::events::notify_lifecycle_actions(
+            db,
+            git,
+            &crate::actions::events::LifecycleEvent {
+                bare_repo: bare,
+                repository_id: repo_id.to_string(),
+                default_branch: repo.default_branch.clone(),
+                event_name: "registry_package",
+                action: action.to_string(),
+                payload,
+                actor_id: Some(sender_id.to_string()),
+                actions_enabled_instance: crate::actions::env_actions_enabled(),
+            },
+        )
+        .await;
+    }
 }

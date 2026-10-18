@@ -504,10 +504,25 @@ pub async fn star(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoPublic, 
             &accessible.row.id,
             "star",
             "created",
-            payload,
+            payload.clone(),
             &ctx.env_name,
         )
         .await;
+        // GitHub's `watch` Actions event fires only on star — `started` is
+        // its sole activity type (unstar triggers nothing).
+        if let Some(ev) = crate::actions::events::rpc_lifecycle_event(
+            ctx,
+            &accessible.owner_username,
+            &accessible.row.name,
+            &accessible.row.id,
+            &accessible.row.default_branch,
+            "watch",
+            "started",
+            payload,
+            Some(user.id.clone()),
+        ) {
+            crate::actions::events::notify_lifecycle_actions(&ctx.db, ctx.git.as_ref(), &ev).await;
+        }
     }
     enrich_social(ctx, to_public(&accessible), Some(&user.id)).await
 }
@@ -1635,10 +1650,23 @@ pub async fn branch_create(
         &accessible.row.id,
         "create",
         "",
-        payload,
+        payload.clone(),
         &ctx.env_name,
     )
     .await;
+    if let Some(ev) = crate::actions::events::rpc_lifecycle_event(
+        ctx,
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.id,
+        &accessible.row.default_branch,
+        "create",
+        "created",
+        payload,
+        Some(actor_id.clone()),
+    ) {
+        crate::actions::events::notify_lifecycle_actions(&ctx.db, ctx.git.as_ref(), &ev).await;
+    }
     crate::mirror::notify_mirror_after_local_mutation(
         ctx.db.clone(),
         ctx.git.clone(),
@@ -1792,10 +1820,23 @@ pub async fn branch_delete(
         &accessible.row.id,
         "delete",
         "",
-        payload,
+        payload.clone(),
         &ctx.env_name,
     )
     .await;
+    if let Some(ev) = crate::actions::events::rpc_lifecycle_event(
+        ctx,
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.id,
+        &accessible.row.default_branch,
+        "delete",
+        "deleted",
+        payload,
+        Some(actor_id.clone()),
+    ) {
+        crate::actions::events::notify_lifecycle_actions(&ctx.db, ctx.git.as_ref(), &ev).await;
+    }
     crate::mirror::notify_mirror_after_local_mutation(
         ctx.db.clone(),
         ctx.git.clone(),
@@ -2583,10 +2624,25 @@ pub async fn fork(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoPublic, 
         &source.row.id,
         "fork",
         "created",
-        payload,
+        payload.clone(),
         &ctx.env_name,
     )
     .await;
+    // `on: fork` runs belong to the *source* repo (GitHub parity — forks of
+    // private repos don't leak workflow execution into the fork).
+    if let Some(ev) = crate::actions::events::rpc_lifecycle_event(
+        ctx,
+        &source.owner_username,
+        &source.row.name,
+        &source.row.id,
+        &source.row.default_branch,
+        "fork",
+        "created",
+        payload,
+        Some(user.id.clone()),
+    ) {
+        crate::actions::events::notify_lifecycle_actions(&ctx.db, ctx.git.as_ref(), &ev).await;
+    }
 
     let accessible = AccessibleRepo {
         row,

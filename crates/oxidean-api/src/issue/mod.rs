@@ -795,10 +795,23 @@ pub async fn comments_create(
         &accessible.row.id,
         "issue_comment",
         "created",
-        payload,
+        payload.clone(),
         &ctx.env_name,
     )
     .await;
+    if let Some(ev) = crate::actions::events::rpc_lifecycle_event(
+        ctx,
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.id,
+        &accessible.row.default_branch,
+        "issue_comment",
+        "created",
+        payload,
+        Some(user.id.clone()),
+    ) {
+        crate::actions::events::notify_lifecycle_actions(&ctx.db, ctx.git.as_ref(), &ev).await;
+    }
     comment_to_public(ctx, &row).await
 }
 
@@ -858,10 +871,23 @@ pub async fn comments_update(
         &accessible.row.id,
         "issue_comment",
         "edited",
-        payload,
+        payload.clone(),
         &ctx.env_name,
     )
     .await;
+    if let Some(ev) = crate::actions::events::rpc_lifecycle_event(
+        ctx,
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.id,
+        &accessible.row.default_branch,
+        "issue_comment",
+        "edited",
+        payload,
+        Some(user.id.clone()),
+    ) {
+        crate::actions::events::notify_lifecycle_actions(&ctx.db, ctx.git.as_ref(), &ev).await;
+    }
     comment_to_public(ctx, &updated).await
 }
 
@@ -916,10 +942,23 @@ pub async fn comments_delete(
         &accessible.row.id,
         "issue_comment",
         "deleted",
-        payload,
+        payload.clone(),
         &ctx.env_name,
     )
     .await;
+    if let Some(ev) = crate::actions::events::rpc_lifecycle_event(
+        ctx,
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.id,
+        &accessible.row.default_branch,
+        "issue_comment",
+        "deleted",
+        payload,
+        Some(user.id.clone()),
+    ) {
+        crate::actions::events::notify_lifecycle_actions(&ctx.db, ctx.git.as_ref(), &ev).await;
+    }
     Ok(DeleteIssueCommentResponse { ok: true })
 }
 

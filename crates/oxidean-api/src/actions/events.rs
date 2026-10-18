@@ -505,22 +505,52 @@ pub async fn dispatch_pull_request_for_sha(
     dispatch_pull_request_inner(db, git, &event).await
 }
 
-/// Repo lifecycle event for `on: release` / `on: issues` dispatch. Callers
-/// build the frozen payload at the mutation site (where the release/issue
-/// row data is still in scope) via `actions::payload::{release_payload,
-/// issues_payload}`.
+/// Repo lifecycle event for domain-mutation dispatch (`release`, `issues`,
+/// `issue_comment`, `create`, `delete`, `watch`, `fork`,
+/// `pull_request_review`, `pull_request_review_comment`,
+/// `registry_package`). Callers build the frozen payload at the mutation
+/// site (where the row data is still in scope) — the GitHub-shaped webhook
+/// payload doubles as `github.event`.
 pub struct LifecycleEvent {
     /// Bare repo path — workflows are read from the default-branch tip.
     pub bare_repo: std::path::PathBuf,
     pub repository_id: String,
     pub default_branch: String,
-    /// `"release"` or `"issues"` — selects the trigger + `types` list.
+    /// GitHub event name — selects the `on.<name>` subscription + `types` list.
     pub event_name: &'static str,
     /// Activity type (`published`, `opened`, `closed`, …).
     pub action: String,
     pub payload: serde_json::Value,
     pub actor_id: Option<String>,
     pub actions_enabled_instance: bool,
+}
+
+/// Build a `LifecycleEvent` from an `RpcCtx` + resolved repo coords — the
+/// default-branch context every RPC mutation site shares. `None` when the
+/// bare repo is absent (dispatch degrades to a no-op anyway).
+#[allow(clippy::too_many_arguments)]
+pub fn rpc_lifecycle_event(
+    ctx: &crate::rpc::RpcCtx,
+    owner: &str,
+    repo_name: &str,
+    repository_id: &str,
+    default_branch: &str,
+    event_name: &'static str,
+    action: &str,
+    payload: serde_json::Value,
+    actor_id: Option<String>,
+) -> Option<LifecycleEvent> {
+    let bare_repo = crate::git::bare_repo_path(&ctx.repos_dir, owner, repo_name).ok()?;
+    Some(LifecycleEvent {
+        bare_repo,
+        repository_id: repository_id.to_string(),
+        default_branch: default_branch.to_string(),
+        event_name,
+        action: action.to_string(),
+        payload,
+        actor_id,
+        actions_enabled_instance: crate::actions::env_actions_enabled(),
+    })
 }
 
 /// Soft-fail wrapper — a release/issue mutation must never fail because
@@ -583,10 +613,14 @@ async fn dispatch_lifecycle_inner(
         if disabled.contains(&wf.path) {
             continue;
         }
-        let types: &[String] = match event.event_name {
-            "release" if wf.document.triggers.release => &wf.document.triggers.release_types,
-            "issues" if wf.document.triggers.issues => &wf.document.triggers.issues_types,
-            _ => continue,
+        let Some(types) = wf
+            .document
+            .triggers
+            .lifecycle
+            .get(event.event_name)
+            .map(|v| v.as_slice())
+        else {
+            continue;
         };
         // Empty `types:` = GitHub default — all activity types fire.
         if !types.is_empty() && !types.iter().any(|t| t == &event.action) {

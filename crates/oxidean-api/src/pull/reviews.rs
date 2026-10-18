@@ -120,6 +120,38 @@ pub async fn reviews_submit(
         &subject,
     )
     .await;
+    // `on: pull_request_review` — `submitted` on every review submission
+    // (approved / changes_requested / commented alike).
+    let payload = crate::webhook::dispatch::pull_request_review_payload(
+        "submitted",
+        &row.id,
+        &row.state,
+        &row.body,
+        row.commit_sha.as_deref(),
+        pull.number,
+        &pull.title,
+        &pull.state,
+        &user.username,
+        &user.id,
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.id,
+        &user.username,
+        &user.id,
+    );
+    if let Some(ev) = crate::actions::events::rpc_lifecycle_event(
+        ctx,
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.id,
+        &accessible.row.default_branch,
+        "pull_request_review",
+        "submitted",
+        payload,
+        Some(user.id.clone()),
+    ) {
+        crate::actions::events::notify_lifecycle_actions(&ctx.db, ctx.git.as_ref(), &ev).await;
+    }
     review_to_public(ctx, &row).await
 }
 
@@ -128,7 +160,7 @@ pub async fn reviews_dismiss(
     ctx: &RpcCtx,
     input: serde_json::Value,
 ) -> Result<PullReviewPublic, AppError> {
-    let _user = require_verified(ctx).await?;
+    let user = require_verified(ctx).await?;
     let req: DismissPullReviewRequest = serde_json::from_value(input).map_err(|e| {
         AppError::new(
             "rpc.bad_input",
@@ -157,6 +189,41 @@ pub async fn reviews_dismiss(
         .dismiss_pull_review(&req.review_id, reason, &now)
         .await
         .map_err(db_err)?;
+    // `on: pull_request_review` — `dismissed`.
+    let reviewer_login = match ctx.db.find_user_by_id(&row.author_id).await {
+        Ok(Some(u)) => u.username,
+        _ => String::new(),
+    };
+    let payload = crate::webhook::dispatch::pull_request_review_payload(
+        "dismissed",
+        &row.id,
+        &row.state,
+        &row.body,
+        row.commit_sha.as_deref(),
+        pull.number,
+        &pull.title,
+        &pull.state,
+        &reviewer_login,
+        &row.author_id,
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.id,
+        &user.username,
+        &user.id,
+    );
+    if let Some(ev) = crate::actions::events::rpc_lifecycle_event(
+        ctx,
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.id,
+        &accessible.row.default_branch,
+        "pull_request_review",
+        "dismissed",
+        payload,
+        Some(user.id.clone()),
+    ) {
+        crate::actions::events::notify_lifecycle_actions(&ctx.db, ctx.git.as_ref(), &ev).await;
+    }
     review_to_public(ctx, &row).await
 }
 

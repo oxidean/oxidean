@@ -685,6 +685,8 @@ async fn authorize_and_cgi(
                         let updates_pull = updates.clone();
                         let updates_act = updates.clone();
                         let git_act = state.git.clone();
+                        let git_ref = state.git.clone();
+                        let suppress_actions = auth.is_job_token;
                         tokio::spawn(async move {
                             let bare = repos_dir.join(&owner_slug).join(format!("{repo_name}.git"));
                             // GIT-25: refresh cached size_bytes for UI/admin surfaces.
@@ -724,6 +726,9 @@ async fn authorize_and_cgi(
                                 &uid,
                                 &updates_wh,
                                 &env_name,
+                                git_ref.as_ref(),
+                                bare.as_path(),
+                                suppress_actions,
                             )
                             .await;
                             crate::pull::synchronize_after_push(
