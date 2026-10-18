@@ -26,7 +26,7 @@ ALTER TABLE action_jobs ADD COLUMN approval_hold TINYINT(1) NOT NULL DEFAULT 0;
 -- minute does not double-fire. Single-node semantics: the sweeper only runs
 -- where the scheduler loop runs.
 CREATE TABLE action_schedule_state (
-  repository_id  VARCHAR(64) NOT NULL,
+  repository_id  CHAR(36) NOT NULL,
   workflow_path  VARCHAR(255) NOT NULL,
   cron           VARCHAR(128) NOT NULL,
   last_fired_minute BIGINT NOT NULL,

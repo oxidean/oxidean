@@ -2,7 +2,7 @@
 
 use std::str::FromStr;
 
-use sqlx::mysql::MySqlPoolOptions;
+use sqlx::mysql::{MySqlConnectOptions, MySqlPoolOptions};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 
@@ -24,12 +24,25 @@ impl DbPool {
                 .await
                 .map(DbPool::Postgres)
                 .map_err(|e| format!("{}: {e}", redact_url(url))),
-            Dialect::MySql => MySqlPoolOptions::new()
-                .max_connections(5)
-                .connect(url)
-                .await
-                .map(DbPool::MySql)
-                .map_err(|e| format!("{}: {e}", redact_url(url))),
+            Dialect::MySql => {
+                // No server-side prepared-statement cache: InnoDB invalidates
+                // prepared handles on table-metadata churn (live ALTERs, and
+                // table_cache/table_definition_cache evictions under many
+                // schemas — the conformance fleet provisions hundreds of
+                // databases). A stale handle fails the next execute with
+                // ER_NEED_REPREPARE (1615), surfacing as an opaque 500. With
+                // the cache off, prepare→execute is atomic per query so the
+                // window cannot open; the cost is one extra round-trip.
+                let opts = MySqlConnectOptions::from_str(url)
+                    .map_err(|e| format!("{}: {e}", redact_url(url)))?
+                    .statement_cache_capacity(0);
+                MySqlPoolOptions::new()
+                    .max_connections(5)
+                    .connect_with(opts)
+                    .await
+                    .map(DbPool::MySql)
+                    .map_err(|e| format!("{}: {e}", redact_url(url)))
+            }
             Dialect::Sqlite => {
                 ensure_sqlite_parent_dir(url)?;
                 let opts = SqliteConnectOptions::from_str(url)

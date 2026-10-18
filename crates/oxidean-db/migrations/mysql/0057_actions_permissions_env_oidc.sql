@@ -28,29 +28,33 @@ ALTER TABLE action_jobs ADD COLUMN deployment_not_before VARCHAR(64) NULL;
 --    "deployment_branches": ["main", "release/*"]}  -- empty = all branches
 CREATE TABLE action_environments (
   id            VARCHAR(64) PRIMARY KEY,
-  repository_id VARCHAR(64) NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
+  repository_id CHAR(36) NOT NULL,
   name          VARCHAR(255) NOT NULL,
   protection_json TEXT NOT NULL,
   created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  UNIQUE KEY uq_action_environments_repo_name (repository_id, name)
-);
+  UNIQUE KEY uq_action_environments_repo_name (repository_id, name),
+  CONSTRAINT fk_action_environments_repo FOREIGN KEY (repository_id) REFERENCES repositories(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
 
 -- Deployment records — one per environment-referencing job. `status` is not
 -- stored: it derives from the job row so transitions need no mirror writes.
 -- `url` is the environment.url the workflow declared (overridable per run).
 CREATE TABLE action_deployments (
   id              VARCHAR(64) PRIMARY KEY,
-  repository_id   VARCHAR(64) NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
+  repository_id   CHAR(36) NOT NULL,
   environment     VARCHAR(255) NOT NULL,
-  run_id          VARCHAR(64) NOT NULL REFERENCES action_runs(id) ON DELETE CASCADE,
-  job_id          VARCHAR(64) NOT NULL REFERENCES action_jobs(id) ON DELETE CASCADE,
+  run_id          CHAR(36) NOT NULL,
+  job_id          CHAR(36) NOT NULL,
   sha             VARCHAR(64) NOT NULL,
   ref             VARCHAR(512) NOT NULL,
   url             TEXT NULL,
   created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-);
+  updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_action_deployments_repo FOREIGN KEY (repository_id) REFERENCES repositories(id) ON DELETE CASCADE,
+  CONSTRAINT fk_action_deployments_run FOREIGN KEY (run_id) REFERENCES action_runs(id) ON DELETE CASCADE,
+  CONSTRAINT fk_action_deployments_job FOREIGN KEY (job_id) REFERENCES action_jobs(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
 CREATE INDEX idx_action_deployments_repo_env ON action_deployments(repository_id, environment);
 CREATE INDEX idx_action_deployments_run ON action_deployments(run_id);
 

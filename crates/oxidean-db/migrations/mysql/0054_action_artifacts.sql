@@ -4,9 +4,9 @@
 
 CREATE TABLE action_artifacts (
   id            VARCHAR(64) PRIMARY KEY,
-  repository_id VARCHAR(64) NOT NULL,
-  run_id        VARCHAR(64) NOT NULL,
-  job_id        VARCHAR(64) NULL,
+  repository_id CHAR(36) NOT NULL,
+  run_id        CHAR(36) NOT NULL,
+  job_id        CHAR(36) NULL,
   name          VARCHAR(255) NOT NULL,
   storage_path  VARCHAR(1024) NOT NULL,
   size_bytes    BIGINT NOT NULL DEFAULT 0,

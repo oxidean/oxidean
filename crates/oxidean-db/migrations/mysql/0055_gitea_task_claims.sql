@@ -5,8 +5,8 @@
 
 CREATE TABLE action_task_claims (
   task_id    BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-  job_id     VARCHAR(64) NOT NULL,
-  runner_id  VARCHAR(64) NOT NULL,
+  job_id     CHAR(36) NOT NULL,
+  runner_id  CHAR(36) NOT NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   KEY idx_action_task_claims_job (job_id),
   CONSTRAINT fk_action_task_claims_job FOREIGN KEY (job_id) REFERENCES action_jobs(id) ON DELETE CASCADE,

@@ -13,31 +13,35 @@ ALTER TABLE action_jobs ADD COLUMN log_index INT NOT NULL DEFAULT 0;
 -- only), 'selected' (rows in action_org_secret_repos).
 CREATE TABLE action_org_secrets (
   id          VARCHAR(64) PRIMARY KEY,
-  owner_id    VARCHAR(64) NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  owner_id    CHAR(36) NOT NULL,
   name        VARCHAR(255) NOT NULL,
   ciphertext  TEXT NOT NULL,
   visibility  VARCHAR(16) NOT NULL DEFAULT 'all',
   created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  UNIQUE KEY uq_action_org_secrets_owner_name (owner_id, name)
-);
+  UNIQUE KEY uq_action_org_secrets_owner_name (owner_id, name),
+  CONSTRAINT fk_action_org_secrets_owner FOREIGN KEY (owner_id) REFERENCES organizations(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
 CREATE INDEX idx_action_org_secrets_owner ON action_org_secrets(owner_id);
 
 CREATE TABLE action_org_secret_repos (
-  secret_id     VARCHAR(64) NOT NULL REFERENCES action_org_secrets(id) ON DELETE CASCADE,
-  repository_id VARCHAR(64) NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
-  PRIMARY KEY (secret_id, repository_id)
-);
+  secret_id     VARCHAR(64) NOT NULL,
+  repository_id CHAR(36) NOT NULL,
+  PRIMARY KEY (secret_id, repository_id),
+  CONSTRAINT fk_action_org_secret_repos_secret FOREIGN KEY (secret_id) REFERENCES action_org_secrets(id) ON DELETE CASCADE,
+  CONSTRAINT fk_action_org_secret_repos_repo FOREIGN KEY (repository_id) REFERENCES repositories(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
 CREATE INDEX idx_action_org_secret_repos_repo ON action_org_secret_repos(repository_id);
 
 -- Environment-level secrets — scoped to one action_environments row, they
 -- win over repo and org secrets for jobs targeting that environment.
 CREATE TABLE action_environment_secrets (
   id             VARCHAR(64) PRIMARY KEY,
-  environment_id VARCHAR(64) NOT NULL REFERENCES action_environments(id) ON DELETE CASCADE,
+  environment_id VARCHAR(64) NOT NULL,
   name           VARCHAR(255) NOT NULL,
   ciphertext     TEXT NOT NULL,
   created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  UNIQUE KEY uq_action_env_secrets_env_name (environment_id, name)
-);
+  UNIQUE KEY uq_action_env_secrets_env_name (environment_id, name),
+  CONSTRAINT fk_action_env_secrets_env FOREIGN KEY (environment_id) REFERENCES action_environments(id) ON DELETE CASCADE
+) ENGINE=InnoDB;

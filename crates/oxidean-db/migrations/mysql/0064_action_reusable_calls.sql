@@ -8,7 +8,7 @@
 -- sharing (job_key, matrix_key) no longer collide.
 
 ALTER TABLE action_jobs
-  ADD COLUMN caller_job_id VARCHAR(64) NOT NULL DEFAULT '';
+  ADD COLUMN caller_job_id CHAR(36) NOT NULL DEFAULT '';
 
 ALTER TABLE action_jobs
   DROP INDEX uq_action_jobs_run_job_matrix,

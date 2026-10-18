@@ -8,7 +8,7 @@
 -- retaining the plaintext fields for listings and debugging.
 CREATE TABLE action_caches (
   id               VARCHAR(64) PRIMARY KEY,
-  repository_id    VARCHAR(64) NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
+  repository_id    CHAR(36) NOT NULL,
   lookup_hash      VARCHAR(64) NOT NULL,
   cache_key        VARCHAR(512) NOT NULL,
   version          VARCHAR(255) NOT NULL,
@@ -18,8 +18,9 @@ CREATE TABLE action_caches (
   state            VARCHAR(32) NOT NULL DEFAULT 'reserved',
   created_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   last_accessed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  UNIQUE (repository_id, lookup_hash)
-);
+  UNIQUE (repository_id, lookup_hash),
+  CONSTRAINT fk_action_caches_repo FOREIGN KEY (repository_id) REFERENCES repositories(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
 -- Restore-key prefix matching scans keys per repo.
 CREATE INDEX idx_action_caches_repo_key ON action_caches(repository_id, cache_key(255));
 -- LRU eviction scans by repo + last_accessed_at.
@@ -30,9 +31,11 @@ CREATE INDEX idx_action_caches_repo_access ON action_caches(repository_id, last_
 -- the claiming runner and never persisted.
 CREATE TABLE action_cache_tokens (
   token_hash    VARCHAR(128) PRIMARY KEY,
-  job_id        VARCHAR(64) NOT NULL REFERENCES action_jobs(id) ON DELETE CASCADE,
-  repository_id VARCHAR(64) NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
+  job_id        CHAR(36) NOT NULL,
+  repository_id CHAR(36) NOT NULL,
   expires_at    DATETIME NOT NULL,
-  created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
+  created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_action_cache_tokens_job FOREIGN KEY (job_id) REFERENCES action_jobs(id) ON DELETE CASCADE,
+  CONSTRAINT fk_action_cache_tokens_repo FOREIGN KEY (repository_id) REFERENCES repositories(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
 CREATE INDEX idx_action_cache_tokens_job ON action_cache_tokens(job_id);
