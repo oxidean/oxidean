@@ -45,19 +45,19 @@ download, annotations, `workflow_job` webhook.
 | Section | supported | partial | unsupported | n/a |
 |---------|-----------|---------|-------------|-----|
 | 1. Workflow files & discovery | 7 | 1 | 0 | 0 |
-| 2. Triggers & filters | 18 | 3 | 1 | 0 |
+| 2. Triggers & filters |20 | 2 | 0 | 0 |
 | 3. Events | 7 | 1 | 28 | 0 |
 | 4. Workflow-level keys | 7 | 0 | 1 | 0 |
-| 5. Jobs | 24 | 1 | 4 | 1 |
+| 5. Jobs |28 | 1 | 0 | 1 |
 | 6. Steps | 17 | 1 | 1 | 1 |
 | 7. Expressions | 15 | 0 | 0 | 0 |
-| 8. Contexts | 18 | 5 | 1 | 0 |
+| 8. Contexts |19 | 4 | 1 | 0 |
 | 9. Workflow commands & environment files | 7 | 7 | 8 | 0 |
-| 10. Default environment variables | 38 | 0 | 10 | 0 |
+| 10. Default environment variables | 39 | 0 | 9 | 0 |
 | 11. Action metadata — action.yml | 14 | 2 | 1 | 1 |
-| 12. Reusable workflows | 0 | 0 | 10 | 0 |
+| 12. Reusable workflows |9 | 1 | 0 | 0 |
 | 13. Artifacts | 10 | 1 | 2 | 0 |
-| 14. Dependency caching | 0 | 0 | 5 | 0 |
+| 14. Dependency caching |5 | 0 | 0 | 0 |
 | 15. Concurrency | 4 | 1 | 0 | 0 |
 | 16. Environments & deployments | 9 | 1 | 1 | 0 |
 | 17. `GITHUB_TOKEN` permissions | 8 | 1 | 0 | 0 |
@@ -66,8 +66,8 @@ download, annotations, `workflow_job` webhook.
 | 20. Runners & labels | 6 | 0 | 0 | 3 |
 | 21. Security behaviours | 8 | 1 | 0 | 0 |
 | 22. Limits | 7 | 0 | 0 | 1 |
-| 23. Run lifecycle & integrations | 6 | 2 | 7 | 1 |
-| 24. GitHub REST API for Actions | 9 | 2 | 4 | 0 |
+| 23. Run lifecycle & integrations |7 | 2 | 7 | 1 |
+| 24. GitHub REST API for Actions |10 | 2 | 3 | 0 |
 
 ## 1. Workflow files & discovery (`file.`)
 
@@ -186,7 +186,7 @@ and <https://docs.github.com/en/actions/using-jobs/using-a-matrix-for-your-jobs>
 |------|---------|--------|----------|-------|
 | `job.id` | Job id rules; ids must be unique | supported | test:crates/oxidean-api/src/actions/parse.rs::job_id_rules_enforced | Empty, `/`, `\` rejected; duplicates fail YAML mapping. |
 | `job.name` | `name:` — display name; expressions honoured | supported | case:job-name-override, case:expr-job-name | |
-| `job.needs` | `needs:` — dependency DAG, implicit skip on failure | supported | case:needs-basic, case:needs-diamond, case:needs-fail-default, case:needs-skipped-dep, case:needs-matrix-dep, case:multi-job-parallel | Jobs with no `needs` run in parallel; skipped deps propagate as `skipped`. |
+| `job.needs` | `needs:` — dependency DAG, implicit skip on failure | supported | case:needs-basic, case:needs-diamond, case:needs-fail-default, case:needs-skipped-dep, case:needs-matrix-dep, case:multi-job-parallel, case:reusable-needs-scope | Jobs with no `needs` run in parallel; skipped deps propagate as `skipped`; `needs` inside a called workflow scopes to callee legs. |
 | `job.needs-result` | `needs.<id>.result` — success/failure/cancelled/skipped | supported | case:needs-failure-fn, case:needs-success-fn, case:needs-always | |
 | `job.needs-outputs` | `needs.<id>.outputs.<name>` — step outputs flow through | supported | case:needs-outputs | |
 | `job.needs-unknown` | `needs:` naming an undeclared job | supported | test:crates/oxidean-api/src/actions/parse.rs::structural_features_are_flagged_unsupported | Validation failure — GitHub rejects the file. |
@@ -391,7 +391,7 @@ and `OXIDEAN_*` twins (same value, both spellings) unless noted.
 | `env.runner-temp` | `RUNNER_TEMP` — per-job temp dir | supported | test:crates/oxidean-runner/src/exec/mod.rs::runner_temp_dir_files | |
 | `env.runner-tool-cache` | `RUNNER_TOOL_CACHE` | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | setup-* actions honour it. |
 | `env.actions-id-token-request` | `ACTIONS_ID_TOKEN_REQUEST_URL`/`_TOKEN` — OIDC mint credentials | supported | test:crates/oxidean-api/tests/actions_phase7.rs::p7_id_token_request_credentials | Present only when `permissions.id-token: write` survives provenance gating. |
-| `env.actions-cache-url` | `ACTIONS_CACHE_URL`/`RESULTS_URL`/`RUNTIME_TOKEN`/`RUNTIME_URL` | supported | case:cache-service-absent; test:crates/oxidean-api/tests/actions_cache_service.rs::cache_roundtrip_exact_restore | Per-job runtime token minted at claim; `RESULTS_URL`/`RUNTIME_URL` mirror `CACHE_URL`. |
+| `env.actions-cache-url` | `ACTIONS_CACHE_URL`/`RESULTS_URL`/`RUNTIME_TOKEN`/`RUNTIME_URL` | supported | case:cache-service-absent,test:crates/oxidean-api/tests/actions_cache_service.rs::cache_roundtrip_exact_restore | Per-job runtime token minted at claim; `RESULTS_URL`/`RUNTIME_URL` mirror `CACHE_URL`. |
 | `env.actions-step-debug` | `ACTIONS_STEP_DEBUG` — enables `::debug::` | unsupported | test:crates/oxidean-runner/src/exec/mod.rs::warn_uninterpreted_commands_covers_behavior_changing_commands | P16 (with `cmd.debug`). |
 
 ## 11. Action metadata — action.yml (`action.`)
@@ -483,7 +483,7 @@ expired tokens are reaped by the actions sweep. `repo.actions.listCaches`
 
 | `id` | Feature | Status | Evidence | Notes |
 |------|---------|--------|----------|-------|
-| `cache.action` | `actions/cache` restore+save | supported | test:crates/oxidean-api/tests/actions_cache_service.rs | Reserve/upload/commit/lookup/download round-trip covered. |
+| `cache.action` | `actions/cache` restore+save | supported | test:crates/oxidean-api/tests/actions_cache_service.rs::cache_roundtrip_exact_restore | Reserve/upload/commit/lookup/download round-trip covered. |
 | `cache.keys` | `key`/`restore-keys` prefix fallback | supported | test:crates/oxidean-api/tests/actions_cache_service.rs::cache_restore_key_prefix_fallback | Committed rows only; newest wins. |
 | `cache.save-only` | `actions/cache/save` | supported | test:crates/oxidean-api/tests/actions_cache_service.rs::cache_immutable_save_409 | Unique key/version/scope conflict surfaces `409`. |
 | `cache.restore-only` | `actions/cache/restore` | supported | test:crates/oxidean-api/tests/actions_cache_service.rs::cache_reserved_not_restorable | Reserved rows never restore; lookup 404s unknown keys. |
@@ -663,7 +663,7 @@ class, not URL parity.
 | `api.jobs` | List jobs / get a job | supported | test:crates/oxidean-api/tests/actions_endpoints.rs::get_run_anonymous_includes_jobs_and_timestamps | Jobs embed in the run detail. |
 | `api.logs` | Stream/download job logs | partial | test:crates/oxidean-api/tests/actions_rpc.rs::actions_rpc_job_logs | Streamed per job; no archive download. P16. |
 | `api.artifacts` | List/download artifacts | supported | test:crates/oxidean-api/tests/actions_phase8.rs::p8_retention_sweep_compresses_terminal_and_deletes_aged | Runner protocol + artifact endpoint. |
-| `api.cache` | Cache endpoints | supported | case:cache-service-absent; test:crates/oxidean-api/tests/actions_cache_service.rs | `_apis/artifactcache` REST surface; repo management via `repo.actions.listCaches`/`deleteCache`. |
+| `api.cache` | Cache endpoints | supported | case:cache-service-absent,test:crates/oxidean-api/tests/actions_cache_service.rs::cache_roundtrip_exact_restore | `_apis/artifactcache` REST surface; repo management via `repo.actions.listCaches`/`deleteCache`. |
 | `api.runners` | Runner registration / tokens / labels | supported | test:crates/oxidean-api/tests/actions_runner_protocol.rs::actions_runner_protocol_register, test:crates/oxidean-api/tests/actions_runner_protocol.rs::actions_runner_protocol_declare_labels | Plus the gitea runner.v1 bridge for stock act_runner. |
 | `api.secrets` | Secret CRUD (repo/env/org) | supported | test:crates/oxidean-api/tests/actions_secrets.rs::actions_secrets_list_names_only_never_echoes_value | Values are write-only. |
 | `api.variables` | Configuration-variable CRUD | unsupported | case:expr-vars-empty | P13 — with `var.vars-context`. |

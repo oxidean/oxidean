@@ -507,10 +507,8 @@
       "warnings": []
     },
     "ci/generator-generic-ossf-slsa3-publish": {
-      "status": "reusable-workflow",
-      "missing_features": [
-        "reusable-workflow"
-      ],
+      "status": "runnable",
+      "missing_features": [],
       "unsupported_actions": [],
       "warnings": []
     },
@@ -521,10 +519,8 @@
       "warnings": []
     },
     "ci/go-ossf-slsa3-publish": {
-      "status": "reusable-workflow",
-      "missing_features": [
-        "reusable-workflow"
-      ],
+      "status": "runnable",
+      "missing_features": [],
       "unsupported_actions": [],
       "warnings": []
     },

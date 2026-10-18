@@ -1322,8 +1322,7 @@
       ],
       "log_absent": [
         "cache-url-unset"
-      ],
-      "divergence": "cache.action"
+      ]
     },
     {
       "id": "reusable-nested",
