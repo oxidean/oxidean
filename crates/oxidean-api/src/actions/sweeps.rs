@@ -82,6 +82,17 @@ pub async fn sweep_stale_action_jobs(
         if let Some(expired) = deadline_lapsed(&job, now) {
             if expired && fail_deadline_job(db, &job).await {
                 timed_out += 1;
+                // Deadline-killed jobs never return to a runner — publish
+                // the terminal commit status here (runner finalize never
+                // sees this transition).
+                let origin = std::env::var("OXIDEAN_PUBLIC_ORIGIN").ok();
+                let _ = crate::actions::statuses::publish_from_job_update(
+                    db,
+                    &job.id,
+                    "failure",
+                    origin.as_deref(),
+                )
+                .await;
                 // Deadline kills complete runs too — claim once and fan out
                 // (watch notifications + `on: workflow_run`), mirroring the
                 // runner finalize path.

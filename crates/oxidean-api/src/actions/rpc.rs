@@ -2302,6 +2302,15 @@ pub async fn cancel_run(
     // API-04: cancellation completes the run with conclusion `cancelled`.
     crate::webhook::dispatch::notify_workflow_run(&ctx.db, &req.run_id, "completed", &ctx.env_name)
         .await;
+    // Commit statuses: interrupted legs flip pending → error so required
+    // checks don't hang on a cancelled run (skipped legs stay green).
+    let origin = std::env::var("OXIDEAN_PUBLIC_ORIGIN").ok();
+    if let Err(e) =
+        crate::actions::statuses::publish_cancelled_for_run(&ctx.db, &req.run_id, origin.as_deref())
+            .await
+    {
+        tracing::warn!(error = %e, run_id = %req.run_id, "failed to publish cancelled statuses");
+    }
     run_mutation_response(ctx, &accessible, &req.run_id).await
 }
 

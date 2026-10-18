@@ -598,7 +598,7 @@ pub async fn expand_call(
             secrets_json: resolve_call_secrets_spec(payload),
         }),
     };
-    let (job_ids, job_keys) = emit_jobs(&mut emit, &doc.jobs).await?;
+    let job_ids = emit_jobs(&mut emit, &doc.jobs).await?;
     if job_ids.is_empty() {
         return Ok(fail(format!(
             "reusable workflow '{uses_spec}' emitted no callee jobs"
@@ -651,7 +651,6 @@ pub async fn expand_call(
         &run.head_sha,
         &doc.name,
         &run.id,
-        &job_keys,
         std::env::var("OXIDEAN_PUBLIC_ORIGIN").ok().as_deref(),
         None,
         None,

@@ -19,6 +19,9 @@ pub fn job_status_to_commit_state(job_status: &str) -> &'static str {
     match job_status {
         "queued" | "in_progress" => "pending",
         "success" => "success",
+        // Skipped/neutral jobs pass checks on GitHub — a required check
+        // whose job was skipped by `if:` or unreachable `needs:` is green.
+        "skipped" | "neutral" => "success",
         "failure" => "failure",
         "cancelled" => "error",
         _ => "pending",
@@ -71,7 +74,10 @@ pub async fn upsert_job_status(
     Ok(())
 }
 
-/// After enqueue: publish pending status for every job in the run.
+/// After enqueue: publish each job's *current* status — most are `queued`,
+/// but `if:`-skipped legs land `skipped` (commit `success` on GitHub) and
+/// validation-failed legs land `failure`. Publishing a flat `queued` would
+/// strand those checks at `pending` forever.
 #[allow(clippy::too_many_arguments)]
 pub async fn publish_queued_for_run(
     db: &Database,
@@ -79,7 +85,6 @@ pub async fn publish_queued_for_run(
     head_sha: &str,
     workflow_name: &str,
     run_id: &str,
-    job_keys: &[String],
     public_origin: Option<&str>,
     owner_slug: Option<&str>,
     repo_name: Option<&str>,
@@ -89,17 +94,62 @@ pub async fn publish_queued_for_run(
         (Some(o), Some(n)) => target_url_for_run(public_origin, o, n, run_id),
         _ => None,
     };
-    for job_key in job_keys {
+    for job in db.list_action_jobs_for_run(run_id).await? {
+        let desc = match job.status.as_str() {
+            "skipped" => "Skipped",
+            "failure" => "Failed",
+            "cancelled" => "Cancelled",
+            _ => "Waiting for a runner",
+        };
         upsert_job_status(
             db,
             repository_id,
             head_sha,
             workflow_name,
-            job_key,
-            "queued",
-            "Waiting for a runner",
+            &job.job_key,
+            &job.status,
+            desc,
             target.as_deref(),
             creator_id,
+        )
+        .await?;
+    }
+    Ok(())
+}
+
+/// After run cancellation: every job the cancel flipped to `cancelled`
+/// publishes commit state `error` — GitHub cancels a run by failing its
+/// pending checks rather than leaving them `pending` forever. Jobs that
+/// finished or skipped before the cancel already carry their state
+/// (re-publishing is an idempotent upsert, so fail-fast-cancelled legs are
+/// safe to re-mark).
+pub async fn publish_cancelled_for_run(
+    db: &Database,
+    run_id: &str,
+    public_origin: Option<&str>,
+) -> Result<(), String> {
+    let run = db
+        .find_action_run_by_id(run_id)
+        .await?
+        .ok_or_else(|| "action run not found".to_string())?;
+    let target = public_origin
+        .map(|o| o.trim().trim_end_matches('/'))
+        .filter(|o| !o.is_empty())
+        .map(|o| format!("{o}/actions/runs/{}", run.id));
+    for job in db.list_action_jobs_for_run(run_id).await? {
+        if job.status != "cancelled" {
+            continue;
+        }
+        upsert_job_status(
+            db,
+            &run.repository_id,
+            &run.head_sha,
+            &run.workflow_name,
+            &job.job_key,
+            "cancelled",
+            "Cancelled",
+            target.as_deref(),
+            run.triggered_by.as_deref(),
         )
         .await?;
     }

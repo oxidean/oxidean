@@ -455,6 +455,18 @@ async fn rerun_and_cancel_run() {
     assert_eq!(res["data"]["run"]["status"], "cancelled");
     let job = fx.db.find_action_job_by_id("job-m").await.unwrap().unwrap();
     assert_eq!(job.status, "cancelled");
+    // The interrupted job's commit status flips pending → error so required
+    // checks don't hang on a cancelled run.
+    let statuses = fx
+        .db
+        .list_commit_statuses("r-act", "deadbeef")
+        .await
+        .unwrap();
+    let st = statuses
+        .iter()
+        .find(|s| s.context == "CI / build")
+        .expect("cancel publishes a commit status for the job");
+    assert_eq!(st.state, "error");
 
     // Seed the dead attempt's leftovers — log files (plain + compressed),
     // outputs/summary, and the append cursor — so the rerun's wipe and

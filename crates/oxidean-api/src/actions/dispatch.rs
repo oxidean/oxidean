@@ -465,7 +465,7 @@ pub async fn enqueue_run(
         supersede_groups: Vec::new(),
         caller: None,
     };
-    let (job_ids, job_keys) = emit_jobs(&mut emit, &doc.jobs).await?;
+    let job_ids = emit_jobs(&mut emit, &doc.jobs).await?;
     let supersede_groups = emit.supersede_groups;
     // `concurrency.cancel-in-progress` — workflow group supersedes whole
     // still-running same-group runs; job groups supersede same-group jobs.
@@ -537,7 +537,6 @@ pub async fn enqueue_run(
         head_sha,
         &doc.name,
         &run_id,
-        &job_keys,
         std::env::var("OXIDEAN_PUBLIC_ORIGIN").ok().as_deref(),
         None,
         None,
@@ -808,13 +807,13 @@ pub(crate) struct CallerEmit {
     pub secrets_json: serde_json::Value,
 }
 
-/// Emit one job row per `JobSpec` × matrix leg. Returns
-/// `(job_ids, job_keys)`. Callee emission passes `emit.caller = Some(..)` so
-/// rows link and `needs`/fail-fast scope within the call.
+/// Emit one job row per `JobSpec` × matrix leg; returns the job ids. Callee
+/// emission passes `emit.caller = Some(..)` so rows link and `needs`/
+/// fail-fast scope within the call.
 pub(crate) async fn emit_jobs(
     emit: &mut EmitCtx<'_>,
     jobs: &[crate::actions::parse::JobSpec],
-) -> Result<(Vec<String>, Vec<String>), String> {
+) -> Result<Vec<String>, String> {
     let db = emit.db;
     let run_id = emit.run_id;
     let repository_id = emit.repository_id;
@@ -827,7 +826,6 @@ pub(crate) async fn emit_jobs(
     let log_dir = emit.log_dir.clone();
     let hold_for_approval = emit.hold_for_approval;
     let mut job_ids = Vec::new();
-    let mut job_keys = Vec::new();
     for job in jobs {
         // Per-job expression evaluation. Errors in `if`/`runs-on` fail the
         // job loudly; errors in display fields degrade to ::warning::.
@@ -1236,9 +1234,8 @@ pub(crate) async fn emit_jobs(
             }
             job_ids.push(job_id);
         }
-        job_keys.push(job.id.clone());
     }
-    Ok((job_ids, job_keys))
+    Ok(job_ids)
 }
 
 #[cfg(test)]

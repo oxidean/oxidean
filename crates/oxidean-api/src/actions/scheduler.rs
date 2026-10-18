@@ -300,6 +300,15 @@ async fn fail_fast_pass(db: &Database, run_id: &str) -> Result<bool, String> {
         {
             db.update_action_job_status(&j.id, "cancelled").await?;
             let _ = db.revoke_action_job_token_for_job(&j.id).await;
+            // Server-side cancel — the runner path never publishes this.
+            let origin = std::env::var("OXIDEAN_PUBLIC_ORIGIN").ok();
+            let _ = crate::actions::statuses::publish_from_job_update(
+                db,
+                &j.id,
+                "cancelled",
+                origin.as_deref(),
+            )
+            .await;
             changed = true;
         }
     }
@@ -366,6 +375,14 @@ async fn needs_pass(
                             )
                             .await;
                             db.update_action_job_status(&job.id, "failure").await?;
+                            let origin = std::env::var("OXIDEAN_PUBLIC_ORIGIN").ok();
+                            let _ = crate::actions::statuses::publish_from_job_update(
+                                db,
+                                &job.id,
+                                "failure",
+                                origin.as_deref(),
+                            )
+                            .await;
                         }
                         Err(e) => {
                             let _ = crate::actions::logs::append_job_log(
@@ -376,6 +393,14 @@ async fn needs_pass(
                             )
                             .await;
                             db.update_action_job_status(&job.id, "failure").await?;
+                            let origin = std::env::var("OXIDEAN_PUBLIC_ORIGIN").ok();
+                            let _ = crate::actions::statuses::publish_from_job_update(
+                                db,
+                                &job.id,
+                                "failure",
+                                origin.as_deref(),
+                            )
+                            .await;
                         }
                     }
                 } else if job.deployment_wait_minutes > 0 {
@@ -395,9 +420,27 @@ async fn needs_pass(
             }
             WaitDecision::Skip => {
                 db.update_action_job_status(&job.id, "skipped").await?;
+                // Skipped jobs never reach a runner — publish the (green)
+                // commit status here or the check stays `pending` forever.
+                let origin = std::env::var("OXIDEAN_PUBLIC_ORIGIN").ok();
+                let _ = crate::actions::statuses::publish_from_job_update(
+                    db,
+                    &job.id,
+                    "skipped",
+                    origin.as_deref(),
+                )
+                .await;
             }
             WaitDecision::Fail => {
                 db.update_action_job_status(&job.id, "failure").await?;
+                let origin = std::env::var("OXIDEAN_PUBLIC_ORIGIN").ok();
+                let _ = crate::actions::statuses::publish_from_job_update(
+                    db,
+                    &job.id,
+                    "failure",
+                    origin.as_deref(),
+                )
+                .await;
             }
         }
         resolved += 1;
