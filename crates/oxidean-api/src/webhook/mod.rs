@@ -28,6 +28,8 @@ const ALLOWED_EVENTS: &[&str] = &[
     "milestone",
     "deployment",
     "deployment_status",
+    "check_run",
+    "check_suite",
     "pull_request_review_comment",
     "release",
     "star",

@@ -18,6 +18,7 @@ use crate::auth::profile;
 use crate::auth::session::{ResolvedSession, SessionService};
 use crate::auth::two_factor;
 use crate::auth::verify_reset;
+use crate::check;
 use crate::deployment;
 use crate::email::EmailSender;
 use crate::emails;
@@ -427,6 +428,17 @@ pub const PROCEDURES: &[&str] = &[
     "deployment.delete",
     "deployment.status.list",
     "deployment.status.create",
+    "check.suites.list",
+    "check.suites.get",
+    "check.suites.create",
+    "check.suites.rerequest",
+    "check.runs.listForSuite",
+    "check.runs.listForRef",
+    "check.runs.get",
+    "check.runs.create",
+    "check.runs.update",
+    "check.runs.rerequest",
+    "check.annotations.list",
     "issue.assigneeCandidates",
     "issue.reactions.toggle",
     "issue.links.list",
@@ -1828,6 +1840,50 @@ async fn dispatch_inner(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Err(e) => RpcResponse::err(e),
         },
         "deployment.status.create" => match deployment::status_create(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "check.suites.list" => match check::suites_list(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "check.suites.get" => match check::suites_get(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "check.suites.create" => match check::suites_create(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "check.suites.rerequest" => match check::suites_rerequest(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "check.runs.listForSuite" => match check::runs_list_for_suite(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "check.runs.listForRef" => match check::runs_list_for_ref(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "check.runs.get" => match check::runs_get(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "check.runs.create" => match check::runs_create(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "check.runs.update" => match check::runs_update(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "check.runs.rerequest" => match check::runs_rerequest(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "check.annotations.list" => match check::annotations_list(ctx, req.input).await {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },

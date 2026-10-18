@@ -354,3 +354,95 @@ pub fn repository_embed(owner: &str, name: &str, default_branch: &str) -> JsonVa
 pub fn user_embed(login: &str) -> JsonValue {
     json!({"login": login})
 }
+
+/// `check_suite` object in GitHub's shape (embedded in `check_suite`
+/// payloads and inside `check_run` objects).
+pub fn check_suite_embed(
+    row: &oxidean_db::CheckSuiteRow,
+    creator_login: &str,
+    repository: &JsonValue,
+) -> JsonValue {
+    json!({
+        "id": row.id,
+        "head_sha": row.head_sha,
+        "head_branch": row.head_branch,
+        "status": row.status,
+        "conclusion": row.conclusion,
+        "url": row.url,
+        "app": {"slug": row.app},
+        "check_runs_url": row.run_id,
+        "latest_check_runs_count": row.check_runs_count,
+        "repository": repository,
+        "creator": {"login": creator_login, "id": row.creator_id},
+        "created_at": row.created_at,
+        "updated_at": row.updated_at,
+    })
+}
+
+/// `check_run` object in GitHub's shape. `annotations_count` reflects stored
+/// annotation rows; the suite embeds as GitHub's partial `check_suite`.
+pub fn check_run_embed(
+    row: &oxidean_db::CheckRunRow,
+    app: &str,
+    creator_login: &str,
+    annotations_count: i64,
+) -> JsonValue {
+    json!({
+        "id": row.id,
+        "name": row.name,
+        "head_sha": row.head_sha,
+        "status": row.status,
+        "conclusion": row.conclusion,
+        "details_url": row.details_url,
+        "external_id": row.external_id,
+        "check_suite": {"id": row.check_suite_id},
+        "app": {"slug": app},
+        "output": {
+            "title": row.output_title,
+            "summary": row.output_summary,
+            "text": row.output_text,
+            "annotations_count": annotations_count,
+        },
+        "creator": {"login": creator_login, "id": row.creator_id},
+        "started_at": row.started_at,
+        "completed_at": row.completed_at,
+        "created_at": row.created_at,
+        "updated_at": row.updated_at,
+    })
+}
+
+/// `check_run` event payload — `action` is `created` | `completed` |
+/// `rerequested` (GitHub vocabulary).
+pub fn check_run_payload(
+    action: &str,
+    run: &oxidean_db::CheckRunRow,
+    app: &str,
+    creator_login: &str,
+    annotations_count: i64,
+    repository: &JsonValue,
+    sender: &JsonValue,
+) -> JsonValue {
+    json!({
+        "action": action,
+        "check_run": check_run_embed(run, app, creator_login, annotations_count),
+        "repository": repository,
+        "sender": sender,
+    })
+}
+
+/// `check_suite` event payload — `action` is `requested` | `rerequested` |
+/// `completed` (GitHub vocabulary).
+pub fn check_suite_payload(
+    action: &str,
+    suite: &oxidean_db::CheckSuiteRow,
+    creator_login: &str,
+    repository: &JsonValue,
+    sender: &JsonValue,
+) -> JsonValue {
+    json!({
+        "action": action,
+        "check_suite": check_suite_embed(suite, creator_login, repository),
+        "repository": repository,
+        "sender": sender,
+    })
+}

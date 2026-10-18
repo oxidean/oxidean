@@ -2708,6 +2708,185 @@ export type DeploymentDeleteResponse = {
   ok: boolean;
 };
 
+export type CheckSuitePublic = {
+  id: string;
+  head_sha: string;
+  head_branch?: string | null;
+  /** `github-actions` for Actions-run suites, `api` for API-created ones. */
+  app: string;
+  /** Bound Actions run for workflow-projected suites. */
+  run_id?: string | null;
+  /** `queued` | `in_progress` | `completed`. */
+  status: string;
+  conclusion?: string | null;
+  url?: string | null;
+  creator_id?: string | null;
+  creator_username?: string | null;
+  /** GitHub `latest_check_runs_count`. */
+  check_runs_count: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CheckRunAnnotationInput = {
+  path: string;
+  start_line: number;
+  end_line: number;
+  start_column?: number;
+  end_column?: number;
+  /** `notice` | `warning` | `failure`. */
+  annotation_level: string;
+  message: string;
+  title?: string;
+  raw_details?: string;
+};
+
+export type CheckRunOutput = {
+  title?: string;
+  summary?: string;
+  text?: string;
+  /** Inline annotations on create/update (GitHub caps at 50 per call). */
+  annotations?: CheckRunAnnotationInput[];
+  /** Response-only — count of stored annotations. */
+  annotations_count?: number;
+};
+
+export type CheckRunPublic = {
+  id: string;
+  name: string;
+  head_sha: string;
+  /** `queued` | `in_progress` | `completed` | `waiting` | `pending` | `requested`. */
+  status: string;
+  conclusion?: string | null;
+  details_url?: string | null;
+  external_id?: string | null;
+  check_suite_id: string;
+  /** Owning suite's `app` label. */
+  app: string;
+  /** Backing Actions job/run for workflow-projected runs. */
+  job_id?: string | null;
+  run_id?: string | null;
+  output: CheckRunOutput;
+  creator_id?: string | null;
+  creator_username?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CheckRunAnnotationPublic = {
+  id: string;
+  check_run_id: string;
+  path: string;
+  blob_href?: string | null;
+  start_line: number;
+  end_line: number;
+  start_column?: number | null;
+  end_column?: number | null;
+  annotation_level: string;
+  message: string;
+  title?: string | null;
+  raw_details?: string | null;
+  created_at: string;
+};
+
+export type CheckSuiteListRequest = {
+  owner: string;
+  name: string;
+  /** Branch name, `refs/…`, tag, or sha — resolved server-side. */
+  ref?: string;
+  head_sha?: string;
+  limit?: number;
+};
+
+export type CheckSuiteListResponse = {
+  suites: CheckSuitePublic[];
+};
+
+export type CheckSuiteRefRequest = {
+  owner: string;
+  name: string;
+  id: string;
+};
+
+export type CheckSuiteCreateRequest = {
+  owner: string;
+  name: string;
+  head_sha: string;
+};
+
+export type CheckRunListForSuiteRequest = {
+  owner: string;
+  name: string;
+  suite_id: string;
+  check_name?: string;
+  status?: string;
+  limit?: number;
+};
+
+export type CheckRunListForRefRequest = {
+  owner: string;
+  name: string;
+  /** Branch name, `refs/…`, tag, or sha — resolved server-side. */
+  ref: string;
+  check_name?: string;
+  status?: string;
+  conclusion?: string;
+  limit?: number;
+};
+
+export type CheckRunListResponse = {
+  check_runs: CheckRunPublic[];
+};
+
+export type CheckRunRefRequest = {
+  owner: string;
+  name: string;
+  id: string;
+};
+
+export type CheckRunCreateRequest = {
+  owner: string;
+  name: string;
+  /** GitHub `check_run.name` — required. */
+  check_name: string;
+  head_sha: string;
+  details_url?: string;
+  external_id?: string;
+  /** Defaults to `queued`. */
+  status?: string;
+  conclusion?: string;
+  started_at?: string;
+  completed_at?: string;
+  output?: CheckRunOutput;
+};
+
+export type CheckRunUpdateRequest = {
+  owner: string;
+  name: string;
+  id: string;
+  check_name?: string;
+  /** `null` clears the stored value. */
+  details_url?: string | null;
+  external_id?: string | null;
+  status?: string;
+  conclusion?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  output?: CheckRunOutput;
+};
+
+export type CheckRunAnnotationsListRequest = {
+  owner: string;
+  name: string;
+  check_run_id: string;
+};
+
+export type CheckRunAnnotationsListResponse = {
+  annotations: CheckRunAnnotationPublic[];
+};
+
 export type OrgSecretMetaPublic = {
   name: string;
   /** `all` | `private` | `selected`. */
@@ -5016,6 +5195,36 @@ export function createClient(opts: CreateClientOptions) {
           rpcCall<DeploymentStatusListResponse>(opts, "deployment.status.list", input),
         create: (input: DeploymentStatusCreateRequest) =>
           rpcCall<DeploymentStatusPublic>(opts, "deployment.status.create", input),
+      },
+    },
+    check: {
+      suites: {
+        list: (input: CheckSuiteListRequest) =>
+          rpcCall<CheckSuiteListResponse>(opts, "check.suites.list", input),
+        get: (input: CheckSuiteRefRequest) =>
+          rpcCall<CheckSuitePublic>(opts, "check.suites.get", input),
+        create: (input: CheckSuiteCreateRequest) =>
+          rpcCall<CheckSuitePublic>(opts, "check.suites.create", input),
+        rerequest: (input: CheckSuiteRefRequest) =>
+          rpcCall<CheckSuitePublic>(opts, "check.suites.rerequest", input),
+      },
+      runs: {
+        listForSuite: (input: CheckRunListForSuiteRequest) =>
+          rpcCall<CheckRunListResponse>(opts, "check.runs.listForSuite", input),
+        listForRef: (input: CheckRunListForRefRequest) =>
+          rpcCall<CheckRunListResponse>(opts, "check.runs.listForRef", input),
+        get: (input: CheckRunRefRequest) =>
+          rpcCall<CheckRunPublic>(opts, "check.runs.get", input),
+        create: (input: CheckRunCreateRequest) =>
+          rpcCall<CheckRunPublic>(opts, "check.runs.create", input),
+        update: (input: CheckRunUpdateRequest) =>
+          rpcCall<CheckRunPublic>(opts, "check.runs.update", input),
+        rerequest: (input: CheckRunRefRequest) =>
+          rpcCall<CheckRunPublic>(opts, "check.runs.rerequest", input),
+      },
+      annotations: {
+        list: (input: CheckRunAnnotationsListRequest) =>
+          rpcCall<CheckRunAnnotationsListResponse>(opts, "check.annotations.list", input),
       },
     },
     pull: {

@@ -301,6 +301,33 @@ pub async fn merge(ctx: &RpcCtx, input: serde_json::Value) -> Result<MergePullRe
             for s in statuses {
                 status_by_context.insert(s.context, s.state);
             }
+            // Check runs satisfy required contexts by name (GitHub treats a
+            // required check as met when a check run — not just a commit
+            // status — reports the name). Completed runs map their
+            // conclusion onto the status vocabulary; mid-flight reads as
+            // `pending`. Check runs win over same-named commit statuses —
+            // they're the newer context writer.
+            if let Ok(check_runs) = ctx
+                .db
+                .list_check_runs_for_sha(&accessible.row.id, &row.head_sha, None, None, None, 500)
+                .await
+            {
+                let mut latest_by_name: std::collections::BTreeMap<String, String> =
+                    std::collections::BTreeMap::new();
+                for r in &check_runs {
+                    // Rows come newest-first; first write per name wins.
+                    latest_by_name.entry(r.name.clone()).or_insert_with(|| {
+                        if r.status == "completed" {
+                            r.conclusion.clone().unwrap_or_else(|| "failure".into())
+                        } else {
+                            "pending".into()
+                        }
+                    });
+                }
+                for (name, state) in latest_by_name {
+                    status_by_context.insert(name, state);
+                }
+            }
             let path_for_anc = bare_repo_path(
                 &ctx.repos_dir,
                 &accessible.owner_username,

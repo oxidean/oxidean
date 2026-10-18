@@ -49,6 +49,11 @@ pub enum PatProc {
     /// Creating deployments and deployment statuses (GitHub Deployments
     /// API). Classic `repo`; FG `deployments:write`.
     DeploymentsWrite,
+    /// Check runs/suites and annotations. Classic `repo`; FG `checks` perm.
+    ChecksRead,
+    /// Creating/updating/rerequesting check runs and suites (GitHub Checks
+    /// API). Classic `repo`; FG `checks:write`.
+    ChecksWrite,
     /// Commit statuses. Classic `repo:status`|`repo`|`public_repo`; FG
     /// `commit_statuses` perm.
     StatusesRead,
@@ -294,6 +299,17 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         "repo.actions.listDeployments" => DeploymentsRead,
         "deployment.list" | "deployment.get" | "deployment.status.list" => DeploymentsRead,
         "deployment.create" | "deployment.status.create" | "deployment.delete" => DeploymentsWrite,
+        "check.suites.list"
+        | "check.suites.get"
+        | "check.runs.listForSuite"
+        | "check.runs.listForRef"
+        | "check.runs.get"
+        | "check.annotations.list" => ChecksRead,
+        "check.suites.create"
+        | "check.suites.rerequest"
+        | "check.runs.create"
+        | "check.runs.update"
+        | "check.runs.rerequest" => ChecksWrite,
 
         // Drafting a workflow file is a contents write (ActionsWrite ⇒ classic
         // `repo` or `workflow`, FG `actions:write`).
@@ -447,8 +463,8 @@ pub fn classic_scopes_for(class: PatProc) -> &'static [ClassicPatScope] {
         // `repo` umbrella classes (narrower scopes add on below).
         RepoRead | RepoWrite | IssuesRead | IssuesWrite | PullsRead | PullsWrite | ActionsRead
         | EnvironmentsRead | EnvironmentsWrite | DeploymentsRead | DeploymentsWrite
-        | SecretsRead | SecretsWrite | ReleasesRead | ReleasesWrite | RepoAdminRead
-        | RepoAdminWrite => &[S::Repo],
+        | ChecksRead | ChecksWrite | SecretsRead | SecretsWrite | ReleasesRead | ReleasesWrite
+        | RepoAdminRead | RepoAdminWrite => &[S::Repo],
         ActionsWrite => &[S::Repo, S::Workflow],
         StatusesRead | StatusesWrite => &[S::Repo, S::RepoStatus],
         WebhooksRead | WebhooksWrite => &[S::Repo, S::AdminRepoHook],
@@ -496,6 +512,7 @@ pub fn fg_family_name(class: PatProc) -> Option<&'static str> {
         ActionsRead | ActionsWrite => "actions",
         EnvironmentsRead | EnvironmentsWrite => "environments",
         DeploymentsRead | DeploymentsWrite => "deployments",
+        ChecksRead | ChecksWrite => "checks",
         StatusesRead | StatusesWrite => "commit_statuses",
         SecretsRead | SecretsWrite => "secrets",
         ReleasesRead | ReleasesWrite => "releases",

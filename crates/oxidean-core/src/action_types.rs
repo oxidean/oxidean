@@ -1306,3 +1306,260 @@ pub struct OrgActionsVariableReposRequest {
 pub struct OrgActionsVariableReposResponse {
     pub repository_ids: Vec<String>,
 }
+
+// ---- Checks domain (check suites / check runs / annotations) ----
+
+/// One `check_suites` row in GitHub's check-suite shape.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct CheckSuitePublic {
+    pub id: String,
+    pub head_sha: String,
+    pub head_branch: Option<String>,
+    /// Suite owner label — `github-actions` for Actions-run suites, `api`
+    /// for runs created through `check.runs.create`.
+    pub app: String,
+    /// Bound Actions run for workflow-projected suites.
+    pub run_id: Option<String>,
+    /// `queued` | `in_progress` | `completed`.
+    pub status: String,
+    pub conclusion: Option<String>,
+    pub url: Option<String>,
+    pub creator_id: Option<String>,
+    pub creator_username: Option<String>,
+    /// GitHub `latest_check_runs_count` — live count of runs under the suite.
+    pub check_runs_count: i64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// GitHub `check_run.output` object.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct CheckRunOutput {
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub summary: Option<String>,
+    #[serde(default)]
+    pub text: Option<String>,
+    /// Inline annotations on create/update (GitHub caps at 50 per call).
+    #[serde(default)]
+    pub annotations: Vec<CheckRunAnnotationInput>,
+    /// Count of stored annotations (response-only; ignored on write).
+    #[serde(default)]
+    pub annotations_count: i64,
+}
+
+/// One annotation submitted inside `check_run.output.annotations`.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct CheckRunAnnotationInput {
+    pub path: String,
+    pub start_line: i64,
+    pub end_line: i64,
+    #[serde(default)]
+    pub start_column: Option<i64>,
+    #[serde(default)]
+    pub end_column: Option<i64>,
+    /// `notice` | `warning` | `failure`.
+    pub annotation_level: String,
+    pub message: String,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub raw_details: Option<String>,
+}
+
+/// One stored `check_run_annotations` row in GitHub's annotation shape.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct CheckRunAnnotationPublic {
+    pub id: String,
+    pub check_run_id: String,
+    pub path: String,
+    /// GitHub `blob_href` — best-effort link into the file viewer.
+    pub blob_href: Option<String>,
+    pub start_line: i64,
+    pub end_line: i64,
+    pub start_column: Option<i64>,
+    pub end_column: Option<i64>,
+    pub annotation_level: String,
+    pub message: String,
+    pub title: Option<String>,
+    pub raw_details: Option<String>,
+    pub created_at: String,
+}
+
+/// One `check_runs` row in GitHub's check-run shape.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct CheckRunPublic {
+    pub id: String,
+    pub name: String,
+    pub head_sha: String,
+    /// `queued` | `in_progress` | `completed` | `waiting` | `pending` |
+    /// `requested`.
+    pub status: String,
+    /// `success`|`failure`|`neutral`|`cancelled`|`skipped`|`timed_out`|
+    /// `action_required`|`startup_failure`|`stale` when completed.
+    pub conclusion: Option<String>,
+    pub details_url: Option<String>,
+    pub external_id: Option<String>,
+    pub check_suite_id: String,
+    /// Owning suite's `app` label.
+    pub app: String,
+    /// Backing Actions job/run for workflow-projected runs.
+    pub job_id: Option<String>,
+    pub run_id: Option<String>,
+    pub output: CheckRunOutput,
+    pub creator_id: Option<String>,
+    pub creator_username: Option<String>,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// `check.suites.list` — suites for a repo, optionally narrowed to a ref/sha
+/// (GitHub `GET /commits/{ref}/check-suites` parity).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct CheckSuiteListRequest {
+    pub owner: String,
+    pub name: String,
+    /// Branch name, `refs/...`, tag, or sha — resolved server-side.
+    #[serde(rename = "ref", default)]
+    pub git_ref: Option<String>,
+    pub head_sha: Option<String>,
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct CheckSuiteListResponse {
+    pub suites: Vec<CheckSuitePublic>,
+}
+
+/// `check.suites.get` / `check.suites.rerequest` — one suite by id.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct CheckSuiteRefRequest {
+    pub owner: String,
+    pub name: String,
+    pub id: String,
+}
+
+/// `check.suites.create` — GitHub `POST /check-suites` parity. Creating a
+/// suite emits `check_suite.requested`.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct CheckSuiteCreateRequest {
+    pub owner: String,
+    pub name: String,
+    pub head_sha: String,
+}
+
+pub type CheckSuiteGetResponse = CheckSuitePublic;
+pub type CheckSuiteCreateResponse = CheckSuitePublic;
+pub type CheckSuiteRerequestResponse = CheckSuitePublic;
+
+/// `check.runs.listForSuite` — GitHub `GET
+/// /check-suites/{id}/check-runs` parity (`check_name`, `status` filters).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct CheckRunListForSuiteRequest {
+    pub owner: String,
+    pub name: String,
+    pub suite_id: String,
+    pub check_name: Option<String>,
+    pub status: Option<String>,
+    pub limit: Option<u32>,
+}
+
+/// `check.runs.listForRef` — GitHub `GET /commits/{ref}/check-runs` parity.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct CheckRunListForRefRequest {
+    pub owner: String,
+    pub name: String,
+    /// Branch name, `refs/...`, tag, or sha — resolved server-side.
+    #[serde(rename = "ref")]
+    pub git_ref: String,
+    pub check_name: Option<String>,
+    pub status: Option<String>,
+    /// Extra server-side filter — GitHub folds conclusions into `filter`.
+    pub conclusion: Option<String>,
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct CheckRunListResponse {
+    pub check_runs: Vec<CheckRunPublic>,
+}
+
+/// `check.runs.get` / `check.runs.rerequest` — one run by id.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct CheckRunRefRequest {
+    pub owner: String,
+    pub name: String,
+    pub id: String,
+}
+
+/// `check.runs.create` — GitHub `POST /check-runs` parity. A `completed`
+/// status requires `conclusion`; annotations ride inside `output`.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct CheckRunCreateRequest {
+    pub owner: String,
+    pub name: String,
+    /// GitHub `check_run.name` — required.
+    pub check_name: String,
+    pub head_sha: String,
+    #[serde(default)]
+    pub details_url: Option<String>,
+    #[serde(default)]
+    pub external_id: Option<String>,
+    /// Defaults to `queued`.
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub conclusion: Option<String>,
+    #[serde(default)]
+    pub started_at: Option<String>,
+    #[serde(default)]
+    pub completed_at: Option<String>,
+    #[serde(default)]
+    pub output: Option<CheckRunOutput>,
+}
+
+/// `check.runs.update` — GitHub `PATCH /check-runs/{id}` parity; omitted
+/// fields keep their stored values, explicit nulls clear.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct CheckRunUpdateRequest {
+    pub owner: String,
+    pub name: String,
+    pub id: String,
+    #[serde(default)]
+    pub check_name: Option<String>,
+    #[serde(default, deserialize_with = "crate::milestone_types::deserialize_some")]
+    pub details_url: Option<Option<String>>,
+    #[serde(default, deserialize_with = "crate::milestone_types::deserialize_some")]
+    pub external_id: Option<Option<String>>,
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default, deserialize_with = "crate::milestone_types::deserialize_some")]
+    pub conclusion: Option<Option<String>>,
+    #[serde(default, deserialize_with = "crate::milestone_types::deserialize_some")]
+    pub started_at: Option<Option<String>>,
+    #[serde(default, deserialize_with = "crate::milestone_types::deserialize_some")]
+    pub completed_at: Option<Option<String>>,
+    #[serde(default)]
+    pub output: Option<CheckRunOutput>,
+}
+
+pub type CheckRunGetResponse = CheckRunPublic;
+pub type CheckRunCreateResponse = CheckRunPublic;
+pub type CheckRunUpdateResponse = CheckRunPublic;
+pub type CheckRunRerequestResponse = CheckRunPublic;
+
+/// `check.annotations.list` — annotations attached to one check run.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct CheckRunAnnotationsListRequest {
+    pub owner: String,
+    pub name: String,
+    pub check_run_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct CheckRunAnnotationsListResponse {
+    pub annotations: Vec<CheckRunAnnotationPublic>,
+}

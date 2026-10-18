@@ -55,6 +55,7 @@ pub mod watches;
 pub mod webhooks;
 pub mod workflow_templates;
 
+pub mod checks;
 pub mod deployments;
 pub use actions::{
     ActionArtifactRow, ActionEnvironmentRow, ActionJobRow, ActionJobTokenRow, ActionOidcKeyRow,
@@ -64,6 +65,7 @@ pub use actions::{
 pub use audit_events::AuditEventRow;
 pub use auth_settings::AuthSettingsRow;
 pub use branch_protection::{BranchProtectionRuleRow, CommitStatusRow};
+pub use checks::{CheckRunAnnotationRow, CheckRunRow, CheckSuiteRow};
 pub use deploy_keys::DeployKeyRow;
 pub use deployments::{ActionDeploymentRow, ActionDeploymentStatusRow};
 use dialect::resolve_dialect_from_env as resolve_from_env;
@@ -3978,6 +3980,142 @@ impl Database {
         limit: i64,
     ) -> Result<Vec<deployments::ActionDeploymentStatusRow>, String> {
         deployments::list_deployment_statuses(self.require_pool()?, deployment_id, limit).await
+    }
+
+    // ---- check_suites / check_runs / check_run_annotations ----
+
+    pub async fn insert_check_suite(
+        &self,
+        s: &checks::NewCheckSuite<'_>,
+    ) -> Result<checks::CheckSuiteRow, String> {
+        checks::insert_check_suite(self.require_pool()?, s).await
+    }
+
+    pub async fn find_check_suite(
+        &self,
+        id: &str,
+    ) -> Result<Option<checks::CheckSuiteRow>, String> {
+        checks::find_check_suite(self.require_pool()?, id).await
+    }
+
+    /// The shared non-run suite for (repo, sha, app) — GitHub's per-app
+    /// suite semantics for API-created check runs.
+    pub async fn find_check_suite_for(
+        &self,
+        repository_id: &str,
+        head_sha: &str,
+        app: &str,
+    ) -> Result<Option<checks::CheckSuiteRow>, String> {
+        checks::find_check_suite_for(self.require_pool()?, repository_id, head_sha, app).await
+    }
+
+    /// The Actions-run suite bound to `run_id`, if projected yet.
+    pub async fn find_check_suite_for_run(
+        &self,
+        run_id: &str,
+    ) -> Result<Option<checks::CheckSuiteRow>, String> {
+        checks::find_check_suite_for_run(self.require_pool()?, run_id).await
+    }
+
+    /// Suites newest-first, optionally narrowed to a head sha.
+    pub async fn list_check_suites(
+        &self,
+        repository_id: &str,
+        head_sha: Option<&str>,
+        limit: i64,
+    ) -> Result<Vec<checks::CheckSuiteRow>, String> {
+        checks::list_check_suites(self.require_pool()?, repository_id, head_sha, limit).await
+    }
+
+    pub async fn update_check_suite_state(
+        &self,
+        id: &str,
+        status: &str,
+        conclusion: Option<&str>,
+    ) -> Result<(), String> {
+        checks::update_check_suite_state(self.require_pool()?, id, status, conclusion).await
+    }
+
+    /// Recompute suite status/conclusion from its runs (GitHub rollup).
+    pub async fn recompute_check_suite(
+        &self,
+        suite_id: &str,
+    ) -> Result<(String, Option<String>), String> {
+        checks::recompute_check_suite(self.require_pool()?, suite_id).await
+    }
+
+    pub async fn insert_check_run(
+        &self,
+        r: &checks::NewCheckRun<'_>,
+    ) -> Result<checks::CheckRunRow, String> {
+        checks::insert_check_run(self.require_pool()?, r).await
+    }
+
+    pub async fn find_check_run(&self, id: &str) -> Result<Option<checks::CheckRunRow>, String> {
+        checks::find_check_run(self.require_pool()?, id).await
+    }
+
+    /// The check run projected for an Actions job.
+    pub async fn find_check_run_by_job(
+        &self,
+        job_id: &str,
+    ) -> Result<Option<checks::CheckRunRow>, String> {
+        checks::find_check_run_by_job(self.require_pool()?, job_id).await
+    }
+
+    /// Runs under one suite, oldest first.
+    pub async fn list_check_runs_for_suite(
+        &self,
+        suite_id: &str,
+        limit: i64,
+    ) -> Result<Vec<checks::CheckRunRow>, String> {
+        checks::list_check_runs_for_suite(self.require_pool()?, suite_id, limit).await
+    }
+
+    /// Runs on a commit with GitHub's `check_name`/`status`/`conclusion`
+    /// filters (each `None` passes).
+    pub async fn list_check_runs_for_sha(
+        &self,
+        repository_id: &str,
+        head_sha: &str,
+        check_name: Option<&str>,
+        status: Option<&str>,
+        conclusion: Option<&str>,
+        limit: i64,
+    ) -> Result<Vec<checks::CheckRunRow>, String> {
+        checks::list_check_runs_for_sha(
+            self.require_pool()?,
+            repository_id,
+            head_sha,
+            check_name,
+            status,
+            conclusion,
+            limit,
+        )
+        .await
+    }
+
+    pub async fn update_check_run(
+        &self,
+        id: &str,
+        patch: &checks::CheckRunPatch<'_>,
+    ) -> Result<checks::CheckRunRow, String> {
+        checks::update_check_run(self.require_pool()?, id, patch).await
+    }
+
+    pub async fn insert_check_run_annotation(
+        &self,
+        a: &checks::NewCheckRunAnnotation<'_>,
+    ) -> Result<(), String> {
+        checks::insert_check_run_annotation(self.require_pool()?, a).await
+    }
+
+    /// Annotations on one check run, insertion order.
+    pub async fn list_check_run_annotations(
+        &self,
+        check_run_id: &str,
+    ) -> Result<Vec<checks::CheckRunAnnotationRow>, String> {
+        checks::list_check_run_annotations(self.require_pool()?, check_run_id).await
     }
 
     /// Record one approve/reject decision on an environment-held job.

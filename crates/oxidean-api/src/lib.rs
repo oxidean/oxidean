@@ -9,6 +9,7 @@ pub mod admin;
 pub mod app;
 pub mod audit;
 pub mod auth;
+pub mod check;
 pub mod cors;
 pub mod crypto;
 pub mod deploy_keys;

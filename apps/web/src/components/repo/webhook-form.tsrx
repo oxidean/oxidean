@@ -17,6 +17,8 @@ const EVENT_OPTIONS = [
   { id: "issue_comment", label: "issue_comment" },
   { id: "deployment", label: "deployment" },
   { id: "deployment_status", label: "deployment_status" },
+  { id: "check_run", label: "check_run" },
+  { id: "check_suite", label: "check_suite" },
   { id: "pull_request_review_comment", label: "pull_request_review_comment" },
   { id: "release", label: "release" },
   { id: "star", label: "star" },

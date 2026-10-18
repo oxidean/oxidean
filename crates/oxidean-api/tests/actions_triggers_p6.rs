@@ -677,6 +677,10 @@ on:
   status: {}
   deployment: {}
   deployment_status: {}
+  check_run:
+    types: [created]
+  check_suite:
+    types: [requested]
   repository_dispatch:
     types: [deploy]
   branch_protection_rule:
@@ -751,17 +755,28 @@ jobs:
     }
     assert_eq!(run_count(&db, &repo_id).await, 14);
 
+    // check_run types:[created] / check_suite types:[requested] — the
+    // mismatched actions are filtered, the matching ones fire.
+    notify_lifecycle_actions(&db, git.as_ref(), &ev("check_run", "completed")).await;
+    assert_eq!(run_count(&db, &repo_id).await, 14);
+    notify_lifecycle_actions(&db, git.as_ref(), &ev("check_run", "created")).await;
+    assert_eq!(run_count(&db, &repo_id).await, 15);
+    notify_lifecycle_actions(&db, git.as_ref(), &ev("check_suite", "completed")).await;
+    assert_eq!(run_count(&db, &repo_id).await, 15);
+    notify_lifecycle_actions(&db, git.as_ref(), &ev("check_suite", "requested")).await;
+    assert_eq!(run_count(&db, &repo_id).await, 16);
+
     // repository_dispatch — types: match the caller-chosen event_type.
     notify_lifecycle_actions(&db, git.as_ref(), &ev("repository_dispatch", "build")).await;
-    assert_eq!(run_count(&db, &repo_id).await, 14);
+    assert_eq!(run_count(&db, &repo_id).await, 16);
     notify_lifecycle_actions(&db, git.as_ref(), &ev("repository_dispatch", "deploy")).await;
-    assert_eq!(run_count(&db, &repo_id).await, 15);
+    assert_eq!(run_count(&db, &repo_id).await, 17);
 
     // branch_protection_rule types:[created] — edited filtered.
     notify_lifecycle_actions(&db, git.as_ref(), &ev("branch_protection_rule", "edited")).await;
-    assert_eq!(run_count(&db, &repo_id).await, 15);
+    assert_eq!(run_count(&db, &repo_id).await, 17);
     notify_lifecycle_actions(&db, git.as_ref(), &ev("branch_protection_rule", "created")).await;
-    assert_eq!(run_count(&db, &repo_id).await, 16);
+    assert_eq!(run_count(&db, &repo_id).await, 18);
 
     let runs = db
         .list_action_runs_for_repo(&repo_id, &Default::default(), 100, 0)
@@ -782,6 +797,8 @@ jobs:
         "status",
         "deployment",
         "deployment_status",
+        "check_run",
+        "check_suite",
         "repository_dispatch",
         "branch_protection_rule",
     ] {

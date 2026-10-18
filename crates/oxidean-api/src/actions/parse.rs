@@ -695,6 +695,8 @@ fn apply_event(
         | "milestone"
         | "deployment"
         | "deployment_status"
+        | "check_run"
+        | "check_suite"
         | "public"
         | "status"
         | "repository_dispatch"
