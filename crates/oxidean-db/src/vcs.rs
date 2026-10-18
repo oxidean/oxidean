@@ -694,6 +694,91 @@ pub async fn repo_object_counts(
     }
 }
 
+/// Membership probe — `true` when a `(repo_id, hash)` link exists
+/// (`has_lfs_link` shape). u3's quota gate: a re-reference skips the
+/// storage_bytes charge.
+pub async fn get_object_link(pool: &DbPool, repo_id: &str, hash: &str) -> Result<bool, String> {
+    match pool {
+        DbPool::Postgres(p) => {
+            let row = sqlx::query(
+                "SELECT 1 AS ok FROM vcs_object_links WHERE repo_id = $1 AND hash = $2",
+            )
+            .bind(repo_id)
+            .bind(hash)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("vcs get_object_link: {e}"))?;
+            Ok(row.is_some())
+        }
+        DbPool::MySql(p) => {
+            let row =
+                sqlx::query("SELECT 1 AS ok FROM vcs_object_links WHERE repo_id = ? AND hash = ?")
+                    .bind(repo_id)
+                    .bind(hash)
+                    .fetch_optional(p)
+                    .await
+                    .map_err(|e| format!("vcs get_object_link: {e}"))?;
+            Ok(row.is_some())
+        }
+        DbPool::Sqlite(p) => {
+            let row = sqlx::query(
+                "SELECT 1 AS ok FROM vcs_object_links WHERE repo_id = ?1 AND hash = ?2",
+            )
+            .bind(repo_id)
+            .bind(hash)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("vcs get_object_link: {e}"))?;
+            Ok(row.is_some())
+        }
+    }
+}
+
+/// Conditional delete (u3 GC pass): `true` = the row was deleted so the
+/// caller may unlink the file; `false` = protected by a live link or a
+/// `vcs_file_changes.blob_hash` reference — distinct from `Err` = a genuine
+/// failure (no per-pass warn spam on the U4-invariant edge). Dialect-
+/// portable: mysql's same-table-subquery ban doesn't apply — the NOT EXISTS
+/// clauses target other tables (`idx_vcs_object_links_hash` /
+/// `idx_vcs_file_changes_blob` serve them).
+pub async fn delete_object_if_unlinked(pool: &DbPool, hash: &str) -> Result<bool, String> {
+    let affected = match pool {
+        DbPool::Postgres(p) => sqlx::query(
+            "DELETE FROM vcs_objects WHERE hash = $1
+                 AND NOT EXISTS (SELECT 1 FROM vcs_object_links WHERE hash = $1)
+                 AND NOT EXISTS (SELECT 1 FROM vcs_file_changes WHERE blob_hash = $1)",
+        )
+        .bind(hash)
+        .execute(p)
+        .await
+        .map_err(|e| format!("vcs delete_object_if_unlinked: {e}"))?
+        .rows_affected(),
+        DbPool::MySql(p) => sqlx::query(
+            "DELETE FROM vcs_objects WHERE hash = ?
+                 AND NOT EXISTS (SELECT 1 FROM vcs_object_links WHERE hash = ?)
+                 AND NOT EXISTS (SELECT 1 FROM vcs_file_changes WHERE blob_hash = ?)",
+        )
+        .bind(hash)
+        .bind(hash)
+        .bind(hash)
+        .execute(p)
+        .await
+        .map_err(|e| format!("vcs delete_object_if_unlinked: {e}"))?
+        .rows_affected(),
+        DbPool::Sqlite(p) => sqlx::query(
+            "DELETE FROM vcs_objects WHERE hash = ?1
+                 AND NOT EXISTS (SELECT 1 FROM vcs_object_links WHERE hash = ?1)
+                 AND NOT EXISTS (SELECT 1 FROM vcs_file_changes WHERE blob_hash = ?1)",
+        )
+        .bind(hash)
+        .execute(p)
+        .await
+        .map_err(|e| format!("vcs delete_object_if_unlinked: {e}"))?
+        .rows_affected(),
+    };
+    Ok(affected > 0)
+}
+
 /// Every object hash linked to this repo — the GC referenced-ness set.
 pub async fn live_object_hashes(pool: &DbPool, repo_id: &str) -> Result<Vec<String>, String> {
     match pool {
@@ -2309,6 +2394,17 @@ impl Database {
         insert_object_link_if_absent(self.require_pool()?, repo_id, hash).await
     }
 
+    /// `true` = a `(repo_id, hash)` link exists (u3 quota membership probe).
+    pub async fn vcs_get_object_link(&self, repo_id: &str, hash: &str) -> Result<bool, String> {
+        get_object_link(self.require_pool()?, repo_id, hash).await
+    }
+
+    /// Conditional object delete — `true` = row gone (caller may unlink the
+    /// file); `false` = still referenced by a link or a manifest `blob_hash`.
+    pub async fn vcs_delete_object_if_unlinked(&self, hash: &str) -> Result<bool, String> {
+        delete_object_if_unlinked(self.require_pool()?, hash).await
+    }
+
     /// `{object_count, storage_bytes}` for `vcs.status`.
     pub async fn vcs_repo_object_counts(
         &self,
@@ -2550,6 +2646,8 @@ mod tests {
             .vcs_insert_object_link_if_absent("r", HASH_A)
             .await
             .is_err());
+        assert!(db.vcs_get_object_link("r", HASH_A).await.is_err());
+        assert!(db.vcs_delete_object_if_unlinked(HASH_A).await.is_err());
         assert!(db.vcs_repo_object_counts("r").await.is_err());
         assert!(db.vcs_live_object_hashes("r").await.is_err());
         assert!(db.vcs_get_changeset("r", CS_A).await.is_err());
@@ -2645,6 +2743,56 @@ mod tests {
             .await
             .unwrap();
         assert!(none.is_empty());
+    }
+
+    /// u3 quota gate probe — `true` iff the (repo, hash) link exists.
+    #[tokio::test]
+    async fn vcs_get_object_link_bool() {
+        let (_d, db) = test_db().await;
+        let (_uid, rid) = seed_repo(&db).await;
+
+        // Absent link → false.
+        assert!(!db.vcs_get_object_link(&rid, HASH_A).await.unwrap());
+        db.vcs_insert_object_if_absent(HASH_A, 10).await.unwrap();
+        db.vcs_insert_object_link_if_absent(&rid, HASH_A)
+            .await
+            .unwrap();
+        assert!(db.vcs_get_object_link(&rid, HASH_A).await.unwrap());
+        // Different repo / different hash stay false.
+        assert!(!db.vcs_get_object_link("other-repo", HASH_A).await.unwrap());
+        assert!(!db.vcs_get_object_link(&rid, HASH_B).await.unwrap());
+    }
+
+    /// u3 conditional delete — GC's row-first unlink gate.
+    #[tokio::test]
+    async fn vcs_delete_object_if_unlinked() {
+        let (_d, db) = test_db().await;
+        let (_uid, rid) = seed_repo(&db).await;
+
+        // Unlinked row → deleted, row gone; absent hash → false.
+        db.vcs_insert_object_if_absent(HASH_B, 20).await.unwrap();
+        assert!(db.vcs_delete_object_if_unlinked(HASH_B).await.unwrap());
+        assert!(db.vcs_get_object(HASH_B).await.unwrap().is_none());
+        assert!(!db.vcs_delete_object_if_unlinked(HASH_B).await.unwrap());
+
+        // Linked row → false, row kept.
+        db.vcs_insert_object_if_absent(HASH_A, 10).await.unwrap();
+        db.vcs_insert_object_link_if_absent(&rid, HASH_A)
+            .await
+            .unwrap();
+        assert!(!db.vcs_delete_object_if_unlinked(HASH_A).await.unwrap());
+        assert!(db.vcs_get_object(HASH_A).await.unwrap().is_some());
+
+        // Referenced by a manifest `blob_hash` (no link — the U4-invariant
+        // edge) → false, row kept.
+        db.vcs_insert_object_if_absent(HASH_C, 5).await.unwrap();
+        let changeset = cs(CS_A, &rid, "[]", None);
+        let files = [add_change("a.txt", HASH_C)];
+        db.vcs_create_changeset_tx(&changeset, &files, &[], &[])
+            .await
+            .unwrap();
+        assert!(!db.vcs_delete_object_if_unlinked(HASH_C).await.unwrap());
+        assert!(db.vcs_get_object(HASH_C).await.unwrap().is_some());
     }
 
     #[tokio::test]
