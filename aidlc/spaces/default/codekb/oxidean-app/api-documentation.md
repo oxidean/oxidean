@@ -1,139 +1,186 @@
 # API Documentation — Oxidean
 
-All surfaces are served by `oxidean-api` except where noted. The typed RPC
-surface is the primary contract; REST is a generated facade over it.
+All surfaces are served by `oxidean-api` (plus the in-process russh SSH
+listener) except where noted. The typed RPC surface is the primary contract;
+REST is a generated facade that re-enters `rpc::dispatch`.
 
 ## External API Surfaces
 
-### 1. Typed JSON RPC — `POST /api/rpc` + WS `/api/rpc/ws`
+### 1. Typed JSON RPC — `POST /api/rpc` + `GET /api/rpc/ws`
 
-Source: `crates/oxidean-api/src/rpc.rs`.
+Source: `crates/oxidean-api/src/rpc.rs` + `src/app.rs`.
 
-- **283 procedures** in the `PROCEDURES` const (`rpc.rs:127`), mirrored 1:1
-  against ~285 dispatch match arms — parity asserted by tests
-  (`rpc.rs:1702-1712`), so the procedure list is self-enforcing.
-- **Envelope**: `RpcRequest` / `RpcResponse` (schemars types in
-  `oxidean-core`).
-- **Version gate**: `Oxidean-RPC-Version` header checked by
-  `check_version_header` (`rpc.rs:105-117`) against compile-time
-  `RPC_PROTOCOL_VERSION`; mismatch → `rpc.version_mismatch` error.
-- **Meta procedures**: `system.manifest` (`rpc.rs:417`) returns
-  `server_version`, `min_cli_version`, and the full procedure map;
-  `system.health` (`rpc.rs:468`) returns `version` (rendered by
-  `apps/web/src/routes/status.tsrx`).
+- **306 procedures** — the `PROCEDURES` const (`rpc.rs:150-457`) is the
+  manifest source of truth, mirrored 1:1 against `dispatch()` match arms
+  (`procedures_list_matches_dispatch` test enforces parity).
+- **Namespaces**: `system.*`, `auth.*` (incl. 2FA), `user.*`, `admin.*`,
+  `org.*`, `repo.*` (~110 procedures: browse/tree/blob/commits/branches/
+  files/lfs/mirror/protection/collaborators/invites/quota/actions/secrets/
+  statuses), `issue.*`, `pull.*`, `release.*`, `webhook.*`, `label.*`,
+  `packages.*`, `pat.*`, `oauthApp.*`, `oauth.*` device, `sshKey.*`,
+  `gpgKey.*`, `email.*`, `notification.*`, `search.global`, `invites.*`.
+- **Envelope**: `{procedure, input}` → `{ok, data}` |
+  `{ok:false, error:{code,message}}` (`RpcRequest`/`RpcResponse`/`AppError`
+  in `oxidean-core`); errors map to HTTP status in `rpc_status()`.
+- **Wire gate**: required `Oxidean-RPC-Version` header checked against
+  `WIRE_VERSION` (SemVer `0.1.0`; legacy `"1"` accepted via
+  `wire_compatible` in `oxidean-core`).
+- **WS transport**: `/api/rpc/ws` re-resolves credentials **per frame**
+  (`app.rs:802-844`) — the precedent for any streaming VCS protocol.
+- **PAT scope gate**: Bearer PAT callers pass
+  `pat::bearer::authorize_rpc` → `oxidean_core::proc_classes`;
+  **fail-closed** — unlisted procedures are `SessionOnly` (machine tokens
+  cannot call them). A new `vcs.*` family MUST register classes.
+- **Registration recipe** (per procedure): name in `PROCEDURES` +
+  `dispatch()` arm + handler module + types in `oxidean-core` +
+  `proc_classes` entry + `rpc_gen.rs` client template (+ optional
+  `rest/spec.rs` `RouteDef`).
 
 ### 2. REST facade — `/api/v1/**`
 
-Source: `crates/oxidean-api/src/rest/` (`mod.rs` + per-domain modules).
+Source: `crates/oxidean-api/src/rest/`.
 
-- ~69 route literals across `RouteDef` tables: `meta`, `users`, `orgs`,
-  `repos`, `issues`, `pulls`, `releases`, `statuses`, `admin`.
-- OpenAPI: `rest/spec.rs` generates `docs/openapi.yaml`
-  (`info.version: '1'`, `spec.rs:335`) and serves live
-  `/api/v1/openapi.json` + Swagger UI (`rest/openapi.rs`,
-  `utoipa-swagger-ui`).
+- **65 `RouteDef` rows** across `rest/{repos,issues,pulls,orgs,users,
+  releases,statuses,admin}.rs` (+meta); each translates to an RPC
+  procedure and re-runs `rpc::dispatch` — no duplicated business logic.
+- `spec.rs` is the single-source route table; `GET /api/v1/openapi.json` +
+  Swagger UI `/api/v1/docs` (`utoipa-swagger-ui`); `docs/openapi.yaml`
+  emitted by `openapi-gen`, drift-gated by `make openapi-sync-check`.
+- New RPC procedures do NOT appear in REST/OpenAPI unless a `RouteDef`
+  row is added by hand.
 
 ### 3. MCP endpoint — `POST /api/mcp`
 
-Source: `crates/oxidean-api/src/mcp.rs`.
+Source: `crates/oxidean-api/src/mcp.rs` (~1,820 LOC, self-contained).
 
-- JSON-RPC methods: `initialize`, `tools/list`, `tools/call`,
-  `resources/list`, `prompts/list`; **18 tool definitions**.
-- **Date-versioned protocol**: negotiates the last shared version from
-  `MCP_PROTOCOL_VERSIONS = ["2024-11-05","2025-03-26","2025-06-18"]`
-  (`mcp.rs:~318`). `serverInfo.version` = `CARGO_PKG_VERSION`.
-- The same list is duplicated in `crates/oxidean-web/src/wellknown.rs:15`
-  (browser WebMCP advertisement) and `apps/web/src/lib/webmcp.ts:2` —
-  comment-flagged manual sync, no CI gate (debt — see
-  `code-quality-assessment.md`).
-- Client side: `crates/oxidean-cli/src/mcp.rs` sends `"2025-06-18"` on
-  initialize and embeds `clientInfo.version` (`mcp.rs:1273`).
+- JSON-RPC 2.0 streamable-HTTP in **JSON mode** (no SSE; GET→405; no
+  `Mcp-Session-Id`). Methods: `initialize`, `ping`, `tools/list`,
+  `tools/call`, `resources/list` (empty), `resources/templates/list`,
+  `resources/read`, `prompts/list` (empty), notifications→202.
+- **20 tools** (`tool_defs()` ~612): `repo_list`, `repo_get`, `repo_tree`,
+  `issue_list`, `issue_get`, `issue_create`, `issue_comment`,
+  `issue_list_comments`, `pull_list`, `pull_get`, `actions_list_runs`,
+  `actions_get_run`, `workflow_templates_list`, `workflow_template_get`,
+  `workflow_create`, `packages_list`, `search_repos`, `search_issues`,
+  `search_pulls`, `search_code` — thin wrappers mapping to RPC procedures
+  via `build_rpc_input` with `Access` gates (RepoRead/RepoWrite/Identity).
+- Resource URI templates `oxidean://repo/{owner}/{name}/{blob,issue,pull}/…`.
+- **Auth**: session cookie OR `Bearer` PAT (`oxidean_pat_`/`oxidean_fg_`)
+  OR OAuth `oxidean_oat_`; instance gate `OXIDEAN_MCP_ENABLED` +
+  `admin.mcp.*` DB override; domain denials surface as `isError` tool
+  content. Protocol versions negotiated from `MCP_PROTOCOL_VERSIONS`
+  (`oxidean-core`); RFC 8414/9728 well-known docs on the router.
+- WebMCP: `oxidean-web` serves `/.well-known/{webmcp,mcp}`
+  (`wellknown.rs`) and every page registers `tools/list` as
+  `document.modelContext` tools bridging to `POST /api/mcp`.
 
-### 4. CLI distribution — `/cli/*`
+### 4. Git Smart HTTP — `/{owner}/{repo}.git`
 
-Source: `crates/oxidean-api/src/routes/cli_dist.rs`. Unauthenticated.
+Source: `src/routes/git_smart_http.rs` + `src/git/http_backend.rs`.
 
-- `GET /cli/install.sh`, `/cli/install.ps1` (from `assets/cli/`),
-  `/cli/skill.md` (from `oxidean-cli/skill/SKILL.md`),
-  `/cli/latest` → `{ "version": <api CARGO_PKG_VERSION> }`
-  (`cli_dist.rs:131`), `/cli/bin/{*file}` binary downloads.
-- `SOURCE_COMMIT`/`dist_commit` file carries git-SHA provenance of the
-  staged binaries (`cli_dist.rs:110-124`).
-- **Semantic gap**: `/cli/latest` reports the *API's* version but describes
-  *CLI* binaries — see `code-quality-assessment.md` § Technical Debt.
+- `GET …/info/refs`, `POST …/git-upload-pack`, `POST …/git-receive-pack`.
+- **HTTP Basic, password = PAT/OAuth/job-token** — session cookies never
+  authorize git (D-12). Private denials → 401 Basic; archived → 403.
+- Spawns `git-http-backend` CGI (`GIT_PROJECT_ROOT=OXIDEAN_REPOS_DIR`,
+  `GIT_PROTOCOL` v2 passthrough, `uploadpack.allowFilter`, `OXIDEAN_*`
+  protection env incl. `oxidean-protection-hook` hook binary).
+- **Greedy top-level route** — any new protocol sharing URL space
+  (`/{owner}/{repo}.vcs` or `/vcs/…` prefix) must be checked against
+  `is_api_git_path` (`proxy.rs:82`) and Traefik `PathRegexp`.
 
-### 5. OAuth/OIDC + auth
+### 5. Git over SSH — in-process russh listener
 
-`/oauth/{authorize,token,userinfo,device/code}`,
-`/api/auth/{workos,oidc}/{start,callback}`, well-known discovery (served by
-`oxidean-web` `wellknown.rs` + api). WorkOS + generic OIDC + device-code
-flows; Mailpit/OIDC/Resend/WorkOS stubs for dev-auth Compose stack.
+Source: `crates/oxidean-api/src/ssh/` (`server.rs`, `pack.rs`).
 
-### 6. Git protocols
+- Spawned from `main.rs:83` (`OXIDEAN_SSH_ENABLED`, port
+  `OXIDEAN_SSH_PORT` default 2222; Compose TCP publish, not Traefik).
+- Username forced `git`; identity = `ssh_public_keys` fingerprint (full
+  account) or per-repo `deploy_keys` fingerprint (read/write flag).
+- Exec allowlist = `git-upload-pack`/`git-receive-pack` argv-spawned;
+  env allowlist = `GIT_PROTOCOL` only. `SshAuthLimiter` per-process.
 
-- Smart HTTP `/{owner}/{repo}.git` (info/refs + upload/receive-pack).
-- LFS `info/lfs` batch API.
-- SSH via in-process russh server (`OXIDEAN_SSH_PORT`).
+### 6. Git LFS — `/{owner}/{repo}.git/info/lfs/…`
 
-### 7. Package registries
+Source: `src/{lfs,routes/git_lfs.rs}`.
 
-Path prefixes `/v2` (OCI distribution), `/npm`, `/generic`.
+- Batch API + basic transfer (streaming PUT ≤2 GiB, Range GET, optional
+  verify). Storage = `OXIDEAN_LFS_DIR` OID-sharded `{ab}/{cd}/{oid}` +
+  DB refcounts; PAT Basic only; per-repo enable flag (Admin); quotas +
+  periodic GC job. **This is object-store precedent #1 for the intent.**
 
-### 8. Actions runner protocol — `/api/actions/**`
+### 7. Package registries — `/v2` `/npm` `/generic`
 
-Custom JSON protocol plus `proto/runner.proto` (prost-build in `build.rs`);
-consumed by `oxidean-runner`.
+Source: `src/packages/{oci,npm,generic}.rs` (`.nest()`ed routers).
 
-### 9. Meta / misc
+- OCI distribution `/v2`, npm `/npm`, generic `/generic`; PAT Basic/Bearer
+  (cookies ignored); content-addressed blobs
+  `OXIDEAN_PACKAGES_DIR/{algo}/{aa}/{bb}/{digest}` + refcount dedup;
+  quotas. **Object-store precedent #2.**
 
-`/health` on both api and web (gated by `Oxidean-Health-Probe` header),
-Atom feeds, avatar/uploads, template packs, release assets.
+### 8. OAuth2 provider + auth routes
+
+Source: `src/oauth/` + `app.rs` mount table.
+
+- `/oauth/authorize`, `/oauth/token` (authorization_code + RFC 8628
+  device_code), `/oauth/userinfo`, `/oauth/device/code`,
+  `/.well-known/oauth-authorization-server` (RFC 8414) +
+  `/.well-known/oauth-protected-resource` (RFC 9728). Mints
+  `oxidean_oat_` access tokens (synthetic classic-PAT row downstream).
+- `/api/auth/{workos,oidc}/{start,callback}`, `/api/auth/session-check`,
+  `/api/auth/setup-check`.
+
+### 9. Actions runner protocol — `/api/actions/*`
+
+Source: `src/actions/runner_proto.rs`.
+
+- register/declare/fetch_task/report; runner token Bearer; `prost` types
+  generated from `proto/runner.proto` via `build.rs`.
+
+### 10. Misc HTTP routes (`app.rs:268-407`)
+
+`/health`, `POST|DELETE /api/user/avatar`, `/uploads/avatars/{file}`,
+release-asset up/download, `/api/admin/templates` upload,
+`/api/repos/{o}/{r}/raw/{ref}/{*path}` + `/archive/{*file}`,
+`/api/repos/{o}/{r}/mirror/hook`, Atom feeds (`…/activity.atom`,
+`releases.atom`, `/api/users/{u}/activity.atom`), CLI dist
+`/cli/{install.sh,install.ps1,skill.md,latest,bin/*}`.
 
 ## Internal API Surfaces / Contracts
 
 | Contract | Producer → Consumer | Mechanism |
 |---|---|---|
-| TS RPC client | `oxidean-api --bin rpc-gen` → `packages/api-client/src/index.ts` | generated; exports `RPC_VERSION = 1` + `RPC_VERSION_HEADER`; drift-gated by `make rpc-sync-check` |
-| OpenAPI doc | `oxidean-api --bin openapi-gen` → `docs/openapi.yaml` + `/api/v1/openapi.json` | generated; `make openapi-sync-check` |
-| ox skill doc | `crates/oxidean-cli/skill/SKILL.md` → `/cli/skill.md` + `ox skill` | `include_dir` embed; `make skill-sync-check`; frontmatter claims `compatibility: ox 0.1+` |
-| Web route corpus | `apps/web/src/pages/**` ↔ `oxidean-web` `SHELLS` | `scripts/check-route-sync.ts` |
-| Runner protocol | `proto/runner.proto` → runner + api | prost-build at api build time |
-| Manifest gate | `system.manifest` ↔ `ox` (`manifest::compat_notices`) | `MIN_CLI_VERSION` vs running ox version; tested in `manifest_gate.rs`, `rpc_http.rs` |
+| `GitBackend` trait | `oxidean-git` → `oxidean-api` (`Arc<dyn GitBackend>` on `AppState`) | `backend.rs:410-771`, ~40 async methods; `CliGitBackend` argv-spawns system git ≥2.5 (boot gate `version.rs`); `GixGitBackend` documented-unimplemented — **the VCS-engine seam** |
+| `Database` façade | `oxidean-db` → all consumers | `Clone`, `skipped()` no-DB mode (`main.rs:52-54`); accept by value, tolerate `is_skipped` |
+| `SessionService` / `EmailSender` | `oxidean-api` auth/email modules | trait seams for side effects |
+| `RouteDef`/`ToolDef` tables | `rest/spec.rs`, `mcp.rs` → `rpc::dispatch` | single-source tables; registration recipe above |
+| TS RPC client | `rpc-gen` bin → `packages/api-client/src/index.ts` | generated; `make rpc-sync-check` drift gate |
+| OpenAPI doc | `openapi-gen` bin → `docs/openapi.yaml` + `/api/v1/openapi.json` | `make openapi-sync-check` |
+| ox skill doc | `crates/oxidean-cli/skill/SKILL.md` → `/cli/skill.md` + `ox skill` | `include_dir` embed; `skill-sync` gate |
+| Manifest gate | `system.manifest` ↔ `ox` `required_procedures` (`commands.rs:481`) | CLI refuses commands whose procedures are absent server-side |
+| Runner proto | `proto/runner.proto` → api + runner | prost-build at compile time |
+| PAT proc classes | `proc_classes.rs` → `pat::bearer::authorize_rpc` | fail-closed scope classification |
+| WebMCP list | `apps/web/src/lib/webmcp.ts` ↔ `oxidean-web/src/wellknown.rs` | hand-synced, no gate |
 
-## Version & Contract Surfaces (intent-critical)
+## Auth & Credential Model (per transport)
 
-Every wire-visible version constant, distinct from package versions:
+| Surface | Accepted credentials | Notes |
+|---|---|---|
+| `/api/rpc` (+WS) | session cookie; Bearer PAT/OAT | PATs additionally scope-gated by `proc_classes` |
+| `/api/mcp` | session cookie; Bearer PAT (`oxidean_pat_`/`oxidean_fg_`); OAuth `oxidean_oat_` | instance + admin gates |
+| Smart HTTP `.git` + LFS | **Basic only** — PAT/OAuth/job-token as password | cookies never authorize git (D-12); `FailedAuthLimiter` |
+| SSH :2222 | pubkey fingerprint (`ssh_public_keys` / `deploy_keys`) | russh in-process |
+| `/v2`, `/npm`, `/generic` | PAT Basic/Bearer | cookies ignored |
+| `/api/actions/*` | runner token Bearer | job tokens also accepted on git fetch |
+| `/cli/*` | unauthenticated | distribution channel |
 
-| Surface | Location | Value today | Notes |
-|---|---|---|---|
-| `RPC_PROTOCOL_VERSION` | `oxidean-core/src/lib.rs:57` | `1` (u32, not semver) | mirrored to generated client `index.ts:3` (`RPC_VERSION`) |
-| `Oxidean-RPC-Version` header | sent by client + `cli/src/rpc.rs:111`; enforced `rpc.rs:105-117` | `1` | compile-time; `OXIDEAN_RPC_VERSION` env var is dead config (`.env.example:19`, `docker-compose.yml:63`) |
-| `MIN_CLI_VERSION` | `oxidean-api/src/rpc.rs:121` | `"0.1.0"` | hand-bumped; asserts at `rpc.rs:1722`, `tests/rpc_http.rs:122`, `cli tests/manifest_gate.rs:36` |
-| OpenAPI `info.version` | `rest/spec.rs:335` → `docs/openapi.yaml:5` | `'1'` | |
-| MCP protocol versions | `webmcp.ts:2`, `wellknown.rs:15`, negotiated `mcp.rs:~318` | `2024-11-05 / 2025-03-26 / 2025-06-18` | date-versioned; list duplicated in 2 files |
-| `skills-lock.json` schema | repo root | `"version": 1` + per-skill `computedHash` pins | vendored `.agents/skills/*` |
-| Service-worker cache | `apps/web/public/sw.js:15` | `oxidean-shell-__OXIDEAN_SW_BUILD__` | commit-SHA fingerprint, not semver |
-| Provenance | `SOURCE_COMMIT`/`dist_commit`, `OXIDEAN_SOURCE_COMMIT`, `RAILWAY_GIT_COMMIT_SHA` | git SHA | real binary provenance for `/cli/*` artifacts |
-
-## `env!("CARGO_PKG_VERSION")` Embed Sites
-
-All currently `"0.1.0"`; after per-component versioning each resolves to its
-own crate's version. Owning component in parentheses:
-
-- `oxidean-cli`: `main.rs:27` (`ox --version`), `commands.rs:834-835`
-  (version report text + `json.data.version`), `commands.rs:801`
-  (→ `manifest::compat_notices`), `http.rs:51,93` + `rpc.rs:112` +
-  `self_update.rs:68` (`User-Agent: ox/{v}`), `mcp.rs:1273`
-  (`clientInfo.version`), `self_update.rs:171` (self-update `current`).
-- `oxidean-api`: `rpc.rs:417` (`system.manifest` → `server_version`),
-  `rpc.rs:468` (`system.health` → `version`), `mcp.rs:332`
-  (`serverInfo.version`), `routes/cli_dist.rs:131` (`/cli/latest` →
-  `version` — **describes CLI binaries**, see debt).
-- Tests embedding it: `oxidean-cli/tests/{self_update_http.rs:38,95,
-  commands_e2e.rs:540}`.
+A new VCS protocol should **reuse `sha256` PAT lookup +
+`FailedAuthLimiter`** (`pat/rate_limit.rs`) rather than mint a parallel
+credential type.
 
 ## Error Conventions
 
-RPC errors are typed codes on the envelope (e.g. `rpc.version_mismatch`);
-REST facade translates to HTTP status per `RouteDef`. `system.manifest` is
-the machine-readable capability/version surface clients should key on.
+RPC errors are typed codes on the envelope
+(`{ok:false, error:{code,message}}`); `rpc_status()` maps code→HTTP status.
+REST facade translates per `RouteDef`. MCP domain denials → `isError`
+tool content (not protocol errors). `system.manifest` is the
+machine-readable capability surface clients key on.

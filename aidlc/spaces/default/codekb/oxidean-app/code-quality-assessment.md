@@ -6,124 +6,134 @@
 
 | Area | Location | Size |
 |---|---|---|
-| API integration tests | `crates/oxidean-api/tests/` | 105 files |
-| DB dialect-parity tests | `crates/oxidean-db/tests/` | 27 files (same suite across pg/mysql/sqlite) |
-| CLI integration tests | `crates/oxidean-cli/tests/` | 4 files: `commands_e2e`, `manifest_gate`, `rpc_http` (shared with api surface), `self_update_http` |
-| Git tests | `crates/oxidean-git/tests/disk_usage.rs` | + colocated `#[cfg(test)]` units in every crate |
-| Web tests | `apps/web/src/**/*.{unit,integration,browser}.test.*` + `e2e/{stack,stack-browser}/` | 155 test files |
+| API integration tests | `crates/oxidean-api/tests/` | 107 files + `tests/support/mod.rs` shared harness (env locks, sysadmin seeding) |
+| DB dialect-parity tests | `crates/oxidean-db/tests/` | ~30 `dialect_*`/`factory_reset_*`/`sqlite_paths` files (same suite across pg/mysql/sqlite) |
+| CLI integration tests | `crates/oxidean-cli/tests/` | 4 files: `commands_e2e`, `manifest_gate`, `rpc_http`, `self_update_http` |
+| Inline Rust units | `#[cfg(test)]` in every crate | ~1,252 `#[test]`/`#[tokio::test]` attrs under `crates/` (44 in `oxidean-git/cli.rs` alone; 5 thorough proxy tests in `oxidean-web/proxy.rs`; migration filename-parity test in `migrate.rs`) |
+| Web tests | `apps/web/src/**/*.{unit,integration,browser}.test.*` | ~183 `*.test.*` files (happy-dom integration + Chromium DOM-race browser) |
+| Web e2e | `apps/web/e2e/{stack,stack-browser}/` | HTTP e2e (smtp/oidc/workos) + full-stack Playwright + visual baselines; `commands.ts` shared flow lib |
 | API client tests | `packages/api-client/src/index.test.ts` | generated-client smoke |
+| Protocol smokes | `scripts/` | `smoke-git-https/ssh/lfs/packages`, `ci-compose-smoke`, `smoke-protocol-ci`, `e2e-actions-pipeline` — run real `git`/`ssh`/`git-lfs` client binaries |
 
 ### Frameworks & Harnesses
 
-- **cargo-nextest** (`.config/nextest.toml`: `default` + `ci` profiles,
-  `fail-fast=false` in CI); `cargo test` fallback.
-- **Vitest** 5 projects: `unit` (node), `integration` (happy-dom),
-  `browser` (Playwright Chromium), `e2e-stack`, `e2e-stack-browser`
-  (`apps/web/vitest.config.ts`).
-- **wiremock** for Rust HTTP fixtures; docker-compose dev-auth stack
-  (Mailpit/OIDC/Resend/WorkOS stubs) for e2e (`make test-e2e-stack`).
+- **cargo-nextest** (`.config/nextest.toml`, `ci` profile: no fail-fast,
+  90s slow-timeout, 5-way `count:N/5` partitioning in CI);
+  `cargo-llvm-cov` optional collection.
+- **Vitest 5** projects in `apps/web/vitest.config.ts`: `unit`,
+  `integration` (happy-dom), `browser` (`@vitest/browser-playwright`
+  Chromium), `e2e-stack`, `e2e-stack-browser`;
+  `@octanejs/testing-library` + `@testing-library/{dom,jest-dom}`.
+- **wiremock** Rust HTTP mocks; real client binaries in protocol smokes.
 
 ### Coverage Gates
 
-- `scripts/coverage-weighted.sh` + `coverage-e2e-checklist.sh` +
-  `coverage-weighted.contract.sh` — weighted gate: unit 25% / integration
-  40% / e2e checklist 35%, floor `COVERAGE_WEIGHTED_FLOOR=0.70`.
-- `make coverage-rust` (cargo-llvm-cov → `var/coverage/rust-*`),
-  `make coverage-web` (vitest v8).
-- Route-coverage manifest + change-aware browser gates:
-  `scripts/route-coverage-check.ts`, `browser-coverage-check.ts`,
-  `ui-coverage-change.contract.sh` (`make browser-coverage-check-pr`).
+- `@vitest/coverage-v8` per-project (`test:coverage[:unit|:integration]`,
+  reports `apps/web/coverage/{unit,integration}`).
+- **Weighted gate** `scripts/coverage-weighted.sh`: unit 0.25 /
+  integration 0.40 / e2e-checklist 0.35, floor `0.70`
+  (`COVERAGE_WEIGHTED_FLOOR`); e2e checklist
+  `scripts/coverage-e2e-checklist.sh`.
+- Route-coverage manifest `apps/web/src/test/route-coverage.manifest.ts`
+  + `scripts/route-coverage-check.ts` (every `.tsrx` page needs a test or
+  documented skip); `browser-coverage.manifest.ts` +
+  `scripts/browser-coverage-check.ts` (high-risk UI Chromium proof).
+- **Rust coverage is collect-only — no gate** (residual debt).
 
 ## Linting & Static Checks
 
 | Check | Tool | Gate |
 |---|---|---|
-| Web lint | oxlint `--type-aware` (oxlint-tsgolint + @tsrx/oxc) + `check-octane-dom-races.ts` | `make web-lint`; plain `tsc` is NOT the web type gate |
-| Web format | oxfmt | `make web-format-check` |
-| Rust lint | clippy `-D warnings`, rustdoc `-D warnings` | CI `dead-code` job |
-| Dead code/deps | cargo-machete + `-D dead_code` + knip (`.tsrx`/`.astro` compilers) | `make dead-code-check` |
-| Makefile | checkmake (`checkmake.ini`) | `makefile-lint` — **first CI job, everything `needs` it** |
-| Contract drift | `rpc-sync`, `openapi-sync`, `skill-sync`, `route-sync`, `cli-parity`, stack-presets sync, internal-anchors | dedicated CI jobs |
+| Rust format | `cargo fmt --check` | CI `rust-fmt` (no committed rustfmt.toml/clippy.toml) |
+| Rust dead code/deps | `cargo machete` + `clippy -D dead_code` | `make dead-code-check` |
+| Web lint | oxlint `--type-aware` (`oxlint-tsgolint`, `@tsrx/oxc`) + `scripts/check-octane-dom-races.ts` | `make web-lint` — **the** web type gate; plain `tsc --noEmit` doesn't parse `.tsrx` (`@tsrx/typescript-plugin` peer-pinned to TS 5.9 vs app TS 7) |
+| Web format | oxfmt + `prettier --check` (`.astro`) | `make web-format-check` |
+| TS dead code | knip (custom `.tsrx`/`.astro`/`.css` compilers, `knip.ts`) | `make dead-code-check` |
+| Makefile | checkmake (`checkmake.ini`) | `makefile-lint` — first CI job, everything `needs` it |
+| Commit grammar | SemVer `type(scope): subject` linter | `.githooks/commit-msg` (`make setup`) + CI `commit-lint` (PR range + title) |
+| Contract drift | `check-{rpc-sync,openapi-sync,skill-sync,route-sync,cli-parity,workflow-templates,stack-presets,internal-anchors,makefile}` | dedicated CI jobs (`rpc-sync` regenerates + `git diff --exit-code`) |
 
 ## CI/CD
 
+`.github/workflows/`:
+
 | Workflow | Trigger | Jobs / purpose |
 |---|---|---|
-| `ci.yml` | PRs + main | 12+ jobs: makefile-lint → api-rust (3-shard nextest), web-octane, dead-code, web-browser, route-coverage, browser-coverage, coverage-weighted, e2e-stack, actions-e2e, rpc-sync, compose, docker-ci-images, compose-smoke ×3 dialects, smoke-protocol, db-matrix ×3 dialects, build-metrics |
-| `ox-cli.yml` | push main, PRs, `v*.*.*` tags, dispatch — path-filtered to `crates/oxidean-cli/**`, `cli_dist.rs`, `assets/cli/**`, api Dockerfile, `packaging/**`, `scripts/ox-*`, `Cargo.{toml,lock}` | build (10-target matrix + FreeBSD VM), install-{linux(7),macos,windows}, packages (nfpm × amd64/arm64), publish-dist (rolling `ox-dist` + staging redeploy), release (tag-only `gh release create --generate-notes`), image-matrix proofs |
-| `publish-runner.yml` | main path changes + `v*.*.*` tags | `ghcr.io/<owner>/oxidean-runner` — branch/tag/sha/latest image tags |
-| `production-deploy.yml` | manual `workflow_dispatch` | promote-by-SHA / rollback to Railway prod behind `Oxidean / production` env gate; requires latest CI green on the SHA; **no version input** |
+| `ci.yml` | PRs + main | ~20 jobs: makefile-lint → ci-image digest resolution → commit-lint, rust-fmt, rust-build (shared nextest archive), api-rust (5-way partition), web-octane (lint/format/test/build), dead-code, web-browser, route-coverage, browser-coverage, coverage-weighted (floor 0.70), e2e-stack, actions-e2e, rpc-sync, compose config-check, compose-smoke (pg/mysql/sqlite matrix), smoke-protocol (live git HTTPS+SSH+LFS+packages), db-dialects, build-metrics, rust-artifacts-cleanup |
+| `ci-base.yml` | docker/ci-base changes | builds `ghcr.io/<owner>/oxidean-ci:{dev,release,cov,tools}`; `ci.yml` resolves `@sha256` digests per run — **no cross-run Rust cache by design** |
+| `images.yml` | pushes/tags | GHCR service images api/web/runner/gateway (sha/pr/tag channels, Railway deploys) |
+| `ox-cli.yml` | path-filtered pushes/tags | cross-platform `ox` build matrix (gnu/musl/darwin/windows/freebsd), installer + nfpm package smokes, `ox-v*` releases |
+| `release.yml` / `release-beta.yml` | component tags | per-component SemVer tag → GitHub Release (driven by `versioning.toml` registry) |
+| `production-deploy.yml` | manual dispatch | promote-by-SHA to Railway prod behind environment gate |
 
-Package version derivation (`ox-cli.yml:368-375`): tag →
-`${GITHUB_REF_NAME#v}`; non-tag → `0.0.0.dev.${GITHUB_RUN_ID}` (no `+`/`-`
-for apk/pacman); `packaging/nfpm.yaml` `@PKG_VERSION@`,
-`version_schema: none`.
+PR template + ISSUE_TEMPLATE present.
 
 ## Documentation Quality
 
-Strong: `README.md`, `CONTRIBUTING.md`, `AGENTS.md`, `ROADMAP.md`,
-`SECURITY.md`, `SUPPORT.md`, and `docs/` covering ARCHITECTURE, API, CLI,
-CLI-PARITY, CODE_PRACTICES, CONFIGURATION, database, DEPLOYMENT, dev-auth,
-DEVELOPMENT, GETTING-STARTED, GIT-PROTOCOL, MCP, TESTING, WEBMCP, `guides/`,
-`openapi.yaml`. Rust sources carry module-level `//!` docs throughout.
-Generated docs are drift-gated in CI (`rpc-sync-check`,
-`openapi-sync-check`, `skill-sync-check`, `cli-parity-check`, route-sync,
-stack-presets sync, internal-anchors).
+Excellent. `README.md` (badges, quickstart) + operator corpus in `docs/`:
+`ARCHITECTURE.md` (component map + **decision IDs** like D-12/GIT-09
+referenced from code comments), `API.md` (auth model, RPC/HTTP tables, PAT
+scopes, rate limits — one `<!-- VERIFY -->` marker on a prod base URL),
+`MCP.md`, `WEBMCP.md`, `GIT-PROTOCOL.md`, `CONFIGURATION.md` (~90
+`OXIDEAN_*` env vars tabled), `database.md`, `DEVELOPMENT.md`,
+`TESTING.md`, `VERSIONING.md`, `CLI.md`, `CLI-PARITY.md` (gh 2.96.0
+parity), `DEPLOYMENT.md`, `SECURITY.md`, `CONTRIBUTING.md`, `AGENTS.md`,
+`docs/guides/*`, generated `docs/openapi.yaml`, read-only
+`docs/archive/planning/`. Rust module heads uniformly carry `//!` docs
+naming the decision IDs they implement; `.cursor/rules/` +
+`.agents/skills/` encode conventions for agents.
 
 ## Technical Debt
 
 Recorded once here; cross-referenced from `architecture.md` and
-`component-inventory.md`.
+`component-inventory.md`. Ordered by relevance to the VCS intent.
 
-1. **`env!("CARGO_PKG_VERSION")` conflation** — `/cli/latest`
-   (`cli_dist.rs:131`) reports `oxidean-api`'s version while serving
-   `oxidean-cli` binaries; `system.manifest`/`system.health`/MCP
-   `serverInfo` are all the api crate's version; `ox --version`, UA
-   headers, `clientInfo`, self-update `current` are all the cli crate's.
-   Correct today only because all crates share `0.1.0` — per-component
-   SemVer must assign each surface a semantics (server vs CLI vs
-   dist-channel).
-2. **`ox-cli.yml` path filter misses `crates/oxidean-core/**`** (lines
-   26-35, 38-47) though `oxidean-cli` depends on it — a core change won't
-   trigger the CLI build/release pipeline. The `.railway/railway.ts`
-   `watchPatterns` list shows the correct transitive-dep pattern.
-3. **`OXIDEAN_RPC_VERSION` env var is dead config** — documented
-   (`.env.example:19`, `docker-compose.yml:63`, `docs/CONFIGURATION.md`)
-   but never read by Rust code; the wire version is compile-time
-   `RPC_PROTOCOL_VERSION`.
-4. **`MIN_CLI_VERSION` is hand-bumped** (`rpc.rs:121`) with hardcoded
-   `"0.1.0"` asserts in three test locations — needs a bump policy under
-   SemVer.
-5. **Dev-version scheme `0.0.0.dev.{run_id}`** (`ox-cli.yml:375`) is
-   packaging-only; `version_schema: none` in `nfpm.yaml` means nfpm does
-   not validate semver shape — may conflict with strict SemVer packaging.
-6. **No changelog infrastructure** — `gh release create --generate-notes`
-   only; no CHANGELOG.md, no git-cliff/release-plz config, no tag
-   convention beyond the `v*.*.*` glob.
-7. **No commit-msg enforcement** — no git hooks at all
-   (`core.hooksPath` unset, no husky/lefthook/pre-commit); conventional
-   prefixes are informal (~94/100 recent subjects, drifting scopes like
-   `fix(11.1)`). Hook distribution is greenfield.
-8. **No semver git tags** — `git tag -l` shows only rolling `ox-dist`;
-   the tag-only release job has never run from this repo state.
-9. **Duplicated MCP protocol-version lists** —
-   `apps/web/src/lib/webmcp.ts:2` vs `oxidean-web/src/wellknown.rs:15`,
-   comment-flagged manual sync with no CI gate.
-10. **Version skew surface** — `/cli/latest` reports crate version while
-    `dist_commit`/`SOURCE_COMMIT` carries real binary provenance;
-    `ox self-update` already compensates by comparing sha256
-    (`self_update.rs:50-57`).
-11. **Stack-preset scaffold versions** — embedded preset manifests carry
-    `0.0.0`/`0.0.1`/`1.0.0` template versions (workspace-`exclude`d); a
-    naive repo-wide version rewrite would collide with them.
-12. TODO/FIXME density very low (5 hits in crates; 0 in apps/web +
-    packages).
+1. **`rpc_gen.rs` is a hand-maintained mirror** — the ~6,100-line
+   `crates/oxidean-api/src/bin/rpc_gen.rs` embeds the TS client template
+   with per-procedure typed methods; NOT derived from `PROCEDURES`
+   automatically — every new RPC requires a manual template edit (guarded
+   only by `make rpc-sync-check` + `procedures_list_matches_dispatch`).
+   **A whole new `vcs.*` family means a large template addition** — or a
+   refactor to metadata-driven codegen first.
+2. **REST/OpenAPI is opt-in per procedure** — new RPC procedures don't
+   appear in `/api/v1`/`openapi.yaml` without a hand-added `RouteDef`
+   row in `rest/spec.rs`.
+3. **Migration triple-write** — every schema change hand-ported to
+   `migrations/{postgres,mysql,sqlite}/` (50 files ×3 today); only
+   filename parity is test-enforced, SQL bodies can drift semantically.
+4. **Monolith hotspots** — `oxidean-db/src/lib.rs` 4,941 LOC;
+   `oxidean-cli/src/{args,commands}.rs` ~4,155/~4,053 LOC (hand-rolled
+   parser, no clap); `oxidean-git/src/cli.rs` 5,943 LOC;
+   `oxidean-api/src/{rpc.rs 1,946, mcp.rs 1,820}`;
+   `packages/api-client/src/index.ts` ~6,000 LOC generated. A new
+   protocol family lands inside several of these.
+5. **Dual notification modules** — `notify/` (fan-out) vs `notification/`
+   (RPC): intentional but confusingly named; don't repeat for VCS events.
+6. **Per-process limiters/stores** — `login_begin_limiter`,
+   `git_auth_limiter`, `lookup_limiter`, `two_factor_store`,
+   `SshAuthLimiter` live in `AppState`; single-node only — a new server
+   component inherits in-memory state (no horizontal scaling story).
+7. **Env-config sprawl** — ~90 `OXIDEAN_*` vars parsed ad-hoc in
+   `AppState::new`/`main`/`mcp`; a new subsystem should group its vars.
+8. **Deferred `GixGitBackend`** — documented-but-unimplemented in
+   `oxidean-git`; the trait seam exists precisely for engine swaps.
+9. **Greedy top-level git route** — `/{owner}/{repo_git}` pattern
+   constrains URL design for any side-by-side protocol (check
+   `is_api_git_path` `proxy.rs:82` + Traefik `PathRegexp` first).
+10. **Rust coverage ungated** — collected via cargo-llvm-cov but no CI
+    floor (`docs/TESTING.md` residual).
+11. **Hygiene is good**: only 5 TODO/FIXME/HACK across all crates, 0 in
+    `apps/web/src`, 0 `todo!`/`unimplemented!`; one `<!-- VERIFY -->`
+    marker in `docs/API.md`.
 
 ## Quality Summary
 
-The repo has an unusually gated quality posture: type-aware lint, dead-code
-triple gate, weighted coverage floor (0.70), generated-contract drift
-gates, dialect-parity DB tests, and a promotion-gated prod deploy. The
-gaps cluster exactly where the active intent lands — versioning semantics,
-changelog generation, tag/commit conventions, and dependency-aware release
-triggering — rather than in general hygiene.
+Unusually gated posture: type-aware lint, dead-code triple gate, weighted
+web coverage floor (0.70), generated-contract drift gates on every
+hand-mirrored surface, dialect-parity DB tests, commit-grammar +
+per-component SemVer release machinery, digest-pinned CI images, and a
+promotion-gated prod deploy. For the VCS intent the load-bearing debt is
+the **5 parallel registration surfaces** per RPC family (PROCEDURES,
+dispatch arm, proc_classes, rpc_gen template, optional RouteDef) and the
+**3-place edge-parity sync** (API_PREFIXES, Traefik, Caddyfile) — both
+gate-enforced but manually maintained.

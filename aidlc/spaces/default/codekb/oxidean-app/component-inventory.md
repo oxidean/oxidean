@@ -1,125 +1,158 @@
 # Component Inventory — Oxidean monorepo
 
-The 10 versionable components (7 Cargo crates + 2 Bun packages + workspace
-root). Internal edge semantics are detailed in `dependencies.md`; wire/API
-contracts in `api-documentation.md`; versions per component are the "Version
-source" column — today everything funnels to `0.1.0`.
+10 components (7 Cargo crates + 2 Bun packages + workspace root), all
+registered in `versioning.toml` for per-component SemVer (a virtual `wire`
+component tracks `WIRE_VERSION`; `oxidean-api`, `oxidean-web`, `ox`,
+`api-client`, `web` all `depends_on = ["wire"]`). Internal edge semantics
+in `dependencies.md`; wire contracts in `api-documentation.md`; the
+"Intent touch" column marks what the agentic-VCS intent (new dedicated
+crate + RPC/MCP/CLI surfaces) is expected to extend.
 
-| Component | Manifest | Type | Version source | Internal deps | Health |
-|---|---|---|---|---|---|
-| `oxidean-api` | `crates/oxidean-api/Cargo.toml` | lib + 4 bins | `version.workspace = true` → `0.1.0` | `oxidean-core`, `oxidean-db`, `oxidean-git` | at-risk |
-| `oxidean-cli` | `crates/oxidean-cli/Cargo.toml` | lib + bin (`ox`) | `version.workspace = true` → `0.1.0` | `oxidean-core` | at-risk |
-| `oxidean-core` | `crates/oxidean-core/Cargo.toml` | lib | `version.workspace = true` → `0.1.0` | — | healthy |
-| `oxidean-db` | `crates/oxidean-db/Cargo.toml` | lib + bin (`migrate`) | `version.workspace = true` → `0.1.0` | `oxidean-core` | healthy |
-| `oxidean-git` | `crates/oxidean-git/Cargo.toml` | lib | `version.workspace = true` → `0.1.0` | — | healthy |
-| `oxidean-runner` | `crates/oxidean-runner/Cargo.toml` | bin | `version.workspace = true` → `0.1.0` | — | healthy |
-| `oxidean-web` | `crates/oxidean-web/Cargo.toml` | bin | `version.workspace = true` → `0.1.0` | — | healthy |
-| `@oxidean/web` | `apps/web/package.json` | app (private) | `"version": "0.1.0"` | `@oxidean/api-client` | healthy |
-| `@oxidean/api-client` | `packages/api-client/package.json` | lib (private) | `"version": "0.1.0"` | peer `@octanejs/tanstack-query` | healthy |
-| `oxidean` (root) | `package.json` | workspace root | **no `version` field** | Bun workspaces `apps/*`, `packages/*` | healthy |
-
-## Component Details
+| Component | Manifest | Type | Internal deps | Intent touch |
+|---|---|---|---|---|
+| `oxidean-api` | `crates/oxidean-api/Cargo.toml` | lib + 4 bins | `oxidean-core`, `oxidean-db`, `oxidean-git` | High — routes/RPC/MCP mounts for the new protocol |
+| `oxidean-cli` | `crates/oxidean-cli/Cargo.toml` | lib + bin (`ox`) | `oxidean-core` | High — new `ox vcs …` command family |
+| `oxidean-core` | `crates/oxidean-core/Cargo.toml` | lib | — | High — VCS wire types + `proc_classes` entries |
+| `oxidean-db` | `crates/oxidean-db/Cargo.toml` | lib + bin (`migrate`) | `oxidean-core` | High — new tables ×3 dialects + façade methods |
+| `oxidean-git` | `crates/oxidean-git/Cargo.toml` | lib | — | None — sibling, not substrate (trait is the model) |
+| `oxidean-runner` | `crates/oxidean-runner/Cargo.toml` | bin | — | Low/none |
+| `oxidean-web` | `crates/oxidean-web/Cargo.toml` | bin | — | Med — `API_PREFIXES`/`is_api_git_path` for any new prefix |
+| `@oxidean/web` | `apps/web/package.json` | app (private) | `@oxidean/api-client` | Med — optional UI surfaces for the new protocol |
+| `@oxidean/api-client` | `packages/api-client/package.json` | lib (private, generated) | peer `@octanejs/tanstack-query` | Med — regenerated once `vcs.*` procedures land |
+| `oxidean` (root) | `package.json` + `Cargo.toml` + `versioning.toml` | workspace root | Bun workspaces `apps/*`, `packages/*`; Cargo members | Med — new crate must join `[workspace.members]` + `versioning.toml` |
 
 ## oxidean-api
 
-- **Responsibility**: the backend. Axum server hosting typed JSON-RPC (283
-  procedures), `/api/v1` REST + OpenAPI, MCP endpoint, OAuth/OIDC, git Smart
-  HTTP/LFS/SSH, package registries (OCI/npm/generic), `/cli/*` ox
-  distribution, Actions runner protocol.
-- **Extra binaries**: `rpc-gen`, `openapi-gen` (contract codegen),
-  `oxidean-protection-hook`; also embeds `assets/{cli,stack-presets}`.
-- **Owns version surfaces**: `MIN_CLI_VERSION`, `system.manifest`,
-  `system.health`, `serverInfo`, `/cli/latest` (see
-  `api-documentation.md` § Version & Contract Surfaces).
-- **Health: at-risk** — largest crate (105 test files, monolithic `rpc.rs`
-  with ~285 dispatch arms); `/cli/latest` version/binary conflation and
-  hand-bumped `MIN_CLI_VERSION` are flagged debt; `ox-cli.yml` release
-  trigger omits its `oxidean-core` transitive dep from path filters.
+- **Responsibility**: the backend. Axum 0.8 server hosting typed JSON-RPC
+  (306 procedures), `/api/v1` REST + OpenAPI, MCP endpoint (20 tools),
+  OAuth2 provider + WorkOS/OIDC, git Smart HTTP/LFS/russh SSH, package
+  registries (OCI/npm/generic), `/cli/*` distribution, Actions runner
+  protocol, background jobs.
+- **Extra binaries**: `rpc-gen`, `openapi-gen`, `oxidean-protection-hook`;
+  embeds `assets/{cli,stack-presets,workflow-templates}`.
+- **Key seams for intent**: `router_with_state` mount table
+  (`app.rs:268-407`) for new routes; `AppState` `Arc<dyn …>` slot pattern
+  (`app.rs:62,186`); `main.rs` aux-listener spawn precedent (SSH,
+  `main.rs:83`); `jobs/mod.rs` for GC/background tasks.
+- **Health: at-risk** — largest crate (`rpc.rs` 1,946 LOC, `mcp.rs`
+  1,820 LOC, 107 test files); five parallel registration surfaces per
+  procedure family (see `api-documentation.md` §1).
 
 ## oxidean-cli
 
-- **Responsibility**: `ox` companion CLI — typed RPC client, device auth,
-  self-update (version OR sha256 → swap), MCP client config, embedded agent
-  `skill/SKILL.md` distributed via `/cli/skill.md` and `ox skill`.
-- **Owns version surfaces**: `ox --version`, `User-Agent: ox/{v}`,
-  `clientInfo.version`, self-update `current`.
-- **Health: at-risk** — self-update semantics depend on `/cli/latest`
-  reporting a meaningful version; per-component SemVer must decide whether
-  that field is the api's or cli's version.
+- **Responsibility**: `ox` companion CLI — hand-rolled parser/dispatch
+  (NOT clap), typed RPC client (Bearer PAT), XDG config + keyring
+  credentials, RFC 8628 device auth, `ox mcp`/`ox skill` harness
+  installers, git credential helper, self-update, `ox api` raw-RPC
+  escape hatch (`args.rs:3386`).
+- **Key seams for intent**: `Command` enum variants + USAGE table rows
+  (`args.rs` ~262) for an `ox vcs …` family; `required_procedures`
+  manifest gate (`commands.rs:481`) wires each command to server
+  procedures.
+- **Health: at-risk** — `args.rs`/`commands.rs` are ~4,155/~4,053 LOC
+  monoliths; adding a command family means touching large files.
 
 ## oxidean-core
 
-- **Responsibility**: shared domain types, RPC envelope
-  (`RpcRequest`/`RpcResponse`), `RPC_PROTOCOL_VERSION`, manifest/health
-  contract types (schemars-derived).
-- **Health: healthy** — but highest fan-out: `api`, `cli`, `db` all path-depend
-  on it, and `ox-cli.yml` path filters miss `crates/oxidean-core/**`
-  (a core change won't trigger the CLI release pipeline).
+- **Responsibility**: shared domain/DTO types, wire envelope
+  (`RpcRequest`/`RpcResponse`/`AppError`), `WIRE_VERSION` +
+  `wire_compatible` (SemVer `0.1.0`, legacy `"1"` accepted),
+  `MCP_PROTOCOL_VERSIONS`, `proc_classes` (procedure→PAT-scope
+  classification, fail-closed `SessionOnly`). No I/O.
+- **Key seams for intent**: new VCS wire/DTO types live here;
+  **every token-callable `vcs.*` procedure needs a `proc_classes`
+  entry** or PATs can't call it.
+- **Health: healthy** — highest fan-out (api/cli/db/web path-depend on it).
 
 ## oxidean-db
 
-- **Responsibility**: sole persistence crate — sqlx multi-dialect
-  (Postgres/MySQL/SQLite), migrations (46 postgres + mirrors), `migrate` bin.
-  Hard boundary: only crate allowed dialect SQL.
-- **Health: healthy** — 27 dialect-parity test files + 3-dialect CI matrix.
+- **Responsibility**: sole persistence crate — sqlx 0.9 multi-dialect
+  (Postgres/MySQL/SQLite) behind façade `Database` (`Clone`,
+  `skipped()` no-DB mode); ~50 domain modules + row types;
+  `migrations/{postgres,mysql,sqlite}/` 50 files each (filename parity
+  enforced by test); `migrate` bin. Hard boundary: only crate allowed
+  dialect SQL.
+- **Key seams for intent**: new VCS tables = migration ×3 dialects + a
+  `Database` method module + row types; call sites accept `Database` by
+  value, never `&DbPool`.
+- **Health: healthy** — `lib.rs` is a 4,941 LOC façade hotspot;
+  ~30 dialect-parity test files + 3-dialect CI matrix.
 
 ## oxidean-git
 
-- **Responsibility**: `GitBackend` trait + `CliGitBackend` shelling to
-  system git; `version.rs` enforces git ≥ 2.5.0 at boot.
-- **Health: healthy**.
+- **Responsibility**: `GitBackend` async trait (~40 methods,
+  `backend.rs:410-771`) + `CliGitBackend` (argv-only spawns of system
+  git ≥2.5, never `sh -c`; `cat-file --batch`; protection-hook
+  installer); boot `git --version` gate.
+- **Key seams for intent**: **the trait is the canonical model** for the
+  new VCS engine boundary — `GixGitBackend` is even documented-but-
+  unimplemented, proving the seam's purpose. The new crate should NOT
+  depend on or modify this one; it defines an analogous boundary.
+- **Health: healthy** — `cli.rs` 5,943 LOC; 44 inline test attrs.
 
 ## oxidean-runner
 
-- **Responsibility**: self-hosted Actions runner binary; custom JSON
-  protocol to `/api/actions/**`; published to GHCR via
-  `publish-runner.yml` (branch/tag/sha/latest image tags — the only
-  component already getting semver image tags from `v*.*.*` git tags).
-- **Health: healthy** — `DOCKER_CLI_VERSION=29.9.0` pin in Dockerfile.
+- **Responsibility**: self-hosted Actions runner; register→poll→exec→
+  report loop against `/api/actions/*` (prost types from
+  `proto/runner.proto`); host exec + `docker://` step labels; GHCR image.
+- **Health: healthy** — no intent touch identified.
 
 ## oxidean-web
 
-- **Responsibility**: Rust binary serving the Astro `dist` SPA — meta
-  injection (theme/title/session), protected-route auth gates, `/health`,
-  well-known endpoints, API prefix proxy (`OXIDEAN_API_ORIGIN`),
-  `SHELLS` route corpus synced with `apps/web/src/pages/**`.
-- **Health: healthy** — note duplicated `MCP_PROTOCOL_VERSIONS` list
-  (hand-synced with `apps/web/src/lib/webmcp.ts`, no gate).
+- **Responsibility**: Rust binary serving Astro `dist` — meta injection
+  (theme/title/session), protected-route gates via
+  `/api/auth/session-check`, `/health`, `/.well-known/{webmcp,mcp}`,
+  API prefix proxy (`API_PREFIXES` + `is_api_git_path` `proxy.rs:16-86`,
+  WS upgrade splice).
+- **Key seams for intent**: any new protocol path prefix must be added
+  to `API_PREFIXES` (or `is_api_git_path` semantics re-checked) —
+  part of the 3-place edge-parity sync with Traefik + Caddyfile
+  (prefix-boundary tests exist in `proxy.rs`).
+- **Health: healthy** — 5 thorough proxy tests colocated.
 
 ## @oxidean/web
 
-- **Responsibility**: the web UI — Astro static shells + 213 Octane `.tsrx`
-  islands; TanStack Query/Form via `@octanejs/*`; WebMCP browser surface;
-  155 test files across unit/integration/browser/e2e projects.
-- **Version**: private `"0.1.0"` in `apps/web/package.json`; not published
-  to npm — version only surfaces in build provenance/SW cache name.
+- **Responsibility**: the web UI — Astro static shells (`src/pages/**`)
+  + Octane `.tsrx` islands (226 files: 142 under `src/components/`,
+  rest in `src/routes/` + `src/lib/`); TanStack Query/Form via
+  `@octanejs/*`; WebMCP browser surface; ~183 test files across
+  unit/integration/browser/e2e projects.
+- **Key seams for intent**: optional — new UI surfaces consume
+  `@oxidean/api-client` like everything else; `.tsrx` is NOT React JSX.
 - **Health: healthy**.
 
 ## @oxidean/api-client
 
-- **Responsibility**: generated typed RPC client (`src/index.ts`, 5427
-  lines, AUTO-GENERATED) + hand-written `languages.ts`, `scope-catalog.ts`.
-  Generated from `oxidean-api` by `rpc-gen`; drift-gated.
-- **Health: healthy** — private package, but its `version` field is a
-  versionable surface under per-component SemVer.
+- **Responsibility**: generated typed RPC client (`src/index.ts` ~6,000
+  lines, AUTO-GENERATED) + hand-written `scope-catalog.ts`; namespaced
+  `createClient` method groups + `wireCompatible`; TanStack Query
+  helpers. Emitted by `rpc-gen`; drift-gated.
+- **Key seams for intent**: regenerated automatically once `vcs.*`
+  procedures are added to the `rpc_gen.rs` template — the template
+  itself is the manual step.
+- **Health: healthy**.
 
 ## oxidean
 
-- **Responsibility**: Bun workspace root (`workspaces: [apps/*, packages/*]`),
-  `packageManager: bun@1.4.0`, shared scripts; no `version` field.
-- **Health: healthy** — included in the inventory because release tooling
-  may need a root version policy decision (e.g., private root stays
-  versionless vs. umbrella version).
+- **Responsibility**: workspace root — Bun `workspaces: [apps/*,
+  packages/*]` (`packageManager: bun@1.4.0`), Cargo workspace (7
+  members, `resolver="2"`, shared deps/profiles), `versioning.toml`
+  component registry, `turbo.json`, `Makefile` (~90 targets).
+- **Key seams for intent**: a new crate needs `[workspace.members]` +
+  shared-dep decisions + `versioning.toml` registration (11th component;
+  decide whether it `depends_on = ["wire"]` if it shares wire types).
+- **Health: healthy**.
 
 ## Dependency Edge Summary
 
 ```
-oxidean-core ◄── oxidean-api, oxidean-cli, oxidean-db   (highest fan-out)
+oxidean-core ◄── oxidean-api, oxidean-cli, oxidean-db, oxidean-web   (highest fan-out)
 oxidean-db   ◄── oxidean-api
 oxidean-git  ◄── oxidean-api
-@oxidean/api-client ◄── @oxidean/web        (workspace:*)
-oxidean-api --rpc-gen──► @oxidean/api-client (generated-source edge)
+@oxidean/api-client ◄── @oxidean/web            (workspace:*)
+oxidean-api --rpc-gen──► @oxidean/api-client    (generated-source edge)
+(new VCS crate) ◄── { oxidean-api or aux listener; oxidean-core types; oxidean-db façade }
 ```
 
-Full graph including generated-source edges, Docker build deps, and
-`watchPatterns` precedent: `dependencies.md`.
+Full graph incl. codegen edges, build deps, and versioning edges:
+`dependencies.md`.
