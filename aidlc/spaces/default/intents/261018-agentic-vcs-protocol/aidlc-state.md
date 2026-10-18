@@ -35,10 +35,34 @@
 - **In Progress**: functional-design
 
 ## Runtime State
-- **Revision Count**: 8
+- **Revision Count**: 9
 - **Construction Checkpoints**: enabled
 - **Construction Iteration**: unit-major
 - **Construction Execution**: serial
+
+- **Skeleton Stance**: off
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+- **Construction Verification Command**: cargo nextest run --workspace
 
 ## Phase Progress
 <!-- Status values: Pending, Active, Verified, Skipped -->
@@ -101,7 +125,9 @@ Per unit: [TBD]
 - **Current Stage**: functional-design
 - **Next Stage**: nfr-requirements
 - **Status**: Running
-- **Last Updated**: 2026-10-18T05:46:35Z
+- **Last Updated**: 2026-10-18T08:02:14Z
+
+- **Construction Autonomy Mode**: autonomous
 
 ## Session Resume Point
 - **Last Completed Stage**: delivery-planning
