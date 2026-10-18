@@ -468,6 +468,7 @@ pub async fn enqueue_run(
         supersede_groups: Vec::new(),
         pending_groups: Vec::new(),
         caller: None,
+        permissions_clamp: None,
     };
     let job_ids = emit_jobs(&mut emit, &doc.jobs).await?;
     let supersede_groups = emit.supersede_groups;
@@ -877,6 +878,11 @@ pub(crate) struct EmitCtx<'a> {
     /// emitted row links to the caller leg and carries the call's resolved
     /// inputs/secrets scope on its payload.
     pub caller: Option<CallerEmit>,
+    /// Reusable-workflow `GITHUB_TOKEN` clamp: callee job permissions can
+    /// only *reduce* the caller job's resolved set, never exceed it. `None`
+    /// outside reusable calls.
+    pub permissions_clamp:
+        Option<std::collections::BTreeMap<String, crate::actions::parse::ContentsPermission>>,
 }
 
 /// Callee-emission linkage — what `call` metadata lands on each emitted
@@ -1097,8 +1103,25 @@ pub(crate) async fn emit_jobs(
         let needs_json = serde_json::to_string(&job.needs).unwrap_or_else(|_| "[]".into());
         // The full GitHub scope set rides the frozen payload — claim mints
         // `OXIDEAN_TOKEN` against it and `id-token: write` gates OIDC.
-        let permission_map =
+        // Reusable calls clamp every scope to the caller job's resolved
+        // permissions — `GITHUB_TOKEN` can only be downgraded downstream.
+        let mut permission_map =
             crate::actions::effective_permissions(doc, job, emit.default_permissions);
+        let mut contents_level = crate::actions::effective_contents_permission(doc, job);
+        if let Some(clamp) = emit.permissions_clamp.as_ref() {
+            for (scope, level) in permission_map.iter_mut() {
+                *level = (*level).min(
+                    *clamp
+                        .get(scope)
+                        .unwrap_or(&crate::actions::parse::ContentsPermission::None),
+                );
+            }
+            contents_level = contents_level.min(
+                *clamp
+                    .get("contents")
+                    .unwrap_or(&crate::actions::parse::ContentsPermission::None),
+            );
+        }
         let permissions_json: serde_json::Map<String, serde_json::Value> = permission_map
             .iter()
             .map(|(k, v)| (k.clone(), serde_json::Value::String(v.as_str().into())))
@@ -1138,7 +1161,7 @@ pub(crate) async fn emit_jobs(
             "timeout_seconds": timeout_seconds,
             "container": job.container.as_ref().map(|c| crate::actions::eval_ctx::interp_json(c, &ctx, &mut notes)),
             "services": job.services.as_ref().map(|s| crate::actions::eval_ctx::interp_json(s, &ctx, &mut notes)),
-            "contents_permission": crate::actions::effective_contents_permission(doc, job).as_str(),
+            "contents_permission": contents_level.as_str(),
             "permissions": serde_json::Value::Object(permissions_json),
             "environment": environment_name.clone(),
             "environment_url": environment_url.clone(),

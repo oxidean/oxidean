@@ -19,7 +19,7 @@ impl std::error::Error for ParseError {}
 
 /// `contents` permission level granted to the per-job `OXIDEAN_TOKEN`
 /// (GitHub `permissions:` semantics — `none` revokes the token entirely).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ContentsPermission {
     None,

@@ -71,6 +71,26 @@ async fn mk_user_repo(
     bare: &std::path::Path,
     workflow: &[u8],
 ) -> (String, String, String) {
+    let (owner_id, repo_id, _, tip) = mk_user_repo_files(
+        db,
+        suffix,
+        bare,
+        &[(".github/workflows/ci.yml".into(), workflow.to_vec())],
+    )
+    .await;
+    (owner_id, repo_id, tip)
+}
+
+/// Same fixture but seeds several files into the root commit — reusable-
+/// workflow tests need caller + callee workflows side by side. Returns
+/// `(owner_id, repo_id, owner_slug, tip)`; the slug is the `<owner>/` dir
+/// level `expand_call`'s local `uses:` resolution builds under the repos dir.
+async fn mk_user_repo_files(
+    db: &Database,
+    suffix: &str,
+    bare: &std::path::Path,
+    files: &[(String, Vec<u8>)],
+) -> (String, String, String, String) {
     let owner = db
         .create_user(
             &format!("u-p6-{suffix}"),
@@ -96,12 +116,8 @@ async fn mk_user_repo(
         )
         .await
         .expect("repo");
-    let tip = seed(
-        bare,
-        &[(".github/workflows/ci.yml".into(), workflow.to_vec())],
-    )
-    .await;
-    (owner.id, repo.id, tip)
+    let tip = seed(bare, files).await;
+    (owner.id, repo.id, owner.username, tip)
 }
 
 async fn run_count(db: &Database, repo_id: &str) -> usize {
@@ -1257,4 +1273,148 @@ jobs:
     assert_eq!(run.event, "pull_request");
     assert_eq!(run.head_sha, head, "unmergeable PR falls back to head sha");
     assert_eq!(run.head_ref, "refs/pull/9/head");
+}
+
+/// Reusable-workflow `GITHUB_TOKEN` is only ever *downgraded* by the call —
+/// every callee scope clamps to the caller job's resolved permissions.
+/// Caller declares `permissions: {contents: read}` (explicit map resets the
+/// rest to none); the callee tries `contents: write` + `issues: write` on one
+/// job and leaves the other undeclared. After expansion the declared leg must
+/// land `read`/`none` and the undeclared leg inherits the repo default —
+/// still clamped.
+#[tokio::test]
+async fn p6_reusable_callee_permissions_clamped_to_caller() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("t.db").display()))
+        .await
+        .unwrap();
+    db.migrate().await.unwrap();
+
+    let repos_dir = dir.path().join("repos");
+    // Local `uses:` resolution reads the bare from OXIDEAN_REPOS_DIR — point
+    // it at this test's repos root. No other test in this binary reads the
+    // var, so the process-global set is safe here.
+    std::env::set_var("OXIDEAN_REPOS_DIR", &repos_dir);
+    // Owner username for suffix "pc" is `p6pc` (mk_user_repo_files' third
+    // create_user arg) — the `<owner>/` level local `uses:` resolves under.
+    let bare = repos_dir.join("p6pc").join("p6-demo.git");
+    std::fs::create_dir_all(bare.parent().unwrap()).unwrap();
+
+    let caller = br#"
+name: Caller
+on: [push]
+jobs:
+  call:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/callee.yml
+"#;
+    let callee = br#"
+name: Callee
+on: workflow_call
+jobs:
+  declared:
+    permissions:
+      contents: write
+      issues: write
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+  undeclared:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+"#;
+    let (_uid, repo_id, _slug, tip) = mk_user_repo_files(
+        &db,
+        "pc",
+        &bare,
+        &[
+            (".github/workflows/ci.yml".into(), caller.to_vec()),
+            (".github/workflows/callee.yml".into(), callee.to_vec()),
+        ],
+    )
+    .await;
+
+    let doc = oxidean_api::actions::parse_workflow_yaml(caller).unwrap();
+    let (run_id, _job_ids) = oxidean_api::actions::enqueue_run(
+        &db,
+        &repo_id,
+        ".github/workflows/ci.yml",
+        &doc,
+        "push",
+        &tip,
+        "refs/heads/main",
+        None,
+        None,
+        None,
+        false,
+    )
+    .await
+    .unwrap();
+
+    let run = db
+        .find_action_run_by_id(&run_id)
+        .await
+        .unwrap()
+        .expect("run row");
+    let jobs = db.list_action_jobs_for_run(&run_id).await.unwrap();
+    let caller_job = jobs
+        .iter()
+        .find(|j| j.job_key == "call")
+        .expect("caller leg");
+    let stored = db
+        .find_action_payload(caller_job.payload_sha.as_deref().unwrap())
+        .await
+        .unwrap()
+        .expect("caller payload");
+    let payload: serde_json::Value = serde_json::from_str(&stored.payload_json).unwrap();
+    // Sanity: the caller leg froze its own resolved map — contents read,
+    // every other scope reset to none by the explicit block.
+    assert_eq!(payload["permissions"]["contents"], "read");
+    assert_eq!(payload["permissions"]["issues"], "none");
+
+    let outcome = oxidean_api::actions::reusable::expand_call(
+        &db,
+        &run,
+        caller_job,
+        &payload,
+        &oxidean_actions_expr::Context::new(),
+    )
+    .await
+    .unwrap();
+    if let oxidean_api::actions::reusable::ExpandOutcome::Failed(msg) = &outcome {
+        panic!("expansion failed: {msg}");
+    }
+
+    let jobs = db.list_action_jobs_for_run(&run_id).await.unwrap();
+    let callee_jobs: Vec<_> = jobs
+        .iter()
+        .filter(|j| j.caller_job_id == caller_job.id)
+        .collect();
+    assert_eq!(callee_jobs.len(), 2);
+    for cj in callee_jobs {
+        let stored = db
+            .find_action_payload(cj.payload_sha.as_deref().unwrap())
+            .await
+            .unwrap()
+            .expect("callee payload");
+        let p: serde_json::Value = serde_json::from_str(&stored.payload_json).unwrap();
+        assert_eq!(
+            p["permissions"]["contents"], "read",
+            "{} must clamp contents write→read",
+            cj.job_key
+        );
+        assert_eq!(p["contents_permission"], "read", "{}", cj.job_key);
+        if cj.job_key == "declared" {
+            // The caller never granted issues — an explicit map reset it to
+            // none, so the callee's `issues: write` clamps to none.
+            assert_eq!(p["permissions"]["issues"], "none", "{}", cj.job_key);
+        } else {
+            // Undeclared callee job resolved the repo `read` default
+            // (contents+packages read) — packages still clamps to the
+            // caller's none.
+            assert_eq!(p["permissions"]["packages"], "none", "{}", cj.job_key);
+        }
+    }
 }

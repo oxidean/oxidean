@@ -55,7 +55,7 @@ download, annotations, `workflow_job` webhook.
 | 9. Workflow commands & environment files | 17 | 4 | 1 | 0 |
 | 10. Default environment variables | 48 | 0 | 0 | 0 |
 | 11. Action metadata — action.yml | 14 | 2 | 1 | 1 |
-| 12. Reusable workflows | 9 | 1 | 0 | 0 |
+| 12. Reusable workflows | 10 | 0 | 0 | 0 |
 | 13. Artifacts | 11 | 1 | 1 | 0 |
 | 14. Dependency caching | 5 | 0 | 0 | 0 |
 | 15. Concurrency | 5 | 0 | 0 | 0 |
@@ -444,7 +444,7 @@ GitHub.
 | `reuse.with` | `jobs.<id>.with` inputs to the call | supported | case:reusable-workflow-local | Expressions evaluate against the caller's context at expansion. |
 | `reuse.strategy` | matrix over a call — one caller row per leg, fan-out capped | supported | case:reusable-matrix-call, case:reusable-fanout, case:reusable-fanout-accumulated | GitHub's 256-leg matrix cap applies inside callees; accumulated call fan-out is bounded separately. |
 | `reuse.nesting` | Up to 4 nested call levels | supported | case:reusable-nested, case:reusable-depth, case:reusable-recursion | Depth beyond GitHub's limit and self-recursion fail loudly. |
-| `reuse.permissions` | Called workflow can only reduce permissions | partial | case:reusable-workflow-remote | The callee's own `permissions:` block applies per job; the ≤-caller clamp is not enforced yet. |
+| `reuse.permissions` | Called workflow can only reduce permissions | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_reusable_callee_permissions_clamped_to_caller | Every callee scope resolves per job then clamps to the caller leg's frozen permission map — `GITHUB_TOKEN` can only be downgraded downstream. |
 | `reuse.env-context` | `env`/`steps`/`continue-on-error` on a caller job are not permitted by GitHub | supported | case:reusable-caller-keywords, test:crates/oxidean-api/src/actions/parse.rs::structural_features_are_flagged_unsupported | Callers reject GitHub-disallowed keywords at parse — loud validation failure. |
 
 ## 13. Artifacts (`art.`)

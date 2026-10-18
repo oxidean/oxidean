@@ -576,6 +576,24 @@ pub async fn expand_call(
         .get_repo_actions_default_permissions(&run.repository_id)
         .await
         .unwrap_or_else(|_| "read".into());
+    // `GITHUB_TOKEN` is only ever downgraded by a reusable call — clamp every
+    // callee job's resolved permissions to the caller job's frozen map.
+    let permissions_clamp = payload
+        .get("permissions")
+        .and_then(|p| p.as_object())
+        .map(|m| {
+            m.iter()
+                .filter_map(|(k, v)| {
+                    let level = match v.as_str()? {
+                        "none" => crate::actions::parse::ContentsPermission::None,
+                        "read" => crate::actions::parse::ContentsPermission::Read,
+                        "write" => crate::actions::parse::ContentsPermission::Write,
+                        _ => return None,
+                    };
+                    Some((k.clone(), level))
+                })
+                .collect()
+        });
     let all_warnings: Vec<String> = doc.warnings.iter().cloned().chain(eval_warnings).collect();
     let mut emit = EmitCtx {
         db,
@@ -598,6 +616,7 @@ pub async fn expand_call(
             inputs,
             secrets_json: resolve_call_secrets_spec(payload),
         }),
+        permissions_clamp,
     };
     let job_ids = emit_jobs(&mut emit, &doc.jobs).await?;
     if job_ids.is_empty() {
