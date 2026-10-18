@@ -46,7 +46,7 @@ download, annotations, `workflow_job` webhook.
 |---------|-----------|---------|-------------|-----|
 | 1. Workflow files & discovery | 8 | 0 | 0 | 0 |
 | 2. Triggers & filters | 22 | 0 | 0 | 0 |
-| 3. Events | 23 | 0 | 13 | 0 |
+| 3. Events | 24 | 0 | 12 | 0 |
 | 4. Workflow-level keys | 8 | 0 | 0 | 0 |
 | 5. Jobs | 29 | 0 | 0 | 1 |
 | 6. Steps | 19 | 0 | 0 | 1 |
@@ -131,7 +131,7 @@ activity-type filter semantics; unsupported ones warn at parse (section 2,
 | `ev.schedule` | `schedule` — cron on the default branch | supported | test:crates/oxidean-api/src/actions/cron.rs::exact_and_ranges, test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_schedule_sweep_dedupes_per_minute | UTC; five-field cron; multiple entries allowed. |
 | `ev.workflow_dispatch` | `workflow_dispatch` — manual run with typed inputs | supported | case:dispatch-only, test:crates/oxidean-api/tests/actions_endpoints.rs::dispatch_workflow_enqueues_run, test:crates/oxidean-api/src/actions/rpc.rs::dispatch_inputs_resolve_types_and_defaults | string/boolean/choice/number/environment types; required/default honoured; 25-input cap. |
 | `ev.release` | `release` — types published/created/edited/prereleased/released | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_lifecycle_release_and_issues | |
-| `ev.issues` | `issues` — all activity types, `types:` filter honoured | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_lifecycle_release_and_issues, test:crates/oxidean-api/tests/webhook_delivery.rs::actions_issue_label_delta_trigger_e2e | `labeled`/`unlabeled` fire per label delta with `payload.label` naming the changed label. |
+| `ev.issues` | `issues` — all activity types, `types:` filter honoured | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_lifecycle_release_and_issues, test:crates/oxidean-api/tests/webhook_delivery.rs::actions_issue_label_delta_trigger_e2e, test:crates/oxidean-api/tests/webhook_delivery.rs::actions_issue_milestone_delta_trigger_e2e | `labeled`/`unlabeled` fire per label delta with `payload.label` naming the changed label; `milestoned`/`demilestoned` fire on milestone assignment/removal with `payload.milestone` (issue creation with a milestone emits `opened` then `milestoned`, matching GitHub ordering). |
 | `ev.schedule-payload` | `github.event.schedule` carries the matched cron entry | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_schedule_sweep_dedupes_per_minute | `schedule_payload` emits `{"schedule": "<cron>", "repository": …}`; the test asserts the field lands on the run's event payload. |
 | `ev.branch_protection_rule` | `branch_protection_rule` — created/edited/deleted | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_lifecycle_generic_events | Fires on `repo.branchProtection.*` mutations; `types:` honoured. Tag protection has no GitHub event analogue. |
 | `ev.check_run` | `check_run` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
@@ -147,7 +147,7 @@ activity-type filter semantics; unsupported ones warn at parse (section 2,
 | `ev.issue_comment` | `issue_comment` — created/edited/deleted | supported | test:crates/oxidean-api/tests/webhook_delivery.rs::actions_issue_comment_trigger_e2e, test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_lifecycle_generic_events | Fires on issue comments and PR conversation comments; `types:` honoured. |
 | `ev.label` | `label` — created/edited/deleted | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_lifecycle_generic_events | Repo-scoped label CRUD; org labels (Oxidean extension) don't map to a repo context and don't fire. `types:` honoured. |
 | `ev.merge_group` | `merge_group` — merge queue | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
-| `ev.milestone` | `milestone` | unsupported | case:on-unsupported-event | Warns at parse; no milestone domain surface exists — needs the entity first. |
+| `ev.milestone` | `milestone` — created/opened/closed/edited/deleted, `types:` honoured | supported | test:crates/oxidean-api/tests/webhook_delivery.rs::actions_milestone_trigger_e2e, test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_lifecycle_generic_events | Reopening a closed milestone fires `opened` (GitHub's activity type). Milestone CRUD is repo-scoped under Issues (`milestone.*` RPC + `/issues/milestones` UI); `payload.milestone` carries the entity. |
 | `ev.page_build` | `page_build` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
 | `ev.project` | `project` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
 | `ev.project_card` | `project_card` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |

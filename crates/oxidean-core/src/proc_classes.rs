@@ -212,6 +212,8 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         | "issue.comments.history"
         | "issue.links.list"
         | "issue.assigneeCandidates"
+        | "milestone.list"
+        | "milestone.get"
         | "label.listForRepo" => IssuesRead,
 
         "issue.create"
@@ -226,6 +228,10 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         | "issue.reactions.toggle"
         | "issue.links.add"
         | "issue.links.remove"
+        | "issue.milestone.set"
+        | "milestone.create"
+        | "milestone.update"
+        | "milestone.delete"
         | "label.create"
         | "label.update"
         | "label.delete" => IssuesWrite,

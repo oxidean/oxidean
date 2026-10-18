@@ -347,6 +347,7 @@ export async function fetchIssueList(
     author?: string;
     label?: string;
     assignee?: string;
+    milestone?: string;
     q?: string;
     offset?: number;
     limit?: number;
@@ -359,6 +360,7 @@ export async function fetchIssueList(
     author: data.author ? String(data.author) : null,
     label: data.label ? String(data.label) : null,
     assignee: data.assignee ? String(data.assignee) : null,
+    milestone: data.milestone ? String(data.milestone) : null,
     q: data.q ? String(data.q) : null,
     offset: typeof data.offset === "number" ? data.offset : 0,
     limit: typeof data.limit === "number" ? data.limit : 25,
@@ -368,6 +370,15 @@ export async function fetchIssueList(
 /** `label.listForRepo`. */
 export async function fetchLabelListForRepo(data: OwnerName) {
   return apiClient.label.listForRepo({ owner: data.owner, name: data.name });
+}
+
+/** `milestone.list` — state defaults to `all` so callers get open + closed. */
+export async function fetchMilestoneList(data: OwnerName & { state?: string }) {
+  return apiClient.milestone.list({
+    owner: data.owner,
+    name: data.name,
+    state: data.state ? String(data.state) : "all",
+  });
 }
 
 /** `issue.get`. */

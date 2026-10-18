@@ -138,6 +138,9 @@ pub struct IssuePublic {
     /// Aggregated reaction counts (D-ISS-11).
     #[serde(default)]
     pub reactions: Vec<ReactionGroupPublic>,
+    /// Milestone this issue belongs to (GitHub embeds the object).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub milestone: Option<Box<crate::milestone_types::MilestonePublic>>,
     /// Number of comments on the issue (shown on list rows).
     #[serde(default)]
     pub comment_count: i64,
@@ -270,6 +273,9 @@ pub struct CreateIssueRequest {
     pub title: String,
     #[serde(default)]
     pub body: Option<String>,
+    /// Milestone `#N` — assigns at create (fires `milestoned`).
+    #[serde(default)]
+    pub milestone: Option<i64>,
 }
 
 /// Issue get / mutate path — owner + repo name + `#N`.
@@ -290,6 +296,9 @@ pub struct UpdateIssueRequest {
     pub title: Option<String>,
     #[serde(default)]
     pub body: Option<String>,
+    /// Milestone `#N`; explicit `null` clears. Absent keeps the current link.
+    #[serde(default, deserialize_with = "crate::milestone_types::deserialize_some")]
+    pub milestone: Option<Option<i64>>,
 }
 
 /// Admin hard-delete with typed confirm (D-ISS-02).
@@ -338,6 +347,10 @@ pub struct IssueListRequest {
     pub label: Option<String>,
     #[serde(default)]
     pub assignee: Option<String>,
+    /// Milestone filter — a milestone `#N`, `*` (any milestone), or `none`
+    /// (issues without one); GitHub REST semantics.
+    #[serde(default)]
+    pub milestone: Option<String>,
     #[serde(default)]
     pub q: Option<String>,
     #[serde(default)]

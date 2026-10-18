@@ -640,6 +640,15 @@ export const routeCoverageManifest: RouteCoverageEntry[] = [
       },
     ],
   },
+  {
+    route: "$owner.$repo.issues.milestones.tsrx",
+    coverage: [
+      {
+        kind: "happy-dom",
+        test: "apps/web/src/routes/$owner.$repo.issues.milestones.integration.test.ts",
+      },
+    ],
+  },
 
   // --- releases ---
   {

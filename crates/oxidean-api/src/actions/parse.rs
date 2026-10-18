@@ -692,6 +692,7 @@ fn apply_event(
         | "pull_request_review_comment"
         | "registry_package"
         | "label"
+        | "milestone"
         | "public"
         | "status"
         | "repository_dispatch"
@@ -1802,8 +1803,8 @@ name: CI
 on:
   push:
   discussion:
-  milestone:
-    types: [opened]
+  gollum:
+    types: [created]
 jobs:
   a:
     runs-on: ubuntu-latest
@@ -1823,7 +1824,7 @@ jobs:
             doc.warnings
         );
         assert!(
-            doc.warnings.iter().any(|w| w.contains("on.milestone")),
+            doc.warnings.iter().any(|w| w.contains("on.gollum")),
             "map entry with filters warns too: {:?}",
             doc.warnings
         );
@@ -1831,7 +1832,7 @@ jobs:
         let doc2 = parse_workflow_yaml(
             br#"
 name: CI
-on: [push, gollum]
+on: [push, merge_group]
 jobs:
   a:
     runs-on: ubuntu-latest
@@ -1840,7 +1841,7 @@ jobs:
 "#,
         )
         .expect("parse");
-        assert!(doc2.warnings.iter().any(|w| w.contains("on.gollum")));
+        assert!(doc2.warnings.iter().any(|w| w.contains("on.merge_group")));
     }
 
     #[test]

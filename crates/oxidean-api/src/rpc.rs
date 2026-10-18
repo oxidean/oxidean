@@ -24,6 +24,7 @@ use crate::gpg_keys;
 use crate::invites;
 use crate::issue;
 use crate::label;
+use crate::milestone;
 use crate::notification;
 use crate::oauth;
 use crate::org;
@@ -413,6 +414,12 @@ pub const PROCEDURES: &[&str] = &[
     "issue.comments.history",
     "issue.labels.set",
     "issue.assignees.set",
+    "issue.milestone.set",
+    "milestone.list",
+    "milestone.get",
+    "milestone.create",
+    "milestone.update",
+    "milestone.delete",
     "issue.assigneeCandidates",
     "issue.reactions.toggle",
     "issue.links.list",
@@ -1766,6 +1773,30 @@ async fn dispatch_inner(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Err(e) => RpcResponse::err(e),
         },
         "issue.assignees.set" => match issue::assignees_set(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "issue.milestone.set" => match milestone::set_issue_milestone(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "milestone.list" => match milestone::list(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "milestone.get" => match milestone::get(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "milestone.create" => match milestone::create(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "milestone.update" => match milestone::update(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "milestone.delete" => match milestone::delete(ctx, req.input).await {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },

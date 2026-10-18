@@ -20,6 +20,7 @@ pub mod issues;
 pub mod lfs;
 pub mod mcp_settings;
 pub mod migrate;
+pub mod milestones;
 pub mod mirrors;
 pub mod notifications;
 pub mod oauth;
@@ -72,10 +73,12 @@ pub use gpg_keys::GpgKeyRow;
 pub use instance_invites::InstanceInviteRow;
 pub use issue_labels::{IssueAssigneeRow, LabelRow};
 pub use issues::{
-    CommentRevisionRow, IssueCommentRow, IssueLinkRow, IssueListFilters, IssueRevisionRow, IssueRow,
+    CommentRevisionRow, IssueCommentRow, IssueLinkRow, IssueListFilters, IssueRevisionRow,
+    IssueRow, MilestoneListFilter,
 };
 pub use lfs::LfsObjectRow;
 pub use mcp_settings::McpSettingsRow;
+pub use milestones::MilestoneRow;
 pub use mirrors::{RepositoryMirrorRefResultRow, RepositoryMirrorRow};
 pub use notifications::NotificationRow;
 pub use oauth::{OAuthAppRow, OAuthCodeRow, OAuthDeviceCodeRow, OAuthTokenRow};
@@ -1791,6 +1794,111 @@ impl Database {
     /// Hard-delete; does not reclaim `#N` (D-ISS-01).
     pub async fn delete_issue(&self, id: &str) -> Result<(), String> {
         issues::delete_issue(self.require_pool()?, id).await
+    }
+
+    // --- milestones ---
+
+    /// Allocate the next per-repo milestone `#N` (monotonic; never reclaims).
+    pub async fn allocate_next_milestone_number(&self, repo_id: &str) -> Result<i64, String> {
+        milestones::allocate_next_number(self.require_pool()?, repo_id).await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn insert_milestone(
+        &self,
+        id: &str,
+        repo_id: &str,
+        number: i64,
+        title: &str,
+        description: &str,
+        due_on: Option<&str>,
+        creator_id: Option<&str>,
+    ) -> Result<MilestoneRow, String> {
+        milestones::insert_milestone(
+            self.require_pool()?,
+            id,
+            repo_id,
+            number,
+            title,
+            description,
+            due_on,
+            creator_id,
+        )
+        .await
+    }
+
+    pub async fn find_milestone_by_id(&self, id: &str) -> Result<Option<MilestoneRow>, String> {
+        milestones::find_milestone_by_id(self.require_pool()?, id).await
+    }
+
+    pub async fn find_milestone_by_repo_number(
+        &self,
+        repo_id: &str,
+        number: i64,
+    ) -> Result<Option<MilestoneRow>, String> {
+        milestones::find_milestone_by_repo_number(self.require_pool()?, repo_id, number).await
+    }
+
+    /// Case-insensitive title match within a repo (duplicate-create check).
+    pub async fn find_milestone_by_repo_title(
+        &self,
+        repo_id: &str,
+        title: &str,
+    ) -> Result<Option<MilestoneRow>, String> {
+        milestones::find_milestone_by_repo_title(self.require_pool()?, repo_id, title).await
+    }
+
+    /// `state` is `open`/`closed`/`all` — sorted by soonest due date.
+    pub async fn list_milestones_for_repo(
+        &self,
+        repo_id: &str,
+        state: &str,
+    ) -> Result<Vec<MilestoneRow>, String> {
+        milestones::list_milestones_for_repo(self.require_pool()?, repo_id, state).await
+    }
+
+    /// Batch lookup for issue enrichment.
+    pub async fn list_milestones_by_ids(
+        &self,
+        ids: &[String],
+    ) -> Result<Vec<MilestoneRow>, String> {
+        milestones::list_milestones_by_ids(self.require_pool()?, ids).await
+    }
+
+    /// Edit title/description/due_on — `due_on` `Some(None)` clears the date.
+    /// `None` when the milestone vanished mid-update.
+    pub async fn update_milestone(
+        &self,
+        id: &str,
+        title: Option<&str>,
+        description: Option<&str>,
+        due_on: Option<Option<&str>>,
+    ) -> Result<Option<MilestoneRow>, String> {
+        milestones::update_milestone(self.require_pool()?, id, title, description, due_on).await
+    }
+
+    /// Open/close a milestone (`closed_at` stamps on close, clears on reopen).
+    /// `None` when the milestone vanished mid-update.
+    pub async fn set_milestone_state(
+        &self,
+        id: &str,
+        state: &str,
+    ) -> Result<Option<MilestoneRow>, String> {
+        milestones::set_milestone_state(self.require_pool()?, id, state).await
+    }
+
+    /// Hard-delete; `issues.milestone_id` clears via `ON DELETE SET NULL`.
+    pub async fn delete_milestone(&self, id: &str) -> Result<(), String> {
+        milestones::delete_milestone(self.require_pool()?, id).await
+    }
+
+    /// Set/clear an issue's milestone (`None` clears).
+    pub async fn set_issue_milestone(
+        &self,
+        issue_id: &str,
+        milestone_id: Option<&str>,
+    ) -> Result<(), String> {
+        milestones::set_issue_milestone(self.require_pool()?, issue_id, milestone_id).await
     }
 
     pub async fn insert_issue_revision(

@@ -228,6 +228,7 @@ async fn dialect_issues_batch_enrichment() {
                 author_id: None,
                 label_id: None,
                 assignee_id: None,
+                milestone: oxidean_db::issues::MilestoneListFilter::Any,
                 q: None,
                 offset: 0,
                 limit: 50,

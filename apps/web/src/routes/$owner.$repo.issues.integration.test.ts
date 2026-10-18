@@ -315,8 +315,9 @@ describe("repo chrome Issues tab Wave 0 (D-ISS-19)", () => {
       import("./$owner.$repo.issues.new.tsrx?raw"),
       import("./$owner.$repo.issues.$n.tsrx?raw"),
       import("./$owner.$repo.issues.labels.tsrx?raw"),
+      import("./$owner.$repo.issues.milestones.tsrx?raw"),
     ]);
-    const names = ["issues.index", "issues.new", "issues.$n", "issues.labels"];
+    const names = ["issues.index", "issues.new", "issues.$n", "issues.labels", "issues.milestones"];
     for (let i = 0; i < sources.length; i++) {
       const src = String((sources[i] as { default: string }).default);
       expect(src, `${names[i]} must not remount RepoChrome`).not.toMatch(/RepoChrome/);

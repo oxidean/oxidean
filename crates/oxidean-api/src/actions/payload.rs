@@ -192,6 +192,34 @@ pub fn issues_payload(
     })
 }
 
+/// `milestone` payload — `action` is the milestone activity type
+/// (`created`/`closed`/`opened`/`edited`/`deleted`); `milestone` embeds
+/// the row in GitHub's webhook shape.
+pub fn milestone_payload(
+    action: &str,
+    row: &oxidean_db::MilestoneRow,
+    repository: &JsonValue,
+    sender: &JsonValue,
+) -> JsonValue {
+    json!({
+        "action": action,
+        "milestone": {
+            "number": row.number,
+            "title": row.title,
+            "description": row.description,
+            "state": row.state,
+            "due_on": row.due_on,
+            "open_issues": row.open_issues,
+            "closed_issues": row.closed_issues,
+            "closed_at": row.closed_at,
+            "created_at": row.created_at,
+            "updated_at": row.updated_at,
+        },
+        "repository": repository,
+        "sender": sender,
+    })
+}
+
 /// `workflow_run` payload — `workflow_run` embeds the completed run in
 /// GitHub's webhook shape; `action` is `completed` (the only activity type
 /// the engine emits today).

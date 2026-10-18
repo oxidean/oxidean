@@ -671,6 +671,8 @@ on:
   registry_package: {}
   label:
     types: [created]
+  milestone:
+    types: [created]
   public: {}
   status: {}
   repository_dispatch:
@@ -729,23 +731,29 @@ jobs:
     notify_lifecycle_actions(&db, git.as_ref(), &ev("label", "created")).await;
     assert_eq!(run_count(&db, &repo_id).await, 9);
 
+    // milestone types:[created] — closed filtered, created fires.
+    notify_lifecycle_actions(&db, git.as_ref(), &ev("milestone", "closed")).await;
+    assert_eq!(run_count(&db, &repo_id).await, 9);
+    notify_lifecycle_actions(&db, git.as_ref(), &ev("milestone", "created")).await;
+    assert_eq!(run_count(&db, &repo_id).await, 10);
+
     // GitHub defines no activity types for these — bare `on:` fires on any.
     for name in ["public", "status"] {
         notify_lifecycle_actions(&db, git.as_ref(), &ev(name, "")).await;
     }
-    assert_eq!(run_count(&db, &repo_id).await, 11);
+    assert_eq!(run_count(&db, &repo_id).await, 12);
 
     // repository_dispatch — types: match the caller-chosen event_type.
     notify_lifecycle_actions(&db, git.as_ref(), &ev("repository_dispatch", "build")).await;
-    assert_eq!(run_count(&db, &repo_id).await, 11);
-    notify_lifecycle_actions(&db, git.as_ref(), &ev("repository_dispatch", "deploy")).await;
     assert_eq!(run_count(&db, &repo_id).await, 12);
+    notify_lifecycle_actions(&db, git.as_ref(), &ev("repository_dispatch", "deploy")).await;
+    assert_eq!(run_count(&db, &repo_id).await, 13);
 
     // branch_protection_rule types:[created] — edited filtered.
     notify_lifecycle_actions(&db, git.as_ref(), &ev("branch_protection_rule", "edited")).await;
-    assert_eq!(run_count(&db, &repo_id).await, 12);
-    notify_lifecycle_actions(&db, git.as_ref(), &ev("branch_protection_rule", "created")).await;
     assert_eq!(run_count(&db, &repo_id).await, 13);
+    notify_lifecycle_actions(&db, git.as_ref(), &ev("branch_protection_rule", "created")).await;
+    assert_eq!(run_count(&db, &repo_id).await, 14);
 
     let runs = db
         .list_action_runs_for_repo(&repo_id, &Default::default(), 100, 0)
@@ -761,6 +769,7 @@ jobs:
         "pull_request_review_comment",
         "registry_package",
         "label",
+        "milestone",
         "public",
         "status",
         "repository_dispatch",

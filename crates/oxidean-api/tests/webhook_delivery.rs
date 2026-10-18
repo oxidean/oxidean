@@ -2248,6 +2248,237 @@ jobs:
     assert!(unlabeled, "expected an unlabeled run");
 }
 
+/// `on: milestone` end-to-end — milestone CRUD through the real RPC enqueues
+/// runs with GitHub's activity types (`created`/`closed`/`opened`/`edited`/`deleted`).
+#[tokio::test]
+async fn actions_milestone_trigger_e2e() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("ms.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos.clone()).await;
+    let cookie = verified_owner(&app, &db, "ms@ex.com", "msown").await;
+    let created = rpc_json(
+        &app,
+        r#"{"procedure":"repo.create","input":{"name":"demo","visibility":"public","description":""}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(created["ok"], true, "{created}");
+    let repo_id = created["data"]["id"].as_str().unwrap().to_string();
+
+    let git = CliGitBackend::new();
+    let bare = repos.join("msown").join("demo.git");
+    git.seed_commit(
+        &bare,
+        "main",
+        "workflows",
+        &[(
+            ".github/workflows/milestones.yml".into(),
+            br#"
+name: Milestones
+on: milestone
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo milestone-driven
+"#
+            .to_vec(),
+        )],
+    )
+    .await
+    .unwrap();
+
+    let milestone = rpc_json(
+        &app,
+        r#"{"procedure":"milestone.create","input":{"owner":"msown","name":"demo","title":"v1","description":"first","due_on":"2030-01-15"}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(milestone["ok"], true, "{milestone}");
+    assert_eq!(milestone["data"]["number"], 1);
+    assert_eq!(milestone["data"]["due_on"], "2030-01-15");
+
+    let closed = rpc_json(
+        &app,
+        r#"{"procedure":"milestone.update","input":{"owner":"msown","name":"demo","number":1,"state":"closed"}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(closed["ok"], true, "{closed}");
+    assert!(closed["data"]["closed_at"].is_string());
+
+    let reopened = rpc_json(
+        &app,
+        r#"{"procedure":"milestone.update","input":{"owner":"msown","name":"demo","number":1,"state":"open"}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(reopened["ok"], true, "{reopened}");
+    assert!(reopened["data"]["closed_at"].is_null());
+
+    // Expect created + closed + opened runs (edited skipped — no field edit).
+    let mut actions: Vec<String> = Vec::new();
+    for _ in 0..40 {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let runs = db
+            .list_action_runs_for_repo(&repo_id, &Default::default(), 50, 0)
+            .await
+            .unwrap_or_default();
+        actions = runs
+            .iter()
+            .filter(|r| r.event == "milestone")
+            .filter_map(|r| {
+                serde_json::from_str::<serde_json::Value>(
+                    r.event_payload_json.as_deref().unwrap_or_default(),
+                )
+                .ok()
+            })
+            .filter_map(|p| p["action"].as_str().map(str::to_string))
+            .collect();
+        if actions.len() >= 3 {
+            break;
+        }
+    }
+    assert_eq!(actions.len(), 3, "milestone runs: {actions:?}");
+    for want in ["created", "closed", "opened"] {
+        assert!(
+            actions.iter().any(|a| a == want),
+            "missing {want}: {actions:?}"
+        );
+    }
+}
+
+/// `on: issues` `milestoned`/`demilestoned` — `issue.milestone.set` fires one
+/// run per link delta with `payload.milestone` naming the milestone.
+#[tokio::test]
+async fn actions_issue_milestone_delta_trigger_e2e() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("md.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos.clone()).await;
+    let cookie = verified_owner(&app, &db, "md@ex.com", "mdown").await;
+    let created = rpc_json(
+        &app,
+        r#"{"procedure":"repo.create","input":{"name":"demo","visibility":"public","description":""}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(created["ok"], true, "{created}");
+    let repo_id = created["data"]["id"].as_str().unwrap().to_string();
+
+    let git = CliGitBackend::new();
+    let bare = repos.join("mdown").join("demo.git");
+    git.seed_commit(
+        &bare,
+        "main",
+        "workflows",
+        &[(
+            ".github/workflows/milestone-delta.yml".into(),
+            br#"
+name: MilestoneDelta
+on:
+  issues:
+    types: [milestoned, demilestoned]
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo milestone-delta
+"#
+            .to_vec(),
+        )],
+    )
+    .await
+    .unwrap();
+
+    let milestone = rpc_json(
+        &app,
+        r#"{"procedure":"milestone.create","input":{"owner":"mdown","name":"demo","title":"v1"}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(milestone["ok"], true, "{milestone}");
+
+    let issue = rpc_json(
+        &app,
+        r#"{"procedure":"issue.create","input":{"owner":"mdown","name":"demo","title":"T","body":"b"}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(issue["ok"], true, "{issue}");
+
+    let set = rpc_json(
+        &app,
+        r#"{"procedure":"issue.milestone.set","input":{"owner":"mdown","name":"demo","number":1,"milestone":1}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(set["ok"], true, "{set}");
+    assert_eq!(set["data"]["milestone"]["number"], 1);
+    assert_eq!(set["data"]["milestone"]["title"], "v1");
+
+    let mut milestoned = None;
+    for _ in 0..40 {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let runs = db
+            .list_action_runs_for_repo(&repo_id, &Default::default(), 50, 0)
+            .await
+            .unwrap_or_default();
+        if let Some(r) = runs.into_iter().find(|r| {
+            r.event == "issues"
+                && r.event_payload_json
+                    .as_deref()
+                    .unwrap_or_default()
+                    .contains("\"milestoned\"")
+        }) {
+            milestoned = Some(r);
+            break;
+        }
+    }
+    let milestoned = milestoned.expect("milestoned run enqueued");
+    let payload: serde_json::Value =
+        serde_json::from_str(milestoned.event_payload_json.as_deref().unwrap()).unwrap();
+    assert_eq!(payload["action"], "milestoned");
+    assert_eq!(payload["milestone"]["number"], 1);
+    assert_eq!(payload["issue"]["number"], 1);
+
+    // Clearing fires `demilestoned` with the removed milestone embedded.
+    let cleared = rpc_json(
+        &app,
+        r#"{"procedure":"issue.milestone.set","input":{"owner":"mdown","name":"demo","number":1,"milestone":null}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(cleared["ok"], true, "{cleared}");
+    assert!(cleared["data"]["milestone"].is_null());
+    let mut demilestoned = false;
+    for _ in 0..40 {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let runs = db
+            .list_action_runs_for_repo(&repo_id, &Default::default(), 50, 0)
+            .await
+            .unwrap_or_default();
+        if runs.iter().any(|r| {
+            r.event == "issues"
+                && r.event_payload_json
+                    .as_deref()
+                    .unwrap_or_default()
+                    .contains("\"demilestoned\"")
+        }) {
+            demilestoned = true;
+            break;
+        }
+    }
+    assert!(demilestoned, "expected a demilestoned run");
+}
+
 fn basic_auth(user: &str, password: &str) -> String {
     const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let raw = format!("{user}:{password}");

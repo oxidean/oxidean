@@ -3804,6 +3804,23 @@ export type ToggleReactionResponse = {
   reacted: boolean;
 };
 
+export type MilestonePublic = {
+  id: string;
+  repo_id: string;
+  number: number;
+  title: string;
+  description: string;
+  state: string;
+  due_on?: string | null;
+  creator_id?: string | null;
+  creator_username?: string | null;
+  closed_at?: string | null;
+  created_at: string;
+  updated_at: string;
+  open_issues?: number;
+  closed_issues?: number;
+};
+
 export type IssuePublic = {
   id: string;
   repo_id: string;
@@ -3820,6 +3837,7 @@ export type IssuePublic = {
   labels?: LabelPublic[];
   assignees?: IssueAssigneePublic[];
   reactions?: ReactionGroupPublic[];
+  milestone?: MilestonePublic | null;
   comment_count?: number;
 };
 
@@ -3828,6 +3846,7 @@ export type CreateIssueRequest = {
   name: string;
   title: string;
   body?: string | null;
+  milestone?: number | null;
 };
 
 export type IssueRefRequest = {
@@ -3843,6 +3862,7 @@ export type IssueListRequest = {
   author?: string | null;
   label?: string | null;
   assignee?: string | null;
+  milestone?: string | null;
   q?: string | null;
   offset?: number | null;
   limit?: number | null;
@@ -3859,6 +3879,52 @@ export type UpdateIssueRequest = {
   number: number;
   title?: string | null;
   body?: string | null;
+  milestone?: number | null;
+};
+
+export type MilestoneListRequest = {
+  owner: string;
+  name: string;
+  state?: string | null;
+};
+
+export type MilestoneListResponse = {
+  milestones: MilestonePublic[];
+};
+
+export type MilestoneRefRequest = {
+  owner: string;
+  name: string;
+  number: number;
+};
+
+export type CreateMilestoneRequest = {
+  owner: string;
+  name: string;
+  title: string;
+  description?: string | null;
+  due_on?: string | null;
+};
+
+export type UpdateMilestoneRequest = {
+  owner: string;
+  name: string;
+  number: number;
+  title?: string | null;
+  description?: string | null;
+  due_on?: string | null;
+  state?: string | null;
+};
+
+export type DeleteMilestoneResponse = {
+  ok: boolean;
+};
+
+export type SetIssueMilestoneRequest = {
+  owner: string;
+  name: string;
+  number: number;
+  milestone?: number | null;
 };
 
 export type DeleteIssueRequest = {
@@ -4813,6 +4879,22 @@ export function createClient(opts: CreateClientOptions) {
         remove: (input: RemoveIssueLinkRequest) =>
           rpcCall<RemoveIssueLinkResponse>(opts, "issue.links.remove", input),
       },
+      milestone: {
+        set: (input: SetIssueMilestoneRequest) =>
+          rpcCall<IssuePublic>(opts, "issue.milestone.set", input),
+      },
+    },
+    milestone: {
+      list: (input: MilestoneListRequest) =>
+        rpcCall<MilestoneListResponse>(opts, "milestone.list", input),
+      get: (input: MilestoneRefRequest) =>
+        rpcCall<MilestonePublic>(opts, "milestone.get", input),
+      create: (input: CreateMilestoneRequest) =>
+        rpcCall<MilestonePublic>(opts, "milestone.create", input),
+      update: (input: UpdateMilestoneRequest) =>
+        rpcCall<MilestonePublic>(opts, "milestone.update", input),
+      delete: (input: MilestoneRefRequest) =>
+        rpcCall<DeleteMilestoneResponse>(opts, "milestone.delete", input),
     },
     pull: {
       create: (input: CreatePullRequest) =>

@@ -9,6 +9,7 @@ import { AppPage } from "@/components/app-page";
 import type {
   IssueAssigneePublic,
   LabelPublic,
+  MilestonePublic,
   RepoFileTemplate,
   RepoPublic,
   RepoTemplatesListResponse,
@@ -26,7 +27,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiClient } from "@/lib/api-client";
 
-import { fetchLabelListForRepo, fetchRepoFileTemplates, fetchRepoGet } from "@/lib/ssr-repo";
+import {
+  fetchLabelListForRepo,
+  fetchMilestoneList,
+  fetchRepoFileTemplates,
+  fetchRepoGet,
+} from "@/lib/ssr-repo";
 import { useChromeAccountState } from "@/lib/use-chrome-account";
 
 const EMPTY_TEMPLATES: RepoTemplatesListResponse = { issues: [], pulls: [] };
@@ -41,6 +47,7 @@ export type IssuesNewLoaderData =
       repo: RepoPublic;
       templates: RepoTemplatesListResponse;
       labels: LabelPublic[];
+      milestones: MilestonePublic[];
     };
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
@@ -59,15 +66,17 @@ async function loadNewIssuePage(owner: string, repoName: string): Promise<Issues
     return { kind: "disabled", repo: got.data };
   }
   // COL-02: template + label listing failures must not block the create form.
-  const [tpl, labelsRes] = await Promise.all([
+  const [tpl, labelsRes, milestonesRes] = await Promise.all([
     fetchRepoFileTemplates({ owner, name: repoName }).catch(() => null),
     fetchLabelListForRepo({ owner, name: repoName }).catch(() => null),
+    fetchMilestoneList({ owner, name: repoName, state: "open" }).catch(() => null),
   ]);
   return {
     kind: "ready",
     repo: got.data,
     templates: tpl?.ok ? tpl.data : EMPTY_TEMPLATES,
     labels: labelsRes?.ok ? labelsRes.data.labels : [],
+    milestones: milestonesRes?.ok ? milestonesRes.data.milestones : [],
   };
 }
 
@@ -145,6 +154,7 @@ function IssuesNewPageContent() @{
   // right after create — create itself takes title+body only.
   const [selLabelIds, setSelLabelIds] = useState<string[]>([]);
   const [selAssigneeIds, setSelAssigneeIds] = useState<string[]>([]);
+  const [selMilestone, setSelMilestone] = useState<number | null>(null);
   // Chooser resolves when a template (or blank) is picked — or `?template=` /
   // a single template auto-picks via the effect below. Seeding must not read
   // `issueTemplates`: the list is empty while the page query is still pending.
@@ -190,6 +200,16 @@ function IssuesNewPageContent() @{
               name: repoName,
               number,
               userIds: selAssigneeIds,
+            }),
+          );
+        }
+        if (selMilestone !== null) {
+          sideEffects.push(
+            apiClient.issue.milestone.set({
+              owner,
+              name: repoName,
+              number,
+              milestone: selMilestone,
             }),
           );
         }
@@ -256,6 +276,18 @@ function IssuesNewPageContent() @{
     initialData: routeLoader?.kind === "ready" ? routeLoader.labels : undefined,
   });
   const repoLabels = labelsQ.data ?? [];
+
+  const milestonesQ = useQuery({
+    queryKey: ["milestone", "list", owner, repoName] as const,
+    queryFn: async () => {
+      const res = await apiClient.milestone.list({ owner, name: repoName, state: "open" });
+      if (!res.ok) throw new Error(res.error.message || NETWORK_ERROR);
+      return res.data.milestones;
+    },
+    enabled: !!owner && !!repoName,
+    initialData: routeLoader?.kind === "ready" ? routeLoader.milestones : undefined,
+  });
+  const repoMilestones = milestonesQ.data ?? [];
 
   const candidatesQ = useQuery({
     queryKey: ["issue", "assigneeCandidates", owner, repoName] as const,
@@ -427,6 +459,41 @@ function IssuesNewPageContent() @{
                         </li>;
                       }
                     </ul>;
+                  }
+                }
+              </section>
+              <section aria-labelledby="new-issue-milestone-heading">
+                <h3
+                  id="new-issue-milestone-heading"
+                  className="text-[13px] font-semibold text-foreground"
+                >
+                  Milestone
+                </h3>
+                @if (milestonesQ.isPending) {
+                  <p className="mt-2 text-[13px] text-muted-foreground">
+                    Loading milestones…
+                  </p>;
+                } @else {
+                  @if (repoMilestones.length === 0) {
+                    <p className="mt-2 text-[13px] text-muted-foreground">None yet</p>;
+                  } @else {
+                    <select
+                      aria-label="Milestone"
+                      className="mt-2 h-9 w-full rounded-md border border-border bg-background px-3 text-[13px] text-foreground"
+                      value={selMilestone === null ? "" : String(selMilestone)}
+                      disabled={pending}
+                      onChange={(e) => {
+                        const v = (e.target as HTMLSelectElement).value;
+                        setSelMilestone(v === "" ? null : Number(v));
+                      }}
+                    >
+                      <option value="">No milestone</option>
+                      @for (const m of repoMilestones; key m.id) {
+                        <option value={String(m.number) as string}>
+                          {m.title as string}
+                        </option>;
+                      }
+                    </select>;
                   }
                 }
               </section>

@@ -17,6 +17,9 @@ pub struct IssueRow {
     pub closed_by: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+    /// `milestones.id` — set via `set_issue_milestone`; cleared when the
+    /// milestone row is deleted (`ON DELETE SET NULL`).
+    pub milestone_id: Option<String>,
     /// Derived `issue_comments` count carried by every `ISSUE_SELECT_*` query.
     pub comment_count: i64,
 }
@@ -54,6 +57,9 @@ macro_rules! map_issue {
             updated_at: row
                 .try_get("updated_at")
                 .map_err(|e| format!("issue row: {e}"))?,
+            milestone_id: row
+                .try_get("milestone_id")
+                .map_err(|e| format!("issue row: {e}"))?,
             comment_count: {
                 let c: i64 = row
                     .try_get("comment_count")
@@ -71,6 +77,7 @@ const ISSUE_SELECT_PG: &str = "SELECT issues.id, issues.repo_id, issues.number, 
        issues.closed_by,
        to_char(issues.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS created_at,
        to_char(issues.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS updated_at,
+       issues.milestone_id,
        (SELECT COUNT(*)::bigint FROM issue_comments c WHERE c.issue_id = issues.id) AS comment_count
 FROM issues";
 
@@ -80,6 +87,7 @@ const ISSUE_SELECT_MYSQL: &str = "SELECT issues.id, issues.repo_id, issues.numbe
        issues.closed_by,
        DATE_FORMAT(issues.created_at, '%Y-%m-%dT%H:%i:%sZ') AS created_at,
        DATE_FORMAT(issues.updated_at, '%Y-%m-%dT%H:%i:%sZ') AS updated_at,
+       issues.milestone_id,
        (SELECT COUNT(*) FROM issue_comments c WHERE c.issue_id = issues.id) AS comment_count
 FROM issues";
 
@@ -89,6 +97,7 @@ const ISSUE_SELECT_SQLITE: &str = "SELECT issues.id, issues.repo_id, issues.numb
        issues.closed_by,
        strftime('%Y-%m-%dT%H:%M:%SZ', issues.created_at) AS created_at,
        strftime('%Y-%m-%dT%H:%M:%SZ', issues.updated_at) AS updated_at,
+       issues.milestone_id,
        (SELECT COUNT(*) FROM issue_comments c WHERE c.issue_id = issues.id) AS comment_count
 FROM issues";
 
@@ -418,8 +427,26 @@ pub struct IssueListFilters<'a> {
     pub assignee_id: Option<&'a str>,
     /// Simple substring match on title/body (dialect LIKE/ILIKE — not the `key:value` qualifier grammar).
     pub q: Option<&'a str>,
+    /// GitHub REST `milestone` param semantics — the API layer resolves the
+    /// milestone number to an id for `Id`.
+    pub milestone: MilestoneListFilter<'a>,
     pub offset: i64,
     pub limit: i64,
+}
+
+/// Milestone list filter — GitHub's `milestone` issue-list param accepts a
+/// milestone number, `*` (any milestone), or `none` (no milestone).
+#[derive(Debug, Clone, Default)]
+pub enum MilestoneListFilter<'a> {
+    /// No milestone filtering.
+    #[default]
+    Any,
+    /// `milestone_id IS NULL` — issues with no milestone.
+    Unset,
+    /// `milestone_id IS NOT NULL` — issues in any milestone.
+    Has,
+    /// `milestone_id = <id>`.
+    Id(&'a str),
 }
 
 fn normalize_list_paging(offset: i64, limit: i64) -> (i64, i64) {
@@ -459,11 +486,24 @@ pub async fn list_for_repo(
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(like_pattern);
+    let milestone_id = match &filters.milestone {
+        MilestoneListFilter::Id(id) => Some(*id),
+        _ => None,
+    };
+    // Literal-only clause — the `Id` variant binds; `Unset`/`Has`/`Any` never
+    // interpolate user data into the SQL text.
+    let milestone_clause = match &filters.milestone {
+        MilestoneListFilter::Any => "",
+        MilestoneListFilter::Unset => " AND milestone_id IS NULL",
+        MilestoneListFilter::Has => " AND milestone_id IS NOT NULL",
+        MilestoneListFilter::Id(_) => " AND milestone_id = ",
+    };
 
     match pool {
         DbPool::Postgres(p) => {
-            let total: i64 = sqlx::query_scalar(
-                r#"SELECT COUNT(*)::bigint FROM issues
+            let total: i64 = {
+                let sql = format!(
+                    r#"SELECT COUNT(*)::bigint FROM issues
 WHERE repo_id = $1
   AND ($2::text IS NULL OR state = $2)
   AND ($3::text IS NULL OR author_id = $3)
@@ -471,17 +511,27 @@ WHERE repo_id = $1
         SELECT 1 FROM issue_labels il WHERE il.issue_id = issues.id AND il.label_id = $4))
   AND ($5::text IS NULL OR EXISTS (
         SELECT 1 FROM issue_assignees ia WHERE ia.issue_id = issues.id AND ia.user_id = $5))
-  AND ($6::text IS NULL OR title ILIKE $6 OR body ILIKE $6)"#,
-            )
-            .bind(repo_id)
-            .bind(state)
-            .bind(author_id)
-            .bind(label_id)
-            .bind(assignee_id)
-            .bind(q.as_deref())
-            .fetch_one(p)
-            .await
-            .map_err(|e| format!("count issues failed: {e}"))?;
+  AND ($6::text IS NULL OR title ILIKE $6 OR body ILIKE $6){}"#,
+                    if milestone_id.is_some() {
+                        " AND milestone_id = $7"
+                    } else {
+                        milestone_clause
+                    }
+                );
+                let mut qb = sqlx::query_scalar(sqlx::AssertSqlSafe(&*sql))
+                    .bind(repo_id)
+                    .bind(state)
+                    .bind(author_id)
+                    .bind(label_id)
+                    .bind(assignee_id)
+                    .bind(q.as_deref());
+                if let Some(m) = milestone_id {
+                    qb = qb.bind(m);
+                }
+                qb.fetch_one(p)
+                    .await
+                    .map_err(|e| format!("count issues failed: {e}"))?
+            };
 
             let sql = format!(
                 r#"{ISSUE_SELECT_PG}
@@ -492,17 +542,31 @@ WHERE repo_id = $1
         SELECT 1 FROM issue_labels il WHERE il.issue_id = issues.id AND il.label_id = $4))
   AND ($5::text IS NULL OR EXISTS (
         SELECT 1 FROM issue_assignees ia WHERE ia.issue_id = issues.id AND ia.user_id = $5))
-  AND ($6::text IS NULL OR title ILIKE $6 OR body ILIKE $6)
+  AND ($6::text IS NULL OR title ILIKE $6 OR body ILIKE $6){}
 ORDER BY updated_at DESC
-OFFSET $7 LIMIT $8"#
+{}"#,
+                if milestone_id.is_some() {
+                    " AND milestone_id = $7"
+                } else {
+                    milestone_clause
+                },
+                if milestone_id.is_some() {
+                    "OFFSET $8 LIMIT $9"
+                } else {
+                    "OFFSET $7 LIMIT $8"
+                }
             );
-            let rows = sqlx::query(sqlx::AssertSqlSafe(&*sql))
+            let mut qb = sqlx::query(sqlx::AssertSqlSafe(&*sql))
                 .bind(repo_id)
                 .bind(state)
                 .bind(author_id)
                 .bind(label_id)
                 .bind(assignee_id)
-                .bind(q.as_deref())
+                .bind(q.as_deref());
+            if let Some(m) = milestone_id {
+                qb = qb.bind(m);
+            }
+            let rows = qb
                 .bind(offset)
                 .bind(limit)
                 .fetch_all(p)
@@ -515,8 +579,9 @@ OFFSET $7 LIMIT $8"#
             Ok((out, total))
         }
         DbPool::MySql(p) => {
-            let total: i64 = sqlx::query_scalar(
-                r#"SELECT COUNT(*) FROM issues
+            let total: i64 = {
+                let sql = format!(
+                    r#"SELECT COUNT(*) FROM issues
 WHERE repo_id = ?
   AND (? IS NULL OR state = ?)
   AND (? IS NULL OR author_id = ?)
@@ -524,23 +589,33 @@ WHERE repo_id = ?
         SELECT 1 FROM issue_labels il WHERE il.issue_id = issues.id AND il.label_id = ?))
   AND (? IS NULL OR EXISTS (
         SELECT 1 FROM issue_assignees ia WHERE ia.issue_id = issues.id AND ia.user_id = ?))
-  AND (? IS NULL OR title LIKE ? OR body LIKE ?)"#,
-            )
-            .bind(repo_id)
-            .bind(state)
-            .bind(state)
-            .bind(author_id)
-            .bind(author_id)
-            .bind(label_id)
-            .bind(label_id)
-            .bind(assignee_id)
-            .bind(assignee_id)
-            .bind(q.as_deref())
-            .bind(q.as_deref())
-            .bind(q.as_deref())
-            .fetch_one(p)
-            .await
-            .map_err(|e| format!("count issues failed: {e}"))?;
+  AND (? IS NULL OR title LIKE ? OR body LIKE ?){}"#,
+                    if milestone_id.is_some() {
+                        " AND milestone_id = ?"
+                    } else {
+                        milestone_clause
+                    }
+                );
+                let mut qb = sqlx::query_scalar(sqlx::AssertSqlSafe(&*sql))
+                    .bind(repo_id)
+                    .bind(state)
+                    .bind(state)
+                    .bind(author_id)
+                    .bind(author_id)
+                    .bind(label_id)
+                    .bind(label_id)
+                    .bind(assignee_id)
+                    .bind(assignee_id)
+                    .bind(q.as_deref())
+                    .bind(q.as_deref())
+                    .bind(q.as_deref());
+                if let Some(m) = milestone_id {
+                    qb = qb.bind(m);
+                }
+                qb.fetch_one(p)
+                    .await
+                    .map_err(|e| format!("count issues failed: {e}"))?
+            };
 
             let sql = format!(
                 r#"{ISSUE_SELECT_MYSQL}
@@ -551,11 +626,16 @@ WHERE repo_id = ?
         SELECT 1 FROM issue_labels il WHERE il.issue_id = issues.id AND il.label_id = ?))
   AND (? IS NULL OR EXISTS (
         SELECT 1 FROM issue_assignees ia WHERE ia.issue_id = issues.id AND ia.user_id = ?))
-  AND (? IS NULL OR title LIKE ? OR body LIKE ?)
+  AND (? IS NULL OR title LIKE ? OR body LIKE ?){}
 ORDER BY updated_at DESC
-LIMIT ? OFFSET ?"#
+LIMIT ? OFFSET ?"#,
+                if milestone_id.is_some() {
+                    " AND milestone_id = ?"
+                } else {
+                    milestone_clause
+                }
             );
-            let rows = sqlx::query(sqlx::AssertSqlSafe(&*sql))
+            let mut qb = sqlx::query(sqlx::AssertSqlSafe(&*sql))
                 .bind(repo_id)
                 .bind(state)
                 .bind(state)
@@ -567,7 +647,11 @@ LIMIT ? OFFSET ?"#
                 .bind(assignee_id)
                 .bind(q.as_deref())
                 .bind(q.as_deref())
-                .bind(q.as_deref())
+                .bind(q.as_deref());
+            if let Some(m) = milestone_id {
+                qb = qb.bind(m);
+            }
+            let rows = qb
                 .bind(limit)
                 .bind(offset)
                 .fetch_all(p)
@@ -580,8 +664,9 @@ LIMIT ? OFFSET ?"#
             Ok((out, total))
         }
         DbPool::Sqlite(p) => {
-            let total: i64 = sqlx::query_scalar(
-                r#"SELECT COUNT(*) FROM issues
+            let total: i64 = {
+                let sql = format!(
+                    r#"SELECT COUNT(*) FROM issues
 WHERE repo_id = ?1
   AND (?2 IS NULL OR state = ?2)
   AND (?3 IS NULL OR author_id = ?3)
@@ -589,17 +674,27 @@ WHERE repo_id = ?1
         SELECT 1 FROM issue_labels il WHERE il.issue_id = issues.id AND il.label_id = ?4))
   AND (?5 IS NULL OR EXISTS (
         SELECT 1 FROM issue_assignees ia WHERE ia.issue_id = issues.id AND ia.user_id = ?5))
-  AND (?6 IS NULL OR title LIKE ?6 COLLATE NOCASE OR body LIKE ?6 COLLATE NOCASE)"#,
-            )
-            .bind(repo_id)
-            .bind(state)
-            .bind(author_id)
-            .bind(label_id)
-            .bind(assignee_id)
-            .bind(q.as_deref())
-            .fetch_one(p)
-            .await
-            .map_err(|e| format!("count issues failed: {e}"))?;
+  AND (?6 IS NULL OR title LIKE ?6 COLLATE NOCASE OR body LIKE ?6 COLLATE NOCASE){}"#,
+                    if milestone_id.is_some() {
+                        " AND milestone_id = ?7"
+                    } else {
+                        milestone_clause
+                    }
+                );
+                let mut qb = sqlx::query_scalar(sqlx::AssertSqlSafe(&*sql))
+                    .bind(repo_id)
+                    .bind(state)
+                    .bind(author_id)
+                    .bind(label_id)
+                    .bind(assignee_id)
+                    .bind(q.as_deref());
+                if let Some(m) = milestone_id {
+                    qb = qb.bind(m);
+                }
+                qb.fetch_one(p)
+                    .await
+                    .map_err(|e| format!("count issues failed: {e}"))?
+            };
 
             let sql = format!(
                 r#"{ISSUE_SELECT_SQLITE}
@@ -610,17 +705,28 @@ WHERE repo_id = ?1
         SELECT 1 FROM issue_labels il WHERE il.issue_id = issues.id AND il.label_id = ?4))
   AND (?5 IS NULL OR EXISTS (
         SELECT 1 FROM issue_assignees ia WHERE ia.issue_id = issues.id AND ia.user_id = ?5))
-  AND (?6 IS NULL OR title LIKE ?6 COLLATE NOCASE OR body LIKE ?6 COLLATE NOCASE)
+  AND (?6 IS NULL OR title LIKE ?6 COLLATE NOCASE OR body LIKE ?6 COLLATE NOCASE){}
 ORDER BY updated_at DESC
-LIMIT ?7 OFFSET ?8"#
+LIMIT {} OFFSET {}"#,
+                if milestone_id.is_some() {
+                    " AND milestone_id = ?7"
+                } else {
+                    milestone_clause
+                },
+                if milestone_id.is_some() { "?8" } else { "?7" },
+                if milestone_id.is_some() { "?9" } else { "?8" }
             );
-            let rows = sqlx::query(sqlx::AssertSqlSafe(&*sql))
+            let mut qb = sqlx::query(sqlx::AssertSqlSafe(&*sql))
                 .bind(repo_id)
                 .bind(state)
                 .bind(author_id)
                 .bind(label_id)
                 .bind(assignee_id)
-                .bind(q.as_deref())
+                .bind(q.as_deref());
+            if let Some(m) = milestone_id {
+                qb = qb.bind(m);
+            }
+            let rows = qb
                 .bind(limit)
                 .bind(offset)
                 .fetch_all(p)
