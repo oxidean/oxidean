@@ -1,6 +1,12 @@
 import type {
+  ActionArtifactsListResponse,
+  ActionDeploymentsListResponse,
   ActionJobLogResponse,
+  ActionSecretsListResponse,
   AdminWorkflowTemplatesListResponse,
+  OrgActionsSecretsListResponse,
+  OrgActionsSecretReposResponse,
+  RepoActionsEnvironmentsListResponse,
   WorkflowTemplateGetResponse,
   WorkflowTemplatesListResponse,
 } from "@oxidean/api-client";
@@ -174,4 +180,103 @@ export function actionsRerunRunMutation() {
 
 export function actionsCancelRunMutation() {
   return actionsCancelRunMutationOptions(apiClient);
+}
+
+/** Run-scoped artifact listing (`repo.actions.listArtifacts`). */
+export function actionsArtifactsQuery(owner: string, name: string, runId: string) {
+  return {
+    queryKey: ["repo", "actions", "artifacts", owner, name, runId] as const,
+    queryFn: async (): Promise<ActionArtifactsListResponse> => {
+      const res = await apiClient.repo.actions.listArtifacts({ owner, name, run_id: runId });
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+    enabled: Boolean(runId),
+    refetchInterval: 10_000,
+  };
+}
+
+/** Deployments — run-scoped when `runId` set, repo-level history otherwise. */
+export function actionsDeploymentsQuery(
+  owner: string,
+  name: string,
+  opts: { runId?: string; environment?: string } = {},
+) {
+  return {
+    queryKey: [
+      "repo",
+      "actions",
+      "deployments",
+      owner,
+      name,
+      opts.runId ?? "",
+      opts.environment ?? "",
+    ] as const,
+    queryFn: async (): Promise<ActionDeploymentsListResponse> => {
+      const res = await apiClient.repo.actions.listDeployments({
+        owner,
+        name,
+        run_id: opts.runId || undefined,
+        environment: opts.environment || undefined,
+      });
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+    refetchInterval: 15_000,
+  };
+}
+
+/** `repo.actions.environments.list`. */
+export function actionsEnvironmentsQuery(owner: string, name: string) {
+  return {
+    queryKey: ["repo", "actions", "environments", owner, name] as const,
+    queryFn: async (): Promise<RepoActionsEnvironmentsListResponse> => {
+      const res = await apiClient.repo.actions.environments.list({ owner, name });
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
+/** `repo.actions.environments.secretsList` — metadata only. */
+export function actionsEnvironmentSecretsQuery(owner: string, name: string, env: string) {
+  return {
+    queryKey: ["repo", "actions", "env-secrets", owner, name, env] as const,
+    queryFn: async (): Promise<ActionSecretsListResponse> => {
+      const res = await apiClient.repo.actions.environments.secretsList({
+        owner,
+        name,
+        environment: env,
+      });
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+    enabled: Boolean(env),
+  };
+}
+
+/** `org.actions.secrets.list`. */
+export function orgActionsSecretsQuery(slug: string) {
+  return {
+    queryKey: ["org", "actions", "secrets", slug] as const,
+    queryFn: async (): Promise<OrgActionsSecretsListResponse> => {
+      const res = await apiClient.org.actions.secrets.list({ slug });
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+    enabled: Boolean(slug),
+  };
+}
+
+/** `org.actions.secrets.listRepos` — selected-visibility repo ids. */
+export function orgActionsSecretReposQuery(slug: string, secret: string) {
+  return {
+    queryKey: ["org", "actions", "secret-repos", slug, secret] as const,
+    queryFn: async (): Promise<OrgActionsSecretReposResponse> => {
+      const res = await apiClient.org.actions.secrets.listRepos({ slug, secret_name: secret });
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+    enabled: Boolean(slug && secret),
+  };
 }

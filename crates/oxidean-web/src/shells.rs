@@ -340,6 +340,13 @@ static SHELLS: &[Shell] = &[
         protected: true,
         redirect: None,
     },
+    Shell {
+        pattern: &[P("owner"), L("settings"), L("actions")],
+        file: "_/settings/actions/index.html",
+        title: Some("Actions · {owner} · Oxidean"),
+        protected: true,
+        redirect: None,
+    },
     // ── Repository leaves — static second segments first, then params/splats
     Shell {
         pattern: &[P("owner"), P("repo"), L("actions")],

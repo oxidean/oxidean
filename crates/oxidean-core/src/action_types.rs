@@ -28,6 +28,30 @@ pub struct ActionRunPublic {
     pub updated_at: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub finished_at: Option<String>,
+    /// Re-run counter — 1 for the first attempt (GitHub `run_attempt`).
+    #[serde(default)]
+    pub attempt: i64,
+    /// Why the run is held when `status` is `waiting_approval` — currently
+    /// always `"fork_approval"`; `None` otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waiting_reason: Option<String>,
+    /// The caller may release a fork-approval hold (`approveRun` → Write+).
+    #[serde(default)]
+    pub can_approve: bool,
+}
+
+/// One approve/reject decision recorded against an environment-held job
+/// (`action_deployment_reviews`, 0061).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionDeploymentReviewPublic {
+    /// Username of the reviewer who decided.
+    pub reviewer: String,
+    /// `'approved'` | `'rejected'`.
+    pub state: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub comment: Option<String>,
+    #[serde(default)]
+    pub created_at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
@@ -38,6 +62,31 @@ pub struct ActionJobPublic {
     pub name: String,
     pub status: String,
     pub runs_on: Vec<String>,
+    /// `needs:` upstream job keys (scheduling DAG).
+    #[serde(default)]
+    pub needs: Vec<String>,
+    /// Expanded matrix values for this leg (`{}` for non-matrix jobs).
+    #[serde(default)]
+    pub matrix: serde_json::Value,
+    /// Resolved `environment:` name when the job targets one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment: Option<String>,
+    /// Claim counter — bumped on requeue (GitHub `run_attempt` per leg).
+    #[serde(default)]
+    pub attempt: i64,
+    /// Why a `waiting`/`waiting_approval` job is held:
+    /// `"fork_approval"` | `"environment_review"` | `"environment_wait_timer"`
+    /// | `"needs"`. `None` for queued/in-flight/terminal jobs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waiting_reason: Option<String>,
+    /// The caller may review this job's deployment hold (named required
+    /// reviewer, or Admin overriding reviewer membership — and not the run's
+    /// triggering actor when the env sets `prevent_self_review`).
+    #[serde(default)]
+    pub can_review: bool,
+    /// Deployment-review history for this job (newest last).
+    #[serde(default)]
+    pub reviews: Vec<ActionDeploymentReviewPublic>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub started_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -144,12 +193,36 @@ pub struct ActionWorkflowsListRequest {
     pub git_ref: Option<String>,
 }
 
+/// One declared `on.workflow_dispatch.inputs.<name>` entry — drives the
+/// dispatch form's typed controls.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionDispatchInputPublic {
+    pub name: String,
+    /// `string` | `choice` | `boolean` | `number` | `environment`.
+    #[serde(rename = "type")]
+    pub input_type: String,
+    #[serde(default)]
+    pub required: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Declared default rendered for the control's initial value. `Value`
+    /// because `boolean`/`number` defaults are non-string.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default: Option<serde_json::Value>,
+    /// `choice` options; empty for other types.
+    #[serde(default)]
+    pub options: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ActionWorkflowPublic {
     /// Repo-relative path, e.g. `.github/workflows/ci.yml`.
     pub path: String,
     pub name: String,
     pub supports_dispatch: bool,
+    /// Declared `workflow_dispatch` inputs; empty when dispatch is off.
+    #[serde(default)]
+    pub inputs: Vec<ActionDispatchInputPublic>,
 }
 
 /// A workflow file that failed discovery validation and was skipped.
@@ -600,8 +673,18 @@ pub struct RepoActionsDefaultPermissionsResponse {
 pub struct ActionEnvironmentProtection {
     #[serde(default)]
     pub wait_timer_minutes: i64,
+    /// Reviewer user ids — write accepts ids or usernames (normalized to
+    /// ids); read additionally resolves `required_reviewer_usernames`.
     #[serde(default)]
     pub required_reviewers: Vec<String>,
+    /// Resolved usernames for `required_reviewers` (read-side only — ignored
+    /// on write; the UI displays these).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub required_reviewer_usernames: Vec<String>,
+    /// GitHub parity: when true the run's triggering actor may not review the
+    /// deployment even when named in `required_reviewers` (or an Admin).
+    #[serde(default)]
+    pub prevent_self_review: bool,
     #[serde(default)]
     pub deployment_branches: Vec<String>,
 }
@@ -676,12 +759,20 @@ pub struct ActionDeploymentPublic {
     pub created_at: String,
 }
 
-/// `repo.actions.listDeployments` — deployment records for a run.
+/// `repo.actions.listDeployments` — deployment records for a run, or for the
+/// repo (optionally narrowed to one environment) when `run_id` is absent.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ActionDeploymentsListRequest {
     pub owner: String,
     pub name: String,
-    pub run_id: String,
+    #[serde(default)]
+    pub run_id: Option<String>,
+    /// Narrow a repo-level listing to one environment (ignored with `run_id`).
+    #[serde(default)]
+    pub environment: Option<String>,
+    /// Repo-level listing cap (default 100, max 500).
+    #[serde(default)]
+    pub limit: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
@@ -702,6 +793,70 @@ pub struct ActionJobApproveRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ActionJobApproveResponse {
     pub job: ActionJobPublic,
+}
+
+/// `repo.actions.reviewDeployment` — approve or reject an environment-held
+/// job, mirroring GitHub's `pending_deployments` review. Write+ plus reviewer
+/// membership when the environment names `required_reviewers` (Admin
+/// overrides); `prevent_self_review` blocks the run's triggering actor.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionDeploymentReviewRequest {
+    pub owner: String,
+    pub name: String,
+    pub job_id: String,
+    /// `'approved'` | `'rejected'` — rejection fails the job and skips its
+    /// dependents (GitHub `state`).
+    pub state: String,
+    #[serde(default)]
+    pub comment: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionDeploymentReviewResponse {
+    pub job: ActionJobPublic,
+}
+
+/// Public artifact metadata (`action_artifacts`) — the payload streams from
+/// the download route, never through RPC.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionArtifactPublic {
+    pub id: String,
+    pub run_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub job_id: Option<String>,
+    pub name: String,
+    pub size_bytes: i64,
+    pub digest_sha256: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<String>,
+    #[serde(default)]
+    pub created_at: String,
+}
+
+/// `repo.actions.listArtifacts` — Read+; every artifact recorded for a run.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionArtifactsListRequest {
+    pub owner: String,
+    pub name: String,
+    pub run_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionArtifactsListResponse {
+    pub artifacts: Vec<ActionArtifactPublic>,
+}
+
+/// `repo.actions.deleteArtifact` — Write+; removes the record and payload.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionArtifactDeleteRequest {
+    pub owner: String,
+    pub name: String,
+    pub artifact_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionArtifactDeleteResponse {
+    pub deleted: bool,
 }
 
 // --- Phase 8: org + environment secrets ---

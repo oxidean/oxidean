@@ -89,6 +89,7 @@ pub struct RpcCtx {
     pub release_assets_dir: PathBuf,
     pub template_packs_dir: PathBuf,
     pub actions_log_dir: PathBuf,
+    pub actions_artifacts_dir: PathBuf,
     pub git: Arc<dyn GitBackend>,
     pub env_name: String,
     pub session: Option<ResolvedSession>,
@@ -363,6 +364,9 @@ pub const PROCEDURES: &[&str] = &[
     "repo.actions.environments.secretsDelete",
     "repo.actions.listDeployments",
     "repo.actions.approveJob",
+    "repo.actions.reviewDeployment",
+    "repo.actions.listArtifacts",
+    "repo.actions.deleteArtifact",
     "repo.actions.workflowTemplates.list",
     "repo.actions.workflowTemplates.get",
     "repo.actions.workflows.create",
@@ -1520,6 +1524,24 @@ async fn dispatch_inner(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },
+        "repo.actions.reviewDeployment" => {
+            match crate::actions::rpc::review_deployment(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
+        "repo.actions.listArtifacts" => {
+            match crate::actions::rpc::list_artifacts(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
+        "repo.actions.deleteArtifact" => {
+            match crate::actions::rpc::delete_artifact(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
         "repo.actions.workflowTemplates.list" => {
             match crate::actions::templates::list_templates(ctx, req.input).await {
                 Ok(v) => RpcResponse::ok(v),

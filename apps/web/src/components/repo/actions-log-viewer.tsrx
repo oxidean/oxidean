@@ -105,6 +105,8 @@ export function ActionsLogViewer(props: {
   jobStatus: string;
   /** Filename base for the raw download. */
   downloadName?: string;
+  /** Server-side download URL for the complete stored log (gzip-safe). */
+  downloadHref?: string;
 }) @{
   const [query, setQuery] = useState("");
   const [rawMode, setRawMode] = useState(false);
@@ -130,6 +132,10 @@ export function ActionsLogViewer(props: {
   }
 
   function downloadLog() {
+    if (props.downloadHref) {
+      window.location.href = props.downloadHref;
+      return;
+    }
     const url = URL.createObjectURL(new Blob([props.log], { type: "text/plain;charset=utf-8" }));
     const a = document.createElement("a");
     a.href = url;

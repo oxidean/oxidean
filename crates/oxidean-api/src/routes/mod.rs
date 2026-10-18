@@ -1,5 +1,6 @@
 //! Thin HTTP routes mounted alongside RPC (auth callbacks, avatar, feeds, repo raw, Smart HTTP, LFS).
 
+pub mod action_downloads;
 pub mod auth_callbacks;
 pub mod avatar;
 pub mod cli_dist;

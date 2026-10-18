@@ -1,7 +1,7 @@
 import { cn } from "@/lib/utils";
 import { AppLink } from "@/components/ui/app-link";
 
-export type OrgSettingsNavActive = "general" | "members" | "labels";
+export type OrgSettingsNavActive = "general" | "members" | "labels" | "actions";
 
 type OrgSettingsNavProps = {
   slug: string;
@@ -17,12 +17,13 @@ function linkClass(isActive: boolean): string {
   );
 }
 
-/** Org settings sidebar: General | Members | Labels. */
+/** Org settings sidebar: General | Members | Labels | Actions. */
 export function OrgSettingsNav({ slug, active }: OrgSettingsNavProps) @{
   const links: { id: OrgSettingsNavActive; href: string; label: string }[] = [
     { id: "general", href: `/${slug}/settings`, label: "General" },
     { id: "members", href: `/${slug}/settings/members`, label: "Members" },
     { id: "labels", href: `/${slug}/settings/labels`, label: "Labels" },
+    { id: "actions", href: `/${slug}/settings/actions`, label: "Actions" },
   ];
 
   <nav className="flex flex-col gap-1" aria-label="Organization settings">

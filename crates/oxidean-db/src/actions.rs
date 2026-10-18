@@ -3230,6 +3230,64 @@ pub async fn list_action_artifacts_for_run(
     }
 }
 
+/// Artifact by primary key — the user-facing download/delete paths address
+/// artifacts by id (names are only unique within a run).
+pub async fn find_action_artifact_by_id(
+    pool: &DbPool,
+    id: &str,
+) -> Result<Option<ActionArtifactRow>, String> {
+    match pool {
+        DbPool::Sqlite(p) => sqlx::query(sqlx::AssertSqlSafe(format!(
+            "SELECT {ARTIFACT_COLS} FROM action_artifacts WHERE id = ?"
+        )))
+        .bind(id)
+        .fetch_optional(p)
+        .await
+        .map(|r| r.map(|r| map_artifact_row!(r)))
+        .map_err(|e| e.to_string()),
+        DbPool::Postgres(p) => sqlx::query(sqlx::AssertSqlSafe(format!(
+            "SELECT {ARTIFACT_COLS} FROM action_artifacts WHERE id = $1"
+        )))
+        .bind(id)
+        .fetch_optional(p)
+        .await
+        .map(|r| r.map(|r| map_artifact_row!(r)))
+        .map_err(|e| e.to_string()),
+        DbPool::MySql(p) => sqlx::query(sqlx::AssertSqlSafe(format!(
+            "SELECT {ARTIFACT_COLS_MYSQL} FROM action_artifacts WHERE id = ?"
+        )))
+        .bind(id)
+        .fetch_optional(p)
+        .await
+        .map(|r| r.map(|r| map_artifact_row!(r)))
+        .map_err(|e| e.to_string()),
+    }
+}
+
+/// Delete an artifact record by id (row only — the caller owns the payload
+/// file under the artifacts dir). Returns whether a row existed.
+pub async fn delete_action_artifact(pool: &DbPool, id: &str) -> Result<bool, String> {
+    let affected = match pool {
+        DbPool::Sqlite(p) => sqlx::query("DELETE FROM action_artifacts WHERE id = ?")
+            .bind(id)
+            .execute(p)
+            .await
+            .map(|r| r.rows_affected()),
+        DbPool::Postgres(p) => sqlx::query("DELETE FROM action_artifacts WHERE id = $1")
+            .bind(id)
+            .execute(p)
+            .await
+            .map(|r| r.rows_affected()),
+        DbPool::MySql(p) => sqlx::query("DELETE FROM action_artifacts WHERE id = ?")
+            .bind(id)
+            .execute(p)
+            .await
+            .map(|r| r.rows_affected()),
+    }
+    .map_err(|e| e.to_string())?;
+    Ok(affected > 0)
+}
+
 // --- `runner.v1` task claims + tasks_version counter (0055) ---------------
 
 /// Bump the global `tasks` watermark — every enqueue/requeue of claimable
@@ -3819,6 +3877,228 @@ pub async fn list_deployments_for_run(
             Ok(rows.into_iter().map(|r| map!(r)).collect())
         }
     }
+}
+
+/// Repo-scoped deployment listing (newest first) — backs the repo
+/// Environments view. `environment` narrows to one environment.
+pub async fn list_deployments_for_repo(
+    pool: &DbPool,
+    repository_id: &str,
+    environment: Option<&str>,
+    limit: i64,
+) -> Result<Vec<ActionDeploymentRow>, String> {
+    macro_rules! map {
+        ($r:expr) => {{
+            let r = $r;
+            ActionDeploymentRow {
+                id: r.get("id"),
+                repository_id: r.get("repository_id"),
+                environment: r.get("environment"),
+                run_id: r.get("run_id"),
+                job_id: r.get("job_id"),
+                sha: r.get("sha"),
+                git_ref: r.get("ref"),
+                url: r.try_get("url").unwrap_or(None),
+                job_status: r.try_get("job_status").unwrap_or_else(|_| "queued".into()),
+                created_at: r.try_get("created_at").unwrap_or_default(),
+            }
+        }};
+    }
+    let limit = limit.clamp(1, 500);
+    match pool {
+        DbPool::Sqlite(p) => {
+            let rows = sqlx::query(
+                "SELECT d.id, d.repository_id, d.environment, d.run_id, d.job_id, d.sha, d.ref, d.url,
+                        j.status AS job_status, d.created_at
+                 FROM action_deployments d JOIN action_jobs j ON j.id = d.job_id
+                 WHERE d.repository_id = ? AND (? IS NULL OR d.environment = ?)
+                 ORDER BY d.created_at DESC, d.id DESC LIMIT ?",
+            ).bind(repository_id).bind(environment).bind(environment).bind(limit)
+            .fetch_all(p).await.map_err(|e| e.to_string())?;
+            Ok(rows.into_iter().map(|r| map!(r)).collect())
+        }
+        DbPool::Postgres(p) => {
+            let rows = sqlx::query(
+                "SELECT d.id, d.repository_id, d.environment, d.run_id, d.job_id, d.sha, d.ref, d.url,
+                        j.status AS job_status, d.created_at::text AS created_at
+                 FROM action_deployments d JOIN action_jobs j ON j.id = d.job_id
+                 WHERE d.repository_id = $1 AND ($2::text IS NULL OR d.environment = $2)
+                 ORDER BY d.created_at DESC, d.id DESC LIMIT $3",
+            ).bind(repository_id).bind(environment).bind(limit)
+            .fetch_all(p).await.map_err(|e| e.to_string())?;
+            Ok(rows.into_iter().map(|r| map!(r)).collect())
+        }
+        DbPool::MySql(p) => {
+            let rows = sqlx::query(
+                "SELECT d.id, d.repository_id, d.environment, d.run_id, d.job_id, d.sha, d.ref, d.url,
+                        j.status AS job_status, CAST(d.created_at AS CHAR) AS created_at
+                 FROM action_deployments d JOIN action_jobs j ON j.id = d.job_id
+                 WHERE d.repository_id = ? AND (? IS NULL OR d.environment = ?)
+                 ORDER BY d.created_at DESC, d.id DESC LIMIT ?",
+            ).bind(repository_id).bind(environment).bind(environment).bind(limit)
+            .fetch_all(p).await.map_err(|e| e.to_string())?;
+            Ok(rows.into_iter().map(|r| map!(r)).collect())
+        }
+    }
+}
+
+// ---- deployment reviews ---------------------------------------------------
+
+/// `action_deployment_reviews` row (0061) — one approve/reject decision on an
+/// environment-held job. `reviewer_username` is denormalized for display.
+#[derive(Debug, Clone)]
+pub struct ActionDeploymentReviewRow {
+    pub id: String,
+    pub repository_id: String,
+    pub run_id: String,
+    pub job_id: String,
+    pub environment: String,
+    pub reviewer_id: String,
+    pub reviewer_username: String,
+    /// `'approved'` | `'rejected'`.
+    pub state: String,
+    pub comment: Option<String>,
+    pub created_at: String,
+}
+
+pub async fn insert_deployment_review(
+    pool: &DbPool,
+    r: &ActionDeploymentReviewRow,
+) -> Result<(), String> {
+    macro_rules! ins {
+        ($q:expr, $p:expr) => {{
+            sqlx::query($q)
+                .bind(&r.id)
+                .bind(&r.repository_id)
+                .bind(&r.run_id)
+                .bind(&r.job_id)
+                .bind(&r.environment)
+                .bind(&r.reviewer_id)
+                .bind(&r.reviewer_username)
+                .bind(&r.state)
+                .bind(&r.comment)
+                .execute($p)
+                .await
+                .map_err(|e| e.to_string())?;
+        }};
+    }
+    match pool {
+        DbPool::Sqlite(p) => ins!(
+            "INSERT INTO action_deployment_reviews
+             (id, repository_id, run_id, job_id, environment, reviewer_id, reviewer_username, state, comment)
+             VALUES (?,?,?,?,?,?,?,?,?)",
+            p
+        ),
+        DbPool::Postgres(p) => ins!(
+            "INSERT INTO action_deployment_reviews
+             (id, repository_id, run_id, job_id, environment, reviewer_id, reviewer_username, state, comment)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+            p
+        ),
+        DbPool::MySql(p) => ins!(
+            "INSERT INTO action_deployment_reviews
+             (id, repository_id, run_id, job_id, environment, reviewer_id, reviewer_username, state, comment)
+             VALUES (?,?,?,?,?,?,?,?,?)",
+            p
+        ),
+    }
+    Ok(())
+}
+
+/// Every review recorded against a run's jobs — feeds `getRun` serialization.
+pub async fn list_deployment_reviews_for_run(
+    pool: &DbPool,
+    run_id: &str,
+) -> Result<Vec<ActionDeploymentReviewRow>, String> {
+    macro_rules! map {
+        ($r:expr) => {{
+            let r = $r;
+            ActionDeploymentReviewRow {
+                id: r.get("id"),
+                repository_id: r.get("repository_id"),
+                run_id: r.get("run_id"),
+                job_id: r.get("job_id"),
+                environment: r.get("environment"),
+                reviewer_id: r.get("reviewer_id"),
+                reviewer_username: r.get("reviewer_username"),
+                state: r.get("state"),
+                comment: r.try_get("comment").unwrap_or(None),
+                created_at: r.try_get("created_at").unwrap_or_default(),
+            }
+        }};
+    }
+    match pool {
+        DbPool::Sqlite(p) => {
+            let rows = sqlx::query(
+                "SELECT id, repository_id, run_id, job_id, environment, reviewer_id,
+                        reviewer_username, state, comment, created_at
+                 FROM action_deployment_reviews WHERE run_id = ? ORDER BY created_at",
+            )
+            .bind(run_id)
+            .fetch_all(p)
+            .await
+            .map_err(|e| e.to_string())?;
+            Ok(rows.into_iter().map(|r| map!(r)).collect())
+        }
+        DbPool::Postgres(p) => {
+            let rows = sqlx::query(
+                "SELECT id, repository_id, run_id, job_id, environment, reviewer_id,
+                        reviewer_username, state, comment, created_at::text AS created_at
+                 FROM action_deployment_reviews WHERE run_id = $1 ORDER BY created_at",
+            )
+            .bind(run_id)
+            .fetch_all(p)
+            .await
+            .map_err(|e| e.to_string())?;
+            Ok(rows.into_iter().map(|r| map!(r)).collect())
+        }
+        DbPool::MySql(p) => {
+            let rows = sqlx::query(
+                "SELECT id, repository_id, run_id, job_id, environment, reviewer_id,
+                        reviewer_username, state, comment, CAST(created_at AS CHAR) AS created_at
+                 FROM action_deployment_reviews WHERE run_id = ? ORDER BY created_at",
+            )
+            .bind(run_id)
+            .fetch_all(p)
+            .await
+            .map_err(|e| e.to_string())?;
+            Ok(rows.into_iter().map(|r| map!(r)).collect())
+        }
+    }
+}
+
+/// Reject a held job — terminal `failure`, hold cleared. Only fires when the
+/// row is still `waiting` + held (the CAS keeps a raced approve/reject pair
+/// from both landing).
+pub async fn reject_action_job(pool: &DbPool, job_id: &str) -> Result<bool, String> {
+    let affected = match pool {
+        DbPool::Sqlite(p) => sqlx::query(
+            "UPDATE action_jobs SET status = 'failure', approval_hold = 0, finished_at = strftime('%Y-%m-%d %H:%M:%S','now'), updated_at = strftime('%Y-%m-%d %H:%M:%S','now')
+             WHERE id = ? AND approval_hold = 1 AND status = 'waiting'",
+        )
+        .bind(job_id)
+        .execute(p)
+        .await
+        .map(|r| r.rows_affected()),
+        DbPool::Postgres(p) => sqlx::query(
+            "UPDATE action_jobs SET status = 'failure', approval_hold = false, finished_at = now(), updated_at = now()
+             WHERE id = $1 AND approval_hold AND status = 'waiting'",
+        )
+        .bind(job_id)
+        .execute(p)
+        .await
+        .map(|r| r.rows_affected()),
+        DbPool::MySql(p) => sqlx::query(
+            "UPDATE action_jobs SET status = 'failure', approval_hold = 0, finished_at = NOW(), updated_at = NOW()
+            WHERE id = ? AND approval_hold = 1 AND status = 'waiting'",
+        )
+        .bind(job_id)
+        .execute(p)
+        .await
+        .map(|r| r.rows_affected()),
+    }
+    .map_err(|e| e.to_string())?;
+    Ok(affected > 0)
 }
 
 // ---- deployment wait-timer ------------------------------------------------

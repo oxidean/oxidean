@@ -259,6 +259,8 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         | "repo.actions.getRun"
         | "repo.actions.getJobLog"
         | "repo.actions.listWorkflows"
+        | "repo.actions.listArtifacts"
+        | "repo.actions.listCaches"
         | "repo.actions.workflowTemplates.list"
         | "repo.actions.workflowTemplates.get" => ActionsRead,
 
@@ -266,7 +268,10 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         | "repo.actions.rerunRun"
         | "repo.actions.cancelRun"
         | "repo.actions.approveRun"
-        | "repo.actions.approveJob" => ActionsWrite,
+        | "repo.actions.approveJob"
+        | "repo.actions.reviewDeployment"
+        | "repo.actions.deleteArtifact"
+        | "repo.actions.deleteCache" => ActionsWrite,
 
         "repo.actions.environments.list" | "repo.actions.environments.get" => EnvironmentsRead,
         "repo.actions.environments.secretsList" => SecretsRead,

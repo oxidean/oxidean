@@ -25,8 +25,8 @@ use crate::email::{self, EmailSender};
 use crate::pat::bearer::{self, BearerRejection};
 use crate::pat::rate_limit::FailedAuthLimiter;
 use crate::routes::{
-    auth_callbacks, avatar, cli_dist, feeds, git_lfs, git_smart_http, release_assets, repo_raw,
-    template_packs,
+    action_downloads, auth_callbacks, avatar, cli_dist, feeds, git_lfs, git_smart_http,
+    release_assets, repo_raw, template_packs,
 };
 use crate::rpc::{self, CookieChange, RpcCtx, VERSION_HEADER};
 use crate::user::rate_limit::LookupLimiter;
@@ -348,6 +348,16 @@ pub fn router_with_state(state: AppState, cors: CorsLayer) -> Router {
             "/api/releases/assets/{asset_id}",
             get(release_assets::download_asset),
         )
+        // Browser-facing Actions downloads — session/PAT-authed, unlike the
+        // runner-token /api/actions/* surface.
+        .route(
+            "/api/repos/{owner}/{repo}/actions/artifacts/{artifact_id}",
+            get(action_downloads::download_artifact),
+        )
+        .route(
+            "/api/repos/{owner}/{repo}/actions/jobs/{job_id}/logs",
+            get(action_downloads::download_job_log),
+        )
         .route(
             "/api/admin/templates",
             post(template_packs::upload_pack).layer(DefaultBodyLimit::max(
@@ -539,6 +549,7 @@ pub(crate) fn build_rpc_ctx_with_session(
         release_assets_dir: state.release_assets_dir.clone(),
         template_packs_dir: state.template_packs_dir.clone(),
         actions_log_dir: state.actions_log_dir.clone(),
+        actions_artifacts_dir: state.actions_artifacts_dir.clone(),
         git: state.git.clone(),
         env_name: state.env_name.clone(),
         session,
@@ -651,6 +662,7 @@ pub(crate) async fn build_rpc_ctx(
         release_assets_dir: state.release_assets_dir.clone(),
         template_packs_dir: state.template_packs_dir.clone(),
         actions_log_dir: state.actions_log_dir.clone(),
+        actions_artifacts_dir: state.actions_artifacts_dir.clone(),
         git: state.git.clone(),
         env_name: state.env_name.clone(),
         session,

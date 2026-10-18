@@ -5,7 +5,10 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 use oxidean_core::{
-    ActionDeploymentPublic, ActionDeploymentsListRequest, ActionDeploymentsListResponse,
+    ActionArtifactDeleteRequest, ActionArtifactDeleteResponse, ActionArtifactPublic,
+    ActionArtifactsListRequest, ActionArtifactsListResponse, ActionDeploymentPublic,
+    ActionDeploymentReviewPublic, ActionDeploymentReviewRequest, ActionDeploymentReviewResponse,
+    ActionDeploymentsListRequest, ActionDeploymentsListResponse, ActionDispatchInputPublic,
     ActionDispatchRequest, ActionDispatchResponse, ActionEnabledRequest, ActionEnabledResponse,
     ActionEnvironmentProtection, ActionEnvironmentPublic, ActionJobApproveRequest,
     ActionJobApproveResponse, ActionJobLogRequest, ActionJobLogResponse, ActionJobPublic,
@@ -64,7 +67,11 @@ fn public_status(status: &str, approval_hold: bool) -> String {
     }
 }
 
-fn run_public(r: &ActionRunRow, actors: &HashMap<String, RunActor>) -> ActionRunPublic {
+fn run_public(
+    r: &ActionRunRow,
+    actors: &HashMap<String, RunActor>,
+    capability: Option<Capability>,
+) -> ActionRunPublic {
     let actor = r.triggered_by.as_ref().and_then(|id| actors.get(id));
     ActionRunPublic {
         id: r.id.clone(),
@@ -82,6 +89,9 @@ fn run_public(r: &ActionRunRow, actors: &HashMap<String, RunActor>) -> ActionRun
         created_at: r.created_at.clone(),
         updated_at: r.updated_at.clone(),
         finished_at: r.finished_at.clone(),
+        attempt: r.attempt,
+        waiting_reason: r.approval_hold.then(|| "fork_approval".to_string()),
+        can_approve: r.approval_hold && meets(capability, Capability::Write),
     }
 }
 
@@ -120,8 +130,74 @@ async fn actors_for_runs(
     Ok(out)
 }
 
-fn job_public(j: &ActionJobRow) -> ActionJobPublic {
+/// Caller-scoped data for job serialization — environment reviewer rules,
+/// the caller's identity/capability (for `can_review`), the run's triggering
+/// actor (for `prevent_self_review`), and recorded review history.
+struct JobViewCtx<'a> {
+    capability: Option<Capability>,
+    caller_id: Option<&'a str>,
+    triggered_by: Option<&'a str>,
+    /// env name → required reviewer user ids (missing/empty = no review gate).
+    env_reviewers: HashMap<String, Vec<String>>,
+    env_prevent_self_review: HashMap<String, bool>,
+    /// job id → recorded deployment reviews, oldest first.
+    reviews: HashMap<String, Vec<ActionDeploymentReviewPublic>>,
+}
+
+impl JobViewCtx<'_> {
+    /// Required reviewer user ids for a job's environment (empty when the job
+    /// has no env or the env names no reviewers).
+    fn reviewers_for(&self, j: &ActionJobRow) -> &[String] {
+        j.environment_name
+            .as_deref()
+            .and_then(|e| self.env_reviewers.get(e))
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
+
+    /// GitHub's `prevent_self_review`: the run's triggering actor may not
+    /// review their own deployment when the environment sets the flag.
+    fn self_review_blocked(&self, j: &ActionJobRow) -> bool {
+        let blocked = j
+            .environment_name
+            .as_deref()
+            .and_then(|e| self.env_prevent_self_review.get(e))
+            .copied()
+            .unwrap_or(false);
+        blocked && self.caller_id.is_some() && self.caller_id == self.triggered_by
+    }
+}
+
+fn waiting_reason(j: &ActionJobRow, view: &JobViewCtx<'_>) -> Option<String> {
+    if j.approval_hold {
+        return Some(
+            if view.reviewers_for(j).is_empty() {
+                "fork_approval"
+            } else {
+                "environment_review"
+            }
+            .to_string(),
+        );
+    }
+    if j.status != "waiting" {
+        return None;
+    }
+    if j.deployment_not_before.is_some() {
+        return Some("environment_wait_timer".into());
+    }
+    Some("needs".into())
+}
+
+fn job_public(j: &ActionJobRow, view: &JobViewCtx<'_>) -> ActionJobPublic {
     let runs_on: Vec<String> = serde_json::from_str(&j.runs_on_json).unwrap_or_default();
+    let reviewers = view.reviewers_for(j);
+    let is_reviewer = view
+        .caller_id
+        .is_some_and(|id| reviewers.iter().any(|r| r == id));
+    let can_review = j.approval_hold
+        && !reviewers.is_empty()
+        && (is_reviewer || meets(view.capability, Capability::Admin))
+        && !view.self_review_blocked(j);
     ActionJobPublic {
         id: j.id.clone(),
         run_id: j.run_id.clone(),
@@ -129,10 +205,92 @@ fn job_public(j: &ActionJobRow) -> ActionJobPublic {
         name: j.name.clone(),
         status: public_status(&j.status, j.approval_hold),
         runs_on,
+        needs: serde_json::from_str(&j.needs_json).unwrap_or_default(),
+        matrix: serde_json::from_str(&j.matrix_json).unwrap_or(serde_json::json!({})),
+        environment: j.environment_name.clone(),
+        attempt: j.attempt,
+        waiting_reason: waiting_reason(j, view),
+        can_review,
+        reviews: view.reviews.get(&j.id).cloned().unwrap_or_default(),
         started_at: j.started_at.clone(),
         finished_at: j.finished_at.clone(),
         summary: j.summary_md.clone(),
     }
+}
+
+/// Parse an environment row's protection JSON into the reviewer list and
+/// `prevent_self_review` flag the view context needs.
+fn env_protection_parts(row: &oxidean_db::ActionEnvironmentRow) -> (Vec<String>, bool) {
+    let raw: serde_json::Value =
+        serde_json::from_str(&row.protection_json).unwrap_or_else(|_| serde_json::json!({}));
+    let reviewers = raw
+        .get("required_reviewers")
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|x| x.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    let prevent = raw
+        .get("prevent_self_review")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    (reviewers, prevent)
+}
+
+/// Build the caller-scoped view for a run's jobs — one env lookup per unique
+/// environment name plus the run's recorded deployment reviews.
+async fn job_view_ctx<'a>(
+    ctx: &'a RpcCtx,
+    repo_id: &str,
+    run: &'a ActionRunRow,
+    jobs: &[ActionJobRow],
+    capability: Option<Capability>,
+) -> Result<JobViewCtx<'a>, AppError> {
+    let mut view = JobViewCtx {
+        capability,
+        caller_id: ctx.session.as_ref().map(|s| s.user_id.as_str()),
+        triggered_by: run.triggered_by.as_deref(),
+        env_reviewers: HashMap::new(),
+        env_prevent_self_review: HashMap::new(),
+        reviews: HashMap::new(),
+    };
+    let mut envs: Vec<String> = jobs
+        .iter()
+        .filter_map(|j| j.environment_name.clone())
+        .collect();
+    envs.sort();
+    envs.dedup();
+    for env in envs {
+        if let Some(row) = ctx
+            .db
+            .find_action_environment(repo_id, &env)
+            .await
+            .map_err(db_err)?
+        {
+            let (reviewers, prevent) = env_protection_parts(&row);
+            view.env_reviewers.insert(env.clone(), reviewers);
+            view.env_prevent_self_review.insert(env, prevent);
+        }
+    }
+    for r in ctx
+        .db
+        .list_deployment_reviews_for_run(&run.id)
+        .await
+        .map_err(db_err)?
+    {
+        view.reviews
+            .entry(r.job_id.clone())
+            .or_default()
+            .push(ActionDeploymentReviewPublic {
+                reviewer: r.reviewer_username,
+                state: r.state,
+                comment: r.comment,
+                created_at: r.created_at,
+            });
+    }
+    Ok(view)
 }
 
 fn runner_public(r: &ActionRunnerRow) -> ActionRunnerPublic {
@@ -215,7 +373,10 @@ pub async fn list_runs(
     .map_err(db_err)?;
     let actors = actors_for_runs(ctx, &rows).await?;
     Ok(ActionRunsListResponse {
-        runs: rows.iter().map(|r| run_public(r, &actors)).collect(),
+        runs: rows
+            .iter()
+            .map(|r| run_public(r, &actors, accessible.capability))
+            .collect(),
         total_count,
         page,
         per_page,
@@ -252,9 +413,10 @@ pub async fn get_run(
         .await
         .map_err(db_err)?;
     let actors = actors_for_runs(ctx, std::slice::from_ref(&run)).await?;
+    let view = job_view_ctx(ctx, &accessible.row.id, &run, &jobs, accessible.capability).await?;
     Ok(ActionRunGetResponse {
-        run: run_public(&run, &actors),
-        jobs: jobs.iter().map(job_public).collect(),
+        run: run_public(&run, &actors, accessible.capability),
+        jobs: jobs.iter().map(|j| job_public(j, &view)).collect(),
     })
 }
 
@@ -647,6 +809,11 @@ fn environment_public(r: &oxidean_db::ActionEnvironmentRow) -> ActionEnvironment
                     .collect()
             })
             .unwrap_or_default(),
+        required_reviewer_usernames: Vec::new(),
+        prevent_self_review: raw
+            .get("prevent_self_review")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
         deployment_branches: raw
             .get("deployment_branches")
             .and_then(|v| v.as_array())
@@ -685,9 +852,40 @@ pub async fn list_environments(
         .list_action_environments(&accessible.row.id)
         .await
         .map_err(db_err)?;
-    Ok(RepoActionsEnvironmentsListResponse {
-        environments: rows.iter().map(environment_public).collect(),
-    })
+    let mut environments: Vec<ActionEnvironmentPublic> =
+        rows.iter().map(environment_public).collect();
+    resolve_reviewer_usernames(ctx, &mut environments).await?;
+    Ok(RepoActionsEnvironmentsListResponse { environments })
+}
+
+/// Resolve stored reviewer ids to display usernames on a set of public
+/// environment records (one batch user lookup).
+async fn resolve_reviewer_usernames(
+    ctx: &RpcCtx,
+    envs: &mut [ActionEnvironmentPublic],
+) -> Result<(), AppError> {
+    let mut ids: Vec<String> = envs
+        .iter()
+        .flat_map(|e| e.protection.required_reviewers.iter().cloned())
+        .collect();
+    ids.sort();
+    ids.dedup();
+    if ids.is_empty() {
+        return Ok(());
+    }
+    let mut names: HashMap<String, String> = HashMap::new();
+    for u in ctx.db.find_users_by_ids(&ids).await.map_err(db_err)? {
+        names.insert(u.id, u.username);
+    }
+    for e in envs.iter_mut() {
+        e.protection.required_reviewer_usernames = e
+            .protection
+            .required_reviewers
+            .iter()
+            .filter_map(|id| names.get(id).cloned())
+            .collect();
+    }
+    Ok(())
 }
 
 /// `repo.actions.environments.get` — Read+.
@@ -711,9 +909,9 @@ pub async fn get_environment(
         .await
         .map_err(db_err)?
         .ok_or_else(not_found)?;
-    Ok(RepoActionsEnvironmentResponse {
-        environment: environment_public(&row),
-    })
+    let mut environment = environment_public(&row);
+    resolve_reviewer_usernames(ctx, std::slice::from_mut(&mut environment)).await?;
+    Ok(RepoActionsEnvironmentResponse { environment })
 }
 
 /// `repo.actions.environments.upsert` — Admin; create or replace an
@@ -743,16 +941,24 @@ pub async fn upsert_environment(
         ));
     }
     let accessible = resolve_repo_for_admin(ctx, &req.owner, &req.name).await?;
-    // Reviewers are user ids — drop unknown ids rather than storing a rule
-    // that can never be satisfied.
+    // Reviewers resolve by user id or username — the UI sends usernames,
+    // integrations may carry ids; both normalize to ids before storage so the
+    // stored rule is stable across renames.
     let mut reviewers = Vec::with_capacity(req.protection.required_reviewers.len());
-    for uid in &req.protection.required_reviewers {
-        match ctx.db.find_user_by_id(uid).await {
-            Ok(Some(_)) => reviewers.push(uid.clone()),
-            _ => {
+    for token in &req.protection.required_reviewers {
+        let hit = match ctx.db.find_user_by_id(token).await {
+            Ok(Some(_)) => Some(token.clone()),
+            _ => match ctx.db.find_user_by_username(token).await {
+                Ok(Some(u)) => Some(u.id),
+                _ => None,
+            },
+        };
+        match hit {
+            Some(uid) => reviewers.push(uid),
+            None => {
                 return Err(AppError::new(
                     "rpc.bad_input",
-                    format!("unknown reviewer user id: {uid}"),
+                    format!("unknown reviewer: {token}"),
                 ))
             }
         }
@@ -760,6 +966,7 @@ pub async fn upsert_environment(
     let protection_json = serde_json::json!({
         "wait_timer_minutes": req.protection.wait_timer_minutes,
         "required_reviewers": reviewers,
+        "prevent_self_review": req.protection.prevent_self_review,
         "deployment_branches": req.protection.deployment_branches,
     })
     .to_string();
@@ -941,20 +1148,33 @@ pub async fn list_deployments(
     if !meets(accessible.capability, Capability::Read) {
         return Err(not_found());
     }
-    let run = ctx
-        .db
-        .find_action_run_by_id(&req.run_id)
-        .await
-        .map_err(db_err)?
-        .ok_or_else(not_found)?;
-    if run.repository_id != accessible.row.id {
-        return Err(not_found());
-    }
-    let rows = ctx
-        .db
-        .list_action_deployments_for_run(&req.run_id)
-        .await
-        .map_err(db_err)?;
+    let rows = match req.run_id.as_deref() {
+        Some(run_id) => {
+            let run = ctx
+                .db
+                .find_action_run_by_id(run_id)
+                .await
+                .map_err(db_err)?
+                .ok_or_else(not_found)?;
+            if run.repository_id != accessible.row.id {
+                return Err(not_found());
+            }
+            ctx.db
+                .list_action_deployments_for_run(run_id)
+                .await
+                .map_err(db_err)?
+        }
+        // Repo-level listing — powers the Environments view's history column.
+        None => ctx
+            .db
+            .list_action_deployments_for_repo(
+                &accessible.row.id,
+                req.environment.as_deref(),
+                i64::from(req.limit.unwrap_or(100)),
+            )
+            .await
+            .map_err(db_err)?,
+    };
     Ok(ActionDeploymentsListResponse {
         deployments: rows.iter().map(deployment_public).collect(),
     })
@@ -969,20 +1189,67 @@ pub async fn approve_job(
     ctx: &RpcCtx,
     input: serde_json::Value,
 ) -> Result<ActionJobApproveResponse, AppError> {
-    let caller = require_verified(ctx).await?;
     let req: ActionJobApproveRequest = serde_json::from_value(input).map_err(|e| {
         AppError::new(
             "rpc.bad_input",
             format!("invalid repo.actions.approveJob input: {e}"),
         )
     })?;
-    let accessible = resolve_repo_for_read(ctx, &req.owner, &req.name).await?;
+    let job = review_held_job(ctx, &req.owner, &req.name, &req.job_id, "approved", None).await?;
+    Ok(ActionJobApproveResponse { job })
+}
+
+/// `repo.actions.reviewDeployment` — Write+ (+ reviewer membership); approve
+/// or reject an environment-held job with an optional comment. Mirrors
+/// GitHub's `POST /actions/runs/{run_id}/pending_deployments`: `rejected`
+/// fails the job and its dependents skip via normal `needs:` resolution.
+pub async fn review_deployment(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<ActionDeploymentReviewResponse, AppError> {
+    let req: ActionDeploymentReviewRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid repo.actions.reviewDeployment input: {e}"),
+        )
+    })?;
+    if !matches!(req.state.as_str(), "approved" | "rejected") {
+        return Err(AppError::new(
+            "rpc.bad_input",
+            "state must be 'approved' or 'rejected'",
+        ));
+    }
+    let job = review_held_job(
+        ctx,
+        &req.owner,
+        &req.name,
+        &req.job_id,
+        &req.state,
+        req.comment,
+    )
+    .await?;
+    Ok(ActionDeploymentReviewResponse { job })
+}
+
+/// Shared approve/reject path for held jobs — reviewer-membership and
+/// `prevent_self_review` gating, review-row recording, release/fail,
+/// scheduler recompute, and wake.
+async fn review_held_job(
+    ctx: &RpcCtx,
+    owner: &str,
+    name: &str,
+    job_id: &str,
+    state: &str,
+    comment: Option<String>,
+) -> Result<ActionJobPublic, AppError> {
+    let caller = require_verified(ctx).await?;
+    let accessible = resolve_repo_for_read(ctx, owner, name).await?;
     if !meets(accessible.capability, Capability::Write) {
         return Err(not_found());
     }
     let job = ctx
         .db
-        .find_action_job_by_id(&req.job_id)
+        .find_action_job_by_id(job_id)
         .await
         .map_err(db_err)?
         .ok_or_else(not_found)?;
@@ -1001,8 +1268,11 @@ pub async fn approve_job(
             "job is not waiting for approval",
         ));
     }
-    // Required-reviewer membership: the hold is a deployment review only
-    // when the env names reviewers — check the stored rule before releasing.
+    // Required-reviewer membership + prevent_self_review: the hold is a
+    // deployment review only when the env names reviewers — check the stored
+    // rule before releasing.
+    let mut reviewers: Vec<String> = Vec::new();
+    let mut prevent_self_review = false;
     if let Some(env_name) = job.environment_name.as_deref() {
         if let Some(env_row) = ctx
             .db
@@ -1010,34 +1280,57 @@ pub async fn approve_job(
             .await
             .map_err(db_err)?
         {
-            let protection: serde_json::Value = serde_json::from_str(&env_row.protection_json)
-                .unwrap_or_else(|_| serde_json::json!({}));
-            let reviewers: Vec<String> = protection
-                .get("required_reviewers")
-                .and_then(|v| v.as_array())
-                .map(|a| {
-                    a.iter()
-                        .filter_map(|x| x.as_str().map(str::to_string))
-                        .collect()
-                })
-                .unwrap_or_default();
-            if !reviewers.is_empty()
-                && !reviewers.iter().any(|r| r == &caller.id)
-                && !meets(accessible.capability, Capability::Admin)
-            {
-                return Err(AppError::new(
-                    "repo.actions.not_a_reviewer",
-                    "caller is not a required reviewer for this environment",
-                ));
-            }
+            let (r, p) = env_protection_parts(&env_row);
+            reviewers = r;
+            prevent_self_review = p;
         }
     }
-    let released = ctx.db.approve_action_job(&job.id).await.map_err(db_err)?;
-    if !released {
+    if !reviewers.is_empty()
+        && !reviewers.iter().any(|r| r == &caller.id)
+        && !meets(accessible.capability, Capability::Admin)
+    {
+        return Err(AppError::new(
+            "repo.actions.not_a_reviewer",
+            "caller is not a required reviewer for this environment",
+        ));
+    }
+    if prevent_self_review && run.triggered_by.as_deref() == Some(caller.id.as_str()) {
+        return Err(AppError::new(
+            "repo.actions.self_review_forbidden",
+            "the run's triggering actor may not review this deployment",
+        ));
+    }
+    let resolved = if state == "approved" {
+        ctx.db.approve_action_job(&job.id).await.map_err(db_err)?
+    } else {
+        ctx.db.reject_action_job(&job.id).await.map_err(db_err)?
+    };
+    if !resolved {
         return Err(AppError::new(
             "repo.actions.job_not_held",
             "job is not waiting for approval",
         ));
+    }
+    // Record the decision against environment-held jobs — review history is
+    // a deployment-review artifact, so fork-approval holds (no environment)
+    // do not accrue rows. After the CAS so a raced approve/reject pair can't
+    // both land a recorded review.
+    if let Some(env_name) = job.environment_name.as_deref() {
+        ctx.db
+            .insert_deployment_review(&oxidean_db::actions::ActionDeploymentReviewRow {
+                id: Uuid::new_v4().to_string(),
+                repository_id: accessible.row.id.clone(),
+                run_id: run.id.clone(),
+                job_id: job.id.clone(),
+                environment: env_name.to_string(),
+                reviewer_id: caller.id.clone(),
+                reviewer_username: caller.username.clone(),
+                state: state.to_string(),
+                comment: comment.clone(),
+                created_at: String::new(),
+            })
+            .await
+            .map_err(db_err)?;
     }
     if let Err(e) = Box::pin(crate::actions::scheduler::recompute_ready_jobs(
         &ctx.db,
@@ -1045,21 +1338,25 @@ pub async fn approve_job(
     ))
     .await
     {
-        tracing::warn!(error = %e, run_id = %job.run_id, "post-approval recompute failed");
+        tracing::warn!(error = %e, run_id = %job.run_id, "post-review recompute failed");
     }
     if let Err(e) = ctx.db.recompute_action_run_status(&job.run_id).await {
-        tracing::warn!(error = %e, run_id = %job.run_id, "post-approval rollup failed");
+        tracing::warn!(error = %e, run_id = %job.run_id, "post-review rollup failed");
     }
     crate::actions::task_wake::wake();
     let job = ctx
         .db
-        .find_action_job_by_id(&req.job_id)
+        .find_action_job_by_id(job_id)
         .await
         .map_err(db_err)?
         .ok_or_else(not_found)?;
-    Ok(ActionJobApproveResponse {
-        job: job_public(&job),
-    })
+    let jobs = ctx
+        .db
+        .list_action_jobs_for_run(&run.id)
+        .await
+        .map_err(db_err)?;
+    let view = job_view_ctx(ctx, &accessible.row.id, &run, &jobs, accessible.capability).await?;
+    Ok(job_public(&job, &view))
 }
 
 /// `admin.actions.createRegistrationToken` — instance Admin; one-time token (D-ACT-08).
@@ -1128,6 +1425,7 @@ pub async fn list_workflows(
                 path: w.path.clone(),
                 name: w.document.name.clone(),
                 supports_dispatch: w.document.triggers.workflow_dispatch,
+                inputs: dispatch_inputs_public(w.document.triggers.dispatch_inputs.as_ref()),
             })
             .collect(),
         errors: discovered
@@ -1142,6 +1440,133 @@ pub async fn list_workflows(
             .git_ref
             .unwrap_or_else(|| accessible.row.default_branch.clone()),
     })
+}
+
+/// Serialize `on.workflow_dispatch.inputs` declarations for the dispatch
+/// form. Declared shape: `{inputs: {name: {type, required, default,
+/// description, options[]}}}` — undeclared fields are ignored (GitHub accepts
+/// extras at dispatch time).
+fn dispatch_inputs_public(declared: Option<&serde_json::Value>) -> Vec<ActionDispatchInputPublic> {
+    let Some(obj) = declared.and_then(|v| v.as_object()) else {
+        return Vec::new();
+    };
+    let mut out: Vec<ActionDispatchInputPublic> = obj
+        .iter()
+        .map(|(name, spec)| {
+            let spec = spec.as_object();
+            let get = |k: &str| spec.and_then(|m| m.get(k));
+            ActionDispatchInputPublic {
+                name: name.clone(),
+                input_type: get("type")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("string")
+                    .to_string(),
+                required: get("required").and_then(|v| v.as_bool()).unwrap_or(false),
+                description: get("description")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string),
+                default: get("default").cloned(),
+                options: get("options")
+                    .and_then(|v| v.as_array())
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|x| x.as_str().map(str::to_string))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+            }
+        })
+        .collect();
+    // Stable order for the form — YAML maps don't guarantee one.
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    out
+}
+
+/// `repo.actions.listArtifacts` — Read+; artifact metadata for a run.
+pub async fn list_artifacts(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<ActionArtifactsListResponse, AppError> {
+    let req: ActionArtifactsListRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid repo.actions.listArtifacts input: {e}"),
+        )
+    })?;
+    let accessible = resolve_repo_for_read(ctx, &req.owner, &req.name).await?;
+    if !meets(accessible.capability, Capability::Read) {
+        return Err(not_found());
+    }
+    let run = ctx
+        .db
+        .find_action_run_by_id(&req.run_id)
+        .await
+        .map_err(db_err)?
+        .ok_or_else(not_found)?;
+    if run.repository_id != accessible.row.id {
+        return Err(not_found());
+    }
+    let rows = ctx
+        .db
+        .list_action_artifacts_for_run(&req.run_id)
+        .await
+        .map_err(db_err)?;
+    Ok(ActionArtifactsListResponse {
+        artifacts: rows
+            .iter()
+            .map(|a| ActionArtifactPublic {
+                id: a.id.clone(),
+                run_id: a.run_id.clone(),
+                job_id: a.job_id.clone(),
+                name: a.name.clone(),
+                size_bytes: a.size_bytes,
+                digest_sha256: a.digest_sha256.clone(),
+                expires_at: a.expires_at.clone(),
+                created_at: a.created_at.clone(),
+            })
+            .collect(),
+    })
+}
+
+/// `repo.actions.deleteArtifact` — Write+; drop the record and payload file.
+pub async fn delete_artifact(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<ActionArtifactDeleteResponse, AppError> {
+    let _ = require_verified(ctx).await?;
+    let req: ActionArtifactDeleteRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid repo.actions.deleteArtifact input: {e}"),
+        )
+    })?;
+    let accessible = resolve_repo_for_read(ctx, &req.owner, &req.name).await?;
+    if !meets(accessible.capability, Capability::Write) {
+        return Err(not_found());
+    }
+    let artifact = ctx
+        .db
+        .find_action_artifact_by_id(&req.artifact_id)
+        .await
+        .map_err(db_err)?
+        .ok_or_else(not_found)?;
+    if artifact.repository_id != accessible.row.id {
+        return Err(not_found());
+    }
+    let deleted = ctx
+        .db
+        .delete_action_artifact(&req.artifact_id)
+        .await
+        .map_err(db_err)?;
+    if deleted {
+        let path = ctx.actions_artifacts_dir.join(&artifact.storage_path);
+        if let Err(e) = tokio::fs::remove_file(&path).await {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                tracing::warn!(error = %e, path = %path.display(), "artifact payload removal failed");
+            }
+        }
+    }
+    Ok(ActionArtifactDeleteResponse { deleted })
 }
 
 /// `repo.actions.dispatchWorkflow` — Write+; enqueues a `workflow_dispatch` run.
@@ -1286,6 +1711,13 @@ fn resolve_dispatch_inputs(
     let Some(declared) = declared.and_then(|v| v.as_object()) else {
         return Ok(serde_json::Value::Object(out));
     };
+    // GitHub caps `on.workflow_dispatch.inputs` at 25 defined inputs.
+    if declared.len() > 25 {
+        return Err(format!(
+            "workflow declares {} inputs — GitHub's maximum is 25",
+            declared.len()
+        ));
+    }
     for (name, spec) in declared {
         let spec = spec.as_object();
         let ty = spec
@@ -1385,7 +1817,7 @@ pub async fn approve_run(
         tracing::warn!(error = %e, run_id = %run.id, "post-approval rollup failed");
     }
     crate::actions::task_wake::wake();
-    run_mutation_response(ctx, &accessible.row.id, &req.run_id).await
+    run_mutation_response(ctx, &accessible, &req.run_id).await
 }
 
 /// `repo.actions.rerunRun` — Write+; requeues the run and all its jobs.
@@ -1462,7 +1894,7 @@ pub async fn rerun_run(
     crate::webhook::dispatch::notify_workflow_run(&ctx.db, &req.run_id, "requested", &ctx.env_name)
         .await;
     crate::actions::task_wake::wake();
-    run_mutation_response(ctx, &accessible.row.id, &req.run_id).await
+    run_mutation_response(ctx, &accessible, &req.run_id).await
 }
 
 /// `repo.actions.cancelRun` — Write+; cancels run + unfinished jobs.
@@ -1507,7 +1939,7 @@ pub async fn cancel_run(
     // API-04: cancellation completes the run with conclusion `cancelled`.
     crate::webhook::dispatch::notify_workflow_run(&ctx.db, &req.run_id, "completed", &ctx.env_name)
         .await;
-    run_mutation_response(ctx, &accessible.row.id, &req.run_id).await
+    run_mutation_response(ctx, &accessible, &req.run_id).await
 }
 
 async fn run_mutation_target(
@@ -1547,7 +1979,7 @@ async fn run_mutation_target(
 
 async fn run_mutation_response(
     ctx: &RpcCtx,
-    repository_id: &str,
+    accessible: &crate::repo::AccessibleRepo,
     run_id: &str,
 ) -> Result<ActionRunMutationResponse, AppError> {
     let run = ctx
@@ -1556,10 +1988,10 @@ async fn run_mutation_response(
         .await
         .map_err(db_err)?
         .ok_or_else(not_found)?;
-    debug_assert_eq!(run.repository_id, repository_id);
+    debug_assert_eq!(run.repository_id, accessible.row.id);
     let actors = actors_for_runs(ctx, std::slice::from_ref(&run)).await?;
     Ok(ActionRunMutationResponse {
-        run: run_public(&run, &actors),
+        run: run_public(&run, &actors, accessible.capability),
     })
 }
 
@@ -1589,5 +2021,54 @@ fn ref_display(git_ref: &str, default_branch: &str) -> String {
         default_branch.to_string()
     } else {
         stripped.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_dispatch_inputs;
+    use serde_json::json;
+
+    #[test]
+    fn dispatch_inputs_resolve_types_and_defaults() {
+        let declared = json!({
+            "name": {"type": "string"},
+            "verbose": {"type": "boolean", "default": false},
+            "level": {"type": "choice", "options": ["a", "b"]},
+            "count": {"type": "number"},
+            "env": {"type": "environment", "required": true},
+        });
+        // Required without default must be supplied; choice must be in
+        // options; boolean/number strings coerce.
+        let err = resolve_dispatch_inputs(Some(&declared), None).unwrap_err();
+        assert!(err.contains("required"), "{err}");
+        let out = resolve_dispatch_inputs(
+            Some(&declared),
+            Some(&json!({"env": "prod", "level": "a", "count": "3", "extra": "kept"})),
+        )
+        .unwrap();
+        assert_eq!(out["env"], json!("prod"));
+        assert_eq!(out["verbose"], json!(false));
+        assert_eq!(out["count"], json!(3.0));
+        assert_eq!(out["extra"], json!("kept"));
+        let err = resolve_dispatch_inputs(
+            Some(&declared),
+            Some(&json!({"env": "prod", "level": "zzz"})),
+        )
+        .unwrap_err();
+        assert!(err.contains("one of"), "{err}");
+    }
+
+    #[test]
+    fn dispatch_inputs_cap_25() {
+        let declared = json!((0..26)
+            .map(|i| (format!("i{i}"), json!({"type": "string"})))
+            .collect::<serde_json::Map<String, serde_json::Value>>());
+        let err = resolve_dispatch_inputs(Some(&declared), None).unwrap_err();
+        assert!(err.contains("25"), "{err}");
+        let ok = json!((0..25)
+            .map(|i| (format!("i{i}"), json!({"type": "string"})))
+            .collect::<serde_json::Map<String, serde_json::Value>>());
+        assert!(resolve_dispatch_inputs(Some(&ok), None).is_ok());
     }
 }

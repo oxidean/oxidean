@@ -3533,6 +3533,11 @@ impl Database {
         actions::approve_job(self.require_pool()?, job_id).await
     }
 
+    /// Reject one approval-held job — terminal `failure`, hold cleared.
+    pub async fn reject_action_job(&self, job_id: &str) -> Result<bool, String> {
+        actions::reject_action_job(self.require_pool()?, job_id).await
+    }
+
     /// `first-time` policy probe — actor has a prior non-held run in repo.
     pub async fn actor_has_prior_approved_run(
         &self,
@@ -3659,6 +3664,33 @@ impl Database {
         run_id: &str,
     ) -> Result<Vec<ActionDeploymentRow>, String> {
         actions::list_deployments_for_run(self.require_pool()?, run_id).await
+    }
+
+    /// Repo-scoped deployment listing, newest first; `environment` narrows.
+    pub async fn list_action_deployments_for_repo(
+        &self,
+        repository_id: &str,
+        environment: Option<&str>,
+        limit: i64,
+    ) -> Result<Vec<ActionDeploymentRow>, String> {
+        actions::list_deployments_for_repo(self.require_pool()?, repository_id, environment, limit)
+            .await
+    }
+
+    /// Record one approve/reject decision on an environment-held job.
+    pub async fn insert_deployment_review(
+        &self,
+        r: &actions::ActionDeploymentReviewRow,
+    ) -> Result<(), String> {
+        actions::insert_deployment_review(self.require_pool()?, r).await
+    }
+
+    /// Every review recorded against a run's jobs.
+    pub async fn list_deployment_reviews_for_run(
+        &self,
+        run_id: &str,
+    ) -> Result<Vec<actions::ActionDeploymentReviewRow>, String> {
+        actions::list_deployment_reviews_for_run(self.require_pool()?, run_id).await
     }
 
     /// Stamp the environment wait-timer deadline on a needs-gated leg.
@@ -4004,6 +4036,18 @@ impl Database {
         run_id: &str,
     ) -> Result<Vec<actions::ActionArtifactRow>, String> {
         actions::list_action_artifacts_for_run(self.require_pool()?, run_id).await
+    }
+
+    pub async fn find_action_artifact_by_id(
+        &self,
+        id: &str,
+    ) -> Result<Option<actions::ActionArtifactRow>, String> {
+        actions::find_action_artifact_by_id(self.require_pool()?, id).await
+    }
+
+    /// Delete an artifact record (row only; caller owns the payload file).
+    pub async fn delete_action_artifact(&self, id: &str) -> Result<bool, String> {
+        actions::delete_action_artifact(self.require_pool()?, id).await
     }
 
     /// `concurrency.cancel-in-progress` — cancel every nonterminal run in

@@ -14,6 +14,14 @@ import { List, ListRow } from "@/components/ui/list";
 import { PageHeader } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ActionsLogViewer } from "@/components/repo/actions-log-viewer";
+import {
+  ActionsForkApprovalBanner,
+  ActionsJobReview,
+  ActionsJobWaitingChip,
+  waitingReasonLabel,
+} from "@/components/repo/actions-approvals";
+import { ActionsArtifacts } from "@/components/repo/actions-artifacts";
+import { ActionsDeployments } from "@/components/repo/actions-deployments";
 import { ActionsRerunMenu } from "@/components/repo/actions-rerun-menu";
 import { useRepoStore } from "@/lib/repo-store";
 import { formatRelative } from "@/lib/relative-time";
@@ -34,6 +42,14 @@ function runStatusVariant(status: string): "success" | "destructive" | "primary"
   if (s === "failure" || s === "failed" || s === "error" || s === "cancelled") return "destructive";
   if (s === "in_progress" || s === "running" || s === "queued" || s === "pending") return "primary";
   return "default";
+}
+
+/** Compact matrix summary — `node: 20 · os: ubuntu-latest`. */
+function matrixSummary(matrix?: Record<string, unknown>): string {
+  if (!matrix) return "";
+  return Object.entries(matrix)
+    .map(([k, v]) => `${k}: ${String(v)}`)
+    .join(" · ");
 }
 
 function isActiveStatus(status: string): boolean {
@@ -291,6 +307,7 @@ function RepoActionsRunPageContent() @{
                 {mutationErr as string}
               </p>;
             }
+            <ActionsForkApprovalBanner owner={owner} name={repoName} run={run} />
             <div className="mt-8 grid gap-6 md:grid-cols-[16rem_1fr]">
               <List data-testid="repo-actions-jobs" className="self-start">
                 @for (const job of jobs; key job.id) {
@@ -309,18 +326,22 @@ function RepoActionsRunPageContent() @{
                       >
                         <span className="min-w-0 flex-1">
                           <span className="block truncate">{job.name as string}</span>
-                          @if (
-                            spanDuration(job.started_at, job.finished_at)
-                          ) {
-                            <span className="block text-[11px] text-muted-foreground">
-                              {
-                                spanDuration(
-                                  job.started_at,
-                                  job.finished_at,
-                                ) as string
-                              }
-                            </span>;
-                          }
+                          <span className="block text-[11px] text-muted-foreground">
+                            {
+                              [
+                                spanDuration(job.started_at, job.finished_at),
+                                matrixSummary(job.matrix),
+                                job.environment ? `env: ${job.environment}` : "",
+                                (job.attempt ?? 1) > 1 ? `attempt ${job.attempt}` : "",
+                                job.needs?.length
+                                  ? `needs ${job.needs.join(", ")}`
+                                  : "",
+                              ]
+                                .filter(Boolean)
+                                .join(" · ") as string
+                            }
+                          </span>
+                          <ActionsJobWaitingChip job={job} />
                         </span>
                         <Badge
                           className="shrink-0"
@@ -354,12 +375,50 @@ function RepoActionsRunPageContent() @{
                   </ListRow>;
                 }
               </List>
-              <ActionsLogViewer
-                log={logText}
-                jobStatus={selectedJob?.status ?? ""}
-                downloadName={selectedJob?.name || "job"}
-              />
+              <div className="min-w-0">
+                @if (selectedJob?.waiting_reason) {
+                  <p
+                    className="mb-3 flex items-center gap-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-[13px] text-foreground"
+                    role="status"
+                    data-testid="actions-job-waiting-banner"
+                  >
+                    {waitingReasonLabel(selectedJob?.waiting_reason) as string}
+                    @if (
+                      selectedJob?.waiting_reason === "needs" &&
+                      selectedJob?.needs?.length
+                    ) {
+                      <span className="text-muted-foreground">
+                        {(": " + (selectedJob?.needs ?? []).join(", ")) as string}
+                      </span>;
+                    }
+                  </p>;
+                }
+                @if (selectedJob) {
+                  <ActionsJobReview owner={owner} name={repoName} job={selectedJob} />;
+                }
+                <ActionsLogViewer
+                  log={logText}
+                  jobStatus={selectedJob?.status ?? ""}
+                  downloadName={selectedJob?.name || "job"}
+                  downloadHref={
+                    selectedJob
+                      ? `/api/repos/${owner}/${repoName}/actions/jobs/${selectedJob.id}/logs`
+                      : undefined
+                  }
+                />
+              </div>
             </div>
+            @if (run) {
+              <>
+                <ActionsArtifacts
+                  owner={owner}
+                  name={repoName}
+                  runId={run.id}
+                  canWrite={canWrite}
+                />
+                <ActionsDeployments owner={owner} name={repoName} runId={run.id} />
+              </>;
+            }
           </>;
         }
       }

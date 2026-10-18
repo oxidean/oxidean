@@ -2076,6 +2076,18 @@ export type ActionRunPublic = {
   created_at?: string;
   updated_at?: string;
   finished_at?: string;
+  attempt?: number;
+  /** `fork_approval` when the run is held for maintainer approval. */
+  waiting_reason?: string;
+  /** The caller may release a fork-approval hold (Write+). */
+  can_approve?: boolean;
+};
+
+export type ActionDeploymentReviewPublic = {
+  reviewer: string;
+  state: string;
+  comment?: string;
+  created_at?: string;
 };
 
 export type ActionJobPublic = {
@@ -2085,6 +2097,15 @@ export type ActionJobPublic = {
   name: string;
   status: string;
   runs_on: string[];
+  needs?: string[];
+  matrix?: Record<string, unknown>;
+  environment?: string;
+  attempt?: number;
+  /** `fork_approval` | `environment_review` | `environment_wait_timer` | `needs`. */
+  waiting_reason?: string;
+  /** Caller is a required reviewer (or Admin override) for the held deployment. */
+  can_review?: boolean;
+  reviews?: ActionDeploymentReviewPublic[];
   started_at?: string;
   finished_at?: string;
   summary?: string;
@@ -2143,10 +2164,21 @@ export type ActionWorkflowsListRequest = {
   git_ref?: string;
 };
 
+export type ActionDispatchInputPublic = {
+  name: string;
+  /** `string` | `choice` | `boolean` | `number` | `environment`. */
+  type: string;
+  required?: boolean;
+  description?: string;
+  default?: unknown;
+  options?: string[];
+};
+
 export type ActionWorkflowPublic = {
   path: string;
   name: string;
   supports_dispatch: boolean;
+  inputs?: ActionDispatchInputPublic[];
 };
 
 export type ActionWorkflowFileError = {
@@ -2270,6 +2302,233 @@ export type ActionRunnerPublic = {
 
 export type ActionListRunnersResponse = {
   runners: ActionRunnerPublic[];
+};
+
+export type ActionJobApproveRequest = {
+  owner: string;
+  name: string;
+  job_id: string;
+};
+
+export type ActionJobApproveResponse = {
+  job: ActionJobPublic;
+};
+
+export type ActionDeploymentReviewRequest = {
+  owner: string;
+  name: string;
+  job_id: string;
+  /** `approved` | `rejected`. */
+  state: string;
+  comment?: string;
+};
+
+export type ActionDeploymentReviewResponse = {
+  job: ActionJobPublic;
+};
+
+export type ActionArtifactPublic = {
+  id: string;
+  run_id: string;
+  job_id?: string;
+  name: string;
+  size_bytes: number;
+  digest_sha256: string;
+  expires_at?: string;
+  created_at?: string;
+};
+
+export type ActionArtifactsListRequest = {
+  owner: string;
+  name: string;
+  run_id: string;
+};
+
+export type ActionArtifactsListResponse = {
+  artifacts: ActionArtifactPublic[];
+};
+
+export type ActionArtifactDeleteRequest = {
+  owner: string;
+  name: string;
+  artifact_id: string;
+};
+
+export type ActionArtifactDeleteResponse = {
+  deleted: boolean;
+};
+
+export type ActionCachePublic = {
+  id: string;
+  key: string;
+  version: string;
+  /** Branch scope the entry was saved under. */
+  scope: string;
+  size_bytes: number;
+  created_at?: string;
+  last_accessed_at?: string;
+};
+
+export type ActionCachesListRequest = {
+  owner: string;
+  name: string;
+};
+
+export type ActionCachesListResponse = {
+  caches: ActionCachePublic[];
+  /** Sum of committed `size_bytes` — the GitHub `cache/usage` answer. */
+  total_size_bytes: number;
+};
+
+export type ActionCacheDeleteRequest = {
+  owner: string;
+  name: string;
+  cache_id: string;
+};
+
+export type ActionCacheDeleteResponse = {
+  deleted: boolean;
+};
+
+export type ActionEnvironmentProtection = {
+  wait_timer_minutes?: number;
+  /** Required reviewers — user ids on read; ids or usernames on write. */
+  required_reviewers?: string[];
+  /** Resolved reviewer usernames (read-side display). */
+  required_reviewer_usernames?: string[];
+  /** Block the run's triggering actor from reviewing (GitHub parity). */
+  prevent_self_review?: boolean;
+  /** Branch allowlist for deployments. */
+  deployment_branches?: string[];
+};
+
+export type ActionEnvironmentPublic = {
+  name: string;
+  protection: ActionEnvironmentProtection;
+  created_at: string;
+  updated_at: string;
+};
+
+export type RepoActionsEnvironmentsListRequest = {
+  owner: string;
+  name: string;
+};
+
+export type RepoActionsEnvironmentsListResponse = {
+  environments: ActionEnvironmentPublic[];
+};
+
+export type RepoActionsEnvironmentGetRequest = {
+  owner: string;
+  name: string;
+  environment: string;
+};
+
+export type RepoActionsEnvironmentResponse = {
+  environment: ActionEnvironmentPublic;
+};
+
+export type RepoActionsEnvironmentUpsertRequest = {
+  owner: string;
+  name: string;
+  environment: string;
+  protection: ActionEnvironmentProtection;
+};
+
+export type RepoActionsEnvironmentDeleteRequest = {
+  owner: string;
+  name: string;
+  environment: string;
+};
+
+export type RepoActionsEnvironmentDeleteResponse = {
+  deleted: boolean;
+};
+
+export type RepoActionsEnvironmentSecretsListRequest = {
+  owner: string;
+  name: string;
+  environment: string;
+};
+
+export type RepoActionsEnvironmentSecretPutRequest = {
+  owner: string;
+  name: string;
+  environment: string;
+  secret_name: string;
+  value: string;
+};
+
+export type RepoActionsEnvironmentSecretDeleteRequest = {
+  owner: string;
+  name: string;
+  environment: string;
+  secret_name: string;
+};
+
+export type ActionDeploymentPublic = {
+  id: string;
+  environment: string;
+  run_id: string;
+  job_id: string;
+  sha: string;
+  git_ref: string;
+  url?: string | null;
+  job_status: string;
+  created_at: string;
+};
+
+export type ActionDeploymentsListRequest = {
+  owner: string;
+  name: string;
+  /** Run-scoped listing; omit for repo-level history. */
+  run_id?: string;
+  /** Narrow a repo-level listing to one environment. */
+  environment?: string;
+  limit?: number;
+};
+
+export type ActionDeploymentsListResponse = {
+  deployments: ActionDeploymentPublic[];
+};
+
+export type OrgSecretMetaPublic = {
+  name: string;
+  /** `all` | `private` | `selected`. */
+  visibility: string;
+  updated_at: string;
+};
+
+export type OrgActionsSecretsListRequest = {
+  slug: string;
+};
+
+export type OrgActionsSecretsListResponse = {
+  secrets: OrgSecretMetaPublic[];
+};
+
+export type OrgActionsSecretPutRequest = {
+  slug: string;
+  secret_name: string;
+  value: string;
+  /** `all` (default) | `private` | `selected`. */
+  visibility?: string;
+  /** Selected-repo ids — replaces the set when visibility is `selected`. */
+  repository_ids?: string[];
+};
+
+export type OrgActionsSecretDeleteRequest = {
+  slug: string;
+  secret_name: string;
+};
+
+export type OrgActionsSecretReposRequest = {
+  slug: string;
+  secret_name: string;
+};
+
+export type OrgActionsSecretReposResponse = {
+  repository_ids: string[];
 };
 
 export type WorkflowTemplateProvenance = "builtin" | "instance" | "org";
@@ -4166,6 +4425,24 @@ export function createClient(opts: CreateClientOptions) {
               "repo.actions.environments.delete",
               input,
             ),
+          secretsList: (input: RepoActionsEnvironmentSecretsListRequest) =>
+            rpcCall<ActionSecretsListResponse>(
+              opts,
+              "repo.actions.environments.secretsList",
+              input,
+            ),
+          secretsPut: (input: RepoActionsEnvironmentSecretPutRequest) =>
+            rpcCall<{ ok: boolean }>(
+              opts,
+              "repo.actions.environments.secretsPut",
+              input,
+            ),
+          secretsDelete: (input: RepoActionsEnvironmentSecretDeleteRequest) =>
+            rpcCall<{ ok: boolean }>(
+              opts,
+              "repo.actions.environments.secretsDelete",
+              input,
+            ),
         },
         listDeployments: (input: ActionDeploymentsListRequest) =>
           rpcCall<ActionDeploymentsListResponse>(
@@ -4175,6 +4452,36 @@ export function createClient(opts: CreateClientOptions) {
           ),
         approveJob: (input: ActionJobApproveRequest) =>
           rpcCall<ActionJobApproveResponse>(opts, "repo.actions.approveJob", input),
+        reviewDeployment: (input: ActionDeploymentReviewRequest) =>
+          rpcCall<ActionDeploymentReviewResponse>(
+            opts,
+            "repo.actions.reviewDeployment",
+            input,
+          ),
+        listArtifacts: (input: ActionArtifactsListRequest) =>
+          rpcCall<ActionArtifactsListResponse>(
+            opts,
+            "repo.actions.listArtifacts",
+            input,
+          ),
+        deleteArtifact: (input: ActionArtifactDeleteRequest) =>
+          rpcCall<ActionArtifactDeleteResponse>(
+            opts,
+            "repo.actions.deleteArtifact",
+            input,
+          ),
+        listCaches: (input: ActionCachesListRequest) =>
+          rpcCall<ActionCachesListResponse>(
+            opts,
+            "repo.actions.listCaches",
+            input,
+          ),
+        deleteCache: (input: ActionCacheDeleteRequest) =>
+          rpcCall<ActionCacheDeleteResponse>(
+            opts,
+            "repo.actions.deleteCache",
+            input,
+          ),
         secrets: {
           list: (input: ActionSecretsListRequest) =>
             rpcCall<ActionSecretsListResponse>(opts, "repo.actions.secrets.list", input),
@@ -4250,6 +4557,26 @@ export function createClient(opts: CreateClientOptions) {
           rpcCall<{ ok: boolean }>(opts, "org.invites.revoke", input),
         accept: (input: OrgInvitesAcceptRequest) =>
           rpcCall<OrgInvitesAcceptResponse>(opts, "org.invites.accept", input),
+      },
+      actions: {
+        secrets: {
+          list: (input: OrgActionsSecretsListRequest) =>
+            rpcCall<OrgActionsSecretsListResponse>(
+              opts,
+              "org.actions.secrets.list",
+              input,
+            ),
+          put: (input: OrgActionsSecretPutRequest) =>
+            rpcCall<{ ok: boolean }>(opts, "org.actions.secrets.put", input),
+          delete: (input: OrgActionsSecretDeleteRequest) =>
+            rpcCall<{ ok: boolean }>(opts, "org.actions.secrets.delete", input),
+          listRepos: (input: OrgActionsSecretReposRequest) =>
+            rpcCall<OrgActionsSecretReposResponse>(
+              opts,
+              "org.actions.secrets.listRepos",
+              input,
+            ),
+        },
       },
     },
     invites: {
