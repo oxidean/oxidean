@@ -16,6 +16,7 @@ pub struct RepoUnitFlags {
     pub issues_enabled: bool,
     pub pulls_enabled: bool,
     pub wiki_enabled: bool,
+    pub projects_enabled: bool,
 }
 
 impl Default for RepoUnitFlags {
@@ -24,6 +25,7 @@ impl Default for RepoUnitFlags {
             issues_enabled: true,
             pulls_enabled: true,
             wiki_enabled: true,
+            projects_enabled: true,
         }
     }
 }
@@ -32,7 +34,7 @@ pub async fn get_unit_flags(pool: &DbPool, repo_id: &str) -> Result<RepoUnitFlag
     match pool {
         DbPool::Sqlite(p) => {
             let row = sqlx::query(
-                "SELECT issues_enabled, pulls_enabled, wiki_enabled FROM repositories WHERE id = ?",
+                "SELECT issues_enabled, pulls_enabled, wiki_enabled, projects_enabled FROM repositories WHERE id = ?",
             )
             .bind(repo_id)
             .fetch_optional(p)
@@ -43,12 +45,13 @@ pub async fn get_unit_flags(pool: &DbPool, repo_id: &str) -> Result<RepoUnitFlag
                     issues_enabled: r.try_get::<i64, _>("issues_enabled").unwrap_or(1) != 0,
                     pulls_enabled: r.try_get::<i64, _>("pulls_enabled").unwrap_or(1) != 0,
                     wiki_enabled: r.try_get::<i64, _>("wiki_enabled").unwrap_or(1) != 0,
+                    projects_enabled: r.try_get::<i64, _>("projects_enabled").unwrap_or(1) != 0,
                 })
                 .unwrap_or_default())
         }
         DbPool::Postgres(p) => {
             let row = sqlx::query(
-                "SELECT issues_enabled, pulls_enabled, wiki_enabled FROM repositories WHERE id = $1",
+                "SELECT issues_enabled, pulls_enabled, wiki_enabled, projects_enabled FROM repositories WHERE id = $1",
             )
             .bind(repo_id)
             .fetch_optional(p)
@@ -59,12 +62,13 @@ pub async fn get_unit_flags(pool: &DbPool, repo_id: &str) -> Result<RepoUnitFlag
                     issues_enabled: r.try_get::<bool, _>("issues_enabled").unwrap_or(true),
                     pulls_enabled: r.try_get::<bool, _>("pulls_enabled").unwrap_or(true),
                     wiki_enabled: r.try_get::<bool, _>("wiki_enabled").unwrap_or(true),
+                    projects_enabled: r.try_get::<bool, _>("projects_enabled").unwrap_or(true),
                 })
                 .unwrap_or_default())
         }
         DbPool::MySql(p) => {
             let row = sqlx::query(
-                "SELECT issues_enabled, pulls_enabled, wiki_enabled FROM repositories WHERE id = ?",
+                "SELECT issues_enabled, pulls_enabled, wiki_enabled, projects_enabled FROM repositories WHERE id = ?",
             )
             .bind(repo_id)
             .fetch_optional(p)
@@ -75,6 +79,7 @@ pub async fn get_unit_flags(pool: &DbPool, repo_id: &str) -> Result<RepoUnitFlag
                     issues_enabled: r.try_get::<i8, _>("issues_enabled").unwrap_or(1) != 0,
                     pulls_enabled: r.try_get::<i8, _>("pulls_enabled").unwrap_or(1) != 0,
                     wiki_enabled: r.try_get::<i8, _>("wiki_enabled").unwrap_or(1) != 0,
+                    projects_enabled: r.try_get::<i8, _>("projects_enabled").unwrap_or(1) != 0,
                 })
                 .unwrap_or_default())
         }
@@ -91,6 +96,14 @@ pub async fn set_pulls_enabled(pool: &DbPool, repo_id: &str, enabled: bool) -> R
 
 pub async fn set_wiki_enabled(pool: &DbPool, repo_id: &str, enabled: bool) -> Result<(), String> {
     set_unit_flag(pool, repo_id, "wiki_enabled", enabled).await
+}
+
+pub async fn set_projects_enabled(
+    pool: &DbPool,
+    repo_id: &str,
+    enabled: bool,
+) -> Result<(), String> {
+    set_unit_flag(pool, repo_id, "projects_enabled", enabled).await
 }
 
 async fn set_unit_flag(

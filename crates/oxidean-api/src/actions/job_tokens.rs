@@ -61,9 +61,9 @@ impl JobTokenIdentity {
 
 /// Translate the stored GitHub scope map (`{"issues":"write",…}`) into the
 /// `FgPerms` the shared PAT ACL consumes. Scopes with no FG family
-/// (`id-token`, `attestations`, `discussions`, `repository-projects`,
-/// `security-events`) carry no proc-class grants; `contents`/`packages` ride
-/// their dedicated `PatRow` columns instead.
+/// (`id-token`, `attestations`, `discussions`, `security-events`) carry no
+/// proc-class grants; `contents`/`packages` ride their dedicated `PatRow`
+/// columns instead.
 fn fg_perms(token: &ActionJobTokenRow) -> oxidean_core::FgPerms {
     use oxidean_core::{FgPermLevel, FgPerms};
     let Some(map) = stored_scope_map(token) else {
@@ -83,6 +83,7 @@ fn fg_perms(token: &ActionJobTokenRow) -> oxidean_core::FgPerms {
         commit_statuses: level("statuses"),
         deployments: level("deployments"),
         checks: level("checks"),
+        repository_projects: level("repository-projects"),
         environments: level("environments"),
         pages: level("pages"),
         ..FgPerms::default()

@@ -72,8 +72,9 @@ pub use tag_protection::{
     update as tag_protection_update,
 };
 pub use units::{
-    issues_get_enabled, issues_set_enabled, pulls_get_enabled, pulls_set_enabled,
-    require_unit_enabled, wiki_get_enabled, wiki_set_enabled, RepoUnit,
+    issues_get_enabled, issues_set_enabled, projects_get_enabled, projects_set_enabled,
+    pulls_get_enabled, pulls_set_enabled, require_unit_enabled, wiki_get_enabled, wiki_set_enabled,
+    RepoUnit,
 };
 
 /// Soft size limit for blob preview / raw soft-cap (D-20 / T-07-16).
@@ -370,6 +371,7 @@ pub(crate) fn to_public(repo: &AccessibleRepo) -> RepoPublic {
         issues_enabled: true,
         pulls_enabled: true,
         wiki_enabled: true,
+        projects_enabled: true,
         fork_network_id: None,
         forked_from: None,
     }
@@ -475,6 +477,7 @@ pub async fn enrich_social(
     public.issues_enabled = unit_flags.issues_enabled;
     public.pulls_enabled = unit_flags.pulls_enabled;
     public.wiki_enabled = unit_flags.wiki_enabled;
+    public.projects_enabled = unit_flags.projects_enabled;
     Ok(public)
 }
 
@@ -826,6 +829,7 @@ pub async fn list_mine(ctx: &RpcCtx) -> Result<RepoListMineResponse, AppError> {
                 issues_enabled: true,
                 pulls_enabled: true,
                 wiki_enabled: true,
+                projects_enabled: true,
                 fork_network_id: None,
                 forked_from: None,
             }
@@ -2536,6 +2540,7 @@ pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoPublic
         issues_enabled: true,
         pulls_enabled: true,
         wiki_enabled: true,
+        projects_enabled: true,
         fork_network_id: None,
         forked_from: None,
     })

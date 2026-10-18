@@ -488,3 +488,96 @@ pub struct GollumPage {
     /// Web-UI link for the page.
     pub html_url: String,
 }
+
+/// `project` payload — `action` is the board activity type
+/// (`created`/`edited`/`closed`/`reopened`/`deleted`); `project` embeds the
+/// board row in GitHub's Projects-API shape. `changes` carries
+/// `name.from`/`body.from` on `edited` (GitHub edit-diff convention).
+pub fn project_payload(
+    action: &str,
+    row: &oxidean_db::ProjectRow,
+    html_url: &str,
+    changes: Option<&JsonValue>,
+    repository: &JsonValue,
+    sender: &JsonValue,
+) -> JsonValue {
+    let mut payload = json!({
+        "action": action,
+        "project": {
+            "id": row.id,
+            "number": row.number,
+            "name": row.title,
+            "body": row.body,
+            "state": row.state,
+            "html_url": html_url,
+            "closed_at": row.closed_at,
+            "created_at": row.created_at,
+            "updated_at": row.updated_at,
+        },
+        "repository": repository,
+        "sender": sender,
+    });
+    if let Some(c) = changes {
+        payload["changes"] = c.clone();
+    }
+    payload
+}
+
+/// `project_column` payload — `action` is `created`/`edited`/`moved`/`deleted`.
+pub fn project_column_payload(
+    action: &str,
+    row: &oxidean_db::ProjectColumnRow,
+    project_html_url: &str,
+    changes: Option<&JsonValue>,
+    repository: &JsonValue,
+    sender: &JsonValue,
+) -> JsonValue {
+    let mut payload = json!({
+        "action": action,
+        "project_column": {
+            "id": row.id,
+            "project_id": row.project_id,
+            "name": row.name,
+            "project_url": project_html_url,
+            "created_at": row.created_at,
+            "updated_at": row.updated_at,
+        },
+        "repository": repository,
+        "sender": sender,
+    });
+    if let Some(c) = changes {
+        payload["changes"] = c.clone();
+    }
+    payload
+}
+
+/// `project_card` payload — `action` is `created`/`edited`/`moved`/
+/// `converted`/`deleted`. `content_url` points at the linked issue/pull;
+/// `changes` carries `note.from`/`column_id.from`/`content_id` diffs.
+pub fn project_card_payload(
+    action: &str,
+    row: &oxidean_db::ProjectCardRow,
+    content_url: Option<&str>,
+    changes: Option<&JsonValue>,
+    repository: &JsonValue,
+    sender: &JsonValue,
+) -> JsonValue {
+    let mut payload = json!({
+        "action": action,
+        "project_card": {
+            "id": row.id,
+            "column_id": row.column_id,
+            "note": row.note,
+            "content_url": content_url,
+            "archived": row.archived,
+            "created_at": row.created_at,
+            "updated_at": row.updated_at,
+        },
+        "repository": repository,
+        "sender": sender,
+    });
+    if let Some(c) = changes {
+        payload["changes"] = c.clone();
+    }
+    payload
+}

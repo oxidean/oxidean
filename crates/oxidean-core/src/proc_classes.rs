@@ -54,6 +54,12 @@ pub enum PatProc {
     /// Creating/updating/rerequesting check runs and suites (GitHub Checks
     /// API). Classic `repo`; FG `checks:write`.
     ChecksWrite,
+    /// Project boards/columns/cards. Classic `repo`; FG
+    /// `repository_projects` perm.
+    ProjectsRead,
+    /// Board/column/card mutations (GitHub Projects API). Classic `repo`;
+    /// FG `repository_projects:write`.
+    ProjectsWrite,
     /// Commit statuses. Classic `repo:status`|`repo`|`public_repo`; FG
     /// `commit_statuses` perm.
     StatusesRead,
@@ -201,6 +207,7 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         | "repo.issues.getEnabled"
         | "repo.pulls.getEnabled"
         | "repo.wiki.getEnabled"
+        | "repo.projects.getEnabled"
         | "wiki.pages.list"
         | "wiki.pages.get"
         | "wiki.revisions.list"
@@ -314,6 +321,22 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         | "check.runs.update"
         | "check.runs.rerequest" => ChecksWrite,
 
+        "projects.list" | "projects.get" | "projects.columns.list" | "projects.cards.list" => {
+            ProjectsRead
+        }
+        "projects.create"
+        | "projects.update"
+        | "projects.delete"
+        | "projects.columns.create"
+        | "projects.columns.update"
+        | "projects.columns.move"
+        | "projects.columns.delete"
+        | "projects.cards.create"
+        | "projects.cards.update"
+        | "projects.cards.move"
+        | "projects.cards.convert"
+        | "projects.cards.delete" => ProjectsWrite,
+
         // Drafting a workflow file is a contents write (ActionsWrite ⇒ classic
         // `repo` or `workflow`, FG `actions:write`).
         "repo.actions.workflows.create" => ActionsWrite,
@@ -358,6 +381,7 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         | "repo.issues.setEnabled"
         | "repo.pulls.setEnabled"
         | "repo.wiki.setEnabled"
+        | "repo.projects.setEnabled"
         | "repo.mirror.upsert"
         | "repo.mirror.delete"
         | "repo.mirror.syncNow"
@@ -452,6 +476,8 @@ pub fn public_repo_covers(class: PatProc) -> bool {
             | StatusesWrite
             | ReleasesRead
             | ReleasesWrite
+            | ProjectsRead
+            | ProjectsWrite
             | StarringWrite
             | WatchingWrite
     )
@@ -468,7 +494,7 @@ pub fn classic_scopes_for(class: PatProc) -> &'static [ClassicPatScope] {
         RepoRead | RepoWrite | IssuesRead | IssuesWrite | PullsRead | PullsWrite | ActionsRead
         | EnvironmentsRead | EnvironmentsWrite | DeploymentsRead | DeploymentsWrite
         | ChecksRead | ChecksWrite | SecretsRead | SecretsWrite | ReleasesRead | ReleasesWrite
-        | RepoAdminRead | RepoAdminWrite => &[S::Repo],
+        | ProjectsRead | ProjectsWrite | RepoAdminRead | RepoAdminWrite => &[S::Repo],
         ActionsWrite => &[S::Repo, S::Workflow],
         StatusesRead | StatusesWrite => &[S::Repo, S::RepoStatus],
         WebhooksRead | WebhooksWrite => &[S::Repo, S::AdminRepoHook],
@@ -517,6 +543,7 @@ pub fn fg_family_name(class: PatProc) -> Option<&'static str> {
         EnvironmentsRead | EnvironmentsWrite => "environments",
         DeploymentsRead | DeploymentsWrite => "deployments",
         ChecksRead | ChecksWrite => "checks",
+        ProjectsRead | ProjectsWrite => "repository_projects",
         StatusesRead | StatusesWrite => "commit_statuses",
         SecretsRead | SecretsWrite => "secrets",
         ReleasesRead | ReleasesWrite => "releases",

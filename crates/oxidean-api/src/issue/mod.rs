@@ -1641,7 +1641,10 @@ pub async fn links_remove(
 
 /// `on: issues` Actions trigger — soft-fail (the mutation already committed).
 /// `action` is the same activity name the webhook fan-out emitted.
-async fn notify_actions_issue(
+/// `pub(crate)` for the project-card convert path — GitHub creates a real
+/// issue when a note is converted, and `issues.opened` fires alongside
+/// `project_card.converted`.
+pub(crate) async fn notify_actions_issue(
     ctx: &RpcCtx,
     accessible: &crate::repo::AccessibleRepo,
     action: &str,

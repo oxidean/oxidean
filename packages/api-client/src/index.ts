@@ -599,6 +599,7 @@ export type RepoPublic = {
   issues_enabled?: boolean;
   pulls_enabled?: boolean;
   wiki_enabled?: boolean;
+  projects_enabled?: boolean;
   fork_network_id?: string | null;
   forked_from?: ForkParentSummary | null;
 };
@@ -2962,6 +2963,203 @@ export type WikiRevisionsListResponse = {
   revisions: WikiRevisionPublic[];
 };
 
+export type ProjectPublic = {
+  id: string;
+  repo_id: string;
+  /** Per-repo sequential `#N` (same scheme as milestones/issues). */
+  number: number;
+  /** GitHub `name` — the board title. */
+  title: string;
+  /** GitHub `body` — the board description. */
+  body: string;
+  state: string;
+  creator_id?: string;
+  creator_username?: string;
+  /** `/{owner}/{repo}/projects/{number}` web route. */
+  html_url: string;
+  closed_at?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ProjectColumnPublic = {
+  id: string;
+  project_id: string;
+  name: string;
+  /** Contiguous 0-based position inside the board. */
+  position: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ProjectCardPublic = {
+  id: string;
+  column_id: string;
+  /** Note text — `undefined` once the card is a linked entity. */
+  note?: string;
+  /** `issue` | `pull_request` — the linked entity kind. */
+  content_type?: string;
+  /** Linked entity row id. */
+  content_id?: string;
+  /** Linked entity `#N` — enrichment for the UI. */
+  content_number?: number;
+  /** Linked entity title — enrichment for the UI. */
+  content_title?: string;
+  /** Linked entity state — enrichment for the UI. */
+  content_state?: string;
+  /** `/{owner}/{repo}/{issues|pulls}/{number}` web route for linked cards. */
+  content_url?: string;
+  /** Contiguous 0-based position inside the column. */
+  position: number;
+  archived: boolean;
+  creator_id?: string;
+  creator_username?: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ProjectsListRequest = {
+  owner: string;
+  name: string;
+  /** `open` (default) | `closed` | `all`. */
+  state?: string;
+};
+
+export type ProjectsListResponse = {
+  projects: ProjectPublic[];
+};
+
+export type ProjectRefRequest = {
+  owner: string;
+  name: string;
+  /** The board's per-repo `#N`. */
+  project: number;
+};
+
+export type ProjectCreateRequest = {
+  owner: string;
+  name: string;
+  /** Board title (GitHub `name`). */
+  title: string;
+  body?: string;
+};
+
+export type ProjectUpdateRequest = {
+  owner: string;
+  name: string;
+  project: number;
+  title?: string;
+  body?: string;
+  /** `open` | `closed` — transitions fire `closed`/`reopened`. */
+  state?: string;
+};
+
+export type ProjectDeleteResponse = {
+  ok: boolean;
+};
+
+export type ProjectColumnsListRequest = {
+  owner: string;
+  name: string;
+  project: number;
+};
+
+export type ProjectColumnsListResponse = {
+  columns: ProjectColumnPublic[];
+};
+
+export type ProjectColumnCreateRequest = {
+  owner: string;
+  name: string;
+  project: number;
+  /** Column display name (GitHub `name`). */
+  column_name: string;
+};
+
+export type ProjectColumnRefRequest = {
+  owner: string;
+  name: string;
+  /** The board's per-repo `#N` — scopes the column to the board. */
+  project: number;
+  /** Column id. */
+  column: string;
+};
+
+export type ProjectColumnUpdateRequest = {
+  owner: string;
+  name: string;
+  project: number;
+  column: string;
+  column_name: string;
+};
+
+export type ProjectColumnMoveRequest = {
+  owner: string;
+  name: string;
+  project: number;
+  column: string;
+  /** New 0-based position inside the board (clamped). */
+  position: number;
+};
+
+export type ProjectDeleteSimpleResponse = {
+  ok: boolean;
+};
+
+export type ProjectCardsListRequest = {
+  owner: string;
+  name: string;
+  /** Column id the cards belong to. */
+  column: string;
+  /** Include archived cards (GitHub hides them by default). */
+  archived?: boolean;
+};
+
+export type ProjectCardsListResponse = {
+  cards: ProjectCardPublic[];
+};
+
+export type ProjectCardCreateRequest = {
+  owner: string;
+  name: string;
+  /** Column id the card lands in (appended last). */
+  column: string;
+  /** Note text — a note card when `content_type`/`content_id` are absent. */
+  note?: string;
+  /** `issue` | `pull_request` — link an existing entity instead. */
+  content_type?: string;
+  content_id?: string;
+};
+
+export type ProjectCardRefRequest = {
+  owner: string;
+  name: string;
+  /** The board's per-repo `#N` — scopes the card to the board. */
+  project: number;
+  /** Card id. */
+  card: string;
+};
+
+export type ProjectCardUpdateRequest = {
+  owner: string;
+  name: string;
+  project: number;
+  card: string;
+  note?: string;
+  archived?: boolean;
+};
+
+export type ProjectCardMoveRequest = {
+  owner: string;
+  name: string;
+  project: number;
+  card: string;
+  /** Destination column (omit = same column reorder). */
+  column?: string;
+  /** New 0-based position inside the destination column (clamped). */
+  position: number;
+};
+
 export type OrgSecretMetaPublic = {
   name: string;
   /** `all` | `private` | `selected`. */
@@ -5121,6 +5319,12 @@ export function createClient(opts: CreateClientOptions) {
         setEnabled: (input: RepoUnitSetEnabledRequest) =>
           rpcCall<RepoUnitEnabledResponse>(opts, "repo.wiki.setEnabled", input),
       },
+      projects: {
+        getEnabled: (input: RepoUnitGetEnabledRequest) =>
+          rpcCall<RepoUnitEnabledResponse>(opts, "repo.projects.getEnabled", input),
+        setEnabled: (input: RepoUnitSetEnabledRequest) =>
+          rpcCall<RepoUnitEnabledResponse>(opts, "repo.projects.setEnabled", input),
+      },
     },
     org: {
       create: (input: CreateOrgRequest) => rpcCall<OrgPublic>(opts, "org.create", input),
@@ -5324,6 +5528,43 @@ export function createClient(opts: CreateClientOptions) {
       revisions: {
         list: (input: WikiRevisionsListRequest) =>
           rpcCall<WikiRevisionsListResponse>(opts, "wiki.revisions.list", input),
+      },
+    },
+    projects: {
+      list: (input: ProjectsListRequest) =>
+        rpcCall<ProjectsListResponse>(opts, "projects.list", input),
+      get: (input: ProjectRefRequest) => rpcCall<ProjectPublic>(opts, "projects.get", input),
+      create: (input: ProjectCreateRequest) =>
+        rpcCall<ProjectPublic>(opts, "projects.create", input),
+      update: (input: ProjectUpdateRequest) =>
+        rpcCall<ProjectPublic>(opts, "projects.update", input),
+      delete: (input: ProjectRefRequest) =>
+        rpcCall<ProjectDeleteResponse>(opts, "projects.delete", input),
+      columns: {
+        list: (input: ProjectColumnsListRequest) =>
+          rpcCall<ProjectColumnsListResponse>(opts, "projects.columns.list", input),
+        create: (input: ProjectColumnCreateRequest) =>
+          rpcCall<ProjectColumnPublic>(opts, "projects.columns.create", input),
+        update: (input: ProjectColumnUpdateRequest) =>
+          rpcCall<ProjectColumnPublic>(opts, "projects.columns.update", input),
+        move: (input: ProjectColumnMoveRequest) =>
+          rpcCall<ProjectColumnPublic>(opts, "projects.columns.move", input),
+        delete: (input: ProjectColumnRefRequest) =>
+          rpcCall<ProjectDeleteSimpleResponse>(opts, "projects.columns.delete", input),
+      },
+      cards: {
+        list: (input: ProjectCardsListRequest) =>
+          rpcCall<ProjectCardsListResponse>(opts, "projects.cards.list", input),
+        create: (input: ProjectCardCreateRequest) =>
+          rpcCall<ProjectCardPublic>(opts, "projects.cards.create", input),
+        update: (input: ProjectCardUpdateRequest) =>
+          rpcCall<ProjectCardPublic>(opts, "projects.cards.update", input),
+        move: (input: ProjectCardMoveRequest) =>
+          rpcCall<ProjectCardPublic>(opts, "projects.cards.move", input),
+        convert: (input: ProjectCardRefRequest) =>
+          rpcCall<ProjectCardPublic>(opts, "projects.cards.convert", input),
+        delete: (input: ProjectCardRefRequest) =>
+          rpcCall<ProjectDeleteSimpleResponse>(opts, "projects.cards.delete", input),
       },
     },
     pull: {

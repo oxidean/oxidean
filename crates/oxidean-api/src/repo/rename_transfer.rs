@@ -77,6 +77,7 @@ async fn to_public(ctx: &RpcCtx, repo: &AccessibleRepo) -> Result<RepoPublic, Ap
         issues_enabled: flags.issues_enabled,
         pulls_enabled: flags.pulls_enabled,
         wiki_enabled: flags.wiki_enabled,
+        projects_enabled: flags.projects_enabled,
         fork_network_id: None,
         forked_from: None,
     })

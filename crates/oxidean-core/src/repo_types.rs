@@ -242,6 +242,10 @@ pub struct RepoPublic {
     /// access, and the Wiki tab (COL-13). Populated by `repo.get`.
     #[serde(default = "repo_unit_enabled_default")]
     pub wiki_enabled: bool,
+    /// Projects unit enabled — gates `projects.*` RPCs and the Projects tab
+    /// (COL-13). Populated by `repo.get`.
+    #[serde(default = "repo_unit_enabled_default")]
+    pub projects_enabled: bool,
     /// Fork network root id (own id for roots) — D-SOC-14 / D-PR-01.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fork_network_id: Option<String>,

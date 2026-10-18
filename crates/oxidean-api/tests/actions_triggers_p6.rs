@@ -681,6 +681,11 @@ on:
     types: [created]
   check_suite:
     types: [requested]
+  project:
+    types: [edited]
+  project_column: {}
+  project_card:
+    types: [moved]
   repository_dispatch:
     types: [deploy]
   branch_protection_rule:
@@ -766,17 +771,30 @@ jobs:
     notify_lifecycle_actions(&db, git.as_ref(), &ev("check_suite", "requested")).await;
     assert_eq!(run_count(&db, &repo_id).await, 16);
 
+    // project types:[edited] / project_column bare / project_card
+    // types:[moved] — mismatched actions filtered, matching fire.
+    notify_lifecycle_actions(&db, git.as_ref(), &ev("project", "created")).await;
+    assert_eq!(run_count(&db, &repo_id).await, 16);
+    notify_lifecycle_actions(&db, git.as_ref(), &ev("project", "edited")).await;
+    assert_eq!(run_count(&db, &repo_id).await, 17);
+    notify_lifecycle_actions(&db, git.as_ref(), &ev("project_column", "created")).await;
+    assert_eq!(run_count(&db, &repo_id).await, 18);
+    notify_lifecycle_actions(&db, git.as_ref(), &ev("project_card", "deleted")).await;
+    assert_eq!(run_count(&db, &repo_id).await, 18);
+    notify_lifecycle_actions(&db, git.as_ref(), &ev("project_card", "moved")).await;
+    assert_eq!(run_count(&db, &repo_id).await, 19);
+
     // repository_dispatch — types: match the caller-chosen event_type.
     notify_lifecycle_actions(&db, git.as_ref(), &ev("repository_dispatch", "build")).await;
-    assert_eq!(run_count(&db, &repo_id).await, 16);
+    assert_eq!(run_count(&db, &repo_id).await, 19);
     notify_lifecycle_actions(&db, git.as_ref(), &ev("repository_dispatch", "deploy")).await;
-    assert_eq!(run_count(&db, &repo_id).await, 17);
+    assert_eq!(run_count(&db, &repo_id).await, 20);
 
     // branch_protection_rule types:[created] — edited filtered.
     notify_lifecycle_actions(&db, git.as_ref(), &ev("branch_protection_rule", "edited")).await;
-    assert_eq!(run_count(&db, &repo_id).await, 17);
+    assert_eq!(run_count(&db, &repo_id).await, 20);
     notify_lifecycle_actions(&db, git.as_ref(), &ev("branch_protection_rule", "created")).await;
-    assert_eq!(run_count(&db, &repo_id).await, 18);
+    assert_eq!(run_count(&db, &repo_id).await, 21);
 
     let runs = db
         .list_action_runs_for_repo(&repo_id, &Default::default(), 100, 0)
@@ -799,6 +817,9 @@ jobs:
         "deployment_status",
         "check_run",
         "check_suite",
+        "project",
+        "project_column",
+        "project_card",
         "repository_dispatch",
         "branch_protection_rule",
     ] {

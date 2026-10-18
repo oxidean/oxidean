@@ -8,10 +8,19 @@ import { toastSuccess } from "@/lib/toast";
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
 
+type Unit = "issues" | "pulls" | "wiki" | "projects";
+
+const UNIT_LABEL: Record<Unit, string> = {
+  issues: "Issues",
+  pulls: "Pull requests",
+  wiki: "Wiki",
+  projects: "Projects",
+};
+
 /**
- * Repo Settings → Features — per-repo unit toggles for Issues / Pulls / Wiki
- * (COL-13). Writes go through `repo.{unit}.setEnabled` (Admin-only RPCs); the
- * store update keeps the repo chrome tabs in sync immediately.
+ * Repo Settings → Features — per-repo unit toggles for Issues / Pulls / Wiki /
+ * Projects (COL-13). Writes go through `repo.{unit}.setEnabled` (Admin-only
+ * RPCs); the store update keeps the repo chrome tabs in sync immediately.
  */
 export function RepoFeaturesPanel(props: {
   owner: string;
@@ -30,46 +39,25 @@ export function RepoFeaturesPanel(props: {
   const issuesEnabled = live.issues_enabled !== false;
   const pullsEnabled = live.pulls_enabled !== false;
   const wikiEnabled = live.wiki_enabled !== false;
+  const projectsEnabled = live.projects_enabled !== false;
 
-  const [pendingUnit, setPendingUnit] = useState<"" | "issues" | "pulls" | "wiki">("");
+  const [pendingUnit, setPendingUnit] = useState<"" | Unit>("");
   const [error, setError] = useState("");
 
-  async function setUnit(unit: "issues" | "pulls" | "wiki", next: boolean) {
+  async function setUnit(unit: Unit, next: boolean) {
     if (!canAdmin || pendingUnit) return;
     setError("");
     setPendingUnit(unit);
     try {
-      const res =
-        unit === "issues"
-          ? await apiClient.repo.issues.setEnabled({ owner, name, enabled: next })
-          : unit === "pulls"
-            ? await apiClient.repo.pulls.setEnabled({ owner, name, enabled: next })
-            : await apiClient.repo.wiki.setEnabled({ owner, name, enabled: next });
+      const res = await apiClient.repo[unit].setEnabled({ owner, name, enabled: next });
       if (!res.ok) {
         setError(res.error.message || "Could not update repository features.");
         setPendingUnit("");
         return;
       }
-      setRepo(
-        unit === "issues"
-          ? { ...live, issues_enabled: res.data.enabled }
-          : unit === "pulls"
-            ? { ...live, pulls_enabled: res.data.enabled }
-            : { ...live, wiki_enabled: res.data.enabled },
-      );
-      toastSuccess(
-        unit === "issues"
-          ? next
-            ? "Issues enabled."
-            : "Issues disabled."
-          : unit === "pulls"
-            ? next
-              ? "Pull requests enabled."
-              : "Pull requests disabled."
-            : next
-              ? "Wiki enabled."
-              : "Wiki disabled.",
-      );
+      const flag = `${unit}_enabled` as keyof RepoPublic;
+      setRepo({ ...live, [flag]: res.data.enabled });
+      toastSuccess(next ? `${UNIT_LABEL[unit]} enabled.` : `${UNIT_LABEL[unit]} disabled.`);
       setPendingUnit("");
     } catch {
       setError(NETWORK_ERROR);
@@ -124,6 +112,16 @@ export function RepoFeaturesPanel(props: {
           aria-label="Enable wiki"
         />
         <Label className="text-[14px]">Wiki</Label>
+      </div>
+      <div className="flex items-center gap-3">
+        <Switch
+          checked={projectsEnabled}
+          disabled={!canAdmin || pendingUnit !== ""}
+          onCheckedChange={(v) => void setUnit("projects", !!v)}
+          data-testid="repo-projects-enabled"
+          aria-label="Enable projects"
+        />
+        <Label className="text-[14px]">Projects</Label>
       </div>
     </div>
 

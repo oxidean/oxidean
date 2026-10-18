@@ -245,6 +245,51 @@ pub async fn insert_pull(
         .ok_or_else(|| "insert pull failed: row missing after insert".into())
 }
 
+/// Id lookup — used by project-card enrichment and other cross-entity joins
+/// that only hold the row id.
+pub async fn find_by_id(pool: &DbPool, id: &str) -> Result<Option<PullRow>, String> {
+    let sql = format!("SELECT {PULL_COLS_PG} FROM pull_requests WHERE id = $1");
+    match pool {
+        DbPool::Postgres(p) => {
+            let row = sqlx::query(sqlx::AssertSqlSafe(&*sql))
+                .bind(id)
+                .fetch_optional(p)
+                .await
+                .map_err(|e| format!("find pull failed: {e}"))?;
+            Ok(match row {
+                Some(r) => Some(map_pull!(&r)),
+                None => None,
+            })
+        }
+        DbPool::MySql(p) => {
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "SELECT {PULL_COLS_MYSQL} FROM pull_requests WHERE id = ?"
+            )))
+            .bind(id)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("find pull failed: {e}"))?;
+            Ok(match row {
+                Some(r) => Some(map_pull!(&r)),
+                None => None,
+            })
+        }
+        DbPool::Sqlite(p) => {
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                "SELECT {PULL_COLS} FROM pull_requests WHERE id = ?1"
+            )))
+            .bind(id)
+            .fetch_optional(p)
+            .await
+            .map_err(|e| format!("find pull failed: {e}"))?;
+            Ok(match row {
+                Some(r) => Some(map_pull!(&r)),
+                None => None,
+            })
+        }
+    }
+}
+
 pub async fn find_by_repo_and_number(
     pool: &DbPool,
     repo_id: &str,

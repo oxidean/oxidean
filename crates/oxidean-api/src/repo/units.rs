@@ -28,6 +28,7 @@ pub enum RepoUnit {
     Issues,
     Pulls,
     Wiki,
+    Projects,
 }
 
 impl RepoUnit {
@@ -36,6 +37,7 @@ impl RepoUnit {
             RepoUnit::Issues => "repo.issues",
             RepoUnit::Pulls => "repo.pulls",
             RepoUnit::Wiki => "repo.wiki",
+            RepoUnit::Projects => "repo.projects",
         }
     }
 
@@ -52,13 +54,17 @@ impl RepoUnit {
             RepoUnit::Wiki => {
                 AppError::new("repo.wiki.disabled", "Wiki is disabled for this repository")
             }
+            RepoUnit::Projects => AppError::new(
+                "repo.projects.disabled",
+                "Projects are disabled for this repository",
+            ),
         }
     }
 }
 
-/// Gate shared by the `issue.*` / `pull.*` / `wiki.*` acl resolvers — a
-/// disabled unit rejects reads, writes, and admin maintenance alike until
-/// re-enabled.
+/// Gate shared by the `issue.*` / `pull.*` / `wiki.*` / `projects.*` acl
+/// resolvers — a disabled unit rejects reads, writes, and admin maintenance
+/// alike until re-enabled.
 pub async fn require_unit_enabled(
     ctx: &RpcCtx,
     unit: RepoUnit,
@@ -69,6 +75,7 @@ pub async fn require_unit_enabled(
         RepoUnit::Issues => flags.issues_enabled,
         RepoUnit::Pulls => flags.pulls_enabled,
         RepoUnit::Wiki => flags.wiki_enabled,
+        RepoUnit::Projects => flags.projects_enabled,
     };
     if enabled {
         Ok(())
@@ -99,6 +106,7 @@ async fn get_enabled(
         RepoUnit::Issues => flags.issues_enabled,
         RepoUnit::Pulls => flags.pulls_enabled,
         RepoUnit::Wiki => flags.wiki_enabled,
+        RepoUnit::Projects => flags.projects_enabled,
     };
     Ok(RepoUnitEnabledResponse { enabled })
 }
@@ -128,6 +136,11 @@ async fn set_enabled(
         RepoUnit::Wiki => {
             ctx.db
                 .set_repo_wiki_enabled(&accessible.row.id, req.enabled)
+                .await
+        }
+        RepoUnit::Projects => {
+            ctx.db
+                .set_repo_projects_enabled(&accessible.row.id, req.enabled)
                 .await
         }
     }
@@ -183,4 +196,20 @@ pub async fn wiki_set_enabled(
     input: serde_json::Value,
 ) -> Result<RepoUnitEnabledResponse, AppError> {
     set_enabled(ctx, input, RepoUnit::Wiki).await
+}
+
+/// `repo.projects.getEnabled`.
+pub async fn projects_get_enabled(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<RepoUnitEnabledResponse, AppError> {
+    get_enabled(ctx, input, RepoUnit::Projects).await
+}
+
+/// `repo.projects.setEnabled`.
+pub async fn projects_set_enabled(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<RepoUnitEnabledResponse, AppError> {
+    set_enabled(ctx, input, RepoUnit::Projects).await
 }

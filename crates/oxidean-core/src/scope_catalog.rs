@@ -302,6 +302,12 @@ pub const FG_PERMS: &[FgPermMeta] = &[
         hint: "Read and create check runs, check suites, and annotations.",
     },
     FgPermMeta {
+        family: "repository_projects",
+        account_level: false,
+        label: "Repository projects",
+        hint: "Read and manage project boards, columns, and cards.",
+    },
+    FgPermMeta {
         family: "webhooks",
         account_level: false,
         label: "Webhooks",
@@ -608,7 +614,7 @@ mod tests {
     fn public_catalog_serializes() {
         let v = serde_json::to_value(public_catalog()).unwrap();
         assert!(v["classic_scopes"].as_array().unwrap().len() == 26);
-        assert!(v["fg_perms"].as_array().unwrap().len() == 22);
+        assert!(v["fg_perms"].as_array().unwrap().len() == 23);
         let admin = v["classic_scopes"]
             .as_array()
             .unwrap()

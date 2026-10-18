@@ -46,7 +46,7 @@ download, annotations, `workflow_job` webhook.
 |---------|-----------|---------|-------------|-----|
 | 1. Workflow files & discovery | 8 | 0 | 0 | 0 |
 | 2. Triggers & filters | 22 | 0 | 0 | 0 |
-| 3. Events | 29 | 0 | 7 | 0 |
+| 3. Events | 32 | 0 | 4 | 0 |
 | 4. Workflow-level keys | 8 | 0 | 0 | 0 |
 | 5. Jobs | 29 | 0 | 0 | 1 |
 | 6. Steps | 19 | 0 | 0 | 1 |
@@ -67,7 +67,7 @@ download, annotations, `workflow_job` webhook.
 | 21. Security behaviours | 9 | 0 | 0 | 0 |
 | 22. Limits | 7 | 0 | 0 | 1 |
 | 23. Run lifecycle & integrations | 16 | 0 | 0 | 1 |
-| 24. GitHub REST API for Actions | 15 | 0 | 1 | 0 |
+| 24. GitHub REST API for Actions | 16 | 0 | 1 | 0 |
 
 ## 1. Workflow files & discovery (`file.`)
 
@@ -149,9 +149,9 @@ activity-type filter semantics; unsupported ones warn at parse (section 2,
 | `ev.merge_group` | `merge_group` — merge queue | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
 | `ev.milestone` | `milestone` — created/opened/closed/edited/deleted, `types:` honoured | supported | test:crates/oxidean-api/tests/webhook_delivery.rs::actions_milestone_trigger_e2e, test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_lifecycle_generic_events | Reopening a closed milestone fires `opened` (GitHub's activity type). Milestone CRUD is repo-scoped under Issues (`milestone.*` RPC + `/issues/milestones` UI); `payload.milestone` carries the entity. |
 | `ev.page_build` | `page_build` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
-| `ev.project` | `project` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
-| `ev.project_card` | `project_card` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
-| `ev.project_column` | `project_column` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
+| `ev.project` | `project` — created/edited/closed/reopened/deleted, `types:` honoured | supported | test:crates/oxidean-api/tests/projects.rs::projects_events_and_convert, test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_lifecycle_generic_events | Fires on `projects.*` board mutations; `projects.update` emits `edited` for title/body changes and `closed`/`reopened` for state transitions. |
+| `ev.project_card` | `project_card` — created/edited/moved/converted/deleted, `types:` honoured | supported | test:crates/oxidean-api/tests/projects.rs::projects_events_and_convert, test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_lifecycle_generic_events | Fires on `projects.cards.*`. `converted` runs GitHub's note→issue flow: a real issue is created (`issues.opened` fires too — first line becomes the title, the trimmed rest the body) and the payload's `changes.note.from` carries the removed note. Column moves carry `changes.column_id.from`. |
+| `ev.project_column` | `project_column` — created/edited/moved/deleted, `types:` honoured | supported | test:crates/oxidean-api/tests/projects.rs::projects_events_and_convert, test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_lifecycle_generic_events | Fires on `projects.columns.*`; renames emit `edited` with `changes.name.from`. |
 | `ev.public` | `public` — repo goes public | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_lifecycle_generic_events | Fires on `repo.updateVisibility` when visibility changes non-public → public. GitHub defines no activity types. |
 | `ev.pull_request_review` | `pull_request_review` — submitted/dismissed | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_lifecycle_generic_events | Fires on review submit and dismiss; payload carries review state/commit/PR context. `edited` is not an activity type here (no review-edit surface). |
 | `ev.pull_request_review_comment` | `pull_request_review_comment` — created/edited/deleted | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_lifecycle_generic_events | Inline (diff) review comments; conversation comments fire `issue_comment` instead, matching GitHub. |
@@ -678,5 +678,6 @@ class, not URL parity.
 | `api.oidc` | OIDC discovery + token mint | supported | test:crates/oxidean-api/tests/actions_phase7.rs::p7_oidc_token_endpoint_flow | `/api/actions/oidc` subtree. |
 | `api.workflows` | List workflows / dispatch | supported | test:crates/oxidean-api/tests/actions_endpoints.rs::list_workflows_discovers_dispatchable_anonymous, test:crates/oxidean-api/tests/actions_endpoints.rs::dispatch_workflow_enqueues_run | |
 | `api.checks` | Check suites / runs / annotations (Checks API) | supported | test:crates/oxidean-api/tests/checks.rs::check_crud_annotations_and_acl, test:crates/oxidean-api/tests/checks.rs::check_actions_job_projection | `check.suites.*` / `check.runs.*` / `check.annotations.list` mirror GitHub's Checks REST surface — GitHub status/conclusion vocabulary, output title+summary, ≤50 annotations per create/update, `rerequest` on both levels. Every Actions job projects a check run under a per-run `github-actions` suite; `output.annotations` merges stored rows with the job's log-extracted `::error::`/`::warning::`/`::notice::` command annotations. |
-| `api.permissions-req` | Token-scope enforcement matching `permissions:` | supported | test:crates/oxidean-api/tests/actions_phase7.rs::p7_permissions_full_map_in_payload, test:crates/oxidean-api/tests/actions_phase7.rs::p7_job_token_scope_map_gates_rpc, test:crates/oxidean-api/tests/checks.rs::check_job_token_does_not_recurse | The granted scope map rides the bearer identity — `issues`/`pull-requests`/`actions`/`statuses`/`deployments`/`environments`/`pages`/`checks` gate their procedure families, `contents`/`packages` ride dedicated fields, and `id-token: write` gates OIDC. Scopes without a procedure domain (`discussions`, `attestations`, `security-events`, `repository-projects`) carry no grants. |
+| `api.permissions-req` | Token-scope enforcement matching `permissions:` | supported | test:crates/oxidean-api/tests/actions_phase7.rs::p7_permissions_full_map_in_payload, test:crates/oxidean-api/tests/actions_phase7.rs::p7_job_token_scope_map_gates_rpc, test:crates/oxidean-api/tests/checks.rs::check_job_token_does_not_recurse | The granted scope map rides the bearer identity — `issues`/`pull-requests`/`actions`/`statuses`/`deployments`/`environments`/`pages`/`checks`/`repository-projects` gate their procedure families, `contents`/`packages` ride dedicated fields, and `id-token: write` gates OIDC. Scopes without a procedure domain (`discussions`, `attestations`, `security-events`) carry no grants. |
+| `api.projects` | Project boards / columns / cards (Projects API) | supported | test:crates/oxidean-api/tests/projects.rs::projects_crud_and_cards, test:crates/oxidean-api/tests/projects.rs::projects_unit_flag_and_acl | `projects.*` / `projects.columns.*` / `projects.cards.*` mirror GitHub's classic Projects REST surface — per-repo `#N` numbering, position-ordered columns and cards, note or issue/pull-linked cards with `content_url`, archive filtering, and note→issue conversion. Repo-scoped and gated by the `repository_projects` token family plus the Projects repo unit (`repo.projects.setEnabled`). |
 | `api.github-rest-compat` | github.com REST URL compatibility for third-party actions | unsupported | test:crates/oxidean-api/src/actions/templates.rs::classify_uses | Actions that call api.github.com directly (labeler, github-script, stale, …) are flagged `GithubApi` in the curated caveats — no shim layer exists. decision: not planned as a REST shim; the caveat table marks them. |

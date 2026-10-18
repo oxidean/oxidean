@@ -32,6 +32,7 @@ pub mod pat_settings;
 pub mod pats;
 pub mod pool;
 pub mod probe;
+pub mod projects;
 pub mod pulls;
 pub mod redirects;
 pub mod releases;
@@ -93,6 +94,7 @@ pub use packages::{PackageRow, PackageUsageBreakdownRow, PackageVersionRow};
 pub use pats::PatRow;
 pub use pool::DbPool;
 use pool::DbPool as Pool;
+pub use projects::{ProjectCardRow, ProjectColumnRow, ProjectRow};
 pub use pulls::{PullCommentRow, PullReviewRow, PullRow, PullSearchFilters, RepoMergeSettingsRow};
 pub use redirects::RedirectRow;
 pub use releases::{ReleaseAssetRow, ReleaseRow};
@@ -1237,6 +1239,12 @@ impl Database {
         pulls::find_by_repo_and_number(self.require_pool()?, repo_id, number).await
     }
 
+    /// Id lookup — used by project-card enrichment and other cross-entity
+    /// joins that only hold the row id.
+    pub async fn find_pull_by_id(&self, id: &str) -> Result<Option<PullRow>, String> {
+        pulls::find_by_id(self.require_pool()?, id).await
+    }
+
     pub async fn list_pulls_for_repo(
         &self,
         repo_id: &str,
@@ -1902,6 +1910,194 @@ impl Database {
         milestone_id: Option<&str>,
     ) -> Result<(), String> {
         milestones::set_issue_milestone(self.require_pool()?, issue_id, milestone_id).await
+    }
+
+    // --- projects (classic boards) ---
+
+    pub async fn allocate_next_project_number(&self, repo_id: &str) -> Result<i64, String> {
+        projects::allocate_next_project_number(self.require_pool()?, repo_id).await
+    }
+
+    pub async fn insert_project(
+        &self,
+        id: &str,
+        repo_id: &str,
+        number: i64,
+        title: &str,
+        body: &str,
+        creator_id: Option<&str>,
+    ) -> Result<ProjectRow, String> {
+        projects::insert_project(
+            self.require_pool()?,
+            id,
+            repo_id,
+            number,
+            title,
+            body,
+            creator_id,
+        )
+        .await
+    }
+
+    pub async fn find_project_by_id(&self, id: &str) -> Result<Option<ProjectRow>, String> {
+        projects::find_project_by_id(self.require_pool()?, id).await
+    }
+
+    pub async fn find_project_by_repo_number(
+        &self,
+        repo_id: &str,
+        number: i64,
+    ) -> Result<Option<ProjectRow>, String> {
+        projects::find_project_by_repo_number(self.require_pool()?, repo_id, number).await
+    }
+
+    pub async fn list_projects_for_repo(
+        &self,
+        repo_id: &str,
+        state: &str,
+    ) -> Result<Vec<ProjectRow>, String> {
+        projects::list_projects_for_repo(self.require_pool()?, repo_id, state).await
+    }
+
+    pub async fn update_project(
+        &self,
+        id: &str,
+        title: Option<&str>,
+        body: Option<&str>,
+    ) -> Result<Option<ProjectRow>, String> {
+        projects::update_project(self.require_pool()?, id, title, body).await
+    }
+
+    pub async fn set_project_state(
+        &self,
+        id: &str,
+        state: &str,
+    ) -> Result<Option<ProjectRow>, String> {
+        projects::set_project_state(self.require_pool()?, id, state).await
+    }
+
+    pub async fn delete_project(&self, id: &str) -> Result<(), String> {
+        projects::delete_project(self.require_pool()?, id).await
+    }
+
+    pub async fn find_column_by_id(&self, id: &str) -> Result<Option<ProjectColumnRow>, String> {
+        projects::find_column_by_id(self.require_pool()?, id).await
+    }
+
+    pub async fn find_column_in_project(
+        &self,
+        project_id: &str,
+        id: &str,
+    ) -> Result<Option<ProjectColumnRow>, String> {
+        projects::find_column_in_project(self.require_pool()?, project_id, id).await
+    }
+
+    pub async fn list_columns_for_project(
+        &self,
+        project_id: &str,
+    ) -> Result<Vec<ProjectColumnRow>, String> {
+        projects::list_columns_for_project(self.require_pool()?, project_id).await
+    }
+
+    pub async fn insert_project_column(
+        &self,
+        id: &str,
+        project_id: &str,
+        name: &str,
+    ) -> Result<ProjectColumnRow, String> {
+        projects::insert_project_column(self.require_pool()?, id, project_id, name).await
+    }
+
+    pub async fn update_project_column(
+        &self,
+        id: &str,
+        name: &str,
+    ) -> Result<Option<ProjectColumnRow>, String> {
+        projects::update_project_column(self.require_pool()?, id, name).await
+    }
+
+    pub async fn move_project_column(
+        &self,
+        id: &str,
+        new_position: i64,
+    ) -> Result<Option<ProjectColumnRow>, String> {
+        projects::move_project_column(self.require_pool()?, id, new_position).await
+    }
+
+    pub async fn delete_project_column(&self, id: &str) -> Result<(), String> {
+        projects::delete_project_column(self.require_pool()?, id).await
+    }
+
+    pub async fn find_card_by_id(&self, id: &str) -> Result<Option<ProjectCardRow>, String> {
+        projects::find_card_by_id(self.require_pool()?, id).await
+    }
+
+    pub async fn find_card_in_column(
+        &self,
+        column_id: &str,
+        id: &str,
+    ) -> Result<Option<ProjectCardRow>, String> {
+        projects::find_card_in_column(self.require_pool()?, column_id, id).await
+    }
+
+    pub async fn list_cards_for_column(
+        &self,
+        column_id: &str,
+        include_archived: bool,
+    ) -> Result<Vec<ProjectCardRow>, String> {
+        projects::list_cards_for_column(self.require_pool()?, column_id, include_archived).await
+    }
+
+    pub async fn insert_project_card(
+        &self,
+        id: &str,
+        column_id: &str,
+        note: Option<&str>,
+        content_type: Option<&str>,
+        content_id: Option<&str>,
+        creator_id: Option<&str>,
+    ) -> Result<ProjectCardRow, String> {
+        projects::insert_project_card(
+            self.require_pool()?,
+            id,
+            column_id,
+            note,
+            content_type,
+            content_id,
+            creator_id,
+        )
+        .await
+    }
+
+    pub async fn update_project_card(
+        &self,
+        id: &str,
+        note: Option<&str>,
+        archived: Option<bool>,
+    ) -> Result<Option<ProjectCardRow>, String> {
+        projects::update_project_card(self.require_pool()?, id, note, archived).await
+    }
+
+    pub async fn convert_project_card(
+        &self,
+        id: &str,
+        content_type: &str,
+        content_id: &str,
+    ) -> Result<Option<ProjectCardRow>, String> {
+        projects::convert_project_card(self.require_pool()?, id, content_type, content_id).await
+    }
+
+    pub async fn move_project_card(
+        &self,
+        id: &str,
+        dest_column_id: &str,
+        new_position: i64,
+    ) -> Result<Option<ProjectCardRow>, String> {
+        projects::move_project_card(self.require_pool()?, id, dest_column_id, new_position).await
+    }
+
+    pub async fn delete_project_card(&self, id: &str) -> Result<(), String> {
+        projects::delete_project_card(self.require_pool()?, id).await
     }
 
     pub async fn insert_issue_revision(
@@ -4381,6 +4577,14 @@ impl Database {
 
     pub async fn set_repo_wiki_enabled(&self, repo_id: &str, enabled: bool) -> Result<(), String> {
         repo_units::set_wiki_enabled(self.require_pool()?, repo_id, enabled).await
+    }
+
+    pub async fn set_repo_projects_enabled(
+        &self,
+        repo_id: &str,
+        enabled: bool,
+    ) -> Result<(), String> {
+        repo_units::set_projects_enabled(self.require_pool()?, repo_id, enabled).await
     }
 
     pub async fn consume_action_runner_registration_token(

@@ -31,6 +31,7 @@ use crate::notification;
 use crate::oauth;
 use crate::org;
 use crate::pat;
+use crate::project;
 use crate::pull;
 use crate::release;
 use crate::repo;
@@ -398,6 +399,8 @@ pub const PROCEDURES: &[&str] = &[
     "repo.pulls.setEnabled",
     "repo.wiki.getEnabled",
     "repo.wiki.setEnabled",
+    "repo.projects.getEnabled",
+    "repo.projects.setEnabled",
     "admin.actions.createRegistrationToken",
     "admin.actions.listRunners",
     "issue.create",
@@ -448,6 +451,22 @@ pub const PROCEDURES: &[&str] = &[
     "wiki.pages.update",
     "wiki.pages.delete",
     "wiki.revisions.list",
+    "projects.list",
+    "projects.get",
+    "projects.create",
+    "projects.update",
+    "projects.delete",
+    "projects.columns.list",
+    "projects.columns.create",
+    "projects.columns.update",
+    "projects.columns.move",
+    "projects.columns.delete",
+    "projects.cards.list",
+    "projects.cards.create",
+    "projects.cards.update",
+    "projects.cards.move",
+    "projects.cards.convert",
+    "projects.cards.delete",
     "issue.assigneeCandidates",
     "issue.reactions.toggle",
     "issue.links.list",
@@ -1724,6 +1743,14 @@ async fn dispatch_inner(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },
+        "repo.projects.getEnabled" => match repo::projects_get_enabled(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "repo.projects.setEnabled" => match repo::projects_set_enabled(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
         "admin.actions.createRegistrationToken" => {
             match crate::actions::rpc::admin_create_registration_token(ctx, req.input).await {
                 Ok(v) => RpcResponse::ok(v),
@@ -1925,6 +1952,70 @@ async fn dispatch_inner(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Err(e) => RpcResponse::err(e),
         },
         "wiki.revisions.list" => match wiki::revisions_list(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "projects.list" => match project::list(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "projects.get" => match project::get(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "projects.create" => match project::create(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "projects.update" => match project::update(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "projects.delete" => match project::delete(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "projects.columns.list" => match project::columns_list(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "projects.columns.create" => match project::columns_create(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "projects.columns.update" => match project::columns_update(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "projects.columns.move" => match project::columns_move(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "projects.columns.delete" => match project::columns_delete(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "projects.cards.list" => match project::cards_list(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "projects.cards.create" => match project::cards_create(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "projects.cards.update" => match project::cards_update(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "projects.cards.move" => match project::cards_move(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "projects.cards.convert" => match project::cards_convert(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "projects.cards.delete" => match project::cards_delete(ctx, req.input).await {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },

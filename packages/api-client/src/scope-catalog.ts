@@ -45,6 +45,7 @@ export const FG_PERM_CATALOG: FgPermPublic[] = [
   { family: "environments", account_level: false, label: "Environments", hint: "Reserved for deployment environments." },
   { family: "deployments", account_level: false, label: "Deployments", hint: "Reserved for deployments." },
   { family: "checks", account_level: false, label: "Checks", hint: "Read and create check runs, check suites, and annotations." },
+  { family: "repository_projects", account_level: false, label: "Repository projects", hint: "Read and manage project boards, columns, and cards." },
   { family: "webhooks", account_level: false, label: "Webhooks", hint: "Manage repository webhooks and deliveries." },
   { family: "administration", account_level: false, label: "Administration", hint: "Collaborators, protection rules, mirrors, settings, deletion." },
   { family: "metadata", account_level: false, label: "Metadata", hint: "Repository metadata reads; an alternative to contents for read-only tokens." },

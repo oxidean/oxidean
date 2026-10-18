@@ -438,7 +438,6 @@ function WikiEditForm(props: {
         }
       </div>
     </form>
-    ;
     @if (props.mode === "edit") {
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <AlertDialogContent>

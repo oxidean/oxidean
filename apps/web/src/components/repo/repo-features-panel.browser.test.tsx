@@ -18,6 +18,7 @@ import type { RepoPublic } from "@oxidean/api-client";
 const issuesSetMock = vi.fn();
 const pullsSetMock = vi.fn();
 const wikiSetMock = vi.fn();
+const projectsSetMock = vi.fn();
 
 vi.mock("@/lib/api-client", () => ({
   apiClient: {
@@ -30,6 +31,9 @@ vi.mock("@/lib/api-client", () => ({
       },
       wiki: {
         setEnabled: (...args: unknown[]) => wikiSetMock(...args),
+      },
+      projects: {
+        setEnabled: (...args: unknown[]) => projectsSetMock(...args),
       },
     },
   },
@@ -67,6 +71,7 @@ beforeEach(() => {
   issuesSetMock.mockReset();
   pullsSetMock.mockReset();
   wikiSetMock.mockReset();
+  projectsSetMock.mockReset();
 });
 
 afterEach(async () => {
@@ -80,6 +85,7 @@ describe("RepoFeaturesPanel browser DOM races", () => {
       issuesSetMock.mockResolvedValue({ ok: true, data: { enabled: false } });
       pullsSetMock.mockResolvedValue({ ok: true, data: { enabled: false } });
       wikiSetMock.mockResolvedValue({ ok: true, data: { enabled: false } });
+      projectsSetMock.mockResolvedValue({ ok: true, data: { enabled: false } });
 
       await mountWithQueryClient(RepoFeaturesPanel, {
         owner: "ada",
@@ -92,6 +98,7 @@ describe("RepoFeaturesPanel browser DOM races", () => {
       await waitForTestId("repo-issues-enabled");
       await waitForTestId("repo-pulls-enabled");
       await waitForTestId("repo-wiki-enabled");
+      await waitForTestId("repo-projects-enabled");
 
       await clickAriaLabel("Enable Issues");
       const issuesDeadline = Date.now() + 5_000;
@@ -121,6 +128,17 @@ describe("RepoFeaturesPanel browser DOM races", () => {
         await new Promise((r) => setTimeout(r, 50));
       }
       expect(wikiSetMock).toHaveBeenCalledWith({
+        owner: "ada",
+        name: "hello",
+        enabled: false,
+      });
+
+      await clickAriaLabel("Enable projects");
+      const projectsDeadline = Date.now() + 5_000;
+      while (projectsSetMock.mock.calls.length === 0 && Date.now() < projectsDeadline) {
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      expect(projectsSetMock).toHaveBeenCalledWith({
         owner: "ada",
         name: "hello",
         enabled: false,
