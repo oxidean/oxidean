@@ -45,7 +45,7 @@ download, annotations, `workflow_job` webhook.
 | Section | supported | partial | unsupported | n/a |
 |---------|-----------|---------|-------------|-----|
 | 1. Workflow files & discovery | 7 | 1 | 0 | 0 |
-| 2. Triggers & filters | 20 | 2 | 0 | 0 |
+| 2. Triggers & filters | 21 | 1 | 0 | 0 |
 | 3. Events | 23 | 0 | 13 | 0 |
 | 4. Workflow-level keys | 8 | 0 | 0 | 0 |
 | 5. Jobs | 29 | 0 | 0 | 1 |
@@ -64,7 +64,7 @@ download, annotations, `workflow_job` webhook.
 | 18. OIDC | 9 | 0 | 0 | 0 |
 | 19. Secrets & configuration variables | 13 | 0 | 0 | 0 |
 | 20. Runners & labels | 6 | 0 | 0 | 3 |
-| 21. Security behaviours | 8 | 1 | 0 | 0 |
+| 21. Security behaviours | 9 | 0 | 0 | 0 |
 | 22. Limits | 7 | 0 | 0 | 1 |
 | 23. Run lifecycle & integrations | 15 | 1 | 0 | 1 |
 | 24. GitHub REST API for Actions | 14 | 0 | 1 | 0 |
@@ -111,7 +111,7 @@ and <https://docs.github.com/en/actions/writing-workflows/workflow-syntax-for-gi
 | `on.branch-delete` | A branch-deletion push does not trigger `push` | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_branch_delete_and_tag_flood | |
 | `on.tag-flood` | A push with more than 3 tags triggers no tag events | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_branch_delete_and_tag_flood | |
 | `on.unsupported-event` | An event we do not implement warns instead of vanishing | supported | case:on-unsupported-event, test:crates/oxidean-api/src/actions/parse.rs::unimplemented_events_warn_loudly | The `on.<event>` name is emitted as a workflow warning; the workflow still runs for its other triggers. |
-| `on.token-events` | GITHUB_TOKEN-caused events do not create runs (except dispatch) | partial | test:crates/oxidean-runner/src/exec/mod.rs::checkout_auth_prefers_job_token | The job token is a fetch credential only — there is no push path, so token-driven events cannot recur. Dispatch suppression verified; the general rule is structurally held. |
+| `on.token-events` | GITHUB_TOKEN-caused events do not create runs (except dispatch) | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_lifecycle_release_and_issues | Every dispatch path gates on the caller's token class: git pushes and `repo.files.*` commits skip `push`/`create`/`delete`, RPC mutations carry `job_token_actor` into lifecycle + `pull_request` dispatch, and `workflow_dispatch`/`repository_dispatch` stay allowed (GitHub's documented exception). |
 | `on.workflow-call` | `workflow_call` trigger — workflow is callable via `uses:` | supported | case:reusable-workflow-local, case:reusable-workflow-remote | A `workflow_call`-only workflow never self-dispatches; caller jobs resolve and expand it. |
 | `on.pr-merge-sha` | `pull_request` runs against the merge-commit SHA | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_pull_request_test_merge_commit, test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_pull_request_merge_conflict_falls_back_to_head | `merge-tree --write-tree` synthesizes the commit against the live base tip; `github.sha` = merge, `github.ref` = `refs/pull/N/merge`. Unmergeable PRs fall back to the head sha + `refs/pull/N/head` — GitHub leaves such checks pending; we keep CI running (documented divergence). |
 
@@ -609,7 +609,7 @@ Source: <https://docs.github.com/en/actions/security-for-github-actions/security
 | `sec.prt-optin` | `pull_request_target` requires the repo opt-in flag | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_pull_request_types_and_target_optin | Base-ref checkout enforced — a fork PR cannot reach a privileged run by rewriting its own workflow file. |
 | `sec.prt-workflow-source` | `pull_request_target` runs the base-ref workflow | supported | case:prt-only | |
 | `sec.pr-workflow-source` | `pull_request` runs the merged-tree workflow | supported | case:pr-only | Workflows evaluate on the test-merge tree (head content merged into base); head-only fallback when unmergeable. |
-| `sec.token-recursion` | Job-token events never re-trigger workflows | partial | test:crates/oxidean-runner/src/exec/mod.rs::checkout_auth_prefers_job_token | The job token has no push capability, so the rule holds structurally; dispatch suppression is explicit. |
+| `sec.token-recursion` | Job-token events never re-trigger workflows | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_pull_request_types_and_target_optin | `job_token_actor` early-returns lifecycle and PR dispatch; push transports (HTTP smart-git, `repo.files.*` commits, SSH — which job tokens can't authenticate) all gate the same way. Webhooks still deliver. |
 | `sec.action-policy` | Instance allowlist / full-SHA pinning for actions | supported | test:crates/oxidean-api/src/actions/policy.rs::allowlist_enforces_owner_and_repo, test:crates/oxidean-api/tests/actions_phase8.rs::p8_policy_violation_fails_validation_loudly | `peter-evans/*` style owner and repo allowlists; `@<full-sha>` pinning enforcible. |
 | `sec.script-injection` | `${{ }}` in `run:` is text-substituted — injection-resistant guidance applies | supported | case:expr-in-run | Same model as GitHub; mitigations are workflow-authoring concerns. |
 | `sec.log-masking` | Secrets and job token masked in logs | supported | test:crates/oxidean-runner/src/exec/mod.rs::secrets_masked_in_logs, test:crates/oxidean-runner/src/exec/mod.rs::job_token_masked_in_logs | `::add-mask::` dynamic masks are not interpreted (see `cmd.add-mask`). |

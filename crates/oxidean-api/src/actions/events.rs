@@ -82,6 +82,11 @@ pub struct PullRequestEvent {
     /// differs for fork heads. Recorded on `pull_request` runs; claim uses it
     /// to gate secrets and the job token's write grant.
     pub head_repo_id: Option<String>,
+    /// Set when the mutating actor authenticated with an Actions job token —
+    /// GITHUB_TOKEN-caused events never start new runs (GitHub's recursion
+    /// rule; `workflow_dispatch`/`repository_dispatch` are exempt and don't
+    /// flow through this path).
+    pub job_token_actor: bool,
     pub actions_enabled_instance: bool,
 }
 
@@ -120,6 +125,10 @@ async fn dispatch_pull_request_inner(
     git: &dyn GitBackend,
     event: &PullRequestEvent,
 ) -> Result<usize, String> {
+    if event.job_token_actor {
+        // GITHUB_TOKEN parity — token-caused mutations never start runs.
+        return Ok(0);
+    }
     if !event.actions_enabled_instance {
         return Ok(0);
     }
@@ -500,6 +509,7 @@ pub async fn dispatch_pull_request_for_sha(
         base_default_branch: "main".into(),
         actor_id: actor_id.map(str::to_string),
         head_repo_id: head_repo_id.map(str::to_string),
+        job_token_actor: false,
         actions_enabled_instance,
     };
     dispatch_pull_request_inner(db, git, &event).await
@@ -522,7 +532,22 @@ pub struct LifecycleEvent {
     pub action: String,
     pub payload: serde_json::Value,
     pub actor_id: Option<String>,
+    /// Set when the mutating actor authenticated with an Actions job token —
+    /// GITHUB_TOKEN-caused events never start new runs (GitHub's recursion
+    /// rule; `workflow_dispatch`/`repository_dispatch` are exempt and don't
+    /// flow through this path).
+    pub job_token_actor: bool,
     pub actions_enabled_instance: bool,
+}
+
+/// Whether the RPC caller authenticated with an Actions job token
+/// (`ctx.pat` synthesized from `OXIDEAN_TOKEN`/GITHUB_TOKEN). Session-cookie
+/// and human-PAT callers return `false`.
+pub fn rpc_caller_is_job_token(ctx: &crate::rpc::RpcCtx) -> bool {
+    ctx.pat
+        .as_ref()
+        .map(crate::pat::bearer::is_job_token)
+        .unwrap_or_default()
 }
 
 /// Build a `LifecycleEvent` from an `RpcCtx` + resolved repo coords — the
@@ -549,6 +574,7 @@ pub fn rpc_lifecycle_event(
         action: action.to_string(),
         payload,
         actor_id,
+        job_token_actor: rpc_caller_is_job_token(ctx),
         actions_enabled_instance: crate::actions::env_actions_enabled(),
     })
 }
@@ -574,6 +600,10 @@ async fn dispatch_lifecycle_inner(
     git: &dyn GitBackend,
     event: &LifecycleEvent,
 ) -> Result<usize, String> {
+    if event.job_token_actor {
+        // GITHUB_TOKEN parity — token-caused mutations never start runs.
+        return Ok(0);
+    }
     if !event.actions_enabled_instance {
         return Ok(0);
     }

@@ -670,6 +670,9 @@ pub async fn notify_ref_events(
                 },
                 payload,
                 actor_id: Some(pusher_id.to_string()),
+                // `suppress_actions` above already skips job-token pushes —
+                // this literal is unreachable then; explicit for clarity.
+                job_token_actor: false,
                 actions_enabled_instance: crate::actions::env_actions_enabled(),
             },
         )
@@ -845,6 +848,9 @@ pub async fn notify_package_publish(
                 action: action.to_string(),
                 payload,
                 actor_id: Some(sender_id.to_string()),
+                // Registry auth rejects job tokens — publish always carries a
+                // human/OAuth identity.
+                job_token_actor: false,
                 actions_enabled_instance: crate::actions::env_actions_enabled(),
             },
         )

@@ -389,6 +389,7 @@ jobs:
         base_default_branch: "main".into(),
         actor_id: Some(uid2.clone()),
         head_repo_id: Some(repo2_id.clone()),
+        job_token_actor: false,
         actions_enabled_instance: true,
     };
     let n = oxidean_api::actions::dispatch_pull_request(
@@ -419,6 +420,15 @@ jobs:
     assert_eq!(run.event, "pull_request_target");
     assert_eq!(run.head_ref, "refs/heads/main", "trusted run uses base ref");
     assert_eq!(run.head_sha, tip2);
+
+    // GITHUB_TOKEN parity — a job-token-caused pull event never enqueues,
+    // even with pull_request_target opted in.
+    let mut tok_ev = mk_event(PullRequestAction::Opened);
+    tok_ev.job_token_actor = true;
+    let n = oxidean_api::actions::dispatch_pull_request(&db, Arc::new(git.clone()), &tok_ev)
+        .await
+        .unwrap();
+    assert_eq!(n, 0, "job-token-caused pull_request must not enqueue");
 }
 
 #[tokio::test]
@@ -601,6 +611,7 @@ jobs:
         action: action.to_string(),
         payload: serde_json::json!({"action": action}),
         actor_id: Some(uid.clone()),
+        job_token_actor: false,
         actions_enabled_instance: true,
     };
 
@@ -619,6 +630,17 @@ jobs:
         .unwrap();
     assert!(runs.iter().any(|r| r.event == "release"));
     assert!(runs.iter().any(|r| r.event == "issues"));
+
+    // GITHUB_TOKEN parity — an actor authenticated with an Actions job token
+    // must not start new runs (job → mutation → run recursion guard).
+    let mut tok_ev = ev("issues", "opened");
+    tok_ev.job_token_actor = true;
+    notify_lifecycle_actions(&db, git.as_ref(), &tok_ev).await;
+    assert_eq!(
+        run_count(&db, &repo_id).await,
+        2,
+        "job-token-caused issues event must not enqueue"
+    );
     let _ = repos_dir;
 }
 
@@ -672,6 +694,7 @@ jobs:
         action: action.to_string(),
         payload: serde_json::json!({"action": action}),
         actor_id: Some(uid.clone()),
+        job_token_actor: false,
         actions_enabled_instance: true,
     };
 
@@ -1134,6 +1157,7 @@ jobs:
         base_default_branch: "main".into(),
         actor_id: Some(uid.clone()),
         head_repo_id: Some(repo_id.clone()),
+        job_token_actor: false,
         actions_enabled_instance: true,
     };
     let n = oxidean_api::actions::dispatch_pull_request(&db, Arc::new(git.clone()), &event)
@@ -1258,6 +1282,7 @@ jobs:
         base_default_branch: "main".into(),
         actor_id: Some(uid.clone()),
         head_repo_id: Some(repo_id.clone()),
+        job_token_actor: false,
         actions_enabled_instance: true,
     };
     let n = oxidean_api::actions::dispatch_pull_request(&db, Arc::new(git.clone()), &event)

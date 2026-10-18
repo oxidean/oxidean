@@ -741,6 +741,7 @@ async fn authorize_and_cgi(
                                 &uid,
                                 &updates_pull,
                                 &env_name,
+                                suppress_actions,
                             )
                             .await;
                         });

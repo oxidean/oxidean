@@ -424,7 +424,7 @@ async fn resolve_job_token(
 /// Whether `pat` is a synthesized Actions job-token identity. Job tokens are
 /// strictly pinned to their repository — unlike FG PATs they get no
 /// public-repo read bypass on other repositories (GITHUB_TOKEN parity).
-fn is_job_token(pat: &PatIdentity) -> bool {
+pub(crate) fn is_job_token(pat: &PatIdentity) -> bool {
     pat.token_prefix
         .starts_with(crate::actions::job_tokens::JOB_TOKEN_PREFIX)
 }

@@ -1564,6 +1564,7 @@ async fn notify_actions_issue(
             action: action.to_string(),
             payload,
             actor_id: Some(user.id.clone()),
+            job_token_actor: crate::actions::events::rpc_caller_is_job_token(ctx),
             actions_enabled_instance: crate::actions::env_actions_enabled(),
         },
     )
@@ -1624,6 +1625,7 @@ async fn notify_actions_label_delta(
             action: action.to_string(),
             payload,
             actor_id: Some(user.id.clone()),
+            job_token_actor: crate::actions::events::rpc_caller_is_job_token(ctx),
             actions_enabled_instance: crate::actions::env_actions_enabled(),
         },
     )

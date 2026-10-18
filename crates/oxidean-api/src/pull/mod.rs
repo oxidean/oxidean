@@ -63,6 +63,7 @@ async fn notify_actions_for_pull(
     head_owner: &str,
     head_name: &str,
     actor_id: Option<&str>,
+    job_token_actor: bool,
     action: crate::actions::PullRequestAction,
 ) {
     let Ok(bare) = bare_repo_path(repos_dir, head_owner, head_name) else {
@@ -97,6 +98,7 @@ async fn notify_actions_for_pull(
         base_default_branch,
         actor_id: actor_id.map(str::to_string),
         head_repo_id: Some(pull.head_repo_id.clone()),
+        job_token_actor,
         actions_enabled_instance: crate::actions::env_actions_enabled(),
     };
     crate::actions::notify_pull_request_actions(db, git, &event).await;
@@ -217,6 +219,9 @@ pub async fn synchronize_after_push(
     pusher_id: &str,
     updates: &[(String, String, String)],
     env_name: &str,
+    // GITHUB_TOKEN parity — job-token pushes must not fire `pull_request`
+    // runs off the synchronize.
+    job_token_actor: bool,
 ) {
     let git = CliGitBackend::new();
     let mut branch_after: Vec<(String, String)> = updates
@@ -272,6 +277,7 @@ pub async fn synchronize_after_push(
             pusher_login,
             pusher_id,
             env_name,
+            job_token_actor,
         )
         .await
         {
@@ -297,6 +303,7 @@ async fn sync_open_pulls_for_branch(
     pusher_login: &str,
     pusher_id: &str,
     env_name: &str,
+    job_token_actor: bool,
 ) -> Result<(), String> {
     let (open, _) = db
         .list_pulls_for_repo(repository_id, Some("open"), 0, 500)
@@ -323,6 +330,7 @@ async fn sync_open_pulls_for_branch(
             pusher_login,
             pusher_id,
             env_name,
+            job_token_actor,
         )
         .await?;
     }
@@ -352,6 +360,8 @@ pub(crate) async fn synchronize_pull_after_head_move(
     actor_login: &str,
     actor_id: &str,
     env_name: &str,
+    // GITHUB_TOKEN parity — token-caused head moves never start runs.
+    job_token_actor: bool,
 ) -> Result<PullRow, String> {
     if pull.head_sha == new_head_sha {
         return Ok(pull.clone());
@@ -426,6 +436,7 @@ pub(crate) async fn synchronize_pull_after_head_move(
         head_owner,
         head_name,
         Some(actor_id),
+        job_token_actor,
         crate::actions::PullRequestAction::Synchronize,
     )
     .await;
@@ -840,6 +851,7 @@ pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullPublic
         &head_owner_slug,
         &head_repo_name,
         Some(&user.id),
+        crate::actions::events::rpc_caller_is_job_token(ctx),
         crate::actions::PullRequestAction::Opened,
     )
     .await;
@@ -1190,6 +1202,7 @@ pub async fn reopen(ctx: &RpcCtx, input: serde_json::Value) -> Result<PullPublic
         &head_owner,
         &head_name,
         Some(&user.id),
+        crate::actions::events::rpc_caller_is_job_token(ctx),
         crate::actions::PullRequestAction::Reopened,
     )
     .await;

@@ -248,6 +248,7 @@ pub async fn update_branch(
         &user.username,
         &user.id,
         &ctx.env_name,
+        crate::actions::events::rpc_caller_is_job_token(ctx),
     )
     .await
     .map_err(db_err)?;

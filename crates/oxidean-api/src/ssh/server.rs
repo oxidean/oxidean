@@ -397,6 +397,9 @@ impl Handler for SshHandler {
                                 &user.id,
                                 &updates,
                                 &env_name,
+                                // SSH auth is deploy/user keys — job tokens
+                                // can't authenticate this transport.
+                                false,
                             )
                             .await;
                             let actions_enabled = crate::actions::env_actions_enabled();
