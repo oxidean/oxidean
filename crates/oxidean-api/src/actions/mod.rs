@@ -16,6 +16,7 @@ pub mod oidc;
 pub mod parse;
 pub mod payload;
 pub mod policy;
+pub mod reusable;
 pub mod rpc;
 pub mod runner_proto;
 pub mod scheduler;

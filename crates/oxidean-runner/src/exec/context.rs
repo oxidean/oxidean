@@ -87,7 +87,15 @@ pub(crate) fn runner_context(
             task.needs.clone().unwrap_or_else(|| serde_json::json!({})),
         )
         .with_context("steps", serde_json::json!({}))
-        .with_context("inputs", serde_json::json!({}))
+        // `inputs` mirrors `github.event.inputs` — workflow_dispatch inputs
+        // and reusable-call `with:` values both land there server-side.
+        .with_context(
+            "inputs",
+            task.event_payload
+                .as_ref()
+                .and_then(|e| e.get("inputs").cloned())
+                .unwrap_or_else(|| serde_json::json!({})),
+        )
         .with_context("vars", serde_json::json!({}))
         .with_context("strategy", serde_json::json!({}))
         .with_context(

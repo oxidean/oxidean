@@ -570,14 +570,54 @@ async fn fetch_task(
                 workflow_ref: workflow_ref.clone(),
             };
             // `needs.<id>.{result,outputs}` for dependents — computed before
-            // the response literal moves `j.run_id`/`j.needs_json`.
+            // the response literal moves `j.run_id`/`j.needs_json`. Scoped
+            // to the caller group so callee-internal needs resolve.
             let needs = {
                 let all = state
                     .db
                     .list_action_jobs_for_run(&j.run_id)
                     .await
                     .unwrap_or_default();
-                crate::actions::scheduler::needs_context_for_task(&all, &j.needs_json)
+                crate::actions::scheduler::needs_context_for_task(
+                    &all,
+                    &j.needs_json,
+                    j.caller_job_id.as_str(),
+                )
+            };
+            // Reusable-workflow callee legs (P13): `call_inputs` patches the
+            // frozen event payload's `inputs` member — `github.event.inputs`
+            // and the runner's `inputs` context both resolve from it.
+            let event_payload = {
+                let base: serde_json::Value = run
+                    .event_payload_json
+                    .as_deref()
+                    .and_then(|s| serde_json::from_str(s).ok())
+                    .unwrap_or_else(|| serde_json::json!({}));
+                match payload_json.get("call_inputs") {
+                    Some(inputs) if !inputs.is_null() => {
+                        crate::actions::reusable::patch_event_inputs(&base, inputs)
+                    }
+                    _ => base,
+                }
+            };
+            // `call_secrets` remaps the caller scope: `inherit` passes
+            // through, a map forwards each callee name from the evaluated
+            // caller-scope expr, absent = the callee sees no secrets.
+            let secrets = if !j.caller_job_id.is_empty() {
+                let spec = payload_json
+                    .get("call_secrets")
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null);
+                let scope: serde_json::Map<String, serde_json::Value> = secrets
+                    .iter()
+                    .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
+                    .collect();
+                crate::actions::reusable::remap_call_secrets(&scope, &spec)
+                    .into_iter()
+                    .map(|(k, v)| (k, v.as_str().unwrap_or_default().to_string()))
+                    .collect()
+            } else {
+                secrets
             };
             // Job timeout clock starts at claim (GitHub semantics), not at
             // enqueue — a needs-gated or held job's `timeout-minutes` must
@@ -641,12 +681,7 @@ async fn fetch_task(
                 env: payload_json.get("env").cloned(),
                 workflow_env: payload_json.get("workflow_env").cloned(),
                 timeout_at,
-                event_payload: Some(
-                    run.event_payload_json
-                        .as_deref()
-                        .and_then(|s| serde_json::from_str(s).ok())
-                        .unwrap_or_else(|| serde_json::json!({})),
-                ),
+                event_payload: Some(event_payload),
                 matrix: Some(
                     serde_json::from_str(&j.matrix_json).unwrap_or_else(|_| serde_json::json!({})),
                 ),

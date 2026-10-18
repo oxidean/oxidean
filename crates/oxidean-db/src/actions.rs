@@ -125,6 +125,9 @@ pub struct ActionJobRow {
     /// RFC3339 instant after which the leg may be queued (environment wait
     /// timer). The scheduler skips `waiting` legs whose timer hasn't lapsed.
     pub deployment_not_before: Option<String>,
+    /// Reusable-workflow link (P13): callee legs carry the `uses:` job's id;
+    /// NULL on top-level jobs. Scopes needs/fail-fast matching per call.
+    pub caller_job_id: String,
     pub runner_id: Option<String>,
     pub started_at: Option<String>,
     pub finished_at: Option<String>,
@@ -173,6 +176,9 @@ pub struct JobInsert {
     /// Precomputed earliest-queue instant for root legs (needs-legs get their
     /// timer stamped at needs-resolution time).
     pub deployment_not_before: Option<String>,
+    /// Reusable-workflow linkage — callee legs carry the caller `uses:` job's
+    /// id so the scheduler scopes needs/fail-fast within the call.
+    pub caller_job_id: String,
 }
 
 impl JobInsert {
@@ -196,6 +202,7 @@ impl JobInsert {
             environment_name: None,
             deployment_wait_minutes: 0,
             deployment_not_before: None,
+            caller_job_id: String::new(),
         }
     }
 }
@@ -214,9 +221,9 @@ pub struct ActionPayloadRow {
 /// Job SELECT-list per dialect — only timestamp casts differ. Keeping the
 /// list in one const per dialect prevents column drift between
 /// `find_job_by_id`, `list_jobs_for_run`, and the claim path.
-const JOB_COLS_SQLITE: &str = "id, run_id, job_key, matrix_key, name, runs_on_json, status, payload_sha, needs_json, matrix_json, outputs_json, summary_md, concurrency_group, attempt, timeout_at, approval_hold, environment_name, deployment_wait_minutes, deployment_not_before, runner_id, started_at, finished_at, heartbeat_at, log_index";
-const JOB_COLS_PG: &str = "id, run_id, job_key, matrix_key, name, runs_on_json, status, payload_sha, needs_json, matrix_json, outputs_json, summary_md, concurrency_group, attempt, to_char(timeout_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS timeout_at, approval_hold, environment_name, deployment_wait_minutes, deployment_not_before::text AS deployment_not_before, runner_id, started_at::text AS started_at, finished_at::text AS finished_at, heartbeat_at, log_index";
-const JOB_COLS_MYSQL: &str = "id, run_id, job_key, matrix_key, name, runs_on_json, status, payload_sha, needs_json, matrix_json, outputs_json, summary_md, concurrency_group, attempt, DATE_FORMAT(timeout_at, '%Y-%m-%dT%H:%i:%sZ') AS timeout_at, approval_hold, environment_name, deployment_wait_minutes, deployment_not_before, runner_id, CAST(started_at AS CHAR) AS started_at, CAST(finished_at AS CHAR) AS finished_at, heartbeat_at, log_index";
+const JOB_COLS_SQLITE: &str = "id, run_id, job_key, matrix_key, name, runs_on_json, status, payload_sha, needs_json, matrix_json, outputs_json, summary_md, concurrency_group, attempt, timeout_at, approval_hold, environment_name, deployment_wait_minutes, deployment_not_before, caller_job_id, runner_id, started_at, finished_at, heartbeat_at, log_index";
+const JOB_COLS_PG: &str = "id, run_id, job_key, matrix_key, name, runs_on_json, status, payload_sha, needs_json, matrix_json, outputs_json, summary_md, concurrency_group, attempt, to_char(timeout_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS timeout_at, approval_hold, environment_name, deployment_wait_minutes, deployment_not_before::text AS deployment_not_before, caller_job_id, runner_id, started_at::text AS started_at, finished_at::text AS finished_at, heartbeat_at, log_index";
+const JOB_COLS_MYSQL: &str = "id, run_id, job_key, matrix_key, name, runs_on_json, status, payload_sha, needs_json, matrix_json, outputs_json, summary_md, concurrency_group, attempt, DATE_FORMAT(timeout_at, '%Y-%m-%dT%H:%i:%sZ') AS timeout_at, approval_hold, environment_name, deployment_wait_minutes, deployment_not_before, caller_job_id, runner_id, CAST(started_at AS CHAR) AS started_at, CAST(finished_at AS CHAR) AS finished_at, heartbeat_at, log_index";
 
 macro_rules! map_job_row {
     ($row:expr) => {{
@@ -250,6 +257,7 @@ macro_rules! map_job_row {
                 })
                 .unwrap_or(0),
             deployment_not_before: r.try_get("deployment_not_before").unwrap_or(None),
+            caller_job_id: r.try_get("caller_job_id").unwrap_or_default(),
             runner_id: r.get("runner_id"),
             started_at: r.try_get("started_at").unwrap_or(None),
             finished_at: r.try_get("finished_at").unwrap_or(None),
@@ -598,8 +606,8 @@ pub async fn insert_job(pool: &DbPool, job: &JobInsert) -> Result<ActionJobRow, 
         DbPool::Postgres(p) => {
             let mut tx = p.begin().await.map_err(|e| e.to_string())?;
             sqlx::query(r#"INSERT INTO action_jobs
-                (id, run_id, job_key, matrix_key, name, runs_on_json, payload_sha, needs_json, matrix_json, outputs_json, concurrency_group, status, timeout_at, approval_hold, environment_name, deployment_wait_minutes, deployment_not_before)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::timestamptz,$14,$15,$16,$17)"#)
+                (id, run_id, job_key, matrix_key, name, runs_on_json, payload_sha, needs_json, matrix_json, outputs_json, concurrency_group, status, timeout_at, approval_hold, environment_name, deployment_wait_minutes, deployment_not_before, caller_job_id)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::timestamptz,$14,$15,$16,$17,$18)"#)
                 .bind(&job.id).bind(&job.run_id).bind(&job.job_key).bind(&job.matrix_key)
                 .bind(&job.name).bind(&job.runs_on_json).bind(&job.payload_sha)
                 .bind(&job.needs_json).bind(&job.matrix_json).bind(&job.outputs_json)
@@ -607,6 +615,7 @@ pub async fn insert_job(pool: &DbPool, job: &JobInsert) -> Result<ActionJobRow, 
                 .bind(job.approval_hold)
                 .bind(&job.environment_name).bind(job.deployment_wait_minutes)
                 .bind(&job.deployment_not_before)
+                .bind(&job.caller_job_id)
                 .execute(&mut *tx).await.map_err(|e| e.to_string())?;
             for label in &labels {
                 sqlx::query("INSERT INTO action_job_labels (job_id, label, base) VALUES ($1,$2,$3) ON CONFLICT DO NOTHING")
@@ -618,8 +627,8 @@ pub async fn insert_job(pool: &DbPool, job: &JobInsert) -> Result<ActionJobRow, 
         DbPool::MySql(p) => {
             let mut tx = p.begin().await.map_err(|e| e.to_string())?;
             sqlx::query(r#"INSERT INTO action_jobs
-                (id, run_id, job_key, matrix_key, name, runs_on_json, payload_sha, needs_json, matrix_json, outputs_json, concurrency_group, status, timeout_at, approval_hold, environment_name, deployment_wait_minutes, deployment_not_before)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,STR_TO_DATE(REPLACE(REPLACE(?, 'T', ' '), 'Z', ''), '%Y-%m-%d %H:%i:%s'),?,?,?,?)"#)
+                (id, run_id, job_key, matrix_key, name, runs_on_json, payload_sha, needs_json, matrix_json, outputs_json, concurrency_group, status, timeout_at, approval_hold, environment_name, deployment_wait_minutes, deployment_not_before, caller_job_id)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,STR_TO_DATE(REPLACE(REPLACE(?, 'T', ' '), 'Z', ''), '%Y-%m-%d %H:%i:%s'),?,?,?,?,?)"#)
                 .bind(&job.id).bind(&job.run_id).bind(&job.job_key).bind(&job.matrix_key)
                 .bind(&job.name).bind(&job.runs_on_json).bind(&job.payload_sha)
                 .bind(&job.needs_json).bind(&job.matrix_json).bind(&job.outputs_json)
@@ -627,6 +636,7 @@ pub async fn insert_job(pool: &DbPool, job: &JobInsert) -> Result<ActionJobRow, 
                 .bind(job.approval_hold)
                 .bind(&job.environment_name).bind(job.deployment_wait_minutes)
                 .bind(&job.deployment_not_before)
+                .bind(&job.caller_job_id)
                 .execute(&mut *tx).await.map_err(|e| e.to_string())?;
             for label in &labels {
                 sqlx::query(
@@ -644,8 +654,8 @@ pub async fn insert_job(pool: &DbPool, job: &JobInsert) -> Result<ActionJobRow, 
         DbPool::Sqlite(p) => {
             let mut tx = p.begin().await.map_err(|e| e.to_string())?;
             sqlx::query(r#"INSERT INTO action_jobs
-                (id, run_id, job_key, matrix_key, name, runs_on_json, payload_sha, needs_json, matrix_json, outputs_json, concurrency_group, status, timeout_at, approval_hold, environment_name, deployment_wait_minutes, deployment_not_before)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"#)
+                (id, run_id, job_key, matrix_key, name, runs_on_json, payload_sha, needs_json, matrix_json, outputs_json, concurrency_group, status, timeout_at, approval_hold, environment_name, deployment_wait_minutes, deployment_not_before, caller_job_id)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"#)
                 .bind(&job.id).bind(&job.run_id).bind(&job.job_key).bind(&job.matrix_key)
                 .bind(&job.name).bind(&job.runs_on_json).bind(&job.payload_sha)
                 .bind(&job.needs_json).bind(&job.matrix_json).bind(&job.outputs_json)
@@ -653,6 +663,7 @@ pub async fn insert_job(pool: &DbPool, job: &JobInsert) -> Result<ActionJobRow, 
                 .bind(job.approval_hold)
                 .bind(&job.environment_name).bind(job.deployment_wait_minutes)
                 .bind(&job.deployment_not_before)
+                .bind(&job.caller_job_id)
                 .execute(&mut *tx).await.map_err(|e| e.to_string())?;
             for label in &labels {
                 sqlx::query(
@@ -688,6 +699,7 @@ pub async fn insert_job(pool: &DbPool, job: &JobInsert) -> Result<ActionJobRow, 
         environment_name: job.environment_name.clone(),
         deployment_wait_minutes: job.deployment_wait_minutes,
         deployment_not_before: job.deployment_not_before.clone(),
+        caller_job_id: job.caller_job_id.clone(),
         runner_id: None,
         started_at: None,
         finished_at: None,
@@ -2698,9 +2710,14 @@ pub async fn requeue_run(
     // Requeued needs-jobs go back to `waiting` so the scheduler re-gates
     // them; enqueue-skipped jobs (if:false, no needs) stay skipped — a
     // rerun must not resurrect a job the expression already rejected.
-    const JOB_RESET_SQLITE: &str = "UPDATE action_jobs SET status = CASE WHEN status = 'skipped' AND needs_json = '[]' THEN 'skipped' WHEN needs_json != '[]' THEN 'waiting' ELSE 'queued' END, runner_id = NULL, started_at = NULL, finished_at = NULL, timeout_at = NULL, attempt = attempt + 1, updated_at = CURRENT_TIMESTAMP WHERE run_id = ?";
-    const JOB_RESET_PG: &str = "UPDATE action_jobs SET status = CASE WHEN status = 'skipped' AND needs_json = '[]' THEN 'skipped' WHEN needs_json != '[]' THEN 'waiting' ELSE 'queued' END, runner_id = NULL, started_at = NULL, finished_at = NULL, timeout_at = NULL, attempt = attempt + 1, updated_at = now() WHERE run_id = $1";
-    const JOB_RESET_MYSQL: &str = "UPDATE action_jobs SET status = CASE WHEN status = 'skipped' AND needs_json = '[]' THEN 'skipped' WHEN needs_json != '[]' THEN 'waiting' ELSE 'queued' END, runner_id = NULL, started_at = NULL, finished_at = NULL, timeout_at = NULL, attempt = attempt + 1, updated_at = CURRENT_TIMESTAMP WHERE run_id = ?";
+    // Reusable-workflow caller legs (payload carries `"call":`) re-queue as
+    // `waiting` too — `queued` would make them claimable; the scheduler's
+    // expansion pass re-emits their callee rows instead. Callee rows
+    // (`caller_job_id` set) likewise reset to `waiting` — never claimable —
+    // because expansion deletes and re-emits them wholesale.
+    const JOB_RESET_SQLITE: &str = "UPDATE action_jobs SET status = CASE WHEN caller_job_id != '' THEN 'waiting' WHEN status = 'skipped' AND needs_json = '[]' THEN 'skipped' WHEN needs_json != '[]' THEN 'waiting' WHEN EXISTS (SELECT 1 FROM action_payloads p WHERE p.sha = action_jobs.payload_sha AND p.payload_json LIKE '%\"call\":{%') THEN 'waiting' ELSE 'queued' END, runner_id = NULL, started_at = NULL, finished_at = NULL, timeout_at = NULL, attempt = attempt + 1, updated_at = CURRENT_TIMESTAMP WHERE run_id = ?";
+    const JOB_RESET_PG: &str = "UPDATE action_jobs SET status = CASE WHEN caller_job_id != '' THEN 'waiting' WHEN status = 'skipped' AND needs_json = '[]' THEN 'skipped' WHEN needs_json != '[]' THEN 'waiting' WHEN EXISTS (SELECT 1 FROM action_payloads p WHERE p.sha = action_jobs.payload_sha AND p.payload_json LIKE '%\"call\":{%') THEN 'waiting' ELSE 'queued' END, runner_id = NULL, started_at = NULL, finished_at = NULL, timeout_at = NULL, attempt = attempt + 1, updated_at = now() WHERE run_id = $1";
+    const JOB_RESET_MYSQL: &str = "UPDATE action_jobs SET status = CASE WHEN caller_job_id != '' THEN 'waiting' WHEN status = 'skipped' AND needs_json = '[]' THEN 'skipped' WHEN needs_json != '[]' THEN 'waiting' WHEN EXISTS (SELECT 1 FROM action_payloads p WHERE p.sha = action_jobs.payload_sha AND p.payload_json LIKE '%\"call\":{%') THEN 'waiting' ELSE 'queued' END, runner_id = NULL, started_at = NULL, finished_at = NULL, timeout_at = NULL, attempt = attempt + 1, updated_at = CURRENT_TIMESTAMP WHERE run_id = ?";
     match pool {
         DbPool::Sqlite(p) => {
             sqlx::query(
@@ -2709,9 +2726,10 @@ pub async fn requeue_run(
             .bind(run_id).execute(p).await.map_err(|e| e.to_string())?;
             if let Some(j) = job_id {
                 sqlx::query(sqlx::AssertSqlSafe(format!(
-                    "{JOB_RESET_SQLITE} AND id = ?"
+                    "{JOB_RESET_SQLITE} AND (id = ? OR caller_job_id = ?)"
                 )))
                 .bind(run_id)
+                .bind(j)
                 .bind(j)
                 .execute(p)
                 .await
@@ -2738,12 +2756,14 @@ pub async fn requeue_run(
             )
             .bind(run_id).execute(p).await.map_err(|e| e.to_string())?;
             if let Some(j) = job_id {
-                sqlx::query(sqlx::AssertSqlSafe(format!("{JOB_RESET_PG} AND id = $2")))
-                    .bind(run_id)
-                    .bind(j)
-                    .execute(p)
-                    .await
-                    .map_err(|e| e.to_string())?;
+                sqlx::query(sqlx::AssertSqlSafe(format!(
+                    "{JOB_RESET_PG} AND (id = $2 OR caller_job_id = $2)"
+                )))
+                .bind(run_id)
+                .bind(j)
+                .execute(p)
+                .await
+                .map_err(|e| e.to_string())?;
             } else if failed_only {
                 sqlx::query(sqlx::AssertSqlSafe(format!(
                     "{JOB_RESET_PG} AND status IN ('failure','cancelled')"
@@ -2766,12 +2786,14 @@ pub async fn requeue_run(
             )
             .bind(run_id).execute(p).await.map_err(|e| e.to_string())?;
             if let Some(j) = job_id {
-                sqlx::query(sqlx::AssertSqlSafe(format!("{JOB_RESET_MYSQL} AND id = ?")))
-                    .bind(run_id)
-                    .bind(j)
-                    .execute(p)
-                    .await
-                    .map_err(|e| e.to_string())?;
+                sqlx::query(sqlx::AssertSqlSafe(format!(
+                    "{JOB_RESET_MYSQL} AND (id = ? OR caller_job_id = ?)"
+                )))
+                .bind(run_id)
+                .bind(j)
+                .execute(p)
+                .await
+                .map_err(|e| e.to_string())?;
             } else if failed_only {
                 sqlx::query(sqlx::AssertSqlSafe(format!(
                     "{JOB_RESET_MYSQL} AND status IN ('failure','cancelled')"
@@ -4599,6 +4621,34 @@ pub async fn requeue_stale_job(pool: &DbPool, job_id: &str) -> Result<bool, Stri
         .await
         .map(|r| r.rows_affected() > 0)
         .map_err(|e| e.to_string()),
+    }
+}
+
+/// Delete a caller leg's callee rows — re-expansion on rerun re-emits fresh
+/// rows; the replaced legs' log files stay on disk but their rows are gone.
+/// Only callee rows (`caller_job_id = ?`) are touched.
+pub async fn delete_callee_jobs(pool: &DbPool, caller_job_id: &str) -> Result<u64, String> {
+    const SQL: &str = "DELETE FROM action_jobs WHERE caller_job_id = ?";
+    const SQL_PG: &str = "DELETE FROM action_jobs WHERE caller_job_id = $1";
+    match pool {
+        DbPool::Sqlite(p) => sqlx::query(SQL)
+            .bind(caller_job_id)
+            .execute(p)
+            .await
+            .map(|r| r.rows_affected())
+            .map_err(|e| e.to_string()),
+        DbPool::Postgres(p) => sqlx::query(SQL_PG)
+            .bind(caller_job_id)
+            .execute(p)
+            .await
+            .map(|r| r.rows_affected())
+            .map_err(|e| e.to_string()),
+        DbPool::MySql(p) => sqlx::query(SQL)
+            .bind(caller_job_id)
+            .execute(p)
+            .await
+            .map(|r| r.rows_affected())
+            .map_err(|e| e.to_string()),
     }
 }
 

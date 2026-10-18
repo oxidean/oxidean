@@ -5,3 +5,8 @@ jobs:
     uses: ./.github/workflows/reusable.yml
     with:
       env: prod
+  report:
+    runs-on: ubuntu-latest
+    needs: [call]
+    steps:
+      - run: echo "call result=${{ needs.call.outputs.result }}"

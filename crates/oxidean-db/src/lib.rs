@@ -3998,6 +3998,12 @@ impl Database {
         actions::transition_job_status(self.require_pool()?, job_id, status).await
     }
 
+    /// Delete a caller leg's callee rows (re-expansion on rerun replaces
+    /// them); only rows whose `caller_job_id` matches are touched.
+    pub async fn delete_callee_jobs(&self, caller_job_id: &str) -> Result<u64, String> {
+        actions::delete_callee_jobs(self.require_pool()?, caller_job_id).await
+    }
+
     /// Persist the evaluated `outputs` map — read by `needs.<id>.outputs.*`.
     pub async fn set_action_job_outputs(
         &self,

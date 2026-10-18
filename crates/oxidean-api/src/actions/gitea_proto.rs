@@ -907,11 +907,20 @@ async fn build_task(
         .mint_action_task_claim(&j.id, runner_id)
         .await
         .map_err(internal_err)?;
-    let event_payload = run
-        .event_payload_json
-        .as_deref()
-        .and_then(|s| serde_json::from_str(s).ok())
-        .unwrap_or_else(|| serde_json::json!({}));
+    let event_payload = {
+        let base: serde_json::Value = run
+            .event_payload_json
+            .as_deref()
+            .and_then(|s| serde_json::from_str(s).ok())
+            .unwrap_or_else(|| serde_json::json!({}));
+        // Callee legs: patch the call's resolved inputs into event.inputs.
+        match payload_json.get("call_inputs") {
+            Some(inputs) if !inputs.is_null() => {
+                crate::actions::reusable::patch_event_inputs(&base, inputs)
+            }
+            _ => base,
+        }
+    };
     let needs = {
         let all = state
             .db
@@ -921,13 +930,34 @@ async fn build_task(
         needs_map(crate::actions::scheduler::needs_context_for_task(
             &all,
             &j.needs_json,
+            j.caller_job_id.as_str(),
         ))
+    };
+    // Callee legs: `call_secrets` remaps the decrypted caller scope —
+    // `inherit` passes through, a map forwards each callee name, absent =
+    // the callee sees nothing.
+    let secrets = if !j.caller_job_id.is_empty() {
+        let spec = payload_json
+            .get("call_secrets")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+        let scope: serde_json::Map<String, serde_json::Value> = cc
+            .secrets
+            .iter()
+            .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
+            .collect();
+        crate::actions::reusable::remap_call_secrets(&scope, &spec)
+            .into_iter()
+            .map(|(k, v)| (k, v.as_str().unwrap_or_default().to_string()))
+            .collect()
+    } else {
+        cc.secrets.clone()
     };
     Ok(pb::Task {
         id: task_id,
         workflow_payload,
         context: Some(task_context(&run, j, &cc, event_payload)),
-        secrets: cc.secrets,
+        secrets,
         machine: String::new(),
         needs,
         vars: HashMap::new(),

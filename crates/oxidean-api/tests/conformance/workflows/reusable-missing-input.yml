@@ -1,0 +1,5 @@
+name: reusable-missing-input
+on: [push]
+jobs:
+  call:
+    uses: ./.github/workflows/reusable-req.yml

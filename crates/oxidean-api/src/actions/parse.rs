@@ -121,6 +121,15 @@ pub struct WorkflowTriggers {
     /// `on.workflow_dispatch.inputs` — `{name: {type, default, required,
     /// options, description}}` normalized to JSON for the dispatch RPC.
     pub dispatch_inputs: Option<JsonValue>,
+    /// `on.workflow_call` — the file is a reusable workflow; only reachable
+    /// via `jobs.<id>.uses`, never dispatched directly.
+    pub workflow_call: bool,
+    /// `on.workflow_call.inputs` — `{name: {type, required, default, …}}`.
+    pub call_inputs: Option<JsonValue>,
+    /// `on.workflow_call.outputs` — `{name: {value: "${{ jobs.*.outputs.* }}"}}`.
+    pub call_outputs: Option<JsonValue>,
+    /// `on.workflow_call.secrets` — `{name: {required, …}}` declarations.
+    pub call_secrets: Option<JsonValue>,
 }
 
 /// `on.<event>` filter detail. GitHub's semantics per key:
@@ -189,11 +198,32 @@ pub struct JobSpec {
     /// `jobs.<id>.environment` — scalar name or `{name, url}`; name/url may
     /// interpolate and are evaluated at enqueue.
     pub environment: Option<EnvironmentSpec>,
+    /// `jobs.<id>.uses` — reusable-workflow call target. Local
+    /// `./{path}.yml` reads the same repo at the run's `head_sha`;
+    /// `{owner}/{repo}/{path}@{ref}` reads another repository at `ref`.
+    /// A calling job carries no steps — the call expands into callee job
+    /// rows linked via `caller_job_id`.
+    pub uses: Option<String>,
+    /// `jobs.<id>.with` — raw `{name: expr}` map evaluated against the
+    /// caller's context when the call expands (needs/matrix/inputs visible).
+    pub with: Option<JsonValue>,
+    /// `jobs.<id>.secrets` — `inherit` | `{callee_name: expr}` map.
+    /// Absent = callee sees no repository secrets (GitHub parity).
+    pub secrets: Option<CallSecretsSpec>,
     /// The raw YAML subtree for this job, re-marshaled at parse. The Gitea
     /// actions-proto surface embeds it into the single-job workflow payload
     /// stock act_runner executes — fields we don't model still reach the
     /// runner verbatim.
     pub raw_yaml: String,
+}
+
+/// `secrets:` on a reusable-workflow call — `inherit` forwards every secret
+/// the caller job could see; a map forwards each callee name from the
+/// caller-side expression value.
+#[derive(Debug, Clone, PartialEq)]
+pub enum CallSecretsSpec {
+    Inherit,
+    Map(JsonValue),
 }
 
 /// `environment:` shape — a bare name string or `{name, url}` mapping.
@@ -584,6 +614,20 @@ fn apply_event(
                 }
             }
         }
+        "workflow_call" => {
+            t.workflow_call = true;
+            if let Some(serde_yaml::Value::Mapping(m)) = value {
+                for (key, slot) in [
+                    ("inputs", &mut t.call_inputs),
+                    ("outputs", &mut t.call_outputs),
+                    ("secrets", &mut t.call_secrets),
+                ] {
+                    if let Some(v) = m.get(serde_yaml::Value::String(key.into())) {
+                        *slot = serde_json::to_value(v).ok();
+                    }
+                }
+            }
+        }
         "schedule" => {
             t.schedule = true;
             // `on.schedule` is a list of `{cron: "…"}` entries.
@@ -900,16 +944,79 @@ pub fn parse_workflow_yaml(bytes: &[u8]) -> Result<WorkflowDocument, ParseError>
         if job.continue_on_error.is_some() {
             flag(&mut unsupported, "continue-on-error");
         }
-        // `uses:`/`with:`/`secrets:` on a job is the reusable-workflow call shape.
-        if job.uses.is_some() || job.with.is_some() || job.secrets.is_some() {
+        // `uses:` makes the job a reusable-workflow call. GitHub restricts
+        // calling jobs to `concurrency`, `if`, `name`, `needs`, `permissions`,
+        // `secrets`, `strategy`, `uses`, `with` — anything else fails
+        // validation rather than silently dropping.
+        let uses = match job.uses.as_ref() {
+            None => None,
+            Some(serde_yaml::Value::String(s)) => {
+                let s = s.trim().to_string();
+                if s.is_empty() {
+                    flag(&mut unsupported, "reusable-workflow");
+                    None
+                } else {
+                    Some(s)
+                }
+            }
+            Some(_) => {
+                flag(&mut unsupported, "reusable-workflow");
+                None
+            }
+        };
+        if uses.is_some() {
+            for (present, key) in [
+                (job.runs_on.is_some(), "runs-on"),
+                (job.steps.as_ref().is_some_and(|s| !s.is_empty()), "steps"),
+                (job.env.is_some(), "env"),
+                (job.defaults.is_some(), "defaults"),
+                (job.container.is_some(), "container"),
+                (job.services.is_some(), "services"),
+                (job.environment.is_some(), "environment"),
+                (job.timeout_minutes.is_some(), "timeout-minutes"),
+                (job.continue_on_error.is_some(), "continue-on-error"),
+                (job.outputs.is_some(), "outputs"),
+            ] {
+                if present {
+                    flag(&mut unsupported, &format!("reusable-workflow:{key}"));
+                }
+            }
+        } else if job.with.is_some() || job.secrets.is_some() {
+            // `with:`/`secrets:` without `uses:` have no target — invalid.
             flag(&mut unsupported, "reusable-workflow");
         }
+        // `secrets:` — `inherit` scalar or a name→expr mapping.
+        let call_secrets = match job.secrets.as_ref() {
+            None => None,
+            Some(serde_yaml::Value::String(s)) if s.trim() == "inherit" => {
+                Some(CallSecretsSpec::Inherit)
+            }
+            Some(serde_yaml::Value::Mapping(_)) => Some(CallSecretsSpec::Map(yaml_to_json(
+                job.secrets.clone().unwrap(),
+            )?)),
+            Some(_) => {
+                flag(&mut unsupported, "reusable-workflow");
+                None
+            }
+        };
+        // `with:` — must be a mapping of input-name → value.
+        let call_with = match job.with.as_ref() {
+            None => None,
+            Some(serde_yaml::Value::Mapping(_)) => {
+                let v = yaml_to_json(job.with.clone().unwrap())?;
+                check_json(&v, &mut unsupported, &mut warnings);
+                Some(v)
+            }
+            Some(_) => {
+                flag(&mut unsupported, "reusable-workflow");
+                None
+            }
+        };
         let job_concurrency = parse_concurrency(job.concurrency.as_ref());
         let needs = parse_needs(job.needs.as_ref(), &id)?;
         let strategy = parse_strategy(job.strategy.as_ref(), &id)?;
-        // Reusable-call jobs (`uses:`) carry no `runs-on` — the unsupported
-        // flag above already routes them to the validation-failure path.
-        let runs_on = if job.uses.is_some() {
+        // Reusable-call jobs (`uses:`) carry no `runs-on`.
+        let runs_on = if uses.is_some() {
             Vec::new()
         } else {
             parse_runs_on(job.runs_on)?
@@ -1020,7 +1127,7 @@ pub fn parse_workflow_yaml(bytes: &[u8]) -> Result<WorkflowDocument, ParseError>
                 continue_on_error: step.continue_on_error.map(yaml_to_json).transpose()?,
             });
         }
-        if steps.is_empty() && job.uses.is_none() {
+        if steps.is_empty() && uses.is_none() {
             // GitHub rejects the file: a job needs `steps:` or a `uses:` call.
             flag(&mut unsupported, "steps");
         }
@@ -1040,6 +1147,9 @@ pub fn parse_workflow_yaml(bytes: &[u8]) -> Result<WorkflowDocument, ParseError>
             container: job_container,
             services: job_services,
             environment: parse_environment(job.environment.as_ref(), &mut warnings),
+            uses,
+            with: call_with,
+            secrets: call_secrets,
             raw_yaml: job_yaml,
         });
     }

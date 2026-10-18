@@ -421,12 +421,6 @@ pub async fn enqueue_run(
     } else {
         Some(crate::actions::logs::resolve_log_dir())
     };
-    let mut job_ids = Vec::new();
-    let mut job_keys = Vec::new();
-    // `concurrency.cancel-in-progress` — applied after all rows exist.
-    // Workflow-level group supersedes whole runs; job-level groups
-    // supersede same-group jobs only.
-    let mut supersede_groups: Vec<String> = Vec::new();
     let run_supersede = doc
         .concurrency
         .as_ref()
@@ -439,345 +433,25 @@ pub async fn enqueue_run(
             cip.then_some(c.group.as_deref()).flatten()
         })
         .map(|s| crate::actions::eval_ctx::interp_or_raw(s, &ctx, &mut Vec::new()).to_lowercase());
-    for job in &doc.jobs {
-        // Per-job expression evaluation. Errors in `if`/`runs-on` fail the
-        // job loudly; errors in display fields degrade to ::warning::.
-        let mut notes: Vec<String> = Vec::new();
-        let mut job_status = "queued";
-        let mut job_err: Option<String> = None;
-        // `jobs.<id>.if` — eval error fails the job; false skips it.
-        // Jobs with `needs:` DEFER if-evaluation to ready-time — the
-        // `needs.<id>.result/outputs` context doesn't exist at enqueue.
-        let has_needs = !job.needs.is_empty();
-        if has_needs {
-            job_status = "waiting";
-        } else if let Some(src) = &job.if_expr {
-            match oxidean_actions_expr::eval_bool(src, &ctx) {
-                Ok(true) => {}
-                Ok(false) => {
-                    job_status = "skipped";
-                    notes.push(format!("job '{}' skipped — if evaluated to false", job.id));
-                }
-                Err(e) => job_err = Some(format!("if '{src}' evaluation failed: {e}")),
-            }
-        }
-        // `strategy.matrix` → one row per leg (shared job_key, distinct
-        // matrix_key); expansion errors fail the whole job loudly.
-        let legs = match crate::actions::matrix::expand_legs(job.strategy.as_ref(), &ctx) {
-            Ok(l) => l,
-            Err(e) => {
-                job_err = Some(format!("strategy.matrix: {e}"));
-                vec![crate::actions::matrix::MatrixLeg {
-                    matrix_key: String::new(),
-                    assignment: serde_json::json!({}),
-                }]
-            }
-        };
-        let fail_fast = crate::actions::matrix::fail_fast(job.strategy.as_ref(), &ctx);
-        let max_parallel = match crate::actions::matrix::max_parallel(job.strategy.as_ref(), &ctx) {
-            Ok(c) => c,
-            Err(e) => {
-                job_err = Some(e);
-                None
-            }
-        };
-        // `runs-on` labels interpolate per leg — `matrix.*` resolves to that
-        // leg's assignment, and the evaluated values drive label matching on
-        // the claim path.
-        let runs_on_for = |ctx: &oxidean_actions_expr::Context, notes: &mut Vec<String>| {
-            job.runs_on
-                .iter()
-                .map(|s| crate::actions::eval_ctx::interp_or_raw(s, ctx, notes))
-                .collect::<Vec<String>>()
-        };
-        let runs_on_eval = runs_on_for(&ctx, &mut notes);
-        // `name` interpolates for display.
-        let name = job
-            .name
-            .as_deref()
-            .map(|s| crate::actions::eval_ctx::interp_or_raw(s, &ctx, &mut notes))
-            .unwrap_or_else(|| job.id.clone());
-        // `timeout-minutes` → absolute deadline; the evaluated seconds ride
-        // the payload so a rerun can restart the clock without the YAML.
-        // Absent → GitHub's 360-minute default job timeout.
-        let timeout_seconds = match &job.timeout_minutes {
-            Some(src) => match crate::actions::eval_ctx::eval_minutes(src, &ctx) {
-                Ok(m) => Some(m * 60.0),
-                Err(e) => {
-                    notes.push(format!("timeout-minutes evaluation failed: {e}"));
-                    None
-                }
-            },
-            None => Some(360.0 * 60.0),
-        };
-        let timeout_at = timeout_seconds.map(|s| {
-            (chrono::Utc::now() + chrono::Duration::milliseconds((s * 1000.0) as i64))
-                .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
-        });
-        // `concurrency:` — job-level group wins over the workflow's for the
-        // job's own group key. `cancel-in-progress` queues a supersede pass:
-        // workflow-level groups supersede whole runs; job-level groups only
-        // supersede same-group jobs in other runs.
-        let concurrency_spec = job.concurrency.as_ref().or(doc.concurrency.as_ref());
-        // Groups match case-insensitively on GitHub — normalize lowercase.
-        let concurrency_group = concurrency_spec
-            .and_then(|c| c.group.as_deref())
-            .map(|s| crate::actions::eval_ctx::interp_or_raw(s, &ctx, &mut notes).to_lowercase())
-            .filter(|g| !g.is_empty());
-        let job_group = job
-            .concurrency
-            .as_ref()
-            .and_then(|c| c.group.as_deref())
-            .map(|s| crate::actions::eval_ctx::interp_or_raw(s, &ctx, &mut notes).to_lowercase())
-            .filter(|g| !g.is_empty());
-        let cancel_in_progress = concurrency_spec
-            .and_then(|c| c.cancel_in_progress.as_deref())
-            .and_then(|s| oxidean_actions_expr::eval_bool(s, &ctx).ok())
-            .unwrap_or(false);
-        if let (Some(g), true) = (&job_group, cancel_in_progress) {
-            if !supersede_groups.contains(g) {
-                supersede_groups.push(g.clone());
-            }
-        }
-        if let Some(err) = job_err {
-            job_status = "failure";
-            notes.push(err);
-        }
-        // `environment:` — name/url interpolate at enqueue; the resolved name
-        // binds protection rules (wait timer, reviewers, branch allowlist)
-        // and the deployment record.
-        let mut environment_name: Option<String> = None;
-        let mut environment_url: Option<String> = None;
-        let mut environment_wait_minutes: i64 = 0;
-        let mut environment_reviewers = false;
-        if let Some(env_spec) = &job.environment {
-            let resolved_name =
-                crate::actions::eval_ctx::interp_or_raw(&env_spec.name, &ctx, &mut notes);
-            if resolved_name.is_empty() {
-                notes.push("environment name evaluated empty — skipped".to_string());
-            } else {
-                environment_url = env_spec
-                    .url
-                    .as_deref()
-                    .map(|u| crate::actions::eval_ctx::interp_or_raw(u, &ctx, &mut notes));
-                environment_name = Some(resolved_name);
-            }
-        }
-        // Protection rules attach by name; the environment row auto-creates
-        // on first reference (GitHub parity). Rule failures degrade to a
-        // loud job failure, never silent passthrough.
-        if let Some(env_name) = &environment_name {
-            match db
-                .ensure_action_environment(&Uuid::new_v4().to_string(), repository_id, env_name)
-                .await
-            {
-                Ok(env_row) => {
-                    let protection: serde_json::Value =
-                        serde_json::from_str(&env_row.protection_json)
-                            .unwrap_or_else(|_| serde_json::json!({}));
-                    environment_wait_minutes = protection
-                        .get("wait_timer_minutes")
-                        .and_then(|v| v.as_i64())
-                        .unwrap_or(0)
-                        .max(0);
-                    environment_reviewers = protection
-                        .get("required_reviewers")
-                        .and_then(|v| v.as_array())
-                        .is_some_and(|a| !a.is_empty());
-                    if let Some(branches) = protection
-                        .get("deployment_branches")
-                        .and_then(|v| v.as_array())
-                    {
-                        let allowed: Vec<String> = branches
-                            .iter()
-                            .filter_map(|b| b.as_str().map(str::to_string))
-                            .collect();
-                        let short_ref = head_ref.strip_prefix("refs/heads/").unwrap_or(head_ref);
-                        if !allowed.is_empty()
-                            && !allowed.iter().any(|b| b == short_ref || b == head_ref)
-                        {
-                            job_status = "failure";
-                            notes.push(format!(
-                                "environment '{env_name}' does not allow deployments from ref '{head_ref}'"
-                            ));
-                        }
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!(error = %e, repository_id, env_name, "environment lookup failed");
-                    notes.push(format!("environment '{env_name}' lookup failed: {e}"));
-                }
-            }
-        }
-        let runs_on_shared = serde_json::to_string(&runs_on_eval).unwrap_or_else(|_| "[]".into());
-        let needs_json = serde_json::to_string(&job.needs).unwrap_or_else(|_| "[]".into());
-        // The full GitHub scope set rides the frozen payload — claim mints
-        // `OXIDEAN_TOKEN` against it and `id-token: write` gates OIDC.
-        let permission_map = crate::actions::effective_permissions(doc, job, &default_permissions);
-        let permissions_json: serde_json::Map<String, serde_json::Value> = permission_map
-            .iter()
-            .map(|(k, v)| (k.clone(), serde_json::Value::String(v.as_str().into())))
-            .collect();
-        // Durable payload: capture everything fetch_task needs at enqueue so
-        // claim never re-reads the bare repo (head could move / be GC'd).
-        // `if`/`needs`/`fail_fast`/`max_parallel` ride along so the scheduler
-        // can re-gate waiting jobs without the workflow YAML.
-        let payload_json = serde_json::json!({
-            "version": 1,
-            "job_key": job.id,
-            "name": name,
-            "runs_on": runs_on_eval,
-            "steps": job.steps,
-            "env": job.env,
-            "workflow_env": doc.env,
-            "workflow_name": workflow_name,
-            // Raw job subtree — re-emitted as the single-job workflow doc the
-            // Gitea `runner.v1` surface hands stock act_runner.
-            "job_yaml": job.raw_yaml,
-            "outputs": job.outputs,
-            "if": job.if_expr,
-            "needs": job.needs,
-            "fail_fast": fail_fast,
-            "max_parallel": max_parallel,
-            "timeout_seconds": timeout_seconds,
-            "container": job.container.as_ref().map(|c| crate::actions::eval_ctx::interp_json(c, &ctx, &mut notes)),
-            "services": job.services.as_ref().map(|s| crate::actions::eval_ctx::interp_json(s, &ctx, &mut notes)),
-            "contents_permission": crate::actions::effective_contents_permission(doc, job).as_str(),
-            "permissions": serde_json::Value::Object(permissions_json),
-            "environment": environment_name.clone(),
-            "environment_url": environment_url.clone(),
-        })
-        .to_string();
-        let sha = crate::auth::session::sha256_hex(payload_json.as_bytes());
-        db.insert_action_payload(&sha, repository_id, workflow_path, head_sha, &payload_json)
-            .await?;
-        // One row per matrix leg — `max-parallel` caps how many start queued.
-        let mut leg_status = job_status;
-        let mut queued_legs = 0usize;
-        for leg in &legs {
-            let job_id = Uuid::new_v4().to_string();
-            if leg_status == "queued" && max_parallel.is_some_and(|c| queued_legs >= c) {
-                leg_status = "waiting";
-            }
-            if leg_status == "queued" {
-                queued_legs += 1;
-            }
-            // Approval-held runs: live legs insert as `waiting` + hold flag —
-            // claim never sees `waiting`, so there is no claim window and the
-            // CHECK-vocabulary stays intact (`waiting_approval` is derived).
-            // Environment `required_reviewers` rides the same flag — a pending
-            // deployment review surfaces identically (`approveJob`/`approveRun`
-            // releases).
-            let held = (hold_for_approval || environment_reviewers)
-                && matches!(leg_status, "queued" | "waiting");
-            let mut insert_status = if held { "waiting" } else { leg_status };
-            // Environment wait timer — ungated legs are ready at enqueue, so
-            // the deadline is stamped now and the timer sweeps promotes them.
-            // Needs-gated legs get the stamp at upstream-resolve time instead.
-            let deployment_not_before = if insert_status == "queued" && environment_wait_minutes > 0
-            {
-                insert_status = "waiting";
-                Some(
-                    (chrono::Utc::now() + chrono::Duration::minutes(environment_wait_minutes))
-                        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
-                )
-            } else {
-                None
-            };
-            let leg_name = crate::actions::matrix::leg_display_name(&name, leg);
-            let leg_runs_on = if leg.assignment.as_object().is_some_and(|o| !o.is_empty()) {
-                let mut lctx = ctx.clone();
-                lctx.set_context("matrix", leg.assignment.clone());
-                serde_json::to_string(&runs_on_for(&lctx, &mut Vec::new()))
-                    .unwrap_or_else(|_| "[]".into())
-            } else {
-                runs_on_shared.clone()
-            };
-            let mut insert =
-                oxidean_db::JobInsert::basic(&job_id, &run_id, &job.id, &leg_name, &leg_runs_on);
-            insert.matrix_key = leg.matrix_key.clone();
-            insert.matrix_json = leg.assignment.to_string();
-            insert.needs_json = needs_json.clone();
-            insert.payload_sha = Some(sha.clone());
-            insert.status = insert_status.into();
-            insert.approval_hold = held;
-            insert.timeout_at = timeout_at.clone();
-            insert.concurrency_group = concurrency_group.clone();
-            insert.environment_name = environment_name.clone();
-            insert.deployment_wait_minutes = environment_wait_minutes;
-            insert.deployment_not_before = deployment_not_before;
-            insert.outputs_json = job
-                .outputs
-                .as_ref()
-                .map(|o| o.to_string())
-                .unwrap_or_else(|| "{}".into());
-            db.insert_action_job(insert).await?;
-            // The deployment record is the public projection of the
-            // environment deployment — GitHub's Deployments API analogue.
-            if let Some(env_name) = &environment_name {
-                if let Err(e) = db
-                    .insert_action_deployment(
-                        &Uuid::new_v4().to_string(),
-                        repository_id,
-                        env_name,
-                        &run_id,
-                        &job_id,
-                        head_sha,
-                        head_ref,
-                        environment_url.as_deref(),
-                    )
-                    .await
-                {
-                    tracing::warn!(error = %e, run_id, env_name, "deployment insert failed");
-                }
-            }
-            // Validation warnings + eval notes + skip/failure annotations
-            // land in the job log — visible without a runner.
-            let mut note = String::new();
-            for w in &all_warnings {
-                note.push_str(&format!("::warning::{w}\n"));
-            }
-            for n in &notes {
-                let kind = if leg_status == "failure" {
-                    "error"
-                } else {
-                    "notice"
-                };
-                note.push_str(&format!("::{kind}::{n}\n"));
-            }
-            if held {
-                let reason = if environment_reviewers {
-                    format!(
-                        "deployment to environment '{}' waits for reviewer approval",
-                        environment_name.as_deref().unwrap_or_default()
-                    )
-                } else {
-                    "run is waiting for maintainer approval (fork policy)".to_string()
-                };
-                note.push_str(&format!("::notice::{reason}\n"));
-            }
-            if leg_status == "waiting" && has_needs {
-                note.push_str(&format!(
-                    "::notice::job '{}' waits on needs [{}]\n",
-                    job.id,
-                    job.needs.join(", ")
-                ));
-            }
-            if !note.is_empty() {
-                let dir = log_dir
-                    .clone()
-                    .unwrap_or_else(crate::actions::logs::resolve_log_dir);
-                if let Err(e) =
-                    crate::actions::logs::append_job_log(&dir, &run_id, &job_id, note.as_bytes())
-                        .await
-                {
-                    tracing::warn!(error = %e, run_id, "failed to write dispatch warnings");
-                }
-            }
-            job_ids.push(job_id);
-        }
-        job_keys.push(job.id.clone());
-    }
+    let mut emit = EmitCtx {
+        db,
+        repository_id,
+        run_id: &run_id,
+        workflow_path,
+        doc,
+        head_sha,
+        head_ref,
+        default_permissions: &default_permissions,
+        workflow_name: &workflow_name,
+        ctx,
+        all_warnings,
+        log_dir,
+        hold_for_approval,
+        supersede_groups: Vec::new(),
+        caller: None,
+    };
+    let (job_ids, job_keys) = emit_jobs(&mut emit, &doc.jobs).await?;
+    let supersede_groups = emit.supersede_groups;
     // `concurrency.cancel-in-progress` — workflow group supersedes whole
     // still-running same-group runs; job groups supersede same-group jobs.
     // Affected runners see the cancel on their next update_task/update_log.
@@ -1077,6 +751,444 @@ pub async fn fail_discovery_runs(
 
 pub fn bare_repo_path(repos_dir: &Path, owner: &str, name: &str) -> PathBuf {
     repos_dir.join(owner).join(format!("{name}.git"))
+}
+
+/// Run-scoped inputs the per-job emit loop shares — extracted so the
+/// reusable-workflow expansion (P13) reuses the identical emission path for
+/// callee jobs under a `caller` linkage instead of duplicating ~300 lines.
+pub(crate) struct EmitCtx<'a> {
+    pub db: &'a Database,
+    pub repository_id: &'a str,
+    pub run_id: &'a str,
+    pub workflow_path: &'a str,
+    pub doc: &'a WorkflowDocument,
+    pub head_sha: &'a str,
+    pub head_ref: &'a str,
+    pub default_permissions: &'a str,
+    pub workflow_name: &'a str,
+    /// Enqueue/expand-time expression context (github/env/vars/inputs).
+    pub ctx: oxidean_actions_expr::Context,
+    pub all_warnings: Vec<String>,
+    pub log_dir: Option<PathBuf>,
+    pub hold_for_approval: bool,
+    pub supersede_groups: Vec<String>,
+    /// Set when emitting callee jobs for a reusable-workflow call — every
+    /// emitted row links to the caller leg and carries the call's resolved
+    /// inputs/secrets scope on its payload.
+    pub caller: Option<CallerEmit>,
+}
+
+/// Callee-emission linkage — what `call` metadata lands on each emitted
+/// callee payload row.
+#[derive(Debug, Clone)]
+pub(crate) struct CallerEmit {
+    /// The calling job's row id — callee `caller_job_id`.
+    pub caller_job_id: String,
+    /// Resolved call inputs → callee `github.event.inputs`/`inputs` ctx.
+    pub inputs: serde_json::Value,
+    /// Secrets forwarding decision — applied at claim when callee secrets
+    /// are decrypted (`inherit` passes the caller scope verbatim, a map
+    /// forwards each callee name from the caller scope, absent = none).
+    pub secrets_json: serde_json::Value,
+}
+
+/// Emit one job row per `JobSpec` × matrix leg. Returns
+/// `(job_ids, job_keys)`. Callee emission passes `emit.caller = Some(..)` so
+/// rows link and `needs`/fail-fast scope within the call.
+pub(crate) async fn emit_jobs(
+    emit: &mut EmitCtx<'_>,
+    jobs: &[crate::actions::parse::JobSpec],
+) -> Result<(Vec<String>, Vec<String>), String> {
+    let db = emit.db;
+    let run_id = emit.run_id;
+    let repository_id = emit.repository_id;
+    let workflow_path = emit.workflow_path;
+    let doc = emit.doc;
+    let head_sha = emit.head_sha;
+    let head_ref = emit.head_ref;
+    let workflow_name = emit.workflow_name;
+    let ctx = emit.ctx.clone();
+    let log_dir = emit.log_dir.clone();
+    let hold_for_approval = emit.hold_for_approval;
+    let mut job_ids = Vec::new();
+    let mut job_keys = Vec::new();
+    for job in jobs {
+        // Per-job expression evaluation. Errors in `if`/`runs-on` fail the
+        // job loudly; errors in display fields degrade to ::warning::.
+        let mut notes: Vec<String> = Vec::new();
+        let mut job_status = "queued";
+        let mut job_err: Option<String> = None;
+        // `jobs.<id>.if` — eval error fails the job; false skips it.
+        // Jobs with `needs:` DEFER if-evaluation to ready-time — the
+        // `needs.<id>.result/outputs` context doesn't exist at enqueue.
+        // Calling jobs (`uses:`) always defer: expansion happens in the
+        // scheduler where the call ctx (`with:`/`secrets:` exprs) sees real
+        // needs/matrix/inputs.
+        let is_call = job.uses.is_some();
+        let has_needs = !job.needs.is_empty();
+        if is_call || has_needs {
+            job_status = "waiting";
+        } else if let Some(src) = &job.if_expr {
+            match oxidean_actions_expr::eval_bool(src, &ctx) {
+                Ok(true) => {}
+                Ok(false) => {
+                    job_status = "skipped";
+                    notes.push(format!("job '{}' skipped — if evaluated to false", job.id));
+                }
+                Err(e) => job_err = Some(format!("if '{src}' evaluation failed: {e}")),
+            }
+        }
+        // `strategy.matrix` → one row per leg (shared job_key, distinct
+        // matrix_key); expansion errors fail the whole job loudly. Calling
+        // jobs fan out the call — each leg expands its own call instance.
+        let legs = match crate::actions::matrix::expand_legs(job.strategy.as_ref(), &ctx) {
+            Ok(l) => l,
+            Err(e) => {
+                job_err = Some(format!("strategy.matrix: {e}"));
+                vec![crate::actions::matrix::MatrixLeg {
+                    matrix_key: String::new(),
+                    assignment: serde_json::json!({}),
+                }]
+            }
+        };
+        let fail_fast = crate::actions::matrix::fail_fast(job.strategy.as_ref(), &ctx);
+        let max_parallel = match crate::actions::matrix::max_parallel(job.strategy.as_ref(), &ctx) {
+            Ok(c) => c,
+            Err(e) => {
+                job_err = Some(e);
+                None
+            }
+        };
+        // `runs-on` labels interpolate per leg — `matrix.*` resolves to that
+        // leg's assignment, and the evaluated values drive label matching on
+        // the claim path.
+        let runs_on_for = |ctx: &oxidean_actions_expr::Context, notes: &mut Vec<String>| {
+            job.runs_on
+                .iter()
+                .map(|s| crate::actions::eval_ctx::interp_or_raw(s, ctx, notes))
+                .collect::<Vec<String>>()
+        };
+        let runs_on_eval = runs_on_for(&ctx, &mut notes);
+        // `name` interpolates for display.
+        let name = job
+            .name
+            .as_deref()
+            .map(|s| crate::actions::eval_ctx::interp_or_raw(s, &ctx, &mut notes))
+            .unwrap_or_else(|| job.id.clone());
+        // `timeout-minutes` → absolute deadline; the evaluated seconds ride
+        // the payload so a rerun can restart the clock without the YAML.
+        let timeout_seconds = match &job.timeout_minutes {
+            Some(src) => match crate::actions::eval_ctx::eval_minutes(src, &ctx) {
+                Ok(m) => Some(m * 60.0),
+                Err(e) => {
+                    notes.push(format!("timeout-minutes evaluation failed: {e}"));
+                    None
+                }
+            },
+            // Absent → GitHub's 360-minute default job timeout.
+            None => Some(360.0 * 60.0),
+        };
+        let timeout_at = timeout_seconds.map(|s| {
+            (chrono::Utc::now() + chrono::Duration::milliseconds((s * 1000.0) as i64))
+                .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+        });
+        // `concurrency:` — job-level group wins over the workflow's for the
+        // job's own group key. `cancel-in-progress` queues a supersede pass:
+        // workflow-level groups supersede whole runs; job-level groups only
+        // supersede same-group jobs in other runs.
+        let concurrency_spec = job.concurrency.as_ref().or(doc.concurrency.as_ref());
+        // Groups match case-insensitively on GitHub — normalize lowercase.
+        let concurrency_group = concurrency_spec
+            .and_then(|c| c.group.as_deref())
+            .map(|s| crate::actions::eval_ctx::interp_or_raw(s, &ctx, &mut notes).to_lowercase())
+            .filter(|g| !g.is_empty());
+        let job_group = job
+            .concurrency
+            .as_ref()
+            .and_then(|c| c.group.as_deref())
+            .map(|s| crate::actions::eval_ctx::interp_or_raw(s, &ctx, &mut notes).to_lowercase())
+            .filter(|g| !g.is_empty());
+        let cancel_in_progress = concurrency_spec
+            .and_then(|c| c.cancel_in_progress.as_deref())
+            .and_then(|s| oxidean_actions_expr::eval_bool(s, &ctx).ok())
+            .unwrap_or(false);
+        if let (Some(g), true) = (&job_group, cancel_in_progress) {
+            if !emit.supersede_groups.contains(g) {
+                emit.supersede_groups.push(g.clone());
+            }
+        }
+        if let Some(err) = job_err {
+            job_status = "failure";
+            notes.push(err);
+        }
+        // `environment:` — name/url interpolate at enqueue; the resolved name
+        // binds protection rules (wait timer, reviewers, branch allowlist)
+        // and the deployment record. Calling jobs cannot declare an
+        // environment (parse rejects it), so this never fires for calls.
+        let mut environment_name: Option<String> = None;
+        let mut environment_url: Option<String> = None;
+        let mut environment_wait_minutes: i64 = 0;
+        let mut environment_reviewers = false;
+        if let Some(env_spec) = &job.environment {
+            let resolved_name =
+                crate::actions::eval_ctx::interp_or_raw(&env_spec.name, &ctx, &mut notes);
+            if resolved_name.is_empty() {
+                notes.push("environment name evaluated empty — skipped".to_string());
+            } else {
+                environment_url = env_spec
+                    .url
+                    .as_deref()
+                    .map(|u| crate::actions::eval_ctx::interp_or_raw(u, &ctx, &mut notes));
+                environment_name = Some(resolved_name);
+            }
+        }
+        // Protection rules attach by name; the environment row auto-creates
+        // on first reference (GitHub parity). Rule failures degrade to a
+        // loud job failure, never silent passthrough.
+        if let Some(env_name) = &environment_name {
+            match db
+                .ensure_action_environment(&Uuid::new_v4().to_string(), repository_id, env_name)
+                .await
+            {
+                Ok(env_row) => {
+                    let protection: serde_json::Value =
+                        serde_json::from_str(&env_row.protection_json)
+                            .unwrap_or_else(|_| serde_json::json!({}));
+                    environment_wait_minutes = protection
+                        .get("wait_timer_minutes")
+                        .and_then(|v| v.as_i64())
+                        .unwrap_or(0)
+                        .max(0);
+                    environment_reviewers = protection
+                        .get("required_reviewers")
+                        .and_then(|v| v.as_array())
+                        .is_some_and(|a| !a.is_empty());
+                    if let Some(branches) = protection
+                        .get("deployment_branches")
+                        .and_then(|v| v.as_array())
+                    {
+                        let allowed: Vec<String> = branches
+                            .iter()
+                            .filter_map(|b| b.as_str().map(str::to_string))
+                            .collect();
+                        let short_ref = head_ref.strip_prefix("refs/heads/").unwrap_or(head_ref);
+                        if !allowed.is_empty()
+                            && !allowed.iter().any(|b| b == short_ref || b == head_ref)
+                        {
+                            job_status = "failure";
+                            notes.push(format!(
+                                "environment '{env_name}' does not allow deployments from ref '{head_ref}'"
+                            ));
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, repository_id, env_name, "environment lookup failed");
+                    notes.push(format!("environment '{env_name}' lookup failed: {e}"));
+                }
+            }
+        }
+        let runs_on_shared = serde_json::to_string(&runs_on_eval).unwrap_or_else(|_| "[]".into());
+        let needs_json = serde_json::to_string(&job.needs).unwrap_or_else(|_| "[]".into());
+        // The full GitHub scope set rides the frozen payload — claim mints
+        // `OXIDEAN_TOKEN` against it and `id-token: write` gates OIDC.
+        let permission_map =
+            crate::actions::effective_permissions(doc, job, emit.default_permissions);
+        let permissions_json: serde_json::Map<String, serde_json::Value> = permission_map
+            .iter()
+            .map(|(k, v)| (k.clone(), serde_json::Value::String(v.as_str().into())))
+            .collect();
+        // `secrets:` shape — `inherit` or a name→expr map evaluated at
+        // expansion (raw map rides the caller payload).
+        let call_secrets_json = job.secrets.as_ref().map(|s| match s {
+            crate::actions::parse::CallSecretsSpec::Inherit => {
+                serde_json::json!("inherit")
+            }
+            crate::actions::parse::CallSecretsSpec::Map(m) => m.clone(),
+        });
+        // Durable payload: capture everything fetch_task needs at enqueue so
+        // claim never re-reads the bare repo (head could move / be GC'd).
+        // `if`/`needs`/`fail_fast`/`max_parallel` ride along so the scheduler
+        // can re-gate waiting jobs without the workflow YAML. `call` marks
+        // caller rows for expansion; `call_inputs`/`call_secrets` mark
+        // callee rows for their claim-time context overrides.
+        let payload_json = serde_json::json!({
+            "version": 1,
+            "job_key": job.id,
+            "name": name,
+            "runs_on": runs_on_eval,
+            "steps": job.steps,
+            "env": job.env,
+            "workflow_env": doc.env,
+            "workflow_name": workflow_name,
+            // Raw job subtree — re-emitted as the single-job workflow doc the
+            // Gitea `runner.v1` surface hands stock act_runner.
+            "job_yaml": job.raw_yaml,
+            "outputs": job.outputs,
+            "if": job.if_expr,
+            "needs": job.needs,
+            "fail_fast": fail_fast,
+            "max_parallel": max_parallel,
+            "timeout_seconds": timeout_seconds,
+            "container": job.container.as_ref().map(|c| crate::actions::eval_ctx::interp_json(c, &ctx, &mut notes)),
+            "services": job.services.as_ref().map(|s| crate::actions::eval_ctx::interp_json(s, &ctx, &mut notes)),
+            "contents_permission": crate::actions::effective_contents_permission(doc, job).as_str(),
+            "permissions": serde_json::Value::Object(permissions_json),
+            "environment": environment_name.clone(),
+            "environment_url": environment_url.clone(),
+            "call": job.uses.as_ref().map(|u| serde_json::json!({
+                "uses": u,
+                "with": job.with,
+                "secrets": call_secrets_json,
+            })),
+            "call_inputs": emit.caller.as_ref().map(|c| c.inputs.clone()),
+            "call_secrets": emit.caller.as_ref().map(|c| c.secrets_json.clone()),
+        })
+        .to_string();
+        let sha = crate::auth::session::sha256_hex(payload_json.as_bytes());
+        db.insert_action_payload(&sha, repository_id, workflow_path, head_sha, &payload_json)
+            .await?;
+        // One row per matrix leg — `max-parallel` caps how many start queued.
+        // Calling legs never consume a runner slot: `waiting` until expanded.
+        let mut leg_status = job_status;
+        let mut queued_legs = 0usize;
+        for leg in &legs {
+            let job_id = Uuid::new_v4().to_string();
+            if leg_status == "queued" && max_parallel.is_some_and(|c| queued_legs >= c) {
+                leg_status = "waiting";
+            }
+            if leg_status == "queued" {
+                queued_legs += 1;
+            }
+            // Approval-held runs: live legs insert as `waiting` + hold flag —
+            // claim never sees `waiting`, so there is no claim window and the
+            // CHECK-vocabulary stays intact (`waiting_approval` is derived).
+            // Environment `required_reviewers` rides the same flag — a pending
+            // deployment review surfaces identically (`approveJob`/`approveRun`
+            // releases).
+            let held = (hold_for_approval || environment_reviewers)
+                && matches!(leg_status, "queued" | "waiting");
+            let mut insert_status = if held { "waiting" } else { leg_status };
+            // Environment wait timer — ungated legs are ready at enqueue, so
+            // the deadline is stamped now and the timer sweeps promotes them.
+            // Needs-gated legs get the stamp at upstream-resolve time instead.
+            let deployment_not_before = if insert_status == "queued" && environment_wait_minutes > 0
+            {
+                insert_status = "waiting";
+                Some(
+                    (chrono::Utc::now() + chrono::Duration::minutes(environment_wait_minutes))
+                        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+                )
+            } else {
+                None
+            };
+            let leg_name = crate::actions::matrix::leg_display_name(&name, leg);
+            let leg_runs_on = if leg.assignment.as_object().is_some_and(|o| !o.is_empty()) {
+                let mut lctx = ctx.clone();
+                lctx.set_context("matrix", leg.assignment.clone());
+                serde_json::to_string(&runs_on_for(&lctx, &mut Vec::new()))
+                    .unwrap_or_else(|_| "[]".into())
+            } else {
+                runs_on_shared.clone()
+            };
+            let mut insert =
+                oxidean_db::JobInsert::basic(&job_id, run_id, &job.id, &leg_name, &leg_runs_on);
+            insert.matrix_key = leg.matrix_key.clone();
+            insert.matrix_json = leg.assignment.to_string();
+            insert.needs_json = needs_json.clone();
+            insert.payload_sha = Some(sha.clone());
+            insert.status = insert_status.into();
+            insert.approval_hold = held;
+            insert.timeout_at = timeout_at.clone();
+            insert.concurrency_group = concurrency_group.clone();
+            insert.environment_name = environment_name.clone();
+            insert.deployment_wait_minutes = environment_wait_minutes;
+            insert.deployment_not_before = deployment_not_before;
+            insert.outputs_json = job
+                .outputs
+                .as_ref()
+                .map(|o| o.to_string())
+                .unwrap_or_else(|| "{}".into());
+            insert.caller_job_id = emit
+                .caller
+                .as_ref()
+                .map(|c| c.caller_job_id.clone())
+                .unwrap_or_default();
+            db.insert_action_job(insert).await?;
+            // The deployment record is the public projection of the
+            // environment deployment — GitHub's Deployments API analogue.
+            if let Some(env_name) = &environment_name {
+                if let Err(e) = db
+                    .insert_action_deployment(
+                        &Uuid::new_v4().to_string(),
+                        repository_id,
+                        env_name,
+                        run_id,
+                        &job_id,
+                        head_sha,
+                        head_ref,
+                        environment_url.as_deref(),
+                    )
+                    .await
+                {
+                    tracing::warn!(error = %e, run_id, env_name, "deployment insert failed");
+                }
+            }
+            // Validation warnings + eval notes + skip/failure annotations
+            // land in the job log — visible without a runner.
+            let mut note = String::new();
+            for w in &emit.all_warnings {
+                note.push_str(&format!("::warning::{w}\n"));
+            }
+            for n in &notes {
+                let kind = if leg_status == "failure" {
+                    "error"
+                } else {
+                    "notice"
+                };
+                note.push_str(&format!("::{kind}::{n}\n"));
+            }
+            if held {
+                let reason = if environment_reviewers {
+                    format!(
+                        "deployment to environment '{}' waits for reviewer approval",
+                        environment_name.as_deref().unwrap_or_default()
+                    )
+                } else {
+                    "run is waiting for maintainer approval (fork policy)".to_string()
+                };
+                note.push_str(&format!("::notice::{reason}\n"));
+            }
+            if is_call {
+                note.push_str(&format!(
+                    "::notice::job '{}' calls reusable workflow '{}'\n",
+                    job.id,
+                    job.uses.as_deref().unwrap_or_default()
+                ));
+            }
+            if leg_status == "waiting" && has_needs {
+                note.push_str(&format!(
+                    "::notice::job '{}' waits on needs [{}]\n",
+                    job.id,
+                    job.needs.join(", ")
+                ));
+            }
+            if !note.is_empty() {
+                let dir = log_dir
+                    .clone()
+                    .unwrap_or_else(crate::actions::logs::resolve_log_dir);
+                if let Err(e) =
+                    crate::actions::logs::append_job_log(&dir, run_id, &job_id, note.as_bytes())
+                        .await
+                {
+                    tracing::warn!(error = %e, run_id, "failed to write dispatch warnings");
+                }
+            }
+            job_ids.push(job_id);
+        }
+        job_keys.push(job.id.clone());
+    }
+    Ok((job_ids, job_keys))
 }
 
 #[cfg(test)]

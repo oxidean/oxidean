@@ -413,7 +413,9 @@ pub fn eval_embedded(s: &str, ctx: &Context) -> Result<Value, ExprError> {
     let mut out = String::new();
     let mut cursor = 0;
     for (inner, whole) in embedded_exprs(s) {
-        let start = s.find(whole).unwrap();
+        // Search from `cursor` — a repeated `${{ expr }}` must not re-match
+        // its first occurrence (that would splice backwards and panic).
+        let start = cursor + s[cursor..].find(whole).unwrap();
         out.push_str(&s[cursor..start]);
         out.push_str(&stringify(&eval(inner, ctx)?));
         cursor = start + whole.len();
@@ -623,6 +625,21 @@ mod tests {
         assert_eq!(
             interpolate("x=${{ github.event.commits }}", &c).unwrap(),
             r#"x=[{"id":"c1"},{"id":"c2"}]"#
+        );
+        // The same `${{ expr }}` repeated in one string must splice at its
+        // own position — searching from 0 re-matches the first occurrence
+        // and panics on a backwards range.
+        assert_eq!(
+            interpolate("a=${{ github.sha }} b=${{ github.sha }}", &c).unwrap(),
+            "a=abc123 b=abc123"
+        );
+        assert_eq!(
+            interpolate(
+                "echo \"env=${{ github.sha }}\" && echo \"r=ok-${{ github.sha }}\"",
+                &c
+            )
+            .unwrap(),
+            "echo \"env=abc123\" && echo \"r=ok-abc123\""
         );
     }
 

@@ -1,0 +1,8 @@
+name: reusable-caller-keywords
+on: [push]
+jobs:
+  call:
+    uses: ./.github/workflows/reusable.yml
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo never

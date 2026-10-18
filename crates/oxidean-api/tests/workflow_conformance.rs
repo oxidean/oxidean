@@ -135,10 +135,13 @@ fn workflow_path(id: &str) -> PathBuf {
 
 static INIT_ONCE: std::sync::Once = std::sync::Once::new();
 static SHARED_LOG_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+static SHARED_REPOS_DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
 
-/// Process-wide env the API resolves at call time: the secret crypto key and
-/// the actions log dir. The log dir is shared (runs/jobs are UUID-namespaced)
-/// because `enqueue_run` resolves it from env, not `AppState`.
+/// Process-wide env the API resolves at call time: the secret crypto key,
+/// the actions log dir, and the bare-repos root. Log/repos dirs are shared
+/// (runs/jobs/repos are slug/UUID-namespaced) because `enqueue_run` and the
+/// scheduler resolve them from env, not `AppState` — per-case tempdirs would
+/// race on the process-global `set_var`.
 fn ensure_env() -> &'static PathBuf {
     INIT_ONCE.call_once(|| {
         // Runner-side warnings (dropped log chunks, command diagnostics) go
@@ -154,7 +157,11 @@ fn ensure_env() -> &'static PathBuf {
         let dir = std::env::temp_dir().join(format!("oxidean-conf-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         std::env::set_var("OXIDEAN_ACTIONS_LOG_DIR", &dir);
+        let repos = dir.join("repos");
+        std::fs::create_dir_all(&repos).unwrap();
+        std::env::set_var("OXIDEAN_REPOS_DIR", &repos);
         SHARED_LOG_DIR.set(dir).unwrap();
+        SHARED_REPOS_DIR.set(repos).unwrap();
     });
     SHARED_LOG_DIR.get().unwrap()
 }
@@ -179,7 +186,7 @@ struct Fixture {
 async fn fixture(case: &Case) -> Fixture {
     let log_dir = ensure_env().clone();
     let dir = tempfile::tempdir().unwrap();
-    let repos_dir = dir.path().join("repos");
+    let repos_dir = SHARED_REPOS_DIR.get().unwrap().clone();
     let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("c.db").display()))
         .await
         .unwrap();
@@ -195,7 +202,14 @@ async fn fixture(case: &Case) -> Fixture {
     .with_repos_dir(repos_dir.clone());
     let app = router_with_state(state, build_cors("development", None).unwrap());
 
-    let slug = format!("cf-{}", &case.id[..case.id.len().min(16)]);
+    // Shared repos root is slug-namespaced — widen the slice so distinct
+    // case ids never collide on the same `{slug}/{slug}.git` path
+    // (`reusable-workflow-local`/`reusable-workflow-remote` share 16 chars),
+    // plus a per-fixture counter so tests seeding the same case id (rerun /
+    // repo-deletion flows) never push into the same bare repo concurrently.
+    static FIXTURE_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = FIXTURE_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let slug = format!("cf-{}-{seq}", &case.id[..case.id.len().min(24)]);
     let owner = db
         .create_user(
             &format!("u-{slug}"),
@@ -427,7 +441,9 @@ async fn claim_loop(
     client: &oxidean_runner::client::Client,
     config: &oxidean_runner::config::Config,
 ) {
-    for _ in 0..64 {
+    // Generous bound — the loop exits on `None` once the queue drains; the
+    // cap only guards a wedge. Reusable-call fan-out tests claim >64 legs.
+    for _ in 0..512 {
         match client.fetch_task(0).await.expect("fetch_task") {
             Some(task) => {
                 oxidean_runner::exec::execute(client, &task, config).await;
@@ -745,6 +761,22 @@ conformance_case!(services_job, "services-job");
 conformance_case!(environment_job, "environment-job");
 conformance_case!(reusable_workflow_local, "reusable-workflow-local");
 conformance_case!(reusable_workflow_remote, "reusable-workflow-remote");
+conformance_case!(reusable_nested, "reusable-nested");
+conformance_case!(reusable_matrix_call, "reusable-matrix-call");
+conformance_case!(reusable_secrets_map, "reusable-secrets-map");
+conformance_case!(reusable_secrets_none, "reusable-secrets-none");
+conformance_case!(reusable_missing_input, "reusable-missing-input");
+conformance_case!(reusable_needs_scope, "reusable-needs-scope");
+conformance_case!(reusable_no_trigger, "reusable-no-trigger");
+conformance_case!(reusable_caller_keywords, "reusable-caller-keywords");
+conformance_case!(reusable_recursion, "reusable-recursion");
+conformance_case!(reusable_fanout, "reusable-fanout");
+conformance_case!(reusable_fanout_accumulated, "reusable-fanout-accumulated");
+conformance_case!(reusable_undeclared_input, "reusable-undeclared-input");
+conformance_case!(reusable_missing_secret, "reusable-missing-secret");
+conformance_case!(reusable_inherit_secret, "reusable-inherit-secret");
+conformance_case!(reusable_type_mismatch, "reusable-type-mismatch");
+conformance_case!(reusable_depth, "reusable-depth");
 conformance_case!(continue_on_error_job, "continue-on-error-job");
 conformance_case!(continue_on_error_step, "continue-on-error-step");
 // Phase 4 — step lifecycle, shells, action runtimes.
@@ -839,7 +871,7 @@ async fn fetch_task_survives_repo_deletion() {
         .expect("run-basic case");
     let fx = fixture(&case).await;
     assert_eq!(fx.n_dispatched, 1);
-    std::fs::remove_dir_all(fx.dir.path().join("repos")).unwrap();
+    std::fs::remove_dir_all(&fx.bare).unwrap();
     drive_runner(&fx, &["ubuntu-latest".into()]).await;
     let runs = fx
         .db
@@ -1017,6 +1049,80 @@ async fn rerun_resets_and_regates() {
         .unwrap()
         .expect("run row");
     assert_eq!(run3.status, "success");
+}
+
+/// Rerun of a reusable-call run: caller legs reset to `waiting` (never
+/// claimable), stale callee rows are replaced by re-expansion, and the rerun
+/// reproduces the same outcome with bumped attempts.
+#[tokio::test]
+async fn reusable_call_rerun_reexpands() {
+    let case = cases()
+        .into_iter()
+        .find(|c| c.id == "reusable-workflow-local")
+        .expect("reusable-workflow-local case");
+    let fx = fixture(&case).await;
+    drive_runner(&fx, &["ubuntu-latest".into()]).await;
+
+    let run = fx
+        .db
+        .list_action_runs_for_repo(&fx.repo_id, &Default::default(), 10, 0)
+        .await
+        .unwrap()[0]
+        .clone();
+    assert_eq!(run.status, "success");
+    let pre = fx.db.list_action_jobs_for_run(&run.id).await.unwrap();
+    assert_eq!(pre.len(), 3, "call + callee build + report");
+
+    fx.db
+        .requeue_action_run(&run.id, false, None)
+        .await
+        .unwrap();
+    oxidean_api::actions::scheduler::recompute_ready_jobs(&fx.db, &run.id)
+        .await
+        .unwrap();
+    // Recompute expands the reset caller in place: it goes straight back to
+    // `in_progress` and the callee rows are fresh (re-emitted, not reused).
+    let mid = fx.db.list_action_jobs_for_run(&run.id).await.unwrap();
+    let caller = mid.iter().find(|j| j.job_key == "call").unwrap();
+    assert_eq!(caller.status, "in_progress");
+    let pre_ids: std::collections::HashSet<&str> = pre.iter().map(|j| j.id.as_str()).collect();
+    assert!(
+        mid.iter()
+            .filter(|j| j.job_key == "build")
+            .all(|j| !pre_ids.contains(j.id.as_str())),
+        "callee rows must be re-emitted, not recycled"
+    );
+
+    drive_runner(&fx, &["ubuntu-latest".into()]).await;
+
+    let jobs = fx.db.list_action_jobs_for_run(&run.id).await.unwrap();
+    let by_key: std::collections::HashMap<String, String> = jobs
+        .iter()
+        .map(|j| (j.job_key.clone(), j.status.clone()))
+        .collect();
+    assert_eq!(
+        by_key,
+        std::collections::HashMap::from([
+            ("call".to_string(), "success".to_string()),
+            ("build".to_string(), "success".to_string()),
+            ("report".to_string(), "success".to_string()),
+        ]),
+        "rerun must re-expand the callee and reproduce the outcome"
+    );
+    // Reset rows (caller + top-level) bump `attempt`; re-emitted callee rows
+    // are fresh inserts at attempt 1.
+    assert_eq!(
+        jobs.iter().find(|j| j.job_key == "call").unwrap().attempt,
+        2
+    );
+    assert_eq!(
+        jobs.iter().find(|j| j.job_key == "report").unwrap().attempt,
+        2
+    );
+    assert_eq!(
+        jobs.iter().find(|j| j.job_key == "build").unwrap().attempt,
+        1
+    );
 }
 
 /// `$GITHUB_STEP_SUMMARY` — the file-command file accumulates across steps

@@ -64,6 +64,12 @@ pub async fn sweep_stale_action_jobs(db: &Database, stale_secs: u64) -> (u64, u6
     let mut timed_out = 0u64;
     let mut requeued = 0u64;
     for job in jobs {
+        // Reusable-workflow caller legs sit `in_progress` with no runner
+        // binding — they expand/close in the scheduler, never claim. Only
+        // reap rows a runner actually claimed.
+        if job.runner_id.is_none() {
+            continue;
+        }
         if let Some(expired) = deadline_lapsed(&job, now) {
             if expired {
                 timed_out += fail_deadline_job(db, &job).await as u64;

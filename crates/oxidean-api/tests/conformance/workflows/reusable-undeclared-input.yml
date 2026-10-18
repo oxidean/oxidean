@@ -1,0 +1,7 @@
+name: reusable-undeclared-input
+on: [push]
+jobs:
+  call:
+    uses: ./.github/workflows/reusable.yml
+    with:
+      bogus: nope

@@ -56,10 +56,15 @@ pub async fn recompute_ready_jobs(db: &Database, run_id: &str) -> Result<usize, 
                 && jobs.iter().any(|l| {
                     l.id != f.id
                         && l.job_key == f.job_key
+                        && l.caller_job_id == f.caller_job_id
                         && matches!(l.status.as_str(), "queued" | "waiting" | "in_progress")
                 })
         });
-        if !any_waiting && !fail_fast_candidate {
+        // An expanded call sits `in_progress` until its children close it —
+        // the fast-path must stay live while a close-out could happen.
+        let open_call = jobs.iter().any(|c| !c.caller_job_id.is_empty())
+            && jobs.iter().any(|j| j.status == "in_progress");
+        if !any_waiting && !fail_fast_candidate && !open_call {
             return Ok(0);
         }
     }
@@ -71,6 +76,7 @@ pub async fn recompute_ready_jobs(db: &Database, run_id: &str) -> Result<usize, 
         let (queued, resolved) = needs_pass(db, run_id, &shared).await?;
         flipped += queued;
         changed |= resolved > 0;
+        changed |= call_close_pass(db, run_id).await?;
         changed |= maxpar_pass(db, run_id).await?;
         if !changed {
             return Ok(flipped);
@@ -110,6 +116,8 @@ impl SharedCtx {
     /// Per-job `if` context: github + secrets + job env (workflow env under
     /// job env) + this leg's `matrix` + real `needs` + `job.status` = the
     /// aggregated needs result (drives `success()`/`failure()`/`cancelled()`).
+    /// Callee legs get `inputs`/`github.event.inputs` from `call_inputs` and
+    /// their `secrets` remapped per the call's `secrets:` spec.
     async fn job_ctx(
         &self,
         db: &Database,
@@ -118,11 +126,44 @@ impl SharedCtx {
         job_status: JobStatus,
     ) -> Context {
         let payload = payload_for(db, job).await.unwrap_or_else(|| json!({}));
+        let call_inputs = payload.get("call_inputs").filter(|v| !v.is_null());
+        let github = match call_inputs {
+            Some(inputs) => {
+                let mut g = self.github.as_object().cloned().unwrap_or_default();
+                if let Some(JsonValue::Object(ev)) = g.get("event").cloned() {
+                    let mut ev = ev;
+                    ev.insert("inputs".into(), inputs.clone());
+                    g.insert("event".into(), JsonValue::Object(ev));
+                }
+                JsonValue::Object(g)
+            }
+            None => self.github.clone(),
+        };
+        let secrets = if !job.caller_job_id.is_empty() {
+            let spec = payload
+                .get("call_secrets")
+                .cloned()
+                .unwrap_or(JsonValue::Null);
+            let scope = self.secrets.as_object().cloned().unwrap_or_default();
+            JsonValue::Object(crate::actions::reusable::remap_call_secrets(&scope, &spec))
+        } else {
+            self.secrets.clone()
+        };
+        // `inputs` mirrors `github.event.inputs` (build_context parity):
+        // callee legs see the call's resolved inputs; everything else sees
+        // the dispatch payload's.
+        let inputs = call_inputs.cloned().unwrap_or_else(|| {
+            github
+                .get("event")
+                .and_then(|e| e.get("inputs"))
+                .cloned()
+                .unwrap_or_else(|| json!({}))
+        });
         let mut ctx = Context::new()
-            .with_context("github", self.github.clone())
-            .with_context("secrets", self.secrets.clone())
+            .with_context("github", github)
+            .with_context("secrets", secrets)
             .with_context("vars", json!({}))
-            .with_context("inputs", json!({}))
+            .with_context("inputs", inputs)
             .with_context("needs", needs_ctx)
             .with_context(
                 "matrix",
@@ -230,9 +271,15 @@ async fn fail_fast_pass(db: &Database, run_id: &str) -> Result<bool, String> {
     if failed_keys.is_empty() {
         return Ok(false);
     }
+    let failed: Vec<&ActionJobRow> = jobs
+        .iter()
+        .filter(|j| j.status == "failure" && failed_keys.contains(&j.job_key))
+        .collect();
     let mut changed = false;
     for j in &jobs {
-        if failed_keys.contains(&j.job_key)
+        if failed
+            .iter()
+            .any(|f| f.job_key == j.job_key && f.caller_job_id == j.caller_job_id)
             && matches!(j.status.as_str(), "queued" | "waiting" | "in_progress")
         {
             db.update_action_job_status(&j.id, "cancelled").await?;
@@ -254,17 +301,24 @@ async fn needs_pass(
     let jobs = db.list_action_jobs_for_run(run_id).await?;
     let mut queued = 0usize;
     let mut resolved = 0usize;
+    let run = db.find_action_run_by_id(run_id).await.ok().flatten();
     for job in &jobs {
         if job.status != "waiting" || job.approval_hold {
             continue;
         }
+        let payload = payload_for(db, job).await.unwrap_or_else(|| json!({}));
+        let is_call = payload.get("call").is_some_and(|c| c.is_object());
         let needs: Vec<String> = serde_json::from_str(&job.needs_json).unwrap_or_default();
-        if needs.is_empty() {
+        if needs.is_empty() && !is_call {
             continue; // max-parallel leg — handled separately
         }
-        // Every leg of every needed key must be terminal.
+        // Every leg of every needed key must be terminal — scoped to the
+        // caller group so callee-internal `needs` resolve naturally.
         let all_terminal = needs.iter().all(|key| {
-            let legs: Vec<&ActionJobRow> = jobs.iter().filter(|x| &x.job_key == key).collect();
+            let legs: Vec<&ActionJobRow> = jobs
+                .iter()
+                .filter(|x| &x.job_key == key && x.caller_job_id == job.caller_job_id)
+                .collect();
             !legs.is_empty() && legs.iter().all(|l| terminal(&l.status))
         });
         if !all_terminal {
@@ -272,10 +326,46 @@ async fn needs_pass(
         }
         match decide_waiting_job(db, job, &jobs, &needs, shared).await {
             WaitDecision::Run => {
-                // Environment wait timer starts at the ready transition —
-                // stamp the deadline and leave the leg `waiting`; the timer
-                // sweep owns the release, so stamped legs never queue here.
-                if job.deployment_wait_minutes > 0 {
+                if is_call {
+                    // Reusable-workflow call — expand the callee file into
+                    // durable callee rows; the caller leg sits `in_progress`
+                    // until call_close_pass rolls its children up.
+                    let ctx = shared
+                        .job_ctx(db, job, JsonValue::Null, JobStatus::Success)
+                        .await;
+                    let outcome = match &run {
+                        Some(r) => {
+                            crate::actions::reusable::expand_call(db, r, job, &payload, &ctx).await
+                        }
+                        None => Err("run row missing".into()),
+                    };
+                    match outcome {
+                        Ok(crate::actions::reusable::ExpandOutcome::Expanded) => {}
+                        Ok(crate::actions::reusable::ExpandOutcome::Failed(msg)) => {
+                            let _ = crate::actions::logs::append_job_log(
+                                &crate::actions::logs::resolve_log_dir(),
+                                run_id,
+                                &job.id,
+                                format!("::error::{msg}\n").as_bytes(),
+                            )
+                            .await;
+                            db.update_action_job_status(&job.id, "failure").await?;
+                        }
+                        Err(e) => {
+                            let _ = crate::actions::logs::append_job_log(
+                                &crate::actions::logs::resolve_log_dir(),
+                                run_id,
+                                &job.id,
+                                format!("::error::call expansion failed: {e}\n").as_bytes(),
+                            )
+                            .await;
+                            db.update_action_job_status(&job.id, "failure").await?;
+                        }
+                    }
+                } else if job.deployment_wait_minutes > 0 {
+                    // Environment wait timer starts at the ready transition —
+                    // stamp the deadline and leave the leg `waiting`; the timer
+                    // sweep owns the release, so stamped legs never queue here.
                     if job.deployment_not_before.is_none() {
                         let not_before = (chrono::Utc::now()
                             + chrono::Duration::minutes(job.deployment_wait_minutes))
@@ -299,26 +389,95 @@ async fn needs_pass(
     Ok((queued, resolved))
 }
 
+/// ── call close-out — `in_progress` caller legs roll up once every callee
+/// row is terminal. Status precedence matches matrix legs; declared
+/// `workflow_call.outputs` materialize onto the caller's `outputs_json` so
+/// top-level `needs.<caller>.outputs` resolves.
+async fn call_close_pass(db: &Database, run_id: &str) -> Result<bool, String> {
+    let jobs = db.list_action_jobs_for_run(run_id).await?;
+    let mut changed = false;
+    for caller in &jobs {
+        // Caller rows carry a `call` payload marker — distinguish them from
+        // claimed runner work (runner_id set) before fetching.
+        if caller.runner_id.is_some() {
+            continue;
+        }
+        if !payload_for(db, caller)
+            .await
+            .is_some_and(|p| p.get("call").is_some_and(|c| c.is_object()))
+        {
+            continue;
+        }
+        let children: Vec<ActionJobRow> = jobs
+            .iter()
+            .filter(|c| c.caller_job_id == caller.id)
+            .cloned()
+            .collect();
+        // A cancelled/failed caller (fail-fast sibling, run cancel) orphans
+        // live children — cancel them and revoke their claim tokens.
+        if caller.status != "in_progress" {
+            if terminal(&caller.status) {
+                for c in children.iter().filter(|c| !terminal(&c.status)) {
+                    db.update_action_job_status(&c.id, "cancelled").await?;
+                    let _ = db.revoke_action_job_token_for_job(&c.id).await;
+                    changed = true;
+                }
+            }
+            continue;
+        }
+        if children.is_empty() || !children.iter().all(|c| terminal(&c.status)) {
+            continue;
+        }
+        let result = crate::actions::reusable::close_call(db, caller, &children).await?;
+        let _ = crate::actions::logs::append_job_log(
+            &crate::actions::logs::resolve_log_dir(),
+            run_id,
+            &caller.id,
+            format!(
+                "::notice::reusable call '{}' completed: {result}\n",
+                caller.job_key
+            )
+            .as_bytes(),
+        )
+        .await;
+        changed = true;
+    }
+    Ok(changed)
+}
+
 /// ── max-parallel release — legs beyond the cap wait for a free slot ────
 async fn maxpar_pass(db: &Database, run_id: &str) -> Result<bool, String> {
     let jobs = db.list_action_jobs_for_run(run_id).await?;
-    let mut keys: Vec<&str> = Vec::new();
+    // Legs group by (job_key, caller_job_id) — callee groups never share
+    // max-parallel pools across call boundaries.
+    let mut keys: Vec<(&str, &str)> = Vec::new();
     for j in &jobs {
         if j.status == "waiting"
             && !j.approval_hold
             && j.needs_json == "[]"
-            && !keys.contains(&j.job_key.as_str())
+            && !keys.contains(&(j.job_key.as_str(), j.caller_job_id.as_str()))
         {
-            keys.push(&j.job_key);
+            keys.push((&j.job_key, j.caller_job_id.as_str()));
         }
     }
     let mut changed = false;
-    for key in keys {
-        let legs: Vec<&ActionJobRow> = jobs.iter().filter(|j| j.job_key == key).collect();
+    for (key, caller) in keys {
+        let legs: Vec<&ActionJobRow> = jobs
+            .iter()
+            .filter(|j| j.job_key == key && j.caller_job_id == caller)
+            .collect();
         let payload = match legs.first() {
             Some(l) => payload_for(db, l).await,
             None => continue,
         };
+        // Caller legs never consume runner slots — needs_pass expanded them
+        // already; a stray `waiting` caller here is a payload-miss edge.
+        if payload
+            .as_ref()
+            .is_some_and(|p| p.get("call").is_some_and(|c| c.is_object()))
+        {
+            continue;
+        }
         let cap = payload
             .as_ref()
             .and_then(|p| p.get("max_parallel").and_then(|v| v.as_u64()))
@@ -386,8 +545,8 @@ async fn decide_waiting_job(
     needs: &[String],
     shared: &SharedCtx,
 ) -> WaitDecision {
-    let needs_ctx = build_needs_context(all_jobs, needs);
-    let agg = aggregate_status(all_jobs, needs);
+    let needs_ctx = build_needs_context(all_jobs, needs, &job.caller_job_id);
+    let agg = aggregate_status(all_jobs, needs, &job.caller_job_id);
     let payload = payload_for(db, job).await.unwrap_or_else(|| json!({}));
     let if_src = payload.get("if").and_then(|v| v.as_str()).map(String::from);
     match &if_src {
@@ -417,11 +576,15 @@ async fn decide_waiting_job(
 }
 
 /// Aggregate the needed keys' leg results into one `JobStatus` — drives
-/// `success()`/`failure()`/`cancelled()` inside job-level `if`.
-fn aggregate_status(all_jobs: &[ActionJobRow], needs: &[String]) -> JobStatus {
+/// `success()`/`failure()`/`cancelled()` inside job-level `if`. Matching is
+/// scoped to `caller_id` so callee `needs` never reach across call groups.
+fn aggregate_status(all_jobs: &[ActionJobRow], needs: &[String], caller_id: &str) -> JobStatus {
     let mut status = JobStatus::Success;
     for key in needs {
-        let legs: Vec<&ActionJobRow> = all_jobs.iter().filter(|j| &j.job_key == key).collect();
+        let legs: Vec<&ActionJobRow> = all_jobs
+            .iter()
+            .filter(|j| &j.job_key == key && j.caller_job_id == caller_id)
+            .collect();
         match leg_result(&legs) {
             "failure" => return JobStatus::Failure,
             "cancelled" => {
@@ -439,10 +602,14 @@ fn aggregate_status(all_jobs: &[ActionJobRow], needs: &[String]) -> JobStatus {
 }
 
 /// `{needs: {<key>: {result, outputs}}}` — aggregated over matrix legs.
-fn build_needs_context(all_jobs: &[ActionJobRow], needs: &[String]) -> JsonValue {
+/// `caller_id` scopes matching: callee `needs` only see same-call legs.
+fn build_needs_context(all_jobs: &[ActionJobRow], needs: &[String], caller_id: &str) -> JsonValue {
     let mut out = Map::new();
     for key in needs {
-        let legs: Vec<&ActionJobRow> = all_jobs.iter().filter(|j| &j.job_key == key).collect();
+        let legs: Vec<&ActionJobRow> = all_jobs
+            .iter()
+            .filter(|j| &j.job_key == key && j.caller_job_id == caller_id)
+            .collect();
         let result = leg_result(&legs);
         // Outputs merge across legs — last completed leg wins per key
         // (GitHub's matrix-outputs semantics).
@@ -537,11 +704,16 @@ pub async fn materialize_outputs(
 }
 
 /// A `needs` context for `fetch_task` — dependents see upstream results
-/// and materialized outputs in their step expressions.
-pub fn needs_context_for_task(all_jobs: &[ActionJobRow], needs_json: &str) -> Option<JsonValue> {
+/// and materialized outputs in their step expressions. `caller_id` scopes
+/// the lookup within a reusable-workflow call group.
+pub fn needs_context_for_task(
+    all_jobs: &[ActionJobRow],
+    needs_json: &str,
+    caller_id: &str,
+) -> Option<JsonValue> {
     let needs: Vec<String> = serde_json::from_str(needs_json).unwrap_or_default();
     if needs.is_empty() {
         return None;
     }
-    Some(build_needs_context(all_jobs, &needs))
+    Some(build_needs_context(all_jobs, &needs, caller_id))
 }
