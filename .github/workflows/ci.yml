@@ -807,11 +807,11 @@ jobs:
             DATABASE_URL="$url" OXIDEAN_DB_DIALECT="$dialect" \
               cargo nextest run --archive-file target/nextest-archive.tar.zst \
                 --workspace-remap "${{ github.workspace }}" \
-                --profile ci -E 'binary_id(oxidean-db::dialect_probe)' "$@"
+                --profile ci -E 'binary_id(oxidean-db::dialect_probe) or binary_id(oxidean-db::dialect_vcs)' "$@"
           }
           probe postgres postgres://oxidean:oxidean@localhost:5432/oxidean
           probe mysql mysql://oxidean:oxidean@127.0.0.1:3306/oxidean
-          # sqlite serializes: the three probe tests share one database file
+          # sqlite serializes: both probe binaries share one database file
           # and parallel migrations race (duplicate column on migration 6).
           probe sqlite sqlite:./var/oxidean.db --test-threads=1
 
