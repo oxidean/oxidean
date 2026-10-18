@@ -13,6 +13,10 @@ const invitesCreateMock = vi.fn();
 const invitesCreateLinkMock = vi.fn();
 const invitesRevokeMock = vi.fn();
 const labelsListMock = vi.fn();
+const orgSecretListMock = vi.fn();
+const orgSecretPutMock = vi.fn();
+const orgSecretDeleteMock = vi.fn();
+const orgSecretReposMock = vi.fn();
 const authMeMock = vi.fn();
 const bootstrapStatusMock = vi.fn();
 const orgGetMock = vi.fn();
@@ -39,6 +43,14 @@ vi.mock("@/lib/api-client", () => ({
         create: (...args: unknown[]) => invitesCreateMock(...args),
         createLink: (...args: unknown[]) => invitesCreateLinkMock(...args),
         revoke: (...args: unknown[]) => invitesRevokeMock(...args),
+      },
+      actions: {
+        secrets: {
+          list: (...args: unknown[]) => orgSecretListMock(...args),
+          put: (...args: unknown[]) => orgSecretPutMock(...args),
+          delete: (...args: unknown[]) => orgSecretDeleteMock(...args),
+          listRepos: (...args: unknown[]) => orgSecretReposMock(...args),
+        },
       },
     },
     label: {
@@ -72,6 +84,7 @@ import { OrgSettingsShell } from "@/components/org/org-settings-shell";
 import { OrgSettingsPage } from "./$owner.settings.index";
 import { OrgMembersPage } from "./$owner.settings.members";
 import { OrgLabelsPage } from "./$owner.settings.labels";
+import { OrgActionsPage } from "./$owner.settings.actions";
 
 function setPathname(path: string) {
   window.history.pushState({}, "", path);
@@ -171,6 +184,25 @@ beforeEach(() => {
     },
   });
   updateSettingsMock.mockReset();
+  orgSecretListMock.mockResolvedValue({
+    ok: true,
+    data: {
+      secrets: [
+        {
+          name: "DEPLOY_TOKEN",
+          visibility: "selected",
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+    },
+  });
+  orgSecretPutMock.mockReset().mockResolvedValue({ ok: true, data: {} });
+  orgSecretDeleteMock.mockReset().mockResolvedValue({ ok: true, data: {} });
+  orgSecretReposMock.mockResolvedValue({
+    ok: true,
+    data: { repository_ids: ["r-abc", "r-def"] },
+  });
 });
 
 afterEach(cleanup);
@@ -382,5 +414,60 @@ describe("org settings labels", () => {
     await waitFor(() => {
       expect(screen.getByText("No org labels yet")).toBeInTheDocument();
     });
+  });
+});
+
+describe("org settings actions", () => {
+  it("happy: secrets list + selected-visibility repos + save flow", async () => {
+    renderWithQueryClient(OrgActionsPage);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("org-actions-settings")).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(screen.getByText("DEPLOY_TOKEN")).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(screen.getByText("Repositories: r-abc, r-def")).toBeInTheDocument();
+    });
+    expect(orgSecretReposMock).toHaveBeenCalledWith(
+      expect.objectContaining({ slug: "acme", secret_name: "DEPLOY_TOKEN" }),
+    );
+
+    // Visibility select reveals the repository-ids field for "selected".
+    fireEvent.change(screen.getByTestId("org-secret-visibility"), {
+      target: { value: "selected" },
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("org-secret-repos")).toBeInTheDocument();
+    });
+
+    fireEvent.input(screen.getByTestId("org-secret-name"), {
+      target: { value: "NEW_TOKEN" },
+    });
+    fireEvent.input(screen.getByTestId("org-secret-value"), {
+      target: { value: "s3cr3t" },
+    });
+    fireEvent.input(screen.getByTestId("org-secret-repos"), {
+      target: { value: "r-abc, r-ghi" },
+    });
+    fireEvent.click(screen.getByTestId("org-secret-save"));
+
+    await waitFor(() => {
+      expect(orgSecretPutMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          slug: "acme",
+          secret_name: "NEW_TOKEN",
+          visibility: "selected",
+          repository_ids: ["r-abc", "r-ghi"],
+        }),
+      );
+    });
+  });
+
+  it("unhappy: loading state when org access unresolved", async () => {
+    accessPending = true;
+    renderWithQueryClient(OrgActionsPage);
+    expect(screen.getByText("Loading…")).toBeInTheDocument();
   });
 });

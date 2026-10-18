@@ -51,6 +51,12 @@ const MIRROR_BROWSER = "apps/web/src/components/repo/mirror-settings-panel.brows
 const WEBHOOK_FORM_BROWSER = "apps/web/src/components/repo/webhook-form.browser.test.tsx";
 const ACTIONS_RERUN_BROWSER = "apps/web/src/components/repo/actions-rerun-menu.browser.test.tsx";
 const ACTIONS_FILTERS_BROWSER = "apps/web/src/components/repo/actions-filters.browser.test.tsx";
+const ACTIONS_SETTINGS_BROWSER =
+  "apps/web/src/components/repo/actions-settings-panel.browser.test.tsx";
+const ACTIONS_DISPATCH_INPUTS_BROWSER =
+  "apps/web/src/components/repo/actions-dispatch-inputs.browser.test.tsx";
+const ACTIONS_ENVIRONMENTS_BROWSER =
+  "apps/web/src/components/repo/actions-environments-panel.browser.test.tsx";
 const FEATURES_BROWSER = "apps/web/src/components/repo/repo-features-panel.browser.test.tsx";
 const CLONE_BOX_BROWSER = "apps/web/src/components/repo/clone-box.browser.test.tsx";
 const MCP_HARNESS_BROWSER = "apps/web/src/components/settings/mcp-harness-blocks.browser.test.tsx";
@@ -242,8 +248,29 @@ export const browserCoverageManifest: BrowserCoverageEntry[] = [
     surface: "components/repo/actions-settings-panel.tsrx",
     coverage: [
       {
-        kind: "skip",
-        rationale: "Actions enable Switch; promote on next actions-settings edit.",
+        kind: "browser",
+        test: ACTIONS_SETTINGS_BROWSER,
+        subject: "actions-settings-panel",
+      },
+    ],
+  },
+  {
+    surface: "components/repo/actions-dispatch-inputs.tsrx",
+    coverage: [
+      {
+        kind: "browser",
+        test: ACTIONS_DISPATCH_INPUTS_BROWSER,
+        subject: "actions-dispatch-inputs",
+      },
+    ],
+  },
+  {
+    surface: "components/repo/actions-environments-panel.tsrx",
+    coverage: [
+      {
+        kind: "browser",
+        test: ACTIONS_ENVIRONMENTS_BROWSER,
+        subject: "actions-environments-panel",
       },
     ],
   },

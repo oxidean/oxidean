@@ -110,7 +110,10 @@ escape hatch; popup is anchor-scoped under the Select root. */}
                 <SelectPopup>
                   <SelectList>
                     @for (const opt of input.options ?? []; key opt) {
-                      <SelectItem value={opt}>
+                      <SelectItem
+                        value={opt}
+                        data-testid={`dispatch-input-field-${input.name}-option-${opt}`}
+                      >
                         <SelectItemIndicator>
                           <Check aria-hidden size={14} className="text-primary" />
                         </SelectItemIndicator>
@@ -153,7 +156,10 @@ escape hatch; popup is anchor-scoped under the Select root. */}
                   <SelectPopup>
                     <SelectList>
                       @for (const opt of envNames; key opt) {
-                        <SelectItem value={opt}>
+                        <SelectItem
+                          value={opt}
+                          data-testid={`dispatch-input-field-${input.name}-option-${opt}`}
+                        >
                           <SelectItemIndicator>
                             <Check aria-hidden size={14} className="text-primary" />
                           </SelectItemIndicator>

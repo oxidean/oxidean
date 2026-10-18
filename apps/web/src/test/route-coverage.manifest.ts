@@ -709,6 +709,15 @@ export const routeCoverageManifest: RouteCoverageEntry[] = [
     route: "$owner.settings.labels.tsrx",
     coverage: [{ kind: "stack-browser", test: FORGE_SSH_ORGS }],
   },
+  {
+    route: "$owner.settings.actions.tsrx",
+    coverage: [
+      {
+        kind: "happy-dom",
+        test: "apps/web/src/routes/$owner.settings.integration.test.ts",
+      },
+    ],
+  },
 
   // --- explore / notifications / global search (Phases 17 / 21) ---
   {

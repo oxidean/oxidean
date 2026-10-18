@@ -339,7 +339,10 @@ escape hatch; popup is anchor-scoped under the Select root. */}
                   <SelectPopup>
                     <SelectList>
                       @for (const opt of DEFAULT_PERM_OPTIONS; key opt.value) {
-                        <SelectItem value={opt.value}>
+                        <SelectItem
+                          value={opt.value}
+                          data-testid={"actions-default-perms-option-" + opt.value}
+                        >
                           <SelectItemIndicator>
                             <Check aria-hidden size={14} className="text-primary" />
                           </SelectItemIndicator>
@@ -388,7 +391,10 @@ escape hatch; popup is anchor-scoped under the Select root. */}
                   <SelectPopup>
                     <SelectList>
                       @for (const opt of FORK_PR_OPTIONS; key opt.value) {
-                        <SelectItem value={opt.value}>
+                        <SelectItem
+                          value={opt.value}
+                          data-testid={"actions-fork-pr-option-" + opt.value}
+                        >
                           <SelectItemIndicator>
                             <Check aria-hidden size={14} className="text-primary" />
                           </SelectItemIndicator>
