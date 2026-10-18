@@ -3784,11 +3784,15 @@ dependencies = [
 name = "oxidean-vcs"
 version = "0.1.0"
 dependencies = [
+ "base64 0.23.1",
  "bytes",
  "chrono",
  "futures-util",
+ "hex",
  "oxidean-core",
  "oxidean-db",
+ "serde",
+ "serde_json",
  "sha2 0.11.0",
  "tempfile",
  "tokio",
