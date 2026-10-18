@@ -1,0 +1,12 @@
+name: Ctx Extra
+on: [push]
+jobs:
+  ctx:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "a=${{ github.action }} prot=${{ github.ref_protected }} days=${{ github.retention_days }} renv=${{ runner.environment }} trig=${{ github.triggering_actor }} gql=$GITHUB_GRAPHQL_URL"
+      - if: github.action == '__run_2'
+        run: echo "if-saw-own-name"
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/probe
+      - run: echo "d=${{ github.action }} repo=${{ github.action_repository || 'cleared' }}"

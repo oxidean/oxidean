@@ -23,6 +23,7 @@ pub(crate) const PAIRED_VARS: &[(&str, &str)] = &[
     ("OXIDEAN_ACTOR", "GITHUB_ACTOR"),
     ("OXIDEAN_ACTOR_ID", "GITHUB_ACTOR_ID"),
     ("OXIDEAN_API_URL", "GITHUB_API_URL"),
+    ("OXIDEAN_GRAPHQL_URL", "GITHUB_GRAPHQL_URL"),
     ("OXIDEAN_SERVER_URL", "GITHUB_SERVER_URL"),
     ("OXIDEAN_BASE_REF", "GITHUB_BASE_REF"),
     ("OXIDEAN_HEAD_REF", "GITHUB_HEAD_REF"),
@@ -140,6 +141,15 @@ pub(crate) fn job_env(
                     String::new()
                 } else {
                     format!("{server_url}/api")
+                }
+            }
+            // No GraphQL endpoint exists — the variable carries where one
+            // would live so scripts interpolating it don't break.
+            "GRAPHQL_URL" => {
+                if server_url.is_empty() {
+                    String::new()
+                } else {
+                    format!("{server_url}/api/graphql")
                 }
             }
             "SERVER_URL" => server_url.clone(),

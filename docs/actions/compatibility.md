@@ -46,14 +46,14 @@ download, annotations, `workflow_job` webhook.
 |---------|-----------|---------|-------------|-----|
 | 1. Workflow files & discovery | 7 | 1 | 0 | 0 |
 | 2. Triggers & filters | 20 | 2 | 0 | 0 |
-| 3. Events | 8 | 1 | 27 | 0 |
+| 3. Events | 9 | 0 | 27 | 0 |
 | 4. Workflow-level keys | 8 | 0 | 0 | 0 |
 | 5. Jobs | 28 | 1 | 0 | 1 |
 | 6. Steps | 17 | 1 | 1 | 1 |
 | 7. Expressions | 15 | 0 | 0 | 0 |
-| 8. Contexts | 20 | 4 | 0 | 0 |
+| 8. Contexts | 22 | 2 | 0 | 0 |
 | 9. Workflow commands & environment files | 17 | 4 | 1 | 0 |
-| 10. Default environment variables | 47 | 0 | 1 | 0 |
+| 10. Default environment variables | 48 | 0 | 0 | 0 |
 | 11. Action metadata — action.yml | 14 | 2 | 1 | 1 |
 | 12. Reusable workflows | 9 | 1 | 0 | 0 |
 | 13. Artifacts | 11 | 1 | 1 | 0 |
@@ -132,7 +132,7 @@ activity-type filter semantics; unsupported ones warn at parse (section 2,
 | `ev.workflow_dispatch` | `workflow_dispatch` — manual run with typed inputs | supported | case:dispatch-only, test:crates/oxidean-api/tests/actions_endpoints.rs::dispatch_workflow_enqueues_run, test:crates/oxidean-api/src/actions/rpc.rs::dispatch_inputs_resolve_types_and_defaults | string/boolean/choice/number/environment types; required/default honoured; 25-input cap. |
 | `ev.release` | `release` — types published/created/edited/prereleased/released | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_lifecycle_release_and_issues | |
 | `ev.issues` | `issues` — all activity types, `types:` filter honoured | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_lifecycle_release_and_issues | |
-| `ev.schedule-payload` | `github.event.schedule` carries the matched cron entry | partial | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_schedule_sweep_dedupes_per_minute | Cron firing is proven; the `schedule` field inside the event payload is not populated — GitHub behaviour unverified whether downstream steps rely on it. |
+| `ev.schedule-payload` | `github.event.schedule` carries the matched cron entry | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_schedule_sweep_dedupes_per_minute | `schedule_payload` emits `{"schedule": "<cron>", "repository": …}`; the test asserts the field lands on the run's event payload. |
 | `ev.branch_protection_rule` | `branch_protection_rule` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
 | `ev.check_run` | `check_run` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
 | `ev.check_suite` | `check_suite` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
@@ -277,13 +277,13 @@ that we also restrict.
 
 | `id` | Feature | Status | Evidence | Notes |
 |------|---------|--------|----------|-------|
-| `ctx.github` | `github` context — sha, ref, ref_name, ref_type, event_name, event payload, repository*, actor*, workflow*, job, run_*, server_url, api_url, base_ref, head_ref, workspace, token | partial | case:expr-github-ctx, test:crates/oxidean-runner/src/exec/context.rs::runner_context | Missing `graphql_url`, `ref_protected`, `retention_days`, `triggering_actor`, `action`, `action_path`, `action_ref`, `action_repository`, `action_status`. Closes in P13. |
+| `ctx.github` | `github` context — sha, ref, ref_name, ref_type, event_name, event payload, repository*, actor*, workflow*, job, run_*, server_url, api_url, graphql_url, ref_protected, retention_days, triggering_actor, action*, base_ref, head_ref, workspace, token | supported | case:expr-github-ctx, case:ctx-github-extra, test:crates/oxidean-runner/src/exec/context.rs::runner_context | `graphql_url` is a shape-only value (no GraphQL endpoint). `github.action`/`action_repository`/`action_ref` are per-step static names incl. `if:` self-reference; `action_path` resolves inside action bodies; `action_status` is set for post phases. `triggering_actor` keeps the original actor on reruns (GitHub restamps). |
 | `ctx.env` | `env` context — workflow/job/step layering | supported | case:expr-env-layering, case:workflow-env | |
 | `ctx.vars` | `vars` context — configuration variables | supported | case:expr-vars-empty, case:vars-context, test:crates/oxidean-api/tests/actions_vars.rs::actions_vars_merge_precedence | Repo/org/environment stores; narrowest scope wins on collisions; values are plaintext by design. |
 | `ctx.job` | `job` context — status | partial | test:crates/oxidean-runner/src/exec/context.rs::sync_job_ctx | `status` only; `container`/`services` sub-objects not populated. P13. |
 | `ctx.jobs` | `jobs.<id>.result` / `.outputs` | supported | case:needs-outputs | |
 | `ctx.steps` | `steps.<id>.outcome` / `.conclusion` / `.outputs` | supported | case:expr-steps-context, case:step-conclusion-coe | |
-| `ctx.runner` | `runner` context — os, arch, name, temp, tool_cache | partial | test:crates/oxidean-runner/src/exec/context.rs::runner_context | Missing `debug` and `environment`. P13. |
+| `ctx.runner` | `runner` context — os, arch, name, temp, tool_cache, debug, environment | supported | case:ctx-github-extra, test:crates/oxidean-runner/src/exec/mod.rs::debug_flags_resolve_from_env_vars_and_secrets | `environment` is always `self-hosted`; `debug` = "1" when `ACTIONS_RUNNER_DEBUG` resolves on (env/vars/secrets, incl. rerun debug logging). |
 | `ctx.secrets` | `secrets` context | supported | case:secrets-context | |
 | `ctx.strategy` | `strategy` context — job-index, job-total, fail-fast, max-parallel | partial | case:matrix-basic | `matrix` carries the leg; `strategy.*` metadata is not populated. P13. |
 | `ctx.matrix` | `matrix` context | supported | case:matrix-basic | |
@@ -363,7 +363,7 @@ and `OXIDEAN_*` twins (same value, both spellings) unless noted.
 | `env.github-env` | `GITHUB_ENV` — env file path | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | Oxidean-side name is `OXIDEAN_ENV_FILE` (see section 9). |
 | `env.github-event-name` | `GITHUB_EVENT_NAME` | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | |
 | `env.github-event-path` | `GITHUB_EVENT_PATH` — event.json path | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values, test:crates/oxidean-runner/src/exec/mod.rs::event_json_pull_request | |
-| `env.github-graphql-url` | `GITHUB_GRAPHQL_URL` | unsupported | test:crates/oxidean-runner/src/exec/context.rs::runner_context_exposes_github_runner_and_job | No GraphQL API exists. P13. |
+| `env.github-graphql-url` | `GITHUB_GRAPHQL_URL` | supported | case:ctx-github-extra | Emitted as `{server_url}/api/graphql` (paired `OXIDEAN_GRAPHQL_URL`) — no GraphQL endpoint exists, so the variable is a stable shape value for interpolation. |
 | `env.github-head-ref` | `GITHUB_HEAD_REF` — PR source branch, else empty | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_pull_request_head_ref | |
 | `env.github-job` | `GITHUB_JOB` — job id | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | |
 | `env.github-output` | `GITHUB_OUTPUT` | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | |

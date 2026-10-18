@@ -545,6 +545,10 @@ jobs:
     assert_eq!(runs.len(), 1);
     assert_eq!(runs[0].event, "schedule");
     assert_eq!(runs[0].head_ref, "refs/heads/main");
+    // `github.event.schedule` carries the cron entry that matched this tick.
+    let payload: serde_json::Value =
+        serde_json::from_str(runs[0].event_payload_json.as_deref().unwrap()).unwrap();
+    assert_eq!(payload["schedule"].as_str().unwrap(), "* * * * *");
 }
 
 #[tokio::test]

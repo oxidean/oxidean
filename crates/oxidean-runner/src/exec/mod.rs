@@ -497,6 +497,16 @@ pub async fn execute(client: &Client, task: &Task, config: &Config) -> &'static 
     if runner_debug && env::env_get(&env.vars, "RUNNER_DEBUG").is_none() {
         env.vars.push(("RUNNER_DEBUG".into(), "1".into()));
     }
+    // `runner.debug` — GitHub emits the property only while runner-debug is
+    // on (always "1"); absent otherwise.
+    if runner_debug {
+        let mut r = ctx
+            .get_context("runner")
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!({}));
+        r["debug"] = serde_json::json!("1");
+        ctx.set_context("runner", r);
+    }
     let default_timeout = Duration::from_secs(config.job_timeout_secs);
     let deadline = JobDeadline::new(task.timeout_seconds);
 
@@ -534,6 +544,36 @@ pub async fn execute(client: &Client, task: &Task, config: &Config) -> &'static 
         let mut action_ordinals: HashMap<String, usize> = HashMap::new();
         for (i, raw_step) in steps.iter().enumerate() {
             let step_id = raw_step.id.clone().unwrap_or_else(|| format!("__step{i}"));
+            // `github.action` naming is assigned at template expansion on
+            // GitHub — skipped and deadline-killed steps still consume their
+            // ordinal — and `github.action` already resolves to *this* step
+            // inside its own `if:`. Compute it before the gates; `uses`
+            // expressions resolve the same way (`docker://img:${{ m.tag }}`).
+            let mut ident_src = raw_step.clone();
+            if let Some(u) = &raw_step.uses {
+                ident_src.uses = Some(expr::interpolate(u, &ctx).unwrap_or_else(|_| u.clone()));
+            }
+            let (action_name, action_repo, action_ref) =
+                step_action_identity(&ident_src, &mut action_ordinals);
+            // `github.action` falls back to the step id for steps with
+            // neither `run:` nor `uses:` (GitHub's documented fallback).
+            {
+                let mut gh = ctx
+                    .get_context("github")
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::json!({}));
+                gh["action"] =
+                    serde_json::json!(action_name.clone().unwrap_or_else(|| step_id.clone()));
+                match &action_repo {
+                    Some(v) => gh["action_repository"] = serde_json::json!(v),
+                    None => gh["action_repository"] = serde_json::Value::Null,
+                }
+                match &action_ref {
+                    Some(v) => gh["action_ref"] = serde_json::json!(v),
+                    None => gh["action_ref"] = serde_json::Value::Null,
+                }
+                ctx.set_context("github", gh);
+            }
             // Job deadline gates every subsequent step (GitHub `cancelled`).
             if deadline.expired() {
                 logger
@@ -615,9 +655,8 @@ pub async fn execute(client: &Client, task: &Task, config: &Config) -> &'static 
             }
             // `GITHUB_ACTION`/`GITHUB_ACTION_REPOSITORY`/`GITHUB_ACTION_REF` —
             // GitHub reserves these per step; `env:` cannot overwrite them, so
-            // they land after the step env layer.
-            let (action_name, action_repo, action_ref) =
-                step_action_identity(&step, &mut action_ordinals);
+            // they land after the step env layer. The values were assigned at
+            // loop top (static naming — this consumes no extra ordinal).
             if let Some(name) = action_name {
                 env_set(&mut this_step_env, "OXIDEAN_ACTION", name.clone());
                 env_set(&mut this_step_env, "GITHUB_ACTION", name);
@@ -737,8 +776,22 @@ pub async fn execute(client: &Client, task: &Task, config: &Config) -> &'static 
     }
 
     // Post actions — reverse declaration order, gated by `post-if`
-    // (default `always()`).
+    // (default `always()`). `github.action_status` reflects the state the
+    // main phases left the job in when the post phase runs.
     let posts = std::mem::take(&mut posts);
+    {
+        let status = match ctx.job_status() {
+            JobStatus::Success => "success",
+            JobStatus::Cancelled => "cancelled",
+            _ => "failure",
+        };
+        let mut gh = ctx
+            .get_context("github")
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!({}));
+        gh["action_status"] = serde_json::json!(status);
+        ctx.set_context("github", gh);
+    }
     for post in posts.into_iter().rev() {
         let allowed = match &post.if_expr {
             None => true,

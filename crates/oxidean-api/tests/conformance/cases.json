@@ -1695,6 +1695,25 @@
       ]
     },
     {
+      "id": "ctx-github-extra",
+      "kind": "run",
+      "desc": "github context completeness — ref_protected/retention_days/triggering_actor/graphql shape plus per-step action naming: __run ordinals count skipped-free declaration order, github.action is the current step inside its own if:, and uses-step action_repository/action_path reach composite internals.",
+      "files": {
+        ".github/actions/probe/action.yml": "name: probe\nruns:\n  using: composite\n  steps:\n    - run: echo \"inside action=${{ github.action }} repo=${{ github.action_repository }} ref=${{ github.action_ref }}\"\n      shell: bash\n"
+      },
+      "expect_run": "success",
+      "expect_jobs": {
+        "ctx": "success"
+      },
+      "log_contains": [
+        "a=__run prot=false days=90 renv=self-hosted trig=cf-ctx-github-extra-",
+        "gql=http://localhost:8080/api/graphql",
+        "if-saw-own-name",
+        "inside action=__github_actions_probe repo=./.github/actions/probe ref=",
+        "d=__run_3 repo=cleared"
+      ]
+    },
+    {
       "id": "workflow-run-branch-filter",
       "kind": "run",
       "desc": "on.workflow_run.branches that exclude the upstream run's head branch never enqueue a downstream run.",

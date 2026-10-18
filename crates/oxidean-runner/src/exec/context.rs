@@ -56,6 +56,14 @@ pub(crate) fn runner_context(
         "run_attempt": task.run_attempt.unwrap_or_default(),
         "server_url": server_url,
         "api_url": if server_url.is_empty() { String::new() } else { format!("{server_url}/api") },
+        // No GraphQL endpoint exists — the shape is present for expressions
+        // that interpolate it, pointing where one would live.
+        "graphql_url": if server_url.is_empty() { String::new() } else { format!("{server_url}/api/graphql") },
+        "ref_protected": task.ref_protected.unwrap_or(false),
+        "retention_days": task.retention_days.unwrap_or_default(),
+        // Restamped-on-rerun divergence lives with GITHUB_TRIGGERING_ACTOR:
+        // we report the original triggering actor, not the rerunner.
+        "triggering_actor": task.actor.clone().unwrap_or_default(),
         "base_ref": if is_pr { task.base_ref.clone().unwrap_or_default() } else { String::new() },
         "head_ref": if is_pr { ref_name } else { String::new() },
         "workspace": workspace_env,
@@ -72,6 +80,10 @@ pub(crate) fn runner_context(
                 "name": config.name,
                 "temp": runner_temp_env,
                 "tool_cache": format!("{runner_temp_env}/tool-cache"),
+                // Oxidean runners are always self-hosted from the workflow's
+                // perspective; `debug` is stamped post-env-layering once the
+                // ACTIONS_RUNNER_DEBUG sources resolve.
+                "environment": "self-hosted",
             }),
         )
         .with_context(

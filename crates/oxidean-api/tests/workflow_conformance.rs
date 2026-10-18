@@ -851,6 +851,7 @@ conformance_case!(run_name, "run-name");
 conformance_case!(workflow_run_listen, "workflow-run-listen");
 conformance_case!(workflow_run_stem, "workflow-run-stem");
 conformance_case!(workflow_run_branch_filter, "workflow-run-branch-filter");
+conformance_case!(ctx_github_extra, "ctx-github-extra");
 conformance_case!(cache_service_absent, "cache-service-absent");
 
 /// Every `cases.json` entry is wired to a generated test and every corpus

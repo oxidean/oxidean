@@ -591,6 +591,16 @@ fn run_action_spec<'x>(
         );
         let mut action_ctx = ctx.clone();
         action_ctx.set_context("inputs", serde_json::Value::Object(inputs_json));
+        // `github.action_path` — the resolved action dir, visible to the
+        // action's own expression eval (composite steps, action.yml).
+        {
+            let mut gh = action_ctx
+                .get_context("github")
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!({}));
+            gh["action_path"] = serde_json::json!(action_dir.to_string_lossy());
+            action_ctx.set_context("github", gh);
+        }
 
         if let Some(n) = &spec.name {
             senv.logger.line(&format!("##[action]{n}")).await;
