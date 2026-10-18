@@ -163,9 +163,6 @@ pub enum ActionCaveat {
     Pages,
     /// `actions/attest*` artifact attestations — no equivalent exists.
     Attestations,
-    /// `actions/cache*` — no cache service yet (P14); upload is a no-op
-    /// warning on a real run.
-    CacheService,
     /// Needs a Docker-capable runner (image pulls, docker CLI).
     Docker,
     /// Needs a Windows/macOS (or otherwise non-Linux) external runner.
@@ -179,7 +176,6 @@ impl ActionCaveat {
             ActionCaveat::GithubApi => "calls the GitHub API, which Oxidean does not emulate",
             ActionCaveat::Pages => "GitHub Pages is not available on Oxidean",
             ActionCaveat::Attestations => "artifact attestations are not available on Oxidean",
-            ActionCaveat::CacheService => "no actions cache service yet — runs without caching",
             ActionCaveat::Docker => "requires a Docker-capable runner",
             ActionCaveat::ExternalOs => "requires a Windows/macOS external runner",
         }
@@ -234,8 +230,6 @@ static KNOWN_ACTION_CAVEATS: &[(&str, ActionCaveat)] = &[
         "slsa-framework/slsa-github-generator",
         ActionCaveat::Attestations,
     ),
-    // Cache service (P14).
-    ("actions/cache", ActionCaveat::CacheService),
     // Docker-capable runner required.
     ("docker/setup-buildx-action", ActionCaveat::Docker),
     ("docker/setup-qemu-action", ActionCaveat::Docker),
