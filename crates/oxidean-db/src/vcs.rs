@@ -1501,7 +1501,9 @@ pub async fn list_file_changes(
     match pool {
         DbPool::Postgres(p) => {
             let rows = sqlx::query(
-                "SELECT changeset_id, path, kind, mode, old_path, blob_hash
+                // mode is INT4; VcsFileChangeRow.mode is i64 → widen in-query
+                // (sqlx-pg refuses implicit INT4→INT8 decode).
+                "SELECT changeset_id, path, kind, mode::bigint AS mode, old_path, blob_hash
                  FROM vcs_file_changes WHERE changeset_id = $1 ORDER BY path",
             )
             .bind(changeset_id)
