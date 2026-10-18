@@ -182,21 +182,75 @@ pub async fn upload(
     Ok(axum::Json(meta(&stored)))
 }
 
+/// Who is reading an artifact. The runner token covers same-run reads
+/// (GitHub's runtime-token path); job tokens and user PATs cover the
+/// `github-token`/`repository`/`run-id` download-artifact inputs — the
+/// caller supplies whichever token GitHub's action would have used.
+enum ArtifactReader {
+    Runner(oxidean_db::ActionRunnerRow),
+    Pat(crate::pat::bearer::PatIdentity),
+}
+
+/// Resolve the artifact caller: runner token first (fast path, keeps the
+/// liveness heartbeat), then the shared bearer resolution that routes
+/// `oxidean_job_*` job tokens and user PATs into one identity.
+async fn artifact_reader(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<ArtifactReader, StatusCode> {
+    let raw = super::runner_proto::bearer_token(headers).ok_or(StatusCode::UNAUTHORIZED)?;
+    let hash = super::tokens::hash_token(&raw);
+    if let Some(runner) = state
+        .db
+        .find_action_runner_by_token_hash(&hash)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    {
+        if let Err(e) = state.db.touch_action_runner_online(&runner.id).await {
+            tracing::warn!(error = %e, runner_id = %runner.id, "failed to bump runner last_online");
+        }
+        return Ok(ArtifactReader::Runner(runner));
+    }
+    let (_session, pat) =
+        crate::pat::bearer::resolve_bearer(&state.db, &state.git_auth_limiter, &raw, None)
+            .await
+            .map_err(|_| StatusCode::UNAUTHORIZED)?;
+    Ok(ArtifactReader::Pat(pat))
+}
+
+/// A `repository` (`owner/name`) input must resolve to the run's own
+/// repository — mismatches 404 like GitHub resolving the run inside the
+/// named repo and finding nothing.
+async fn check_repository_param(
+    state: &AppState,
+    repository: Option<&str>,
+    run: &oxidean_db::ActionRunRow,
+) -> Result<(), StatusCode> {
+    let Some(repository) = repository else {
+        return Ok(());
+    };
+    let Some((owner, name)) = repository.split_once('/') else {
+        return Err(StatusCode::NOT_FOUND);
+    };
+    match crate::repo::lookup_repo_row_or_redirect(&state.db, owner, name).await {
+        Ok(Some((row, _))) if row.id == run.repository_id => Ok(()),
+        Ok(_) => Err(StatusCode::NOT_FOUND),
+        Err(e) => {
+            tracing::error!(error = %e, "repository lookup failed");
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+    }
+}
+
 /// Read-side authorization: the runner must own a job in the run, or be
 /// repository-scoped to the run's repository. Mirrors GitHub's behavior where
 /// `download-artifact` reaches other jobs' artifacts in the same run.
-async fn authorize_run_read(
+async fn authorize_runner_read(
     state: &AppState,
     runner: &oxidean_db::ActionRunnerRow,
-    run_id: &str,
+    run: &oxidean_db::ActionRunRow,
 ) -> Result<(), StatusCode> {
     if let Some(repo) = runner.repository_id.as_deref() {
-        let run = state
-            .db
-            .find_action_run_by_id(run_id)
-            .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-            .ok_or(StatusCode::NOT_FOUND)?;
         return if run.repository_id == repo {
             Ok(())
         } else {
@@ -205,7 +259,7 @@ async fn authorize_run_read(
     }
     let jobs = state
         .db
-        .list_action_jobs_for_run(run_id)
+        .list_action_jobs_for_run(&run.id)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     if jobs.is_empty() {
@@ -221,14 +275,104 @@ async fn authorize_run_read(
     }
 }
 
+/// Job-token / PAT read authorization — GitHub's `actions:read` requirement.
+/// Job tokens are pinned to their repository and need `actions` granted; FG
+/// PATs need `actions:read` over the repo; classic PATs need a repo-family
+/// scope. User tokens also need repository visibility — outsiders get 404,
+/// never a revealing 403.
+async fn authorize_pat_read(
+    state: &AppState,
+    pat: &crate::pat::bearer::PatIdentity,
+    run: &oxidean_db::ActionRunRow,
+) -> Result<(), StatusCode> {
+    use oxidean_core::pat_types::{ClassicPatScope, FgPermLevel, FgRepoAccess, PatKind};
+    let actions_granted = matches!(
+        pat.perms.actions,
+        Some(FgPermLevel::Read) | Some(FgPermLevel::Write)
+    );
+    if crate::pat::bearer::is_job_token(pat) {
+        let pinned = pat.repository_ids.iter().any(|id| id == &run.repository_id);
+        return if pinned && actions_granted {
+            Ok(())
+        } else {
+            Err(StatusCode::FORBIDDEN)
+        };
+    }
+    match pat.kind {
+        PatKind::FineGrained => {
+            let covers = match pat.repo_access {
+                Some(FgRepoAccess::All) => true,
+                _ => pat.repository_ids.iter().any(|id| id == &run.repository_id),
+            };
+            if !(actions_granted && covers) {
+                return Err(StatusCode::FORBIDDEN);
+            }
+        }
+        _ => {
+            let scoped = pat
+                .scopes
+                .iter()
+                .any(|s| matches!(s, ClassicPatScope::Repo | ClassicPatScope::PublicRepo));
+            if !scoped {
+                return Err(StatusCode::FORBIDDEN);
+            }
+        }
+    }
+    let repo = state
+        .db
+        .find_repository_by_id(&run.repository_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+    let owner = crate::repo::owner_ref_for_repo(&state.db, &repo)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+    let capability =
+        crate::repo::effective_capability(&state.db, Some(&pat.user_id), &repo, &owner)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    if crate::repo::meets(capability, crate::repo::Capability::Read) {
+        Ok(())
+    } else {
+        Err(StatusCode::NOT_FOUND)
+    }
+}
+
+async fn authorize_run_read(
+    state: &AppState,
+    reader: &ArtifactReader,
+    run: &oxidean_db::ActionRunRow,
+) -> Result<(), StatusCode> {
+    match reader {
+        ArtifactReader::Runner(r) => authorize_runner_read(state, r, run).await,
+        ArtifactReader::Pat(pat) => authorize_pat_read(state, pat, run).await,
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DownloadQuery {
+    /// `owner/name` the caller claims the run lives in — must match the
+    /// run's repository (GitHub's cross-repo `repository` input).
+    pub repository: Option<String>,
+}
+
 /// GET /artifacts/{run_id}/{name} — stream the stored tar.gz back.
 pub async fn download(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path((run_id, name)): Path<(String, String)>,
+    Query(q): Query<DownloadQuery>,
 ) -> Result<Response, StatusCode> {
-    let runner = super::runner_proto::runner_from_headers_pub(&state, &headers).await?;
-    authorize_run_read(&state, &runner, &run_id).await?;
+    let reader = artifact_reader(&state, &headers).await?;
+    let run = state
+        .db
+        .find_action_run_by_id(&run_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+    check_repository_param(&state, q.repository.as_deref(), &run).await?;
+    authorize_run_read(&state, &reader, &run).await?;
     let row = state
         .db
         .find_action_artifact(&run_id, &name)
@@ -251,6 +395,9 @@ pub async fn download(
 #[derive(Debug, Deserialize)]
 pub struct ListRequest {
     pub run_id: String,
+    /// Optional `owner/name` guard, same as the download query param.
+    #[serde(default)]
+    pub repository: Option<String>,
 }
 
 /// POST /artifacts/list — every artifact metadata row for a run.
@@ -259,8 +406,15 @@ pub async fn list(
     headers: HeaderMap,
     axum::Json(req): axum::Json<ListRequest>,
 ) -> Result<axum::Json<Vec<ArtifactMeta>>, StatusCode> {
-    let runner = super::runner_proto::runner_from_headers_pub(&state, &headers).await?;
-    authorize_run_read(&state, &runner, &req.run_id).await?;
+    let reader = artifact_reader(&state, &headers).await?;
+    let run = state
+        .db
+        .find_action_run_by_id(&req.run_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+    check_repository_param(&state, req.repository.as_deref(), &run).await?;
+    authorize_run_read(&state, &reader, &run).await?;
     let rows = state
         .db
         .list_action_artifacts_for_run(&req.run_id)

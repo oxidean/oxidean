@@ -316,15 +316,26 @@ impl Client {
     }
 
     /// Fetch a run artifact blob by name. `Err("artifact '…' not found")`
-    /// on 404 so callers can emit GitHub-style messages.
-    pub async fn download_artifact(&self, run_id: &str, name: &str) -> Result<Vec<u8>, String> {
+    /// on 404 so callers can emit GitHub-style messages. `repository` is the
+    /// optional `owner/name` guard for `download-artifact`'s cross-run
+    /// inputs — the server 404s when it disagrees with the run's repo.
+    pub async fn download_artifact(
+        &self,
+        run_id: &str,
+        name: &str,
+        repository: Option<&str>,
+    ) -> Result<Vec<u8>, String> {
+        let mut url = format!(
+            "{}/{}/{}",
+            self.url("artifacts"),
+            urlencoding(run_id),
+            urlencoding(name)
+        );
+        if let Some(r) = repository {
+            url.push_str(&format!("?repository={}", urlencoding(r)));
+        }
         let res = self
-            .authed(self.http.get(format!(
-                "{}/{}/{}",
-                self.url("artifacts"),
-                urlencoding(run_id),
-                urlencoding(name)
-            )))
+            .authed(self.http.get(url))
             .send()
             .await
             .map_err(|e| e.to_string())?;
@@ -339,10 +350,14 @@ impl Client {
     }
 
     /// Every artifact metadata row for a run.
-    pub async fn list_artifacts(&self, run_id: &str) -> Result<Vec<ArtifactMeta>, String> {
+    pub async fn list_artifacts(
+        &self,
+        run_id: &str,
+        repository: Option<&str>,
+    ) -> Result<Vec<ArtifactMeta>, String> {
         let res = self
             .authed(self.http.post(self.url("artifacts/list")))
-            .json(&serde_json::json!({"run_id": run_id}))
+            .json(&serde_json::json!({"run_id": run_id, "repository": repository}))
             .send()
             .await
             .map_err(|e| e.to_string())?;

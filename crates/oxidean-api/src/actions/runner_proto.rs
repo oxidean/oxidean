@@ -70,7 +70,7 @@ pub fn router() -> Router<AppState> {
         .merge(crate::actions::cache::router())
 }
 
-fn bearer_token(headers: &HeaderMap) -> Option<String> {
+pub(crate) fn bearer_token(headers: &HeaderMap) -> Option<String> {
     let auth = headers
         .get(axum::http::header::AUTHORIZATION)?
         .to_str()

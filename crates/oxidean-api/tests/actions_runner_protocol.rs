@@ -1067,3 +1067,522 @@ jobs:
         t0.elapsed()
     );
 }
+
+/// Cross-run / cross-repository artifact downloads — the `download-artifact`
+/// `github-token`/`repository`/`run-id` inputs (GitHub's v4 cross-run path).
+/// Runner tokens keep same-run reads; job tokens and user PATs authorize on
+/// token scope plus repository ACL.
+async fn artifact_fixture() -> (
+    axum::Router,
+    Database,
+    tempfile::TempDir,
+    std::path::PathBuf,
+    oxidean_db::UserRow,
+    oxidean_db::RepositoryRow,
+    String,
+    Vec<String>,
+) {
+    let dir = tempfile::tempdir().unwrap();
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("x.db").display()))
+        .await
+        .unwrap();
+    db.migrate().await.unwrap();
+    support::unlock_signup(&db).await;
+    let artifacts_dir = dir.path().join("art");
+    let state = AppState::new(
+        db.clone(),
+        Arc::new(LogSink) as Arc<dyn EmailSender>,
+        "development",
+    )
+    .with_actions_enabled(true)
+    .with_actions_artifacts_dir(artifacts_dir.clone());
+    let app = router_with_state(state, build_cors("development", None).unwrap());
+
+    let owner = db
+        .create_user(
+            "u-art",
+            "art@example.com",
+            "artown",
+            Some("h"),
+            "A",
+            "",
+            None,
+            Role::User,
+        )
+        .await
+        .unwrap();
+    let repo = db
+        .insert_repository("r-art", &owner.id, "user", "artdemo", "private", "", "main")
+        .await
+        .unwrap();
+    let doc = parse_workflow_yaml(
+        br#"
+name: A
+on: [push]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+"#,
+    )
+    .unwrap();
+    let (run_id, job_ids) = enqueue_run(
+        &db,
+        &repo.id,
+        ".github/workflows/ci.yml",
+        &doc,
+        "push",
+        "deadbeef",
+        "refs/heads/main",
+        Some(&owner.id),
+        None,
+        None,
+        false,
+    )
+    .await
+    .unwrap();
+
+    let rel = format!("{run_id}/art-x.tgz");
+    let dest = artifacts_dir.join(&rel);
+    std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
+    std::fs::write(&dest, b"payload-a").unwrap();
+    db.upsert_action_artifact(&oxidean_db::actions::ActionArtifactRow {
+        id: "art-x".into(),
+        repository_id: repo.id.clone(),
+        run_id: run_id.clone(),
+        job_id: Some(job_ids[0].clone()),
+        name: "dist".into(),
+        storage_path: rel,
+        size_bytes: 9,
+        digest_sha256: "ab".repeat(32),
+        expires_at: None,
+        created_at: String::new(),
+    })
+    .await
+    .unwrap();
+    (app, db, dir, artifacts_dir, owner, repo, run_id, job_ids)
+}
+
+async fn artifact_get(app: &axum::Router, uri: String, token: Option<&str>) -> StatusCode {
+    let mut b = Request::builder().method("GET").uri(uri);
+    if let Some(t) = token {
+        b = b.header("authorization", format!("Bearer {t}"));
+    }
+    app.clone()
+        .oneshot(b.body(Body::empty()).unwrap())
+        .await
+        .unwrap()
+        .status()
+}
+
+async fn artifact_list_status(
+    app: &axum::Router,
+    run_id: &str,
+    repository: Option<&str>,
+    token: Option<&str>,
+) -> StatusCode {
+    let mut body = serde_json::json!({"run_id": run_id});
+    if let Some(r) = repository {
+        body["repository"] = serde_json::Value::String(r.to_string());
+    }
+    let mut b = Request::builder()
+        .method("POST")
+        .uri("/api/actions/artifacts/list")
+        .header("content-type", "application/json");
+    if let Some(t) = token {
+        b = b.header("authorization", format!("Bearer {t}"));
+    }
+    app.clone()
+        .oneshot(b.body(Body::from(body.to_string())).unwrap())
+        .await
+        .unwrap()
+        .status()
+}
+
+/// Register a runner through the real endpoint and return its bearer token.
+async fn register_runner(app: &axum::Router, db: &Database, name: &str) -> (String, String) {
+    let reg = mint_registration_token(db).await.unwrap();
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/actions/register")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "name": name,
+                        "labels": ["ubuntu-latest"],
+                        "token": reg
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let v: serde_json::Value =
+        serde_json::from_slice(&res.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    (
+        v["runner_id"].as_str().unwrap().to_string(),
+        v["runner_token"].as_str().unwrap().to_string(),
+    )
+}
+
+fn make_pat(
+    user_id: &str,
+    kind: &str,
+    scopes: Option<&str>,
+    perms: Option<&str>,
+    repo_access: Option<&str>,
+    repos: &[String],
+) -> (String, String) {
+    let prefix = if kind == "fine_grained" {
+        "oxidean_fg_"
+    } else {
+        "oxidean_pat_"
+    };
+    let token = format!("{}{}", prefix, uuid::Uuid::new_v4().simple());
+    let hash = oxidean_api::auth::session::sha256_hex(token.as_bytes());
+    (
+        token,
+        serde_json::json!({
+            "user_id": user_id,
+            "kind": kind,
+            "hash": hash,
+            "scopes": scopes,
+            "perms": perms,
+            "repo_access": repo_access,
+            "repos": repos,
+        })
+        .to_string(),
+    )
+}
+
+async fn insert_pat(db: &Database, spec: &str) {
+    let v: serde_json::Value = serde_json::from_str(spec).unwrap();
+    let repos: Vec<String> = v["repos"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r.as_str().unwrap().to_string())
+        .collect();
+    db.create_pat(
+        &uuid::Uuid::new_v4().to_string(),
+        v["user_id"].as_str().unwrap(),
+        v["kind"].as_str().unwrap(),
+        "artifact-test",
+        "oxidean_tok_test",
+        v["hash"].as_str().unwrap(),
+        v["scopes"].as_str(),
+        None,
+        v["perms"].as_str(),
+        v["repo_access"].as_str(),
+        None,
+        &repos,
+    )
+    .await
+    .expect("create_pat");
+}
+
+#[tokio::test]
+async fn artifacts_runner_and_unauthenticated_reads() {
+    let (app, db, _dir, _art_dir, _owner, _repo, run_id, job_ids) = artifact_fixture().await;
+    let uri = format!("/api/actions/artifacts/{run_id}/dist");
+
+    // No credential / garbage credential → 401.
+    assert_eq!(
+        artifact_get(&app, uri.clone(), None).await,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        artifact_get(&app, uri.clone(), Some("oxidean_pat_deadbeef")).await,
+        StatusCode::UNAUTHORIZED
+    );
+
+    // An unscoped runner that owns a job in the run reads it (GitHub's
+    // runtime-token path); a runner owning nothing is denied.
+    let (runner_id, runner_token) = register_runner(&app, &db, "claiming").await;
+    assert_eq!(
+        artifact_get(&app, uri.clone(), Some(&runner_token)).await,
+        StatusCode::FORBIDDEN,
+        "unscoped runner with no claimed job"
+    );
+    let claimed = db
+        .claim_queued_action_job_for_labels(&runner_id, &["ubuntu-latest".to_string()])
+        .await
+        .unwrap();
+    assert_eq!(claimed.unwrap().id, job_ids[0]);
+    assert_eq!(
+        artifact_get(&app, uri.clone(), Some(&runner_token)).await,
+        StatusCode::OK,
+        "runner owning a job in the run"
+    );
+
+    // A runner registered to the run's repository reads without a claim.
+    db.insert_action_runner(
+        "rnr-scoped",
+        "scoped",
+        &oxidean_api::actions::tokens::hash_token("repo-scoped-secret"),
+        "[]",
+        Some("r-art"),
+        false,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        artifact_get(&app, uri.clone(), Some("repo-scoped-secret")).await,
+        StatusCode::OK
+    );
+
+    // A runner scoped to a *different* repository is denied.
+    db.insert_repository(
+        "r-other",
+        "u-art",
+        "user",
+        "otherdemo",
+        "private",
+        "",
+        "main",
+    )
+    .await
+    .unwrap();
+    db.insert_action_runner(
+        "rnr-foreign",
+        "foreign",
+        &oxidean_api::actions::tokens::hash_token("foreign-secret"),
+        "[]",
+        Some("r-other"),
+        false,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        artifact_get(&app, uri.clone(), Some("foreign-secret")).await,
+        StatusCode::FORBIDDEN
+    );
+}
+
+#[tokio::test]
+async fn artifacts_token_matrix_and_repository_param() {
+    let (app, db, _dir, _art_dir, owner, repo, run_id, job_ids) = artifact_fixture().await;
+    let uri = format!("/api/actions/artifacts/{run_id}/dist");
+
+    // Job token minted against the run's job: repo-pinned + `actions: read`
+    // granted by the workflow's permissions map → reads succeed.
+    let run = db.find_action_run_by_id(&run_id).await.unwrap().unwrap();
+    let owner_ref = oxidean_api::repo::owner_ref_for_repo(&db, &repo)
+        .await
+        .unwrap()
+        .unwrap();
+    let job = db
+        .find_action_job_by_id(&job_ids[0])
+        .await
+        .unwrap()
+        .unwrap();
+    let payload_row = db
+        .find_action_payload(job.payload_sha.as_deref().unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    let payload: serde_json::Value = serde_json::from_str(&payload_row.payload_json).unwrap();
+    let requested = oxidean_api::actions::job_tokens::permissions_from_payload(&payload);
+    let minted = oxidean_api::actions::job_tokens::mint_job_token(
+        &db,
+        &run,
+        &repo,
+        &owner_ref,
+        &job_ids[0],
+        &requested,
+    )
+    .await
+    .unwrap()
+    .expect("contents+actions grants mint a token");
+    let job_token = minted.plaintext.expect("plaintext token");
+    assert_eq!(
+        artifact_get(&app, uri.clone(), Some(&job_token)).await,
+        StatusCode::OK,
+        "repo-pinned job token with actions:read"
+    );
+    assert_eq!(
+        artifact_list_status(&app, &run_id, None, Some(&job_token)).await,
+        StatusCode::OK
+    );
+
+    // The same job token cannot read another repository's run — the pin is
+    // the token's repository, not the caller's visibility.
+    let repo_b = db
+        .insert_repository("r-art-b", &owner.id, "user", "artb", "public", "", "main")
+        .await
+        .unwrap();
+    db.insert_action_run(
+        "run-b",
+        &repo_b.id,
+        ".github/workflows/ci.yml",
+        "CI",
+        "push",
+        "cafebabe",
+        "main",
+        "CI",
+        Some(&owner.id),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        artifact_get(
+            &app,
+            "/api/actions/artifacts/run-b/dist".into(),
+            Some(&job_token)
+        )
+        .await,
+        StatusCode::FORBIDDEN,
+        "job token is pinned to its own repository"
+    );
+
+    // Classic PATs: `repo` scope + repository visibility passes; a non-repo
+    // scope fails even though the owner can see the repository.
+    let (pat_repo, spec) = make_pat(&owner.id, "classic", Some(r#"["repo"]"#), None, None, &[]);
+    insert_pat(&db, &spec).await;
+    assert_eq!(
+        artifact_get(&app, uri.clone(), Some(&pat_repo)).await,
+        StatusCode::OK,
+        "classic repo PAT from the owner"
+    );
+
+    let (pat_wf, spec) = make_pat(
+        &owner.id,
+        "classic",
+        Some(r#"["workflow"]"#),
+        None,
+        None,
+        &[],
+    );
+    insert_pat(&db, &spec).await;
+    assert_eq!(
+        artifact_get(&app, uri.clone(), Some(&pat_wf)).await,
+        StatusCode::FORBIDDEN,
+        "workflow scope is not a repo-family scope"
+    );
+
+    // A repo-scoped PAT from a user who cannot see the private repo gets 404 —
+    // never a revealing 403.
+    let outsider = db
+        .create_user(
+            "u-out",
+            "out@example.com",
+            "outp",
+            Some("h"),
+            "O",
+            "",
+            None,
+            Role::User,
+        )
+        .await
+        .unwrap();
+    let (pat_out, spec) = make_pat(
+        &outsider.id,
+        "classic",
+        Some(r#"["repo"]"#),
+        None,
+        None,
+        &[],
+    );
+    insert_pat(&db, &spec).await;
+    assert_eq!(
+        artifact_get(&app, uri.clone(), Some(&pat_out)).await,
+        StatusCode::NOT_FOUND,
+        "private repo invisible to outsiders"
+    );
+
+    // Fine-grained PATs: `actions: read` over a selected repository passes;
+    // missing grant or missing repository coverage fails.
+    let (fg_ok, spec) = make_pat(
+        &owner.id,
+        "fine_grained",
+        None,
+        Some(r#"{"actions":"read"}"#),
+        Some("selected"),
+        &["r-art".to_string()],
+    );
+    insert_pat(&db, &spec).await;
+    assert_eq!(
+        artifact_get(&app, uri.clone(), Some(&fg_ok)).await,
+        StatusCode::OK,
+        "FG actions:read over the selected repo"
+    );
+
+    let (fg_nocover, spec) = make_pat(
+        &owner.id,
+        "fine_grained",
+        None,
+        Some(r#"{"actions":"read"}"#),
+        Some("selected"),
+        &[],
+    );
+    insert_pat(&db, &spec).await;
+    assert_eq!(
+        artifact_get(&app, uri.clone(), Some(&fg_nocover)).await,
+        StatusCode::FORBIDDEN,
+        "actions:read but repo not covered"
+    );
+
+    let (fg_noperm, spec) = make_pat(
+        &owner.id,
+        "fine_grained",
+        None,
+        Some(r#"{"contents":"read"}"#),
+        Some("all"),
+        &[],
+    );
+    insert_pat(&db, &spec).await;
+    assert_eq!(
+        artifact_get(&app, uri.clone(), Some(&fg_noperm)).await,
+        StatusCode::FORBIDDEN,
+        "contents:read without actions grant"
+    );
+
+    // `repository` must resolve to the run's own repository.
+    assert_eq!(
+        artifact_get(
+            &app,
+            format!("{uri}?repository=artown/artdemo"),
+            Some(&pat_repo)
+        )
+        .await,
+        StatusCode::OK,
+        "matching repository param"
+    );
+    assert_eq!(
+        artifact_get(
+            &app,
+            format!("{uri}?repository=artown/artb"),
+            Some(&pat_repo)
+        )
+        .await,
+        StatusCode::NOT_FOUND,
+        "different repo → 404 like GitHub resolving the run inside it"
+    );
+    assert_eq!(
+        artifact_get(&app, format!("{uri}?repository=noslash"), Some(&pat_repo)).await,
+        StatusCode::NOT_FOUND,
+        "malformed repository param"
+    );
+    assert_eq!(
+        artifact_list_status(&app, &run_id, Some("artown/artdemo"), Some(&pat_repo)).await,
+        StatusCode::OK
+    );
+    assert_eq!(
+        artifact_list_status(&app, &run_id, Some("artown/artb"), Some(&pat_repo)).await,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        artifact_list_status(&app, &run_id, None, None).await,
+        StatusCode::UNAUTHORIZED
+    );
+}
