@@ -1,0 +1,9 @@
+name: node-version-migration
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout
+      - uses: ./tools/oldact
+      - uses: ./tools/ancient

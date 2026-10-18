@@ -1856,6 +1856,27 @@
     "##[ann]",
     "##[error]badFile.js: line 60"
    ]
+  },
+  {
+   "id": "node-version-migration",
+   "kind": "run",
+   "files": {
+    "tools/oldact/action.yml": "name: oldact\nruns:\n  using: node20\n  main: index.js\n",
+    "tools/oldact/index.js": "console.log('oldact ran');\n",
+    "tools/ancient/action.yml": "name: ancient\nruns:\n  using: node12\n  main: index.js\n",
+    "tools/ancient/index.js": "console.log('ancient ran');\n"
+   },
+   "expect_run": "success",
+   "expect_jobs": {
+    "build": "success"
+   },
+   "log_contains": [
+    "declares 'using: node20'",
+    "Node 20 is deprecated",
+    "'node12' is end-of-life",
+    "oldact ran",
+    "ancient ran"
+   ]
   }
  ]
 }

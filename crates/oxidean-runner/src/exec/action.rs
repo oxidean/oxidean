@@ -16,7 +16,7 @@ use expr::{Context, JobStatus};
 use oxidean_actions_expr as expr;
 
 use super::context::{record_step, step_allowed, sync_job_ctx};
-use super::env::{env_set, layer_env, parse_env_file};
+use super::env::{env_get, env_set, layer_env, parse_env_file};
 use super::run_step::{run_step, run_streamed};
 use super::{PendingPost, Step, StepEnv};
 
@@ -872,6 +872,47 @@ fn reoverlay_env(ctx: &mut Context, pairs: &[(String, String)]) {
     ctx.overlay_env(&serde_json::Value::Object(m));
 }
 
+/// Declared `using: node*` → the major to provision. Mirrors GitHub's
+/// `DetermineActionsNodeVersion`: `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24`
+/// upgrades any action to node24 (workflow env wins over the runner's
+/// process env); `node12/16` coerce to 20 with an EOL warning; `node20`
+/// carries the deprecation warning GitHub emits during the migration.
+/// (`ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION` is the opt-out of a
+/// node24-*default* — this runner's default stays the declared version,
+/// so the var is accepted but inert.)
+fn select_node_major(using: &str, action_env: &[(String, String)]) -> (u32, Option<String>) {
+    let env_truthy = |key: &str| {
+        env_get(action_env, key)
+            .map(str::to_owned)
+            .or_else(|| std::env::var(key).ok())
+            .is_some_and(|v| v.eq_ignore_ascii_case("true") || v == "1")
+    };
+    if env_truthy("FORCE_JAVASCRIPT_ACTIONS_TO_NODE24") {
+        return (24, None);
+    }
+    let declared = using
+        .trim_start_matches("node")
+        .parse::<u32>()
+        .unwrap_or(20);
+    if declared < 17 {
+        (
+            20,
+            Some(format!(
+                "::warning::action runtime '{using}' is end-of-life — running under node20 (GitHub parity)"
+            )),
+        )
+    } else if declared == 20 {
+        (
+            20,
+            Some(
+                "::warning::action declares 'using: node20' — Node 20 is deprecated and migrates to node24; set FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true to opt in now (GitHub parity)".into(),
+            ),
+        )
+    } else {
+        (declared, None)
+    }
+}
+
 /// node12/16/20/24 — resolve a node binary (tool-cache → PATH → download),
 /// run `pre` then `main`, and queue `post` for after the job.
 #[allow(clippy::too_many_arguments)]
@@ -885,18 +926,7 @@ async fn run_node_action(
     using: &str,
     timeout: Duration,
 ) -> Result<HashMap<String, String>, String> {
-    let wanted = using.trim_start_matches("node");
-    let major = wanted.parse::<u32>().unwrap_or(20);
-    let (major, warned) = if major < 17 {
-        (
-            20,
-            Some(format!(
-                "::warning::action runtime '{using}' is end-of-life — running under node20 (GitHub parity)"
-            )),
-        )
-    } else {
-        (major, None)
-    };
+    let (major, warned) = select_node_major(using, action_env);
     if let Some(w) = warned {
         senv.logger.line(&w).await;
     }
@@ -1779,5 +1809,41 @@ runs: {using: node20, main: index.js}
             split_arg_string("  one \"two three\" four  "),
             vec!["one", "two three", "four"]
         );
+    }
+
+    /// `using: node*` major selection — declared version by default, EOL
+    /// coercion for <17, node20 deprecation warning, and the
+    /// `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24` opt-in.
+    #[test]
+    fn node_major_selection() {
+        use super::select_node_major;
+        let none: Vec<(String, String)> = vec![];
+        let force = vec![(
+            "FORCE_JAVASCRIPT_ACTIONS_TO_NODE24".to_string(),
+            "true".to_string(),
+        )];
+
+        let (m, w) = select_node_major("node20", &none);
+        assert_eq!(m, 20);
+        assert!(w.unwrap().contains("deprecated"));
+
+        let (m, w) = select_node_major("node16", &none);
+        assert_eq!(m, 20);
+        assert!(w.unwrap().contains("end-of-life"));
+
+        let (m, w) = select_node_major("node24", &none);
+        assert_eq!(m, 24);
+        assert!(w.is_none());
+
+        // Force overrides any declared version and suppresses the warnings.
+        let (m, w) = select_node_major("node20", &force);
+        assert_eq!(m, 24);
+        assert!(w.is_none());
+        // Explicit false in workflow env does not force.
+        let off = vec![(
+            "FORCE_JAVASCRIPT_ACTIONS_TO_NODE24".to_string(),
+            "false".to_string(),
+        )];
+        assert_eq!(select_node_major("node20", &off).0, 20);
     }
 }

@@ -837,6 +837,7 @@ conformance_case!(artifact_pattern_download, "artifact-pattern-download");
 conformance_case!(artifact_compression_level, "artifact-compression-level");
 conformance_case!(annotations, "annotations");
 conformance_case!(problem_matchers, "problem-matchers");
+conformance_case!(node_version_migration, "node-version-migration");
 conformance_case!(artifact_missing, "artifact-missing");
 conformance_case!(artifact_no_files_error, "artifact-no-files-error");
 conformance_case!(expr_malformed_run, "expr-malformed-run");

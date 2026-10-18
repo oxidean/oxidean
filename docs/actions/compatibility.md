@@ -54,7 +54,7 @@ download, annotations, `workflow_job` webhook.
 | 8. Contexts | 24 | 0 | 0 | 0 |
 | 9. Workflow commands & environment files | 22 | 0 | 0 | 0 |
 | 10. Default environment variables | 48 | 0 | 0 | 0 |
-| 11. Action metadata — action.yml | 16 | 1 | 0 | 1 |
+| 11. Action metadata — action.yml | 17 | 0 | 0 | 1 |
 | 12. Reusable workflows | 10 | 0 | 0 | 0 |
 | 13. Artifacts | 12 | 0 | 1 | 0 |
 | 14. Dependency caching | 5 | 0 | 0 | 0 |
@@ -417,7 +417,7 @@ Source: <https://docs.github.com/en/actions/sharing-automations/creating-actions
 | `action.deprecation` | `deprecationMessage:` surfaces as a warning | supported | case:action-metadata-warnings | |
 | `action.outputs` | `outputs:` — composite `outputs.<id>.value` evaluated | supported | case:uses-local-composite, case:composite-env | |
 | `action.runs-using` | `runs.using:` — composite, node*, docker | supported | case:uses-local-composite, case:uses-node-action, test:crates/oxidean-runner/src/exec/containers.rs::spec_missing_image_fails | |
-| `action.node-versions` | `using: node12/16/20/24` | partial | case:uses-node-action | Non-bundled runtimes are coerced to the runner's bundled Node instead of downloading per-version — same execution semantics, different runtime provenance. GitHub behaviour unverified for node24 selection rules. |
+| `action.node-versions` | `using: node12/16/20/24` | supported | case:uses-node-action, case:node-version-migration, test:crates/oxidean-runner/src/exec/action.rs::node_major_selection | Declared major resolves tool-cache → PATH → nodejs.org download; `node12/16` coerce to 20 with an EOL warning (GitHub removed them from `externals/`); `node20` warns deprecation; `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true` (workflow env over runner env) upgrades to 24; `ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION` accepted (inert — our default stays the declared version, not node24-forced). |
 | `action.pre-post` | `pre:`/`post:` lifecycle, `pre-if`/`post-if` default `always()` | supported | case:uses-node-pre-if, case:uses-node-post | |
 | `action.post-order` | Post steps run in reverse order | supported | case:uses-node-post | |
 | `action.docker-runtime` | docker `image`/`entrypoint`/`args`/`pre-entrypoint`/`post-entrypoint`/`env`, workspace mounted | supported | test:crates/oxidean-runner/src/exec/containers.rs::spec_object_form | Requires a Docker-capable runner. |
