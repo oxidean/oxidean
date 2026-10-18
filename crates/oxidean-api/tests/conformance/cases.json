@@ -1294,12 +1294,11 @@
         }
       },
       "log_contains": [
-        "cache-url-unset"
-      ],
-      "log_absent": [
         "cache-url="
       ],
-      "divergence": "cache.action"
+      "log_absent": [
+        "cache-url-unset"
+      ]
     }
   ]
 }

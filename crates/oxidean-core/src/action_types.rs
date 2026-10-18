@@ -859,6 +859,51 @@ pub struct ActionArtifactDeleteResponse {
     pub deleted: bool,
 }
 
+// --- actions/cache service (P14): repo management surface ---
+
+/// Public cache-entry metadata (`action_caches`) — payloads stream from the
+/// `_apis/artifactcache` download route, never through RPC.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionCachePublic {
+    pub id: String,
+    pub key: String,
+    pub version: String,
+    /// Branch scope the entry was saved under.
+    pub scope: String,
+    pub size_bytes: i64,
+    #[serde(default)]
+    pub created_at: String,
+    #[serde(default)]
+    pub last_accessed_at: String,
+}
+
+/// `repo.actions.listCaches` — Read+; committed entries + usage rollup.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionCachesListRequest {
+    pub owner: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionCachesListResponse {
+    pub caches: Vec<ActionCachePublic>,
+    /// Sum of committed `size_bytes` — the GitHub `cache/usage` answer.
+    pub total_size_bytes: i64,
+}
+
+/// `repo.actions.deleteCache` — Write+; removes the record and payload.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionCacheDeleteRequest {
+    pub owner: String,
+    pub name: String,
+    pub cache_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionCacheDeleteResponse {
+    pub deleted: bool,
+}
+
 // --- Phase 8: org + environment secrets ---
 
 /// `repo.actions.environments.secretsList` — names only, never values.

@@ -90,6 +90,8 @@ pub struct RpcCtx {
     pub template_packs_dir: PathBuf,
     pub actions_log_dir: PathBuf,
     pub actions_artifacts_dir: PathBuf,
+    /// `actions/cache` payload root — delete handlers unlink blobs here.
+    pub actions_cache_dir: PathBuf,
     pub git: Arc<dyn GitBackend>,
     pub env_name: String,
     pub session: Option<ResolvedSession>,
@@ -367,6 +369,8 @@ pub const PROCEDURES: &[&str] = &[
     "repo.actions.reviewDeployment",
     "repo.actions.listArtifacts",
     "repo.actions.deleteArtifact",
+    "repo.actions.listCaches",
+    "repo.actions.deleteCache",
     "repo.actions.workflowTemplates.list",
     "repo.actions.workflowTemplates.get",
     "repo.actions.workflows.create",
@@ -1538,6 +1542,16 @@ async fn dispatch_inner(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
         }
         "repo.actions.deleteArtifact" => {
             match crate::actions::rpc::delete_artifact(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
+        "repo.actions.listCaches" => match crate::actions::rpc::list_caches(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "repo.actions.deleteCache" => {
+            match crate::actions::rpc::delete_cache(ctx, req.input).await {
                 Ok(v) => RpcResponse::ok(v),
                 Err(e) => RpcResponse::err(e),
             }

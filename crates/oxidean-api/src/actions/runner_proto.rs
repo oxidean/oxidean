@@ -65,6 +65,9 @@ pub fn router() -> Router<AppState> {
             "/template-icons/{name}",
             get(crate::actions::templates::template_icon),
         )
+        // actions/cache service — `_apis/artifactcache` REST surface authed
+        // by per-job runtime tokens (not the runner token).
+        .merge(crate::actions::cache::router())
 }
 
 fn bearer_token(headers: &HeaderMap) -> Option<String> {
@@ -282,6 +285,10 @@ struct FetchTaskResponse {
     id_token_request_url: Option<String>,
     /// `ACTIONS_ID_TOKEN_REQUEST_TOKEN` — bound to this job's token row.
     id_token_request_token: Option<String>,
+    /// `ACTIONS_CACHE_URL` — `_apis/artifactcache` service root for this job.
+    cache_url: Option<String>,
+    /// `ACTIONS_RUNTIME_TOKEN` — per-job bearer for the cache endpoints.
+    cache_token: Option<String>,
 }
 
 impl FetchTaskResponse {
@@ -327,6 +334,8 @@ impl FetchTaskResponse {
             environment_url: None,
             id_token_request_url: None,
             id_token_request_token: None,
+            cache_url: None,
+            cache_token: None,
         }
     }
 }
@@ -523,6 +532,15 @@ async fn fetch_task(
                 .as_ref()
                 .map(|_| format!("{server_url}{}", crate::actions::oidc::TOKEN_REQUEST_PATH));
 
+            // Per-job `ACTIONS_RUNTIME_TOKEN` for the `actions/cache` service —
+            // failures degrade to "cache unavailable" rather than failing the
+            // claim (the action treats missing env as a skip).
+            let cache_token =
+                crate::actions::cache::mint_cache_token(&state, &j.id, &run.repository_id).await;
+            let cache_url = cache_token
+                .as_ref()
+                .map(|_| format!("{server_url}/api/actions/_apis/artifactcache"));
+
             // Keep prost types linked when regenerating.
             let _ = pb::FetchTaskResponse {
                 job_id: j.id.clone(),
@@ -645,13 +663,9 @@ async fn fetch_task(
                     .map(String::from),
                 id_token_request_url,
                 id_token_request_token,
-                timeout_seconds: j.timeout_at.as_deref().and_then(|s| {
-                    chrono::DateTime::parse_from_rfc3339(s).ok().map(|t| {
-                        t.signed_duration_since(chrono::Utc::now())
-                            .num_seconds()
-                            .max(0)
-                    })
-                }),
+                cache_url,
+                cache_token,
+                timeout_seconds,
             }
         }
         None => FetchTaskResponse::empty(),

@@ -162,6 +162,20 @@ pub fn spawn_background_jobs(
                 if timed_out > 0 || requeued > 0 {
                     tracing::info!(timed_out, requeued, "stale-claim sweep reaped jobs");
                 }
+                // actions/cache upkeep — expired runtime tokens + abandoned
+                // `reserved` rows (their `.part` payloads get unlinked).
+                match crate::actions::cache::sweep_action_caches(
+                    &db_c,
+                    &crate::actions::cache::resolve_cache_dir(),
+                )
+                .await
+                {
+                    Ok(n) if n > 0 => {
+                        tracing::info!(reaped = n, "actions cache sweep reaped rows");
+                    }
+                    Err(e) => tracing::error!(error = %e, "actions cache sweep failed"),
+                    _ => {}
+                }
             }
         });
         tracing::info!(

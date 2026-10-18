@@ -1,6 +1,7 @@
 //! Uniform database adapter boundary — the only place dialect branching is allowed (D-08).
 
 pub mod actions;
+pub mod actions_cache;
 pub mod admin;
 pub mod audit_events;
 pub mod auth_identities;
@@ -4048,6 +4049,114 @@ impl Database {
     /// Delete an artifact record (row only; caller owns the payload file).
     pub async fn delete_action_artifact(&self, id: &str) -> Result<bool, String> {
         actions::delete_action_artifact(self.require_pool()?, id).await
+    }
+
+    // --- actions/cache service (0062) ----------------------------------------
+
+    /// Exact committed-entry lookup by (repo, key, version, scope) hash.
+    pub async fn find_action_cache(
+        &self,
+        repo_id: &str,
+        lookup_hash: &str,
+    ) -> Result<Option<actions_cache::ActionCacheRow>, String> {
+        actions_cache::find_action_cache(self.require_pool()?, repo_id, lookup_hash).await
+    }
+
+    /// By-id probe — any state; caller filters reserved/committed.
+    pub async fn find_action_cache_by_id(
+        &self,
+        id: &str,
+    ) -> Result<Option<actions_cache::ActionCacheRow>, String> {
+        actions_cache::find_action_cache_by_id(self.require_pool()?, id).await
+    }
+
+    /// Prefix fallback for `restore-keys` — committed rows, newest first.
+    pub async fn find_action_caches_by_key_prefix(
+        &self,
+        repo_id: &str,
+        prefix: &str,
+        scope: &str,
+    ) -> Result<Vec<actions_cache::ActionCacheRow>, String> {
+        actions_cache::find_action_caches_by_key_prefix(
+            self.require_pool()?,
+            repo_id,
+            prefix,
+            scope,
+        )
+        .await
+    }
+
+    /// Reserve an entry (`POST /caches`). Unique-conflict surfaces as Err.
+    pub async fn insert_action_cache(
+        &self,
+        c: &actions_cache::ActionCacheRow,
+    ) -> Result<(), String> {
+        actions_cache::insert_action_cache(self.require_pool()?, c).await
+    }
+
+    /// Finalize a reservation (`POST /caches/{id}`); false = already committed.
+    pub async fn commit_action_cache(&self, id: &str, size_bytes: i64) -> Result<bool, String> {
+        actions_cache::commit_action_cache(self.require_pool()?, id, size_bytes).await
+    }
+
+    /// Bump `last_accessed_at` on download (LRU basis).
+    pub async fn touch_action_cache(&self, id: &str) -> Result<(), String> {
+        actions_cache::touch_action_cache(self.require_pool()?, id).await
+    }
+
+    /// Delete a cache row (caller owns the payload file).
+    pub async fn delete_action_cache(&self, id: &str) -> Result<bool, String> {
+        actions_cache::delete_action_cache(self.require_pool()?, id).await
+    }
+
+    /// Committed rows for a repo, LRU-first (eviction scans head → tail).
+    pub async fn list_action_caches_for_repo(
+        &self,
+        repo_id: &str,
+    ) -> Result<Vec<actions_cache::ActionCacheRow>, String> {
+        actions_cache::list_action_caches_for_repo(self.require_pool()?, repo_id).await
+    }
+
+    /// Reap `reserved` rows older than `cutoff` (abandoned uploads) — returns
+    /// their storage paths for payload cleanup.
+    pub async fn reap_stale_action_cache_reservations(
+        &self,
+        cutoff: &str,
+    ) -> Result<Vec<String>, String> {
+        actions_cache::reap_stale_action_cache_reservations(self.require_pool()?, cutoff).await
+    }
+
+    /// Mint a per-job cache-service token (hash persisted; plaintext stays
+    /// with the claiming runner).
+    pub async fn insert_action_cache_token(
+        &self,
+        token_hash: &str,
+        job_id: &str,
+        repository_id: &str,
+        expires_at: &str,
+    ) -> Result<(), String> {
+        actions_cache::insert_action_cache_token(
+            self.require_pool()?,
+            token_hash,
+            job_id,
+            repository_id,
+            expires_at,
+        )
+        .await
+    }
+
+    /// Resolve a presented bearer token → job + repo scope (unexpired only).
+    pub async fn find_action_cache_token(
+        &self,
+        token_hash: &str,
+        now: &str,
+    ) -> Result<Option<actions_cache::ActionCacheTokenRow>, String> {
+        actions_cache::find_action_cache_token(self.require_pool()?, token_hash, now).await
+    }
+
+    /// Drop expired token rows (sweep).
+    pub async fn reap_action_cache_tokens(&self, now: &str) -> Result<u64, String> {
+        actions_cache::reap_action_cache_tokens(self.require_pool()?, now).await
     }
 
     /// `concurrency.cancel-in-progress` — cancel every nonterminal run in

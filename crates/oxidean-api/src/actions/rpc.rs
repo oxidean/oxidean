@@ -6,10 +6,12 @@ use uuid::Uuid;
 
 use oxidean_core::{
     ActionArtifactDeleteRequest, ActionArtifactDeleteResponse, ActionArtifactPublic,
-    ActionArtifactsListRequest, ActionArtifactsListResponse, ActionDeploymentPublic,
-    ActionDeploymentReviewPublic, ActionDeploymentReviewRequest, ActionDeploymentReviewResponse,
-    ActionDeploymentsListRequest, ActionDeploymentsListResponse, ActionDispatchInputPublic,
-    ActionDispatchRequest, ActionDispatchResponse, ActionEnabledRequest, ActionEnabledResponse,
+    ActionArtifactsListRequest, ActionArtifactsListResponse, ActionCacheDeleteRequest,
+    ActionCacheDeleteResponse, ActionCachePublic, ActionCachesListRequest,
+    ActionCachesListResponse, ActionDeploymentPublic, ActionDeploymentReviewPublic,
+    ActionDeploymentReviewRequest, ActionDeploymentReviewResponse, ActionDeploymentsListRequest,
+    ActionDeploymentsListResponse, ActionDispatchInputPublic, ActionDispatchRequest,
+    ActionDispatchResponse, ActionEnabledRequest, ActionEnabledResponse,
     ActionEnvironmentProtection, ActionEnvironmentPublic, ActionJobApproveRequest,
     ActionJobApproveResponse, ActionJobLogRequest, ActionJobLogResponse, ActionJobPublic,
     ActionListRunnersResponse, ActionRegistrationTokenResponse, ActionRunGetRequest,
@@ -1567,6 +1569,85 @@ pub async fn delete_artifact(
         }
     }
     Ok(ActionArtifactDeleteResponse { deleted })
+}
+
+/// `repo.actions.listCaches` — Read+; committed cache entries + usage rollup.
+pub async fn list_caches(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<ActionCachesListResponse, AppError> {
+    let req: ActionCachesListRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid repo.actions.listCaches input: {e}"),
+        )
+    })?;
+    let accessible = resolve_repo_for_read(ctx, &req.owner, &req.name).await?;
+    if !meets(accessible.capability, Capability::Read) {
+        return Err(not_found());
+    }
+    let rows = ctx
+        .db
+        .list_action_caches_for_repo(&accessible.row.id)
+        .await
+        .map_err(db_err)?;
+    let total_size_bytes = rows.iter().map(|c| c.size_bytes).sum();
+    Ok(ActionCachesListResponse {
+        caches: rows
+            .iter()
+            .map(|c| ActionCachePublic {
+                id: c.id.clone(),
+                key: c.cache_key.clone(),
+                version: c.version.clone(),
+                scope: c.scope.clone(),
+                size_bytes: c.size_bytes,
+                created_at: c.created_at.clone(),
+                last_accessed_at: c.last_accessed_at.clone(),
+            })
+            .collect(),
+        total_size_bytes,
+    })
+}
+
+/// `repo.actions.deleteCache` — Write+; drop the record and payload file.
+pub async fn delete_cache(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<ActionCacheDeleteResponse, AppError> {
+    let _ = require_verified(ctx).await?;
+    let req: ActionCacheDeleteRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid repo.actions.deleteCache input: {e}"),
+        )
+    })?;
+    let accessible = resolve_repo_for_read(ctx, &req.owner, &req.name).await?;
+    if !meets(accessible.capability, Capability::Write) {
+        return Err(not_found());
+    }
+    let cache = ctx
+        .db
+        .find_action_cache_by_id(&req.cache_id)
+        .await
+        .map_err(db_err)?
+        .ok_or_else(not_found)?;
+    if cache.repository_id != accessible.row.id {
+        return Err(not_found());
+    }
+    let deleted = ctx
+        .db
+        .delete_action_cache(&req.cache_id)
+        .await
+        .map_err(db_err)?;
+    if deleted {
+        let path = ctx.actions_cache_dir.join(&cache.storage_path);
+        if let Err(e) = tokio::fs::remove_file(&path).await {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                tracing::warn!(error = %e, path = %path.display(), "cache payload removal failed");
+            }
+        }
+    }
+    Ok(ActionCacheDeleteResponse { deleted })
 }
 
 /// `repo.actions.dispatchWorkflow` — Write+; enqueues a `workflow_dispatch` run.

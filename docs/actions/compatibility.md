@@ -36,7 +36,7 @@ Statuses:
 
 Closing phases referenced in Notes: **P12** web UI; **P13** reusable
 workflows, job `continue-on-error`, `vars`, remaining events, workflow
-dirs, command gaps; **P14** cache service; **P15** PR test-merge;
+dirs, command gaps; **P15** PR test-merge;
 **P16** runner scopes, badges, workflow disable, run delete, log
 download, annotations, `workflow_job` webhook.
 
@@ -391,7 +391,7 @@ and `OXIDEAN_*` twins (same value, both spellings) unless noted.
 | `env.runner-temp` | `RUNNER_TEMP` — per-job temp dir | supported | test:crates/oxidean-runner/src/exec/mod.rs::runner_temp_dir_files | |
 | `env.runner-tool-cache` | `RUNNER_TOOL_CACHE` | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | setup-* actions honour it. |
 | `env.actions-id-token-request` | `ACTIONS_ID_TOKEN_REQUEST_URL`/`_TOKEN` — OIDC mint credentials | supported | test:crates/oxidean-api/tests/actions_phase7.rs::p7_id_token_request_credentials | Present only when `permissions.id-token: write` survives provenance gating. |
-| `env.actions-cache-url` | `ACTIONS_CACHE_URL`/`RESULTS_URL`/`RUNTIME_TOKEN`/`RUNTIME_URL` | unsupported | case:cache-service-absent | No cache service; unset, so actions/cache warns and continues. P14. |
+| `env.actions-cache-url` | `ACTIONS_CACHE_URL`/`RESULTS_URL`/`RUNTIME_TOKEN`/`RUNTIME_URL` | supported | case:cache-service-absent; test:crates/oxidean-api/tests/actions_cache_service.rs::cache_roundtrip_exact_restore | Per-job runtime token minted at claim; `RESULTS_URL`/`RUNTIME_URL` mirror `CACHE_URL`. |
 | `env.actions-step-debug` | `ACTIONS_STEP_DEBUG` — enables `::debug::` | unsupported | test:crates/oxidean-runner/src/exec/mod.rs::warn_uninterpreted_commands_covers_behavior_changing_commands | P16 (with `cmd.debug`). |
 
 ## 11. Action metadata — action.yml (`action.`)
@@ -470,19 +470,22 @@ needed. Search-path semantics follow upstream `findFilesToUpload`
 Source: <https://docs.github.com/en/actions/using-workflows/caching-dependencies-to-speed-up-workflows>
 and <https://github.com/actions/cache#readme>
 
-No cache service exists yet. `actions/cache*` resolves and runs as a node
-action, but without `ACTIONS_CACHE_URL` the toolkit warns and continues —
-the step does not fail. The curated action ledger flags every
-`actions/cache*` reference for template listings. Whole section closes in
-P14.
+The `_apis/artifactcache` service implements GitHub's cache REST contract
+(reserve → upload → commit → lookup → download) under per-job
+`ACTIONS_RUNTIME_TOKEN`s minted at claim. Entries are scoped
+`repo + key + version + ref`; `restore-keys` fall back by prefix, newest
+first. Repo usage is capped (`OXIDEAN_ACTIONS_CACHE_MAX_BYTES`, 10 GiB
+default) with LRU eviction on commit; abandoned `reserved` rows and
+expired tokens are reaped by the actions sweep. `repo.actions.listCaches`
+/`deleteCache` expose the management surface `gh cache` mirrors.
 
 | `id` | Feature | Status | Evidence | Notes |
 |------|---------|--------|----------|-------|
-| `cache.action` | `actions/cache` restore+save | unsupported | case:cache-service-absent | Warns "cache service not available"; step succeeds. P14. |
-| `cache.keys` | `key`/`restore-keys` prefix fallback | unsupported | case:cache-service-absent | P14. |
-| `cache.save-only` | `actions/cache/save` | unsupported | case:cache-service-absent | P14. |
-| `cache.restore-only` | `actions/cache/restore` | unsupported | case:cache-service-absent | P14. |
-| `cache.lookup-only` | `lookup-only` dry-run | unsupported | case:cache-service-absent | P14. |
+| `cache.action` | `actions/cache` restore+save | supported | test:crates/oxidean-api/tests/actions_cache_service.rs | Reserve/upload/commit/lookup/download round-trip covered. |
+| `cache.keys` | `key`/`restore-keys` prefix fallback | supported | test:crates/oxidean-api/tests/actions_cache_service.rs::cache_restore_key_prefix_fallback | Committed rows only; newest wins. |
+| `cache.save-only` | `actions/cache/save` | supported | test:crates/oxidean-api/tests/actions_cache_service.rs::cache_immutable_save_409 | Unique key/version/scope conflict surfaces `409`. |
+| `cache.restore-only` | `actions/cache/restore` | supported | test:crates/oxidean-api/tests/actions_cache_service.rs::cache_reserved_not_restorable | Reserved rows never restore; lookup 404s unknown keys. |
+| `cache.lookup-only` | `lookup-only` dry-run | supported | test:crates/oxidean-api/tests/actions_cache_service.rs::cache_roundtrip_exact_restore | Same `GET /caches` lookup — hit/miss identical sans download. |
 
 ## 15. Concurrency (`conc.`)
 
@@ -657,7 +660,7 @@ class, not URL parity.
 | `api.jobs` | List jobs / get a job | supported | test:crates/oxidean-api/tests/actions_endpoints.rs::get_run_anonymous_includes_jobs_and_timestamps | Jobs embed in the run detail. |
 | `api.logs` | Stream/download job logs | partial | test:crates/oxidean-api/tests/actions_rpc.rs::actions_rpc_job_logs | Streamed per job; no archive download. P16. |
 | `api.artifacts` | List/download artifacts | supported | test:crates/oxidean-api/tests/actions_phase8.rs::p8_retention_sweep_compresses_terminal_and_deletes_aged | Runner protocol + artifact endpoint. |
-| `api.cache` | Cache endpoints | unsupported | case:cache-service-absent | P14. |
+| `api.cache` | Cache endpoints | supported | case:cache-service-absent; test:crates/oxidean-api/tests/actions_cache_service.rs | `_apis/artifactcache` REST surface; repo management via `repo.actions.listCaches`/`deleteCache`. |
 | `api.runners` | Runner registration / tokens / labels | supported | test:crates/oxidean-api/tests/actions_runner_protocol.rs::actions_runner_protocol_register, test:crates/oxidean-api/tests/actions_runner_protocol.rs::actions_runner_protocol_declare_labels | Plus the gitea runner.v1 bridge for stock act_runner. |
 | `api.secrets` | Secret CRUD (repo/env/org) | supported | test:crates/oxidean-api/tests/actions_secrets.rs::actions_secrets_list_names_only_never_echoes_value | Values are write-only. |
 | `api.variables` | Configuration-variable CRUD | unsupported | case:expr-vars-empty | P13 — with `var.vars-context`. |

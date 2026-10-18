@@ -459,6 +459,10 @@ pub(crate) struct ClaimContext {
     /// only when `id-token: write` survived provenance gating).
     pub id_token_request_url: Option<String>,
     pub id_token_request_token: Option<String>,
+    /// `ACTIONS_CACHE_URL` / `ACTIONS_RUNTIME_TOKEN` pair — act_runner maps
+    /// `gitea_runtime_token` onto the runtime token env for actions/cache.
+    pub cache_url: Option<String>,
+    pub cache_token: Option<String>,
     pub server_url: String,
     pub workflow_ref: String,
 }
@@ -549,6 +553,13 @@ pub(crate) async fn claim_context(
     let id_token_request_url = id_token_request_token
         .as_ref()
         .map(|_| format!("{server_url}{}", crate::actions::oidc::TOKEN_REQUEST_PATH));
+    // Per-job `ACTIONS_RUNTIME_TOKEN` for the `actions/cache` service —
+    // failure degrades to "cache unavailable" rather than failing the claim.
+    let cache_token =
+        crate::actions::cache::mint_cache_token(state, &j.id, &run.repository_id).await;
+    let cache_url = cache_token
+        .as_ref()
+        .map(|_| format!("{server_url}/api/actions/_apis/artifactcache"));
     Ok(ClaimContext {
         repo_name: repo.name.clone(),
         owner_slug,
@@ -559,6 +570,8 @@ pub(crate) async fn claim_context(
         job_token,
         id_token_request_url,
         id_token_request_token,
+        cache_url,
+        cache_token,
         server_url,
         workflow_ref,
     })
@@ -705,7 +718,8 @@ fn task_context(
         "workflow_ref": ctx.workflow_ref,
         "workspace": "",
         "token": ctx.job_token.clone().unwrap_or_default(),
-        "gitea_runtime_token": "",
+        "gitea_runtime_token": ctx.cache_token.clone().unwrap_or_default(),
+        "cache_url": ctx.cache_url.clone().unwrap_or_default(),
         "gitea_default_actions_url": ctx.server_url,
     }))
     .unwrap_or_else(|| prost_types::Struct {

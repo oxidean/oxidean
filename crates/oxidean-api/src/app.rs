@@ -56,6 +56,12 @@ pub struct AppState {
     /// Actions artifact blob store (`OXIDEAN_ACTIONS_ARTIFACTS_DIR`,
     /// default `var/actions-artifacts`) — upload/download-artifact payloads.
     pub actions_artifacts_dir: PathBuf,
+    /// Actions cache blob store (`OXIDEAN_ACTIONS_CACHE_DIR`, default
+    /// `var/actions-cache`) — `actions/cache` service payloads.
+    pub actions_cache_dir: PathBuf,
+    /// Per-repo cache ceiling (`OXIDEAN_ACTIONS_CACHE_MAX_BYTES`, default
+    /// 10 GiB) — LRU eviction past this point.
+    pub actions_cache_max_bytes: u64,
     /// Max bytes for a single artifact upload (default 2 GiB).
     pub actions_artifact_max_bytes: u64,
     /// Days an artifact is retained (default 90 — GitHub's own default).
@@ -190,6 +196,8 @@ impl AppState {
             packages_dir,
             actions_log_dir,
             actions_artifacts_dir,
+            actions_cache_dir: crate::actions::cache::resolve_cache_dir(),
+            actions_cache_max_bytes: crate::actions::cache::default_cache_max_bytes(),
             actions_artifact_max_bytes,
             actions_artifact_retention_days,
             actions_enabled,
@@ -247,6 +255,16 @@ impl AppState {
 
     pub fn with_actions_artifacts_dir(mut self, dir: PathBuf) -> Self {
         self.actions_artifacts_dir = dir;
+        self
+    }
+
+    pub fn with_actions_cache_dir(mut self, dir: PathBuf) -> Self {
+        self.actions_cache_dir = dir;
+        self
+    }
+
+    pub fn with_actions_cache_max_bytes(mut self, max: u64) -> Self {
+        self.actions_cache_max_bytes = max;
         self
     }
 
@@ -550,6 +568,7 @@ pub(crate) fn build_rpc_ctx_with_session(
         template_packs_dir: state.template_packs_dir.clone(),
         actions_log_dir: state.actions_log_dir.clone(),
         actions_artifacts_dir: state.actions_artifacts_dir.clone(),
+        actions_cache_dir: state.actions_cache_dir.clone(),
         git: state.git.clone(),
         env_name: state.env_name.clone(),
         session,
@@ -663,6 +682,7 @@ pub(crate) async fn build_rpc_ctx(
         template_packs_dir: state.template_packs_dir.clone(),
         actions_log_dir: state.actions_log_dir.clone(),
         actions_artifacts_dir: state.actions_artifacts_dir.clone(),
+        actions_cache_dir: state.actions_cache_dir.clone(),
         git: state.git.clone(),
         env_name: state.env_name.clone(),
         session,

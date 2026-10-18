@@ -94,6 +94,10 @@ pub struct Task {
     pub id_token_request_url: Option<String>,
     /// `ACTIONS_ID_TOKEN_REQUEST_TOKEN` — request credential bound to this job.
     pub id_token_request_token: Option<String>,
+    /// `ACTIONS_CACHE_URL` — `_apis/artifactcache` service root for this job.
+    pub cache_url: Option<String>,
+    /// `ACTIONS_RUNTIME_TOKEN` — per-job bearer for the cache endpoints.
+    pub cache_token: Option<String>,
 }
 
 impl Task {

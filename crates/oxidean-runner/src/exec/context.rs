@@ -249,3 +249,104 @@ pub(crate) fn step_outputs_report(ctx: &Context) -> serde_json::Value {
     }
     serde_json::Value::Object(out)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+
+    fn test_task() -> Task {
+        Task {
+            job_id: Some("j1".into()),
+            run_id: Some("r1".into()),
+            job_key: Some("build".into()),
+            runs_on: None,
+            workflow_name: Some("CI".into()),
+            head_sha: Some("abc123".into()),
+            head_ref: Some("refs/heads/main".into()),
+            steps: None,
+            secrets: None,
+            repository_owner: Some("acme".into()),
+            repository_name: Some("demo".into()),
+            repository_id: Some("repo-1".into()),
+            repository_owner_id: Some("u1".into()),
+            event: Some("push".into()),
+            run_number: Some(4),
+            run_attempt: Some(1),
+            actor: Some("alice".into()),
+            actor_id: Some("u1".into()),
+            server_url: Some("https://oxidean.example".into()),
+            base_ref: None,
+            pull_number: None,
+            job_token: Some("oxidean_job_x".into()),
+            workflow_ref: Some("acme/demo/.github/workflows/ci.yml@refs/heads/main".into()),
+            env: None,
+            workflow_env: None,
+            timeout_at: None,
+            timeout_seconds: None,
+            event_payload: None,
+            matrix: Some(serde_json::json!({"os": "linux"})),
+            needs: None,
+            container: None,
+            services: None,
+            environment: None,
+            environment_url: None,
+            id_token_request_url: None,
+            id_token_request_token: None,
+            cache_url: None,
+            cache_token: None,
+        }
+    }
+
+    fn test_config() -> Config {
+        Config {
+            origin: "http://localhost".into(),
+            registration_token: None,
+            name: "runner-1".into(),
+            labels: Vec::new(),
+            state_path: std::path::PathBuf::from("/tmp/x"),
+            work_dir: std::path::PathBuf::from("/tmp/xwork"),
+            poll_ms: 1,
+            wait_ms: 0,
+            git_token: None,
+            job_timeout_secs: 60,
+            actions_mirror: None,
+        }
+    }
+
+    #[test]
+    fn runner_context_exposes_github_runner_and_job() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = test_config();
+        let ctx = runner_context(
+            &test_task(),
+            &cfg,
+            dir.path(),
+            "/ws",
+            "/tmp/rt",
+            &HashMap::new(),
+        );
+        let gh = ctx.get_context("github").unwrap();
+        assert_eq!(gh["sha"], "abc123");
+        assert_eq!(gh["ref"], "refs/heads/main");
+        assert_eq!(gh["ref_name"], "main");
+        assert_eq!(gh["ref_type"], "branch");
+        assert_eq!(gh["repository"], "acme/demo");
+        assert_eq!(gh["actor"], "alice");
+        assert_eq!(gh["workflow"], "CI");
+        assert_eq!(gh["job"], "build");
+        assert_eq!(gh["server_url"], "https://oxidean.example");
+        assert_eq!(gh["api_url"], "https://oxidean.example/api");
+        assert_eq!(gh["run_number"], 4);
+        let runner = ctx.get_context("runner").unwrap();
+        assert_eq!(runner["name"], "runner-1");
+        assert_eq!(runner["temp"], "/tmp/rt");
+        assert_eq!(runner["tool_cache"], "/tmp/rt/tool-cache");
+        let job = ctx.get_context("job").unwrap();
+        assert_eq!(job["status"], "success");
+        assert_eq!(ctx.get_context("matrix").unwrap()["os"], "linux");
+        // `vars` and `inputs` exist but are empty — pinned divergences.
+        assert_eq!(ctx.get_context("vars").unwrap(), &serde_json::json!({}));
+        assert_eq!(ctx.get_context("inputs").unwrap(), &serde_json::json!({}));
+    }
+}

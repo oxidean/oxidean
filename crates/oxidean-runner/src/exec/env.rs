@@ -216,6 +216,15 @@ pub(crate) fn job_env(
         vars.push(("ACTIONS_ID_TOKEN_REQUEST_TOKEN".into(), tok.clone()));
     }
 
+    // `ACTIONS_CACHE_URL` / `ACTIONS_RUNTIME_TOKEN` — actions/cache service
+    // creds minted at claim. `ACTIONS_RESULTS_URL` mirrors the cache URL:
+    // newer toolkit builds probe it first for the v2 backend.
+    if let (Some(url), Some(tok)) = (task.cache_url.as_ref(), task.cache_token.as_ref()) {
+        vars.push(("ACTIONS_CACHE_URL".into(), url.clone()));
+        vars.push(("ACTIONS_RESULTS_URL".into(), url.clone()));
+        vars.push(("ACTIONS_RUNTIME_TOKEN".into(), tok.clone()));
+    }
+
     // Repo secrets last: a collision with a reserved name is skipped loudly
     // rather than silently overriding a default.
     let reserved: std::collections::HashSet<String> = vars.iter().map(|(k, _)| k.clone()).collect();
