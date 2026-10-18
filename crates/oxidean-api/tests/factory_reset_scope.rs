@@ -116,9 +116,10 @@ async fn factory_reset_database_only_keeps_repo_files() {
         ))
         .await
         .unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
+    let status = res.status();
     let bytes = res.into_body().collect().await.unwrap().to_bytes();
     let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(status, StatusCode::OK, "{v}");
     assert_eq!(v["ok"], true, "{v}");
     assert_eq!(v["data"]["needs_setup"], true);
     assert!(
@@ -155,9 +156,10 @@ async fn factory_reset_database_and_repositories_wipes_disk() {
         ))
         .await
         .unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
+    let status = res.status();
     let bytes = res.into_body().collect().await.unwrap().to_bytes();
     let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(status, StatusCode::OK, "{v}");
     assert_eq!(v["ok"], true, "{v}");
     assert!(repos_dir.exists(), "repos root must remain");
     assert!(
@@ -196,9 +198,10 @@ async fn factory_reset_defaults_scope_to_database_only() {
         ))
         .await
         .unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
+    let status = res.status();
     let bytes = res.into_body().collect().await.unwrap().to_bytes();
     let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(status, StatusCode::OK, "{v}");
     assert_eq!(v["ok"], true, "{v}");
     assert!(bare.join("HEAD").exists(), "omitted scope keeps disk");
 }
@@ -295,9 +298,10 @@ async fn factory_reset_wipes_org_acl_and_repository_rows() {
         ))
         .await
         .unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
+    let status = res.status();
     let bytes = res.into_body().collect().await.unwrap().to_bytes();
     let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(status, StatusCode::OK, "{v}");
     assert_eq!(v["ok"], true, "{v}");
     assert_eq!(v["data"]["needs_setup"], true);
 
@@ -388,9 +392,10 @@ async fn factory_reset_wipes_issue_domain_rows() {
         ))
         .await
         .unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
+    let status = res.status();
     let bytes = res.into_body().collect().await.unwrap().to_bytes();
     let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(status, StatusCode::OK, "{v}");
     assert_eq!(v["ok"], true, "{v}");
     assert_eq!(v["data"]["needs_setup"], true);
 
@@ -432,9 +437,10 @@ async fn factory_reset_database_and_repositories_wipes_lfs_dir_children() {
         ))
         .await
         .unwrap();
-    assert_eq!(res.status(), StatusCode::OK);
+    let status = res.status();
     let bytes = res.into_body().collect().await.unwrap().to_bytes();
     let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(status, StatusCode::OK, "{v}");
     assert_eq!(v["ok"], true, "{v}");
     assert!(lfs.is_dir(), "root kept");
     let mut entries = std::fs::read_dir(&lfs).unwrap();
