@@ -14,6 +14,7 @@ pub mod cors;
 pub mod crypto;
 pub mod deploy_keys;
 pub mod deployment;
+pub mod discussion;
 pub mod email;
 pub mod emails;
 pub mod git;

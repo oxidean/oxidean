@@ -58,6 +58,7 @@ pub mod workflow_templates;
 
 pub mod checks;
 pub mod deployments;
+pub mod discussions;
 pub use actions::{
     ActionArtifactRow, ActionEnvironmentRow, ActionJobRow, ActionJobTokenRow, ActionOidcKeyRow,
     ActionPayloadRow, ActionRunFilter, ActionRunRow, ActionRunnerRow, ActionSecretCipherRow,
@@ -71,6 +72,7 @@ pub use deploy_keys::DeployKeyRow;
 pub use deployments::{ActionDeploymentRow, ActionDeploymentStatusRow};
 use dialect::resolve_dialect_from_env as resolve_from_env;
 pub use dialect::{redact_url, resolve_dialect, resolve_dialect_from_env, Dialect};
+pub use discussions::{DiscussionCategoryRow, DiscussionCommentRow, DiscussionRow};
 pub use follows::UserFollowListRow;
 pub use git_settings::GitSettingsRow;
 pub use gpg_keys::GpgKeyRow;
@@ -2098,6 +2100,222 @@ impl Database {
 
     pub async fn delete_project_card(&self, id: &str) -> Result<(), String> {
         projects::delete_project_card(self.require_pool()?, id).await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn insert_discussion_category(
+        &self,
+        id: &str,
+        repo_id: &str,
+        name: &str,
+        slug: &str,
+        emoji: &str,
+        description: &str,
+        is_answerable: bool,
+    ) -> Result<DiscussionCategoryRow, String> {
+        discussions::insert_category(
+            self.require_pool()?,
+            id,
+            repo_id,
+            name,
+            slug,
+            emoji,
+            description,
+            is_answerable,
+        )
+        .await
+    }
+
+    pub async fn find_discussion_category_by_id(
+        &self,
+        id: &str,
+    ) -> Result<Option<DiscussionCategoryRow>, String> {
+        discussions::find_category_by_id(self.require_pool()?, id).await
+    }
+
+    pub async fn find_discussion_category_by_slug(
+        &self,
+        repo_id: &str,
+        slug: &str,
+    ) -> Result<Option<DiscussionCategoryRow>, String> {
+        discussions::find_category_by_slug(self.require_pool()?, repo_id, slug).await
+    }
+
+    pub async fn list_discussion_categories(
+        &self,
+        repo_id: &str,
+    ) -> Result<Vec<DiscussionCategoryRow>, String> {
+        discussions::list_categories(self.require_pool()?, repo_id).await
+    }
+
+    pub async fn update_discussion_category(
+        &self,
+        id: &str,
+        name: Option<&str>,
+        emoji: Option<&str>,
+        description: Option<&str>,
+        is_answerable: Option<bool>,
+    ) -> Result<Option<DiscussionCategoryRow>, String> {
+        discussions::update_category(
+            self.require_pool()?,
+            id,
+            name,
+            emoji,
+            description,
+            is_answerable,
+        )
+        .await
+    }
+
+    pub async fn delete_discussion_category(&self, id: &str) -> Result<(), String> {
+        discussions::delete_category(self.require_pool()?, id).await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn insert_discussion(
+        &self,
+        id: &str,
+        repo_id: &str,
+        number: i64,
+        title: &str,
+        body: &str,
+        category_id: Option<&str>,
+        author_id: Option<&str>,
+    ) -> Result<DiscussionRow, String> {
+        discussions::insert_discussion(
+            self.require_pool()?,
+            id,
+            repo_id,
+            number,
+            title,
+            body,
+            category_id,
+            author_id,
+        )
+        .await
+    }
+
+    pub async fn find_discussion_by_id(&self, id: &str) -> Result<Option<DiscussionRow>, String> {
+        discussions::find_discussion_by_id(self.require_pool()?, id).await
+    }
+
+    pub async fn find_discussion_by_number(
+        &self,
+        repo_id: &str,
+        number: i64,
+    ) -> Result<Option<DiscussionRow>, String> {
+        discussions::find_discussion_by_number(self.require_pool()?, repo_id, number).await
+    }
+
+    pub async fn list_discussions(
+        &self,
+        repo_id: &str,
+        category_id: Option<&str>,
+        answered: Option<bool>,
+    ) -> Result<Vec<DiscussionRow>, String> {
+        discussions::list_discussions(self.require_pool()?, repo_id, category_id, answered).await
+    }
+
+    pub async fn update_discussion(
+        &self,
+        id: &str,
+        title: Option<&str>,
+        body: Option<&str>,
+        category_id: Option<Option<&str>>,
+    ) -> Result<Option<DiscussionRow>, String> {
+        discussions::update_discussion(self.require_pool()?, id, title, body, category_id).await
+    }
+
+    pub async fn set_discussion_flags(
+        &self,
+        id: &str,
+        pinned: Option<bool>,
+        locked: Option<bool>,
+    ) -> Result<Option<DiscussionRow>, String> {
+        discussions::set_discussion_flags(self.require_pool()?, id, pinned, locked).await
+    }
+
+    pub async fn set_discussion_answer(
+        &self,
+        id: &str,
+        comment_id: Option<&str>,
+        actor_id: Option<&str>,
+    ) -> Result<Option<DiscussionRow>, String> {
+        discussions::set_discussion_answer(self.require_pool()?, id, comment_id, actor_id).await
+    }
+
+    pub async fn transfer_discussion(
+        &self,
+        id: &str,
+        target_repo_id: &str,
+        target_number: i64,
+    ) -> Result<Option<DiscussionRow>, String> {
+        discussions::transfer_discussion(self.require_pool()?, id, target_repo_id, target_number)
+            .await
+    }
+
+    pub async fn delete_discussion(&self, id: &str) -> Result<(), String> {
+        discussions::delete_discussion(self.require_pool()?, id).await
+    }
+
+    pub async fn insert_discussion_comment(
+        &self,
+        id: &str,
+        discussion_id: &str,
+        parent_id: Option<&str>,
+        author_id: Option<&str>,
+        body: &str,
+    ) -> Result<DiscussionCommentRow, String> {
+        discussions::insert_comment(
+            self.require_pool()?,
+            id,
+            discussion_id,
+            parent_id,
+            author_id,
+            body,
+        )
+        .await
+    }
+
+    pub async fn find_discussion_comment_by_id(
+        &self,
+        id: &str,
+    ) -> Result<Option<DiscussionCommentRow>, String> {
+        discussions::find_comment_by_id(self.require_pool()?, id).await
+    }
+
+    pub async fn list_discussion_comments(
+        &self,
+        discussion_id: &str,
+    ) -> Result<Vec<DiscussionCommentRow>, String> {
+        discussions::list_comments(self.require_pool()?, discussion_id).await
+    }
+
+    pub async fn update_discussion_comment(
+        &self,
+        id: &str,
+        body: &str,
+    ) -> Result<Option<DiscussionCommentRow>, String> {
+        discussions::update_comment(self.require_pool()?, id, body).await
+    }
+
+    pub async fn delete_discussion_comment(&self, id: &str) -> Result<(), String> {
+        discussions::delete_comment(self.require_pool()?, id).await
+    }
+
+    pub async fn set_discussion_labels(
+        &self,
+        discussion_id: &str,
+        label_ids: &[String],
+    ) -> Result<(), String> {
+        discussions::set_discussion_labels(self.require_pool()?, discussion_id, label_ids).await
+    }
+
+    pub async fn list_discussion_label_ids(
+        &self,
+        discussion_id: &str,
+    ) -> Result<Vec<String>, String> {
+        discussions::list_discussion_label_ids(self.require_pool()?, discussion_id).await
     }
 
     pub async fn insert_issue_revision(
@@ -4585,6 +4803,14 @@ impl Database {
         enabled: bool,
     ) -> Result<(), String> {
         repo_units::set_projects_enabled(self.require_pool()?, repo_id, enabled).await
+    }
+
+    pub async fn set_repo_discussions_enabled(
+        &self,
+        repo_id: &str,
+        enabled: bool,
+    ) -> Result<(), String> {
+        repo_units::set_discussions_enabled(self.require_pool()?, repo_id, enabled).await
     }
 
     pub async fn consume_action_runner_registration_token(

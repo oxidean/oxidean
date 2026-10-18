@@ -60,6 +60,12 @@ pub enum PatProc {
     /// Board/column/card mutations (GitHub Projects API). Classic `repo`;
     /// FG `repository_projects:write`.
     ProjectsWrite,
+    /// Discussion categories/threads/comments. Classic `repo`; FG
+    /// `discussions` perm.
+    DiscussionsRead,
+    /// Discussion/category/comment mutations (GitHub Discussions surface).
+    /// Classic `repo`; FG `discussions:write`.
+    DiscussionsWrite,
     /// Commit statuses. Classic `repo:status`|`repo`|`public_repo`; FG
     /// `commit_statuses` perm.
     StatusesRead,
@@ -337,6 +343,26 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         | "projects.cards.convert"
         | "projects.cards.delete" => ProjectsWrite,
 
+        "discussions.list"
+        | "discussions.get"
+        | "discussions.categories.list"
+        | "discussions.comments.list" => DiscussionsRead,
+        "discussions.create"
+        | "discussions.update"
+        | "discussions.delete"
+        | "discussions.pin"
+        | "discussions.lock"
+        | "discussions.transfer"
+        | "discussions.labels.set"
+        | "discussions.answer.set"
+        | "discussions.answer.clear"
+        | "discussions.categories.create"
+        | "discussions.categories.update"
+        | "discussions.categories.delete"
+        | "discussions.comments.create"
+        | "discussions.comments.update"
+        | "discussions.comments.delete" => DiscussionsWrite,
+
         // Drafting a workflow file is a contents write (ActionsWrite ⇒ classic
         // `repo` or `workflow`, FG `actions:write`).
         "repo.actions.workflows.create" => ActionsWrite,
@@ -478,6 +504,8 @@ pub fn public_repo_covers(class: PatProc) -> bool {
             | ReleasesWrite
             | ProjectsRead
             | ProjectsWrite
+            | DiscussionsRead
+            | DiscussionsWrite
             | StarringWrite
             | WatchingWrite
     )
@@ -494,7 +522,8 @@ pub fn classic_scopes_for(class: PatProc) -> &'static [ClassicPatScope] {
         RepoRead | RepoWrite | IssuesRead | IssuesWrite | PullsRead | PullsWrite | ActionsRead
         | EnvironmentsRead | EnvironmentsWrite | DeploymentsRead | DeploymentsWrite
         | ChecksRead | ChecksWrite | SecretsRead | SecretsWrite | ReleasesRead | ReleasesWrite
-        | ProjectsRead | ProjectsWrite | RepoAdminRead | RepoAdminWrite => &[S::Repo],
+        | ProjectsRead | ProjectsWrite | DiscussionsRead | DiscussionsWrite | RepoAdminRead
+        | RepoAdminWrite => &[S::Repo],
         ActionsWrite => &[S::Repo, S::Workflow],
         StatusesRead | StatusesWrite => &[S::Repo, S::RepoStatus],
         WebhooksRead | WebhooksWrite => &[S::Repo, S::AdminRepoHook],
@@ -544,6 +573,7 @@ pub fn fg_family_name(class: PatProc) -> Option<&'static str> {
         DeploymentsRead | DeploymentsWrite => "deployments",
         ChecksRead | ChecksWrite => "checks",
         ProjectsRead | ProjectsWrite => "repository_projects",
+        DiscussionsRead | DiscussionsWrite => "discussions",
         StatusesRead | StatusesWrite => "commit_statuses",
         SecretsRead | SecretsWrite => "secrets",
         ReleasesRead | ReleasesWrite => "releases",

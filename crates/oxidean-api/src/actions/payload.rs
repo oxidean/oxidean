@@ -581,3 +581,114 @@ pub fn project_card_payload(
     }
     payload
 }
+
+/// `discussion` object in GitHub's webhook embed shape — shared by the
+/// `discussion` and `discussion_comment` event payloads.
+#[allow(clippy::too_many_arguments)]
+pub fn discussion_embed(
+    row: &oxidean_db::DiscussionRow,
+    category: Option<&oxidean_db::DiscussionCategoryRow>,
+    author_login: Option<&str>,
+    label_names: &[String],
+    comments_count: i64,
+    html_url: &str,
+    answer_html_url: Option<&str>,
+) -> JsonValue {
+    let cat = category.map(|c| {
+        json!({
+            "id": c.id,
+            "name": c.name,
+            "slug": c.slug,
+            "emoji": c.emoji,
+            "description": c.description,
+            "is_answerable": c.is_answerable,
+            "created_at": c.created_at,
+            "updated_at": c.updated_at,
+        })
+    });
+    json!({
+        "id": row.id,
+        "number": row.number,
+        "title": row.title,
+        "body": row.body,
+        "state": "open",
+        "locked": row.locked,
+        "comments": comments_count,
+        "user": author_login.map(|u| json!({ "login": u })),
+        "category": cat,
+        "labels": label_names,
+        "answer_html_url": answer_html_url,
+        "answer_chosen_at": row.answered_at,
+        "answer_chosen_by": row.answered_by,
+        "html_url": html_url,
+        "created_at": row.created_at,
+        "updated_at": row.updated_at,
+    })
+}
+
+/// `discussion` payload — `action` is the GitHub activity type:
+/// `created`/`edited`/`deleted`/`transferred`/`pinned`/`unpinned`/`locked`/
+/// `unlocked`/`category_changed`/`answered`/`unanswered`/`labeled`/`unlabeled`.
+/// `changes` carries GitHub's edit-diff convention (`title.from`/`body.from`).
+#[allow(clippy::too_many_arguments)]
+pub fn discussion_payload(
+    action: &str,
+    embed: &JsonValue,
+    changes: Option<&JsonValue>,
+    label: Option<&JsonValue>,
+    answer: Option<&JsonValue>,
+    repository: &JsonValue,
+    sender: &JsonValue,
+) -> JsonValue {
+    let mut payload = json!({
+        "action": action,
+        "discussion": embed,
+        "repository": repository,
+        "sender": sender,
+    });
+    if let Some(c) = changes {
+        payload["changes"] = c.clone();
+    }
+    if let Some(l) = label {
+        payload["label"] = l.clone();
+    }
+    if let Some(a) = answer {
+        payload["answer"] = a.clone();
+    }
+    payload
+}
+
+/// `discussion_comment` payload — `action` is `created`/`edited`/`deleted`;
+/// `discussion` carries the same embed as `discussion_payload`.
+#[allow(clippy::too_many_arguments)]
+pub fn discussion_comment_payload(
+    action: &str,
+    discussion_embed: &JsonValue,
+    comment: &oxidean_db::DiscussionCommentRow,
+    comment_html_url: &str,
+    author_login: Option<&str>,
+    changes: Option<&JsonValue>,
+    repository: &JsonValue,
+    sender: &JsonValue,
+) -> JsonValue {
+    let mut payload = json!({
+        "action": action,
+        "discussion": discussion_embed,
+        "comment": {
+            "id": comment.id,
+            "discussion_id": comment.discussion_id,
+            "parent_id": comment.parent_id,
+            "user": author_login.map(|u| json!({ "login": u })),
+            "body": comment.body,
+            "html_url": comment_html_url,
+            "created_at": comment.created_at,
+            "updated_at": comment.updated_at,
+        },
+        "repository": repository,
+        "sender": sender,
+    });
+    if let Some(c) = changes {
+        payload["changes"] = c.clone();
+    }
+    payload
+}

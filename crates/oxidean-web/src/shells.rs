@@ -496,6 +496,20 @@ static SHELLS: &[Shell] = &[
         redirect: None,
     },
     Shell {
+        pattern: &[P("owner"), P("repo"), L("discussions")],
+        file: "_/_/discussions/_/index.html",
+        title: Some("Discussions · {owner}/{repo} · Oxidean"),
+        protected: false,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[P("owner"), P("repo"), L("discussions"), S("path")],
+        file: "_/_/discussions/_/index.html",
+        title: Some("Discussions · {owner}/{repo} · Oxidean"),
+        protected: false,
+        redirect: None,
+    },
+    Shell {
         pattern: &[P("owner"), P("repo"), L("wiki")],
         file: "_/_/wiki/_/index.html",
         title: Some("Wiki · {owner}/{repo} · Oxidean"),

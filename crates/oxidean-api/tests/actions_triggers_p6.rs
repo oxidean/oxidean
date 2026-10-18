@@ -686,6 +686,10 @@ on:
   project_column: {}
   project_card:
     types: [moved]
+  discussion:
+    types: [answered]
+  discussion_comment:
+    types: [created]
   repository_dispatch:
     types: [deploy]
   branch_protection_rule:
@@ -784,17 +788,28 @@ jobs:
     notify_lifecycle_actions(&db, git.as_ref(), &ev("project_card", "moved")).await;
     assert_eq!(run_count(&db, &repo_id).await, 19);
 
+    // discussion types:[answered] / discussion_comment types:[created] —
+    // mismatched actions filtered, matching fire.
+    notify_lifecycle_actions(&db, git.as_ref(), &ev("discussion", "created")).await;
+    assert_eq!(run_count(&db, &repo_id).await, 19);
+    notify_lifecycle_actions(&db, git.as_ref(), &ev("discussion", "answered")).await;
+    assert_eq!(run_count(&db, &repo_id).await, 20);
+    notify_lifecycle_actions(&db, git.as_ref(), &ev("discussion_comment", "deleted")).await;
+    assert_eq!(run_count(&db, &repo_id).await, 20);
+    notify_lifecycle_actions(&db, git.as_ref(), &ev("discussion_comment", "created")).await;
+    assert_eq!(run_count(&db, &repo_id).await, 21);
+
     // repository_dispatch — types: match the caller-chosen event_type.
     notify_lifecycle_actions(&db, git.as_ref(), &ev("repository_dispatch", "build")).await;
-    assert_eq!(run_count(&db, &repo_id).await, 19);
+    assert_eq!(run_count(&db, &repo_id).await, 21);
     notify_lifecycle_actions(&db, git.as_ref(), &ev("repository_dispatch", "deploy")).await;
-    assert_eq!(run_count(&db, &repo_id).await, 20);
+    assert_eq!(run_count(&db, &repo_id).await, 22);
 
     // branch_protection_rule types:[created] — edited filtered.
     notify_lifecycle_actions(&db, git.as_ref(), &ev("branch_protection_rule", "edited")).await;
-    assert_eq!(run_count(&db, &repo_id).await, 20);
+    assert_eq!(run_count(&db, &repo_id).await, 22);
     notify_lifecycle_actions(&db, git.as_ref(), &ev("branch_protection_rule", "created")).await;
-    assert_eq!(run_count(&db, &repo_id).await, 21);
+    assert_eq!(run_count(&db, &repo_id).await, 23);
 
     let runs = db
         .list_action_runs_for_repo(&repo_id, &Default::default(), 100, 0)
@@ -820,6 +835,8 @@ jobs:
         "project",
         "project_column",
         "project_card",
+        "discussion",
+        "discussion_comment",
         "repository_dispatch",
         "branch_protection_rule",
     ] {

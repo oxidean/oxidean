@@ -705,6 +705,8 @@ fn apply_event(
         | "project"
         | "project_column"
         | "project_card"
+        | "discussion"
+        | "discussion_comment"
         | "public"
         | "status"
         | "repository_dispatch"
@@ -713,7 +715,7 @@ fn apply_event(
                 .insert(name.to_string(), parse_event_filters(value).types);
         }
         other => {
-            // Other unimplemented events (discussion, merge_group, …) never
+            // Other unimplemented events (merge_group, …) never
             // fire — the caller warns loudly so the gap isn't silent.
             return Some(other.to_string());
         }
@@ -1814,7 +1816,7 @@ jobs:
 name: CI
 on:
   push:
-  discussion:
+  page_build:
   merge_group:
     types: [checks_requested]
 jobs:
@@ -1831,7 +1833,7 @@ jobs:
         assert!(
             doc.warnings
                 .iter()
-                .any(|w| w.contains("on.discussion") && w.contains("unsupported event")),
+                .any(|w| w.contains("on.page_build") && w.contains("unsupported event")),
             "missing unsupported-event warning: {:?}",
             doc.warnings
         );

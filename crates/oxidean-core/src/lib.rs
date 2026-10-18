@@ -3,6 +3,7 @@
 pub mod action_types;
 pub mod auth_types;
 pub mod deploy_key_types;
+pub mod discussion_types;
 pub mod email_types;
 pub mod gpg_key_types;
 pub mod issue_types;
@@ -31,6 +32,7 @@ pub mod wiki_types;
 pub use action_types::*;
 pub use auth_types::*;
 pub use deploy_key_types::*;
+pub use discussion_types::*;
 pub use email_types::*;
 pub use gpg_key_types::*;
 pub use issue_types::*;

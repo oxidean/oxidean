@@ -8,13 +8,14 @@ import { toastSuccess } from "@/lib/toast";
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
 
-type Unit = "issues" | "pulls" | "wiki" | "projects";
+type Unit = "issues" | "pulls" | "wiki" | "projects" | "discussions";
 
 const UNIT_LABEL: Record<Unit, string> = {
   issues: "Issues",
   pulls: "Pull requests",
   wiki: "Wiki",
   projects: "Projects",
+  discussions: "Discussions",
 };
 
 /**
@@ -40,6 +41,7 @@ export function RepoFeaturesPanel(props: {
   const pullsEnabled = live.pulls_enabled !== false;
   const wikiEnabled = live.wiki_enabled !== false;
   const projectsEnabled = live.projects_enabled !== false;
+  const discussionsEnabled = live.discussions_enabled !== false;
 
   const [pendingUnit, setPendingUnit] = useState<"" | Unit>("");
   const [error, setError] = useState("");
@@ -122,6 +124,16 @@ export function RepoFeaturesPanel(props: {
           aria-label="Enable projects"
         />
         <Label className="text-[14px]">Projects</Label>
+      </div>
+      <div className="flex items-center gap-3">
+        <Switch
+          checked={discussionsEnabled}
+          disabled={!canAdmin || pendingUnit !== ""}
+          onCheckedChange={(v) => void setUnit("discussions", !!v)}
+          data-testid="repo-discussions-enabled"
+          aria-label="Enable discussions"
+        />
+        <Label className="text-[14px]">Discussions</Label>
       </div>
     </div>
 

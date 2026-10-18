@@ -52,6 +52,7 @@ export function RepoChrome({ repo, active, showSettings = false }: RepoChromePro
   const pullsEnabled = live.pulls_enabled !== false;
   const wikiEnabled = live.wiki_enabled !== false;
   const projectsEnabled = live.projects_enabled !== false;
+  const discussionsEnabled = live.discussions_enabled !== false;
 
   const owner = live.owner_username;
   const name = live.name;
@@ -63,6 +64,7 @@ export function RepoChrome({ repo, active, showSettings = false }: RepoChromePro
   const issuesHref = `${base}/issues`;
   const pullsHref = `${base}/pulls`;
   const projectsHref = `${base}/projects`;
+  const discussionsHref = `${base}/discussions`;
   const wikiHref = `${base}/wiki`;
   const releasesHref = `${base}/releases`;
   const packagesHref = `${base}/packages`;
@@ -429,6 +431,16 @@ export function RepoChrome({ repo, active, showSettings = false }: RepoChromePro
           data-testid="repo-chrome-projects"
         >
           Projects
+        </AppLink>;
+      }
+      @if (discussionsEnabled) {
+        <AppLink
+          href={discussionsHref as string}
+          className={navClass(active === "discussions") as string}
+          aria-current={active === "discussions" ? "page" : undefined}
+          data-testid="repo-chrome-discussions"
+        >
+          Discussions
         </AppLink>;
       }
       @if (wikiEnabled) {

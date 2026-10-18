@@ -29,6 +29,7 @@ pub enum RepoUnit {
     Pulls,
     Wiki,
     Projects,
+    Discussions,
 }
 
 impl RepoUnit {
@@ -38,6 +39,7 @@ impl RepoUnit {
             RepoUnit::Pulls => "repo.pulls",
             RepoUnit::Wiki => "repo.wiki",
             RepoUnit::Projects => "repo.projects",
+            RepoUnit::Discussions => "repo.discussions",
         }
     }
 
@@ -58,12 +60,16 @@ impl RepoUnit {
                 "repo.projects.disabled",
                 "Projects are disabled for this repository",
             ),
+            RepoUnit::Discussions => AppError::new(
+                "repo.discussions.disabled",
+                "Discussions are disabled for this repository",
+            ),
         }
     }
 }
 
-/// Gate shared by the `issue.*` / `pull.*` / `wiki.*` / `projects.*` acl
-/// resolvers — a disabled unit rejects reads, writes, and admin maintenance
+/// Gate shared by the `issue.*` / `pull.*` / `wiki.*` / `projects.*` /
+/// `discussions.*` acl resolvers — a disabled unit rejects reads, writes, and admin maintenance
 /// alike until re-enabled.
 pub async fn require_unit_enabled(
     ctx: &RpcCtx,
@@ -76,6 +82,7 @@ pub async fn require_unit_enabled(
         RepoUnit::Pulls => flags.pulls_enabled,
         RepoUnit::Wiki => flags.wiki_enabled,
         RepoUnit::Projects => flags.projects_enabled,
+        RepoUnit::Discussions => flags.discussions_enabled,
     };
     if enabled {
         Ok(())
@@ -107,6 +114,7 @@ async fn get_enabled(
         RepoUnit::Pulls => flags.pulls_enabled,
         RepoUnit::Wiki => flags.wiki_enabled,
         RepoUnit::Projects => flags.projects_enabled,
+        RepoUnit::Discussions => flags.discussions_enabled,
     };
     Ok(RepoUnitEnabledResponse { enabled })
 }
@@ -141,6 +149,11 @@ async fn set_enabled(
         RepoUnit::Projects => {
             ctx.db
                 .set_repo_projects_enabled(&accessible.row.id, req.enabled)
+                .await
+        }
+        RepoUnit::Discussions => {
+            ctx.db
+                .set_repo_discussions_enabled(&accessible.row.id, req.enabled)
                 .await
         }
     }
@@ -212,4 +225,20 @@ pub async fn projects_set_enabled(
     input: serde_json::Value,
 ) -> Result<RepoUnitEnabledResponse, AppError> {
     set_enabled(ctx, input, RepoUnit::Projects).await
+}
+
+/// `repo.discussions.getEnabled`.
+pub async fn discussions_get_enabled(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<RepoUnitEnabledResponse, AppError> {
+    get_enabled(ctx, input, RepoUnit::Discussions).await
+}
+
+/// `repo.discussions.setEnabled`.
+pub async fn discussions_set_enabled(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<RepoUnitEnabledResponse, AppError> {
+    set_enabled(ctx, input, RepoUnit::Discussions).await
 }

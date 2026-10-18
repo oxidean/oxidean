@@ -23,6 +23,8 @@ const EVENT_OPTIONS = [
   { id: "project", label: "project" },
   { id: "project_column", label: "project_column" },
   { id: "project_card", label: "project_card" },
+  { id: "discussion", label: "discussion" },
+  { id: "discussion_comment", label: "discussion_comment" },
   { id: "pull_request_review_comment", label: "pull_request_review_comment" },
   { id: "release", label: "release" },
   { id: "star", label: "star" },

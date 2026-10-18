@@ -326,6 +326,9 @@ pub struct FgPerms {
     /// Repository projects (boards/columns/cards).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repository_projects: Option<FgPermLevel>,
+    /// Discussions (categories/threads/comments).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub discussions: Option<FgPermLevel>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub webhooks: Option<FgPermLevel>,
     /// Repository administration (collaborators, protection rules, mirrors,

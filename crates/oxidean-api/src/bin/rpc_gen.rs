@@ -610,6 +610,7 @@ export type RepoPublic = {
   pulls_enabled?: boolean;
   wiki_enabled?: boolean;
   projects_enabled?: boolean;
+  discussions_enabled?: boolean;
   fork_network_id?: string | null;
   forked_from?: ForkParentSummary | null;
 };
@@ -3170,6 +3171,204 @@ export type ProjectCardMoveRequest = {
   position: number;
 };
 
+export type DiscussionCategoryPublic = {
+  id: string;
+  repo_id: string;
+  name: string;
+  slug: string;
+  emoji: string;
+  description: string;
+  is_answerable: boolean;
+  position: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type DiscussionPublic = {
+  id: string;
+  repo_id: string;
+  /** The shared issue-sequence `#N`. */
+  number: number;
+  title: string;
+  body: string;
+  category?: DiscussionCategoryPublic | null;
+  author_id?: string | null;
+  author_username?: string | null;
+  answer_comment_id?: string | null;
+  answered_at?: string | null;
+  answered_by?: string | null;
+  answered_by_username?: string | null;
+  locked: boolean;
+  pinned: boolean;
+  label_ids: string[];
+  html_url: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type DiscussionCommentPublic = {
+  id: string;
+  discussion_id: string;
+  parent_id?: string | null;
+  author_id?: string | null;
+  author_username?: string | null;
+  body: string;
+  html_url: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type DiscussionRepoRequest = {
+  owner: string;
+  name: string;
+};
+
+export type DiscussionRefRequest = {
+  owner: string;
+  name: string;
+  /** The discussion's shared issue-sequence `#N`. */
+  discussion: number;
+};
+
+export type DiscussionsListRequest = {
+  owner: string;
+  name: string;
+  /** Category id or slug (absent = all categories). */
+  category?: string;
+  /** `true` = answered only, `false` = unanswered only. */
+  answered?: boolean;
+};
+
+export type DiscussionsListResponse = {
+  discussions: DiscussionPublic[];
+};
+
+export type DiscussionCreateRequest = {
+  owner: string;
+  name: string;
+  title: string;
+  body?: string;
+  /** Category id (from `discussions.categories.list`). */
+  category?: string;
+  label_ids?: string[];
+};
+
+export type DiscussionUpdateRequest = {
+  owner: string;
+  name: string;
+  discussion: number;
+  title?: string;
+  body?: string;
+  /** `null` clears the category; a value switches it. */
+  category?: string | null;
+};
+
+export type DiscussionDeleteResponse = {
+  ok: boolean;
+};
+
+export type DiscussionPinRequest = {
+  owner: string;
+  name: string;
+  discussion: number;
+  pinned: boolean;
+};
+
+export type DiscussionLockRequest = {
+  owner: string;
+  name: string;
+  discussion: number;
+  locked: boolean;
+};
+
+export type DiscussionTransferRequest = {
+  owner: string;
+  name: string;
+  discussion: number;
+  target_owner: string;
+  target_name: string;
+};
+
+export type DiscussionLabelsSetRequest = {
+  owner: string;
+  name: string;
+  discussion: number;
+  label_ids: string[];
+};
+
+export type DiscussionAnswerSetRequest = {
+  owner: string;
+  name: string;
+  discussion: number;
+  /** Comment id to mark as the answer. */
+  comment: string;
+};
+
+export type DiscussionCategoriesListResponse = {
+  categories: DiscussionCategoryPublic[];
+};
+
+export type DiscussionCategoryCreateRequest = {
+  owner: string;
+  name: string;
+  /** Display name (the request field is `category_name` in Rust — see rpc_gen). */
+  category_name: string;
+  emoji?: string;
+  description?: string;
+  is_answerable?: boolean;
+};
+
+export type DiscussionCategoryRefRequest = {
+  owner: string;
+  name: string;
+  /** Category id. */
+  category: string;
+};
+
+export type DiscussionCategoryUpdateRequest = {
+  owner: string;
+  name: string;
+  category: string;
+  category_name?: string;
+  emoji?: string;
+  description?: string;
+  is_answerable?: boolean;
+};
+
+export type DiscussionCommentsListRequest = {
+  owner: string;
+  name: string;
+  discussion: number;
+};
+
+export type DiscussionCommentsListResponse = {
+  comments: DiscussionCommentPublic[];
+};
+
+export type DiscussionCommentCreateRequest = {
+  owner: string;
+  name: string;
+  discussion: number;
+  body: string;
+  /** Parent comment id — replies thread one level deep. */
+  parent?: string;
+};
+
+export type DiscussionCommentRefRequest = {
+  owner: string;
+  name: string;
+  discussion: number;
+  comment: string;
+};
+
+export type DiscussionCommentUpdateRequest = {
+  owner: string;
+  name: string;
+  discussion: number;
+  comment: string;
+  body: string;
+};
+
 export type OrgSecretMetaPublic = {
   name: string;
   /** `all` | `private` | `selected`. */
@@ -3561,6 +3760,9 @@ export type FgPerms = {
   variables?: FgPermLevel;
   environments?: FgPermLevel;
   deployments?: FgPermLevel;
+  checks?: FgPermLevel;
+  repository_projects?: FgPermLevel;
+  discussions?: FgPermLevel;
   webhooks?: FgPermLevel;
   administration?: FgPermLevel;
   metadata?: FgPermLevel;
@@ -5335,6 +5537,12 @@ export function createClient(opts: CreateClientOptions) {
         setEnabled: (input: RepoUnitSetEnabledRequest) =>
           rpcCall<RepoUnitEnabledResponse>(opts, "repo.projects.setEnabled", input),
       },
+      discussions: {
+        getEnabled: (input: RepoUnitGetEnabledRequest) =>
+          rpcCall<RepoUnitEnabledResponse>(opts, "repo.discussions.getEnabled", input),
+        setEnabled: (input: RepoUnitSetEnabledRequest) =>
+          rpcCall<RepoUnitEnabledResponse>(opts, "repo.discussions.setEnabled", input),
+      },
     },
     org: {
       create: (input: CreateOrgRequest) => rpcCall<OrgPublic>(opts, "org.create", input),
@@ -5575,6 +5783,54 @@ export function createClient(opts: CreateClientOptions) {
           rpcCall<ProjectCardPublic>(opts, "projects.cards.convert", input),
         delete: (input: ProjectCardRefRequest) =>
           rpcCall<ProjectDeleteSimpleResponse>(opts, "projects.cards.delete", input),
+      },
+    },
+    discussions: {
+      list: (input: DiscussionsListRequest) =>
+        rpcCall<DiscussionsListResponse>(opts, "discussions.list", input),
+      get: (input: DiscussionRefRequest) =>
+        rpcCall<DiscussionPublic>(opts, "discussions.get", input),
+      create: (input: DiscussionCreateRequest) =>
+        rpcCall<DiscussionPublic>(opts, "discussions.create", input),
+      update: (input: DiscussionUpdateRequest) =>
+        rpcCall<DiscussionPublic>(opts, "discussions.update", input),
+      delete: (input: DiscussionRefRequest) =>
+        rpcCall<DiscussionDeleteResponse>(opts, "discussions.delete", input),
+      pin: (input: DiscussionPinRequest) =>
+        rpcCall<DiscussionPublic>(opts, "discussions.pin", input),
+      lock: (input: DiscussionLockRequest) =>
+        rpcCall<DiscussionPublic>(opts, "discussions.lock", input),
+      transfer: (input: DiscussionTransferRequest) =>
+        rpcCall<DiscussionPublic>(opts, "discussions.transfer", input),
+      labels: {
+        set: (input: DiscussionLabelsSetRequest) =>
+          rpcCall<DiscussionPublic>(opts, "discussions.labels.set", input),
+      },
+      answer: {
+        set: (input: DiscussionAnswerSetRequest) =>
+          rpcCall<DiscussionPublic>(opts, "discussions.answer.set", input),
+        clear: (input: DiscussionRefRequest) =>
+          rpcCall<DiscussionPublic>(opts, "discussions.answer.clear", input),
+      },
+      categories: {
+        list: (input: DiscussionRepoRequest) =>
+          rpcCall<DiscussionCategoriesListResponse>(opts, "discussions.categories.list", input),
+        create: (input: DiscussionCategoryCreateRequest) =>
+          rpcCall<DiscussionCategoryPublic>(opts, "discussions.categories.create", input),
+        update: (input: DiscussionCategoryUpdateRequest) =>
+          rpcCall<DiscussionCategoryPublic>(opts, "discussions.categories.update", input),
+        delete: (input: DiscussionCategoryRefRequest) =>
+          rpcCall<DiscussionDeleteResponse>(opts, "discussions.categories.delete", input),
+      },
+      comments: {
+        list: (input: DiscussionCommentsListRequest) =>
+          rpcCall<DiscussionCommentsListResponse>(opts, "discussions.comments.list", input),
+        create: (input: DiscussionCommentCreateRequest) =>
+          rpcCall<DiscussionCommentPublic>(opts, "discussions.comments.create", input),
+        update: (input: DiscussionCommentUpdateRequest) =>
+          rpcCall<DiscussionCommentPublic>(opts, "discussions.comments.update", input),
+        delete: (input: DiscussionCommentRefRequest) =>
+          rpcCall<DiscussionDeleteResponse>(opts, "discussions.comments.delete", input),
       },
     },
     pull: {

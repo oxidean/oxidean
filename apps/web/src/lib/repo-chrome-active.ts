@@ -10,6 +10,7 @@ export type RepoChromeActive =
   | "packages"
   | "actions"
   | "projects"
+  | "discussions"
   | "wiki"
   | "insights"
   | "settings"
@@ -20,6 +21,7 @@ const SEGMENT_TO_ACTIVE: Record<string, RepoChromeActive> = {
   pulls: "pulls",
   pull: "pulls",
   projects: "projects",
+  discussions: "discussions",
   wiki: "wiki",
   releases: "releases",
   packages: "packages",

@@ -20,6 +20,7 @@ use crate::auth::two_factor;
 use crate::auth::verify_reset;
 use crate::check;
 use crate::deployment;
+use crate::discussion;
 use crate::email::EmailSender;
 use crate::emails;
 use crate::gpg_keys;
@@ -467,6 +468,27 @@ pub const PROCEDURES: &[&str] = &[
     "projects.cards.move",
     "projects.cards.convert",
     "projects.cards.delete",
+    "discussions.list",
+    "discussions.get",
+    "discussions.create",
+    "discussions.update",
+    "discussions.delete",
+    "discussions.pin",
+    "discussions.lock",
+    "discussions.transfer",
+    "discussions.labels.set",
+    "discussions.answer.set",
+    "discussions.answer.clear",
+    "discussions.categories.list",
+    "discussions.categories.create",
+    "discussions.categories.update",
+    "discussions.categories.delete",
+    "discussions.comments.list",
+    "discussions.comments.create",
+    "discussions.comments.update",
+    "discussions.comments.delete",
+    "repo.discussions.getEnabled",
+    "repo.discussions.setEnabled",
     "issue.assigneeCandidates",
     "issue.reactions.toggle",
     "issue.links.list",
@@ -2019,6 +2041,100 @@ async fn dispatch_inner(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },
+        "discussions.list" => match discussion::list(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "discussions.get" => match discussion::get(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "discussions.create" => match discussion::create(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "discussions.update" => match discussion::update(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "discussions.delete" => match discussion::delete(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "discussions.pin" => match discussion::pin(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "discussions.lock" => match discussion::lock(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "discussions.transfer" => match discussion::transfer(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "discussions.labels.set" => match discussion::labels_set(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "discussions.answer.set" => match discussion::answer_set(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "discussions.answer.clear" => match discussion::answer_clear(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "discussions.categories.list" => match discussion::categories_list(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "discussions.categories.create" => {
+            match discussion::categories_create(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
+        "discussions.categories.update" => {
+            match discussion::categories_update(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
+        "discussions.categories.delete" => {
+            match discussion::categories_delete(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
+        "discussions.comments.list" => match discussion::comments_list(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "discussions.comments.create" => match discussion::comments_create(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "discussions.comments.update" => match discussion::comments_update(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "discussions.comments.delete" => match discussion::comments_delete(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "repo.discussions.getEnabled" => {
+            match repo::discussions_get_enabled(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
+        "repo.discussions.setEnabled" => {
+            match repo::discussions_set_enabled(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
         "issue.assigneeCandidates" => match issue::assignee_candidates(ctx, req.input).await {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
