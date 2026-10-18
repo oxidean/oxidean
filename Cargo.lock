@@ -3790,6 +3790,7 @@ version = "0.2.0"
 dependencies = [
  "base64 0.23.1",
  "oxidean-actions-expr",
+ "regex",
  "reqwest 0.13.5",
  "serde",
  "serde_json",

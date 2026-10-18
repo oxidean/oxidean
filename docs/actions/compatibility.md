@@ -52,7 +52,7 @@ download, annotations, `workflow_job` webhook.
 | 6. Steps | 19 | 0 | 0 | 1 |
 | 7. Expressions | 15 | 0 | 0 | 0 |
 | 8. Contexts | 24 | 0 | 0 | 0 |
-| 9. Workflow commands & environment files | 21 | 0 | 1 | 0 |
+| 9. Workflow commands & environment files | 22 | 0 | 0 | 0 |
 | 10. Default environment variables | 48 | 0 | 0 | 0 |
 | 11. Action metadata — action.yml | 16 | 1 | 0 | 1 |
 | 12. Reusable workflows | 10 | 0 | 0 | 0 |
@@ -331,8 +331,8 @@ the server strips at ingest and persists as a structured annotation row;
 | `cmd.set-env` | `::set-env::` — disabled upstream unless ACTIONS_ALLOW_UNSECURE_COMMANDS | supported | test:crates/oxidean-runner/src/exec/commands.rs::file_commands_land_in_runner_temp_files | Applies via `$GITHUB_ENV` + deprecation warning (Gitea/`act` parity — GitHub hard-fails it by default). |
 | `cmd.add-path` | `::add-path::` — same disabled-by-default family | supported | test:crates/oxidean-runner/src/exec/commands.rs::file_commands_land_in_runner_temp_files | Applies via `$GITHUB_PATH` + deprecation warning. |
 | `cmd.stop-commands` | `::stop-commands::{token}`/`::{token}::` | supported | test:crates/oxidean-runner/src/exec/commands.rs::stop_commands_suppresses_until_token | All lines literal until the matching `::{token}::`; a missing token warns once. |
-| `cmd.echo` | `::echo::on` / `::echo::off` | supported | test:crates/oxidean-runner/src/exec/commands.rs::echo_toggle_and_matchers_are_consumed | Interpreted no-op — this runner never echoes commands, so the toggle has nothing to gate. |
-| `cmd.add-matcher` | `::add-matcher::`/`::remove-matcher::` problem matchers | unsupported | test:crates/oxidean-runner/src/exec/commands.rs::echo_toggle_and_matchers_are_consumed | Warns and drops the line; matchers are not installed. P16 annotations. |
+| `cmd.echo` | `::echo::on` / `::echo::off` | supported | test:crates/oxidean-runner/src/exec/commands.rs::echo_toggle_is_consumed | Interpreted no-op — this runner never echoes commands, so the toggle has nothing to gate. |
+| `cmd.add-matcher` | `::add-matcher::`/`::remove-matcher owner=o::` problem matchers | supported | test:crates/oxidean-runner/src/exec/commands.rs::add_matcher_registers_and_remove_drops, case:problem-matchers | Full `IssueMatcher` port — multi-pattern `loop` state machine, ANSI strip before matching, same-owner clobber + prepend ordering, hit resets other matchers, error/warning/notice severity map (default `error`), `file` kept only when it resolves under the workspace, 10-annotation-per-level cap, matcher state scoped per step. Matcher paths resolve workspace-relative (GitHub uses the action dir for `uses:` steps — divergence). |
 | `cmd.escaping` | `%25 %0D %0A %3A %2C` command-data escaping | supported | test:crates/oxidean-runner/src/exec/commands.rs::escaped_command_data_decodes | `%0D`/`%0A`/`%25` decode in payloads; `%3A`/`%2C` additionally decode in property values. |
 | `envfile.env` | `$GITHUB_ENV` — `KEY=value` and `KEY<<DELIM` heredoc, later steps see it | supported | test:crates/oxidean-runner/src/exec/mod.rs::env_file_simple_and_blank_lines, test:crates/oxidean-runner/src/exec/mod.rs::env_file_heredoc, case:run-env-step | |
 | `envfile.env-later-wins` | Later entries override earlier ones | supported | test:crates/oxidean-runner/src/exec/mod.rs::env_file_later_wins | |

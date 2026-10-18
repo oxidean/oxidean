@@ -1612,6 +1612,9 @@ runs: {using: node20, main: index.js}
             seen_cmd_warns: std::sync::Mutex::new(std::collections::BTreeSet::new()),
             runner_temp: std::sync::OnceLock::new(),
             step_debug: std::sync::atomic::AtomicBool::new(false),
+            matchers: std::sync::Mutex::new(Vec::new()),
+            workspace: std::sync::OnceLock::new(),
+            annotation_counts: std::sync::Mutex::new(std::collections::BTreeMap::new()),
         };
         let mode = ExecMode::Host;
         let mut env: Vec<(String, String)> = vec![];

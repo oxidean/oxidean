@@ -337,6 +337,9 @@ mod tests {
             seen_cmd_warns: Mutex::new(std::collections::BTreeSet::new()),
             runner_temp: std::sync::OnceLock::new(),
             step_debug: AtomicBool::new(false),
+            matchers: Mutex::new(Vec::new()),
+            workspace: std::sync::OnceLock::new(),
+            annotation_counts: Mutex::new(std::collections::BTreeMap::new()),
         }
     }
 

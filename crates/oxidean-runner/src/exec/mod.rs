@@ -10,6 +10,7 @@ pub(crate) mod containers;
 pub(crate) mod context;
 pub(crate) mod env;
 pub(crate) mod glob;
+pub(crate) mod matchers;
 pub(crate) mod run_step;
 
 use std::collections::HashMap;
@@ -201,6 +202,15 @@ pub(crate) struct Logger<'a> {
     pub runner_temp: std::sync::OnceLock<PathBuf>,
     /// `ACTIONS_STEP_DEBUG` — when set, `::debug::` lines forward to the log.
     pub step_debug: std::sync::atomic::AtomicBool,
+    /// Problem matchers registered by `::add-matcher::` — per-step state,
+    /// cleared when the next `##[step]` boundary is emitted.
+    pub matchers: std::sync::Mutex<Vec<matchers::ProblemMatcher>>,
+    /// Checkout workspace — roots `::add-matcher::` paths and validates
+    /// matcher `file` values against the on-disk tree.
+    pub workspace: std::sync::OnceLock<PathBuf>,
+    /// Per-level annotation counts for the current step — enforces
+    /// GitHub's 10-annotation-per-level cap.
+    pub annotation_counts: std::sync::Mutex<std::collections::BTreeMap<&'static str, u32>>,
 }
 
 impl<'a> Logger<'a> {
@@ -376,6 +386,9 @@ pub async fn execute(client: &Client, task: &Task, config: &Config) -> &'static 
         seen_cmd_warns: std::sync::Mutex::new(std::collections::BTreeSet::new()),
         runner_temp: std::sync::OnceLock::new(),
         step_debug: std::sync::atomic::AtomicBool::new(false),
+        matchers: std::sync::Mutex::new(Vec::new()),
+        workspace: std::sync::OnceLock::new(),
+        annotation_counts: std::sync::Mutex::new(std::collections::BTreeMap::new()),
     };
 
     match client.update_task(&job_id, "in_progress", None, None).await {
@@ -412,6 +425,7 @@ pub async fn execute(client: &Client, task: &Task, config: &Config) -> &'static 
         return "failure";
     }
     logger.set_runner_temp(runner_temp.clone());
+    logger.set_workspace(workspace.clone());
 
     let steps: Vec<Step> = task
         .steps
@@ -661,6 +675,7 @@ pub async fn execute(client: &Client, task: &Task, config: &Config) -> &'static 
                 .or_else(|| step.uses.clone())
                 .or_else(|| step.run.as_ref().map(|r| truncate(r, 60)))
                 .unwrap_or_else(|| format!("step {i}"));
+            logger.reset_step_state();
             logger.line(&format!("##[step]{title}")).await;
 
             // A cancelled job's drained steps get their own timeout — the

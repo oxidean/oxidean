@@ -15,19 +15,19 @@
 //! | `::echo::on` / `::echo::off`| consumed — command echoing is never on here    |
 //! | `::stop-commands::t`        | literal forwards until `::t::`                 |
 //! | `::error/warning/notice::m` | `##[level]m` + `##[ann]{json}` annotation marker |
+//! | `::add-matcher::f`        | registers problem matchers; hits become annotations |
+//! | `::remove-matcher owner=o::` | drops matchers registered under `o`             |
 //!
 //! File-targeted commands write into the same `runner_temp` files the
 //! `$GITHUB_*` env-file protocol uses, so the existing post-step drain
 //! applies them with identical ordering. `set-env`/`add-path` are applied
 //! (Gitea/`act` parity) — GitHub hard-fails them server-side; the deprecation
 //! warning keeps the divergence loud rather than silent.
-//!
-//! `add-matcher`/`remove-matcher` stay warned-and-passed-through: problem
-//! matchers are not implemented.
 
 use std::path::PathBuf;
 use std::sync::atomic::Ordering;
 
+use super::matchers;
 use super::Logger;
 
 /// What one interpreted line becomes in the forwarded log chunk.
@@ -76,6 +76,19 @@ impl<'a> Logger<'a> {
     /// still log before it lands) — set once, read by file-command writes.
     pub(crate) fn set_runner_temp(&self, dir: PathBuf) {
         let _ = self.runner_temp.set(dir);
+    }
+
+    /// Checkout workspace — roots `::add-matcher::` paths and the `file`
+    /// existence check on matcher hits. Set once after `prepare_workspace`.
+    pub(crate) fn set_workspace(&self, dir: PathBuf) {
+        let _ = self.workspace.set(dir);
+    }
+
+    /// Step boundary — matchers and the annotation cap are per-step state
+    /// (GitHub builds a fresh OutputManager per step execution).
+    pub(crate) fn reset_step_state(&self) {
+        self.matchers.lock().unwrap().clear();
+        self.annotation_counts.lock().unwrap().clear();
     }
 
     /// `ACTIONS_STEP_DEBUG` gate — `::debug::` lines forward only when set.
@@ -142,8 +155,19 @@ impl<'a> Logger<'a> {
                 .unwrap_or((line, ""));
             match self.interpret_line(body) {
                 Verdict::Forward => {
-                    out.push_str(body);
-                    out.push_str(nl);
+                    // Problem matchers scan every forwarded line — on a
+                    // hit the line logs as `##[level]line` with an
+                    // `##[ann]` marker carrying the structured fields.
+                    match self.match_line(body) {
+                        Some(sub) => {
+                            out.push_str(&sub);
+                            out.push_str(nl);
+                        }
+                        None => {
+                            out.push_str(body);
+                            out.push_str(nl);
+                        }
+                    }
                 }
                 Verdict::Replace(r) => {
                     out.push_str(&r);
@@ -256,20 +280,127 @@ impl<'a> Logger<'a> {
             "set-output" | "save-state" | "set-env" | "add-path" => {
                 self.apply_file_command(cmd, params, &payload)
             }
-            "add-matcher" | "remove-matcher" => {
-                self.queue_warn(
-                    match cmd {
-                        "add-matcher" => "add-matcher",
-                        _ => "remove-matcher",
-                    },
-                    format!(
-                        "workflow command '::{cmd}::' is not interpreted — problem matchers are unsupported"
-                    ),
-                );
+            "add-matcher" => {
+                // `::add-matcher::path` — resolved relative to the
+                // workspace (GitHub resolves against the action's dir for
+                // `uses:` steps; workspace is our closest stable root).
+                let rel = payload.trim();
+                let path = match self.workspace.get() {
+                    Some(ws) if !rel.is_empty() && !PathBuf::from(rel).is_absolute() => {
+                        ws.join(rel)
+                    }
+                    _ => PathBuf::from(rel),
+                };
+                match matchers::load_matchers(&path) {
+                    Ok(new) => {
+                        let mut matchers = self.matchers.lock().unwrap();
+                        for m in new {
+                            // Same-owner clobbers; new matchers prepend so
+                            // later registrations take precedence.
+                            matchers.retain(|x| !x.owner.eq_ignore_ascii_case(&m.owner));
+                            matchers.insert(0, m);
+                        }
+                    }
+                    Err(e) => self.queue_warn_always(format!("add-matcher ignored: {e}")),
+                }
+                Verdict::Drop
+            }
+            "remove-matcher" => {
+                // `::remove-matcher owner=<o>::` — drops every matcher
+                // registered under `o` (case-insensitive).
+                if let Some(owner) = param(params, "owner") {
+                    let owner = unescape_prop(owner);
+                    self.matchers
+                        .lock()
+                        .unwrap()
+                        .retain(|m| !m.owner.eq_ignore_ascii_case(&owner));
+                }
                 Verdict::Drop
             }
             _ => Verdict::Forward,
         }
+    }
+
+    /// Scan one forwarded line through the registered problem matchers.
+    /// A hit becomes `##[ann]{json}\n##[level]<stripped line>` — the
+    /// `##[ann]` marker rides the annotation side channel, the visible
+    /// line is GitHub's decorated form. On a hit every *other* matcher
+    /// resets its multi-line state (OutputManager semantics).
+    fn match_line(&self, line: &str) -> Option<String> {
+        {
+            let matchers = self.matchers.lock().unwrap();
+            if matchers.is_empty() {
+                return None;
+            }
+        }
+        let stripped = matchers::strip_ansi(line);
+        let mut list = self.matchers.lock().unwrap();
+        let mut hit_idx = None;
+        let mut issue = None;
+        for (i, m) in list.iter_mut().enumerate() {
+            if let Some(matched) = m.match_line(&stripped) {
+                issue = matchers::convert(
+                    &matched,
+                    m,
+                    self.workspace.get().map(|p| p.as_path()),
+                    &stripped,
+                );
+                hit_idx = Some(i);
+                break;
+            }
+        }
+        let hit = hit_idx?;
+        for (i, m) in list.iter_mut().enumerate() {
+            if i != hit {
+                m.reset_pub();
+            }
+        }
+        drop(list);
+        let issue = issue?; // unsupported severity — line forwards raw
+                            // 10-annotation cap per level per step (GitHub's step cap).
+        {
+            let mut counts = self.annotation_counts.lock().unwrap();
+            let n = counts.entry(issue.level).or_insert(0);
+            if *n >= 10 {
+                let key: &'static str = match issue.level {
+                    "error" => "cap:error",
+                    "warning" => "cap:warning",
+                    _ => "cap:notice",
+                };
+                drop(counts);
+                self.queue_warn(
+                    key,
+                    format!(
+                        "skipped a {level} annotation — the step already emitted the 10-annotation limit",
+                        level = issue.level,
+                    ),
+                );
+                return None;
+            }
+            *n += 1;
+        }
+        let mut ann = serde_json::json!({
+            "level": issue.level,
+            "message": issue.message,
+        });
+        if let Some(obj) = ann.as_object_mut() {
+            if let Some(f) = issue.file {
+                obj.insert("path".into(), serde_json::json!(f));
+            }
+            if let Some(l) = issue.line {
+                obj.insert("line".into(), serde_json::json!(l));
+            }
+            if let Some(c) = issue.column {
+                obj.insert("col".into(), serde_json::json!(c));
+            }
+            if let Some(t) = issue.code {
+                obj.insert("title".into(), serde_json::json!(t));
+            }
+        }
+        Some(format!(
+            "##[ann]{ann}\n##[{level}]{stripped}",
+            level = issue.level
+        ))
     }
 
     /// `set-output`/`save-state`/`set-env`/`add-path` → append the equivalent
@@ -353,6 +484,9 @@ mod tests {
             seen_cmd_warns: Mutex::new(BTreeSet::new()),
             runner_temp: OnceLock::new(),
             step_debug: AtomicBool::new(false),
+            matchers: Mutex::new(Vec::new()),
+            workspace: OnceLock::new(),
+            annotation_counts: Mutex::new(std::collections::BTreeMap::new()),
         }
     }
 
@@ -463,15 +597,116 @@ mod tests {
     }
 
     #[test]
-    fn echo_toggle_and_matchers_are_consumed() {
+    fn echo_toggle_is_consumed() {
         let l = logger();
-        // `echo` is an interpreted no-op — we never echo commands. Matchers
-        // drop with a once-queued warning (problem matchers unsupported).
-        let out = l.interpret_chunk(
-            "::echo::on\n::add-matcher::m.json\n::remove-matcher owner=x::\n::echo::off\n",
-        );
+        // `echo` is an interpreted no-op — we never echo commands.
+        let out = l.interpret_chunk("::echo::on\n::echo::off\n");
         assert_eq!(out, "");
-        assert_eq!(l.pending_warnings.lock().unwrap().len(), 2);
+        assert!(l.pending_warnings.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn add_matcher_registers_and_remove_drops() {
+        let l = logger();
+        let dir = tempfile::tempdir().unwrap();
+        l.set_workspace(dir.path().to_path_buf());
+        std::fs::write(
+            dir.path().join("m.json"),
+            r#"{"problemMatcher":[{"owner":"demo","pattern":[{"regexp":"^E (\\d+): (.+)$","line":1,"message":2}]}]}"#,
+        )
+        .unwrap();
+        let out = l.interpret_chunk("::add-matcher::m.json\nE 7: blew up\nplain\n");
+        let (marker, rest) = out.split_once('\n').unwrap();
+        let ann: serde_json::Value =
+            serde_json::from_str(marker.strip_prefix("##[ann]").unwrap()).unwrap();
+        assert_eq!(ann["level"], "error");
+        assert_eq!(ann["message"], "blew up");
+        assert_eq!(ann["line"], 7);
+        assert_eq!(rest, "##[error]E 7: blew up\nplain\n");
+        // ::remove-matcher owner=demo:: stops matching subsequent lines.
+        let out = l.interpret_chunk("::remove-matcher owner=demo::\nE 9: again\n");
+        assert_eq!(out, "E 9: again\n");
+    }
+
+    #[test]
+    fn matcher_severity_and_bad_file_warn() {
+        let l = logger();
+        let dir = tempfile::tempdir().unwrap();
+        l.set_workspace(dir.path().to_path_buf());
+        std::fs::write(
+            dir.path().join("m.json"),
+            r#"{"problemMatcher":[{"owner":"w","pattern":[{"regexp":"^W (warning|error): (.+)$","severity":1,"message":2}]}]}"#,
+        )
+        .unwrap();
+        let out = l.interpret_chunk(
+            "::add-matcher::missing.json\n::add-matcher::m.json\nW warning: heads up\n",
+        );
+        // First add-matcher warns (missing file); the hit annotates as
+        // warning via the capture group.
+        let (marker, rest) = out.split_once('\n').unwrap();
+        let ann: serde_json::Value =
+            serde_json::from_str(marker.strip_prefix("##[ann]").unwrap()).unwrap();
+        assert_eq!(ann["level"], "warning");
+        assert_eq!(ann["message"], "heads up");
+        assert_eq!(rest, "##[warning]W warning: heads up\n");
+        assert_eq!(l.pending_warnings.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn matcher_multiline_loop_carries_file() {
+        let l = logger();
+        let dir = tempfile::tempdir().unwrap();
+        l.set_workspace(dir.path().to_path_buf());
+        // The `file` group lives in the header pattern; the looped last
+        // pattern produces one annotation per violation line.
+        std::fs::write(dir.path().join("badFile.js"), "x\n").unwrap();
+        std::fs::write(
+            dir.path().join("m.json"),
+            r#"{"problemMatcher":[{"owner":"stylish","pattern":[
+                {"regexp":"^([^\\s].*)$","file":1},
+                {"regexp":"^\\s+line\\s(\\d+),\\scol\\s(\\d+),\\s(Error|Warning)\\s-\\s(.+)\\s\\((.+)\\)$","line":1,"column":2,"severity":3,"message":4,"code":5,"loop":true}
+            ]}]}"#,
+        )
+        .unwrap();
+        let out = l.interpret_chunk(
+            "::add-matcher::m.json\nbadFile.js\n  line 50, col 11, Error - 'myVar' unused. (no-unused-vars)\n  line 60, col 2, Warning - 'x' unused. (no-x)\n",
+        );
+        let anns: Vec<serde_json::Value> = out
+            .lines()
+            .filter_map(|l| l.strip_prefix("##[ann]"))
+            .map(|j| serde_json::from_str(j).unwrap())
+            .collect();
+        assert_eq!(anns.len(), 2);
+        // File captured by the header pattern carries into both hits and
+        // resolves workspace-relative.
+        assert_eq!(anns[0]["path"], "badFile.js");
+        assert_eq!(anns[0]["level"], "error");
+        assert_eq!(anns[0]["line"], 50);
+        assert_eq!(anns[0]["col"], 11);
+        assert_eq!(anns[0]["title"], "no-unused-vars");
+        assert_eq!(anns[1]["level"], "warning");
+        assert_eq!(anns[1]["line"], 60);
+    }
+
+    #[test]
+    fn matcher_cap_is_ten_per_level() {
+        let l = logger();
+        let dir = tempfile::tempdir().unwrap();
+        l.set_workspace(dir.path().to_path_buf());
+        std::fs::write(
+            dir.path().join("m.json"),
+            r#"{"problemMatcher":[{"owner":"flood","pattern":[{"regexp":"^E (.+)$","message":1}]}]}"#,
+        )
+        .unwrap();
+        let mut input = "::add-matcher::m.json\n".to_string();
+        for i in 0..12 {
+            input.push_str(&format!("E fail {i}\n"));
+        }
+        let out = l.interpret_chunk(&input);
+        assert_eq!(out.matches("##[ann]").count(), 10);
+        // Lines 11-12 still forward — just raw, no annotation.
+        assert!(out.contains("E fail 11\n"));
+        assert_eq!(l.pending_warnings.lock().unwrap().len(), 1);
     }
 
     #[test]
