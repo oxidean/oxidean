@@ -584,11 +584,19 @@ pub fn capability_env_label(capability: Option<Capability>) -> &'static str {
 /// `GIT_CONFIG_*` advertises the `filter` capability so partial clone
 /// (`--filter=blob:none`, `tree:0`, …) works; env config covers repos created
 /// before the flag existed and is inert on non-upload-pack git commands.
+/// `allowReachableSHA1InWant` lets `git fetch origin <sha>` resolve commits
+/// reachable from any ref tip — runners need it for `refs/pull/N/merge`
+/// test-merge checkouts and `actions/checkout` `with: ref: <sha>`.
 pub fn upload_pack_config_env() -> Vec<(String, String)> {
     vec![
-        ("GIT_CONFIG_COUNT".into(), "1".into()),
+        ("GIT_CONFIG_COUNT".into(), "2".into()),
         ("GIT_CONFIG_KEY_0".into(), "uploadpack.allowFilter".into()),
         ("GIT_CONFIG_VALUE_0".into(), "true".into()),
+        (
+            "GIT_CONFIG_KEY_1".into(),
+            "uploadpack.allowReachableSHA1InWant".into(),
+        ),
+        ("GIT_CONFIG_VALUE_1".into(), "true".into()),
     ]
 }
 
@@ -810,13 +818,19 @@ mod tests {
     fn upload_pack_config_env_enables_filter() {
         let vars = upload_pack_config_env();
         let map: HashMap<&str, &str> = vars.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
-        assert_eq!(map.get("GIT_CONFIG_COUNT").copied(), Some("1"));
+        assert_eq!(map.get("GIT_CONFIG_COUNT").copied(), Some("2"));
         assert_eq!(
             map.get("GIT_CONFIG_KEY_0").copied(),
             Some("uploadpack.allowFilter"),
             "upload-pack must advertise the filter capability (GIT-27)"
         );
         assert_eq!(map.get("GIT_CONFIG_VALUE_0").copied(), Some("true"));
+        assert_eq!(
+            map.get("GIT_CONFIG_KEY_1").copied(),
+            Some("uploadpack.allowReachableSHA1InWant"),
+            "upload-pack must serve refs/pull/*/merge test-merge commits by sha"
+        );
+        assert_eq!(map.get("GIT_CONFIG_VALUE_1").copied(), Some("true"));
     }
 
     #[test]
