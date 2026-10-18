@@ -9,7 +9,7 @@ function relativeActivityTime(iso: string): string {
 }
 
 function actionCopy(item: RepoActivityItem): string {
-  const branch = item.ref_short || item.ref_name;
+  const branch = item.ref_short ?? item.ref_name ?? "";
   switch (item.push_type) {
     case "branch_creation":
       return `created branch ${branch}`;
@@ -37,8 +37,8 @@ function actorInitial(item: RepoActivityItem): string {
   return source.slice(0, 1).toUpperCase();
 }
 
-function hasCommitOid(oid: string): boolean {
-  return oid.length > 0 && !oid.split("").every((c) => c === "0");
+function hasCommitOid(oid: string | null): boolean {
+  return oid != null && oid.length > 0 && !oid.split("").every((c) => c === "0");
 }
 
 type RepoActivityRowProps = {
@@ -53,8 +53,9 @@ export function RepoActivityRow(props: RepoActivityRowProps) @{
   const action = actionCopy(item);
   const when = relativeActivityTime(item.pushed_at);
   const initial = actorInitial(item);
-  const showCommitLink = !!item.commit_message && hasCommitOid(item.after);
-  const commitCountLabel = item.commits_count > 1 ? `${String(item.commits_count)} commits` : "";
+  const showCommitLink = !!item.commit_message && item.after != null && hasCommitOid(item.after);
+  const commitCountLabel =
+    (item.commits_count ?? 0) > 1 ? `${String(item.commits_count)} commits` : "";
 
   <ListRow className="items-start gap-3 py-3">
     <AppLink
@@ -88,7 +89,7 @@ export function RepoActivityRow(props: RepoActivityRowProps) @{
         <div className="mt-0.5 truncate text-[13px] text-muted-foreground">
           @if (showCommitLink) {
             <AppLink
-              href={commitHref(owner, repoName, item.after) as string}
+              href={commitHref(owner, repoName, item.after ?? "") as string}
               className="text-primary no-underline hover:underline"
             >
               {item.commit_message as string}

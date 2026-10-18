@@ -364,12 +364,12 @@ fn row_to_item(row: oxidean_db::RepoActivityRow) -> RepoActivityItem {
     RepoActivityItem {
         id: row.id,
         push_type: row.push_type,
-        ref_short: short_ref(&row.ref_name),
-        ref_name: row.ref_name,
-        before: row.before_oid,
-        after: row.after_oid,
+        ref_short: Some(short_ref(&row.ref_name)),
+        ref_name: Some(row.ref_name),
+        before: Some(row.before_oid),
+        after: Some(row.after_oid),
         pushed_at: row.created_at,
-        commits_count: row.commits_count,
+        commits_count: Some(row.commits_count),
         commit_message: row.commit_message,
         pr_number: row.pr_number,
         pusher: RepoActivityActor {

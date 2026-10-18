@@ -3781,6 +3781,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxidean-vcs"
+version = "0.1.0"
+
+[[package]]
 name = "oxidean-web"
 version = "0.1.0"
 dependencies = [

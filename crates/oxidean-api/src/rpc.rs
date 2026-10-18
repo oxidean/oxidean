@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use cookie::Cookie;
 use oxidean_core::{
     wire_compatible, AppError, EchoRequest, EchoResponse, HealthResponse, ManifestCapabilities,
-    ManifestResponse, RpcRequest, RpcResponse, ECHO_MAX_BYTES, LEGACY_WIRE_VERSION,
+    ManifestResponse, RpcRequest, RpcResponse, VcsErrorCode, ECHO_MAX_BYTES, LEGACY_WIRE_VERSION,
     RPC_PROTOCOL_VERSION, WIRE_VERSION,
 };
 use oxidean_db::Database;
@@ -454,6 +454,24 @@ pub const PROCEDURES: &[&str] = &[
     "email.remove",
     "email.setPrimary",
     "email.resendVerify",
+    // Agentic VCS protocol (contract C1 — the pinned 17-name set, BR1.2).
+    "vcs.repo_enable",
+    "vcs.status",
+    "vcs.changeset_create",
+    "vcs.changeset_get",
+    "vcs.log",
+    "vcs.diff",
+    "vcs.tree",
+    "vcs.file_get",
+    "vcs.blame",
+    "vcs.path_history",
+    "vcs.merge_base",
+    "vcs.merge",
+    "vcs.rebase",
+    "vcs.ref_list",
+    "vcs.ref_update",
+    "vcs.git_import",
+    "vcs.git_export",
 ];
 
 /// `system.manifest` payload — the versioned capability contract (CLI-02).
@@ -1834,6 +1852,80 @@ pub async fn dispatch(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },
+        // Agentic VCS protocol — registered with stub arms returning
+        // `vcs.disabled` until the domain handlers land (no repo can be
+        // enabled before then, so the stub is behaviorally correct). One
+        // single-name arm per procedure: `procedures_list_matches_dispatch`
+        // scans `"name" =>` arm literals, so alternation arms are invisible
+        // to it.
+        "vcs.repo_enable" => RpcResponse::err(AppError::new(
+            VcsErrorCode::Disabled,
+            "VCS is not enabled for this repository",
+        )),
+        "vcs.status" => RpcResponse::err(AppError::new(
+            VcsErrorCode::Disabled,
+            "VCS is not enabled for this repository",
+        )),
+        "vcs.changeset_create" => RpcResponse::err(AppError::new(
+            VcsErrorCode::Disabled,
+            "VCS is not enabled for this repository",
+        )),
+        "vcs.changeset_get" => RpcResponse::err(AppError::new(
+            VcsErrorCode::Disabled,
+            "VCS is not enabled for this repository",
+        )),
+        "vcs.log" => RpcResponse::err(AppError::new(
+            VcsErrorCode::Disabled,
+            "VCS is not enabled for this repository",
+        )),
+        "vcs.diff" => RpcResponse::err(AppError::new(
+            VcsErrorCode::Disabled,
+            "VCS is not enabled for this repository",
+        )),
+        "vcs.tree" => RpcResponse::err(AppError::new(
+            VcsErrorCode::Disabled,
+            "VCS is not enabled for this repository",
+        )),
+        "vcs.file_get" => RpcResponse::err(AppError::new(
+            VcsErrorCode::Disabled,
+            "VCS is not enabled for this repository",
+        )),
+        "vcs.blame" => RpcResponse::err(AppError::new(
+            VcsErrorCode::Disabled,
+            "VCS is not enabled for this repository",
+        )),
+        "vcs.path_history" => RpcResponse::err(AppError::new(
+            VcsErrorCode::Disabled,
+            "VCS is not enabled for this repository",
+        )),
+        "vcs.merge_base" => RpcResponse::err(AppError::new(
+            VcsErrorCode::Disabled,
+            "VCS is not enabled for this repository",
+        )),
+        "vcs.merge" => RpcResponse::err(AppError::new(
+            VcsErrorCode::Disabled,
+            "VCS is not enabled for this repository",
+        )),
+        "vcs.rebase" => RpcResponse::err(AppError::new(
+            VcsErrorCode::Disabled,
+            "VCS is not enabled for this repository",
+        )),
+        "vcs.ref_list" => RpcResponse::err(AppError::new(
+            VcsErrorCode::Disabled,
+            "VCS is not enabled for this repository",
+        )),
+        "vcs.ref_update" => RpcResponse::err(AppError::new(
+            VcsErrorCode::Disabled,
+            "VCS is not enabled for this repository",
+        )),
+        "vcs.git_import" => RpcResponse::err(AppError::new(
+            VcsErrorCode::Disabled,
+            "VCS is not enabled for this repository",
+        )),
+        "vcs.git_export" => RpcResponse::err(AppError::new(
+            VcsErrorCode::Disabled,
+            "VCS is not enabled for this repository",
+        )),
         other => RpcResponse::err(AppError::new(
             "rpc.unknown_procedure",
             format!("unknown procedure: {other}"),
@@ -1942,5 +2034,89 @@ mod tests {
     fn legacy_alias_expires_at_1_0() {
         assert!(wire_compatible(LEGACY_WIRE_VERSION, WIRE_VERSION));
         assert!(!wire_compatible(LEGACY_WIRE_VERSION, "1.0.0"));
+    }
+
+    /// vcs.* registration completeness (BR1.2/BR1.8, SD1): every pinned name
+    /// is in `PROCEDURES` with a dispatch arm and a non-`SessionOnly` token
+    /// class; the two object-route aliases are classified yet absent from
+    /// `PROCEDURES` and dispatch.
+    #[test]
+    fn vcs_procedures_registered_and_classified() {
+        use oxidean_core::{classify_pat_proc, PatProc};
+
+        assert_eq!(oxidean_core::VCS_PROCEDURES.len(), 17);
+        let listed: std::collections::BTreeSet<&str> = PROCEDURES.iter().copied().collect();
+
+        let src = include_str!("rpc.rs");
+        let arms: std::collections::BTreeSet<&str> = src
+            .lines()
+            .filter_map(|line| {
+                let line = line.trim_start();
+                if !line.starts_with('"') {
+                    return None;
+                }
+                let end = line[1..].find('"')?;
+                let rest = line[2 + end..].trim_start();
+                rest.starts_with("=>").then(|| &line[1..1 + end])
+            })
+            .collect();
+
+        for name in oxidean_core::VCS_PROCEDURES {
+            assert!(listed.contains(name), "{name} missing from PROCEDURES");
+            assert!(arms.contains(name), "{name} has no dispatch arm");
+            assert_ne!(
+                classify_pat_proc(name),
+                PatProc::SessionOnly,
+                "{name} must classify non-SessionOnly — only unlisted names fail closed"
+            );
+        }
+        for alias in oxidean_core::VCS_OBJECT_ROUTE_ALIASES {
+            assert!(
+                !listed.contains(alias),
+                "route alias {alias} must never appear in PROCEDURES"
+            );
+            assert!(
+                !arms.contains(alias),
+                "route alias {alias} must never gain a dispatch arm"
+            );
+            assert_ne!(
+                classify_pat_proc(alias),
+                PatProc::SessionOnly,
+                "route alias {alias} must classify for route authorization"
+            );
+        }
+
+        // Reverse closed-set (BR1.2): nothing `vcs.*` may appear in
+        // PROCEDURES or gain a dispatch arm without being in the pinned set —
+        // an unlisted name would classify SessionOnly yet stay invocable by
+        // cookie sessions, silently widening the surface.
+        let pinned: std::collections::BTreeSet<&str> =
+            oxidean_core::VCS_PROCEDURES.iter().copied().collect();
+        for name in listed.iter().chain(arms.iter()) {
+            if name.starts_with("vcs.") {
+                assert!(pinned.contains(name), "unlisted vcs.* name {name} reached the wire surface");
+            }
+        }
+    }
+
+    /// The u1 dispatch arms are stubs: each `vcs.*` arm returns `vcs.disabled`
+    /// until the domain handlers land. Scans the arm's own lines so a real
+    /// handler swap-in fails here as a reminder that u7 owns the replacement.
+    #[test]
+    fn vcs_dispatch_arms_return_disabled() {
+        let src = include_str!("rpc.rs");
+        let lines: Vec<&str> = src.lines().collect();
+        for name in oxidean_core::VCS_PROCEDURES {
+            let needle = format!("\"{name}\" =>");
+            let start = lines
+                .iter()
+                .position(|l| l.trim_start().starts_with(&needle))
+                .unwrap_or_else(|| panic!("no dispatch arm for {name}"));
+            let arm: String = lines[start..(start + 6).min(lines.len())].join("\n");
+            assert!(
+                arm.contains("VcsErrorCode::Disabled"),
+                "{name} arm must return vcs.disabled while stubbed:\n{arm}"
+            );
+        }
     }
 }
