@@ -132,6 +132,53 @@ export function actionsJobLogQuery(owner: string, name: string, runId: string, j
 }
 
 /**
+ * One SSE frame from `GET …/logs/stream` — `offset` is the byte position the
+ * chunk starts at; an `offset:0` frame is a full snapshot (connect or
+ * post-wipe resend) and replaces rather than appends.
+ */
+export interface JobLogTailFrame {
+  offset: number;
+  content: string;
+  size: number;
+  done: boolean;
+}
+
+/**
+ * Apply one tail frame to the accumulated log state. The log is append-only
+ * byte-truth, so a frame whose `offset` matches the current size appends;
+ * `offset:0` replaces; anything else is a stale/duplicate frame and is
+ * dropped — the next snapshot frame self-corrects.
+ */
+export function applyJobLogFrame(
+  prev: ActionJobLogResponse | undefined,
+  frame: JobLogTailFrame,
+): ActionJobLogResponse {
+  const cur: ActionJobLogResponse = prev ?? {
+    content: "",
+    next_offset: 0,
+    size: 0,
+    done: false,
+  };
+  if (frame.offset === 0) {
+    return { content: frame.content, next_offset: frame.size, size: frame.size, done: frame.done };
+  }
+  if (frame.offset === cur.size) {
+    return {
+      content: cur.content + frame.content,
+      next_offset: frame.size,
+      size: frame.size,
+      done: frame.done,
+    };
+  }
+  return cur;
+}
+
+/** SSE live-tail endpoint for a job's log (`stream_job_log` route). */
+export function actionsJobLogStreamUrl(owner: string, name: string, jobId: string) {
+  return `/api/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/actions/jobs/${encodeURIComponent(jobId)}/logs/stream`;
+}
+
+/**
  * Structured `::error`/`::warning`/`::notice` annotations for one job
  * (`repo.actions.jobAnnotations`). Live-tail cadence matches the log query —
  * annotations accrue while the job runs.

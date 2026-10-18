@@ -377,6 +377,10 @@ pub fn router_with_state(state: AppState, cors: CorsLayer) -> Router {
             get(action_downloads::download_job_log),
         )
         .route(
+            "/api/repos/{owner}/{repo}/actions/jobs/{job_id}/logs/stream",
+            get(action_downloads::stream_job_log),
+        )
+        .route(
             "/api/repos/{owner}/{repo}/actions/runs/{run_id}/logs",
             get(action_downloads::download_run_logs),
         )

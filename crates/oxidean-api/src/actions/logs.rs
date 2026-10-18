@@ -42,6 +42,22 @@ fn reject_id(id: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Live-tail wake channel — one broadcast for every job; each successful
+/// append publishes the job_id so SSE tailers re-read the file immediately
+/// instead of waiting out a poll interval. A lagging subscriber simply
+/// re-reads on its next tick — the file cursor, not the channel, is the
+/// source of truth for what bytes are new.
+fn log_wakes() -> &'static tokio::sync::broadcast::Sender<String> {
+    static WAKES: std::sync::OnceLock<tokio::sync::broadcast::Sender<String>> =
+        std::sync::OnceLock::new();
+    WAKES.get_or_init(|| tokio::sync::broadcast::channel(1024).0)
+}
+
+/// Subscribe to append notifications — payload is the appended job_id.
+pub(crate) fn subscribe_job_log_wakes() -> tokio::sync::broadcast::Receiver<String> {
+    log_wakes().subscribe()
+}
+
 pub async fn append_job_log(
     log_dir: &Path,
     run_id: &str,
@@ -67,6 +83,7 @@ pub async fn append_job_log(
     // Flush before drop so a following read_job_log in the same process
     // cannot observe an empty file (tokio File drop alone is racy under load).
     f.flush().await.map_err(|e| format!("flush log: {e}"))?;
+    let _ = log_wakes().send(job_id.to_string());
     Ok(())
 }
 

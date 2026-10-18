@@ -10,7 +10,7 @@ use std::io::Write as _;
 
 use axum::extract::{Path as AxumPath, State};
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
-use axum::response::{IntoResponse, Response};
+use axum::response::{sse, IntoResponse, Response};
 use axum::Json;
 
 use crate::app::AppState;
@@ -274,6 +274,205 @@ pub async fn download_job_log(
         res.headers_mut().insert(header::CONTENT_DISPOSITION, hv);
     }
     res
+}
+
+/// Byte prefix of `bytes` that ends on a UTF-8 codepoint boundary. A live log
+/// file can end mid-sequence while a write is in flight; holding the partial
+/// tail back keeps streamed frames lossless — the held bytes ride out with the
+/// next append. Genuinely invalid bytes (`error_len` set) are sent as-is and
+/// render as U+FFFD, same as the raw download path.
+fn utf8_floor(bytes: &[u8]) -> usize {
+    match std::str::from_utf8(bytes) {
+        Ok(_) => bytes.len(),
+        Err(e) if e.error_len().is_none() => e.valid_up_to(),
+        Err(_) => bytes.len(),
+    }
+}
+
+/// One SSE `data:` frame — `{offset, content, size, done}`; `offset` is the
+/// byte position this chunk starts at so the client can detect a log wipe
+/// (`offset == 0` frames replace rather than append).
+fn tail_frame(offset: u64, content: &[u8], size: u64, done: bool) -> sse::Event {
+    sse::Event::default().data(
+        serde_json::json!({
+            "offset": offset,
+            "content": String::from_utf8_lossy(content),
+            "size": size,
+            "done": done,
+        })
+        .to_string(),
+    )
+}
+
+/// GET /api/repos/{owner}/{repo}/actions/jobs/{job_id}/logs/stream — SSE live
+/// tail. Connect sends a full snapshot (`offset:0`), then every append pushes
+/// the new bytes; `done:true` is the last frame. The wake channel makes
+/// appends instant; a 2s fallback tick covers any missed notification, and a
+/// shrunk file (rerun wipe) re-sends the snapshot. Same auth as the raw
+/// download — the long-poll `repo.actions.getJobLog` RPC stays the portable
+/// client surface; this stream is the web UI's low-latency path.
+pub async fn stream_job_log(
+    State(state): State<AppState>,
+    AxumPath((owner, repo, job_id)): AxumPath<(String, String, String)>,
+    headers: HeaderMap,
+) -> Response {
+    let lookup = match lookup_repo(&state, &owner, &repo).await {
+        Ok(l) => l,
+        Err(r) => return *r,
+    };
+    if let Err(r) = authorize_read(&state, &headers, &lookup, "repo.actions.getJobLog").await {
+        return *r;
+    }
+    let job = match state.db.find_action_job_by_id(&job_id).await {
+        Ok(Some(j)) => j,
+        Ok(None) => {
+            return err_response(
+                StatusCode::NOT_FOUND,
+                "actions.job_not_found",
+                "Job not found",
+            );
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "find job for log stream");
+            return err_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "actions.internal",
+                "stream failed",
+            );
+        }
+    };
+    let run = match state.db.find_action_run_by_id(&job.run_id).await {
+        Ok(Some(r)) => r,
+        Ok(None) => {
+            return err_response(
+                StatusCode::NOT_FOUND,
+                "actions.job_not_found",
+                "Job not found",
+            );
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "find run for log stream");
+            return err_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "actions.internal",
+                "stream failed",
+            );
+        }
+    };
+    if run.repository_id != lookup.repo.id {
+        return err_response(
+            StatusCode::NOT_FOUND,
+            "actions.job_not_found",
+            "Job not found",
+        );
+    }
+
+    let mut wakes = crate::actions::logs::subscribe_job_log_wakes();
+    let log_dir = state.actions_log_dir.clone();
+    let db = state.db.clone();
+    let run_id = run.id;
+    let job_id = job.id;
+    let mut live = !crate::actions::rpc::job_status_terminal(&job.status);
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<sse::Event, std::convert::Infallible>>(16);
+    tokio::spawn(async move {
+        // Snapshot — always an `offset:0` replace frame. A live file can end
+        // mid-codepoint; hold the partial tail so frames stay lossless (it
+        // re-reads with the next append). Terminal jobs send the raw tail —
+        // nothing more is coming.
+        let (bytes, _file_size) = crate::actions::logs::read_job_log(&log_dir, &run_id, &job_id, 0)
+            .await
+            .unwrap_or_default();
+        let send_len = if live {
+            utf8_floor(&bytes)
+        } else {
+            bytes.len()
+        };
+        let mut cursor = send_len as u64;
+        if tx
+            .send(Ok(tail_frame(0, &bytes[..send_len], cursor, !live)))
+            .await
+            .is_err()
+        {
+            return;
+        }
+        let mut tick = tokio::time::interval(std::time::Duration::from_secs(2));
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        while live {
+            tokio::select! {
+                r = wakes.recv() => {
+                    match r {
+                        // Other job's append — keep waiting.
+                        Ok(id) if id != job_id => continue,
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                        _ => {}
+                    }
+                }
+                _ = tick.tick() => {}
+            }
+            let (bytes, new_size) =
+                crate::actions::logs::read_job_log(&log_dir, &run_id, &job_id, cursor)
+                    .await
+                    .unwrap_or_default();
+            if new_size < cursor {
+                // Wiped (rerun replaces the prior attempt's log) — resend a
+                // snapshot frame so the client replaces rather than appends.
+                let (b, _file_size) =
+                    crate::actions::logs::read_job_log(&log_dir, &run_id, &job_id, 0)
+                        .await
+                        .unwrap_or_default();
+                let send_len = utf8_floor(&b);
+                cursor = send_len as u64;
+                if tx
+                    .send(Ok(tail_frame(0, &b[..send_len], cursor, false)))
+                    .await
+                    .is_err()
+                {
+                    return;
+                }
+            } else if new_size > cursor {
+                let send_len = utf8_floor(&bytes);
+                if send_len > 0 {
+                    let end = cursor + send_len as u64;
+                    if tx
+                        .send(Ok(tail_frame(cursor, &bytes[..send_len], end, false)))
+                        .await
+                        .is_err()
+                    {
+                        return;
+                    }
+                    cursor = end;
+                }
+            }
+            live = db
+                .find_action_job_by_id(&job_id)
+                .await
+                .ok()
+                .flatten()
+                .is_some_and(|j| !crate::actions::rpc::job_status_terminal(&j.status));
+            if !live {
+                // Final frame carries any bytes still held back (e.g. a
+                // permanently partial trailing codepoint) plus `done` so the
+                // client lands on the file's true end state.
+                let (rest, _) =
+                    crate::actions::logs::read_job_log(&log_dir, &run_id, &job_id, cursor)
+                        .await
+                        .unwrap_or_default();
+                let end = cursor + rest.len() as u64;
+                let _ = tx.send(Ok(tail_frame(cursor, &rest, end, true))).await;
+                return;
+            }
+        }
+    });
+    let stream = futures_util::stream::unfold(rx, |mut rx| async move {
+        rx.recv().await.map(|item| (item, rx))
+    });
+    sse::Sse::new(stream)
+        .keep_alive(
+            sse::KeepAlive::new()
+                .interval(std::time::Duration::from_secs(15))
+                .text("keepalive"),
+        )
+        .into_response()
 }
 
 /// Split a job log stream on `##[step]`/`##[step-done]` markers into GitHub's

@@ -503,7 +503,7 @@ pub async fn get_job_log(
     })
 }
 
-fn job_status_terminal(status: &str) -> bool {
+pub(crate) fn job_status_terminal(status: &str) -> bool {
     matches!(status, "success" | "failure" | "cancelled" | "skipped")
 }
 

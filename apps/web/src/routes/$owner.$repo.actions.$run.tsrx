@@ -7,7 +7,7 @@ import { RepoLayout } from "@/routes/$owner.$repo.tsrx";
 import { AppPage } from "@/components/app-page";
 import type { ActionJobLogResponse, ActionRunGetResponse } from "@oxidean/api-client";
 import { ArrowLeft, Ban, Ellipsis, RotateCcw, Workflow } from "@octanejs/lucide";
-import { useState } from "octane";
+import { useEffect, useState } from "octane";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
@@ -40,8 +40,11 @@ import { cn } from "@/lib/utils";
 import {
   actionsCancelRunMutation,
   actionsJobLogQuery,
+  actionsJobLogStreamUrl,
   actionsRerunRunMutation,
   actionsRunDetailQuery,
+  applyJobLogFrame,
+  type JobLogTailFrame,
 } from "@/lib/actions-queries";
 import { AppLink } from "@/components/ui/app-link";
 
@@ -189,17 +192,52 @@ function RepoActionsRunPageContent() @{
     selectedJobId === routeLoader.detail.jobs[0]?.id
       ? routeLoader.firstJobLog
       : undefined;
+  const qc = useQueryClient();
+  // Live tail prefers the SSE push stream — frames write into the same query
+  // cache the long-poll query fills, so both transports stay byte-consistent.
+  // `deadTail` keys the job whose stream failed (pre-SSE server, repeated
+  // drops) and switches that job back to the long-poll RPC.
+  const [deadTail, setDeadTail] = useState("");
+  const tailKey = `${runId}/${selectedJobId}`;
+  const tailPoll = deadTail === tailKey || typeof EventSource === "undefined";
+  const logOpts = actionsJobLogQuery(owner, repoName, runId, selectedJobId);
   const logQ = useQuery({
-    ...actionsJobLogQuery(owner, repoName, runId, selectedJobId),
-    enabled: !!selectedJobId,
+    ...logOpts,
+    enabled: !!selectedJobId && tailPoll,
     initialData: ssrFirstJobLog,
   });
+  useEffect(() => {
+    if (!selectedJobId || tailPoll) return;
+    const es = new EventSource(actionsJobLogStreamUrl(owner, repoName, selectedJobId));
+    let drops = 0;
+    es.onmessage = (ev) => {
+      drops = 0;
+      try {
+        const frame = JSON.parse(ev.data) as JobLogTailFrame;
+        qc.setQueryData(logOpts.queryKey, (prev: ActionJobLogResponse | undefined) =>
+          applyJobLogFrame(prev, frame),
+        );
+        if (frame.done) es.close();
+      } catch {
+        // Malformed frame — ignore; the next snapshot frame self-corrects.
+      }
+    };
+    es.onerror = () => {
+      // EventSource auto-retries transient drops; give up after a few so a
+      // server without the stream route falls back to the long-poll RPC.
+      drops += 1;
+      if (drops >= 3 || es.readyState === EventSource.CLOSED) {
+        es.close();
+        setDeadTail(tailKey);
+      }
+    };
+    return () => es.close();
+  }, [selectedJobId, runId, tailPoll]);
   const logText =
     logQ.data?.content ??
     ssrFirstJobLog?.content ??
     (logQ.isPending ? "Loading log…" : "(empty log)");
 
-  const qc = useQueryClient();
   const rerunM = useMutation({
     ...actionsRerunRunMutation(),
     onSuccess: async () => {

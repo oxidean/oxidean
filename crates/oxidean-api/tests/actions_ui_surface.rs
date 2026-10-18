@@ -648,3 +648,125 @@ jobs:
     assert_eq!(ch["options"], serde_json::json!(["stable", "beta"]));
     assert_eq!(by_name("reason")["type"], "string");
 }
+
+/// Live log tail over SSE — `GET …/logs/stream` pushes a snapshot frame, a
+/// frame per append, and a `done` frame when the job goes terminal. The wake
+/// channel on log append makes the stream real-time rather than polled.
+#[tokio::test]
+async fn job_log_stream_sse_pushes_appends() {
+    use futures_util::StreamExt;
+
+    let fx = fixture().await;
+    let (run_id, job_ids) = enqueue(
+        &fx.db,
+        &fx.owner_id,
+        br#"
+name: T
+on: [push]
+jobs:
+  tail:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo tail
+"#,
+    )
+    .await;
+    let job_id = &job_ids[0];
+    // Seed one line so the connect-time snapshot is deterministic.
+    oxidean_api::actions::logs::append_job_log(&fx.log_dir, &run_id, job_id, b"line one\n")
+        .await
+        .unwrap();
+    let url = format!("/api/repos/uiowner/uidemo/actions/jobs/{job_id}/logs/stream");
+
+    // Anonymous on a private repo → 404, same as the raw download.
+    let res = fx
+        .app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(&url)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+
+    // Owner session → 200 text/event-stream.
+    let res = fx
+        .app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(&url)
+                .header("cookie", &fx.owner_cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(
+        res.headers().get("content-type").unwrap().to_str().unwrap(),
+        "text/event-stream"
+    );
+
+    // Collect the body until a marker appears (bounded by a deadline).
+    async fn read_until<S, E>(stream: &mut S, buf: &mut String, needle: &str)
+    where
+        S: futures_util::Stream<Item = Result<axum::body::Bytes, E>> + Unpin,
+        E: std::fmt::Debug,
+    {
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+        while !buf.contains(needle) {
+            let chunk = tokio::time::timeout_at(deadline, stream.next())
+                .await
+                .unwrap_or_else(|_| panic!("timed out waiting for {needle:?} — got {buf}"))
+                .expect("stream ended early")
+                .expect("body chunk");
+            buf.push_str(&String::from_utf8_lossy(&chunk));
+        }
+    }
+    let mut stream = res.into_body().into_data_stream();
+    let mut buf = String::new();
+    // Snapshot frame: full content at offset 0, still live.
+    read_until(&mut stream, &mut buf, "\"offset\":0").await;
+    assert!(
+        buf.contains("line one"),
+        "snapshot carries the seed — {buf}"
+    );
+    assert!(buf.contains("\"done\":false"), "job is live — {buf}");
+
+    // An append wakes the stream — pushed bytes arrive without a client poll.
+    oxidean_api::actions::logs::append_job_log(&fx.log_dir, &run_id, job_id, b"line two\n")
+        .await
+        .unwrap();
+    read_until(&mut stream, &mut buf, "line two").await;
+    let frames_at_append = buf.matches("\"offset\":").count();
+    assert_eq!(
+        frames_at_append, 2,
+        "snapshot + append frames so far — {buf}"
+    );
+
+    // A rerun wipes the attempt log — the shrunk file triggers an offset:0
+    // replacement snapshot so the client rebuilds instead of appending.
+    let log_file = oxidean_api::actions::logs::job_log_path(&fx.log_dir, &run_id, job_id).unwrap();
+    tokio::fs::write(&log_file, b"fresh attempt\n")
+        .await
+        .unwrap();
+    read_until(&mut stream, &mut buf, "fresh attempt").await;
+    let tail = &buf[buf.rfind("\"offset\":").unwrap()..];
+    assert!(
+        tail.starts_with("\"offset\":0,") || tail.starts_with("\"offset\":0}"),
+        "wipe resends a replacement snapshot — {tail}"
+    );
+
+    // Terminal status ends the stream with a done frame.
+    fx.db
+        .update_action_job_status(job_id, "success")
+        .await
+        .unwrap();
+    read_until(&mut stream, &mut buf, "\"done\":true").await;
+}
