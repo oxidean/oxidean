@@ -19,10 +19,12 @@ async fn test_app(
     db: Database,
     repos_dir: std::path::PathBuf,
     lfs_dir: std::path::PathBuf,
+    actions_log_dir: std::path::PathBuf,
 ) -> axum::Router {
     let state = AppState::new(db, Arc::new(LogSink) as Arc<dyn EmailSender>, "development")
         .with_repos_dir(repos_dir)
-        .with_lfs_dir(lfs_dir);
+        .with_lfs_dir(lfs_dir)
+        .with_actions_log_dir(actions_log_dir);
     let cors = build_cors("development", None).expect("cors");
     router_with_state(state, cors)
 }
@@ -106,7 +108,13 @@ async fn factory_reset_database_only_keeps_repo_files() {
     db.migrate().await.expect("migrate");
     seed_sys_admin(&db).await;
 
-    let app = test_app(db, repos_dir.clone(), dir.path().join("lfs")).await;
+    let app = test_app(
+        db,
+        repos_dir.clone(),
+        dir.path().join("lfs"),
+        dir.path().join("actions-logs"),
+    )
+    .await;
     let cookie = login_admin(&app).await;
 
     let res = app
@@ -146,7 +154,13 @@ async fn factory_reset_database_and_repositories_wipes_disk() {
     db.migrate().await.expect("migrate");
     seed_sys_admin(&db).await;
 
-    let app = test_app(db, repos_dir.clone(), dir.path().join("lfs")).await;
+    let app = test_app(
+        db,
+        repos_dir.clone(),
+        dir.path().join("lfs"),
+        dir.path().join("actions-logs"),
+    )
+    .await;
     let cookie = login_admin(&app).await;
 
     let res = app
@@ -187,7 +201,13 @@ async fn factory_reset_defaults_scope_to_database_only() {
     db.migrate().await.expect("migrate");
     seed_sys_admin(&db).await;
 
-    let app = test_app(db, repos_dir, dir.path().join("lfs")).await;
+    let app = test_app(
+        db,
+        repos_dir,
+        dir.path().join("lfs"),
+        dir.path().join("actions-logs"),
+    )
+    .await;
     let cookie = login_admin(&app).await;
 
     // Omit scope — serde default database_only.
@@ -217,7 +237,13 @@ async fn factory_reset_wrong_phrase_rejected() {
     db.migrate().await.expect("migrate");
     seed_sys_admin(&db).await;
 
-    let app = test_app(db, dir.path().join("repos"), dir.path().join("lfs")).await;
+    let app = test_app(
+        db,
+        dir.path().join("repos"),
+        dir.path().join("lfs"),
+        dir.path().join("actions-logs"),
+    )
+    .await;
     let cookie = login_admin(&app).await;
 
     let res = app
@@ -288,7 +314,13 @@ async fn factory_reset_wipes_org_acl_and_repository_rows() {
         .await
         .expect("user repo");
 
-    let app = test_app(db.clone(), dir.path().join("repos"), dir.path().join("lfs")).await;
+    let app = test_app(
+        db.clone(),
+        dir.path().join("repos"),
+        dir.path().join("lfs"),
+        dir.path().join("actions-logs"),
+    )
+    .await;
     let cookie = login_admin(&app).await;
 
     let res = app
@@ -382,7 +414,13 @@ async fn factory_reset_wipes_issue_domain_rows() {
     .await
     .expect("link");
 
-    let app = test_app(db.clone(), dir.path().join("repos"), dir.path().join("lfs")).await;
+    let app = test_app(
+        db.clone(),
+        dir.path().join("repos"),
+        dir.path().join("lfs"),
+        dir.path().join("actions-logs"),
+    )
+    .await;
     let cookie = login_admin(&app).await;
 
     let res = app
@@ -427,7 +465,7 @@ async fn factory_reset_database_and_repositories_wipes_lfs_dir_children() {
     let db = Database::connect(&url).await.expect("connect");
     db.migrate().await.expect("migrate");
     seed_sys_admin(&db).await;
-    let app = test_app(db, repos, lfs.clone()).await;
+    let app = test_app(db, repos, lfs.clone(), dir.path().join("actions-logs")).await;
     let cookie = login_admin(&app).await;
 
     let res = app

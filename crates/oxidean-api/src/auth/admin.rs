@@ -322,18 +322,31 @@ pub async fn wipe_dir_contents(dir: &Path, err_code: &str, label: &str) -> Resul
     if !dir.exists() {
         return Ok(());
     }
-    let root = tokio::fs::canonicalize(dir).await.map_err(|e| {
-        tracing::error!(error = %e, path = %dir.display(), label, "canonicalize storage dir failed");
-        AppError::new(
-            err_code,
-            format!("Failed to resolve {label} path."),
-        )
-    })?;
+    // Every filesystem call below is best-effort against concurrent writers
+    // and removers: a live runner can still be writing a job log while the
+    // reset wipes its storage, and another wipe may race the same root.
+    // An entry (or the root itself) that vanishes mid-walk is already
+    // deleted — skipping it is the wipe succeeding, not failing.
+    let root = match tokio::fs::canonicalize(dir).await {
+        Ok(p) => p,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => {
+            tracing::error!(error = %e, path = %dir.display(), label, "canonicalize storage dir failed");
+            return Err(AppError::new(
+                err_code,
+                format!("Failed to resolve {label} path."),
+            ));
+        }
+    };
 
-    let mut entries = tokio::fs::read_dir(&root).await.map_err(|e| {
-        tracing::error!(error = %e, path = %root.display(), label, "read_dir storage failed");
-        AppError::new(err_code, format!("Failed to list {label}."))
-    })?;
+    let mut entries = match tokio::fs::read_dir(&root).await {
+        Ok(rd) => rd,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => {
+            tracing::error!(error = %e, path = %root.display(), label, "read_dir storage failed");
+            return Err(AppError::new(err_code, format!("Failed to list {label}.")));
+        }
+    };
 
     while let Some(entry) = entries.next_entry().await.map_err(|e| {
         tracing::error!(error = %e, label, "storage dir entry read failed");
@@ -342,6 +355,7 @@ pub async fn wipe_dir_contents(dir: &Path, err_code: &str, label: &str) -> Resul
         let path = entry.path();
         let canon = match tokio::fs::canonicalize(&path).await {
             Ok(p) => p,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
             Err(e) => {
                 tracing::error!(error = %e, path = %path.display(), label, "canonicalize child failed");
                 return Err(AppError::new(
@@ -362,23 +376,41 @@ pub async fn wipe_dir_contents(dir: &Path, err_code: &str, label: &str) -> Resul
                 format!("Refusing to delete a path outside {label}."),
             ));
         }
-        let ft = entry.file_type().await.map_err(|e| {
-            tracing::error!(error = %e, path = %canon.display(), label, "file_type failed");
-            AppError::new(err_code, format!("Failed to inspect {label} entry."))
-        })?;
-        if ft.is_dir() {
-            tokio::fs::remove_dir_all(&canon).await.map_err(|e| {
-                tracing::error!(error = %e, path = %canon.display(), label, "remove_dir_all failed");
-                AppError::new(
+        let ft = match entry.file_type().await {
+            Ok(ft) => ft,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => {
+                tracing::error!(error = %e, path = %canon.display(), label, "file_type failed");
+                return Err(AppError::new(
                     err_code,
-                    format!("Failed to delete {label} directories."),
-                )
-            })?;
+                    format!("Failed to inspect {label} entry."),
+                ));
+            }
+        };
+        if ft.is_dir() {
+            match tokio::fs::remove_dir_all(&canon).await {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => {
+                    tracing::error!(error = %e, path = %canon.display(), label, "remove_dir_all failed");
+                    return Err(AppError::new(
+                        err_code,
+                        format!("Failed to delete {label} directories."),
+                    ));
+                }
+            }
         } else {
-            tokio::fs::remove_file(&canon).await.map_err(|e| {
-                tracing::error!(error = %e, path = %canon.display(), label, "remove_file failed");
-                AppError::new(err_code, format!("Failed to delete a file under {label}."))
-            })?;
+            match tokio::fs::remove_file(&canon).await {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => {
+                    tracing::error!(error = %e, path = %canon.display(), label, "remove_file failed");
+                    return Err(AppError::new(
+                        err_code,
+                        format!("Failed to delete a file under {label}."),
+                    ));
+                }
+            }
         }
     }
     Ok(())
