@@ -1,0 +1,15 @@
+{
+  "stage": "code-generation",
+  "unit": "u3-vcs-object-store",
+  "version": 1,
+  "writes": [
+    {"path": "crates/oxidean-vcs/Cargo.toml"},
+    {"path": "crates/oxidean-vcs/src/lib.rs"},
+    {"path": "crates/oxidean-vcs/src/object_store/"},
+    {"path": "crates/oxidean-db/src/vcs.rs"},
+    {"path": ".github/workflows/ci.yml"},
+    {"path": "Makefile"},
+    {"path": "docs/TESTING.md"},
+    {"path": "Cargo.lock"}
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "stage": "nfr-requirements",
+  "unit": "u3-vcs-object-store",
+  "upstream_ids": ["NFR6","NFR7","NFR8","NFR9","NFR10","SR3.1","SR3.2","SR3.3","SR3.4","SR3.5","SR3.6","SR3.7","SR3.8","SR3.9","SR3.10","SR3.11","TD3.1","TD3.2","TD3.3","TD3.4","TD3.5","TD3.6","TD3.7"],
+  "coverage": [
+    {"id": "NFR6", "status": "OK", "target": "TD3.4", "note": "zero new migrations — sanctioned additions reuse 0053 tables/indexes; facade idioms keep dialect parity"},
+    {"id": "NFR7", "status": "OK", "target": "TD3.3, SR3.3", "note": "per-object streamed GETs + rename-only visibility — partial transfers never corrupt"},
+    {"id": "NFR8", "status": "OK", "target": "TD3.2, SR3.5", "note": "tracing stats on GC; counts/hashes only in logs"},
+    {"id": "NFR9", "status": "OK", "target": "SR3.1-SR3.10", "note": "traversal guard, typed quota, file modes 0600/0700, store marker, fail-closed, no auth inside"},
+    {"id": "NFR10", "status": "OK", "target": "TD3.7", "note": "named feature-gated invocations + #[cfg(all(test, feature=\"server\"))] — zero-test runs are failures"},
+    {"id": "SR3.1", "status": "OK", "target": "security-requirements.md", "note": "64-hex guard + shard-shape sweep + canonicalize/no-follow + stray-tmp sweep"},
+    {"id": "SR3.2", "status": "OK", "target": "security-requirements.md", "note": "two typed quota sites; probe-gated; checked casts; eager cleanup on repo denial"},
+    {"id": "SR3.3", "status": "OK", "target": "security-requirements.md", "note": "rename-only visibility + lock release/heartbeat keeps mutual exclusion honest"},
+    {"id": "SR3.4", "status": "OK", "target": "security-requirements.md", "note": "grace+link anti-join + conditional-delete bool gating + per-file probe + per-object tolerance"},
+    {"id": "SR3.5", "status": "OK", "target": "security-requirements.md", "note": "counts/hashes only in logs; no secrets in config"},
+    {"id": "SR3.6", "status": "OK", "target": "security-requirements.md", "note": "eager is_skipped; io::NotFound carve-out; stream-error client-fault variant"},
+    {"id": "SR3.7", "status": "OK", "target": "security-requirements.md", "note": "repo_id-scoped attribution; global CAS never gains repo col"},
+    {"id": "SR3.8", "status": "OK", "target": "security-requirements.md", "note": "zero auth inside — transport/VcsApi gate"},
+    {"id": "SR3.9", "status": "OK", "target": "security-requirements.md", "note": "env ranges: grace>=1, interval 0=disable, byte caps <=i64::MAX, dir-is-file is config error"},
+    {"id": "SR3.10", "status": "OK", "target": "security-requirements.md", "note": "0600/0700 modes + .oxidean-vcs-objects marker refusing foreign dirs"},
+    {"id": "SR3.11", "status": "OK", "target": "security-requirements.md", "note": "residual register: quota overshoot, probe->count double-charge, sweep TOCTOU, fsync, same-fs tmp, CWD-relative dir"},
+    {"id": "TD3.1", "status": "OK", "target": "tech-stack-decisions.md", "note": "dep:-gated server; cargo-tree enforcement pin"},
+    {"id": "TD3.2", "status": "OK", "target": "tech-stack-decisions.md", "note": "per-crate pins at api versions; bytes=1 new direct dep; sha2 0.11"},
+    {"id": "TD3.3", "status": "OK", "target": "tech-stack-decisions.md", "note": "stream shape + File GET + bare-hash PutOutcome + verify()->Result<()> + Stream variant"},
+    {"id": "TD3.4", "status": "OK", "target": "tech-stack-decisions.md", "note": "two sanctioned facade additions; vcs_get_object as sweep probe"},
+    {"id": "TD3.5", "status": "OK", "target": "tech-stack-decisions.md", "note": "closed error enum + From impls"},
+    {"id": "TD3.6", "status": "OK", "target": "tech-stack-decisions.md", "note": "lock release+heartbeat; dedup race clean; POSIX-fs note"},
+    {"id": "TD3.7", "status": "OK", "target": "tech-stack-decisions.md", "note": "named cargo invocations + Makefile delta claim + test matrix"}
+  ]
+}
