@@ -2094,7 +2094,10 @@ mod tests {
             oxidean_core::VCS_PROCEDURES.iter().copied().collect();
         for name in listed.iter().chain(arms.iter()) {
             if name.starts_with("vcs.") {
-                assert!(pinned.contains(name), "unlisted vcs.* name {name} reached the wire surface");
+                assert!(
+                    pinned.contains(name),
+                    "unlisted vcs.* name {name} reached the wire surface"
+                );
             }
         }
     }

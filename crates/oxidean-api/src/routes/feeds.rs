@@ -196,8 +196,11 @@ fn acl_err_response(e: &AppError) -> Response {
 /// Human-readable title for one activity row. `repo_ctx` appends
 /// `in {owner}/{repo}` for feeds where the repo is not already the subject.
 fn activity_title(row: &RepoActivityRow, repo_ctx: Option<&str>) -> String {
-    let ref_short = short_ref(&row.ref_name);
-    let n = row.commits_count;
+    // Ref-free `vcs.*` activity rows carry NULL push columns (C4) — display
+    // fallbacks keep the feed readable.
+    let ref_name = row.ref_name.as_deref().unwrap_or("");
+    let ref_short = short_ref(ref_name);
+    let n = row.commits_count.unwrap_or(0);
     let verb = match row.push_type.as_str() {
         "push" => {
             if n <= 0 {
@@ -232,7 +235,7 @@ fn activity_title(row: &RepoActivityRow, repo_ctx: Option<&str>) -> String {
             Some(num) => format!("merged pull request #{num} into {ref_short}"),
             None => format!("merged into {ref_short}"),
         },
-        other => format!("updated {} ({other})", row.ref_name),
+        other => format!("updated {ref_name} ({other})"),
     };
     match repo_ctx {
         Some(ctx) => format!("{} {verb} in {ctx}", row.actor_username),
@@ -247,8 +250,8 @@ fn activity_link(origin: &str, owner: &str, repo_name: &str, row: &RepoActivityR
         path_segment(owner),
         path_segment(repo_name)
     );
-    let before = row.before_oid.as_str();
-    let after = row.after_oid.as_str();
+    let before = row.before_oid.as_deref().unwrap_or("");
+    let after = row.after_oid.as_deref().unwrap_or("");
     let after_live = !after.is_empty() && !is_zero_oid(after);
     match row.push_type.as_str() {
         "pr_merge" => match row.pr_number {
@@ -265,7 +268,10 @@ fn activity_link(origin: &str, owner: &str, repo_name: &str, row: &RepoActivityR
             }
         }
         "branch_creation" | "branch_rename" => {
-            format!("{base}/tree/{}", path_segment(short_ref(&row.ref_name)))
+            format!(
+                "{base}/tree/{}",
+                path_segment(short_ref(row.ref_name.as_deref().unwrap_or("")))
+            )
         }
         _ => base,
     }
@@ -548,10 +554,10 @@ mod tests {
             repository_id: "r".into(),
             actor_id: "u".into(),
             push_type: "push".into(),
-            ref_name: "refs/heads/main".into(),
-            before_oid: "a".into(),
-            after_oid: "b".into(),
-            commits_count: 2,
+            ref_name: Some("refs/heads/main".into()),
+            before_oid: Some("a".into()),
+            after_oid: Some("b".into()),
+            commits_count: Some(2),
             commit_message: Some("x".into()),
             pr_number: None,
             created_at: "2026-01-01T00:00:00Z".into(),
@@ -568,7 +574,7 @@ mod tests {
         let mut rename = base.clone();
         rename.push_type = "branch_rename".into();
         rename.commit_message = Some("old".into());
-        rename.ref_name = "refs/heads/new".into();
+        rename.ref_name = Some("refs/heads/new".into());
         assert_eq!(
             activity_title(&rename, None),
             "alice renamed branch old to new"

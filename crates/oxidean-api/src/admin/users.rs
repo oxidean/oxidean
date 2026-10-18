@@ -332,8 +332,8 @@ pub async fn get_activity(
                 user_agent: None,
                 repo_owner: r.repo_owner.clone(),
                 repo_name: r.repo_name.clone(),
-                ref_name: Some(r.ref_name.clone()),
-                commits_count: Some(r.commits_count),
+                ref_name: r.ref_name.clone(),
+                commits_count: r.commits_count,
                 commit_message: r.commit_message.clone(),
                 pr_number: r.pr_number,
             });
