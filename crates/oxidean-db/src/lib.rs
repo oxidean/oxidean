@@ -55,16 +55,17 @@ pub mod watches;
 pub mod webhooks;
 pub mod workflow_templates;
 
+pub mod deployments;
 pub use actions::{
-    ActionArtifactRow, ActionDeploymentRow, ActionEnvironmentRow, ActionJobRow, ActionJobTokenRow,
-    ActionOidcKeyRow, ActionPayloadRow, ActionRunFilter, ActionRunRow, ActionRunnerRow,
-    ActionSecretCipherRow, ActionSecretMetaRow, EnvSecretMetaRow, JobInsert, LogIndexCas,
-    OrgSecretRow, StaleJobRow,
+    ActionArtifactRow, ActionEnvironmentRow, ActionJobRow, ActionJobTokenRow, ActionOidcKeyRow,
+    ActionPayloadRow, ActionRunFilter, ActionRunRow, ActionRunnerRow, ActionSecretCipherRow,
+    ActionSecretMetaRow, EnvSecretMetaRow, JobInsert, LogIndexCas, OrgSecretRow, StaleJobRow,
 };
 pub use audit_events::AuditEventRow;
 pub use auth_settings::AuthSettingsRow;
 pub use branch_protection::{BranchProtectionRuleRow, CommitStatusRow};
 pub use deploy_keys::DeployKeyRow;
+pub use deployments::{ActionDeploymentRow, ActionDeploymentStatusRow};
 use dialect::resolve_dialect_from_env as resolve_from_env;
 pub use dialect::{redact_url, resolve_dialect, resolve_dialect_from_env, Dialect};
 pub use follows::UserFollowListRow;
@@ -3875,37 +3876,32 @@ impl Database {
         actions::delete_environment(self.require_pool()?, repository_id, name).await
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub async fn insert_action_deployment(
         &self,
+        d: &deployments::NewDeployment<'_>,
+    ) -> Result<ActionDeploymentRow, String> {
+        deployments::insert_deployment(self.require_pool()?, d).await
+    }
+
+    pub async fn find_action_deployment_by_id(
+        &self,
         id: &str,
-        repository_id: &str,
-        environment: &str,
-        run_id: &str,
+    ) -> Result<Option<ActionDeploymentRow>, String> {
+        deployments::find_deployment_by_id(self.require_pool()?, id).await
+    }
+
+    pub async fn find_action_deployment_by_job_id(
+        &self,
         job_id: &str,
-        sha: &str,
-        git_ref: &str,
-        url: Option<&str>,
-    ) -> Result<(), String> {
-        actions::insert_deployment(
-            self.require_pool()?,
-            id,
-            repository_id,
-            environment,
-            run_id,
-            job_id,
-            sha,
-            git_ref,
-            url,
-        )
-        .await
+    ) -> Result<Option<ActionDeploymentRow>, String> {
+        deployments::find_deployment_by_job_id(self.require_pool()?, job_id).await
     }
 
     pub async fn list_action_deployments_for_run(
         &self,
         run_id: &str,
     ) -> Result<Vec<ActionDeploymentRow>, String> {
-        actions::list_deployments_for_run(self.require_pool()?, run_id).await
+        deployments::list_deployments_for_run(self.require_pool()?, run_id).await
     }
 
     /// Repo-scoped deployment listing, newest first; `environment` narrows.
@@ -3915,8 +3911,73 @@ impl Database {
         environment: Option<&str>,
         limit: i64,
     ) -> Result<Vec<ActionDeploymentRow>, String> {
-        actions::list_deployments_for_repo(self.require_pool()?, repository_id, environment, limit)
-            .await
+        deployments::list_deployments_for_repo(
+            self.require_pool()?,
+            repository_id,
+            environment,
+            limit,
+        )
+        .await
+    }
+
+    /// Public Deployments-API listing with all GitHub query filters.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn list_action_deployments_filtered(
+        &self,
+        repository_id: &str,
+        environment: Option<&str>,
+        sha: Option<&str>,
+        git_ref: Option<&str>,
+        task: Option<&str>,
+        limit: i64,
+    ) -> Result<Vec<ActionDeploymentRow>, String> {
+        deployments::list_deployments_filtered(
+            self.require_pool()?,
+            repository_id,
+            environment,
+            sha,
+            git_ref,
+            task,
+            limit,
+        )
+        .await
+    }
+
+    /// Deployments in `repo + environment` whose latest status is not
+    /// `inactive` — `auto_inactive` targets.
+    pub async fn list_active_deployments_for_environment(
+        &self,
+        repository_id: &str,
+        environment: &str,
+        except_deployment_id: &str,
+    ) -> Result<Vec<ActionDeploymentRow>, String> {
+        deployments::list_active_deployments_for_environment(
+            self.require_pool()?,
+            repository_id,
+            environment,
+            except_deployment_id,
+        )
+        .await
+    }
+
+    pub async fn delete_action_deployment(&self, id: &str) -> Result<bool, String> {
+        deployments::delete_deployment(self.require_pool()?, id).await
+    }
+
+    pub async fn insert_action_deployment_status(
+        &self,
+        s: &deployments::NewDeploymentStatus<'_>,
+    ) -> Result<deployments::ActionDeploymentStatusRow, String> {
+        deployments::insert_deployment_status(self.require_pool()?, s).await
+    }
+
+    /// Statuses for one deployment, newest first.
+    pub async fn list_action_deployment_statuses(
+        &self,
+        deployment_id: &str,
+        limit: i64,
+    ) -> Result<Vec<deployments::ActionDeploymentStatusRow>, String> {
+        deployments::list_deployment_statuses(self.require_pool()?, deployment_id, limit).await
     }
 
     /// Record one approve/reject decision on an environment-held job.

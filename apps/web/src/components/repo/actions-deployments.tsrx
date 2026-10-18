@@ -34,21 +34,27 @@ export function ActionsDeployments(props: {
           <ListRow className="gap-3">
             <div className="min-w-0 flex-1">
               <p className="flex flex-wrap items-center gap-2 text-[13px]">
-                <AppLink
-                  href={`/${props.owner}/${props.name}/actions/${d.run_id}` as string}
-                  className="font-medium text-foreground no-underline hover:text-primary hover:underline"
-                >
-                  {d.environment as string}
-                </AppLink>
+                @if (d.run_id) {
+                  <AppLink
+                    href={`/${props.owner}/${props.name}/actions/${d.run_id}` as string}
+                    className="font-medium text-foreground no-underline hover:text-primary hover:underline"
+                  >
+                    {d.environment as string}
+                  </AppLink>;
+                } @else {
+                  <span className="font-medium text-foreground">
+                    {d.environment as string}
+                  </span>;
+                }
                 <AppLink
                   href={`/${props.owner}/${props.name}/commit/${d.sha}` as string}
                   className="font-mono text-muted-foreground no-underline hover:text-primary hover:underline"
                 >
                   {d.sha.slice(0, 7) as string}
                 </AppLink>
-                @if (d.git_ref) {
+                @if (d.ref) {
                   <span className="font-mono text-[12px] text-muted-foreground">
-                    {d.git_ref.replace(/^refs\/(heads|tags)\//, "") as string}
+                    {d.ref.replace(/^refs\/(heads|tags)\//, "") as string}
                   </span>;
                 }
               </p>
@@ -70,14 +76,16 @@ service endpoint) — not an app route. */
             <div className="flex shrink-0 flex-col items-end gap-1">
               <Badge
                 variant={
-                  d.job_status === "success"
+                  (d.state ?? d.job_status) === "success"
                     ? "success"
-                    : d.job_status === "failure" || d.job_status === "cancelled"
+                    : (d.state ?? d.job_status) === "failure" ||
+                        (d.state ?? d.job_status) === "cancelled" ||
+                        (d.state ?? d.job_status) === "error"
                       ? "destructive"
                       : "primary"
                 }
               >
-                {d.job_status as string}
+                {(d.state ?? d.job_status) as string}
               </Badge>
               @if (d.created_at) {
                 <span className="text-[11px] text-muted-foreground">

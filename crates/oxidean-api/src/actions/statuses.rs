@@ -153,6 +153,7 @@ pub async fn publish_cancelled_for_run(
         )
         .await?;
         crate::webhook::dispatch::notify_workflow_job(db, &job.id, "completed").await;
+        crate::webhook::dispatch::notify_deployment_job_status(db, &job.id).await;
     }
     Ok(())
 }
@@ -204,6 +205,7 @@ pub async fn publish_from_job_update(
         "success" | "failure" | "cancelled" | "skipped" | "neutral"
     ) {
         crate::webhook::dispatch::notify_workflow_job(db, job_id, "completed").await;
+        crate::webhook::dispatch::notify_deployment_job_status(db, job_id).await;
     }
     Ok(())
 }

@@ -26,6 +26,8 @@ const ALLOWED_EVENTS: &[&str] = &[
     "issues",
     "issue_comment",
     "milestone",
+    "deployment",
+    "deployment_status",
     "pull_request_review_comment",
     "release",
     "star",

@@ -887,6 +887,7 @@ pub async fn fetch_task(
                     task = Some(t);
                     crate::webhook::dispatch::notify_workflow_job(&state.db, &j.id, "in_progress")
                         .await;
+                    crate::webhook::dispatch::notify_deployment_job_status(&state.db, &j.id).await;
                 }
                 Err(resp) => return resp,
             }

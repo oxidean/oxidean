@@ -2579,13 +2579,25 @@ export type RepoActionsEnvironmentSecretDeleteRequest = {
 export type ActionDeploymentPublic = {
   id: string;
   environment: string;
-  run_id: string;
-  job_id: string;
+  /** Present for environment-job deployments; null for API-created ones. */
+  run_id?: string | null;
+  job_id?: string | null;
   sha: string;
-  git_ref: string;
+  /** GitHub `deployment.ref`. */
+  ref: string;
   url?: string | null;
+  task: string;
+  description: string;
+  payload?: unknown;
+  creator_id?: string | null;
+  creator_username?: string | null;
+  transient_environment: boolean;
+  production_environment: boolean;
+  /** Latest deployment-status state (null until the first lands). */
+  state?: string | null;
   job_status: string;
   created_at: string;
+  updated_at: string;
 };
 
 export type ActionDeploymentsListRequest = {
@@ -2600,6 +2612,90 @@ export type ActionDeploymentsListRequest = {
 
 export type ActionDeploymentsListResponse = {
   deployments: ActionDeploymentPublic[];
+};
+
+export type DeploymentListRequest = {
+  owner: string;
+  name: string;
+  sha?: string;
+  ref?: string;
+  task?: string;
+  environment?: string;
+  limit?: number;
+};
+
+export type DeploymentListResponse = {
+  deployments: ActionDeploymentPublic[];
+};
+
+export type DeploymentRefRequest = {
+  owner: string;
+  name: string;
+  id: string;
+};
+
+export type DeploymentCreateRequest = {
+  owner: string;
+  name: string;
+  /** Branch name, `refs/…`, tag, or sha — resolved server-side. */
+  ref: string;
+  /** Task identifier (GitHub default `deploy`). */
+  task?: string;
+  /** Merge the default branch into the ref first (GitHub default true). */
+  auto_merge?: boolean;
+  /** Contexts that must be `success`; `[]` skips (GitHub: omitted = all). */
+  required_contexts?: string[];
+  payload?: unknown;
+  /** Environment name (GitHub default `production`). */
+  environment?: string;
+  description?: string;
+  transient_environment?: boolean;
+  production_environment?: boolean;
+};
+
+export type DeploymentStatusPublic = {
+  id: string;
+  deployment_id: string;
+  state: string;
+  description: string;
+  environment?: string | null;
+  environment_url?: string | null;
+  target_url?: string | null;
+  log_url?: string | null;
+  creator_id?: string | null;
+  creator_username?: string | null;
+  created_at: string;
+};
+
+export type DeploymentStatusCreateRequest = {
+  owner: string;
+  name: string;
+  deployment_id: string;
+  /** error|failure|inactive|in_progress|pending|queued|success|waiting */
+  state: string;
+  description?: string;
+  environment?: string;
+  environment_url?: string;
+  log_url?: string;
+  /** Deprecated GitHub alias for `log_url`. */
+  target_url?: string;
+  /** `success` marks prior env deployments inactive (GitHub default true). */
+  auto_inactive?: boolean;
+};
+
+export type DeploymentStatusListRequest = {
+  owner: string;
+  name: string;
+  deployment_id: string;
+  limit?: number;
+};
+
+export type DeploymentStatusListResponse = {
+  statuses: DeploymentStatusPublic[];
+};
+
+export type DeploymentDeleteResponse = {
+  ok: boolean;
 };
 
 export type OrgSecretMetaPublic = {
@@ -4895,6 +4991,22 @@ export function createClient(opts: CreateClientOptions) {
         rpcCall<MilestonePublic>(opts, "milestone.update", input),
       delete: (input: MilestoneRefRequest) =>
         rpcCall<DeleteMilestoneResponse>(opts, "milestone.delete", input),
+    },
+    deployment: {
+      list: (input: DeploymentListRequest) =>
+        rpcCall<DeploymentListResponse>(opts, "deployment.list", input),
+      get: (input: DeploymentRefRequest) =>
+        rpcCall<ActionDeploymentPublic>(opts, "deployment.get", input),
+      create: (input: DeploymentCreateRequest) =>
+        rpcCall<ActionDeploymentPublic>(opts, "deployment.create", input),
+      delete: (input: DeploymentRefRequest) =>
+        rpcCall<DeploymentDeleteResponse>(opts, "deployment.delete", input),
+      status: {
+        list: (input: DeploymentStatusListRequest) =>
+          rpcCall<DeploymentStatusListResponse>(opts, "deployment.status.list", input),
+        create: (input: DeploymentStatusCreateRequest) =>
+          rpcCall<DeploymentStatusPublic>(opts, "deployment.status.create", input),
+      },
     },
     pull: {
       create: (input: CreatePullRequest) =>

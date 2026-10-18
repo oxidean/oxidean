@@ -148,6 +148,8 @@ pub fn spawn_background_jobs(
                         for job_id in &ids {
                             crate::webhook::dispatch::notify_workflow_job(&db_c, job_id, "queued")
                                 .await;
+                            crate::webhook::dispatch::notify_deployment_job_status(&db_c, job_id)
+                                .await;
                         }
                         crate::actions::task_wake::wake();
                         tracing::info!(promoted = ids.len(), "deployment wait timer released jobs");

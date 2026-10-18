@@ -605,6 +605,7 @@ fn fg_repo_perm(pat: &PatIdentity, class: PatProc) -> Option<(Option<FgPermLevel
         EnvironmentsRead => (p.environments, FgPermLevel::Read),
         EnvironmentsWrite => (p.environments, FgPermLevel::Write),
         DeploymentsRead => (p.deployments, FgPermLevel::Read),
+        DeploymentsWrite => (p.deployments, FgPermLevel::Write),
         StatusesRead => (p.commit_statuses, FgPermLevel::Read),
         StatusesWrite => (p.commit_statuses, FgPermLevel::Write),
         SecretsRead => (p.secrets, FgPermLevel::Read),

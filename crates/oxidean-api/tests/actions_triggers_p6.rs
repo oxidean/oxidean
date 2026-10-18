@@ -675,6 +675,8 @@ on:
     types: [created]
   public: {}
   status: {}
+  deployment: {}
+  deployment_status: {}
   repository_dispatch:
     types: [deploy]
   branch_protection_rule:
@@ -743,17 +745,23 @@ jobs:
     }
     assert_eq!(run_count(&db, &repo_id).await, 12);
 
+    // deployment / deployment_status — bare `on:` fires on `created`.
+    for name in ["deployment", "deployment_status"] {
+        notify_lifecycle_actions(&db, git.as_ref(), &ev(name, "created")).await;
+    }
+    assert_eq!(run_count(&db, &repo_id).await, 14);
+
     // repository_dispatch — types: match the caller-chosen event_type.
     notify_lifecycle_actions(&db, git.as_ref(), &ev("repository_dispatch", "build")).await;
-    assert_eq!(run_count(&db, &repo_id).await, 12);
+    assert_eq!(run_count(&db, &repo_id).await, 14);
     notify_lifecycle_actions(&db, git.as_ref(), &ev("repository_dispatch", "deploy")).await;
-    assert_eq!(run_count(&db, &repo_id).await, 13);
+    assert_eq!(run_count(&db, &repo_id).await, 15);
 
     // branch_protection_rule types:[created] — edited filtered.
     notify_lifecycle_actions(&db, git.as_ref(), &ev("branch_protection_rule", "edited")).await;
-    assert_eq!(run_count(&db, &repo_id).await, 13);
+    assert_eq!(run_count(&db, &repo_id).await, 15);
     notify_lifecycle_actions(&db, git.as_ref(), &ev("branch_protection_rule", "created")).await;
-    assert_eq!(run_count(&db, &repo_id).await, 14);
+    assert_eq!(run_count(&db, &repo_id).await, 16);
 
     let runs = db
         .list_action_runs_for_repo(&repo_id, &Default::default(), 100, 0)
@@ -772,6 +780,8 @@ jobs:
         "milestone",
         "public",
         "status",
+        "deployment",
+        "deployment_status",
         "repository_dispatch",
         "branch_protection_rule",
     ] {

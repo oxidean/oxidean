@@ -820,14 +820,144 @@ pub struct RepoActionsEnvironmentDeleteResponse {
 pub struct ActionDeploymentPublic {
     pub id: String,
     pub environment: String,
-    pub run_id: String,
-    pub job_id: String,
+    /// Present for environment-job deployments; NULL for API-created ones.
+    pub run_id: Option<String>,
+    pub job_id: Option<String>,
     pub sha: String,
+    /// Serializes as `ref` (GitHub `deployment.ref`).
+    #[serde(rename = "ref")]
     pub git_ref: String,
     pub url: Option<String>,
+    /// GitHub `deployment.task` — `deploy` for environment jobs.
+    pub task: String,
+    pub description: String,
+    /// Free-form JSON payload (GitHub `deployment.payload`).
+    pub payload: Option<serde_json::Value>,
+    pub creator_id: Option<String>,
+    pub creator_username: Option<String>,
+    pub transient_environment: bool,
+    pub production_environment: bool,
+    /// Latest `action_deployment_statuses.state` — the Deployments-API
+    /// `state` projection (NULL until the first status lands).
+    pub state: Option<String>,
     /// Derived from the backing job's status (coalesced `waiting_approval`).
     pub job_status: String,
     pub created_at: String,
+    pub updated_at: String,
+}
+
+/// `deployment.list` — repo-scoped listing (GitHub REST `GET /deployments`
+/// parity: `sha`, `ref`, `task`, `environment` filters).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct DeploymentListRequest {
+    pub owner: String,
+    pub name: String,
+    pub sha: Option<String>,
+    #[serde(rename = "ref")]
+    pub git_ref: Option<String>,
+    pub task: Option<String>,
+    pub environment: Option<String>,
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct DeploymentListResponse {
+    pub deployments: Vec<ActionDeploymentPublic>,
+}
+
+/// `deployment.get` / `deployment.delete` — one deployment by id.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct DeploymentRefRequest {
+    pub owner: String,
+    pub name: String,
+    pub id: String,
+}
+
+/// `deployment.create` — GitHub REST `POST /deployments` parity.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct DeploymentCreateRequest {
+    pub owner: String,
+    pub name: String,
+    /// Branch name, `refs/...`, tag, or sha — resolved server-side.
+    #[serde(rename = "ref")]
+    pub git_ref: String,
+    /// Task identifier (GitHub default `deploy`).
+    pub task: Option<String>,
+    /// Merge the default branch into the ref before deploying — creates a
+    /// merge commit on the ref (GitHub default `true`; only applies to
+    /// branch refs that aren't the default branch).
+    pub auto_merge: Option<bool>,
+    /// Commit-status contexts that must be `success`. Omitted verifies
+    /// every context present on the sha; `[]` skips verification (GitHub).
+    pub required_contexts: Option<Vec<String>>,
+    /// Free-form JSON stored on the deployment.
+    pub payload: Option<serde_json::Value>,
+    /// Environment name (GitHub default `production`).
+    pub environment: Option<String>,
+    pub description: Option<String>,
+    /// Transient envs never auto-inactivate prior deployments.
+    pub transient_environment: Option<bool>,
+    /// Defaults from the environment's protection rules when unset.
+    pub production_environment: Option<bool>,
+}
+
+pub type DeploymentCreateResponse = ActionDeploymentPublic;
+pub type DeploymentGetResponse = ActionDeploymentPublic;
+
+/// `deployment.status.create` — GitHub REST `POST
+/// /deployments/{id}/statuses` parity.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct DeploymentStatusCreateRequest {
+    pub owner: String,
+    pub name: String,
+    pub deployment_id: String,
+    /// `error`|`failure`|`inactive`|`in_progress`|`pending`|`queued`|
+    /// `success`|`waiting` (GitHub vocabulary).
+    pub state: String,
+    pub description: Option<String>,
+    /// Overrides the deployment's environment name on this status.
+    pub environment: Option<String>,
+    pub environment_url: Option<String>,
+    /// Logs/result link (GitHub `log_url`; `target_url` accepted as alias).
+    pub log_url: Option<String>,
+    pub target_url: Option<String>,
+    /// `success` statuses mark prior env deployments `inactive` (GitHub
+    /// default `true`).
+    pub auto_inactive: Option<bool>,
+}
+
+/// One `action_deployment_statuses` row in GitHub's status shape.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct DeploymentStatusPublic {
+    pub id: String,
+    pub deployment_id: String,
+    pub state: String,
+    pub description: String,
+    pub environment: Option<String>,
+    pub environment_url: Option<String>,
+    pub target_url: Option<String>,
+    pub log_url: Option<String>,
+    pub creator_id: Option<String>,
+    pub creator_username: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct DeploymentStatusListRequest {
+    pub owner: String,
+    pub name: String,
+    pub deployment_id: String,
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct DeploymentStatusListResponse {
+    pub statuses: Vec<DeploymentStatusPublic>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct DeploymentDeleteResponse {
+    pub ok: bool,
 }
 
 /// `repo.actions.listDeployments` — deployment records for a run, or for the

@@ -46,6 +46,9 @@ pub enum PatProc {
     /// Environment deployment records. Classic `repo`; FG `deployments`
     /// perm.
     DeploymentsRead,
+    /// Creating deployments and deployment statuses (GitHub Deployments
+    /// API). Classic `repo`; FG `deployments:write`.
+    DeploymentsWrite,
     /// Commit statuses. Classic `repo:status`|`repo`|`public_repo`; FG
     /// `commit_statuses` perm.
     StatusesRead,
@@ -289,6 +292,8 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
             SecretsWrite
         }
         "repo.actions.listDeployments" => DeploymentsRead,
+        "deployment.list" | "deployment.get" | "deployment.status.list" => DeploymentsRead,
+        "deployment.create" | "deployment.status.create" | "deployment.delete" => DeploymentsWrite,
 
         // Drafting a workflow file is a contents write (ActionsWrite ⇒ classic
         // `repo` or `workflow`, FG `actions:write`).
@@ -441,8 +446,9 @@ pub fn classic_scopes_for(class: PatProc) -> &'static [ClassicPatScope] {
     match class {
         // `repo` umbrella classes (narrower scopes add on below).
         RepoRead | RepoWrite | IssuesRead | IssuesWrite | PullsRead | PullsWrite | ActionsRead
-        | EnvironmentsRead | EnvironmentsWrite | DeploymentsRead | SecretsRead | SecretsWrite
-        | ReleasesRead | ReleasesWrite | RepoAdminRead | RepoAdminWrite => &[S::Repo],
+        | EnvironmentsRead | EnvironmentsWrite | DeploymentsRead | DeploymentsWrite
+        | SecretsRead | SecretsWrite | ReleasesRead | ReleasesWrite | RepoAdminRead
+        | RepoAdminWrite => &[S::Repo],
         ActionsWrite => &[S::Repo, S::Workflow],
         StatusesRead | StatusesWrite => &[S::Repo, S::RepoStatus],
         WebhooksRead | WebhooksWrite => &[S::Repo, S::AdminRepoHook],
@@ -489,7 +495,7 @@ pub fn fg_family_name(class: PatProc) -> Option<&'static str> {
         PullsRead | PullsWrite => "pull_requests",
         ActionsRead | ActionsWrite => "actions",
         EnvironmentsRead | EnvironmentsWrite => "environments",
-        DeploymentsRead => "deployments",
+        DeploymentsRead | DeploymentsWrite => "deployments",
         StatusesRead | StatusesWrite => "commit_statuses",
         SecretsRead | SecretsWrite => "secrets",
         ReleasesRead | ReleasesWrite => "releases",

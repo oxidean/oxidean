@@ -265,6 +265,80 @@ pub fn workflow_run_payload(
     })
 }
 
+/// `deployment` object in GitHub's Deployments-API shape — shared by the
+/// `deployment` event payload and the `deployment_status.deployment` embed.
+pub fn deployment_embed(row: &oxidean_db::ActionDeploymentRow, creator_login: &str) -> JsonValue {
+    json!({
+        "id": row.id,
+        "sha": row.sha,
+        "ref": row.git_ref,
+        "task": row.task,
+        "payload": row.payload.as_deref().and_then(|p| serde_json::from_str::<JsonValue>(p).ok()).unwrap_or(JsonValue::Object(Default::default())),
+        "environment": row.environment,
+        "original_environment": row.environment,
+        "description": if row.description.is_empty() { JsonValue::Null } else { JsonValue::String(row.description.clone()) },
+        "creator": {"login": creator_login, "id": row.creator_id},
+        "url": row.url,
+        "transient_environment": row.transient_environment,
+        "production_environment": row.production_environment,
+        "created_at": row.created_at,
+        "updated_at": row.updated_at,
+    })
+}
+
+/// `deployment` event payload — `action` is always `created` (GitHub defines
+/// no activity types for deployments).
+pub fn deployment_payload(
+    row: &oxidean_db::ActionDeploymentRow,
+    creator_login: &str,
+    repository: &JsonValue,
+    sender: &JsonValue,
+) -> JsonValue {
+    json!({
+        "action": "created",
+        "deployment": deployment_embed(row, creator_login),
+        "repository": repository,
+        "sender": sender,
+    })
+}
+
+/// `deployment_status` object in GitHub's shape.
+pub fn deployment_status_embed(
+    row: &oxidean_db::ActionDeploymentStatusRow,
+    creator_login: &str,
+) -> JsonValue {
+    json!({
+        "id": row.id,
+        "state": row.state,
+        "description": if row.description.is_empty() { JsonValue::Null } else { JsonValue::String(row.description.clone()) },
+        "environment": row.environment,
+        "environment_url": row.environment_url,
+        "target_url": row.target_url,
+        "log_url": row.log_url,
+        "creator": {"login": creator_login, "id": row.creator_id},
+        "created_at": row.created_at,
+        "updated_at": row.created_at,
+    })
+}
+
+/// `deployment_status` event payload — `action` is always `created`.
+pub fn deployment_status_payload(
+    status: &oxidean_db::ActionDeploymentStatusRow,
+    deployment: &oxidean_db::ActionDeploymentRow,
+    status_creator_login: &str,
+    deployment_creator_login: &str,
+    repository: &JsonValue,
+    sender: &JsonValue,
+) -> JsonValue {
+    json!({
+        "action": "created",
+        "deployment_status": deployment_status_embed(status, status_creator_login),
+        "deployment": deployment_embed(deployment, deployment_creator_login),
+        "repository": repository,
+        "sender": sender,
+    })
+}
+
 /// `{full_name, name, owner.login, default_branch}` — the `repository`
 /// embed every payload shares.
 pub fn repository_embed(owner: &str, name: &str, default_branch: &str) -> JsonValue {

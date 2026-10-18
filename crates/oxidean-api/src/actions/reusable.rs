@@ -605,6 +605,7 @@ pub async fn expand_call(
         head_ref: &run.head_ref,
         default_permissions: &default_permissions,
         workflow_name: &doc.name,
+        triggered_by: run.triggered_by.as_deref(),
         ctx,
         all_warnings,
         log_dir: Some(crate::actions::logs::resolve_log_dir()),

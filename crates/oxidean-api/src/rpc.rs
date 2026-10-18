@@ -18,6 +18,7 @@ use crate::auth::profile;
 use crate::auth::session::{ResolvedSession, SessionService};
 use crate::auth::two_factor;
 use crate::auth::verify_reset;
+use crate::deployment;
 use crate::email::EmailSender;
 use crate::emails;
 use crate::gpg_keys;
@@ -420,6 +421,12 @@ pub const PROCEDURES: &[&str] = &[
     "milestone.create",
     "milestone.update",
     "milestone.delete",
+    "deployment.list",
+    "deployment.get",
+    "deployment.create",
+    "deployment.delete",
+    "deployment.status.list",
+    "deployment.status.create",
     "issue.assigneeCandidates",
     "issue.reactions.toggle",
     "issue.links.list",
@@ -1797,6 +1804,30 @@ async fn dispatch_inner(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Err(e) => RpcResponse::err(e),
         },
         "milestone.delete" => match milestone::delete(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "deployment.list" => match deployment::list(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "deployment.get" => match deployment::get(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "deployment.create" => match deployment::create(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "deployment.delete" => match deployment::delete(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "deployment.status.list" => match deployment::status_list(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "deployment.status.create" => match deployment::status_create(ctx, req.input).await {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },

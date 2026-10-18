@@ -206,6 +206,7 @@ async fn requeue_dead_runner_job(db: &Database, job: &StaleJobRow, stale_secs: u
         }
         // Requeue re-announces the job — new attempt is `queued` again.
         crate::webhook::dispatch::notify_workflow_job(db, &job.id, "queued").await;
+        crate::webhook::dispatch::notify_deployment_job_status(db, &job.id).await;
         tracing::info!(
             job_id = %job.id,
             job_key = %job.job_key,

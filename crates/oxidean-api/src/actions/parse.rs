@@ -693,6 +693,8 @@ fn apply_event(
         | "registry_package"
         | "label"
         | "milestone"
+        | "deployment"
+        | "deployment_status"
         | "public"
         | "status"
         | "repository_dispatch"

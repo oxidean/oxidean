@@ -46,7 +46,7 @@ download, annotations, `workflow_job` webhook.
 |---------|-----------|---------|-------------|-----|
 | 1. Workflow files & discovery | 8 | 0 | 0 | 0 |
 | 2. Triggers & filters | 22 | 0 | 0 | 0 |
-| 3. Events | 24 | 0 | 12 | 0 |
+| 3. Events | 26 | 0 | 10 | 0 |
 | 4. Workflow-level keys | 8 | 0 | 0 | 0 |
 | 5. Jobs | 29 | 0 | 0 | 1 |
 | 6. Steps | 19 | 0 | 0 | 1 |
@@ -138,8 +138,8 @@ activity-type filter semantics; unsupported ones warn at parse (section 2,
 | `ev.check_suite` | `check_suite` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
 | `ev.create` | `create` — branch/tag creation | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_lifecycle_generic_events | Fires on RPC branch/tag creation and receive-pack creates; `ref_type` distinguishes branch/tag in the payload. Job-token pushes are suppressed (GITHUB_TOKEN non-recursion). |
 | `ev.delete` | `delete` — branch/tag deletion | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_lifecycle_generic_events | Fires on RPC and receive-pack deletes; job-token pushes suppressed. |
-| `ev.deployment` | `deployment` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
-| `ev.deployment_status` | `deployment_status` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
+| `ev.deployment` | `deployment` — action `created` | supported | test:crates/oxidean-api/tests/deployments.rs::deployment_events_trigger_runs_and_webhooks, test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_lifecycle_generic_events | Fires on `deployment.create` (the public Deployments API); environment-job deployment projections emit webhooks only, preserving GITHUB_TOKEN non-recursion (job-token API callers are suppressed too). `deployment.ref` resolves branches/tags/sha server-side; `auto_merge`, `required_contexts`, `transient_environment`, and `production_environment` follow GitHub semantics. |
+| `ev.deployment_status` | `deployment_status` — action `created` | supported | test:crates/oxidean-api/tests/deployments.rs::deployment_events_trigger_runs_and_webhooks, test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_lifecycle_generic_events | Fires on `deployment.status.create` and on every deployment-state transition (job transitions, auto-`inactive` supersede, `auto_inactive` on `success`). The deployment's `state` projects the latest status row, ordered by a monotonic sequence so same-second bursts stay deterministic. |
 | `ev.discussion` | `discussion` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
 | `ev.discussion_comment` | `discussion_comment` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
 | `ev.fork` | `fork` | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_lifecycle_generic_events | Fires on `repo.fork` with a `forkee` payload; action `created`. |
@@ -523,7 +523,7 @@ Source: <https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-
 | `envr.rejection-fails` | Rejected approval fails the job | supported | test:crates/oxidean-api/tests/actions_phase7.rs::p7_environment_required_reviewers_hold | |
 | `envr.secret-precedence` | Environment secrets override repo secrets, which override org secrets | supported | test:crates/oxidean-api/tests/actions_phase8.rs::p8_org_env_secret_merge_precedence_and_audit | |
 | `envr.url` | `environment.url` → job outputs `url` | supported | case:environment-job | |
-| `envr.deployments` | Deployment records per job | supported | test:crates/oxidean-api/tests/actions_phase7.rs::p7_environment_auto_create_and_deployments | |
+| `envr.deployments` | Deployment records per job + public Deployments API | supported | test:crates/oxidean-api/tests/actions_phase7.rs::p7_environment_auto_create_and_deployments, test:crates/oxidean-api/tests/deployments.rs::deployment_crud_statuses_and_supersede | Environment jobs project a deployment row + status history; `deployment.*` RPCs mirror GitHub's REST surface (ref resolution, `auto_merge`, `required_contexts`, `auto_inactive`, inactive-gated delete). |
 | `envr.admin-bypass` | Repo admins can release a held deployment | supported | test:crates/oxidean-api/tests/actions_phase7.rs::p7_environment_required_reviewers_hold | Matches GitHub's admin override. |
 
 ## 17. `GITHUB_TOKEN` permissions (`perm.`)

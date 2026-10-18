@@ -415,6 +415,7 @@ pub async fn enqueue_run(
         }
         let env_name = std::env::var("OXIDEAN_ENV").unwrap_or_else(|_| "development".into());
         crate::webhook::dispatch::notify_workflow_job(db, &job_id, "completed").await;
+        crate::webhook::dispatch::notify_deployment_job_status(db, &job_id).await;
         crate::webhook::dispatch::notify_workflow_run(db, &run_id, "requested", &env_name).await;
         if let Err(e) = crate::actions::statuses::upsert_job_status(
             db,
@@ -461,6 +462,7 @@ pub async fn enqueue_run(
         head_ref,
         default_permissions: &default_permissions,
         workflow_name: &workflow_name,
+        triggered_by,
         ctx,
         all_warnings,
         log_dir,
@@ -826,6 +828,7 @@ pub async fn fail_discovery_runs(
             tracing::warn!(error = %e, run_id, "validation run rollup failed");
         }
         crate::webhook::dispatch::notify_workflow_job(db, &job_id, "completed").await;
+        crate::webhook::dispatch::notify_deployment_job_status(db, &job_id).await;
         crate::webhook::dispatch::notify_workflow_run(db, &run_id, "requested", &env_name).await;
         if let Err(e) = crate::actions::statuses::upsert_job_status(
             db,
@@ -864,6 +867,8 @@ pub(crate) struct EmitCtx<'a> {
     pub head_ref: &'a str,
     pub default_permissions: &'a str,
     pub workflow_name: &'a str,
+    /// Run initiator — stamped as `creator_id` on environment deployments.
+    pub triggered_by: Option<&'a str>,
     /// Enqueue/expand-time expression context (github/env/vars/inputs).
     pub ctx: oxidean_actions_expr::Context,
     pub all_warnings: Vec<String>,
@@ -1040,6 +1045,7 @@ pub(crate) async fn emit_jobs(
         let mut environment_url: Option<String> = None;
         let mut environment_wait_minutes: i64 = 0;
         let mut environment_reviewers = false;
+        let mut environment_protected = false;
         if let Some(env_spec) = &job.environment {
             let resolved_name =
                 crate::actions::eval_ctx::interp_or_raw(&env_spec.name, &ctx, &mut notes);
@@ -1074,6 +1080,12 @@ pub(crate) async fn emit_jobs(
                         .get("required_reviewers")
                         .and_then(|v| v.as_array())
                         .is_some_and(|a| !a.is_empty());
+                    environment_protected = environment_reviewers
+                        || environment_wait_minutes > 0
+                        || protection
+                            .get("deployment_branches")
+                            .and_then(|v| v.as_array())
+                            .is_some_and(|a| !a.is_empty());
                     if let Some(branches) = protection
                         .get("deployment_branches")
                         .and_then(|v| v.as_array())
@@ -1297,21 +1309,38 @@ pub(crate) async fn emit_jobs(
             crate::webhook::dispatch::notify_workflow_job(db, &job_id, wj_action).await;
             // The deployment record is the public projection of the
             // environment deployment — GitHub's Deployments API analogue.
+            // `deployment` + initial `deployment_status` webhooks ride the
+            // job token's non-recursion rule: they never trigger new runs.
             if let Some(env_name) = &environment_name {
-                if let Err(e) = db
-                    .insert_action_deployment(
-                        &Uuid::new_v4().to_string(),
+                let deployment_id = Uuid::new_v4().to_string();
+                match db
+                    .insert_action_deployment(&oxidean_db::deployments::NewDeployment {
+                        id: &deployment_id,
                         repository_id,
-                        env_name,
-                        run_id,
-                        &job_id,
-                        head_sha,
-                        head_ref,
-                        environment_url.as_deref(),
-                    )
+                        environment: env_name,
+                        run_id: Some(run_id),
+                        job_id: Some(&job_id),
+                        sha: head_sha,
+                        git_ref: head_ref,
+                        url: environment_url.as_deref(),
+                        task: "deploy",
+                        description: "",
+                        payload: None,
+                        creator_id: emit.triggered_by,
+                        transient_environment: false,
+                        // GitHub marks protected environments as production
+                        // on the deployment record.
+                        production_environment: environment_protected,
+                    })
                     .await
                 {
-                    tracing::warn!(error = %e, run_id, env_name, "deployment insert failed");
+                    Ok(_) => {
+                        crate::webhook::dispatch::notify_deployment_created(db, &deployment_id)
+                            .await;
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, run_id, env_name, "deployment insert failed")
+                    }
                 }
             }
             // Validation warnings + eval notes + skip/failure annotations

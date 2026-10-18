@@ -1386,7 +1386,10 @@ pub async fn delete_environment_secret(
     Ok(serde_json::json!({ "ok": ok }))
 }
 
-fn deployment_public(d: &oxidean_db::ActionDeploymentRow) -> ActionDeploymentPublic {
+pub(crate) fn deployment_public(
+    d: &oxidean_db::ActionDeploymentRow,
+    creator_username: Option<String>,
+) -> ActionDeploymentPublic {
     ActionDeploymentPublic {
         id: d.id.clone(),
         environment: d.environment.clone(),
@@ -1395,8 +1398,20 @@ fn deployment_public(d: &oxidean_db::ActionDeploymentRow) -> ActionDeploymentPub
         sha: d.sha.clone(),
         git_ref: d.git_ref.clone(),
         url: d.url.clone(),
+        task: d.task.clone(),
+        description: d.description.clone(),
+        payload: d
+            .payload
+            .as_deref()
+            .and_then(|p| serde_json::from_str(p).ok()),
+        creator_id: d.creator_id.clone(),
+        creator_username,
+        transient_environment: d.transient_environment,
+        production_environment: d.production_environment,
+        state: d.latest_state.clone(),
         job_status: d.job_status.clone(),
         created_at: d.created_at.clone(),
+        updated_at: d.updated_at.clone(),
     }
 }
 
@@ -1443,9 +1458,21 @@ pub async fn list_deployments(
             .await
             .map_err(db_err)?,
     };
-    Ok(ActionDeploymentsListResponse {
-        deployments: rows.iter().map(deployment_public).collect(),
-    })
+    let mut deployments = Vec::with_capacity(rows.len());
+    for d in &rows {
+        let creator_username = match d.creator_id.as_deref() {
+            Some(id) => ctx
+                .db
+                .find_user_by_id(id)
+                .await
+                .ok()
+                .flatten()
+                .map(|u| u.username),
+            None => None,
+        };
+        deployments.push(deployment_public(d, creator_username));
+    }
+    Ok(ActionDeploymentsListResponse { deployments })
 }
 
 /// `repo.actions.approveJob` — Write+; release one approval-held job.
@@ -2424,6 +2451,7 @@ pub async fn rerun_run(
                 "queued"
             };
             crate::webhook::dispatch::notify_workflow_job(&ctx.db, &job.id, action).await;
+            crate::webhook::dispatch::notify_deployment_job_status(&ctx.db, &job.id).await;
         }
     }
     // API-04: a requeued run is a new `workflow_run` `requested` delivery.

@@ -795,6 +795,172 @@ pub async fn notify_workflow_job(db: &Database, job_id: &str, action: &str) {
     .await;
 }
 
+/// Map a job lifecycle status onto GitHub's deployment-status vocabulary.
+fn job_status_deployment_state(status: &str) -> &'static str {
+    match status {
+        "in_progress" => "in_progress",
+        "success" => "success",
+        "failure" => "failure",
+        "cancelled" => "error",
+        "waiting" | "waiting_approval" => "waiting",
+        "skipped" => "inactive",
+        _ => "queued",
+    }
+}
+
+/// Emit the `deployment` webhook for one deployment row (`action: created`).
+pub(crate) async fn emit_deployment_webhook(
+    db: &Database,
+    deployment: &oxidean_db::ActionDeploymentRow,
+    repository_id: &str,
+    env_name: &str,
+) {
+    let Some((repo, owner)) = repo_context(db, repository_id).await else {
+        return;
+    };
+    let creator_login = sender_login(db, deployment.creator_id.as_deref()).await;
+    let repository = repository_block(&repo.id, &repo.name, &owner);
+    let sender = json!({
+        "login": creator_login,
+        "id": deployment.creator_id.as_deref().unwrap_or(""),
+    });
+    let payload = crate::actions::payload::deployment_payload(
+        deployment,
+        &creator_login,
+        &repository,
+        &sender,
+    );
+    emit(
+        db,
+        repository_id,
+        "deployment",
+        "created",
+        payload,
+        env_name,
+    )
+    .await;
+}
+
+/// Insert one `deployment_status` row and emit the `deployment_status`
+/// webhook. Returns the stored row; `None` on insert failure (warned).
+pub(crate) async fn record_deployment_status_webhook(
+    db: &Database,
+    deployment: &oxidean_db::ActionDeploymentRow,
+    status: &oxidean_db::deployments::NewDeploymentStatus<'_>,
+    repository_id: &str,
+    env_name: &str,
+) -> Option<oxidean_db::ActionDeploymentStatusRow> {
+    let row = match db.insert_action_deployment_status(status).await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!(error = %e, deployment_id = %status.deployment_id, "deployment status insert failed");
+            return None;
+        }
+    };
+    let Some((repo, owner)) = repo_context(db, repository_id).await else {
+        return Some(row);
+    };
+    let status_creator_login = sender_login(db, status.creator_id).await;
+    let deployment_creator_login = sender_login(db, deployment.creator_id.as_deref()).await;
+    let repository = repository_block(&repo.id, &repo.name, &owner);
+    let sender = json!({
+        "login": status_creator_login,
+        "id": status.creator_id.unwrap_or(""),
+    });
+    let payload = crate::actions::payload::deployment_status_payload(
+        &row,
+        deployment,
+        &status_creator_login,
+        &deployment_creator_login,
+        &repository,
+        &sender,
+    );
+    emit(
+        db,
+        repository_id,
+        "deployment_status",
+        "created",
+        payload,
+        env_name,
+    )
+    .await;
+    Some(row)
+}
+
+/// Job-bound deployment at insert: `deployment` (created) webhook + the
+/// initial `deployment_status` mirroring the job's status. Job-token work —
+/// GitHub's non-recursion rule keeps these out of Actions triggers, so only
+/// webhooks fire.
+pub async fn notify_deployment_created(db: &Database, deployment_id: &str) {
+    let Some(deployment) = db
+        .find_action_deployment_by_id(deployment_id)
+        .await
+        .ok()
+        .flatten()
+    else {
+        return;
+    };
+    let env_name = std::env::var("OXIDEAN_ENV").unwrap_or_else(|_| "development".into());
+    emit_deployment_webhook(db, &deployment, &deployment.repository_id, &env_name).await;
+    let status_id = Uuid::new_v4().to_string();
+    record_deployment_status_webhook(
+        db,
+        &deployment,
+        &oxidean_db::deployments::NewDeploymentStatus {
+            id: &status_id,
+            deployment_id,
+            state: job_status_deployment_state(&deployment.job_status),
+            description: "",
+            environment: None,
+            environment_url: None,
+            target_url: None,
+            log_url: None,
+            creator_id: deployment.creator_id.as_deref(),
+        },
+        &deployment.repository_id,
+        &env_name,
+    )
+    .await;
+}
+
+/// Mirror a `workflow_job` transition onto the job's deployment record —
+/// inserts the mapped `deployment_status` + emits the webhook. No-op for
+/// jobs with no environment deployment. Reads the durable job status so
+/// `completed` carries the real conclusion.
+pub async fn notify_deployment_job_status(db: &Database, job_id: &str) {
+    let Some(deployment) = db
+        .find_action_deployment_by_job_id(job_id)
+        .await
+        .ok()
+        .flatten()
+    else {
+        return;
+    };
+    let Some(job) = db.find_action_job_by_id(job_id).await.ok().flatten() else {
+        return;
+    };
+    let env_name = std::env::var("OXIDEAN_ENV").unwrap_or_else(|_| "development".into());
+    let status_id = Uuid::new_v4().to_string();
+    record_deployment_status_webhook(
+        db,
+        &deployment,
+        &oxidean_db::deployments::NewDeploymentStatus {
+            id: &status_id,
+            deployment_id: &deployment.id,
+            state: job_status_deployment_state(&job.status),
+            description: "",
+            environment: None,
+            environment_url: None,
+            target_url: None,
+            log_url: None,
+            creator_id: deployment.creator_id.as_deref(),
+        },
+        &deployment.repository_id,
+        &env_name,
+    )
+    .await;
+}
+
 /// Emit `registry_package` when a version is published on a package linked to
 /// a repository (API-04), and fire `on: registry_package` Actions triggers.
 /// Unlinked packages have no webhook scope — nothing is emitted for them.
