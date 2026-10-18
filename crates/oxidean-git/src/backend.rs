@@ -570,6 +570,19 @@ pub trait GitBackend: Send + Sync {
         message: &str,
     ) -> Result<String, GitError>;
 
+    /// Build a test-merge commit of `head_sha` into `base_sha` inside `repo`
+    /// without moving any branch — `merge-tree --write-tree` + `commit-tree`
+    /// with parents `(base_sha, head_sha)`. Conflicts → [`GitError::Process`].
+    /// Callers publish the result via [`update_ref`](Self::update_ref)
+    /// (e.g. `refs/pull/N/merge`).
+    async fn test_merge_commit(
+        &self,
+        repo: &Path,
+        base_sha: &str,
+        head_sha: &str,
+        message: &str,
+    ) -> Result<String, GitError>;
+
     /// Squash `head_sha` onto `base_ref` as a single commit.
     async fn squash_merge(
         &self,

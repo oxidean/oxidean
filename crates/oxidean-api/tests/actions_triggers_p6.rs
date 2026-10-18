@@ -934,3 +934,195 @@ jobs:
     .unwrap();
     assert_eq!(n, 1);
 }
+
+#[tokio::test]
+async fn p6_pull_request_test_merge_commit() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("t.db").display()))
+        .await
+        .unwrap();
+    db.migrate().await.unwrap();
+    let bare = dir.path().join("p6-tm").join("p6-demo.git");
+    std::fs::create_dir_all(bare.parent().unwrap()).unwrap();
+    let git = CliGitBackend::new();
+
+    let yaml = br#"
+name: CI
+on: [pull_request]
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo sha=${{ github.sha }} ref=${{ github.ref }}
+"#;
+    let (uid, repo_id, tip) = mk_user_repo(&db, "tm", &bare, yaml).await;
+    // Head branch adds a file — merges cleanly into main.
+    let head = commit_on(
+        &git,
+        &bare,
+        "feature",
+        "main",
+        "add",
+        &[("head.txt", b"head\n")],
+    )
+    .await;
+
+    let event = PullRequestEvent {
+        action: PullRequestAction::Opened,
+        repository_id: repo_id.clone(),
+        bare_repo: bare.clone(),
+        base_bare: bare.clone(),
+        head_sha: head.clone(),
+        head_ref: "feature".into(),
+        base_ref: "main".into(),
+        base_sha: tip.clone(),
+        pull_number: 7,
+        pull_title: "t".into(),
+        pull_author_id: Some(uid.clone()),
+        head_owner: "u".into(),
+        head_name: "p6-demo".into(),
+        base_owner: "u".into(),
+        base_name: "p6-demo".into(),
+        base_default_branch: "main".into(),
+        actor_id: Some(uid.clone()),
+        head_repo_id: Some(repo_id.clone()),
+        actions_enabled_instance: true,
+    };
+    let n = oxidean_api::actions::dispatch_pull_request(&db, Arc::new(git.clone()), &event)
+        .await
+        .unwrap();
+    assert_eq!(n, 1);
+
+    let runs = db
+        .list_action_runs_for_repo(&repo_id, &Default::default(), 100, 0)
+        .await
+        .unwrap();
+    let run = &runs[0];
+    assert_eq!(run.event, "pull_request");
+    assert_eq!(run.head_ref, "refs/pull/7/merge");
+    assert_ne!(
+        run.head_sha, head,
+        "run sha is the test-merge, not the head"
+    );
+    assert_eq!(run.head_sha.len(), 40);
+
+    // Merge ref resolves in the base repo and has (base, head) parents.
+    let bare_s = bare.to_str().unwrap();
+    let resolved = std::process::Command::new("git")
+        .args(["-C", bare_s, "rev-parse", "refs/pull/7/merge"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8_lossy(&resolved.stdout).trim(),
+        run.head_sha
+    );
+    let parents = std::process::Command::new("git")
+        .args(["-C", bare_s, "rev-parse", &format!("{}^@", run.head_sha)])
+        .output()
+        .unwrap();
+    let mut ps: Vec<String> = String::from_utf8_lossy(&parents.stdout)
+        .lines()
+        .map(|l| l.trim().to_string())
+        .collect();
+    ps.sort();
+    let mut want = vec![tip.clone(), head.clone()];
+    want.sort();
+    assert_eq!(ps, want);
+    // Merged tree carries the head-only file.
+    let tree = std::process::Command::new("git")
+        .args(["-C", bare_s, "ls-tree", "--name-only", &run.head_sha])
+        .output()
+        .unwrap();
+    assert!(String::from_utf8_lossy(&tree.stdout).contains("head.txt"));
+    // Base branch unmoved.
+    let base_tip = std::process::Command::new("git")
+        .args(["-C", bare_s, "rev-parse", "refs/heads/main"])
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&base_tip.stdout).trim(), tip);
+
+    // Payload keeps pull_request.head.sha = the real head.
+    let payload: serde_json::Value =
+        serde_json::from_str(run.event_payload_json.as_deref().unwrap_or("{}")).unwrap();
+    assert_eq!(
+        payload["pull_request"]["head"]["sha"].as_str().unwrap(),
+        head
+    );
+}
+
+#[tokio::test]
+async fn p6_pull_request_merge_conflict_falls_back_to_head() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = support::connect_test_db(&format!("sqlite:{}", dir.path().join("t.db").display()))
+        .await
+        .unwrap();
+    db.migrate().await.unwrap();
+    let bare = dir.path().join("p6-tmc").join("p6-demo.git");
+    std::fs::create_dir_all(bare.parent().unwrap()).unwrap();
+    let git = CliGitBackend::new();
+
+    let yaml = br#"
+name: CI
+on: [pull_request]
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+"#;
+    let (uid, repo_id, tip) = mk_user_repo(&db, "tmc", &bare, yaml).await;
+    // Both sides touch the same line → unmergeable.
+    let head = commit_on(
+        &git,
+        &bare,
+        "feature",
+        "main",
+        "conflict",
+        &[(".github/workflows/ci.yml", b"name: CI\non: [pull_request]\njobs:\n  check:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo head\n")],
+    )
+    .await;
+    let _diverged = commit_on(
+        &git,
+        &bare,
+        "main",
+        "main",
+        "diverge",
+        &[(".github/workflows/ci.yml", b"name: CI\non: [pull_request]\njobs:\n  check:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo base\n")],
+    )
+    .await;
+
+    let event = PullRequestEvent {
+        action: PullRequestAction::Opened,
+        repository_id: repo_id.clone(),
+        bare_repo: bare.clone(),
+        base_bare: bare.clone(),
+        head_sha: head.clone(),
+        head_ref: "feature".into(),
+        base_ref: "main".into(),
+        base_sha: tip.clone(),
+        pull_number: 9,
+        pull_title: "t".into(),
+        pull_author_id: Some(uid.clone()),
+        head_owner: "u".into(),
+        head_name: "p6-demo".into(),
+        base_owner: "u".into(),
+        base_name: "p6-demo".into(),
+        base_default_branch: "main".into(),
+        actor_id: Some(uid.clone()),
+        head_repo_id: Some(repo_id.clone()),
+        actions_enabled_instance: true,
+    };
+    let n = oxidean_api::actions::dispatch_pull_request(&db, Arc::new(git.clone()), &event)
+        .await
+        .unwrap();
+    assert_eq!(n, 1);
+
+    let runs = db
+        .list_action_runs_for_repo(&repo_id, &Default::default(), 100, 0)
+        .await
+        .unwrap();
+    let run = &runs[0];
+    assert_eq!(run.event, "pull_request");
+    assert_eq!(run.head_sha, head, "unmergeable PR falls back to head sha");
+    assert_eq!(run.head_ref, "refs/pull/9/head");
+}

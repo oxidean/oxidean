@@ -293,7 +293,66 @@ async fn dispatch_pull_request_inner(
     }
 
     // ── pull_request — untrusted head-context ─────────────────────────────
-    let discovered = discover_workflows(git, &event.bare_repo, &event.head_sha)
+    // GitHub runs `pull_request` workflows against a synthesized test-merge
+    // commit (`github.sha` = the merge, `github.ref` = `refs/pull/N/merge`)
+    // and evaluates workflow files from the merged tree. A merge that cannot
+    // be built (conflict, missing objects) falls back to the head commit —
+    // CI must not wedge on an unmergeable PR.
+    let mut run_sha = event.head_sha.clone();
+    let mut run_ref = format!("refs/pull/{}/head", event.pull_number);
+    let mut wf_repo = &event.bare_repo;
+    // Merge against the *current* base tip — `pull.base_sha` may lag the
+    // branch if it moved between PR open and this event.
+    let live_base = if event.base_bare.exists() {
+        git.rev_parse(&event.base_bare, &format!("refs/heads/{}", event.base_ref))
+            .await
+            .ok()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| event.base_sha.clone())
+    } else {
+        event.base_sha.clone()
+    };
+    if !live_base.is_empty() && !live_base.chars().all(|c| c == '0') {
+        // Fork heads live in the head repo's object store — pull the commit
+        // into the base repo so merge-tree can see both parents.
+        if event.head_repo_id.as_deref() != Some(event.repository_id.as_str()) {
+            if let Err(e) = git
+                .fetch_ref_from(&event.base_bare, &event.bare_repo, &event.head_sha)
+                .await
+            {
+                tracing::warn!(error = %e, pull = event.pull_number,
+                    "fork head fetch failed — test-merge unavailable");
+            }
+        }
+        match git
+            .test_merge_commit(
+                &event.base_bare,
+                &live_base,
+                &event.head_sha,
+                &format!("Merge {} into {}", event.head_sha, event.base_ref),
+            )
+            .await
+        {
+            Ok(merge_sha) => {
+                let merge_ref = format!("refs/pull/{}/merge", event.pull_number);
+                match git
+                    .update_ref(&event.base_bare, &merge_ref, &merge_sha)
+                    .await
+                {
+                    Ok(()) => {
+                        run_sha = merge_sha;
+                        run_ref = merge_ref;
+                        wf_repo = &event.base_bare;
+                    }
+                    Err(e) => tracing::warn!(error = %e, pull = event.pull_number,
+                        "test-merge ref write failed — falling back to head"),
+                }
+            }
+            Err(e) => tracing::info!(error = %e, pull = event.pull_number,
+                "test-merge unavailable — pull_request runs on head"),
+        }
+    }
+    let discovered = discover_workflows(git, wf_repo, &run_sha)
         .await
         .map_err(|e| e.to_string())?;
     if !discovered.errors.is_empty() {
@@ -305,8 +364,8 @@ async fn dispatch_pull_request_inner(
             &event.repository_id,
             &discovered.errors,
             "pull_request",
-            &event.head_sha,
-            &format!("refs/pull/{}/head", event.pull_number),
+            &run_sha,
+            &run_ref,
             event.actor_id.as_deref(),
             event.head_repo_id.as_deref(),
             Some(&payload),
@@ -333,8 +392,8 @@ async fn dispatch_pull_request_inner(
             &wf.path,
             &wf.document,
             "pull_request",
-            &event.head_sha,
-            &format!("refs/pull/{}/head", event.pull_number),
+            &run_sha,
+            &run_ref,
             event.actor_id.as_deref(),
             event.head_repo_id.as_deref(),
             Some(&payload),

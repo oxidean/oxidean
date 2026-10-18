@@ -2501,6 +2501,76 @@ impl GitBackend for CliGitBackend {
         merge_via_worktree(repo, base_ref, head_sha, message, MergeMode::MergeCommit).await
     }
 
+    async fn test_merge_commit(
+        &self,
+        repo: &Path,
+        base_sha: &str,
+        head_sha: &str,
+        message: &str,
+    ) -> Result<String, GitError> {
+        let base_sha = validate_treeish(base_sha)?;
+        let head_sha = validate_treeish(head_sha)?;
+        if message.contains('\0') {
+            return Err(GitError::InvalidArg("commit message contains NUL".into()));
+        }
+        let repo_abs = absolute_path(repo)?;
+        let repo_s = repo_abs.to_str().ok_or_else(|| {
+            GitError::InvalidArg(format!("non-utf8 repo path: {}", repo_abs.display()))
+        })?;
+
+        // Plumbing-only merge: `merge-tree --write-tree` computes the merged
+        // tree directly in the object store — no checkout, no ref motion.
+        // Exit 1 = conflicts (CONFLICT records on stdout); other failures
+        // propagate as-is.
+        let tree = match run_git_stdout(&[
+            "-C",
+            repo_s,
+            "merge-tree",
+            "--write-tree",
+            base_sha,
+            head_sha,
+        ])
+        .await
+        {
+            Ok(out) => String::from_utf8_lossy(&out)
+                .lines()
+                .next()
+                .map(|l| l.trim().to_string())
+                .filter(|l| !l.is_empty())
+                .ok_or_else(|| GitError::Process("merge-tree produced no tree oid".into()))?,
+            Err(e) => {
+                let msg = e.to_string();
+                if msg.to_lowercase().contains("conflict") {
+                    return Err(GitError::Process(format!("merge conflict: {msg}")));
+                }
+                return Err(e);
+            }
+        };
+
+        // Two parents (base, head) mark this as a merge commit; committer is
+        // the forge identity — the run pins this sha as `github.sha`.
+        let out = run_git_stdout(&[
+            "-C",
+            repo_s,
+            "commit-tree",
+            &tree,
+            "-p",
+            base_sha,
+            "-p",
+            head_sha,
+            "-m",
+            message,
+        ])
+        .await?;
+        let sha = String::from_utf8_lossy(&out).trim().to_string();
+        if sha.chars().any(|c| !c.is_ascii_hexdigit()) || sha.len() != 40 {
+            return Err(GitError::Process(format!(
+                "commit-tree returned non-sha output: {sha}"
+            )));
+        }
+        Ok(sha)
+    }
+
     async fn squash_merge(
         &self,
         repo: &Path,
@@ -4316,6 +4386,119 @@ mod tests {
         .trim()
         .to_string();
         assert_eq!(tip, sha);
+    }
+
+    #[tokio::test]
+    async fn test_merge_commit_leaves_base_unmoved() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bare = tmp.path().join("pr.git");
+        let git = CliGitBackend::new();
+        git.init_bare(&bare, "main").await.unwrap();
+        git.seed_commit(
+            &bare,
+            "main",
+            "seed",
+            &[("a.txt".into(), b"base\n".to_vec())],
+        )
+        .await
+        .unwrap();
+        push_branch_with_file(&bare, "feature", "main", "b.txt", b"feat\n", "feat").await;
+        let bare_s = bare.to_str().unwrap();
+        let base = String::from_utf8_lossy(
+            &run_git_stdout(&["-C", bare_s, "rev-parse", "refs/heads/main"])
+                .await
+                .unwrap(),
+        )
+        .trim()
+        .to_string();
+        let head = String::from_utf8_lossy(
+            &run_git_stdout(&["-C", bare_s, "rev-parse", "refs/heads/feature"])
+                .await
+                .unwrap(),
+        )
+        .trim()
+        .to_string();
+        let sha = git
+            .test_merge_commit(&bare, &base, &head, "Merge feature into main")
+            .await
+            .expect("test_merge_commit");
+        assert_eq!(sha.len(), 40);
+        // Base branch unmoved — the merge exists only as an object.
+        let tip = String::from_utf8_lossy(
+            &run_git_stdout(&["-C", bare_s, "rev-parse", "refs/heads/main"])
+                .await
+                .unwrap(),
+        )
+        .trim()
+        .to_string();
+        assert_eq!(tip, base);
+        // Two parents: (base, head).
+        let parents_ref = format!("{sha}^@");
+        let parents_raw = run_git_stdout(&["-C", bare_s, "rev-parse", &parents_ref])
+            .await
+            .unwrap();
+        let parents: Vec<String> = String::from_utf8_lossy(&parents_raw)
+            .lines()
+            .map(|l| l.trim().to_string())
+            .collect();
+        assert_eq!(parents, vec![base.clone(), head.clone()]);
+        // Merged tree carries both files.
+        let files_raw = run_git_stdout(&["-C", bare_s, "ls-tree", "--name-only", &sha])
+            .await
+            .unwrap();
+        let files = String::from_utf8_lossy(&files_raw);
+        assert!(files.contains("a.txt") && files.contains("b.txt"));
+        // Publishable via update_ref — `refs/pull/N/merge` seam (API-06).
+        git.update_ref(&bare, "refs/pull/1/merge", &sha)
+            .await
+            .unwrap();
+        let resolved = String::from_utf8_lossy(
+            &run_git_stdout(&["-C", bare_s, "rev-parse", "refs/pull/1/merge"])
+                .await
+                .unwrap(),
+        )
+        .trim()
+        .to_string();
+        assert_eq!(resolved, sha);
+    }
+
+    #[tokio::test]
+    async fn test_merge_commit_conflict_errors() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bare = tmp.path().join("pr-conflict.git");
+        let git = CliGitBackend::new();
+        git.init_bare(&bare, "main").await.unwrap();
+        git.seed_commit(
+            &bare,
+            "main",
+            "seed",
+            &[("a.txt".into(), b"base\n".to_vec())],
+        )
+        .await
+        .unwrap();
+        push_branch_with_file(&bare, "feature", "main", "a.txt", b"feat\n", "feat").await;
+        // Diverge main so the same file conflicts.
+        push_branch_with_file(&bare, "main", "main", "a.txt", b"main2\n", "diverge").await;
+        let bare_s = bare.to_str().unwrap();
+        let base = String::from_utf8_lossy(
+            &run_git_stdout(&["-C", bare_s, "rev-parse", "refs/heads/main"])
+                .await
+                .unwrap(),
+        )
+        .trim()
+        .to_string();
+        let head = String::from_utf8_lossy(
+            &run_git_stdout(&["-C", bare_s, "rev-parse", "refs/heads/feature"])
+                .await
+                .unwrap(),
+        )
+        .trim()
+        .to_string();
+        let err = git
+            .test_merge_commit(&bare, &base, &head, "Merge feature into main")
+            .await
+            .expect_err("conflicting merge must error");
+        assert!(err.to_string().contains("conflict"));
     }
 
     #[tokio::test]
