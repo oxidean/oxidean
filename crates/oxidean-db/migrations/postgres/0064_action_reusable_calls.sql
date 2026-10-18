@@ -10,7 +10,7 @@
 ALTER TABLE action_jobs ADD COLUMN caller_job_id TEXT NOT NULL DEFAULT '';
 
 ALTER TABLE action_jobs
-  DROP CONSTRAINT action_jobs_run_id_job_key_matrix_key_key;
+  DROP CONSTRAINT action_jobs_run_job_matrix_unique;
 ALTER TABLE action_jobs
   ADD CONSTRAINT uq_action_jobs_run_job_matrix_caller
     UNIQUE (run_id, job_key, matrix_key, caller_job_id);
