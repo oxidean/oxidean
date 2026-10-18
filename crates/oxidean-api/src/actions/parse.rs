@@ -198,6 +198,11 @@ pub struct JobSpec {
     /// `jobs.<id>.environment` — scalar name or `{name, url}`; name/url may
     /// interpolate and are evaluated at enqueue.
     pub environment: Option<EnvironmentSpec>,
+    /// `jobs.<id>.continue-on-error` — bool or expression source, resolved
+    /// per leg at emit (matrix context available); a failing leg still marks
+    /// `failure` but the run concludes success and the leg can't trigger
+    /// `fail-fast` cancellation.
+    pub continue_on_error: Option<JsonValue>,
     /// `jobs.<id>.uses` — reusable-workflow call target. Local
     /// `./{path}.yml` reads the same repo at the run's `head_sha`;
     /// `{owner}/{repo}/{path}@{ref}` reads another repository at `ref`.
@@ -940,10 +945,9 @@ pub fn parse_workflow_yaml(bytes: &[u8]) -> Result<WorkflowDocument, ParseError>
                 k.as_str().unwrap_or("<non-string>")
             ));
         }
-        // Structural features that would mis-execute — fail loudly at dispatch.
-        if job.continue_on_error.is_some() {
-            flag(&mut unsupported, "continue-on-error");
-        }
+        // `continue-on-error` is honored — failing coe legs don't fail the
+        // run, don't fire fail-fast, and report `failure` to needs so
+        // dependents skip (GitHub semantics).
         // `uses:` makes the job a reusable-workflow call. GitHub restricts
         // calling jobs to `concurrency`, `if`, `name`, `needs`, `permissions`,
         // `secrets`, `strategy`, `uses`, `with` — anything else fails
@@ -1147,6 +1151,7 @@ pub fn parse_workflow_yaml(bytes: &[u8]) -> Result<WorkflowDocument, ParseError>
             container: job_container,
             services: job_services,
             environment: parse_environment(job.environment.as_ref(), &mut warnings),
+            continue_on_error: job.continue_on_error.map(yaml_to_json).transpose()?,
             uses,
             with: call_with,
             secrets: call_secrets,
@@ -1558,19 +1563,6 @@ jobs:
       - run: echo hi
 "#,
                 &["needs"],
-            ),
-            (
-                br#"
-name: CI
-on: [push]
-jobs:
-  a:
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    steps:
-      - run: echo hi
-"#,
-                &["continue-on-error"],
             ),
             (
                 br#"

@@ -1,8 +1,17 @@
 name: continue-on-error-job
-on: [push]
+on: push
 jobs:
-  build:
+  flaky:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
       - run: exit 1
+  gated:
+    runs-on: ubuntu-latest
+    needs: flaky
+    steps:
+      - run: echo gated
+  solo:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo solo

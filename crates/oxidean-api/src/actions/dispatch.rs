@@ -1028,6 +1028,7 @@ pub(crate) async fn emit_jobs(
             "if": job.if_expr,
             "needs": job.needs,
             "fail_fast": fail_fast,
+            "continue_on_error": job.continue_on_error,
             "max_parallel": max_parallel,
             "timeout_seconds": timeout_seconds,
             "container": job.container.as_ref().map(|c| crate::actions::eval_ctx::interp_json(c, &ctx, &mut notes)),
@@ -1083,13 +1084,45 @@ pub(crate) async fn emit_jobs(
                 None
             };
             let leg_name = crate::actions::matrix::leg_display_name(&name, leg);
-            let leg_runs_on = if leg.assignment.as_object().is_some_and(|o| !o.is_empty()) {
+            let leg_ctx = if leg.assignment.as_object().is_some_and(|o| !o.is_empty()) {
                 let mut lctx = ctx.clone();
                 lctx.set_context("matrix", leg.assignment.clone());
-                serde_json::to_string(&runs_on_for(&lctx, &mut Vec::new()))
+                lctx
+            } else {
+                ctx.clone()
+            };
+            let leg_runs_on = if leg.assignment.as_object().is_some_and(|o| !o.is_empty()) {
+                serde_json::to_string(&runs_on_for(&leg_ctx, &mut Vec::new()))
                     .unwrap_or_else(|_| "[]".into())
             } else {
                 runs_on_shared.clone()
+            };
+            // `continue-on-error` resolves per leg — `matrix.*` interpolates.
+            // Bool literals bind directly; strings evaluate as expressions;
+            // eval errors degrade to `false` + a warning (an unsatisfiable
+            // suppression must not silently absorb failures).
+            let leg_coe = match &job.continue_on_error {
+                Some(serde_json::Value::Bool(b)) => *b,
+                Some(serde_json::Value::String(src)) => {
+                    match oxidean_actions_expr::eval_bool(src, &leg_ctx) {
+                        Ok(b) => b,
+                        Err(e) => {
+                            notes.push(format!(
+                                "job '{}' continue-on-error '{src}' evaluation failed: {e} — treated as false",
+                                job.id
+                            ));
+                            false
+                        }
+                    }
+                }
+                Some(serde_json::Value::Null) | None => false,
+                Some(other) => {
+                    notes.push(format!(
+                        "job '{}' continue-on-error has non-bool value {other} — treated as false",
+                        job.id
+                    ));
+                    false
+                }
             };
             let mut insert =
                 oxidean_db::JobInsert::basic(&job_id, run_id, &job.id, &leg_name, &leg_runs_on);
@@ -1114,6 +1147,7 @@ pub(crate) async fn emit_jobs(
                 .as_ref()
                 .map(|c| c.caller_job_id.clone())
                 .unwrap_or_default();
+            insert.continue_on_error = leg_coe;
             db.insert_action_job(insert).await?;
             // The deployment record is the public projection of the
             // environment deployment — GitHub's Deployments API analogue.

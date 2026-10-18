@@ -257,7 +257,7 @@ async fn fail_fast_pass(db: &Database, run_id: &str) -> Result<bool, String> {
     let jobs = db.list_action_jobs_for_run(run_id).await?;
     let mut failed_keys: Vec<String> = Vec::new();
     for j in &jobs {
-        if j.status == "failure" && !j.matrix_key.is_empty() {
+        if j.status == "failure" && !j.matrix_key.is_empty() && !j.continue_on_error {
             let payload = payload_for(db, j).await;
             let ff = payload
                 .as_ref()

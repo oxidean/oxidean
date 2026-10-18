@@ -1,0 +1,21 @@
+name: continue-on-error-matrix
+on: push
+jobs:
+  flaky:
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.allow_fail }}
+    strategy:
+      matrix:
+        include:
+          - {variant: tolerated, allow_fail: true}
+          - {variant: healthy, allow_fail: false}
+    steps:
+      - run: |
+          if [ "${{ matrix.variant }}" = tolerated ]; then exit 1; fi
+          echo "variant=${{ matrix.variant }} ok"
+  downstream:
+    needs: flaky
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "downstream ran"

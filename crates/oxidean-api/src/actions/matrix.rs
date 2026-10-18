@@ -67,7 +67,7 @@ pub fn expand_legs(
         }
     }
     keys.sort_by(|a, b| a.0.cmp(b.0));
-    if keys.is_empty() {
+    if keys.is_empty() && includes.is_empty() {
         return Ok(vec![single_leg()]);
     }
     if keys.iter().any(|(_, vals)| vals.is_empty()) {

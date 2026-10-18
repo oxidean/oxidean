@@ -777,7 +777,9 @@ conformance_case!(reusable_missing_secret, "reusable-missing-secret");
 conformance_case!(reusable_inherit_secret, "reusable-inherit-secret");
 conformance_case!(reusable_type_mismatch, "reusable-type-mismatch");
 conformance_case!(reusable_depth, "reusable-depth");
+conformance_case!(reusable_coe_callee, "reusable-coe-callee");
 conformance_case!(continue_on_error_job, "continue-on-error-job");
+conformance_case!(continue_on_error_matrix, "continue-on-error-matrix");
 conformance_case!(continue_on_error_step, "continue-on-error-step");
 // Phase 4 — step lifecycle, shells, action runtimes.
 conformance_case!(shell_python, "shell-python");

@@ -671,9 +671,14 @@ pub async fn close_call(
 ) -> Result<String, String> {
     // Rollup mirrors `recompute_run_status`: failure > cancelled, and
     // `skipped` only propagates when every child skipped (a mixed group is
-    // `success`, matching GitHub's callee-run conclusion).
+    // `success`, matching GitHub's callee-run conclusion). `continue-on-error`
+    // callee legs report `failure` but don't fail the callee run — same
+    // suppression the run rollup applies.
     let result = {
-        if children.iter().any(|l| l.status == "failure") {
+        if children
+            .iter()
+            .any(|l| l.status == "failure" && !l.continue_on_error)
+        {
             "failure"
         } else if children.iter().any(|l| l.status == "cancelled") {
             "cancelled"

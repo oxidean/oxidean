@@ -112,7 +112,7 @@ and <https://docs.github.com/en/actions/writing-workflows/workflow-syntax-for-gi
 | `on.tag-flood` | A push with more than 3 tags triggers no tag events | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_branch_delete_and_tag_flood | |
 | `on.unsupported-event` | An event we do not implement warns instead of vanishing | supported | case:on-unsupported-event, test:crates/oxidean-api/src/actions/parse.rs::unimplemented_events_warn_loudly | The `on.<event>` name is emitted as a workflow warning; the workflow still runs for its other triggers. |
 | `on.token-events` | GITHUB_TOKEN-caused events do not create runs (except dispatch) | partial | test:crates/oxidean-runner/src/exec/mod.rs::checkout_auth_prefers_job_token | The job token is a fetch credential only — there is no push path, so token-driven events cannot recur. Dispatch suppression verified; the general rule is structurally held. |
-| `on.workflow-call` | `workflow_call` trigger | unsupported | case:reusable-workflow-local | Reusable workflows are not dispatched — the trigger is ignored with a warning. Closes in P13. |
+| `on.workflow-call` | `workflow_call` trigger — workflow is callable via `uses:` | supported | case:reusable-workflow-local, case:reusable-workflow-remote | A `workflow_call`-only workflow never self-dispatches; caller jobs resolve and expand it. |
 | `on.pr-merge-sha` | `pull_request` runs against the merge-commit SHA | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_pull_request_test_merge_commit, test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_pull_request_merge_conflict_falls_back_to_head | `merge-tree --write-tree` synthesizes the commit against the live base tip; `github.sha` = merge, `github.ref` = `refs/pull/N/merge`. Unmergeable PRs fall back to the head sha + `refs/pull/N/head` — GitHub leaves such checks pending; we keep CI running (documented divergence). |
 
 ## 3. Events (`ev.`)
@@ -206,13 +206,13 @@ and <https://docs.github.com/en/actions/using-jobs/using-a-matrix-for-your-jobs>
 | `job.matrix-cap` | Over-256 expanded legs fail loudly | supported | case:matrix-over-256, test:crates/oxidean-api/src/actions/matrix.rs::over_256_legs_fails_loud | GitHub's documented 256-job limit. |
 | `job.fail-fast` | `fail-fast:` cancels sibling legs on first failure; `false` disables | supported | case:matrix-fail-fast, case:matrix-fail-fast-off | |
 | `job.max-parallel` | `max-parallel:` caps concurrent legs | supported | case:matrix-max-parallel | |
-| `job.continue-on-error` | Job-level `continue-on-error:` | unsupported | case:continue-on-error-job, test:crates/oxidean-api/src/actions/parse.rs::structural_features_are_flagged_unsupported | Validation failure at dispatch — GitHub's semantics (run stays green, upstream-skip for dependents) need scheduler work. Closes in P13. |
+| `job.continue-on-error` | Job-level `continue-on-error:` — leg reports `failure` but the run stays green; exempt from `fail-fast` | supported | case:continue-on-error-job, case:continue-on-error-matrix, case:reusable-coe-callee | Evaluated per matrix leg (`${{ matrix.* }}` allowed). `needs.<job>.result` remains `failure` so dependents without a status function skip, matching GitHub. Rejected on `uses:` caller jobs (as GitHub does). |
 | `job.container` | `container:` — image shorthand and object form | supported | case:container-job, test:crates/oxidean-runner/src/exec/containers.rs::spec_object_form | Requires a Docker-capable runner; absent Docker the job fails loudly. |
 | `job.services` | `services:` — service containers | supported | case:services-job, test:crates/oxidean-runner/src/exec/containers.rs::spec_object_form | Host jobs reach services on published ports; container jobs reach them by service id. |
 | `job.services-ports-ctx` | `job.services.<id>.ports` context | partial | case:services-job | Services run; the mapped-ports context is not populated. Closes in P13. |
-| `job.uses` | `jobs.<id>.uses:` — call a reusable workflow | unsupported | case:reusable-workflow-local, case:reusable-workflow-remote | Validation failure at dispatch. P13. |
-| `job.with` | `jobs.<id>.with:` — inputs to a called workflow | unsupported | case:reusable-workflow-local | P13. |
-| `job.secrets` | `jobs.<id>.secrets:` — secrets to a called workflow, `inherit` | unsupported | case:reusable-workflow-local | P13. |
+| `job.uses` | `jobs.<id>.uses:` — call a reusable workflow | supported | case:reusable-workflow-local, case:reusable-workflow-remote, case:reusable-nested | Caller row stays durable and `in_progress` until callee legs close; expansion is deferred to the scheduler. |
+| `job.with` | `jobs.<id>.with:` — inputs to a called workflow | supported | case:reusable-workflow-local, case:reusable-missing-input, case:reusable-undeclared-input, case:reusable-type-mismatch | Required/undeclared inputs and type mismatches fail the caller loudly. |
+| `job.secrets` | `jobs.<id>.secrets:` — secrets to a called workflow, `inherit` | supported | case:reusable-secrets-map, case:reusable-secrets-none, case:reusable-inherit-secret, case:reusable-missing-secret | `inherit` passes the repo's secret set; required-but-absent callee secrets fail loudly. |
 | `job.steps` | `steps:` — required unless `uses:` | supported | case:empty-steps | A job with neither `steps:` nor `uses:` is a validation failure, matching GitHub. |
 
 ## 6. Steps (`step.`)
@@ -288,7 +288,7 @@ that we also restrict.
 | `ctx.strategy` | `strategy` context — job-index, job-total, fail-fast, max-parallel | partial | case:matrix-basic | `matrix` carries the leg; `strategy.*` metadata is not populated. P13. |
 | `ctx.matrix` | `matrix` context | supported | case:matrix-basic | |
 | `ctx.needs` | `needs.<id>.result` / `.outputs` | supported | case:needs-outputs, case:needs-failure-fn | |
-| `ctx.inputs` | `inputs` context — workflow_dispatch / workflow_call inputs | partial | test:crates/oxidean-api/src/actions/rpc.rs::dispatch_inputs_resolve_types_and_defaults | `github.event.inputs` carries the typed values; the dedicated `inputs` context is empty. P13. |
+| `ctx.inputs` | `inputs` context — workflow_dispatch / workflow_call inputs | supported | test:crates/oxidean-api/src/actions/rpc.rs::dispatch_inputs_resolve_types_and_defaults, case:reusable-workflow-local | Mirrors `github.event.inputs` — typed values resolve in callee steps. |
 | `avail.on` | Contexts in `on:` filters | supported | case:trigger-map-form | Filters are pattern lists, not expressions — matching GitHub. |
 | `avail.env` | Contexts in `env:` at all levels | supported | case:expr-env-layering | |
 | `avail.job-if` | Contexts in `jobs.<id>.if` | supported | case:job-if, case:needs-ctx-if | needs/github/env/vars/inputs available — no steps context, matching GitHub. |
@@ -423,21 +423,23 @@ Source: <https://docs.github.com/en/actions/sharing-automations/creating-actions
 
 Source: <https://docs.github.com/en/actions/sharing-automations/reusing-workflows>
 
-Not implemented — a `uses:` job or `on: workflow_call` workflow is a
-validation-failure run, never a silent skip. Whole section closes in P13.
+Implemented — a `uses:` caller job stays a durable row in the run and
+expands into durable callee job rows once its `needs` are satisfied.
+`continue-on-error` on a caller remains a validation failure, matching
+GitHub.
 
 | `id` | Feature | Status | Evidence | Notes |
 |------|---------|--------|----------|-------|
-| `reuse.call` | `jobs.<id>.uses:` — call a reusable workflow | unsupported | case:reusable-workflow-local, case:reusable-workflow-remote | Validation failure. P13. |
-| `reuse.trigger` | `on: workflow_call` — define a callable workflow | unsupported | case:reusable-workflow-local | Warned at parse. P13. |
-| `reuse.inputs` | `on.workflow_call.inputs` typed inputs | unsupported | case:reusable-workflow-local | P13. |
-| `reuse.outputs` | `on.workflow_call.outputs` | unsupported | case:reusable-workflow-local | P13. |
-| `reuse.secrets` | `jobs.<id>.secrets` / `secrets: inherit` | unsupported | case:reusable-workflow-local | P13. |
-| `reuse.with` | `jobs.<id>.with` inputs to the call | unsupported | case:reusable-workflow-local | P13. |
-| `reuse.strategy` | matrix over a call | unsupported | case:reusable-workflow-local | P13. |
-| `reuse.nesting` | Up to 4 nested call levels | unsupported | case:reusable-workflow-remote | P13. |
-| `reuse.permissions` | Called workflow can only reduce permissions | unsupported | case:reusable-workflow-remote | P13. |
-| `reuse.env-context` | `env` in a call is not permitted by GitHub | unsupported | test:crates/oxidean-api/src/actions/parse.rs::structural_features_are_flagged_unsupported | P13. |
+| `reuse.call` | `jobs.<id>.uses:` — call a reusable workflow | supported | case:reusable-workflow-local, case:reusable-workflow-remote | Local `./.github/workflows/x.yml` and remote `owner/repo/path@ref` targets. |
+| `reuse.trigger` | `on: workflow_call` — define a callable workflow | supported | case:reusable-workflow-local, case:reusable-no-trigger | Non-callable targets (`push`/`workflow_dispatch`-only) fail the call loudly. |
+| `reuse.inputs` | `on.workflow_call.inputs` typed inputs | supported | case:reusable-missing-input, case:reusable-type-mismatch, case:reusable-undeclared-input | Defaults satisfy `required:`; undeclared caller keys and type mismatches fail loudly. |
+| `reuse.outputs` | `on.workflow_call.outputs` — materialized onto the caller | supported | case:reusable-workflow-local | `needs.<caller>.outputs.*` resolves against callee `jobs.*` outputs. |
+| `reuse.secrets` | `jobs.<id>.secrets` / `secrets: inherit` | supported | case:reusable-secrets-map, case:reusable-secrets-none, case:reusable-inherit-secret | `secrets: {}` passes nothing; `inherit` exposes the repo set; `required:` secrets must resolve. |
+| `reuse.with` | `jobs.<id>.with` inputs to the call | supported | case:reusable-workflow-local | Expressions evaluate against the caller's context at expansion. |
+| `reuse.strategy` | matrix over a call — one caller row per leg, fan-out capped | supported | case:reusable-matrix-call, case:reusable-fanout, case:reusable-fanout-accumulated | GitHub's 256-leg matrix cap applies inside callees; accumulated call fan-out is bounded separately. |
+| `reuse.nesting` | Up to 4 nested call levels | supported | case:reusable-nested, case:reusable-depth, case:reusable-recursion | Depth beyond GitHub's limit and self-recursion fail loudly. |
+| `reuse.permissions` | Called workflow can only reduce permissions | partial | case:reusable-workflow-remote | The callee's own `permissions:` block applies per job; the ≤-caller clamp is not enforced yet. |
+| `reuse.env-context` | `env`/`steps`/`continue-on-error` on a caller job are not permitted by GitHub | supported | case:reusable-caller-keywords, test:crates/oxidean-api/src/actions/parse.rs::structural_features_are_flagged_unsupported | Callers reject GitHub-disallowed keywords at parse — loud validation failure. |
 
 ## 13. Artifacts (`art.`)
 

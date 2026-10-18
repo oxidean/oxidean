@@ -529,10 +529,13 @@
     },
     {
       "id": "continue-on-error-job",
-      "kind": "validation_failure",
-      "expect_unsupported": [
-        "continue-on-error"
-      ]
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "flaky": "failure",
+        "gated": "skipped",
+        "solo": "success"
+      }
     },
     {
       "id": "continue-on-error-step",
@@ -1569,6 +1572,43 @@
       "log_contains": [
         "fan-out cap"
       ]
+    },
+    {
+      "id": "continue-on-error-matrix",
+      "kind": "run",
+      "workflow_path": "continue-on-error-matrix.yml",
+      "desc": "Job-level continue-on-error evaluates per matrix leg: tolerated leg fails without cancelling siblings or failing the run; always() dependents still run.",
+      "expect_run": "success",
+      "expect_job_statuses": {
+        "flaky": [
+          "failure",
+          "success"
+        ]
+      },
+      "expect_jobs": {
+        "downstream": "success"
+      }
+    },
+    {
+      "id": "reusable-coe-callee",
+      "kind": "run",
+      "workflow_path": "reusable-coe-callee.yml",
+      "desc": "continue-on-error inside a callee: the tolerated failure doesn't fail the caller job or the run, while the callee leg still reports failure.",
+      "files": {
+        ".github/workflows/coe-callee.yml": "name: coe-callee\non: workflow_call\njobs:\n  tolerated:\n    runs-on: ubuntu-latest\n    continue-on-error: true\n    steps:\n      - run: exit 1\n  fine:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo fine\n"
+      },
+      "expect_run": "success",
+      "expect_jobs": {
+        "call": "success"
+      },
+      "expect_job_statuses": {
+        "tolerated": [
+          "failure"
+        ],
+        "fine": [
+          "success"
+        ]
+      }
     }
   ]
 }
