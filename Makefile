@@ -329,6 +329,7 @@ db-switch-dialect:
 
 db-matrix:
 	cargo test -p oxidean-db --test dialect_probe -- --nocapture
+	cargo test -p oxidean-db --test dialect_vcs -- --nocapture
 
 # D-QH-02 coverage collect + weighted gate (see docs/TESTING.md).
 # Collect continues when Vitest exits non-zero so summaries are still emitted
