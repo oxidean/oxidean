@@ -2,7 +2,7 @@
 //! `OXIDEAN_ACTIONS_ARTIFACTS_DIR` (default `var/actions-artifacts`).
 //!
 //! Runner-proto endpoints (runner-token authed like fetch_task/update_task):
-//!   POST /artifacts/upload?job_id=<id>&name=<n>  (raw tar.gz body, streamed)
+//!   POST /artifacts/upload?job_id={id}&name={n}  (raw tar.gz body, streamed)
 //!   GET  /artifacts/{run_id}/{name}              (raw tar.gz body back)
 //!   POST /artifacts/list                         ({run_id} → metadata list)
 

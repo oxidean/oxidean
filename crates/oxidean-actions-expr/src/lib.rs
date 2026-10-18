@@ -8,7 +8,7 @@
 //! secrets job strategy`), supplied by the caller via [`Context`].
 //!
 //! Two entry shapes:
-//! - [`eval`] / [`eval_bool`] — a bare expression (or `${{ }}`-delimited) as
+//! - [`eval()`] / [`eval_bool`] — a bare expression (or `${{ }}`-delimited) as
 //!   found in `if:` / `timeout-minutes:` / `runs-on:` / `concurrency:`.
 //! - [`interpolate`] / [`eval_embedded`] / [`eval_json`] — strings that may
 //!   embed `${{ expr }}` inside literal text (`run:`, `name:`, `with:`,

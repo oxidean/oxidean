@@ -3478,7 +3478,7 @@ pub async fn find_task_claim(
 // ---------------------------------------------------------------------------
 
 /// `repositories.actions_default_permissions` — `read` (restricted) |
-/// `write` (permissive). Drives [`effective_permissions`] at enqueue when a
+/// `write` (permissive). Drives `effective_permissions` at enqueue when a
 /// workflow declares no `permissions:`.
 pub async fn get_actions_default_permissions(
     pool: &DbPool,
