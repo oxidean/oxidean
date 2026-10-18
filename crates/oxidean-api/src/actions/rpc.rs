@@ -1512,6 +1512,19 @@ async fn review_held_job(
             "job is not waiting for approval",
         ));
     }
+    // A rejection is a terminal transition — publish the commit status (which
+    // also emits `workflow_job` `completed`) since the job never reaches a
+    // runner or the scheduler's terminal paths.
+    if state == "rejected" {
+        let origin = std::env::var("OXIDEAN_PUBLIC_ORIGIN").ok();
+        let _ = crate::actions::statuses::publish_from_job_update(
+            &ctx.db,
+            &job.id,
+            "failure",
+            origin.as_deref(),
+        )
+        .await;
+    }
     // Record the decision against environment-held jobs — review history is
     // a deployment-review artifact, so fork-approval holds (no environment)
     // do not accrue rows. After the CAS so a raced approve/reject pair can't
@@ -2252,6 +2265,19 @@ pub async fn rerun_run(
         }
         if let Err(e) = ctx.db.recompute_action_run_status(&req.run_id).await {
             tracing::warn!(error = %e, run_id = %req.run_id, "post-requeue rollup failed");
+        }
+        // Rerun re-announces each reset job at its new lifecycle state —
+        // `queued` for runnable legs, `waiting` for re-gated ones.
+        for job in &jobs {
+            if !reset_jobs.contains(&job.id) {
+                continue;
+            }
+            let action = if job.status == "waiting" {
+                "waiting"
+            } else {
+                "queued"
+            };
+            crate::webhook::dispatch::notify_workflow_job(&ctx.db, &job.id, action).await;
         }
     }
     // API-04: a requeued run is a new `workflow_run` `requested` delivery.

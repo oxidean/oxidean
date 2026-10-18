@@ -152,6 +152,7 @@ pub async fn publish_cancelled_for_run(
             run.triggered_by.as_deref(),
         )
         .await?;
+        crate::webhook::dispatch::notify_workflow_job(db, &job.id, "completed").await;
     }
     Ok(())
 }
@@ -194,5 +195,15 @@ pub async fn publish_from_job_update(
         target.as_deref(),
         run.triggered_by.as_deref(),
     )
-    .await
+    .await?;
+    // Terminal transitions emit `workflow_job` completed — this publisher is
+    // the choke point for runner finalize, deadline sweeps, fail-fast, and
+    // needs-gate skip/fail decisions.
+    if matches!(
+        job_status,
+        "success" | "failure" | "cancelled" | "skipped" | "neutral"
+    ) {
+        crate::webhook::dispatch::notify_workflow_job(db, job_id, "completed").await;
+    }
+    Ok(())
 }

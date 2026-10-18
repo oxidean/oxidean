@@ -883,7 +883,11 @@ pub async fn fetch_task(
         };
         if let Some(j) = job {
             match build_task(&state, &j, &runner.id).await {
-                Ok(t) => task = Some(t),
+                Ok(t) => {
+                    task = Some(t);
+                    crate::webhook::dispatch::notify_workflow_job(&state.db, &j.id, "in_progress")
+                        .await;
+                }
                 Err(resp) => return resp,
             }
         }

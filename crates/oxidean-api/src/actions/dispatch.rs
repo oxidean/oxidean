@@ -414,6 +414,7 @@ pub async fn enqueue_run(
             tracing::warn!(error = %e, run_id, "validation run rollup failed");
         }
         let env_name = std::env::var("OXIDEAN_ENV").unwrap_or_else(|_| "development".into());
+        crate::webhook::dispatch::notify_workflow_job(db, &job_id, "completed").await;
         crate::webhook::dispatch::notify_workflow_run(db, &run_id, "requested", &env_name).await;
         if let Err(e) = crate::actions::statuses::upsert_job_status(
             db,
@@ -823,6 +824,7 @@ pub async fn fail_discovery_runs(
         if let Err(e) = db.recompute_action_run_status(&run_id).await {
             tracing::warn!(error = %e, run_id, "validation run rollup failed");
         }
+        crate::webhook::dispatch::notify_workflow_job(db, &job_id, "completed").await;
         crate::webhook::dispatch::notify_workflow_run(db, &run_id, "requested", &env_name).await;
         if let Err(e) = crate::actions::statuses::upsert_job_status(
             db,
@@ -1261,6 +1263,15 @@ pub(crate) async fn emit_jobs(
                 .unwrap_or_default();
             insert.continue_on_error = leg_coe;
             db.insert_action_job(insert).await?;
+            // workflow_job webhook — `waiting` for approval/env-held jobs,
+            // `queued` for runnable ones; terminal-at-insert legs emit
+            // `completed` (skipped/failed validation never queue).
+            let wj_action = match insert_status {
+                "skipped" | "failure" | "cancelled" => "completed",
+                "waiting" => "waiting",
+                _ => "queued",
+            };
+            crate::webhook::dispatch::notify_workflow_job(db, &job_id, wj_action).await;
             // The deployment record is the public projection of the
             // environment deployment — GitHub's Deployments API analogue.
             if let Some(env_name) = &environment_name {

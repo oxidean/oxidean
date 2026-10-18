@@ -204,6 +204,8 @@ async fn requeue_dead_runner_job(db: &Database, job: &StaleJobRow, stale_secs: u
         if let Err(e) = db.revoke_action_job_token_for_job(&job.id).await {
             tracing::warn!(error = %e, job_id = %job.id, "stale requeue: token revoke failed");
         }
+        // Requeue re-announces the job — new attempt is `queued` again.
+        crate::webhook::dispatch::notify_workflow_job(db, &job.id, "queued").await;
         tracing::info!(
             job_id = %job.id,
             job_key = %job.job_key,

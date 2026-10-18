@@ -144,9 +144,13 @@ pub fn spawn_background_jobs(
                 // minute-granularity anyway).
                 let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
                 match db_c.promote_due_deployment_jobs(&now).await {
-                    Ok(n) if n > 0 => {
+                    Ok(ids) if !ids.is_empty() => {
+                        for job_id in &ids {
+                            crate::webhook::dispatch::notify_workflow_job(&db_c, job_id, "queued")
+                                .await;
+                        }
                         crate::actions::task_wake::wake();
-                        tracing::info!(promoted = n, "deployment wait timer released jobs");
+                        tracing::info!(promoted = ids.len(), "deployment wait timer released jobs");
                     }
                     Err(e) => {
                         tracing::error!(error = %e, "deployment wait timer sweep failed")

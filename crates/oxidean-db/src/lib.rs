@@ -3837,7 +3837,7 @@ impl Database {
     }
 
     /// Promote `waiting` legs whose wait timer lapsed (scheduler sweep tick).
-    pub async fn promote_due_deployment_jobs(&self, now: &str) -> Result<u64, String> {
+    pub async fn promote_due_deployment_jobs(&self, now: &str) -> Result<Vec<String>, String> {
         actions::promote_due_deployment_jobs(self.require_pool()?, now).await
     }
 

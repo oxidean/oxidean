@@ -32,6 +32,7 @@ const ALLOWED_EVENTS: &[&str] = &[
     "create",
     "delete",
     "workflow_run",
+    "workflow_job",
     "registry_package",
     "ping",
     "*",

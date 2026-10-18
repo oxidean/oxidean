@@ -397,6 +397,7 @@ async fn fetch_task(
             if let Err(e) = state.db.recompute_action_run_status(&j.run_id).await {
                 tracing::warn!("action run rollup after claim failed: {e}");
             }
+            crate::webhook::dispatch::notify_workflow_job(&state.db, &j.id, "in_progress").await;
             let run = state
                 .db
                 .find_action_run_by_id(&j.run_id)

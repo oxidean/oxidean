@@ -639,6 +639,82 @@ pub async fn notify_workflow_run(db: &Database, run_id: &str, action: &str, env_
     .await;
 }
 
+/// GitHub-compatible `workflow_job` payload — `queued`/`waiting` at
+/// scheduling, `in_progress` at runner claim, `completed` on a terminal
+/// conclusion (internal status carries through as `conclusion`).
+pub fn workflow_job_payload(
+    action: &str,
+    job: &oxidean_db::actions::ActionJobRow,
+    run: &oxidean_db::actions::ActionRunRow,
+    owner: &str,
+    repo_name: &str,
+    sender_login: &str,
+    sender_id: &str,
+) -> serde_json::Value {
+    let conclusion = if action == "completed" {
+        json!(job.status)
+    } else {
+        serde_json::Value::Null
+    };
+    let labels: serde_json::Value =
+        serde_json::from_str(&job.runs_on_json).unwrap_or_else(|_| json!([]));
+    json!({
+        "action": action,
+        "workflow_job": {
+            "id": job.id,
+            "run_id": job.run_id,
+            "run_attempt": job.attempt,
+            "name": job.name,
+            "status": action,
+            "conclusion": conclusion,
+            "workflow_name": run.workflow_name,
+            "head_sha": run.head_sha,
+            "head_branch": run.head_ref.strip_prefix("refs/heads/").unwrap_or(&run.head_ref),
+            "labels": labels,
+            "runner_id": job.runner_id,
+            "started_at": job.started_at,
+            "completed_at": job.finished_at,
+            "html_url": format!("/{owner}/{repo_name}/actions/{}", run.id),
+        },
+        "repository": repository_block(&run.repository_id, repo_name, owner),
+        "sender": { "login": sender_login, "id": sender_id },
+    })
+}
+
+/// Emit `workflow_job` for a job row by id (API-04 counterpart of
+/// `notify_workflow_run`). Best-effort: missing rows skip the fan-out.
+pub async fn notify_workflow_job(db: &Database, job_id: &str, action: &str) {
+    let Some(job) = db.find_action_job_by_id(job_id).await.ok().flatten() else {
+        return;
+    };
+    let Some(run) = db.find_action_run_by_id(&job.run_id).await.ok().flatten() else {
+        return;
+    };
+    let Some((repo, owner)) = repo_context(db, &run.repository_id).await else {
+        return;
+    };
+    let sender = sender_login(db, run.triggered_by.as_deref()).await;
+    let env_name = std::env::var("OXIDEAN_ENV").unwrap_or_else(|_| "development".into());
+    let payload = workflow_job_payload(
+        action,
+        &job,
+        &run,
+        &owner,
+        &repo.name,
+        &sender,
+        run.triggered_by.as_deref().unwrap_or(""),
+    );
+    emit(
+        db,
+        &run.repository_id,
+        "workflow_job",
+        action,
+        payload,
+        &env_name,
+    )
+    .await;
+}
+
 /// Emit `registry_package` when a version is published on a package linked to
 /// a repository (API-04). Unlinked packages have no webhook scope — nothing
 /// is emitted for them.

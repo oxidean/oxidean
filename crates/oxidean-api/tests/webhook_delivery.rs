@@ -1922,6 +1922,117 @@ async fn webhook_registry_package_generic_publish() {
     );
 }
 
+/// `workflow_job` lifecycle — a hook subscribed to the event receives
+/// `queued` when a job leg is enqueued and `completed` when the run is
+/// cancelled (conclusion carries the internal terminal status).
+#[tokio::test]
+async fn webhook_workflow_job_lifecycle() {
+    use oxidean_api::actions::{enqueue_run, parse_workflow_yaml};
+
+    let sink = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/wfj"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&sink)
+        .await;
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("wfj.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos).await;
+    let cookie = verified_owner(&app, &db, "wfj@ex.com", "wfjown").await;
+    let created_repo = rpc_json(
+        &app,
+        r#"{"procedure":"repo.create","input":{"name":"demo","visibility":"public","description":""}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(created_repo["ok"], true, "{created_repo}");
+    let repo_id = created_repo["data"]["id"].as_str().unwrap().to_string();
+
+    let hook_url = format!("{}/wfj", sink.uri());
+    let created = rpc_json(
+        &app,
+        &format!(
+            r#"{{"procedure":"webhook.create","input":{{"owner":"wfjown","name":"demo","url":"{hook_url}","secret":"s","events":["workflow_job"]}}}}"#
+        ),
+        &cookie,
+    )
+    .await;
+    assert_eq!(created["ok"], true, "{created}");
+    let hook_id = created["data"]["id"].as_str().unwrap().to_string();
+
+    let doc = parse_workflow_yaml(
+        br#"
+name: CI
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+"#,
+    )
+    .unwrap();
+    let (run_id, _jobs) = enqueue_run(
+        &db,
+        &repo_id,
+        ".github/workflows/ci.yml",
+        &doc,
+        "push",
+        "abc1234deadbeef",
+        "refs/heads/main",
+        None,
+        None,
+        None,
+        false,
+    )
+    .await
+    .unwrap();
+
+    let cancel = rpc_json(
+        &app,
+        &format!(
+            r#"{{"procedure":"repo.actions.cancelRun","input":{{"owner":"wfjown","name":"demo","run_id":"{run_id}"}}}}"#
+        ),
+        &cookie,
+    )
+    .await;
+    assert_eq!(cancel["ok"], true, "{cancel}");
+
+    let mut actions = std::collections::HashSet::new();
+    let mut completed_payload = String::new();
+    for _ in 0..50 {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let deliveries = db
+            .list_webhook_deliveries(&hook_id, 50)
+            .await
+            .expect("list");
+        for d in deliveries.iter().filter(|d| d.event == "workflow_job") {
+            actions.insert(d.action.clone());
+            if d.action == "completed" {
+                completed_payload = d.payload_json.clone();
+            }
+        }
+        if actions.contains("queued") && actions.contains("completed") {
+            break;
+        }
+    }
+    assert!(actions.contains("queued"), "{actions:?}");
+    assert!(actions.contains("completed"), "{actions:?}");
+    assert!(
+        completed_payload.contains("\"conclusion\":\"cancelled\""),
+        "{completed_payload}"
+    );
+    assert!(
+        completed_payload.contains("\"workflow_job\""),
+        "{completed_payload}"
+    );
+}
+
 fn basic_auth(user: &str, password: &str) -> String {
     const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let raw = format!("{user}:{password}");

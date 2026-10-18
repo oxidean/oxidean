@@ -670,6 +670,8 @@ pub async fn expand_call(
     // outputs ride `outputs_json` for close-out materialization.
     db.update_action_job_status(&caller.id, "in_progress")
         .await?;
+    // Call jobs never see a runner — expansion start is their `in_progress`.
+    crate::webhook::dispatch::notify_workflow_job(db, &caller.id, "in_progress").await;
     // New callee legs publish their own queued commit statuses; needs-gated
     // children re-gate on this tick's fixpoint loop.
     if let Err(e) = crate::actions::statuses::publish_queued_for_run(
@@ -763,9 +765,11 @@ pub async fn close_call(
         }
         if output_err {
             db.update_action_job_status(&caller.id, "failure").await?;
+            crate::webhook::dispatch::notify_workflow_job(db, &caller.id, "completed").await;
             return Ok("failure".into());
         }
     }
     db.update_action_job_status(&caller.id, result).await?;
+    crate::webhook::dispatch::notify_workflow_job(db, &caller.id, "completed").await;
     Ok(result.to_string())
 }

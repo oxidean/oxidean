@@ -415,6 +415,7 @@ async fn needs_pass(
                     }
                 } else {
                     db.update_action_job_status(&job.id, "queued").await?;
+                    crate::webhook::dispatch::notify_workflow_job(db, &job.id, "queued").await;
                     queued += 1;
                 }
             }
@@ -479,6 +480,7 @@ async fn call_close_pass(db: &Database, run_id: &str) -> Result<bool, String> {
                 for c in children.iter().filter(|c| !terminal(&c.status)) {
                     db.update_action_job_status(&c.id, "cancelled").await?;
                     let _ = db.revoke_action_job_token_for_job(&c.id).await;
+                    crate::webhook::dispatch::notify_workflow_job(db, &c.id, "completed").await;
                     changed = true;
                 }
             }
@@ -556,6 +558,7 @@ async fn maxpar_pass(db: &Database, run_id: &str) -> Result<bool, String> {
                     db.set_job_deployment_timer(&leg.id, &not_before).await?;
                 } else {
                     db.update_action_job_status(&leg.id, "queued").await?;
+                    crate::webhook::dispatch::notify_workflow_job(db, &leg.id, "queued").await;
                 }
                 changed = true;
             }
@@ -581,6 +584,7 @@ async fn maxpar_pass(db: &Database, run_id: &str) -> Result<bool, String> {
                 db.set_job_deployment_timer(&leg.id, &not_before).await?;
             } else {
                 db.update_action_job_status(&leg.id, "queued").await?;
+                crate::webhook::dispatch::notify_workflow_job(db, &leg.id, "queued").await;
             }
             room -= 1;
             changed = true;

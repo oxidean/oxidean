@@ -66,7 +66,7 @@ download, annotations, `workflow_job` webhook.
 | 20. Runners & labels | 6 | 0 | 0 | 3 |
 | 21. Security behaviours | 8 | 1 | 0 | 0 |
 | 22. Limits | 7 | 0 | 0 | 1 |
-| 23. Run lifecycle & integrations | 13 | 2 | 1 | 1 |
+| 23. Run lifecycle & integrations | 14 | 2 | 0 | 1 |
 | 24. GitHub REST API for Actions | 13 | 1 | 1 | 0 |
 
 ## 1. Workflow files & discovery (`file.`)
@@ -648,7 +648,7 @@ and <https://docs.github.com/en/actions/monitoring-and-troubleshooting-workflows
 | `life.log-retention` | Logs compress + expire on a retention sweep | supported | test:crates/oxidean-api/tests/actions_phase8.rs::p8_gzip_roundtrip_preserves_offsets_and_merges_late_appends, test:crates/oxidean-api/tests/actions_phase8.rs::p8_retention_sweep_compresses_terminal_and_deletes_aged | |
 | `life.commit-status` | Commit status / required checks integration | supported | test:crates/oxidean-api/tests/actions_endpoints.rs::rerun_and_cancel_run | Classic commit statuses under context `{workflow} / {job_key}`: enqueue publishes each job's real state (queued/waiting → pending, `if:`-skipped → success, validation-failed → failure); runner updates refresh; cancel → error, deadline-fail/fail-fast-cancel → error/failure via `actions::statuses`. |
 | `life.workflow-run-webhook` | `workflow_run` webhook fires on run lifecycle | supported | case:workflow-run-listen | `workflow_run` deliveries go out on `requested` (enqueue/rerun), `in_progress` (first claim), and `completed` (terminal, including cancel and deadline-fail) via `webhook::dispatch::notify_workflow_run`; `on: workflow_run` downstream enqueues emit `requested` too. |
-| `life.workflow-job-webhook` | `workflow_job` webhook | unsupported | case:on-unsupported-event | P16. |
+| `life.workflow-job-webhook` | `workflow_job` webhook | supported | test:crates/oxidean-api/tests/webhook_delivery.rs::webhook_workflow_job_lifecycle | `workflow_job` deliveries go out on `queued`/`waiting` at leg insert and every queued promotion (needs resolve, matrix slot, approval/timer release, requeue), `in_progress` at runner claim and reusable-call expansion, and `completed` on every terminal transition via the commit-status choke points; `conclusion` carries the internal status. |
 | `life.notifications` | Email/Slack notifications on failure | n/a | | No notification subsystem on Oxidean. |
 | `life.ui` | Runs list/detail in the web UI | supported | test:crates/oxidean-api/tests/actions_endpoints.rs::get_run_anonymous_includes_jobs_and_timestamps | Run page, typed dispatch form, settings panels, env deployments/reviews, artifact management. |
 | `life.approval-gate` | Deployment approval releases a held job | supported | test:crates/oxidean-api/tests/actions_phase7.rs::p7_environment_required_reviewers_hold | |

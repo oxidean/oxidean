@@ -445,7 +445,11 @@ jobs:
 
     // Not yet due — the sweep promotes nothing.
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    assert_eq!(db.promote_due_deployment_jobs(&now).await.unwrap(), 0);
+    assert!(db
+        .promote_due_deployment_jobs(&now)
+        .await
+        .unwrap()
+        .is_empty());
     let job = db
         .find_action_job_by_id(&job_ids[0])
         .await
@@ -456,7 +460,10 @@ jobs:
     // Past the deadline — the sweep releases the leg to queued.
     let later = (chrono::Utc::now() + chrono::Duration::minutes(31))
         .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-    assert_eq!(db.promote_due_deployment_jobs(&later).await.unwrap(), 1);
+    assert_eq!(
+        db.promote_due_deployment_jobs(&later).await.unwrap(),
+        vec![job_ids[0].clone()]
+    );
     let job = db
         .find_action_job_by_id(&job_ids[0])
         .await

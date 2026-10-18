@@ -4721,27 +4721,51 @@ pub async fn set_deployment_timer(
 /// (enqueue for ungated legs, upstream-resolve for needs-gated ones), so a
 /// non-NULL value is itself proof the leg is otherwise runnable.
 /// `now` is an RFC3339 UTC string (text comparison is format-stable).
-pub async fn promote_due_deployment_jobs(pool: &DbPool, now: &str) -> Result<u64, String> {
-    match pool {
-        DbPool::Sqlite(p) => {
-            sqlx::query("UPDATE action_jobs SET status = 'queued', deployment_not_before = NULL, updated_at = CURRENT_TIMESTAMP
-                         WHERE status = 'waiting' AND approval_hold = 0
-                           AND deployment_not_before IS NOT NULL AND deployment_not_before <= ?")
-                .bind(now).execute(p).await.map(|r| r.rows_affected()).map_err(|e| e.to_string())
-        }
-        DbPool::Postgres(p) => {
-            sqlx::query("UPDATE action_jobs SET status = 'queued', deployment_not_before = NULL, updated_at = now()
-                         WHERE status = 'waiting' AND approval_hold = false
-                           AND deployment_not_before IS NOT NULL AND deployment_not_before <= $1")
-                .bind(now).execute(p).await.map(|r| r.rows_affected()).map_err(|e| e.to_string())
-        }
-        DbPool::MySql(p) => {
-            sqlx::query("UPDATE action_jobs SET status = 'queued', deployment_not_before = NULL, updated_at = CURRENT_TIMESTAMP
-                         WHERE status = 'waiting' AND approval_hold = 0
-                           AND deployment_not_before IS NOT NULL AND deployment_not_before <= ?")
-                .bind(now).execute(p).await.map(|r| r.rows_affected()).map_err(|e| e.to_string())
-        }
+/// Returns the promoted job ids — `waiting` rows can't be claimed between
+/// the select and the update, so the id set is stable.
+pub async fn promote_due_deployment_jobs(pool: &DbPool, now: &str) -> Result<Vec<String>, String> {
+    macro_rules! promote {
+        ($p:expr, $lit:literal, $pg:literal) => {{
+            let ids: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+                "SELECT id FROM action_jobs WHERE status = 'waiting' AND approval_hold = {}
+                   AND deployment_not_before IS NOT NULL AND deployment_not_before <= {}",
+                if $pg { "false" } else { "0" },
+                $lit
+            )))
+            .bind(now)
+            .fetch_all($p)
+            .await
+            .map_err(|e| e.to_string())?;
+            if !ids.is_empty() {
+                let marks = ids
+                    .iter()
+                    .enumerate()
+                    .map(|(i, _)| {
+                        if $pg {
+                            format!("${}", i + 1)
+                        } else {
+                            "?".to_string()
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let mut q = sqlx::query(sqlx::AssertSqlSafe(format!(
+                    "UPDATE action_jobs SET status = 'queued', deployment_not_before = NULL, updated_at = CURRENT_TIMESTAMP
+                     WHERE id IN ({marks}) AND status = 'waiting'"
+                )));
+                for id in &ids {
+                    q = q.bind(id);
+                }
+                q.execute($p).await.map_err(|e| e.to_string())?;
+            }
+            ids
+        }};
     }
+    Ok(match pool {
+        DbPool::Sqlite(p) => promote!(p, "?", false),
+        DbPool::Postgres(p) => promote!(p, "$1", true),
+        DbPool::MySql(p) => promote!(p, "?", false),
+    })
 }
 
 // ---- OIDC signing keys ----------------------------------------------------
