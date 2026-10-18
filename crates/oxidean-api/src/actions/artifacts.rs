@@ -97,7 +97,10 @@ pub async fn upload(
         .db
         .find_action_artifact(&job.run_id, &q.name)
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(|e| {
+            tracing::error!("artifact find failed: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
     let artifact_id = existing
         .as_ref()
         .map(|a| a.id.clone())
@@ -165,11 +168,10 @@ pub async fn upload(
         expires_at: expires_at.map(|t| t.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)),
         created_at: String::new(),
     };
-    state
-        .db
-        .upsert_action_artifact(&row)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    state.db.upsert_action_artifact(&row).await.map_err(|e| {
+        tracing::error!("artifact upsert failed: {e}");
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
     let stored = state
         .db
         .find_action_artifact(&job.run_id, &q.name)

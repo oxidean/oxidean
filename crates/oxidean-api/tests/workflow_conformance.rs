@@ -289,7 +289,9 @@ async fn fixture(case: &Case) -> Fixture {
             .await
             .unwrap();
         db.insert_repository(
-            &format!("r-{slug}-{name}"),
+            // CHAR(36) on MySQL — `r-{slug}-{name}` overflows for longer
+            // case slugs; a bare uuid fits everywhere.
+            &Uuid::new_v4().to_string(),
             &owner.id,
             "user",
             &name,
