@@ -632,6 +632,13 @@ pub async fn execute(client: &Client, task: &Task, config: &Config) -> &'static 
                 }
             };
             if !allowed {
+                if cancelled {
+                    logger
+                        .line(&format!(
+                            "::notice::step '{step_id}' skipped — job cancelled"
+                        ))
+                        .await;
+                }
                 record_step(&mut ctx, &step_id, "skipped", "skipped", HashMap::new());
                 continue;
             }

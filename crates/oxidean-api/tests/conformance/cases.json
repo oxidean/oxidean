@@ -1022,6 +1022,36 @@
       ]
     },
     {
+      "id": "concurrency-pending",
+      "kind": "run",
+      "second_dispatch": true,
+      "expect_runs": [
+        "cancelled",
+        "success"
+      ],
+      "expect_jobs": {
+        "build": "success"
+      },
+      "log_contains": [
+        "pending-winner"
+      ]
+    },
+    {
+      "id": "concurrency-job-pending",
+      "kind": "run",
+      "second_dispatch": true,
+      "expect_runs": [
+        "cancelled",
+        "success"
+      ],
+      "expect_jobs": {
+        "build": "success"
+      },
+      "log_contains": [
+        "job-pending-winner"
+      ]
+    },
+    {
       "id": "shell-python",
       "kind": "run",
       "expect_run": "success",

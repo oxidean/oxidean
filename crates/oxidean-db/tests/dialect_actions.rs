@@ -376,6 +376,222 @@ async fn dialect_actions_claim_race() {
 }
 
 #[tokio::test]
+async fn dialect_actions_concurrency_gate() {
+    // GitHub concurrency-group semantics at claim time: a job-level group
+    // blocks while another same-group job runs (any run); a workflow-level
+    // group blocks while another same-group run is in progress; pending
+    // supersede cancels the older queued run even without cip.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let url = format!("sqlite:{}", dir.path().join("actions-conc.db").display());
+    let db = Database::connect_as(&url, oxidean_db::Dialect::Sqlite)
+        .await
+        .expect("connect");
+    db.migrate().await.expect("migrate");
+    let owner = db
+        .create_user(
+            "u-conc",
+            "conc@example.com",
+            "concuser",
+            Some("hash"),
+            "Conc",
+            "",
+            None,
+            Role::User,
+        )
+        .await
+        .expect("user");
+    let repo = db
+        .insert_repository(
+            "r-conc",
+            &owner.id,
+            "user",
+            "conc-repo",
+            "private",
+            "",
+            "main",
+        )
+        .await
+        .expect("repo");
+    db.insert_action_runner(
+        "runner-1",
+        "conc-runner",
+        "hash-token",
+        r#"["ubuntu-latest"]"#,
+        Some(&repo.id),
+        false,
+    )
+    .await
+    .expect("runner");
+    let labels = vec!["ubuntu-latest".to_string()];
+    let labels_json = r#"["ubuntu-latest"]"#;
+    let mk_run = |id: &str| {
+        let (db, repo_id, owner_id) = (db.clone(), repo.id.clone(), owner.id.clone());
+        let id = id.to_string();
+        async move {
+            db.insert_action_run(
+                &id,
+                &repo_id,
+                ".github/workflows/ci.yml",
+                "CI",
+                "push",
+                "abc123",
+                "refs/heads/main",
+                "CI",
+                Some(&owner_id),
+                None,
+                None,
+            )
+            .await
+        }
+    };
+    let mk_job = |id: &str, run: &str, group: Option<&str>| {
+        let db = db.clone();
+        let (id, run) = (id.to_string(), run.to_string());
+        let group = group.map(|g| g.to_string());
+        async move {
+            let mut ins = oxidean_db::JobInsert::basic(&id, &run, &id, "build", labels_json);
+            ins.concurrency_group = group;
+            db.insert_action_job(ins).await
+        }
+    };
+
+    // --- job-level group: serializes across runs -------------------------
+    let ra = mk_run("run-a").await.expect("run-a");
+    let rb = mk_run("run-b").await.expect("run-b");
+    mk_job("job-a", &ra.id, Some("jg")).await.expect("job-a");
+    mk_job("job-b", &rb.id, Some("jg")).await.expect("job-b");
+    let first = db
+        .claim_queued_action_job_for_labels("runner-1", &labels)
+        .await
+        .expect("claim")
+        .expect("job-a claims");
+    assert_eq!(first.id, "job-a");
+    assert!(
+        db.claim_queued_action_job_for_labels("runner-1", &labels)
+            .await
+            .expect("claim")
+            .is_none(),
+        "same-group job must not claim while another runs"
+    );
+    db.update_action_job_status("job-a", "success")
+        .await
+        .expect("finish job-a");
+    db.recompute_action_run_status(&ra.id)
+        .await
+        .expect("rollup a");
+    let second = db
+        .claim_queued_action_job_for_labels("runner-1", &labels)
+        .await
+        .expect("claim")
+        .expect("job-b claims after occupancy released");
+    assert_eq!(second.id, "job-b");
+    db.update_action_job_status("job-b", "success")
+        .await
+        .expect("finish job-b");
+    db.recompute_action_run_status(&rb.id)
+        .await
+        .expect("rollup b");
+
+    // --- workflow-level group: run occupancy, same-run jobs parallel -----
+    let rc = mk_run("run-c").await.expect("run-c");
+    let rd = mk_run("run-d").await.expect("run-d");
+    db.set_action_run_concurrency(&rc.id, "wg")
+        .await
+        .expect("run-c group");
+    db.set_action_run_concurrency(&rd.id, "wg")
+        .await
+        .expect("run-d group");
+    mk_job("job-c1", &rc.id, None).await.expect("job-c1");
+    mk_job("job-c2", &rc.id, None).await.expect("job-c2");
+    mk_job("job-d", &rd.id, None).await.expect("job-d");
+    let c1 = db
+        .claim_queued_action_job_for_labels("runner-1", &labels)
+        .await
+        .expect("claim")
+        .expect("job-c1 claims");
+    assert_eq!(c1.id, "job-c1");
+    db.recompute_action_run_status(&rc.id)
+        .await
+        .expect("rollup c");
+    // Same-run sibling is not blocked by its own run's group.
+    let c2 = db
+        .claim_queued_action_job_for_labels("runner-1", &labels)
+        .await
+        .expect("claim")
+        .expect("job-c2 claims — same run");
+    assert_eq!(c2.id, "job-c2");
+    // Other run in the group is blocked.
+    assert!(
+        db.claim_queued_action_job_for_labels("runner-1", &labels)
+            .await
+            .expect("claim")
+            .is_none(),
+        "run-d's job must wait while run-c occupies the group"
+    );
+    db.update_action_job_status("job-c1", "success")
+        .await
+        .expect("finish c1");
+    db.update_action_job_status("job-c2", "success")
+        .await
+        .expect("finish c2");
+    db.recompute_action_run_status(&rc.id)
+        .await
+        .expect("rollup c");
+    let d = db
+        .claim_queued_action_job_for_labels("runner-1", &labels)
+        .await
+        .expect("claim")
+        .expect("job-d claims after run-c finished");
+    assert_eq!(d.id, "job-d");
+    db.update_action_job_status("job-d", "success")
+        .await
+        .expect("finish d");
+    db.recompute_action_run_status(&rd.id)
+        .await
+        .expect("rollup d");
+
+    // --- pending supersede: newest queued wins, no cip needed ------------
+    let re = mk_run("run-e").await.expect("run-e");
+    let rf = mk_run("run-f").await.expect("run-f");
+    db.set_action_run_concurrency(&re.id, "pg")
+        .await
+        .expect("run-e group");
+    db.set_action_run_concurrency(&rf.id, "pg")
+        .await
+        .expect("run-f group");
+    mk_job("job-e", &re.id, None).await.expect("job-e");
+    mk_job("job-f", &rf.id, None).await.expect("job-f");
+    let superseded = db
+        .cancel_pending_concurrency_runs(&repo.id, "pg", &rf.id)
+        .await
+        .expect("pending supersede");
+    assert_eq!(superseded, vec![re.id.clone()]);
+    assert_eq!(
+        db.find_action_run_by_id(&re.id)
+            .await
+            .expect("find")
+            .unwrap()
+            .status,
+        "cancelled"
+    );
+    assert_eq!(
+        db.find_action_run_by_id(&rf.id)
+            .await
+            .expect("find")
+            .unwrap()
+            .status,
+        "queued"
+    );
+    // The surviving pending run claims normally.
+    let f = db
+        .claim_queued_action_job_for_labels("runner-1", &labels)
+        .await
+        .expect("claim")
+        .expect("job-f claims");
+    assert_eq!(f.id, "job-f");
+}
+
+#[tokio::test]
 async fn dialect_actions_factory_reset_scope() {
     // Covered by factory_reset_actions.rs — keep discoverable name for Wave 0 filter.
 }

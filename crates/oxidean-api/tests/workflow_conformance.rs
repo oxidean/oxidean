@@ -782,6 +782,8 @@ conformance_case!(matrix_fail_fast, "matrix-fail-fast");
 conformance_case!(matrix_fail_fast_off, "matrix-fail-fast-off");
 conformance_case!(concurrency_cancel, "concurrency-cancel");
 conformance_case!(concurrency_job_cancel, "concurrency-job-cancel");
+conformance_case!(concurrency_pending, "concurrency-pending");
+conformance_case!(concurrency_job_pending, "concurrency-job-pending");
 
 // ── queued / never_dispatch ───────────────────────────────────────────
 conformance_case!(runs_on_nomatch, "runs-on-nomatch");

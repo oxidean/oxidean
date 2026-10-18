@@ -358,12 +358,14 @@ pub async fn enqueue_run(
     .await?;
     // Workflow `concurrency:` — recorded on the run; enforcement lands with
     // the scheduler phase.
+    let mut run_group: Option<String> = None;
     if let Some(group_src) = doc.concurrency.as_ref().and_then(|c| c.group.as_deref()) {
         let mut notes = Vec::new();
         // GitHub concurrency groups are case-insensitive — store lowercase.
         let group =
             crate::actions::eval_ctx::interp_or_raw(group_src, &ctx, &mut notes).to_lowercase();
         eval_warnings.extend(notes);
+        run_group = Some(group.clone());
         if let Err(e) = db.set_action_run_concurrency(&run_id, &group).await {
             tracing::warn!(error = %e, run_id, "failed to record run concurrency group");
         }
@@ -463,10 +465,74 @@ pub async fn enqueue_run(
         log_dir,
         hold_for_approval,
         supersede_groups: Vec::new(),
+        pending_groups: Vec::new(),
         caller: None,
     };
     let job_ids = emit_jobs(&mut emit, &doc.jobs).await?;
     let supersede_groups = emit.supersede_groups;
+    let pending_groups = emit.pending_groups;
+    let public_origin = std::env::var("OXIDEAN_PUBLIC_ORIGIN").ok();
+    // GitHub pending-supersede — `cancel-in-progress` or not, a new arrival
+    // in a concurrency group cancels the older *pending* member (a group
+    // holds at most one running + one pending occupant). Running work only
+    // dies under the cip passes below.
+    if let Some(group) = &run_group {
+        match db
+            .cancel_pending_concurrency_runs(repository_id, group, &run_id)
+            .await
+        {
+            Ok(ids) if !ids.is_empty() => {
+                for id in &ids {
+                    let _ = crate::actions::statuses::publish_cancelled_for_run(
+                        db,
+                        id,
+                        public_origin.as_deref(),
+                    )
+                    .await;
+                }
+                tracing::info!(
+                    run_id,
+                    group,
+                    superseded = ids.len(),
+                    "concurrency superseded pending runs"
+                );
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, run_id, group, "concurrency pending supersede failed");
+            }
+            _ => {}
+        }
+    }
+    for group in &pending_groups {
+        match db
+            .cancel_pending_concurrency_jobs(repository_id, group, &run_id)
+            .await
+        {
+            Ok(ids) if !ids.is_empty() => {
+                for id in &ids {
+                    if let Err(e) = db.recompute_action_run_status(id).await {
+                        tracing::warn!(error = %e, run_id = id, "post-supersede rollup failed");
+                    }
+                    let _ = crate::actions::statuses::publish_cancelled_for_run(
+                        db,
+                        id,
+                        public_origin.as_deref(),
+                    )
+                    .await;
+                }
+                tracing::info!(
+                    run_id,
+                    group,
+                    superseded = ids.len(),
+                    "concurrency superseded pending jobs"
+                );
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, run_id, group, "concurrency pending job supersede failed");
+            }
+            _ => {}
+        }
+    }
     // `concurrency.cancel-in-progress` — workflow group supersedes whole
     // still-running same-group runs; job groups supersede same-group jobs.
     // Affected runners see the cancel on their next update_task/update_log.
@@ -476,6 +542,14 @@ pub async fn enqueue_run(
             .await
         {
             Ok(ids) if !ids.is_empty() => {
+                for id in &ids {
+                    let _ = crate::actions::statuses::publish_cancelled_for_run(
+                        db,
+                        id,
+                        public_origin.as_deref(),
+                    )
+                    .await;
+                }
                 tracing::info!(
                     run_id,
                     group,
@@ -499,6 +573,12 @@ pub async fn enqueue_run(
                     if let Err(e) = db.recompute_action_run_status(id).await {
                         tracing::warn!(error = %e, run_id = id, "post-supersede rollup failed");
                     }
+                    let _ = crate::actions::statuses::publish_cancelled_for_run(
+                        db,
+                        id,
+                        public_origin.as_deref(),
+                    )
+                    .await;
                 }
                 tracing::info!(
                     run_id,
@@ -787,6 +867,10 @@ pub(crate) struct EmitCtx<'a> {
     pub log_dir: Option<PathBuf>,
     pub hold_for_approval: bool,
     pub supersede_groups: Vec<String>,
+    /// Job-level groups needing pending-supersede — newest pending cancels
+    /// older pending same-group jobs in other runs (no `cancel-in-progress`
+    /// needed; GitHub always applies the rule).
+    pub pending_groups: Vec<String>,
     /// Set when emitting callee jobs for a reusable-workflow call — every
     /// emitted row links to the caller leg and carries the call's resolved
     /// inputs/secrets scope on its payload.
@@ -912,10 +996,8 @@ pub(crate) async fn emit_jobs(
         // supersede same-group jobs in other runs.
         let concurrency_spec = job.concurrency.as_ref().or(doc.concurrency.as_ref());
         // Groups match case-insensitively on GitHub — normalize lowercase.
-        let concurrency_group = concurrency_spec
-            .and_then(|c| c.group.as_deref())
-            .map(|s| crate::actions::eval_ctx::interp_or_raw(s, &ctx, &mut notes).to_lowercase())
-            .filter(|g| !g.is_empty());
+        // Job-level groups only: the workflow group lives on the run row —
+        // same-run jobs sharing it must not serialize against each other.
         let job_group = job
             .concurrency
             .as_ref()
@@ -929,6 +1011,13 @@ pub(crate) async fn emit_jobs(
         if let (Some(g), true) = (&job_group, cancel_in_progress) {
             if !emit.supersede_groups.contains(g) {
                 emit.supersede_groups.push(g.clone());
+            }
+        }
+        // Pending-supersede fires for every job-level group regardless of
+        // `cancel-in-progress` — newest pending cancels older pending.
+        if let Some(g) = &job_group {
+            if !emit.pending_groups.contains(g) {
+                emit.pending_groups.push(g.clone());
             }
         }
         if let Some(err) = job_err {
@@ -1156,7 +1245,7 @@ pub(crate) async fn emit_jobs(
             insert.status = insert_status.into();
             insert.approval_hold = held;
             insert.timeout_at = timeout_at.clone();
-            insert.concurrency_group = concurrency_group.clone();
+            insert.concurrency_group = job_group.clone();
             insert.environment_name = environment_name.clone();
             insert.deployment_wait_minutes = environment_wait_minutes;
             insert.deployment_not_before = deployment_not_before;

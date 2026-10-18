@@ -4105,6 +4105,40 @@ impl Database {
         actions::requeue_run(self.require_pool()?, run_id, failed_only, job_id, debug).await
     }
 
+    /// `concurrency` pending-supersede — cancels older same-group *queued*
+    /// runs (GitHub: newest pending wins, `cancel-in-progress` or not).
+    pub async fn cancel_pending_concurrency_runs(
+        &self,
+        repository_id: &str,
+        group: &str,
+        new_run_id: &str,
+    ) -> Result<Vec<String>, String> {
+        actions::cancel_pending_concurrency_runs(
+            self.require_pool()?,
+            repository_id,
+            group,
+            new_run_id,
+        )
+        .await
+    }
+
+    /// Job-level variant — cancels older same-group *queued/waiting* jobs in
+    /// other runs; returns affected run ids for rollup + status publishing.
+    pub async fn cancel_pending_concurrency_jobs(
+        &self,
+        repository_id: &str,
+        group: &str,
+        new_run_id: &str,
+    ) -> Result<Vec<String>, String> {
+        actions::cancel_pending_concurrency_jobs(
+            self.require_pool()?,
+            repository_id,
+            group,
+            new_run_id,
+        )
+        .await
+    }
+
     /// `deleteRun` — cascades jobs/tokens/artifacts on `run_id` and returns
     /// the on-disk paths the caller should remove. `None` when absent.
     pub async fn delete_action_run(

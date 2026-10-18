@@ -592,6 +592,7 @@ pub async fn expand_call(
         log_dir: Some(crate::actions::logs::resolve_log_dir()),
         hold_for_approval: false,
         supersede_groups: Vec::new(),
+        pending_groups: Vec::new(),
         caller: Some(CallerEmit {
             caller_job_id: caller.id.clone(),
             inputs,
@@ -618,6 +619,32 @@ pub async fn expand_call(
         return Ok(fail(format!(
             "reusable call fan-out cap ({MAX_CALLEE_JOBS} callee jobs) reached"
         )));
+    }
+    // Pending-supersede fires for callee job-level groups too — a group
+    // keeps at most one pending occupant, `cancel-in-progress` or not.
+    for group in &emit.pending_groups {
+        match db
+            .cancel_pending_concurrency_jobs(&run.repository_id, group, &run.id)
+            .await
+        {
+            Ok(ids) if !ids.is_empty() => {
+                for id in &ids {
+                    if let Err(e) = db.recompute_action_run_status(id).await {
+                        tracing::warn!(error = %e, run_id = id, "post-supersede rollup failed");
+                    }
+                    let _ = crate::actions::statuses::publish_cancelled_for_run(
+                        db,
+                        id,
+                        std::env::var("OXIDEAN_PUBLIC_ORIGIN").ok().as_deref(),
+                    )
+                    .await;
+                }
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, run_id = %run.id, group, "callee pending supersede failed");
+            }
+            _ => {}
+        }
     }
     // `concurrency.cancel-in-progress` on callee jobs supersedes same-group
     // jobs in *other* runs — same application the enqueue path runs.

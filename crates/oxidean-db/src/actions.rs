@@ -612,6 +612,17 @@ pub async fn find_run_by_id(pool: &DbPool, id: &str) -> Result<Option<ActionRunR
     }
 }
 
+/// FNV-1a 64-bit — deterministic short hash for MySQL `GET_LOCK` names
+/// (64-char cap) derived from the repo+group key.
+fn fnv1a(bytes: &[u8]) -> u64 {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for b in bytes {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    h
+}
+
 /// Label match key — `labels_match` semantics: `have_base == base || have ==
 /// need` reduces to `base(need) IN base(runner_labels)` since `have == need`
 /// implies equal bases. `action_job_labels.base` stores this value.
@@ -1923,6 +1934,43 @@ pub async fn find_runner_by_token_hash(
 /// reduces to `base(need) IN base(runner_labels)` (equality implies equal
 /// bases), so claim compares `action_job_labels.base` against the runner's
 /// label bases — precomputed here once per call.
+/// Occupancy predicates for concurrency groups, embedded in the claim's
+/// candidate subquery: a job-level group blocks while another job carrying
+/// it runs (any run — matrix legs serialize), and a run-level group blocks
+/// while another run in the repo occupies it.
+const CLAIM_JOB_GROUP_FREE: &str = "AND NOT EXISTS ( \
+    SELECT 1 FROM action_jobs o JOIN action_runs ro ON ro.id = o.run_id \
+    WHERE o.concurrency_group = j.concurrency_group AND o.status = 'in_progress' \
+      AND ro.repository_id = rj.repository_id)";
+const CLAIM_RUN_GROUP_FREE: &str = "AND NOT EXISTS ( \
+    SELECT 1 FROM action_runs r2 \
+    WHERE r2.repository_id = rj.repository_id AND r2.concurrency_group = rj.concurrency_group \
+      AND r2.id != j.run_id AND r2.status = 'in_progress')";
+
+/// One queued candidate row lifted for the group-aware claim path.
+#[derive(sqlx::FromRow)]
+struct ClaimCandidate {
+    id: String,
+    run_id: String,
+    job_group: Option<String>,
+    run_group: Option<String>,
+    repository_id: String,
+}
+
+/// Group-lock keys for a candidate — sorted so multi-group claims take
+/// locks in a consistent order (deadlock-free).
+fn candidate_lock_keys(c: &ClaimCandidate) -> Vec<String> {
+    let mut keys = Vec::new();
+    if let Some(g) = &c.job_group {
+        keys.push(format!("conc-job:{}:{g}", c.repository_id));
+    }
+    if let Some(g) = &c.run_group {
+        keys.push(format!("conc-run:{}:{g}", c.repository_id));
+    }
+    keys.sort();
+    keys
+}
+
 pub async fn claim_queued_job_for_labels(
     pool: &DbPool,
     runner_id: &str,
@@ -1935,45 +1983,191 @@ pub async fn claim_queued_job_for_labels(
     let heartbeat = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
     match pool {
         DbPool::Postgres(p) => {
-            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
-                "UPDATE action_jobs SET status = 'in_progress', runner_id = $1, \
-                 started_at = COALESCE(started_at, now()), heartbeat_at = $3, updated_at = now() \
-                 WHERE id = (SELECT j.id FROM action_jobs j \
-                   WHERE j.status = 'queued' AND j.approval_hold = false AND NOT EXISTS ( \
-                     SELECT 1 FROM action_job_labels l WHERE l.job_id = j.id \
-                     AND NOT (l.base = ANY($2::text[]))) \
-                   ORDER BY j.created_at, j.matrix_key LIMIT 1 FOR UPDATE SKIP LOCKED) \
-                 AND status = 'queued' AND approval_hold = false RETURNING {JOB_COLS_PG}"
-            )))
-            .bind(runner_id)
-            .bind(&bases)
-            .bind(&heartbeat)
-            .fetch_optional(p)
-            .await
-            .map_err(|e| e.to_string())?;
-            Ok(row.map(|r| map_job_row!(r)))
+            // Explicit tx + per-group advisory locks: two runners claiming
+            // distinct jobs of one group could otherwise both pass the
+            // occupancy predicate before either's in_progress commit lands.
+            let mut tx = p.begin().await.map_err(|e| e.to_string())?;
+            let mut claimed = None;
+            for _ in 0..8 {
+                let cand: Option<ClaimCandidate> =
+                    sqlx::query_as(sqlx::AssertSqlSafe(format!(
+                        "SELECT j.id, j.run_id, j.concurrency_group AS job_group, rj.concurrency_group AS run_group, rj.repository_id \
+                         FROM action_jobs j JOIN action_runs rj ON rj.id = j.run_id \
+                         WHERE j.status = 'queued' AND j.approval_hold = false AND NOT EXISTS ( \
+                           SELECT 1 FROM action_job_labels l WHERE l.job_id = j.id \
+                           AND NOT (l.base = ANY($1::text[]))) \
+                           {CLAIM_JOB_GROUP_FREE} {CLAIM_RUN_GROUP_FREE} \
+                         ORDER BY j.created_at, j.matrix_key LIMIT 1 FOR UPDATE OF j SKIP LOCKED"
+                    )))
+                    .bind(&bases)
+                    .fetch_optional(&mut *tx)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                let Some(cand) = cand else { break };
+                // Sorted lock order keeps multi-group claims deadlock-free.
+                let lock_keys = candidate_lock_keys(&cand);
+                let mut blocked = false;
+                for key in &lock_keys {
+                    let got: bool = sqlx::query_scalar(
+                        "SELECT pg_try_advisory_xact_lock(hashtextextended($1, 0))",
+                    )
+                    .bind(key)
+                    .fetch_one(&mut *tx)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                    if !got {
+                        blocked = true;
+                        break;
+                    }
+                }
+                if blocked {
+                    continue;
+                }
+                // Recheck under the locks — a losing racer sees the winner's
+                // committed in_progress row.
+                let occupied: bool = sqlx::query_scalar(
+                    "SELECT EXISTS ( \
+                       SELECT 1 FROM action_jobs o JOIN action_runs ro ON ro.id = o.run_id \
+                       WHERE $3::text IS NOT NULL AND o.concurrency_group = $3 \
+                         AND o.status = 'in_progress' AND ro.repository_id = $5) \
+                     OR EXISTS ( \
+                       SELECT 1 FROM action_runs r2 WHERE r2.repository_id = $5 \
+                       AND $4::text IS NOT NULL AND r2.concurrency_group = $4 \
+                       AND r2.status = 'in_progress' AND r2.id != $2)",
+                )
+                .bind(&cand.id)
+                .bind(&cand.run_id)
+                .bind(&cand.job_group)
+                .bind(&cand.run_group)
+                .bind(&cand.repository_id)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(|e| e.to_string())?;
+                if occupied {
+                    continue;
+                }
+                let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+                    "UPDATE action_jobs SET status = 'in_progress', runner_id = $1, \
+                     started_at = COALESCE(started_at, now()), heartbeat_at = $3, updated_at = now() \
+                     WHERE id = $2 AND status = 'queued' AND approval_hold = false \
+                     RETURNING {JOB_COLS_PG}"
+                )))
+                .bind(runner_id)
+                .bind(&cand.id)
+                .bind(&heartbeat)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(|e| e.to_string())?;
+                if let Some(r) = row {
+                    claimed = Some(map_job_row!(r));
+                    break;
+                }
+            }
+            tx.commit().await.map_err(|e| e.to_string())?;
+            Ok(claimed)
         }
         DbPool::MySql(p) => {
             let bases_json = serde_json::to_string(&bases).unwrap_or_else(|_| "[]".into());
             for _ in 0..4 {
-                let candidates: Vec<String> = sqlx::query_scalar(
-                    "SELECT j.id FROM action_jobs j \
-                     WHERE j.status = 'queued' AND j.approval_hold = 0 AND NOT EXISTS ( \
-                       SELECT 1 FROM action_job_labels l WHERE l.job_id = j.id \
-                       AND l.base NOT IN (SELECT value FROM JSON_TABLE(?, '$[*]' \
-                         COLUMNS (value VARCHAR(255) PATH '$')) AS lb)) \
-                     ORDER BY j.created_at, j.matrix_key LIMIT 5",
-                )
-                .bind(&bases_json)
-                .fetch_all(p)
-                .await
-                .map_err(|e| e.to_string())?;
+                let candidates: Vec<ClaimCandidate> =
+                    sqlx::query_as(sqlx::AssertSqlSafe(format!(
+                        "SELECT j.id, j.run_id, j.concurrency_group AS job_group, rj.concurrency_group AS run_group, rj.repository_id \
+                         FROM action_jobs j JOIN action_runs rj ON rj.id = j.run_id \
+                         WHERE j.status = 'queued' AND j.approval_hold = 0 AND NOT EXISTS ( \
+                           SELECT 1 FROM action_job_labels l WHERE l.job_id = j.id \
+                           AND l.base NOT IN (SELECT value FROM JSON_TABLE(?, '$[*]' \
+                             COLUMNS (value VARCHAR(255) PATH '$')) AS lb)) \
+                           {CLAIM_JOB_GROUP_FREE} {CLAIM_RUN_GROUP_FREE} \
+                         ORDER BY j.created_at, j.matrix_key LIMIT 5",
+                    )))
+                    .bind(&bases_json)
+                    .fetch_all(p)
+                    .await
+                    .map_err(|e| e.to_string())?;
                 if candidates.is_empty() {
                     return Ok(None);
                 }
-                for id in candidates {
-                    if assign_job_runner(pool, &id, runner_id).await? {
-                        return find_job_by_id(pool, &id).await;
+                for cand in candidates {
+                    if cand.job_group.is_none() && cand.run_group.is_none() {
+                        // Ungrouped fast path — no mutual exclusion needed.
+                        if assign_job_runner(pool, &cand.id, runner_id).await? {
+                            return find_job_by_id(pool, &cand.id).await;
+                        }
+                        continue;
+                    }
+                    // Grouped claims mutex on GET_LOCK keys (session-scoped,
+                    // same pooled conn) so racing claims see the winner's
+                    // committed in_progress row on recheck.
+                    let mut conn = p.acquire().await.map_err(|e| e.to_string())?;
+                    let lock_keys = candidate_lock_keys(&cand);
+                    // GET_LOCK names cap at 64 chars — hash the key.
+                    let mut held: Vec<String> = Vec::new();
+                    let mut blocked = false;
+                    for key in &lock_keys {
+                        let lock_name = format!("conc:{:x}", fnv1a(key.as_bytes()));
+                        let got: Option<i64> = sqlx::query_scalar("SELECT GET_LOCK(?, 0)")
+                            .bind(&lock_name)
+                            .fetch_one(&mut *conn)
+                            .await
+                            .map_err(|e| e.to_string())?;
+                        if got == Some(1) {
+                            held.push(lock_name);
+                        } else {
+                            blocked = true;
+                            break;
+                        }
+                    }
+                    if !blocked {
+                        let occupied: i64 = sqlx::query_scalar(
+                            "SELECT EXISTS ( \
+                               SELECT 1 FROM action_jobs o JOIN action_runs ro ON ro.id = o.run_id \
+                               WHERE ? IS NOT NULL AND o.concurrency_group = ? \
+                                 AND o.status = 'in_progress' AND ro.repository_id = ?) \
+                             + EXISTS ( \
+                               SELECT 1 FROM action_runs r2 WHERE r2.repository_id = ? \
+                               AND ? IS NOT NULL AND r2.concurrency_group = ? \
+                               AND r2.status = 'in_progress' AND r2.id != ?)",
+                        )
+                        .bind(&cand.job_group)
+                        .bind(&cand.job_group)
+                        .bind(&cand.repository_id)
+                        .bind(&cand.repository_id)
+                        .bind(&cand.run_group)
+                        .bind(&cand.run_group)
+                        .bind(&cand.run_id)
+                        .fetch_one(&mut *conn)
+                        .await
+                        .map_err(|e| e.to_string())?;
+                        if occupied == 0 {
+                            let res = sqlx::query(
+                                "UPDATE action_jobs SET status = 'in_progress', runner_id = ?, \
+                                 started_at = COALESCE(started_at, CURRENT_TIMESTAMP), heartbeat_at = ?, \
+                                 updated_at = CURRENT_TIMESTAMP \
+                                 WHERE id = ? AND status = 'queued' AND approval_hold = 0",
+                            )
+                            .bind(runner_id)
+                            .bind(&heartbeat)
+                            .bind(&cand.id)
+                            .execute(&mut *conn)
+                            .await
+                            .map_err(|e| e.to_string())?;
+                            if res.rows_affected() > 0 {
+                                for name in &held {
+                                    let _ = sqlx::query("SELECT RELEASE_LOCK(?)")
+                                        .bind(name)
+                                        .execute(&mut *conn)
+                                        .await;
+                                }
+                                drop(conn);
+                                return find_job_by_id(pool, &cand.id).await;
+                            }
+                        }
+                    }
+                    for name in &held {
+                        let _ = sqlx::query("SELECT RELEASE_LOCK(?)")
+                            .bind(name)
+                            .execute(&mut *conn)
+                            .await;
                     }
                 }
             }
@@ -1984,10 +2178,11 @@ pub async fn claim_queued_job_for_labels(
             let row = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "UPDATE action_jobs SET status = 'in_progress', runner_id = ?1, \
                  started_at = COALESCE(started_at, CURRENT_TIMESTAMP), heartbeat_at = ?3, updated_at = CURRENT_TIMESTAMP \
-                 WHERE id = (SELECT j.id FROM action_jobs j \
+                 WHERE id = (SELECT j.id FROM action_jobs j JOIN action_runs rj ON rj.id = j.run_id \
                    WHERE j.status = 'queued' AND j.approval_hold = 0 AND NOT EXISTS ( \
                      SELECT 1 FROM action_job_labels l WHERE l.job_id = j.id \
                      AND l.base NOT IN (SELECT value FROM json_each(?2))) \
+                   {CLAIM_JOB_GROUP_FREE} {CLAIM_RUN_GROUP_FREE} \
                    ORDER BY j.created_at, j.matrix_key LIMIT 1) \
                  AND status = 'queued' AND approval_hold = 0 RETURNING {JOB_COLS_SQLITE}"
             )))
@@ -2326,12 +2521,39 @@ pub async fn cancel_superseded_concurrency_jobs(
     group: &str,
     new_run_id: &str,
 ) -> Result<Vec<String>, String> {
-    const SEL_SQLITE: &str = "SELECT DISTINCT run_id FROM action_jobs WHERE concurrency_group = ? AND status IN ('queued','waiting','in_progress') AND run_id IN (SELECT id FROM action_runs WHERE repository_id = ? AND id != ? AND finished_at IS NULL)";
-    const UPD_SQLITE: &str = "UPDATE action_jobs SET status = 'cancelled', finished_at = COALESCE(finished_at, CURRENT_TIMESTAMP), updated_at = CURRENT_TIMESTAMP WHERE concurrency_group = ? AND status IN ('queued','waiting','in_progress') AND run_id IN (SELECT id FROM action_runs WHERE repository_id = ? AND id != ? AND finished_at IS NULL)";
+    cancel_concurrency_jobs(pool, repository_id, group, new_run_id, false).await
+}
+
+/// GitHub pending-supersede — fires even without `cancel-in-progress`:
+/// a new job landing in a group cancels the older *pending* jobs in other
+/// runs, so at most one queued occupant remains per group.
+pub async fn cancel_pending_concurrency_jobs(
+    pool: &DbPool,
+    repository_id: &str,
+    group: &str,
+    new_run_id: &str,
+) -> Result<Vec<String>, String> {
+    cancel_concurrency_jobs(pool, repository_id, group, new_run_id, true).await
+}
+
+async fn cancel_concurrency_jobs(
+    pool: &DbPool,
+    repository_id: &str,
+    group: &str,
+    new_run_id: &str,
+    pending_only: bool,
+) -> Result<Vec<String>, String> {
+    let live = if pending_only {
+        "'queued','waiting'"
+    } else {
+        "'queued','waiting','in_progress'"
+    };
+    const SEL_SQLITE: &str = "SELECT DISTINCT run_id FROM action_jobs WHERE concurrency_group = ? AND status IN ({LIVE}) AND run_id IN (SELECT id FROM action_runs WHERE repository_id = ? AND id != ? AND finished_at IS NULL)";
+    const UPD_SQLITE: &str = "UPDATE action_jobs SET status = 'cancelled', finished_at = COALESCE(finished_at, CURRENT_TIMESTAMP), updated_at = CURRENT_TIMESTAMP WHERE concurrency_group = ? AND status IN ({LIVE}) AND run_id IN (SELECT id FROM action_runs WHERE repository_id = ? AND id != ? AND finished_at IS NULL)";
     const REVOKE_SQLITE: &str = "UPDATE action_job_tokens SET revoked_at = CURRENT_TIMESTAMP WHERE revoked_at IS NULL AND job_id IN (SELECT id FROM action_jobs WHERE concurrency_group = ? AND run_id IN (SELECT id FROM action_runs WHERE repository_id = ? AND id != ?))";
     const MARK_SQLITE: &str = "UPDATE action_runs SET concurrency_cancel_pending = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?";
-    const SEL_PG: &str = "SELECT DISTINCT run_id FROM action_jobs WHERE concurrency_group = $1 AND status IN ('queued','waiting','in_progress') AND run_id IN (SELECT id FROM action_runs WHERE repository_id = $2 AND id != $3 AND finished_at IS NULL)";
-    const UPD_PG: &str = "UPDATE action_jobs SET status = 'cancelled', finished_at = COALESCE(finished_at, now()), updated_at = now() WHERE concurrency_group = $1 AND status IN ('queued','waiting','in_progress') AND run_id IN (SELECT id FROM action_runs WHERE repository_id = $2 AND id != $3 AND finished_at IS NULL)";
+    const SEL_PG: &str = "SELECT DISTINCT run_id FROM action_jobs WHERE concurrency_group = $1 AND status IN ({LIVE}) AND run_id IN (SELECT id FROM action_runs WHERE repository_id = $2 AND id != $3 AND finished_at IS NULL)";
+    const UPD_PG: &str = "UPDATE action_jobs SET status = 'cancelled', finished_at = COALESCE(finished_at, now()), updated_at = now() WHERE concurrency_group = $1 AND status IN ({LIVE}) AND run_id IN (SELECT id FROM action_runs WHERE repository_id = $2 AND id != $3 AND finished_at IS NULL)";
     const REVOKE_PG: &str = "UPDATE action_job_tokens SET revoked_at = now() WHERE revoked_at IS NULL AND job_id IN (SELECT id FROM action_jobs WHERE concurrency_group = $1 AND run_id IN (SELECT id FROM action_runs WHERE repository_id = $2 AND id != $3))";
     const MARK_PG: &str = "UPDATE action_runs SET concurrency_cancel_pending = true, updated_at = now() WHERE id = $1";
     const SEL_MYSQL: &str = SEL_SQLITE;
@@ -2341,15 +2563,16 @@ pub async fn cancel_superseded_concurrency_jobs(
     match pool {
         DbPool::Sqlite(p) => {
             let mut tx = p.begin().await.map_err(|e| e.to_string())?;
-            let ids: Vec<String> = sqlx::query_scalar(SEL_SQLITE)
-                .bind(group)
-                .bind(repository_id)
-                .bind(new_run_id)
-                .fetch_all(&mut *tx)
-                .await
-                .map_err(|e| e.to_string())?;
+            let ids: Vec<String> =
+                sqlx::query_scalar(sqlx::AssertSqlSafe(SEL_SQLITE.replace("{LIVE}", live)))
+                    .bind(group)
+                    .bind(repository_id)
+                    .bind(new_run_id)
+                    .fetch_all(&mut *tx)
+                    .await
+                    .map_err(|e| e.to_string())?;
             if !ids.is_empty() {
-                sqlx::query(UPD_SQLITE)
+                sqlx::query(sqlx::AssertSqlSafe(UPD_SQLITE.replace("{LIVE}", live)))
                     .bind(group)
                     .bind(repository_id)
                     .bind(new_run_id)
@@ -2376,15 +2599,16 @@ pub async fn cancel_superseded_concurrency_jobs(
         }
         DbPool::Postgres(p) => {
             let mut tx = p.begin().await.map_err(|e| e.to_string())?;
-            let ids: Vec<String> = sqlx::query_scalar(SEL_PG)
-                .bind(group)
-                .bind(repository_id)
-                .bind(new_run_id)
-                .fetch_all(&mut *tx)
-                .await
-                .map_err(|e| e.to_string())?;
+            let ids: Vec<String> =
+                sqlx::query_scalar(sqlx::AssertSqlSafe(SEL_PG.replace("{LIVE}", live)))
+                    .bind(group)
+                    .bind(repository_id)
+                    .bind(new_run_id)
+                    .fetch_all(&mut *tx)
+                    .await
+                    .map_err(|e| e.to_string())?;
             if !ids.is_empty() {
-                sqlx::query(UPD_PG)
+                sqlx::query(sqlx::AssertSqlSafe(UPD_PG.replace("{LIVE}", live)))
                     .bind(group)
                     .bind(repository_id)
                     .bind(new_run_id)
@@ -2411,15 +2635,16 @@ pub async fn cancel_superseded_concurrency_jobs(
         }
         DbPool::MySql(p) => {
             let mut tx = p.begin().await.map_err(|e| e.to_string())?;
-            let ids: Vec<String> = sqlx::query_scalar(SEL_MYSQL)
-                .bind(group)
-                .bind(repository_id)
-                .bind(new_run_id)
-                .fetch_all(&mut *tx)
-                .await
-                .map_err(|e| e.to_string())?;
+            let ids: Vec<String> =
+                sqlx::query_scalar(sqlx::AssertSqlSafe(SEL_MYSQL.replace("{LIVE}", live)))
+                    .bind(group)
+                    .bind(repository_id)
+                    .bind(new_run_id)
+                    .fetch_all(&mut *tx)
+                    .await
+                    .map_err(|e| e.to_string())?;
             if !ids.is_empty() {
-                sqlx::query(UPD_MYSQL)
+                sqlx::query(sqlx::AssertSqlSafe(UPD_MYSQL.replace("{LIVE}", live)))
                     .bind(group)
                     .bind(repository_id)
                     .bind(new_run_id)
@@ -2481,11 +2706,45 @@ pub async fn cancel_superseded_concurrency_runs(
     group: &str,
     new_run_id: &str,
 ) -> Result<Vec<String>, String> {
+    cancel_concurrency_runs(pool, repository_id, group, new_run_id, false).await
+}
+
+/// GitHub pending-supersede — fires even without `cancel-in-progress`:
+/// a new run landing in a group cancels the older *pending* run (never
+/// started → `status='queued'`), so at most one queued run waits per group.
+pub async fn cancel_pending_concurrency_runs(
+    pool: &DbPool,
+    repository_id: &str,
+    group: &str,
+    new_run_id: &str,
+) -> Result<Vec<String>, String> {
+    cancel_concurrency_runs(pool, repository_id, group, new_run_id, true).await
+}
+
+async fn cancel_concurrency_runs(
+    pool: &DbPool,
+    repository_id: &str,
+    group: &str,
+    new_run_id: &str,
+    pending_only: bool,
+) -> Result<Vec<String>, String> {
+    // Pending runs never started: `status = 'queued'`. Under pending
+    // supersede only pending jobs cancel; in-flight work keeps running.
+    let run_tail = if pending_only {
+        " AND status = 'queued'"
+    } else {
+        ""
+    };
+    let job_live = if pending_only {
+        "'queued','waiting'"
+    } else {
+        "'queued','waiting','in_progress'"
+    };
     match pool {
         DbPool::Sqlite(p) => {
             let mut tx = p.begin().await.map_err(|e| e.to_string())?;
             let ids: Vec<String> = sqlx::query_scalar(
-                "SELECT id FROM action_runs WHERE repository_id = ? AND concurrency_group = ? AND id != ? AND finished_at IS NULL",
+                sqlx::AssertSqlSafe(format!("SELECT id FROM action_runs WHERE repository_id = ? AND concurrency_group = ? AND id != ? AND finished_at IS NULL{run_tail}")),
             )
             .bind(repository_id).bind(group).bind(new_run_id)
             .fetch_all(&mut *tx).await.map_err(|e| e.to_string())?;
@@ -2495,7 +2754,7 @@ pub async fn cancel_superseded_concurrency_runs(
                 )
                 .bind(id).execute(&mut *tx).await.map_err(|e| e.to_string())?;
                 sqlx::query(
-                    "UPDATE action_jobs SET status = 'cancelled', finished_at = COALESCE(finished_at, CURRENT_TIMESTAMP), updated_at = CURRENT_TIMESTAMP WHERE run_id = ? AND status IN ('queued','waiting','in_progress')",
+                    sqlx::AssertSqlSafe(format!("UPDATE action_jobs SET status = 'cancelled', finished_at = COALESCE(finished_at, CURRENT_TIMESTAMP), updated_at = CURRENT_TIMESTAMP WHERE run_id = ? AND status IN ({job_live})")),
                 )
                 .bind(id).execute(&mut *tx).await.map_err(|e| e.to_string())?;
                 sqlx::query(
@@ -2513,7 +2772,7 @@ pub async fn cancel_superseded_concurrency_runs(
         DbPool::Postgres(p) => {
             let mut tx = p.begin().await.map_err(|e| e.to_string())?;
             let ids: Vec<String> = sqlx::query_scalar(
-                "SELECT id FROM action_runs WHERE repository_id = $1 AND concurrency_group = $2 AND id != $3 AND finished_at IS NULL",
+                sqlx::AssertSqlSafe(format!("SELECT id FROM action_runs WHERE repository_id = $1 AND concurrency_group = $2 AND id != $3 AND finished_at IS NULL{run_tail}")),
             )
             .bind(repository_id).bind(group).bind(new_run_id)
             .fetch_all(&mut *tx).await.map_err(|e| e.to_string())?;
@@ -2523,7 +2782,7 @@ pub async fn cancel_superseded_concurrency_runs(
                 )
                 .bind(id).execute(&mut *tx).await.map_err(|e| e.to_string())?;
                 sqlx::query(
-                    "UPDATE action_jobs SET status = 'cancelled', finished_at = COALESCE(finished_at, now()), updated_at = now() WHERE run_id = $1 AND status IN ('queued','waiting','in_progress')",
+                    sqlx::AssertSqlSafe(format!("UPDATE action_jobs SET status = 'cancelled', finished_at = COALESCE(finished_at, now()), updated_at = now() WHERE run_id = $1 AND status IN ({job_live})")),
                 )
                 .bind(id).execute(&mut *tx).await.map_err(|e| e.to_string())?;
                 sqlx::query(
@@ -2541,7 +2800,7 @@ pub async fn cancel_superseded_concurrency_runs(
         DbPool::MySql(p) => {
             let mut tx = p.begin().await.map_err(|e| e.to_string())?;
             let ids: Vec<String> = sqlx::query_scalar(
-                "SELECT id FROM action_runs WHERE repository_id = ? AND concurrency_group = ? AND id != ? AND finished_at IS NULL",
+                sqlx::AssertSqlSafe(format!("SELECT id FROM action_runs WHERE repository_id = ? AND concurrency_group = ? AND id != ? AND finished_at IS NULL{run_tail}")),
             )
             .bind(repository_id).bind(group).bind(new_run_id)
             .fetch_all(&mut *tx).await.map_err(|e| e.to_string())?;
@@ -2551,7 +2810,7 @@ pub async fn cancel_superseded_concurrency_runs(
                 )
                 .bind(id).execute(&mut *tx).await.map_err(|e| e.to_string())?;
                 sqlx::query(
-                    "UPDATE action_jobs SET status = 'cancelled', finished_at = COALESCE(finished_at, CURRENT_TIMESTAMP), updated_at = CURRENT_TIMESTAMP WHERE run_id = ? AND status IN ('queued','waiting','in_progress')",
+                    sqlx::AssertSqlSafe(format!("UPDATE action_jobs SET status = 'cancelled', finished_at = COALESCE(finished_at, CURRENT_TIMESTAMP), updated_at = CURRENT_TIMESTAMP WHERE run_id = ? AND status IN ({job_live})")),
                 )
                 .bind(id).execute(&mut *tx).await.map_err(|e| e.to_string())?;
                 sqlx::query(

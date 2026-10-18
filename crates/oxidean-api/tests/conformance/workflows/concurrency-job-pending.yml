@@ -1,0 +1,9 @@
+name: concurrency-job-pending
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: job-pending
+    steps:
+      - run: echo job-pending-winner

@@ -58,7 +58,7 @@ download, annotations, `workflow_job` webhook.
 | 12. Reusable workflows | 9 | 1 | 0 | 0 |
 | 13. Artifacts | 11 | 1 | 1 | 0 |
 | 14. Dependency caching | 5 | 0 | 0 | 0 |
-| 15. Concurrency | 4 | 1 | 0 | 0 |
+| 15. Concurrency | 5 | 0 | 0 | 0 |
 | 16. Environments & deployments | 11 | 0 | 0 | 0 |
 | 17. `GITHUB_TOKEN` permissions | 8 | 1 | 0 | 0 |
 | 18. OIDC | 9 | 0 | 0 | 0 |
@@ -504,7 +504,7 @@ Source: <https://docs.github.com/en/actions/how-tos/writing-workflows/choosing-w
 | `conc.group` | `concurrency:` — bare group string or `{group, cancel-in-progress}` | supported | case:concurrency-workflow, case:concurrency-job | Workflow- and job-level; job group wins for its legs. |
 | `conc.case-insensitive` | Group names match case-insensitively | supported | case:concurrency-cancel | Groups are normalized to lowercase at enqueue. |
 | `conc.cancel-in-progress` | `cancel-in-progress: true` supersedes running same-group runs/jobs | supported | case:concurrency-cancel, case:concurrency-job-cancel | |
-| `conc.pending-supersede` | At most one running + one pending per group; a newer pending cancels the older pending | partial | case:concurrency-workflow | Without `cancel-in-progress`, same-group jobs are not serialized and an older pending run is not superseded — both queue normally. Closes in P13. |
+| `conc.pending-supersede` | At most one running + one pending per group; a newer pending cancels the older pending | supported | case:concurrency-pending, case:concurrency-job-pending, test:crates/oxidean-db/tests/dialect_actions.rs::dialect_actions_concurrency_gate | Claim gate serializes same-group jobs (any run — matrix legs too) and blocks a run while another same-group run is in progress; enqueue cancels older pending runs/jobs. Postgres claims take per-group advisory locks; MySQL uses `GET_LOCK`; SQLite is writer-serialized. |
 | `conc.expression-group` | `group` evaluated as an expression | supported | case:concurrency-job | github/vars/inputs contexts at enqueue. |
 
 ## 16. Environments & deployments (`envr.`)
