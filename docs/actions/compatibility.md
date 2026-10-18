@@ -67,7 +67,7 @@ download, annotations, `workflow_job` webhook.
 | 21. Security behaviours | 8 | 1 | 0 | 0 |
 | 22. Limits | 7 | 0 | 0 | 1 |
 | 23. Run lifecycle & integrations | 14 | 2 | 0 | 1 |
-| 24. GitHub REST API for Actions | 13 | 1 | 1 | 0 |
+| 24. GitHub REST API for Actions | 14 | 0 | 1 | 0 |
 
 ## 1. Workflow files & discovery (`file.`)
 
@@ -676,5 +676,5 @@ class, not URL parity.
 | `api.environments` | Environment CRUD + protection rules | supported | test:crates/oxidean-api/tests/actions_phase7.rs::p7_environment_auto_create_and_deployments | |
 | `api.oidc` | OIDC discovery + token mint | supported | test:crates/oxidean-api/tests/actions_phase7.rs::p7_oidc_token_endpoint_flow | `/api/actions/oidc` subtree. |
 | `api.workflows` | List workflows / dispatch | supported | test:crates/oxidean-api/tests/actions_endpoints.rs::list_workflows_discovers_dispatchable_anonymous, test:crates/oxidean-api/tests/actions_endpoints.rs::dispatch_workflow_enqueues_run | |
-| `api.permissions-req` | Token-scope enforcement matching `permissions:` | partial | test:crates/oxidean-api/tests/actions_phase7.rs::p7_permissions_full_map_in_payload | The payload records every scope; only `contents` and `id-token` currently gate behaviour. P13 hardening. |
+| `api.permissions-req` | Token-scope enforcement matching `permissions:` | supported | test:crates/oxidean-api/tests/actions_phase7.rs::p7_permissions_full_map_in_payload, test:crates/oxidean-api/tests/actions_phase7.rs::p7_job_token_scope_map_gates_rpc | The granted scope map rides the bearer identity — `issues`/`pull-requests`/`actions`/`statuses`/`deployments`/`environments`/`pages` gate their procedure families, `contents`/`packages` ride dedicated fields, and `id-token: write` gates OIDC. Scopes without a procedure domain (`checks`, `discussions`, `attestations`, `security-events`, `repository-projects`) carry no grants. |
 | `api.github-rest-compat` | github.com REST URL compatibility for third-party actions | unsupported | test:crates/oxidean-api/src/actions/templates.rs::classify_uses | Actions that call api.github.com directly (labeler, github-script, stale, …) are flagged `GithubApi` in the curated caveats — no shim layer exists. decision: not planned as a REST shim; the caveat table marks them. |

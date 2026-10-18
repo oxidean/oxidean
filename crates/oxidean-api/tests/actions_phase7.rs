@@ -868,3 +868,180 @@ jobs:
     .await;
     assert_eq!(s, StatusCode::FORBIDDEN);
 }
+
+/// RPC scope enforcement: the granted `perms_json` scope map rides the
+/// resolved `PatIdentity`, so `issue.*` calls pass for `issues: write` jobs
+/// and deny for ungranted scopes (GitHub `permissions:` parity). Before the
+/// fix the map was dropped at bearer resolution and every domain procedure
+/// scope-failed for job tokens.
+#[tokio::test]
+async fn p7_job_token_scope_map_gates_rpc() {
+    ensure_env();
+    let (app, db, _dir) = app_db().await;
+    let (owner, repo) = mk_owner_repo(&db, "rpcscope").await;
+    // Mutating procedures require a verified owner — the job token resolves
+    // to the triggering user, so verify it like the signup-path tests do.
+    db.set_email_verified_at(&owner.id, "2026-01-01T00:00:00Z")
+        .await
+        .unwrap();
+
+    let rpc = |app: &axum::Router, token: &str, body: String| {
+        let app = app.clone();
+        let token = token.to_string();
+        async move {
+            let res = app
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/api/rpc")
+                        .header("content-type", "application/json")
+                        .header("Oxidean-RPC-Version", "1")
+                        .header("authorization", format!("Bearer {token}"))
+                        .body(Body::from(body))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let bytes = res.into_body().collect().await.unwrap().to_bytes();
+            serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()
+        }
+    };
+
+    // Job grants `issues: write` + `contents: read` — nothing else.
+    let (run_id, job_ids) = enqueue(
+        &db,
+        &repo.id,
+        &owner.id,
+        br#"
+name: S
+on: [push]
+jobs:
+  work:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - run: echo hi
+"#,
+        false,
+    )
+    .await;
+    let run = db.find_action_run_by_id(&run_id).await.unwrap().unwrap();
+    let owner_ref = oxidean_api::repo::owner_ref_for_repo(&db, &repo)
+        .await
+        .unwrap()
+        .unwrap();
+    let requested = oxidean_api::actions::job_tokens::permissions_from_payload(
+        &job_payload(&db, &job_ids[0]).await,
+    );
+    let minted = oxidean_api::actions::job_tokens::mint_job_token(
+        &db,
+        &run,
+        &repo,
+        &owner_ref,
+        &job_ids[0],
+        &requested,
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let token = minted.plaintext.expect("contents:read injects plaintext");
+
+    let target = r#"{"owner":"p7rpcscope","name":"p7-demo"}"#;
+    let list = rpc(
+        &app,
+        &token,
+        format!(r#"{{"procedure":"issue.list","input":{target}}}"#),
+    )
+    .await;
+    assert_eq!(
+        list["ok"], true,
+        "issues:write satisfies issue.list — {list}"
+    );
+
+    let create = rpc(
+        &app,
+        &token,
+        r#"{"procedure":"issue.create","input":{"owner":"p7rpcscope","name":"p7-demo","title":"t","body":"b"}}"#.to_string(),
+    )
+    .await;
+    assert_eq!(
+        create["ok"], true,
+        "issues:write allows issue.create — {create}"
+    );
+
+    let denied = rpc(
+        &app,
+        &token,
+        format!(r#"{{"procedure":"pull.list","input":{target}}}"#),
+    )
+    .await;
+    assert_eq!(denied["ok"], false, "{denied}");
+    assert_eq!(denied["error"]["code"], "auth.pat_scope", "{denied}");
+
+    let read = rpc(
+        &app,
+        &token,
+        format!(r#"{{"procedure":"repo.get","input":{target}}}"#),
+    )
+    .await;
+    assert_eq!(
+        read["ok"], true,
+        "contents:read satisfies repo.get — {read}"
+    );
+
+    // A second job with the repo default map grants no issues scope —
+    // the same procedures now deny.
+    let (run_id2, job_ids2) = enqueue(
+        &db,
+        &repo.id,
+        &owner.id,
+        br#"
+name: S2
+on: [push]
+jobs:
+  work:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo hi
+"#,
+        false,
+    )
+    .await;
+    let run2 = db.find_action_run_by_id(&run_id2).await.unwrap().unwrap();
+    let requested2 = oxidean_api::actions::job_tokens::permissions_from_payload(
+        &job_payload(&db, &job_ids2[0]).await,
+    );
+    let minted2 = oxidean_api::actions::job_tokens::mint_job_token(
+        &db,
+        &run2,
+        &repo,
+        &owner_ref,
+        &job_ids2[0],
+        &requested2,
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let token2 = minted2.plaintext.expect("default map injects plaintext");
+
+    let denied2 = rpc(
+        &app,
+        &token2,
+        format!(r#"{{"procedure":"issue.list","input":{target}}}"#),
+    )
+    .await;
+    assert_eq!(denied2["ok"], false, "{denied2}");
+    assert_eq!(denied2["error"]["code"], "auth.pat_scope", "{denied2}");
+
+    let create2 = rpc(
+        &app,
+        &token2,
+        r#"{"procedure":"issue.create","input":{"owner":"p7rpcscope","name":"p7-demo","title":"t2","body":"b"}}"#
+            .to_string(),
+    )
+    .await;
+    assert_eq!(create2["ok"], false, "{create2}");
+    assert_eq!(create2["error"]["code"], "auth.pat_scope", "{create2}");
+}

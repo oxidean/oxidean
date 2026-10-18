@@ -393,6 +393,10 @@ async fn resolve_job_token(
             &tail[..tail.len().min(8)]
         )
     };
+    // The granted scope map (frozen at claim, capability-capped at mint) gates
+    // domain RPCs — `issues: write` jobs may comment, ungranted scopes deny.
+    // `contents`/`packages` ride their dedicated identity fields.
+    let (contents, perms, scopes) = crate::actions::job_tokens::rpc_identity_grants(&row);
     let identity = PatIdentity {
         token_id: row.id.clone(),
         user_id: owner.id.clone(),
@@ -402,11 +406,11 @@ async fn resolve_job_token(
         expires_at_raw: Some(row.expires_at.clone()),
         last_used_at: None,
         created_at: row.created_at.clone(),
-        scopes: Vec::new(),
-        contents: ContentsPerm::parse(&row.permission).ok(),
+        scopes,
+        contents,
         repo_access: Some(FgRepoAccess::Selected),
         repository_ids: vec![row.repository_id.clone()],
-        perms: FgPerms::default(),
+        perms,
     };
     let session = ResolvedSession {
         session_id: format!("job:{}", row.id),

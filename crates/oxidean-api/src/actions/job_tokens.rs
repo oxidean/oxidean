@@ -60,17 +60,14 @@ impl JobTokenIdentity {
 }
 
 /// Translate the stored GitHub scope map (`{"issues":"write",…}`) into the
-/// `FgPerms` JSON the shared PAT ACL consumes. Scopes with no FG family
+/// `FgPerms` the shared PAT ACL consumes. Scopes with no FG family
 /// (`id-token`, `attestations`, `checks`, `discussions`, `repository-projects`,
 /// `security-events`) carry no proc-class grants; `contents`/`packages` ride
 /// their dedicated `PatRow` columns instead.
-fn fg_perms_json(token: &ActionJobTokenRow) -> String {
+fn fg_perms(token: &ActionJobTokenRow) -> oxidean_core::FgPerms {
     use oxidean_core::{FgPermLevel, FgPerms};
-    let Some(raw) = token.perms_json.as_deref() else {
-        return "{}".into();
-    };
-    let Ok(map) = serde_json::from_str::<std::collections::BTreeMap<String, String>>(raw) else {
-        return "{}".into();
+    let Some(map) = stored_scope_map(token) else {
+        return FgPerms::default();
     };
     let level = |scope: &str| -> Option<FgPermLevel> {
         match map.get(scope).map(String::as_str) {
@@ -79,7 +76,7 @@ fn fg_perms_json(token: &ActionJobTokenRow) -> String {
             _ => None,
         }
     };
-    let perms = FgPerms {
+    FgPerms {
         issues: level("issues"),
         pull_requests: level("pull-requests"),
         actions: level("actions"),
@@ -88,8 +85,51 @@ fn fg_perms_json(token: &ActionJobTokenRow) -> String {
         environments: level("environments"),
         pages: level("pages"),
         ..FgPerms::default()
+    }
+}
+
+/// `perms_json` → `{scope: "none"|"read"|"write"}` — `None` on absent or
+/// malformed storage (pre-Phase-7 rows carry only the contents column).
+fn stored_scope_map(
+    token: &ActionJobTokenRow,
+) -> Option<std::collections::BTreeMap<String, String>> {
+    let raw = token.perms_json.as_deref()?;
+    serde_json::from_str::<std::collections::BTreeMap<String, String>>(raw).ok()
+}
+
+fn fg_perms_json(token: &ActionJobTokenRow) -> String {
+    serde_json::to_string(&fg_perms(token)).unwrap_or_else(|_| "{}".into())
+}
+
+/// The granted scope set as RPC `PatIdentity` fields — `(contents, perms,
+/// scopes)`: `contents` reads from the granted map (falling back to the row's
+/// `read`/`write` column on pre-Phase-7 storage), domain scopes land on
+/// `perms`, and `packages` becomes the FG-classic `package:*` scope names
+/// `authorize_fine_grained` checks on `PatIdentity.scopes`.
+pub(crate) fn rpc_identity_grants(
+    token: &ActionJobTokenRow,
+) -> (
+    Option<oxidean_core::ContentsPerm>,
+    oxidean_core::FgPerms,
+    Vec<oxidean_core::ClassicPatScope>,
+) {
+    use oxidean_core::{ClassicPatScope, ContentsPerm};
+    let map = stored_scope_map(token);
+    let contents = match &map {
+        Some(m) => m.get("contents").and_then(|s| ContentsPerm::parse(s).ok()),
+        // Pre-Phase-7 row: the `permission` column is the whole grant.
+        None => ContentsPerm::parse(&token.permission).ok(),
     };
-    serde_json::to_string(&perms).unwrap_or_else(|_| "{}".into())
+    let scopes = match map
+        .as_ref()
+        .and_then(|m| m.get("packages"))
+        .map(String::as_str)
+    {
+        Some("write") => vec![ClassicPatScope::PackageWrite],
+        Some("read") => vec![ClassicPatScope::PackageRead],
+        _ => Vec::new(),
+    };
+    (contents, fg_perms(token), scopes)
 }
 
 /// Why an `oxidean_job_` credential failed — mirrors
