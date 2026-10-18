@@ -1,0 +1,962 @@
+{
+  "stage": "code-generation",
+  "unit": "u4-vcs-changeset-core",
+  "upstream_ids": [
+    "AC2.1.1",
+    "AC2.1.2",
+    "AC2.1.3",
+    "AC2.1.4",
+    "AC2.1.5",
+    "AC2.2.1",
+    "AC2.2.2",
+    "AC2.2.3",
+    "AC2.3.1",
+    "AC2.3.2",
+    "AC2.4.1",
+    "AC2.6.1",
+    "AC2.6.2",
+    "AC3.5.2",
+    "AC4.1.1",
+    "AC4.1.2",
+    "AC4.1.3",
+    "AC4.2.1",
+    "AC4.2.2",
+    "AC4.3.1",
+    "AC4.3.2",
+    "AC4.4.1",
+    "AC4.5.1",
+    "AC4.5.2",
+    "AC5.1.1",
+    "AC5.1.2",
+    "AC5.1.3",
+    "AC5.1.4",
+    "AC5.2.1",
+    "AC5.2.2",
+    "AC5.2.3",
+    "AC7.1.2",
+    "AC7.4.2",
+    "FR2.1",
+    "FR2.2",
+    "FR2.4",
+    "FR2.3",
+    "FR2.5",
+    "FR5.1",
+    "FR5.2",
+    "FR5.3",
+    "FR5.4",
+    "FR6.1",
+    "FR6.2",
+    "FR6.3",
+    "FR7.4",
+    "FR9.4",
+    "FR10.1",
+    "C1",
+    "C5",
+    "C6",
+    "BR3.11",
+    "ADR-005",
+    "ADR-011",
+    "NFR1",
+    "NFR6",
+    "NFR7",
+    "NFR8",
+    "NFR9",
+    "NFR10",
+    "SR4.1",
+    "SR4.2",
+    "SR4.3",
+    "SR4.4",
+    "SR4.5",
+    "SR4.6",
+    "SR4.7",
+    "SR4.8",
+    "SR4.9",
+    "SR4.10",
+    "SR4.11",
+    "SR4.12",
+    "TD4.1",
+    "TD4.2",
+    "TD4.3",
+    "TD4.4",
+    "TD4.5",
+    "TD4.6",
+    "TD4.7",
+    "TD4.8",
+    "TD4.9",
+    "BR4.1",
+    "BR4.2",
+    "BR4.3",
+    "BR4.4",
+    "BR4.5",
+    "BR4.6",
+    "BR4.7",
+    "BR4.8",
+    "BR4.9",
+    "BR4.10",
+    "BR4.11",
+    "BR4.12",
+    "BR4.13",
+    "BR4.14",
+    "BR4.15",
+    "BR4.16",
+    "BR4.17",
+    "BR4.18",
+    "BR4.19",
+    "FR15.5",
+    "N-01",
+    "N-02",
+    "N-03",
+    "N-04",
+    "N-05",
+    "N-06",
+    "N-07",
+    "N-08",
+    "N-09",
+    "N-10",
+    "N-11",
+    "N-12",
+    "N-13",
+    "DS-01",
+    "DS-02",
+    "DS-03",
+    "DS-04",
+    "DS-05",
+    "DS-06",
+    "DS-07",
+    "DS-08",
+    "DS-09",
+    "DS-10",
+    "DS-11",
+    "DS-12",
+    "DS-13",
+    "DS-14",
+    "DS-15",
+    "DS-16",
+    "AR-01",
+    "AR-02",
+    "AR-03",
+    "AR-04",
+    "AR-05",
+    "AR-06",
+    "AR-07",
+    "AR-08",
+    "AR-09",
+    "U4-ND-01",
+    "U4-ND-02",
+    "U4-ND-03",
+    "U4-ND-04",
+    "U4-ND-05",
+    "U4-ND-06",
+    "U4-ND-07",
+    "U4-ND-08",
+    "U4-ND-09",
+    "U4-ND-10",
+    "U4-ND-11",
+    "U4-AR-01",
+    "U4-AR-02",
+    "U4-AR-03",
+    "U4-AR-04",
+    "U4-AR-05",
+    "U4-AR-06",
+    "LC4.7",
+    "U4-INF-01",
+    "U4-INF-02"
+  ],
+  "coverage": [
+    {
+      "id": "AC2.1.1",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "AC2.1.2",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "AC2.1.3",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "AC2.1.4",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "AC2.1.5",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "AC2.2.1",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "AC2.2.2",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "AC2.2.3",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "AC2.3.1",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "AC2.3.2",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "AC2.4.1",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "AC2.6.1",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "AC2.6.2",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "AC3.5.2",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "AC4.1.1",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "AC4.1.2",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "AC4.1.3",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "AC4.2.1",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "AC4.2.2",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "AC4.3.1",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "AC4.3.2",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "AC4.4.1",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "AC4.5.1",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "AC4.5.2",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "AC5.1.1",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "AC5.1.2",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "AC5.1.3",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "AC5.1.4",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "AC5.2.1",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "AC5.2.2",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "AC5.2.3",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "AC7.1.2",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "AC7.4.2",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "FR2.1",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "FR2.2",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "FR2.4",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "FR2.3",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "FR2.5",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "FR5.1",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "FR5.2",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "FR5.3",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "FR5.4",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "FR6.1",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "FR6.2",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "FR6.3",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "FR7.4",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "FR9.4",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "FR10.1",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "C1",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "C5",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "C6",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "BR3.11",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "ADR-005",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "ADR-011",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "NFR1",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "NFR6",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "NFR7",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "NFR8",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "NFR9",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "NFR10",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "SR4.1",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "SR4.2",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "SR4.3",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "SR4.4",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "SR4.5",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "SR4.6",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "SR4.7",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "SR4.8",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "SR4.9",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "SR4.10",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "SR4.11",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "SR4.12",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "TD4.1",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "TD4.2",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "TD4.3",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "TD4.4",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "TD4.5",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "TD4.6",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "TD4.7",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "TD4.8",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "TD4.9",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "BR4.1",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "BR4.2",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "BR4.3",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "BR4.4",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "BR4.5",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "BR4.6",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "BR4.7",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "BR4.8",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "BR4.9",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "BR4.10",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "BR4.11",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "BR4.12",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "BR4.13",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "BR4.14",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "BR4.15",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "BR4.16",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "BR4.17",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "BR4.18",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "BR4.19",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "FR15.5",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "N-01",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "N-02",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "N-03",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "N-04",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "N-05",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "N-06",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "N-07",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "N-08",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "N-09",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "N-10",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "N-11",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "N-12",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "N-13",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "DS-01",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "DS-02",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "DS-03",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "DS-04",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "DS-05",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "DS-06",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "DS-07",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "DS-08",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "DS-09",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "DS-10",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "DS-11",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "DS-12",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "DS-13",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "DS-14",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "DS-15",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "DS-16",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "AR-01",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "AR-02",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "AR-03",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "AR-04",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "AR-05",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "AR-06",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "AR-07",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "AR-08",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "AR-09",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "U4-ND-01",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "U4-ND-02",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "U4-ND-03",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "U4-ND-04",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "U4-ND-05",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "U4-ND-06",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "U4-ND-07",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "U4-ND-08",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "U4-ND-09",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "U4-ND-10",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "U4-ND-11",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "U4-AR-01",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "U4-AR-02",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "U4-AR-03",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "U4-AR-04",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "U4-AR-05",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "U4-AR-06",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "LC4.7",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "U4-INF-01",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    },
+    {
+      "id": "U4-INF-02",
+      "status": "OK",
+      "target": "implementation + unit tests (code-generation-plan.md deliverables + unit-test-instructions.md matrix)"
+    }
+  ]
+}

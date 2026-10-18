@@ -1,0 +1,536 @@
+{
+  "stage": "nfr-requirements",
+  "unit": "u4-vcs-changeset-core",
+  "upstream_ids": [
+    "NFR1",
+    "NFR6",
+    "NFR7",
+    "NFR8",
+    "NFR9",
+    "NFR10",
+    "SR4.1",
+    "SR4.2",
+    "SR4.3",
+    "SR4.4",
+    "SR4.5",
+    "SR4.6",
+    "SR4.7",
+    "SR4.8",
+    "SR4.9",
+    "SR4.10",
+    "SR4.11",
+    "SR4.12",
+    "TD4.1",
+    "TD4.2",
+    "TD4.3",
+    "TD4.4",
+    "TD4.5",
+    "TD4.6",
+    "TD4.7",
+    "TD4.8",
+    "TD4.9",
+    "BR4.1",
+    "BR4.2",
+    "BR4.3",
+    "BR4.4",
+    "BR4.5",
+    "BR4.6",
+    "BR4.7",
+    "BR4.8",
+    "BR4.9",
+    "BR4.10",
+    "BR4.11",
+    "BR4.12",
+    "BR4.13",
+    "BR4.14",
+    "BR4.15",
+    "BR4.16",
+    "BR4.17",
+    "BR4.18",
+    "BR4.19",
+    "FR15.5",
+    "N-01",
+    "N-02",
+    "N-03",
+    "N-04",
+    "N-05",
+    "N-06",
+    "N-07",
+    "N-08",
+    "N-09",
+    "N-10",
+    "N-11",
+    "N-12",
+    "N-13",
+    "DS-01",
+    "DS-02",
+    "DS-03",
+    "DS-04",
+    "DS-05",
+    "DS-06",
+    "DS-07",
+    "DS-08",
+    "DS-09",
+    "DS-10",
+    "DS-11",
+    "DS-12",
+    "DS-13",
+    "DS-14",
+    "DS-15",
+    "DS-16",
+    "AR-01",
+    "AR-02",
+    "AR-03",
+    "AR-04",
+    "AR-05",
+    "AR-06"
+  ],
+  "coverage": [
+    {
+      "id": "NFR1",
+      "status": "OK",
+      "target": "SR4.8",
+      "note": "named bounded-walk caps (injectable) + honest residuals in SR4.11"
+    },
+    {
+      "id": "NFR6",
+      "status": "OK",
+      "target": "TD4.3, TD4.7",
+      "note": "one additive 0054 migration (three-dir parity); zero new facade methods"
+    },
+    {
+      "id": "NFR7",
+      "status": "OK",
+      "target": "SR4.7, TD4.8",
+      "note": "resumability substance: cursor resume + tree_snap-last crash-resume + crash-resume test arm (AR-03 retarget)"
+    },
+    {
+      "id": "NFR8",
+      "status": "OK",
+      "target": "SR4.2, SR4.9, SR4.12",
+      "note": "opaque Internal + unit's own tracing requirement (AR-04)"
+    },
+    {
+      "id": "NFR9",
+      "status": "OK",
+      "target": "SR4.1\u2013SR4.10, SR4.12"
+    },
+    {
+      "id": "NFR10",
+      "status": "OK",
+      "target": "TD4.8",
+      "note": "feature-gated invocations; honest dialect-coverage claim + gated dialect_vcs test pinned"
+    },
+    {
+      "id": "SR4.1",
+      "status": "OK",
+      "target": "security-requirements.md",
+      "note": "mode set corrected to {33188,33261,40960,16384} \u2014 supersedes FD's 41471 (DS-01);  +old_path-uniqueness rule (AR-01)"
+    },
+    {
+      "id": "SR4.2",
+      "status": "OK",
+      "target": "security-requirements.md"
+    },
+    {
+      "id": "SR4.3",
+      "status": "OK",
+      "target": "security-requirements.md",
+      "note": "id-shape oracle pinned to ChangesetId::parse (is_changeset_id is private; DS-03)"
+    },
+    {
+      "id": "SR4.4",
+      "status": "OK",
+      "target": "security-requirements.md",
+      "note": "post-CAS observation wording; MySQL-only atomicity + absent-vs-NULL-head conflation documented (DS-05)"
+    },
+    {
+      "id": "SR4.5",
+      "status": "OK",
+      "target": "security-requirements.md"
+    },
+    {
+      "id": "SR4.6",
+      "status": "OK",
+      "target": "security-requirements.md + TD4.3",
+      "note": "rename old-path row keyed {hash32}\\x01{ts}\\x01{cs}\\x01r \u2014 supersedes FD 83-char pin (AR-01)"
+    },
+    {
+      "id": "SR4.7",
+      "status": "OK",
+      "target": "security-requirements.md",
+      "note": "uniform base64 cursors incl. ref-list {k}; diff path-order pin; second-precision wording landed here (DS-11/DS-15/N-11)"
+    },
+    {
+      "id": "SR4.8",
+      "status": "OK",
+      "target": "security-requirements.md",
+      "note": "injectable caps + payload bounds (blame \u226432KB, all kinds <64KB TEXT ceiling; DS-09); blame touches cap 65536 injectable (AR-02)"
+    },
+    {
+      "id": "SR4.9",
+      "status": "OK",
+      "target": "security-requirements.md"
+    },
+    {
+      "id": "SR4.10",
+      "status": "OK",
+      "target": "security-requirements.md",
+      "note": "scoped to hashed-path reads; tree_entry guards on key suffix (DS-04)"
+    },
+    {
+      "id": "SR4.11",
+      "status": "OK",
+      "target": "security-requirements.md",
+      "note": "register expanded: O(#refs) scan, cold-fold, GC-safety invariant, unverified-collation CI gap (DS-08/DS-16); blame O(#touches)-inside-cap + log depth-ceiling entries (AR-02)"
+    },
+    {
+      "id": "SR4.12",
+      "status": "OK",
+      "target": "security-requirements.md",
+      "note": "NEW \u2014 tracing on typed-error + index-write paths, ids/hashes only (DS-07)"
+    },
+    {
+      "id": "TD4.1",
+      "status": "OK",
+      "target": "tech-stack-decisions.md",
+      "note": "+dep:oxidean-core; hex=\"0.4\"; derive feature dropped; clone count corrected (DS-03/DS-13); Ref mislabel reworded (AR-05)"
+    },
+    {
+      "id": "TD4.2",
+      "status": "OK",
+      "target": "tech-stack-decisions.md"
+    },
+    {
+      "id": "TD4.3",
+      "status": "OK",
+      "target": "tech-stack-decisions.md",
+      "note": "full MODIFY COLUMN \u2026 CHARACTER SET \u2026 COLLATE \u2026 NOT NULL on all three ALTERs (DS-10)"
+    },
+    {
+      "id": "TD4.4",
+      "status": "OK",
+      "target": "tech-stack-decisions.md"
+    },
+    {
+      "id": "TD4.5",
+      "status": "OK",
+      "target": "tech-stack-decisions.md",
+      "note": "manifest_json never persisted \u2014 reworded (DS-14)"
+    },
+    {
+      "id": "TD4.6",
+      "status": "OK",
+      "target": "tech-stack-decisions.md"
+    },
+    {
+      "id": "TD4.7",
+      "status": "OK",
+      "target": "tech-stack-decisions.md"
+    },
+    {
+      "id": "TD4.8",
+      "status": "OK",
+      "target": "tech-stack-decisions.md",
+      "note": "honest migrate-only dialect claim + gated dialect_vcs test; six added test arms; injectable caps (DS-02/DS-06); dialect_vcs placement pinned to oxidean-db/tests/ (AR-06)"
+    },
+    {
+      "id": "TD4.9",
+      "status": "OK",
+      "target": "tech-stack-decisions.md"
+    },
+    {
+      "id": "BR4.1",
+      "status": "OK",
+      "target": "SR4.5, TD4.5"
+    },
+    {
+      "id": "BR4.2",
+      "status": "OK",
+      "target": "SR4.5, TD4.8"
+    },
+    {
+      "id": "BR4.3",
+      "status": "OK",
+      "target": "TD4.7"
+    },
+    {
+      "id": "BR4.4",
+      "status": "OK",
+      "target": "SR4.1",
+      "note": "mode constant corrected here; upstream rules.md text superseded by this register"
+    },
+    {
+      "id": "BR4.5",
+      "status": "OK",
+      "target": "SR4.1, TD4.6"
+    },
+    {
+      "id": "BR4.6",
+      "status": "OK",
+      "target": "TD4.7, TD4.8",
+      "note": "object-links completeness test arm added (DS-06e)"
+    },
+    {
+      "id": "BR4.7",
+      "status": "OK",
+      "target": "TD4.7"
+    },
+    {
+      "id": "BR4.8",
+      "status": "OK",
+      "target": "SR4.4"
+    },
+    {
+      "id": "BR4.9",
+      "status": "OK",
+      "target": "SR4.3"
+    },
+    {
+      "id": "BR4.10",
+      "status": "OK",
+      "target": "SR4.4"
+    },
+    {
+      "id": "BR4.11",
+      "status": "OK",
+      "target": "SR4.11"
+    },
+    {
+      "id": "BR4.12",
+      "status": "OK",
+      "target": "SR4.6, TD4.7"
+    },
+    {
+      "id": "BR4.13",
+      "status": "OK",
+      "target": "SR4.8, TD4.8"
+    },
+    {
+      "id": "BR4.14",
+      "status": "OK",
+      "target": "SR4.8, SR4.11"
+    },
+    {
+      "id": "BR4.15",
+      "status": "OK",
+      "target": "SR4.7"
+    },
+    {
+      "id": "BR4.16",
+      "status": "OK",
+      "target": "SR4.9, TD4.2"
+    },
+    {
+      "id": "BR4.17",
+      "status": "OK",
+      "target": "SR4.11, TD4.2"
+    },
+    {
+      "id": "BR4.18",
+      "status": "OK",
+      "target": "SR4.2"
+    },
+    {
+      "id": "BR4.19",
+      "status": "OK",
+      "target": "SR4.6, TD4.3"
+    },
+    {
+      "id": "FR15.5",
+      "status": "OK",
+      "target": "TD4.3"
+    },
+    {
+      "id": "N-01",
+      "status": "OK",
+      "target": "SR4.11"
+    },
+    {
+      "id": "N-02",
+      "status": "OK",
+      "target": "SR4.7",
+      "note": "ref cursor base64-wrapped {k:last_ref_name} for uniformity"
+    },
+    {
+      "id": "N-03",
+      "status": "OK",
+      "target": "SR4.7"
+    },
+    {
+      "id": "N-04",
+      "status": "OK",
+      "target": "SR4.8"
+    },
+    {
+      "id": "N-05",
+      "status": "OK",
+      "target": "SR4.1"
+    },
+    {
+      "id": "N-06",
+      "status": "OK",
+      "target": "TD4.9 + code-gen register",
+      "note": "carried \u2014 upstream entities.md NULL-head wording persists (FD artifacts bound); correction lands at code-gen"
+    },
+    {
+      "id": "N-07",
+      "status": "OK",
+      "target": "TD4.4",
+      "note": "carried \u2014 upstream entities.md CHAR(29) wording persists; TD4.4's column-type note is the authority"
+    },
+    {
+      "id": "N-08",
+      "status": "OK",
+      "target": "TD4.9",
+      "note": "carried \u2014 rules.md '(actual=null)' parenthetical persists upstream; BaseNotFound alias + actual:String pinned here"
+    },
+    {
+      "id": "N-09",
+      "status": "OK",
+      "target": "SR4.2"
+    },
+    {
+      "id": "N-10",
+      "status": "OK",
+      "target": "SR4.1",
+      "note": "corrected mode set pinned here; upstream entities.md example superseded (DS-01 compounds it)"
+    },
+    {
+      "id": "N-11",
+      "status": "OK",
+      "target": "SR4.7",
+      "note": "wording now lands here (second-precision; same-second ties by id); upstream WF7.1/entities superseded"
+    },
+    {
+      "id": "N-12",
+      "status": "OK",
+      "target": "FR15.5 row"
+    },
+    {
+      "id": "N-13",
+      "status": "OK",
+      "target": "SR4.10",
+      "note": "pinned forward here \u2014 blame shard payload carries path; upstream entities.md shape superseded"
+    },
+    {
+      "id": "DS-01",
+      "status": "OK",
+      "target": "SR4.1",
+      "note": "mode 41471\u219240960 corrected in this register"
+    },
+    {
+      "id": "DS-02",
+      "status": "OK",
+      "target": "TD4.8 + SR4.11",
+      "note": "honest claim + gated dialect_vcs test pinned"
+    },
+    {
+      "id": "DS-03",
+      "status": "OK",
+      "target": "TD4.1 + SR4.3"
+    },
+    {
+      "id": "DS-04",
+      "status": "OK",
+      "target": "SR4.10"
+    },
+    {
+      "id": "DS-05",
+      "status": "OK",
+      "target": "SR4.4"
+    },
+    {
+      "id": "DS-06",
+      "status": "OK",
+      "target": "TD4.8 + SR4.8"
+    },
+    {
+      "id": "DS-07",
+      "status": "OK",
+      "target": "SR4.12"
+    },
+    {
+      "id": "DS-08",
+      "status": "OK",
+      "target": "SR4.11 + SR4.8"
+    },
+    {
+      "id": "DS-09",
+      "status": "OK",
+      "target": "SR4.8"
+    },
+    {
+      "id": "DS-10",
+      "status": "OK",
+      "target": "TD4.3"
+    },
+    {
+      "id": "DS-11",
+      "status": "OK",
+      "target": "SR4.7"
+    },
+    {
+      "id": "DS-12",
+      "status": "OK",
+      "target": "this file",
+      "note": "N-06/07/08/11/13 re-marked as carried/pinned-here"
+    },
+    {
+      "id": "DS-13",
+      "status": "OK",
+      "target": "TD4.1"
+    },
+    {
+      "id": "DS-14",
+      "status": "OK",
+      "target": "TD4.5"
+    },
+    {
+      "id": "DS-15",
+      "status": "OK",
+      "target": "SR4.7"
+    },
+    {
+      "id": "DS-16",
+      "status": "OK",
+      "target": "SR4.11"
+    },
+    {
+      "id": "AR-01",
+      "status": "OK",
+      "target": "security-requirements.md / tech-stack-decisions.md",
+      "note": "key-segregated \\x01r rename row + old_path uniqueness \u2014 silent LWW merge closed"
+    },
+    {
+      "id": "AR-02",
+      "status": "OK",
+      "target": "security-requirements.md / tech-stack-decisions.md",
+      "note": "blame touches cap + register exclusivity fix + log depth ceiling"
+    },
+    {
+      "id": "AR-03",
+      "status": "OK",
+      "target": "security-requirements.md / tech-stack-decisions.md",
+      "note": "NFR7 retargeted to cursor resume + crash-resume"
+    },
+    {
+      "id": "AR-04",
+      "status": "OK",
+      "target": "security-requirements.md / tech-stack-decisions.md",
+      "note": "NFR8 target adds SR4.12"
+    },
+    {
+      "id": "AR-05",
+      "status": "OK",
+      "target": "security-requirements.md / tech-stack-decisions.md",
+      "note": "Ref wire-type mislabel corrected"
+    },
+    {
+      "id": "AR-06",
+      "status": "OK",
+      "target": "security-requirements.md / tech-stack-decisions.md",
+      "note": "dialect_vcs home + gating idiom pinned"
+    }
+  ]
+}
