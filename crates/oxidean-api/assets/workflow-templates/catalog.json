@@ -485,12 +485,10 @@
       ]
     },
     "ci/elixir": {
-      "status": "partial",
+      "status": "runnable",
       "missing_features": [],
       "unsupported_actions": [],
-      "warnings": [
-        "actions/cache@v3 (no actions cache service yet — runs without caching)"
-      ]
+      "warnings": []
     },
     "ci/erlang": {
       "status": "partial",
@@ -539,12 +537,10 @@
       "warnings": []
     },
     "ci/haskell": {
-      "status": "partial",
+      "status": "runnable",
       "missing_features": [],
       "unsupported_actions": [],
-      "warnings": [
-        "actions/cache@v3 (no actions cache service yet — runs without caching)"
-      ]
+      "warnings": []
     },
     "ci/ios": {
       "status": "runnable",
@@ -617,12 +613,10 @@
       "warnings": []
     },
     "ci/php": {
-      "status": "partial",
+      "status": "runnable",
       "missing_features": [],
       "unsupported_actions": [],
-      "warnings": [
-        "actions/cache@v3 (no actions cache service yet — runs without caching)"
-      ]
+      "warnings": []
     },
     "ci/pylint": {
       "status": "runnable",
@@ -705,12 +699,10 @@
       "warnings": []
     },
     "ci/symfony": {
-      "status": "partial",
+      "status": "runnable",
       "missing_features": [],
       "unsupported_actions": [],
-      "warnings": [
-        "actions/cache@v3 (no actions cache service yet — runs without caching)"
-      ]
+      "warnings": []
     },
     "ci/webpack": {
       "status": "runnable",
@@ -815,12 +807,10 @@
       "warnings": []
     },
     "deployments/azure-webapps-dotnet-core": {
-      "status": "partial",
+      "status": "runnable",
       "missing_features": [],
       "unsupported_actions": [],
-      "warnings": [
-        "actions/cache@v3 (no actions cache service yet — runs without caching)"
-      ]
+      "warnings": []
     },
     "deployments/azure-webapps-java-jar": {
       "status": "runnable",
@@ -841,12 +831,10 @@
       "warnings": []
     },
     "deployments/azure-webapps-php": {
-      "status": "partial",
+      "status": "runnable",
       "missing_features": [],
       "unsupported_actions": [],
-      "warnings": [
-        "actions/cache@v3 (no actions cache service yet — runs without caching)"
-      ]
+      "warnings": []
     },
     "deployments/azure-webapps-python": {
       "status": "runnable",

@@ -44,8 +44,8 @@ download, annotations, `workflow_job` webhook.
 
 | Section | supported | partial | unsupported | n/a |
 |---------|-----------|---------|-------------|-----|
-| 1. Workflow files & discovery | 7 | 1 | 0 | 0 |
-| 2. Triggers & filters | 21 | 1 | 0 | 0 |
+| 1. Workflow files & discovery | 8 | 0 | 0 | 0 |
+| 2. Triggers & filters | 22 | 0 | 0 | 0 |
 | 3. Events | 23 | 0 | 13 | 0 |
 | 4. Workflow-level keys | 8 | 0 | 0 | 0 |
 | 5. Jobs | 29 | 0 | 0 | 1 |
@@ -83,7 +83,7 @@ and <https://docs.github.com/en/actions/using-workflows/triggering-a-workflow>
 | `file.multiple` | Multiple workflows per repo, each independent | supported | test:crates/oxidean-api/tests/actions_workflow_parse.rs::actions_workflow_parse_bad_file_does_not_block_good_workflows | |
 | `file.yaml-on-key` | `on:` parses as a key, not a YAML 1.1 boolean | supported | test:crates/oxidean-api/src/actions/parse.rs::parses_minimal_push_workflow | serde_yaml ≥0.9 uses the YAML 1.2 core schema. |
 | `file.invalid` | Malformed/invalid YAML produces a failed-validation run | supported | case:runs-on-missing, test:crates/oxidean-api/tests/actions_phase8.rs::p8_discovery_errors_persist_as_failed_validation_runs | Parse errors never silently drop a workflow; a failed run records the error. |
-| `file.unknown-keys` | Unknown top-level keys rejected | partial | test:crates/oxidean-api/src/actions/parse.rs::unknown_keys_warn_at_every_level | GitHub fails workflow validation; we emit a workflow warning and still run. Divergence pinned. |
+| `file.unknown-keys` | Unknown top-level keys rejected | supported | test:crates/oxidean-api/src/actions/parse.rs::unknown_keys_fail_validation_at_every_level | Unknown keys at workflow, job, or step level flag `unsupported` — dispatch refuses the run (failed validation), matching GitHub's "Unexpected value" rejection. |
 
 ## 2. Triggers & filters (`on.`)
 
@@ -102,7 +102,7 @@ and <https://docs.github.com/en/actions/writing-workflows/workflow-syntax-for-gi
 | `on.paths` | `paths:` at least one changed file must match | supported | test:crates/oxidean-api/src/actions/filters.rs::paths_positive_and_ignore, test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_push_paths_filters | |
 | `on.paths-ignore` | `paths-ignore:` fires when any file escapes the list | supported | test:crates/oxidean-api/src/actions/filters.rs::paths_positive_and_ignore | |
 | `on.types` | `types:` activity-type filter | supported | test:crates/oxidean-api/src/actions/filters.rs::types_filter, test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_pull_request_types_and_target_optin | Applies to pull_request/pull_request_target/release/issues. |
-| `on.mixed-ignore` | Positive and `-ignore` list on the same event | partial | test:crates/oxidean-api/src/actions/parse.rs::mixed_positive_and_ignore_filters_warn | GitHub rejects the workflow; we warn and still run. Divergence pinned. |
+| `on.mixed-ignore` | Positive and `-ignore` list on the same event | supported | test:crates/oxidean-api/src/actions/parse.rs::mixed_positive_and_ignore_filters_fail_validation | A positive list plus its `-ignore` twin on the same event flags `unsupported` — dispatch refuses the run, matching GitHub's rejection. |
 | `on.branches-and-paths` | `branches` and `paths` both apply (AND) | supported | test:crates/oxidean-api/src/actions/filters.rs::branch_and_path_filters_are_conjunctive | |
 | `on.glob-syntax` | `*`, `**`, `?`, `[...]` classes, `!` negation | supported | test:crates/oxidean-api/src/actions/filters.rs::glob_basics, test:crates/oxidean-api/src/actions/filters.rs::glob_char_classes | `+(…)`/`@(…)` extglob syntax is not implemented — GitHub behaviour unverified whether docs-minimatch requires it. |
 | `on.negation-order` | `!` patterns apply in order; a later positive re-includes | supported | test:crates/oxidean-api/src/actions/filters.rs::negation_last_match_wins | |
@@ -241,7 +241,7 @@ and <https://docs.github.com/en/actions/using-workflows/using-a-shell>
 | `step.with-on-run` | `with:` on a `run:` step has no effect | supported | test:crates/oxidean-api/src/actions/parse.rs::captured_features_warn_not_unsupported | Warned at parse, matching the docs' "no effect" note. |
 | `step.continue-on-error` | `continue-on-error:` — step failure does not fail the job | supported | case:continue-on-error-step, case:step-conclusion-coe | `steps.<id>.outcome` keeps `failure`; `conclusion` normalizes to `success`. |
 | `step.timeout-minutes` | `timeout-minutes:` per step — expressions allowed | supported | case:timeout-minutes-step | Clipped by the job deadline. |
-| `step.args-entrypoint` | `with.args`/`with.entrypoint` on docker actions | supported | case:docker-uses-args, test:crates/oxidean-runner/src/exec/action.rs::split_arg_string_honors_quotes | `with.entrypoint` → `--entrypoint`; `with.args` is a single string split with quote grouping. Bare `args:`/`entrypoint:` step keys still warn — GitHub rejects them outright. |
+| `step.args-entrypoint` | `with.args`/`with.entrypoint` on docker actions | supported | case:docker-uses-args, test:crates/oxidean-runner/src/exec/action.rs::split_arg_string_honors_quotes | `with.entrypoint` → `--entrypoint`; `with.args` is a single string split with quote grouping. Bare `args:`/`entrypoint:` step keys are rejected as unknown keys — matching GitHub outright. |
 
 ## 7. Expressions (`expr.`)
 

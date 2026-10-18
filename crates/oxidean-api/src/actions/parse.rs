@@ -369,7 +369,8 @@ struct RawJob {
     continue_on_error: Option<serde_yaml::Value>,
     #[serde(rename = "timeout-minutes")]
     timeout_minutes: Option<serde_yaml::Value>,
-    /// Unknown job keys — GitHub rejects them; we warn loudly at parse.
+    /// Unknown job keys — GitHub rejects them; flagged `unsupported` so
+    /// dispatch fails validation.
     #[serde(flatten)]
     extra: serde_yaml::Mapping,
 }
@@ -402,8 +403,8 @@ struct RawStep {
     timeout_minutes: Option<serde_yaml::Value>,
     /// Unknown step keys — GitHub rejects the whole workflow for these
     /// (bare `args:`/`entrypoint:` are not step keys; docker steps take
-    /// `with.args`/`with.entrypoint`); we warn loudly rather than drop
-    /// them silently.
+    /// `with.args`/`with.entrypoint`); flagged `unsupported` so dispatch
+    /// fails validation.
     #[serde(flatten)]
     extra: serde_yaml::Mapping,
 }
@@ -548,7 +549,7 @@ fn check_json(v: &JsonValue, unsupported: &mut Vec<String>, warnings: &mut Vec<S
 
 fn parse_triggers(on: Option<RawOn>) -> (WorkflowTriggers, Vec<String>, Vec<String>) {
     let mut t = WorkflowTriggers::default();
-    let unsupported = Vec::new();
+    let mut unsupported = Vec::new();
     let mut warnings = Vec::new();
     match on {
         None => {}
@@ -581,8 +582,8 @@ fn parse_triggers(on: Option<RawOn>) -> (WorkflowTriggers, Vec<String>, Vec<Stri
         }
     }
     // GitHub forbids mixing a positive filter list with its `-ignore` twin on
-    // the same event — surface it as a validation failure rather than
-    // silently honoring one side.
+    // the same event — flag `unsupported` so dispatch fails validation rather
+    // than silently honoring one side.
     for (event, f) in [
         ("push", &t.push_filters),
         ("pull_request", &t.pull_request_filters),
@@ -590,19 +591,22 @@ fn parse_triggers(on: Option<RawOn>) -> (WorkflowTriggers, Vec<String>, Vec<Stri
         ("workflow_run", &t.workflow_run_filters),
     ] {
         if !f.branches.is_empty() && !f.branches_ignore.is_empty() {
-            warnings.push(format!(
-                "on.{event}: 'branches' and 'branches-ignore' are mutually exclusive"
-            ));
+            flag(
+                &mut unsupported,
+                &format!("on.{event}: 'branches' and 'branches-ignore' are mutually exclusive"),
+            );
         }
         if !f.tags.is_empty() && !f.tags_ignore.is_empty() {
-            warnings.push(format!(
-                "on.{event}: 'tags' and 'tags-ignore' are mutually exclusive"
-            ));
+            flag(
+                &mut unsupported,
+                &format!("on.{event}: 'tags' and 'tags-ignore' are mutually exclusive"),
+            );
         }
         if !f.paths.is_empty() && !f.paths_ignore.is_empty() {
-            warnings.push(format!(
-                "on.{event}: 'paths' and 'paths-ignore' are mutually exclusive"
-            ));
+            flag(
+                &mut unsupported,
+                &format!("on.{event}: 'paths' and 'paths-ignore' are mutually exclusive"),
+            );
         }
     }
     (t, unsupported, warnings)
@@ -938,13 +942,12 @@ pub fn parse_workflow_yaml(bytes: &[u8]) -> Result<WorkflowDocument, ParseError>
             None
         }
     };
-    // Unknown top-level keys: GitHub rejects keys outside the workflow schema;
-    // warn loudly rather than silently dropping them.
+    // Unknown top-level keys: GitHub rejects keys outside the workflow
+    // schema — flag them `unsupported` so dispatch fails validation rather
+    // than running a workflow GitHub would refuse.
     for (k, _) in &raw.extra {
         let key = k.as_str().unwrap_or("<non-string>");
-        warnings.push(format!(
-            "{key}: unknown top-level key — ignored (GitHub rejects it)"
-        ));
+        flag(&mut unsupported, &format!("unknown key '{key}'"));
     }
 
     let wf_concurrency = parse_concurrency(raw.concurrency.as_ref());
@@ -991,10 +994,13 @@ pub fn parse_workflow_yaml(bytes: &[u8]) -> Result<WorkflowDocument, ParseError>
             message: format!("invalid job '{id}': {e}"),
         })?;
         for (k, _) in &job.extra {
-            warnings.push(format!(
-                "jobs.{id}.{}: unknown key — ignored (GitHub rejects it)",
-                k.as_str().unwrap_or("<non-string>")
-            ));
+            flag(
+                &mut unsupported,
+                &format!(
+                    "unknown key 'jobs.{id}.{}'",
+                    k.as_str().unwrap_or("<non-string>")
+                ),
+            );
         }
         // `continue-on-error` is honored — failing coe legs don't fail the
         // run, don't fire fail-fast, and report `failure` to needs so
@@ -1123,10 +1129,13 @@ pub fn parse_workflow_yaml(bytes: &[u8]) -> Result<WorkflowDocument, ParseError>
         let mut steps = Vec::new();
         for (i, step) in job.steps.unwrap_or_default().into_iter().enumerate() {
             for (k, _) in &step.extra {
-                warnings.push(format!(
-                    "jobs.{id}.steps[{i}].{}: unknown key — ignored (GitHub applies it or rejects the workflow)",
-                    k.as_str().unwrap_or("<non-string>")
-                ));
+                flag(
+                    &mut unsupported,
+                    &format!(
+                        "unknown key 'jobs.{id}.steps[{i}].{}'",
+                        k.as_str().unwrap_or("<non-string>")
+                    ),
+                );
             }
             if step.uses.is_none() && step.run.is_none() {
                 return Err(ParseError {
@@ -1793,8 +1802,8 @@ name: CI
 on:
   push:
   discussion:
-  label:
-    types: [created]
+  milestone:
+    types: [opened]
 jobs:
   a:
     runs-on: ubuntu-latest
@@ -1814,7 +1823,7 @@ jobs:
             doc.warnings
         );
         assert!(
-            doc.warnings.iter().any(|w| w.contains("on.label")),
+            doc.warnings.iter().any(|w| w.contains("on.milestone")),
             "map entry with filters warns too: {:?}",
             doc.warnings
         );
@@ -1822,7 +1831,7 @@ jobs:
         let doc2 = parse_workflow_yaml(
             br#"
 name: CI
-on: [push, watch]
+on: [push, gollum]
 jobs:
   a:
     runs-on: ubuntu-latest
@@ -1831,11 +1840,11 @@ jobs:
 "#,
         )
         .expect("parse");
-        assert!(doc2.warnings.iter().any(|w| w.contains("on.watch")));
+        assert!(doc2.warnings.iter().any(|w| w.contains("on.gollum")));
     }
 
     #[test]
-    fn unknown_keys_warn_at_every_level() {
+    fn unknown_keys_fail_validation_at_every_level() {
         let doc = parse_workflow_yaml(
             br#"
 name: CI
@@ -1852,11 +1861,15 @@ jobs:
 "#,
         )
         .expect("parse");
-        for want in ["bogus-top", "jobs.a.bogus-job-key", "jobs.a.steps[0].args"] {
+        for want in [
+            "unknown key 'bogus-top'",
+            "unknown key 'jobs.a.bogus-job-key'",
+            "unknown key 'jobs.a.steps[0].args'",
+        ] {
             assert!(
-                doc.warnings.iter().any(|w| w.contains(want)),
-                "missing warning for '{want}': {:?}",
-                doc.warnings
+                doc.unsupported.iter().any(|u| u == want),
+                "missing unsupported flag '{want}': {:?}",
+                doc.unsupported
             );
         }
     }
@@ -1902,7 +1915,7 @@ jobs:
     }
 
     #[test]
-    fn mixed_positive_and_ignore_filters_warn() {
+    fn mixed_positive_and_ignore_filters_fail_validation() {
         let doc = parse_workflow_yaml(
             br#"
 name: CI
@@ -1919,11 +1932,11 @@ jobs:
         )
         .expect("parse");
         assert!(
-            doc.warnings
+            doc.unsupported
                 .iter()
-                .any(|w| w.contains("branches") && w.contains("mutually exclusive")),
-            "missing mutual-exclusion warning: {:?}",
-            doc.warnings
+                .any(|u| u.contains("on.push") && u.contains("mutually exclusive")),
+            "missing mutual-exclusion flag: {:?}",
+            doc.unsupported
         );
     }
 }

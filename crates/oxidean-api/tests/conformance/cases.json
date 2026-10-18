@@ -1348,7 +1348,7 @@
     "tools/warn/action.yml": "name: warn\ndeprecationMessage: 'this action is deprecated: use warn2'\ninputs:\n  msg:\n    required: true\nruns:\n  using: composite\n  steps:\n    - run: echo \"msg=${{ inputs.msg }}\"\n      shell: bash\n"
    },
    "log_contains": [
-    "::warning::this action is deprecated: use warn2",
+    "##[warning]this action is deprecated: use warn2",
     "unexpected input(s) 'bogus'",
     "msg=hi"
    ]
