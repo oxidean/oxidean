@@ -1171,12 +1171,25 @@ pub async fn insert_runner_token(
 
 pub async fn wipe_actions_domain(pool: &DbPool) -> Result<(), String> {
     for sql in [
+        "DELETE FROM action_task_claims",
+        "DELETE FROM action_cache_tokens",
+        "DELETE FROM action_deployment_reviews",
+        "DELETE FROM action_deployments",
+        "DELETE FROM action_artifacts",
         "DELETE FROM action_job_tokens",
         "DELETE FROM action_job_labels",
         "DELETE FROM action_jobs",
         "DELETE FROM action_payloads",
         "DELETE FROM action_runs",
+        "DELETE FROM action_environment_secrets",
+        "DELETE FROM action_environments",
+        "DELETE FROM action_caches",
+        "DELETE FROM action_org_secret_repos",
+        "DELETE FROM action_org_secrets",
         "DELETE FROM action_secrets",
+        "DELETE FROM action_schedule_state",
+        "DELETE FROM action_oidc_keys",
+        "DELETE FROM action_counters",
         "DELETE FROM action_runners",
         "DELETE FROM action_runner_tokens",
     ] {
