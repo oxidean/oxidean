@@ -380,7 +380,7 @@ WHERE id = $1",
         }
         DbPool::MySql(p) => {
             sqlx::query(
-                "UPDATE deploy_keys SET last_used_at = ?, last_used_ip = ?
+                "UPDATE deploy_keys SET last_used_at = STR_TO_DATE(REPLACE(REPLACE(?, 'T', ' '), 'Z', ''), '%Y-%m-%d %H:%i:%s'), last_used_ip = ?
 WHERE id = ?",
             )
             .bind(last_used_at)

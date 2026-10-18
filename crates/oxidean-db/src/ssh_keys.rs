@@ -387,7 +387,7 @@ WHERE id = $1",
         }
         DbPool::MySql(p) => {
             sqlx::query(
-                "UPDATE ssh_public_keys SET last_used_at = ?, last_used_ip = ?
+                "UPDATE ssh_public_keys SET last_used_at = STR_TO_DATE(REPLACE(REPLACE(?, 'T', ' '), 'Z', ''), '%Y-%m-%d %H:%i:%s'), last_used_ip = ?
 WHERE id = ?",
             )
             .bind(last_used_at)
