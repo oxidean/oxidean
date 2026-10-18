@@ -631,6 +631,12 @@ on:
     types: [dismissed]
   pull_request_review_comment: {}
   registry_package: {}
+  label:
+    types: [created]
+  public: {}
+  status: {}
+  repository_dispatch:
+    types: [deploy]
 jobs:
   l:
     runs-on: ubuntu-latest
@@ -676,6 +682,24 @@ jobs:
     notify_lifecycle_actions(&db, git.as_ref(), &ev("pull_request_review", "dismissed")).await;
     assert_eq!(run_count(&db, &repo_id).await, 8);
 
+    // label types:[created] — edited filtered, created fires.
+    notify_lifecycle_actions(&db, git.as_ref(), &ev("label", "edited")).await;
+    assert_eq!(run_count(&db, &repo_id).await, 8);
+    notify_lifecycle_actions(&db, git.as_ref(), &ev("label", "created")).await;
+    assert_eq!(run_count(&db, &repo_id).await, 9);
+
+    // GitHub defines no activity types for these — bare `on:` fires on any.
+    for name in ["public", "status"] {
+        notify_lifecycle_actions(&db, git.as_ref(), &ev(name, "")).await;
+    }
+    assert_eq!(run_count(&db, &repo_id).await, 11);
+
+    // repository_dispatch — types: match the caller-chosen event_type.
+    notify_lifecycle_actions(&db, git.as_ref(), &ev("repository_dispatch", "build")).await;
+    assert_eq!(run_count(&db, &repo_id).await, 11);
+    notify_lifecycle_actions(&db, git.as_ref(), &ev("repository_dispatch", "deploy")).await;
+    assert_eq!(run_count(&db, &repo_id).await, 12);
+
     let runs = db
         .list_action_runs_for_repo(&repo_id, &Default::default(), 100, 0)
         .await
@@ -689,6 +713,10 @@ jobs:
         "pull_request_review",
         "pull_request_review_comment",
         "registry_package",
+        "label",
+        "public",
+        "status",
+        "repository_dispatch",
     ] {
         assert!(
             runs.iter().any(|r| r.event == name),

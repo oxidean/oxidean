@@ -1002,7 +1002,7 @@ pub async fn comments_history(
 
 /// `issue.labels.set` — Write+; replace label ids from effective repo set (D-ISS-07 / D-ISS-20).
 pub async fn labels_set(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssuePublic, AppError> {
-    let _user = require_verified(ctx).await?;
+    let user = require_verified(ctx).await?;
     let req: SetIssueLabelsRequest = serde_json::from_value(input).map_err(|e| {
         AppError::new(
             "rpc.bad_input",
@@ -1038,10 +1038,40 @@ pub async fn labels_set(ctx: &RpcCtx, input: serde_json::Value) -> Result<IssueP
         }
     }
 
+    let before: std::collections::HashMap<String, oxidean_db::LabelRow> = ctx
+        .db
+        .list_labels_for_issue(&issue.id)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|l| (l.id.clone(), l))
+        .collect();
+
     ctx.db
         .set_issue_labels(&issue.id, &unique_ids)
         .await
         .map_err(db_err)?;
+
+    // `on: issues` `labeled`/`unlabeled` — one event per label delta, with
+    // `payload.label` naming the added/removed label (GitHub semantics).
+    let unique_set: std::collections::HashSet<&str> =
+        unique_ids.iter().map(String::as_str).collect();
+    let mut deltas: Vec<(&str, oxidean_db::LabelRow)> = Vec::new();
+    for (id, label) in &before {
+        if !unique_set.contains(id.as_str()) {
+            deltas.push(("unlabeled", label.clone()));
+        }
+    }
+    for id in &unique_ids {
+        if !before.contains_key(id) {
+            if let Ok(Some(label)) = ctx.db.find_label_by_id(id).await {
+                deltas.push(("labeled", label));
+            }
+        }
+    }
+    for (action, label) in deltas {
+        notify_actions_label_delta(ctx, &accessible, action, &issue, &label, &user).await;
+    }
 
     let refreshed = ctx
         .db
@@ -1523,6 +1553,66 @@ async fn notify_actions_issue(
         &repository,
         &sender,
     );
+    crate::actions::events::notify_lifecycle_actions(
+        &ctx.db,
+        ctx.git.as_ref(),
+        &crate::actions::events::LifecycleEvent {
+            bare_repo: bare,
+            repository_id: accessible.row.id.clone(),
+            default_branch: accessible.row.default_branch.clone(),
+            event_name: "issues",
+            action: action.to_string(),
+            payload,
+            actor_id: Some(user.id.clone()),
+            actions_enabled_instance: crate::actions::env_actions_enabled(),
+        },
+    )
+    .await;
+}
+
+/// `on: issues` `labeled`/`unlabeled` — one dispatch per label delta; the
+/// `label` field names the added/removed label like GitHub's webhook body.
+async fn notify_actions_label_delta(
+    ctx: &RpcCtx,
+    accessible: &crate::repo::AccessibleRepo,
+    action: &str,
+    row: &IssueRow,
+    label: &oxidean_db::LabelRow,
+    user: &oxidean_db::UserRow,
+) {
+    let Ok(bare) = crate::git::bare_repo_path(
+        &ctx.repos_dir,
+        &accessible.owner_username,
+        &accessible.row.name,
+    ) else {
+        return;
+    };
+    let author = match ctx.db.find_user_by_id(&row.author_id).await {
+        Ok(Some(u)) => crate::actions::payload::user_embed(&u.username),
+        _ => serde_json::json!({}),
+    };
+    let repository = crate::actions::payload::repository_embed(
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.default_branch,
+    );
+    let sender = crate::actions::payload::user_embed(&user.username);
+    let mut payload = crate::actions::payload::issues_payload(
+        action,
+        row.number,
+        &row.title,
+        &row.state,
+        &row.body,
+        &author,
+        &repository,
+        &sender,
+    );
+    payload["label"] = serde_json::json!({
+        "id": label.id,
+        "name": label.name,
+        "color": label.color,
+        "description": label.description,
+    });
     crate::actions::events::notify_lifecycle_actions(
         &ctx.db,
         ctx.git.as_ref(),

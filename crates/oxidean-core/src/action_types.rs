@@ -278,6 +278,20 @@ pub struct ActionDispatchResponse {
     pub run_id: Option<String>,
 }
 
+/// `repo.actions.dispatchRepository` — Write+; `repository_dispatch` trigger.
+/// Mirrors GitHub `POST /repos/{owner}/{repo}/dispatches`.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionDispatchRepositoryRequest {
+    pub owner: String,
+    pub name: String,
+    /// Activity type the run records — `on: repository_dispatch` `types:`
+    /// filters match it (GitHub `event_type`).
+    pub event_type: String,
+    /// Arbitrary JSON echoed verbatim as `github.event.client_payload`.
+    #[serde(default)]
+    pub client_payload: Option<serde_json::Value>,
+}
+
 /// `repo.actions.rerunRun` / `repo.actions.cancelRun` — Write+.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ActionRunMutationRequest {

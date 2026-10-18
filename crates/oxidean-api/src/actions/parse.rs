@@ -684,7 +684,11 @@ fn apply_event(
         | "fork"
         | "pull_request_review"
         | "pull_request_review_comment"
-        | "registry_package") => {
+        | "registry_package"
+        | "label"
+        | "public"
+        | "status"
+        | "repository_dispatch") => {
             t.lifecycle
                 .insert(name.to_string(), parse_event_filters(value).types);
         }

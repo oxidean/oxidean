@@ -46,7 +46,7 @@ download, annotations, `workflow_job` webhook.
 |---------|-----------|---------|-------------|-----|
 | 1. Workflow files & discovery | 7 | 1 | 0 | 0 |
 | 2. Triggers & filters | 20 | 2 | 0 | 0 |
-| 3. Events | 18 | 0 | 18 | 0 |
+| 3. Events | 22 | 0 | 14 | 0 |
 | 4. Workflow-level keys | 8 | 0 | 0 | 0 |
 | 5. Jobs | 29 | 0 | 0 | 1 |
 | 6. Steps | 18 | 0 | 1 | 1 |
@@ -131,7 +131,7 @@ activity-type filter semantics; unsupported ones warn at parse (section 2,
 | `ev.schedule` | `schedule` — cron on the default branch | supported | test:crates/oxidean-api/src/actions/cron.rs::exact_and_ranges, test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_schedule_sweep_dedupes_per_minute | UTC; five-field cron; multiple entries allowed. |
 | `ev.workflow_dispatch` | `workflow_dispatch` — manual run with typed inputs | supported | case:dispatch-only, test:crates/oxidean-api/tests/actions_endpoints.rs::dispatch_workflow_enqueues_run, test:crates/oxidean-api/src/actions/rpc.rs::dispatch_inputs_resolve_types_and_defaults | string/boolean/choice/number/environment types; required/default honoured; 25-input cap. |
 | `ev.release` | `release` — types published/created/edited/prereleased/released | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_lifecycle_release_and_issues | |
-| `ev.issues` | `issues` — all activity types, `types:` filter honoured | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_lifecycle_release_and_issues | |
+| `ev.issues` | `issues` — all activity types, `types:` filter honoured | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_lifecycle_release_and_issues, test:crates/oxidean-api/tests/webhook_delivery.rs::actions_issue_label_delta_trigger_e2e | `labeled`/`unlabeled` fire per label delta with `payload.label` naming the changed label. |
 | `ev.schedule-payload` | `github.event.schedule` carries the matched cron entry | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_schedule_sweep_dedupes_per_minute | `schedule_payload` emits `{"schedule": "<cron>", "repository": …}`; the test asserts the field lands on the run's event payload. |
 | `ev.branch_protection_rule` | `branch_protection_rule` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
 | `ev.check_run` | `check_run` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
@@ -145,20 +145,20 @@ activity-type filter semantics; unsupported ones warn at parse (section 2,
 | `ev.fork` | `fork` | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_lifecycle_generic_events | Fires on `repo.fork` with a `forkee` payload; action `created`. |
 | `ev.gollum` | `gollum` — wiki edits | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
 | `ev.issue_comment` | `issue_comment` — created/edited/deleted | supported | test:crates/oxidean-api/tests/webhook_delivery.rs::actions_issue_comment_trigger_e2e, test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_lifecycle_generic_events | Fires on issue comments and PR conversation comments; `types:` honoured. |
-| `ev.label` | `label` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
+| `ev.label` | `label` — created/edited/deleted | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_lifecycle_generic_events | Repo-scoped label CRUD; org labels (Oxidean extension) don't map to a repo context and don't fire. `types:` honoured. |
 | `ev.merge_group` | `merge_group` — merge queue | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
-| `ev.milestone` | `milestone` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
+| `ev.milestone` | `milestone` | unsupported | case:on-unsupported-event | Warns at parse; no milestone domain surface exists — needs the entity first. |
 | `ev.page_build` | `page_build` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
 | `ev.project` | `project` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
 | `ev.project_card` | `project_card` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
 | `ev.project_column` | `project_column` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
-| `ev.public` | `public` — repo goes public | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
+| `ev.public` | `public` — repo goes public | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_lifecycle_generic_events | Fires on `repo.updateVisibility` when visibility changes non-public → public. GitHub defines no activity types. |
 | `ev.pull_request_review` | `pull_request_review` — submitted/dismissed | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_lifecycle_generic_events | Fires on review submit and dismiss; payload carries review state/commit/PR context. `edited` is not an activity type here (no review-edit surface). |
 | `ev.pull_request_review_comment` | `pull_request_review_comment` — created/edited/deleted | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_lifecycle_generic_events | Inline (diff) review comments; conversation comments fire `issue_comment` instead, matching GitHub. |
 | `ev.pull_request_comment` | `issue_comment` on a PR (GitHub aliases it) | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_lifecycle_generic_events | Covered by `issue_comment` — PR conversation comments carry `issue.pull_request` in the payload like GitHub. |
 | `ev.registry_package` | `registry_package` — published/updated | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_lifecycle_generic_events | Fires on generic/npm/OCI package pushes; `types:` honoured. |
-| `ev.repository_dispatch` | `repository_dispatch` — external webhook trigger | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
-| `ev.status` | `status` — commit status posted | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
+| `ev.repository_dispatch` | `repository_dispatch` — external trigger | supported | test:crates/oxidean-api/tests/actions_endpoints.rs::dispatch_repository_enqueues_run | `repo.actions.dispatchRepository` (Write+): `event_type` is the activity type, `client_payload` lands as `github.event.client_payload`, `types:` filters apply. |
+| `ev.status` | `status` — commit status posted | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_lifecycle_generic_events | Fires on `repo.commitStatus.create` (REST statuses API included). Actions' own publisher writes rows directly, bypassing the RPC, so job-token recursion can't occur. No activity types. |
 | `ev.watch` | `watch` — repo starred | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_lifecycle_generic_events | Fires on star creation with action `started`; un-starring does not fire (GitHub has no `watch` delete activity). |
 | `ev.workflow_run` | `workflow_run` — another workflow finished | supported | case:workflow-run-listen, case:workflow-run-stem, case:workflow-run-branch-filter | Fan-out on run completion/cancel/timeout; listeners resolve on the default branch (trusted), match `workflows:` by name or file stem, apply `types:`/`branches:` filters, and receive `github.event.workflow_run`. Only `completed` fires — `requested`/`in_progress` activity types are not emitted. |
 

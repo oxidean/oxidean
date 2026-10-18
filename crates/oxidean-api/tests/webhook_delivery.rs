@@ -2120,6 +2120,134 @@ jobs:
     assert!(fired, "expected an issue_comment action run");
 }
 
+/// `on: issues` `labeled`/`unlabeled` — `issue.labels.set` computes the label
+/// delta and fires one run per added/removed label.
+#[tokio::test]
+async fn actions_issue_label_delta_trigger_e2e() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repos = dir.path().join("repos");
+    let url = format!("sqlite:{}", dir.path().join("lb.db").display());
+    let db = Database::connect(&url).await.expect("connect");
+    db.migrate().await.expect("migrate");
+    support::unlock_signup(&db).await;
+    let app = test_app(db.clone(), repos.clone()).await;
+    let cookie = verified_owner(&app, &db, "lb@ex.com", "lbown").await;
+    let created = rpc_json(
+        &app,
+        r#"{"procedure":"repo.create","input":{"name":"demo","visibility":"public","description":""}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(created["ok"], true, "{created}");
+    let repo_id = created["data"]["id"].as_str().unwrap().to_string();
+
+    let git = CliGitBackend::new();
+    let bare = repos.join("lbown").join("demo.git");
+    git.seed_commit(
+        &bare,
+        "main",
+        "workflows",
+        &[(
+            ".github/workflows/labels.yml".into(),
+            br#"
+name: Labels
+on:
+  issues:
+    types: [labeled, unlabeled]
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo label-driven
+"#
+            .to_vec(),
+        )],
+    )
+    .await
+    .unwrap();
+
+    let label = rpc_json(
+        &app,
+        r##"{"procedure":"label.create","input":{"owner":"lbown","repo":"demo","scope":"repo","name":"bug","color":"#ff0000"}}"##,
+        &cookie,
+    )
+    .await;
+    assert_eq!(label["ok"], true, "{label}");
+    let label_id = label["data"]["id"].as_str().unwrap().to_string();
+
+    let issue = rpc_json(
+        &app,
+        r#"{"procedure":"issue.create","input":{"owner":"lbown","name":"demo","title":"T","body":"b"}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(issue["ok"], true, "{issue}");
+
+    // Applying the label fires `labeled` with payload.label.name = "bug".
+    let set = rpc_json(
+        &app,
+        &format!(
+            r#"{{"procedure":"issue.labels.set","input":{{"owner":"lbown","name":"demo","number":1,"label_ids":["{label_id}"]}}}}"#
+        ),
+        &cookie,
+    )
+    .await;
+    assert_eq!(set["ok"], true, "{set}");
+
+    let mut labeled = None;
+    for _ in 0..40 {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let runs = db
+            .list_action_runs_for_repo(&repo_id, &Default::default(), 50, 0)
+            .await
+            .unwrap_or_default();
+        if let Some(r) = runs.into_iter().find(|r| {
+            r.event == "issues"
+                && r.event_payload_json
+                    .as_deref()
+                    .unwrap_or_default()
+                    .contains("\"labeled\"")
+        }) {
+            labeled = Some(r);
+            break;
+        }
+    }
+    let labeled = labeled.expect("labeled run enqueued");
+    let payload: serde_json::Value =
+        serde_json::from_str(labeled.event_payload_json.as_deref().unwrap()).unwrap();
+    assert_eq!(payload["action"], "labeled");
+    assert_eq!(payload["label"]["name"], "bug");
+    assert_eq!(payload["issue"]["number"], 1);
+
+    // Removing it fires `unlabeled`.
+    let cleared = rpc_json(
+        &app,
+        r#"{"procedure":"issue.labels.set","input":{"owner":"lbown","name":"demo","number":1,"label_ids":[]}}"#,
+        &cookie,
+    )
+    .await;
+    assert_eq!(cleared["ok"], true, "{cleared}");
+    let mut unlabeled = false;
+    for _ in 0..40 {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let runs = db
+            .list_action_runs_for_repo(&repo_id, &Default::default(), 50, 0)
+            .await
+            .unwrap_or_default();
+        if runs.iter().any(|r| {
+            r.event == "issues"
+                && r.event_payload_json
+                    .as_deref()
+                    .unwrap_or_default()
+                    .contains("\"unlabeled\"")
+        }) {
+            unlabeled = true;
+            break;
+        }
+    }
+    assert!(unlabeled, "expected an unlabeled run");
+}
+
 fn basic_auth(user: &str, password: &str) -> String {
     const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let raw = format!("{user}:{password}");

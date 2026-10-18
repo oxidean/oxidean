@@ -405,6 +405,103 @@ async fn dispatch_workflow_enqueues_run() {
     assert_eq!(res["error"]["code"], "repo.actions.dispatch_unsupported");
 }
 
+/// `repo.actions.dispatchRepository` — GitHub's repository_dispatch surface:
+/// `event_type` is the activity type, `client_payload` lands verbatim in
+/// `github.event.client_payload`, and `types:` filters apply.
+#[tokio::test]
+async fn dispatch_repository_enqueues_run() {
+    let fx = fixture("public").await;
+    let bare = fx.repos_dir.join(&fx.owner_username).join("actdemo.git");
+    std::fs::create_dir_all(bare.parent().unwrap()).unwrap();
+    let git = CliGitBackend::new();
+    git.init_bare(&bare, "main").await.unwrap();
+    git.seed_commit(
+        &bare,
+        "main",
+        "workflows",
+        &[(
+            ".github/workflows/deploy-hook.yml".into(),
+            br#"
+name: Deploy Hook
+on:
+  repository_dispatch:
+    types: [deploy]
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo deployed
+"#
+            .to_vec(),
+        )],
+    )
+    .await
+    .unwrap();
+
+    // Anonymous dispatch must fail (Write+).
+    let anon = rpc_json(
+        &fx.app,
+        "",
+        r#"{"procedure":"repo.actions.dispatchRepository","input":{"owner":"actowner","name":"actdemo","event_type":"deploy"}}"#,
+    )
+    .await;
+    assert_eq!(anon["ok"], false, "anonymous dispatch — {anon}");
+
+    // event_type mismatch — `types: [deploy]` filters `build` out.
+    let res = rpc_json(
+        &fx.app,
+        &fx.cookie,
+        r#"{"procedure":"repo.actions.dispatchRepository","input":{"owner":"actowner","name":"actdemo","event_type":"build"}}"#,
+    )
+    .await;
+    assert_eq!(res["ok"], true, "dispatch — {res}");
+    assert!(fx
+        .db
+        .list_action_runs_for_repo("r-act", &Default::default(), 10, 0)
+        .await
+        .unwrap()
+        .is_empty());
+
+    let res = rpc_json(
+        &fx.app,
+        &fx.cookie,
+        r#"{"procedure":"repo.actions.dispatchRepository","input":{"owner":"actowner","name":"actdemo","event_type":"deploy","client_payload":{"env":"prod","unit":42}}}"#,
+    )
+    .await;
+    assert_eq!(res["ok"], true, "dispatch — {res}");
+
+    let mut run = None;
+    for _ in 0..40 {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let runs = fx
+            .db
+            .list_action_runs_for_repo("r-act", &Default::default(), 10, 0)
+            .await
+            .unwrap();
+        if let Some(r) = runs.into_iter().find(|r| r.event == "repository_dispatch") {
+            run = Some(r);
+            break;
+        }
+    }
+    let run = run.expect("repository_dispatch run enqueued");
+    let payload: serde_json::Value =
+        serde_json::from_str(run.event_payload_json.as_deref().unwrap()).unwrap();
+    assert_eq!(payload["action"], "deploy");
+    assert_eq!(payload["client_payload"]["env"], "prod");
+    assert_eq!(payload["client_payload"]["unit"], 42);
+    assert_eq!(payload["repository"]["name"], "actdemo");
+
+    // event_type validation.
+    let bad = rpc_json(
+        &fx.app,
+        &fx.cookie,
+        r#"{"procedure":"repo.actions.dispatchRepository","input":{"owner":"actowner","name":"actdemo","event_type":"  "}}"#,
+    )
+    .await;
+    assert_eq!(bad["ok"], false, "blank event_type — {bad}");
+    assert_eq!(bad["error"]["code"], "rpc.bad_input");
+}
+
 #[tokio::test]
 async fn rerun_and_cancel_run() {
     let fx = fixture("public").await;

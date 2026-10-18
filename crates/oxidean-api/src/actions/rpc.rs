@@ -10,8 +10,8 @@ use oxidean_core::{
     ActionCacheDeleteResponse, ActionCachePublic, ActionCachesListRequest,
     ActionCachesListResponse, ActionDeploymentPublic, ActionDeploymentReviewPublic,
     ActionDeploymentReviewRequest, ActionDeploymentReviewResponse, ActionDeploymentsListRequest,
-    ActionDeploymentsListResponse, ActionDispatchInputPublic, ActionDispatchRequest,
-    ActionDispatchResponse, ActionEnabledRequest, ActionEnabledResponse,
+    ActionDeploymentsListResponse, ActionDispatchInputPublic, ActionDispatchRepositoryRequest,
+    ActionDispatchRequest, ActionDispatchResponse, ActionEnabledRequest, ActionEnabledResponse,
     ActionEnvironmentProtection, ActionEnvironmentPublic, ActionJobApproveRequest,
     ActionJobApproveResponse, ActionJobLogRequest, ActionJobLogResponse, ActionJobPublic,
     ActionListRunnersResponse, ActionRegistrationTokenResponse, ActionRunGetRequest,
@@ -1995,6 +1995,85 @@ pub async fn dispatch_workflow(
     Ok(ActionDispatchResponse {
         ok: true,
         run_id: Some(run_id),
+    })
+}
+
+/// `repo.actions.dispatchRepository` — `repository_dispatch` fan-out for
+/// external integrations (GitHub `POST /repos/{o}/{r}/dispatches`). Write+.
+/// `event_type` is the activity type (`on.repository_dispatch.types:` filters
+/// match it); `client_payload` lands verbatim as `github.event.client_payload`.
+pub async fn dispatch_repository(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<ActionDispatchResponse, AppError> {
+    let user = require_verified(ctx).await?;
+    let req: ActionDispatchRepositoryRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid repo.actions.dispatchRepository input: {e}"),
+        )
+    })?;
+    let event_type = req.event_type.trim();
+    if event_type.is_empty() || event_type.len() > 100 {
+        return Err(AppError::new(
+            "rpc.bad_input",
+            "event_type is required (1–100 characters)",
+        ));
+    }
+    if let Some(cp) = &req.client_payload {
+        if !cp.is_object() {
+            return Err(AppError::new(
+                "rpc.bad_input",
+                "client_payload must be a JSON object",
+            ));
+        }
+    }
+    let accessible = resolve_repo_for_read(ctx, &req.owner, &req.name).await?;
+    if !meets(accessible.capability, Capability::Write) {
+        return Err(not_found());
+    }
+    if !ctx
+        .db
+        .get_repo_actions_enabled(&accessible.row.id)
+        .await
+        .map_err(db_err)?
+    {
+        return Err(AppError::new(
+            "repo.actions.disabled",
+            "actions are disabled for this repository",
+        ));
+    }
+    let repository = crate::actions::payload::repository_embed(
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.default_branch,
+    );
+    let payload = serde_json::json!({
+        "action": event_type,
+        "client_payload": req.client_payload.unwrap_or(serde_json::json!({})),
+        "repository": repository,
+        "sender": crate::actions::payload::user_embed(&user.username),
+    });
+    let Some(ev) = crate::actions::events::rpc_lifecycle_event(
+        ctx,
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.id,
+        &accessible.row.default_branch,
+        "repository_dispatch",
+        event_type,
+        payload,
+        Some(user.id),
+    ) else {
+        return Err(AppError::new(
+            "repo.internal",
+            "repository storage is not available",
+        ));
+    };
+    crate::actions::events::notify_lifecycle_actions(&ctx.db, ctx.git.as_ref(), &ev).await;
+    Ok(ActionDispatchResponse {
+        ok: true,
+        run_id: None,
     })
 }
 

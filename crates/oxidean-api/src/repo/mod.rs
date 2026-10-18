@@ -1861,6 +1861,8 @@ pub async fn update_visibility(
         )
     })?;
     let accessible = resolve_repo_for_admin(ctx, &req.owner, &req.name).await?;
+    let was_public = accessible.row.visibility == "public";
+    let actor_id = require_verified(ctx).await?.id;
     let row = ctx
         .db
         .update_repository_visibility(&accessible.row.id, map_visibility(req.visibility))
@@ -1870,6 +1872,35 @@ pub async fn update_visibility(
     // drop notification rows for users who just lost access.
     if is_private_visibility(&row.visibility) {
         crate::notify::sweep_repo_access(&ctx.db, &row.id).await;
+    }
+    // `on: public` — the repo went public (any non-public → public).
+    if !was_public && row.visibility == "public" {
+        let repository = crate::actions::payload::repository_embed(
+            &accessible.owner_username,
+            &accessible.row.name,
+            &accessible.row.default_branch,
+        );
+        let sender = match ctx.db.find_user_by_id(&actor_id).await {
+            Ok(Some(u)) => crate::actions::payload::user_embed(&u.username),
+            _ => serde_json::json!({}),
+        };
+        let payload = serde_json::json!({
+            "repository": repository,
+            "sender": sender,
+        });
+        if let Some(ev) = crate::actions::events::rpc_lifecycle_event(
+            ctx,
+            &accessible.owner_username,
+            &accessible.row.name,
+            &accessible.row.id,
+            &accessible.row.default_branch,
+            "public",
+            "",
+            payload,
+            Some(actor_id),
+        ) {
+            crate::actions::events::notify_lifecycle_actions(&ctx.db, ctx.git.as_ref(), &ev).await;
+        }
     }
     Ok(to_public(&AccessibleRepo {
         row,

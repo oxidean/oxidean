@@ -94,6 +94,39 @@ pub async fn create(
         )
         .await
         .map_err(db_err)?;
+    // `on: status` — a commit status was posted through the API. Actions'
+    // own status publisher writes rows directly (never through this RPC), so
+    // job-token recursion can't occur here.
+    let repository = crate::actions::payload::repository_embed(
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.default_branch,
+    );
+    let payload = serde_json::json!({
+        "id": row.id,
+        "sha": row.sha,
+        "state": row.state,
+        "context": row.context,
+        "description": row.description,
+        "target_url": row.target_url,
+        "created_at": row.created_at,
+        "updated_at": row.updated_at,
+        "repository": repository,
+        "sender": crate::actions::payload::user_embed(&user.username),
+    });
+    if let Some(ev) = crate::actions::events::rpc_lifecycle_event(
+        ctx,
+        &accessible.owner_username,
+        &accessible.row.name,
+        &accessible.row.id,
+        &accessible.row.default_branch,
+        "status",
+        "",
+        payload,
+        Some(user.id.clone()),
+    ) {
+        crate::actions::events::notify_lifecycle_actions(&ctx.db, ctx.git.as_ref(), &ev).await;
+    }
     row_public(&row)
 }
 

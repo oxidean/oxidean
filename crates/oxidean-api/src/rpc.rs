@@ -347,6 +347,7 @@ pub const PROCEDURES: &[&str] = &[
     "repo.actions.getJobLog",
     "repo.actions.listWorkflows",
     "repo.actions.dispatchWorkflow",
+    "repo.actions.dispatchRepository",
     "repo.actions.setWorkflowEnabled",
     "repo.actions.rerunRun",
     "repo.actions.cancelRun",
@@ -1424,6 +1425,15 @@ async fn dispatch_inner(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
         // monolithic dispatch future's stack.
         "repo.actions.dispatchWorkflow" => {
             match Box::pin(crate::actions::rpc::dispatch_workflow(ctx, req.input)).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
+        // Boxed: dispatch fans out to discovery + enqueue for every matching
+        // `repository_dispatch` workflow — keep the future off the dispatch
+        // stack like dispatch_workflow.
+        "repo.actions.dispatchRepository" => {
+            match Box::pin(crate::actions::rpc::dispatch_repository(ctx, req.input)).await {
                 Ok(v) => RpcResponse::ok(v),
                 Err(e) => RpcResponse::err(e),
             }

@@ -2196,6 +2196,15 @@ export type ActionDispatchResponse = {
   run_id?: string;
 };
 
+export type ActionDispatchRepositoryRequest = {
+  owner: string;
+  name: string;
+  /** Activity type (`on.repository_dispatch.types:` filters match it). */
+  event_type: string;
+  /** Arbitrary JSON echoed verbatim as `github.event.client_payload`. */
+  client_payload?: Record<string, unknown>;
+};
+
 export type ActionRunMutationRequest = {
   owner: string;
   name: string;
@@ -4435,6 +4444,12 @@ export function createClient(opts: CreateClientOptions) {
           rpcCall<ActionWorkflowsListResponse>(opts, "repo.actions.listWorkflows", input),
         dispatchWorkflow: (input: ActionDispatchRequest) =>
           rpcCall<ActionDispatchResponse>(opts, "repo.actions.dispatchWorkflow", input),
+        dispatchRepository: (input: ActionDispatchRepositoryRequest) =>
+          rpcCall<ActionDispatchResponse>(
+            opts,
+            "repo.actions.dispatchRepository",
+            input,
+          ),
         setWorkflowEnabled: (input: ActionSetWorkflowEnabledRequest) =>
           rpcCall<{ ok: boolean; path: string; enabled: boolean }>(
             opts,
@@ -5816,6 +5831,17 @@ export function actionsDispatchWorkflowMutationOptions(client: OxideanClient) {
     mutationKey: ["repo", "actions", "dispatchWorkflow"] as const,
     mutationFn: async (input: ActionDispatchRequest) => {
       const res = await client.repo.actions.dispatchWorkflow(input);
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
+export function actionsDispatchRepositoryMutationOptions(client: OxideanClient) {
+  return {
+    mutationKey: ["repo", "actions", "dispatchRepository"] as const,
+    mutationFn: async (input: ActionDispatchRepositoryRequest) => {
+      const res = await client.repo.actions.dispatchRepository(input);
       if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
       return res.data;
     },
