@@ -638,12 +638,13 @@ and <https://docs.github.com/en/actions/monitoring-and-troubleshooting-workflows
 | `life.disable-workflow` | Disable/enable a workflow file | unsupported | test:crates/oxidean-api/tests/actions_endpoints.rs::list_workflows_discovers_dispatchable_anonymous | P16. |
 | `life.status-badge` | Workflow status badge endpoint | unsupported | test:crates/oxidean-api/tests/actions_endpoints.rs::list_runs_paginates | P16. |
 | `life.log-download` | Download a run's full log archive | partial | test:crates/oxidean-api/tests/actions_rpc.rs::actions_rpc_job_logs | Per-job logs stream over RPC; a zip-archive download endpoint does not exist. P16. |
+| `life.log-tail` | Live log tail while a job runs | partial | test:crates/oxidean-api/tests/actions_rpc.rs::actions_rpc_job_logs | Log reads are pull/poll RPC — clients refetch `job_logs` for new offsets. No SSE/WebSocket push channel; deliberately out of scope for the parity surface. |
 | `life.log-retention` | Logs compress + expire on a retention sweep | supported | test:crates/oxidean-api/tests/actions_phase8.rs::p8_gzip_roundtrip_preserves_offsets_and_merges_late_appends, test:crates/oxidean-api/tests/actions_phase8.rs::p8_retention_sweep_compresses_terminal_and_deletes_aged | |
 | `life.commit-status` | Commit status / required checks integration | unsupported | test:crates/oxidean-api/tests/actions_endpoints.rs::get_run_anonymous_includes_jobs_and_timestamps | Run results are not reported back as commit statuses. P16. |
 | `life.workflow-run-webhook` | `workflow_run` event fires when a run completes | unsupported | case:on-unsupported-event | Same gap as `ev.workflow_run`. P13/P16. |
 | `life.workflow-job-webhook` | `workflow_job` webhook | unsupported | case:on-unsupported-event | P16. |
 | `life.notifications` | Email/Slack notifications on failure | n/a | | No notification subsystem on Oxidean. |
-| `life.ui` | Runs list/detail in the web UI | partial | test:crates/oxidean-api/tests/actions_endpoints.rs::get_run_anonymous_includes_jobs_and_timestamps | RPC surface exists; the web console is P12. |
+| `life.ui` | Runs list/detail in the web UI | supported | test:crates/oxidean-api/tests/actions_endpoints.rs::get_run_anonymous_includes_jobs_and_timestamps | Run page, typed dispatch form, settings panels, env deployments/reviews, artifact management. |
 | `life.approval-gate` | Deployment approval releases a held job | supported | test:crates/oxidean-api/tests/actions_phase7.rs::p7_environment_required_reviewers_hold | |
 
 ## 24. GitHub REST API for Actions (`api.`)
