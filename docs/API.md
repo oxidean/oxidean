@@ -825,7 +825,7 @@ Oxidean speaks a GitHub-compatible subset so existing CI/deploy tooling can targ
 | Ref | Resolves to |
 | --- | --- |
 | `refs/pull/{N}/head` | The PR's current head tip (`head_sha`), refreshed on create / head-branch push / reopen. Fork heads are fetched into the base repo so the object is always fetchable. |
-| `refs/pull/{N}/merge` | The recorded merge commit, written when the PR merges. **Delta from GitHub:** no speculative test-merge commit is computed while the PR is open, so `/merge` simply does not exist until merge — `ls-remote`/`fetch` will not see it. |
+| `refs/pull/{N}/merge` | While open, the test-merge commit synthesized by actions dispatch (`pull_request` merges base tip + head off-ref, like GitHub); repointed at the recorded merge commit when the PR merges. Unmergeable heads skip the test-merge write (run fallback: head sha on `refs/pull/{N}/head`), so `/merge` is absent only until a dispatch computes it. |
 
 `refs/pull/*` is a **read-only namespace**: pushes that create, update, or delete it are denied (`git.pull_refs_read_only` over Smart HTTP; the pack bridge closes the stream over SSH; the installed `hooks/update` denies it as a backstop when the protection helper is wired). Refs persist after close/merge like GitHub's.
 

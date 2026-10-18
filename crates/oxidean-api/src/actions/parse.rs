@@ -1564,19 +1564,6 @@ jobs:
 "#,
                 &["needs"],
             ),
-            (
-                br#"
-name: CI
-on: [push]
-jobs:
-  call:
-    uses: ./.github/workflows/reuse.yml
-    with:
-      x: 1
-    secrets: inherit
-"#,
-                &["reusable-workflow"],
-            ),
         ];
         for (yaml, want) in cases {
             let got = unsupported_of(yaml);

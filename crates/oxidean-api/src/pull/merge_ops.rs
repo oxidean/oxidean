@@ -414,8 +414,8 @@ pub async fn merge(ctx: &RpcCtx, input: serde_json::Value) -> Result<MergePullRe
 
     // API-06: refs/pull/{N}/merge resolves to the recorded merge commit — the
     // merge object was pushed into the base repo by the worktree merge above.
-    // (`/head` keeps tracking pull.head_sha; GitHub's /merge is a test-merge
-    // which we do not compute, so it exists only after a real merge.)
+    // (`/head` keeps tracking pull.head_sha; while the PR was open /merge held
+    // the actions test-merge commit — the real merge repoints it here.)
     super::refs::sync_merge_ref(
         ctx.git.as_ref(),
         &ctx.repos_dir,
