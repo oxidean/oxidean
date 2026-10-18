@@ -68,7 +68,7 @@ pub fn spawn_background_jobs(
     config: JobConfig,
 ) {
     let env_name = std::env::var("OXIDEAN_ENV").unwrap_or_else(|_| "development".into());
-    crate::webhook::worker::spawn_webhook_worker(db.clone(), env_name);
+    crate::webhook::worker::spawn_webhook_worker(db.clone(), env_name.clone());
     crate::mirror::spawn_mirror_poller(db.clone(), git.clone(), repos_dir.clone());
     if config.orphan_interval.as_secs() > 0 {
         let db_o = db.clone();
@@ -114,6 +114,7 @@ pub fn spawn_background_jobs(
         let db_c = db.clone();
         let git_c = git.clone();
         let repos_c = repos_dir.clone();
+        let env_c = env_name.clone();
         let period = config.actions_schedule_sweep;
         tokio::spawn(async move {
             let mut ticker = interval(period);
@@ -156,7 +157,10 @@ pub fn spawn_background_jobs(
                 // fail legs past `timeout_at` (Phase 8).
                 let (timed_out, requeued) = crate::actions::sweeps::sweep_stale_action_jobs(
                     &db_c,
+                    git_c.as_ref(),
+                    &repos_c,
                     crate::actions::sweeps::stale_job_secs(),
+                    &env_c,
                 )
                 .await;
                 if timed_out > 0 || requeued > 0 {

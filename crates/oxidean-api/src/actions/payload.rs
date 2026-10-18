@@ -192,6 +192,51 @@ pub fn issues_payload(
     })
 }
 
+/// `workflow_run` payload — `workflow_run` embeds the completed run in
+/// GitHub's webhook shape; `action` is `completed` (the only activity type
+/// the engine emits today).
+#[allow(clippy::too_many_arguments)]
+pub fn workflow_run_payload(
+    run_id: &str,
+    run_number: i64,
+    run_attempt: i64,
+    workflow_name: &str,
+    workflow_path: &str,
+    head_branch: &str,
+    head_sha: &str,
+    event: &str,
+    conclusion: &str,
+    created_at: &str,
+    finished_at: &str,
+    pull_requests: &JsonValue,
+    repository: &JsonValue,
+    sender: &JsonValue,
+) -> JsonValue {
+    json!({
+        "action": "completed",
+        "workflow_run": {
+            "id": run_id,
+            "name": workflow_name,
+            "path": workflow_path,
+            "display_title": workflow_name,
+            "run_number": run_number,
+            "run_attempt": run_attempt,
+            "event": event,
+            "status": "completed",
+            "conclusion": conclusion,
+            "head_branch": head_branch,
+            "head_sha": head_sha,
+            "pull_requests": pull_requests,
+            "created_at": created_at,
+            "updated_at": finished_at,
+            "actor": sender,
+            "triggering_actor": sender,
+        },
+        "repository": repository,
+        "sender": sender,
+    })
+}
+
 /// `{full_name, name, owner.login, default_branch}` — the `repository`
 /// embed every payload shares.
 pub fn repository_embed(owner: &str, name: &str, default_branch: &str) -> JsonValue {

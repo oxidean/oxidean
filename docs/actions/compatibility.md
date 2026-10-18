@@ -45,29 +45,29 @@ download, annotations, `workflow_job` webhook.
 | Section | supported | partial | unsupported | n/a |
 |---------|-----------|---------|-------------|-----|
 | 1. Workflow files & discovery | 7 | 1 | 0 | 0 |
-| 2. Triggers & filters |20 | 2 | 0 | 0 |
-| 3. Events | 7 | 1 | 28 | 0 |
-| 4. Workflow-level keys | 7 | 0 | 1 | 0 |
-| 5. Jobs |28 | 1 | 0 | 1 |
+| 2. Triggers & filters | 20 | 2 | 0 | 0 |
+| 3. Events | 8 | 1 | 27 | 0 |
+| 4. Workflow-level keys | 8 | 0 | 0 | 0 |
+| 5. Jobs | 28 | 1 | 0 | 1 |
 | 6. Steps | 17 | 1 | 1 | 1 |
 | 7. Expressions | 15 | 0 | 0 | 0 |
-| 8. Contexts |20 | 4 | 0 | 0 |
+| 8. Contexts | 20 | 4 | 0 | 0 |
 | 9. Workflow commands & environment files | 17 | 4 | 1 | 0 |
-| 10. Default environment variables | 40 | 0 | 8 | 0 |
+| 10. Default environment variables | 47 | 0 | 1 | 0 |
 | 11. Action metadata — action.yml | 14 | 2 | 1 | 1 |
-| 12. Reusable workflows |9 | 1 | 0 | 0 |
-| 13. Artifacts | 10 | 1 | 2 | 0 |
-| 14. Dependency caching |5 | 0 | 0 | 0 |
+| 12. Reusable workflows | 9 | 1 | 0 | 0 |
+| 13. Artifacts | 11 | 1 | 1 | 0 |
+| 14. Dependency caching | 5 | 0 | 0 | 0 |
 | 15. Concurrency | 4 | 1 | 0 | 0 |
-| 16. Environments & deployments | 9 | 1 | 1 | 0 |
+| 16. Environments & deployments | 10 | 1 | 0 | 0 |
 | 17. `GITHUB_TOKEN` permissions | 8 | 1 | 0 | 0 |
 | 18. OIDC | 9 | 0 | 0 | 0 |
-| 19. Secrets & configuration variables | 12 | 0 | 1 | 0 |
+| 19. Secrets & configuration variables | 13 | 0 | 0 | 0 |
 | 20. Runners & labels | 6 | 0 | 0 | 3 |
 | 21. Security behaviours | 8 | 1 | 0 | 0 |
 | 22. Limits | 7 | 0 | 0 | 1 |
-| 23. Run lifecycle & integrations |7 | 2 | 7 | 1 |
-| 24. GitHub REST API for Actions |10 | 2 | 3 | 0 |
+| 23. Run lifecycle & integrations | 12 | 2 | 2 | 1 |
+| 24. GitHub REST API for Actions | 11 | 2 | 2 | 0 |
 
 ## 1. Workflow files & discovery (`file.`)
 
@@ -160,7 +160,7 @@ activity-type filter semantics; unsupported ones warn at parse (section 2,
 | `ev.repository_dispatch` | `repository_dispatch` — external webhook trigger | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
 | `ev.status` | `status` — commit status posted | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
 | `ev.watch` | `watch` — repo starred | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
-| `ev.workflow_run` | `workflow_run` — another workflow finished | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
+| `ev.workflow_run` | `workflow_run` — another workflow finished | supported | case:workflow-run-listen, case:workflow-run-stem, case:workflow-run-branch-filter | Fan-out on run completion/cancel/timeout; listeners resolve on the default branch (trusted), match `workflows:` by name or file stem, apply `types:`/`branches:` filters, and receive `github.event.workflow_run`. Only `completed` fires — `requested`/`in_progress` activity types are not emitted. |
 
 ## 4. Workflow-level keys (`wf.`)
 
@@ -169,7 +169,7 @@ Source: <https://docs.github.com/en/actions/writing-workflows/workflow-syntax-fo
 | `id` | Feature | Status | Evidence | Notes |
 |------|---------|--------|----------|-------|
 | `wf.name` | `name:` — workflow display name | supported | test:crates/oxidean-api/src/actions/parse.rs::parses_minimal_push_workflow | |
-| `wf.run-name` | `run-name:` — per-run display name | unsupported | test:crates/oxidean-api/src/actions/parse.rs::unknown_keys_warn_at_every_level | Warns at parse; runs show the workflow name. P13. |
+| `wf.run-name` | `run-name:` — per-run display name | supported | case:run-name, test:crates/oxidean-api/src/actions/parse.rs::run_name_parses_as_expression_source | Expression-evaluated at enqueue (`github`/`vars`/`inputs`); empty or absent falls back to the workflow name. |
 | `wf.on` | `on:` — see section 2 | supported | case:run-basic | |
 | `wf.env` | workflow-level `env:` map | supported | case:workflow-env, case:expr-env-layering | |
 | `wf.defaults` | `defaults.run.shell` / `defaults.run.working-directory` | supported | case:run-defaults-shell, case:run-defaults-workdir, test:crates/oxidean-api/tests/actions_workflow_parse.rs::actions_workflow_parse_defaults_run_shell_and_workdir | |
@@ -352,9 +352,9 @@ and `OXIDEAN_*` twins (same value, both spellings) unless noted.
 | `id` | Feature | Status | Evidence | Notes |
 |------|---------|--------|----------|-------|
 | `env.ci` | `CI` — always `true` | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | `OXIDEAN=true` twin too. |
-| `env.github-action` | `GITHUB_ACTION` — current action name/id | unsupported | test:crates/oxidean-runner/src/exec/context.rs::runner_context_exposes_github_runner_and_job | Not populated. P13. |
+| `env.github-action` | `GITHUB_ACTION` — current action name/id | supported | test:crates/oxidean-runner/src/exec/mod.rs::step_action_identity_naming | `__run`/`__run_N` for `run:` steps, `__<uses-slug>` (`_N` dedup) for `uses:`. Composite-action nesting does not re-scope the name. |
 | `env.github-action-path` | `GITHUB_ACTION_PATH` — the action's checked-out dir | supported | test:crates/oxidean-runner/src/exec/action.rs::resolve_inputs_applies_scalar_and_expr_defaults | Set inside `uses:` steps. |
-| `env.github-action-repository` | `GITHUB_ACTION_REPOSITORY` | unsupported | test:crates/oxidean-runner/src/exec/context.rs::runner_context_exposes_github_runner_and_job | P13. |
+| `env.github-action-repository` | `GITHUB_ACTION_REPOSITORY` | supported | test:crates/oxidean-runner/src/exec/mod.rs::step_action_identity_naming | `owner/repo` (or `./local`/`docker://` spec) plus `GITHUB_ACTION_REF` for `uses:` steps. |
 | `env.github-actions` | `GITHUB_ACTIONS=true` | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | |
 | `env.github-actor` | `GITHUB_ACTOR` — triggering user | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | |
 | `env.github-actor-id` | `GITHUB_ACTOR_ID` | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | |
@@ -370,28 +370,28 @@ and `OXIDEAN_*` twins (same value, both spellings) unless noted.
 | `env.github-path` | `GITHUB_PATH` | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | |
 | `env.github-ref` | `GITHUB_REF` — full ref | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_tag_ref | |
 | `env.github-ref-name` | `GITHUB_REF_NAME` — short ref | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_tag_ref | |
-| `env.github-ref-protected` | `GITHUB_REF_PROTECTED` | unsupported | test:crates/oxidean-runner/src/exec/context.rs::runner_context_exposes_github_runner_and_job | Branch-protection state not surfaced. P13. |
+| `env.github-ref-protected` | `GITHUB_REF_PROTECTED` | supported | test:crates/oxidean-api/tests/actions_phase7.rs::p7_oidc_token_endpoint_flow | Evaluated at claim via the same branch/tag rule match as the OIDC `ref_protected` claim; failure degrades to `false`. |
 | `env.github-ref-type` | `GITHUB_REF_TYPE` — branch/tag | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_tag_ref | |
 | `env.github-repository` | `GITHUB_REPOSITORY` — `owner/repo` | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | |
 | `env.github-repository-id` | `GITHUB_REPOSITORY_ID` | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | |
 | `env.github-repository-owner` | `GITHUB_REPOSITORY_OWNER` | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | |
 | `env.github-repository-owner-id` | `GITHUB_REPOSITORY_OWNER_ID` | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | |
-| `env.github-retention-days` | `GITHUB_RETENTION_DAYS` | unsupported | test:crates/oxidean-runner/src/exec/context.rs::runner_context_exposes_github_runner_and_job | Instance-configured retention exists (sweep in `sweeps.rs`); the variable is not emitted. P16. |
+| `env.github-retention-days` | `GITHUB_RETENTION_DAYS` | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | The instance's actions retention window (`sweeps::log_retention_days`), sent on the claim. |
 | `env.github-run-attempt` | `GITHUB_RUN_ATTEMPT` | supported | test:crates/oxidean-api/tests/actions_runner_protocol.rs::actions_runner_protocol_rerun_bumps_run_attempt | |
 | `env.github-run-id` | `GITHUB_RUN_ID` | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | |
 | `env.github-run-number` | `GITHUB_RUN_NUMBER` | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | |
 | `env.github-server-url` | `GITHUB_SERVER_URL` | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | |
 | `env.github-sha` | `GITHUB_SHA` — run commit | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | |
 | `env.github-step-summary` | `GITHUB_STEP_SUMMARY` | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | |
-| `env.github-triggering-actor` | `GITHUB_TRIGGERING_ACTOR` | unsupported | test:crates/oxidean-runner/src/exec/context.rs::runner_context_exposes_github_runner_and_job | P13. |
+| `env.github-triggering-actor` | `GITHUB_TRIGGERING_ACTOR` | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | Equals `triggered_by`; GitHub restamps it with the re-running actor on re-runs — Oxidean keeps the original. |
 | `env.github-workflow` | `GITHUB_WORKFLOW` — workflow name | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | |
 | `env.github-workflow-ref` | `GITHUB_WORKFLOW_REF` | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | |
 | `env.github-workflow-sha` | `GITHUB_WORKFLOW_SHA` | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | |
 | `env.github-workspace` | `GITHUB_WORKSPACE` — checkout dir | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | |
 | `env.github-token` | `GITHUB_TOKEN` — scoped job token | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_token_masked_in_logs | Masked in logs; revoked at job end. |
 | `env.runner-arch` | `RUNNER_ARCH` — X64/ARM64/… | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | |
-| `env.runner-debug` | `RUNNER_DEBUG` — set when debug logging enabled | unsupported | test:crates/oxidean-runner/src/exec/context.rs::runner_context_exposes_github_runner_and_job | No runner-debug toggle. P16. |
-| `env.runner-environment` | `RUNNER_ENVIRONMENT` — github-hosted/self-hosted | unsupported | test:crates/oxidean-runner/src/exec/context.rs::runner_context_exposes_github_runner_and_job | All Oxidean runners are self-hosted; the variable is not emitted. P16. |
+| `env.runner-debug` | `RUNNER_DEBUG` — set when debug logging enabled | supported | test:crates/oxidean-runner/src/exec/mod.rs::debug_flags_resolve_from_env_vars_and_secrets | `RUNNER_DEBUG=1` is injected into the job env when `ACTIONS_RUNNER_DEBUG` is truthy (env/vars/secrets); an explicit `env:` entry wins. |
+| `env.runner-environment` | `RUNNER_ENVIRONMENT` — github-hosted/self-hosted | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | Emitted as `self-hosted` — all Oxidean runners are self-hosted (GitHub emits the same constant for self-hosted fleets). |
 | `env.runner-name` | `RUNNER_NAME` | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | |
 | `env.runner-os` | `RUNNER_OS` — Linux/macOS/Windows spelling | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | |
 | `env.runner-temp` | `RUNNER_TEMP` — per-job temp dir | supported | test:crates/oxidean-runner/src/exec/mod.rs::runner_temp_dir_files | |
@@ -471,7 +471,7 @@ needed. Search-path semantics follow upstream `findFilesToUpload`
 | `art.merge-multiple` | `merge-multiple: true` flattens matched artifacts into `path:` | supported | case:artifact-pattern-download | |
 | `art.download-missing` | Missing artifact name fails the step | supported | case:artifact-missing | |
 | `art.cross-repo` | `github-token`/`repository`/`run-id` download from another repo/run | unsupported | case:artifact-upload-download | Inputs warned as ignored; same-run only. decision: not planned — cross-repo token semantics need design. |
-| `art.digest` | `outputs.digest` — artifact SHA-256 | unsupported | case:artifact-upload-download | Not emitted. P13. |
+| `art.digest` | `outputs.digest` — artifact SHA-256 | supported | case:artifact-upload-download | Emitted as `artifact-digest` (`sha256:<hex>` of the tar.gz). GitHub v4.4+ also emits `artifact-id`/`artifact-url`; digest hex vs upstream base64 differs cosmetically. |
 
 ## 14. Dependency caching (`cache.`)
 
@@ -516,7 +516,7 @@ Source: <https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-
 | `envr.auto-create` | A job naming an environment creates it if missing | supported | test:crates/oxidean-api/tests/actions_phase7.rs::p7_environment_auto_create_and_deployments | |
 | `envr.required-reviewers` | `required_reviewers` hold the job for approval | supported | test:crates/oxidean-api/tests/actions_phase7.rs::p7_environment_required_reviewers_hold | `waiting_approval` until a reviewer releases it. |
 | `envr.reviewer-cap` | Max 6 reviewers per environment | partial | test:crates/oxidean-api/tests/actions_phase7.rs::p7_environment_required_reviewers_hold | The cap is not enforced — GitHub rejects more; we store them. P13 hardening. |
-| `envr.prevent-self-review` | `prevent_self_review` — the deployer cannot approve | unsupported | test:crates/oxidean-api/tests/actions_phase7.rs::p7_environment_required_reviewers_hold | Field is not stored/enforced today — silently ignored, flagged for P13. |
+| `envr.prevent-self-review` | `prevent_self_review` — the deployer cannot approve | supported | test:crates/oxidean-api/tests/actions_ui_surface.rs::review_deployment_membership_and_self_review_gates | Stored in the environment's protection JSON; the review endpoint rejects with `repo.actions.self_review_forbidden` and `can_review` hides the control. |
 | `envr.wait-timer` | `wait_timer_minutes` delays the deployment | supported | test:crates/oxidean-api/tests/actions_phase7.rs::p7_environment_wait_timer | GitHub caps at 30 days; ours accepts any non-negative value — cap not enforced. |
 | `envr.branch-policy` | `deployment_branches` allowlist fails non-matching refs | supported | test:crates/oxidean-api/tests/actions_phase7.rs::p7_environment_branch_allowlist_fails_loudly | Loud failure on disallowed refs, not a silent skip. |
 | `envr.rejection-fails` | Rejected approval fails the job | supported | test:crates/oxidean-api/tests/actions_phase7.rs::p7_environment_required_reviewers_hold | |
@@ -577,7 +577,7 @@ and <https://docs.github.com/en/actions/how-tos/writing-workflows/choosing-what-
 | `secret.masking` | Secret values masked (`***`) in logs | supported | case:secrets-mask, test:crates/oxidean-runner/src/exec/mod.rs::secrets_masked_in_logs | |
 | `secret.reserved` | A secret cannot override a reserved `GITHUB_*`/`RUNNER_*` name | supported | test:crates/oxidean-runner/src/exec/mod.rs::secrets_cannot_override_reserved_vars | Warns and skips. |
 | `secret.fork-pr` | Secrets withheld on untrusted fork PRs | supported | test:crates/oxidean-api/tests/actions_runner_protocol.rs::actions_runner_protocol_pull_request_provenance_gate | Fork runs also hold for approval (see `sec.fork-approval`). |
-| `var.vars-context` | `vars` configuration variables | unsupported | case:expr-vars-empty | Context exists but is empty; no vars storage yet. P13. |
+| `var.vars-context` | `vars` configuration variables | supported | case:vars-context, test:crates/oxidean-api/tests/actions_vars.rs::actions_vars_merge_precedence | Repo/org/env stores; visibility-aware org reach; narrowest scope wins. |
 | `var.cases-sensitivity` | Variable/secret names in contexts are case-insensitive lookups | supported | test:crates/oxidean-actions-expr/src/eval.rs::secrets_context_is_plain_lookup | Context keys resolve case-insensitively like GitHub. |
 
 ## 20. Runners & labels (`runner.`)
@@ -639,15 +639,15 @@ and <https://docs.github.com/en/actions/monitoring-and-troubleshooting-workflows
 | `life.rerun-failed` | Re-run failed/cancelled jobs only | supported | test:crates/oxidean-api/src/actions/rpc.rs::rerun_run | `failed_only` flag. |
 | `life.rerun-job` | Re-run a single job | supported | test:crates/oxidean-api/src/actions/rpc.rs::rerun_run | `job_id` targeting. |
 | `life.cancel` | Cancel a run | supported | test:crates/oxidean-api/tests/actions_endpoints.rs::rerun_and_cancel_run | Runners see cancel on next update. |
-| `life.debug-rerun` | Re-run with step-debug logging | unsupported | test:crates/oxidean-api/tests/actions_endpoints.rs::rerun_and_cancel_run | No ACTIONS_STEP_DEBUG plumbing. P16. |
-| `life.delete-run` | Delete run history | unsupported | test:crates/oxidean-api/tests/actions_endpoints.rs::list_runs_paginates | P16. |
-| `life.disable-workflow` | Disable/enable a workflow file | unsupported | test:crates/oxidean-api/tests/actions_endpoints.rs::list_workflows_discovers_dispatchable_anonymous | P16. |
-| `life.status-badge` | Workflow status badge endpoint | unsupported | test:crates/oxidean-api/tests/actions_endpoints.rs::list_runs_paginates | P16. |
-| `life.log-download` | Download a run's full log archive | partial | test:crates/oxidean-api/tests/actions_rpc.rs::actions_rpc_job_logs | Per-job logs stream over RPC; a zip-archive download endpoint does not exist. P16. |
+| `life.debug-rerun` | Re-run with step-debug logging | supported | test:crates/oxidean-api/tests/actions_endpoints.rs::rerun_and_cancel_run, test:crates/oxidean-runner/src/exec/mod.rs::debug_flags_resolve_from_env_vars_and_secrets | `rerunRun` accepts `debug`; requeued jobs stamp `debug_logging`, surfaced at claim as `ACTIONS_STEP_DEBUG`/`ACTIONS_RUNNER_DEBUG` vars on both runner protocols; the web re-run menu carries the checkbox. |
+| `life.delete-run` | Delete run history | supported | test:crates/oxidean-api/tests/actions_endpoints.rs::rerun_and_cancel_run | `repo.actions.deleteRun` (Write+) removes a finished run — jobs, tokens, and artifact rows cascade; the run's log dir and artifact payloads are unlinked. In-flight runs must be cancelled first. P16. |
+| `life.disable-workflow` | Disable/enable a workflow file | supported | test:crates/oxidean-api/tests/actions_endpoints.rs::workflow_enable_disable | `repo.actions.setWorkflowEnabled` (Write+) upserts a per-(repo, path) flag; `listWorkflows` marks `disabled`, dispatch errors `workflow_disabled`, push/pull/schedule/lifecycle loops skip it, and `workflow_call` fails the caller. |
+| `life.status-badge` | Workflow status badge endpoint | supported | test:crates/oxidean-api/tests/actions_endpoints.rs::workflow_badge_svg | `GET /{owner}/{repo}/actions/workflows/{file}/badge.svg` (proxied by the web tier + Traefik) and `/api/repos/.../badge.svg`; `?branch=`/`?event=` filters; anonymous on public repos, 404 on private. |
+| `life.log-download` | Download a run's full log archive | partial | test:crates/oxidean-api/tests/actions_endpoints.rs::download_run_logs_zip | `GET /api/repos/{o}/{r}/actions/runs/{run}/logs` returns `logs.zip`; single-job raw logs at `.../jobs/{job}/logs`. Archive carries one `{job}.txt` entry per job — GitHub zips per step; per-step files aren't retained. P16. |
 | `life.log-tail` | Live log tail while a job runs | partial | test:crates/oxidean-api/tests/actions_rpc.rs::actions_rpc_job_logs | Log reads are pull/poll RPC — clients refetch `job_logs` for new offsets. No SSE/WebSocket push channel; deliberately out of scope for the parity surface. |
 | `life.log-retention` | Logs compress + expire on a retention sweep | supported | test:crates/oxidean-api/tests/actions_phase8.rs::p8_gzip_roundtrip_preserves_offsets_and_merges_late_appends, test:crates/oxidean-api/tests/actions_phase8.rs::p8_retention_sweep_compresses_terminal_and_deletes_aged | |
 | `life.commit-status` | Commit status / required checks integration | unsupported | test:crates/oxidean-api/tests/actions_endpoints.rs::get_run_anonymous_includes_jobs_and_timestamps | Run results are not reported back as commit statuses. P16. |
-| `life.workflow-run-webhook` | `workflow_run` event fires when a run completes | unsupported | case:on-unsupported-event | Same gap as `ev.workflow_run`. P13/P16. |
+| `life.workflow-run-webhook` | `workflow_run` webhook fires on run lifecycle | supported | case:workflow-run-listen | `workflow_run` deliveries go out on `requested` (enqueue/rerun), `in_progress` (first claim), and `completed` (terminal, including cancel and deadline-fail) via `webhook::dispatch::notify_workflow_run`; `on: workflow_run` downstream enqueues emit `requested` too. |
 | `life.workflow-job-webhook` | `workflow_job` webhook | unsupported | case:on-unsupported-event | P16. |
 | `life.notifications` | Email/Slack notifications on failure | n/a | | No notification subsystem on Oxidean. |
 | `life.ui` | Runs list/detail in the web UI | supported | test:crates/oxidean-api/tests/actions_endpoints.rs::get_run_anonymous_includes_jobs_and_timestamps | Run page, typed dispatch form, settings panels, env deployments/reviews, artifact management. |
@@ -672,7 +672,7 @@ class, not URL parity.
 | `api.cache` | Cache endpoints | supported | case:cache-service-absent,test:crates/oxidean-api/tests/actions_cache_service.rs::cache_roundtrip_exact_restore | `_apis/artifactcache` REST surface; repo management via `repo.actions.listCaches`/`deleteCache`. |
 | `api.runners` | Runner registration / tokens / labels | supported | test:crates/oxidean-api/tests/actions_runner_protocol.rs::actions_runner_protocol_register, test:crates/oxidean-api/tests/actions_runner_protocol.rs::actions_runner_protocol_declare_labels | Plus the gitea runner.v1 bridge for stock act_runner. |
 | `api.secrets` | Secret CRUD (repo/env/org) | supported | test:crates/oxidean-api/tests/actions_secrets.rs::actions_secrets_list_names_only_never_echoes_value | Values are write-only. |
-| `api.variables` | Configuration-variable CRUD | unsupported | case:expr-vars-empty | P13 — with `var.vars-context`. |
+| `api.variables` | Configuration-variable CRUD | supported | test:crates/oxidean-api/tests/actions_vars.rs::actions_vars_repo_rpc_roundtrip | `repo.actions.variables.*`, `repo.actions.environments.variables*`, `org.actions.variables.*`; values are plaintext and listable. |
 | `api.environments` | Environment CRUD + protection rules | supported | test:crates/oxidean-api/tests/actions_phase7.rs::p7_environment_auto_create_and_deployments | |
 | `api.oidc` | OIDC discovery + token mint | supported | test:crates/oxidean-api/tests/actions_phase7.rs::p7_oidc_token_endpoint_flow | `/api/actions/oidc` subtree. |
 | `api.workflows` | List workflows / dispatch | supported | test:crates/oxidean-api/tests/actions_endpoints.rs::list_workflows_discovers_dispatchable_anonymous, test:crates/oxidean-api/tests/actions_endpoints.rs::dispatch_workflow_enqueues_run | |

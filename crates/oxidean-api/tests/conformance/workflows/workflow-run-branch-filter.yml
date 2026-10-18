@@ -1,0 +1,7 @@
+name: Upstream CI
+on: [push]
+jobs:
+  up:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "upstream-${{ github.sha }}"

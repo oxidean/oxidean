@@ -2202,6 +2202,7 @@ export type ActionRunMutationRequest = {
   run_id: string;
   job_id?: string;
   failed_only?: boolean;
+  debug?: boolean;
 };
 
 export type ActionRunMutationResponse = {
@@ -4434,10 +4435,18 @@ export function createClient(opts: CreateClientOptions) {
           rpcCall<ActionWorkflowsListResponse>(opts, "repo.actions.listWorkflows", input),
         dispatchWorkflow: (input: ActionDispatchRequest) =>
           rpcCall<ActionDispatchResponse>(opts, "repo.actions.dispatchWorkflow", input),
+        setWorkflowEnabled: (input: ActionSetWorkflowEnabledRequest) =>
+          rpcCall<{ ok: boolean; path: string; enabled: boolean }>(
+            opts,
+            "repo.actions.setWorkflowEnabled",
+            input,
+          ),
         rerunRun: (input: ActionRunMutationRequest) =>
           rpcCall<ActionRunMutationResponse>(opts, "repo.actions.rerunRun", input),
         cancelRun: (input: ActionRunMutationRequest) =>
           rpcCall<ActionRunMutationResponse>(opts, "repo.actions.cancelRun", input),
+        deleteRun: (input: ActionRunMutationRequest) =>
+          rpcCall<{ ok: boolean }>(opts, "repo.actions.deleteRun", input),
         approveRun: (input: ActionRunMutationRequest) =>
           rpcCall<ActionRunMutationResponse>(opts, "repo.actions.approveRun", input),
         getPullRequestTarget: (input: RepoActionsPullRequestTargetRequest) =>
@@ -5829,6 +5838,28 @@ export function actionsCancelRunMutationOptions(client: OxideanClient) {
     mutationKey: ["repo", "actions", "cancelRun"] as const,
     mutationFn: async (input: ActionRunMutationRequest) => {
       const res = await client.repo.actions.cancelRun(input);
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
+export function actionsDeleteRunMutationOptions(client: OxideanClient) {
+  return {
+    mutationKey: ["repo", "actions", "deleteRun"] as const,
+    mutationFn: async (input: ActionRunMutationRequest) => {
+      const res = await client.repo.actions.deleteRun(input);
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+  };
+}
+
+export function actionsSetWorkflowEnabledMutationOptions(client: OxideanClient) {
+  return {
+    mutationKey: ["repo", "actions", "setWorkflowEnabled"] as const,
+    mutationFn: async (input: ActionSetWorkflowEnabledRequest) => {
+      const res = await client.repo.actions.setWorkflowEnabled(input);
       if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
       return res.data;
     },

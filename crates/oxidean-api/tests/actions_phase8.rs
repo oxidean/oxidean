@@ -18,6 +18,7 @@ use oxidean_api::actions::secrets::{decrypted_secrets_for_job, encrypt_secret, S
 use oxidean_api::actions::sweeps::{sweep_action_logs, sweep_stale_action_jobs};
 use oxidean_core::Role;
 use oxidean_db::Database;
+use oxidean_git::CliGitBackend;
 
 async fn mk_owner_repo(
     db: &Database,
@@ -174,13 +175,15 @@ async fn p8_stale_sweep_requeues_dead_runner() {
     assert_eq!(job.id, job_ids[0]);
 
     // Fresh heartbeat — not stale.
-    let (timed_out, requeued) = sweep_stale_action_jobs(&db, 300).await;
+    let (timed_out, requeued) =
+        sweep_stale_action_jobs(&db, &CliGitBackend::new(), dir.path(), 300, "test").await;
     assert_eq!((timed_out, requeued), (0, 0));
 
     // Runner went silent — backdate the heartbeat past the threshold.
     let old = (chrono::Utc::now() - chrono::Duration::seconds(3600)).to_rfc3339();
     db.touch_action_job_heartbeat(&job.id, &old).await.unwrap();
-    let (timed_out, requeued) = sweep_stale_action_jobs(&db, 300).await;
+    let (timed_out, requeued) =
+        sweep_stale_action_jobs(&db, &CliGitBackend::new(), dir.path(), 300, "test").await;
     assert_eq!((timed_out, requeued), (0, 1));
 
     let after = db.find_action_job_by_id(&job.id).await.unwrap().unwrap();
@@ -237,7 +240,8 @@ jobs:
     // re-checks `timeout_at < at` with a seconds-precision bound, so the
     // deadline must be in a strictly earlier second to land this pass.
     tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
-    let (timed_out, requeued) = sweep_stale_action_jobs(&db, 300).await;
+    let (timed_out, requeued) =
+        sweep_stale_action_jobs(&db, &CliGitBackend::new(), dir.path(), 300, "test").await;
     assert_eq!((timed_out, requeued), (1, 0));
     let after = db.find_action_job_by_id(&job.id).await.unwrap().unwrap();
     assert_eq!(after.status, "failure");

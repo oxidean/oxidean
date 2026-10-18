@@ -18,10 +18,10 @@ use oxidean_core::{
     ActionRunGetResponse, ActionRunMutationRequest, ActionRunMutationResponse, ActionRunPublic,
     ActionRunnerPublic, ActionRunsListRequest, ActionRunsListResponse, ActionSecretDeleteRequest,
     ActionSecretMetaPublic, ActionSecretPutRequest, ActionSecretsListRequest,
-    ActionSecretsListResponse, ActionSetEnabledRequest, ActionVariablePublic,
-    ActionVariablesDeleteRequest, ActionVariablesListRequest, ActionVariablesListResponse,
-    ActionVariablesPutRequest, ActionWorkflowFileError, ActionWorkflowPublic,
-    ActionWorkflowsListRequest, ActionWorkflowsListResponse, AppError,
+    ActionSecretsListResponse, ActionSetEnabledRequest, ActionSetWorkflowEnabledRequest,
+    ActionVariablePublic, ActionVariablesDeleteRequest, ActionVariablesListRequest,
+    ActionVariablesListResponse, ActionVariablesPutRequest, ActionWorkflowFileError,
+    ActionWorkflowPublic, ActionWorkflowsListRequest, ActionWorkflowsListResponse, AppError,
     RepoActionsDefaultPermissionsRequest, RepoActionsDefaultPermissionsResponse,
     RepoActionsEnvironmentDeleteRequest, RepoActionsEnvironmentDeleteResponse,
     RepoActionsEnvironmentGetRequest, RepoActionsEnvironmentResponse,
@@ -1607,6 +1607,11 @@ pub async fn list_workflows(
             tracing::warn!(error = %e, "workflow discovery failed");
             AppError::new("repo.actions.discovery_failed", "failed to read workflows")
         })?;
+    let disabled = ctx
+        .db
+        .list_disabled_action_workflows(&accessible.row.id)
+        .await
+        .map_err(db_err)?;
     Ok(ActionWorkflowsListResponse {
         workflows: discovered
             .workflows
@@ -1615,6 +1620,7 @@ pub async fn list_workflows(
                 path: w.path.clone(),
                 name: w.document.name.clone(),
                 supports_dispatch: w.document.triggers.workflow_dispatch,
+                disabled: disabled.contains(&w.path),
                 inputs: dispatch_inputs_public(w.document.triggers.dispatch_inputs.as_ref()),
             })
             .collect(),
@@ -1909,6 +1915,17 @@ pub async fn dispatch_workflow(
             ));
         }
     };
+    if ctx
+        .db
+        .is_action_workflow_disabled(&accessible.row.id, &wf.path)
+        .await
+        .map_err(db_err)?
+    {
+        return Err(AppError::new(
+            "repo.actions.workflow_disabled",
+            "workflow is disabled",
+        ));
+    }
     if !wf.document.triggers.workflow_dispatch {
         return Err(AppError::new(
             "repo.actions.dispatch_unsupported",
@@ -2060,6 +2077,41 @@ fn resolve_dispatch_inputs(
     Ok(serde_json::Value::Object(out))
 }
 
+/// `repo.actions.setWorkflowEnabled` — Write+; GitHub's disable/enable
+/// workflow toggle. Path must name a file under `.github/workflows/`.
+pub async fn set_workflow_enabled(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<serde_json::Value, AppError> {
+    let _ = require_verified(ctx).await?;
+    let req: ActionSetWorkflowEnabledRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid repo.actions.setWorkflowEnabled input: {e}"),
+        )
+    })?;
+    let accessible = resolve_repo_for_read(ctx, &req.owner, &req.name).await?;
+    if !meets(accessible.capability, Capability::Write) {
+        return Err(not_found());
+    }
+    let path = req.path.trim().trim_matches('/');
+    let valid = path.starts_with(".github/workflows/")
+        && (path.ends_with(".yml") || path.ends_with(".yaml"))
+        && !path.contains("..")
+        && path.len() < 255;
+    if !valid {
+        return Err(AppError::new(
+            "rpc.bad_input",
+            "path must name a .yml/.yaml file under .github/workflows/",
+        ));
+    }
+    ctx.db
+        .set_action_workflow_disabled(&accessible.row.id, path, !req.enabled)
+        .await
+        .map_err(db_err)?;
+    Ok(serde_json::json!({ "ok": true, "path": path, "enabled": req.enabled }))
+}
+
 /// `repo.actions.approveRun` — Write+; releases a fork PR run held by the
 /// `actions_fork_pr_approval` policy (clears `approval_hold`; the public
 /// `waiting_approval` status is derived from that flag).
@@ -2130,6 +2182,7 @@ pub async fn rerun_run(
             &req.run_id,
             req.failed_only.unwrap_or(false),
             req.job_id.as_deref(),
+            req.debug.unwrap_or(false),
         )
         .await
         .map_err(db_err)?;
@@ -2234,12 +2287,61 @@ pub async fn cancel_run(
     {
         if let Ok(Some(run)) = ctx.db.find_action_run_by_id(&req.run_id).await {
             crate::notify::fanout_workflow_completed(&ctx.db, &run).await;
+            // `on: workflow_run` fans out on every terminal run — cancel too
+            // (GitHub fires `completed` with conclusion `cancelled`).
+            crate::actions::events::notify_workflow_run_actions(
+                &ctx.db,
+                ctx.git.as_ref(),
+                &ctx.repos_dir,
+                &run,
+                &ctx.env_name,
+            )
+            .await;
         }
     }
     // API-04: cancellation completes the run with conclusion `cancelled`.
     crate::webhook::dispatch::notify_workflow_run(&ctx.db, &req.run_id, "completed", &ctx.env_name)
         .await;
     run_mutation_response(ctx, &accessible, &req.run_id).await
+}
+
+/// `repo.actions.deleteRun` — Write+; deletes a finished run, its jobs,
+/// logs, and artifact payloads (GitHub "Delete workflow run"). In-flight
+/// runs must be cancelled first — deleting a live run would orphan the
+/// runner mid-step.
+pub async fn delete_run(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<serde_json::Value, AppError> {
+    let (req, _accessible, run) = run_mutation_target(ctx, input, "deleteRun").await?;
+    if run.finished_at.is_none() {
+        return Err(AppError::new(
+            "repo.actions.run_not_finished",
+            "cancel the run before deleting it",
+        ));
+    }
+    let files = ctx
+        .db
+        .delete_action_run(&req.run_id)
+        .await
+        .map_err(db_err)?
+        .unwrap_or_default();
+    // Log directory per run + every artifact payload the run owned.
+    let log_dir = ctx.actions_log_dir.join(&req.run_id);
+    if let Err(e) = tokio::fs::remove_dir_all(&log_dir).await {
+        if e.kind() != std::io::ErrorKind::NotFound {
+            tracing::warn!(error = %e, run_id = %req.run_id, "run log dir removal failed");
+        }
+    }
+    for rel in &files.artifact_storage_paths {
+        let path = ctx.actions_artifacts_dir.join(rel);
+        if let Err(e) = tokio::fs::remove_file(&path).await {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                tracing::warn!(error = %e, path = %path.display(), "artifact payload removal failed");
+            }
+        }
+    }
+    Ok(serde_json::json!({ "ok": true }))
 }
 
 async fn run_mutation_target(

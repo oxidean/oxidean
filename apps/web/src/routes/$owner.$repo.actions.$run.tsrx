@@ -6,9 +6,17 @@ import { usePathname, useSearchString } from "@/lib/pathname.tsrx";
 import { RepoLayout } from "@/routes/$owner.$repo.tsrx";
 import { AppPage } from "@/components/app-page";
 import type { ActionJobLogResponse, ActionRunGetResponse } from "@oxidean/api-client";
-import { ArrowLeft, Ban, RotateCcw, Workflow } from "@octanejs/lucide";
+import { ArrowLeft, Ban, Ellipsis, RotateCcw, Workflow } from "@octanejs/lucide";
+import { useState } from "octane";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/ui/empty-state";
 import { List, ListRow } from "@/components/ui/list";
 import { PageHeader } from "@/components/ui/page-header";
@@ -23,6 +31,7 @@ import {
 import { ActionsArtifacts } from "@/components/repo/actions-artifacts";
 import { ActionsDeployments } from "@/components/repo/actions-deployments";
 import { ActionsRerunMenu } from "@/components/repo/actions-rerun-menu";
+import { ActionsRunDeleteDialog } from "@/components/repo/actions-run-delete-dialog";
 import { useRepoStore } from "@/lib/repo-store";
 import { formatRelative } from "@/lib/relative-time";
 import { fetchActionsGetJobLog, fetchActionsGetRun } from "@/lib/ssr-repo";
@@ -202,6 +211,7 @@ function RepoActionsRunPageContent() @{
       await qc.invalidateQueries({ queryKey: ["repo", "actions"] });
     },
   });
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const mutationErr =
     rerunM.isError || cancelM.isError
       ? String(rerunM.error?.message ?? cancelM.error?.message ?? "Action failed")
@@ -215,7 +225,7 @@ function RepoActionsRunPageContent() @{
     );
   }
 
-  function rerun(target: { job_id?: string; failed_only?: boolean }) {
+  function rerun(target: { job_id?: string; failed_only?: boolean; debug?: boolean }) {
     rerunM.mutate({ owner, name: repoName, run_id: runId, ...target });
   }
 
@@ -299,6 +309,38 @@ function RepoActionsRunPageContent() @{
                   {canWrite && !runActive ? (
                     <ActionsRerunMenu jobs={jobs} busy={rerunM.isPending} onRerun={rerun} />
                   ) : undefined}
+                  {canWrite && !runActive ? (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger
+                        data-testid="actions-run-more"
+                        aria-label="More actions"
+                        className={cn(
+                          buttonVariants({ variant: "outline", size: "sm" }),
+                          "px-2",
+                        )}
+                      >
+                        <Ellipsis aria-hidden size={14} />
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="min-w-56">
+                        <DropdownMenuItem
+                          data-testid="actions-download-logs"
+                          onClick={() => {
+                            window.location.href = `/api/repos/${owner}/${repoName}/actions/runs/${runId}/logs`;
+                          }}
+                        >
+                          Download log archive
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          data-testid="actions-delete-run"
+                          className="text-destructive focus:text-destructive"
+                          onClick={() => setDeleteOpen(true)}
+                        >
+                          Delete workflow run
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  ) : undefined}
                 </div>
               }
             />
@@ -307,6 +349,17 @@ function RepoActionsRunPageContent() @{
                 {mutationErr as string}
               </p>;
             }
+            <ActionsRunDeleteDialog
+              owner={owner}
+              name={repoName}
+              runId={runId}
+              runTitle={run.title}
+              open={deleteOpen}
+              onOpenChange={setDeleteOpen}
+              onDeleted={() =>
+                void navigate(routeHref("/$owner/$repo/actions", { owner, repo: repoName }))
+              }
+            />
             <ActionsForkApprovalBanner owner={owner} name={repoName} run={run} />
             <div className="mt-8 grid gap-6 md:grid-cols-[16rem_1fr]">
               <List data-testid="repo-actions-jobs" className="self-start">

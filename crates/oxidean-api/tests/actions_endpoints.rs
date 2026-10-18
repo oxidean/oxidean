@@ -18,10 +18,12 @@ async fn test_app(
     db: Database,
     repos_dir: std::path::PathBuf,
     actions_log_dir: std::path::PathBuf,
+    actions_artifacts_dir: std::path::PathBuf,
 ) -> axum::Router {
     let state = AppState::new(db, Arc::new(LogSink) as Arc<dyn EmailSender>, "development")
         .with_repos_dir(repos_dir)
-        .with_actions_log_dir(actions_log_dir);
+        .with_actions_log_dir(actions_log_dir)
+        .with_actions_artifacts_dir(actions_artifacts_dir);
     let cors = build_cors("development", None).expect("cors");
     router_with_state(state, cors)
 }
@@ -98,6 +100,7 @@ struct Fixture {
     app: axum::Router,
     repos_dir: std::path::PathBuf,
     log_dir: std::path::PathBuf,
+    artifacts_dir: std::path::PathBuf,
     cookie: String,
     owner_username: String,
     owner_id: String,
@@ -113,7 +116,14 @@ async fn fixture(visibility: &str) -> Fixture {
     support::unlock_signup(&db).await;
     let repos_dir = dir.path().join("repos");
     let log_dir = dir.path().join("alogs");
-    let app = test_app(db.clone(), repos_dir.clone(), log_dir.clone()).await;
+    let artifacts_dir = dir.path().join("artifacts");
+    let app = test_app(
+        db.clone(),
+        repos_dir.clone(),
+        log_dir.clone(),
+        artifacts_dir.clone(),
+    )
+    .await;
     let cookie = signup_verified_owner(&app, &db, "owner@example.com", "actowner").await;
     let owner = db
         .find_user_by_username("actowner")
@@ -132,6 +142,7 @@ async fn fixture(visibility: &str) -> Fixture {
         app,
         repos_dir,
         log_dir,
+        artifacts_dir,
         cookie,
         owner_username: "actowner".into(),
         owner_id: owner.id,
@@ -495,6 +506,38 @@ async fn rerun_and_cancel_run() {
         !log_path.with_extension("log.gz").exists(),
         "compressed-at-rest log deleted"
     );
+    assert!(
+        !job.debug_logging,
+        "plain rerun leaves debug_logging cleared"
+    );
+
+    // "Enable debug logging" stamps the flag on the new attempt; a plain
+    // rerun afterwards clears it (per-attempt, not sticky).
+    fx.db.cancel_action_run("run-m").await.unwrap();
+    let res = rpc_json(
+        &fx.app,
+        &fx.cookie,
+        r#"{"procedure":"repo.actions.rerunRun","input":{"owner":"actowner","name":"actdemo","run_id":"run-m","debug":true}}"#,
+    )
+    .await;
+    assert_eq!(res["ok"], true, "debug rerun — {res}");
+    let job = fx.db.find_action_job_by_id("job-m").await.unwrap().unwrap();
+    assert_eq!(job.status, "queued");
+    assert!(job.debug_logging, "debug rerun stamps debug_logging");
+
+    fx.db.cancel_action_run("run-m").await.unwrap();
+    let res = rpc_json(
+        &fx.app,
+        &fx.cookie,
+        r#"{"procedure":"repo.actions.rerunRun","input":{"owner":"actowner","name":"actdemo","run_id":"run-m"}}"#,
+    )
+    .await;
+    assert_eq!(res["ok"], true, "plain rerun — {res}");
+    let job = fx.db.find_action_job_by_id("job-m").await.unwrap().unwrap();
+    assert!(
+        !job.debug_logging,
+        "plain rerun clears the attempt's debug flag"
+    );
 
     // An unfinished run cannot be rerun.
     fx.db
@@ -530,4 +573,336 @@ async fn rerun_and_cancel_run() {
     )
     .await;
     assert_eq!(other["ok"], false, "wrong run — {other}");
+
+    // deleteRun — in-flight runs must cancel first; a finished run deletes
+    // its jobs (cascade), the run's log dir, and owned artifact payloads.
+    fx.db
+        .upsert_action_artifact(&oxidean_db::ActionArtifactRow {
+            id: "art-1".into(),
+            repository_id: "r-act".into(),
+            run_id: "run-m".into(),
+            job_id: Some("job-m".into()),
+            name: "dist".into(),
+            storage_path: "run-m/dist.zip".into(),
+            size_bytes: 4,
+            digest_sha256: "deadbeef".into(),
+            expires_at: None,
+            created_at: String::new(),
+        })
+        .await
+        .unwrap();
+    let payload = fx.artifacts_dir.join("run-m").join("dist.zip");
+    std::fs::create_dir_all(payload.parent().unwrap()).unwrap();
+    std::fs::write(&payload, b"zip!").unwrap();
+    std::fs::write(&log_path, "attempt-3 output\n").unwrap();
+
+    let in_flight = rpc_json(
+        &fx.app,
+        &fx.cookie,
+        r#"{"procedure":"repo.actions.deleteRun","input":{"owner":"actowner","name":"actdemo","run_id":"run-m"}}"#,
+    )
+    .await;
+    assert_eq!(in_flight["ok"], false, "in-flight delete — {in_flight}");
+    assert_eq!(in_flight["error"]["code"], "repo.actions.run_not_finished");
+
+    fx.db.cancel_action_run("run-m").await.unwrap();
+    let del = rpc_json(
+        &fx.app,
+        &fx.cookie,
+        r#"{"procedure":"repo.actions.deleteRun","input":{"owner":"actowner","name":"actdemo","run_id":"run-m"}}"#,
+    )
+    .await;
+    assert_eq!(del["ok"], true, "delete — {del}");
+    assert!(
+        fx.db
+            .find_action_run_by_id("run-m")
+            .await
+            .unwrap()
+            .is_none(),
+        "run row deleted"
+    );
+    assert!(
+        fx.db
+            .find_action_job_by_id("job-m")
+            .await
+            .unwrap()
+            .is_none(),
+        "job cascaded"
+    );
+    assert!(
+        fx.db
+            .find_action_artifact_by_id("art-1")
+            .await
+            .unwrap()
+            .is_none(),
+        "artifact row cascaded"
+    );
+    assert!(!log_path.exists(), "run log dir removed");
+    assert!(!payload.exists(), "artifact payload removed");
+}
+
+#[tokio::test]
+async fn workflow_enable_disable() {
+    let fx = fixture("public").await;
+    seed_workflows(&fx).await;
+
+    let list = rpc_json(
+        &fx.app,
+        &fx.cookie,
+        r#"{"procedure":"repo.actions.listWorkflows","input":{"owner":"actowner","name":"actdemo"}}"#,
+    )
+    .await;
+    assert_eq!(list["ok"], true, "list — {list}");
+    assert_eq!(list["data"]["workflows"][0]["disabled"], false);
+
+    // Disable — dispatchWorkflow then refuses, listWorkflows marks it.
+    let off = rpc_json(
+        &fx.app,
+        &fx.cookie,
+        r#"{"procedure":"repo.actions.setWorkflowEnabled","input":{"owner":"actowner","name":"actdemo","path":".github/workflows/ci.yml","enabled":false}}"#,
+    )
+    .await;
+    assert_eq!(off["ok"], true, "disable — {off}");
+
+    let list = rpc_json(
+        &fx.app,
+        &fx.cookie,
+        r#"{"procedure":"repo.actions.listWorkflows","input":{"owner":"actowner","name":"actdemo"}}"#,
+    )
+    .await;
+    assert_eq!(list["data"]["workflows"][0]["disabled"], true, "marked");
+
+    let disp = rpc_json(
+        &fx.app,
+        &fx.cookie,
+        r#"{"procedure":"repo.actions.dispatchWorkflow","input":{"owner":"actowner","name":"actdemo","workflow_id":".github/workflows/ci.yml","git_ref":"main"}}"#,
+    )
+    .await;
+    assert_eq!(disp["ok"], false, "disabled dispatch — {disp}");
+    assert_eq!(disp["error"]["code"], "repo.actions.workflow_disabled");
+
+    // A non-workflow path is rejected before touching the store.
+    let bad = rpc_json(
+        &fx.app,
+        &fx.cookie,
+        r#"{"procedure":"repo.actions.setWorkflowEnabled","input":{"owner":"actowner","name":"actdemo","path":"src/main.rs","enabled":false}}"#,
+    )
+    .await;
+    assert_eq!(bad["ok"], false, "bad path — {bad}");
+
+    // Re-enable restores dispatch.
+    let on = rpc_json(
+        &fx.app,
+        &fx.cookie,
+        r#"{"procedure":"repo.actions.setWorkflowEnabled","input":{"owner":"actowner","name":"actdemo","path":".github/workflows/ci.yml","enabled":true}}"#,
+    )
+    .await;
+    assert_eq!(on["ok"], true, "enable — {on}");
+    let disp = rpc_json(
+        &fx.app,
+        &fx.cookie,
+        r#"{"procedure":"repo.actions.dispatchWorkflow","input":{"owner":"actowner","name":"actdemo","workflow_id":".github/workflows/ci.yml","git_ref":"main"}}"#,
+    )
+    .await;
+    assert_eq!(disp["ok"], true, "re-enabled dispatch — {disp}");
+}
+
+#[tokio::test]
+async fn download_run_logs_zip() {
+    let fx = fixture("public").await;
+    fx.db
+        .insert_action_run(
+            "run-z",
+            "r-act",
+            ".github/workflows/ci.yml",
+            "CI",
+            "push",
+            "deadbeef",
+            "main",
+            "CI",
+            Some(&fx.owner_id),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    fx.db
+        .insert_action_job(oxidean_db::JobInsert::basic(
+            "job-z",
+            "run-z",
+            "build",
+            "build",
+            r#"["ubuntu-latest"]"#,
+        ))
+        .await
+        .unwrap();
+    let log_dir = fx.log_dir.join("run-z");
+    std::fs::create_dir_all(&log_dir).unwrap();
+    std::fs::write(log_dir.join("job-z.log"), "build output\n").unwrap();
+
+    // Anonymous on a public repo reads the archive.
+    let res = fx
+        .app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/repos/actowner/actdemo/actions/runs/run-z/logs")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(
+        res.headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok()),
+        Some("application/zip")
+    );
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    assert_eq!(&bytes[..2], b"PK", "zip magic");
+    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
+    let mut entry = zip.by_name("build.txt").expect("job entry in archive");
+    let mut text = String::new();
+    std::io::Read::read_to_string(&mut entry, &mut text).unwrap();
+    assert_eq!(text, "build output\n");
+
+    // Unknown run and private-repo anonymous reads 404.
+    let missing = fx
+        .app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/repos/actowner/actdemo/actions/runs/nope/logs")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+    let pfx = fixture("private").await;
+    let denied = pfx
+        .app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/repos/actowner/actdemo/actions/runs/run-z/logs")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(denied.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn workflow_badge_svg() {
+    let fx = fixture("public").await;
+    fx.db
+        .insert_action_run(
+            "run-b",
+            "r-act",
+            ".github/workflows/ci.yml",
+            "CI",
+            "push",
+            "deadbeef",
+            "main",
+            "CI",
+            Some(&fx.owner_id),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    fx.db
+        .insert_action_job(oxidean_db::JobInsert::basic(
+            "job-b",
+            "run-b",
+            "build",
+            "build",
+            r#"["ubuntu-latest"]"#,
+        ))
+        .await
+        .unwrap();
+    fx.db
+        .update_action_job_status("job-b", "success")
+        .await
+        .unwrap();
+    fx.db.recompute_action_run_status("run-b").await.unwrap();
+
+    async fn badge(app: &axum::Router, uri: &str) -> (StatusCode, String) {
+        let res = app
+            .clone()
+            .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let status = res.status();
+        let body = String::from_utf8(res.into_body().collect().await.unwrap().to_bytes().to_vec())
+            .unwrap();
+        (status, body)
+    }
+
+    // Anonymous read on a public repo — passing badge.
+    let (status, body) = badge(
+        &fx.app,
+        "/actowner/actdemo/actions/workflows/ci.yml/badge.svg",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "badge — {body}");
+    assert!(body.contains("image") || body.starts_with("<svg"), "{body}");
+    assert!(body.contains("passing"), "{body}");
+    assert!(body.contains("CI"), "{body}");
+
+    // Same shape under /api/repos for direct API consumers.
+    let (status, body) = badge(
+        &fx.app,
+        "/api/repos/actowner/actdemo/actions/workflows/ci.yml/badge.svg",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "api badge — {body}");
+    assert!(body.contains("passing"), "{body}");
+
+    // `?branch=`/`?event=` filters — matching branch passes, mismatching
+    // branch renders "no status".
+    let (status, body) = badge(
+        &fx.app,
+        "/actowner/actdemo/actions/workflows/ci.yml/badge.svg?branch=main",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("passing"), "{body}");
+    let (status, body) = badge(
+        &fx.app,
+        "/actowner/actdemo/actions/workflows/ci.yml/badge.svg?branch=release",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("no status"), "{body}");
+
+    // Unknown workflow file → no status; unknown repo → 404.
+    let (status, body) = badge(
+        &fx.app,
+        "/actowner/actdemo/actions/workflows/nope.yml/badge.svg",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("no status"), "{body}");
+    let (status, _) = badge(
+        &fx.app,
+        "/actowner/nothere/actions/workflows/ci.yml/badge.svg",
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // Private repos don't leak badge status to anonymous callers.
+    let fx2 = fixture("private").await;
+    let (status, _) = badge(
+        &fx2.app,
+        "/actowner/actdemo/actions/workflows/ci.yml/badge.svg",
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
 }

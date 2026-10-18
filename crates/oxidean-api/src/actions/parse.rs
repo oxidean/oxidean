@@ -85,6 +85,10 @@ pub struct WorkflowDocument {
     /// Workflow-level `concurrency:` — evaluated at enqueue onto the run row
     /// (enforcement lands with the scheduler phase).
     pub concurrency: Option<Concurrency>,
+    /// `run-name:` — per-run display name; expression source evaluated at
+    /// enqueue (`github`/`inputs`/`vars` contexts). `None` = runs title after
+    /// the workflow name.
+    pub run_name: Option<String>,
     /// Dispatch-time warnings: features that run but are partially ignored
     /// (`with:` inputs not applied, `concurrency` captured but not enforced).
     /// Surfaced in each job's log at enqueue — never silent.
@@ -130,6 +134,19 @@ pub struct WorkflowTriggers {
     pub call_outputs: Option<JsonValue>,
     /// `on.workflow_call.secrets` — `{name: {required, …}}` declarations.
     pub call_secrets: Option<JsonValue>,
+    /// `on.workflow_run` — fires when another workflow run in the repo
+    /// completes; the downstream run executes from the *default branch*
+    /// (trusted context) with the completed run embedded in
+    /// `github.event.workflow_run`.
+    pub workflow_run: bool,
+    /// `on.workflow_run.workflows` — triggering workflow names/filename
+    /// stems. GitHub requires the key; an absent or empty list matches
+    /// nothing.
+    pub workflow_run_workflows: Vec<String>,
+    /// `on.workflow_run` filter detail — `branches`/`branches-ignore`
+    /// constrain the completed run's head branch; `types` carries the
+    /// activity types (`completed` is the only one we ever emit).
+    pub workflow_run_filters: EventFilters,
 }
 
 /// `on.<event>` filter detail. GitHub's semantics per key:
@@ -570,6 +587,7 @@ fn parse_triggers(on: Option<RawOn>) -> (WorkflowTriggers, Vec<String>, Vec<Stri
         ("push", &t.push_filters),
         ("pull_request", &t.pull_request_filters),
         ("pull_request_target", &t.pull_request_target_filters),
+        ("workflow_run", &t.workflow_run_filters),
     ] {
         if !f.branches.is_empty() && !f.branches_ignore.is_empty() {
             warnings.push(format!(
@@ -644,6 +662,15 @@ fn apply_event(
                     {
                         t.schedule_crons.push(cron.trim().to_string());
                     }
+                }
+            }
+        }
+        "workflow_run" => {
+            t.workflow_run = true;
+            t.workflow_run_filters = parse_event_filters(value);
+            if let Some(serde_yaml::Value::Mapping(m)) = value {
+                if let Some(v) = m.get(serde_yaml::Value::String("workflows".into())) {
+                    t.workflow_run_workflows = yaml_string_list(v);
                 }
             }
         }
@@ -887,11 +914,19 @@ pub fn parse_workflow_yaml(bytes: &[u8]) -> Result<WorkflowDocument, ParseError>
 
     let (triggers, mut unsupported, mut warnings) = parse_triggers(raw.on);
 
+    // `run-name:` — expression source evaluated at enqueue into the run's
+    // display title (GitHub: `github`/`inputs`/`vars` contexts; falls back
+    // to the workflow name when absent).
+    let run_name = match raw.run_name.as_ref() {
+        None => None,
+        Some(serde_yaml::Value::String(s)) => Some(s.trim().to_string()),
+        Some(_) => {
+            warnings.push("run-name: must be a string — ignored".into());
+            None
+        }
+    };
     // Unknown top-level keys: GitHub rejects keys outside the workflow schema;
     // warn loudly rather than silently dropping them.
-    if raw.run_name.is_some() {
-        warnings.push("run-name: not supported — runs are titled after the workflow".into());
-    }
     for (k, _) in &raw.extra {
         let key = k.as_str().unwrap_or("<non-string>");
         warnings.push(format!(
@@ -901,6 +936,9 @@ pub fn parse_workflow_yaml(bytes: &[u8]) -> Result<WorkflowDocument, ParseError>
 
     let wf_concurrency = parse_concurrency(raw.concurrency.as_ref());
     check_str(&name, &mut unsupported, &mut warnings);
+    if let Some(s) = &run_name {
+        check_str(s, &mut unsupported, &mut warnings);
+    }
     let wf_env = raw.env.map(yaml_to_json).transpose()?;
     if let Some(v) = &wf_env {
         check_json(v, &mut unsupported, &mut warnings);
@@ -1218,6 +1256,7 @@ pub fn parse_workflow_yaml(bytes: &[u8]) -> Result<WorkflowDocument, ParseError>
         permissions: parse_permissions(raw.permissions.as_ref(), &mut unsupported),
         unsupported,
         concurrency: wf_concurrency,
+        run_name,
         warnings,
     })
 }
@@ -1800,18 +1839,37 @@ jobs:
 "#,
         )
         .expect("parse");
-        for want in [
-            "run-name",
-            "bogus-top",
-            "jobs.a.bogus-job-key",
-            "jobs.a.steps[0].args",
-        ] {
+        for want in ["bogus-top", "jobs.a.bogus-job-key", "jobs.a.steps[0].args"] {
             assert!(
                 doc.warnings.iter().any(|w| w.contains(want)),
                 "missing warning for '{want}': {:?}",
                 doc.warnings
             );
         }
+    }
+
+    #[test]
+    fn run_name_parses_as_expression_source() {
+        let doc = parse_workflow_yaml(
+            b"name: CI\nrun-name: deploy ${{ github.ref_name }} by ${{ github.actor }}\non: [push]\njobs:\n  a:\n    runs-on: x\n    steps:\n      - run: hi\n",
+        )
+        .expect("parse");
+        assert_eq!(
+            doc.run_name.as_deref(),
+            Some("deploy ${{ github.ref_name }} by ${{ github.actor }}")
+        );
+        assert!(
+            !doc.warnings.iter().any(|w| w.contains("run-name")),
+            "run-name must not warn: {:?}",
+            doc.warnings
+        );
+        // Non-string run-name warns and is ignored.
+        let doc2 = parse_workflow_yaml(
+            b"name: CI\nrun-name: [a, b]\non: [push]\njobs:\n  a:\n    runs-on: x\n    steps:\n      - run: hi\n",
+        )
+        .expect("parse");
+        assert!(doc2.run_name.is_none());
+        assert!(doc2.warnings.iter().any(|w| w.contains("run-name")));
     }
 
     #[test]

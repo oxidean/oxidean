@@ -119,3 +119,44 @@ export function DropdownMenuSeparator({
     {...props}
   />;
 }
+
+/**
+ * Toggleable menu item — Base UI `Menu.CheckboxItem` stays open on select,
+ * so options like "Enable debug logging" can flip before picking an action.
+ * The check indicator reserves a leading slot so labels align with plain
+ * items.
+ */
+export function DropdownMenuCheckboxItem({
+  className,
+  children,
+  ...props
+}: ComponentProps<typeof MenuPrimitive.CheckboxItem>) @{
+  <MenuPrimitive.CheckboxItem
+    data-slot="dropdown-menu-checkbox-item"
+    className={cn(
+      "relative flex h-11 cursor-default select-none items-center gap-2 rounded-sm py-2 pr-2 pl-8 text-[14px] font-normal outline-none",
+      "data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground",
+      "data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+      className,
+    )}
+    {...props}
+  >
+    <span className="absolute left-2 flex size-4 items-center justify-center">
+      <MenuPrimitive.CheckboxItemIndicator>
+        <svg
+          aria-hidden
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          className="size-4"
+        >
+          <path d="M20 6 9 17l-5-5" />
+        </svg>
+      </MenuPrimitive.CheckboxItemIndicator>
+    </span>
+    {children}
+  </MenuPrimitive.CheckboxItem>;
+}

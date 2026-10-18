@@ -50,6 +50,9 @@ pub(crate) const PAIRED_VARS: &[(&str, &str)] = &[
     ("OXIDEAN_OUTPUT", "GITHUB_OUTPUT"),
     ("OXIDEAN_STEP_SUMMARY", "GITHUB_STEP_SUMMARY"),
     ("OXIDEAN_STATE", "GITHUB_STATE"),
+    ("OXIDEAN_TRIGGERING_ACTOR", "GITHUB_TRIGGERING_ACTOR"),
+    ("OXIDEAN_REF_PROTECTED", "GITHUB_REF_PROTECTED"),
+    ("OXIDEAN_RETENTION_DAYS", "GITHUB_RETENTION_DAYS"),
 ];
 
 /// Result of [`job_env`]: the ordered variable list, the set of reserved names
@@ -181,6 +184,21 @@ pub(crate) fn job_env(
             "OUTPUT" => file("output"),
             "STEP_SUMMARY" => file("step_summary"),
             "STATE" => file("state"),
+            // GitHub distinguishes TRIGGERING_ACTOR (who started the latest
+            // attempt) from ACTOR. We restamp neither on requeue — both read
+            // the dispatch-time `triggered_by`.
+            "TRIGGERING_ACTOR" => task.actor.clone().unwrap_or_default(),
+            "REF_PROTECTED" => {
+                if task.ref_protected.unwrap_or(false) {
+                    "true".into()
+                } else {
+                    "false".into()
+                }
+            }
+            "RETENTION_DAYS" => task
+                .retention_days
+                .map(|d| d.to_string())
+                .unwrap_or_default(),
             _ => String::new(),
         }
     };
@@ -204,6 +222,10 @@ pub(crate) fn job_env(
             "RUNNER_TOOL_CACHE".into(),
             format!("{runner_temp_env}/tool-cache"),
         ),
+        // Every Oxidean runner is self-hosted — GitHub emits the same
+        // constant for self-hosted fleets (`github-hosted` only on their
+        // own VMs).
+        ("RUNNER_ENVIRONMENT".into(), "self-hosted".into()),
     ]);
 
     // `ACTIONS_ID_TOKEN_REQUEST_*` — unpaired (already ACTIONS-namespaced);

@@ -188,7 +188,14 @@ pub async fn sweep_scheduled_workflows(
         }
         let repository =
             crate::actions::payload::repository_embed(&owner, &repo.name, &repo.default_branch);
+        let disabled = db
+            .list_disabled_action_workflows(&repo.id)
+            .await
+            .unwrap_or_default();
         for wf in &discovered.workflows {
+            if disabled.contains(&wf.path) {
+                continue;
+            }
             for cron in &wf.document.triggers.schedule_crons {
                 if !matches(cron, &now) {
                     continue;

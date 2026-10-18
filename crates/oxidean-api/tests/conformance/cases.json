@@ -1330,6 +1330,18 @@
       ]
     },
     {
+      "id": "run-name",
+      "kind": "run",
+      "vars": {
+        "TARGET": "prod"
+      },
+      "expect_run": "success",
+      "expect_title": "deploy main to prod",
+      "expect_jobs": {
+        "build": "success"
+      }
+    },
+    {
       "id": "cache-service-absent",
       "kind": "run",
       "expect_run": "success",
@@ -1633,6 +1645,75 @@
           "success"
         ]
       }
+    },
+    {
+      "id": "workflow-run-listen",
+      "kind": "run",
+      "desc": "on.workflow_run — a completed run fans out to listeners discovered on the default branch; the listener sees the completed run via github.event.workflow_run and executes in trusted context on the default branch ref.",
+      "files": {
+        ".github/workflows/downstream.yml": "name: Downstream\non:\n  workflow_run:\n    workflows: [\"Upstream CI\"]\n    types: [completed]\njobs:\n  notify:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo \"saw ${{ github.event.workflow_run.name }} conclude ${{ github.event.workflow_run.conclusion }} as ${{ github.event_name }} on ${{ github.ref_name }}\"\n"
+      },
+      "expect_runs": [
+        "success",
+        "success"
+      ],
+      "expect_events": [
+        "push",
+        "workflow_run"
+      ],
+      "pick_event": "workflow_run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "notify": "success"
+      },
+      "log_contains": [
+        "saw Upstream CI conclude success as workflow_run on main"
+      ]
+    },
+    {
+      "id": "workflow-run-stem",
+      "kind": "run",
+      "desc": "on.workflow_run.workflows also matches the upstream workflow's filename stem when the display name differs.",
+      "files": {
+        ".github/workflows/downstream.yml": "name: Downstream\non:\n  workflow_run:\n    workflows: [conformance]\njobs:\n  notify:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo stem-matched\n"
+      },
+      "expect_runs": [
+        "success",
+        "success"
+      ],
+      "expect_events": [
+        "push",
+        "workflow_run"
+      ],
+      "pick_event": "workflow_run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "notify": "success"
+      },
+      "log_contains": [
+        "stem-matched"
+      ]
+    },
+    {
+      "id": "workflow-run-branch-filter",
+      "kind": "run",
+      "desc": "on.workflow_run.branches that exclude the upstream run's head branch never enqueue a downstream run.",
+      "files": {
+        ".github/workflows/downstream.yml": "name: Downstream\non:\n  workflow_run:\n    workflows: [\"Upstream CI\"]\n    branches: [\"release/**\"]\njobs:\n  notify:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo should-never-run\n"
+      },
+      "expect_runs": [
+        "success"
+      ],
+      "expect_events": [
+        "push"
+      ],
+      "expect_run": "success",
+      "expect_jobs": {
+        "up": "success"
+      },
+      "log_contains": [
+        "upstream-"
+      ]
     }
   ]
 }

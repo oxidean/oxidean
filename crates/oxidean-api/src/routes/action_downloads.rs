@@ -6,6 +6,8 @@
 //! Read+ on the repository (public repos allow anonymous reads, private repos
 //! 404 for unauthorized callers).
 
+use std::io::Write as _;
+
 use axum::extract::{Path as AxumPath, State};
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
@@ -38,13 +40,13 @@ fn pat_err_response(e: &oxidean_core::AppError) -> Response {
     err_response(status, &e.code, &e.message)
 }
 
-struct RepoLookup {
-    repo: oxidean_db::repositories::RepositoryRow,
-    owner_ref: crate::repo::OwnerRef,
+pub(crate) struct RepoLookup {
+    pub repo: oxidean_db::repositories::RepositoryRow,
+    pub owner_ref: crate::repo::OwnerRef,
 }
 
 /// `{owner}/{repo}` → repo row + owner ref (404-shaped errors).
-async fn lookup_repo(
+pub(crate) async fn lookup_repo(
     state: &AppState,
     owner: &str,
     repo: &str,
@@ -87,7 +89,7 @@ async fn lookup_repo(
 }
 
 /// Session/PAT credential + Read capability gate for Actions downloads.
-async fn authorize_read(
+pub(crate) async fn authorize_read(
     state: &AppState,
     headers: &HeaderMap,
     lookup: &RepoLookup,
@@ -269,6 +271,103 @@ pub async fn download_job_log(
         sanitize_filename(&job.name)
     );
     if let Ok(hv) = HeaderValue::from_str(&disp) {
+        res.headers_mut().insert(header::CONTENT_DISPOSITION, hv);
+    }
+    res
+}
+
+/// GET /api/repos/{owner}/{repo}/actions/runs/{run_id}/logs — every job log
+/// in the run as a zip archive (GitHub's run-logs download). Entries are one
+/// `{job_name}.txt` per job — GitHub zips per step, we retain per-job streams.
+pub async fn download_run_logs(
+    State(state): State<AppState>,
+    AxumPath((owner, repo, run_id)): AxumPath<(String, String, String)>,
+    headers: HeaderMap,
+) -> Response {
+    let lookup = match lookup_repo(&state, &owner, &repo).await {
+        Ok(l) => l,
+        Err(r) => return *r,
+    };
+    if let Err(r) = authorize_read(&state, &headers, &lookup, "repo.actions.getJobLog").await {
+        return *r;
+    }
+    let run = match state.db.find_action_run_by_id(&run_id).await {
+        Ok(Some(r)) => r,
+        Ok(None) => {
+            return err_response(
+                StatusCode::NOT_FOUND,
+                "actions.run_not_found",
+                "Run not found",
+            );
+        }
+        Err(e) => {
+            tracing::error!(error = %e, "find run");
+            return err_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "actions.internal",
+                "download failed",
+            );
+        }
+    };
+    if run.repository_id != lookup.repo.id {
+        return err_response(
+            StatusCode::NOT_FOUND,
+            "actions.run_not_found",
+            "Run not found",
+        );
+    }
+    let jobs = match state.db.list_action_jobs_for_run(&run.id).await {
+        Ok(j) => j,
+        Err(e) => {
+            tracing::error!(error = %e, "list run jobs");
+            return err_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "actions.internal",
+                "download failed",
+            );
+        }
+    };
+    let mut buf = std::io::Cursor::new(Vec::new());
+    {
+        let mut zip = zip::ZipWriter::new(&mut buf);
+        let opts = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+        let mut used = std::collections::HashSet::new();
+        for job in &jobs {
+            let (bytes, _size) =
+                crate::actions::logs::read_job_log(&state.actions_log_dir, &run.id, &job.id, 0)
+                    .await
+                    .unwrap_or_default();
+            // Unique, filesystem-safe entry names — matrix siblings share a name.
+            let mut entry = format!("{}.txt", sanitize_filename(&job.name));
+            for n in 2.. {
+                if used.insert(entry.clone()) {
+                    break;
+                }
+                entry = format!("{} ({n}).txt", sanitize_filename(&job.name));
+            }
+            if zip.start_file(entry, opts).is_err() || zip.write_all(&bytes).is_err() {
+                return err_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "actions.internal",
+                    "archive build failed",
+                );
+            }
+        }
+        if zip.finish().is_err() {
+            return err_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "actions.internal",
+                "archive build failed",
+            );
+        }
+    }
+    let mut res = Response::new(axum::body::Body::from(buf.into_inner()));
+    *res.status_mut() = StatusCode::OK;
+    if let Ok(hv) = HeaderValue::from_str("application/zip") {
+        res.headers_mut().insert(header::CONTENT_TYPE, hv);
+    }
+    if let Ok(hv) = HeaderValue::from_str("attachment; filename=\"logs.zip\"") {
         res.headers_mut().insert(header::CONTENT_DISPOSITION, hv);
     }
     res

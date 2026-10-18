@@ -347,8 +347,10 @@ pub const PROCEDURES: &[&str] = &[
     "repo.actions.getJobLog",
     "repo.actions.listWorkflows",
     "repo.actions.dispatchWorkflow",
+    "repo.actions.setWorkflowEnabled",
     "repo.actions.rerunRun",
     "repo.actions.cancelRun",
+    "repo.actions.deleteRun",
     "repo.actions.approveRun",
     "repo.actions.secrets.list",
     "repo.actions.secrets.put",
@@ -1438,6 +1440,16 @@ async fn dispatch_inner(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },
+        "repo.actions.deleteRun" => match crate::actions::rpc::delete_run(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "repo.actions.setWorkflowEnabled" => {
+            match crate::actions::rpc::set_workflow_enabled(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
         "repo.actions.approveRun" => match crate::actions::rpc::approve_run(ctx, req.input).await {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),

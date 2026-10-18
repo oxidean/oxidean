@@ -220,9 +220,22 @@ pub struct ActionWorkflowPublic {
     pub path: String,
     pub name: String,
     pub supports_dispatch: bool,
+    /// GitHub "disabled" workflow state — no trigger (events, schedule,
+    /// dispatch, `workflow_call`) runs it until re-enabled.
+    #[serde(default)]
+    pub disabled: bool,
     /// Declared `workflow_dispatch` inputs; empty when dispatch is off.
     #[serde(default)]
     pub inputs: Vec<ActionDispatchInputPublic>,
+}
+
+/// `repo.actions.setWorkflowEnabled` — `{owner, name, path, enabled}`.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionSetWorkflowEnabledRequest {
+    pub owner: String,
+    pub name: String,
+    pub path: String,
+    pub enabled: bool,
 }
 
 /// A workflow file that failed discovery validation and was skipped.
@@ -279,6 +292,11 @@ pub struct ActionRunMutationRequest {
     /// (GitHub "Re-run failed jobs").
     #[serde(default)]
     pub failed_only: Option<bool>,
+    /// `rerunRun` only: stamp `debug_logging` on the requeued jobs —
+    /// GitHub's "enable debug logging" checkbox; surfaced to the runner as
+    /// `ACTIONS_STEP_DEBUG`/`ACTIONS_RUNNER_DEBUG` at claim.
+    #[serde(default)]
+    pub debug: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]

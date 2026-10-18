@@ -249,8 +249,9 @@ async fn dispatch_push_inner(
             .await?;
         }
 
+        let disabled = db.list_disabled_action_workflows(repository_id).await?;
         for wf in &discovered.workflows {
-            if !wf.document.triggers.push {
+            if !wf.document.triggers.push || disabled.contains(&wf.path) {
                 continue;
             }
             if !crate::actions::filters::event_matches(
@@ -325,6 +326,20 @@ pub async fn enqueue_run(
     let workflow_name = crate::actions::eval_ctx::interp_or_raw(&doc.name, &ctx, &mut name_notes);
     eval_warnings.extend(name_notes);
     crate::actions::eval_ctx::set_workflow_name(&mut ctx, &workflow_name);
+    // `run-name:` — per-run title evaluated against the same enqueue ctx
+    // (github/inputs/vars). Empty or absent falls back to the workflow name,
+    // matching GitHub's title column.
+    let run_title = doc
+        .run_name
+        .as_deref()
+        .map(|s| {
+            let mut notes = Vec::new();
+            let t = crate::actions::eval_ctx::interp_or_raw(s, &ctx, &mut notes);
+            eval_warnings.extend(notes);
+            t
+        })
+        .filter(|t| !t.trim().is_empty())
+        .unwrap_or_else(|| workflow_name.clone());
     db.insert_action_run(
         &run_id,
         repository_id,
@@ -333,7 +348,7 @@ pub async fn enqueue_run(
         event,
         head_sha,
         head_ref,
-        &workflow_name,
+        &run_title,
         triggered_by,
         head_repo_id,
         event_payload
@@ -635,8 +650,9 @@ pub async fn dispatch_push_for_sha(
         &repository,
         &serde_json::json!({}),
     );
+    let disabled = db.list_disabled_action_workflows(repository_id).await?;
     for wf in &discovered.workflows {
-        if !wf.document.triggers.push {
+        if !wf.document.triggers.push || disabled.contains(&wf.path) {
             continue;
         }
         // No `before` → changed set unknown → paths filters unconstrained

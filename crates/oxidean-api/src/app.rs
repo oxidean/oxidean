@@ -25,8 +25,8 @@ use crate::email::{self, EmailSender};
 use crate::pat::bearer::{self, BearerRejection};
 use crate::pat::rate_limit::FailedAuthLimiter;
 use crate::routes::{
-    action_downloads, auth_callbacks, avatar, cli_dist, feeds, git_lfs, git_smart_http,
-    release_assets, repo_raw, template_packs,
+    action_badge, action_downloads, auth_callbacks, avatar, cli_dist, feeds, git_lfs,
+    git_smart_http, release_assets, repo_raw, template_packs,
 };
 use crate::rpc::{self, CookieChange, RpcCtx, VERSION_HEADER};
 use crate::user::rate_limit::LookupLimiter;
@@ -377,6 +377,10 @@ pub fn router_with_state(state: AppState, cors: CorsLayer) -> Router {
             get(action_downloads::download_job_log),
         )
         .route(
+            "/api/repos/{owner}/{repo}/actions/runs/{run_id}/logs",
+            get(action_downloads::download_run_logs),
+        )
+        .route(
             "/api/admin/templates",
             post(template_packs::upload_pack).layer(DefaultBodyLimit::max(
                 crate::templates::store::DEFAULT_MAX_PACK_BYTES as usize,
@@ -406,6 +410,17 @@ pub fn router_with_state(state: AppState, cors: CorsLayer) -> Router {
         .route(
             "/api/users/{username}/activity.atom",
             get(feeds::user_activity_feed),
+        )
+        // GitHub-shaped workflow status badge — /{owner}/{repo}/actions/
+        // workflows/{file}/badge.svg (web tier proxies this path here); also
+        // mounted under /api/repos for direct API consumers.
+        .route(
+            "/{owner}/{repo}/actions/workflows/{workflow}/badge.svg",
+            get(action_badge::workflow_badge),
+        )
+        .route(
+            "/api/repos/{owner}/{repo}/actions/workflows/{workflow}/badge.svg",
+            get(action_badge::workflow_badge),
         )
         // Smart HTTP — D-18/D-22: only on /{owner}/{repo}.git (segment includes .git suffix)
         .route(

@@ -183,12 +183,13 @@ async fn ancestor_call_specs(db: &Database, caller: &ActionJobRow) -> Vec<String
     specs
 }
 
-/// Resolve the call target to `(bare_repo_path, treeish, workflow_path)`.
+/// Resolve the call target to `(bare_repo_path, treeish, workflow_path,
+/// callee repository_id)`.
 async fn resolve_target(
     db: &Database,
     run: &ActionRunRow,
     uses: &UsesRef,
-) -> Result<(std::path::PathBuf, String, String), String> {
+) -> Result<(std::path::PathBuf, String, String, String), String> {
     match uses {
         UsesRef::Local { path } => {
             let repo = db
@@ -203,6 +204,7 @@ async fn resolve_target(
                 bare_repo_path(&resolve_repos_dir(), &owner, &repo.name),
                 run.head_sha.clone(),
                 path.clone(),
+                repo.id.clone(),
             ))
         }
         UsesRef::Remote {
@@ -226,6 +228,7 @@ async fn resolve_target(
                 bare_repo_path(&resolve_repos_dir(), owner, &row.name),
                 git_ref.clone(),
                 path.clone(),
+                row.id.clone(),
             ))
         }
     }
@@ -465,10 +468,18 @@ pub async fn expand_call(
         }
         db.delete_callee_jobs(&caller.id).await?;
     }
-    let (bare, treeish, wf_path) = match resolve_target(db, run, &uses).await {
+    let (bare, treeish, wf_path, callee_repo_id) = match resolve_target(db, run, &uses).await {
         Ok(t) => t,
         Err(e) => return Ok(fail(e)),
     };
+    // A disabled workflow does not run on any trigger — `workflow_call`
+    // included; the call leg fails like GitHub's "workflow is disabled".
+    if db
+        .is_action_workflow_disabled(&callee_repo_id, &wf_path)
+        .await?
+    {
+        return Ok(fail(format!("reusable workflow '{uses_spec}' is disabled")));
+    }
     let git = CliGitBackend::new();
     let bytes = match git.cat_blob(&bare, &treeish, &wf_path).await {
         Ok(b) => b,

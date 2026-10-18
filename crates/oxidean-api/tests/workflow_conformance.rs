@@ -43,12 +43,20 @@ struct Case {
     /// Push the same workflow twice — exercises concurrency supersede.
     second_dispatch: Option<bool>,
     expect_run: Option<String>,
+    /// `run-name:` evaluates to the run's display title at enqueue.
+    expect_title: Option<String>,
     expect_jobs: Option<HashMap<String, String>>,
     expect_job_names: Option<HashMap<String, String>>,
     /// Per-job_key status multiset over all legs: {"build": ["success","success"]}.
     expect_job_statuses: Option<HashMap<String, Vec<String>>>,
     /// Status multiset over every run in the repo: ["cancelled","success"].
     expect_runs: Option<Vec<String>>,
+    /// Event-name multiset over every run: ["push","workflow_run"].
+    expect_events: Option<Vec<String>>,
+    /// Assert `expect_jobs`/`log_contains` against the run with this `event`
+    /// instead of the newest non-cancelled run — needed when fan-out leaves
+    /// same-second `created_at` ties whose `id DESC` break is arbitrary.
+    pick_event: Option<String>,
     expect_unsupported: Option<Vec<String>>,
     /// Extra files seeded into the main repo's commit (local actions etc.).
     files: Option<HashMap<String, String>>,
@@ -82,10 +90,13 @@ fn base_case(id: &str) -> Case {
         head_ref: None,
         second_dispatch: None,
         expect_run: None,
+        expect_title: None,
         expect_jobs: None,
         expect_job_names: None,
         expect_job_statuses: None,
         expect_runs: None,
+        expect_events: None,
+        pick_event: None,
         expect_unsupported: None,
         files: None,
         action_repos: None,
@@ -614,7 +625,10 @@ async fn run_case(case: &Case) {
             // superseded run is flagged `concurrency_cancel_pending`.
             let run = runs
                 .iter()
-                .find(|r| !r.concurrency_cancel_pending)
+                .find(|r| {
+                    !r.concurrency_cancel_pending
+                        && case.pick_event.as_deref().is_none_or(|e| r.event == e)
+                })
                 .unwrap_or(&runs[0]);
             if let Some(want) = case.expect_runs.clone() {
                 let mut got: Vec<String> = runs.iter().map(|r| r.status.clone()).collect();
@@ -622,6 +636,13 @@ async fn run_case(case: &Case) {
                 got.sort();
                 want.sort();
                 assert_eq!(got, want, "{}: run status multiset", case.id);
+            }
+            if let Some(want) = case.expect_events.clone() {
+                let mut got: Vec<String> = runs.iter().map(|r| r.event.clone()).collect();
+                let mut want = want;
+                got.sort();
+                want.sort();
+                assert_eq!(got, want, "{}: run event multiset", case.id);
             }
             let jobs = fx.db.list_action_jobs_for_run(&run.id).await.unwrap();
             for (key, want) in case.expect_jobs.clone().unwrap_or_default() {
@@ -662,6 +683,9 @@ async fn run_case(case: &Case) {
                 let run = fx.db.find_action_run_by_id(&run.id).await.unwrap().unwrap();
                 if let Some(want) = &case.expect_run {
                     assert_eq!(run.status, *want, "{}: run status", case.id);
+                }
+                if let Some(want) = &case.expect_title {
+                    assert_eq!(run.title, *want, "{}: run title", case.id);
                 }
                 golden_diff(
                     case,
@@ -823,6 +847,10 @@ conformance_case!(step_conclusion_coe, "step-conclusion-coe");
 conformance_case!(step_if_false_literal, "step-if-false-literal");
 conformance_case!(expr_vars_empty, "expr-vars-empty");
 conformance_case!(vars_context, "vars-context");
+conformance_case!(run_name, "run-name");
+conformance_case!(workflow_run_listen, "workflow-run-listen");
+conformance_case!(workflow_run_stem, "workflow-run-stem");
+conformance_case!(workflow_run_branch_filter, "workflow-run-branch-filter");
 conformance_case!(cache_service_absent, "cache-service-absent");
 
 /// Every `cases.json` entry is wired to a generated test and every corpus
@@ -1020,7 +1048,7 @@ async fn rerun_resets_and_regates() {
     assert_eq!(run.status, "success");
 
     fx.db
-        .requeue_action_run(&run.id, false, None)
+        .requeue_action_run(&run.id, false, None, false)
         .await
         .unwrap();
     oxidean_api::actions::scheduler::recompute_ready_jobs(&fx.db, &run.id)
@@ -1088,7 +1116,7 @@ async fn reusable_call_rerun_reexpands() {
     assert_eq!(pre.len(), 3, "call + callee build + report");
 
     fx.db
-        .requeue_action_run(&run.id, false, None)
+        .requeue_action_run(&run.id, false, None, false)
         .await
         .unwrap();
     oxidean_api::actions::scheduler::recompute_ready_jobs(&fx.db, &run.id)

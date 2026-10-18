@@ -28,14 +28,16 @@ use context::{
     interpolate_step, record_step, runner_context, step_allowed, step_outputs_report, step_timeout,
     sync_job_ctx, JobDeadline,
 };
-use env::{apply_file_commands, job_env, layer_env, parse_output_file, prepare_runner_temp};
+use env::{
+    apply_file_commands, env_set, job_env, layer_env, parse_output_file, prepare_runner_temp,
+};
 use run_step::run_step;
 
 #[cfg(test)]
 pub(crate) use {
     checkout::checkout_auth_args,
     env::{
-        env_get, env_set, parse_env_file, parse_path_file, prepare_workspace, DOCKER_DEFAULT_PATH,
+        env_get, parse_env_file, parse_path_file, prepare_workspace, DOCKER_DEFAULT_PATH,
         PAIRED_VARS,
     },
     glob::{glob_match, glob_walk, hash_files_fn},
@@ -94,6 +96,80 @@ fn exec_mode_for(task: &Task, config: &Config) -> ExecMode {
         }
     }
     ExecMode::Host
+}
+
+fn truthy(v: impl AsRef<str>) -> bool {
+    let v = v.as_ref().trim();
+    v.eq_ignore_ascii_case("true") || v == "1"
+}
+
+/// Resolves `(step_debug, runner_debug)` from the three sources GitHub
+/// honours: the layered job env (workflow/job/step `env:`), configuration
+/// `vars`, and secrets. An explicit `env:` entry wins because the env layer
+/// is checked first — but all three are OR'd, matching GitHub's truthy-any
+/// semantics.
+fn debug_flags(
+    env_vars: &[(String, String)],
+    task_vars: Option<&HashMap<String, String>>,
+    secrets: &HashMap<String, String>,
+) -> (bool, bool) {
+    let flag = |key: &str| {
+        env::env_get(env_vars, key).is_some_and(truthy)
+            || task_vars.is_some_and(|m| m.get(key).is_some_and(truthy))
+            || secrets.get(key).is_some_and(truthy)
+    };
+    (flag("ACTIONS_STEP_DEBUG"), flag("ACTIONS_RUNNER_DEBUG"))
+}
+
+/// Per-step `GITHUB_ACTION`/`GITHUB_ACTION_REPOSITORY`/`GITHUB_ACTION_REF`
+/// values — GitHub names these from the step kind:
+/// - `run:` steps → `__run`, `__run_2`, … (ordinal counts `run:` steps only)
+/// - `uses:` steps → `__` + the uses slug with `@ref` split off and
+///   non-alphanumerics folded to `_` (`actions/checkout@v4` →
+///   `__actions_checkout`); repeats of the same slug get `_2`, `_3`, …
+/// - steps with neither → no vars emitted (a `name`-only step carries none).
+///
+/// `GITHUB_ACTION_REPOSITORY` is `owner/repo` (or the `./local` path),
+/// `GITHUB_ACTION_REF` the `@` suffix; both absent for `run:` steps.
+fn step_action_identity(
+    step: &Step,
+    ordinals: &mut HashMap<String, usize>,
+) -> (Option<String>, Option<String>, Option<String>) {
+    if step.run.is_some() {
+        let n = ordinals.entry("__run".into()).or_insert(0);
+        *n += 1;
+        let name = if *n == 1 {
+            "__run".into()
+        } else {
+            format!("__run_{n}")
+        };
+        return (Some(name), None, None);
+    }
+    let Some(uses) = &step.uses else {
+        return (None, None, None);
+    };
+    let (spec, refr) = match uses.split_once('@') {
+        Some((s, r)) => (s, Some(r.to_string())),
+        None => (uses.as_str(), None),
+    };
+    // Runs of separators fold to a single `_` (`docker://alpine:3` →
+    // `docker_alpine_3`, `./x` → `x`).
+    let mut slug = String::new();
+    let mut last_sep = true; // leading separators fold away entirely
+    for c in spec.chars() {
+        if c.is_ascii_alphanumeric() {
+            slug.push(c);
+            last_sep = false;
+        } else if !last_sep {
+            slug.push('_');
+            last_sep = true;
+        }
+    }
+    let base = format!("__{}", slug.trim_end_matches('_'));
+    let n = ordinals.entry(base.clone()).or_insert(0);
+    *n += 1;
+    let name = if *n == 1 { base } else { format!("{base}_{n}") };
+    (Some(name), Some(spec.to_string()), refr)
 }
 
 pub(crate) struct Logger<'a> {
@@ -411,25 +487,16 @@ pub async fn execute(client: &Client, task: &Task, config: &Config) -> &'static 
     // `::debug::` lines forward only when the workflow asked for them —
     // GitHub reads `ACTIONS_STEP_DEBUG` from repo/org variables OR secrets
     // (truthy: "true"/"1"); an explicit `env:` entry wins over both.
-    fn truthy(v: impl AsRef<str>) -> bool {
-        let v = v.as_ref().trim();
-        v.eq_ignore_ascii_case("true") || v == "1"
-    }
-    let step_debug = env::env_get(&env.vars, "ACTIONS_STEP_DEBUG").is_some_and(truthy)
-        || task
-            .vars
-            .as_ref()
-            .is_some_and(|m| m.get("ACTIONS_STEP_DEBUG").is_some_and(truthy))
-        || secrets.get("ACTIONS_STEP_DEBUG").is_some_and(truthy);
     // `ACTIONS_RUNNER_DEBUG` gates runner-internal diagnostics on GitHub; our
     // only debug surface is the job log, so it implies step-debug here.
-    let runner_debug = env::env_get(&env.vars, "ACTIONS_RUNNER_DEBUG").is_some_and(truthy)
-        || task
-            .vars
-            .as_ref()
-            .is_some_and(|m| m.get("ACTIONS_RUNNER_DEBUG").is_some_and(truthy))
-        || secrets.get("ACTIONS_RUNNER_DEBUG").is_some_and(truthy);
+    let (step_debug, runner_debug) = debug_flags(&env.vars, task.vars.as_ref(), &secrets);
     logger.set_step_debug(step_debug || runner_debug);
+    // GitHub exports `RUNNER_DEBUG=1` to every step once runner-debug is on —
+    // actions/toolkit code keys verbose diagnostics off it. An explicit
+    // `env:` entry still wins (env vars layer over runner defaults).
+    if runner_debug && env::env_get(&env.vars, "RUNNER_DEBUG").is_none() {
+        env.vars.push(("RUNNER_DEBUG".into(), "1".into()));
+    }
     let default_timeout = Duration::from_secs(config.job_timeout_secs);
     let deadline = JobDeadline::new(task.timeout_seconds);
 
@@ -461,6 +528,10 @@ pub async fn execute(client: &Client, task: &Task, config: &Config) -> &'static 
             logger: &logger,
             posts: &mut posts,
         };
+        // `GITHUB_ACTION` naming state — GitHub counts `run:` steps and
+        // repeats of the same `uses:` slug per job (`__run`, `__run_2`,
+        // `__actions_checkout`, `__actions_checkout_2`, …).
+        let mut action_ordinals: HashMap<String, usize> = HashMap::new();
         for (i, raw_step) in steps.iter().enumerate() {
             let step_id = raw_step.id.clone().unwrap_or_else(|| format!("__step{i}"));
             // Job deadline gates every subsequent step (GitHub `cancelled`).
@@ -541,6 +612,27 @@ pub async fn execute(client: &Client, task: &Task, config: &Config) -> &'static 
                 for w in layer_env(&mut step_ctx, &mut this_step_env, step_env_map) {
                     logger.line(&w).await;
                 }
+            }
+            // `GITHUB_ACTION`/`GITHUB_ACTION_REPOSITORY`/`GITHUB_ACTION_REF` —
+            // GitHub reserves these per step; `env:` cannot overwrite them, so
+            // they land after the step env layer.
+            let (action_name, action_repo, action_ref) =
+                step_action_identity(&step, &mut action_ordinals);
+            if let Some(name) = action_name {
+                env_set(&mut this_step_env, "OXIDEAN_ACTION", name.clone());
+                env_set(&mut this_step_env, "GITHUB_ACTION", name);
+            }
+            if let Some(repo) = action_repo {
+                env_set(
+                    &mut this_step_env,
+                    "OXIDEAN_ACTION_REPOSITORY",
+                    repo.clone(),
+                );
+                env_set(&mut this_step_env, "GITHUB_ACTION_REPOSITORY", repo);
+            }
+            if let Some(r) = action_ref {
+                env_set(&mut this_step_env, "OXIDEAN_ACTION_REF", r.clone());
+                env_set(&mut this_step_env, "GITHUB_ACTION_REF", r);
             }
             let result: Result<(), String>;
             let mut outputs = HashMap::new();
@@ -805,6 +897,8 @@ mod tests {
             environment: None,
             environment_url: None,
             vars: None,
+            ref_protected: None,
+            retention_days: None,
             id_token_request_url: None,
             id_token_request_token: None,
             cache_url: None,
@@ -814,6 +908,29 @@ mod tests {
 
     fn env_map(vars: &[(String, String)]) -> HashMap<String, String> {
         vars.iter().cloned().collect()
+    }
+
+    #[test]
+    fn debug_flags_resolve_from_env_vars_and_secrets() {
+        let none = HashMap::new();
+        // Env layer (workflow/job `env:` merged).
+        let env = vec![("ACTIONS_STEP_DEBUG".into(), "true".into())];
+        assert_eq!(debug_flags(&env, None, &none), (true, false));
+        // Task vars (repo/org/env configuration variables).
+        let vars = HashMap::from([("ACTIONS_RUNNER_DEBUG".into(), "1".into())]);
+        assert_eq!(debug_flags(&[], Some(&vars), &none), (false, true));
+        // Secrets.
+        let secrets = HashMap::from([("ACTIONS_STEP_DEBUG".into(), "true".into())]);
+        assert_eq!(debug_flags(&[], None, &secrets), (true, false));
+        // Off values and absent keys stay off.
+        let env = vec![("ACTIONS_STEP_DEBUG".into(), "0".into())];
+        assert_eq!(debug_flags(&env, None, &none), (false, false));
+        assert_eq!(debug_flags(&[], None, &none), (false, false));
+        // Whitespace/case tolerated; arbitrary text is not truthy.
+        let env = vec![("ACTIONS_RUNNER_DEBUG".into(), "  True ".into())];
+        assert_eq!(debug_flags(&env, None, &none), (false, true));
+        let env = vec![("ACTIONS_RUNNER_DEBUG".into(), "yes".into())];
+        assert_eq!(debug_flags(&env, None, &none), (false, false));
     }
 
     #[test]
@@ -935,6 +1052,7 @@ mod tests {
         assert_eq!(map["RUNNER_TEMP"], "/tmp/rt");
         assert_eq!(map["RUNNER_TOOL_CACHE"], "/tmp/rt/tool-cache");
         assert_eq!(map["RUNNER_NAME"], "t");
+        assert_eq!(map["RUNNER_ENVIRONMENT"], "self-hosted");
         // push event → BASE_REF / HEAD_REF empty.
         assert_eq!(map["OXIDEAN_BASE_REF"], "");
         assert_eq!(map["OXIDEAN_HEAD_REF"], "");
@@ -1309,6 +1427,60 @@ mod tests {
             Some(Duration::from_secs(10)),
         );
         assert_eq!(t, Duration::from_secs(10));
+    }
+
+    #[test]
+    fn step_action_identity_naming() {
+        fn step(uses: Option<&str>, run: Option<&str>) -> Step {
+            Step {
+                continue_on_error: None,
+                id: None,
+                name: None,
+                uses: uses.map(String::from),
+                run: run.map(String::from),
+                if_expr: None,
+                timeout_minutes: None,
+                shell: None,
+                working_directory: None,
+                with: None,
+                env: None,
+            }
+        }
+        let mut ord = HashMap::new();
+        // run steps number as __run, __run_2, …
+        assert_eq!(
+            step_action_identity(&step(None, Some("echo a")), &mut ord).0,
+            Some("__run".into())
+        );
+        assert_eq!(
+            step_action_identity(&step(None, Some("echo b")), &mut ord).0,
+            Some("__run_2".into())
+        );
+        // uses: → `__<slug>` + repository/ref fields.
+        let (name, repo, refr) =
+            step_action_identity(&step(Some("actions/checkout@v4"), None), &mut ord);
+        assert_eq!(name, Some("__actions_checkout".into()));
+        assert_eq!(repo, Some("actions/checkout".into()));
+        assert_eq!(refr, Some("v4".into()));
+        // Repeated slugs dedupe with _2.
+        let (name, _, _) = step_action_identity(&step(Some("actions/checkout@v4"), None), &mut ord);
+        assert_eq!(name, Some("__actions_checkout_2".into()));
+        // Local + docker specs.
+        let (name, repo, refr) =
+            step_action_identity(&step(Some("./.github/actions/x"), None), &mut ord);
+        assert_eq!(name, Some("__github_actions_x".into()));
+        assert_eq!(repo, Some("./.github/actions/x".into()));
+        assert_eq!(refr, None);
+        let (name, _, _) = step_action_identity(&step(Some("docker://alpine:3"), None), &mut ord);
+        assert_eq!(name, Some("__docker_alpine_3".into()));
+        // No run/uses → no GITHUB_ACTION.
+        assert_eq!(step_action_identity(&step(None, None), &mut ord).0, None);
+        // Run and uses ordinals count independently (GitHub's run counter
+        // only counts run steps).
+        assert_eq!(
+            step_action_identity(&step(None, Some("echo c")), &mut ord).0,
+            Some("__run_3".into())
+        );
     }
 
     #[test]

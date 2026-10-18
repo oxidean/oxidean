@@ -258,8 +258,11 @@ async fn dispatch_pull_request_inner(
             .await?;
         }
         let hold = is_fork && fork_needs_approval(db, event).await;
+        let disabled = db
+            .list_disabled_action_workflows(&event.repository_id)
+            .await?;
         for wf in &discovered.workflows {
-            if !wf.document.triggers.pull_request_target {
+            if !wf.document.triggers.pull_request_target || disabled.contains(&wf.path) {
                 continue;
             }
             if !crate::actions::filters::event_matches(
@@ -373,8 +376,11 @@ async fn dispatch_pull_request_inner(
         .await?;
     }
     let hold = is_fork && fork_needs_approval(db, event).await;
+    let disabled = db
+        .list_disabled_action_workflows(&event.repository_id)
+        .await?;
     for wf in &discovered.workflows {
-        if !wf.document.triggers.pull_request {
+        if !wf.document.triggers.pull_request || disabled.contains(&wf.path) {
             continue;
         }
         if !crate::actions::filters::event_matches(
@@ -570,7 +576,13 @@ async fn dispatch_lifecycle_inner(
         )
         .await?;
     }
+    let disabled = db
+        .list_disabled_action_workflows(&event.repository_id)
+        .await?;
     for wf in &discovered.workflows {
+        if disabled.contains(&wf.path) {
+            continue;
+        }
         let types: &[String] = match event.event_name {
             "release" if wf.document.triggers.release => &wf.document.triggers.release_types,
             "issues" if wf.document.triggers.issues => &wf.document.triggers.issues_types,
@@ -594,6 +606,210 @@ async fn dispatch_lifecycle_inner(
             false,
         )
         .await?;
+        n += 1;
+    }
+    Ok(n)
+}
+
+/// `on: workflow_run` — soft-fail wrapper. A run completing must never fail
+/// the runner/RPC path because downstream dispatch errored; GitHub treats
+/// this fan-out as fire-and-forget too.
+pub async fn notify_workflow_run_actions(
+    db: &Database,
+    git: &dyn GitBackend,
+    repos_dir: &Path,
+    run: &oxidean_db::ActionRunRow,
+    env_name: &str,
+) {
+    if let Err(e) = dispatch_workflow_run_inner(db, git, repos_dir, run, env_name).await {
+        tracing::warn!(
+            error = %e,
+            run_id = %run.id,
+            repository_id = %run.repository_id,
+            "workflow_run dispatch failed (completing run already committed)"
+        );
+    }
+}
+
+/// Enqueue `on: workflow_run` workflows for a completed run. GitHub
+/// semantics: downstream workflows are read from the **default branch**
+/// (trusted context — they run with full `GITHUB_TOKEN` scope regardless of
+/// what triggered the upstream run), `branches`/`branches-ignore` match the
+/// completed run's head branch, `types` filters on the activity type
+/// (`completed` — the only one the engine emits), and `workflows` matches
+/// the completed workflow's `name:` (its file stem when unnamed). An absent
+/// `workflows` list matches every workflow, matching GitHub's runtime (the
+/// docs call the key required but the schema tolerates omission).
+async fn dispatch_workflow_run_inner(
+    db: &Database,
+    git: &dyn GitBackend,
+    repos_dir: &Path,
+    run: &oxidean_db::ActionRunRow,
+    env_name: &str,
+) -> Result<usize, String> {
+    if !crate::actions::env_actions_enabled()
+        || !db.get_repo_actions_enabled(&run.repository_id).await?
+    {
+        return Ok(0);
+    }
+    let repo = db
+        .find_repository_by_id(&run.repository_id)
+        .await?
+        .ok_or_else(|| "repository missing".to_string())?;
+    let owner_ref = crate::repo::owner_ref_for_repo(db, &repo)
+        .await?
+        .ok_or_else(|| "repository owner missing".to_string())?;
+    let bare = crate::actions::dispatch::bare_repo_path(repos_dir, owner_ref.slug(), &repo.name);
+    if !bare.exists() {
+        return Ok(0);
+    }
+    // Downstream runs live on the default branch tip — never on the
+    // completed run's ref (which may be a transient merge ref).
+    let default_ref = format!("refs/heads/{}", repo.default_branch);
+    let head_sha = git
+        .rev_parse(&bare, &default_ref)
+        .await
+        .map_err(|e| e.to_string())?;
+    if head_sha.is_empty() {
+        return Ok(0);
+    }
+    let discovered = discover_workflows(git, &bare, &head_sha)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // Frozen payload — `github.event.workflow_run` embeds the completed run.
+    let actor_login = match run.triggered_by.as_deref() {
+        Some(uid) => db
+            .find_user_by_id(uid)
+            .await
+            .ok()
+            .flatten()
+            .map(|u| u.username)
+            .unwrap_or_default(),
+        None => String::new(),
+    };
+    let sender = crate::actions::payload::user_embed(&actor_login);
+    let repository = crate::actions::payload::repository_embed(
+        owner_ref.slug(),
+        &repo.name,
+        &repo.default_branch,
+    );
+    let head_branch = run
+        .head_ref
+        .strip_prefix("refs/heads/")
+        .unwrap_or(&run.head_ref)
+        .to_string();
+    // `workflow_run.pull_requests` — the PR embed(s) the completed run was
+    // for (only pull_request events carry one in our payload shape).
+    let upstream_payload: serde_json::Value = run
+        .event_payload_json
+        .as_deref()
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+    let pull_requests = upstream_payload
+        .get("pull_request")
+        .filter(|p| p.is_object())
+        .map(|pr| {
+            serde_json::json!([{
+                "number": pr.get("number").cloned().unwrap_or(serde_json::Value::Null),
+                "head": pr.get("head").cloned().unwrap_or(serde_json::Value::Null),
+                "base": pr.get("base").cloned().unwrap_or(serde_json::Value::Null),
+            }])
+        })
+        .unwrap_or_else(|| serde_json::json!([]));
+    let conclusion = match run.status.as_str() {
+        "success" => "success",
+        "cancelled" => "cancelled",
+        "skipped" => "skipped",
+        _ => "failure",
+    };
+    let payload = crate::actions::payload::workflow_run_payload(
+        &run.id,
+        run.run_number,
+        run.attempt,
+        &run.workflow_name,
+        &run.workflow_path,
+        &head_branch,
+        &run.head_sha,
+        &run.event,
+        conclusion,
+        &run.created_at,
+        run.finished_at.as_deref().unwrap_or(&run.updated_at),
+        &pull_requests,
+        &repository,
+        &sender,
+    );
+
+    let mut n = 0;
+    if !discovered.errors.is_empty() {
+        for fe in &discovered.errors {
+            tracing::warn!(path = %fe.path, error = %fe.message, "invalid workflow file");
+        }
+        n += crate::actions::dispatch::fail_discovery_runs(
+            db,
+            &run.repository_id,
+            &discovered.errors,
+            "workflow_run",
+            &head_sha,
+            &default_ref,
+            run.triggered_by.as_deref(),
+            None,
+            Some(&payload),
+        )
+        .await?;
+    }
+    let disabled = db
+        .list_disabled_action_workflows(&run.repository_id)
+        .await?;
+    // `workflows:` matches the completed workflow's name — unnamed
+    // workflows match their file stem (GitHub's display fallback).
+    let file_stem = Path::new(&run.workflow_path)
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
+    for wf in &discovered.workflows {
+        if !wf.document.triggers.workflow_run || disabled.contains(&wf.path) {
+            continue;
+        }
+        let listed = &wf.document.triggers.workflow_run_workflows;
+        if !listed.is_empty()
+            && !listed
+                .iter()
+                .any(|w| w.trim() == run.workflow_name || w.trim() == file_stem)
+        {
+            continue;
+        }
+        // Only `completed` is a real activity type for us — `requested`/
+        // `in_progress` are declared in GitHub's schema but the engine never
+        // emits them, so a types list without `completed` matches nothing.
+        if !crate::actions::filters::event_matches(
+            &wf.document.triggers.workflow_run_filters,
+            Some(&head_branch),
+            None,
+            None,
+            Some("completed"),
+        ) {
+            continue;
+        }
+        // Downstream runs execute in trusted context: default-branch sha/ref,
+        // no fork clamp, no fork-approval hold (the workflow text came from
+        // the repo's own default branch).
+        let (run_id, _) = enqueue_run(
+            db,
+            &run.repository_id,
+            &wf.path,
+            &wf.document,
+            "workflow_run",
+            &head_sha,
+            &default_ref,
+            run.triggered_by.as_deref(),
+            None,
+            Some(&payload),
+            false,
+        )
+        .await?;
+        crate::webhook::dispatch::notify_workflow_run(db, &run_id, "requested", env_name).await;
+        tracing::info!(run_id, upstream = %run.id, "workflow_run run enqueued");
         n += 1;
     }
     Ok(n)

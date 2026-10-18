@@ -293,6 +293,13 @@ struct FetchTaskResponse {
     cache_url: Option<String>,
     /// `ACTIONS_RUNTIME_TOKEN` — per-job bearer for the cache endpoints.
     cache_token: Option<String>,
+    /// `GITHUB_REF_PROTECTED` — whether a branch/tag protection rule matched
+    /// `head_ref` at claim (same evaluation the OIDC `ref_protected` claim
+    /// uses).
+    ref_protected: Option<bool>,
+    /// `GITHUB_RETENTION_DAYS` — the instance's actions log/artifact retention
+    /// window (`OXIDEAN_ACTIONS_LOG_RETENTION_DAYS`, default 90).
+    retention_days: Option<i64>,
 }
 
 impl FetchTaskResponse {
@@ -341,6 +348,8 @@ impl FetchTaskResponse {
             id_token_request_token: None,
             cache_url: None,
             cache_token: None,
+            ref_protected: None,
+            retention_days: None,
         }
     }
 }
@@ -501,13 +510,14 @@ async fn fetch_task(
             // Plaintext (not secrets): they flow to untrusted PR runs just
             // like GitHub exposes `vars.*` there. Failure degrades to an
             // empty map rather than failing the claim.
-            let vars = crate::actions::vars::variables_for_job(
+            let mut vars = crate::actions::vars::variables_for_job(
                 &state.db,
                 &run.repository_id,
                 j.environment_name.as_deref(),
             )
             .await
             .unwrap_or_default();
+            crate::actions::vars::inject_debug_logging(&mut vars, j.debug_logging);
             let base_ref = pr_ctx.base_ref.clone();
             let pull_number = pr_ctx.pull_number;
 
@@ -668,6 +678,22 @@ async fn fetch_task(
                     timeout_at = Some(fresh_deadline);
                 }
             }
+            // `GITHUB_REF_PROTECTED` — same branch/tag rule evaluation the
+            // OIDC `ref_protected` claim uses. Failure degrades to `false`
+            // (unprotected), never fails the claim.
+            let ref_protected = if let Some(tag) = crate::protection::tag_from_ref(&run.head_ref) {
+                crate::protection::effective_for_tag(&state.db, &repo.id, tag)
+                    .await
+                    .map(|e| e.matched)
+                    .unwrap_or(false)
+            } else if let Some(branch) = crate::protection::branch_from_ref(&run.head_ref) {
+                crate::protection::effective_for_branch(&state.db, &repo.id, branch)
+                    .await
+                    .map(|e| e.matched)
+                    .unwrap_or(false)
+            } else {
+                false
+            };
             FetchTaskResponse {
                 job_id: Some(j.id),
                 run_id: Some(j.run_id),
@@ -717,6 +743,10 @@ async fn fetch_task(
                 id_token_request_token,
                 cache_url,
                 cache_token,
+                ref_protected: Some(ref_protected),
+                retention_days: Some(
+                    crate::actions::sweeps::log_retention_days().min(i64::MAX as u64) as i64,
+                ),
                 timeout_seconds,
             }
         }
@@ -908,6 +938,17 @@ pub(crate) async fn finalize_task_update(
     {
         if let Ok(Some(run)) = state.db.find_action_run_by_id(&job.run_id).await {
             crate::notify::fanout_workflow_completed(&state.db, &run).await;
+            // `on: workflow_run` — the same once-per-run claim gates the
+            // downstream fan-out, so a run fans out exactly once per attempt
+            // lifetime (requeue clears the flag and may fan out again).
+            crate::actions::events::notify_workflow_run_actions(
+                &state.db,
+                state.git.as_ref(),
+                &state.repos_dir,
+                &run,
+                &state.env_name,
+            )
+            .await;
         }
     }
     // API-04: emit workflow_run webhook on queued→in_progress and terminal states.

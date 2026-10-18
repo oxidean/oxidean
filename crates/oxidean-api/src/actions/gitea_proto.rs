@@ -469,6 +469,11 @@ pub(crate) struct ClaimContext {
     pub cache_token: Option<String>,
     pub server_url: String,
     pub workflow_ref: String,
+    /// Whether a branch/tag protection rule matched `head_ref` — feeds the
+    /// `github.ref_protected` context (same evaluation as the OIDC claim).
+    pub ref_protected: bool,
+    /// `github.retention_days` — the instance actions retention window.
+    pub retention_days: i64,
 }
 
 /// Resolve repo/actor/secrets/token for a claimed job — the security-bearing
@@ -529,13 +534,14 @@ pub(crate) async fn claim_context(
         HashMap::new()
     };
     // Variables — plaintext config (not secrets): no trust gate.
-    let vars = crate::actions::vars::variables_for_job(
+    let mut vars = crate::actions::vars::variables_for_job(
         &state.db,
         &run.repository_id,
         j.environment_name.as_deref(),
     )
     .await
     .unwrap_or_default();
+    crate::actions::vars::inject_debug_logging(&mut vars, j.debug_logging);
     let minted = match crate::actions::job_tokens::mint_job_token(
         &state.db,
         run,
@@ -572,6 +578,21 @@ pub(crate) async fn claim_context(
     let cache_url = cache_token
         .as_ref()
         .map(|_| format!("{server_url}/api/actions/_apis/artifactcache"));
+    // `github.ref_protected` — same rule evaluation as the OIDC claim;
+    // failure degrades to `false`, never fails the claim.
+    let ref_protected = if let Some(tag) = crate::protection::tag_from_ref(&run.head_ref) {
+        crate::protection::effective_for_tag(&state.db, &repo.id, tag)
+            .await
+            .map(|e| e.matched)
+            .unwrap_or(false)
+    } else if let Some(branch) = crate::protection::branch_from_ref(&run.head_ref) {
+        crate::protection::effective_for_branch(&state.db, &repo.id, branch)
+            .await
+            .map(|e| e.matched)
+            .unwrap_or(false)
+    } else {
+        false
+    };
     Ok(ClaimContext {
         repo_name: repo.name.clone(),
         owner_slug,
@@ -587,6 +608,8 @@ pub(crate) async fn claim_context(
         cache_token,
         server_url,
         workflow_ref,
+        ref_protected,
+        retention_days: crate::actions::sweeps::log_retention_days().min(i64::MAX as u64) as i64,
     })
 }
 
@@ -714,12 +737,12 @@ fn task_context(
         "path": "",
         "ref": run.head_ref,
         "ref_name": ref_short,
-        "ref_protected": false,
+        "ref_protected": ctx.ref_protected,
         "ref_type": ref_type,
         "repository": format!("{}/{}", ctx.owner_slug, ctx.repo_name),
         "repository_owner": ctx.owner_slug,
         "repositoryUrl": format!("{}/{}/{}", ctx.server_url, ctx.owner_slug, ctx.repo_name),
-        "retention_days": "",
+        "retention_days": ctx.retention_days.to_string(),
         "run_id": run.id,
         "run_number": run.run_number.to_string(),
         "run_attempt": run.attempt.to_string(),

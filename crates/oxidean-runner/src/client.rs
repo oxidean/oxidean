@@ -101,6 +101,10 @@ pub struct Task {
     /// Configuration variables → `vars` context (repo < org < environment
     /// merged server-side). Plaintext config, unlike `secrets`.
     pub vars: Option<HashMap<String, String>>,
+    /// `GITHUB_REF_PROTECTED` — branch/tag protection matched `head_ref`.
+    pub ref_protected: Option<bool>,
+    /// `GITHUB_RETENTION_DAYS` — instance actions retention window.
+    pub retention_days: Option<i64>,
 }
 
 impl Task {

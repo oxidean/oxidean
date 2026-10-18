@@ -131,6 +131,10 @@ pub struct ActionJobRow {
     /// Resolved `jobs.<id>.continue-on-error` — a `failure` on this leg does
     /// not flip the run to failure and cannot fire `fail-fast`.
     pub continue_on_error: bool,
+    /// Set by "re-run with debug logging" — claim-time `vars` surface
+    /// `ACTIONS_STEP_DEBUG`/`ACTIONS_RUNNER_DEBUG` to the runner for this
+    /// attempt. Cleared on a plain re-run.
+    pub debug_logging: bool,
     pub runner_id: Option<String>,
     pub started_at: Option<String>,
     pub finished_at: Option<String>,
@@ -228,9 +232,9 @@ pub struct ActionPayloadRow {
 /// Job SELECT-list per dialect — only timestamp casts differ. Keeping the
 /// list in one const per dialect prevents column drift between
 /// `find_job_by_id`, `list_jobs_for_run`, and the claim path.
-const JOB_COLS_SQLITE: &str = "id, run_id, job_key, matrix_key, name, runs_on_json, status, payload_sha, needs_json, matrix_json, outputs_json, summary_md, concurrency_group, attempt, timeout_at, approval_hold, environment_name, deployment_wait_minutes, deployment_not_before, caller_job_id, continue_on_error, runner_id, started_at, finished_at, heartbeat_at, log_index";
-const JOB_COLS_PG: &str = "id, run_id, job_key, matrix_key, name, runs_on_json, status, payload_sha, needs_json, matrix_json, outputs_json, summary_md, concurrency_group, attempt, to_char(timeout_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS timeout_at, approval_hold, environment_name, deployment_wait_minutes, deployment_not_before::text AS deployment_not_before, caller_job_id, continue_on_error, runner_id, started_at::text AS started_at, finished_at::text AS finished_at, heartbeat_at, log_index";
-const JOB_COLS_MYSQL: &str = "id, run_id, job_key, matrix_key, name, runs_on_json, status, payload_sha, needs_json, matrix_json, outputs_json, summary_md, concurrency_group, attempt, DATE_FORMAT(timeout_at, '%Y-%m-%dT%H:%i:%sZ') AS timeout_at, approval_hold, environment_name, deployment_wait_minutes, deployment_not_before, caller_job_id, continue_on_error, runner_id, CAST(started_at AS CHAR) AS started_at, CAST(finished_at AS CHAR) AS finished_at, heartbeat_at, log_index";
+const JOB_COLS_SQLITE: &str = "id, run_id, job_key, matrix_key, name, runs_on_json, status, payload_sha, needs_json, matrix_json, outputs_json, summary_md, concurrency_group, attempt, timeout_at, approval_hold, environment_name, deployment_wait_minutes, deployment_not_before, caller_job_id, continue_on_error, debug_logging, runner_id, started_at, finished_at, heartbeat_at, log_index";
+const JOB_COLS_PG: &str = "id, run_id, job_key, matrix_key, name, runs_on_json, status, payload_sha, needs_json, matrix_json, outputs_json, summary_md, concurrency_group, attempt, to_char(timeout_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS timeout_at, approval_hold, environment_name, deployment_wait_minutes, deployment_not_before::text AS deployment_not_before, caller_job_id, continue_on_error, debug_logging, runner_id, started_at::text AS started_at, finished_at::text AS finished_at, heartbeat_at, log_index";
+const JOB_COLS_MYSQL: &str = "id, run_id, job_key, matrix_key, name, runs_on_json, status, payload_sha, needs_json, matrix_json, outputs_json, summary_md, concurrency_group, attempt, DATE_FORMAT(timeout_at, '%Y-%m-%dT%H:%i:%sZ') AS timeout_at, approval_hold, environment_name, deployment_wait_minutes, deployment_not_before, caller_job_id, continue_on_error, debug_logging, runner_id, CAST(started_at AS CHAR) AS started_at, CAST(finished_at AS CHAR) AS finished_at, heartbeat_at, log_index";
 
 macro_rules! map_job_row {
     ($row:expr) => {{
@@ -266,6 +270,7 @@ macro_rules! map_job_row {
             deployment_not_before: r.try_get("deployment_not_before").unwrap_or(None),
             caller_job_id: r.try_get("caller_job_id").unwrap_or_default(),
             continue_on_error: r.try_get("continue_on_error").unwrap_or(false),
+            debug_logging: r.try_get("debug_logging").unwrap_or(false),
             runner_id: r.get("runner_id"),
             started_at: r.try_get("started_at").unwrap_or(None),
             finished_at: r.try_get("finished_at").unwrap_or(None),
@@ -709,6 +714,7 @@ pub async fn insert_job(pool: &DbPool, job: &JobInsert) -> Result<ActionJobRow, 
         deployment_not_before: job.deployment_not_before.clone(),
         caller_job_id: job.caller_job_id.clone(),
         continue_on_error: job.continue_on_error,
+        debug_logging: false,
         runner_id: None,
         started_at: None,
         finished_at: None,
@@ -2722,12 +2728,15 @@ pub async fn count_runs_for_repo(
 /// Requeue a run for re-run: reset the run to queued and requeue its jobs so a
 /// runner can claim them again. `job_id` requeues a single job (GitHub
 /// "Re-run this job"); `failed_only` limits the reset to failed/cancelled
-/// jobs (GitHub "Re-run failed jobs"); otherwise every job resets.
+/// jobs (GitHub "Re-run failed jobs"); otherwise every job resets. `debug`
+/// stamps `debug_logging` on the reset jobs — GitHub's "enable debug
+/// logging" checkbox — surfaced at claim as ACTIONS_*_DEBUG vars.
 pub async fn requeue_run(
     pool: &DbPool,
     run_id: &str,
     failed_only: bool,
     job_id: Option<&str>,
+    debug: bool,
 ) -> Result<Vec<String>, String> {
     // Requeued needs-jobs go back to `waiting` so the scheduler re-gates
     // them; enqueue-skipped jobs (if:false, no needs) stay skipped — a
@@ -2893,6 +2902,38 @@ pub async fn requeue_run(
             }
         }
     }
+    // "Enable debug logging" is per-attempt: stamp the flag on every reset
+    // job; a plain re-run clears it so debug never leaks into the next
+    // attempt. Per-row update keeps the dialect placeholders simple — the
+    // affected set is small.
+    for id in &affected {
+        match pool {
+            DbPool::Sqlite(p) => {
+                sqlx::query("UPDATE action_jobs SET debug_logging = ? WHERE id = ?")
+                    .bind(debug)
+                    .bind(id)
+                    .execute(p)
+                    .await
+                    .map_err(|e| e.to_string())?;
+            }
+            DbPool::Postgres(p) => {
+                sqlx::query("UPDATE action_jobs SET debug_logging = $1 WHERE id = $2")
+                    .bind(debug)
+                    .bind(id)
+                    .execute(p)
+                    .await
+                    .map_err(|e| e.to_string())?;
+            }
+            DbPool::MySql(p) => {
+                sqlx::query("UPDATE action_jobs SET debug_logging = ? WHERE id = ?")
+                    .bind(debug)
+                    .bind(id)
+                    .execute(p)
+                    .await
+                    .map_err(|e| e.to_string())?;
+            }
+        }
+    }
     // Requeued jobs are claimable again — wake `runner.v1` pollers.
     bump_action_tasks_version(pool).await?;
     Ok(affected)
@@ -2983,6 +3024,177 @@ pub async fn cancel_run(pool: &DbPool, run_id: &str) -> Result<bool, String> {
         }
     }
     Ok(true)
+}
+
+/// File paths a run delete must clean up — job logs live under
+/// `{log_dir}/{run_id}/`, artifact payloads under `{artifacts_dir}/{path}`.
+/// Collected before `delete_run` cascades the rows away.
+#[derive(Debug, Clone, Default)]
+pub struct RunFilesToDelete {
+    pub job_ids: Vec<String>,
+    pub artifact_storage_paths: Vec<String>,
+}
+
+/// `deleteRun` (GitHub "Delete workflow run"): collect on-disk paths, then
+/// DELETE the run row — `action_jobs`, `action_job_tokens`, and
+/// `action_artifacts` cascade on `run_id`. `payloads` stay (content-addressed
+/// and shared). Returns `None` when the run doesn't exist.
+pub async fn delete_run(pool: &DbPool, run_id: &str) -> Result<Option<RunFilesToDelete>, String> {
+    let mut files = RunFilesToDelete::default();
+    let jobs = list_jobs_for_run(pool, run_id).await?;
+    files.job_ids = jobs.into_iter().map(|j| j.id).collect();
+    match pool {
+        DbPool::Sqlite(p) => {
+            let rows: Vec<(String,)> =
+                sqlx::query_as("SELECT storage_path FROM action_artifacts WHERE run_id = ?")
+                    .bind(run_id)
+                    .fetch_all(p)
+                    .await
+                    .map_err(|e| e.to_string())?;
+            files.artifact_storage_paths = rows.into_iter().map(|r| r.0).collect();
+            let res = sqlx::query("DELETE FROM action_runs WHERE id = ?")
+                .bind(run_id)
+                .execute(p)
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok((res.rows_affected() > 0).then_some(files))
+        }
+        DbPool::Postgres(p) => {
+            let rows: Vec<(String,)> =
+                sqlx::query_as("SELECT storage_path FROM action_artifacts WHERE run_id = $1")
+                    .bind(run_id)
+                    .fetch_all(p)
+                    .await
+                    .map_err(|e| e.to_string())?;
+            files.artifact_storage_paths = rows.into_iter().map(|r| r.0).collect();
+            let res = sqlx::query("DELETE FROM action_runs WHERE id = $1")
+                .bind(run_id)
+                .execute(p)
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok((res.rows_affected() > 0).then_some(files))
+        }
+        DbPool::MySql(p) => {
+            let rows: Vec<(String,)> =
+                sqlx::query_as("SELECT storage_path FROM action_artifacts WHERE run_id = ?")
+                    .bind(run_id)
+                    .fetch_all(p)
+                    .await
+                    .map_err(|e| e.to_string())?;
+            files.artifact_storage_paths = rows.into_iter().map(|r| r.0).collect();
+            let res = sqlx::query("DELETE FROM action_runs WHERE id = ?")
+                .bind(run_id)
+                .execute(p)
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok((res.rows_affected() > 0).then_some(files))
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Per-workflow disable flag (0068) — GitHub "Disable workflow". Absent row =
+// enabled; a disabled workflow does not run on any trigger.
+// ---------------------------------------------------------------------------
+
+/// `setWorkflowEnabled` — upserts the disable flag for `(repo, path)`.
+pub async fn set_workflow_disabled(
+    pool: &DbPool,
+    repository_id: &str,
+    path: &str,
+    disabled: bool,
+) -> Result<(), String> {
+    match pool {
+        DbPool::Sqlite(p) => {
+            sqlx::query(
+                "INSERT INTO action_workflow_states (repository_id, path, disabled) VALUES (?,?,?) \
+                 ON CONFLICT(repository_id, path) DO UPDATE SET disabled = excluded.disabled, updated_at = strftime('%Y-%m-%d %H:%M:%S','now')",
+            )
+            .bind(repository_id).bind(path).bind(disabled).execute(p).await.map_err(|e| e.to_string())?;
+        }
+        DbPool::Postgres(p) => {
+            sqlx::query(
+                "INSERT INTO action_workflow_states (repository_id, path, disabled) VALUES ($1,$2,$3) \
+                 ON CONFLICT(repository_id, path) DO UPDATE SET disabled = EXCLUDED.disabled, updated_at = now()",
+            )
+            .bind(repository_id).bind(path).bind(disabled).execute(p).await.map_err(|e| e.to_string())?;
+        }
+        DbPool::MySql(p) => {
+            sqlx::query(
+                "INSERT INTO action_workflow_states (repository_id, path, disabled) VALUES (?,?,?) \
+                 ON DUPLICATE KEY UPDATE disabled = VALUES(disabled), updated_at = CURRENT_TIMESTAMP",
+            )
+            .bind(repository_id).bind(path).bind(disabled).execute(p).await.map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+/// Disabled workflow paths for a repo — `listWorkflows` marks these.
+pub async fn list_disabled_workflows(
+    pool: &DbPool,
+    repository_id: &str,
+) -> Result<std::collections::HashSet<String>, String> {
+    let rows: Vec<String> =
+        match pool {
+            DbPool::Sqlite(p) => sqlx::query_scalar(
+                "SELECT path FROM action_workflow_states WHERE repository_id = ? AND disabled <> 0",
+            )
+            .bind(repository_id)
+            .fetch_all(p)
+            .await,
+            DbPool::Postgres(p) => {
+                sqlx::query_scalar(
+                    "SELECT path FROM action_workflow_states WHERE repository_id = $1 AND disabled",
+                )
+                .bind(repository_id)
+                .fetch_all(p)
+                .await
+            }
+            DbPool::MySql(p) => sqlx::query_scalar(
+                "SELECT path FROM action_workflow_states WHERE repository_id = ? AND disabled <> 0",
+            )
+            .bind(repository_id)
+            .fetch_all(p)
+            .await,
+        }
+        .map_err(|e| e.to_string())?;
+    Ok(rows.into_iter().collect())
+}
+
+/// Single-path check for the dispatch/event/`workflow_call` gates.
+pub async fn is_workflow_disabled(
+    pool: &DbPool,
+    repository_id: &str,
+    path: &str,
+) -> Result<bool, String> {
+    match pool {
+        DbPool::Sqlite(p) => sqlx::query_scalar::<_, i64>(
+            "SELECT disabled FROM action_workflow_states WHERE repository_id = ? AND path = ?",
+        )
+        .bind(repository_id)
+        .bind(path)
+        .fetch_optional(p)
+        .await
+        .map(|v| v.map(|d| d != 0).unwrap_or(false)),
+        DbPool::Postgres(p) => sqlx::query_scalar::<_, bool>(
+            "SELECT disabled FROM action_workflow_states WHERE repository_id = $1 AND path = $2",
+        )
+        .bind(repository_id)
+        .bind(path)
+        .fetch_optional(p)
+        .await
+        .map(|v| v.unwrap_or(false)),
+        DbPool::MySql(p) => sqlx::query_scalar::<_, i64>(
+            "SELECT disabled FROM action_workflow_states WHERE repository_id = ? AND path = ?",
+        )
+        .bind(repository_id)
+        .bind(path)
+        .fetch_optional(p)
+        .await
+        .map(|v| v.map(|d| d != 0).unwrap_or(false)),
+    }
+    .map_err(|e| e.to_string())
 }
 
 // ---------------------------------------------------------------------------

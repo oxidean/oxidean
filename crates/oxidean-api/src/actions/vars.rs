@@ -108,6 +108,17 @@ pub async fn variables_for_job(
     Ok(out)
 }
 
+/// "Re-run with debug logging" stamps `action_jobs.debug_logging`; claim-time
+/// vars force the debug flags on for that attempt — GitHub overrides any
+/// contrary `ACTIONS_*_DEBUG` configuration on a debug re-run, so this
+/// inserts rather than defaults.
+pub fn inject_debug_logging(vars: &mut HashMap<String, String>, debug_logging: bool) {
+    if debug_logging {
+        vars.insert("ACTIONS_STEP_DEBUG".into(), "true".into());
+        vars.insert("ACTIONS_RUNNER_DEBUG".into(), "true".into());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

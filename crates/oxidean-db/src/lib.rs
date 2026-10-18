@@ -55,9 +55,10 @@ pub mod webhooks;
 pub mod workflow_templates;
 
 pub use actions::{
-    ActionDeploymentRow, ActionEnvironmentRow, ActionJobRow, ActionJobTokenRow, ActionOidcKeyRow,
-    ActionPayloadRow, ActionRunFilter, ActionRunRow, ActionRunnerRow, ActionSecretCipherRow,
-    ActionSecretMetaRow, EnvSecretMetaRow, JobInsert, LogIndexCas, OrgSecretRow, StaleJobRow,
+    ActionArtifactRow, ActionDeploymentRow, ActionEnvironmentRow, ActionJobRow, ActionJobTokenRow,
+    ActionOidcKeyRow, ActionPayloadRow, ActionRunFilter, ActionRunRow, ActionRunnerRow,
+    ActionSecretCipherRow, ActionSecretMetaRow, EnvSecretMetaRow, JobInsert, LogIndexCas,
+    OrgSecretRow, StaleJobRow,
 };
 pub use audit_events::AuditEventRow;
 pub use auth_settings::AuthSettingsRow;
@@ -4092,13 +4093,52 @@ impl Database {
     /// Requeue a run for re-run; returns the ids of the jobs whose state was
     /// reset so the caller can wipe their on-disk logs (rerun replaces the
     /// prior attempt's output rather than appending to it).
+    /// `debug` stamps `debug_logging` on the reset jobs — GitHub's "enable
+    /// debug logging" checkbox — surfaced at claim as ACTIONS_*_DEBUG vars.
     pub async fn requeue_action_run(
         &self,
         run_id: &str,
         failed_only: bool,
         job_id: Option<&str>,
+        debug: bool,
     ) -> Result<Vec<String>, String> {
-        actions::requeue_run(self.require_pool()?, run_id, failed_only, job_id).await
+        actions::requeue_run(self.require_pool()?, run_id, failed_only, job_id, debug).await
+    }
+
+    /// `deleteRun` — cascades jobs/tokens/artifacts on `run_id` and returns
+    /// the on-disk paths the caller should remove. `None` when absent.
+    pub async fn delete_action_run(
+        &self,
+        run_id: &str,
+    ) -> Result<Option<actions::RunFilesToDelete>, String> {
+        actions::delete_run(self.require_pool()?, run_id).await
+    }
+
+    /// `setWorkflowEnabled` — upserts the disable flag for `(repo, path)`.
+    pub async fn set_action_workflow_disabled(
+        &self,
+        repository_id: &str,
+        path: &str,
+        disabled: bool,
+    ) -> Result<(), String> {
+        actions::set_workflow_disabled(self.require_pool()?, repository_id, path, disabled).await
+    }
+
+    /// Disabled workflow paths for a repo — `listWorkflows` marks these.
+    pub async fn list_disabled_action_workflows(
+        &self,
+        repository_id: &str,
+    ) -> Result<std::collections::HashSet<String>, String> {
+        actions::list_disabled_workflows(self.require_pool()?, repository_id).await
+    }
+
+    /// Single-path check for the dispatch/event/`workflow_call` gates.
+    pub async fn is_action_workflow_disabled(
+        &self,
+        repository_id: &str,
+        path: &str,
+    ) -> Result<bool, String> {
+        actions::is_workflow_disabled(self.require_pool()?, repository_id, path).await
     }
 
     /// `false` when the run had already finished — nothing was clobbered.

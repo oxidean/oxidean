@@ -309,7 +309,9 @@ jobs:
         .await
         .unwrap();
 
-    db.requeue_action_run(&run_id, false, None).await.unwrap();
+    db.requeue_action_run(&run_id, false, None, false)
+        .await
+        .unwrap();
 
     let second = fetch(app.clone(), &runner_token).await;
     assert_eq!(second["run_attempt"], 2);

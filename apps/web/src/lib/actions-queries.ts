@@ -22,6 +22,7 @@ import {
   actionsListRunsQueryOptions,
   actionsListWorkflowsQueryOptions,
   actionsRerunRunMutationOptions,
+  actionsSetWorkflowEnabledMutationOptions,
 } from "@oxidean/api-client";
 import { apiClient } from "@/lib/api-client";
 
@@ -183,6 +184,10 @@ export function actionsRerunRunMutation() {
 
 export function actionsCancelRunMutation() {
   return actionsCancelRunMutationOptions(apiClient);
+}
+
+export function actionsSetWorkflowEnabledMutation() {
+  return actionsSetWorkflowEnabledMutationOptions(apiClient);
 }
 
 /** Run-scoped artifact listing (`repo.actions.listArtifacts`). */

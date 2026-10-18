@@ -297,6 +297,8 @@ mod tests {
             cache_url: None,
             cache_token: None,
             vars: None,
+            ref_protected: None,
+            retention_days: None,
         }
     }
 

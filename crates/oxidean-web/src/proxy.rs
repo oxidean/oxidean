@@ -85,6 +85,20 @@ pub fn is_api_git_path(path: &str) -> bool {
         && segs.next().is_some_and(|repo| repo.ends_with(".git"))
 }
 
+/// GitHub-shaped workflow badge: `/{owner}/{repo}/actions/workflows/{file}/
+/// badge.svg` — README `<img>` URLs can't live under `/api/` when users copy
+/// GitHub badge markup, so the repo-path shape forwards to the API. The
+/// workflow segment is a single flat filename (workflow files live flat in
+/// `.github/workflows/`).
+pub fn is_api_badge_path(path: &str) -> bool {
+    let segs: Vec<&str> = path.trim_start_matches('/').split('/').collect();
+    matches!(
+        segs.as_slice(),
+        [owner, repo, "actions", "workflows", file, "badge.svg"]
+            if !owner.is_empty() && !repo.is_empty() && !file.is_empty()
+    )
+}
+
 pub struct ApiProxy {
     origin: String,
     client: reqwest::Client,

@@ -50,8 +50,17 @@ fn parse_ts(raw: &str) -> Option<chrono::DateTime<chrono::Utc>> {
 }
 
 /// Sweep one pass: deadline-fail + stale-requeue. Returns
-/// `(timed_out, requeued)` counts for logging.
-pub async fn sweep_stale_action_jobs(db: &Database, stale_secs: u64) -> (u64, u64) {
+/// `(timed_out, requeued)` counts for logging. `git`/`repos_dir` feed the
+/// run-completion fan-out (notifications + `workflow_run` triggers) for
+/// jobs the deadline kill pushed terminal — the same once-per-run claim the
+/// runner finalize path uses.
+pub async fn sweep_stale_action_jobs(
+    db: &Database,
+    git: &dyn oxidean_git::GitBackend,
+    repos_dir: &std::path::Path,
+    stale_secs: u64,
+    env_name: &str,
+) -> (u64, u64) {
     let jobs = match db.list_in_progress_action_jobs().await {
         Ok(j) => j,
         Err(e) => {
@@ -71,8 +80,31 @@ pub async fn sweep_stale_action_jobs(db: &Database, stale_secs: u64) -> (u64, u6
             continue;
         }
         if let Some(expired) = deadline_lapsed(&job, now) {
-            if expired {
-                timed_out += fail_deadline_job(db, &job).await as u64;
+            if expired && fail_deadline_job(db, &job).await {
+                timed_out += 1;
+                // Deadline kills complete runs too — claim once and fan out
+                // (watch notifications + `on: workflow_run`), mirroring the
+                // runner finalize path.
+                if db
+                    .claim_run_completion_notice(&job.run_id)
+                    .await
+                    .unwrap_or(false)
+                {
+                    if let Ok(Some(run)) = db.find_action_run_by_id(&job.run_id).await {
+                        crate::notify::fanout_workflow_completed(db, &run).await;
+                        crate::actions::events::notify_workflow_run_actions(
+                            db, git, repos_dir, &run, env_name,
+                        )
+                        .await;
+                        crate::webhook::dispatch::notify_workflow_run(
+                            db,
+                            &run.id,
+                            "completed",
+                            env_name,
+                        )
+                        .await;
+                    }
+                }
                 continue;
             }
         }

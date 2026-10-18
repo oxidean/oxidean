@@ -306,6 +306,8 @@ mod tests {
             environment: None,
             environment_url: None,
             vars: None,
+            ref_protected: None,
+            retention_days: None,
             id_token_request_url: None,
             id_token_request_token: None,
             cache_url: None,
