@@ -70,6 +70,32 @@ describe("parseJobLog", () => {
     expect(flattenedLines(parsed).map((l) => l.plain)).toEqual(["x", "done-msg", ""]);
   });
 
+  it("renders group headers and debug lines, hides endgroup", () => {
+    const log = [
+      "##[step]build",
+      "##[group]Environment",
+      "A=1",
+      "##[endgroup]",
+      "::debug::detail here",
+      "##[debug]act_runner form",
+      "##[step-done]build",
+    ].join("\n");
+    const parsed = parseJobLog(log, "success");
+    const lines = parsed.steps[0].lines;
+    expect(lines.map((l) => [l.kind, l.plain])).toEqual([
+      ["group", "Environment"],
+      ["out", "A=1"],
+      ["debug", "detail here"],
+      ["debug", "act_runner form"],
+    ]);
+  });
+
+  it("keeps raw ::group:: / ::endgroup:: commands hidden (pre-interpreter logs)", () => {
+    const log = ["##[step]s", "::group::t", "in", "::endgroup::", "##[step-done]s"].join("\n");
+    const parsed = parseJobLog(log, "success");
+    expect(parsed.steps[0].lines.map((l) => l.plain)).toEqual(["in"]);
+  });
+
   it("treats a run with no markers as one preamble", () => {
     const parsed = parseJobLog("plain\nlog\n", "success");
     expect(parsed.steps).toHaveLength(0);

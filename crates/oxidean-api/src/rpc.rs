@@ -247,6 +247,10 @@ pub const PROCEDURES: &[&str] = &[
     "org.actions.secrets.put",
     "org.actions.secrets.delete",
     "org.actions.secrets.listRepos",
+    "org.actions.variables.list",
+    "org.actions.variables.put",
+    "org.actions.variables.delete",
+    "org.actions.variables.listRepos",
     "invites.accept",
     "invites.get",
     "repo.listMine",
@@ -349,6 +353,9 @@ pub const PROCEDURES: &[&str] = &[
     "repo.actions.secrets.list",
     "repo.actions.secrets.put",
     "repo.actions.secrets.delete",
+    "repo.actions.variables.list",
+    "repo.actions.variables.put",
+    "repo.actions.variables.delete",
     "repo.actions.getEnabled",
     "repo.actions.setEnabled",
     "repo.actions.getPullRequestTarget",
@@ -364,6 +371,9 @@ pub const PROCEDURES: &[&str] = &[
     "repo.actions.environments.secretsList",
     "repo.actions.environments.secretsPut",
     "repo.actions.environments.secretsDelete",
+    "repo.actions.environments.variablesList",
+    "repo.actions.environments.variablesPut",
+    "repo.actions.environments.variablesDelete",
     "repo.actions.listDeployments",
     "repo.actions.approveJob",
     "repo.actions.reviewDeployment",
@@ -993,6 +1003,22 @@ async fn dispatch_inner(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },
+        "org.actions.variables.list" => match org::vars::list(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "org.actions.variables.put" => match org::vars::put(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "org.actions.variables.delete" => match org::vars::delete(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "org.actions.variables.listRepos" => match org::vars::list_repos(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
         "invites.accept" => match invites::accept(ctx, req.input).await {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
@@ -1432,6 +1458,24 @@ async fn dispatch_inner(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
                 Err(e) => RpcResponse::err(e),
             }
         }
+        "repo.actions.variables.list" => {
+            match crate::actions::rpc::list_variables(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
+        "repo.actions.variables.put" => {
+            match crate::actions::rpc::put_variable(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
+        "repo.actions.variables.delete" => {
+            match crate::actions::rpc::delete_variable(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
         "repo.actions.getEnabled" => match crate::actions::rpc::get_enabled(ctx, req.input).await {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
@@ -1514,6 +1558,24 @@ async fn dispatch_inner(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
         }
         "repo.actions.environments.secretsDelete" => {
             match crate::actions::rpc::delete_environment_secret(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
+        "repo.actions.environments.variablesList" => {
+            match crate::actions::rpc::list_environment_variables(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
+        "repo.actions.environments.variablesPut" => {
+            match crate::actions::rpc::put_environment_variable(ctx, req.input).await {
+                Ok(v) => RpcResponse::ok(v),
+                Err(e) => RpcResponse::err(e),
+            }
+        }
+        "repo.actions.environments.variablesDelete" => {
+            match crate::actions::rpc::delete_environment_variable(ctx, req.input).await {
                 Ok(v) => RpcResponse::ok(v),
                 Err(e) => RpcResponse::err(e),
             }

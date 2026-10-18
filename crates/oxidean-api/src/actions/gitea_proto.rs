@@ -454,6 +454,10 @@ pub(crate) struct ClaimContext {
     pub base_ref: String,
     pub pull_number: i64,
     pub secrets: HashMap<String, String>,
+    /// Configuration variables — repo < org < environment plaintext merge.
+    /// Not secrets: flows regardless of PR trust (GitHub exposes `vars.*`
+    /// to untrusted workflows too).
+    pub vars: HashMap<String, String>,
     pub job_token: Option<String>,
     /// OIDC request credential pair — `ACTIONS_ID_TOKEN_REQUEST_*` (Some
     /// only when `id-token: write` survived provenance gating).
@@ -524,6 +528,14 @@ pub(crate) async fn claim_context(
     } else {
         HashMap::new()
     };
+    // Variables — plaintext config (not secrets): no trust gate.
+    let vars = crate::actions::vars::variables_for_job(
+        &state.db,
+        &run.repository_id,
+        j.environment_name.as_deref(),
+    )
+    .await
+    .unwrap_or_default();
     let minted = match crate::actions::job_tokens::mint_job_token(
         &state.db,
         run,
@@ -567,6 +579,7 @@ pub(crate) async fn claim_context(
         base_ref: pr_ctx.base_ref,
         pull_number: pr_ctx.pull_number,
         secrets,
+        vars,
         job_token,
         id_token_request_url,
         id_token_request_token,
@@ -960,7 +973,7 @@ async fn build_task(
         secrets,
         machine: String::new(),
         needs,
-        vars: HashMap::new(),
+        vars: cc.vars.clone(),
     })
 }
 

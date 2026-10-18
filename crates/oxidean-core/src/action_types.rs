@@ -985,3 +985,123 @@ pub struct OrgActionsSecretReposRequest {
 pub struct OrgActionsSecretReposResponse {
     pub repository_ids: Vec<String>,
 }
+
+// --- configuration variables (`vars` context) — plaintext, values ARE
+// returned on GET (they are not secrets). ---
+
+/// Public variable view — name + value (plaintext by design) + updated_at.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionVariablePublic {
+    pub name: String,
+    pub value: String,
+    pub updated_at: String,
+}
+
+/// `repo.actions.variables.list` — Admin.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionVariablesListRequest {
+    pub owner: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionVariablesListResponse {
+    pub variables: Vec<ActionVariablePublic>,
+}
+
+/// `repo.actions.variables.put` — Admin.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionVariablesPutRequest {
+    pub owner: String,
+    pub name: String,
+    pub variable_name: String,
+    pub value: String,
+}
+
+/// `repo.actions.variables.delete` — Admin.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ActionVariablesDeleteRequest {
+    pub owner: String,
+    pub name: String,
+    pub variable_name: String,
+}
+
+/// `repo.actions.environments.variablesList` — Admin; values included.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RepoActionsEnvironmentVariablesListRequest {
+    pub owner: String,
+    pub name: String,
+    pub environment: String,
+}
+
+/// `repo.actions.environments.variablesPut` — Admin.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RepoActionsEnvironmentVariablePutRequest {
+    pub owner: String,
+    pub name: String,
+    pub environment: String,
+    pub variable_name: String,
+    pub value: String,
+}
+
+/// `repo.actions.environments.variablesDelete` — Admin.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct RepoActionsEnvironmentVariableDeleteRequest {
+    pub owner: String,
+    pub name: String,
+    pub environment: String,
+    pub variable_name: String,
+}
+
+/// Public org variable view — value + visibility (plaintext by design).
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OrgVariablePublic {
+    pub name: String,
+    pub value: String,
+    /// 'all' | 'private' | 'selected'.
+    pub visibility: String,
+    pub updated_at: String,
+}
+
+/// `org.actions.variables.list` — Admin+.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OrgActionsVariablesListRequest {
+    pub slug: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OrgActionsVariablesListResponse {
+    pub variables: Vec<OrgVariablePublic>,
+}
+
+/// `org.actions.variables.put` — Admin+. `visibility` defaults to 'all';
+/// `repository_ids` replaces the selected-repo set when 'selected'.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OrgActionsVariablePutRequest {
+    pub slug: String,
+    pub variable_name: String,
+    pub value: String,
+    #[serde(default)]
+    pub visibility: Option<String>,
+    #[serde(default)]
+    pub repository_ids: Option<Vec<String>>,
+}
+
+/// `org.actions.variables.delete` — Admin+.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OrgActionsVariableDeleteRequest {
+    pub slug: String,
+    pub variable_name: String,
+}
+
+/// `org.actions.variables.listRepos` — Admin+; repo ids in the selected set.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OrgActionsVariableReposRequest {
+    pub slug: String,
+    pub variable_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct OrgActionsVariableReposResponse {
+    pub repository_ids: Vec<String>,
+}

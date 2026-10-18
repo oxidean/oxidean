@@ -1302,7 +1302,32 @@
       "log_contains": [
         "vars=[] end"
       ],
-      "divergence": "ctx.vars"
+      "notes": "No variables seeded \u2014 empty lookups still render empty."
+    },
+    {
+      "id": "vars-context",
+      "kind": "run",
+      "vars": {
+        "REGION": "us-east",
+        "DEPLOY_TARGET": "prod"
+      },
+      "expect_run": "success",
+      "expect_jobs": {
+        "build": "success",
+        "gated": "success",
+        "skipped": "skipped"
+      },
+      "log_contains": [
+        "region=us-east",
+        "target=prod",
+        "missing=[] end",
+        "if-saw-var end",
+        "gated-ran end"
+      ],
+      "log_absent": [
+        "wrong-region end",
+        "should-not-run end"
+      ]
     },
     {
       "id": "cache-service-absent",

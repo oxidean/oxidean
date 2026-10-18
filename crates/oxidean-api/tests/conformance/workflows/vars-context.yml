@@ -1,0 +1,21 @@
+name: vars-context
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "region=${{ vars.REGION }} target=${{ vars.DEPLOY_TARGET }} missing=[${{ vars.NOPE }}] end"
+      - if: vars.REGION == 'us-east'
+        run: echo "if-saw-var end"
+      - if: vars.REGION == 'eu-west'
+        run: echo "wrong-region end"
+  gated:
+    if: vars.DEPLOY_TARGET == 'prod'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "gated-ran end"
+  skipped:
+    if: vars.DEPLOY_TARGET == 'staging'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "should-not-run end"

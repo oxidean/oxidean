@@ -1,4 +1,4 @@
-import type { ActionSecretMetaPublic } from "@oxidean/api-client";
+import type { ActionSecretMetaPublic, ActionVariablePublic } from "@oxidean/api-client";
 import { useQuery, useQueryClient } from "@octanejs/tanstack-query";
 import { useState } from "octane";
 import { Check, ChevronDown } from "@octanejs/lucide";
@@ -28,6 +28,10 @@ const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.
 
 function secretsQueryKey(owner: string, name: string) {
   return ["repo", "actions", "secrets", owner, name] as const;
+}
+
+function variablesQueryKey(owner: string, name: string) {
+  return ["repo", "actions", "variables", owner, name] as const;
 }
 
 function enabledQueryKey(owner: string, name: string) {
@@ -75,10 +79,23 @@ export function ActionsSettingsPanel(props: {
     enabled: canAdmin,
   });
 
+  const variablesQ = useQuery({
+    queryKey: variablesQueryKey(owner, name),
+    queryFn: async (): Promise<ActionVariablePublic[]> => {
+      const res = await apiClient.repo.actions.variables.list({ owner, name });
+      if (!res.ok) throw new Error(res.error.message || "Could not load variables.");
+      return res.data.variables;
+    },
+    enabled: canAdmin,
+  });
+
   const [togglePending, setTogglePending] = useState(false);
   const [secretName, setSecretName] = useState("");
   const [secretValue, setSecretValue] = useState("");
   const [secretPending, setSecretPending] = useState(false);
+  const [varName, setVarName] = useState("");
+  const [varValue, setVarValue] = useState("");
+  const [varPending, setVarPending] = useState(false);
   const [error, setError] = useState("");
 
   const forkPrQ = useQuery({
@@ -200,8 +217,58 @@ export function ActionsSettingsPanel(props: {
     }
   }
 
+  async function putVariable() {
+    if (!canAdmin) return;
+    const vn = varName.trim();
+    if (!vn) return;
+    setError("");
+    setVarPending(true);
+    try {
+      const res = await apiClient.repo.actions.variables.put({
+        owner,
+        name,
+        variable_name: vn,
+        value: varValue,
+      });
+      if (!res.ok) {
+        setError(res.error.message || "Could not save variable.");
+        setVarPending(false);
+        return;
+      }
+      setVarName("");
+      setVarValue("");
+      await queryClient.invalidateQueries({ queryKey: variablesQueryKey(owner, name) });
+      toastSuccess("Variable saved.");
+      setVarPending(false);
+    } catch {
+      setError(NETWORK_ERROR);
+      setVarPending(false);
+    }
+  }
+
+  async function deleteVariable(vn: string) {
+    if (!canAdmin) return;
+    setError("");
+    try {
+      const res = await apiClient.repo.actions.variables.delete({
+        owner,
+        name,
+        variable_name: vn,
+      });
+      if (!res.ok) {
+        toastError(res.error.message || "Could not delete variable.");
+        return;
+      }
+      await queryClient.invalidateQueries({ queryKey: variablesQueryKey(owner, name) });
+      toastSuccess("Variable deleted.");
+    } catch {
+      toastError(NETWORK_ERROR);
+    }
+  }
+
   const enabled = enabledQ.data ?? true;
   const secrets = secretsQ.data ?? [];
+  const variables = variablesQ.data ?? [];
 
   <section
     id="actions"
@@ -291,6 +358,71 @@ export function ActionsSettingsPanel(props: {
               </li>;
             } @empty {
               <li className="text-muted-foreground">No secrets yet.</li>;
+            }
+          </ul>
+        </div>
+        <div className="mt-6 space-y-3" data-testid="actions-variables-section">
+          <h3 className="text-[15px] font-semibold text-foreground">Repository variables</h3>
+          <p className="text-[13px] text-muted-foreground">
+            Plaintext configuration exposed as{" "}
+            <code className="rounded bg-muted px-1 py-0.5 font-mono text-[12px]">vars.*</code>{" "}
+            in workflow expressions — visible to anyone with write access, unlike secrets.
+          </p>
+          <form
+            className="flex flex-wrap items-end gap-3"
+            method="post"
+            action="#"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void putVariable();
+            }}
+          >
+            <label className="flex flex-col gap-1 text-[14px]">
+              <span className="font-medium">Name</span>
+              <Input
+                data-testid="repo-actions-variable-name"
+                value={varName}
+                onInput={(e) => setVarName((e.target as HTMLInputElement).value)}
+                autocomplete="off"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-[14px]">
+              <span className="font-medium">Value</span>
+              <Input
+                data-testid="repo-actions-variable-value"
+                value={varValue}
+                onInput={(e) => setVarValue((e.target as HTMLInputElement).value)}
+                autocomplete="off"
+              />
+            </label>
+            <Button
+              type="submit"
+              disabled={varPending}
+              data-testid="repo-actions-variable-save"
+            >
+              Save variable
+            </Button>
+          </form>
+          <ul className="space-y-2">
+            @for (const v of variables; key v.name) {
+              <li className="flex items-center justify-between gap-3 text-[14px]">
+                <span className="font-mono">
+                  {v.name as string}
+                  <span className="ml-2 font-normal text-muted-foreground">
+                    {v.value as string}
+                  </span>
+                </span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => void deleteVariable(v.name)}
+                  data-testid={"repo-actions-variable-delete-" + v.name}
+                >
+                  Delete
+                </Button>
+              </li>;
+            } @empty {
+              <li className="text-muted-foreground">No variables yet.</li>;
             }
           </ul>
         </div>

@@ -3,6 +3,7 @@
 mod invites;
 pub(crate) mod members;
 mod secrets;
+pub mod vars;
 
 pub use invites::{
     accept as invites_accept, create as invites_create, create_link as invites_create_link,

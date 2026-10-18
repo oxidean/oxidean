@@ -59,9 +59,9 @@ fn github_ctx(
 }
 
 /// Build the enqueue evaluation context: `github` populated from the run's
-/// provenance, `env` from the evaluated workflow env, `vars`/`inputs` empty
-/// (no variables surface / dispatch inputs yet), `needs`/`matrix`/`steps`
-/// empty until the scheduler phase.
+/// provenance, `env` from the evaluated workflow env, `vars` from repo+org
+/// configuration variables, `inputs` from the dispatch payload;
+/// `needs`/`matrix`/`steps` stay empty until the scheduler phase.
 pub async fn build_context(
     db: &Database,
     repository_id: &str,
@@ -112,9 +112,19 @@ pub async fn build_context(
         .and_then(|i| i.as_object())
         .map(|m| JsonValue::Object(m.clone()))
         .unwrap_or_else(|| serde_json::json!({}));
+    // `vars` context — repo < org configuration variables (plaintext).
+    // Environment-scoped vars join per job at claim — they depend on the
+    // job's `environment:` and aren't knowable at run level.
+    let vars = match crate::actions::vars::variables_for_context(db, repository_id).await {
+        Ok(v) => v,
+        Err(e) => {
+            warnings.push(format!("vars context failed: {e}"));
+            serde_json::json!({})
+        }
+    };
     let mut ctx = Context::new()
         .with_context("github", github)
-        .with_context("vars", serde_json::json!({}))
+        .with_context("vars", vars)
         .with_context("inputs", inputs)
         .with_context("needs", serde_json::json!({}))
         .with_context("matrix", serde_json::json!({}))

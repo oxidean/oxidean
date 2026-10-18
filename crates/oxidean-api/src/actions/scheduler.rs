@@ -86,8 +86,12 @@ pub async fn recompute_ready_jobs(db: &Database, run_id: &str) -> Result<usize, 
 
 /// Run-level data every waiting job's `if` context shares.
 struct SharedCtx {
+    /// Frozen `github` context for the run (sha/ref/event provenance).
     github: JsonValue,
+    /// Repo+org secrets (values) for `secrets.*` gating.
     secrets: JsonValue,
+    /// Repo+org plaintext variables for `vars.*` gating.
+    vars: JsonValue,
 }
 
 impl SharedCtx {
@@ -110,7 +114,19 @@ impl SharedCtx {
             }
             None => json!({}),
         };
-        SharedCtx { github, secrets }
+        // `vars` context — repo + org plaintext variables (env-scoped vars
+        // join per-leg at claim, like env secrets).
+        let vars = match &run {
+            Some(r) => crate::actions::vars::variables_for_context(db, &r.repository_id)
+                .await
+                .unwrap_or_else(|_| json!({})),
+            None => json!({}),
+        };
+        SharedCtx {
+            github,
+            secrets,
+            vars,
+        }
     }
 
     /// Per-job `if` context: github + secrets + job env (workflow env under
@@ -162,7 +178,7 @@ impl SharedCtx {
         let mut ctx = Context::new()
             .with_context("github", github)
             .with_context("secrets", secrets)
-            .with_context("vars", json!({}))
+            .with_context("vars", self.vars.clone())
             .with_context("inputs", inputs)
             .with_context("needs", needs_ctx)
             .with_context(

@@ -136,22 +136,27 @@ async fn fail_deadline_job(db: &Database, job: &StaleJobRow) -> bool {
     landed
 }
 
-/// Requeue one stale job — log notice + token revoke so the dead runner's
-/// credentials die with it.
+/// Requeue one stale job — wipe the dead attempt's log, then record the
+/// notice as the new attempt's first line and revoke the dead runner's
+/// credentials so its writes can't leak into the retry.
 async fn requeue_dead_runner_job(db: &Database, job: &StaleJobRow, stale_secs: u64) -> bool {
-    let _ = crate::actions::logs::append_job_log(
-        &crate::actions::logs::resolve_log_dir(),
-        &job.run_id,
-        &job.id,
-        format!(
-            "::warning::runner lost contact for over {stale_secs}s — job requeued (attempt {})\n",
-            job.attempt + 1
-        )
-        .as_bytes(),
-    )
-    .await;
     let landed = db.requeue_stale_action_job(&job.id).await.unwrap_or(false);
     if landed {
+        let log_dir = crate::actions::logs::resolve_log_dir();
+        if let Err(e) = crate::actions::logs::delete_job_log(&log_dir, &job.run_id, &job.id).await {
+            tracing::warn!(error = %e, job_id = %job.id, "stale requeue: log wipe failed");
+        }
+        let _ = crate::actions::logs::append_job_log(
+            &log_dir,
+            &job.run_id,
+            &job.id,
+            format!(
+                "::warning::runner lost contact for over {stale_secs}s — job requeued (attempt {})\n",
+                job.attempt + 1
+            )
+            .as_bytes(),
+        )
+        .await;
         crate::actions::task_wake::wake();
         if let Err(e) = db.revoke_action_job_token_for_job(&job.id).await {
             tracing::warn!(error = %e, job_id = %job.id, "stale requeue: token revoke failed");

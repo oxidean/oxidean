@@ -497,7 +497,8 @@ impl<R> PullRefGate<R> {
             // (push-options, commands we don't recognize) are skipped.
             if parts.len() >= 3
                 && parts[2].starts_with("refs/")
-                && crate::pull::refs::is_pull_ref(parts[2])
+                && (crate::pull::refs::is_pull_ref(parts[2])
+                    || parts[2].starts_with("refs/actions/"))
             {
                 self.forbidden = Some(parts[2].to_string());
                 self.state = PullRefScan::Forbidden;
@@ -587,9 +588,11 @@ pub fn capability_env_label(capability: Option<Capability>) -> &'static str {
 /// `allowReachableSHA1InWant` lets `git fetch origin <sha>` resolve commits
 /// reachable from any ref tip — runners need it for `refs/pull/N/merge`
 /// test-merge checkouts and `actions/checkout` `with: ref: <sha>`.
+/// `hideRefs` keeps the `refs/actions/runs/*` sha-pin namespace out of ref
+/// advertisement (clones stay clean); sha-in-want fetches still resolve.
 pub fn upload_pack_config_env() -> Vec<(String, String)> {
     vec![
-        ("GIT_CONFIG_COUNT".into(), "2".into()),
+        ("GIT_CONFIG_COUNT".into(), "3".into()),
         ("GIT_CONFIG_KEY_0".into(), "uploadpack.allowFilter".into()),
         ("GIT_CONFIG_VALUE_0".into(), "true".into()),
         (
@@ -597,6 +600,8 @@ pub fn upload_pack_config_env() -> Vec<(String, String)> {
             "uploadpack.allowReachableSHA1InWant".into(),
         ),
         ("GIT_CONFIG_VALUE_1".into(), "true".into()),
+        ("GIT_CONFIG_KEY_2".into(), "uploadpack.hideRefs".into()),
+        ("GIT_CONFIG_VALUE_2".into(), "refs/actions/".into()),
     ]
 }
 
@@ -818,7 +823,7 @@ mod tests {
     fn upload_pack_config_env_enables_filter() {
         let vars = upload_pack_config_env();
         let map: HashMap<&str, &str> = vars.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
-        assert_eq!(map.get("GIT_CONFIG_COUNT").copied(), Some("2"));
+        assert_eq!(map.get("GIT_CONFIG_COUNT").copied(), Some("3"));
         assert_eq!(
             map.get("GIT_CONFIG_KEY_0").copied(),
             Some("uploadpack.allowFilter"),
@@ -831,6 +836,15 @@ mod tests {
             "upload-pack must serve refs/pull/*/merge test-merge commits by sha"
         );
         assert_eq!(map.get("GIT_CONFIG_VALUE_1").copied(), Some("true"));
+        assert_eq!(
+            map.get("GIT_CONFIG_KEY_2").copied(),
+            Some("uploadpack.hideRefs"),
+            "upload-pack must not advertise the refs/actions/* run-pin namespace"
+        );
+        assert_eq!(
+            map.get("GIT_CONFIG_VALUE_2").copied(),
+            Some("refs/actions/")
+        );
     }
 
     #[test]

@@ -26,6 +26,7 @@ pub mod sweeps;
 pub mod task_wake;
 pub mod templates;
 pub mod tokens;
+pub mod vars;
 pub mod workflow;
 
 pub use dispatch::{dispatch_push_for_sha, enqueue_run, env_actions_enabled, notify_push_actions};

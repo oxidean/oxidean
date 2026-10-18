@@ -8,7 +8,9 @@
  *   ##[step-done]<title> — step finished successfully
  *   ::error::<msg>       — failure annotation (runner emits before aborting)
  *   ::warning::/::notice:: — annotation severities
- *   ::group::/::endgroup:: — passthrough group markers (hidden, unfolded)
+ *   ##[group]<title>     — group header line (runner rewrites `::group::`)
+ *   ##[endgroup]         — group close (hidden)
+ *   ::debug::<msg> / ##[debug]<msg> — step-debug lines (dimmed)
  *
  * Everything else is raw streamed output (ANSI SGR escapes included). A step
  * still open at end-of-log is running/failed/cancelled depending on the job
@@ -25,7 +27,7 @@ export type AnsiSegment = {
   dim?: boolean;
 };
 
-type LogLineKind = "out" | "error" | "warning" | "notice";
+type LogLineKind = "out" | "error" | "warning" | "notice" | "debug" | "group";
 
 export type LogLine = {
   /** 1-based line number in the raw log. */
@@ -53,7 +55,13 @@ export type ParsedJobLog = {
 
 const STEP_OPEN = /^##\[step\](.*)$/;
 const STEP_DONE = /^##\[step-done\](.*)$/;
+const GROUP_OPEN = /^##\[group\](.*)$/;
 const ANNOTATION = /^::(error|warning|notice)::(.*)$/;
+// `::debug::` is the bundled runner's passthrough form; `##[debug]` is what
+// a stock act_runner emits — both render as dimmed debug lines.
+const DEBUG_LINE = /^(?:::debug::|##\[debug\])(.*)$/;
+// Raw `::cmd::` forms that still reach the log (pre-interpreter attempts,
+// act_runner passthrough) stay hidden.
 const HIDDEN_COMMAND = /^::(group|endgroup|add-mask|set-output|debug|stop-commands|save-state)::/;
 const OTHER_MARKER = /^##\[/;
 
@@ -234,6 +242,21 @@ export function parseJobLog(log: string, jobStatus: string): ParsedJobLog {
       continue;
     }
     if (HIDDEN_COMMAND.test(raw) || OTHER_MARKER.test(raw)) {
+      // `##[group]`/`::debug::` are visible line kinds — handle them first.
+      const group = GROUP_OPEN.exec(raw);
+      const debug = DEBUG_LINE.exec(raw);
+      if (group || debug) {
+        const line = group
+          ? makeLine(n, "group", group[1].trim() || "group")
+          : makeLine(n, "debug", debug![1]);
+        if (current) {
+          current.lines.push(line);
+        } else if (sawDone) {
+          epilogue.push(line);
+        } else {
+          preamble.push(line);
+        }
+      }
       continue;
     }
     const ann = ANNOTATION.exec(raw);

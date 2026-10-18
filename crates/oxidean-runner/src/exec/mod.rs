@@ -5,6 +5,7 @@
 pub(crate) mod action;
 pub(crate) mod artifacts;
 pub(crate) mod checkout;
+pub(crate) mod commands;
 pub(crate) mod containers;
 pub(crate) mod context;
 pub(crate) mod env;
@@ -95,49 +96,35 @@ fn exec_mode_for(task: &Task, config: &Config) -> ExecMode {
     ExecMode::Host
 }
 
-/// Behaviour-changing `::command::`s the runner does not interpret —
-/// detected as `::cmd::` or `::cmd key=v::`. Annotation-only commands
-/// (`error`, `warning`, `notice`, `debug`) are deliberately absent: they
-/// carry rendering semantics the log consumer owns, and warning about them
-/// would flood the log.
-fn uninterpreted_commands_in_line(line: &str) -> Vec<&'static str> {
-    const EFFECT_COMMANDS: &[&str] = &[
-        "add-mask",
-        "set-env",
-        "add-path",
-        "set-output",
-        "save-state",
-        "stop-commands",
-        "echo",
-        "add-matcher",
-        "remove-matcher",
-        "group",
-        "endgroup",
-    ];
-    EFFECT_COMMANDS
-        .iter()
-        .copied()
-        .filter(|cmd| line.contains(&format!("::{cmd}::")) || line.contains(&format!("::{cmd} ")))
-        .collect()
-}
-
 pub(crate) struct Logger<'a> {
     pub client: &'a Client,
     pub run_id: String,
     pub job_id: String,
     /// Secret values + the job token — masked out of every log chunk.
     pub mask_values: &'a [String],
+    /// `::add-mask::` values collected mid-run — masked alongside `mask_values`.
+    pub extra_masks: std::sync::Mutex<Vec<String>>,
+    /// `::stop-commands::token` suppression — while set, all lines are literal.
+    pub stop_token: std::sync::Mutex<Option<String>>,
+    /// Unterminated output tail — a command can split across read chunks.
+    pub partial_line: std::sync::Mutex<String>,
+    /// Warnings queued by the sync interpreter; `send` drains them next to the
+    /// triggering chunk (kept off `send_masked` — warning text can contain
+    /// `::cmd::` markers and would re-enter interpretation).
+    pub pending_warnings: std::sync::Mutex<Vec<String>>,
     /// Server-side cancel signal — set when an `update_log` ack reports
     /// `cancelled`; the step loop checks `take_cancelled()` between steps.
     pub cancelled: std::sync::atomic::AtomicBool,
     /// Next log-batch index the server expects. Shared because log sends can
     /// overlap with step output; every ack (and every 409) resyncs it.
     pub log_cursor: std::sync::atomic::AtomicI64,
-    /// Behaviour-changing `::cmd::` workflow commands already warned about —
-    /// they pass through to the log uninterpreted (annotations-only lines
-    /// like `::error::`/`::warning::` are excluded — log consumers render
-    /// those themselves).
+    /// Once-warned command keys (uninterpreted matchers, deprecated commands).
     pub seen_cmd_warns: std::sync::Mutex<std::collections::BTreeSet<&'static str>>,
+    /// `runner_temp` — the `$GITHUB_*` file dir `::` file-commands append to.
+    /// Set once `prepare_runner_temp` succeeds (early claim errors predate it).
+    pub runner_temp: std::sync::OnceLock<PathBuf>,
+    /// `ACTIONS_STEP_DEBUG` — when set, `::debug::` lines forward to the log.
+    pub step_debug: std::sync::atomic::AtomicBool,
 }
 
 impl<'a> Logger<'a> {
@@ -167,36 +154,21 @@ impl<'a> Logger<'a> {
         Ok(ack)
     }
 
-    /// Behaviour-changing workflow commands we do not interpret — a line
-    /// carrying one passes through to the log verbatim, which on GitHub
-    /// would mask secrets or mutate env. Warn once per command per job so
-    /// the gap is loud, never silent.
-    async fn warn_uninterpreted_commands(&self, chunk: &str) {
-        let mut pending: Vec<&'static str> = Vec::new();
+    /// Outbound chunk: interpret `::cmd::` workflow commands (file effects
+    /// land in `runner_temp`, masks extend, group markers substitute), then
+    /// mask (base secrets + `::add-mask::` values) and upload. Queued command
+    /// warnings go first so they read next to the line that triggered them.
+    pub(crate) async fn send(&self, chunk: &str) {
+        let text = self.interpret_chunk(chunk);
+        self.drain_warnings().await;
+        let mut masked = mask_secrets(&text, self.mask_values);
         {
-            let mut seen = self.seen_cmd_warns.lock().unwrap();
-            for line in chunk.lines() {
-                for cmd in uninterpreted_commands_in_line(line.trim()) {
-                    if seen.insert(cmd) {
-                        pending.push(cmd);
-                    }
-                }
+            let extra = self.extra_masks.lock().unwrap();
+            if !extra.is_empty() {
+                masked = mask_secrets(&masked, &extra);
             }
         }
-        for cmd in pending {
-            // Bypass `send`'s command scan — the warning text itself
-            // contains `::cmd::` markers (and would recurse).
-            let w = format!(
-                "::warning::workflow command '::{cmd}::' is not interpreted by the Oxidean runner — use the $GITHUB_* env files instead\n"
-            );
-            self.send_masked(&mask_secrets(&w, self.mask_values)).await;
-        }
-    }
-
-    pub(crate) async fn send(&self, chunk: &str) {
-        self.warn_uninterpreted_commands(chunk).await;
-        self.send_masked(&mask_secrets(chunk, self.mask_values))
-            .await;
+        self.send_masked(&masked).await;
     }
 
     /// Masked-text send: upload with cursor/ack handling + stdout mirror.
@@ -319,9 +291,15 @@ pub async fn execute(client: &Client, task: &Task, config: &Config) -> &'static 
         run_id: run_id.clone(),
         job_id: job_id.clone(),
         mask_values: &mask_values,
+        extra_masks: std::sync::Mutex::new(Vec::new()),
+        stop_token: std::sync::Mutex::new(None),
+        partial_line: std::sync::Mutex::new(String::new()),
+        pending_warnings: std::sync::Mutex::new(Vec::new()),
         cancelled: std::sync::atomic::AtomicBool::new(false),
         log_cursor: std::sync::atomic::AtomicI64::new(0),
         seen_cmd_warns: std::sync::Mutex::new(std::collections::BTreeSet::new()),
+        runner_temp: std::sync::OnceLock::new(),
+        step_debug: std::sync::atomic::AtomicBool::new(false),
     };
 
     match client.update_task(&job_id, "in_progress", None, None).await {
@@ -357,6 +335,7 @@ pub async fn execute(client: &Client, task: &Task, config: &Config) -> &'static 
         let _ = client.update_task(&job_id, "failure", None, None).await;
         return "failure";
     }
+    logger.set_runner_temp(runner_temp.clone());
 
     let steps: Vec<Step> = task
         .steps
@@ -429,6 +408,28 @@ pub async fn execute(client: &Client, task: &Task, config: &Config) -> &'static 
             logger.line(&w).await;
         }
     }
+    // `::debug::` lines forward only when the workflow asked for them —
+    // GitHub reads `ACTIONS_STEP_DEBUG` from repo/org variables OR secrets
+    // (truthy: "true"/"1"); an explicit `env:` entry wins over both.
+    fn truthy(v: impl AsRef<str>) -> bool {
+        let v = v.as_ref().trim();
+        v.eq_ignore_ascii_case("true") || v == "1"
+    }
+    let step_debug = env::env_get(&env.vars, "ACTIONS_STEP_DEBUG").is_some_and(truthy)
+        || task
+            .vars
+            .as_ref()
+            .is_some_and(|m| m.get("ACTIONS_STEP_DEBUG").is_some_and(truthy))
+        || secrets.get("ACTIONS_STEP_DEBUG").is_some_and(truthy);
+    // `ACTIONS_RUNNER_DEBUG` gates runner-internal diagnostics on GitHub; our
+    // only debug surface is the job log, so it implies step-debug here.
+    let runner_debug = env::env_get(&env.vars, "ACTIONS_RUNNER_DEBUG").is_some_and(truthy)
+        || task
+            .vars
+            .as_ref()
+            .is_some_and(|m| m.get("ACTIONS_RUNNER_DEBUG").is_some_and(truthy))
+        || secrets.get("ACTIONS_RUNNER_DEBUG").is_some_and(truthy);
+    logger.set_step_debug(step_debug || runner_debug);
     let default_timeout = Duration::from_secs(config.job_timeout_secs);
     let deadline = JobDeadline::new(task.timeout_seconds);
 
@@ -636,6 +637,9 @@ pub async fn execute(client: &Client, task: &Task, config: &Config) -> &'static 
                     sync_job_ctx(&mut ctx);
                 }
             }
+            // An unterminated output tail must land inside *this* step's
+            // section — flush before the done marker.
+            logger.flush_partial().await;
             logger.line(&format!("##[step-done]{title}")).await;
         }
     }
@@ -687,6 +691,9 @@ pub async fn execute(client: &Client, task: &Task, config: &Config) -> &'static 
             }
         }
     }
+
+    // Final unterminated tail, if any.
+    logger.flush_partial().await;
 
     // `$GITHUB_STEP_SUMMARY` (accumulated across steps) ships once at
     // terminal — capped like GitHub's 1MiB. Read before temp cleanup.
@@ -797,6 +804,7 @@ mod tests {
             services: None,
             environment: None,
             environment_url: None,
+            vars: None,
             id_token_request_url: None,
             id_token_request_token: None,
             cache_url: None,
@@ -1337,44 +1345,5 @@ mod tests {
         prepare_workspace(&ws).unwrap();
         assert!(!ws.join("stale").exists());
         assert!(ws.exists());
-    }
-
-    #[test]
-    fn warn_uninterpreted_commands_covers_behavior_changing_commands() {
-        // Every behaviour-changing GitHub command we don't interpret is
-        // detected (bare and parameterized forms).
-        for (line, want) in [
-            ("::add-mask::hunter2", "add-mask"),
-            ("::set-env name=FOO::bar", "set-env"),
-            ("::add-path::/opt/bin", "add-path"),
-            ("::set-output name=x::1", "set-output"),
-            ("::save-state name=k::v", "save-state"),
-            ("::stop-commands::tok123", "stop-commands"),
-            ("::echo::off", "echo"),
-            ("::add-matcher::p.json", "add-matcher"),
-            ("::remove-matcher owner=lint::", "remove-matcher"),
-            ("::group::build", "group"),
-            ("::endgroup::", "endgroup"),
-        ] {
-            assert!(
-                uninterpreted_commands_in_line(line).contains(&want),
-                "'{line}' should flag '{want}'"
-            );
-        }
-        // Annotation commands are NOT flagged — they pass through as text
-        // for the log consumer to render.
-        for line in [
-            "::error file=a.rs,line=1::boom",
-            "::warning::careful",
-            "::notice::fyi",
-            "::debug::detail",
-        ] {
-            assert!(
-                uninterpreted_commands_in_line(line).is_empty(),
-                "'{line}' must not be flagged"
-            );
-        }
-        // Plain text never warns.
-        assert!(uninterpreted_commands_in_line("just text").is_empty());
     }
 }

@@ -116,8 +116,8 @@ pub(crate) async fn checkout(
             // test-merge commit living on `refs/pull/N/{merge,head}`, and
             // `with: ref` may name a ref clone skipped or a sha (needs
             // `uploadpack.allowReachableSHA1InWant` server-side). Fetch the
-            // candidates in order — explicit ref, head ref, the raw target —
-            // and detach once the object lands.
+            // candidates in order — explicit ref, head ref, the per-run pin
+            // ref, the raw target — and detach once the object lands.
             let mut specs: Vec<String> = Vec::new();
             if let Some(r) = ref_override {
                 specs.push(r);
@@ -127,9 +127,18 @@ pub(crate) async fn checkout(
                     specs.push(r.to_string());
                 }
             }
+            // `refs/actions/runs/<run_id>` pins the recorded sha — survives
+            // `refs/pull/N/merge` rebuilds between event and rerun.
+            if let Some(run_id) = task.run_id.as_deref() {
+                let pin = format!("refs/actions/runs/{run_id}");
+                if !specs.iter().any(|s| s == &pin) {
+                    specs.push(pin);
+                }
+            }
             if !specs.iter().any(|s| s == &target) {
                 specs.push(target.clone());
             }
+            let sha_target = target.len() == 40 && target.chars().all(|c| c.is_ascii_hexdigit());
             let mut checked_out = false;
             for spec in specs {
                 let mut args =
@@ -148,8 +157,27 @@ pub(crate) async fn checkout(
                     continue;
                 }
                 // A ref-spec fetch only sets FETCH_HEAD; a sha fetch leaves the
-                // object for `checkout <target>` to find. Try both.
+                // object for `checkout <target>` to find. Try both — but for a
+                // sha target, FETCH_HEAD may resolve to a different commit
+                // (the ref moved since the run was queued); checking it out
+                // would silently run the wrong code, so verify the match.
+                let fetch_head = Command::new("git")
+                    .args(["rev-parse", "--verify", "FETCH_HEAD"])
+                    .current_dir(&dest)
+                    .output()
+                    .await
+                    .ok()
+                    .filter(|o| o.status.success())
+                    .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
                 for cand in [target.as_str(), "FETCH_HEAD"] {
+                    if cand == "FETCH_HEAD"
+                        && sha_target
+                        && !fetch_head
+                            .as_deref()
+                            .is_some_and(|h| h.eq_ignore_ascii_case(&target))
+                    {
+                        continue;
+                    }
                     let mut cmd = Command::new("git");
                     cmd.args(["checkout", cand]).current_dir(&dest);
                     if run_streamed(&mut cmd, env, logger, timeout).await? == 0 {
@@ -268,6 +296,7 @@ mod tests {
             id_token_request_token: None,
             cache_url: None,
             cache_token: None,
+            vars: None,
         }
     }
 
@@ -296,9 +325,15 @@ mod tests {
             run_id: "r".into(),
             job_id: "j".into(),
             mask_values: &[],
+            extra_masks: Mutex::new(Vec::new()),
+            stop_token: Mutex::new(None),
+            partial_line: Mutex::new(String::new()),
+            pending_warnings: Mutex::new(Vec::new()),
             cancelled: AtomicBool::new(false),
             log_cursor: AtomicI64::new(0),
             seen_cmd_warns: Mutex::new(std::collections::BTreeSet::new()),
+            runner_temp: std::sync::OnceLock::new(),
+            step_debug: AtomicBool::new(false),
         }
     }
 
@@ -379,6 +414,67 @@ mod tests {
         .expect("checkout must fetch the pull merge ref and detach at the sha");
         assert_eq!(git(&ws, &["rev-parse", "HEAD"]), merge);
         assert!(ws.join("pr.txt").exists(), "merge tree materialized");
+    }
+
+    /// Rerun-after-ref-move: `refs/pull/1/merge` gets rebuilt to a *new* merge
+    /// commit, but the run's recorded sha stays pinned under
+    /// `refs/actions/runs/<run_id>`. Checkout must land the recorded sha, not
+    /// the moved FETCH_HEAD tip.
+    #[tokio::test]
+    async fn checkout_stale_merge_sha_uses_run_pin() {
+        let base = tempfile::tempdir().unwrap();
+        let (remote, merge_v1) = seed_pull_merge_remote(base.path());
+
+        // Rebuild the merge ref at a new commit (as a second pull event would)
+        // and pin the original sha under the run ref.
+        let work = base.path().join("seed");
+        std::fs::write(work.join("v2.txt"), "v2\n").unwrap();
+        git(&work, &["add", "."]);
+        git(&work, &["commit", "-m", "v2"]);
+        let v2_tip = git(&work, &["rev-parse", "HEAD"]);
+        let tree = git(&work, &["rev-parse", "HEAD^{tree}"]);
+        let merge_v2 = git(
+            &work,
+            &["commit-tree", &tree, "-p", &v2_tip, "-m", "merge v2"],
+        );
+        let remote_s = remote.to_string_lossy().to_string();
+        let merge_spec = format!("{merge_v2}:refs/pull/1/merge");
+        git(&work, &["push", "--force", &remote_s, &merge_spec]);
+        // Pin the ORIGINAL merge under the run ref — same reachability the
+        // API's `update_ref` write creates.
+        let pin_spec = format!("{merge_v1}:refs/actions/runs/run-9");
+        git(&work, &["push", "--force", &remote_s, &pin_spec]);
+        // Production hides the pin namespace from advertisement; the pin only
+        // serves sha-in-want reachability. Match that so the test exercises
+        // the real path instead of a trivially-advertised clone.
+        git(&remote, &["config", "uploadpack.hideRefs", "refs/actions/"]);
+
+        let client = Client::new("", None);
+        let logger = test_logger(&client);
+        let config = test_config(base.path());
+        let ws = base.path().join("ws");
+        std::fs::create_dir_all(&ws).unwrap();
+
+        let task = Task {
+            run_id: Some("run-9".into()),
+            head_sha: Some(merge_v1.clone()),
+            head_ref: Some("refs/pull/1/merge".into()),
+            repository_owner: Some("o".into()),
+            repository_name: Some("remote".into()),
+            ..base_task()
+        };
+        checkout(
+            &task,
+            &config,
+            &ws,
+            &serde_json::Map::new(),
+            &[],
+            &logger,
+            Duration::from_secs(60),
+        )
+        .await
+        .expect("checkout must land the pinned sha, not the moved merge tip");
+        assert_eq!(git(&ws, &["rev-parse", "HEAD"]), merge_v1);
     }
 
     #[tokio::test]

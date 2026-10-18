@@ -70,6 +70,23 @@ pub async fn append_job_log(
     Ok(())
 }
 
+/// Delete the plain and compressed-at-rest log files for a job — rerun and
+/// stale-claim requeues call this so a new attempt starts with an empty log
+/// instead of appending to the dead attempt's output. Missing files are fine.
+pub async fn delete_job_log(log_dir: &Path, run_id: &str, job_id: &str) -> Result<(), String> {
+    for path in [
+        job_log_path(log_dir, run_id, job_id)?,
+        job_log_gz_path(log_dir, run_id, job_id)?,
+    ] {
+        match fs::remove_file(&path).await {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(format!("remove log {}: {e}", path.display())),
+        }
+    }
+    Ok(())
+}
+
 /// Byte size of the job log on disk — 0 when absent. Stat-only, unlike
 /// [`read_job_log`] which materializes the file.
 pub async fn job_log_size(log_dir: &Path, run_id: &str, job_id: &str) -> Result<u64, String> {

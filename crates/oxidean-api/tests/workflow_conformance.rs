@@ -36,6 +36,9 @@ struct Case {
     kind: String, // run | validation_failure | queued | never_dispatch
     runner_labels: Option<Vec<String>>,
     secrets: Option<HashMap<String, String>>,
+    /// Repo-level configuration variables (`vars` context) seeded on the
+    /// fixture repo.
+    vars: Option<HashMap<String, String>>,
     head_ref: Option<String>,
     /// Push the same workflow twice — exercises concurrency supersede.
     second_dispatch: Option<bool>,
@@ -75,6 +78,7 @@ fn base_case(id: &str) -> Case {
         kind: "run".into(),
         runner_labels: None,
         secrets: None,
+        vars: None,
         head_ref: None,
         second_dispatch: None,
         expect_run: None,
@@ -245,6 +249,11 @@ async fn fixture(case: &Case) -> Fixture {
         )
         .await
         .unwrap();
+    }
+    for (name, value) in case.vars.clone().unwrap_or_default() {
+        db.upsert_action_variable(&Uuid::new_v4().to_string(), &repo.id, &name, &value)
+            .await
+            .unwrap();
     }
 
     // fetch_task re-reads the workflow via {repos_dir}/{owner}/{repo}.git.
@@ -813,6 +822,7 @@ conformance_case!(action_metadata_warnings, "action-metadata-warnings");
 conformance_case!(step_conclusion_coe, "step-conclusion-coe");
 conformance_case!(step_if_false_literal, "step-if-false-literal");
 conformance_case!(expr_vars_empty, "expr-vars-empty");
+conformance_case!(vars_context, "vars-context");
 conformance_case!(cache_service_absent, "cache-service-absent");
 
 /// Every `cases.json` entry is wired to a generated test and every corpus

@@ -51,9 +51,9 @@ download, annotations, `workflow_job` webhook.
 | 5. Jobs |28 | 1 | 0 | 1 |
 | 6. Steps | 17 | 1 | 1 | 1 |
 | 7. Expressions | 15 | 0 | 0 | 0 |
-| 8. Contexts |19 | 4 | 1 | 0 |
-| 9. Workflow commands & environment files | 7 | 7 | 8 | 0 |
-| 10. Default environment variables | 39 | 0 | 9 | 0 |
+| 8. Contexts |20 | 4 | 0 | 0 |
+| 9. Workflow commands & environment files | 17 | 4 | 1 | 0 |
+| 10. Default environment variables | 40 | 0 | 8 | 0 |
 | 11. Action metadata — action.yml | 14 | 2 | 1 | 1 |
 | 12. Reusable workflows |9 | 1 | 0 | 0 |
 | 13. Artifacts | 10 | 1 | 2 | 0 |
@@ -279,7 +279,7 @@ that we also restrict.
 |------|---------|--------|----------|-------|
 | `ctx.github` | `github` context — sha, ref, ref_name, ref_type, event_name, event payload, repository*, actor*, workflow*, job, run_*, server_url, api_url, base_ref, head_ref, workspace, token | partial | case:expr-github-ctx, test:crates/oxidean-runner/src/exec/context.rs::runner_context | Missing `graphql_url`, `ref_protected`, `retention_days`, `triggering_actor`, `action`, `action_path`, `action_ref`, `action_repository`, `action_status`. Closes in P13. |
 | `ctx.env` | `env` context — workflow/job/step layering | supported | case:expr-env-layering, case:workflow-env | |
-| `ctx.vars` | `vars` context — configuration variables | unsupported | case:expr-vars-empty | Vars are not stored yet; the context is empty rather than absent. Closes in P13. |
+| `ctx.vars` | `vars` context — configuration variables | supported | case:expr-vars-empty, case:vars-context, test:crates/oxidean-api/tests/actions_vars.rs::actions_vars_merge_precedence | Repo/org/environment stores; narrowest scope wins on collisions; values are plaintext by design. |
 | `ctx.job` | `job` context — status | partial | test:crates/oxidean-runner/src/exec/context.rs::sync_job_ctx | `status` only; `container`/`services` sub-objects not populated. P13. |
 | `ctx.jobs` | `jobs.<id>.result` / `.outputs` | supported | case:needs-outputs | |
 | `ctx.steps` | `steps.<id>.outcome` / `.conclusion` / `.outputs` | supported | case:expr-steps-context, case:step-conclusion-coe | |
@@ -306,27 +306,33 @@ that we also restrict.
 
 Source: <https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-commands>
 
-Log commands (`::name::`) are echoed to the job log. Behaviour-changing
-commands the runner does not interpret produce a `::warning::` — never a
-silent no-op. Annotation rendering (error/warning/notice decorators in the
-UI) is a P16 UI item; the command text is preserved in the log either way.
+Log commands (`::name::`) pass through the step-output stream;
+the runner interprets the behaviour-changing commands itself: file-targeted
+commands (`set-output`, `save-state`, `set-env`, `add-path`) write into the
+same `runner_temp` files the `$GITHUB_*` protocol drains, `add-mask` extends
+the job mask list, `stop-commands` pauses interpretation, and `group`/
+`endgroup`/`debug` translate to the `##[…]` log markers the UI folds.
+Uninterpreted commands (`add-matcher`/`remove-matcher`) produce a
+`::warning::` — never a silent no-op. Annotation rendering (error/warning/
+notice decorators in the UI) is a P16 UI item; the command text is preserved
+in the log either way.
 
 | `id` | Feature | Status | Evidence | Notes |
 |------|---------|--------|----------|-------|
-| `cmd.error` | `::error file=…,line=…::msg` — error annotation | partial | test:crates/oxidean-runner/src/exec/mod.rs::warn_uninterpreted_commands_covers_behavior_changing_commands | Text is logged; the annotation is not parsed or rendered. P16 annotations. |
-| `cmd.warning` | `::warning::` annotation | partial | test:crates/oxidean-runner/src/exec/mod.rs::warn_uninterpreted_commands_covers_behavior_changing_commands | Same as `cmd.error`. |
-| `cmd.notice` | `::notice::` annotation | partial | test:crates/oxidean-runner/src/exec/mod.rs::warn_uninterpreted_commands_covers_behavior_changing_commands | Same as `cmd.error`. |
-| `cmd.debug` | `::debug::` shown only with ACTIONS_STEP_DEBUG | unsupported | test:crates/oxidean-runner/src/exec/mod.rs::warn_uninterpreted_commands_covers_behavior_changing_commands | Debug lines are always logged as text; the ACTIONS_STEP_DEBUG gate does not exist. P16. |
-| `cmd.group` | `::group::`/`::endgroup::` collapsible log sections | unsupported | test:crates/oxidean-runner/src/exec/mod.rs::warn_uninterpreted_commands_covers_behavior_changing_commands | Warns and logs the text; no folding. P16 log rendering. |
-| `cmd.add-mask` | `::add-mask::` registers a runtime mask | unsupported | test:crates/oxidean-runner/src/exec/mod.rs::warn_uninterpreted_commands_covers_behavior_changing_commands | Warns; repo/env secrets are always masked already, but dynamic masks are not registered. P13 command gaps. |
-| `cmd.set-output` | `::set-output::` (deprecated upstream) | unsupported | test:crates/oxidean-runner/src/exec/mod.rs::warn_uninterpreted_commands_covers_behavior_changing_commands | Warns; use `$GITHUB_OUTPUT`. decision: not planned — deprecated upstream. |
-| `cmd.save-state` | `::save-state::` (deprecated upstream) | unsupported | test:crates/oxidean-runner/src/exec/mod.rs::warn_uninterpreted_commands_covers_behavior_changing_commands | Warns; use `$GITHUB_STATE`. decision: not planned — deprecated upstream. |
-| `cmd.set-env` | `::set-env::` — disabled upstream unless ACTIONS_ALLOW_UNSECURE_COMMANDS | partial | test:crates/oxidean-runner/src/exec/mod.rs::warn_uninterpreted_commands_covers_behavior_changing_commands | GitHub hard-errors; we warn and continue without applying. Use `$GITHUB_ENV`. decision: matches GitHub's disabled default, different signal. |
-| `cmd.add-path` | `::add-path::` — same disabled-by-default family | partial | test:crates/oxidean-runner/src/exec/mod.rs::warn_uninterpreted_commands_covers_behavior_changing_commands | Same as `cmd.set-env`; use `$GITHUB_PATH`. |
-| `cmd.stop-commands` | `::stop-commands::{token}`/`::{token}::` | unsupported | test:crates/oxidean-runner/src/exec/mod.rs::warn_uninterpreted_commands_covers_behavior_changing_commands | Warns; command processing is never paused — a line looking like a command inside a stop block still warns. P13. |
-| `cmd.echo` | `::echo::on` / `::echo::off` | unsupported | test:crates/oxidean-runner/src/exec/mod.rs::warn_uninterpreted_commands_covers_behavior_changing_commands | Warns; all commands echo anyway. P13. |
-| `cmd.add-matcher` | `::add-matcher::`/`::remove-matcher::` problem matchers | unsupported | test:crates/oxidean-runner/src/exec/mod.rs::warn_uninterpreted_commands_covers_behavior_changing_commands | Warns; matchers are not installed. P16 annotations. |
-| `cmd.escaping` | `%25 %0D %0A %3A %2C` command-data escaping | partial | test:crates/oxidean-runner/src/exec/mod.rs::warn_uninterpreted_commands_covers_behavior_changing_commands | Commands are not parsed, so escape sequences pass through literally — consistent with not interpreting them. |
+| `cmd.error` | `::error file=…,line=…::msg` — error annotation | partial | test:crates/oxidean-runner/src/exec/commands.rs::annotations_and_text_pass_through | Text is logged; the annotation is not parsed or rendered. P16 annotations. |
+| `cmd.warning` | `::warning::` annotation | partial | test:crates/oxidean-runner/src/exec/commands.rs::annotations_and_text_pass_through | Same as `cmd.error`. |
+| `cmd.notice` | `::notice::` annotation | partial | test:crates/oxidean-runner/src/exec/commands.rs::annotations_and_text_pass_through | Same as `cmd.error`. |
+| `cmd.debug` | `::debug::` shown only with ACTIONS_STEP_DEBUG | supported | test:crates/oxidean-runner/src/exec/commands.rs::debug_lines_gate_on_step_debug | Forwarded when `ACTIONS_STEP_DEBUG` (or `ACTIONS_RUNNER_DEBUG`) is truthy in job env, `vars`, or secrets; otherwise dropped. |
+| `cmd.group` | `::group::`/`::endgroup::` collapsible log sections | supported | test:crates/oxidean-runner/src/exec/commands.rs::group_commands_emit_markers | Translated to `##[group]`/`##[endgroup]` markers; the log viewer folds them. |
+| `cmd.add-mask` | `::add-mask::` registers a runtime mask | supported | test:crates/oxidean-runner/src/exec/commands.rs::add_mask_extends_masks | Appends to the job's mask list alongside repo/env secrets. |
+| `cmd.set-output` | `::set-output::` (deprecated upstream) | supported | test:crates/oxidean-runner/src/exec/commands.rs::file_commands_land_in_runner_temp_files | Applies via `$GITHUB_OUTPUT` + deprecation warning — deprecated upstream but still interpreted there. |
+| `cmd.save-state` | `::save-state::` (deprecated upstream) | supported | test:crates/oxidean-runner/src/exec/commands.rs::file_commands_land_in_runner_temp_files | Applies via `$GITHUB_STATE` + deprecation warning. |
+| `cmd.set-env` | `::set-env::` — disabled upstream unless ACTIONS_ALLOW_UNSECURE_COMMANDS | supported | test:crates/oxidean-runner/src/exec/commands.rs::file_commands_land_in_runner_temp_files | Applies via `$GITHUB_ENV` + deprecation warning (Gitea/`act` parity — GitHub hard-fails it by default). |
+| `cmd.add-path` | `::add-path::` — same disabled-by-default family | supported | test:crates/oxidean-runner/src/exec/commands.rs::file_commands_land_in_runner_temp_files | Applies via `$GITHUB_PATH` + deprecation warning. |
+| `cmd.stop-commands` | `::stop-commands::{token}`/`::{token}::` | supported | test:crates/oxidean-runner/src/exec/commands.rs::stop_commands_suppresses_until_token | All lines literal until the matching `::{token}::`; a missing token warns once. |
+| `cmd.echo` | `::echo::on` / `::echo::off` | supported | test:crates/oxidean-runner/src/exec/commands.rs::echo_toggle_and_matchers_are_consumed | Interpreted no-op — this runner never echoes commands, so the toggle has nothing to gate. |
+| `cmd.add-matcher` | `::add-matcher::`/`::remove-matcher::` problem matchers | unsupported | test:crates/oxidean-runner/src/exec/commands.rs::echo_toggle_and_matchers_are_consumed | Warns and drops the line; matchers are not installed. P16 annotations. |
+| `cmd.escaping` | `%25 %0D %0A %3A %2C` command-data escaping | supported | test:crates/oxidean-runner/src/exec/commands.rs::escaped_command_data_decodes | `%0D`/`%0A`/`%25` decode in payloads; `%3A`/`%2C` additionally decode in property values. |
 | `envfile.env` | `$GITHUB_ENV` — `KEY=value` and `KEY<<DELIM` heredoc, later steps see it | supported | test:crates/oxidean-runner/src/exec/mod.rs::env_file_simple_and_blank_lines, test:crates/oxidean-runner/src/exec/mod.rs::env_file_heredoc, case:run-env-step | |
 | `envfile.env-later-wins` | Later entries override earlier ones | supported | test:crates/oxidean-runner/src/exec/mod.rs::env_file_later_wins | |
 | `envfile.output` | `$GITHUB_OUTPUT` → `steps.<id>.outputs.*` | supported | case:needs-outputs, test:crates/oxidean-runner/src/exec/mod.rs::path_file_parsing | |
@@ -392,7 +398,7 @@ and `OXIDEAN_*` twins (same value, both spellings) unless noted.
 | `env.runner-tool-cache` | `RUNNER_TOOL_CACHE` | supported | test:crates/oxidean-runner/src/exec/mod.rs::job_env_values | setup-* actions honour it. |
 | `env.actions-id-token-request` | `ACTIONS_ID_TOKEN_REQUEST_URL`/`_TOKEN` — OIDC mint credentials | supported | test:crates/oxidean-api/tests/actions_phase7.rs::p7_id_token_request_credentials | Present only when `permissions.id-token: write` survives provenance gating. |
 | `env.actions-cache-url` | `ACTIONS_CACHE_URL`/`RESULTS_URL`/`RUNTIME_TOKEN`/`RUNTIME_URL` | supported | case:cache-service-absent,test:crates/oxidean-api/tests/actions_cache_service.rs::cache_roundtrip_exact_restore | Per-job runtime token minted at claim; `RESULTS_URL`/`RUNTIME_URL` mirror `CACHE_URL`. |
-| `env.actions-step-debug` | `ACTIONS_STEP_DEBUG` — enables `::debug::` | unsupported | test:crates/oxidean-runner/src/exec/mod.rs::warn_uninterpreted_commands_covers_behavior_changing_commands | P16 (with `cmd.debug`). |
+| `env.actions-step-debug` | `ACTIONS_STEP_DEBUG` — enables `::debug::` | supported | test:crates/oxidean-runner/src/exec/commands.rs::debug_lines_gate_on_step_debug, test:crates/oxidean-api/tests/actions_vars.rs::actions_vars_injected_into_fetch_task | Read from job `env:`, `vars`, and secrets (truthy `"true"`/`"1"`); `ACTIONS_RUNNER_DEBUG` implies the same log surface. |
 
 ## 11. Action metadata — action.yml (`action.`)
 

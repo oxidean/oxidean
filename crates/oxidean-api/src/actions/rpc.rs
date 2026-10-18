@@ -18,18 +18,21 @@ use oxidean_core::{
     ActionRunGetResponse, ActionRunMutationRequest, ActionRunMutationResponse, ActionRunPublic,
     ActionRunnerPublic, ActionRunsListRequest, ActionRunsListResponse, ActionSecretDeleteRequest,
     ActionSecretMetaPublic, ActionSecretPutRequest, ActionSecretsListRequest,
-    ActionSecretsListResponse, ActionSetEnabledRequest, ActionWorkflowFileError,
-    ActionWorkflowPublic, ActionWorkflowsListRequest, ActionWorkflowsListResponse, AppError,
+    ActionSecretsListResponse, ActionSetEnabledRequest, ActionVariablePublic,
+    ActionVariablesDeleteRequest, ActionVariablesListRequest, ActionVariablesListResponse,
+    ActionVariablesPutRequest, ActionWorkflowFileError, ActionWorkflowPublic,
+    ActionWorkflowsListRequest, ActionWorkflowsListResponse, AppError,
     RepoActionsDefaultPermissionsRequest, RepoActionsDefaultPermissionsResponse,
     RepoActionsEnvironmentDeleteRequest, RepoActionsEnvironmentDeleteResponse,
     RepoActionsEnvironmentGetRequest, RepoActionsEnvironmentResponse,
     RepoActionsEnvironmentSecretDeleteRequest, RepoActionsEnvironmentSecretPutRequest,
     RepoActionsEnvironmentSecretsListRequest, RepoActionsEnvironmentUpsertRequest,
-    RepoActionsEnvironmentsListRequest, RepoActionsEnvironmentsListResponse,
-    RepoActionsForkPrApprovalRequest, RepoActionsForkPrApprovalResponse,
-    RepoActionsPullRequestTargetRequest, RepoActionsPullRequestTargetResponse,
-    RepoActionsSetDefaultPermissionsRequest, RepoActionsSetForkPrApprovalRequest,
-    RepoActionsSetPullRequestTargetRequest,
+    RepoActionsEnvironmentVariableDeleteRequest, RepoActionsEnvironmentVariablePutRequest,
+    RepoActionsEnvironmentVariablesListRequest, RepoActionsEnvironmentsListRequest,
+    RepoActionsEnvironmentsListResponse, RepoActionsForkPrApprovalRequest,
+    RepoActionsForkPrApprovalResponse, RepoActionsPullRequestTargetRequest,
+    RepoActionsPullRequestTargetResponse, RepoActionsSetDefaultPermissionsRequest,
+    RepoActionsSetForkPrApprovalRequest, RepoActionsSetPullRequestTargetRequest,
 };
 use oxidean_db::{ActionJobRow, ActionRunFilter, ActionRunRow, ActionRunnerRow};
 
@@ -585,6 +588,191 @@ pub async fn delete_secret(
     let ok = ctx
         .db
         .delete_action_secret_by_name(&accessible.row.id, &req.secret_name)
+        .await
+        .map_err(db_err)?;
+    Ok(serde_json::json!({ "ok": ok }))
+}
+
+/// `repo.actions.variables.list` — Admin; values returned (variables are
+/// plaintext config, not secrets — GitHub GET returns them too).
+pub async fn list_variables(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<ActionVariablesListResponse, AppError> {
+    let _ = require_verified(ctx).await?;
+    let req: ActionVariablesListRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid repo.actions.variables.list input: {e}"),
+        )
+    })?;
+    let accessible = resolve_repo_for_admin(ctx, &req.owner, &req.name).await?;
+    let rows = ctx
+        .db
+        .list_action_variables(&accessible.row.id)
+        .await
+        .map_err(db_err)?;
+    Ok(ActionVariablesListResponse {
+        variables: rows
+            .into_iter()
+            .map(|r| ActionVariablePublic {
+                name: r.name,
+                value: r.value,
+                updated_at: r.updated_at,
+            })
+            .collect(),
+    })
+}
+
+/// `repo.actions.variables.put` — Admin; creates or replaces a variable.
+pub async fn put_variable(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<serde_json::Value, AppError> {
+    let _ = require_verified(ctx).await?;
+    let req: ActionVariablesPutRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid repo.actions.variables.put input: {e}"),
+        )
+    })?;
+    crate::actions::vars::validate_variable_name(&req.variable_name)
+        .map_err(|msg| AppError::new("repo.actions.invalid_variable_name", msg))?;
+    crate::actions::vars::validate_variable_value(&req.value)
+        .map_err(|msg| AppError::new("repo.actions.invalid_variable_value", msg))?;
+    let accessible = resolve_repo_for_admin(ctx, &req.owner, &req.name).await?;
+    // Reuse the existing row's id so referential identity survives edits.
+    let id = ctx
+        .db
+        .find_action_variable(&accessible.row.id, &req.variable_name)
+        .await
+        .map_err(db_err)?
+        .map(|r| r.id)
+        .unwrap_or_else(|| Uuid::new_v4().to_string());
+    ctx.db
+        .upsert_action_variable(&id, &accessible.row.id, &req.variable_name, &req.value)
+        .await
+        .map_err(db_err)?;
+    Ok(serde_json::json!({ "ok": true, "name": req.variable_name }))
+}
+
+/// `repo.actions.variables.delete` — Admin.
+pub async fn delete_variable(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<serde_json::Value, AppError> {
+    let _ = require_verified(ctx).await?;
+    let req: ActionVariablesDeleteRequest = serde_json::from_value(input).map_err(|e| {
+        AppError::new(
+            "rpc.bad_input",
+            format!("invalid repo.actions.variables.delete input: {e}"),
+        )
+    })?;
+    let accessible = resolve_repo_for_admin(ctx, &req.owner, &req.name).await?;
+    let ok = ctx
+        .db
+        .delete_action_variable(&accessible.row.id, &req.variable_name)
+        .await
+        .map_err(db_err)?;
+    Ok(serde_json::json!({ "ok": ok }))
+}
+
+/// `repo.actions.environments.variablesList` — Admin; values included.
+pub async fn list_environment_variables(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<ActionVariablesListResponse, AppError> {
+    let _ = require_verified(ctx).await?;
+    let req: RepoActionsEnvironmentVariablesListRequest =
+        serde_json::from_value(input).map_err(|e| {
+            AppError::new(
+                "rpc.bad_input",
+                format!("invalid repo.actions.environments.variablesList input: {e}"),
+            )
+        })?;
+    let accessible = resolve_repo_for_admin(ctx, &req.owner, &req.name).await?;
+    let env = ctx
+        .db
+        .find_action_environment(&accessible.row.id, &req.environment)
+        .await
+        .map_err(db_err)?
+        .ok_or_else(|| AppError::new("repo.actions.env_not_found", "environment not found"))?;
+    let rows = ctx
+        .db
+        .list_action_environment_variables(&env.id)
+        .await
+        .map_err(db_err)?;
+    Ok(ActionVariablesListResponse {
+        variables: rows
+            .into_iter()
+            .map(|r| ActionVariablePublic {
+                name: r.name,
+                value: r.value,
+                updated_at: r.updated_at,
+            })
+            .collect(),
+    })
+}
+
+/// `repo.actions.environments.variablesPut` — Admin.
+pub async fn put_environment_variable(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<serde_json::Value, AppError> {
+    let _ = require_verified(ctx).await?;
+    let req: RepoActionsEnvironmentVariablePutRequest =
+        serde_json::from_value(input).map_err(|e| {
+            AppError::new(
+                "rpc.bad_input",
+                format!("invalid repo.actions.environments.variablesPut input: {e}"),
+            )
+        })?;
+    crate::actions::vars::validate_variable_name(&req.variable_name)
+        .map_err(|msg| AppError::new("repo.actions.invalid_variable_name", msg))?;
+    crate::actions::vars::validate_variable_value(&req.value)
+        .map_err(|msg| AppError::new("repo.actions.invalid_variable_value", msg))?;
+    let accessible = resolve_repo_for_admin(ctx, &req.owner, &req.name).await?;
+    let env = ctx
+        .db
+        .find_action_environment(&accessible.row.id, &req.environment)
+        .await
+        .map_err(db_err)?
+        .ok_or_else(|| AppError::new("repo.actions.env_not_found", "environment not found"))?;
+    ctx.db
+        .upsert_action_environment_variable(
+            &Uuid::new_v4().to_string(),
+            &env.id,
+            &req.variable_name,
+            &req.value,
+        )
+        .await
+        .map_err(db_err)?;
+    Ok(serde_json::json!({ "ok": true, "name": req.variable_name }))
+}
+
+/// `repo.actions.environments.variablesDelete` — Admin.
+pub async fn delete_environment_variable(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<serde_json::Value, AppError> {
+    let _ = require_verified(ctx).await?;
+    let req: RepoActionsEnvironmentVariableDeleteRequest =
+        serde_json::from_value(input).map_err(|e| {
+            AppError::new(
+                "rpc.bad_input",
+                format!("invalid repo.actions.environments.variablesDelete input: {e}"),
+            )
+        })?;
+    let accessible = resolve_repo_for_admin(ctx, &req.owner, &req.name).await?;
+    let env = ctx
+        .db
+        .find_action_environment(&accessible.row.id, &req.environment)
+        .await
+        .map_err(db_err)?
+        .ok_or_else(|| AppError::new("repo.actions.env_not_found", "environment not found"))?;
+    let ok = ctx
+        .db
+        .delete_action_environment_variable(&env.id, &req.variable_name)
         .await
         .map_err(db_err)?;
     Ok(serde_json::json!({ "ok": ok }))
@@ -1906,7 +2094,17 @@ pub async fn rerun_run(
     ctx: &RpcCtx,
     input: serde_json::Value,
 ) -> Result<ActionRunMutationResponse, AppError> {
-    let (req, accessible, _run) = run_mutation_target(ctx, input, "rerunRun").await?;
+    let (req, accessible, run) = run_mutation_target(ctx, input, "rerunRun").await?;
+    // GitHub forbids re-running an in-flight run — only a finished run (or a
+    // finished job inside one) can be requeued. Without the guard a zombie
+    // runner from the still-open attempt would keep streaming into the new
+    // attempt's reset log.
+    if run.finished_at.is_none() {
+        return Err(AppError::new(
+            "repo.actions.run_not_finished",
+            "workflow run has not finished",
+        ));
+    }
     // Optional targeting: `job_id` requeues a single job ("Re-run this job"),
     // `failed_only` requeues just failed/cancelled jobs ("Re-run failed jobs").
     if let Some(job_id) = req.job_id.as_deref() {
@@ -1919,8 +2117,15 @@ pub async fn rerun_run(
         if job.run_id != req.run_id {
             return Err(not_found());
         }
+        if job.finished_at.is_none() {
+            return Err(AppError::new(
+                "repo.actions.job_not_finished",
+                "job has not finished",
+            ));
+        }
     }
-    ctx.db
+    let reset_jobs = ctx
+        .db
         .requeue_action_run(
             &req.run_id,
             req.failed_only.unwrap_or(false),
@@ -1928,6 +2133,20 @@ pub async fn rerun_run(
         )
         .await
         .map_err(db_err)?;
+    // Rerun replaces the prior attempt's state: drop each reset job's stored
+    // log (plain + compressed-at-rest) so the new attempt starts empty, and
+    // revoke the dead attempt's job tokens so a lingering runner cannot
+    // append into the new attempt.
+    for job_id in &reset_jobs {
+        if let Err(e) =
+            crate::actions::logs::delete_job_log(&ctx.actions_log_dir, &req.run_id, job_id).await
+        {
+            tracing::warn!(error = %e, job_id = %job_id, "rerun log wipe failed");
+        }
+        if let Err(e) = ctx.db.revoke_action_job_token_for_job(job_id).await {
+            tracing::warn!(error = %e, job_id = %job_id, "rerun token revoke failed");
+        }
+    }
     // Requeue cleared `timeout_at` — restart job deadlines from the
     // evaluated `timeout_seconds` captured in the durable payload, and let
     // the scheduler re-gate `waiting` needs-jobs whose upstreams stayed

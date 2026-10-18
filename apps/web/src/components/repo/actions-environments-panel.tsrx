@@ -9,7 +9,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { List, ListRow } from "@/components/ui/list";
 import { apiClient } from "@/lib/api-client";
-import { actionsEnvironmentSecretsQuery, actionsEnvironmentsQuery } from "@/lib/actions-queries";
+import {
+  actionsEnvironmentSecretsQuery,
+  actionsEnvironmentVariablesQuery,
+  actionsEnvironmentsQuery,
+} from "@/lib/actions-queries";
 import { toastError, toastSuccess } from "@/lib/toast";
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
@@ -129,6 +133,123 @@ function EnvSecrets(props: { owner: string; name: string; env: string }) @{
         </li>;
       } @empty {
         <li className="text-[12px] text-muted-foreground">No environment secrets.</li>;
+      }
+    </ul>
+  </div>;
+}
+
+/** Per-environment variable list — plaintext values, `vars.*` context. */
+function EnvVariables(props: { owner: string; name: string; env: string }) @{
+  const qc = useQueryClient();
+  const q = useQuery(actionsEnvironmentVariablesQuery(props.owner, props.name, props.env));
+  const variables = q.data?.variables ?? [];
+  const [varName, setVarName] = useState("");
+  const [varValue, setVarValue] = useState("");
+  const [pending, setPending] = useState(false);
+  const qk = ["repo", "actions", "env-variables", props.owner, props.name, props.env] as const;
+
+  async function put() {
+    const vn = varName.trim();
+    if (!vn) return;
+    setPending(true);
+    try {
+      const res = await apiClient.repo.actions.environments.variablesPut({
+        owner: props.owner,
+        name: props.name,
+        environment: props.env,
+        variable_name: vn,
+        value: varValue,
+      });
+      if (!res.ok) {
+        toastError(res.error.message || "Could not save variable.");
+        setPending(false);
+        return;
+      }
+      setVarName("");
+      setVarValue("");
+      await qc.invalidateQueries({ queryKey: qk });
+      toastSuccess("Environment variable saved.");
+      setPending(false);
+    } catch {
+      toastError(NETWORK_ERROR);
+      setPending(false);
+    }
+  }
+
+  async function del(vn: string) {
+    try {
+      const res = await apiClient.repo.actions.environments.variablesDelete({
+        owner: props.owner,
+        name: props.name,
+        environment: props.env,
+        variable_name: vn,
+      });
+      if (!res.ok) {
+        toastError(res.error.message || "Could not delete variable.");
+        return;
+      }
+      await qc.invalidateQueries({ queryKey: qk });
+      toastSuccess("Environment variable deleted.");
+    } catch {
+      toastError(NETWORK_ERROR);
+    }
+  }
+
+  <div className="mt-3 flex flex-col gap-2" data-testid={`env-vars-${props.env}`}>
+    <p className="text-[12px] font-medium text-muted-foreground">Variables (plaintext)</p>
+    <form
+      className="flex flex-wrap items-end gap-2"
+      method="post"
+      action="#"
+      onSubmit={(e) => {
+        e.preventDefault();
+        void put();
+      }}
+    >
+      <Input
+        value={varName}
+        onInput={(e) => setVarName((e.target as HTMLInputElement).value)}
+        placeholder="VAR_NAME"
+        className="h-8 w-44 font-mono text-[12px]"
+        data-testid={`env-var-name-${props.env}`}
+      />
+      <Input
+        value={varValue}
+        onInput={(e) => setVarValue((e.target as HTMLInputElement).value)}
+        placeholder="value"
+        className="h-8 w-52 text-[12px]"
+        data-testid={`env-var-value-${props.env}`}
+      />
+      <Button
+        type="submit"
+        size="sm"
+        variant="outline"
+        disabled={pending || !varName.trim()}
+        data-testid={`env-var-save-${props.env}`}
+      >
+        Add variable
+      </Button>
+    </form>
+    <ul className="flex flex-col gap-1">
+      @for (const v of variables; key v.name) {
+        <li className="flex items-center gap-3 text-[13px]">
+          <span className="font-mono">
+            {v.name as string}
+            <span className="ml-2 font-normal text-muted-foreground">
+              {v.value as string}
+            </span>
+          </span>
+          <button
+            type="button"
+            className="text-[12px] text-muted-foreground underline-offset-2 hover:text-destructive hover:underline"
+            data-testid={`env-var-delete-${props.env}-${v.name}`}
+            onClick={() => void del(v.name)}
+          >
+            Delete
+          </button>
+        </li>;
+      } @empty {
+        <li className="text-[12px] text-muted-foreground">No environment variables.</li>;
       }
     </ul>
   </div>;
@@ -450,6 +571,7 @@ export function ActionsEnvironmentsPanel(props: {
           @if (expanded[env.name]) {
             <div className="border-t border-border px-3 py-3">
               <EnvSecrets owner={props.owner} name={props.name} env={env.name} />
+              <EnvVariables owner={props.owner} name={props.name} env={env.name} />
             </div>;
           }
           @if (editing === env.name) {

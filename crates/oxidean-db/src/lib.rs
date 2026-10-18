@@ -3453,6 +3453,138 @@ impl Database {
         actions::delete_secret_by_name(self.require_pool()?, repository_id, name).await
     }
 
+    // ---- configuration variables (`vars` context — plaintext) -------------
+
+    pub async fn upsert_action_variable(
+        &self,
+        id: &str,
+        repository_id: &str,
+        name: &str,
+        value: &str,
+    ) -> Result<(), String> {
+        actions::upsert_variable(self.require_pool()?, id, repository_id, name, value).await
+    }
+
+    pub async fn find_action_variable(
+        &self,
+        repository_id: &str,
+        name: &str,
+    ) -> Result<Option<actions::ActionVariableRow>, String> {
+        actions::find_variable_by_name(self.require_pool()?, repository_id, name).await
+    }
+
+    pub async fn delete_action_variable(
+        &self,
+        repository_id: &str,
+        name: &str,
+    ) -> Result<bool, String> {
+        actions::delete_variable(self.require_pool()?, repository_id, name).await
+    }
+
+    pub async fn list_action_variables(
+        &self,
+        repository_id: &str,
+    ) -> Result<Vec<actions::ActionVariableRow>, String> {
+        actions::list_variables(self.require_pool()?, repository_id).await
+    }
+
+    pub async fn list_action_variable_values(
+        &self,
+        repository_id: &str,
+    ) -> Result<Vec<actions::VariableValueRow>, String> {
+        actions::list_variable_values(self.require_pool()?, repository_id).await
+    }
+
+    pub async fn upsert_action_org_variable(
+        &self,
+        id: &str,
+        owner_id: &str,
+        name: &str,
+        value: &str,
+        visibility: &str,
+    ) -> Result<(), String> {
+        actions::upsert_org_variable(self.require_pool()?, id, owner_id, name, value, visibility)
+            .await
+    }
+
+    pub async fn find_action_org_variable(
+        &self,
+        owner_id: &str,
+        name: &str,
+    ) -> Result<Option<actions::OrgVariableRow>, String> {
+        actions::find_org_variable_by_name(self.require_pool()?, owner_id, name).await
+    }
+
+    pub async fn delete_action_org_variable(
+        &self,
+        owner_id: &str,
+        name: &str,
+    ) -> Result<bool, String> {
+        actions::delete_org_variable(self.require_pool()?, owner_id, name).await
+    }
+
+    pub async fn list_action_org_variables(
+        &self,
+        owner_id: &str,
+    ) -> Result<Vec<actions::OrgVariableRow>, String> {
+        actions::list_org_variables(self.require_pool()?, owner_id).await
+    }
+
+    pub async fn set_action_org_variable_repos(
+        &self,
+        variable_id: &str,
+        repository_ids: &[String],
+    ) -> Result<(), String> {
+        actions::set_org_variable_repos(self.require_pool()?, variable_id, repository_ids).await
+    }
+
+    pub async fn list_action_org_variable_repos(
+        &self,
+        variable_id: &str,
+    ) -> Result<Vec<String>, String> {
+        actions::list_org_variable_repos(self.require_pool()?, variable_id).await
+    }
+
+    pub async fn list_action_org_variables_for_repo(
+        &self,
+        repository_id: &str,
+    ) -> Result<Vec<actions::VariableValueRow>, String> {
+        actions::list_org_variables_for_repo(self.require_pool()?, repository_id).await
+    }
+
+    pub async fn upsert_action_environment_variable(
+        &self,
+        id: &str,
+        environment_id: &str,
+        name: &str,
+        value: &str,
+    ) -> Result<(), String> {
+        actions::upsert_environment_variable(self.require_pool()?, id, environment_id, name, value)
+            .await
+    }
+
+    pub async fn list_action_environment_variables(
+        &self,
+        environment_id: &str,
+    ) -> Result<Vec<actions::EnvVariableRow>, String> {
+        actions::list_environment_variables(self.require_pool()?, environment_id).await
+    }
+
+    pub async fn delete_action_environment_variable(
+        &self,
+        environment_id: &str,
+        name: &str,
+    ) -> Result<bool, String> {
+        actions::delete_environment_variable(self.require_pool()?, environment_id, name).await
+    }
+
+    pub async fn list_action_environment_variable_values(
+        &self,
+        environment_id: &str,
+    ) -> Result<Vec<actions::VariableValueRow>, String> {
+        actions::list_environment_variable_values(self.require_pool()?, environment_id).await
+    }
+
     pub async fn list_action_runners(&self) -> Result<Vec<actions::ActionRunnerRow>, String> {
         actions::list_runners(self.require_pool()?).await
     }
@@ -3957,12 +4089,15 @@ impl Database {
 
     /// `failed_only` requeues just failed/cancelled jobs; `job_id` requeues a
     /// single job; both unset requeues all jobs.
+    /// Requeue a run for re-run; returns the ids of the jobs whose state was
+    /// reset so the caller can wipe their on-disk logs (rerun replaces the
+    /// prior attempt's output rather than appending to it).
     pub async fn requeue_action_run(
         &self,
         run_id: &str,
         failed_only: bool,
         job_id: Option<&str>,
-    ) -> Result<(), String> {
+    ) -> Result<Vec<String>, String> {
         actions::requeue_run(self.require_pool()?, run_id, failed_only, job_id).await
     }
 

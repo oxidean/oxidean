@@ -98,6 +98,9 @@ pub struct Task {
     pub cache_url: Option<String>,
     /// `ACTIONS_RUNTIME_TOKEN` — per-job bearer for the cache endpoints.
     pub cache_token: Option<String>,
+    /// Configuration variables → `vars` context (repo < org < environment
+    /// merged server-side). Plaintext config, unlike `secrets`.
+    pub vars: Option<HashMap<String, String>>,
 }
 
 impl Task {

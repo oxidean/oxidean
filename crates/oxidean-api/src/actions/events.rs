@@ -400,6 +400,21 @@ async fn dispatch_pull_request_inner(
             hold,
         )
         .await?;
+        // Pin the run's head sha under a per-run ref. `refs/pull/N/merge` is
+        // rebuilt on the next pull event, which orphanages the recorded merge
+        // commit — a rerun would then check out a *different* commit than the
+        // run row claims. The pin keeps the sha reachable so the runner's
+        // `fetch <sha>` (allow-reachable-sha-in-want) always resolves.
+        if let Err(e) = git
+            .update_ref(
+                &event.base_bare,
+                &format!("refs/actions/runs/{run_id}"),
+                &run_sha,
+            )
+            .await
+        {
+            tracing::warn!(error = %e, run_id, "run sha pin failed — rerun may drift to the current ref tip");
+        }
         tracing::info!(run_id, hold, "pull_request run enqueued");
         n += 1;
     }

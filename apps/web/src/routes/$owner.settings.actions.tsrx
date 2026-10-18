@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@octanejs/tanstack-query";
 import { useState } from "octane";
-import { KeyRound } from "@octanejs/lucide";
+import { KeyRound, SlidersHorizontal } from "@octanejs/lucide";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,7 +14,12 @@ import {
   orgSettingsOwner,
 } from "@/components/org/org-settings-shell.tsrx";
 import { usePathname } from "@/lib/pathname.tsrx";
-import { orgActionsSecretReposQuery, orgActionsSecretsQuery } from "@/lib/actions-queries";
+import {
+  orgActionsSecretReposQuery,
+  orgActionsSecretsQuery,
+  orgActionsVariableReposQuery,
+  orgActionsVariablesQuery,
+} from "@/lib/actions-queries";
 import { toastError, toastSuccess } from "@/lib/toast";
 
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
@@ -46,6 +51,17 @@ function SecretReposLine(props: { slug: string; name: string }) @{
   }
 }
 
+/** Selected-visibility repo coverage for one org variable. */
+function VariableReposLine(props: { slug: string; name: string }) @{
+  const reposQ = useQuery(orgActionsVariableReposQuery(props.slug, props.name));
+  const ids = reposQ.data?.repository_ids ?? [];
+  @if (ids.length > 0) {
+    <span className="block text-[12px] text-muted-foreground">
+      {"Repositories: " + ids.join(", ")}
+    </span>;
+  }
+}
+
 /** Org Actions secrets — Admin only; values are write-only. */
 function OrgActionsContent() @{
   const pathname = usePathname();
@@ -59,12 +75,22 @@ function OrgActionsContent() @{
     enabled: Boolean(org),
   });
   const secrets = secretsQ.data?.secrets ?? [];
+  const variablesQ = useQuery({
+    ...orgActionsVariablesQuery(slug),
+    enabled: Boolean(org),
+  });
+  const variables = variablesQ.data?.variables ?? [];
 
   const [secretName, setSecretName] = useState("");
   const [secretValue, setSecretValue] = useState("");
   const [visibility, setVisibility] = useState<string>("all");
   const [repoIds, setRepoIds] = useState("");
   const [pending, setPending] = useState(false);
+  const [varName, setVarName] = useState("");
+  const [varValue, setVarValue] = useState("");
+  const [varVisibility, setVarVisibility] = useState<string>("all");
+  const [varRepoIds, setVarRepoIds] = useState("");
+  const [varPending, setVarPending] = useState(false);
 
   async function put() {
     const sn = secretName.trim();
@@ -112,6 +138,57 @@ function OrgActionsContent() @{
       }
       await qc.invalidateQueries({ queryKey: ["org", "actions", "secrets", slug] });
       toastSuccess("Organization secret deleted.");
+    } catch {
+      toastError(NETWORK_ERROR);
+    }
+  }
+
+  async function putVariable() {
+    const vn = varName.trim();
+    if (!vn) return;
+    setVarPending(true);
+    try {
+      const res = await apiClient.org.actions.variables.put({
+        slug,
+        variable_name: vn,
+        value: varValue,
+        visibility: varVisibility,
+        repository_ids:
+          varVisibility === "selected"
+            ? varRepoIds
+                .split(",")
+                .map((s) => s.trim())
+                .filter(Boolean)
+            : undefined,
+      });
+      if (!res.ok) {
+        toastError(
+          res.error.code === "org.forbidden" ? FORBIDDEN : res.error.message || NETWORK_ERROR,
+        );
+        setVarPending(false);
+        return;
+      }
+      setVarName("");
+      setVarValue("");
+      setVarRepoIds("");
+      await qc.invalidateQueries({ queryKey: ["org", "actions", "variables", slug] });
+      toastSuccess("Organization variable saved.");
+      setVarPending(false);
+    } catch {
+      toastError(NETWORK_ERROR);
+      setVarPending(false);
+    }
+  }
+
+  async function delVariable(vn: string) {
+    try {
+      const res = await apiClient.org.actions.variables.delete({ slug, variable_name: vn });
+      if (!res.ok) {
+        toastError(res.error.message || "Could not delete variable.");
+        return;
+      }
+      await qc.invalidateQueries({ queryKey: ["org", "actions", "variables", slug] });
+      toastSuccess("Organization variable deleted.");
     } catch {
       toastError(NETWORK_ERROR);
     }
@@ -230,6 +307,118 @@ function OrgActionsContent() @{
           <ListRow>
             <span className="text-[14px] text-muted-foreground">
               No organization secrets yet.
+            </span>
+          </ListRow>;
+        }
+      </List>
+
+      <h2 className="mt-10 flex items-center gap-2 text-[18px] font-semibold text-foreground">
+        <SlidersHorizontal aria-hidden size={18} />
+        Actions variables
+      </h2>
+      <p className="mt-1 text-[14px] text-muted-foreground">
+        Plaintext configuration exposed as{" "}
+        <code className="rounded bg-muted px-1 py-0.5 font-mono text-[13px]">vars.*</code> in
+        workflow expressions. Visibility controls which repositories resolve them — a repository
+        variable of the same name takes precedence.
+      </p>
+
+      <form
+        className="mt-6 flex flex-col gap-3"
+        method="post"
+        action="#"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void putVariable();
+        }}
+      >
+        <div className="grid gap-3 sm:grid-cols-3">
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="org-var-name">Name</Label>
+            <Input
+              id="org-var-name"
+              value={varName}
+              onInput={(e) => setVarName((e.target as HTMLInputElement).value)}
+              placeholder="DEPLOY_TARGET"
+              data-testid="org-var-name"
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="org-var-value">Value</Label>
+            <Input
+              id="org-var-value"
+              value={varValue}
+              onInput={(e) => setVarValue((e.target as HTMLInputElement).value)}
+              data-testid="org-var-value"
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="org-var-visibility">Visibility</Label>
+            <select
+              id="org-var-visibility"
+              className="h-9 rounded-md border border-border bg-background px-3 text-[14px] text-foreground"
+              value={varVisibility}
+              data-testid="org-var-visibility"
+              suppressNativeChangeWarning
+              onChange={(e) => setVarVisibility((e.target as HTMLSelectElement).value)}
+            >
+              @for (const o of VISIBILITY_OPTIONS; key o.value) {
+                <option value={o.value}>{o.label as string}</option>;
+              }
+            </select>
+          </div>
+        </div>
+        @if (varVisibility === "selected") {
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="org-var-repos">Repository ids (comma-separated)</Label>
+            <Input
+              id="org-var-repos"
+              value={varRepoIds}
+              onInput={(e) => setVarRepoIds((e.target as HTMLInputElement).value)}
+              placeholder="r-abc, r-def"
+              data-testid="org-var-repos"
+            />
+          </div>;
+        }
+        <div>
+          <Button type="submit" disabled={varPending || !varName.trim()} data-testid="org-var-save">
+            Save variable
+          </Button>
+        </div>
+      </form>
+
+      <List className="mt-6">
+        @for (const v of variables; key v.name) {
+          <ListRow className="items-center justify-between gap-3">
+            <span className="flex flex-col gap-0.5 font-mono text-[14px]">
+              <span className="flex items-center gap-2">
+                {v.name as string}
+                <Badge variant="default" className="text-[10px]">
+                  {
+                    (VISIBILITY_OPTIONS.find((o) => o.value === v.visibility)?.label ??
+                      v.visibility) as string
+                  }
+                </Badge>
+              </span>
+              <span className="font-normal text-muted-foreground">{v.value as string}</span>
+              @if (v.visibility === "selected") {
+                <VariableReposLine slug={slug} name={v.name} />;
+              }
+            </span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              data-testid={"org-var-delete-" + v.name}
+              onClick={() => void delVariable(v.name)}
+            >
+              Delete
+            </Button>
+          </ListRow>;
+        } @empty {
+          <ListRow>
+            <span className="text-[14px] text-muted-foreground">
+              No organization variables yet.
             </span>
           </ListRow>;
         }

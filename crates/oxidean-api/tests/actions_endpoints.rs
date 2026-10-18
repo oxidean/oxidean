@@ -14,9 +14,14 @@ use oxidean_db::Database;
 use oxidean_git::{CliGitBackend, GitBackend};
 use tower::ServiceExt;
 
-async fn test_app(db: Database, repos_dir: std::path::PathBuf) -> axum::Router {
+async fn test_app(
+    db: Database,
+    repos_dir: std::path::PathBuf,
+    actions_log_dir: std::path::PathBuf,
+) -> axum::Router {
     let state = AppState::new(db, Arc::new(LogSink) as Arc<dyn EmailSender>, "development")
-        .with_repos_dir(repos_dir);
+        .with_repos_dir(repos_dir)
+        .with_actions_log_dir(actions_log_dir);
     let cors = build_cors("development", None).expect("cors");
     router_with_state(state, cors)
 }
@@ -92,6 +97,7 @@ struct Fixture {
     db: Database,
     app: axum::Router,
     repos_dir: std::path::PathBuf,
+    log_dir: std::path::PathBuf,
     cookie: String,
     owner_username: String,
     owner_id: String,
@@ -106,7 +112,8 @@ async fn fixture(visibility: &str) -> Fixture {
     db.migrate().await.unwrap();
     support::unlock_signup(&db).await;
     let repos_dir = dir.path().join("repos");
-    let app = test_app(db.clone(), repos_dir.clone()).await;
+    let log_dir = dir.path().join("alogs");
+    let app = test_app(db.clone(), repos_dir.clone(), log_dir.clone()).await;
     let cookie = signup_verified_owner(&app, &db, "owner@example.com", "actowner").await;
     let owner = db
         .find_user_by_username("actowner")
@@ -124,6 +131,7 @@ async fn fixture(visibility: &str) -> Fixture {
         db,
         app,
         repos_dir,
+        log_dir,
         cookie,
         owner_username: "actowner".into(),
         owner_id: owner.id,
@@ -437,7 +445,37 @@ async fn rerun_and_cancel_run() {
     let job = fx.db.find_action_job_by_id("job-m").await.unwrap().unwrap();
     assert_eq!(job.status, "cancelled");
 
-    // Rerun requeues run + jobs.
+    // Seed the dead attempt's leftovers — log files (plain + compressed),
+    // outputs/summary, and the append cursor — so the rerun's wipe and
+    // state reset are observable rather than vacuous.
+    let log_path = fx.log_dir.join("run-m").join("job-m.log");
+    std::fs::create_dir_all(log_path.parent().unwrap()).unwrap();
+    std::fs::write(&log_path, "attempt-1 output\n").unwrap();
+    std::fs::write(log_path.with_extension("log.gz"), b"gzip-bytes").unwrap();
+    fx.db
+        .set_action_job_outputs("job-m", r#"{"out":"v"}"#)
+        .await
+        .unwrap();
+    fx.db
+        .set_action_job_summary("job-m", "# old")
+        .await
+        .unwrap();
+    fx.db
+        .touch_action_job_heartbeat(
+            "job-m",
+            &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+        )
+        .await
+        .unwrap();
+    assert!(
+        fx.db
+            .set_action_job_log_index_if("job-m", 0, 7)
+            .await
+            .unwrap(),
+        "log-index seed"
+    );
+
+    // Rerun requeues run + jobs and replaces the prior attempt's state.
     let res = rpc_json(
         &fx.app,
         &fx.cookie,
@@ -448,6 +486,41 @@ async fn rerun_and_cancel_run() {
     assert_eq!(res["data"]["run"]["status"], "queued");
     let job = fx.db.find_action_job_by_id("job-m").await.unwrap().unwrap();
     assert_eq!(job.status, "queued");
+    assert_eq!(job.log_index, 0, "append cursor resets");
+    assert_eq!(job.outputs_json, "{}", "outputs cleared");
+    assert_eq!(job.summary_md, None, "summary cleared");
+    assert_eq!(job.heartbeat_at, None, "heartbeat cleared");
+    assert!(!log_path.exists(), "prior attempt log deleted");
+    assert!(
+        !log_path.with_extension("log.gz").exists(),
+        "compressed-at-rest log deleted"
+    );
+
+    // An unfinished run cannot be rerun.
+    fx.db
+        .insert_action_run(
+            "run-open",
+            "r-act",
+            ".github/workflows/ci.yml",
+            "CI",
+            "push",
+            "deadbeef",
+            "main",
+            "CI",
+            Some(&fx.owner_id),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    let open = rpc_json(
+        &fx.app,
+        &fx.cookie,
+        r#"{"procedure":"repo.actions.rerunRun","input":{"owner":"actowner","name":"actdemo","run_id":"run-open"}}"#,
+    )
+    .await;
+    assert_eq!(open["ok"], false, "unfinished rerun — {open}");
+    assert_eq!(open["error"]["code"], "repo.actions.run_not_finished");
 
     // A run id from another repo is rejected.
     let other = rpc_json(

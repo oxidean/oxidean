@@ -2728,7 +2728,7 @@ pub async fn requeue_run(
     run_id: &str,
     failed_only: bool,
     job_id: Option<&str>,
-) -> Result<(), String> {
+) -> Result<Vec<String>, String> {
     // Requeued needs-jobs go back to `waiting` so the scheduler re-gates
     // them; enqueue-skipped jobs (if:false, no needs) stay skipped — a
     // rerun must not resurrect a job the expression already rejected.
@@ -2737,9 +2737,69 @@ pub async fn requeue_run(
     // expansion pass re-emits their callee rows instead. Callee rows
     // (`caller_job_id` set) likewise reset to `waiting` — never claimable —
     // because expansion deletes and re-emits them wholesale.
-    const JOB_RESET_SQLITE: &str = "UPDATE action_jobs SET status = CASE WHEN caller_job_id != '' THEN 'waiting' WHEN status = 'skipped' AND needs_json = '[]' THEN 'skipped' WHEN needs_json != '[]' THEN 'waiting' WHEN EXISTS (SELECT 1 FROM action_payloads p WHERE p.sha = action_jobs.payload_sha AND p.payload_json LIKE '%\"call\":{%') THEN 'waiting' ELSE 'queued' END, runner_id = NULL, started_at = NULL, finished_at = NULL, timeout_at = NULL, attempt = attempt + 1, updated_at = CURRENT_TIMESTAMP WHERE run_id = ?";
-    const JOB_RESET_PG: &str = "UPDATE action_jobs SET status = CASE WHEN caller_job_id != '' THEN 'waiting' WHEN status = 'skipped' AND needs_json = '[]' THEN 'skipped' WHEN needs_json != '[]' THEN 'waiting' WHEN EXISTS (SELECT 1 FROM action_payloads p WHERE p.sha = action_jobs.payload_sha AND p.payload_json LIKE '%\"call\":{%') THEN 'waiting' ELSE 'queued' END, runner_id = NULL, started_at = NULL, finished_at = NULL, timeout_at = NULL, attempt = attempt + 1, updated_at = now() WHERE run_id = $1";
-    const JOB_RESET_MYSQL: &str = "UPDATE action_jobs SET status = CASE WHEN caller_job_id != '' THEN 'waiting' WHEN status = 'skipped' AND needs_json = '[]' THEN 'skipped' WHEN needs_json != '[]' THEN 'waiting' WHEN EXISTS (SELECT 1 FROM action_payloads p WHERE p.sha = action_jobs.payload_sha AND p.payload_json LIKE '%\"call\":{%') THEN 'waiting' ELSE 'queued' END, runner_id = NULL, started_at = NULL, finished_at = NULL, timeout_at = NULL, attempt = attempt + 1, updated_at = CURRENT_TIMESTAMP WHERE run_id = ?";
+    const JOB_RESET_SQLITE: &str = "UPDATE action_jobs SET status = CASE WHEN caller_job_id != '' THEN 'waiting' WHEN status = 'skipped' AND needs_json = '[]' THEN 'skipped' WHEN needs_json != '[]' THEN 'waiting' WHEN EXISTS (SELECT 1 FROM action_payloads p WHERE p.sha = action_jobs.payload_sha AND p.payload_json LIKE '%\"call\":{%') THEN 'waiting' ELSE 'queued' END, runner_id = NULL, started_at = NULL, finished_at = NULL, timeout_at = NULL, heartbeat_at = NULL, log_index = 0, outputs_json = '{}', summary_md = NULL, attempt = attempt + 1, updated_at = CURRENT_TIMESTAMP WHERE run_id = ?";
+    const JOB_RESET_PG: &str = "UPDATE action_jobs SET status = CASE WHEN caller_job_id != '' THEN 'waiting' WHEN status = 'skipped' AND needs_json = '[]' THEN 'skipped' WHEN needs_json != '[]' THEN 'waiting' WHEN EXISTS (SELECT 1 FROM action_payloads p WHERE p.sha = action_jobs.payload_sha AND p.payload_json LIKE '%\"call\":{%') THEN 'waiting' ELSE 'queued' END, runner_id = NULL, started_at = NULL, finished_at = NULL, timeout_at = NULL, heartbeat_at = NULL, log_index = 0, outputs_json = '{}', summary_md = NULL, attempt = attempt + 1, updated_at = now() WHERE run_id = $1";
+    const JOB_RESET_MYSQL: &str = "UPDATE action_jobs SET status = CASE WHEN caller_job_id != '' THEN 'waiting' WHEN status = 'skipped' AND needs_json = '[]' THEN 'skipped' WHEN needs_json != '[]' THEN 'waiting' WHEN EXISTS (SELECT 1 FROM action_payloads p WHERE p.sha = action_jobs.payload_sha AND p.payload_json LIKE '%\"call\":{%') THEN 'waiting' ELSE 'queued' END, runner_id = NULL, started_at = NULL, finished_at = NULL, timeout_at = NULL, heartbeat_at = NULL, log_index = 0, outputs_json = '{}', summary_md = NULL, attempt = attempt + 1, updated_at = CURRENT_TIMESTAMP WHERE run_id = ?";
+    // Ids of the rows the reset below touches — the caller wipes those jobs'
+    // log files so a rerun replaces rather than appends the prior attempt's
+    // output. Same scope clauses as the UPDATE arms.
+    let id_scope = if job_id.is_some() {
+        match pool {
+            DbPool::Postgres(_) => " AND (id = $2 OR caller_job_id = $2)",
+            _ => " AND (id = ? OR caller_job_id = ?)",
+        }
+    } else if failed_only {
+        " AND status IN ('failure','cancelled')"
+    } else {
+        ""
+    };
+    let affected: Vec<String> = match pool {
+        DbPool::Sqlite(p) => {
+            let mut q = sqlx::query_as::<_, (String,)>(sqlx::AssertSqlSafe(format!(
+                "SELECT id FROM action_jobs WHERE run_id = ?{id_scope}"
+            )))
+            .bind(run_id);
+            if let Some(j) = job_id {
+                q = q.bind(j).bind(j);
+            }
+            q.fetch_all(p)
+                .await
+                .map_err(|e| e.to_string())?
+                .into_iter()
+                .map(|r| r.0)
+                .collect()
+        }
+        DbPool::Postgres(p) => {
+            let mut q = sqlx::query_as::<_, (String,)>(sqlx::AssertSqlSafe(format!(
+                "SELECT id FROM action_jobs WHERE run_id = $1{id_scope}"
+            )))
+            .bind(run_id);
+            if let Some(j) = job_id {
+                q = q.bind(j).bind(j);
+            }
+            q.fetch_all(p)
+                .await
+                .map_err(|e| e.to_string())?
+                .into_iter()
+                .map(|r| r.0)
+                .collect()
+        }
+        DbPool::MySql(p) => {
+            let mut q = sqlx::query_as::<_, (String,)>(sqlx::AssertSqlSafe(format!(
+                "SELECT id FROM action_jobs WHERE run_id = ?{id_scope}"
+            )))
+            .bind(run_id);
+            if let Some(j) = job_id {
+                q = q.bind(j).bind(j);
+            }
+            q.fetch_all(p)
+                .await
+                .map_err(|e| e.to_string())?
+                .into_iter()
+                .map(|r| r.0)
+                .collect()
+        }
+    };
     match pool {
         DbPool::Sqlite(p) => {
             sqlx::query(
@@ -2835,7 +2895,7 @@ pub async fn requeue_run(
     }
     // Requeued jobs are claimable again — wake `runner.v1` pollers.
     bump_action_tasks_version(pool).await?;
-    Ok(())
+    Ok(affected)
 }
 
 /// Atomically claim the right to emit the "run completed" in-app notification
@@ -5160,5 +5220,626 @@ pub async fn list_environment_secret_ciphertexts(
             .map_err(|e| e.to_string())?;
             Ok(rows)
         }
+    }
+}
+
+// ---- configuration variables (`vars` context) -------------------------------
+// Plaintext mirrors of the secrets tables — variables are not secrets;
+// GitHub returns values on GET. Same repo < org < environment precedence.
+
+#[derive(Debug, Clone)]
+pub struct ActionVariableRow {
+    pub id: String,
+    pub repository_id: String,
+    pub name: String,
+    pub value: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// name→value pair for job-time merges and the `vars` expression context.
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct VariableValueRow {
+    pub name: String,
+    pub value: String,
+}
+
+macro_rules! map_variable {
+    ($r:expr) => {{
+        let r = $r;
+        ActionVariableRow {
+            id: r.get("id"),
+            repository_id: r.get("repository_id"),
+            name: r.get("name"),
+            value: r.get("value"),
+            created_at: r.try_get("created_at").unwrap_or_default(),
+            updated_at: r.try_get("updated_at").unwrap_or_default(),
+        }
+    }};
+}
+
+pub async fn upsert_variable(
+    pool: &DbPool,
+    id: &str,
+    repository_id: &str,
+    name: &str,
+    value: &str,
+) -> Result<(), String> {
+    match pool {
+        DbPool::Sqlite(p) => {
+            sqlx::query("INSERT INTO action_variables (id, repository_id, name, value) VALUES (?, ?, ?, ?)
+                         ON CONFLICT (repository_id, name) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP")
+                .bind(id).bind(repository_id).bind(name).bind(value)
+                .execute(p).await.map_err(|e| e.to_string())?;
+        }
+        DbPool::Postgres(p) => {
+            sqlx::query("INSERT INTO action_variables (id, repository_id, name, value) VALUES ($1, $2, $3, $4)
+                         ON CONFLICT (repository_id, name) DO UPDATE SET value = excluded.value, updated_at = now()")
+                .bind(id).bind(repository_id).bind(name).bind(value)
+                .execute(p).await.map_err(|e| e.to_string())?;
+        }
+        DbPool::MySql(p) => {
+            sqlx::query(
+                "INSERT INTO action_variables (id, repository_id, name, value) VALUES (?, ?, ?, ?)
+                         ON DUPLICATE KEY UPDATE value = VALUES(value)",
+            )
+            .bind(id)
+            .bind(repository_id)
+            .bind(name)
+            .bind(value)
+            .execute(p)
+            .await
+            .map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+pub async fn find_variable_by_name(
+    pool: &DbPool,
+    repository_id: &str,
+    name: &str,
+) -> Result<Option<ActionVariableRow>, String> {
+    match pool {
+        DbPool::Sqlite(p) => {
+            let row = sqlx::query("SELECT id, repository_id, name, value, created_at, updated_at FROM action_variables WHERE repository_id = ? AND name = ?")
+                .bind(repository_id).bind(name).fetch_optional(p).await.map_err(|e| e.to_string())?;
+            Ok(row.map(|r| map_variable!(r)))
+        }
+        DbPool::Postgres(p) => {
+            let row = sqlx::query("SELECT id, repository_id, name, value, created_at::text, updated_at::text FROM action_variables WHERE repository_id = $1 AND name = $2")
+                .bind(repository_id).bind(name).fetch_optional(p).await.map_err(|e| e.to_string())?;
+            Ok(row.map(|r| map_variable!(r)))
+        }
+        DbPool::MySql(p) => {
+            let row = sqlx::query("SELECT id, repository_id, name, value, CAST(created_at AS CHAR), CAST(updated_at AS CHAR) FROM action_variables WHERE repository_id = ? AND name = ?")
+                .bind(repository_id).bind(name).fetch_optional(p).await.map_err(|e| e.to_string())?;
+            Ok(row.map(|r| map_variable!(r)))
+        }
+    }
+}
+
+pub async fn delete_variable(
+    pool: &DbPool,
+    repository_id: &str,
+    name: &str,
+) -> Result<bool, String> {
+    match pool {
+        DbPool::Sqlite(p) => {
+            sqlx::query("DELETE FROM action_variables WHERE repository_id = ? AND name = ?")
+                .bind(repository_id)
+                .bind(name)
+                .execute(p)
+                .await
+                .map(|r| r.rows_affected() > 0)
+                .map_err(|e| e.to_string())
+        }
+        DbPool::Postgres(p) => {
+            sqlx::query("DELETE FROM action_variables WHERE repository_id = $1 AND name = $2")
+                .bind(repository_id)
+                .bind(name)
+                .execute(p)
+                .await
+                .map(|r| r.rows_affected() > 0)
+                .map_err(|e| e.to_string())
+        }
+        DbPool::MySql(p) => {
+            sqlx::query("DELETE FROM action_variables WHERE repository_id = ? AND name = ?")
+                .bind(repository_id)
+                .bind(name)
+                .execute(p)
+                .await
+                .map(|r| r.rows_affected() > 0)
+                .map_err(|e| e.to_string())
+        }
+    }
+}
+
+pub async fn list_variables(
+    pool: &DbPool,
+    repository_id: &str,
+) -> Result<Vec<ActionVariableRow>, String> {
+    match pool {
+        DbPool::Sqlite(p) => {
+            let rows = sqlx::query("SELECT id, repository_id, name, value, created_at, updated_at FROM action_variables WHERE repository_id = ? ORDER BY name")
+                .bind(repository_id).fetch_all(p).await.map_err(|e| e.to_string())?;
+            Ok(rows.into_iter().map(|r| map_variable!(r)).collect())
+        }
+        DbPool::Postgres(p) => {
+            let rows = sqlx::query("SELECT id, repository_id, name, value, created_at::text, updated_at::text FROM action_variables WHERE repository_id = $1 ORDER BY name")
+                .bind(repository_id).fetch_all(p).await.map_err(|e| e.to_string())?;
+            Ok(rows.into_iter().map(|r| map_variable!(r)).collect())
+        }
+        DbPool::MySql(p) => {
+            let rows = sqlx::query("SELECT id, repository_id, name, value, CAST(created_at AS CHAR), CAST(updated_at AS CHAR) FROM action_variables WHERE repository_id = ? ORDER BY name")
+                .bind(repository_id).fetch_all(p).await.map_err(|e| e.to_string())?;
+            Ok(rows.into_iter().map(|r| map_variable!(r)).collect())
+        }
+    }
+}
+
+/// Repo variables as name→value — feeds the `vars` context and the per-job
+/// merge (`variables_for_job` in the API layer).
+pub async fn list_variable_values(
+    pool: &DbPool,
+    repository_id: &str,
+) -> Result<Vec<VariableValueRow>, String> {
+    match pool {
+        DbPool::Sqlite(p) => sqlx::query_as::<_, VariableValueRow>(
+            "SELECT name, value FROM action_variables WHERE repository_id = ? ORDER BY name",
+        )
+        .bind(repository_id)
+        .fetch_all(p)
+        .await
+        .map_err(|e| e.to_string()),
+        DbPool::Postgres(p) => sqlx::query_as::<_, VariableValueRow>(
+            "SELECT name, value FROM action_variables WHERE repository_id = $1 ORDER BY name",
+        )
+        .bind(repository_id)
+        .fetch_all(p)
+        .await
+        .map_err(|e| e.to_string()),
+        DbPool::MySql(p) => sqlx::query_as::<_, VariableValueRow>(
+            "SELECT name, value FROM action_variables WHERE repository_id = ? ORDER BY name",
+        )
+        .bind(repository_id)
+        .fetch_all(p)
+        .await
+        .map_err(|e| e.to_string()),
+    }
+}
+
+// ---- org variables ----------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct OrgVariableRow {
+    pub id: String,
+    pub owner_id: String,
+    pub name: String,
+    pub value: String,
+    pub visibility: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+macro_rules! map_org_variable {
+    ($r:expr) => {{
+        let r = $r;
+        OrgVariableRow {
+            id: r.get("id"),
+            owner_id: r.get("owner_id"),
+            name: r.get("name"),
+            value: r.get("value"),
+            visibility: r.try_get("visibility").unwrap_or_else(|_| "all".into()),
+            created_at: r.try_get("created_at").unwrap_or_default(),
+            updated_at: r.try_get("updated_at").unwrap_or_default(),
+        }
+    }};
+}
+
+pub async fn upsert_org_variable(
+    pool: &DbPool,
+    id: &str,
+    owner_id: &str,
+    name: &str,
+    value: &str,
+    visibility: &str,
+) -> Result<(), String> {
+    match pool {
+        DbPool::Sqlite(p) => {
+            sqlx::query("INSERT INTO action_org_variables (id, owner_id, name, value, visibility) VALUES (?, ?, ?, ?, ?)
+                         ON CONFLICT (owner_id, name) DO UPDATE SET value = excluded.value, visibility = excluded.visibility, updated_at = CURRENT_TIMESTAMP")
+                .bind(id).bind(owner_id).bind(name).bind(value).bind(visibility)
+                .execute(p).await.map_err(|e| e.to_string())?;
+        }
+        DbPool::Postgres(p) => {
+            sqlx::query("INSERT INTO action_org_variables (id, owner_id, name, value, visibility) VALUES ($1, $2, $3, $4, $5)
+                         ON CONFLICT (owner_id, name) DO UPDATE SET value = excluded.value, visibility = excluded.visibility, updated_at = now()")
+                .bind(id).bind(owner_id).bind(name).bind(value).bind(visibility)
+                .execute(p).await.map_err(|e| e.to_string())?;
+        }
+        DbPool::MySql(p) => {
+            sqlx::query("INSERT INTO action_org_variables (id, owner_id, name, value, visibility) VALUES (?, ?, ?, ?, ?)
+                         ON DUPLICATE KEY UPDATE value = VALUES(value), visibility = VALUES(visibility)")
+                .bind(id).bind(owner_id).bind(name).bind(value).bind(visibility)
+                .execute(p).await.map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+pub async fn list_org_variables(
+    pool: &DbPool,
+    owner_id: &str,
+) -> Result<Vec<OrgVariableRow>, String> {
+    match pool {
+        DbPool::Sqlite(p) => {
+            let rows = sqlx::query("SELECT id, owner_id, name, value, visibility, created_at, updated_at FROM action_org_variables WHERE owner_id = ? ORDER BY name")
+                .bind(owner_id).fetch_all(p).await.map_err(|e| e.to_string())?;
+            Ok(rows.into_iter().map(|r| map_org_variable!(r)).collect())
+        }
+        DbPool::Postgres(p) => {
+            let rows = sqlx::query("SELECT id, owner_id, name, value, visibility, created_at::text, updated_at::text FROM action_org_variables WHERE owner_id = $1 ORDER BY name")
+                .bind(owner_id).fetch_all(p).await.map_err(|e| e.to_string())?;
+            Ok(rows.into_iter().map(|r| map_org_variable!(r)).collect())
+        }
+        DbPool::MySql(p) => {
+            let rows = sqlx::query("SELECT id, owner_id, name, value, visibility, CAST(created_at AS CHAR), CAST(updated_at AS CHAR) FROM action_org_variables WHERE owner_id = ? ORDER BY name")
+                .bind(owner_id).fetch_all(p).await.map_err(|e| e.to_string())?;
+            Ok(rows.into_iter().map(|r| map_org_variable!(r)).collect())
+        }
+    }
+}
+
+pub async fn find_org_variable_by_name(
+    pool: &DbPool,
+    owner_id: &str,
+    name: &str,
+) -> Result<Option<OrgVariableRow>, String> {
+    match pool {
+        DbPool::Sqlite(p) => {
+            let row = sqlx::query("SELECT id, owner_id, name, value, visibility, created_at, updated_at FROM action_org_variables WHERE owner_id = ? AND name = ?")
+                .bind(owner_id).bind(name).fetch_optional(p).await.map_err(|e| e.to_string())?;
+            Ok(row.map(|r| map_org_variable!(r)))
+        }
+        DbPool::Postgres(p) => {
+            let row = sqlx::query("SELECT id, owner_id, name, value, visibility, created_at::text, updated_at::text FROM action_org_variables WHERE owner_id = $1 AND name = $2")
+                .bind(owner_id).bind(name).fetch_optional(p).await.map_err(|e| e.to_string())?;
+            Ok(row.map(|r| map_org_variable!(r)))
+        }
+        DbPool::MySql(p) => {
+            let row = sqlx::query("SELECT id, owner_id, name, value, visibility, CAST(created_at AS CHAR), CAST(updated_at AS CHAR) FROM action_org_variables WHERE owner_id = ? AND name = ?")
+                .bind(owner_id).bind(name).fetch_optional(p).await.map_err(|e| e.to_string())?;
+            Ok(row.map(|r| map_org_variable!(r)))
+        }
+    }
+}
+
+pub async fn delete_org_variable(
+    pool: &DbPool,
+    owner_id: &str,
+    name: &str,
+) -> Result<bool, String> {
+    match pool {
+        DbPool::Sqlite(p) => {
+            sqlx::query("DELETE FROM action_org_variables WHERE owner_id = ? AND name = ?")
+                .bind(owner_id)
+                .bind(name)
+                .execute(p)
+                .await
+                .map(|r| r.rows_affected() > 0)
+                .map_err(|e| e.to_string())
+        }
+        DbPool::Postgres(p) => {
+            sqlx::query("DELETE FROM action_org_variables WHERE owner_id = $1 AND name = $2")
+                .bind(owner_id)
+                .bind(name)
+                .execute(p)
+                .await
+                .map(|r| r.rows_affected() > 0)
+                .map_err(|e| e.to_string())
+        }
+        DbPool::MySql(p) => {
+            sqlx::query("DELETE FROM action_org_variables WHERE owner_id = ? AND name = ?")
+                .bind(owner_id)
+                .bind(name)
+                .execute(p)
+                .await
+                .map(|r| r.rows_affected() > 0)
+                .map_err(|e| e.to_string())
+        }
+    }
+}
+
+/// Replace the `visibility = 'selected'` repo set for an org variable.
+pub async fn set_org_variable_repos(
+    pool: &DbPool,
+    variable_id: &str,
+    repository_ids: &[String],
+) -> Result<(), String> {
+    match pool {
+        DbPool::Sqlite(p) => {
+            sqlx::query("DELETE FROM action_org_variable_repos WHERE variable_id = ?")
+                .bind(variable_id)
+                .execute(p)
+                .await
+                .map_err(|e| e.to_string())?;
+            for repo_id in repository_ids {
+                sqlx::query(
+                    "INSERT OR IGNORE INTO action_org_variable_repos (variable_id, repository_id) VALUES (?, ?)",
+                )
+                .bind(variable_id)
+                .bind(repo_id)
+                .execute(p)
+                .await
+                .map_err(|e| e.to_string())?;
+            }
+        }
+        DbPool::Postgres(p) => {
+            sqlx::query("DELETE FROM action_org_variable_repos WHERE variable_id = $1")
+                .bind(variable_id)
+                .execute(p)
+                .await
+                .map_err(|e| e.to_string())?;
+            for repo_id in repository_ids {
+                sqlx::query(
+                    "INSERT INTO action_org_variable_repos (variable_id, repository_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+                )
+                .bind(variable_id)
+                .bind(repo_id)
+                .execute(p)
+                .await
+                .map_err(|e| e.to_string())?;
+            }
+        }
+        DbPool::MySql(p) => {
+            sqlx::query("DELETE FROM action_org_variable_repos WHERE variable_id = ?")
+                .bind(variable_id)
+                .execute(p)
+                .await
+                .map_err(|e| e.to_string())?;
+            for repo_id in repository_ids {
+                sqlx::query(
+                    "INSERT IGNORE INTO action_org_variable_repos (variable_id, repository_id) VALUES (?, ?)",
+                )
+                .bind(variable_id)
+                .bind(repo_id)
+                .execute(p)
+                .await
+                .map_err(|e| e.to_string())?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Repo ids in a `visibility = 'selected'` org variable's allow set.
+pub async fn list_org_variable_repos(
+    pool: &DbPool,
+    variable_id: &str,
+) -> Result<Vec<String>, String> {
+    match pool {
+        DbPool::Sqlite(p) => sqlx::query_scalar(
+            "SELECT repository_id FROM action_org_variable_repos WHERE variable_id = ? ORDER BY repository_id",
+        )
+        .bind(variable_id)
+        .fetch_all(p)
+        .await
+        .map_err(|e| e.to_string()),
+        DbPool::Postgres(p) => sqlx::query_scalar(
+            "SELECT repository_id FROM action_org_variable_repos WHERE variable_id = $1 ORDER BY repository_id",
+        )
+        .bind(variable_id)
+        .fetch_all(p)
+        .await
+        .map_err(|e| e.to_string()),
+        DbPool::MySql(p) => sqlx::query_scalar(
+            "SELECT repository_id FROM action_org_variable_repos WHERE variable_id = ? ORDER BY repository_id",
+        )
+        .bind(variable_id)
+        .fetch_all(p)
+        .await
+        .map_err(|e| e.to_string()),
+    }
+}
+
+/// Org variables visible to `repository_id` at claim time — mirrors
+/// [`list_org_secret_ciphertexts_for_repo`]: org-owned repos only, then
+/// `visibility` picks the reach ('all' / 'private' / 'selected' join).
+pub async fn list_org_variables_for_repo(
+    pool: &DbPool,
+    repository_id: &str,
+) -> Result<Vec<VariableValueRow>, String> {
+    const SQL: &str = "SELECT v.name, v.value FROM action_org_variables v
+      WHERE v.owner_id = (SELECT r.owner_id FROM repositories r WHERE r.id = ? AND r.owner_type = 'org')
+        AND (v.visibility = 'all'
+          OR (v.visibility = 'private' AND (SELECT r2.visibility FROM repositories r2 WHERE r2.id = ?) = 'private')
+          OR (v.visibility = 'selected' AND EXISTS (
+                SELECT 1 FROM action_org_variable_repos x WHERE x.variable_id = v.id AND x.repository_id = ?)))
+      ORDER BY v.name";
+    match pool {
+        DbPool::Sqlite(p) => {
+            let rows = sqlx::query_as::<_, VariableValueRow>(SQL)
+                .bind(repository_id)
+                .bind(repository_id)
+                .bind(repository_id)
+                .fetch_all(p)
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(rows)
+        }
+        DbPool::Postgres(p) => {
+            let rows = sqlx::query_as::<_, VariableValueRow>(
+                "SELECT v.name, v.value FROM action_org_variables v
+                  WHERE v.owner_id = (SELECT r.owner_id FROM repositories r WHERE r.id = $1 AND r.owner_type = 'org')
+                    AND (v.visibility = 'all'
+                      OR (v.visibility = 'private' AND (SELECT r2.visibility FROM repositories r2 WHERE r2.id = $2) = 'private')
+                      OR (v.visibility = 'selected' AND EXISTS (
+                            SELECT 1 FROM action_org_variable_repos x WHERE x.variable_id = v.id AND x.repository_id = $3)))
+                  ORDER BY v.name",
+            )
+            .bind(repository_id)
+            .bind(repository_id)
+            .bind(repository_id)
+            .fetch_all(p)
+            .await
+            .map_err(|e| e.to_string())?;
+            Ok(rows)
+        }
+        DbPool::MySql(p) => {
+            let rows = sqlx::query_as::<_, VariableValueRow>(SQL)
+                .bind(repository_id)
+                .bind(repository_id)
+                .bind(repository_id)
+                .fetch_all(p)
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(rows)
+        }
+    }
+}
+
+// ---- environment variables --------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct EnvVariableRow {
+    pub id: String,
+    pub environment_id: String,
+    pub name: String,
+    pub value: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+macro_rules! map_env_variable {
+    ($r:expr) => {{
+        let r = $r;
+        EnvVariableRow {
+            id: r.get("id"),
+            environment_id: r.get("environment_id"),
+            name: r.get("name"),
+            value: r.get("value"),
+            created_at: r.try_get("created_at").unwrap_or_default(),
+            updated_at: r.try_get("updated_at").unwrap_or_default(),
+        }
+    }};
+}
+
+pub async fn upsert_environment_variable(
+    pool: &DbPool,
+    id: &str,
+    environment_id: &str,
+    name: &str,
+    value: &str,
+) -> Result<(), String> {
+    match pool {
+        DbPool::Sqlite(p) => {
+            sqlx::query("INSERT INTO action_environment_variables (id, environment_id, name, value) VALUES (?, ?, ?, ?)
+                         ON CONFLICT (environment_id, name) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP")
+                .bind(id).bind(environment_id).bind(name).bind(value)
+                .execute(p).await.map_err(|e| e.to_string())?;
+        }
+        DbPool::Postgres(p) => {
+            sqlx::query("INSERT INTO action_environment_variables (id, environment_id, name, value) VALUES ($1, $2, $3, $4)
+                         ON CONFLICT (environment_id, name) DO UPDATE SET value = excluded.value, updated_at = now()")
+                .bind(id).bind(environment_id).bind(name).bind(value)
+                .execute(p).await.map_err(|e| e.to_string())?;
+        }
+        DbPool::MySql(p) => {
+            sqlx::query("INSERT INTO action_environment_variables (id, environment_id, name, value) VALUES (?, ?, ?, ?)
+                         ON DUPLICATE KEY UPDATE value = VALUES(value)")
+                .bind(id).bind(environment_id).bind(name).bind(value)
+                .execute(p).await.map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+pub async fn list_environment_variables(
+    pool: &DbPool,
+    environment_id: &str,
+) -> Result<Vec<EnvVariableRow>, String> {
+    match pool {
+        DbPool::Sqlite(p) => {
+            let rows = sqlx::query("SELECT id, environment_id, name, value, created_at, updated_at FROM action_environment_variables WHERE environment_id = ? ORDER BY name")
+                .bind(environment_id).fetch_all(p).await.map_err(|e| e.to_string())?;
+            Ok(rows.into_iter().map(|r| map_env_variable!(r)).collect())
+        }
+        DbPool::Postgres(p) => {
+            let rows = sqlx::query("SELECT id, environment_id, name, value, created_at::text, updated_at::text FROM action_environment_variables WHERE environment_id = $1 ORDER BY name")
+                .bind(environment_id).fetch_all(p).await.map_err(|e| e.to_string())?;
+            Ok(rows.into_iter().map(|r| map_env_variable!(r)).collect())
+        }
+        DbPool::MySql(p) => {
+            let rows = sqlx::query("SELECT id, environment_id, name, value, CAST(created_at AS CHAR), CAST(updated_at AS CHAR) FROM action_environment_variables WHERE environment_id = ? ORDER BY name")
+                .bind(environment_id).fetch_all(p).await.map_err(|e| e.to_string())?;
+            Ok(rows.into_iter().map(|r| map_env_variable!(r)).collect())
+        }
+    }
+}
+
+pub async fn delete_environment_variable(
+    pool: &DbPool,
+    environment_id: &str,
+    name: &str,
+) -> Result<bool, String> {
+    match pool {
+        DbPool::Sqlite(p) => sqlx::query(
+            "DELETE FROM action_environment_variables WHERE environment_id = ? AND name = ?",
+        )
+        .bind(environment_id)
+        .bind(name)
+        .execute(p)
+        .await
+        .map(|r| r.rows_affected() > 0)
+        .map_err(|e| e.to_string()),
+        DbPool::Postgres(p) => sqlx::query(
+            "DELETE FROM action_environment_variables WHERE environment_id = $1 AND name = $2",
+        )
+        .bind(environment_id)
+        .bind(name)
+        .execute(p)
+        .await
+        .map(|r| r.rows_affected() > 0)
+        .map_err(|e| e.to_string()),
+        DbPool::MySql(p) => sqlx::query(
+            "DELETE FROM action_environment_variables WHERE environment_id = ? AND name = ?",
+        )
+        .bind(environment_id)
+        .bind(name)
+        .execute(p)
+        .await
+        .map(|r| r.rows_affected() > 0)
+        .map_err(|e| e.to_string()),
+    }
+}
+
+/// Claim-time environment variable read — plaintext, ready to merge.
+pub async fn list_environment_variable_values(
+    pool: &DbPool,
+    environment_id: &str,
+) -> Result<Vec<VariableValueRow>, String> {
+    match pool {
+        DbPool::Sqlite(p) => sqlx::query_as::<_, VariableValueRow>(
+            "SELECT name, value FROM action_environment_variables WHERE environment_id = ? ORDER BY name",
+        )
+        .bind(environment_id)
+        .fetch_all(p)
+        .await
+        .map_err(|e| e.to_string()),
+        DbPool::Postgres(p) => sqlx::query_as::<_, VariableValueRow>(
+            "SELECT name, value FROM action_environment_variables WHERE environment_id = $1 ORDER BY name",
+        )
+        .bind(environment_id)
+        .fetch_all(p)
+        .await
+        .map_err(|e| e.to_string()),
+        DbPool::MySql(p) => sqlx::query_as::<_, VariableValueRow>(
+            "SELECT name, value FROM action_environment_variables WHERE environment_id = ? ORDER BY name",
+        )
+        .bind(environment_id)
+        .fetch_all(p)
+        .await
+        .map_err(|e| e.to_string()),
     }
 }

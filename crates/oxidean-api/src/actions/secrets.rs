@@ -91,11 +91,10 @@ pub async fn decrypted_secrets_for_job(
     environment_name: Option<&str>,
     audit: Option<SecretAudit<'_>>,
 ) -> Result<HashMap<String, String>, String> {
-    let mut out = decrypted_secrets_for_repo(db, repository_id).await?;
-    let repo_count = out.len();
+    // Broadest scope first so the narrowest wins on name collisions —
+    // GitHub: environment > repository > organization.
+    let mut out: HashMap<String, String> = HashMap::new();
     let mut org_count = 0usize;
-    let mut env_count = 0usize;
-
     for row in db
         .list_action_org_secret_ciphertexts_for_repo(repository_id)
         .await?
@@ -103,6 +102,12 @@ pub async fn decrypted_secrets_for_job(
         out.insert(row.name, decrypt_secret(&row.ciphertext)?);
         org_count += 1;
     }
+    let repo_rows = decrypted_secrets_for_repo(db, repository_id).await?;
+    let repo_count = repo_rows.len();
+    for (k, v) in repo_rows {
+        out.insert(k, v);
+    }
+    let mut env_count = 0usize;
 
     if let Some(env_name) = environment_name {
         if let Some(env) = db.find_action_environment(repository_id, env_name).await? {

@@ -2245,6 +2245,92 @@ export type ActionSecretDeleteRequest = {
   secret_name: string;
 };
 
+export type ActionVariablePublic = {
+  name: string;
+  value: string;
+  updated_at: string;
+};
+
+export type ActionVariablesListRequest = {
+  owner: string;
+  name: string;
+};
+
+export type ActionVariablesListResponse = {
+  variables: ActionVariablePublic[];
+};
+
+export type ActionVariablesPutRequest = {
+  owner: string;
+  name: string;
+  variable_name: string;
+  value: string;
+};
+
+export type ActionVariablesDeleteRequest = {
+  owner: string;
+  name: string;
+  variable_name: string;
+};
+
+export type RepoActionsEnvironmentVariablesListRequest = {
+  owner: string;
+  name: string;
+  environment: string;
+};
+
+export type RepoActionsEnvironmentVariablePutRequest = {
+  owner: string;
+  name: string;
+  environment: string;
+  variable_name: string;
+  value: string;
+};
+
+export type RepoActionsEnvironmentVariableDeleteRequest = {
+  owner: string;
+  name: string;
+  environment: string;
+  variable_name: string;
+};
+
+export type OrgVariablePublic = {
+  name: string;
+  value: string;
+  visibility: string;
+  updated_at: string;
+};
+
+export type OrgActionsVariablesListRequest = {
+  slug: string;
+};
+
+export type OrgActionsVariablesListResponse = {
+  variables: OrgVariablePublic[];
+};
+
+export type OrgActionsVariablePutRequest = {
+  slug: string;
+  variable_name: string;
+  value: string;
+  visibility?: string;
+  repository_ids?: string[];
+};
+
+export type OrgActionsVariableDeleteRequest = {
+  slug: string;
+  variable_name: string;
+};
+
+export type OrgActionsVariableReposRequest = {
+  slug: string;
+  variable_name: string;
+};
+
+export type OrgActionsVariableReposResponse = {
+  repository_ids: string[];
+};
+
 export type ActionEnabledRequest = {
   owner: string;
   name: string;
@@ -4443,6 +4529,24 @@ export function createClient(opts: CreateClientOptions) {
               "repo.actions.environments.secretsDelete",
               input,
             ),
+          variablesList: (input: RepoActionsEnvironmentVariablesListRequest) =>
+            rpcCall<ActionVariablesListResponse>(
+              opts,
+              "repo.actions.environments.variablesList",
+              input,
+            ),
+          variablesPut: (input: RepoActionsEnvironmentVariablePutRequest) =>
+            rpcCall<{ ok: boolean }>(
+              opts,
+              "repo.actions.environments.variablesPut",
+              input,
+            ),
+          variablesDelete: (input: RepoActionsEnvironmentVariableDeleteRequest) =>
+            rpcCall<{ ok: boolean }>(
+              opts,
+              "repo.actions.environments.variablesDelete",
+              input,
+            ),
         },
         listDeployments: (input: ActionDeploymentsListRequest) =>
           rpcCall<ActionDeploymentsListResponse>(
@@ -4489,6 +4593,18 @@ export function createClient(opts: CreateClientOptions) {
             rpcCall<{ ok: boolean }>(opts, "repo.actions.secrets.put", input),
           delete: (input: ActionSecretDeleteRequest) =>
             rpcCall<{ ok: boolean }>(opts, "repo.actions.secrets.delete", input),
+        },
+        variables: {
+          list: (input: ActionVariablesListRequest) =>
+            rpcCall<ActionVariablesListResponse>(
+              opts,
+              "repo.actions.variables.list",
+              input,
+            ),
+          put: (input: ActionVariablesPutRequest) =>
+            rpcCall<{ ok: boolean }>(opts, "repo.actions.variables.put", input),
+          delete: (input: ActionVariablesDeleteRequest) =>
+            rpcCall<{ ok: boolean }>(opts, "repo.actions.variables.delete", input),
         },
         getEnabled: (input: ActionEnabledRequest) =>
           rpcCall<ActionEnabledResponse>(opts, "repo.actions.getEnabled", input),
@@ -4574,6 +4690,24 @@ export function createClient(opts: CreateClientOptions) {
             rpcCall<OrgActionsSecretReposResponse>(
               opts,
               "org.actions.secrets.listRepos",
+              input,
+            ),
+        },
+        variables: {
+          list: (input: OrgActionsVariablesListRequest) =>
+            rpcCall<OrgActionsVariablesListResponse>(
+              opts,
+              "org.actions.variables.list",
+              input,
+            ),
+          put: (input: OrgActionsVariablePutRequest) =>
+            rpcCall<{ ok: boolean }>(opts, "org.actions.variables.put", input),
+          delete: (input: OrgActionsVariableDeleteRequest) =>
+            rpcCall<{ ok: boolean }>(opts, "org.actions.variables.delete", input),
+          listRepos: (input: OrgActionsVariableReposRequest) =>
+            rpcCall<OrgActionsVariableReposResponse>(
+              opts,
+              "org.actions.variables.listRepos",
               input,
             ),
         },

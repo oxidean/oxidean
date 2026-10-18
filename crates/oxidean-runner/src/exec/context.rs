@@ -96,7 +96,13 @@ pub(crate) fn runner_context(
                 .and_then(|e| e.get("inputs").cloned())
                 .unwrap_or_else(|| serde_json::json!({})),
         )
-        .with_context("vars", serde_json::json!({}))
+        .with_context(
+            "vars",
+            task.vars
+                .clone()
+                .map(|m| serde_json::to_value(m).unwrap_or_else(|_| serde_json::json!({})))
+                .unwrap_or_else(|| serde_json::json!({})),
+        )
         .with_context("strategy", serde_json::json!({}))
         .with_context(
             // `jobs.<id>.environment` — `{name, url}` for job expressions.
@@ -299,6 +305,7 @@ mod tests {
             services: None,
             environment: None,
             environment_url: None,
+            vars: None,
             id_token_request_url: None,
             id_token_request_token: None,
             cache_url: None,

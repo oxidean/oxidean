@@ -225,6 +225,10 @@ struct FetchTaskResponse {
     /// row captured at enqueue (never re-read from the bare repo at claim).
     steps: Option<serde_json::Value>,
     secrets: Option<std::collections::HashMap<String, String>>,
+    /// Configuration variables (`vars` context) — repo < org < environment
+    /// merged at claim. Plaintext config, flows to untrusted PR runs too
+    /// (variables aren't secrets).
+    vars: Option<std::collections::HashMap<String, String>>,
     /// Repository coordinates — runners clone {origin}/{owner}/{repo}.git.
     repository_owner: Option<String>,
     repository_name: Option<String>,
@@ -306,6 +310,7 @@ impl FetchTaskResponse {
             head_ref: None,
             steps: None,
             secrets: None,
+            vars: None,
             repository_owner: None,
             repository_name: None,
             event: None,
@@ -492,6 +497,17 @@ async fn fetch_task(
             } else {
                 std::collections::HashMap::new()
             };
+            // Configuration variables — repo < org < environment merge.
+            // Plaintext (not secrets): they flow to untrusted PR runs just
+            // like GitHub exposes `vars.*` there. Failure degrades to an
+            // empty map rather than failing the claim.
+            let vars = crate::actions::vars::variables_for_job(
+                &state.db,
+                &run.repository_id,
+                j.environment_name.as_deref(),
+            )
+            .await
+            .unwrap_or_default();
             let base_ref = pr_ctx.base_ref.clone();
             let pull_number = pr_ctx.pull_number;
 
@@ -663,6 +679,7 @@ async fn fetch_task(
                 head_ref: Some(run.head_ref.clone()),
                 steps: Some(steps),
                 secrets: Some(secrets),
+                vars: Some(vars),
                 repository_owner: Some(owner_slug),
                 repository_name: Some(repo.name),
                 event: Some(run.event),

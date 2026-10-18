@@ -51,6 +51,12 @@ function lineKindClass(kind: LogLine["kind"]): string {
       return "bg-amber-500/10 text-amber-700 dark:text-amber-400";
     case "notice":
       return "text-muted-foreground";
+    // `::debug::` lines — GitHub renders them dimmed.
+    case "debug":
+      return "text-muted-foreground/70";
+    // `##[group]` headers — bold section title (contents stay unfolded).
+    case "group":
+      return "font-semibold";
     default:
       return "";
   }

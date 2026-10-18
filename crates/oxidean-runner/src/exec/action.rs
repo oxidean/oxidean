@@ -186,12 +186,62 @@ async fn resolve_target(
     Ok(ActionTarget::Remote(dir))
 }
 
+/// `(url, auth-sets)` pairs for `uses:` resolution — credentials stay scoped
+/// to Oxidean-controlled endpoints. The job token and runner PAT may
+/// authenticate to the instance origin (and to `OXIDEAN_ACTIONS_MIRROR` when
+/// configured — the PAT only; the job token is repo-locked to the job's own
+/// repository). The public github.com fallback receives **no** instance
+/// credential — a hostile or redirecting endpoint must never be able to
+/// harvest tokens out of an `extraHeader`.
+fn action_endpoints(
+    origin: &str,
+    mirror: Option<&str>,
+    job_token: Option<&str>,
+    git_token: Option<&str>,
+    owner: &str,
+    repo: &str,
+) -> Vec<(String, Vec<Vec<String>>)> {
+    let instance_url = format!("{}/{}/{}.git", origin, owner, repo);
+    let instance_creds: Vec<Vec<String>> = [
+        job_token.filter(|t| !t.is_empty()),
+        git_token.filter(|t| !t.is_empty()),
+        None,
+    ]
+    .into_iter()
+    .map(auth_args)
+    .collect();
+    let mut endpoints = vec![(instance_url, instance_creds)];
+    match mirror {
+        // Instance mirror (`OXIDEAN_ACTIONS_MIRROR`) replaces the public
+        // github fallback — an airgapped instance mirrors vetted action
+        // repos instead of letting the runner reach out directly. The
+        // mirror is Oxidean-controlled, so the runner PAT may authenticate;
+        // the repo-locked job token cannot (scoped to the job's repo).
+        Some(mirror) if mirror.trim_end_matches('/') != origin.trim_end_matches('/') => {
+            endpoints.push((
+                format!("{mirror}/{}/{}.git", owner, repo),
+                vec![
+                    auth_args(git_token.filter(|t| !t.is_empty())),
+                    auth_args(None),
+                ],
+            ));
+        }
+        Some(_) => {}
+        None => endpoints.push((
+            format!("https://github.com/{}/{}.git", owner, repo),
+            vec![auth_args(None)],
+        )),
+    }
+    endpoints
+}
+
 /// Clone `owner/repo` at `ref` into `RUNNER_TOOL_CACHE/actions/…` and return
 /// the action directory. Instance repos resolve via `config.origin` first;
-/// on clone failure fall back to `https://github.com/…`. Auth rides per-command
+/// on clone failure fall back to the actions mirror or `https://github.com/…`
+/// (see [`action_endpoints`] for credential scoping). Auth rides per-command
 /// `http.extraHeader` — the repo-locked job token first (same-repo actions),
 /// then the runner PAT (`OXIDEAN_RUNNER_GIT_TOKEN`, cross-repo), then
-/// unauthenticated (public github.com).
+/// unauthenticated (public repos).
 async fn fetch_remote_action(
     senv: &StepEnv<'_>,
     owner: &str,
@@ -206,27 +256,14 @@ async fn fetch_remote_action(
         .join(owner)
         .join(repo);
     let sha_pinned = git_ref.len() == 40 && git_ref.chars().all(|c| c.is_ascii_hexdigit());
-
-    let creds: Vec<Vec<String>> = [
-        senv.task.job_token.as_deref().filter(|t| !t.is_empty()),
-        senv.config.git_token.as_deref().filter(|t| !t.is_empty()),
-        None,
-    ]
-    .into_iter()
-    .map(auth_args)
-    .collect();
-    // Instance mirror (`OXIDEAN_ACTIONS_MIRROR`) replaces the public github
-    // fallback — an airgapped instance mirrors vetted action repos instead of
-    // letting the runner reach out directly.
-    let fallback = senv
-        .config
-        .actions_mirror
-        .as_deref()
-        .unwrap_or("https://github.com");
-    let urls = [
-        format!("{}/{}/{}.git", senv.config.origin, owner, repo),
-        format!("{fallback}/{}/{}.git", owner, repo),
-    ];
+    let endpoints = action_endpoints(
+        &senv.config.origin,
+        senv.config.actions_mirror.as_deref(),
+        senv.task.job_token.as_deref(),
+        senv.config.git_token.as_deref(),
+        owner,
+        repo,
+    );
 
     // Git must never prompt — a `uses:` repo that hits an auth/askpass
     // prompt would otherwise block the job forever (no tty to answer it).
@@ -244,8 +281,8 @@ async fn fetch_remote_action(
         Some(git_ref.to_string())
     } else {
         let mut sha = None;
-        'resolve: for url in &urls {
-            for auth in &creds {
+        'resolve: for (url, creds) in &endpoints {
+            for auth in creds {
                 if let Some(s) = ls_remote_commit(git_env, url, auth, git_ref).await {
                     sha = Some(s);
                     break 'resolve;
@@ -279,8 +316,8 @@ async fn fetch_remote_action(
         std::process::id(),
         CLONE_TMP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     ));
-    for url in &urls {
-        for auth in &creds {
+    for (url, creds) in &endpoints {
+        for auth in creds {
             let _ = std::fs::remove_dir_all(&tmp);
             let attempts = [
                 vec![
@@ -1507,9 +1544,15 @@ runs: {using: node20, main: index.js}
             run_id: "r".into(),
             job_id: "j".into(),
             mask_values: &[],
+            extra_masks: std::sync::Mutex::new(Vec::new()),
+            stop_token: std::sync::Mutex::new(None),
+            partial_line: std::sync::Mutex::new(String::new()),
+            pending_warnings: std::sync::Mutex::new(Vec::new()),
             cancelled: std::sync::atomic::AtomicBool::new(false),
             log_cursor: std::sync::atomic::AtomicI64::new(0),
             seen_cmd_warns: std::sync::Mutex::new(std::collections::BTreeSet::new()),
+            runner_temp: std::sync::OnceLock::new(),
+            step_debug: std::sync::atomic::AtomicBool::new(false),
         };
         let mode = ExecMode::Host;
         let mut env: Vec<(String, String)> = vec![];
@@ -1577,5 +1620,76 @@ runs: {using: node20, main: index.js}
         );
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Credentials never cross endpoint boundaries: the job token and runner
+    /// PAT authenticate to the instance origin only — the public github.com
+    /// fallback must carry no `Authorization` header at all (a redirect or
+    /// hostile mirror must not harvest instance tokens).
+    #[test]
+    fn action_endpoints_scope_credentials_per_endpoint() {
+        use super::action_endpoints;
+
+        let eps = action_endpoints(
+            "https://ox.example",
+            None,
+            Some("JOBTOKEN"),
+            Some("RUNNERPAT"),
+            "actions",
+            "setup-go",
+        );
+        assert_eq!(eps.len(), 2);
+        assert_eq!(eps[0].0, "https://ox.example/actions/setup-go.git");
+        // Instance: job token, runner PAT, then unauthenticated.
+        assert_eq!(eps[0].1.len(), 3);
+        assert!(eps[0].1[0].iter().any(|a| a.contains("extraHeader")));
+        assert!(eps[0].1[1].iter().any(|a| a.contains("extraHeader")));
+        assert!(eps[0].1[2].is_empty());
+        // github.com: exactly one auth set — empty.
+        assert_eq!(eps[1].0, "https://github.com/actions/setup-go.git");
+        assert_eq!(eps[1].1, vec![Vec::<String>::new()]);
+        let github_blob = eps[1].1.concat().concat();
+        assert!(!github_blob.contains("JOBTOKEN"));
+        assert!(!github_blob.contains("RUNNERPAT"));
+        assert!(!github_blob.contains("Authorization"));
+    }
+
+    /// With `OXIDEAN_ACTIONS_MIRROR` configured the mirror replaces the
+    /// github fallback — and, being instance-controlled, it may take the
+    /// runner PAT (but never the repo-locked job token).
+    #[test]
+    fn action_endpoints_mirror_takes_pat_not_job_token() {
+        use super::action_endpoints;
+        use base64::Engine;
+
+        let eps = action_endpoints(
+            "https://ox.example",
+            Some("https://mirror.example"),
+            Some("JOBTOKEN"),
+            Some("RUNNERPAT"),
+            "actions",
+            "setup-go",
+        );
+        assert_eq!(eps.len(), 2);
+        assert_eq!(eps[1].0, "https://mirror.example/actions/setup-go.git");
+        let mirror_blob = eps[1].1.concat().concat();
+        let pat_b64 = base64::engine::general_purpose::STANDARD.encode("oauth2:RUNNERPAT");
+        let job_b64 = base64::engine::general_purpose::STANDARD.encode("oauth2:JOBTOKEN");
+        assert!(mirror_blob.contains(&pat_b64), "PAT allowed on mirror");
+        assert!(
+            !mirror_blob.contains(&job_b64),
+            "job token stays repo-locked"
+        );
+
+        // Mirror == origin: no duplicate endpoint.
+        let eps = action_endpoints(
+            "https://ox.example/",
+            Some("https://ox.example"),
+            None,
+            None,
+            "a",
+            "b",
+        );
+        assert_eq!(eps.len(), 1);
     }
 }

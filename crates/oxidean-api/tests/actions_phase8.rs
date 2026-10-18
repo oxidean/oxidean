@@ -388,7 +388,7 @@ async fn p8_org_env_secret_merge_precedence_and_audit() {
         .await
         .expect("repo");
 
-    // Same name at three scopes → narrowest wins (repo < org < environment).
+    // Same name at three scopes → narrowest wins (org < repo < environment).
     db.insert_action_secret(
         "s1",
         &repo.id,
@@ -445,11 +445,12 @@ async fn p8_org_env_secret_merge_precedence_and_audit() {
     assert_eq!(merged.get("TOKEN").map(String::as_str), Some("env-val"));
     assert_eq!(merged.get("ORG_ONLY").map(String::as_str), Some("org-only"));
 
-    // Without an environment the org secret beats the repo secret.
+    // Without an environment the repo secret beats the org secret —
+    // GitHub: on a name collision the narrowest scope wins.
     let merged = decrypted_secrets_for_job(&db, &repo.id, None, None)
         .await
         .unwrap();
-    assert_eq!(merged.get("TOKEN").map(String::as_str), Some("org-val"));
+    assert_eq!(merged.get("TOKEN").map(String::as_str), Some("repo-val"));
 
     // Decrypt path was audited — names/counts land, never values.
     let events = db

@@ -3,9 +3,12 @@ import type {
   ActionDeploymentsListResponse,
   ActionJobLogResponse,
   ActionSecretsListResponse,
+  ActionVariablesListResponse,
   AdminWorkflowTemplatesListResponse,
   OrgActionsSecretsListResponse,
   OrgActionsSecretReposResponse,
+  OrgActionsVariableReposResponse,
+  OrgActionsVariablesListResponse,
   RepoActionsEnvironmentsListResponse,
   WorkflowTemplateGetResponse,
   WorkflowTemplatesListResponse,
@@ -255,6 +258,23 @@ export function actionsEnvironmentSecretsQuery(owner: string, name: string, env:
   };
 }
 
+/** `repo.actions.environments.variablesList` — values are plaintext. */
+export function actionsEnvironmentVariablesQuery(owner: string, name: string, env: string) {
+  return {
+    queryKey: ["repo", "actions", "env-variables", owner, name, env] as const,
+    queryFn: async (): Promise<ActionVariablesListResponse> => {
+      const res = await apiClient.repo.actions.environments.variablesList({
+        owner,
+        name,
+        environment: env,
+      });
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+    enabled: Boolean(env),
+  };
+}
+
 /** `org.actions.secrets.list`. */
 export function orgActionsSecretsQuery(slug: string) {
   return {
@@ -278,5 +298,34 @@ export function orgActionsSecretReposQuery(slug: string, secret: string) {
       return res.data;
     },
     enabled: Boolean(slug && secret),
+  };
+}
+
+/** `org.actions.variables.list` — values are plaintext (not secrets). */
+export function orgActionsVariablesQuery(slug: string) {
+  return {
+    queryKey: ["org", "actions", "variables", slug] as const,
+    queryFn: async (): Promise<OrgActionsVariablesListResponse> => {
+      const res = await apiClient.org.actions.variables.list({ slug });
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+    enabled: Boolean(slug),
+  };
+}
+
+/** `org.actions.variables.listRepos` — selected-visibility repo ids. */
+export function orgActionsVariableReposQuery(slug: string, variable: string) {
+  return {
+    queryKey: ["org", "actions", "variable-repos", slug, variable] as const,
+    queryFn: async (): Promise<OrgActionsVariableReposResponse> => {
+      const res = await apiClient.org.actions.variables.listRepos({
+        slug,
+        variable_name: variable,
+      });
+      if (!res.ok) throw new Error(`${res.error.code}: ${res.error.message}`);
+      return res.data;
+    },
+    enabled: Boolean(slug && variable),
   };
 }
