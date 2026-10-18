@@ -1,0 +1,22 @@
+{
+  "stage": "nfr-requirements",
+  "unit": "u2-vcs-persistence",
+  "upstream_ids": ["AC1.2.2","AC1.3.1","AC2.3.2","AC2.2.2","AC5.1.3","BR2.1","BR2.2","BR2.5","BR2.6","BR2.8","C4","C5","NFR2","NFR5","NFR8"],
+  "coverage": [
+    {"id": "AC1.2.2", "status": "OK", "target": "SR2.2", "note": "skipped DB → db.not_configured on every method"},
+    {"id": "AC1.3.1", "status": "OK", "target": "SR2.3, SR2.8", "note": "cascade correctness + explicit FK actions prevent cross-repo bleed and RESTRICT aborts"},
+    {"id": "AC2.3.2", "status": "OK", "target": "SR2.4", "note": "all-or-nothing create_tx"},
+    {"id": "AC2.2.2", "status": "OK", "target": "SR2.4", "note": "unique-race→reselect, never error-string match"},
+    {"id": "AC5.1.3", "status": "OK", "target": "SR2.4", "note": "CasOutcome preserves data.actual for vcs.ref_conflict"},
+    {"id": "BR2.1", "status": "OK", "target": "SR2.1, TD2.2", "note": "sql-only-inside-db + module convention"},
+    {"id": "BR2.2", "status": "OK", "target": "SR2.2"},
+    {"id": "BR2.5", "status": "OK", "target": "SR2.6", "note": "per-dialect alteration recipes; existing rows survive"},
+    {"id": "BR2.6", "status": "OK", "target": "SR2.4, SR2.5"},
+    {"id": "BR2.8", "status": "OK", "target": "SR2.4"},
+    {"id": "C4", "status": "OK", "target": "SR2.6, TD2.4"},
+    {"id": "C5", "status": "OK", "target": "TD2.2, TD2.3"},
+    {"id": "NFR2", "status": "OK", "target": "SR2.1, SR2.3", "note": "injection safety + tenant isolation"},
+    {"id": "NFR5", "status": "OK", "target": "SR2.6", "note": "migration reliability across dialects"},
+    {"id": "NFR8", "status": "OK", "target": "SR2.7, TD2.6", "note": "no secrets, no new deps; index-bound GC scans partially verifiable at this stage"}
+  ]
+}

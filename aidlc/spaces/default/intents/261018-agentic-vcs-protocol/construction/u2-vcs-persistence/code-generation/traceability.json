@@ -1,0 +1,29 @@
+{
+  "stage": "code-generation",
+  "unit": "u2-vcs-persistence",
+  "upstream_ids": [
+    "AC1.3.1","AC1.3.2","AC1.3.3","AC2.1.4","AC2.2.1","AC2.2.2","AC2.2.3",
+    "AC2.3.1","AC2.3.2","AC2.7.1","AC2.7.3","AC3.5.2","AC5.1.3","AC5.2.1",
+    "AC1.2.2","FR1.5","C4","C5"
+  ],
+  "coverage": [
+    {"id":"AC1.3.1","status":"OK","target":"0053_vcs_schema.sql ×3 dialects + migrate.rs auto-pickup","note":"applied migrations never deleted; revert = code-only or compensating forward migration"},
+    {"id":"AC1.3.2","status":"OK","target":"vcs_repo_surface_flags + vcs_get/upsert_repo_surface_flag","note":"enabled_by SET NULL; upsert idempotent"},
+    {"id":"AC1.3.3","status":"OK","target":"vcs_objects global + vcs_object_links attribution","note":"insert-if-absent; RESTRICT keeps GC from deleting referenced objects"},
+    {"id":"AC2.1.4","status":"OK","target":"vcs_create_changeset_tx sentinel pre-validation","note":"vcs.not_found:parent / vcs.not_found:object typed errors — no error-string sniffing"},
+    {"id":"AC2.2.1","status":"OK","target":"vcs_changesets idem_key unique index + tx reselect","note":"concurrent identical dedups; divergent both succeed"},
+    {"id":"AC2.2.2","status":"OK","target":"vcs_file_changes PK (changeset_id,path) + kind/mode/old_path/blob_hash","note":"delete allows NULL blob; non-delete rejects NULL in tx"},
+    {"id":"AC2.2.3","status":"OK","target":"parents/payload TEXT-JSON encode/decode at row boundary","note":"dialect-agnostic"},
+    {"id":"AC2.3.1","status":"OK","target":"vcs_cas_ref_update → CasOutcome","note":"Applied(RefRow)|Conflict{actual}; null-safe equality per dialect; mysql rows_affected+reselect"},
+    {"id":"AC2.3.2","status":"OK","target":"new=NULL delete-only path + vcs_delete_ref","note":"never inserts NULL-changeset row"},
+    {"id":"AC2.7.1","status":"OK","target":"repository_activity 4 nullable cols (3 dialects) + RepoActivityRow Option + api de-wraps","note":"ref-free VCS activity rows round-trip"},
+    {"id":"AC2.7.3","status":"OK","target":"feeds.rs/admin/users.rs Option-safe consumers","note":"title/link fallbacks \"\"/0"},
+    {"id":"AC3.5.2","status":"OK","target":"vcs_derived_index + upsert/query","note":"merge upsert on (repo,kind,index_key); covering_changeset tracked"},
+    {"id":"AC5.1.3","status":"OK","target":"vcs_repo_object_counts + vcs_count_changesets","note":"vcs.status needs {object_count, storage_bytes, changeset_count}"},
+    {"id":"AC5.2.1","status":"OK","target":"vcs_import_links + insert_if_absent + lookup + cursor_page","note":"git_oid CHAR(64) covers sha256-format repos"},
+    {"id":"AC1.2.2","status":"OK","target":"vcs_list_orphaned_objects_before + vcs_live_object_hashes","note":"GC hooks for u3; RESTRICT interplay documented"},
+    {"id":"FR1.5","status":"OK","target":"global vcs_objects (no repo_id) + link attribution","note":"cross-repo dedup by design"},
+    {"id":"C4","status":"OK","target":"17 vcs.* procs persist through this façade (u7 wires them)","note":"u2 share is the storage substrate"},
+    {"id":"C5","status":"OK","target":"21 vcs_* façade methods matching amended contract-summary yaml","note":"insert_if_absent, index_key, count_for_repo, CasOutcome — C5 updated on landing"}
+  ]
+}

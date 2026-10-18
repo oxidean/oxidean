@@ -177,14 +177,16 @@ All methods `Database`-by-value, `skipped()` → `db.not_configured`. Signature-
 ```yaml
 facade:
   repo_surface_flag: "{get, upsert}"
-  object_entry:      "{get_by_hash, insert_if_absent, list_orphaned_before(grace_ts)}"
-  object_link:       "{insert (same tx as changeset), count_for_repo, live_hashes()}"
-  changeset:         "{create_tx(changeset, file_changes, object_links, index_upserts), get, parents_of, find_by_idempotency}"
-  ref:               "{list, cas_update(expected_old, new), delete}"
-  derived_index:     "{upsert_rows (merge semantics — concurrent same-parent safe), query(kind, key, cursor)}"
-  import_link:       "{insert, lookup(git_oid), cursor_page}"
+  object_entry:      "{get_by_hash, insert_if_absent -> bool (Stored|Dedup), list_orphaned_before(grace_ts)}"
+  object_link:       "{insert_if_absent (same tx as changeset; re-referenced blobs never collide), count_for_repo -> {object_count, storage_bytes}, live_hashes()}"
+  changeset:         "{create_tx(changeset, file_changes, object_links, index_upserts) -> id, get, parents_of, find_by_idempotency, count_for_repo -> i64 (vcs.status.changeset_count)}"
+  ref:               "{list, cas_update(expected_old, new) -> CasOutcome{Applied(RefRow)|Conflict{actual}}, delete}"
+  derived_index:     "{upsert_rows (merge semantics — concurrent same-parent safe), query(kind, index_key, cursor)}"
+  import_link:       "{insert_if_absent, lookup(git_oid) -> changeset_id, cursor_page}"
   repo_activity:     "{insert_repo_activity — push columns NULLable per C4}"
 ```
+
+C5 errata applied at u2 landing (FD R-13/R-15/R-19 + review corrections): `object_link`/`import_link` inserts are insert-if-absent; the derived-index column is `index_key` (`key` is mysql-reserved); `cas_update` returns the typed `CasOutcome` (a `Result` can't carry `actual`); `count_for_repo` is the `{object_count, storage_bytes}` join pair and `changeset.count_for_repo` exists for `vcs.status`; `create_tx` pre-validates parents/objects inside the tx and fails with the sentinel strings `vcs.not_found:parent`/`vcs.not_found:object`; `cas_update` with `new = null` is delete-only and never inserts a NULL-changeset row; `git_oid` is 64-wide (covers sha256-format repos).
 
 ## C6 — Engine interfaces (provider-owned)
 
