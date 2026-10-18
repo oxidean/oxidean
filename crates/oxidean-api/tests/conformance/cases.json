@@ -1225,6 +1225,20 @@
       ]
     },
     {
+      "id": "artifact-compression-level",
+      "kind": "run",
+      "expect_run": "success",
+      "expect_jobs": {
+        "up": "success",
+        "down": "success"
+      },
+      "log_contains": [
+        "Uploaded artifact 'raw'",
+        "invalid compression-level '42'",
+        "level-zero"
+      ]
+    },
+    {
       "id": "artifact-missing",
       "kind": "run",
       "expect_run": "failure",

@@ -33,11 +33,23 @@ pub(crate) async fn upload(
     let path_spec =
         input(with, "path").ok_or_else(|| "upload-artifact requires a 'path' input".to_string())?;
     let include_hidden = bool_input(with, "include-hidden-files");
-    if input(with, "compression-level").is_some() {
-        senv.logger
-            .line("::warning::input 'compression-level' is ignored — artifacts are always gzip-compressed")
-            .await;
-    }
+    // `compression-level` 0–9: 0 stores an uncompressed tar, 1–9 tune the
+    // gzip effort (GitHub default 6 — `tar czf` compresses at gzip's own
+    // default, so only non-default levels take the explicit path).
+    let compression_level = match input(with, "compression-level") {
+        Some(s) => match s.parse::<u8>() {
+            Ok(n) if n <= 9 => Some(n),
+            _ => {
+                senv.logger
+                    .line(&format!(
+                        "::warning::invalid compression-level '{s}' — expected 0-9, using the default"
+                    ))
+                    .await;
+                None
+            }
+        },
+        None => None,
+    };
 
     // Multiline path list; `!` negates like hashFiles.
     let mut files: Vec<PathBuf> = Vec::new();
@@ -112,24 +124,67 @@ pub(crate) async fn upload(
         .collect();
     let list_file = stage.join(format!("{name}.files"));
     std::fs::write(&list_file, rels.join("\n")).map_err(|e| e.to_string())?;
-    let tgz = stage.join(format!("{name}.tgz"));
-    let out = Command::new("tar")
-        .args(["czf"])
-        .arg(&tgz)
-        .arg("-C")
-        .arg(&root)
-        .arg("-T")
-        .arg(&list_file)
-        .output()
-        .await
-        .map_err(|e| format!("tar unavailable: {e}"))?;
-    if !out.status.success() {
-        return Err(format!(
-            "artifact archive failed: {}",
-            String::from_utf8_lossy(&out.stderr)
-        ));
-    }
-    let bytes = std::fs::read(&tgz).map_err(|e| e.to_string())?;
+    let archive = match compression_level {
+        // Level 0 stores the tar uncompressed; 1–9 drive `gzip -N`.
+        // The download side auto-detects (`tar xf`), so both shapes extract.
+        Some(level) => {
+            let tar = stage.join(format!("{name}.tar"));
+            let out = Command::new("tar")
+                .args(["cf"])
+                .arg(&tar)
+                .arg("-C")
+                .arg(&root)
+                .arg("-T")
+                .arg(&list_file)
+                .output()
+                .await
+                .map_err(|e| format!("tar unavailable: {e}"))?;
+            if !out.status.success() {
+                return Err(format!(
+                    "artifact archive failed: {}",
+                    String::from_utf8_lossy(&out.stderr)
+                ));
+            }
+            if level == 0 {
+                tar
+            } else {
+                let out = Command::new("gzip")
+                    .arg(format!("-{level}"))
+                    .arg(&tar)
+                    .output()
+                    .await
+                    .map_err(|e| format!("gzip unavailable: {e}"))?;
+                if !out.status.success() {
+                    return Err(format!(
+                        "artifact compression failed: {}",
+                        String::from_utf8_lossy(&out.stderr)
+                    ));
+                }
+                stage.join(format!("{name}.tar.gz"))
+            }
+        }
+        None => {
+            let tgz = stage.join(format!("{name}.tgz"));
+            let out = Command::new("tar")
+                .args(["czf"])
+                .arg(&tgz)
+                .arg("-C")
+                .arg(&root)
+                .arg("-T")
+                .arg(&list_file)
+                .output()
+                .await
+                .map_err(|e| format!("tar unavailable: {e}"))?;
+            if !out.status.success() {
+                return Err(format!(
+                    "artifact archive failed: {}",
+                    String::from_utf8_lossy(&out.stderr)
+                ));
+            }
+            tgz
+        }
+    };
+    let bytes = std::fs::read(&archive).map_err(|e| e.to_string())?;
     let job_id = senv
         .task
         .job_id
@@ -229,8 +284,10 @@ pub(crate) async fn download(
         std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
         let tgz = stage.join(format!("dl-{name}.tgz"));
         std::fs::write(&tgz, &bytes).map_err(|e| e.to_string())?;
+        // `xf` auto-detects compression — `compression-level: 0` uploads are
+        // plain tar, anything else is gzipped.
         let out = Command::new("tar")
-            .args(["xzf"])
+            .args(["xf"])
             .arg(&tgz)
             .arg("-C")
             .arg(dir)

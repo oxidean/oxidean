@@ -56,7 +56,7 @@ download, annotations, `workflow_job` webhook.
 | 10. Default environment variables | 48 | 0 | 0 | 0 |
 | 11. Action metadata — action.yml | 14 | 2 | 1 | 1 |
 | 12. Reusable workflows | 10 | 0 | 0 | 0 |
-| 13. Artifacts | 11 | 1 | 1 | 0 |
+| 13. Artifacts | 12 | 0 | 1 | 0 |
 | 14. Dependency caching | 5 | 0 | 0 | 0 |
 | 15. Concurrency | 5 | 0 | 0 | 0 |
 | 16. Environments & deployments | 11 | 0 | 0 | 0 |
@@ -465,7 +465,7 @@ needed. Search-path semantics follow upstream `findFilesToUpload`
 | `art.hidden-files` | `include-hidden-files:` — dot-segments excluded by default | supported | test:crates/oxidean-runner/src/exec/artifacts.rs::archive_root_follows_search_paths | v4 default changed upstream; we match (hidden files skipped unless opted in). |
 | `art.retention-days` | `retention-days:` per-artifact expiry | supported | test:crates/oxidean-api/tests/actions_phase8.rs::p8_retention_sweep_compresses_terminal_and_deletes_aged | Server sweep enforces expiry; artifact-level override accepted. |
 | `art.overwrite` | `overwrite: true` replaces an existing artifact | supported | case:artifact-overwrite | v4 requires this flag to re-upload a name. |
-| `art.compression-level` | `compression-level:` | partial | case:artifact-upload-download | Accepted but ignored — archives are always gzip. Warns in log. |
+| `art.compression-level` | `compression-level:` | supported | case:artifact-compression-level | 0 stores an uncompressed tar; 1–9 drive `gzip -N` (default 6 via `tar czf`); invalid values warn and fall back. Download auto-detects (`tar xf`). Codec is gzip vs upstream zstd — level semantics honored. |
 | `art.download` | `actions/download-artifact` — by name into `path:` | supported | case:artifact-upload-download, case:artifact-pattern-download | |
 | `art.download-pattern` | `pattern:` glob over artifact names | supported | case:artifact-pattern-download | |
 | `art.merge-multiple` | `merge-multiple: true` flattens matched artifacts into `path:` | supported | case:artifact-pattern-download | |

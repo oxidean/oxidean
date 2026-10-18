@@ -1,0 +1,30 @@
+name: artifact-compression-level
+on: [push]
+jobs:
+  up:
+    runs-on: ubuntu-latest
+    steps:
+      - run: mkdir -p out && echo "level-zero" > out/zero.txt
+      # compression-level: 0 stores an uncompressed tar blob.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: raw
+          path: out/**
+          compression-level: "0"
+      # Out-of-range levels warn and fall back to the default compression.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bad
+          path: out/**
+          compression-level: "42"
+
+  down:
+    needs: [up]
+    runs-on: ubuntu-latest
+    steps:
+      # Auto-detecting extract must handle the level-0 plain tar.
+      - uses: actions/download-artifact@v4
+        with:
+          name: raw
+          path: dl
+      - run: cat dl/zero.txt

@@ -833,6 +833,7 @@ conformance_case!(artifact_upload_download, "artifact-upload-download");
 conformance_case!(artifact_search_path_root, "artifact-search-path-root");
 conformance_case!(artifact_overwrite, "artifact-overwrite");
 conformance_case!(artifact_pattern_download, "artifact-pattern-download");
+conformance_case!(artifact_compression_level, "artifact-compression-level");
 conformance_case!(artifact_missing, "artifact-missing");
 conformance_case!(artifact_no_files_error, "artifact-no-files-error");
 conformance_case!(expr_malformed_run, "expr-malformed-run");
