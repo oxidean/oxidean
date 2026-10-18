@@ -688,7 +688,8 @@ fn apply_event(
         | "label"
         | "public"
         | "status"
-        | "repository_dispatch") => {
+        | "repository_dispatch"
+        | "branch_protection_rule") => {
             t.lifecycle
                 .insert(name.to_string(), parse_event_filters(value).types);
         }

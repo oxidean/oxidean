@@ -637,6 +637,8 @@ on:
   status: {}
   repository_dispatch:
     types: [deploy]
+  branch_protection_rule:
+    types: [created]
 jobs:
   l:
     runs-on: ubuntu-latest
@@ -700,6 +702,12 @@ jobs:
     notify_lifecycle_actions(&db, git.as_ref(), &ev("repository_dispatch", "deploy")).await;
     assert_eq!(run_count(&db, &repo_id).await, 12);
 
+    // branch_protection_rule types:[created] — edited filtered.
+    notify_lifecycle_actions(&db, git.as_ref(), &ev("branch_protection_rule", "edited")).await;
+    assert_eq!(run_count(&db, &repo_id).await, 12);
+    notify_lifecycle_actions(&db, git.as_ref(), &ev("branch_protection_rule", "created")).await;
+    assert_eq!(run_count(&db, &repo_id).await, 13);
+
     let runs = db
         .list_action_runs_for_repo(&repo_id, &Default::default(), 100, 0)
         .await
@@ -717,6 +725,7 @@ jobs:
         "public",
         "status",
         "repository_dispatch",
+        "branch_protection_rule",
     ] {
         assert!(
             runs.iter().any(|r| r.event == name),

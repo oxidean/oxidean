@@ -46,7 +46,7 @@ download, annotations, `workflow_job` webhook.
 |---------|-----------|---------|-------------|-----|
 | 1. Workflow files & discovery | 7 | 1 | 0 | 0 |
 | 2. Triggers & filters | 20 | 2 | 0 | 0 |
-| 3. Events | 22 | 0 | 14 | 0 |
+| 3. Events | 23 | 0 | 13 | 0 |
 | 4. Workflow-level keys | 8 | 0 | 0 | 0 |
 | 5. Jobs | 29 | 0 | 0 | 1 |
 | 6. Steps | 18 | 0 | 1 | 1 |
@@ -133,7 +133,7 @@ activity-type filter semantics; unsupported ones warn at parse (section 2,
 | `ev.release` | `release` — types published/created/edited/prereleased/released | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_lifecycle_release_and_issues | |
 | `ev.issues` | `issues` — all activity types, `types:` filter honoured | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_lifecycle_release_and_issues, test:crates/oxidean-api/tests/webhook_delivery.rs::actions_issue_label_delta_trigger_e2e | `labeled`/`unlabeled` fire per label delta with `payload.label` naming the changed label. |
 | `ev.schedule-payload` | `github.event.schedule` carries the matched cron entry | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_schedule_sweep_dedupes_per_minute | `schedule_payload` emits `{"schedule": "<cron>", "repository": …}`; the test asserts the field lands on the run's event payload. |
-| `ev.branch_protection_rule` | `branch_protection_rule` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
+| `ev.branch_protection_rule` | `branch_protection_rule` — created/edited/deleted | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_lifecycle_generic_events | Fires on `repo.branchProtection.*` mutations; `types:` honoured. Tag protection has no GitHub event analogue. |
 | `ev.check_run` | `check_run` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
 | `ev.check_suite` | `check_suite` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
 | `ev.create` | `create` — branch/tag creation | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_lifecycle_generic_events | Fires on RPC branch/tag creation and receive-pack creates; `ref_type` distinguishes branch/tag in the payload. Job-token pushes are suppressed (GITHUB_TOKEN non-recursion). |
