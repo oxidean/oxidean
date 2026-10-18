@@ -94,7 +94,7 @@ tag_prefix = "oxidean-vcs-v"
 changelog_path = "crates/oxidean-vcs/CHANGELOG.md"
 globs = ["crates/oxidean-vcs/**"]
 scopes = ["vcs"]
-depends_on = []
+depends_on = ["oxidean-core", "oxidean-db"]
 
 # --- Bun workspaces --------------------------------------------------------
 
