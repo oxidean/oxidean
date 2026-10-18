@@ -47,6 +47,7 @@ pub mod templates;
 pub mod user;
 pub mod version;
 pub mod webhook;
+pub mod wiki;
 
 pub use app::{router, router_with_state, AppState};
 pub use cors::build_cors;

@@ -46,7 +46,7 @@ download, annotations, `workflow_job` webhook.
 |---------|-----------|---------|-------------|-----|
 | 1. Workflow files & discovery | 8 | 0 | 0 | 0 |
 | 2. Triggers & filters | 22 | 0 | 0 | 0 |
-| 3. Events | 28 | 0 | 8 | 0 |
+| 3. Events | 29 | 0 | 7 | 0 |
 | 4. Workflow-level keys | 8 | 0 | 0 | 0 |
 | 5. Jobs | 29 | 0 | 0 | 1 |
 | 6. Steps | 19 | 0 | 0 | 1 |
@@ -143,7 +143,7 @@ activity-type filter semantics; unsupported ones warn at parse (section 2,
 | `ev.discussion` | `discussion` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
 | `ev.discussion_comment` | `discussion_comment` | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
 | `ev.fork` | `fork` | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_lifecycle_generic_events | Fires on `repo.fork` with a `forkee` payload; action `created`. |
-| `ev.gollum` | `gollum` — wiki edits | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |
+| `ev.gollum` | `gollum` — wiki edits | supported | test:crates/oxidean-api/tests/wiki.rs::wiki_gollum_events_webhook_and_trigger, test:crates/oxidean-api/tests/wiki.rs::wiki_push_fanout_emits_gollum | Fires on `wiki.pages.create`/`update` and on every push to the `{name}.wiki.git` bare (Smart HTTP + SSH) — the payload carries a `pages` array with per-page `action` (`created`/`edited`), `page_name`, `title`, `sha`, `html_url`, `summary`. Deletes emit webhooks only (no `gollum` action; GitHub fires none). The wiki domain itself is a separate Git-backed unit: `{name}.wiki.git` clone/push over both transports gated on `wiki_enabled`, page CRUD + `wiki.revisions.list` RPC, `/{o}/{r}/wiki` UI with `_Sidebar`/`_Footer`/`_Header` chrome pages, and rename/transfer/delete/orphan-reconcile lifecycle for the wiki bare. |
 | `ev.issue_comment` | `issue_comment` — created/edited/deleted | supported | test:crates/oxidean-api/tests/webhook_delivery.rs::actions_issue_comment_trigger_e2e, test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_lifecycle_generic_events | Fires on issue comments and PR conversation comments; `types:` honoured. |
 | `ev.label` | `label` — created/edited/deleted | supported | test:crates/oxidean-api/tests/actions_triggers_p6.rs::p6_lifecycle_generic_events | Repo-scoped label CRUD; org labels (Oxidean extension) don't map to a repo context and don't fire. `types:` honoured. |
 | `ev.merge_group` | `merge_group` — merge queue | unsupported | case:on-unsupported-event | Warns at parse; never fires. P13. |

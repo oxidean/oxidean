@@ -76,6 +76,7 @@ async fn to_public(ctx: &RpcCtx, repo: &AccessibleRepo) -> Result<RepoPublic, Ap
         viewer_watch_level: None,
         issues_enabled: flags.issues_enabled,
         pulls_enabled: flags.pulls_enabled,
+        wiki_enabled: flags.wiki_enabled,
         fork_network_id: None,
         forked_from: None,
     })
@@ -202,6 +203,19 @@ pub async fn rename(
         })?;
     }
 
+    // The wiki bare (`{name}.wiki.git`) rides along — best-effort like the
+    // redirect insert below: a missing dir is normal (wiki never created),
+    // a failed move is logged rather than reverting the primary rename.
+    let wiki_old = bare_repo_path(&ctx.repos_dir, &owner_slug, &format!("{old_name}.wiki"))?;
+    let wiki_new = bare_repo_path(&ctx.repos_dir, &owner_slug, &format!("{new_name}.wiki"))?;
+    if tokio::fs::try_exists(&wiki_old).await.unwrap_or(false)
+        && !tokio::fs::try_exists(&wiki_new).await.unwrap_or(false)
+    {
+        if let Err(e) = tokio::fs::rename(&wiki_old, &wiki_new).await {
+            tracing::error!(error = %e, "wiki bare rename failed");
+        }
+    }
+
     let updated = match ctx
         .db
         .update_repository_name(&accessible.row.id, &new_name)
@@ -211,6 +225,9 @@ pub async fn rename(
         Err(e) => {
             if tokio::fs::try_exists(&new_path).await.unwrap_or(false) {
                 let _ = tokio::fs::rename(&new_path, &old_path).await;
+            }
+            if tokio::fs::try_exists(&wiki_new).await.unwrap_or(false) {
+                let _ = tokio::fs::rename(&wiki_new, &wiki_old).await;
             }
             return Err(db_err(e));
         }
@@ -373,6 +390,22 @@ pub async fn transfer(
         false
     };
 
+    // Wiki bare rides along on transfer too (`{name}.wiki.git` under the
+    // destination owner dir) — best-effort, same rationale as `rename`.
+    let wiki_old = bare_repo_path(&ctx.repos_dir, &old_slug, &format!("{name}.wiki"))?;
+    let wiki_new = bare_repo_path(&ctx.repos_dir, &dest_slug, &format!("{name}.wiki"))?;
+    let wiki_moved = if tokio::fs::try_exists(&wiki_old).await.unwrap_or(false) && moved {
+        match tokio::fs::rename(&wiki_old, &wiki_new).await {
+            Ok(()) => true,
+            Err(e) => {
+                tracing::error!(error = %e, "wiki bare transfer rename failed");
+                false
+            }
+        }
+    } else {
+        false
+    };
+
     let former_owner_id = accessible.row.owner_id.clone();
     let former_was_user = accessible.row.owner_type.eq_ignore_ascii_case("user");
 
@@ -385,6 +418,9 @@ pub async fn transfer(
         Err(e) => {
             if moved {
                 let _ = tokio::fs::rename(&new_path, &old_path).await;
+            }
+            if wiki_moved {
+                let _ = tokio::fs::rename(&wiki_new, &wiki_old).await;
             }
             return Err(db_err(e));
         }

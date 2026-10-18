@@ -9,10 +9,9 @@ import { toastSuccess } from "@/lib/toast";
 const NETWORK_ERROR = "Can't reach Oxidean. Check your connection and try again.";
 
 /**
- * Repo Settings → Features — per-repo unit toggles for Issues / Pulls
- * (COL-13). Writes go through `repo.issues.setEnabled` /
- * `repo.pulls.setEnabled` (Admin-only RPCs); the store update keeps the repo
- * chrome tabs in sync immediately.
+ * Repo Settings → Features — per-repo unit toggles for Issues / Pulls / Wiki
+ * (COL-13). Writes go through `repo.{unit}.setEnabled` (Admin-only RPCs); the
+ * store update keeps the repo chrome tabs in sync immediately.
  */
 export function RepoFeaturesPanel(props: {
   owner: string;
@@ -30,11 +29,12 @@ export function RepoFeaturesPanel(props: {
   const live = storeRepo && storeRepo.id === props.repo.id ? storeRepo : props.repo;
   const issuesEnabled = live.issues_enabled !== false;
   const pullsEnabled = live.pulls_enabled !== false;
+  const wikiEnabled = live.wiki_enabled !== false;
 
-  const [pendingUnit, setPendingUnit] = useState<"" | "issues" | "pulls">("");
+  const [pendingUnit, setPendingUnit] = useState<"" | "issues" | "pulls" | "wiki">("");
   const [error, setError] = useState("");
 
-  async function setUnit(unit: "issues" | "pulls", next: boolean) {
+  async function setUnit(unit: "issues" | "pulls" | "wiki", next: boolean) {
     if (!canAdmin || pendingUnit) return;
     setError("");
     setPendingUnit(unit);
@@ -42,7 +42,9 @@ export function RepoFeaturesPanel(props: {
       const res =
         unit === "issues"
           ? await apiClient.repo.issues.setEnabled({ owner, name, enabled: next })
-          : await apiClient.repo.pulls.setEnabled({ owner, name, enabled: next });
+          : unit === "pulls"
+            ? await apiClient.repo.pulls.setEnabled({ owner, name, enabled: next })
+            : await apiClient.repo.wiki.setEnabled({ owner, name, enabled: next });
       if (!res.ok) {
         setError(res.error.message || "Could not update repository features.");
         setPendingUnit("");
@@ -51,16 +53,22 @@ export function RepoFeaturesPanel(props: {
       setRepo(
         unit === "issues"
           ? { ...live, issues_enabled: res.data.enabled }
-          : { ...live, pulls_enabled: res.data.enabled },
+          : unit === "pulls"
+            ? { ...live, pulls_enabled: res.data.enabled }
+            : { ...live, wiki_enabled: res.data.enabled },
       );
       toastSuccess(
         unit === "issues"
           ? next
             ? "Issues enabled."
             : "Issues disabled."
-          : next
-            ? "Pull requests enabled."
-            : "Pull requests disabled.",
+          : unit === "pulls"
+            ? next
+              ? "Pull requests enabled."
+              : "Pull requests disabled."
+            : next
+              ? "Wiki enabled."
+              : "Wiki disabled.",
       );
       setPendingUnit("");
     } catch {
@@ -106,6 +114,16 @@ export function RepoFeaturesPanel(props: {
           aria-label="Enable pull requests"
         />
         <Label className="text-[14px]">Pull requests</Label>
+      </div>
+      <div className="flex items-center gap-3">
+        <Switch
+          checked={wikiEnabled}
+          disabled={!canAdmin || pendingUnit !== ""}
+          onCheckedChange={(v) => void setUnit("wiki", !!v)}
+          data-testid="repo-wiki-enabled"
+          aria-label="Enable wiki"
+        />
+        <Label className="text-[14px]">Wiki</Label>
       </div>
     </div>
 

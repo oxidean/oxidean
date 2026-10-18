@@ -446,3 +446,45 @@ pub fn check_suite_payload(
         "sender": sender,
     })
 }
+
+/// `gollum` event payload — GitHub fires one gollum event per wiki change
+/// set with a `pages[]` array; each entry carries its own `action`
+/// (`created` | `edited`). `summary` is always `null` (GitHub never
+/// populates it). RPC page writes emit one page; direct wiki pushes can
+/// carry several.
+pub fn gollum_payload(
+    pages: &[GollumPage],
+    repository: &JsonValue,
+    sender: &JsonValue,
+) -> JsonValue {
+    let pages: Vec<JsonValue> = pages
+        .iter()
+        .map(|p| {
+            json!({
+                "page_name": p.page_name,
+                "title": p.page_name,
+                "summary": JsonValue::Null,
+                "action": p.action,
+                "sha": p.sha,
+                "html_url": p.html_url,
+            })
+        })
+        .collect();
+    json!({
+        "pages": pages,
+        "repository": repository,
+        "sender": sender,
+    })
+}
+
+/// One entry in a `gollum.pages[]` array (see [`gollum_payload`]).
+pub struct GollumPage {
+    /// Page title without extension — `My-Page` for `My-Page.md`.
+    pub page_name: String,
+    /// `created` | `edited` (GitHub's gollum activity vocabulary).
+    pub action: String,
+    /// Commit SHA that produced the page state.
+    pub sha: String,
+    /// Web-UI link for the page.
+    pub html_url: String,
+}

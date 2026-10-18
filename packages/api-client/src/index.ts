@@ -598,6 +598,7 @@ export type RepoPublic = {
   viewer_watch_level?: WatchLevel | null;
   issues_enabled?: boolean;
   pulls_enabled?: boolean;
+  wiki_enabled?: boolean;
   fork_network_id?: string | null;
   forked_from?: ForkParentSummary | null;
 };
@@ -2877,6 +2878,90 @@ export type CheckRunAnnotationsListResponse = {
   annotations: CheckRunAnnotationPublic[];
 };
 
+export type WikiPagePublic = {
+  /** Page title without extension — `My-Page` for `My-Page.md`. */
+  page_name: string;
+  /** Web-UI link for the page. */
+  html_url: string;
+  /** GitHub reserved layout pages (`_Sidebar`/`_Footer`/`_Header`). */
+  reserved: boolean;
+  /** Commit sha that last touched the page (empty on unborn wikis). */
+  sha: string;
+  updated_at?: string | null;
+  /** Raw Markdown body — set by `wiki.pages.get`, absent on lists. */
+  content?: string | null;
+};
+
+export type WikiRevisionPublic = {
+  sha: string;
+  /** First line of the commit message. */
+  message: string;
+  author_name: string;
+  /** Forge username when the author email maps to an account. */
+  author_username?: string | null;
+  timestamp: string;
+};
+
+export type WikiPagesListRequest = {
+  owner: string;
+  name: string;
+};
+
+export type WikiPagesListResponse = {
+  pages: WikiPagePublic[];
+};
+
+export type WikiPageGetRequest = {
+  owner: string;
+  name: string;
+  /** Page name without `.md` — `Home`, `My-Page`, `_Sidebar`. */
+  page: string;
+};
+
+export type WikiPageCreateRequest = {
+  owner: string;
+  name: string;
+  /** Page title — spaces are converted to dashes, GitHub-style. */
+  title: string;
+  content: string;
+  /** Commit message; defaults to `Created {title} (markdown)`. */
+  message?: string;
+};
+
+export type WikiPageUpdateRequest = {
+  owner: string;
+  name: string;
+  page: string;
+  content: string;
+  message?: string;
+};
+
+export type WikiPageDeleteRequest = {
+  owner: string;
+  name: string;
+  page: string;
+  message?: string;
+};
+
+export type WikiPageWriteResponse = {
+  page: WikiPagePublic;
+};
+
+export type WikiPageDeleteResponse = {
+  ok: boolean;
+};
+
+export type WikiRevisionsListRequest = {
+  owner: string;
+  name: string;
+  page: string;
+  limit?: number;
+};
+
+export type WikiRevisionsListResponse = {
+  revisions: WikiRevisionPublic[];
+};
+
 export type OrgSecretMetaPublic = {
   name: string;
   /** `all` | `private` | `selected`. */
@@ -5030,6 +5115,12 @@ export function createClient(opts: CreateClientOptions) {
         setEnabled: (input: RepoUnitSetEnabledRequest) =>
           rpcCall<RepoUnitEnabledResponse>(opts, "repo.pulls.setEnabled", input),
       },
+      wiki: {
+        getEnabled: (input: RepoUnitGetEnabledRequest) =>
+          rpcCall<RepoUnitEnabledResponse>(opts, "repo.wiki.getEnabled", input),
+        setEnabled: (input: RepoUnitSetEnabledRequest) =>
+          rpcCall<RepoUnitEnabledResponse>(opts, "repo.wiki.setEnabled", input),
+      },
     },
     org: {
       create: (input: CreateOrgRequest) => rpcCall<OrgPublic>(opts, "org.create", input),
@@ -5215,6 +5306,24 @@ export function createClient(opts: CreateClientOptions) {
       annotations: {
         list: (input: CheckRunAnnotationsListRequest) =>
           rpcCall<CheckRunAnnotationsListResponse>(opts, "check.annotations.list", input),
+      },
+    },
+    wiki: {
+      pages: {
+        list: (input: WikiPagesListRequest) =>
+          rpcCall<WikiPagesListResponse>(opts, "wiki.pages.list", input),
+        get: (input: WikiPageGetRequest) =>
+          rpcCall<WikiPageWriteResponse>(opts, "wiki.pages.get", input),
+        create: (input: WikiPageCreateRequest) =>
+          rpcCall<WikiPageWriteResponse>(opts, "wiki.pages.create", input),
+        update: (input: WikiPageUpdateRequest) =>
+          rpcCall<WikiPageWriteResponse>(opts, "wiki.pages.update", input),
+        delete: (input: WikiPageDeleteRequest) =>
+          rpcCall<WikiPageDeleteResponse>(opts, "wiki.pages.delete", input),
+      },
+      revisions: {
+        list: (input: WikiRevisionsListRequest) =>
+          rpcCall<WikiRevisionsListResponse>(opts, "wiki.revisions.list", input),
       },
     },
     pull: {

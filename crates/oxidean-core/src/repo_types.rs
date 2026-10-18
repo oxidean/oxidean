@@ -238,6 +238,10 @@ pub struct RepoPublic {
     /// Populated by `repo.get`; list endpoints may report the default `true`.
     #[serde(default = "repo_unit_enabled_default")]
     pub pulls_enabled: bool,
+    /// Wiki unit enabled — gates `wiki.*` RPCs, `{name}.wiki.git` transport
+    /// access, and the Wiki tab (COL-13). Populated by `repo.get`.
+    #[serde(default = "repo_unit_enabled_default")]
+    pub wiki_enabled: bool,
     /// Fork network root id (own id for roots) — D-SOC-14 / D-PR-01.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fork_network_id: Option<String>,
@@ -1909,6 +1913,12 @@ pub fn validate_repo_name(raw: &str) -> Result<(), String> {
     }
     if is_reserved_username(name) {
         return Err("repository name is reserved".into());
+    }
+    // GitHub parity: `.wiki` is the wiki-bare suffix on the git transports —
+    // a repo named `x.wiki` would collide with repo `x`'s wiki at
+    // `{owner}/x.wiki.git`.
+    if name.to_ascii_lowercase().ends_with(".wiki") {
+        return Err("repository name cannot end with .wiki".into());
     }
     Ok(())
 }

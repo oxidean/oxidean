@@ -35,6 +35,10 @@ pub enum AuthzDecision {
         repo_id: String,
         owner_slug: String,
         repo_name: String,
+        /// Request targeted `{name}.wiki.git` — bare is the wiki repo while
+        /// `repo_id`/`repo_name` stay on the base repository (GitHub emits
+        /// wiki `gollum` events against the parent repo).
+        is_wiki: bool,
         is_push: bool,
         /// Forge capability for `OXIDEAN_ACTOR_CAPABILITY` on receive-pack (D-PKG-01).
         capability: Option<Capability>,
@@ -122,8 +126,11 @@ pub async fn authorize_pack(
             (owner.as_str(), name.as_str(), PackAction::Push)
         }
     };
+    // `owner/name.wiki.git` targets repo `name`'s wiki bare — the row lookup,
+    // capability ladder, and unit flag all stay on the base repository.
+    let (base_name, is_wiki) = crate::git::split_wiki_name(name);
 
-    let pair = match lookup_repo_row_or_redirect(db, owner, name).await {
+    let pair = match lookup_repo_row_or_redirect(db, owner, base_name).await {
         Ok(Some(p)) => p,
         Ok(None) => {
             return AuthzDecision::Deny {
@@ -138,9 +145,24 @@ pub async fn authorize_pack(
     };
     let (row, owner_ref) = pair;
     let disk_owner = owner_ref.slug();
-    let disk_name = row.name.as_str();
+    let disk_name = if is_wiki {
+        format!("{}.wiki", row.name)
+    } else {
+        row.name.clone()
+    };
 
-    let bare = match resolve_bare(repos_dir, disk_owner, disk_name) {
+    if is_wiki {
+        match db.get_repo_unit_flags(&row.id).await {
+            Ok(flags) if flags.wiki_enabled => {}
+            _ => {
+                return AuthzDecision::Deny {
+                    message: "ERROR: Repository not found.\n".into(),
+                };
+            }
+        }
+    }
+
+    let bare = match resolve_bare(repos_dir, disk_owner, &disk_name) {
         Ok(p) if p.exists() => p,
         _ => {
             return AuthzDecision::Deny {
@@ -170,7 +192,8 @@ pub async fn authorize_pack(
                 bare,
                 repo_id: row.id.clone(),
                 owner_slug: disk_owner.to_string(),
-                repo_name: disk_name.to_string(),
+                repo_name: row.name.clone(),
+                is_wiki,
                 is_push: false,
                 capability,
                 actor_user_id: caller_user_id.to_string(),
@@ -210,7 +233,8 @@ pub async fn authorize_pack(
                 bare,
                 repo_id: row.id.clone(),
                 owner_slug: disk_owner.to_string(),
-                repo_name: disk_name.to_string(),
+                repo_name: row.name.clone(),
+                is_wiki,
                 is_push: true,
                 capability,
                 actor_user_id: caller_user_id.to_string(),
@@ -247,8 +271,9 @@ pub async fn authorize_deploy_key_pack(
             (owner.as_str(), name.as_str(), PackAction::Push)
         }
     };
+    let (base_name, is_wiki) = crate::git::split_wiki_name(name);
 
-    let pair = match lookup_repo_row_or_redirect(db, owner, name).await {
+    let pair = match lookup_repo_row_or_redirect(db, owner, base_name).await {
         Ok(Some(p)) => p,
         Ok(None) => {
             return AuthzDecision::Deny {
@@ -263,9 +288,24 @@ pub async fn authorize_deploy_key_pack(
     };
     let (row, owner_ref) = pair;
     let disk_owner = owner_ref.slug();
-    let disk_name = row.name.as_str();
+    let disk_name = if is_wiki {
+        format!("{}.wiki", row.name)
+    } else {
+        row.name.clone()
+    };
 
-    let bare = match resolve_bare(repos_dir, disk_owner, disk_name) {
+    if is_wiki {
+        match db.get_repo_unit_flags(&row.id).await {
+            Ok(flags) if flags.wiki_enabled => {}
+            _ => {
+                return AuthzDecision::Deny {
+                    message: "ERROR: Repository not found.\n".into(),
+                };
+            }
+        }
+    }
+
+    let bare = match resolve_bare(repos_dir, disk_owner, &disk_name) {
         Ok(p) if p.exists() => p,
         _ => {
             return AuthzDecision::Deny {
@@ -305,7 +345,8 @@ pub async fn authorize_deploy_key_pack(
         bare,
         repo_id: row.id.clone(),
         owner_slug: disk_owner.to_string(),
-        repo_name: disk_name.to_string(),
+        repo_name: row.name.clone(),
+        is_wiki,
         is_push: action == PackAction::Push,
         capability: Some(if key.can_write {
             Capability::Write
@@ -855,6 +896,7 @@ mod tests {
             repo_id: "rid".into(),
             owner_slug: "o".into(),
             repo_name: "n".into(),
+            is_wiki: false,
             is_push: true,
             capability: Some(Capability::Admin),
             actor_user_id: "u1".into(),

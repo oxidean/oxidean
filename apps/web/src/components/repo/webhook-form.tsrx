@@ -19,6 +19,7 @@ const EVENT_OPTIONS = [
   { id: "deployment_status", label: "deployment_status" },
   { id: "check_run", label: "check_run" },
   { id: "check_suite", label: "check_suite" },
+  { id: "gollum", label: "gollum" },
   { id: "pull_request_review_comment", label: "pull_request_review_comment" },
   { id: "release", label: "release" },
   { id: "star", label: "star" },
@@ -113,20 +114,10 @@ export function WebhookForm(props: {
         "pull_request_review_comment",
       ],
     );
-    return {
-      push: set.has("push"),
-      pull_request: set.has("pull_request"),
-      issues: set.has("issues"),
-      issue_comment: set.has("issue_comment"),
-      pull_request_review_comment: set.has("pull_request_review_comment"),
-      release: set.has("release"),
-      star: set.has("star"),
-      fork: set.has("fork"),
-      create: set.has("create"),
-      delete: set.has("delete"),
-      workflow_run: set.has("workflow_run"),
-      registry_package: set.has("registry_package"),
-    };
+    return Object.fromEntries(EVENT_OPTIONS.map((o) => [o.id, set.has(o.id)])) as Record<
+      EventId,
+      boolean
+    >;
   });
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");

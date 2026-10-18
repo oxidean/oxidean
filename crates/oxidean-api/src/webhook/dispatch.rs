@@ -297,6 +297,103 @@ pub async fn notify_push(
 // workflow_run / registry_package.
 // ---------------------------------------------------------------------------
 
+/// Wiki pushes emit `gollum`, never `push` (GitHub semantics — wiki refs are
+/// a separate event surface). One gollum event per push batches every
+/// changed root-level `*.md` page; `created` wins when a page is added and
+/// modified inside the same push. Workflows still resolve against the main
+/// bare — `on: gollum` dispatches through the shared LifecycleEvent fan-out
+/// with job-token suppression (GitHub recursion rule).
+#[allow(clippy::too_many_arguments)]
+pub async fn notify_wiki_push(
+    db: &Database,
+    git: &dyn oxidean_git::GitBackend,
+    main_bare: &std::path::Path,
+    wiki_bare: &std::path::Path,
+    repository_id: &str,
+    owner: &str,
+    repo_name: &str,
+    default_branch: &str,
+    pusher_login: &str,
+    pusher_id: &str,
+    updates: &[(String, String, String)],
+    env_name: &str,
+    job_token_actor: bool,
+    actions_enabled: bool,
+) {
+    use crate::actions::payload::GollumPage;
+    use std::collections::HashMap;
+
+    let mut order: Vec<String> = Vec::new();
+    let mut pages: HashMap<String, GollumPage> = HashMap::new();
+    for (old, new, _refname) in updates {
+        if is_zero_oid(new) {
+            continue;
+        }
+        // Newest-first history for the push range — the first sighting of a
+        // page carries the sha that last touched it.
+        let commits = git
+            .push_event_commits(wiki_bare, old, new, 2048)
+            .await
+            .unwrap_or_default();
+        for commit in &commits {
+            for path in commit.added.iter().chain(commit.modified.iter()) {
+                let Some(page) = path.strip_suffix(".md") else {
+                    continue;
+                };
+                if page.is_empty() || page.contains('/') {
+                    continue;
+                }
+                let action = if commit.added.contains(path) {
+                    "created"
+                } else {
+                    "edited"
+                };
+                match pages.get_mut(page) {
+                    Some(existing) => {
+                        if action == "created" {
+                            existing.action = "created".to_string();
+                        }
+                    }
+                    None => {
+                        order.push(page.to_string());
+                        pages.insert(
+                            page.to_string(),
+                            GollumPage {
+                                page_name: page.to_string(),
+                                action: action.to_string(),
+                                sha: commit.sha.clone(),
+                                html_url: format!("/{owner}/{repo_name}/wiki/{page}"),
+                            },
+                        );
+                    }
+                }
+            }
+        }
+    }
+    if pages.is_empty() {
+        return;
+    }
+    let ordered: Vec<GollumPage> = order.iter().filter_map(|p| pages.remove(p)).collect();
+
+    let repository = repository_block(repository_id, repo_name, owner);
+    let sender = json!({ "login": pusher_login });
+    let payload = crate::actions::payload::gollum_payload(&ordered, &repository, &sender);
+    emit(db, repository_id, "gollum", "", payload.clone(), env_name).await;
+
+    let event = crate::actions::events::LifecycleEvent {
+        bare_repo: main_bare.to_path_buf(),
+        repository_id: repository_id.to_string(),
+        default_branch: default_branch.to_string(),
+        event_name: "gollum",
+        action: String::new(),
+        payload,
+        actor_id: Some(pusher_id.to_string()),
+        job_token_actor,
+        actions_enabled_instance: actions_enabled,
+    };
+    crate::actions::events::notify_lifecycle_actions(db, git, &event).await;
+}
+
 /// Shared `repository` block for repo-scoped payloads (GitHub shape).
 fn repository_block(repo_id: &str, repo_name: &str, owner: &str) -> serde_json::Value {
     json!({

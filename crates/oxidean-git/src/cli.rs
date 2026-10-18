@@ -2981,6 +2981,7 @@ impl GitBackend for CliGitBackend {
         // each header as `X\tpath` lines (`R100\told\tnew` for renames).
         // core.quotePath=false keeps non-ASCII names literal.
         let old = old.trim();
+        let new_oid = String::from_utf8_lossy(&rev.stdout).trim().to_string();
         let max = format!("--max-count={}", limit.clamp(1, 2048));
         let mut args = vec![
             "-C",
@@ -2992,11 +2993,31 @@ impl GitBackend for CliGitBackend {
             "--name-status",
             &max,
             new,
-            "--not",
         ];
-        if old.is_empty() || old.bytes().all(|b| b == b'0') {
-            args.push("--all");
+        let other_tips = if old.is_empty() || old.bytes().all(|b| b == b'0') {
+            // Created/force-ref pushes have no `old` baseline — the new
+            // commits are those not reachable from the repo's OTHER refs.
+            // `--not --all` would also exclude the just-updated ref itself
+            // (it already points at `new` when post-receive runs), always
+            // yielding an empty list — enumerate ref tips and exclude every
+            // tip other than `new`'s.
+            self.list_refs(repo)
+                .await
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|r| r.oid != new_oid)
+                .map(|r| r.oid)
+                .collect::<Vec<_>>()
         } else {
+            Vec::new()
+        };
+        if old.is_empty() || old.bytes().all(|b| b == b'0') {
+            if !other_tips.is_empty() {
+                args.push("--not");
+                args.extend(other_tips.iter().map(|o| o.as_str()));
+            }
+        } else {
+            args.push("--not");
             args.push(validate_treeish(old)?);
         }
         let stdout = run_git_stdout(&args).await?;
@@ -6216,5 +6237,92 @@ mod tests {
             .expect("missing ref");
         assert!(missing.times.is_empty());
         assert!(!missing.truncated);
+    }
+
+    #[tokio::test]
+    async fn push_event_commits_zero_old_lists_commits_not_on_other_refs() {
+        let (_d, bare) = seeded_bare().await;
+        let git = CliGitBackend::new();
+        let tip1 = git.rev_parse(&bare, "main").await.unwrap();
+
+        // Second commit on main: one modified, one added, one removed file.
+        let tip2 = git
+            .commit_files(
+                &bare,
+                "main",
+                "main",
+                "second",
+                &[
+                    FileChange::Upsert {
+                        path: "README.md".into(),
+                        content: b"hi v2\n".to_vec(),
+                    },
+                    FileChange::Upsert {
+                        path: "b.txt".into(),
+                        content: b"b\n".to_vec(),
+                    },
+                    FileChange::Delete {
+                        path: "docs/a.md".into(),
+                    },
+                ],
+                "Oxidean",
+                FORGE_NOREPLY_EMAIL,
+                None,
+                "admin",
+            )
+            .await
+            .unwrap()
+            .sha;
+
+        // Zero-old on a ref create must NOT collapse to empty via
+        // `--not --all` (which also excludes the just-updated ref itself):
+        // it is the full history of `new` minus other refs' tips.
+        let zero = "0".repeat(40);
+        let all = git
+            .push_event_commits(&bare, &zero, &tip2, 2048)
+            .await
+            .expect("zero-old");
+        assert_eq!(all.len(), 2, "{all:?}");
+        assert_eq!(all[0].sha, tip2);
+        assert_eq!(all[0].modified, vec!["README.md".to_string()]);
+        assert_eq!(all[0].added, vec!["b.txt".to_string()]);
+        assert_eq!(all[0].removed, vec!["docs/a.md".to_string()]);
+        assert_eq!(all[1].sha, tip1);
+
+        // A real old baseline still lists only the pushed range.
+        let range = git
+            .push_event_commits(&bare, &tip1, &tip2, 2048)
+            .await
+            .expect("old..new");
+        assert_eq!(range.len(), 1);
+        assert_eq!(range[0].sha, tip2);
+
+        // Created branch off tip1 with a unique commit: zero-old excludes
+        // commits reachable from main but keeps the branch's own.
+        let feat = git
+            .commit_files(
+                &bare,
+                "feat",
+                &tip1,
+                "feat work",
+                &[FileChange::Upsert {
+                    path: "feat.txt".into(),
+                    content: b"f\n".to_vec(),
+                }],
+                "Oxidean",
+                FORGE_NOREPLY_EMAIL,
+                None,
+                "admin",
+            )
+            .await
+            .unwrap()
+            .sha;
+        let on_feat = git
+            .push_event_commits(&bare, &zero, &feat, 2048)
+            .await
+            .expect("feat create");
+        assert_eq!(on_feat.len(), 1, "{on_feat:?}");
+        assert_eq!(on_feat[0].sha, feat);
+        assert_eq!(on_feat[0].added, vec!["feat.txt".to_string()]);
     }
 }

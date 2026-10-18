@@ -30,6 +30,7 @@ const ALLOWED_EVENTS: &[&str] = &[
     "deployment_status",
     "check_run",
     "check_suite",
+    "gollum",
     "pull_request_review_comment",
     "release",
     "star",

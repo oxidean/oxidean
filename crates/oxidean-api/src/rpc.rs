@@ -39,6 +39,7 @@ use crate::ssh_keys;
 use crate::user;
 use crate::user::rate_limit::LookupLimiter;
 use crate::webhook;
+use crate::wiki;
 
 pub const VERSION_HEADER: &str = "Oxidean-RPC-Version";
 
@@ -395,6 +396,8 @@ pub const PROCEDURES: &[&str] = &[
     "repo.issues.setEnabled",
     "repo.pulls.getEnabled",
     "repo.pulls.setEnabled",
+    "repo.wiki.getEnabled",
+    "repo.wiki.setEnabled",
     "admin.actions.createRegistrationToken",
     "admin.actions.listRunners",
     "issue.create",
@@ -439,6 +442,12 @@ pub const PROCEDURES: &[&str] = &[
     "check.runs.update",
     "check.runs.rerequest",
     "check.annotations.list",
+    "wiki.pages.list",
+    "wiki.pages.get",
+    "wiki.pages.create",
+    "wiki.pages.update",
+    "wiki.pages.delete",
+    "wiki.revisions.list",
     "issue.assigneeCandidates",
     "issue.reactions.toggle",
     "issue.links.list",
@@ -1707,6 +1716,14 @@ async fn dispatch_inner(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },
+        "repo.wiki.getEnabled" => match repo::wiki_get_enabled(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "repo.wiki.setEnabled" => match repo::wiki_set_enabled(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
         "admin.actions.createRegistrationToken" => {
             match crate::actions::rpc::admin_create_registration_token(ctx, req.input).await {
                 Ok(v) => RpcResponse::ok(v),
@@ -1884,6 +1901,30 @@ async fn dispatch_inner(ctx: &mut RpcCtx, req: RpcRequest) -> RpcResponse {
             Err(e) => RpcResponse::err(e),
         },
         "check.annotations.list" => match check::annotations_list(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "wiki.pages.list" => match wiki::pages_list(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "wiki.pages.get" => match wiki::page_get(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "wiki.pages.create" => match wiki::page_create(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "wiki.pages.update" => match wiki::page_update(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "wiki.pages.delete" => match wiki::page_delete(ctx, req.input).await {
+            Ok(v) => RpcResponse::ok(v),
+            Err(e) => RpcResponse::err(e),
+        },
+        "wiki.revisions.list" => match wiki::revisions_list(ctx, req.input).await {
             Ok(v) => RpcResponse::ok(v),
             Err(e) => RpcResponse::err(e),
         },

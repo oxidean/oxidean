@@ -200,6 +200,10 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         | "repo.insights.forkNetwork"
         | "repo.issues.getEnabled"
         | "repo.pulls.getEnabled"
+        | "repo.wiki.getEnabled"
+        | "wiki.pages.list"
+        | "wiki.pages.get"
+        | "wiki.revisions.list"
         | "repo.templates.list"
         | "repo.listMine"
         | "repo.listByOwner"
@@ -209,9 +213,8 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         // commit through the contents domain).
         "repo.create" | "repo.fork" | "repo.commit" | "repo.branchCreate" | "repo.branchRename"
         | "repo.branchDelete" | "repo.syncFork" | "repo.file.create" | "repo.file.delete"
-        | "repo.file.mkdir" | "repo.file.rename" | "repo.file.update" | "repo.file.upload" => {
-            RepoWrite
-        }
+        | "repo.file.mkdir" | "repo.file.rename" | "repo.file.update" | "repo.file.upload"
+        | "wiki.pages.create" | "wiki.pages.update" | "wiki.pages.delete" => RepoWrite,
 
         "issue.get"
         | "issue.list"
@@ -354,6 +357,7 @@ pub fn classify_pat_proc(procedure: &str) -> PatProc {
         | "repo.tagProtection.delete"
         | "repo.issues.setEnabled"
         | "repo.pulls.setEnabled"
+        | "repo.wiki.setEnabled"
         | "repo.mirror.upsert"
         | "repo.mirror.delete"
         | "repo.mirror.syncNow"

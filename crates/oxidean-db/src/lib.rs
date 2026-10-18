@@ -4362,7 +4362,7 @@ impl Database {
         actions::list_environment_secret_ciphertexts(self.require_pool()?, environment_id).await
     }
 
-    /// Per-repo unit enable flags (COL-13): issues / pulls, future wiki/boards.
+    /// Per-repo unit enable flags (COL-13): issues / pulls / wiki.
     pub async fn get_repo_unit_flags(&self, repo_id: &str) -> Result<RepoUnitFlags, String> {
         repo_units::get_unit_flags(self.require_pool()?, repo_id).await
     }
@@ -4377,6 +4377,10 @@ impl Database {
 
     pub async fn set_repo_pulls_enabled(&self, repo_id: &str, enabled: bool) -> Result<(), String> {
         repo_units::set_pulls_enabled(self.require_pool()?, repo_id, enabled).await
+    }
+
+    pub async fn set_repo_wiki_enabled(&self, repo_id: &str, enabled: bool) -> Result<(), String> {
+        repo_units::set_wiki_enabled(self.require_pool()?, repo_id, enabled).await
     }
 
     pub async fn consume_action_runner_registration_token(

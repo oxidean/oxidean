@@ -482,6 +482,20 @@ static SHELLS: &[Shell] = &[
         redirect: None,
     },
     Shell {
+        pattern: &[P("owner"), P("repo"), L("wiki")],
+        file: "_/_/wiki/_/index.html",
+        title: Some("Wiki · {owner}/{repo} · Oxidean"),
+        protected: false,
+        redirect: None,
+    },
+    Shell {
+        pattern: &[P("owner"), P("repo"), L("wiki"), S("path")],
+        file: "_/_/wiki/_/index.html",
+        title: Some("Wiki · {owner}/{repo} · Oxidean"),
+        protected: false,
+        redirect: None,
+    },
+    Shell {
         pattern: &[P("owner"), P("repo"), L("releases")],
         file: "_/_/releases/index.html",
         title: Some("Releases · {owner}/{repo} · Oxidean"),

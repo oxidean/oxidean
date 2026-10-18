@@ -24,9 +24,10 @@ use super::db_err;
 
 /// Which per-repo unit a toggle/gate addresses (COL-13).
 #[derive(Clone, Copy)]
-pub(crate) enum RepoUnit {
+pub enum RepoUnit {
     Issues,
     Pulls,
+    Wiki,
 }
 
 impl RepoUnit {
@@ -34,6 +35,7 @@ impl RepoUnit {
         match self {
             RepoUnit::Issues => "repo.issues",
             RepoUnit::Pulls => "repo.pulls",
+            RepoUnit::Wiki => "repo.wiki",
         }
     }
 
@@ -47,13 +49,17 @@ impl RepoUnit {
                 "repo.pulls.disabled",
                 "Pull requests are disabled for this repository",
             ),
+            RepoUnit::Wiki => {
+                AppError::new("repo.wiki.disabled", "Wiki is disabled for this repository")
+            }
         }
     }
 }
 
-/// Gate shared by the `issue.*` / `pull.*` acl resolvers — a disabled unit
-/// rejects reads, writes, and admin maintenance alike until re-enabled.
-pub(crate) async fn require_unit_enabled(
+/// Gate shared by the `issue.*` / `pull.*` / `wiki.*` acl resolvers — a
+/// disabled unit rejects reads, writes, and admin maintenance alike until
+/// re-enabled.
+pub async fn require_unit_enabled(
     ctx: &RpcCtx,
     unit: RepoUnit,
     repo_id: &str,
@@ -62,6 +68,7 @@ pub(crate) async fn require_unit_enabled(
     let enabled = match unit {
         RepoUnit::Issues => flags.issues_enabled,
         RepoUnit::Pulls => flags.pulls_enabled,
+        RepoUnit::Wiki => flags.wiki_enabled,
     };
     if enabled {
         Ok(())
@@ -91,6 +98,7 @@ async fn get_enabled(
     let enabled = match unit {
         RepoUnit::Issues => flags.issues_enabled,
         RepoUnit::Pulls => flags.pulls_enabled,
+        RepoUnit::Wiki => flags.wiki_enabled,
     };
     Ok(RepoUnitEnabledResponse { enabled })
 }
@@ -115,6 +123,11 @@ async fn set_enabled(
         RepoUnit::Pulls => {
             ctx.db
                 .set_repo_pulls_enabled(&accessible.row.id, req.enabled)
+                .await
+        }
+        RepoUnit::Wiki => {
+            ctx.db
+                .set_repo_wiki_enabled(&accessible.row.id, req.enabled)
                 .await
         }
     }
@@ -154,4 +167,20 @@ pub async fn pulls_set_enabled(
     input: serde_json::Value,
 ) -> Result<RepoUnitEnabledResponse, AppError> {
     set_enabled(ctx, input, RepoUnit::Pulls).await
+}
+
+/// `repo.wiki.getEnabled`.
+pub async fn wiki_get_enabled(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<RepoUnitEnabledResponse, AppError> {
+    get_enabled(ctx, input, RepoUnit::Wiki).await
+}
+
+/// `repo.wiki.setEnabled`.
+pub async fn wiki_set_enabled(
+    ctx: &RpcCtx,
+    input: serde_json::Value,
+) -> Result<RepoUnitEnabledResponse, AppError> {
+    set_enabled(ctx, input, RepoUnit::Wiki).await
 }

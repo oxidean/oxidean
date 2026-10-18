@@ -71,7 +71,10 @@ pub use tag_protection::{
     create as tag_protection_create, delete as tag_protection_delete, list as tag_protection_list,
     update as tag_protection_update,
 };
-pub use units::{issues_get_enabled, issues_set_enabled, pulls_get_enabled, pulls_set_enabled};
+pub use units::{
+    issues_get_enabled, issues_set_enabled, pulls_get_enabled, pulls_set_enabled,
+    require_unit_enabled, wiki_get_enabled, wiki_set_enabled, RepoUnit,
+};
 
 /// Soft size limit for blob preview / raw soft-cap (D-20 / T-07-16).
 /// 1 MiB keeps preview responses cheap without clipping most source files.
@@ -366,6 +369,7 @@ pub(crate) fn to_public(repo: &AccessibleRepo) -> RepoPublic {
         // on single-repo responses (COL-13).
         issues_enabled: true,
         pulls_enabled: true,
+        wiki_enabled: true,
         fork_network_id: None,
         forked_from: None,
     }
@@ -470,6 +474,7 @@ pub async fn enrich_social(
         .map_err(db_err)?;
     public.issues_enabled = unit_flags.issues_enabled;
     public.pulls_enabled = unit_flags.pulls_enabled;
+    public.wiki_enabled = unit_flags.wiki_enabled;
     Ok(public)
 }
 
@@ -820,6 +825,7 @@ pub async fn list_mine(ctx: &RpcCtx) -> Result<RepoListMineResponse, AppError> {
                 viewer_watch_level: None,
                 issues_enabled: true,
                 pulls_enabled: true,
+                wiki_enabled: true,
                 fork_network_id: None,
                 forked_from: None,
             }
@@ -2529,6 +2535,7 @@ pub async fn create(ctx: &RpcCtx, input: serde_json::Value) -> Result<RepoPublic
         viewer_watch_level: None,
         issues_enabled: true,
         pulls_enabled: true,
+        wiki_enabled: true,
         fork_network_id: None,
         forked_from: None,
     })
